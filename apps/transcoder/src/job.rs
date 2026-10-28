@@ -181,6 +181,47 @@ pub struct Job {
     runtime: Mutex<Runtime>,
     served_segments: AtomicU64,
     served_bytes: AtomicU64,
+    /// Its lower renditions ([`JobRequest::variants`]), each a job of its
+    /// own in a folder of this one's (`v1`…). The job manager knows this one
+    /// only: they come and go with it.
+    variants: Vec<Arc<Job>>,
+    /// What the segments are named with: "" for a job's own, "v1-"… for its
+    /// variants'.
+    prefix: String,
+    /// The rendition its player asked for last: 0 for its own, 1 for its
+    /// first variant…
+    active: AtomicU32,
+}
+
+/// A job's file by name ([`JobRequest::variants`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobFile {
+    /// `master.m3u8`.
+    Master,
+    /// A rendition's media playlist: `index.m3u8` (0), `v1.m3u8`…
+    Playlist(usize),
+    /// A rendition's segment: `12.ts` (0), `v1-12.ts`…
+    Segment(usize, u32),
+}
+
+impl JobFile {
+    pub fn parse(name: &str) -> Option<JobFile> {
+        let rendition = |k: &str| k.parse().ok().filter(|k| *k > 0);
+        match name {
+            "master.m3u8" => Some(JobFile::Master),
+            "index.m3u8" => Some(JobFile::Playlist(0)),
+            _ => match name.strip_suffix(".m3u8") {
+                Some(playlist) => playlist.strip_prefix('v').and_then(rendition).map(JobFile::Playlist),
+                None => {
+                    let segment = name.strip_suffix(".ts")?;
+                    match segment.strip_prefix('v').and_then(|s| s.split_once('-')) {
+                        Some((k, n)) => Some(JobFile::Segment(rendition(k)?, n.parse().ok()?)),
+                        None => Some(JobFile::Segment(0, segment.parse().ok()?)),
+                    }
+                }
+            },
+        }
+    }
 }
 
 #[derive(Default)]
@@ -353,6 +394,11 @@ impl JobManager {
         jobs
     }
 
+    /// Every job's renditions ([`Job::renditions`]), whose processes run.
+    fn renditions(&self) -> Vec<Arc<Job>> {
+        self.list().iter().flat_map(Job::renditions).collect()
+    }
+
     pub async fn create(self: &Arc<Self>, req: JobRequest) -> ApiResult<JobCreated> {
         if self.closed.load(Relaxed) {
             return Err(ApiError::Busy("the transcoder is shutting down".into()));
@@ -403,8 +449,20 @@ impl JobManager {
             self.extractor.extract_ass(&input, source, &dir.join(file_name)).await?;
         }
 
-        let count = plan.segment_count() as usize;
         let start_segment = plan.segment_for(req.start_ms.unwrap_or(0));
+        let mut variants = Vec::new();
+        for (k, (variant, plan)) in self.variant_plans(&req, &media, &plan).into_iter().enumerate() {
+            let k = k + 1;
+            let variant_dir = dir.join(format!("v{k}"));
+            tokio::fs::create_dir_all(&variant_dir).await?;
+            // Its subtitles are the job's: extracted once.
+            if let Some(Burn::Text { file_name, .. }) = &plan.burn {
+                tokio::fs::copy(dir.join(file_name), variant_dir.join(file_name)).await?;
+            }
+            let job =
+                Job::new(format!("{id}-v{k}"), variant, media.clone(), plan, input.clone(), variant_dir, start_segment);
+            variants.push(Arc::new(Job { prefix: format!("v{k}-"), ..job }));
+        }
         let created = JobCreated {
             id: id.clone(),
             duration_ms: plan.duration_ms,
@@ -413,27 +471,9 @@ impl JobManager {
             video: plan.video_plan(&media, None),
             audio: plan.audio_plan(&media),
             warnings: plan.warnings.clone(),
+            variants: variants.len() as u32,
         };
-        let job = Arc::new(Job {
-            id: id.clone(),
-            input,
-            dir,
-            created_at_ms: now_ms(),
-            last_access_ms: AtomicI64::new(now_ms()),
-            last_requested: AtomicU32::new(start_segment),
-            ready: Mutex::new(vec![false; count]),
-            ready_count: AtomicU32::new(0),
-            waiting: Mutex::default(),
-            closed: AtomicBool::new(false),
-            notify: Notify::new(),
-            process: tokio::sync::Mutex::new(None),
-            runtime: Mutex::new(Runtime::default()),
-            served_segments: AtomicU64::new(0),
-            served_bytes: AtomicU64::new(0),
-            request: req,
-            media,
-            plan,
-        });
+        let job = Arc::new(Job { variants, ..Job::new(id.clone(), req, media, plan, input, dir, start_segment) });
         self.jobs.lock().insert(id.clone(), job.clone());
         unmade.made();
         Metrics::inc(&self.metrics.jobs_created);
@@ -454,6 +494,62 @@ impl JobManager {
             tracing::warn!(job = %id, "could not pre-start transcode: {err:?}");
         }
         Ok(created)
+    }
+
+    /// The lower renditions of `req` ([`JobRequest::variants`]) that make a
+    /// difference: each no bigger and with fewer bits than the one above it,
+    /// and laid out as `top`, so a player moves between them at any segment.
+    fn variant_plans(&self, req: &JobRequest, media: &MediaInfo, top: &Plan) -> Vec<(JobRequest, Plan)> {
+        let mut made: Vec<(JobRequest, Plan)> = Vec::new();
+        if top.video.as_ref().is_none_or(|v| v.copy) {
+            return made;
+        }
+        for want in &req.variants {
+            let mut variant = JobRequest { variants: Vec::new(), ..req.clone() };
+            if let Some(v) = variant.video.as_mut() {
+                (v.max_width, v.max_height, v.max_bitrate_kbps) =
+                    (want.max_width, want.max_height, want.max_bitrate_kbps);
+            }
+            let Ok(plan) = Plan::build(&variant, media, &self.ff, None) else { continue };
+            let above = made.last().map_or(top, |(_, plan)| plan);
+            let (Some(v), Some(a)) = (plan.video.as_ref(), above.video.as_ref()) else { continue };
+            let lower = !v.copy && v.width * v.height <= a.width * a.height && v.bitrate_kbps < a.bitrate_kbps;
+            if lower && plan.boundaries == top.boundaries {
+                made.push((variant, plan));
+            }
+        }
+        made
+    }
+
+    /// Segment `n` of rendition `k` of `job` ([`JobFile`]), the rendition
+    /// its player takes from now on: the others stop making segments (those
+    /// made stay, for when it comes back).
+    pub async fn rendition_segment(
+        self: &Arc<Self>,
+        job: &Arc<Job>,
+        k: usize,
+        n: u32,
+    ) -> ApiResult<(Arc<Job>, PathBuf)> {
+        let rendition = match k.checked_sub(1) {
+            None => job.clone(),
+            Some(i) => job.variants.get(i).cloned().ok_or_else(|| ApiError::NotFound(format!("no rendition {k}")))?,
+        };
+        job.touch();
+        let before = job.active.swap(k as u32, Relaxed) as usize;
+        if before != k {
+            tracing::info!(job = %job.id, "the player moved from rendition {before} to {k}");
+            for (i, other) in job.renditions().into_iter().enumerate() {
+                if i != k {
+                    park(other);
+                }
+            }
+        }
+        let path = self.segment(&rendition, n).await?;
+        // Asked for before its player moved on: made, and stopped again.
+        if job.active.load(Relaxed) as usize != k {
+            park(rendition.clone());
+        }
+        Ok((rendition, path))
     }
 
     /// Path of segment `n`, waiting for or (re)starting ffmpeg as needed.
@@ -550,7 +646,7 @@ impl JobManager {
 
     /// Software encodes running now.
     fn software_encodes(&self) -> u32 {
-        self.list().iter().filter(|job| job.encodes_in_software()).count() as u32
+        self.renditions().iter().filter(|job| job.encodes_in_software()).count() as u32
     }
 
     /// What the automatic preset depends on for `job` now, counting it.
@@ -560,7 +656,7 @@ impl JobManager {
             .video
             .as_ref()
             .map_or((0, false), |v| (v.width.max(0) as u64 * v.height.max(0) as u64, v.codec == VideoCodec::Hevc));
-        let others = self.list().iter().filter(|j| j.id != job.id && j.encodes_in_software()).count() as u32;
+        let others = self.renditions().iter().filter(|j| j.id != job.id && j.encodes_in_software()).count() as u32;
         adaptive::Load { software_jobs: others + 1, cores: crate::util::processors(), pixels, hevc }
     }
 
@@ -571,7 +667,7 @@ impl JobManager {
         if self.software_encodes() == 0 {
             return;
         }
-        for job in self.list() {
+        for job in self.renditions() {
             let Some((current, moved_at)) = job.runtime.lock().preset else { continue };
             let Ok(mut guard) = job.process.try_lock() else { continue };
             // A paused process is far ahead already: it moves once it goes on.
@@ -778,12 +874,15 @@ impl JobManager {
 
     pub async fn remove(&self, id: &str) -> bool {
         let Some(job) = self.jobs.lock().remove(id) else { return false };
-        job.closed.store(true, Relaxed);
-        if let Some(p) = job.process.lock().await.take() {
-            p.stop().await;
+        for rendition in job.renditions() {
+            rendition.closed.store(true, Relaxed);
+            if let Some(p) = rendition.process.lock().await.take() {
+                p.stop().await;
+            }
+            // Wake waiting requests so they fail now instead of at their timeout.
+            rendition.notify.notify_waiters();
         }
-        // Wake waiting requests so they fail now instead of at their timeout.
-        job.notify.notify_waiters();
+        // The variants' folders with it.
         remove_dir_with_retry(&job.dir).await;
         tracing::info!(job = %id, "job removed");
         true
@@ -805,28 +904,32 @@ impl JobManager {
         self.adapt().await;
         let now = now_ms();
         for job in self.list() {
+            // A job is asked for whichever rendition its player takes.
             let idle = now - job.last_access_ms.load(Relaxed);
             if idle > JOB_EXPIRE_MS {
                 tracing::info!(job = %job.id, "job expired after {}s idle", idle / 1000);
                 self.remove(&job.id).await;
                 continue;
             }
-            if idle > PROCESS_IDLE_MS
-                && let Ok(mut guard) = job.process.try_lock()
-                && guard.as_ref().is_some_and(Proc::running)
-            {
-                tracing::debug!(job = %job.id, "stopping idle ffmpeg process");
-                if let Some(p) = guard.take() {
-                    p.stop().await;
+            for job in job.renditions() {
+                let idle = now - job.last_access_ms.load(Relaxed);
+                if idle > PROCESS_IDLE_MS
+                    && let Ok(mut guard) = job.process.try_lock()
+                    && guard.as_ref().is_some_and(Proc::running)
+                {
+                    tracing::debug!(job = %job.id, "stopping idle ffmpeg process");
+                    if let Some(p) = guard.take() {
+                        p.stop().await;
+                    }
                 }
+                if let Ok(guard) = job.process.try_lock()
+                    && let Some(p) = guard.as_ref().filter(|p| p.running())
+                {
+                    job.pace_lead(p);
+                }
+                let pruned = job.clone();
+                let _ = tokio::task::spawn_blocking(move || pruned.prune()).await;
             }
-            if let Ok(guard) = job.process.try_lock()
-                && let Some(p) = guard.as_ref().filter(|p| p.running())
-            {
-                job.pace_lead(p);
-            }
-            let pruned = job.clone();
-            let _ = tokio::task::spawn_blocking(move || pruned.prune()).await;
         }
     }
 
@@ -836,6 +939,16 @@ impl JobManager {
         let ids: Vec<String> = self.jobs.lock().keys().cloned().collect();
         futures::future::join_all(ids.iter().map(|id| self.remove(id))).await;
     }
+}
+
+/// Stops the job's process, if it runs: what it made stays.
+fn park(job: Arc<Job>) {
+    tokio::spawn(async move {
+        if let Some(p) = job.process.lock().await.take() {
+            p.stop().await;
+            tracing::debug!(job = %job.id, "stopped: its player took another rendition");
+        }
+    });
 }
 
 /// Registers a request as waiting for a segment for as long as it lives.
@@ -866,6 +979,47 @@ impl Drop for Waiting<'_> {
 }
 
 impl Job {
+    fn new(
+        id: String,
+        request: JobRequest,
+        media: Arc<MediaInfo>,
+        plan: Plan,
+        input: PathBuf,
+        dir: PathBuf,
+        start_segment: u32,
+    ) -> Job {
+        let count = plan.segment_count() as usize;
+        Job {
+            id,
+            request,
+            media,
+            plan,
+            input,
+            dir,
+            created_at_ms: now_ms(),
+            last_access_ms: AtomicI64::new(now_ms()),
+            last_requested: AtomicU32::new(start_segment),
+            ready: Mutex::new(vec![false; count]),
+            ready_count: AtomicU32::new(0),
+            waiting: Mutex::default(),
+            closed: AtomicBool::new(false),
+            notify: Notify::new(),
+            process: tokio::sync::Mutex::new(None),
+            runtime: Mutex::new(Runtime::default()),
+            served_segments: AtomicU64::new(0),
+            served_bytes: AtomicU64::new(0),
+            variants: Vec::new(),
+            prefix: String::new(),
+            active: AtomicU32::new(0),
+        }
+    }
+
+    /// The job and its lower renditions, highest first: rendition `k` is
+    /// `[k]`.
+    pub fn renditions(self: &Arc<Self>) -> Vec<Arc<Job>> {
+        std::iter::once(self.clone()).chain(self.variants.iter().cloned()).collect()
+    }
+
     pub fn touch(&self) {
         self.last_access_ms.store(now_ms(), Relaxed);
     }
@@ -1080,9 +1234,13 @@ impl Job {
         }
     }
 
-    /// The multivariant playlist, naming the codecs (see [`crate::hls`]).
+    /// The multivariant playlist, naming the codecs (see [`crate::hls`]),
+    /// and the lower renditions.
     pub fn master_playlist(&self) -> String {
-        hls::master_playlist(&self.plan, &self.media)
+        let renditions: Vec<(&Plan, String)> = std::iter::once((&self.plan, "index.m3u8".to_owned()))
+            .chain(self.variants.iter().enumerate().map(|(i, v)| (&v.plan, format!("v{}.m3u8", i + 1))))
+            .collect();
+        hls::renditions_playlist(&renditions, &self.media)
     }
 
     /// Does to segment `n`'s video what FFmpeg couldn't (see
@@ -1118,13 +1276,32 @@ impl Job {
             out.push_str("#EXT-X-INDEPENDENT-SEGMENTS\n");
         }
         for (i, w) in bounds.windows(2).enumerate() {
-            out.push_str(&format!("#EXTINF:{:.3},\n{i}.ts\n", (w[1] - w[0]) as f64 / 1000.0));
+            out.push_str(&format!("#EXTINF:{:.3},\n{}{i}.ts\n", (w[1] - w[0]) as f64 / 1000.0, self.prefix));
         }
         out.push_str("#EXT-X-ENDLIST\n");
         out
     }
 
+    /// How the job goes: that of the rendition its player takes, with what
+    /// all of them served.
     pub fn status(&self) -> JobStatus {
+        if self.variants.is_empty() {
+            return self.own_status();
+        }
+        let renditions: Vec<&Job> = std::iter::once(self).chain(self.variants.iter().map(Arc::as_ref)).collect();
+        let k = (self.active.load(Relaxed) as usize).min(renditions.len() - 1);
+        JobStatus {
+            id: self.id.clone(),
+            last_access_ms: self.last_access_ms.load(Relaxed),
+            served_segments: renditions.iter().map(|r| r.served_segments.load(Relaxed)).sum(),
+            served_bytes: renditions.iter().map(|r| r.served_bytes.load(Relaxed)).sum(),
+            rendition: k as u32,
+            variants: self.variants.len() as u32,
+            ..renditions[k].own_status()
+        }
+    }
+
+    fn own_status(&self) -> JobStatus {
         let rt = self.runtime.lock();
         let mut video = self.plan.video_plan(&self.media, rt.encoder_override.as_ref());
         if let Some(v) = video.as_mut().filter(|_| rt.decoded_in_software) {
@@ -1155,6 +1332,8 @@ impl Job {
             served_bytes: self.served_bytes.load(Relaxed),
             last_error: rt.last_error.clone(),
             warnings,
+            rendition: 0,
+            variants: 0,
         }
     }
 
@@ -1577,38 +1756,28 @@ mod tests {
 
     /// A job with the given segment boundaries whose segments live in `dir`.
     fn job(dir: &Path, boundaries: Vec<i64>) -> Job {
-        let count = boundaries.len() - 1;
-        Job {
-            id: "test".into(),
-            request: JobRequest::default(),
-            media: Arc::new(MediaInfo::default()),
-            plan: Plan {
-                duration_ms: *boundaries.last().unwrap(),
-                split_at: boundaries.clone(),
-                seek_at: boundaries.clone(),
-                boundaries,
-                segment_seconds: 4.0,
-                video: None,
-                audio: None,
-                burn: None,
-                throttle: false,
-                warnings: vec![],
-            },
-            input: dir.join("input.mkv"),
-            dir: dir.to_path_buf(),
-            created_at_ms: 0,
-            last_access_ms: AtomicI64::new(0),
-            last_requested: AtomicU32::new(0),
-            ready: Mutex::new(vec![false; count]),
-            ready_count: AtomicU32::new(0),
-            waiting: Mutex::default(),
-            closed: AtomicBool::new(false),
-            notify: Notify::new(),
-            process: tokio::sync::Mutex::new(None),
-            runtime: Mutex::new(Runtime::default()),
-            served_segments: AtomicU64::new(0),
-            served_bytes: AtomicU64::new(0),
-        }
+        let plan = Plan {
+            duration_ms: *boundaries.last().unwrap(),
+            split_at: boundaries.clone(),
+            seek_at: boundaries.clone(),
+            boundaries,
+            segment_seconds: 4.0,
+            video: None,
+            audio: None,
+            burn: None,
+            throttle: false,
+            warnings: vec![],
+        };
+        let job = Job::new(
+            "test".into(),
+            JobRequest::default(),
+            Arc::new(MediaInfo::default()),
+            plan,
+            dir.join("input.mkv"),
+            dir.to_path_buf(),
+            0,
+        );
+        Job { created_at_ms: 0, last_access_ms: AtomicI64::new(0), ..job }
     }
 
     /// A manager whose FFmpeg "works" but whose binaries are missing.
@@ -1808,6 +1977,135 @@ mod tests {
         assert_eq!(status.process.map(|p| p.hardware), Some(false));
         assert_eq!(jobs.hardware_failures.load(Relaxed), 1);
         jobs.remove(&created.id).await;
+    }
+
+    #[test]
+    fn job_files_are_named_by_rendition() {
+        for (name, file) in [
+            ("master.m3u8", Some(JobFile::Master)),
+            ("index.m3u8", Some(JobFile::Playlist(0))),
+            ("v2.m3u8", Some(JobFile::Playlist(2))),
+            ("12.ts", Some(JobFile::Segment(0, 12))),
+            ("v1-12.ts", Some(JobFile::Segment(1, 12))),
+            ("v0.m3u8", None),
+            ("v0-3.ts", None),
+            ("v1.ts", None),
+            ("x.m3u8", None),
+            ("12.jpg", None),
+        ] {
+            assert_eq!(JobFile::parse(name), file, "{name}");
+        }
+    }
+
+    /// A clip FFmpeg makes, and a manager whose only encoder is libx264
+    /// (`None` without FFmpeg).
+    fn with_ffmpeg(dir: &Path, size: &str) -> Option<(PathBuf, Arc<JobManager>)> {
+        use pley_transcoder_api::{EncoderInfo, HwAccel};
+        let ok =
+            |tool: &str| std::process::Command::new(tool).arg("-version").output().is_ok_and(|o| o.status.success());
+        if !(ok("ffmpeg") && ok("ffprobe")) {
+            eprintln!("ffmpeg not found: skipped");
+            return None;
+        }
+        let input = dir.join("clip.mkv");
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i"])
+            .arg(format!("testsrc2=size={size}:rate=25:duration=10"))
+            .args(["-c:v", "libx264", "-preset", "ultrafast", "-g", "25"])
+            .arg(&input)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let x264 = EncoderInfo {
+            name: "libx264".into(),
+            codec: VideoCodec::H264,
+            hardware: false,
+            accel: HwAccel::None,
+            main10: false,
+        };
+        let caps = pley_transcoder_api::Capabilities {
+            ffmpeg_available: true,
+            ffprobe_available: true,
+            encoders: vec![x264],
+            ..Default::default()
+        };
+        let ff = Ffmpeg { ffmpeg: "ffmpeg".into(), ffprobe: "ffprobe".into(), caps, segment_times_relative: true };
+        Some((input, manager_with(dir, ff)))
+    }
+
+    /// When the first video packet of a segment is shown, in seconds.
+    fn first_video_pts(segment: &Path) -> f64 {
+        let out = std::process::Command::new("ffprobe")
+            .args(["-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#1"])
+            .args(["-show_entries", "packet=pts_time", "-of", "csv=p=0"])
+            .arg(segment)
+            .output()
+            .unwrap();
+        // "5.400000," (with the packet's side data after it).
+        let text = String::from_utf8_lossy(&out.stdout);
+        text.lines().next().and_then(|l| l.split(',').next()).and_then(|t| t.trim().parse().ok()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn variants_are_laid_out_alike_and_made_one_at_a_time() {
+        use pley_transcoder_api::{VariantRequest, VideoRequest};
+        let dir = tempfile::tempdir().unwrap();
+        let Some((input, jobs)) = with_ffmpeg(dir.path(), "1280x720") else { return };
+        let variant =
+            |w, h, kbps| VariantRequest { max_width: Some(w), max_height: Some(h), max_bitrate_kbps: Some(kbps) };
+        let created = jobs
+            .create(JobRequest {
+                input: input.to_string_lossy().into_owned(),
+                video: Some(VideoRequest::default()),
+                segment_seconds: Some(2.0),
+                variants: vec![
+                    variant(854, 480, 1_200),
+                    // No smaller than the one above: left out.
+                    variant(1280, 720, 1_000),
+                    variant(640, 360, 600),
+                ],
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(created.variants, 2);
+        let job = jobs.get(&created.id).unwrap();
+
+        // Listed highest first, each with its playlist and its segments' names.
+        let master = job.master_playlist();
+        let listed: Vec<(&str, &str)> = master
+            .lines()
+            .zip(master.lines().skip(1))
+            .filter(|(info, _)| info.starts_with("#EXT-X-STREAM-INF"))
+            .map(|(info, uri)| (info.split("RESOLUTION=").nth(1).unwrap().split(',').next().unwrap(), uri))
+            .collect();
+        assert_eq!(listed, [("1280x720", "index.m3u8"), ("854x480", "v1.m3u8"), ("640x360", "v2.m3u8")], "{master}");
+        let renditions = job.renditions();
+        assert!(renditions[1].playlist().contains("\nv1-0.ts\n"));
+        assert_eq!(renditions[1].playlist().replace("v1-", ""), job.playlist(), "the same segments");
+
+        // The player starts on the job's own, then moves down a rendition at
+        // segment 2: the first stops, and the job tells of the second.
+        let (_, top) = jobs.rendition_segment(&job, 0, 1).await.unwrap();
+        let (_, lower) = jobs.rendition_segment(&job, 1, 2).await.unwrap();
+        assert!(lower.starts_with(dir.path().join("jobs").join(&created.id).join("v1")), "{}", lower.display());
+        let status = job.status();
+        assert_eq!((status.id.as_str(), status.rendition, status.variants), (created.id.as_str(), 1, 2));
+        assert_eq!(status.video.and_then(|v| v.width_out), Some(854));
+        let stopped = async {
+            while job.process.lock().await.as_ref().is_some_and(Proc::running) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(10), stopped).await.expect("the first rendition stops");
+
+        // Seamless: the second's segment 2 starts when the first's would.
+        let (_, top_2) = jobs.rendition_segment(&job, 0, 2).await.unwrap();
+        assert!((first_video_pts(&lower) - first_video_pts(&top_2)).abs() < 0.001);
+        assert!(first_video_pts(&top) < first_video_pts(&top_2));
+        assert_eq!(job.status().rendition, 0);
+        jobs.remove(&created.id).await;
+        assert!(!dir.path().join("jobs").join(&created.id).exists(), "the variants' folders with it");
     }
 
     #[tokio::test]

@@ -25,7 +25,7 @@ use crate::convert::Conversions;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::Extractor;
 use crate::fingerprint::Fingerprinter;
-use crate::job::JobManager;
+use crate::job::{JobFile, JobManager};
 use crate::keyframes::KeyframeStore;
 use crate::metrics::{Metrics, render_prometheus};
 use crate::prefetch::Prefetcher;
@@ -438,22 +438,25 @@ async fn touch_job(State(state): Shared, Path(id): Path<String>) -> ApiResult<St
 
 async fn job_file(State(state): Shared, Path((id, file)): Path<(String, String)>) -> ApiResult<Response> {
     let job = state.jobs.get(&id).ok_or_else(|| ApiError::JobNotFound(format!("job {id} not found")))?;
-    if file == "index.m3u8" || file == "master.m3u8" {
-        job.touch();
-        let mut headers = HeaderMap::new();
-        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/vnd.apple.mpegurl"));
-        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-        let playlist = if file == "master.m3u8" { job.master_playlist() } else { job.playlist() };
-        return Ok((headers, playlist).into_response());
-    }
-    let n: u32 = file
-        .strip_suffix(".ts")
-        .and_then(|n| n.parse().ok())
-        .ok_or_else(|| ApiError::NotFound(format!("unknown file {file}")))?;
-    let path = state.jobs.segment(&job, n).await?;
+    let unknown = || ApiError::NotFound(format!("unknown file {file}"));
+    let (k, n) = match JobFile::parse(&file).ok_or_else(unknown)? {
+        JobFile::Segment(k, n) => (k, n),
+        playlist => {
+            job.touch();
+            let mut headers = HeaderMap::new();
+            headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/vnd.apple.mpegurl"));
+            headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+            let playlist = match playlist {
+                JobFile::Playlist(k) => job.renditions().get(k).ok_or_else(unknown)?.playlist(),
+                _ => job.master_playlist(),
+            };
+            return Ok((headers, playlist).into_response());
+        }
+    };
+    let (rendition, path) = state.jobs.rendition_segment(&job, k, n).await?;
     let handle = tokio::fs::File::open(&path).await?;
     let len = handle.metadata().await?.len();
-    job.record_served(len);
+    rendition.record_served(len);
     Metrics::inc(&state.metrics.segments_served);
     state.metrics.bytes_served.fetch_add(len, Ordering::Relaxed);
     let body = Body::from_stream(ReaderStream::with_capacity(handle, 256 * 1024));

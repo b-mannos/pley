@@ -265,6 +265,8 @@ export interface PlaybackInfo {
   auto_quality?: string | null;
   /** What the screen gets of HDR video, by name: "Dolby Vision P8.1", "HDR10 (Dolby Vision base layer)", "SDR (tone-mapped)"… */
   video_range?: string | null;
+  /** The stream comes in several sizes the TV's player moves between by itself: Automatic leaves the session be. */
+  adaptive?: boolean;
 }
 
 export interface TranscodeInfo {
@@ -326,7 +328,8 @@ export interface ClientCaps {
   subtitle_codecs: string[];
   audio_track_switching: boolean;
   picture_subtitles_sideload: boolean;
-  hls: { master_playlist: boolean; segments: string[] };
+  /** `variants`: moves between a multivariant playlist's sizes by itself (adaptive bitrate). */
+  hls: { master_playlist: boolean; segments: string[]; variants?: boolean };
   display?: { width: number; height: number; refresh_rates: number[] };
   device: { form: "tv"; tier: "low" | "mid" | "high"; fire_tv: false; model: string };
 }

@@ -80,6 +80,7 @@ exports[`Samsung capabilities, per set > 2018 NU8000, Tizen 4.0, TV speakers 1`]
     "segments": [
       "ts",
     ],
+    "variants": true,
   },
   "picture_subtitles_sideload": true,
   "subtitle_codecs": [
@@ -258,6 +259,7 @@ exports[`Samsung capabilities, per set > 2019 Q90R, Tizen 5.0, Dolby Digital Plu
     "segments": [
       "ts",
     ],
+    "variants": true,
   },
   "picture_subtitles_sideload": true,
   "subtitle_codecs": [
@@ -433,6 +435,7 @@ exports[`Samsung capabilities, per set > 2019 Q900R 8K, Tizen 5.0 1`] = `
     "segments": [
       "ts",
     ],
+    "variants": true,
   },
   "picture_subtitles_sideload": true,
   "subtitle_codecs": [
@@ -618,6 +621,7 @@ exports[`Samsung capabilities, per set > 2020 HD set T5300, Tizen 5.5, no HDR 1`
       "ts",
       "fmp4",
     ],
+    "variants": true,
   },
   "picture_subtitles_sideload": true,
   "subtitle_codecs": [
@@ -791,6 +795,7 @@ exports[`Samsung capabilities, per set > 2020 TU7000, Tizen 5.5 1`] = `
       "ts",
       "fmp4",
     ],
+    "variants": true,
   },
   "picture_subtitles_sideload": true,
   "subtitle_codecs": [
@@ -982,6 +987,7 @@ exports[`Samsung capabilities, per set > 2021 QN90A, Tizen 6.0, Dolby Digital Pl
       "ts",
       "fmp4",
     ],
+    "variants": true,
   },
   "picture_subtitles_sideload": true,
   "subtitle_codecs": [
@@ -1170,6 +1176,7 @@ exports[`Samsung capabilities, per set > 2023 S95C OLED, Tizen 7.0 1`] = `
       "ts",
       "fmp4",
     ],
+    "variants": true,
   },
   "picture_subtitles_sideload": true,
   "subtitle_codecs": [
@@ -1358,6 +1365,7 @@ exports[`Samsung capabilities, per set > 2025 QN90F, Tizen 9.0 1`] = `
       "ts",
       "fmp4",
     ],
+    "variants": true,
   },
   "picture_subtitles_sideload": true,
   "subtitle_codecs": [

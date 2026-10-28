@@ -1398,6 +1398,9 @@ export class PlaybackController {
     const auto = this.auto;
     if (!auto || !this.wantPlay || !this.mediaShown || this.ended || this.state.value.phase.kind === "error") return false;
     if (now - this.seekedAt <= SEEK_SETTLE_MS) return false;
+    // A stream in several sizes: the TV's player moves between them as its
+    // connection allows, without a new session (dropped frames still lower it).
+    if (this.info?.adaptive) return false;
     if (moving) {
       auto.sample(now, engine.positionMs() / 1000, engine.knowsBuffer === false ? null : engine.bufferedMs() / 1000);
       const kbps = engine.bandwidthKbps ? engine.bandwidthKbps() : null;

@@ -129,7 +129,8 @@ object CapsBuilder {
             subtitleCodecs = SUBTITLES,
             audioTrackSwitching = true,
             pictureSubtitlesSideload = true,
-            hls = HlsCaps(masterPlaylist = true, segments = listOf("ts", "fmp4")),
+            // Media3 moves between a transcode's sizes by itself (adaptive bitrate).
+            hls = HlsCaps(masterPlaylist = true, segments = listOf("ts", "fmp4"), variants = true),
             display = displayCaps(input.display, device.isTv),
             device = DeviceCaps(
                 form = when (device.form) {

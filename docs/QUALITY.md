@@ -11,7 +11,7 @@ In this order, the same on every app:
 | id | Label | Video at most |
 |---|---|---|
 | `original` | Original | the file as it is |
-| `auto` | Automatic | Original, lower only when it doesn't play well |
+| `auto` | Automatic | Original, lower only when it doesn't play well; a transcode in several sizes the player moves between |
 | `30m` | 30 Mbps 4K | 30 Mbps, 2160 lines |
 | `15m` | 15 Mbps 4K | 15 Mbps, 2160 lines |
 | `20m` | 20 Mbps 1080p | 20 Mbps, 1080 lines |
@@ -95,9 +95,38 @@ forgets it.
 Picking a quality in the menu, Automatic again included, starts from that
 choice afresh.
 
+## Several sizes (adaptive bitrate)
+
+A transcode comes in several sizes for a player that moves between them
+by itself, as streaming services' players do: hls.js and the browsers' own
+HLS, Media3, Samsung's AVPlay, LG's media pipeline and Roku's Video node
+(each says so, `caps.hls.variants`; Kodi's player doesn't, and keeps the
+restarts above). The session's `master.m3u8` lists the transcode's own size
+first, then 1080p, 720p, 540p and 360p below it, each at the bitrate its
+size gets (8, 4, 2 and 0.7 Mbps) and never more than the one above; one
+with more than two thirds of the bits of the one above is left out. A
+quality picked is the top: its sizes go no higher. Every size is cut into
+the same segments, each starting with a keyframe at the same time, so the
+player moves at any segment without a pause, a new session or a sound.
+
+The transcoder makes only the size the player asks for: the others stop
+when it moves (what they made stays, for when it comes back). A size the
+transcoder can't make in real time arrives slower than it plays, and the
+player moves down for it as it would for a slow network.
+
+While a session comes in several sizes (`PlaybackInfo.adaptive`), the
+player's own ABR moves between them and Automatic watches only for what
+sizes don't solve: a device dropping frames, and a stream stalled long
+enough to ask the server (both still start again lower). It keeps its
+step down from Original, which makes such a session in the first place.
+The web's Automatic plays no size bigger than the player shows; a quality
+picked plays its own size whenever the connection allows. The menu says
+the size playing: "Automatic · 720p". The dashboard says which of the
+sizes plays ("size 2 of 4").
+
 ## The server
 
-Nothing changes on the server: Automatic asks for Original
-(`mode: "auto"`) or for a quality (`mode: "transcode"`, `max_bitrate`,
-`max_height`), as the menu's other choices do, and reads `auto_quality`
-for what it would choose for the file.
+Automatic asks for Original (`mode: "auto"`) or for a quality
+(`mode: "transcode"`, `max_bitrate`, `max_height`), as the menu's other
+choices do, and reads `auto_quality` for what it would choose for the
+file, and `adaptive` for whether the stream moves between sizes itself.

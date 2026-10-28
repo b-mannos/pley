@@ -49,7 +49,7 @@ class ClientCapsTest {
             subtitleCodecs = listOf("subrip", "ass"),
             audioTrackSwitching = true,
             pictureSubtitlesSideload = true,
-            hls = HlsCaps(masterPlaylist = true, segments = listOf("ts", "fmp4")),
+            hls = HlsCaps(masterPlaylist = true, segments = listOf("ts", "fmp4"), variants = true),
             display = DisplayCaps(3840, 2160, listOf(23.976f, 50f, 60f)),
             device = DeviceCaps(DeviceForm.Tv, tier = "high", fireTv = false, model = "Chromecast"),
         )
@@ -67,7 +67,7 @@ class ClientCapsTest {
             body.getValue("video").jsonArray[0].jsonObject.keys,
         )
         assertEquals("""["hdr10","hlg"]""", body["hdr_types"].toString())
-        assertEquals("""{"master_playlist":true,"segments":["ts","fmp4"]}""", body["hls"].toString())
+        assertEquals("""{"master_playlist":true,"segments":["ts","fmp4"],"variants":true}""", body["hls"].toString())
         assertEquals("""{"form":"tv","tier":"high","fire_tv":false,"model":"Chromecast"}""", body["device"].toString())
         assertEquals("""{"width":3840,"height":2160,"refresh_rates":[23.976,50.0,60.0]}""", body["display"].toString())
         assertEquals(v2, PleyJson.decodeFromJsonElement(ClientCaps.serializer(), body))

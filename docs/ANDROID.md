@@ -82,7 +82,11 @@ Automatic step down rather than offer a lower quality. The network's
 ceiling is kept in the app's preferences for each server, on the
 device's clock since it started: a ceiling from before a restart is
 forgotten. Downloads play as they are, in Automatic too. Waits while the
-server is out of reach (Reconnecting) aren't play issues.
+server is out of reach (Reconnecting) aren't play issues. A transcode
+comes in several sizes (`hls.variants`, docs/QUALITY.md) that Media3
+moves between by itself, no bigger than the screen: in such a session
+(`PlaybackInfo.adaptive`) the half-second feed leaves `AutoQuality` be,
+and only stalls and dropped frames can still start it again lower.
 
 ## Screens
 

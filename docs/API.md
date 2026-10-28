@@ -317,7 +317,8 @@ interface PlaybackInfo {
   session_id: string;
   method: "direct" | "remux" | "transcode";
   url: string;                      // direct: file url; otherwise HLS playlist url (master.m3u8 for
-                                    // version 2 players with hls.master_playlist, else index.m3u8)
+                                    // version 2 players with hls.master_playlist and for an
+                                    // adaptive stream, else index.m3u8)
   hls: boolean;
   file_id: Id;
   duration_ms: number;
@@ -339,6 +340,9 @@ interface PlaybackInfo {
                                     // decoded (wrong colours)" for a direct play the player insisted on.
                                     // Version 1 players don't say which HDR formats their
                                     // screen shows: their HDR10+ is named as it is
+  adaptive: boolean;                // the transcode comes in several sizes the player moves between
+                                    // by itself (hls.variants; see Several sizes): its own Automatic
+                                    // leaves the session be
 }
 ```
 
@@ -1171,8 +1175,9 @@ queue.
 | GET | `/api/playback/{session_id}` | – | `{ session_id, method, transcode: TranscodeInfo \| null }`: the player's details, how the session plays now (`transcode` is null for a direct play). `403` for someone else's session (administrators see any), `404` "playback session expired" once it is gone, `410` when it was stopped |
 | DELETE | `/api/playback/{session_id}` | – | `204` (stops any transcode) |
 | GET | `/api/playback/{session_id}/index.m3u8` | – | HLS VOD playlist (`application/vnd.apple.mpegurl`) |
-| GET | `/api/playback/{session_id}/master.m3u8` | – | multivariant playlist naming the codecs (see [Dolby Vision remuxes](#dolby-vision-remuxes)), one variant: `index.m3u8` |
+| GET | `/api/playback/{session_id}/master.m3u8` | – | multivariant playlist naming the codecs (see [Dolby Vision remuxes](#dolby-vision-remuxes)): `index.m3u8`, then a transcode's smaller sizes `v1.m3u8`… for a player that moves between them (see [Several sizes](#several-sizes)) |
 | GET | `/api/playback/{session_id}/{n}.ts` | – | MPEG-TS segment |
+| GET | `/api/playback/{session_id}/v{k}.m3u8`, `/api/playback/{session_id}/v{k}-{n}.ts` | – | a smaller size's playlist and segments, laid out as `index.m3u8`'s |
 | GET | `/api/files/{id}/stream` | – | raw file, supports `Range` (direct play) |
 | GET | `/api/media/{key}/{file}` | – | a keyed session's media, for a player that can't send the Authorization header: `master.m3u8`, `index.m3u8` and `{n}.ts` of a stream, `file.{ext}` of a direct play (see [Keyed URLs](#keyed-urls)). No token |
 | GET | `/api/files/{id}/subtitles/{index}.vtt` | query: `offset_ms` | WebVTT (text subtitles; extracted/converted on demand and cached). `offset_ms` moves every cue that much later (earlier when negative, never before 0; at most ±600000), for players that can't move a track themselves (Roku's subtitle sync); `400` when it isn't a whole number. Any embedded track may come partial: one still being read out of its file comes with the cues found so far and `X-Pley-Complete: 0` (not cached), so check that header and ask again for the rest. A Matroska file's track usually comes whole at once, read through its Cues when they list it. Requests for a subtitle file being converted share that conversion, which goes on (to the cache) when they stop waiting; one that failed is tried again on the next request |
@@ -1222,7 +1227,8 @@ queue.
     subtitle_codecs?: string[];   // shown by the player itself, pictures included ("hdmv_pgs_subtitle")
     picture_subtitles_sideload?: boolean; // shows picture subtitles from their `.mks` next to HLS too
     audio_track_switching?: boolean; // switches a file's audio tracks itself
-    hls?: { master_playlist?: boolean; segments?: string[] }; // "ts", "fmp4"
+    hls?: { master_playlist?: boolean; segments?: string[]; // "ts", "fmp4"
+            variants?: boolean }; // moves between a stream's sizes by itself: transcodes come in several (any version)
     display?: { width: number; height: number; refresh_rates?: number[] };
     device?: { form?: "phone" | "tablet" | "tv" | "unknown"; tier?: "low" | "mid" | "high";
                fire_tv?: boolean; model?: string };
@@ -1434,6 +1440,25 @@ to H.264 SDR as before; version 1 players always are. The master
 playlist names it `hvc1.2.4.LLL.B0` with `VIDEO-RANGE=PQ` or `HLG`, and the
 player's details say `video_out: "HEVC 3840×2160 HDR10"`.
 
+### Several sizes
+
+A player that moves between a multivariant playlist's variants by itself
+(`caps.hls.variants`, any caps version) gets each transcode in several
+sizes, from `master.m3u8` (`PlaybackInfo.adaptive`): the size it asked for
+(or the original's closest quality, `auto_quality`), then 1080p, 720p,
+540p and 360p below it (a film wider than 16:9 by its width: 1920×800 is
+1080p's), each at 8, 4, 2 or 0.7 Mbps and never more than the one above.
+One with more than two thirds of the bits of the one above is left out,
+and a remux, a direct play and a download come in one size. A smaller
+size's playlist is `v{k}.m3u8`, its segments `v{k}-{n}.ts`: segment `n`
+of every size starts at the same time with a keyframe, so the player
+moves at any segment. The transcoder makes only the size asked for last
+(what the others made stays), and a size it can't make in real time
+arrives slower than it plays, so the player moves down for it too.
+`TranscodeInfo.rendition` and `variants` say which size plays. A
+transcoder without `capabilities.hls_variants` makes one size, as before.
+See docs/QUALITY.md for what the players do.
+
 ### Dolby Vision remuxes
 
 MPEG-TS segments carry a Dolby Vision stream's metadata (its RPUs) but
@@ -1441,7 +1466,8 @@ can't say that they do: Media3's `TsExtractor` sees plain HEVC, which plays
 as its base layer at best and with wrong colours for profile 5. A
 multivariant playlist can say it. A version 2 player sending
 `hls: { master_playlist: true }` gets `PlaybackInfo.url` pointing to
-`master.m3u8` for every HLS session, remux or transcode, with one variant:
+`master.m3u8` for every HLS session, remux or transcode, with one variant
+(and a transcode's smaller sizes after it, see [Several sizes](#several-sizes)):
 
 ```
 #EXTM3U
@@ -1734,6 +1760,8 @@ interface TranscodeInfo {
   segments_total: number;
   bitrate_out: number | null;   // what a conversion aims for, video and audio together (bits per second); null for copied video
   last_error: string | null;
+  rendition: number;            // a stream in several sizes: the one the player takes now (0 the largest; the rest is its)
+  variants: number;             // how many smaller sizes it has (0: one size)
 }
 
 type ServerEvent =

@@ -16,7 +16,7 @@ sub test_caps_of_a_4k_hdr_roku_with_a_receiver()
     tkEqual(caps.audio_passthrough, ["ac3", "eac3", "dts"])
     tkEqual(caps.audio_codecs, ["aac", "mp3", "ac3", "eac3", "flac", "alac", "opus", "vorbis", "pcm_s16le", "pcm_s24le", "pcm_s16be", "pcm_s24be", "dts"])
     tkEqual(caps.audio_channels, 6)
-    tkEqual(caps.hls, { master_playlist: true, segments: ["ts"] })
+    tkEqual(caps.hls, { master_playlist: true, segments: ["ts"], variants: true })
     tkEqual(caps.display, { width: 3840, height: 2160, refresh_rates: [60] })
     tkEqual(caps.device, { form: "tv", model: "Roku Ultra" })
 end sub

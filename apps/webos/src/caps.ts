@@ -95,7 +95,8 @@ export function webosCaps(f: WebosFacts, o: CapsOverrides = { truehd: false, dts
     subtitle_codecs: SUBTITLES,
     audio_track_switching: v >= 4,
     picture_subtitles_sideload: true,
-    hls: { master_playlist: true, segments: v >= 5 ? ["ts", "fmp4"] : ["ts"] },
+    // LG's media pipeline moves between a stream's sizes by itself (adaptive bitrate).
+    hls: { master_playlist: true, segments: v >= 5 ? ["ts", "fmp4"] : ["ts"], variants: true },
     display: f.screen ? { width: f.screen.width, height: f.screen.height, refresh_rates: [50, 60] } : undefined,
     device: { form: "tv", tier: tierOf(f), fire_tv: false, model: f.model },
   };
@@ -164,7 +165,7 @@ export function browserCaps(): CapsResult {
     subtitle_codecs: SUBTITLES,
     audio_track_switching: false,
     picture_subtitles_sideload: true,
-    hls: { master_playlist: true, segments: ["ts", "fmp4"] },
+    hls: { master_playlist: true, segments: ["ts", "fmp4"], variants: true },
     device: { form: "tv", tier: "high", fire_tv: false, model: "Browser" },
   };
   return { caps, lines: ["A desktop browser, for development: it plays what it says it plays."], dvContainers: [] };

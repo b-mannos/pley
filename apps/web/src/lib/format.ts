@@ -406,6 +406,8 @@ export function transcodeSummary(t: TranscodeInfo): string {
   const decoded = t.decoder !== "cpu" || t.pipeline === "hybrid";
   if (t.decoder && decoded && t.video === "transcode") parts.push(`${t.decoder} decode`);
   if (t.tonemap) parts.push(t.tonemap);
+  // A stream in several sizes: which of them the player takes, the largest first.
+  if (t.variants) parts.push(`size ${(t.rendition ?? 0) + 1} of ${t.variants + 1}`);
   if (t.subtitle_burn) parts.push("burn-in subs");
   if (t.speed != null && t.speed > 0) parts.push(`${t.speed.toFixed(1)}×`);
   return parts.join(" · ");

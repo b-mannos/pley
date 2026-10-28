@@ -2,7 +2,7 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } fro
 import { useLocation, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type HlsType from "hls.js";
-import type { ErrorData, FragLoadedData } from "hls.js";
+import type { ErrorData, FragLoadedData, LevelSwitchedData } from "hls.js";
 import {
   ArrowLeft,
   CircleStop,
@@ -228,6 +228,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const say = (text: string) => setQualityNotice((old) => ({ text, n: (old?.n ?? 0) + 1 }));
   /** Automatic's original fell back to a conversion: the next session says at what. */
   const announceFallback = useRef(false);
+  /** The lines of the size a stream in several sizes plays at now (hls.js picks it). */
+  const [levelLines, setLevelLines] = useState<number | null>(null);
 
   const file = item.files.find((f) => f.id === fileId) ?? item.files[0] ?? null;
   const audioStreams = useMemo(() => file?.streams.filter((s) => s.kind === "audio") ?? [], [file]);
@@ -493,6 +495,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     playedFrom.current = null;
     mediaShown.current = false;
     autoSettling.current = true;
+    setLevelLines(null);
     // A new session gets the full grace before it counts as stalled.
     lastAdvance.current = { at: performance.now(), time: -1 };
     lastData.current = performance.now();
@@ -586,6 +589,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 // The first segment is asked for as soon as the playlist is
                 // in, not once the element's MediaSource has opened (~0.1 s later).
                 startFragPrefetch: true,
+                // A stream in several sizes (`pinfo.adaptive`): Automatic
+                // takes none bigger than the player shows; a quality picked
+                // plays at its size whenever the connection allows.
+                capLevelToPlayerSize: auto !== null,
                 maxBufferLength: 30,
                 maxMaxBufferLength: 120,
                 backBufferLength: 60,
@@ -634,6 +641,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 // No answer at all, after the retries: the server is out of reach.
                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !data.response?.code) failUnreachable();
                 else setError(`Playback failed (${data.details}).`);
+              });
+              hls.on(Hls.Events.LEVEL_SWITCHED, (_evt, data: LevelSwitchedData) => {
+                const level = hls.levels[data.level];
+                // Lines as a 16:9 picture's: a 1920×800 film plays at 1080p.
+                if (level && pinfo.adaptive) setLevelLines(Math.max(level.height, Math.round((level.width * 9) / 16)));
               });
               hls.on(Hls.Events.FRAG_LOADED, (_evt, data: FragLoadedData) => {
                 // Media that arrives isn't media that plays: budgets start over
@@ -864,7 +876,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const v = videoRef.current;
     if (!auto || !v) return;
     const now = performance.now();
-    if (!sessionRef.current || !mediaShown.current || autoSettling.current || v.paused || v.seeking || v.ended || document.hidden || error || stoppedRef.current) {
+    // A stream in several sizes: hls.js (or the browser) moves between them
+    // without a new session.
+    if (!sessionRef.current || sessionRef.current.adaptive || !mediaShown.current || autoSettling.current || v.paused || v.seeking || v.ended || document.hidden || error || stoppedRef.current) {
       auto.interrupted();
       return;
     }
@@ -1423,7 +1437,15 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     : null;
   // What Automatic plays ("Original", "8 Mbps 1080p"; the original converted here by its quality), and why when lower.
   const converted = info?.auto_quality && playingQuality.id === ORIGINAL_ID ? namedFor(file, qualityById(info.auto_quality)) : null;
-  const autoNow = auto ? (playingQuality.id === ORIGINAL_ID ? (converted?.maxBitrate ? converted.label : "Original") : playingQuality.label) : null;
+  const autoNow = !auto
+    ? null
+    : info?.adaptive && levelLines
+      ? `${levelLines}p`
+      : playingQuality.id === ORIGINAL_ID
+        ? converted?.maxBitrate
+          ? converted.label
+          : "Original"
+        : playingQuality.label;
   const autoWhy = auto?.lowered && auto.playing !== ORIGINAL_ID ? LOWERED[auto.lowered] : null;
   const note = fallbackNote ?? autoWhy;
 

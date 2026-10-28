@@ -179,6 +179,7 @@ pub async fn start(
             reason: None,
             auto_quality: None,
             video_range: video_stream.and_then(|v| video_range_shown(&v, &req.caps, Delivery::Direct)),
+            adaptive: false,
         }));
     }
 
@@ -203,6 +204,12 @@ pub async fn start(
         start_ms: Some(start_ms),
         options: settings.transcode_options(),
         container: None,
+        // A transcoder older than adaptive bitrate makes one size.
+        variants: if state.transcoder.info().is_some_and(|t| t.capabilities.hls_variants) {
+            decision.variants.clone()
+        } else {
+            Vec::new()
+        },
     };
     let created = state.transcoder.create_job(&job_request).await.map_err(|err| for_viewer(&user, err))?;
     let method = match (&created.video, &created.audio) {
@@ -236,8 +243,10 @@ pub async fn start(
     let session = state.sessions.insert_transcode(session, slot);
     state.events.send(ServerEvent::SessionsChanged);
     // Players that read multivariant playlists learn the codecs (Dolby
-    // Vision, above all) before the first segment.
-    let playlist = if req.caps.master_playlist() { "master.m3u8" } else { "index.m3u8" };
+    // Vision, above all) before the first segment; one that moves between
+    // sizes learns them there.
+    let adaptive = created.variants > 0;
+    let playlist = if req.caps.master_playlist() || adaptive { "master.m3u8" } else { "index.m3u8" };
     // Playlists name their segments by relative addresses, so a keyed
     // playlist's segments carry the key too.
     let url = match &session.media_key {
@@ -264,6 +273,7 @@ pub async fn start(
         video_range: video_stream
             .zip(created.video.as_ref())
             .and_then(|(v, plan)| video_range_shown(&v, &req.caps, Delivery::of_plan(plan))),
+        adaptive,
     }))
 }
 
@@ -570,6 +580,7 @@ pub async fn convert(
         start_ms: None,
         options: state.settings.get().transcode_options(),
         container: (container == FileContainer::Mp4).then_some(container),
+        variants: Vec::new(),
     };
     let status = state.transcoder.create_conversion(&job).await.map_err(|err| match AppError::from(err) {
         // The file can't be read now (a share asleep, unmounted): a moment's
@@ -668,7 +679,8 @@ async fn session_hls(state: &AppState, user: &AuthUser, session: &Arc<Session>, 
     }
     let job = session.job_id().ok_or_else(|| AppError::not_found("playback session expired"))?;
 
-    if file == "index.m3u8" || file == "master.m3u8" {
+    let playlist = hls_file_kind(file).ok_or_else(|| AppError::not_found("unknown playlist file"))?;
+    if playlist {
         let playlist = match state.transcoder.playlist_file(&job, file).await {
             Err(err) if err.is_job_gone() => {
                 let job = replacement_job(state, user, session, &job).await?;
@@ -683,14 +695,10 @@ async fn session_hls(state: &AppState, user: &AuthUser, session: &Arc<Session>, 
             .into_response());
     }
 
-    let n: u32 = file
-        .strip_suffix(".ts")
-        .and_then(|n| n.parse().ok())
-        .ok_or_else(|| AppError::not_found("unknown playlist file"))?;
-    let upstream = match state.transcoder.segment(&job, n).await {
+    let upstream = match state.transcoder.segment_file(&job, file).await {
         Err(err) if err.is_job_gone() => {
             let job = replacement_job(state, user, session, &job).await?;
-            state.transcoder.segment(&job, n).await?
+            state.transcoder.segment_file(&job, file).await?
         }
         other => other?,
     };
@@ -700,6 +708,23 @@ async fn session_hls(state: &AppState, user: &AuthUser, session: &Arc<Session>, 
         response = response.header(header::CONTENT_LENGTH, len);
     }
     response.body(Body::from_stream(upstream.bytes_stream())).map_err(|e| AppError::Internal(e.into()))
+}
+
+/// What a transcode session's file is by its name: a playlist (`true`:
+/// `master.m3u8`, `index.m3u8`, a lower rendition's `v1.m3u8`…) or a segment
+/// (`false`: `12.ts`, `v1-12.ts`…); `None` for anything else.
+fn hls_file_kind(name: &str) -> Option<bool> {
+    let rendition = |s: &str| s.strip_prefix('v').and_then(|k| k.parse::<u32>().ok()).is_some_and(|k| k > 0);
+    let number = |s: &str| !s.is_empty() && s.len() <= 9 && s.bytes().all(|b| b.is_ascii_digit());
+    if let Some(stem) = name.strip_suffix(".m3u8") {
+        return (stem == "index" || stem == "master" || rendition(stem)).then_some(true);
+    }
+    let stem = name.strip_suffix(".ts")?;
+    let segment = match stem.split_once('-') {
+        Some((k, n)) => rendition(k) && number(n),
+        None => number(stem),
+    };
+    segment.then_some(false)
 }
 
 /// `GET /api/media/{key}/{file}`: a session's media for a player that can't

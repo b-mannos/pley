@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-Restricted
-//! A job's multivariant playlist, `master.m3u8`: one variant (the job's
-//! `index.m3u8`) and what a player needs to pick its decoders before it
+//! A job's multivariant playlist, `master.m3u8`: its variants (the job's
+//! `index.m3u8`, then its lower renditions' `v1.m3u8`… for adaptive
+//! bitrate) and what a player needs to pick its decoders before it
 //! reads a segment, since MPEG-TS segments can't say that a stream is Dolby
 //! Vision: `CODECS` (RFC 6381), `SUPPLEMENTAL-CODECS` for Dolby Vision
 //! profile 8 (RFC 8216bis), `RESOLUTION`, `FRAME-RATE`, `VIDEO-RANGE` and
@@ -9,9 +10,9 @@
 //! decoder, and with every codec named it prepares without downloading a
 //! segment first.
 
-use pley_transcoder_api::{DolbyVisionMode, DynamicRange, MediaInfo, MediaStream, VideoCodec};
+use pley_transcoder_api::{DolbyVisionMode, DynamicRange, MediaInfo, MediaStream, VideoCodec, default_video_kbps};
 
-use crate::plan::{AudioOut, Plan, VideoOut, default_bitrate_kbps};
+use crate::plan::{AudioOut, Plan, VideoOut};
 
 /// The variant of a job's master playlist.
 #[derive(Debug, Clone, PartialEq)]
@@ -91,13 +92,23 @@ impl Variant {
 
 /// The master playlist of a job whose media playlist is `index.m3u8` next
 /// to it.
+#[cfg(test)]
 pub fn master_playlist(plan: &Plan, media: &MediaInfo) -> String {
-    let variant = Variant::of(plan, media);
+    renditions_playlist(&[(plan, "index.m3u8".into())], media)
+}
+
+/// The master playlist of a job with lower renditions too
+/// ([`pley_transcoder_api::JobRequest::variants`]), each with its media
+/// playlist, highest first: players that pick by the list's order start
+/// with the best.
+pub fn renditions_playlist(renditions: &[(&Plan, String)], media: &MediaInfo) -> String {
     let mut out = String::from("#EXTM3U\n#EXT-X-VERSION:3\n");
-    if plan.video.is_some() {
+    if renditions.iter().any(|(plan, _)| plan.video.is_some()) {
         out.push_str("#EXT-X-INDEPENDENT-SEGMENTS\n");
     }
-    out.push_str(&format!("#EXT-X-STREAM-INF:{}\nindex.m3u8\n", variant.attributes()));
+    for (plan, uri) in renditions {
+        out.push_str(&format!("#EXT-X-STREAM-INF:{}\n{uri}\n", Variant::of(plan, media).attributes()));
+    }
     out
 }
 
@@ -248,7 +259,7 @@ fn video_bitrate(v: &VideoOut, src: Option<&MediaStream>, media: &MediaInfo) -> 
     src.and_then(|s| s.bitrate)
         .or_else(|| media.bitrate.map(|b| b - audio))
         .filter(|b| *b > 0)
-        .map_or(u64::from(default_bitrate_kbps(v.height)) * 1000, |b| b as u64)
+        .map_or(u64::from(default_video_kbps(v.width, v.height)) * 1000, |b| b as u64)
 }
 
 fn audio_bitrate(a: &AudioOut, src: Option<&MediaStream>) -> u64 {

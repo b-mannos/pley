@@ -77,7 +77,8 @@ function capsBuild(device as object) as object
         audio_decode: decode,
         audio_passthrough: passthrough,
         audio_channels: channels,
-        hls: { master_playlist: true, segments: ["ts"] },
+        ' The Video node moves between a transcode's sizes by itself (adaptive bitrate).
+        hls: { master_playlist: true, segments: ["ts"], variants: true },
         device: { form: "tv", model: capsModel(device) }
     }
     ' Roku's Dolby Vision decoders take profiles 5 and 8; their levels go

@@ -85,6 +85,8 @@ export function videoCaps(): ClientCaps {
     audio_codecs: audioCodecs(v),
     hdr: tenBit && (hdrDisplay || (isChromium() && !/\bAndroid\b/.test(navigator.userAgent))),
     dolby_vision: dolbyVision,
+    // hls.js, and a browser's own HLS, move between a transcode's sizes as the connection allows.
+    hls: { variants: true },
   };
   return videoCache;
 }

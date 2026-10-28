@@ -168,6 +168,11 @@ data class PlaybackInfo(
      * P7 FEL)", "SDR (tone-mapped)"… `null` for SDR video and older servers.
      */
     val videoRange: String? = null,
+    /**
+     * The stream comes in several sizes Media3 moves between by itself, as
+     * the connection allows: Automatic leaves the session be.
+     */
+    val adaptive: Boolean = false,
 )
 
 /** A transcode job's state (packages/transcoder-api, `JobState`). */

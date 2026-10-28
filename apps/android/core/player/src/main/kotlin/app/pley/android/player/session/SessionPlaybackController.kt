@@ -809,7 +809,10 @@ class SessionPlaybackController(
                 return
             }
         }
-        if (automatic && !stopped && ui.value.phase !is PlayerPhase.Error) {
+        // A stream in several sizes: Media3 moves between them as the
+        // connection allows, without a new session (stalls and dropped
+        // frames still lower it).
+        if (automatic && !s.info.adaptive && !stopped && ui.value.phase !is PlayerPhase.Error) {
             val step = autoQuality.sample(
                 AutoSample(
                     atMs = now,

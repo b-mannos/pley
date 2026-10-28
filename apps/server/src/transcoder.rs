@@ -462,9 +462,14 @@ impl Transcoder {
 
     /// Streaming response of segment `n` (the caller forwards the body).
     pub async fn segment(&self, job_id: &str, n: u32) -> TranscoderResult<reqwest::Response> {
+        self.segment_file(job_id, &format!("{n}.ts")).await
+    }
+
+    /// A segment by its name: `12.ts`, or a lower rendition's `v1-12.ts`.
+    pub async fn segment_file(&self, job_id: &str, name: &str) -> TranscoderResult<reqwest::Response> {
         let base = self.base()?;
         let resp = self
-            .authed(self.http.get(format!("{base}/v1/jobs/{job_id}/{n}.ts")))
+            .authed(self.http.get(format!("{base}/v1/jobs/{job_id}/{name}")))
             .timeout(Duration::from_secs(120))
             .send()
             .await?;

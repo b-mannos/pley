@@ -454,6 +454,11 @@ export interface PlaybackInfo {
    * and from older servers.
    */
   video_range?: string | null;
+  /**
+   * The stream comes in several sizes the player moves between by itself
+   * (`master.m3u8`): Automatic leaves the session be. Absent from older servers.
+   */
+  adaptive?: boolean;
 }
 
 /** `GET /api/playback/{session}`: how a session plays, with its transcode's live numbers. */
@@ -471,6 +476,8 @@ export interface ClientCaps {
   hdr?: boolean;
   /** Decodes Dolby Vision (needed for profile 5). */
   dolby_vision?: boolean;
+  /** HLS: `variants` moves between a multivariant playlist's sizes by itself (adaptive bitrate). */
+  hls?: { variants?: boolean };
 }
 
 /** `auto` lets the server pick the cheapest method the client supports. */
@@ -539,6 +546,10 @@ export interface TranscodeInfo {
   /** What the transcode aims for, video and audio together (bits per second). */
   bitrate_out?: number | null;
   last_error: string | null;
+  /** Of a transcode in several sizes: the one the player takes now (0 the largest; the rest is its)… */
+  rendition?: number;
+  /** …and how many smaller ones there are (0: one size). */
+  variants?: number;
 }
 
 export interface SessionInfo {

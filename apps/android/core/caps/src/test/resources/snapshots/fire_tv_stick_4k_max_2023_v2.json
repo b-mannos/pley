@@ -158,7 +158,8 @@
         "segments": [
             "ts",
             "fmp4"
-        ]
+        ],
+        "variants": true
     },
     "display": {
         "width": 3840,

@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use pley_transcoder_api::{
     AudioCodec, AudioMode, AudioPlan, DolbyVisionMode, DynamicRange, EncoderInfo, FileContainer, HwAccel, JobRequest,
     MediaInfo, MediaStream, StreamKind, Tonemapper, VideoCodec, VideoMode, VideoPlan, VideoRequest, decode_key,
-    is_text_subtitle_codec,
+    default_video_kbps, is_text_subtitle_codec,
 };
 
 use crate::devices::vaapi_device;
@@ -357,7 +357,7 @@ impl Plan {
                     })
                 } else {
                     let (width, height) = fit(src_width, src_height, vreq.max_width, vreq.max_height);
-                    let mut bitrate = default_bitrate_kbps(height);
+                    let mut bitrate = default_video_kbps(width, height);
                     if let Some(max) = vreq.max_bitrate_kbps {
                         bitrate = bitrate.min(max.max(300));
                     }
@@ -1243,17 +1243,6 @@ pub fn fit(w: i64, h: i64, max_w: Option<u32>, max_h: Option<u32>) -> (i64, i64)
     let scale = scale.min(1.0);
     let even = |v: f64| ((v / 2.0).round() as i64 * 2).max(2);
     (even(w as f64 * scale), even(h as f64 * scale))
-}
-
-pub fn default_bitrate_kbps(height: i64) -> u32 {
-    match height {
-        h if h >= 2000 => 20_000,
-        h if h >= 1400 => 12_000,
-        h if h >= 1000 => 8_000,
-        h if h >= 700 => 4_000,
-        h if h >= 500 => 2_000,
-        _ => 1_200,
-    }
 }
 
 fn is_x264_preset(p: &str) -> bool {

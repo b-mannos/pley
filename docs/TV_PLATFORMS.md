@@ -402,6 +402,11 @@ within 2 s of a seek of its own:
   Neither TV's engine counts frames yet, so on a TV that is the
   fallbacks' alone.
 
+A transcode comes in several sizes (`hls.variants`, docs/QUALITY.md),
+which AVPlay and LG's media pipeline move between by themselves: in such
+a session (`PlaybackInfo.adaptive`) the tick leaves Automatic be, and only
+the stall and dropped-frame paths above can still start it again lower.
+
 The slow network is kept for 30 minutes per TV and server
 (`pley.autoQuality.<server>`), so Up Next, and the playback that starts
 again when the TV shows the app again, begin where it left off. A step

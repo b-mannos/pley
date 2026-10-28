@@ -101,8 +101,9 @@ with the following status codes:
 | DELETE | `/v1/jobs/{id}` | – | `204` (kills ffmpeg, deletes segments) |
 | POST | `/v1/jobs/{id}/touch` | – | `204` (keeps a paused session alive) |
 | GET | `/v1/jobs/{id}/index.m3u8` | – | HLS VOD playlist |
-| GET | `/v1/jobs/{id}/master.m3u8` | – | multivariant playlist: one variant (`index.m3u8`) with `CODECS`, `SUPPLEMENTAL-CODECS`, `RESOLUTION`, `FRAME-RATE`, `VIDEO-RANGE` and the bandwidth (see *Dolby Vision in remuxes*). Transcoders that serve it say `hls_master_playlist: true` in their capabilities |
+| GET | `/v1/jobs/{id}/master.m3u8` | – | multivariant playlist: the job's variant (`index.m3u8`), then its smaller renditions' (`v1.m3u8`…, see *Renditions*), each with `CODECS`, `SUPPLEMENTAL-CODECS`, `RESOLUTION`, `FRAME-RATE`, `VIDEO-RANGE` and the bandwidth (see *Dolby Vision in remuxes*). Transcoders that serve it say `hls_master_playlist: true` in their capabilities |
 | GET | `/v1/jobs/{id}/{n}.ts` | – | MPEG-TS segment `n` (waits for it, or starts ffmpeg) |
+| GET | `/v1/jobs/{id}/v{k}.m3u8`, `/v1/jobs/{id}/v{k}-{n}.ts` | – | rendition `k`'s playlist and segments (`JobRequest.variants`; transcoders that make them say `hls_variants: true`) |
 | POST | `/v1/conversions` | `JobRequest` | `ConversionStatus {id, state, progress, duration_ms, size?, error?, video?, audio?}`: the request made into one Matroska file, or MP4 with `container: "mp4"` (see *Conversions*). Asked again for the same input and request, the same conversion (or its file) answers; a failed one starts again. Transcoders that serve it say `conversions: true` in their capabilities, and `conversions_mp4: true` when they make MP4 |
 | GET | `/v1/conversions/{id}` | – | `ConversionStatus`: `queued`, `running` (with `progress`, 0 to 1), `done` (with `size`) or `failed` (with `error`) |
 | DELETE | `/v1/conversions/{id}` | – | `204` (stops ffmpeg, deletes the file) |
@@ -257,6 +258,26 @@ half-made ones are deleted.
    the software encoder, as when hardware sessions run out, with a warning
    on the job; once that happened to three jobs, `capabilities.json` is
    deleted, so the next start tests the encoders again.
+7. **Renditions.** A transcode asked for with `variants` (adaptive
+   bitrate: a player that moves between sizes by itself) also comes
+   smaller: each variant is the job's request with its own `max_width`,
+   `max_height` and `max_bitrate_kbps`, kept when it is no bigger and has
+   fewer bits than the one above and its segments are laid out as the
+   job's (transcodes' are: the layout depends on the duration alone).
+   They are jobs of their own inside the job, in folders `v1/`…, with
+   their segments named `v1-{n}.ts`… in their playlists; burned-in text
+   subtitles are extracted once and copied to them. The job's
+   `master.m3u8` lists them after its own, largest first. A process runs
+   for the rendition the player asked last: when its requests move to
+   another, the others' processes stop (what they made stays), and one
+   asked for again starts where it is wanted. They expire, go and are
+   tidied with the job, and its status is the playing rendition's
+   (`rendition`, `variants`), with what all of them served.
+
+   A transcode's bitrate, unless asked for less, is its size's: 20 Mbps
+   from 2000 lines, 12 from 1400, 8 from 1000, 4 from 700, 2 from 500, 1.2
+   from 400 and 0.7 below, counting the lines a 16:9 picture as wide
+   would have (a 1920×800 film is 1080p's 8 Mbps).
 
 ## Transcoding features
 

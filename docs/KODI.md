@@ -255,7 +255,10 @@ own views instead (below), which skins' widgets and favourites always get.
   the settings, before playing.
 - **Automatic** plays the original and watches it from the service, once
   a second while it plays (not paused, seeking, fast-forwarding or
-  rewinding, nor in the seconds after a seek or the start):
+  rewinding, nor in the seconds after a seek or the start). Kodi's own
+  HLS player takes one variant of a playlist and keeps it, so the add-on
+  doesn't ask for transcodes in several sizes (`hls.variants`,
+  docs/QUALITY.md) and steps down itself:
   - *Waits*: Kodi buffering (`Player.Caching`), or the position not
     moving while it plays. One of 2 seconds or more, or two shorter ones
     within a minute, is a play issue.

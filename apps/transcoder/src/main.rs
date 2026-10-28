@@ -436,6 +436,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
             subtitle_matroska: true,
             conversions: true,
             conversions_mp4: true,
+            hls_variants: true,
             ..ff.caps.clone()
         },
         limits,

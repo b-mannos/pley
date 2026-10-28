@@ -358,24 +358,33 @@ end sub
 ' down once the stream plays.
 sub watchState(state as string)
     if m.watch = invalid then return
+    if state = "playing" and m.autoNotice <> ""
+        showToast(m.autoNotice)
+        m.autoNotice = ""
+    end if
+    if adaptiveStream() then return
     underrun = invalid
     if state = "buffering"
         status = m.video.bufferingStatus
         if GetInterface(status, "ifAssociativeArray") <> invalid and GetInterface(status.isUnderrun, "ifBoolean") <> invalid then underrun = status.isUnderrun
     end if
     quality = aqState(m.watch, m.clock.TotalMilliseconds(), state, underrun)
-    if state = "playing" and m.autoNotice <> ""
-        showToast(m.autoNotice)
-        m.autoNotice = ""
-    end if
     if quality <> "" then autoSwitch(quality)
 end sub
 
 sub onAutoTick()
-    if m.watch = invalid or m.info = invalid then return
+    if m.watch = invalid or m.info = invalid or adaptiveStream() then return
     quality = aqTick(m.watch, m.clock.TotalMilliseconds())
     if quality <> "" then autoSwitch(quality)
 end sub
+
+' The stream comes in several sizes the Video node moves between by itself,
+' as the connection allows: Automatic leaves the session be.
+function adaptiveStream() as boolean
+    if m.info = invalid then return false
+    flag = m.info.adaptive
+    return GetInterface(flag, "ifBoolean") <> invalid and flag
+end function
 
 ' Each HLS segment the Video node downloaded: its size over the time it
 ' took is what the network carried.

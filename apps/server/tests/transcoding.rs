@@ -312,6 +312,7 @@ async fn start_fake() -> (Fake, String) {
                     video: status.video,
                     audio: status.audio,
                     warnings: vec![],
+                    variants: 0,
                 })
                 .into_response()
             }),

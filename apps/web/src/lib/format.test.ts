@@ -397,6 +397,12 @@ describe("transcodeSummary", () => {
     );
   });
 
+  it("says which of a stream's sizes plays", () => {
+    expect(transcodeSummary({ ...base, video_out: "H.264 1280×720", rendition: 1, variants: 3, speed: null })).toBe(
+      "HEVC 3840×2160 Dolby Vision P8.1 → H.264 1280×720 · EAC3 5.1 (copy) · h264_nvenc · cuda decode · libplacebo · size 2 of 4",
+    );
+  });
+
   it("names a video transcode without details", () => {
     expect(
       transcodeSummary({ ...base, video_in: null, video_out: null, audio: "none", decoder: null, tonemap: null, speed: 0 }),

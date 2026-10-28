@@ -32,6 +32,8 @@ describe("videoCaps", () => {
       audio_codecs: ["aac", "opus", "flac"],
       hdr: false,
       dolby_vision: false,
+      // Transcodes come in several sizes, which hls.js moves between.
+      hls: { variants: true },
     });
   });
 

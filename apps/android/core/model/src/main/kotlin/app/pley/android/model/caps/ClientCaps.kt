@@ -96,6 +96,8 @@ data class HlsCaps(
     val masterPlaylist: Boolean = false,
     /** The segment formats it plays: "ts", "fmp4". */
     val segments: List<String> = emptyList(),
+    /** Moves between a master playlist's sizes by itself (adaptive bitrate): transcodes come in several. */
+    val variants: Boolean = false,
 )
 
 /** The screen (version 2). */

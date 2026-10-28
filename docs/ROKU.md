@@ -158,9 +158,11 @@ Rules the code keeps:
   ("8 Mbps 720p"), the tallest first, then by bitrate; one chosen there
   becomes the Roku's setting, and the title opens again at it where it
   was.
-- Automatic plays the original and watches it. Roku's own HLS would adapt
-  between a stream's variants, but pley's streams have one, so stepping
-  down is the app's:
+- Automatic plays the original and watches it. A transcode comes in
+  several sizes (`hls.variants`, docs/QUALITY.md) the Video node moves
+  between by itself, so in such a session (`PlaybackInfo.adaptive`)
+  Automatic leaves it be; the original and its remuxes come in one, so
+  stepping down from them is the app's:
   - *Waits*: the Video node's state `buffering` after at least 2 s of
     playing (not a start, nor after a seek pley made or a pause), and not
     when `bufferingStatus.isUnderrun` says it isn't for want of data. One

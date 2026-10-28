@@ -13,8 +13,8 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use pley_transcoder_api::{
     AudioCodec, AudioMode, AudioRequest, DolbyVisionLayer, DolbyVisionMode, DynamicRange, FileContainer, JobRequest,
-    JobStatus, MediaInfo, MediaStream, OutputRange, StreamKind, SubtitleBurnRequest, VideoCodec, VideoMode, VideoPlan,
-    VideoRequest, video_range_label,
+    JobStatus, MediaInfo, MediaStream, OutputRange, StreamKind, SubtitleBurnRequest, VariantRequest, VideoCodec,
+    VideoMode, VideoPlan, VideoRequest, default_video_kbps, video_range_label,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
@@ -131,6 +131,11 @@ pub struct HlsCaps {
     pub master_playlist: bool,
     /// Segment formats: "ts", "fmp4".
     pub segments: Vec<String>,
+    /// Moves between a multivariant playlist's variants by itself, as its
+    /// connection allows (adaptive bitrate): its transcodes come in several
+    /// sizes ([`ladder`]), from `master.m3u8`. Taken from players of either
+    /// version.
+    pub variants: bool,
 }
 
 /// A version 2 player's screen mode.
@@ -205,6 +210,11 @@ impl Caps {
     /// remuxes").
     pub fn master_playlist(&self) -> bool {
         self.is_v2() && self.hls.as_ref().is_some_and(|hls| hls.master_playlist)
+    }
+
+    /// The player moves between variants by itself ([`HlsCaps::variants`]).
+    pub fn adaptive(&self) -> bool {
+        self.hls.as_ref().is_some_and(|hls| hls.variants)
     }
 }
 
@@ -333,6 +343,10 @@ pub struct PlaybackInfo {
     /// "Dolby Vision P8.1", "HDR10 (Dolby Vision base layer)", "SDR
     /// (tone-mapped)"… `None` for SDR video.
     pub video_range: Option<String>,
+    /// The stream comes in several sizes the player moves between by itself
+    /// ([`HlsCaps::variants`]), from `master.m3u8`: its own Automatic
+    /// quality leaves the session be.
+    pub adaptive: bool,
 }
 
 /// The qualities players offer (apps/web/src/player/quality.ts), highest
@@ -406,6 +420,48 @@ pub struct Decision {
     pub reasons: Vec<String>,
     /// The quality picked for the original ([`closest_quality`]), by id.
     pub quality: Option<&'static str>,
+    /// The transcode's lower renditions, for a player that moves between
+    /// them ([`ladder`]).
+    pub variants: Vec<VariantRequest>,
+}
+
+/// The lines of adaptive bitrate's renditions below a transcode's own size,
+/// each a 16:9 picture's (a film wider than 16:9 is made narrower, so as
+/// tall as it fits).
+const LADDER_LINES: [i64; 4] = [1080, 720, 540, 360];
+
+/// The lower renditions of a transcode of a `width`×`height` video as
+/// `top` asks, for a player that moves between them by itself as its
+/// connection allows: 1080p, 720p, 540p and 360p below its own size, each
+/// at the bitrate its size gets and never more than the one above
+/// ([`default_video_kbps`]). Steps of about half the bits each: one with
+/// more than two thirds of the one above is left out.
+pub fn ladder(width: Option<i64>, height: Option<i64>, top: &VideoRequest) -> Vec<VariantRequest> {
+    let (w, h) = (width.unwrap_or(1920).max(2), height.unwrap_or(1080).max(2));
+    // The transcode's own size, as the transcoder fits it.
+    let scale = [top.max_width.map(|m| f64::from(m) / w as f64), top.max_height.map(|m| f64::from(m) / h as f64)]
+        .into_iter()
+        .flatten()
+        .fold(1.0f64, f64::min);
+    let (w, h) = ((w as f64 * scale) as i64, (h as f64 * scale) as i64);
+    let lines = h.max(w * 9 / 16);
+    let cap = top.max_bitrate_kbps.unwrap_or(u32::MAX);
+    let mut above = default_video_kbps(w, h).min(cap);
+    let mut rungs = Vec::new();
+    for rung in LADDER_LINES.into_iter().filter(|l| *l < lines * 9 / 10) {
+        let width = (rung * 16 / 9 + 1) / 2 * 2;
+        let kbps = default_video_kbps(width, rung).min(cap);
+        if u64::from(kbps) * 3 > u64::from(above) * 2 {
+            continue;
+        }
+        rungs.push(VariantRequest {
+            max_width: u32::try_from(width).ok(),
+            max_height: u32::try_from(rung).ok(),
+            max_bitrate_kbps: Some(kbps),
+        });
+        above = kbps;
+    }
+    rungs
 }
 
 /// Why the client cannot show this video's dynamic range as is (the video is
@@ -981,6 +1037,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             burn_index: None,
             reasons: if direct { vec![] } else { vec!["This file hasn't been analyzed yet.".into()] },
             quality: None,
+            variants: Vec::new(),
         };
     };
 
@@ -1119,6 +1176,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             burn_index: None,
             reasons: Vec::new(),
             quality: None,
+            variants: Vec::new(),
         };
     }
 
@@ -1203,6 +1261,14 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         Some(v) => v.mode == VideoMode::Copy,
         None => audio_req.as_ref().is_some_and(|a| a.mode == AudioMode::Copy),
     };
+    // Smaller sizes too, for a player that moves between them as its
+    // connection allows; a download is one file.
+    let variants = match (&video_req, video) {
+        (Some(v), Some(src)) if v.mode == VideoMode::Transcode && caps.adaptive() && !req.download => {
+            ladder(src.width, src.height, v)
+        }
+        _ => Vec::new(),
+    };
     let subtitle = burn.map(|s| {
         if s.external {
             let path = file.external_subs().into_iter().find(|e| e.index == s.index).map(|e| e.path);
@@ -1220,6 +1286,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         audio_index,
         reasons,
         quality,
+        variants,
     }
 }
 
@@ -1871,6 +1938,11 @@ pub struct TranscodeInfo {
     /// What the transcode aims for, video and audio together (bits per second).
     pub bitrate_out: Option<i64>,
     pub last_error: Option<String>,
+    /// Of a transcode in several sizes ([`HlsCaps::variants`]): the one the
+    /// player takes now (0 the largest; the rest of this is its)…
+    pub rendition: u32,
+    /// …and how many smaller ones there are (0: one size).
+    pub variants: u32,
 }
 
 /// A codec as people know it: `"hevc"` → `"HEVC"`, `"hdmv_pgs_subtitle"` → `"PGS"`.
@@ -1995,6 +2067,8 @@ pub fn transcode_info(job: &JobStatus) -> TranscodeInfo {
             .and_then(|v| v.bitrate_kbps)
             .map(|kbps| (i64::from(kbps) + audio.and_then(|a| a.bitrate_kbps).map_or(0, i64::from)) * 1000),
         last_error: job.last_error.clone(),
+        rendition: job.rendition,
+        variants: job.variants,
     }
 }
 
@@ -2242,6 +2316,29 @@ mod tests {
         let d = decide(&file("mp4", 5_000_000), Some(&i), &i.streams, &req);
         assert_eq!(d.method, Method::Transcode);
         assert_eq!(d.subtitle.unwrap().stream_index, Some(9));
+    }
+
+    #[test]
+    fn adaptive_renditions_step_down_by_about_half() {
+        let rungs = |w, h, max_height, kbps: Option<u32>| {
+            let top = VideoRequest { max_height, max_bitrate_kbps: kbps, ..Default::default() };
+            ladder(Some(w), Some(h), &top)
+                .iter()
+                .map(|v| (v.max_height.unwrap(), v.max_bitrate_kbps.unwrap()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            rungs(3840, 2160, Some(2160), Some(29_808)),
+            [(1080, 8_000), (720, 4_000), (540, 2_000), (360, 700)]
+        );
+        // A scope film is 1080p's for its width: its rungs are 720p's and below.
+        assert_eq!(rungs(1920, 800, Some(1080), Some(19_808)), [(720, 4_000), (540, 2_000), (360, 700)]);
+        // Below a quality picked, at most its bitrate.
+        assert_eq!(rungs(1920, 1080, Some(720), Some(3_808)), [(540, 2_000), (360, 700)]);
+        assert_eq!(rungs(1920, 1080, Some(480), Some(1_808)), [(360, 700)]);
+        // Too close to the one above to make a difference: left out.
+        assert!(rungs(1920, 1080, Some(1080), Some(1_000)).is_empty());
+        assert!(rungs(640, 360, None, None).is_empty(), "nothing below 360p");
     }
 
     #[test]

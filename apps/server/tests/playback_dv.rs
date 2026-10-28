@@ -595,6 +595,7 @@ async fn start_fake(masters: bool, hdr: bool) -> (Fake, String) {
                         ffprobe_available: true,
                         hls_master_playlist: fake.masters.load(Ordering::SeqCst),
                         hdr_transcode: fake.hdr.load(Ordering::SeqCst),
+                        hls_variants: true,
                         ..Default::default()
                     },
                     limits: Limits { max_jobs: 8, max_hw_jobs: 0 },
@@ -616,6 +617,7 @@ async fn start_fake(masters: bool, hdr: bool) -> (Fake, String) {
             "/v1/jobs",
             post(|State(fake): State<Fake>, Json(req): Json<JobRequest>| async move {
                 let status = job_status(&req);
+                let variants = req.variants.len() as u32;
                 fake.created.lock().push(req);
                 Json(JobCreated {
                     id: "job1".into(),
@@ -625,6 +627,7 @@ async fn start_fake(masters: bool, hdr: bool) -> (Fake, String) {
                     video: status.video,
                     audio: None,
                     warnings: vec![],
+                    variants,
                 })
             }),
         )
@@ -644,6 +647,11 @@ async fn start_fake(masters: bool, hdr: bool) -> (Fake, String) {
                     "index.m3u8" => {
                         "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2.000,\n0.ts\n#EXT-X-ENDLIST\n".to_owned()
                     }
+                    "v1.m3u8" => {
+                        "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2.000,\nv1-0.ts\n#EXT-X-ENDLIST\n".to_owned()
+                    }
+                    // A lower rendition's segment, as the job's own would come.
+                    "v1-0.ts" => return ([(header::CONTENT_TYPE, "video/mp2t")], vec![0x47u8; 188]).into_response(),
                     _ => return error(StatusCode::NOT_FOUND, "not_found"),
                 };
                 ([(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")], playlist).into_response()
@@ -716,6 +724,44 @@ async fn master_playlists_reach_players_that_read_them() {
     let session = web.body["session_id"].as_str().unwrap();
     assert_eq!(web.body["url"], json!(format!("/api/playback/{session}/index.m3u8")));
     assert_eq!(fake.created.lock().last().unwrap().video.as_ref().unwrap().dolby_vision, DolbyVisionMode::Copy);
+}
+
+#[tokio::test]
+async fn players_that_adapt_get_transcodes_in_several_sizes() {
+    let (app, fake, admin, movie) = world(true).await;
+    let mut caps = chrome();
+    caps["hls"] = json!({"variants": true});
+    let started = app.post("/api/playback", &admin, json!({"item_id": movie, "caps": caps, "mode": "transcode"})).await;
+    assert_eq!(started.status, StatusCode::OK, "{:?}", started.body);
+    let session = started.body["session_id"].as_str().unwrap().to_owned();
+    assert_eq!(started.body["adaptive"], json!(true));
+    assert_eq!(started.body["url"], json!(format!("/api/playback/{session}/master.m3u8")));
+    // The 1080p film's own size, then 720p, 540p and 360p.
+    let job = fake.created.lock().last().cloned().unwrap();
+    let rungs: Vec<_> = job.variants.iter().map(|v| (v.max_width, v.max_height, v.max_bitrate_kbps)).collect();
+    assert_eq!(
+        rungs,
+        [(Some(1280), Some(720), Some(4_000)), (Some(960), Some(540), Some(2_000)), (Some(640), Some(360), Some(700))]
+    );
+
+    // A lower rendition's playlist and segments come through the session,
+    // and nothing else by such names.
+    assert_eq!(app.get(&format!("/api/playback/{session}/v1.m3u8"), &admin).await.status, StatusCode::OK);
+    let segment = app.get(&format!("/api/playback/{session}/v1-0.ts"), &admin).await;
+    assert_eq!(
+        (segment.status, segment.headers[header::CONTENT_TYPE].to_str().unwrap()),
+        (StatusCode::OK, "video/mp2t")
+    );
+    for name in ["v0.m3u8", "v1-x.ts", "v1.ts", "status.m3u8", "..%2Fstatus"] {
+        let answer = app.get(&format!("/api/playback/{session}/{name}"), &admin).await;
+        assert_eq!(answer.status, StatusCode::NOT_FOUND, "{name}");
+    }
+
+    // A player that doesn't say so gets one size, as before.
+    let plain =
+        app.post("/api/playback", &admin, json!({"item_id": movie, "caps": chrome(), "mode": "transcode"})).await;
+    assert_eq!(plain.body["adaptive"], json!(false));
+    assert!(fake.created.lock().last().unwrap().variants.is_empty());
 }
 
 #[tokio::test]

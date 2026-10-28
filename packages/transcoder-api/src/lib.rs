@@ -505,6 +505,10 @@ pub struct Capabilities {
     /// transcoders make Matroska only.
     #[serde(default)]
     pub conversions_mp4: bool,
+    /// Jobs take lower renditions for adaptive bitrate
+    /// ([`JobRequest::variants`]). Older transcoders make one.
+    #[serde(default)]
+    pub hls_variants: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -622,6 +626,33 @@ pub struct VideoRequest {
     /// with a warning.
     #[serde(default)]
     pub dynamic_range: OutputRange,
+}
+
+/// A lower rendition of a job's video ([`JobRequest::variants`]): the video
+/// as [`VideoRequest`] asks, made no bigger and with no more bits than this.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VariantRequest {
+    #[serde(default)]
+    pub max_width: Option<u32>,
+    #[serde(default)]
+    pub max_height: Option<u32>,
+    /// Video bitrate cap in kbit/s (default chosen from the output resolution).
+    #[serde(default)]
+    pub max_bitrate_kbps: Option<u32>,
+}
+
+/// The video bitrate a transcode aims for at a size, in kbit/s: by its
+/// lines counted as a 16:9 picture's, so a 1920×800 film gets 1080p's.
+pub fn default_video_kbps(width: i64, height: i64) -> u32 {
+    match height.max(width * 9 / 16) {
+        h if h >= 2000 => 20_000,
+        h if h >= 1400 => 12_000,
+        h if h >= 1000 => 8_000,
+        h if h >= 700 => 4_000,
+        h if h >= 500 => 2_000,
+        h if h >= 400 => 1_200,
+        _ => 700,
+    }
 }
 
 /// The dynamic range of a transcode of HDR video.
@@ -791,6 +822,18 @@ pub struct JobRequest {
     /// when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<FileContainer>,
+    /// Lower renditions of the video, for a player that moves between them
+    /// by itself as its connection and the transcoder allow (adaptive
+    /// bitrate), highest first. Each is `video` made no bigger and with no
+    /// more bits than it says, and everything else the same; the job's
+    /// `master.m3u8` lists them after `video`'s `index.m3u8`, as
+    /// `v1.m3u8`… with segments `v1-{n}.ts`…, laid out as `index.m3u8`'s,
+    /// so the player can move at any segment. Only one makes segments at a
+    /// time: the one the player asked last. Ignored unless the video is
+    /// transcoded into segments (a copy, a conversion), and a rendition no
+    /// smaller than the one above it is left out ([`JobCreated::variants`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variants: Vec<VariantRequest>,
 }
 
 /// What a conversion's file is: Matroska, which keeps every track, or MP4
@@ -892,6 +935,10 @@ pub struct JobCreated {
     pub video: Option<VideoPlan>,
     pub audio: Option<AudioPlan>,
     pub warnings: Vec<String>,
+    /// The lower renditions made of [`JobRequest::variants`]: with any, the
+    /// job is played from its `master.m3u8`.
+    #[serde(default)]
+    pub variants: u32,
 }
 
 /// Where a conversion is.
@@ -987,6 +1034,14 @@ pub struct JobStatus {
     pub served_bytes: u64,
     pub last_error: Option<String>,
     pub warnings: Vec<String>,
+    /// The rendition the player takes now, of a job with lower ones
+    /// ([`JobRequest::variants`]): 0 for `video`, 1 for the first variant…
+    /// The rest of the status is that rendition's.
+    #[serde(default)]
+    pub rendition: u32,
+    /// How many lower renditions the job has.
+    #[serde(default)]
+    pub variants: u32,
 }
 
 // ---------------------------------------------------------------------------
