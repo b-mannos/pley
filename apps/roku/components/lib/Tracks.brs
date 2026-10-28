@@ -248,9 +248,12 @@ function tracksSameLanguage(a as string, b as string) as boolean
 end function
 
 ' The body of PUT /api/items/{id}/streams: the file and the tracks it
-' plays, null for its default audio (-1) and for subtitles off (-1).
+' plays, null for its default audio (-1) and for subtitles off (-1). The
+' audio left out (-2) keeps the one picked before: subtitles changed alone
+' don't pin the track the server chose for this Roku on other devices.
 function tracksStreamsBody(fileId as dynamic, audioIndex as integer, subtitleIndex as integer) as object
-    body = { audio_index: invalid, subtitle_index: invalid }
+    body = { subtitle_index: invalid }
+    if audioIndex <> -2 then body.audio_index = invalid
     file = httpNumber(fileId, 0)
     if file > 0 then body.file_id = file
     if audioIndex >= 0 then body.audio_index = audioIndex

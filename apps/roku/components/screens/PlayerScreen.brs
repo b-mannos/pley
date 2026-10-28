@@ -346,21 +346,24 @@ sub onTracks()
     end if
     if not subtitlePicked and not audioPicked then return
     if m.tracksFrom < 0 or m.clock.TotalMilliseconds() < m.tracksFrom then return
-    saveTracks(file, subtitlePicked)
+    saveTracks(file, subtitlePicked, audioPicked)
 end sub
 
 ' PUT /api/items/{id}/streams with the tracks playing; kept in the file too,
 ' so a stream started again shows them. Text subtitles picked over picture
 ' ones the server draws need a stream without those.
-sub saveTracks(file as dynamic, subtitlePicked as boolean)
+sub saveTracks(file as dynamic, subtitlePicked as boolean, audioPicked as boolean)
     burned = -1
     if httpTrue(m.info.burn_subtitles) then burned = Int(httpNumber(m.info.subtitle_index, -1))
     subtitle = m.subtitleShown
     if not subtitlePicked and subtitle < 0 then subtitle = burned
-    body = tracksStreamsBody(m.info.file_id, m.audioPlaying, subtitle)
+    ' The audio only when it was picked: subtitles alone keep the audio picked before.
+    audio = -2
+    if audioPicked then audio = m.audioPlaying
+    body = tracksStreamsBody(m.info.file_id, audio, subtitle)
     uiRequest({ method: "PUT", path: "/api/items/" + urlValue(m.itemId) + "/streams", jsonText: FormatJson(body) }, "")
     if file <> invalid
-        file.selected_audio = body.audio_index
+        if body.DoesExist("audio_index") then file.selected_audio = body.audio_index
         file.selected_subtitle = body.subtitle_index
     end if
     if not subtitlePicked or not tracksNeedNewSession(burned, subtitle) then return

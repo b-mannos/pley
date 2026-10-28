@@ -175,6 +175,7 @@ sub test_tracks_streams_bodies()
     tkEqual(FormatJson(tracksStreamsBody(7, 2, -1)), "{""audio_index"":2,""file_id"":7,""subtitle_index"":null}", "subtitles off")
     tkEqual(FormatJson(tracksStreamsBody(7, -1, 1000)), "{""audio_index"":null,""file_id"":7,""subtitle_index"":1000}", "the default audio")
     tkFalse(tracksStreamsBody(invalid, 1, 3).DoesExist("file_id"), "the item's first file")
+    tkEqual(FormatJson(tracksStreamsBody(7, -2, 13)), "{""file_id"":7,""subtitle_index"":13}", "subtitles alone: the audio left as picked before")
 end sub
 
 sub test_tracks_new_session_only_away_from_drawn_pictures()
