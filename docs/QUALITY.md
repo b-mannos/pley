@@ -51,9 +51,18 @@ waits.
 
 Original, unless it doesn't play well; then the quality that does.
 
-**It starts as Original**, with one exception: a network found too slow in
-the last 30 minutes on this device and server (below). Then it starts at
-the quality that network carried, if that is below the file's.
+**It starts as Original**, unless this device knows its network to be
+slower than the file. Before playing, it asks the server what it knows of
+the network it plays on (below). Then it starts at the highest quality of
+the menu at or below what that network carries, if that is below the
+file's, and never below 2 Mbps 480p; the menu and the details say
+"Lowered for your connection".
+
+Away from home, on a network nothing is known of yet, it first runs a
+short speed test: at most 2 s of data from the server, behind the usual
+loading. It starts at 70 % of the speed it found, or as Original when the
+whole test arrived in time. On the server's own network there is never a
+test.
 
 **It watches** while the video plays (not paused, not seeking):
 
@@ -94,10 +103,18 @@ network from what they download: an HLS segment's size over the time it
 took, or a direct play's bytes read while it fills its buffer. A player
 that can't tell its network's speed stays where it went down to.
 
-**It remembers** for 30 minutes, per device and server, the bitrate the
-network last carried when it stepped down; the next title in Automatic
-starts at most at that (Up Next included). A step back up to Original
-forgets it.
+**It remembers** on the server, per profile, device and network, what the
+network carries: the bitrate of its last step for 24 hours, and a speed
+test for 7 days. The next title in Automatic starts at most at that (Up
+Next included), and so does the same device back on that network
+tomorrow. A step down or a step up to a quality moves it; a step back up
+to Original, or picking Automatic in the menu, forgets it, and no speed
+test runs there for 7 days. The server keeps only a keyed hash of the
+address, never the address.
+
+When the server can't be reached for this, or is older, the device keeps
+its own memory instead, as before: for 30 minutes, per device and server,
+the bitrate the network last carried when it stepped down.
 
 Picking a quality in the menu, Automatic again included, starts from that
 choice afresh.
@@ -137,3 +154,7 @@ Automatic asks for Original (`mode: "auto"`) or for a quality
 (`mode: "transcode"`, `max_bitrate`, `max_height`), as the menu's other
 choices do, and reads `auto_quality` for what it would choose for the
 file, and `adaptive` for whether the stream moves between sizes itself.
+What it knows of the network comes from `GET /api/playback/network`, its
+speed test from `GET /api/playback/speedtest`, and it reports both with
+`PUT /api/playback/network` (docs/API.md, "Network memory and speed
+test").

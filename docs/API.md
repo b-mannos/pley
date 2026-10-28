@@ -762,6 +762,9 @@ sign-in settings among them.
 | GET | `/api/search` | `library` |
 | GET | `/api/events` | `library` |
 | POST | `/api/playback` | `play` |
+| GET | `/api/playback/network` | `play` |
+| PUT | `/api/playback/network` | `play` |
+| GET | `/api/playback/speedtest` | `play` |
 | GET | `/api/playback/{session}` | `play` |
 | DELETE | `/api/playback/{session}` | `play` |
 | GET | `/api/playback/{session}/{file}` | `play` |
@@ -1174,6 +1177,9 @@ queue.
 | POST | `/api/playback` | see below | `PlaybackInfo` |
 | GET | `/api/playback/{session_id}` | – | `{ session_id, method, transcode: TranscodeInfo \| null }`: the player's details, how the session plays now (`transcode` is null for a direct play). `403` for someone else's session (administrators see any), `404` "playback session expired" once it is gone, `410` when it was stopped |
 | DELETE | `/api/playback/{session_id}` | – | `204` (stops any transcode) |
+| GET | `/api/playback/network?client_id=` | – | `NetworkAnswer`: what Automatic knows of the network this request came from (see [Network memory and speed test](#network-memory-and-speed-test)) |
+| PUT | `/api/playback/network` | `{ client_id, probe_kbps, probe_complete? }` or `{ client_id, ceiling_kbps }` | `NetworkAnswer` |
+| GET | `/api/playback/speedtest?bytes=` | – | that many bytes to time (`application/octet-stream`) |
 | GET | `/api/playback/{session_id}/index.m3u8` | – | HLS VOD playlist (`application/vnd.apple.mpegurl`) |
 | GET | `/api/playback/{session_id}/master.m3u8` | – | multivariant playlist naming the codecs (see [Dolby Vision remuxes](#dolby-vision-remuxes)): `index.m3u8`, then a transcode's smaller sizes `v1.m3u8`… for a player that moves between them (see [Several sizes](#several-sizes)) |
 | GET | `/api/playback/{session_id}/{n}.ts` | – | MPEG-TS segment |
@@ -1345,6 +1351,80 @@ addresses carry a key of their own instead:
 Everything else the player asks for (subtitles, seek previews, its
 reports) goes with the token as usual. Pley's Samsung and LG TV apps ask
 for keyed URLs.
+
+### Network memory and speed test
+
+Automatic quality (docs/QUALITY.md) starts at what the network carries.
+The server remembers it per signed-in user, client and network: the
+ceiling Automatic's last change left, for 24 hours, and the last speed
+test, for 7 days. Only Automatic uses any of it; Original and a quality
+picked in the menu never do.
+
+The network is the one the request came from (the other end of its
+connection, or the client a proxy on the server's own network forwards
+for; nobody on the internet can choose it). An address on the server's
+own network (private, loopback, link-local, Tailscale) is `"local"`;
+any other is an IPv4 address as it is, or an IPv6 address by its /64,
+which a home's devices share. Only a keyed hash of the address is
+stored (HMAC-SHA256 with a key derived from the server's `secret.key`),
+never the address, and rows nobody wrote for 7 days go.
+
+```ts
+// GET /api/playback/network?client_id=<id>, and PUT's answer
+{
+  local: boolean;              // this server's own network: never a speed test
+  ceiling_kbps: number | null; // the most Automatic starts at here; null = no limit known
+  source: "playback" | "probe" | null; // what set it
+  since: number | null;        // when (unix ms)
+  probe: boolean;              // run a speed test before starting Automatic
+}
+```
+
+- `client_id` is the one the client sends in `POST /api/playback`, 1 to
+  128 characters; missing or longer: `400 bad_request`.
+- `ceiling_kbps`: a ceiling from playback set within 24 hours wins
+  (`source: "playback"`); else a speed test within 7 days gives 70 % of
+  what it measured (`"probe"`), or no limit when the whole test arrived
+  in time (`probe_complete`); else `null`. `source` and `since` are
+  `null` whenever `ceiling_kbps` is.
+- `probe` is true only away from the server's network, with no speed
+  test (nor forget, below) from this client on this network within 7 days
+  and no ceiling from playback within 24 hours.
+
+`PUT /api/playback/network` keeps what the client reports, with exactly
+one of `probe_kbps` and `ceiling_kbps`, and answers as `GET`:
+
+```ts
+{ client_id, probe_kbps: 52000, probe_complete: false } // a speed test's result
+{ client_id, ceiling_kbps: 8000 }  // Automatic's ceiling changed: a step down, or up to a quality
+{ client_id, ceiling_kbps: null }  // back to Original, or Automatic picked again: forget
+```
+
+- Speeds are kbps from 1 to 10000000 (a fraction is rounded); anything
+  else, both fields, or neither: `400 bad_request`.
+- `probe_complete: true` (the whole test arrived inside the client's
+  time) says the network is at least that fast: no limit is kept.
+  Left out, it is `false`.
+- `ceiling_kbps: null` clears the ceiling from playback and counts as a
+  speed test that found no limit, for 7 days: nothing limits, and no test
+  is due.
+
+`GET /api/playback/speedtest?bytes=<n>` answers exactly `n` bytes
+(default 33554432, 32 MiB; kept between 65536 and 67108864) of
+pseudo-random data no compression shrinks, made as it is sent, with
+`Content-Length`, `Cache-Control: no-store, no-transform`, and never
+compressed. `bytes` that isn't a whole number: `400`. A user runs two at
+a time: a third answers `429 too_many_requests` until one ends or is
+dropped. One still going after 2 minutes is cut off.
+
+The client times it from the first byte and stops 2 s later (or when it
+has all arrived): kbps = bytes × 8 / seconds / 1000, and
+`probe_complete` when it all arrived within the 2 s. Under 256 KiB
+arrived reports nothing. A client that can't read a body as it arrives
+(Roku) fetches `bytes=8388608` whole, times the whole request, and
+reports `probe_complete: false`. All three routes take app tokens with
+the `play` scope. A server without them answers `404`: clients then use
+their own memory, as before.
 
 ### Version 2
 
