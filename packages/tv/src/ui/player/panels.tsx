@@ -1,6 +1,9 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { channelsLabel, codecLabel, formatBitrate, formatClock } from "../../format/format";
+import { errorMessage, isApiError } from "../../api/client";
+import type { SubtitleResult } from "../../api/types";
+import { channelsLabel, codecLabel, formatBitrate, formatClock, languageName } from "../../format/format";
+import { Cancel } from "../../net/transport";
 import { mediaFacts, streamBlock, type FactBlock } from "../../format/media-info";
 import type { PlaybackController, PlayerState } from "../../player/controller";
 import type { EngineStats } from "../../player/engine";
@@ -11,8 +14,25 @@ import { PanelRow } from "../kit/buttons";
 import { F } from "../kit/focusable";
 import { Icon } from "../kit/icons";
 import { PanelTitle, SidePanel } from "../kit/panel";
+import { useApp } from "../screens/common";
+import { LANGUAGES } from "../screens/settings";
 
-export type PlayerPanel = "subtitles" | "audio" | "quality" | "chapters" | "speed" | "sleep" | "info";
+export type PlayerPanel = "subtitles" | "find" | "audio" | "quality" | "chapters" | "speed" | "sleep" | "info";
+
+/** Subtitle search on this server, as last heard: not set up, or a server older than it. */
+let searchUnavailable: "setup" | "older" | null = null;
+
+/** Forgets what the server said of subtitle search (tests). */
+export function forgetSubtitleSearch(): void {
+  searchUnavailable = null;
+}
+
+/** Why the server can't search for subtitles: not set up (503 with `setup: false`), or older than search (404). */
+function unavailableOf(e: unknown): "setup" | "older" | null {
+  if (isApiError(e, 404)) return "older";
+  if (isApiError(e, 503) && (e.body as { setup?: unknown } | undefined)?.setup === false) return "setup";
+  return null;
+}
 
 /** A chapter's name: its title, or "Chapter N" (its title after it, unless it is one already). */
 export function chapterName(title: string | null, n: number): string {
@@ -21,15 +41,28 @@ export function chapterName(title: string | null, n: number): string {
 }
 
 /** The player's side panels (TvPlayerPanels): pick a row, it applies and closes; Back closes. */
-export function PlayerPanels(p: { panel: PlayerPanel; state: PlayerState; controller: PlaybackController; positionMs: number; onClose: () => void; stats: () => EngineStats | null; engineName: string }) {
+export function PlayerPanels(p: {
+  panel: PlayerPanel;
+  state: PlayerState;
+  controller: PlaybackController;
+  positionMs: number;
+  onClose: () => void;
+  /** Opens another panel in this one's place (Find subtitles…). */
+  onOpen?: (panel: PlayerPanel) => void;
+  stats: () => EngineStats | null;
+  engineName: string;
+}) {
   const s = p.state;
   const c = p.controller;
+  const me = useApp().me.value;
   const pick = (fn: () => void) => () => {
     fn();
     p.onClose();
   };
   switch (p.panel) {
-    case "subtitles":
+    case "subtitles": {
+      // Search the server can't do: not offered where it never will, said for an administrator who can set it up.
+      const find = !!p.onOpen && searchUnavailable !== "older" && (searchUnavailable !== "setup" || !!me?.is_admin);
       return (
         <SidePanel onClose={p.onClose} label="Subtitles">
           <PanelTitle>Subtitles</PanelTitle>
@@ -38,14 +71,27 @@ export function PlayerPanels(p: { panel: PlayerPanel; state: PlayerState; contro
             <PanelRow
               key={String(t.index)}
               label={t.label}
-              sub={t.burnIn ? "Drawn into the picture by the server" : null}
+              sub={t.burnIn ? "Drawn into the picture by the server" : t.added ? "Added" : null}
               checked={t.selected}
               initial={t.selected}
               onSelect={pick(() => c.selectSubtitle(t.index))}
             />
           ))}
+          {find && (
+            <PanelRow
+              fid="find-subtitles"
+              icon="search"
+              label="Find subtitles…"
+              sub={searchUnavailable === "setup" ? "Subtitle search isn't set up" : null}
+              initial={!s.subtitles.length}
+              onSelect={() => p.onOpen?.("find")}
+            />
+          )}
         </SidePanel>
       );
+    }
+    case "find":
+      return <FindPanel controller={c} language={me?.subtitle_language ?? null} isAdmin={!!me?.is_admin} onClose={p.onClose} />;
     case "audio":
       return (
         <SidePanel onClose={p.onClose} label="Audio">
@@ -115,6 +161,116 @@ export function PlayerPanels(p: { panel: PlayerPanel; state: PlayerState; contro
     case "info":
       return <InfoPanel state={s} controller={c} onClose={p.onClose} stats={p.stats} engineName={p.engineName} />;
   }
+}
+
+type Found = { kind: "results"; results: SubtitleResult[] } | { kind: "setup" } | { kind: "older" } | { kind: "error"; message: string };
+
+/** "1,234 downloads". */
+function downloads(n: number): string {
+  return `${String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} download${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * Find subtitles… (the web's): what OpenSubtitles has for the file, in the
+ * profile's language or another picked here, those made for this very file
+ * first; one picked is added on the server for everyone, and shows.
+ */
+function FindPanel(p: { controller: PlaybackController; language: string | null; isAdmin: boolean; onClose: () => void }) {
+  const [language, setLanguage] = useState(p.language || "eng");
+  const [choosing, setChoosing] = useState(false);
+  const [answer, setAnswer] = useState<{ language: string; found: Found } | null>(null);
+  const [adding, setAdding] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    const cancel = new Cancel();
+    p.controller.findSubtitles(language, cancel).then(
+      (results) => setAnswer({ language, found: { kind: "results", results } }),
+      (e: unknown) => {
+        if (cancel.cancelled) return;
+        const why = unavailableOf(e);
+        if (why) searchUnavailable = why;
+        setAnswer({ language, found: why ? { kind: why } : { kind: "error", message: errorMessage(e) } });
+      },
+    );
+    return () => cancel.cancel();
+  }, [language]);
+
+  if (choosing) {
+    return (
+      <SidePanel key="languages" onClose={() => setChoosing(false)} label="Subtitle language">
+        <PanelTitle>Subtitle language</PanelTitle>
+        {LANGUAGES.map(([code, name]) => (
+          <PanelRow
+            key={code}
+            label={name}
+            checked={code === language}
+            initial={code === language}
+            onSelect={() => {
+              setLanguage(code);
+              setChoosing(false);
+            }}
+          />
+        ))}
+      </SidePanel>
+    );
+  }
+  const add = (r: SubtitleResult) => {
+    if (adding) return;
+    setAdding(r.id);
+    setFailed(null);
+    p.controller.addFoundSubtitle(r).then(
+      () => p.onClose(),
+      (e: unknown) => {
+        setAdding(null);
+        setFailed(`These subtitles couldn't be added. ${errorMessage(e)}`);
+      },
+    );
+  };
+  const found = answer && answer.language === language ? answer.found : null;
+  const name = languageName(language) ?? language;
+  return (
+    <SidePanel key="results" onClose={p.onClose} label="Find subtitles">
+      <PanelTitle>Find subtitles</PanelTitle>
+      {found?.kind === "setup" || found?.kind === "older" ? (
+        <div class="t-body c-muted panel-note">
+          {found.kind === "older"
+            ? "This server can't search for subtitles: it needs an update."
+            : p.isAdmin
+              ? "Subtitle search isn't set up on this server. Set it up in pley on the web: Settings → Server → Subtitles."
+              : "Subtitle search isn't set up on this server."}
+        </div>
+      ) : (
+        <>
+          <PanelRow fid="find-language" icon="captions" label="Language" sub={name} initial={!found || found.kind !== "results" || !found.results.length} onSelect={() => setChoosing(true)} />
+          {failed && <div class="t-body c-muted panel-note">{failed}</div>}
+          {!found ? (
+            <div class="t-body c-muted panel-note">Searching…</div>
+          ) : found.kind === "error" ? (
+            <div class="t-body c-muted panel-note">{`Couldn't search for subtitles. ${found.message}`}</div>
+          ) : !found.results.length ? (
+            <div class="t-body c-muted panel-note">{`No ${name} subtitles found for this video.`}</div>
+          ) : (
+            found.results.map((r, i) => (
+              <PanelRow
+                key={r.id}
+                label={r.name}
+                sub={
+                  adding === r.id
+                    ? "Adding…"
+                    : [r.matched === "hash" ? "Made for this file" : null, languageName(r.language), r.format.toUpperCase(), r.hearing_impaired ? "SDH" : null, r.forced ? "Forced" : null, downloads(r.downloads)]
+                        .filter(Boolean)
+                        .join(" · ")
+                }
+                initial={i === 0}
+                disabled={adding !== null && adding !== r.id}
+                onSelect={() => add(r)}
+              />
+            ))
+          )}
+        </>
+      )}
+    </SidePanel>
+  );
 }
 
 /** Subtitle sync: Left and Right move the subtitles 0.1 s, OK puts them back. */

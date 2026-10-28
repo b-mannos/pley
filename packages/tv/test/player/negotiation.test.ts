@@ -1052,3 +1052,31 @@ describe("speed", () => {
     c.close();
   });
 });
+
+describe("subtitles found on the server", () => {
+  it("are searched in the language's two-letter code, and one added is listed with the file's and shows", async () => {
+    const w = world(item(file()), () => info({ method: "remux", hls: true, url: "/api/media/pley_mk_KEY/master.m3u8" }));
+    const searched: unknown[][] = [];
+    const api = w.env.api as unknown as Record<string, unknown>;
+    api.searchSubtitles = (...args: unknown[]) => {
+      searched.push(args);
+      return Promise.resolve([]);
+    };
+    api.addSubtitle = (_item: number, _file: number, result: string) =>
+      Promise.resolve({ index: 2000, codec: "subrip", language: "fre", title: null, default: false, forced: false, external: true, text_based: true, url: `/api/files/7/subtitles/2000.vtt?r=${result}`, added: true });
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await settle();
+    await c.findSubtitles("fre");
+    expect(searched[0]!.slice(0, 3)).toEqual([70, 7, ["fr"]]);
+
+    await c.addFoundSubtitle({ id: "opensubtitles:9", provider: "opensubtitles", language: "fr", name: "Film", format: "srt", hearing_impaired: false, forced: false, downloads: 3, matched: "hash" });
+    const subs = c.state.value.subtitles;
+    expect(subs[subs.length - 1]).toMatchObject({ index: 2000, selected: true, added: true });
+    expect(c.state.value.notice).toMatch(/^Subtitles added: French/);
+    // Text: drawn by the TV from the same session, chosen for the title as any track picked.
+    expect(w.requests).toHaveLength(1);
+    expect(w.saved[w.saved.length - 1]).toEqual([undefined, 2000]);
+    c.close();
+  });
+});

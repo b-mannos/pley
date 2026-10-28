@@ -22,6 +22,8 @@ import type {
   PlaylistEntry,
   SessionStatus,
   SubtitleMode,
+  SubtitleResult,
+  SubtitleTrack,
   Trickplay,
   User,
 } from "./types";
@@ -30,11 +32,14 @@ import type {
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
-  constructor(status: number, code: string, message: string) {
+  /** The answer's JSON, when it had some (fields past `code` and `message`, as `setup`). */
+  readonly body: unknown;
+  constructor(status: number, code: string, message: string, body?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.body = body;
   }
 }
 
@@ -428,6 +433,22 @@ export class Api {
     });
   }
 
+  /** Subtitle files found for an item's file, in `languages` (two-letter codes; the profile's own when left out). */
+  searchSubtitles(itemId: Id, fileId: Id | null, languages: string[] | null, cancel?: Cancel): Promise<SubtitleResult[]> {
+    return this.get<{ results?: SubtitleResult[] }>(`/api/items/${itemId}/subtitles/search`, {
+      query: { file_id: fileId, language: languages && languages.length ? languages.join(",") : null },
+      cancel,
+      timeoutMs: 30_000,
+    }).then((r) => r.results ?? []);
+  }
+
+  /** Adds a subtitle file `searchSubtitles` found, for everyone; the new track. */
+  addSubtitle(itemId: Id, fileId: Id | null, result: string): Promise<SubtitleTrack> {
+    return this.send(`/api/items/${itemId}/subtitles`, { method: "POST", body: fileId === null ? { result } : { result, file_id: fileId }, timeoutMs: 30_000 }).then(
+      (r) => r.body as SubtitleTrack,
+    );
+  }
+
   trickplay(fileId: Id, cancel?: Cancel): Promise<Trickplay> {
     return this.get(`/api/files/${fileId}/trickplay`, { cancel });
   }
@@ -452,7 +473,7 @@ function toError(res: HttpResponse): ApiError {
     const note = body && typeof body === "object" ? (body as { message?: unknown }).message : null;
     return new SessionStoppedError(typeof note === "string" ? note : null);
   }
-  return new ApiError(res.status, code, message);
+  return new ApiError(res.status, code, message, body && typeof body === "object" && !(body instanceof Blob) ? body : undefined);
 }
 
 function statusCode(status: number): string {

@@ -455,7 +455,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
   const closePanel = () => {
     const opener = panel;
     setPanel(null);
-    if (opener) focusFid(opener === "subtitles" ? "subtitles" : opener);
+    if (opener) focusFid(opener === "find" ? "subtitles" : opener);
   };
 
   const target = seeker.target;
@@ -509,7 +509,8 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
             {hasPrevNext && <PlayerButton fid="next" icon="skip-forward" iconSize={24} label="Next" onSelect={() => media("next")} />}
           </div>
           <div class="row-right">
-            {s.subtitles.length > 0 && <PlayerButton fid="subtitles" icon="captions" label="Subtitles" onSelect={() => openPanel("subtitles")} />}
+            {/* Without subtitles too: Find subtitles… is there. */}
+            {s.itemId > 0 && <PlayerButton fid="subtitles" icon="captions" label="Subtitles" onSelect={() => openPanel("subtitles")} />}
             {s.audio.length > 1 && <PlayerButton fid="audio" icon="audio-lines" label="Audio" onSelect={() => openPanel("audio")} />}
             {s.qualities.length > 0 && <PlayerButton fid="quality" icon="gauge" label="Quality" onSelect={() => openPanel("quality")} />}
             <PlayerButton fid="info" icon="info" label="Info" onSelect={() => openPanel("info")} />
@@ -550,7 +551,18 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
           {T.reconnecting}
         </div>
       )}
-      {panel && <PlayerPanels panel={panel} state={s} controller={c} positionMs={clockNow().positionMs} onClose={closePanel} stats={engineStats} engineName={c.engine?.name ?? ""} />}
+      {panel && (
+        <PlayerPanels
+          panel={panel}
+          state={s}
+          controller={c}
+          positionMs={clockNow().positionMs}
+          onClose={closePanel}
+          onOpen={openPanel}
+          stats={engineStats}
+          engineName={c.engine?.name ?? ""}
+        />
+      )}
       {error && (
         <div class="player-error">
           <div class="t-page c-fg" style="text-align:center">

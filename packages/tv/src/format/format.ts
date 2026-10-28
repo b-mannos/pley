@@ -282,6 +282,19 @@ const LANGUAGES: Record<string, string> = {
   yi: "Yiddish", zu: "Zulu",
 };
 
+/**
+ * A language's two-letter code (ISO 639-1), as subtitle sites name them:
+ * "eng" → "en", "chi" → "zh"; a code without one comes back as it is.
+ */
+export function twoLetterCode(code: string): string {
+  const base = code.trim().toLowerCase();
+  if (base.length === 2) return base;
+  const name = LANGUAGES[base];
+  if (!name) return base;
+  for (const key in LANGUAGES) if (key.length === 2 && LANGUAGES[key] === name) return key;
+  return base;
+}
+
 /** "eng" → "English", "pt-BR" → "Portuguese (BR)", unknown codes upper-cased; `null` without one. */
 export function languageName(code: string | null | undefined): string | null {
   const raw = (code ?? "").trim();

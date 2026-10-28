@@ -20,6 +20,7 @@ export const T = {
   lastInQueue: "This is the last one",
   subtitlesOff: "Off",
   subtitlesFailed: "These subtitles couldn't be loaded.",
+  subtitlesAdded: (label: string) => `Subtitles added: ${label}`,
   slowServer: "The server can't keep up with this video. Try a lower quality.",
   noFile: "This item has no file to play.",
   burnedIn: "Drawn onto the video",

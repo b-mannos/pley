@@ -14,6 +14,7 @@ export interface User {
   username: string;
   name: string;
   display_name: string | null;
+  is_admin?: boolean;
   /** A profile without a password, reached by switching. */
   managed?: boolean;
   avatar_url: string | null;

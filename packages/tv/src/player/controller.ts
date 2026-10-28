@@ -12,12 +12,14 @@ import type {
   PlaybackMode,
   PlaybackRequest,
   ServerEvent,
+  SubtitleResult,
+  SubtitleTrack,
   TranscodeInfo,
   Trickplay,
 } from "../api/types";
 import { SignedOutError } from "../auth/tokens";
 import { Cancel } from "../net/transport";
-import { episodeLabel, streamLabel } from "../format/format";
+import { episodeLabel, streamLabel, twoLetterCode } from "../format/format";
 import { decide } from "../caps/policy";
 import { NOTHING_SHOWN, SubtitlePresenter, type ShownSubtitles } from "../subs/presenter";
 import { clampOffset, type OffsetStore } from "../subs/sync";
@@ -72,6 +74,8 @@ export interface TrackChoice {
   selected: boolean;
   /** Pictures a stream draws onto the video ("burn-in"). */
   burnIn: boolean;
+  /** Subtitles added on the server (found, or a file uploaded on the web). */
+  added?: boolean;
 }
 
 export interface QualityChoice {
@@ -1196,6 +1200,50 @@ export class PlaybackController {
     else this.applyTracks();
   }
 
+  /** Subtitle files the server finds for what plays, in `language` (ISO 639-2; the profile's own when `null`). */
+  findSubtitles(language: string | null, cancel?: Cancel): Promise<SubtitleResult[]> {
+    const item = this.item;
+    const file = this.file;
+    if (!item || !file) return Promise.resolve([]);
+    return this.env.api.searchSubtitles(item.id, file.id, language ? [twoLetterCode(language)] : null, cancel);
+  }
+
+  /** Adds `result` on the server, for everyone; then it is listed with the file's and shows. */
+  addFoundSubtitle(result: SubtitleResult): Promise<void> {
+    const item = this.item;
+    const file = this.file;
+    if (!item || !file) return Promise.reject(new Error(T.noFile));
+    return this.env.api.addSubtitle(item.id, file.id, result.id).then((track) => this.subtitleAdded(track));
+  }
+
+  /** A track added on the server: listed with the file's own (and the session's, for its address), and shown. */
+  private subtitleAdded(track: SubtitleTrack): void {
+    const file = this.file;
+    const item = this.item;
+    if (this.closed || this.stopped || !file || !item) return;
+    const stream: MediaStream = {
+      index: track.index,
+      kind: "subtitle",
+      codec: track.codec,
+      language: track.language,
+      title: track.title,
+      default: false,
+      forced: track.forced,
+      external: true,
+      text_based: track.text_based,
+      added: true,
+      added_by: track.added_by,
+    };
+    const updated: MediaFile = { ...file, streams: file.streams.filter((s) => !(s.kind === "subtitle" && s.index === track.index)).concat([stream]) };
+    this.file = updated;
+    this.item = { ...item, files: item.files.map((f) => (f.id === updated.id ? updated : f)) };
+    const info = this.info;
+    if (info) this.info = { ...info, subtitles: info.subtitles.filter((t) => t.index !== track.index).concat([track]) };
+    this.notice(T.subtitlesAdded(streamLabel(stream)));
+    if (this.subtitle?.index === track.index) this.publishChoices();
+    else this.selectSubtitle(track.index);
+  }
+
   setSubtitleOffset(ms: number): void {
     if (this.closed) return;
     const moved = clampOffset(ms);
@@ -1599,7 +1647,7 @@ export class PlaybackController {
     const off: TrackChoice = { index: null, label: T.subtitlesOff, selected: !this.subtitle, burnIn: false };
     const subtitles: TrackChoice[] = subs.length
       ? [off].concat(
-          subs.map((s) => ({ index: s.index, label: streamLabel(s), selected: s.index === this.subtitle?.index, burnIn: isPicture(s) && !this.sideload })),
+          subs.map((s) => ({ index: s.index, label: streamLabel(s), selected: s.index === this.subtitle?.index, burnIn: isPicture(s) && !this.sideload, added: !!s.added })),
         )
       : [];
     const sub = this.subtitle;
