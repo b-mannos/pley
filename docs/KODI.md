@@ -233,6 +233,35 @@ own views instead (below), which skins' widgets and favourites always get.
   settings (Playback), saved at once (`PUT /api/me/track-defaults`); a
   server that doesn't let apps change them says to change them on the
   web.
+- **Find subtitles** (`subtitles.py`): the add-on is one of Kodi's
+  subtitle services too (`xbmc.subtitle.module` in `addon.xml`), so the
+  player's Subtitles → Download lists "pley" beside any other service
+  installed, and Kodi's own dialog is the search's: pley has no menu in
+  Kodi's player, and this is where Kodi's people look for subtitles.
+  Kodi asks the plugin (`?action=search`); for a title pley plays (the
+  service's `pley.playing`; anything else lists nothing) it lists what
+  the server found on OpenSubtitles for the file playing, in the
+  profile's subtitle language (`GET /api/items/{id}/subtitles/search`,
+  no `language`: the server takes the profile's, English without one;
+  Kodi's own language setting isn't used), by the language's name with
+  the release under it, its flag, stars for how often it was downloaded
+  (five for one made for this very file, also marked as in sync), and
+  hearing impaired where it is. The one picked (`?action=download`) is
+  added on the server (`POST /api/items/{id}/subtitles`), its WebVTT
+  fetched through the proxy into Kodi's temp folder
+  (`pley-subtitles/10001.eng.vtt`) and handed to Kodi, which loads it
+  into the player and shows it; it is saved as the profile's choice for
+  the show or the movie (`PUT /api/items/{id}/streams`), so the next
+  episode and every other device start with it. Kodi lists the new track
+  among the playback's where the service's layout doesn't know it, so
+  the service stops following track changes for the rest of that
+  playback (`pley.subtitle_added`). A server without OpenSubtitles set up
+  (503) has Kodi say "Subtitle search isn't set up on this server. An
+  administrator sets it up on the web, in Settings → Server."; one from
+  before it (404), that finding subtitles needs a newer pley. Subtitles
+  added on any device are ordinary text tracks here, beside a converted
+  stream or a file played as it is (they are files next to it, to the
+  server).
 - **Listings** carry what Kodi shows of a title, since it asks the plugin
   for nothing more: synopses of every kind (`summaries=1`, docs/API.md),
   and artwork as Kodi's own library has it. An episode's still is its

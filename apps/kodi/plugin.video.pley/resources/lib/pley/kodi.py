@@ -200,6 +200,8 @@ TEXT = {
     "smart_playlist_empty": 30241,
     "your_rating": 30242,
     "not_rated": 30243,
+    "subtitles_not_set_up": 30244,
+    "subtitles_need_newer": 30245,
 }
 
 

@@ -119,7 +119,10 @@ class Plugin:
     # ----------------------------------------------------------------- routes
 
     def run(self) -> None:
-        route = self.params.get("route", "root")
+        from .subtitles import ACTIONS as SUBTITLE_ACTIONS
+
+        # Kodi's subtitle dialog says `action`, not `route` (subtitles.py).
+        route = self.params.get("route") or ("subtitles" if self.params.get("action") in SUBTITLE_ACTIONS else "root")
         handler = getattr(self, "route_" + route, None)
         if handler is None:
             kodi.log("unknown route " + route, xbmc.LOGWARNING)
@@ -405,6 +408,60 @@ class Plugin:
             kodi.text,
             api.ApiError,
         )
+
+    def route_subtitles(self) -> None:
+        """Kodi's subtitle dialog (Subtitles → Download in the player), with
+        pley as one of its services: the results for the title pley plays,
+        or the one picked, added on the server and handed to Kodi as a
+        file. Anything else playing lists nothing."""
+        from . import subtitles
+
+        found = subtitles.playing(kodi.get_property(kodi.PLAYING))
+        try:
+            if self.params.get("action") == "download":
+                self.subtitle_download(found)
+            elif found is not None:
+                self.subtitle_search(found)
+        except (api.ApiError, ValueError, OSError) as e:
+            kodi.log("subtitles: %r" % e, xbmc.LOGWARNING)
+            message = subtitles.problem(e, kodi.text) if isinstance(e, api.ApiError) else kodi.text("server_error") % e
+            kodi.notify(message, error=not (isinstance(e, api.ApiError) and e.status == 503))
+        self.end()
+
+    def subtitle_search(self, found: dict) -> None:
+        from . import subtitles
+
+        results = subtitles.search(self.client(), found["item_id"], found.get("file_id"))
+        convert = getattr(xbmc, "convertLanguage", None)
+        english = getattr(xbmc, "ENGLISH_NAME", None)
+        for url, label, label2, art, props in subtitles.entries(
+            results, self.base_url, found["item_id"], found.get("file_id"), (lambda code: convert(code, english)) if convert else None
+        ):
+            li = xbmcgui.ListItem(label=label, label2=label2, offscreen=True)
+            li.setArt(art)
+            for name, value in props.items():
+                li.setProperty(name, value)
+            xbmcplugin.addDirectoryItem(self.handle, url, li, isFolder=False)
+
+    def subtitle_download(self, found) -> None:
+        """Adds the result picked, saves it as the profile's choice, and
+        gives Kodi its file, which Kodi loads into the player and shows.
+        The service stops following track changes in this playback: Kodi
+        lists the new track where the playback's layout doesn't know it."""
+        from . import subtitles
+
+        client = self.client()
+        item_id = int(self.params["item"])
+        file_id = int(self.params["file"]) if self.params.get("file") else None
+        track = subtitles.add(client, item_id, file_id, self.params["result"])
+        path = subtitles.save(client, track, os.path.join(kodi.temp_dir(), "pley-subtitles"))
+        try:
+            client.put("/api/items/%d/streams" % item_id, subtitles.chosen(file_id, track["index"]))
+        except api.ApiError as e:
+            kodi.log("added subtitles not saved as the choice: %s" % e.message, xbmc.LOGWARNING)
+        if found is not None and found.get("item_id") == item_id:
+            kodi.set_property(subtitles.ADDED, found.get("session_id") or "")
+        xbmcplugin.addDirectoryItem(self.handle, path, xbmcgui.ListItem(label=path, offscreen=True), isFolder=False)
 
     def route_profiles(self) -> None:
         """Switch profile (the add-on's settings, Kodi's lists): the

@@ -7,6 +7,8 @@
     <provides>video audio</provides>
   </extension>
   <extension point="xbmc.service" library="service.py"/>
+  <!-- Find subtitles: pley among the services of the player's Subtitles → Download. -->
+  <extension point="xbmc.subtitle.module" library="default.py"/>
   <extension point="xbmc.addon.metadata">
     <!-- One Python for every call: modules load once, not for each listing. -->
     <reuselanguageinvoker>true</reuselanguageinvoker>

@@ -550,6 +550,10 @@ class Player(xbmc.Player):
                 moments = self.after_end
             playing = self.reports is not None
         if follower is not None:
+            if follower.following and self.subtitle_added():
+                # Subtitles added from Kodi's dialog: saved as the choice
+                # there, and Kodi's places don't say pley's tracks any more.
+                follower.following = False
             # The account's choice shown, and changes made in Kodi's player
             # saved (Kodi asked outside the lock).
             follower.turn()
@@ -558,6 +562,14 @@ class Player(xbmc.Player):
         self.fullscreen = bool(playing) and xbmc.getCondVisibility(FULLSCREEN)
         with self.ui:
             self.offer(moments, playing, position)
+
+    def subtitle_added(self) -> bool:
+        """Whether the plugin added subtitles to this playback (subtitles.ADDED)."""
+        from .subtitles import ADDED
+
+        with self.lock:
+            session = self.reports.playing.get("session_id") if self.reports is not None else None
+        return bool(session) and kodi.get_property(ADDED) == session
 
     def offer(self, moments, playing: bool, position: float) -> None:
         if moments is None:

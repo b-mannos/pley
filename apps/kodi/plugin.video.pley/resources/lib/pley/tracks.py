@@ -244,6 +244,9 @@ class Follower:
         self.baseline = None
         self.pending = None
         self.pending_since = 0.0
+        # Off once Kodi lists a track the layout doesn't know (subtitles
+        # added while it plays): its places no longer say pley's tracks.
+        self.following = True
 
     def turn(self) -> None:
         # Kodi's callback and the loop may both turn it: one at a time, the
@@ -258,6 +261,8 @@ class Follower:
             self.lock.release()
 
     def _turn(self, props: dict) -> None:
+        if not self.following:
+            return
         now = self.clock()
         if not self.shown:
             if self.show(props):

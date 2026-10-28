@@ -810,3 +810,11 @@ msgstr ""
 msgctxt "#30243"
 msgid "Not rated"
 msgstr ""
+
+msgctxt "#30244"
+msgid "Subtitle search isn't set up on this server. An administrator sets it up on the web, in Settings → Server."
+msgstr ""
+
+msgctxt "#30245"
+msgid "Finding subtitles needs a newer pley server."
+msgstr ""
