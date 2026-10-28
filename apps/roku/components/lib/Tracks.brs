@@ -6,18 +6,6 @@
 ' matching ones. Indexes are the file's stream indexes (sidecar subtitle
 ' files from 1000).
 
-' The languages offered for the defaults, as ISO 639-2/B codes (the other
-' apps' 34): [[code, name]].
-function tracksLanguages() as object
-    return [
-        ["ara", "Arabic"], ["bul", "Bulgarian"], ["cat", "Catalan"], ["chi", "Chinese"], ["hrv", "Croatian"], ["cze", "Czech"], ["dan", "Danish"],
-        ["dut", "Dutch"], ["eng", "English"], ["fin", "Finnish"], ["fre", "French"], ["ger", "German"], ["gre", "Greek"], ["heb", "Hebrew"],
-        ["hin", "Hindi"], ["hun", "Hungarian"], ["ind", "Indonesian"], ["ita", "Italian"], ["jpn", "Japanese"], ["kor", "Korean"], ["nor", "Norwegian"],
-        ["per", "Persian"], ["pol", "Polish"], ["por", "Portuguese"], ["rum", "Romanian"], ["rus", "Russian"], ["srp", "Serbian"], ["slo", "Slovak"],
-        ["spa", "Spanish"], ["swe", "Swedish"], ["tha", "Thai"], ["tur", "Turkish"], ["ukr", "Ukrainian"], ["vie", "Vietnamese"]
-    ]
-end function
-
 ' When subtitles come on by default (subtitle_mode), worded as on the TVs.
 function tracksModes() as object
     return [
@@ -70,15 +58,6 @@ function tracksRefused(status as integer) as boolean
     return status = 403 or status = 404 or status = 405
 end function
 
-' A language's name, its code for one not offered, none for "".
-function tracksLanguageName(code as string, none as string) as string
-    if code = "" then return none
-    for each language in tracksLanguages()
-        if language[0] = code then return language[1]
-    end for
-    return code
-end function
-
 function tracksModeLabel(mode as string) as string
     for each known in tracksModes()
         if known.id = mode then return known.label
@@ -100,11 +79,11 @@ function tracksRows(defaults as dynamic, readOnly as boolean) as object
         return [{ kind: "audio", text: "Audio language" }, { kind: "mode", text: "Subtitles" }]
     end if
     rows = [
-        { kind: "audio", text: "Audio language: " + tracksLanguageName(defaults.audio, "The file's default") + suffix },
+        { kind: "audio", text: "Audio language: " + fmtLanguageName(defaults.audio, "The file's default") + suffix },
         { kind: "mode", text: "Subtitles: " + tracksModeLabel(defaults.mode) + suffix }
     ]
     if tracksAsksSubtitleLanguage(defaults.mode)
-        rows.Push({ kind: "subtitle", text: "Subtitle language: " + tracksLanguageName(defaults.subtitle, "Same as the audio language") + suffix })
+        rows.Push({ kind: "subtitle", text: "Subtitle language: " + fmtLanguageName(defaults.subtitle, "Same as the audio language") + suffix })
     end if
     return rows
 end function
@@ -131,7 +110,7 @@ function tracksChoices(kind as string, defaults as object) as object
         end if
         labels.Push(none)
         values.Push("")
-        for each language in tracksLanguages()
+        for each language in fmtLanguages()
             labels.Push(language[1])
             values.Push(language[0])
         end for

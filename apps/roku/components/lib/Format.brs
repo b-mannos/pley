@@ -99,3 +99,28 @@ function fmtOneDecimal(value as dynamic) as string
     if tenths mod 10 = 0 then return Int(tenths / 10).ToStr()
     return Int(tenths / 10).ToStr() + "." + (tenths mod 10).ToStr()
 end function
+
+' The languages offered for the audio and subtitle defaults, as ISO 639-2/B
+' codes (the other apps' 34): [[code, name]].
+function fmtLanguages() as object
+    return [
+        ["ara", "Arabic"], ["bul", "Bulgarian"], ["cat", "Catalan"], ["chi", "Chinese"], ["hrv", "Croatian"], ["cze", "Czech"], ["dan", "Danish"],
+        ["dut", "Dutch"], ["eng", "English"], ["fin", "Finnish"], ["fre", "French"], ["ger", "German"], ["gre", "Greek"], ["heb", "Hebrew"],
+        ["hin", "Hindi"], ["hun", "Hungarian"], ["ind", "Indonesian"], ["ita", "Italian"], ["jpn", "Japanese"], ["kor", "Korean"], ["nor", "Norwegian"],
+        ["per", "Persian"], ["pol", "Polish"], ["por", "Portuguese"], ["rum", "Romanian"], ["rus", "Russian"], ["srp", "Serbian"], ["slo", "Slovak"],
+        ["spa", "Spanish"], ["swe", "Swedish"], ["tha", "Thai"], ["tur", "Turkish"], ["ukr", "Ukrainian"], ["vie", "Vietnamese"]
+    ]
+end function
+
+' A language's name, its code for one not offered, none for "". Files name
+' some by their ISO 639-2/T code (fra for fre).
+function fmtLanguageName(code as string, none as string) as string
+    if code = "" then return none
+    wanted = LCase(code)
+    other = { fra: "fre", deu: "ger", zho: "chi", ces: "cze", nld: "dut", ell: "gre", fas: "per", ron: "rum", slk: "slo" }
+    if other.DoesExist(wanted) then wanted = other[wanted]
+    for each language in fmtLanguages()
+        if language[0] = wanted then return language[1]
+    end for
+    return code
+end function

@@ -366,18 +366,25 @@ function contentStream(info as object, detail as object, server as string, start
     }
 end function
 
-' What Roku's subtitle menu calls a track: its title, else its language;
-' "Unknown" for neither, "Forced" for forced ones of no language.
+' What Roku's subtitle menu calls a track: its title, else its language's
+' name (its code for one not among the 34); "Unknown" for neither, "Forced"
+' for forced ones of no language. A title that says forced isn't said twice.
 function contentSubtitleName(track as object, language as string) as string
     name = httpSentence(track.title)
-    if name = "" and language <> "und" then name = language
+    if name = "" and language <> "und" then name = fmtLanguageName(language, language)
     forced = httpTrue(track.forced)
     if name = ""
         if forced then return "Forced"
         return "Unknown"
     end if
-    if forced then return name + " (Forced)"
+    if forced and not contentSaysForced(name) then return name + " (Forced)"
     return name
+end function
+
+' Whether a track's name says it is forced ("Forced", "English (Forced)").
+function contentSaysForced(name as string) as boolean
+    re = CreateObject("roRegex", "(^|[^a-z0-9])forced($|[^a-z0-9])", "i")
+    return re.IsMatch(name)
 end function
 
 ' "Show · S1 E2 · Pilot" for an episode, the title for a movie.

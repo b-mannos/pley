@@ -145,8 +145,13 @@ end sub
 
 sub test_content_names_subtitles()
     tkEqual(contentSubtitleName({ title: "SDH" }, "eng"), "SDH")
-    tkEqual(contentSubtitleName({ title: invalid }, "fre"), "fre")
-    tkEqual(contentSubtitleName({ title: invalid, forced: true }, "fre"), "fre (Forced)")
+    tkEqual(contentSubtitleName({ title: invalid }, "fre"), "French", "a file without titles: the language's name, not its code")
+    tkEqual(contentSubtitleName({ title: invalid }, "fra"), "French", "the ISO 639-2/T code")
+    tkEqual(contentSubtitleName({ title: invalid }, "kur"), "kur", "a language not among the 34: its code")
+    tkEqual(contentSubtitleName({ title: invalid, forced: true }, "fre"), "French (Forced)")
+    tkEqual(contentSubtitleName({ title: "English (Forced)", forced: true }, "eng"), "English (Forced)", "said once")
+    tkEqual(contentSubtitleName({ title: "FORCED", forced: true }, "eng"), "FORCED")
+    tkEqual(contentSubtitleName({ title: "Forcedly", forced: true }, "eng"), "Forcedly (Forced)")
     tkEqual(contentSubtitleName({ title: "" }, "und"), "Unknown")
     tkEqual(contentSubtitleName({ forced: true }, "und"), "Forced")
 end sub

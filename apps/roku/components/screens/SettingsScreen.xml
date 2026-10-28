@@ -15,6 +15,7 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nodes.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Format.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/SubtitleSync.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Tracks.brs" />
     <children>
