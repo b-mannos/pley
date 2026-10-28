@@ -20,9 +20,15 @@ In this order, the same on every app:
 | `4m` | 4 Mbps 720p | 4 Mbps, 720 lines |
 | `2m` | 2 Mbps 480p | 2 Mbps, 480 lines |
 
-The two 4K qualities come first, then 1080p and below. As today, a file is
-offered only the qualities that make it smaller (Original and Automatic
-always). Automatic is the default for a player where no quality was ever
+The two 4K qualities come first, then 1080p and below. A player that knows
+the file offers only the qualities that make it smaller (Original and
+Automatic always): fewer lines, or at most 80 % of its bitrate, as a copy a
+little lighter plays no better than the file. A quality taller than the
+file is named by the file's own lines: a 720p file at 12 Mbps is offered
+"8 Mbps 720p", not "8 Mbps 1080p". Two qualities that come to the same
+bitrate and lines show once. A setting chosen before playback, with no file
+in sight (Settings' default quality, Kodi's and Roku's settings), keeps the
+table's names. Automatic is the default for a player where no quality was ever
 chosen; a quality chosen before, Original included, is kept.
 
 While Automatic plays, the menu says what it plays: "Automatic · Original"
