@@ -92,18 +92,25 @@ class LiveUpdatesTest {
     }
 
     @Test
-    fun `changes to the list of libraries ask for the libraries and Home again`() = runTest {
+    fun `changes to the libraries this profile sees ask again for everything shown, and who it is`() = runTest {
         val data = signedIn(folder.newFolder())
         collect(data.graph.libraries.libraries())
         collect(data.graph.hubs.home())
+        collect(data.graph.hubs.library(1))
+        collect(data.graph.items.detail(101))
         data.graph.liveUpdates.start()
         testScheduler.runCurrent()
+        val me = data.api.calls("me").size
 
+        // A kid's age limit lifted (or a library added, or their order): their Home fills at once.
         data.events.send(LiveEvent.Event(ServerEvent.LibrariesChanged))
         testScheduler.runCurrent()
 
         assertEquals(2, data.api.calls("libraries").size)
         assertEquals(2, data.api.calls("homeHubs").size)
+        assertEquals(2, data.api.calls("libraryHubs").size)
+        assertEquals(2, data.api.calls("item").size)
+        assertEquals(me + 1, data.api.calls("me").size)
     }
 
     @Test

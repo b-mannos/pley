@@ -208,7 +208,7 @@ async fn each_profile_may_list_its_libraries_in_its_own_order() {
     assert_eq!(names(&shared.body), ["TV", "Movies", "Music"], "the shared order, asked for");
     let told: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).collect();
     assert!(
-        told.iter().any(|e| matches!(e, ServerEvent::OwnLibraryOrderChanged { user_id } if *user_id == bob_id)),
+        told.iter().any(|e| matches!(e, ServerEvent::OwnLibrariesChanged { user_id } if *user_id == bob_id)),
         "their other devices are told"
     );
     let json = serde_json::to_value(&told[0]).unwrap();

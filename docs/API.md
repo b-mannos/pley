@@ -1718,7 +1718,7 @@ type ServerEvent =
   | { type: "scan_progress"; library_id: Id; phase: ScanStatus["phase"]; processed: number; total: number }
   | { type: "scan_finished"; library_id: Id; added: number; updated: number; removed: number }
   | { type: "library_changed"; library_id: Id }      // items/metadata changed → refetch
-  | { type: "libraries_changed" }                    // library created/updated/deleted, or the order changed (the user's own: to their streams only)
+  | { type: "libraries_changed" }                    // library created/updated/deleted, or the order changed; to one user's streams only: their own order, or what they may see (is_admin, all_libraries, library_ids, max_age changed)
   | { type: "sessions_changed" }
   | { type: "watchlist_changed" }                    // the user's My List changed (their streams only)
   | { type: "user_state_changed"; item_ids: Id[]; children: boolean } // the user's watch state changed (their streams only)
@@ -1731,7 +1731,7 @@ type ServerEvent =
 |---|---|---|---|
 | GET | `/api/users` | – | `User[]` |
 | POST | `/api/users` | `{ username, password?, display_name?, is_admin?, managed?, home? (true), all_libraries? (true), library_ids?, max_age?, pin? }` | `User`; managed profiles need no password |
-| PATCH | `/api/users/{id}` | `{ password?, display_name?, is_admin?, home?, disabled?, all_libraries?, library_ids?, max_age?, pin? }` (`null` clears nullable fields) | `User`. pley always keeps one enabled administrator. A new `password` signs the user out on every device (an administrator's own device stays) and in every app using the account or allowed by it |
+| PATCH | `/api/users/{id}` | `{ password?, display_name?, is_admin?, home?, disabled?, all_libraries?, library_ids?, max_age?, pin? }` (`null` clears nullable fields) | `User`. pley always keeps one enabled administrator. A new `password` signs the user out on every device (an administrator's own device stays) and in every app using the account or allowed by it. A change to `is_admin`, `all_libraries`, `library_ids` or `max_age` sends `libraries_changed` to the user's streams, so their devices fetch what they may see again |
 | DELETE | `/api/users/{id}` | – | `204` (cannot delete yourself); their apps end with them |
 | GET | `/api/users/{id}/devices` | – | `Device[]` |
 | DELETE | `/api/users/{id}/devices` | – | `204`, signs the user out everywhere, apps included |

@@ -35,10 +35,13 @@ pub enum ServerEvent {
         library_id: i64,
     },
     LibrariesChanged,
-    /// The user chose their own order of the libraries, or went back to
-    /// the shared one: to their streams, as `libraries_changed`.
+    /// The libraries one user sees changed: they chose their own order or
+    /// went back to the shared one, or an administrator changed what they
+    /// may see (their libraries, their age limit, administrator or not).
+    /// To their streams, as `libraries_changed`: their devices fetch the
+    /// libraries, Home and what shows again.
     #[serde(rename = "libraries_changed")]
-    OwnLibraryOrderChanged {
+    OwnLibrariesChanged {
         #[serde(skip)]
         user_id: i64,
     },
@@ -83,7 +86,7 @@ impl ServerEvent {
             | ServerEvent::ScanFinished { library_id, .. }
             | ServerEvent::LibraryChanged { library_id } => Some(*library_id),
             ServerEvent::LibrariesChanged
-            | ServerEvent::OwnLibraryOrderChanged { .. }
+            | ServerEvent::OwnLibrariesChanged { .. }
             | ServerEvent::SessionsChanged
             | ServerEvent::WatchlistChanged { .. }
             | ServerEvent::UserStateChanged { .. }
@@ -95,7 +98,7 @@ impl ServerEvent {
     pub fn user_id(&self) -> Option<i64> {
         match self {
             ServerEvent::WatchlistChanged { user_id }
-            | ServerEvent::OwnLibraryOrderChanged { user_id }
+            | ServerEvent::OwnLibrariesChanged { user_id }
             | ServerEvent::UserStateChanged { user_id, .. }
             | ServerEvent::SessionStopped { user_id, .. } => Some(*user_id),
             _ => None,

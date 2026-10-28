@@ -264,7 +264,7 @@ pub async fn set_my_order(
     if !access::set_own_order(&state.db, &user, &body.ids).await? {
         return Err(AppError::conflict("your libraries have changed: the order must list each of them once"));
     }
-    state.events.send(ServerEvent::OwnLibraryOrderChanged { user_id: user.id });
+    state.events.send(ServerEvent::OwnLibrariesChanged { user_id: user.id });
     let libraries = access::visible_libraries(&state.db, &user).await?;
     listed(&state, &user, libraries).await
 }
@@ -273,7 +273,7 @@ pub async fn set_my_order(
 /// order everyone does again. Answers them in it.
 pub async fn forget_my_order(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<LibraryDto>>> {
     access::forget_own_order(&state.db, &user).await?;
-    state.events.send(ServerEvent::OwnLibraryOrderChanged { user_id: user.id });
+    state.events.send(ServerEvent::OwnLibrariesChanged { user_id: user.id });
     let libraries = access::shared_order(&state.db, &user).await?;
     listed(&state, &user, libraries).await
 }

@@ -490,3 +490,30 @@ async fn events_about_libraries_the_user_cannot_open_are_not_sent_to_them() {
     tokio::time::timeout(std::time::Duration::from_secs(10), read).await.expect("the movies event");
     assert!(!received.contains(&format!("\"library_id\":{}", w.private)), "{received}");
 }
+
+#[tokio::test]
+async fn a_changed_age_limit_or_library_list_tells_the_users_devices() {
+    use pley::events::ServerEvent;
+
+    let w = world().await;
+    let mut events = w.app.state.events.subscribe();
+    let mut told = move || -> Vec<ServerEvent> { std::iter::from_fn(|| events.try_recv().ok()).collect() };
+    let kid_id = w.kid_id;
+    let for_kid = move |heard: &[ServerEvent]| {
+        heard.iter().any(|e| matches!(e, ServerEvent::OwnLibrariesChanged { user_id } if *user_id == kid_id))
+    };
+    let user = format!("/api/users/{}", w.kid_id);
+    // A name changes nothing they see.
+    let renamed = w.app.patch(&user, &w.admin, json!({"display_name": "Little One"})).await;
+    assert_eq!(renamed.status, StatusCode::OK, "{:?}", renamed.body);
+    assert!(!for_kid(&told()));
+    // Lifting the age limit, or giving them a library, does: their devices fetch Home again.
+    for change in [json!({"max_age": null}), json!({"library_ids": [w.movies, w.tv, w.music, w.private]})] {
+        let reply = w.app.patch(&user, &w.admin, change).await;
+        assert_eq!(reply.status, StatusCode::OK, "{:?}", reply.body);
+        let heard = told();
+        assert!(for_kid(&heard), "{heard:?}");
+        let json = serde_json::to_value(heard.iter().find(|e| for_kid(std::slice::from_ref(e))).unwrap()).unwrap();
+        assert_eq!(json, json!({"type": "libraries_changed"}));
+    }
+}

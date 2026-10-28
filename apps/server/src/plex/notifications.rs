@@ -204,7 +204,7 @@ impl Listener {
             // pley's own: Plex clients hear of a stopped session as of any
             // that ends (`sessions_changed` follows).
             ServerEvent::WatchlistChanged { .. }
-            | ServerEvent::OwnLibraryOrderChanged { .. }
+            | ServerEvent::OwnLibrariesChanged { .. }
             | ServerEvent::UserStateChanged { .. }
             | ServerEvent::SessionStopped { .. } => Ok(Vec::new()),
         };

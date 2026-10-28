@@ -41,7 +41,10 @@ import kotlinx.coroutines.launch
  * - `library_changed`, held [DEBOUNCE_MS] per library (a scan sends many),
  *   asks again for what shows that library: its rows, listings and
  *   collections, Home, the libraries, and the pages of its items;
- * - `libraries_changed` asks again for the libraries and Home;
+ * - `libraries_changed` (a library added, renamed or removed, their order,
+ *   or what an administrator lets this profile see: its libraries, its age
+ *   limit) asks again for everything held, and for who the profile is: a
+ *   kid's Home fills once their age limit is lifted;
  * - `watchlist_changed` (My List changed on another device) asks again
  *   for My List, Home and the pages of movies and shows;
  * - `user_state_changed` (something watched, started or taken out of
@@ -154,7 +157,11 @@ internal class ServerLiveUpdates(
                     cache.revalidate { key, value -> affects(libraryId, key, value) }
                 }
             }
-            ServerEvent.LibrariesChanged -> cache.revalidate { key, _ -> key == SnapshotKeys.LIBRARIES || key == SnapshotKeys.HOME }
+            ServerEvent.LibrariesChanged -> {
+                // Which titles this profile may see may have changed with it: whatever shows them.
+                cache.revalidate { _, _ -> true }
+                launch { session.refresh() }
+            }
             ServerEvent.WatchlistChanged -> cache.revalidate { key, value ->
                 key == SnapshotKeys.HOME || key == SnapshotKeys.WATCHLIST || (value is ItemDetail && value.kind.listable)
             }

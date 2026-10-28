@@ -15,6 +15,7 @@ use crate::auth::{
     AdminUser, AuthUser, ClientIp, CurrentToken, hash_password, hash_token, validate_password, validate_username,
 };
 use crate::error::{ApiResult, AppError};
+use crate::events::ServerEvent;
 use crate::state::AppState;
 use crate::streams::{self, SubtitleMode};
 use crate::util::now;
@@ -186,6 +187,9 @@ pub async fn update_user(
         accounts::validate_pin(pin)?;
     }
 
+    // What the user may see changes: their devices are told to fetch it again.
+    let sees_otherwise =
+        body.is_admin.is_some() || body.all_libraries.is_some() || body.library_ids.is_some() || body.max_age.is_some();
     if let Some(password) = body.password {
         let hash = hash_password(password).await?;
         sqlx::query("UPDATE users SET password_hash = ?, managed = 0 WHERE id = ?")
@@ -263,6 +267,9 @@ pub async fn update_user(
             .await?;
     }
     state.auth.forget_user(id);
+    if sees_otherwise {
+        state.events.send(ServerEvent::OwnLibrariesChanged { user_id: id });
+    }
     Ok(Json(accounts::user(&state.db, id).await?.ok_or_else(|| AppError::not_found("user not found"))?))
 }
 
