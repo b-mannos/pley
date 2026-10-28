@@ -24,22 +24,26 @@ port this way:
 - so is a path only this API has (`/identity`, `/library/sections/…`,
   `/:/timeline`, a stream's `/video/:/transcode/…` segments, which players
   fetch without the headers);
-- the rest, `/`, `/search` and `/playlists` among them, is the web app's,
-  and `/api/…` is always pley's own API.
+- the rest, `/`, `/search`, `/library` and `/playlists` among them, is the
+  web app's, and `/api/…` and `/.well-known/…` are always pley's own.
 
-Its answers there are sandboxed (`Content-Security-Policy: sandbox`), since
-they share the web app's origin, and vary with those headers for caches.
+Its answers there are sandboxed (`Content-Security-Policy: default-src
+'none'; sandbox`, `X-Frame-Options: DENY`, `Cache-Control: private` unless
+they say otherwise), since they share the web app's origin, and the paths
+both answer vary with `X-Plex-Token` and `X-Plex-Client-Identifier` for
+caches.
 Settings → Network turns it off, or gives it a port of its own:
 
 | Where | Setting |
 |---|---|
-| Command line | `--plex-bind web` (the default), `--plex-bind 0.0.0.0:32400` or `--plex-bind off` |
+| Command line | `--plex-bind web` (the default), `--plex-bind 0.0.0.0:32400` (several addresses separated by commas) or `--plex-bind off` |
 | Environment | `PLEY_PLEX_BIND` |
 | `pley.toml` | `plex_bind = "web"` |
 
 Its own port suits tools that only know Plex's, 32400. If that port is taken
-(another media server uses it on the same machine), pley logs a warning and
-keeps running without it there.
+(another media server uses it on the same machine), pley logs a warning,
+keeps running without it there, and tries again every 30 seconds (Settings
+→ Network says why it isn't listening).
 
 ## Authentication
 
@@ -121,7 +125,8 @@ parameters; containers report `size`, `totalSize` and `offset`.
   a pley HLS session, remuxed when the video can be copied and transcoded
   otherwise (`directStream=0` forces transcoding). It honors `offset`,
   `maxVideoBitrate`, `videoResolution`, `audioStreamID` and burned-in
-  `subtitleStreamID`. The master playlist points at
+  `subtitleStreamID`; without `audioStreamID`, pley picks the track as for
+  its own players (docs/API.md, "The audio track"). The master playlist points at
   `session/<id>/base/index.m3u8`. Session URLs need no token: the 128-bit
   session id is the credential.
 - **Preview thumbnails and chapters.** Parts of files with seek previews have
