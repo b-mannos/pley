@@ -2,7 +2,7 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } fro
 import { useLocation, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type HlsType from "hls.js";
-import type { ErrorData } from "hls.js";
+import type { ErrorData, FragLoadedData } from "hls.js";
 import {
   ArrowLeft,
   CircleStop,
@@ -23,7 +23,7 @@ import {
 import { errorMessage, isApiError } from "@/api/client";
 import { onServerEvent } from "@/api/events";
 import { fetchNext, invalidateWatchState, keys, useTrickplay } from "@/api/hooks";
-import type { ItemDetail, ItemSummary, PlaybackInfo, PlaybackMode, PlaybackState, ServerEvent } from "@/api/types";
+import type { ItemDetail, ItemSummary, MediaFile, PlaybackInfo, PlaybackMode, PlaybackState, ServerEvent } from "@/api/types";
 import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { useAuth } from "@/auth";
 import { Slider } from "@/components/Slider";
@@ -44,7 +44,8 @@ import {
 } from "@/lib/progress";
 import { playUrl } from "@/lib/usePlayItem";
 import { nextInQueue, queuePlayUrl, type QueuePosition } from "@/lib/videoQueue";
-import { modeFor, qualitiesFor, qualityById } from "./quality";
+import { AutoQuality, ORIGINAL_ID, storedMemory, type AutoMemory, type AutoStep, type Lowered } from "./autoQuality";
+import { autoLadder, chooseQuality, modeFor, qualitiesFor, qualityById } from "./quality";
 import { ChaptersMenu } from "./ChaptersMenu";
 import { SeekBar } from "./SeekBar";
 import { methodLabel, PlaybackDetails } from "./PlaybackDetails";
@@ -64,6 +65,7 @@ import {
   type SubtitleCue,
   type SubtitleStyle,
 } from "./subtitles";
+import { QualityNotice, type QualityNoticeText } from "./QualityNotice";
 import { UpNext } from "./UpNext";
 import { itemUrl } from "@/lib/urls";
 
@@ -159,6 +161,36 @@ function bufferedAhead(v: HTMLMediaElement): number {
 /** What to check when the server answers nothing (the Android apps say the same). */
 const REACH_HINT = "Check that the server is on and that this device is on its network.";
 
+/** How often Automatic looks at what has loaded (autoQuality.ts). */
+const AUTO_SAMPLE_MS = 1_000;
+/** Why Automatic plays below the original, as the details say. */
+const LOWERED: Record<Lowered, string> = { network: "Lowered for the network", device: "Lowered: the device fell behind" };
+
+/**
+ * Automatic's memory of a slow network: this browser's, for the server it
+ * talks to (the page's origin), for 30 minutes.
+ */
+const autoMemory: AutoMemory = storedMemory(
+  {
+    get: (key) => window.localStorage.getItem(key),
+    set: (key, value) => window.localStorage.setItem(key, value),
+    remove: (key) => window.localStorage.removeItem(key),
+  },
+  "pley.autoQuality",
+);
+
+/** Automatic for `file`, starting at the original or at the network remembered. */
+function newAuto(file: MediaFile): AutoQuality {
+  const auto = new AutoQuality({ ladder: autoLadder(file), originalKbps: file.bitrate ? file.bitrate / 1000 : null, memory: autoMemory });
+  auto.start(performance.now());
+  return auto;
+}
+
+/** "Playing at 8 Mbps 1080p for a smoother picture." */
+function smootherText(label: string): string {
+  return `Playing at ${label} for a smoother picture`;
+}
+
 export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: initialSub, queue }: VideoPlayerProps) {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -189,6 +221,13 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const mediaShown = useRef(false);
   /** POST /api/playback of the previous run, which ends its own session if that run was cancelled. */
   const pendingStartRef = useRef<Promise<void>>(Promise.resolve());
+  /** A new session or a seek: waits for data don't count for Automatic until it plays again. */
+  const autoSettling = useRef(true);
+  /** What Automatic last said over the picture. */
+  const [qualityNotice, setQualityNotice] = useState<QualityNoticeText | null>(null);
+  const say = (text: string) => setQualityNotice((old) => ({ text, n: (old?.n ?? 0) + 1 }));
+  /** Automatic's original fell back to a conversion: the next session says at what. */
+  const announceFallback = useRef(false);
 
   const file = item.files.find((f) => f.id === fileId) ?? item.files[0] ?? null;
   const audioStreams = useMemo(() => file?.streams.filter((s) => s.kind === "audio") ?? [], [file]);
@@ -200,13 +239,25 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const trickplay = useTrickplay(file?.id);
   const [audioIndex, setAudioIndex] = useState<number | null>(initialAudio ?? null);
   const [subIndex, setSubIndex] = useState<number | null>(initialSub ?? file?.selected_subtitle ?? null);
-  const [quality, setQuality] = useLocalStorage<string>("pley.quality", "original");
-  // One menu: the original plays the best way the browser can, every other
-  // quality is a transcode. A remembered quality this file doesn't need (an
-  // 8 Mbps cap on a 5 Mbps file) plays the original.
+  // Only a quality picked is stored: until one is, Automatic plays.
+  const [quality, setQuality] = useLocalStorage<string>("pley.quality", "auto");
+  // One menu: the original plays the best way the browser can, Automatic
+  // plays it unless it doesn't play well, every other quality is a
+  // transcode. A remembered quality this file doesn't need (an 8 Mbps cap
+  // on a 5 Mbps file) plays the original.
   const qualities = useMemo(() => qualitiesFor(file), [file]);
-  const selectedQuality = qualities.find((q) => q.id === quality) ?? qualityById("original");
-  const mode = modeFor(selectedQuality);
+  const selectedQuality = chooseQuality(quality, qualities);
+  // Automatic, when chosen: one for each file (Up Next's starts where the
+  // network last allowed), and a fresh one when picked again.
+  const [autoRun, setAutoRun] = useState(0);
+  const [, setAutoStepped] = useState(0);
+  const auto = useMemo(
+    () => (selectedQuality.id === "auto" && file ? newAuto(file) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [file?.id, selectedQuality.id, autoRun],
+  );
+  const playingQuality = auto ? qualityById(auto.playing) : selectedQuality;
+  const mode = modeFor(playingQuality);
   const [loadToken, setLoadToken] = useState(0);
 
   const selectedSub = subStreams.find((s) => s.index === subIndex) ?? null;
@@ -406,21 +457,42 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** A session of Automatic's began: what it measured of the one before goes. */
+  const autoBegan = useEffectEvent((pinfo: PlaybackInfo) => {
+    const announce = announceFallback.current;
+    announceFallback.current = false;
+    if (!auto) return;
+    auto.began();
+    // The original converted here (a fallback): Automatic steps down from what it plays at.
+    const converted = auto.playing === ORIGINAL_ID && pinfo.auto_quality ? qualityById(pinfo.auto_quality) : null;
+    if (converted?.maxBitrate) {
+      auto.setOriginalKbps(converted.maxBitrate);
+      if (announce) say(smootherText(converted.label));
+    }
+  });
+
+  /** A segment of `bytes` took `ms` to load: the network's speed, for Automatic. */
+  const autoLoaded = useEffectEvent((bytes: number, ms: number) => {
+    auto?.loaded(performance.now(), bytes, ms);
+  });
+
   // ---------------------------------------------------------------------
   // Session lifecycle: (re)start whenever the stream parameters change.
+
   // ---------------------------------------------------------------------
   useEffect(() => {
     const video = videoRef.current;
     // Stopped on the server: nothing starts again here.
     if (!video || !file || stoppedRef.current) return;
     let cancelled = false;
-    const q = selectedQuality;
+    const q = playingQuality;
     const startSec = startMsRef.current / 1000;
     const requestMode = fallbackModeRef.current ?? mode;
     recoveries.current.network = 0;
     recoveries.current.media = 0;
     playedFrom.current = null;
     mediaShown.current = false;
+    autoSettling.current = true;
     // A new session gets the full grace before it counts as stalled.
     lastAdvance.current = { at: performance.now(), time: -1 };
     lastData.current = performance.now();
@@ -494,6 +566,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         if (!pinfo || cancelled) return;
         setInfo(pinfo);
         setFellBack(requestMode !== mode);
+        autoBegan(pinfo);
 
         if (pinfo.hls) {
           const hasMse = typeof window.MediaSource !== "undefined" || "ManagedMediaSource" in window;
@@ -562,10 +635,13 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR && !data.response?.code) failUnreachable();
                 else setError(`Playback failed (${data.details}).`);
               });
-              hls.on(Hls.Events.FRAG_LOADED, () => {
+              hls.on(Hls.Events.FRAG_LOADED, (_evt, data: FragLoadedData) => {
                 // Media that arrives isn't media that plays: budgets start over
                 // when playback moves on (`onTime`).
                 lastData.current = performance.now();
+                // How fast the network brought it, for Automatic.
+                const stats = data?.frag?.stats;
+                if (stats) autoLoaded(stats.loaded, stats.loading.end - stats.loading.start);
               });
               hls.loadSource(pinfo.url);
               hls.attachMedia(video);
@@ -594,7 +670,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item.id, file?.id, audioIndex, burnIndex, selectedQuality.id, loadToken]);
+  }, [item.id, file?.id, audioIndex, burnIndex, playingQuality.id, loadToken]);
 
   // Final teardown on unmount: report "stopped" and release the transcode.
   useEffect(() => {
@@ -674,6 +750,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     if (s.method === "direct" && undecodable && !fallbackModeRef.current) {
       // The browser claimed support but can't decode this file: transcode it instead.
       fallbackModeRef.current = "transcode";
+      auto?.fellBack(performance.now());
       restartAt(at);
       return;
     }
@@ -726,8 +803,13 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const hls = hlsRef.current;
     if (!starving && s.method === "direct" && !fallbackModeRef.current) {
       // The browser said it plays this file, and doesn't keep up: transcode it.
+      // Automatic counts it as its own change, and says what it plays then.
       fallbackModeRef.current = "transcode";
       setStalled(true);
+      if (auto) {
+        auto.fellBack(now);
+        announceFallback.current = true;
+      }
       restartAt(livePosition());
       return;
     }
@@ -762,6 +844,74 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   useEffect(() => {
     const timer = window.setInterval(onStall, STALL_CHECK_MS);
     return () => window.clearInterval(timer);
+  }, []);
+
+  // ---------------------------------------------------------------------
+  // Automatic (docs/QUALITY.md): it watches the video while it plays (not
+  // paused, seeking, settling after a seek or a new session, or out of
+  // sight) and starts again at the quality it decides on.
+  // ---------------------------------------------------------------------
+  const applyAutoStep = (step: AutoStep | null) => {
+    if (!step) return;
+    startMsRef.current = currentMs();
+    // The stall watch starts over: the new session is on its way.
+    lastAdvance.current = { at: performance.now(), time: -1 };
+    setAutoStepped((n) => n + 1);
+    if (step.why) say(smootherText(qualityById(step.to).label));
+  };
+
+  const watchQuality = useEffectEvent(() => {
+    const v = videoRef.current;
+    if (!auto || !v) return;
+    const now = performance.now();
+    if (!sessionRef.current || !mediaShown.current || autoSettling.current || v.paused || v.seeking || v.ended || document.hidden || error || stoppedRef.current) {
+      auto.interrupted();
+      return;
+    }
+    auto.sample(now, v.currentTime, v.currentTime + bufferedAhead(v));
+    applyAutoStep(auto.check(now));
+  });
+
+  const autoEvent = useEffectEvent((kind: "waiting" | "playing" | "seeking" | "pause" | "hidden") => {
+    const v = videoRef.current;
+    if (!auto || !v) return;
+    const now = performance.now();
+    if (kind === "waiting") {
+      // The picture stops for want of data while it plays: not a seek's wait, nor a new session's.
+      if (!autoSettling.current && !v.seeking && !v.paused && mediaShown.current && !document.hidden) auto.waiting(now);
+    } else if (kind === "playing") {
+      autoSettling.current = false;
+      auto.resumed(now);
+    } else {
+      if (kind === "seeking") autoSettling.current = true;
+      auto.interrupted();
+    }
+  });
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const timer = window.setInterval(watchQuality, AUTO_SAMPLE_MS);
+    const onWaiting = () => autoEvent("waiting");
+    const onPlaying = () => autoEvent("playing");
+    const onSeeking = () => autoEvent("seeking");
+    const onPause = () => autoEvent("pause");
+    const onVisibility = () => {
+      if (document.hidden) autoEvent("hidden");
+    };
+    v.addEventListener("waiting", onWaiting);
+    v.addEventListener("playing", onPlaying);
+    v.addEventListener("seeking", onSeeking);
+    v.addEventListener("pause", onPause);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(timer);
+      v.removeEventListener("waiting", onWaiting);
+      v.removeEventListener("playing", onPlaying);
+      v.removeEventListener("seeking", onSeeking);
+      v.removeEventListener("pause", onPause);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   useEffect(() => {
@@ -1102,12 +1252,23 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     setAudioIndex(index);
     rememberTracks(index, subIndex);
   };
+  /**
+   * A quality picked in the menu, kept for the next titles. Automatic
+   * picked again (or anew) starts afresh at the original. The session starts
+   * again when it asks for something else, or leaves a fallback behind.
+   */
   const changeQuality = (id: string) => {
-    if (id === selectedQuality.id) return;
+    if (id === selectedQuality.id && !(auto && auto.playing !== ORIGINAL_ID)) return;
     startMsRef.current = currentMs();
+    const fellBackBefore = fallbackModeRef.current !== null;
     fallbackModeRef.current = null;
     setStalled(false);
+    if (id === "auto") {
+      autoMemory.set(null);
+      setAutoRun((n) => n + 1);
+    }
     setQuality(id);
+    if (fellBackBefore) setLoadToken((t) => t + 1);
   };
   const changeSubtitle = (index: number | null) => {
     const s = subStreams.find((x) => x.index === index);
@@ -1260,6 +1421,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       ? "The original didn't play smoothly in this browser."
       : "This browser couldn't play the original file."
     : null;
+  // What Automatic plays ("Original", "8 Mbps 1080p"; the original converted here by its quality), and why when lower.
+  const converted = info?.auto_quality && playingQuality.id === ORIGINAL_ID ? qualityById(info.auto_quality) : null;
+  const autoNow = auto ? (playingQuality.id === ORIGINAL_ID ? (converted?.maxBitrate ? converted.label : "Original") : playingQuality.label) : null;
+  const autoWhy = auto?.lowered && auto.playing !== ORIGINAL_ID ? LOWERED[auto.lowered] : null;
+  const note = fallbackNote ?? autoWhy;
 
   return (
     <div
@@ -1457,7 +1623,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             >
               <span
                 tabIndex={0}
-                aria-label={[methodLabel(info), fallbackNote ?? info.reason].filter(Boolean).join(". ")}
+                aria-label={[methodLabel(info), note ?? info.reason].filter(Boolean).join(". ")}
                 className={cn(
                   "cursor-default rounded px-2 py-0.5 text-xs font-semibold outline-none focus-visible:ring-2 focus-visible:ring-white/60",
                   info.method === "direct" ? "bg-success/20 text-success" : info.method === "remux" ? "bg-info/20 text-info" : "bg-accent/20 text-accent",
@@ -1474,7 +1640,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                     info={info}
                     file={file}
                     audioIndex={audioIndex}
-                    note={fallbackNote}
+                    note={note}
                     positionMs={current * 1000}
                     open
                   />
@@ -1510,7 +1676,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 info={info}
                 file={file}
                 audioIndex={audioIndex}
-                note={fallbackNote}
+                note={note}
                 positionMs={current * 1000}
                 open={settingsOpen}
               />
@@ -1519,6 +1685,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             quality={selectedQuality.id}
             originalHint={[fileResolution(file), formatBitrate(file?.bitrate)].filter(Boolean).join(" · ") || null}
             autoQuality={info?.auto_quality ?? null}
+            autoNow={autoNow}
+            autoWhy={autoWhy}
+
             onQuality={changeQuality}
             audioStreams={audioStreams}
             audioIndex={audioIndex ?? info?.audio_index ?? null}
@@ -1553,8 +1722,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         <SleepNotice seconds={sleep.notice} onKeepWatching={sleep.keepWatching} lifted={active || !playing} />
       ) : null}
 
+      {!stopped && !error ? <QualityNotice notice={qualityNotice} /> : null}
+
       {upNext ? (
         <UpNext
+
           next={upNext}
           paused={!playing && !ended}
           onPlay={() => void playNext()}

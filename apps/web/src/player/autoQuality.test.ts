@@ -1,0 +1,333 @@
+import { describe, expect, it } from "vitest";
+import { AutoQuality, MEMORY_MS, storedMemory, type AutoMemory, type Remembered } from "./autoQuality";
+import { autoLadder } from "./quality";
+
+// The same decisions as the TV's (packages/tv/test/player/autoquality.test.ts).
+
+type FileSize = { bitrate: number | null; width: number | null; height: number | null };
+function file(width: number | null, height: number | null, mbps: number | null): FileSize {
+  return { width, height, bitrate: mbps === null ? null : mbps * 1_000_000 };
+}
+
+// ---- the decisions
+
+function memory(initial: Remembered | null = null): AutoMemory & { value: Remembered | null } {
+  const m = {
+    value: initial,
+    get: () => m.value,
+    set: (v: Remembered | null) => {
+      m.value = v;
+    },
+  };
+  return m;
+}
+
+/** Automatic for a 4K file of `mbps`, on a clock the test moves (`t`, ms; the wall clock is 1e12 + t). */
+function auto(mbps = 60, mem = memory(), f = file(3840, 2160, mbps)) {
+  const clock = { t: 0 };
+  const a = new AutoQuality({ ladder: autoLadder(f), originalKbps: f.bitrate ? f.bitrate / 1000 : null, memory: mem, wall: () => 1e12 + clock.t });
+  a.start(clock.t);
+  /**
+   * Plays `seconds` at `delivery` seconds of video a second, starting with
+   * `ahead` seconds loaded ahead; checks each second and returns the first step.
+   */
+  let pos = 100;
+  let end = 130;
+  const play = (seconds: number, delivery: number, ahead?: number) => {
+    if (ahead !== undefined) end = pos + ahead;
+    for (let i = 0; i < seconds; i++) {
+      clock.t += 1000;
+      // The playhead moves on as far as what has loaded.
+      pos += Math.max(0, Math.min(1, end - pos));
+      end += delivery;
+      a.sample(clock.t, pos, end);
+      const step = a.check(clock.t);
+      if (step) return step;
+    }
+    return null;
+  };
+  /** A wait for data of `ms`. */
+  const wait = (ms: number) => {
+    a.waiting(clock.t);
+    let step = null;
+    for (let left = ms; left > 0; left -= 500) {
+      clock.t += Math.min(500, left);
+      step = step ?? a.check(clock.t);
+    }
+    a.resumed(clock.t);
+    return step ?? a.check(clock.t);
+  };
+  /** Up to `seconds` pass with segments loading at `kbps`, one every 4 s, until a step. */
+  const network = (seconds: number, kbps: number) => {
+    for (let i = 0; i < seconds; i += 4) {
+      clock.t += 4000;
+      const ms = 1000;
+      a.loaded(clock.t, (kbps * ms) / 8, ms);
+      const step = a.check(clock.t);
+      if (step) return step;
+    }
+    return null;
+  };
+  return { a, clock, mem, play, wait, network };
+}
+
+describe("Automatic", () => {
+  it("starts at the original", () => {
+    const { a } = auto();
+    expect(a.playing).toBe("original");
+    expect(a.lowered).toBeNull();
+  });
+
+  it("plays on while the video arrives fast enough", () => {
+    const { a, play } = auto();
+    expect(play(120, 1.2, 8)).toBeNull();
+    expect(a.playing).toBe("original");
+  });
+
+  describe("on a wait for data", () => {
+    it("of 2 s steps down, to the bitrate playing times the delivery seen times 0.75", () => {
+      const { a, play, wait } = auto(20, memory(), file(1920, 1080, 20));
+      // 20 Mbps arriving at half speed: 20 × 0.5 × 0.75 = 7.5 → 4 Mbps 720p.
+      play(20, 0.5, 9);
+      expect(wait(2_000)).toEqual({ to: "4m", why: "network" });
+      expect(a.playing).toBe("4m");
+      expect(a.lowered).toBe("network");
+    });
+
+    it("of 2 s counts while it lasts, not only once it ends", () => {
+      const { a, clock } = auto();
+      a.waiting(clock.t);
+      clock.t += 1_500;
+      expect(a.check(clock.t)).toBeNull();
+      clock.t += 500;
+      expect(a.check(clock.t)?.why).toBe("network");
+    });
+
+    it("shorter: two within a minute step down, one doesn't, nor two a minute apart", () => {
+      const one = auto();
+      expect(one.wait(800)).toBeNull();
+      expect(one.play(30, 1.2)).toBeNull();
+      expect(one.wait(800)?.why).toBe("network");
+
+      const apart = auto();
+      expect(apart.wait(800)).toBeNull();
+      apart.clock.t += 61_000;
+      expect(apart.wait(800)).toBeNull();
+      expect(apart.a.playing).toBe("original");
+    });
+
+    it("isn't one when a seek, a pause or a new session ends it", () => {
+      const { a, clock } = auto();
+      a.waiting(clock.t);
+      clock.t += 1_000;
+      a.interrupted();
+      clock.t += 5_000;
+      a.resumed(clock.t);
+      expect(a.check(clock.t)).toBeNull();
+      // Short waits of the session before don't pair with the next session's.
+      a.waiting(clock.t);
+      clock.t += 500;
+      a.resumed(clock.t);
+      a.began();
+      a.waiting(clock.t);
+      clock.t += 500;
+      a.resumed(clock.t);
+      expect(a.check(clock.t)).toBeNull();
+    });
+  });
+
+  describe("on slow delivery", () => {
+    it("steps down before it waits: under 1.1 for 15 s, under 10 s ahead and falling", () => {
+      const { a, play } = auto(20, memory(), file(1920, 1080, 20));
+      const step = play(40, 0.8, 9);
+      // 20 × 0.8 × 0.75 = 12 → 12 Mbps 1080p.
+      expect(step).toEqual({ to: "12m", why: "network" });
+      expect(a.playing).toBe("12m");
+    });
+
+    it("doesn't with 10 s or more ahead, or ahead not falling", () => {
+      expect(auto().play(60, 0.9, 25)).toBeNull();
+      expect(auto().play(60, 1.05, 5)).toBeNull();
+    });
+
+    it("can't tell when the player doesn't know what it has loaded", () => {
+      const { a, clock } = auto();
+      for (let i = 0; i < 60; i++) {
+        clock.t += 1000;
+        a.sample(clock.t, 100 + i, null);
+        expect(a.check(clock.t)).toBeNull();
+      }
+    });
+  });
+
+  describe("stepping down", () => {
+    it("never goes above the server's own quality for the file", () => {
+      const { play, wait } = auto(60);
+      // 60 × 0.9 × 0.75 = 40.5, above the server's 30 Mbps 4K.
+      play(20, 0.9, 9);
+      expect(wait(2_000)?.to).toBe("30m");
+    });
+
+    it("never below 2 Mbps 480p", () => {
+      const { a, play, wait, clock } = auto(20, memory(), file(1920, 1080, 20));
+      play(20, 0.05, 2);
+      expect(wait(2_000)?.to).toBe("2m");
+      clock.t += 30_000;
+      expect(wait(3_000)).toBeNull();
+      expect(a.playing).toBe("2m");
+    });
+
+    it("goes one quality down at least, again on more issues", () => {
+      const { a, play, wait, clock } = auto(60);
+      play(20, 1.0, 9);
+      expect(wait(2_000)?.to).toBe("30m");
+      clock.t += 25_000;
+      // At 30 Mbps, arriving as fast as it plays: 30 × 1 × 0.75 = 22.5, still one down.
+      play(20, 1.0, 9);
+      expect(wait(2_000)?.to).toBe("15m");
+      expect(a.playing).toBe("15m");
+    });
+
+    it("waits 20 s after a change before the next", () => {
+      const { a, play, wait, clock } = auto(60);
+      play(20, 0.9, 9);
+      expect(wait(2_000)?.to).toBe("30m");
+      clock.t += 5_000;
+      expect(wait(2_000)).toBeNull();
+      expect(a.playing).toBe("30m");
+      clock.t += 15_000;
+      expect(wait(2_000)?.to).toBe("15m");
+    });
+
+    it("on frames the decoder drops: one quality down, said as the device's, not remembered", () => {
+      const { a, mem, play, wait, clock } = auto(60);
+      play(20, 0.9, 9);
+      wait(2_000);
+      const kept = mem.value;
+      clock.t += 21_000;
+      a.decoding();
+      expect(a.check(clock.t)).toEqual({ to: "15m", why: "device" });
+      expect(a.lowered).toBe("device");
+      expect(mem.value).toBe(kept);
+    });
+
+    it("waits after the player's own fallback as after a change of its own", () => {
+      const { a, clock } = auto();
+      a.fellBack(clock.t);
+      clock.t += 10_000;
+      a.decoding();
+      expect(a.check(clock.t)).toBeNull();
+    });
+
+    it("steps from what the original plays at once the player converts it", () => {
+      const { a, clock } = auto(60);
+      a.setOriginalKbps(15_000);
+      a.decoding();
+      clock.t += 1_000;
+      // 15 × 0.75 = 11.25 → 8 Mbps 1080p (12 is above it).
+      expect(a.check(clock.t)?.to).toBe("8m");
+    });
+  });
+
+  describe("stepping back up", () => {
+    function lowered() {
+      const t = auto(20, memory(), file(1920, 1080, 20));
+      t.play(20, 0.5, 9);
+      expect(t.wait(2_000)?.to).toBe("4m");
+      return t;
+    }
+
+    it("waits 5 minutes after a step down, then goes one step up when the network carries 1.6 times it", () => {
+      const { a, network } = lowered();
+      // 3 calm minutes aren't enough so soon after the step down.
+      expect(network(180, 50_000)).toBeNull();
+      const step = network(124, 50_000);
+      expect(step).toEqual({ to: "8m", why: null });
+      expect(a.playing).toBe("8m");
+    });
+
+    it("stays when the network doesn't carry 1.6 times the next quality, or can't say", () => {
+      const { a, network, clock } = lowered();
+      expect(network(400, 8_000 * 1.5)).toBeNull();
+      clock.t += 400_000;
+      expect(a.check(clock.t)).toBeNull();
+      expect(a.playing).toBe("4m");
+    });
+
+    it("needs 3 minutes without an issue", () => {
+      const { a, play, wait, network } = auto(20, memory(), file(1920, 1080, 20));
+      play(20, 0.05, 2);
+      expect(wait(2_000)?.to).toBe("2m");
+      expect(network(296, 50_000)).toBeNull();
+      // An issue at the lowest quality changes nothing, but 3 calm minutes count from it.
+      wait(800);
+      expect(wait(800)).toBeNull();
+      expect(a.playing).toBe("2m");
+      expect(network(176, 50_000)).toBeNull();
+      expect(network(8, 50_000)?.to).toBe("4m");
+    });
+
+    it("one step every 3 minutes, back to the original, which forgets the network", () => {
+      const { a, mem, network } = lowered();
+      expect(mem.value).not.toBeNull();
+      expect(network(304, 50_000)?.to).toBe("8m");
+      expect(network(176, 50_000)).toBeNull();
+      expect(network(8, 50_000)?.to).toBe("12m");
+      expect(network(184, 50_000)?.to).toBe("original");
+      expect(a.lowered).toBeNull();
+      expect(mem.value).toBeNull();
+    });
+
+    it("measures the network from engine figures too, by their median", () => {
+      const { a, clock } = lowered();
+      clock.t += 301_000;
+      // 1.6 × 8 Mbps is 12.8: the median, 20, carries it (the mean of the first three wouldn't).
+      for (const kbps of [100, 7_000, 20_000, 25_000, 30_000]) a.bandwidth(clock.t, kbps);
+      expect(a.check(clock.t)).toEqual({ to: "8m", why: null });
+    });
+  });
+
+  describe("its memory", () => {
+    it("keeps the ceiling of a step down for the device and server", () => {
+      const { mem, play, wait } = auto(20, memory(), file(1920, 1080, 20));
+      play(20, 0.5, 9);
+      wait(2_000);
+      expect(mem.value).toEqual({ kbps: 7_500, at: 1e12 + 22_000 });
+    });
+
+    it("starts the next title at most at it, when below the file, and not up again before 5 minutes from then", () => {
+      const mem = memory({ kbps: 7_500, at: 1e12 - 60_000 });
+      const { a, network } = auto(20, mem, file(1920, 1080, 20));
+      expect(a.playing).toBe("4m");
+      expect(a.lowered).toBe("network");
+      expect(network(200, 50_000)).toBeNull();
+      expect(network(44, 50_000)?.to).toBe("8m");
+    });
+
+    it("starts at the original when the file needs less than it", () => {
+      const { a } = auto(5, memory({ kbps: 7_500, at: 1e12 - 60_000 }), file(1920, 1080, 5));
+      expect(a.playing).toBe("original");
+    });
+
+    it("forgets it after 30 minutes", () => {
+      const mem = memory({ kbps: 2_000, at: 1e12 - MEMORY_MS });
+      const { a } = auto(20, mem, file(1920, 1080, 20));
+      expect(a.playing).toBe("original");
+      expect(mem.value).toBeNull();
+    });
+
+    it("lives in the browser's storage", () => {
+      const m = new Map<string, string>();
+      const store = { get: (k: string) => m.get(k) ?? null, set: (k: string, v: string) => void m.set(k, v), remove: (k: string) => void m.delete(k) };
+      const kept = storedMemory(store, "pley.autoQuality");
+      expect(kept.get()).toBeNull();
+      kept.set({ kbps: 4_000, at: 5 });
+      expect(storedMemory(store, "pley.autoQuality").get()).toEqual({ kbps: 4_000, at: 5 });
+      expect(storedMemory(store, "pley.autoQuality.other").get()).toBeNull();
+      kept.set(null);
+      expect(m.size).toBe(0);
+      m.set("pley.autoQuality.x", "{broken");
+      expect(storedMemory(store, "pley.autoQuality.x").get()).toBeNull();
+    });
+  });
+});

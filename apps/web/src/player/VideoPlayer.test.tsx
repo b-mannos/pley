@@ -522,3 +522,106 @@ describe("VideoPlayer with hls.js", () => {
     expect(hlsInstances[0]?.config.startFragPrefetch).toBe(true);
   });
 });
+
+describe("VideoPlayer in Automatic", () => {
+  const starts = (requests: FakeRequest[]) =>
+    requests.filter((r) => r.method === "POST" && r.path === "/api/playback").map((r) => r.body as Record<string, unknown>);
+
+  /** A 20 Mbps 1080p file, played as it is. */
+  function render20() {
+    const item = detail();
+    item.files[0]!.bitrate = 20_000_000;
+    const requests = serve([session("d1", { method: "direct", hls: false, url: "/api/files/3/stream" }), session("t2")], {
+      "DELETE /api/playback/d1": () => undefined,
+    });
+    const view = renderWithProviders(<VideoPlayer item={item} startMs={60_000} fileId={null} audio={null} sub={null} />);
+    return { requests, ...view };
+  }
+
+  /** The element plays at 60 s with `ahead` seconds loaded: what jsdom's element can't say by itself. */
+  function playing(video: HTMLVideoElement, ahead = 5) {
+    const state = { time: 60, paused: false, seeking: false };
+    Object.defineProperty(video, "readyState", { configurable: true, get: () => 4 });
+    Object.defineProperty(video, "paused", { configurable: true, get: () => state.paused });
+    Object.defineProperty(video, "seeking", { configurable: true, get: () => state.seeking });
+    Object.defineProperty(video, "currentTime", { configurable: true, get: () => state.time, set: (t: number) => (state.time = t) });
+    Object.defineProperty(video, "buffered", {
+      configurable: true,
+      get: () => ({ length: 1, start: () => 0, end: () => state.time + ahead }),
+    });
+    act(() => {
+      video.dispatchEvent(new Event("timeupdate"));
+      video.dispatchEvent(new Event("playing"));
+    });
+    return state;
+  }
+
+  const sleep = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
+
+  it("plays the original, and the menu says so", async () => {
+    const { requests } = render20();
+    await waitFor(() => expect(starts(requests)).toHaveLength(1));
+    expect(starts(requests)[0]).toMatchObject({ mode: "auto", max_bitrate: null });
+    await userEvent.click(screen.getByRole("button", { name: "Playback settings" }));
+    expect(screen.getByRole("button", { name: /Quality\s*Automatic · Original/ })).toBeInTheDocument();
+  });
+
+  it("steps down on a 2 s wait for data, where it was, and says so once", async () => {
+    const { requests, container } = render20();
+    const video = container.querySelector("video")!;
+    await waitFor(() => expect(video.getAttribute("src")).toBe("/api/files/3/stream"));
+    playing(video);
+    act(() => {
+      video.dispatchEvent(new Event("waiting"));
+    });
+    // 20 Mbps × 0.75 = 15 → 12 Mbps 1080p, the highest below it.
+    await waitFor(() => expect(starts(requests)).toHaveLength(2), { timeout: 4_000 });
+    expect(starts(requests)[1]).toMatchObject({ mode: "transcode", max_bitrate: 12_000, max_height: 1080, start_ms: 60_000 });
+    expect(await screen.findByText("Playing at 12 Mbps 1080p for a smoother picture")).toBeInTheDocument();
+    expect(screen.getAllByText("Playing at 12 Mbps 1080p for a smoother picture")).toHaveLength(1);
+    expect(JSON.parse(window.localStorage.getItem("pley.autoQuality")!)).toMatchObject({ kbps: 15_000 });
+    // Nothing was picked: the next title starts in Automatic too.
+    expect(window.localStorage.getItem("pley.quality")).toBeNull();
+  });
+
+  it("doesn't count a seek's wait, nor a wait while paused", async () => {
+    const { requests, container } = render20();
+    const video = container.querySelector("video")!;
+    await waitFor(() => expect(video.getAttribute("src")).toBe("/api/files/3/stream"));
+    const state = playing(video);
+    state.seeking = true;
+    act(() => {
+      video.dispatchEvent(new Event("seeking"));
+      video.dispatchEvent(new Event("waiting"));
+    });
+    state.seeking = false;
+    await sleep(3_100);
+    state.paused = true;
+    act(() => {
+      video.dispatchEvent(new Event("pause"));
+      video.dispatchEvent(new Event("waiting"));
+    });
+    await sleep(3_100);
+    expect(starts(requests)).toHaveLength(1);
+  }, 15_000);
+
+  it("keeps a quality picked before, Original included: a slow network waits", async () => {
+    window.localStorage.setItem("pley.quality", JSON.stringify("original"));
+    const { requests, container } = render20();
+    const video = container.querySelector("video")!;
+    await waitFor(() => expect(video.getAttribute("src")).toBe("/api/files/3/stream"));
+    playing(video);
+    act(() => {
+      video.dispatchEvent(new Event("waiting"));
+    });
+    await sleep(3_100);
+    expect(starts(requests)).toHaveLength(1);
+  }, 15_000);
+
+  it("starts the next title at the network it remembers", async () => {
+    window.localStorage.setItem("pley.autoQuality", JSON.stringify({ kbps: 9_000, at: Date.now() - 60_000 }));
+    const { requests } = render20();
+    await waitFor(() => expect(starts(requests)).toHaveLength(1));
+    expect(starts(requests)[0]).toMatchObject({ mode: "transcode", max_bitrate: 8_000, max_height: 1080 });
+  });
+});

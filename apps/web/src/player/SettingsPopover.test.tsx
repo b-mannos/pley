@@ -51,13 +51,14 @@ describe("SettingsPopover", () => {
     expect(original).toHaveAttribute("aria-checked", "true");
   });
 
-  it("offers the original and the qualities that convert it", async () => {
+  it("offers the original, Automatic and the qualities that convert it", async () => {
     const user = userEvent.setup();
     const props = renderPopover();
     await user.click(screen.getByRole("button", { name: /Quality/ }));
     const options = screen.getAllByRole("menuitemradio");
     expect(options.map((o) => o.textContent)).toEqual([
       "Original1080p · 9.0 Mbps",
+      "AutomaticOriginal, lower only when it doesn't play well",
       "8 Mbps 1080pConverted",
       "4 Mbps 720pConverted",
       "2 Mbps 480pConverted",
@@ -69,7 +70,31 @@ describe("SettingsPopover", () => {
     expect(props.setOpen).toHaveBeenCalledWith(false);
   });
 
+  it("says what Automatic plays, and why when lower", async () => {
+    const user = userEvent.setup();
+    renderPopover({ quality: "auto", autoNow: "Original" });
+    expect(screen.getByRole("button", { name: /Quality\s*Automatic · Original/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Quality/ }));
+    const automatic = screen.getByRole("menuitemradio", { name: /Automatic/ });
+    expect(automatic).toHaveAttribute("aria-checked", "true");
+    expect(automatic).toHaveTextContent("Now Original");
+    // The Original row stays the file as it is.
+    expect(screen.getAllByRole("menuitemradio")[0]).toHaveTextContent("Original1080p · 9.0 Mbps");
+  });
+
+  it("says when Automatic went lower, and lets it be picked again to start afresh", async () => {
+    const user = userEvent.setup();
+    const props = renderPopover({ quality: "auto", autoNow: "4 Mbps 720p", autoWhy: "Lowered for the network" });
+    expect(screen.getByRole("button", { name: /Quality\s*Automatic · 4 Mbps 720p/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Quality/ }));
+    const automatic = screen.getByRole("menuitemradio", { name: /Automatic/ });
+    expect(automatic).toHaveTextContent("Now 4 Mbps 720p · Lowered for the network");
+    await user.click(automatic);
+    expect(props.onQuality).toHaveBeenCalledWith("auto");
+  });
+
   const english: MediaStream = {
+
     index: 3,
     kind: "subtitle",
     codec: "subrip",
