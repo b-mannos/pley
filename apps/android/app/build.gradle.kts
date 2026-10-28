@@ -26,7 +26,10 @@ android {
         // The id Google Play and the Amazon Appstore know the app by. The code
         // keeps its namespace, and sign-in its app.pley.android: scheme.
         applicationId = "com.formandelement.pley"
-        versionCode = versionCodeOf(pleyVersion)
+        // A rebuild of the same version for the stores, which take each code
+        // once: PLEY_BUILD, 1 to 99, on top of the version's.
+        versionCode = versionCodeOf(pleyVersion) +
+            (providers.environmentVariable("PLEY_BUILD").orNull?.trim()?.toIntOrNull()?.takeIf { it in 0..99 } ?: 0)
         versionName = pleyVersion
         buildConfigField("String", "COMMIT", "\"$pleyCommit\"")
     }
