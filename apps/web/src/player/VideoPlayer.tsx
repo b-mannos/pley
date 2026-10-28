@@ -52,17 +52,21 @@ import { ChaptersMenu } from "./ChaptersMenu";
 import { SeekBar } from "./SeekBar";
 import { methodLabel, PlaybackDetails } from "./PlaybackDetails";
 import { SettingsPopover } from "./SettingsPopover";
+import { speedLabel, stepSpeed } from "./speed";
 import { fileMarkers, SkipButton, skipTarget, useSkipMarkers } from "./SkipButton";
 import { carriedSleepTimer, sleepChoice, SleepNotice, useSleepTimer } from "./sleepTimer";
 import { SubtitleOverlay } from "./SubtitleOverlay";
 import {
   clampSubtitleOffset,
+  cueAtTop,
   cuesAt,
   DEFAULT_SUBTITLE_STYLE,
   nextCueChange,
   parseVtt,
   storedSubtitleOffset,
   storeSubtitleOffset,
+  SUBTITLE_BOTTOM,
+  subtitleLift,
   subtitleStyle,
   type SubtitleCue,
   type SubtitleStyle,
@@ -156,8 +160,12 @@ function sameStart(before: VTTCue[], after: VTTCue[]): boolean {
   return last < 0 || (after[last]?.startTime === before[last]?.startTime && after[last]?.text === before[last]?.text);
 }
 
-/** A copy of `cue` shown `shift` seconds later (positive: later), placed the same. */
-function movedCue(cue: VTTCue, shift: number): VTTCue {
+/**
+ * A copy of `cue` shown `shift` seconds later (positive: later), placed the
+ * same; one at the bottom raised `lift` % of the height when asked
+ * (`SUBTITLE_POSITIONS`).
+ */
+function movedCue(cue: VTTCue, shift: number, lift: number): VTTCue {
   const moved = new VTTCue(Math.max(0, cue.startTime + shift), Math.max(0, cue.endTime + shift), cue.text);
   moved.line = cue.line;
   moved.lineAlign = cue.lineAlign;
@@ -167,6 +175,11 @@ function movedCue(cue: VTTCue, shift: number): VTTCue {
   moved.align = cue.align;
   moved.snapToLines = cue.snapToLines;
   moved.vertical = cue.vertical;
+  if (lift > 0 && !cueAtTop(cue)) {
+    moved.snapToLines = false;
+    moved.line = 100 - SUBTITLE_BOTTOM - lift;
+    moved.lineAlign = "end";
+  }
   return moved;
 }
 
@@ -1227,6 +1240,21 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     return () => window.clearInterval(timer);
   }, [playing, report, ended, error]);
 
+  // Speed: this title's only. The element starts each session at its
+  // default rate, so that changes too.
+  const [speed, setSpeed] = useState(1);
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.defaultPlaybackRate = speed;
+    v.playbackRate = speed;
+  }, [speed]);
+  const stepPlaybackSpeed = (by: 1 | -1) => {
+    const next = stepSpeed(speed, by);
+    setSpeed(next);
+    toast.info(`Speed: ${speedLabel(next)}`);
+  };
+
   // Volume.
   useEffect(() => {
     const v = videoRef.current;
@@ -1268,31 +1296,35 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   }, [shownTextUrl, toast]);
   const shownCues = loadedCues && loadedCues.url === shownTextUrl ? loadedCues.cues : null;
   /** The cues on the track: more of the same subtitles only add the new ones. */
-  const trackCues = useRef<{ track: TextTrack | null; cues: VTTCue[] | null; shift: number }>({
+  const trackCues = useRef<{ track: TextTrack | null; cues: VTTCue[] | null; shift: number; lift: number }>({
     track: null,
     cues: null,
     shift: 0,
+    lift: 0,
   });
+  const subtitlePosition = subStyle.position;
   useEffect(() => {
     const v = videoRef.current;
     if (!v || typeof v.addTextTrack !== "function") return;
     // One track for the element's life: tracks added by script can't be removed.
     const track = pleyTrack(v);
     // In native fullscreen the browser draws the track's cues at their own
-    // times, so moved subtitles go on it moved.
+    // times and places, so moved or raised subtitles go on it moved or raised.
     const shift = nativeFullscreen ? subtitleOffset : 0;
+    const lift = nativeFullscreen ? subtitleLift(subtitlePosition) : 0;
     const before = trackCues.current;
     const more =
       before.track === track &&
       before.shift === shift &&
+      before.lift === lift &&
       !!before.cues &&
       !!shownCues &&
       sameStart(before.cues, shownCues);
     if (!more) for (const cue of Array.from(track.cues ?? [])) track.removeCue(cue);
     for (const cue of (shownCues ?? []).slice(more ? (before.cues?.length ?? 0) : 0)) {
-      track.addCue(shift ? movedCue(cue, shift) : cue);
+      track.addCue(shift || lift ? movedCue(cue, shift, lift) : cue);
     }
-    trackCues.current = { track, cues: shownCues, shift };
+    trackCues.current = { track, cues: shownCues, shift, lift };
     track.mode = shownCues?.length ? (nativeFullscreen ? "showing" : "hidden") : "disabled";
     // The lines at the playhead, worked out here: after a seek the track's
     // own active cues stay as they were until the video plays again (seconds
@@ -1327,7 +1359,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       v.removeEventListener("pause", update);
       setCues([]);
     };
-  }, [shownCues, nativeFullscreen, subtitleOffset]);
+  }, [shownCues, nativeFullscreen, subtitleOffset, subtitlePosition]);
 
   const changeSubtitleOffset = (offset: number) => {
     const value = clampSubtitleOffset(offset);
@@ -1576,6 +1608,10 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         case "C":
           cycleSubtitles();
           break;
+        case ">":
+        case "<":
+          stepPlaybackSpeed(e.key === ">" ? 1 : -1);
+          break;
         case "s":
         case "S":
           if (!marker) return;
@@ -1650,6 +1686,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         className="absolute inset-0 size-full bg-black object-contain"
         playsInline
         preload="auto"
+        data-subtitle-font={subStyle.font}
         onPointerDown={(e) => {
           pointerType.current = e.pointerType;
         }}
@@ -1906,6 +1943,8 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             onSubtitleStyle={setSubtitleStyle}
             subtitleOffset={subtitleOffset}
             onSubtitleOffset={changeSubtitleOffset}
+            speed={speed}
+            onSpeed={setSpeed}
             sleep={sleepChoice(sleep.timer)}
             sleepLeft={sleep.timer && "endsAt" in sleep.timer ? sleep.secondsLeft : null}
             sleepEndLabel={sleepEndLabel}

@@ -714,3 +714,24 @@ describe("VideoPlayer in Automatic", () => {
     expect(starts(requests)[0]).toMatchObject({ mode: "transcode", max_bitrate: 8_000, max_height: 1080 });
   });
 });
+
+describe("VideoPlayer speed", () => {
+  it("plays at the speed picked, also once a new session starts, and > and < step it", async () => {
+    serve([session("s1"), session("s2")], { "DELETE /api/playback/s1": () => undefined });
+    window.localStorage.setItem("pley.quality", JSON.stringify("original"));
+    const { container } = renderPlayer(0);
+    const video = container.querySelector("video")!;
+    await waitFor(() => expect(hlsInstances).toHaveLength(1));
+    await userEvent.click(screen.getByRole("button", { name: "Playback settings" }));
+    await userEvent.click(screen.getByRole("button", { name: /Speed\s*Normal/ }));
+    await userEvent.click(screen.getByRole("menuitemradio", { name: "1.5×" }));
+    expect([video.playbackRate, video.defaultPlaybackRate]).toEqual([1.5, 1.5]);
+    fireEvent.keyDown(document.body, { key: ">" });
+    expect(video.playbackRate).toBe(2);
+    expect(await screen.findByText("Speed: 2×")).toBeInTheDocument();
+    fireEvent.keyDown(document.body, { key: "<" });
+    fireEvent.keyDown(document.body, { key: "<" });
+    expect(video.playbackRate).toBe(1.25);
+    window.localStorage.removeItem("pley.quality");
+  });
+});

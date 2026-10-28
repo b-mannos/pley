@@ -1,18 +1,22 @@
 /**
  * How pley draws text subtitles (player/SubtitleOverlay.tsx): white, a little
- * heavy, with a dark outline and no box, as Plex does; in a size and with a
- * background chosen on each device.
+ * heavy, with a dark outline and no box, as Plex does; in a size, with a
+ * background, in a font and as high up as chosen on each device.
  */
 
 export type SubtitleSize = "small" | "normal" | "large" | "huge";
 export type SubtitleBackground = "none" | "box";
+export type SubtitleFont = "sans" | "serif" | "mono" | "casual";
+export type SubtitlePosition = "bottom" | "raised" | "higher" | "highest";
 
 export interface SubtitleStyle {
   size: SubtitleSize;
   background: SubtitleBackground;
+  font: SubtitleFont;
+  position: SubtitlePosition;
 }
 
-export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = { size: "normal", background: "none" };
+export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = { size: "normal", background: "none", font: "sans", position: "bottom" };
 
 /** The sizes offered, with the text's height as a share of the player's. */
 export const SUBTITLE_SIZES: { id: SubtitleSize; label: string; share: number }[] = [
@@ -26,6 +30,35 @@ export const SUBTITLE_BACKGROUNDS: { id: SubtitleBackground; label: string }[] =
   { id: "none", label: "None" },
   { id: "box", label: "Dark box" },
 ];
+
+/** The fonts offered: the app's own, and the browser's serif, monospace and casual faces. */
+export const SUBTITLE_FONTS: { id: SubtitleFont; label: string; family: string }[] = [
+  { id: "sans", label: "Default", family: "var(--font-sans)" },
+  { id: "serif", label: "Serif", family: 'Georgia, "Times New Roman", "Noto Serif", serif' },
+  { id: "mono", label: "Monospace", family: 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace' },
+  { id: "casual", label: "Casual", family: '"Comic Sans MS", "Comic Neue", "Chalkboard SE", cursive' },
+];
+
+/** How high bottom subtitles sit: raised from the usual place by a share of the player's height (%). */
+export const SUBTITLE_POSITIONS: { id: SubtitlePosition; label: string; lift: number }[] = [
+  { id: "bottom", label: "Bottom", lift: 0 },
+  { id: "raised", label: "A little higher", lift: 5 },
+  { id: "higher", label: "Higher", lift: 10 },
+  { id: "highest", label: "Highest", lift: 16 },
+];
+
+/** The space under bottom subtitles, as a share of the player's height (%). */
+export const SUBTITLE_BOTTOM = 6;
+
+/** The share of the player's height `position` raises bottom subtitles by (%). */
+export function subtitleLift(position: SubtitlePosition): number {
+  return SUBTITLE_POSITIONS.find((p) => p.id === position)?.lift ?? 0;
+}
+
+/** The CSS font family for `font`. */
+export function subtitleFontFamily(font: SubtitleFont): string {
+  return SUBTITLE_FONTS.find((f) => f.id === font)?.family ?? SUBTITLE_FONTS[0]!.family;
+}
 
 /** The CSS font size for `size`: a share of the player's height, never unreadably small. */
 export function subtitleFontSize(size: SubtitleSize): string {
@@ -41,6 +74,10 @@ export function subtitleStyle(stored: unknown): SubtitleStyle {
     background: SUBTITLE_BACKGROUNDS.some((b) => b.id === value.background)
       ? (value.background as SubtitleBackground)
       : DEFAULT_SUBTITLE_STYLE.background,
+    font: SUBTITLE_FONTS.some((f) => f.id === value.font) ? (value.font as SubtitleFont) : DEFAULT_SUBTITLE_STYLE.font,
+    position: SUBTITLE_POSITIONS.some((p) => p.id === value.position)
+      ? (value.position as SubtitlePosition)
+      : DEFAULT_SUBTITLE_STYLE.position,
   };
 }
 

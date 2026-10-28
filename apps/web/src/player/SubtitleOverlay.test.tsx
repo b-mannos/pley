@@ -51,10 +51,19 @@ describe("SubtitleOverlay", () => {
   it("moves above the controls while they show, and has a box when asked", () => {
     const { rerender } = render(<SubtitleOverlay cues={[cue("Hi")]} lifted={false} style={DEFAULT_SUBTITLE_STYLE} />);
     const line = () => screen.getByText("Hi");
-    expect(line().parentElement?.className).toContain("pb-[6cqh]");
-    rerender(<SubtitleOverlay cues={[cue("Hi")]} lifted style={{ size: "large", background: "box" }} />);
-    expect(line().parentElement?.className).toContain("pb-[max(6cqh,7rem)]");
+    expect(line().parentElement?.style.paddingBottom).toBe("6cqh");
+    rerender(<SubtitleOverlay cues={[cue("Hi")]} lifted style={{ ...DEFAULT_SUBTITLE_STYLE, size: "large", background: "box" }} />);
+    expect(line().parentElement?.style.paddingBottom).toBe("max(6cqh, 7rem)");
     expect(line()).toHaveAttribute("data-background", "box");
+  });
+
+  it("sits higher and in another font when asked", () => {
+    const { rerender } = render(<SubtitleOverlay cues={[cue("Hi")]} lifted={false} style={{ ...DEFAULT_SUBTITLE_STYLE, position: "higher", font: "serif" }} />);
+    const line = () => screen.getByText("Hi");
+    expect(line().parentElement?.style.paddingBottom).toBe("16cqh");
+    expect(line().parentElement?.parentElement?.style.getPropertyValue("--subtitle-font")).toContain("serif");
+    rerender(<SubtitleOverlay cues={[cue("Hi")]} lifted style={{ ...DEFAULT_SUBTITLE_STYLE, position: "highest" }} />);
+    expect(line().parentElement?.style.paddingBottom).toBe("max(22cqh, 7rem)");
   });
 
   it("puts cues placed high at the top", () => {

@@ -24,6 +24,8 @@ function renderPopover(overrides: Partial<SettingsPopoverProps> = {}) {
     onSubtitleStyle: vi.fn(),
     subtitleOffset: 0,
     onSubtitleOffset: vi.fn(),
+    speed: 1,
+    onSpeed: vi.fn(),
     sleep: null,
     sleepLeft: null,
     sleepEndLabel: "End of this episode",
@@ -109,14 +111,35 @@ describe("SettingsPopover", () => {
     text_based: true,
   };
 
-  it("styles text subtitles: their size and background", async () => {
+  it("styles text subtitles: their size, background, font and position", async () => {
     const user = userEvent.setup();
     const props = renderPopover({ subtitleStreams: [english], subtitleIndex: 3 });
     await user.click(screen.getByRole("button", { name: /Subtitle style\s*Normal/ }));
     await user.click(screen.getByRole("menuitemradio", { name: "Large" }));
-    expect(props.onSubtitleStyle).toHaveBeenCalledWith({ size: "large", background: "none" });
+    expect(props.onSubtitleStyle).toHaveBeenCalledWith({ ...DEFAULT_SUBTITLE_STYLE, size: "large" });
     await user.click(screen.getByRole("menuitemradio", { name: "Dark box" }));
-    expect(props.onSubtitleStyle).toHaveBeenCalledWith({ size: "normal", background: "box" });
+    expect(props.onSubtitleStyle).toHaveBeenCalledWith({ ...DEFAULT_SUBTITLE_STYLE, background: "box" });
+    expect(screen.getAllByRole("menuitemradio").map((o) => o.textContent)).toEqual([
+      ...["Small", "Normal", "Large", "Huge"],
+      ...["None", "Dark box"],
+      ...["Default", "Serif", "Monospace", "Casual"],
+      ...["Bottom", "A little higher", "Higher", "Highest"],
+    ]);
+    await user.click(screen.getByRole("menuitemradio", { name: "Serif" }));
+    expect(props.onSubtitleStyle).toHaveBeenCalledWith({ ...DEFAULT_SUBTITLE_STYLE, font: "serif" });
+    await user.click(screen.getByRole("menuitemradio", { name: "Higher" }));
+    expect(props.onSubtitleStyle).toHaveBeenCalledWith({ ...DEFAULT_SUBTITLE_STYLE, position: "higher" });
+  });
+
+  it("plays faster or slower, from half to twice the speed", async () => {
+    const user = userEvent.setup();
+    const props = renderPopover({ speed: 1.5 });
+    await user.click(screen.getByRole("button", { name: /Speed\s*1.5×/ }));
+    expect(screen.getAllByRole("menuitemradio").map((o) => o.textContent)).toEqual(["0.5×", "0.75×", "Normal", "1.25×", "1.5×", "2×"]);
+    expect(screen.getByRole("menuitemradio", { name: "1.5×" })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("menuitemradio", { name: "Normal" }));
+    expect(props.onSpeed).toHaveBeenCalledWith(1);
+    expect(props.setOpen).toHaveBeenCalledWith(false);
   });
 
   it("has no style to choose without text subtitles", () => {

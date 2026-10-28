@@ -163,7 +163,7 @@
   padding: 0.04em 0.28em;
   border-radius: 0.12em;
   color: #fff;
-  font-family: var(--font-sans);
+  font-family: var(--subtitle-font, var(--font-sans));
   font-weight: 600;
   line-height: 1.22;
   text-align: center;
@@ -198,4 +198,15 @@ video::cue {
     0 0.05em 0 #000,
     0 -0.05em 0 #000,
     0 0.06em 0.3em rgb(0 0 0 / 0.75);
+}
+
+/* The font chosen (player/subtitles.ts), where the browser draws them. */
+video[data-subtitle-font="serif"]::cue {
+  font-family: Georgia, "Times New Roman", "Noto Serif", serif;
+}
+video[data-subtitle-font="mono"]::cue {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+video[data-subtitle-font="casual"]::cue {
+  font-family: "Comic Sans MS", "Comic Neue", "Chalkboard SE", cursive;
 }

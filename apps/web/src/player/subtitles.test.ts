@@ -32,8 +32,15 @@ function cue(text: string, extra: Partial<SubtitleCue> = {}): SubtitleCue {
 
 describe("subtitle style", () => {
   it("comes back from storage, unknown values as the default", () => {
-    expect(subtitleStyle({ size: "large", background: "box" })).toEqual({ size: "large", background: "box" });
-    expect(subtitleStyle({ size: "gigantic", background: 3 })).toEqual(DEFAULT_SUBTITLE_STYLE);
+    expect(subtitleStyle({ size: "large", background: "box", font: "mono", position: "raised" })).toEqual({
+      size: "large",
+      background: "box",
+      font: "mono",
+      position: "raised",
+    });
+    // Kept before fonts and positions were offered: those are the default.
+    expect(subtitleStyle({ size: "large", background: "box" })).toEqual({ ...DEFAULT_SUBTITLE_STYLE, size: "large", background: "box" });
+    expect(subtitleStyle({ size: "gigantic", background: 3, font: "wingdings", position: 9 })).toEqual(DEFAULT_SUBTITLE_STYLE);
     expect(subtitleStyle(null)).toEqual(DEFAULT_SUBTITLE_STYLE);
   });
 

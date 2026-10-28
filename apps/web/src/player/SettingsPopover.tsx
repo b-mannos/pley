@@ -6,23 +6,27 @@ import { formatClock, streamLabel } from "@/lib/format";
 import { useDismiss } from "@/lib/hooks";
 import { qualityById, type QualityOption } from "./quality";
 import { SLEEP_MINUTES, type SleepChoice } from "./sleepTimer";
+import { SPEEDS, speedLabel } from "./speed";
 import {
   clampSubtitleOffset,
   formatSubtitleOffset,
   SUBTITLE_BACKGROUNDS,
+  SUBTITLE_FONTS,
   SUBTITLE_OFFSET_MAX,
   SUBTITLE_OFFSET_STEP,
+  SUBTITLE_POSITIONS,
   SUBTITLE_SIZES,
   type SubtitleStyle,
 } from "./subtitles";
 
-type Panel = "root" | "quality" | "audio" | "subtitles" | "style" | "sleep";
+type Panel = "root" | "quality" | "audio" | "subtitles" | "style" | "speed" | "sleep";
 
 const PANEL_TITLE: Record<Exclude<Panel, "root">, string> = {
   quality: "Quality",
   audio: "Audio",
   subtitles: "Subtitles",
   style: "Subtitle style",
+  speed: "Speed",
   sleep: "Sleep timer",
 };
 
@@ -150,6 +154,9 @@ export interface SettingsPopoverProps {
   /** Seconds text subtitles are moved by (positive: later), for this file. */
   subtitleOffset: number;
   onSubtitleOffset: (offset: number) => void;
+  /** How fast it plays (1: normal), for this title. */
+  speed: number;
+  onSpeed: (speed: number) => void;
   /** The sleep timer, if set, and how long it has left (seconds; for minutes). */
   sleep: SleepChoice | null;
   sleepLeft: number | null;
@@ -161,7 +168,7 @@ export interface SettingsPopoverProps {
 export function SettingsPopover(props: SettingsPopoverProps) {
   const { open, setOpen, details, qualities, quality, originalHint, autoQuality, autoNow, autoWhy, onQuality } = props;
   const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle } = props;
-  const { subtitleStyle, onSubtitleStyle, subtitleOffset, onSubtitleOffset } = props;
+  const { subtitleStyle, onSubtitleStyle, subtitleOffset, onSubtitleOffset, speed, onSpeed } = props;
   const { sleep, sleepLeft, sleepEndLabel, onSleep } = props;
   const [panel, setPanel] = useState<Panel>("root");
   const ref = useRef<HTMLDivElement>(null);
@@ -253,6 +260,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                   onClick={() => setPanel("style")}
                 />
               ) : null}
+              <Nav label="Speed" value={speedLabel(speed)} onClick={() => setPanel("speed")} />
               <Nav label="Sleep timer" value={sleepValue} onClick={() => setPanel("sleep")} />
             </>
           ) : (
@@ -318,8 +326,42 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                       {b.label}
                     </Option>
                   ))}
+                  <GroupLabel>Font</GroupLabel>
+                  {SUBTITLE_FONTS.map((f) => (
+                    <Option
+                      key={f.id}
+                      selected={f.id === subtitleStyle.font}
+                      onClick={() => onSubtitleStyle({ ...subtitleStyle, font: f.id })}
+                    >
+                      <span style={{ fontFamily: f.family }}>{f.label}</span>
+                    </Option>
+                  ))}
+                  <GroupLabel>Position</GroupLabel>
+                  {SUBTITLE_POSITIONS.map((p) => (
+                    <Option
+                      key={p.id}
+                      selected={p.id === subtitleStyle.position}
+                      onClick={() => onSubtitleStyle({ ...subtitleStyle, position: p.id })}
+                    >
+                      {p.label}
+                    </Option>
+                  ))}
                 </>
               ) : null}
+              {panel === "speed"
+                ? SPEEDS.map((s) => (
+                    <Option
+                      key={s}
+                      selected={s === speed}
+                      onClick={() => {
+                        onSpeed(s);
+                        close();
+                      }}
+                    >
+                      {speedLabel(s)}
+                    </Option>
+                  ))
+                : null}
               {panel === "subtitles" ? (
                 <>
                   <Option
