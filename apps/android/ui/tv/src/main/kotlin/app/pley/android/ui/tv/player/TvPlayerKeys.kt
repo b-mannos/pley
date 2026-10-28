@@ -26,7 +26,7 @@ internal sealed interface PlayerKey {
     /** Subtitles on (the last ones, or the first) or off. */
     data object Captions : PlayerKey
 
-    /** The next audio track. */
+    /** The Audio panel, to choose a track there. */
     data object AudioTrack : PlayerKey
 
     /** Stop and go back to where playing started. */

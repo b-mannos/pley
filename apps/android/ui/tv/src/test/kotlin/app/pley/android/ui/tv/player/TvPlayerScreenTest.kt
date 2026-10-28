@@ -361,6 +361,26 @@ class TvPlayerScreenTest {
     }
 
     @Test
+    fun `the audio key opens the Audio panel to choose in, changing nothing by itself`() {
+        val controller = playing()
+        show(controller)
+        send(AndroidKeyEvent.ACTION_DOWN, AndroidKeyEvent.KEYCODE_MEDIA_AUDIO_TRACK, 0, SystemClock.uptimeMillis())
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        compose.onNodeWithTag(TAG_PANEL).assertExists()
+        compose.onNodeWithText("French (EAC3 5.1)").assertExists()
+        assertTrue(controller.calls("selectAudio").isEmpty())
+        // Choosing there picks the track; the panel closes onto the Audio button.
+        press(Key.DirectionDown)
+        press(Key.DirectionCenter)
+        assertEquals(listOf(2L), controller.calls("selectAudio").map { it.args.single() })
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        compose.onNodeWithTag(TAG_PANEL).assertDoesNotExist()
+        compose.onNodeWithTag(TAG_SCRUBBER).assertExists()
+    }
+
+    @Test
     fun `the screen goes black with the ring while the TV matches its refresh rate, saying nothing`() {
         val controller = playing { it.copy(phase = PlayerPhase.Paused) }
         val engine = FakePlayerEngine()

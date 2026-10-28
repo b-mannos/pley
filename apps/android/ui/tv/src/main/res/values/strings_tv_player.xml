@@ -31,7 +31,6 @@
     <!-- Side panels. -->
     <string name="tv_player_subtitles_off_toast">Subtitles off</string>
     <string name="tv_player_subtitles_toast">Subtitles: %1$s</string>
-    <string name="tv_player_audio_toast">Audio: %1$s</string>
     <string name="tv_player_burn_in">Drawn into the picture by the server</string>
     <string name="tv_player_play_original">Play original</string>
     <string name="tv_player_play_original_hint">Try the file as it is again</string>

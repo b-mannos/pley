@@ -40,7 +40,7 @@ class TvPlayerKeysTest {
     }
 
     @Test
-    fun `media keys play, pause, jump 30 s, change episode or chapter and toggle captions`() {
+    fun `media keys play, pause, jump 30 s, change episode or chapter, toggle captions and open the audio`() {
         assertEquals(PlayerKey.PlayPause, TvPlayerKeys.media(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
         assertEquals(PlayerKey.Play, TvPlayerKeys.media(KeyEvent.KEYCODE_MEDIA_PLAY))
         assertEquals(PlayerKey.Pause, TvPlayerKeys.media(KeyEvent.KEYCODE_MEDIA_PAUSE))
@@ -49,6 +49,7 @@ class TvPlayerKeysTest {
         assertEquals(PlayerKey.Next, TvPlayerKeys.media(KeyEvent.KEYCODE_MEDIA_NEXT))
         assertEquals(PlayerKey.Previous, TvPlayerKeys.media(KeyEvent.KEYCODE_MEDIA_PREVIOUS))
         assertEquals(PlayerKey.Captions, TvPlayerKeys.media(KeyEvent.KEYCODE_CAPTIONS))
+        assertEquals(PlayerKey.AudioTrack, TvPlayerKeys.media(KeyEvent.KEYCODE_MEDIA_AUDIO_TRACK))
         assertEquals(PlayerKey.Stop, TvPlayerKeys.media(KeyEvent.KEYCODE_MEDIA_STOP))
     }
 }

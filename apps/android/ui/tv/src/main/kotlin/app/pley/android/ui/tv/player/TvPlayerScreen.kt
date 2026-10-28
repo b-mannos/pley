@@ -174,13 +174,17 @@ internal fun TvPlayerScreen(
         }
     }
 
-    fun nextAudio() {
-        val audio = state.value.audio
-        if (audio.size < 2) return
-        val i = audio.indexOfFirst { it.selected }
-        val pick = audio[(i + 1).mod(audio.size)]
-        pick.index?.let(controller::selectAudio)
-        ui.toast(resources.getString(R.string.tv_player_audio_toast, pick.label), TvPlayerUi.CAPTIONS_TOAST_MS)
+    /**
+     * The remote's audio key opens the Audio panel over the controls, the
+     * track playing ticked: the person chooses there, as with the Audio
+     * button (stepping to the next track could land on a commentary and
+     * keep it for the title).
+     */
+    fun openAudio() {
+        val s = state.value
+        if (s.audio.size < 2 || s.phase is PlayerPhase.Error || s.upNextCard != null || ui.panel == PlayerPanel.Audio) return
+        ui.showControls(PlayerFocus.Audio)
+        ui.openPanel(PlayerPanel.Audio)
     }
 
     fun act(key: PlayerKey) {
@@ -195,7 +199,7 @@ internal fun TvPlayerScreen(
             PlayerKey.Next -> next()
             PlayerKey.Previous -> previous()
             PlayerKey.Captions -> toggleCaptions()
-            PlayerKey.AudioTrack -> nextAudio()
+            PlayerKey.AudioTrack -> openAudio()
             PlayerKey.Stop -> exit()
             is PlayerKey.Show -> ui.showControls(focusFor(key.focus))
             is PlayerKey.Step -> seeker.press(key.direction)
