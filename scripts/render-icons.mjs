@@ -28,9 +28,8 @@
 //                                           tiles, as the Android TV app's banner
 //   apps/roku/images/splash_{fhd,hd,sd}.png the logo on the Roku app's background
 //   apps/android/app/src/main/res/drawable-{xhdpi,xxhdpi,xxxhdpi}/tv_banner.png
-//                                           the Android TV app's banner, 320×180 dp:
-//                                           TV home screens show it, and Fire TV's
-//                                           shows it as the app's icon
+//                                           the Android TV app's banner, 320×180 dp,
+//                                           on Android TV's home screen
 //   deploy/stores/                          the stores' listing pictures (README.md
 //                                           there): icons, Play's feature graphic,
 //                                           the TV banner, Fire TV's background

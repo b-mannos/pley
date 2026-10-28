@@ -20,10 +20,12 @@ or a signed release:
   apps" for the Downloader app, then open the APK's address in Downloader.
 
 The phone or tablet's launcher opens `MainActivity`; the TV home screen
-shows the 320×180 banner and opens `TvActivity`. Fire TV shows a
-sideloaded app by its TV icon in a 16:9 tile, so `TvActivity`'s icon is
-the banner too, drawn sharp enough for a 4K TV. A TV that opens
-`MainActivity` (some launchers do) is sent on to `TvActivity`.
+opens `TvActivity`. Android TV's shows the 320×180 banner; Google TV's
+draws the app's icon, the P, in a circle (`TvActivity` has no icon of its
+own, so it is never the banner cut to a circle); Fire TV's shows a
+sideloaded app by its icon in a square between grey bars, whatever the
+icon's shape, and an app from its store by the store's pictures. A TV
+that opens `MainActivity` (some launchers do) is sent on to `TvActivity`.
 
 ## Fire TV
 

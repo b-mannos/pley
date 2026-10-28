@@ -67,15 +67,15 @@
         </activity>
 
         <!--
-          TVs, with the 320x180 banner on their home screens. Fire TV's shows
-          an app it didn't install from its store by the launcher's icon, in
-          a 16:9 tile: the banner is that icon too, so it fills the tile. A
-          remote or keyboard connecting doesn't restart it.
+          TVs, with the 320x180 banner on Android TV's home screen. Its icon
+          is the app's: Google TV's home screen draws it in a circle, and Fire
+          TV's shows a sideloaded app by the app's icon in a square, between
+          grey bars, whatever its shape. A remote or keyboard connecting
+          doesn't restart it.
         -->
         <activity
             android:name=".TvActivity"
             android:banner="@drawable/tv_banner"
-            android:icon="@drawable/tv_banner"
             android:configChanges="keyboard|keyboardHidden|navigation"
             android:exported="true"
             android:theme="@style/Theme.Pley.Tv">
