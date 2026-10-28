@@ -49,7 +49,7 @@ object SubtitleSync {
     }
 }
 
-/** Subtitle offsets, remembered per file on this device (never on the server). */
+/** Subtitle offsets, remembered per file and profile on this device (never on the server). */
 interface SubtitleOffsets {
     /** The offset of the file under [key]; 0 when none was set. */
     suspend fun offset(key: String): Long
@@ -71,7 +71,7 @@ interface SubtitleOffsets {
     }
 }
 
-/** In a preferences file of the player's own ("subtitle_offsets"), an entry per file whose offset isn't 0. */
+/** In a preferences file of the player's own ("subtitle_offsets"), an entry per file and profile whose offset isn't 0. */
 class PreferencesSubtitleOffsets(context: Context, private val io: CoroutineDispatcher = Dispatchers.IO) : SubtitleOffsets {
     private val app = context.applicationContext
     private val prefs by lazy { app.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }

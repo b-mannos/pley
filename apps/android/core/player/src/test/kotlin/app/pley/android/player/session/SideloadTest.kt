@@ -86,6 +86,27 @@ class SideloadTest {
     }
 
     @Test
+    fun `a subtitle offset is each profile's own`() {
+        val movie = Catalogue.movieWithTracks(h.api)
+        h.profileId = 1
+        val first = h.play(PlayRequest(movie.id, fromStart = true))
+        first.setSubtitleOffset(1_500)
+        h.settle()
+        first.close()
+        // Another profile on this device starts in time.
+        h.profileId = 2
+        val other = h.play(PlayRequest(movie.id, fromStart = true))
+        h.settle()
+        assertEquals(0L, other.state.value.subtitleOffsetMs)
+        other.close()
+        // The first finds its own again.
+        h.profileId = 1
+        val again = h.play(PlayRequest(movie.id, fromStart = true))
+        h.settle()
+        assertEquals(1_500L, again.state.value.subtitleOffsetMs)
+    }
+
+    @Test
     fun `a stream that starts with pictures asks for none to be burned in`() {
         val movie = Catalogue.movieWithTracks(h.api)
         val picture = movie.files.first().streams.first { it.kind == StreamKind.Subtitle && it.textBased == false }

@@ -114,6 +114,7 @@ class SessionPlaybackServices(
                     },
                     lowMemory = profile.tier == Tier.T0,
                     offsets = offsets,
+                    profileId = session.me?.id,
                     pictures = OkHttpPictureSource({ network.subtitles(session.issuer) }, pictureDir),
                     events = data.liveUpdates.events,
                     local = local(),

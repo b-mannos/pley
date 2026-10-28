@@ -189,8 +189,10 @@ class PlaybackEnvironment(
     val now: () -> Long = SystemClock::elapsedRealtime,
     /** Where subtitles are parsed and seek previews cut, off the main thread. */
     val work: CoroutineDispatcher = Dispatchers.Default,
-    /** Subtitle offsets per file, on this device. */
+    /** Subtitle offsets per file and profile, on this device. */
     val offsets: SubtitleOffsets = SubtitleOffsets.memory(),
+    /** The profile watching: its subtitle offsets are its own. `null`: not known (offsets kept per file alone). */
+    val profileId: Long? = null,
     /** Reads picture subtitles beside a stream (the server's .mks); `null`: they are burned in instead. */
     val pictures: PictureSource? = null,
     /** The server's events, to hear of this playback being stopped. */

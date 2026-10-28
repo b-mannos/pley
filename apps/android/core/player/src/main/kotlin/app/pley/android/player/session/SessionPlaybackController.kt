@@ -578,8 +578,15 @@ class SessionPlaybackController(
         notice(texts.subtitlesFailed)
     }
 
-    /** Where a file's subtitle offset is kept: the file's own address, so files of different servers don't mix. */
-    private fun offsetKey(fileId: Long): String = env.api.url("/api/files/$fileId")
+    /**
+     * Where a file's subtitle offset is kept: the file's own address, so
+     * files of different servers don't mix, and the profile watching, so
+     * one profile's timing never moves another's subtitles.
+     */
+    private fun offsetKey(fileId: Long): String {
+        val file = env.api.url("/api/files/$fileId")
+        return env.profileId?.let { "$file#profile=$it" } ?: file
+    }
 
     // ---------------------------------------------------------------- engine events
 

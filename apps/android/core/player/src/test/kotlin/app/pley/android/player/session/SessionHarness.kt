@@ -26,6 +26,7 @@ import app.pley.android.player.PlayRequest
 import app.pley.android.player.PlayerUiState
 import app.pley.android.player.subtitles.ApiSubtitleFetcher
 import app.pley.android.player.subtitles.PictureSource
+import app.pley.android.player.subtitles.SubtitleOffsets
 import app.pley.android.testing.caps.FakeDeviceCapabilities
 import app.pley.android.testing.caps.TestDevices
 import app.pley.android.testing.caps.capsOf
@@ -116,7 +117,12 @@ class SessionHarness(
     val pictures: PictureSource? = null,
     /** The server's events, as the app's stream would bring them. */
     val events: Flow<ServerEvent> = emptyFlow(),
+    /** Subtitle offsets, shared by the playbacks of this harness. */
+    val offsets: SubtitleOffsets = SubtitleOffsets.memory(),
 ) : AutoCloseable {
+    /** The profile watching the playbacks started from now on. */
+    var profileId: Long? = null
+
     val scheduler = TestCoroutineScheduler()
     private val dispatcher = StandardTestDispatcher(scheduler)
     val server = FixtureServer(FixtureServer.Options(scanEveryMs = 0, clock = { scheduler.currentTime }))
@@ -164,6 +170,8 @@ class SessionHarness(
         pictures = pictures,
         events = events,
         local = local,
+        offsets = offsets,
+        profileId = profileId,
         tracksChosen = { itemId, choice -> synchronized(tracksChosen) { tracksChosen += itemId to choice } },
     )
 
