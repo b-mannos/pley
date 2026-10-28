@@ -175,3 +175,30 @@ describe("who is watching and the libraries", () => {
     expect(store.get("pley.libraries")).toBeNull();
   });
 });
+
+describe("the quality setting", () => {
+  const open = (store: KeyValue) => new AppState({ name: "webos", clientId: "test", storage: store } as unknown as Platform, () => Promise.reject(new Error("no network in tests")));
+
+  it("is Automatic on a TV where none was picked", () => {
+    expect(open(memoryStore()).settings.value.quality).toBe("auto");
+  });
+
+  it("is Automatic where Original was saved only as the old default, along with another setting", () => {
+    const store = memoryStore();
+    store.set("pley.settings", JSON.stringify({ autoplayNext: false, quality: "original" }));
+    const app = open(store);
+    expect(app.settings.value.quality).toBe("auto");
+    expect(app.settings.value.autoplayNext).toBe(false);
+  });
+
+  it("keeps a quality picked, Original included", () => {
+    const store = memoryStore();
+    open(store).updateSettings({ quality: "original" });
+    expect(open(store).settings.value.quality).toBe("original");
+    open(store).updateSettings({ autoplayNext: false });
+    expect(open(store).settings.value.quality).toBe("original");
+    const other = memoryStore();
+    other.set("pley.settings", JSON.stringify({ quality: "8m" }));
+    expect(open(other).settings.value.quality).toBe("8m");
+  });
+});

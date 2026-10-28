@@ -5,6 +5,7 @@ import type { KeyValue } from "../../src/auth/tokens";
 import { PlaybackController, type PlayerEnv } from "../../src/player/controller";
 import type { EngineListener, EngineSource, EngineStatus, PlayerEngine } from "../../src/player/engine";
 import { dvContainerMode, dvRetryMode, initialAudio, initialSubtitle, playbackRequest, playingAudio, withTracks, type Choices } from "../../src/player/plan";
+import { storedMemory } from "../../src/player/autoquality";
 import { ORIGINAL } from "../../src/player/quality";
 import { Reporter } from "../../src/player/reporter";
 import { NetworkError } from "../../src/net/transport";
@@ -242,8 +243,10 @@ class FakeEngine implements PlayerEngine {
   durationMs() {
     return 7_200_000;
   }
+  /** How far it has loaded; tests of Automatic move it on. */
+  buffered = 600_000;
   bufferedMs() {
-    return 600_000;
+    return this.buffered;
   }
   status() {
     return this.state;
@@ -600,6 +603,176 @@ describe("stalls (Info's count)", () => {
     await vi.advanceTimersByTimeAsync(3_000);
     now("buffering");
     expect(c.state.value.stalls).toBe(2);
+    c.close();
+  });
+});
+
+describe("Automatic", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** The original as it is; a conversion asked for, or the original converted at the server's quality for it. */
+  const converted = (req: PlaybackRequest) =>
+    info(
+      req.mode === "auto"
+        ? {}
+        : { session_id: `s${req.max_bitrate ?? "t"}`, method: "transcode", hls: true, url: "/api/media/pley_mk_KEY2/master.m3u8", auto_quality: req.max_bitrate ? null : "30m" },
+    );
+
+  /** A playback in Automatic that has shown its picture, on a clock the test moves; `kept` is the TV's storage. */
+  async function automatic(detail = item(file()), kept = memory(), dv: string[] | null = null) {
+    vi.useFakeTimers();
+    const w = world(detail, converted, dv);
+    w.env.now = () => Date.now();
+    const picked: string[] = [];
+    w.env.quality = { remembered: () => "auto", remember: (id) => void picked.push(id) };
+    w.env.autoMemory = storedMemory(kept, "pley.autoQuality.http://nas:7539");
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await vi.advanceTimersByTimeAsync(50);
+    const now = (s: EngineStatus) => {
+      w.engine.state = s;
+      w.engine.listener?.status(s);
+    };
+    now("ready");
+    w.engine.buffered = w.engine.pos + 8_000;
+    let shown = 1;
+    /** `seconds` of playback, the video arriving at `delivery` seconds a second; a new session shows at once. */
+    const play = async (seconds: number, delivery: number) => {
+      for (let i = 0; i < seconds * 2; i++) {
+        if (w.engine.prepared.length > shown) {
+          shown = w.engine.prepared.length;
+          now("ready");
+        }
+        w.engine.pos += 500;
+        w.engine.buffered += 500 * delivery;
+        await vi.advanceTimersByTimeAsync(500);
+      }
+    };
+    /** The picture stops for want of data for `ms`. */
+    const wait = async (ms: number) => {
+      now("buffering");
+      await vi.advanceTimersByTimeAsync(ms);
+    };
+    return { w, c, now, play, wait, kept, picked };
+  }
+
+  it("plays the original, and its menu says so, in the menu's order", async () => {
+    const { w, c } = await automatic();
+    expect(w.requests.map((r) => [r.mode, r.max_bitrate])).toEqual([["auto", undefined]]);
+    expect(c.state.value.quality).toBe("Automatic · Original");
+    expect(c.state.value.qualities.map((q) => q.id)).toEqual(["original", "auto", "30m", "15m", "20m", "12m", "8m", "4m", "2m"]);
+    expect(c.state.value.qualities.filter((q) => q.selected).map((q) => q.id)).toEqual(["auto"]);
+    c.close();
+  });
+
+  it("keeps the Dolby Vision guard of the original (LG before webOS 25)", async () => {
+    const { w, c } = await automatic(item(dvFile(8)), memory(), ["mp4", "ts"]);
+    expect(w.requests.map((r) => r.mode)).toEqual(["remux"]);
+    c.close();
+  });
+
+  it("steps down on a 2 s wait, from where it was, and says so once", async () => {
+    const { w, c, play, wait, kept } = await automatic();
+    const notices: string[] = [];
+    c.state.subscribe((s) => {
+      if (s.notice && notices[notices.length - 1] !== s.notice) notices.push(s.notice);
+    });
+    // 40 Mbps arriving at half speed: 40 × 0.5 × 0.75 = 15 → 15 Mbps 4K.
+    await play(12, 0.5);
+    await wait(2_500);
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(w.requests.map((r) => [r.mode, r.max_bitrate, r.max_height])).toEqual([
+      ["auto", undefined, undefined],
+      ["transcode", 15_000, 2160],
+    ]);
+    expect(w.requests[1]!.start_ms).toBeGreaterThan(600_000);
+    expect(notices).toEqual(["Playing at 15 Mbps 4K for a smoother picture"]);
+    expect(c.state.value.quality).toBe("Automatic · 15 Mbps 4K");
+    expect(c.state.value.note).toBe("Lowered for the network");
+    expect(c.state.value.qualities.filter((q) => q.id === "auto")[0]!.hint).toBe("Now 15 Mbps 4K · Lowered for the network");
+    expect(JSON.parse(kept.get("pley.autoQuality.http://nas:7539")!)).toMatchObject({ kbps: 15_000 });
+    c.close();
+  });
+
+  it("doesn't count the wait of a seek, nor waits while paused", async () => {
+    const { w, c, play, wait, now } = await automatic();
+    await play(6, 1.2);
+    c.seekTo(1_200_000);
+    w.engine.pos = 1_200_000;
+    w.engine.buffered = 1_200_000;
+    await wait(3_000);
+    now("ready");
+    c.pause();
+    await wait(3_000);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(w.requests.length).toBe(1);
+    c.close();
+  });
+
+  it("leaves the original's dropped frames to the fallback, and lowers a conversion that drops them", async () => {
+    const { w, c, play, now } = await automatic();
+    const frames = { dropped: 0, total: 0 };
+    w.engine.frames = frames;
+    w.engine.listener?.firstFrame();
+    const drop = async (seconds: number, dropped: number) => {
+      frames.dropped += dropped;
+      for (let i = 0; i < seconds * 2; i++) {
+        frames.total += 12;
+        await play(0.5, 1.2);
+      }
+    };
+    await drop(4, 0);
+    await drop(14, 130);
+    await vi.advanceTimersByTimeAsync(2_500);
+    // As ever: the server's own quality for the file, once.
+    expect(w.requests.map((r) => [r.mode, r.max_bitrate])).toEqual([
+      ["auto", undefined],
+      ["transcode", undefined],
+    ]);
+    now("ready");
+    // Within 20 s of that change, nothing more.
+    frames.dropped = 0;
+    frames.total = 0;
+    await drop(14, 130);
+    expect(w.requests.length).toBe(2);
+    // Then the conversion, at 30 Mbps 4K, goes one step down.
+    await drop(4, 0);
+    await drop(14, 130);
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(w.requests.map((r) => [r.mode, r.max_bitrate]).slice(2)).toEqual([["transcode", 15_000]]);
+    expect(c.state.value.note).toBe("The original didn't play smoothly on this device.");
+    c.close();
+  });
+
+  it("starts the next title at the remembered network, and picking Automatic again starts afresh", async () => {
+    const kept = memory();
+    const first = await automatic(item(file()), kept);
+    await first.play(12, 0.5);
+    await first.wait(2_500);
+    await vi.advanceTimersByTimeAsync(2_500);
+    first.c.close();
+    vi.useRealTimers();
+
+    const next = await automatic(item(file()), kept);
+    expect(next.w.requests.map((r) => [r.mode, r.max_bitrate])).toEqual([["transcode", 15_000]]);
+    expect(next.c.state.value.quality).toBe("Automatic · 15 Mbps 4K");
+    next.c.selectQuality("auto");
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(next.w.requests.map((r) => [r.mode, r.max_bitrate]).slice(1)).toEqual([["auto", undefined]]);
+    expect(kept.get("pley.autoQuality.http://nas:7539")).toBeNull();
+    expect(next.picked).toEqual(["auto"]);
+    next.c.close();
+  });
+
+  it("doesn't start again when Original is picked while it plays the original", async () => {
+    const { w, c, picked } = await automatic();
+    c.selectQuality("original");
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(w.requests.length).toBe(1);
+    expect(picked).toEqual(["original"]);
+    expect(c.state.value.quality).toBe("Original");
     c.close();
   });
 });

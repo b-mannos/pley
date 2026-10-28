@@ -6,6 +6,13 @@ import type { FallbackReason } from "./recovery";
 /** What the player says, as the Android app's strings_session.xml does. */
 export const T = {
   autoQuality: (label: string) => `${label} (auto)`,
+  /** The menu's value while Automatic plays: "Automatic · 8 Mbps 1080p". */
+  automatic: (now: string) => `Automatic · ${now}`,
+  autoHint: "Original, lower only when it doesn't play well",
+  autoNow: (now: string, why: string | null) => (why ? `Now ${now} · ${why}` : `Now ${now}`),
+  lowered: { network: "Lowered for the network", device: "Lowered: the device fell behind" },
+  smoother: (label: string) => `Playing at ${label} for a smoother picture`,
+
   playsAs: (label: string, file: string | null) => (file ? `Plays as ${label} here (the file: ${file})` : `Plays as ${label} here`),
   converted: "Converted",
   upNext: (label: string | null) => (label ? `Up next · ${label}` : "Up next"),

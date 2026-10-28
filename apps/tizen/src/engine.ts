@@ -268,6 +268,19 @@ export class AvplayEngine implements PlayerEngine {
     return this.positionMs();
   }
 
+  readonly knowsBuffer = false;
+
+  /** A stream's bandwidth as AVPlay measures it (bits a second); nothing for a file. */
+  bandwidthKbps(): number | null {
+    try {
+      const bps = Number(this.player.getStreamingProperty("CURRENT_BANDWIDTH"));
+      return bps > 0 ? bps / 1000 : null;
+    } catch {
+      return null;
+    }
+  }
+
+
   status(): EngineStatus {
     return this.state;
   }

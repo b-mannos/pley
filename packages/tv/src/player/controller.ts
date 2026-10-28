@@ -42,7 +42,8 @@ import {
   type Choices,
   type PlayRequest,
 } from "./plan";
-import { chooseQuality, fileHint, modeOf, ORIGINAL, presetById, qualitiesFor, type QualityPreset } from "./quality";
+import { AutoQuality, type AutoMemory, type AutoStep } from "./autoquality";
+import { AUTO, autoLadder, chooseQuality, fileHint, modeOf, ORIGINAL, presetById, qualitiesFor, type QualityPreset } from "./quality";
 import { failureText, Recovery, StruggleMeter, type EngineError, type RecoveryAction } from "./recovery";
 import type { Reporter } from "./reporter";
 import { SLEEP_OFF, SleepTimer, type SleepChoice, type SleepState } from "./sleep";
@@ -174,6 +175,8 @@ export interface PlayerEnv {
   clientId: string;
   offsets: OffsetStore;
   quality: { remembered(): string | null; remember(id: string): void };
+  /** Where Automatic keeps a slow network for the next title (per TV and server). */
+  autoMemory?: AutoMemory | null;
   autoplayNext: () => boolean;
   /** Subscribes to the server's events; returns the unsubscribe. */
   events: (listener: (e: ServerEvent) => void) => () => void;
@@ -267,7 +270,10 @@ export class PlaybackController {
   /** The audio was picked (asked for, or in the menu), not chosen for this TV by the server: it is saved for next time. */
   private audioPicked = false;
   private subtitle: MediaStream | null = null;
+  /** The quality chosen in the menu: Automatic, the original, or one of the conversions. */
   private quality: QualityPreset = ORIGINAL;
+  /** Automatic, when chosen: where it plays now, and when it changes. */
+  private auto: AutoQuality | null = null;
   private markers: Marker[] = [];
   /** The mode a Dolby Vision guard asked for, for this item's later sessions too. */
   private guardMode: PlaybackMode | null = null;
@@ -407,6 +413,7 @@ export class PlaybackController {
     this.audioPicked = this.audio !== null;
     this.subtitle = initialSubtitle(chosen, req.subtitleIndex);
     this.quality = chooseQuality(this.env.quality.remembered(), qualitiesFor(chosen));
+    this.startAuto();
     this.offset = chosen ? this.env.offsets.get(this.env.api.server, chosen.id) : 0;
     this.markers = chosen ? markersOf(detail, chosen.id) : [];
     const episode = detail.kind === "episode";
@@ -468,15 +475,18 @@ export class PlaybackController {
     this.update({ phase: { kind: "preparing" }, skipLabel: null, firstFrameMs: null });
     this.setClock({ positionMs: atMs });
 
-    if (this.quality.id === ORIGINAL.id && !this.guardMode) this.guardMode = dvContainerMode(chosen, this.caps, this.env.dvContainers?.());
-    const mode = this.recovery.fallbackMode ?? (this.quality.id === ORIGINAL.id ? this.guardMode : null) ?? modeOf(this.quality);
+    // The original, chosen or played by Automatic, gets the Dolby Vision guards and the fallbacks; a lower quality is a conversion.
+    const playing = this.playingPreset;
+    const original = playing.id === ORIGINAL.id;
+    if (original && !this.guardMode) this.guardMode = dvContainerMode(chosen, this.caps, this.env.dvContainers?.());
+    const mode = original ? this.recovery.fallbackMode ?? this.guardMode ?? modeOf(playing) : modeOf(playing);
     const decision = this.caps ? decide(chosen, this.caps) : null;
     let choices: Choices = {
       file: chosen,
       startMs: atMs,
       audio: this.audio,
       subtitle: this.subtitle,
-      quality: this.quality,
+      quality: playing,
       mode,
       streaming: willStream(mode, decision, chosen, this.audio, this.caps),
       sideload: this.sideload,
@@ -516,9 +526,15 @@ export class PlaybackController {
     if (!this.audio) this.audio = playingAudio(chosen, info);
     this.sessionEnded = false;
     this.live = null;
+    if (this.auto) {
+      this.auto.began();
+      // The original converted (a fallback): Automatic steps down from what it plays at.
+      const converted = original && info.auto_quality ? presetById(info.auto_quality) : null;
+      if (converted) this.auto.setOriginalKbps(converted.maxBitrateKbps);
+    }
     this.update({
       method: methodText(info),
-      note: this.recovery.fallbackReason ? fallbackText(this.recovery.fallbackReason) : null,
+      note: this.noteText(),
       canPlayOriginal: this.recovery.struggleSwitched && this.recovery.fallbackMode !== null,
     });
     if (info.duration_ms > 0) this.setClock({ durationMs: info.duration_ms });
@@ -622,12 +638,16 @@ export class PlaybackController {
       case "buffering":
         if (this.ended) break;
         // A stall: it played, and no seek of its own asked it to wait.
-        if (this.state.value.phase.kind === "playing" && this.now() - this.seekedAt > SEEK_SETTLE_MS) this.update({ stalls: this.state.value.stalls + 1 });
+        if (this.state.value.phase.kind === "playing" && this.now() - this.seekedAt > SEEK_SETTLE_MS) {
+          this.update({ stalls: this.state.value.stalls + 1 });
+          this.auto?.waiting(this.now());
+        }
         this.phase({ kind: "buffering" });
         break;
       case "ready":
         this.mediaShown = true;
         this.shownOnce = true;
+        this.auto?.resumed(this.now());
         if (!this.outage) this.phase(this.engineRef?.playing() ? { kind: "playing" } : { kind: "paused" });
         break;
       case "ended":
@@ -690,6 +710,8 @@ export class PlaybackController {
   private act(action: RecoveryAction, starving: boolean): void {
     switch (action.kind) {
       case "new_session":
+        // The player's own fallback is a change too: Automatic waits before it changes again.
+        if (action.reason) this.auto?.fellBack(this.now());
         if (action.reason === "not_smooth" && this.recovery.struggleSwitched) this.update({ canPlayOriginal: true });
         this.restart(this.livePosition());
         break;
@@ -798,6 +820,7 @@ export class PlaybackController {
       }
       return;
     }
+    if (this.watchQuality(now, engine, moving)) return;
     // A stall: meant to play, not moving.
     const stalling = this.wantPlay && !this.ended && this.state.value.phase.kind !== "error" && status !== "idle";
     const pos = this.mediaShown ? engine.positionMs() : -1;
@@ -816,8 +839,13 @@ export class PlaybackController {
       const counts = engine.frameCounts();
       if (counts && this.struggle.sample(now, counts.dropped, counts.total)) {
         this.struggle.reset();
+        // The original falls back to a conversion once, as ever; a conversion that drops frames is Automatic's to lower.
         const action = this.recovery.onStruggling(info.method);
         if (action) this.act(action, false);
+        else if (this.auto) {
+          this.auto.decoding();
+          this.applyAuto(this.auto.check(now));
+        }
       }
     }
   }
@@ -950,6 +978,7 @@ export class PlaybackController {
     if (!this.info || was === play) return;
     if (!play) {
       this.struggle.reset();
+      this.auto?.interrupted();
       if (!this.ended) this.report("paused");
       if (this.engineRef?.status() === "ready") this.phase({ kind: "paused" });
     } else if (this.engineRef?.status() === "ready") {
@@ -976,6 +1005,7 @@ export class PlaybackController {
     this.startedAtMs = target;
     this.recovery.onJump();
     this.struggle.reset();
+    this.auto?.interrupted();
     this.lastAdvanceAt = this.now();
     this.setClock({ positionMs: target });
     this.presenter.refresh();
@@ -1041,15 +1071,25 @@ export class PlaybackController {
     if (known && this.state.value.upNext && this.countdownTimer === null && !this.ended) this.showUpNext(known, true);
   }
 
+  /**
+   * A quality picked in the menu, kept for the next titles. Automatic
+   * picked again while it plays lower starts afresh at the original. The
+   * session starts again only when it would ask for something else.
+   */
   selectQuality(id: string): void {
     const chosen = qualitiesFor(this.file).filter((p) => p.id === presetById(id)?.id)[0];
-    if (!chosen || chosen.id === this.quality.id) return;
+    if (!chosen) return;
+    if (chosen.id === this.quality.id && !(this.auto && this.auto.playing !== ORIGINAL.id)) return;
+    const before = this.playingPreset.id;
+    const fellBack = this.recovery.fallbackMode !== null;
     this.quality = chosen;
     this.recovery.qualityChanged();
-    this.update({ suggestLowerQuality: false, note: null, canPlayOriginal: false });
+    if (chosen.id === AUTO.id) this.env.autoMemory?.set(null);
+    this.startAuto();
+    this.update({ suggestLowerQuality: false, note: this.noteText(), canPlayOriginal: false });
     this.env.quality.remember(chosen.id);
     this.publishChoices();
-    if (this.item) this.restart(this.livePosition());
+    if (this.item && (this.playingPreset.id !== before || fellBack)) this.restart(this.livePosition());
   }
 
   skip(): void {
@@ -1080,7 +1120,7 @@ export class PlaybackController {
   playOriginal(): void {
     if (this.recovery.fallbackMode === null) return;
     this.recovery.playOriginal();
-    this.update({ canPlayOriginal: false, note: null });
+    this.update({ canPlayOriginal: false, note: this.noteText() });
     this.restart(this.livePosition());
   }
 
@@ -1122,7 +1162,7 @@ export class PlaybackController {
         info,
         file: this.file,
         audioIndex: this.audio?.index ?? null,
-        note: this.recovery.fallbackReason ? fallbackText(this.recovery.fallbackReason) : null,
+        note: this.noteText(),
         positionMs: this.livePosition(),
         live: this.live,
         subtitle: this.subtitle,
@@ -1320,9 +1360,66 @@ export class PlaybackController {
     ask();
   }
 
+  // ---------------------------------------------------------------- Automatic
+
+  /** What plays: Automatic's quality of the moment, or the one chosen. */
+  private get playingPreset(): QualityPreset {
+    return this.auto ? presetById(this.auto.playing) ?? ORIGINAL : this.quality;
+  }
+
+  /** Automatic, when chosen: a new one for the title, starting where the network last allowed (Up Next too). */
+  private startAuto(): void {
+    this.auto = null;
+    if (this.quality.id !== AUTO.id) return;
+    const file = this.file;
+    this.auto = new AutoQuality({
+      ladder: autoLadder(file),
+      originalKbps: file?.bitrate ? file.bitrate / 1000 : null,
+      memory: this.env.autoMemory ?? null,
+    });
+    this.auto.start(this.now());
+  }
+
+  /**
+   * Tells Automatic what the engine shows while it is meant to play (not
+   * paused, not settling after a seek), and acts on what it decides; true
+   * when a new session starts.
+   */
+  private watchQuality(now: number, engine: PlayerEngine, moving: boolean): boolean {
+    const auto = this.auto;
+    if (!auto || !this.wantPlay || !this.mediaShown || this.ended || this.state.value.phase.kind === "error") return false;
+    if (now - this.seekedAt <= SEEK_SETTLE_MS) return false;
+    if (moving) {
+      auto.sample(now, engine.positionMs() / 1000, engine.knowsBuffer === false ? null : engine.bufferedMs() / 1000);
+      const kbps = engine.bandwidthKbps ? engine.bandwidthKbps() : null;
+      if (kbps) auto.bandwidth(now, kbps);
+    }
+    return this.applyAuto(auto.check(now));
+  }
+
+  /** Starts again at Automatic's new quality; a step down says so, once. */
+  private applyAuto(step: AutoStep | null): boolean {
+    if (!step || this.closed || this.stopped) return false;
+    const to = presetById(step.to) ?? ORIGINAL;
+    this.update({ suggestLowerQuality: false, note: this.noteText() });
+    this.publishChoices();
+    if (step.why) this.notice(T.smoother(to.label));
+    this.struggle.reset();
+    this.restart(this.livePosition());
+    return true;
+  }
+
+  /** Why it doesn't play the original: the player's fallback, or Automatic's step down. */
+  private noteText(): string | null {
+    if (this.recovery.fallbackReason) return fallbackText(this.recovery.fallbackReason);
+    const auto = this.auto;
+    return auto && auto.lowered && auto.playing !== ORIGINAL.id ? T.lowered[auto.lowered] : null;
+  }
+
   // ---------------------------------------------------------------- state
 
   private publishChoices(): void {
+
     const file = this.file;
     const info = this.info;
     const audio = audioStreams(file).map((s) => ({ index: s.index, label: streamLabel(s), selected: s.index === this.audio?.index, burnIn: false }));
@@ -1336,20 +1433,34 @@ export class PlaybackController {
     const sub = this.subtitle;
     // Text moves always; pictures when drawn here from the server's .mks.
     const syncable = !!sub && (!isPicture(sub) || (this.sideload && info?.burn_subtitles !== true));
-    const autoId = info?.auto_quality && this.quality.id === ORIGINAL.id ? info.auto_quality : null;
-    const auto = autoId ? presetById(autoId) : null;
+    const playing = this.playingPreset;
+    // The original, converted here: at the closest quality, which the menu names.
+    const convertedId = info?.auto_quality && playing.id === ORIGINAL.id ? info.auto_quality : null;
+    const converted = convertedId ? presetById(convertedId) : null;
+    const convertedLabel = converted && converted.maxBitrateKbps !== null ? converted.label : null;
     const hint = fileHint(file) || null;
+    const auto = this.auto;
+    const autoNow = playing.id === ORIGINAL.id ? convertedLabel ?? ORIGINAL.label : playing.label;
     const qualities: QualityChoice[] = qualitiesFor(file).map((p) => ({
       id: p.id,
       label: p.label,
-      hint: p.id !== ORIGINAL.id ? T.converted : auto && auto.id !== ORIGINAL.id ? T.playsAs(auto.label, hint) : hint,
+      hint:
+        p.id === AUTO.id
+          ? auto
+            ? T.autoNow(autoNow, auto.lowered && playing.id !== ORIGINAL.id ? T.lowered[auto.lowered] : null)
+            : T.autoHint
+          : p.id !== ORIGINAL.id
+            ? T.converted
+            : this.quality.id === ORIGINAL.id && convertedLabel
+              ? T.playsAs(convertedLabel, hint)
+              : hint,
       selected: p.id === this.quality.id,
     }));
     this.update({
       audio,
       subtitles,
       qualities,
-      quality: auto && auto.id !== ORIGINAL.id ? T.autoQuality(auto.label) : this.quality.label,
+      quality: auto ? T.automatic(autoNow) : convertedLabel ? T.autoQuality(convertedLabel) : this.quality.label,
       subtitleSync: syncable,
       subtitleOffsetMs: this.offset,
     });

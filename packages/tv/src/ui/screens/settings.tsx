@@ -4,7 +4,7 @@ import { errorMessage, isApiError } from "../../api/client";
 import type { HistoryEntry, SubtitleMode } from "../../api/types";
 import { displayAddress } from "../../auth/addresses";
 import { episodeLabel } from "../../format/format";
-import { PRESETS } from "../../player/quality";
+import { AUTO, ORIGINAL, PRESETS, presetById } from "../../player/quality";
 import type { AppState, Settings } from "../../state";
 import { useUi } from "../context";
 import { Art, artCandidates } from "../kit/art";
@@ -267,7 +267,7 @@ export function SettingsScreen(p: { entry: Entry }) {
             choose(
               "row-quality",
               "Quality",
-              PRESETS.map((q) => ({ value: q.id, label: qualityName(q.id) })),
+              PRESETS.map((q) => ({ value: q.id, label: q.label, hint: qualityHint(q.id) })),
               settings.quality,
               (v) => setting({ quality: v as string }),
             )
@@ -486,12 +486,16 @@ export function SettingsScreen(p: { entry: Entry }) {
   );
 }
 
-/** "Original", "4K · 30 Mbps", "1080p · 20 Mbps". */
+/** "Automatic", "Original", "30 Mbps 4K": as the player's Quality menu says. */
 function qualityName(id: string): string {
-  const q = PRESETS.filter((x) => x.id === id)[0];
-  if (!q || !q.maxBitrateKbps) return "Original";
-  const res = q.maxHeight === 2160 ? "4K" : `${q.maxHeight}p`;
-  return `${res} · ${q.maxBitrateKbps / 1000} Mbps`;
+  return (presetById(id) ?? AUTO).label;
+}
+
+/** What the original and Automatic do, under their names in the list. */
+function qualityHint(id: string): string | undefined {
+  if (id === AUTO.id) return "Original, lower only when it doesn't play well";
+  if (id === ORIGINAL.id) return "The file as it is; a slow network waits";
+  return undefined;
 }
 
 /** A row of Settings (TvSettingRow): an icon, a label, a value line; a switch or a chevron at the end. */

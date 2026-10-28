@@ -90,6 +90,11 @@ export interface PlayerEngine {
   /** 0 while unknown. */
   durationMs(): number;
   bufferedMs(): number;
+  /** False when `bufferedMs` only repeats the position (AVPlay doesn't say how far it has loaded). */
+  readonly knowsBuffer?: boolean;
+  /** How fast the network brings the stream, kbps, when the engine measures it; `null` when it can't say. */
+  bandwidthKbps?(): number | null;
+
   status(): EngineStatus;
   playing(): boolean;
   audioTracks(): EngineTrack[];

@@ -18,7 +18,7 @@ export interface Settings {
   reduceMotion: boolean;
   /** The compact readout over the video while the controls are hidden. */
   playbackDetails: boolean;
-  /** The quality last picked ("original", "8m"…). */
+  /** The quality last picked ("auto", "original", "8m"…); Automatic until one is. */
   quality: string;
   /** Send TrueHD to the receiver as it is (the TV can't promise it). */
   passthroughTrueHd: boolean;
@@ -32,13 +32,15 @@ const DEFAULT_SETTINGS: Settings = {
   autoplayNext: true,
   reduceMotion: false,
   playbackDetails: false,
-  quality: "original",
+  quality: "auto",
   passthroughTrueHd: false,
   passthroughDts: false,
 };
 
 const SERVER_KEY = "pley.server";
 const SETTINGS_KEY = "pley.settings";
+/** Set once a quality is picked: the settings saved before Automatic held Original whether picked or not. */
+const QUALITY_PICKED_KEY = "pley.qualityPicked";
 const HOME_KEY = "pley.home";
 const HOUSEHOLD_KEY = "pley.household";
 /** Who is watching and their libraries, as last heard: the rail and the library pages before the server answers. */
@@ -141,7 +143,10 @@ export class AppState {
     this.http = http;
     this.store = platform.storage;
     this.offsets = new OffsetStore(platform.storage, () => this.me.value?.id ?? null);
-    this.settings.value = { ...DEFAULT_SETTINGS, ...(readJson<Partial<Settings>>(this.store, SETTINGS_KEY) ?? {}) };
+    const kept = readJson<Partial<Settings>>(this.store, SETTINGS_KEY) ?? {};
+    // Original was the default before Automatic, and was saved along with any other setting: unless picked, it is Automatic now.
+    if (kept.quality === "original" && this.store.get(QUALITY_PICKED_KEY) !== "1") delete kept.quality;
+    this.settings.value = { ...DEFAULT_SETTINGS, ...kept };
     const server = this.store.get(SERVER_KEY);
     if (server) this.use(server);
     this.home.value = readJson<Hub[]>(this.store, HOME_KEY);
@@ -316,6 +321,7 @@ export class AppState {
     if ("passthroughTrueHd" in patch || "passthroughDts" in patch) this.capsPromise = null;
     this.settings.value = { ...this.settings.value, ...patch };
     this.store.set(SETTINGS_KEY, JSON.stringify(this.settings.value));
+    if ("quality" in patch) this.store.set(QUALITY_PICKED_KEY, "1");
   }
 
   // ---- what the server has
