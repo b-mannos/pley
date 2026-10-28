@@ -179,6 +179,17 @@ impl Store {
         let http = reqwest::Client::builder()
             .user_agent(concat!("pley/", env!("CARGO_PKG_VERSION")))
             .timeout(Duration::from_secs(30))
+            // A redirect stays on the picture hosts, over HTTPS, as the first
+            // address must ([`allowed_image_url`]): never to this network.
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() < 3 && allowed_image_url(attempt.url().as_str()) {
+                    attempt.follow()
+                } else {
+                    attempt.stop()
+                }
+            }))
+            // A compressed answer's size says nothing of what it unpacks to.
+            .no_gzip()
             .build()
             .expect("http client");
         Self {
@@ -259,12 +270,16 @@ impl Store {
         if !allowed_image_url(url) {
             bail!("pictures are not downloaded from {url}");
         }
-        let resp = self.http.get(url).send().await?.error_for_status()?;
+        let mut resp = self.http.get(url).send().await?.error_for_status()?;
         if resp.content_length().is_some_and(|n| n as usize > MAX_REMOTE_BYTES) {
             bail!("{url} is too large");
         }
-        let bytes = resp.bytes().await?;
-        anyhow::ensure!(bytes.len() <= MAX_REMOTE_BYTES, "{url} is too large");
+        // Read up to the limit, whatever the answer said its size was.
+        let mut bytes = Vec::new();
+        while let Some(chunk) = resp.chunk().await? {
+            anyhow::ensure!(bytes.len() + chunk.len() <= MAX_REMOTE_BYTES, "{url} is too large");
+            bytes.extend_from_slice(&chunk);
+        }
         let ext = picture_ext(&bytes).with_context(|| format!("{url} is not a picture"))?;
         let blob = self.put(&bytes, ext).await?;
         sqlx::query("INSERT OR REPLACE INTO remote_images (url, blob, fetched_at) VALUES (?, ?, ?)")

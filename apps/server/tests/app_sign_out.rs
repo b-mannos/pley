@@ -126,12 +126,16 @@ async fn an_administrator_setting_a_password_ends_the_accounts_apps() {
     assert_eq!(set.status, StatusCode::OK, "{:?}", set.body);
     assert_ended(&app, &tokens).await;
 
-    // An administrator setting their own password through the users page
-    // keeps their session, but their apps end too.
+    // An administrator's own password changes in Account, with the current
+    // one, not on the users page; their session stays, their apps end.
     let me: i64 = app.get("/api/auth/me", &admin).await.body["id"].as_i64().unwrap();
     let mine = app.app_token(me, "library").await;
-    let set = app.patch(&format!("/api/users/{me}"), &admin, json!({"password": "secret-two"})).await;
-    assert_eq!(set.status, StatusCode::OK, "{:?}", set.body);
+    let users_page = app.patch(&format!("/api/users/{me}"), &admin, json!({"password": "secret-two"})).await;
+    assert_eq!(users_page.status, StatusCode::BAD_REQUEST, "{:?}", users_page.body);
+    assert!(works(&app, &mine.0).await, "refused: nothing changed");
+    let change = json!({"current_password": "secret-one", "new_password": "secret-two"});
+    let set = app.put("/api/auth/password", &admin, change).await;
+    assert_eq!(set.status, StatusCode::NO_CONTENT, "{:?}", set.body);
     assert_eq!(app.get("/api/auth/me", &admin).await.status, StatusCode::OK, "the session stays");
     assert_ended(&app, &mine).await;
 }
@@ -184,14 +188,14 @@ async fn codes_from_before_a_sign_out_sign_nothing_in_after_it() {
     assert_eq!(set.status, StatusCode::OK, "{}", set.text());
     signs_nothing_in(&app, &code).await;
 
-    // An administrator sets their own password on the users page: their
-    // sessions stay, but their codes end with their apps, and so do the
+    // An administrator changes their own password (in Account): their
+    // session stays, but their codes end with their apps, and so do the
     // requests their consent page shows.
     let code = code_from(&app, &admin).await;
     let shown = consent(&app, &admin).await;
-    let me = app.get("/api/auth/me", &admin).await.body["id"].as_i64().unwrap();
-    let set = app.patch(&format!("/api/users/{me}"), &admin, json!({"password": "secret-two"})).await;
-    assert_eq!(set.status, StatusCode::OK, "{}", set.text());
+    let change = json!({"current_password": "secret-one", "new_password": "secret-two"});
+    let set = app.put("/api/auth/password", &admin, change).await;
+    assert_eq!(set.status, StatusCode::NO_CONTENT, "{}", set.text());
     assert_eq!(app.get("/api/auth/me", &admin).await.status, StatusCode::OK, "the session stays");
     signs_nothing_in(&app, &code).await;
     let allow = Some(json!({"allow": true}));

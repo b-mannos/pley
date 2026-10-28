@@ -446,7 +446,10 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
               <TextInput id="user-password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} />
             </Field>
           ) : null}
-          {!isNew ? (
+          {!isNew && self ? (
+            <p className="text-xs text-subtle">Your own password and two-step sign-in change in Account, which asks for your current password.</p>
+          ) : null}
+          {!isNew && !self ? (
             <Field
               label={user?.managed ? "Password" : "New password"}
               htmlFor="user-password"
@@ -527,7 +530,7 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
           </div>
         </Field>
 
-        {!isNew && user?.two_step ? <TwoStepReset user={user} /> : null}
+        {!isNew && user?.two_step && !self ? <TwoStepReset user={user} /> : null}
         {!isNew && user ? <UserDevices key={user.id} user={user} self={self} /> : null}
         {!isNew && user ? <UserApps user={user} /> : null}
 

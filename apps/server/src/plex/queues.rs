@@ -25,6 +25,9 @@ use crate::state::AppState;
 
 /// Queues kept at once (the least recently used go first).
 const MAX_QUEUES: usize = 1000;
+/// Queues one user keeps: theirs go first, so nobody can make everyone
+/// else's queues go.
+const MAX_QUEUES_EACH: usize = 50;
 /// How long an unused queue is kept.
 const KEEP: Duration = Duration::from_secs(24 * 60 * 60);
 /// Items in one queue at most.
@@ -61,10 +64,22 @@ fn store(queue: Queue) -> i64 {
     let id = NEXT_QUEUE.fetch_add(1, Ordering::Relaxed);
     let mut queues = QUEUES.lock();
     queues.retain(|_, q| q.used.elapsed() < KEEP);
-    if queues.len() >= MAX_QUEUES
-        && let Some(oldest) = queues.iter().min_by_key(|(_, q)| q.used).map(|(id, _)| *id)
+    let oldest = |queues: &HashMap<i64, Queue>, user: Option<i64>| {
+        queues
+            .iter()
+            .filter(|(_, q)| user.is_none_or(|u| q.user_id == u))
+            .min_by_key(|(_, q)| q.used)
+            .map(|(id, _)| *id)
+    };
+    if queues.values().filter(|q| q.user_id == queue.user_id).count() >= MAX_QUEUES_EACH
+        && let Some(theirs) = oldest(&queues, Some(queue.user_id))
     {
-        queues.remove(&oldest);
+        queues.remove(&theirs);
+    }
+    if queues.len() >= MAX_QUEUES
+        && let Some(any) = oldest(&queues, None)
+    {
+        queues.remove(&any);
     }
     queues.insert(id, queue);
     id

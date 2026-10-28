@@ -24,18 +24,24 @@ const MAX_DECODE_BYTES: u64 = 256 * 1024 * 1024;
 /// Uploaded pictures decoded at the same time (each can take a few hundred MB).
 pub static UPLOAD_DECODES: Semaphore = Semaphore::const_new(2);
 
-fn limited<R: BufRead + Seek>(mut reader: ImageReader<R>) -> ImageResult<DynamicImage> {
+fn limited<R: BufRead + Seek>(mut reader: ImageReader<R>, dimension: u32, bytes: u64) -> ImageResult<DynamicImage> {
     let mut limits = Limits::default();
-    limits.max_image_width = Some(MAX_DIMENSION);
-    limits.max_image_height = Some(MAX_DIMENSION);
-    limits.max_alloc = Some(MAX_DECODE_BYTES);
+    limits.max_image_width = Some(dimension);
+    limits.max_image_height = Some(dimension);
+    limits.max_alloc = Some(bytes);
     reader.limits(limits);
     reader.decode()
 }
 
 /// Decode a picture (any supported format) within the size limits.
 pub fn decode(bytes: &[u8]) -> ImageResult<DynamicImage> {
-    limited(ImageReader::new(Cursor::new(bytes)).with_guessed_format()?)
+    limited(ImageReader::new(Cursor::new(bytes)).with_guessed_format()?, MAX_DIMENSION, MAX_DECODE_BYTES)
+}
+
+/// Decode a profile picture, which ends up 256 pixels wide: anyone signed in
+/// may upload one, so it may take a fraction of what artwork may.
+pub fn decode_avatar(bytes: &[u8]) -> ImageResult<DynamicImage> {
+    limited(ImageReader::new(Cursor::new(bytes)).with_guessed_format()?, 4096, 96 << 20)
 }
 
 const BUCKETS: [u32; 8] = [160, 240, 320, 480, 640, 960, 1280, 1920];
@@ -133,7 +139,7 @@ fn resize_to_file(source: &Path, width: u32, out: &Path) -> anyhow::Result<Optio
     if w <= width {
         return Ok(None);
     }
-    let img = limited(ImageReader::open(source)?.with_guessed_format()?)?;
+    let img = limited(ImageReader::open(source)?.with_guessed_format()?, MAX_DIMENSION, MAX_DECODE_BYTES)?;
     let height = ((h as f64) * (width as f64) / (w as f64)).round().max(1.0) as u32;
     let resized = img.resize_exact(width, height, image::imageops::FilterType::Triangle).to_rgb8();
     let mut buf = Vec::with_capacity((width * height / 4) as usize);

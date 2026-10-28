@@ -43,6 +43,16 @@ RestrictRealtime=true
 LockPersonality=true
 RestrictNamespaces=true
 SystemCallArchitectures=native
+# No capabilities at all, files only for itself, no other users' processes,
+# and only the network families it uses (netlink: GPU drivers ask with it).
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+ProtectProc=invisible
+RemoveIPC=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# Not DevicePolicy, MemoryDenyWriteExecute nor SystemCallFilter: GPU drivers
+# and Mesa's shader compilers need what they would take away.
 
 [Install]
 WantedBy=multi-user.target

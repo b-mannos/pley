@@ -220,11 +220,18 @@ impl Extractor {
             .arg("-i")
             .arg(input_arg(&path))
             .args(["-map", &map, "-vn", "-an", "-dn", "-c", "copy", "-f", "matroska", "-y"])
+            // Stopped just past the most that is read back.
+            .args(["-fs", &(MAX_EXTRACTED + 1).to_string()])
             .arg(input_arg(&out));
         let _permit = self.passes.acquire().await.map_err(|e| ApiError::Internal(e.into()))?;
         Metrics::inc(&self.metrics.subtitle_extractions);
         let result = match run_capture(cmd, (self.pass_time)(&path)).await {
-            Ok(_) => tokio::fs::read(&out).await.map_err(ApiError::from),
+            Ok(_) => match tokio::fs::metadata(&out).await {
+                Ok(made) if made.len() > MAX_EXTRACTED => {
+                    Err(ApiError::Failed(format!("the subtitle track is over {} MB", MAX_EXTRACTED >> 20)))
+                }
+                _ => tokio::fs::read(&out).await.map_err(ApiError::from),
+            },
             Err(err) => Err(err),
         };
         let _ = tokio::fs::remove_file(&out).await;
@@ -789,20 +796,77 @@ fn existing(path: &str) -> ApiResult<PathBuf> {
     if path.is_file() { Ok(path) } else { Err(ApiError::NotFound(format!("file not found: {}", path.display()))) }
 }
 
-/// Run ffmpeg, returning stdout. Non-zero exit becomes `ApiError::Failed`.
+/// The most a capture takes from ffmpeg's output (a cover, a thumbnail, a
+/// subtitle track): a crafted file's several hundred megabytes of "picture"
+/// would otherwise be held whole, here and in the server.
+const MAX_CAPTURE: usize = 64 << 20;
+/// The most of its log a capture keeps (the rest is read and dropped).
+const MAX_CAPTURE_LOG: usize = 1 << 20;
+/// The most a subtitle track extracted to a file may be (a Blu-ray's
+/// pictures are tens of megabytes).
+const MAX_EXTRACTED: u64 = 512 << 20;
+
+/// Run ffmpeg, returning stdout. Non-zero exit becomes `ApiError::Failed`;
+/// output past [`MAX_CAPTURE`] stops it.
 pub(crate) async fn run_capture(mut cmd: tokio::process::Command, timeout: Duration) -> ApiResult<(Vec<u8>, String)> {
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let child = cmd.spawn().map_err(|e| ApiError::Internal(anyhow::anyhow!("failed to start ffmpeg: {e}")))?;
-    let output = tokio::time::timeout(timeout, child.wait_with_output())
-        .await
+    let mut child = cmd.spawn().map_err(|e| ApiError::Internal(anyhow::anyhow!("failed to start ffmpeg: {e}")))?;
+    let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
+        return Err(ApiError::Internal(anyhow::anyhow!("ffmpeg's output isn't piped")));
+    };
+    // The log is read on its own, so that a full pipe never holds ffmpeg up.
+    let log = tokio::spawn(read_capped(stderr, MAX_CAPTURE_LOG, true));
+    let run = async {
+        let (stdout, over) = read_capped(stdout, MAX_CAPTURE, false).await?;
+        if over {
+            let _ = child.kill().await;
+            return Ok((stdout, None));
+        }
+        child.wait().await.map(|status| (stdout, Some(status)))
+    };
+    let result = tokio::time::timeout(timeout, run).await;
+    let stderr = match log.await {
+        Ok(Ok((log, _))) => String::from_utf8_lossy(&log).trim().to_owned(),
+        _ => String::new(),
+    };
+    let (stdout, status) = result
         .map_err(|_| ApiError::Timeout("ffmpeg took too long".into()))?
-        .map_err(|e| ApiError::Internal(e.into()))?;
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    if !output.status.success() {
+        .map_err(|e: std::io::Error| ApiError::Internal(e.into()))?;
+    let Some(status) = status else {
+        return Err(ApiError::Failed(format!("ffmpeg wrote more than {} MB", MAX_CAPTURE >> 20)));
+    };
+    if !status.success() {
         let message = stderr.lines().last().unwrap_or("ffmpeg failed").to_owned();
         return Err(ApiError::Failed(message));
     }
-    Ok((output.stdout, stderr))
+    Ok((stdout, stderr))
+}
+
+/// What `reader` gives, up to `max` bytes: and whether there was more, which
+/// is read and dropped with `drain`, else left (the writer is stopped).
+async fn read_capped(
+    mut reader: impl tokio::io::AsyncRead + Unpin,
+    max: usize,
+    drain: bool,
+) -> std::io::Result<(Vec<u8>, bool)> {
+    use tokio::io::AsyncReadExt;
+    let mut kept = Vec::new();
+    let mut chunk = vec![0; 64 << 10];
+    let mut over = false;
+    loop {
+        let n = reader.read(&mut chunk).await?;
+        if n == 0 {
+            return Ok((kept, over));
+        }
+        if kept.len() + n > max {
+            over = true;
+            if !drain {
+                return Ok((kept, true));
+            }
+        } else {
+            kept.extend_from_slice(&chunk[..n]);
+        }
+    }
 }
 
 fn sniff_image(bytes: &[u8]) -> Option<&'static str> {

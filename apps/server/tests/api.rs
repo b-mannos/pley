@@ -185,6 +185,25 @@ async fn setup_login_and_permissions() {
     assert_eq!(clean(&[("origin", "http://nas:8080"), ("host", "nas:7539")]).await, StatusCode::FORBIDDEN);
     assert_ne!(clean(&[("sec-fetch-site", "same-origin")]).await, StatusCode::FORBIDDEN);
     assert_ne!(clean(&[("origin", "http://nas:7539"), ("host", "nas:7539")]).await, StatusCode::FORBIDDEN);
+    // A `?token=` of the page's making doesn't turn the check off: the cookie
+    // is what would sign the request in.
+    let headers = [("cookie", cookie_pair.as_str()), ("sec-fetch-site", "same-site")];
+    let with_query = app.call(Method::POST, "/api/system/storage/clean?token=x", None, None, &headers).await;
+    assert_eq!(with_query.status, StatusCode::FORBIDDEN);
+    // Nor do its links and images fetch anything with it (an administrator's
+    // folder browser opening the attacker's share); the address bar does.
+    let browse = |site: &'static str| {
+        let headers = [("cookie", cookie_pair.as_str()), ("sec-fetch-site", site)];
+        let app = &app;
+        async move { app.call(Method::GET, "/api/fs", None, None, &headers).await.status }
+    };
+    assert_eq!(browse("cross-site").await, StatusCode::FORBIDDEN);
+    assert_eq!(browse("same-site").await, StatusCode::FORBIDDEN);
+    assert_eq!(browse("same-origin").await, StatusCode::OK);
+    assert_eq!(browse("none").await, StatusCode::OK);
+    // A token sent on purpose is no cookie.
+    let headers = [("sec-fetch-site", "cross-site")];
+    assert_eq!(app.call(Method::GET, "/api/fs", Some(&admin), None, &headers).await.status, StatusCode::OK);
 
     // A regular user cannot use admin endpoints.
     let created =

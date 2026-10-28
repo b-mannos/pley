@@ -12,7 +12,7 @@ use windows_sys::Win32::Foundation::{
     ERROR_SERVICE_MARKED_FOR_DELETE, ERROR_SERVICE_NOT_ACTIVE, ERROR_SERVICE_SPECIFIC_ERROR, ERROR_SUCCESS, NO_ERROR,
 };
 use windows_sys::Win32::System::Registry::{
-    HKEY, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, REG_MULTI_SZ, RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegSetValueExW,
+    HKEY, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, REG_MULTI_SZ, RegCloseKey, RegOpenKeyExW, RegSetValueExW,
 };
 use windows_sys::Win32::System::Services::{
     ChangeServiceConfig2W, ChangeServiceConfigW, CloseServiceHandle, ControlService, CreateServiceW, DeleteService,
@@ -36,9 +36,10 @@ use crate::config::{Cli, Config};
 const SERVICE_SID_TYPE_RESTRICTED: u32 = 3;
 /// `DELETE`, a standard access right.
 const DELETE: u32 = 0x0001_0000;
-/// The privileges a restricted service keeps: going through folders it may
-/// not list, and creating the shared objects GPU drivers use. Not
-/// impersonation, which a compromised service could use to become SYSTEM.
+/// The privileges the service keeps, restricted or not (the restriction is
+/// about where it may write): going through folders it may not list, and
+/// creating the shared objects GPU drivers use. Not impersonation, which a
+/// compromised service could use to become SYSTEM.
 const PRIVILEGES: &[&str] = &["SeChangeNotifyPrivilege", "SeCreateGlobalPrivilege"];
 
 fn wide(s: &str) -> Vec<u16> {
@@ -243,20 +244,13 @@ pub fn install(definition: &Definition) -> anyhow::Result<()> {
     set_config(&service, SERVICE_CONFIG_PRESHUTDOWN_INFO, &SERVICE_PRESHUTDOWN_INFO { dwPreshutdownTimeout: 50_000 })?;
     let sid_type = if definition.restricted { SERVICE_SID_TYPE_RESTRICTED } else { SERVICE_SID_TYPE_UNRESTRICTED };
     set_config(&service, SERVICE_CONFIG_SERVICE_SID_INFO, &SERVICE_SID_INFO { dwServiceSidType: sid_type })?;
-    if definition.restricted {
-        let mut privileges = multi_sz(PRIVILEGES);
-        set_config(
-            &service,
-            SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
-            &SERVICE_REQUIRED_PRIVILEGES_INFOW { pmszRequiredPrivileges: privileges.as_mut_ptr() },
-        )?;
-    }
-    let key = ServiceKey::open()?;
-    if !definition.restricted {
-        // Without the list, the service has all of its account's privileges.
-        key.delete("RequiredPrivileges")?;
-    }
-    key.set_multi_sz("Environment", &definition.environment)
+    let mut privileges = multi_sz(PRIVILEGES);
+    set_config(
+        &service,
+        SERVICE_CONFIG_REQUIRED_PRIVILEGES_INFO,
+        &SERVICE_REQUIRED_PRIVILEGES_INFOW { pmszRequiredPrivileges: privileges.as_mut_ptr() },
+    )?;
+    ServiceKey::open()?.set_multi_sz("Environment", &definition.environment)
 }
 
 fn set_config<T>(service: &Handle, level: u32, info: &T) -> anyhow::Result<()> {
@@ -296,19 +290,6 @@ impl ServiceKey {
         if status != ERROR_SUCCESS {
             anyhow::bail!(
                 "setting the pley service's environment: {}",
-                std::io::Error::from_raw_os_error(status as i32)
-            );
-        }
-        Ok(())
-    }
-
-    fn delete(&self, name: &str) -> anyhow::Result<()> {
-        let name = wide(name);
-        // SAFETY: valid key and NUL-terminated name.
-        let status = unsafe { RegDeleteValueW(self.0, name.as_ptr()) };
-        if status != ERROR_SUCCESS && status != windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND {
-            anyhow::bail!(
-                "changing the pley service's privileges: {}",
                 std::io::Error::from_raw_os_error(status as i32)
             );
         }

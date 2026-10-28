@@ -68,7 +68,14 @@ on the same page, so they take the code as well.
 `HttpOnly`, `SameSite=Lax` cookie only: no answer gives a page's script the
 token. What changes anything with the cookie must come from pley's own page
 (`Sec-Fetch-Site`, or `Origin`): a page on another port of the same host is
-the same site to the browser. Event streams end once their session is signed out. Switching from a
+the same site to the browser. Other sites' pages can't have the API fetch
+anything with it either (links, pictures), only the address bar and
+bookmarks; a `?token=` in their address changes none of that, since the
+cookie is what would sign them in. The devices and apps lists show the
+address a request came from as the rate limits count it, which nobody on
+the internet can choose. Administrators change their own password and
+two-step sign-in in Account, which asks for the password (and code), not
+through the users list. Event streams end once their session is signed out. Switching from a
 restricted profile to one that can see more (an administrator, a higher age
 limit, other libraries) takes that profile's PIN, or its password (and code).
 
@@ -113,11 +120,23 @@ headers.
 
 **Files.** A symbolic link in a library is followed only to a file of the
 same kind (a video to a video, a picture to a picture), when the library is
-scanned and again when the file is played or the picture or subtitle
-served: a link named like a film can't hand out other files. The data
-folder (database, backups, log, settings) is kept to pley's account: mode
-0700 on Unix; on Windows, a folder every account could use (one on D:\,
-say) is limited to pley's account, SYSTEM and the administrators.
+scanned and again whenever the file is used (played directly or
+transcoded, downloaded, its pictures or subtitles served): a link named like
+a film can't hand out other files. The data folder (database, backups, log,
+settings) is kept to pley's account: mode 0700 on Unix; on Windows, a
+folder every account could use (one on D:\, say) is limited to pley's
+account, SYSTEM and the administrators. The Windows service takes a data
+folder only when it is new or the administrators' (one an ordinary user
+made beforehand would stay theirs to open up again), makes a new one closed
+from the start, and keeps two privileges, never impersonation, restricted
+or not.
+
+**Untrusted media.** What FFmpeg hands back for one picture or subtitle
+track is capped (64 MB, and 512 MB for an extracted track); a crafted
+file's subtitle styles and MP4 sample tables can't take more memory than a
+real one's. Pictures come only from the metadata services' hosts over
+HTTPS, redirects included, read up to 25 MB whatever their headers say; a
+profile picture is decoded only up to 4096 pixels.
 
 **Transcoder.** The transcoder pley starts listens on `127.0.0.1` with a
 random token. One started on another machine refuses to listen on the

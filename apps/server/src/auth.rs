@@ -784,27 +784,17 @@ impl<S: Send + Sync> FromRequestParts<S> for CurrentToken {
     }
 }
 
-/// The client's address as seen by the server (for the devices list). It is
-/// the first X-Forwarded-For value when there is one, which anyone can
-/// write: limits count by [`SourceIp`] instead.
+/// The client's address, for the devices and apps lists: [`SourceIp`]'s, so
+/// that someone signing in with a stolen password can't show its owner's
+/// own address there.
 pub struct ClientIp(pub Option<String>);
 
 impl<S: Send + Sync> FromRequestParts<S> for ClientIp {
     type Rejection = std::convert::Infallible;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let forwarded = parts
-            .headers
-            .get("x-forwarded-for")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.split(',').next())
-            .map(|v| v.trim().to_owned())
-            .filter(|v| !v.is_empty());
-        let peer = parts
-            .extensions
-            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-            .map(|info| info.0.ip().to_string());
-        Ok(ClientIp(forwarded.or(peer)))
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let SourceIp(source) = SourceIp::from_request_parts(parts, state).await?;
+        Ok(ClientIp(source.map(|ip| ip.to_string())))
     }
 }
 
@@ -908,16 +898,29 @@ async fn authenticate(parts: &Parts, state: &AppState) -> Result<AuthUser, AppEr
     // The session's cookie goes along with requests other sites' pages
     // make too (a page on another port of this host is the same site to
     // the browser), and SameSite=Lax lets their POSTs through when there is
-    // no body to ask about first: what changes anything with it comes from
-    // pley's own page. A token sent on purpose (a header, `?token=`) is no
+    // no body to ask about first, and their links: what changes anything
+    // with it comes from pley's own page, and no other site's page has it
+    // fetch anything (an administrator's folder browser opening a share of
+    // the attacker's, say). Typed addresses and bookmarks are no site's. The
+    // cookie is what signs the request in, `?token=` or not; a header is no
     // cookie.
-    if !matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS)
-        && token_without_cookie(parts).is_none()
-        && from_another_site(parts)
-    {
-        return Err(AppError::forbidden("this request didn't come from pley's page"));
+    let by_cookie = header_token(parts).is_none() && cookie_token(parts).is_some();
+    if by_cookie {
+        let elsewhere = match parts.method {
+            Method::GET | Method::HEAD | Method::OPTIONS => from_another_sites_page(parts),
+            _ => from_another_site(parts),
+        };
+        if elsewhere {
+            return Err(AppError::forbidden("this request didn't come from pley's page"));
+        }
     }
     state.auth.validate(&token).await.ok_or(AppError::Unauthorized)
+}
+
+/// Whether the browser says another site's page asked for this (a link, an
+/// image, a fetch), not the user's own address bar or bookmarks.
+fn from_another_sites_page(parts: &Parts) -> bool {
+    parts.headers.get("sec-fetch-site").is_some_and(|site| matches!(site.as_bytes(), b"cross-site" | b"same-site"))
 }
 
 /// Whether a browser says another site's page made this request: by

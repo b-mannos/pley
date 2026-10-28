@@ -21,11 +21,18 @@ use windows_sys::Win32::Security::Authentication::Identity::{
     LSA_HANDLE, LSA_OBJECT_ATTRIBUTES, LSA_UNICODE_STRING, LsaAddAccountRights, LsaClose, LsaNtStatusToWinError,
     LsaOpenPolicy, LsaRemoveAccountRights, POLICY_CREATE_ACCOUNT, POLICY_LOOKUP_NAMES,
 };
-use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSidToSidW};
+use windows_sys::Win32::Security::Authorization::{
+    ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertSidToStringSidW,
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, ConvertStringSidToSidW, GetNamedSecurityInfoW,
+    SDDL_REVISION_1, SE_FILE_OBJECT,
+};
 use windows_sys::Win32::Security::Credentials::{
     CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_DOMAIN_PASSWORD, CREDENTIALW, CredWriteW,
 };
-use windows_sys::Win32::Security::{LookupAccountNameW, LookupAccountSidW, PSID};
+use windows_sys::Win32::Security::{
+    LookupAccountNameW, LookupAccountSidW, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+};
+use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
 use windows_sys::Win32::System::Threading::{
     CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateProcessWithLogonW, GetExitCodeProcess, LOGON_WITH_PROFILE,
     PROCESS_INFORMATION, STARTUPINFOW, WaitForSingleObject,
@@ -334,6 +341,84 @@ fn system32(program: &str) -> std::path::PathBuf {
 /// `M` or `F`) into `dir` and everything in it. The administrators own it
 /// all, and what anyone else was allowed is gone: a folder someone made in
 /// ProgramData before pley was installed stays theirs otherwise.
+/// Who owns `path`, as SDDL names them: `BA` (the administrators), `SY`
+/// (SYSTEM), or a SID.
+pub fn owner(path: &Path) -> anyhow::Result<String> {
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+    // SAFETY: a NUL-terminated path; Windows allocates the descriptor, freed below.
+    let status = unsafe {
+        GetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            &mut descriptor,
+        )
+    };
+    anyhow::ensure!(
+        status == 0,
+        "reading who owns {}: {}",
+        path.display(),
+        std::io::Error::from_raw_os_error(status as i32)
+    );
+    let mut text = null_mut();
+    // SAFETY: the descriptor read above; Windows allocates the string, freed below.
+    let ok = unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor,
+            SDDL_REVISION_1,
+            OWNER_SECURITY_INFORMATION,
+            &mut text,
+            null_mut(),
+        )
+    };
+    let error = std::io::Error::last_os_error();
+    // SAFETY: a NUL-terminated string from Windows, when it gave one.
+    let sddl = (ok != 0).then(|| unsafe { from_wide(text) });
+    // SAFETY: both allocated by Windows with LocalAlloc (or null).
+    unsafe {
+        LocalFree(text.cast());
+        LocalFree(descriptor);
+    }
+    let sddl = sddl.ok_or_else(|| anyhow::anyhow!("reading who owns {}: {error}", path.display()))?;
+    Ok(sddl.trim_start_matches("O:").to_owned())
+}
+
+/// Makes the folder `dir` (not its parents) open to SYSTEM and the
+/// administrators alone from the moment it exists: nobody can put anything
+/// in it before [`protect_folder`] has run.
+pub fn create_private_folder(dir: &Path) -> anyhow::Result<()> {
+    let sddl: Vec<u16> = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)".encode_utf16().chain(Some(0)).collect();
+    let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+    // SAFETY: a NUL-terminated SDDL string; Windows allocates the descriptor, freed below.
+    let ok = unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            null_mut(),
+        )
+    };
+    anyhow::ensure!(ok != 0, "making a security descriptor: {}", std::io::Error::last_os_error());
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: descriptor,
+        bInheritHandle: 0,
+    };
+    let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: a NUL-terminated path and attributes that outlive the call.
+    let made = unsafe { CreateDirectoryW(wide.as_ptr(), &attributes) };
+    let error = std::io::Error::last_os_error();
+    // SAFETY: allocated by Windows with LocalAlloc.
+    unsafe { LocalFree(descriptor) };
+    anyhow::ensure!(made != 0, "creating {}: {error}", dir.display());
+    Ok(())
+}
+
 pub fn protect_folder(dir: &Path, allowed: &[(String, &str)]) -> anyhow::Result<()> {
     icacls(dir, &["/setowner", "*S-1-5-32-544", "/T", "/Q"])?;
     // Only what the folder inherits, everywhere in it…

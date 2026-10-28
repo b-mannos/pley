@@ -156,6 +156,11 @@ pub async fn update_user(
     let current = accounts::user(&state.db, id).await?.ok_or_else(|| AppError::not_found("user not found"))?;
     // Check everything first: a refused update changes nothing.
     if let Some(password) = &body.password {
+        // One's own, from Account, which asks for the current one first and
+        // signs one's other devices out: a session alone isn't enough.
+        if id == admin.id {
+            return Err(AppError::bad_request("change your own password in Account"));
+        }
         validate_password(password, &current.username)?;
     }
     if let Some(is_admin) = body.is_admin {

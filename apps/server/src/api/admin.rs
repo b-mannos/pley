@@ -202,8 +202,11 @@ pub async fn get_network(State(state): State<AppState>, _admin: AdminUser) -> Ap
 pub async fn put_network(
     State(state): State<AppState>,
     AdminUser(user): AdminUser,
-    Json(listen): Json<Listen>,
+    Json(mut listen): Json<Listen>,
 ) -> ApiResult<Json<NetworkInfo>> {
+    // This computer's address first: pley must listen on the first as it
+    // starts, and an adapter's may be gone by then (DHCP, a VPN off).
+    listen.web.sort_by_key(|addr| !addr.ip().is_loopback());
     listen.check().map_err(AppError::bad_request)?;
     let (now, fixed) = (state.network.wanted(), state.network.fixed);
     if (fixed.web && listen.web != now.web)

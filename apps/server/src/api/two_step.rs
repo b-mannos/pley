@@ -95,6 +95,11 @@ pub async fn reset_user(
     AdminUser(admin): AdminUser,
     Path(id): Path<i64>,
 ) -> ApiResult<StatusCode> {
+    // One's own, from Account, which takes the password and a code: a
+    // session alone isn't enough.
+    if id == admin.id {
+        return Err(AppError::bad_request("turn your own two-step sign-in off in Account"));
+    }
     if !state.two_step.turn_off(id).await? {
         return Err(AppError::not_found("this user doesn't use two-step sign-in"));
     }

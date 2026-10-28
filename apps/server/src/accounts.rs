@@ -424,12 +424,14 @@ pub fn avatars_dir(data_dir: &Path) -> PathBuf {
 
 /// Center-crop and scale an uploaded picture to a square JPEG.
 pub fn process_avatar(bytes: &[u8]) -> Result<Vec<u8>, AppError> {
-    let img =
-        crate::images::decode(bytes).map_err(|_| AppError::bad_request("that file is not a supported picture"))?;
+    let img = crate::images::decode_avatar(bytes)
+        .map_err(|_| AppError::bad_request("that file is not a supported picture, or is over 4096 pixels"))?;
     let side = img.width().min(img.height());
     let (x, y) = ((img.width() - side) / 2, (img.height() - side) / 2);
-    let square = img.crop_imm(x, y, side, side);
-    let resized = square.resize_exact(AVATAR_SIZE, AVATAR_SIZE, image::imageops::FilterType::Lanczos3).to_rgb8();
+    // Scaled from a view of the square, not a copy of it.
+    let square = image::imageops::crop_imm(&img, x, y, side, side);
+    let resized = image::imageops::resize(&*square, AVATAR_SIZE, AVATAR_SIZE, image::imageops::FilterType::Lanczos3);
+    let resized = image::DynamicImage::ImageRgba8(resized).to_rgb8();
     let mut out = Vec::new();
     JpegEncoder::new_with_quality(&mut out, 88)
         .encode_image(&resized)

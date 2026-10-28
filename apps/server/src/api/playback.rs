@@ -643,6 +643,11 @@ async fn session_hls(state: &AppState, user: &AuthUser, session: &Arc<Session>, 
     if session.transcode.is_none() {
         return Err(AppError::not_found("not a transcode session"));
     }
+    // A library taken away or an age limit lowered since it started ends it
+    // too, as it does direct play.
+    if !catalog::is_visible(&state.db, user.id, session.item_id).await? {
+        return Err(AppError::not_found("playback session expired"));
+    }
     let job = session.job_id().ok_or_else(|| AppError::not_found("playback session expired"))?;
 
     if file == "index.m3u8" || file == "master.m3u8" {
@@ -741,6 +746,20 @@ fn container_extension(container: Option<&str>) -> String {
 pub(crate) async fn visible_file(state: &AppState, user: &AuthUser, id: i64) -> ApiResult<catalog::FileRow> {
     let file = catalog::file(&state.db, id).await?.ok_or_else(|| AppError::not_found("file not found"))?;
     if !catalog::is_visible(&state.db, user.id, file.item_id).await? {
+        return Err(AppError::not_found("file not found"));
+    }
+    // A link swapped in since the scan leads nowhere else, for whatever the
+    // file is used for: transcodes and downloads too, not only direct play
+    // ([`crate::library::walk::leads_to_its_kind`]). A file gone (a share
+    // asleep) is left to what reads it, which says so its own way.
+    let path = std::path::PathBuf::from(&file.path);
+    let astray = tokio::task::spawn_blocking(move || {
+        std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink())
+            && !crate::library::walk::leads_to_its_kind(&path)
+    })
+    .await
+    .unwrap_or(true);
+    if astray {
         return Err(AppError::not_found("file not found"));
     }
     Ok(file)

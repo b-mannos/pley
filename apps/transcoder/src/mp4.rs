@@ -258,6 +258,11 @@ fn sample_sizes<R: Read + Seek>(r: &mut Reader<R>, h: BoxHead, budget: &mut u64)
     // `stz2`: 4, 8 or 16 bits per sample.
     let bits = f.take::<4>()?[3];
     let n = f.u32()? as usize;
+    // 4 bits each would hold 8 times their size in memory: as many as a
+    // track may have, no more.
+    if n as u64 > MAX_SAMPLES {
+        return Err("too many samples");
+    }
     let bytes = match bits {
         4 => n.div_ceil(2),
         8 => n,

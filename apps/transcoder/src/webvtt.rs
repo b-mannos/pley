@@ -18,6 +18,8 @@ use std::collections::HashMap;
 /// The most styles an ASS header may define here: real scripts define tens,
 /// a few hundred at most. FFmpeg converts a track whose header has more.
 const MAX_STYLES: usize = 10_000;
+/// The most fields a `Format:` line is read for.
+const MAX_FORMAT_FIELDS: usize = 64;
 
 /// A text subtitle codec, by FFmpeg's name for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -634,10 +636,12 @@ fn parse_section_name(line: &[u8]) -> Option<Section> {
     Section::named(&rest[..len])
 }
 
-/// A `Format:` line: the position of each listed field among `fields`.
+/// A `Format:` line: the position of each listed field among `fields`. Real
+/// ones list about twenty: past [`MAX_FORMAT_FIELDS`] (a line of commas in a
+/// crafted file), the rest is left out rather than kept in memory.
 fn parse_format(mut buf: &[u8], fields: &[&str]) -> Vec<Option<usize>> {
     let mut order = Vec::new();
-    while !buf.is_empty() && !matches!(buf[0], b'\r' | b'\n') {
+    while !buf.is_empty() && !matches!(buf[0], b'\r' | b'\n') && order.len() < MAX_FORMAT_FIELDS {
         buf = skip_spaces(buf);
         let len = span_until(buf, b", \r\n");
         order.push(fields.iter().position(|f| strn_eq(buf, f.as_bytes(), len)));

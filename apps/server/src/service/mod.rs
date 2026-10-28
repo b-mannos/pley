@@ -189,6 +189,7 @@ fn install(cli: &Cli, args: &InstallArgs) -> anyhow::Result<()> {
     let exe = std::env::current_exe().context("locating pley.exe")?;
     let data_dir = data_dir(cli);
     check_data_dir(&data_dir)?;
+    check_owner(&data_dir)?;
     let steps = Steps { dry_run: args.dry_run };
 
     let (account, password) = match args.account {
@@ -218,7 +219,13 @@ fn install(cli: &Cli, args: &InstallArgs) -> anyhow::Result<()> {
 
     let temp = data_dir.join("tmp");
     steps.run(format!("create {}", data_dir.display()), || {
-        for dir in [&data_dir, &data_dir.join("logs"), &temp] {
+        if !data_dir.exists() {
+            if let Some(parent) = data_dir.parent() {
+                std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+            }
+            accounts::create_private_folder(&data_dir)?;
+        }
+        for dir in [&data_dir.join("logs"), &temp] {
             std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         }
         Ok(())
@@ -251,7 +258,9 @@ fn install(cli: &Cli, args: &InstallArgs) -> anyhow::Result<()> {
         allowed.push((steps.run(format!("look up {account}"), || accounts::sid(account))?, "F"));
     }
     steps.run(format!("let only {} into {}", allowed_in(&args.grant), data_dir.display()), || {
-        accounts::protect_folder(&data_dir, &allowed)
+        accounts::protect_folder(&data_dir, &allowed)?;
+        // Nothing was slipped in on the way (icacls follows junctions).
+        check_data_dir(&data_dir)
     })?;
     if let Some(from) = &args.copy_data_from {
         steps.run(format!("copy the data in {} into {}", from.display(), data_dir.display()), || {
@@ -349,6 +358,26 @@ fn copy_data(from: &Path, to: &Path) -> anyhow::Result<()> {
 /// root, a folder with other things in it than pley's, and links: a
 /// junction made in ProgramData before pley was installed would lead its
 /// changes (as an administrator) anywhere.
+/// The data folder, when it is there already, must be the administrators'
+/// (or SYSTEM's): one an ordinary user made beforehand in ProgramData stays
+/// theirs to open up again, however it is locked down, and with it
+/// pley.toml (the FFmpeg the service runs), its database and its log.
+fn check_owner(dir: &Path) -> anyhow::Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    let owner = accounts::owner(dir)?;
+    anyhow::ensure!(
+        matches!(owner.as_str(), "BA" | "SY" | "S-1-5-32-544" | "S-1-5-18"),
+        "{} belongs to {owner}, not to the administrators: whoever owns it could open it up again. \
+         Choose a new folder (Setup can copy the data into it), or give it to the administrators first: \
+         takeown /a /r /d y /f \"{}\"",
+        dir.display(),
+        dir.display()
+    );
+    Ok(())
+}
+
 fn check_data_dir(dir: &Path) -> anyhow::Result<()> {
     anyhow::ensure!(dir.parent().is_some(), "{} is a drive: choose a folder in it", dir.display());
     if dir.exists() {
@@ -528,6 +557,20 @@ fn ffmpeg_line(log: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_data_folder_someone_else_made_is_refused() {
+        // Made by whoever runs the tests, not by the administrators: as one
+        // an ordinary user made in ProgramData before pley was installed.
+        let dir = tempfile::tempdir().unwrap();
+        let owner = accounts::owner(dir.path()).unwrap();
+        assert!(owner.starts_with("S-1-5-21-") || owner == "BA", "{owner}");
+        if owner != "BA" {
+            let err = check_owner(dir.path()).unwrap_err().to_string();
+            assert!(err.contains("not to the administrators"), "{err}");
+        }
+        assert!(check_owner(&dir.path().join("new")).is_ok(), "a folder still to make");
+    }
 
     #[test]
     fn the_service_account_has_the_sid_windows_gives_it() {
