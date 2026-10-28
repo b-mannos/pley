@@ -26,6 +26,9 @@ sub init()
     ' server's event stream): gathered for 0.3 s, then the screens follow.
     m.events = CreateObject("roSGNode", "EventsTask")
     m.events.observeField("event", "onServerEvent")
+    m.events.observeField("tokenRefused", "onStreamRefused")
+    ' The token the stream was last refused with, renewed since.
+    m.renewing = ""
     m.gather = m.top.findNode("gather")
     m.gather.observeField("fire", "onGathered")
     session.observeField("accessToken", "onStream")
@@ -68,6 +71,15 @@ sub onStream()
     m.events.userAgent = session.userAgent
     m.events.server = session.server
     m.events.token = session.accessToken
+end sub
+
+' The stream's token ran out while nothing asked the server: any request
+' has the API task renew it, once for each token.
+sub onStreamRefused(event as object)
+    token = event.getData()
+    if token = "" or token <> m.global.session.accessToken or token = m.renewing then return
+    m.renewing = token
+    uiGet("/api/auth/me", "")
 end sub
 
 ' Watch state, My List or libraries changed elsewhere: Home asks again

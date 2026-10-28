@@ -28,8 +28,10 @@ sub apiRun()
     m.tokens = invalid
     m.signIn = invalid
     m.signIns = 0
-    ' A profile switch waiting for a refresh to end: { request, spec }.
+    ' A profile switch waiting for a refresh or another switch to end:
+    ' { request, spec }; and whether one is under way.
     m.switchWaiting = invalid
+    m.switching = false
     m.profileAsked = 0
     apiDeviceFacts()
     m.top.ready = true
@@ -278,6 +280,13 @@ sub apiTick()
 end sub
 
 sub apiCallAnswered(job as object, status as integer, body as string, headers as dynamic)
+    ' A switch stops the tokens it replaces at once: what they were sent
+    ' with goes again with the new pair, not taken for the sign-in's end.
+    if status = 401 and job.auth and job.server = m.server and m.switching and not job.retried
+        job.retried = true
+        m.waiting.Push(job)
+        return
+    end if
     if status = 401 and job.auth and job.server = m.server
         challenge = invalid
         if GetInterface(headers, "ifAssociativeArray") <> invalid then challenge = headers["www-authenticate"]
@@ -888,10 +897,13 @@ sub apiSwitchProfile(request as object, spec as object)
         return
     end if
     if m.refreshing.DoesExist(tokens.issuer)
+        ' One switch waits at most: an earlier one asked for meanwhile gives way.
+        if m.switchWaiting <> invalid then apiAnswer(m.switchWaiting.request, apiFail("switch_replaced", "Another profile was chosen."))
         m.switchWaiting = { request: request, spec: spec }
         return
     end if
     m.refreshing[tokens.issuer] = true
+    m.switching = true
     params = { grant_type: authSwitchGrant(), client_id: httpClientId(), refresh_token: tokens.refresh, profile: urlValue(spec.profile) }
     pin = httpString(spec.pin)
     if pin <> "" then params.pin = pin
@@ -906,6 +918,7 @@ end sub
 sub apiSwitchAnswered(job as object, status as integer, body as string)
     old = job.tokens
     m.refreshing.Delete(old.issuer)
+    m.switching = false
     current = m.tokens <> invalid and m.tokens.issuer = old.issuer and m.tokens.refresh = old.refresh
     outcome = authSwitchOutcome(status, body)
     if outcome.kind = "tokens"
@@ -945,6 +958,11 @@ sub apiSwitchAnswered(job as object, status as integer, body as string)
         apiAnswer(job.request, failure)
     end if
     apiSendWaiting()
+    if m.switchWaiting <> invalid
+        waiting = m.switchWaiting
+        m.switchWaiting = invalid
+        apiSwitchProfile(waiting.request, waiting.spec)
+    end if
 end sub
 
 ' --- Playback ---

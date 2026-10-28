@@ -81,6 +81,7 @@ sub showMessage(text as string, buttons as object)
 end sub
 
 sub onButton(event as object)
+    if m.busy then return
     if m.buttons.buttons[event.getData()] = "Try again"
         load()
     else
@@ -167,8 +168,13 @@ end sub
 sub onSwitched(event as object)
     m.busy = false
     answer = event.getData()
-    if answer.ok
+    ' No PIN to check is fine for the profile signed in only.
+    if answer.ok and (not answer.data.through or m.picked.current)
         done()
+        return
+    end if
+    if answer.ok
+        m.message.text = "The server couldn't switch to " + m.picked.title + "."
         return
     end if
     m.message.text = ""
@@ -181,6 +187,13 @@ sub onSwitched(event as object)
         m.message.text = answer.message
     end if
 end sub
+
+' While a switch is under way the screen stays: Back would leave the app
+' half switched.
+function onKeyEvent(key as string, press as boolean) as boolean
+    if not press or not m.busy then return false
+    return key = "back" or key = "OK" or key = "options"
+end function
 
 ' The profile chosen: Home, everything as that profile sees it.
 sub done()

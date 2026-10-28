@@ -356,8 +356,8 @@ function pageQueueFrom(queue as object, at as integer, shuffled as boolean) as o
         for i = 0 to at - 1
             out.Push(queue[i])
         end for
-        for i = out.Count() - 1 to 1 step -1
-            j = Rnd(i + 1) - 1
+        for i = out.Count() - 1 to 2 step -1
+            j = Rnd(i)
             other = out[i]
             out[i] = out[j]
             out[j] = other

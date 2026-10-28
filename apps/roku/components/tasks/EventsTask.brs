@@ -61,7 +61,9 @@ sub connect()
         socket.setMessagePort(m.port)
         socket.setSendToAddress(address)
         socket.notifyReadable(true)
-        connected = socket.connect()
+        socket.notifyWritable(true)
+        ' A socket with a port connects in the background.
+        connected = socket.connect() or socket.eInProgress()
     catch failure
         connected = false
     end try
@@ -75,7 +77,6 @@ sub connect()
     m.reader = evReader()
     m.unsent = request.text
     m.connectedAt = m.clock.TotalMilliseconds()
-    m.socket.notifyWritable(true)
     sendSome()
 end sub
 
@@ -84,6 +85,8 @@ sub sendSome()
     sent = -1
     try
         sent = m.socket.sendStr(m.unsent)
+        ' Not connected yet, or full: when it can take more.
+        if sent < 0 and (m.socket.eWouldBlock() or m.socket.eAgain() or m.socket.eInProgress()) then sent = 0
     catch failure
         sent = -1
     end try
@@ -125,6 +128,9 @@ sub readSome()
     end if
     events = evRead(m.reader, received)
     if not m.reader.head and not m.reader.failed then m.failures = 0
+    ' The token ran out (the stream ends with it): the scene has the API
+    ' task renew it, and the new one connects again.
+    if m.reader.status = 401 then m.top.tokenRefused = m.top.token
     for each event in events
         m.top.event = event
     end for

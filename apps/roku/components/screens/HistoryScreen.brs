@@ -100,7 +100,7 @@ sub onEntryOption(event as object)
     if event.getData() <> 0 then return
     entry = m.content.getChild(m.removing)
     if entry = invalid then return
-    uiRequest({ method: "DELETE", path: "/api/history/" + urlValue(entry.historyId), at: m.removing }, "onRemoved")
+    uiRequest({ method: "DELETE", path: "/api/history/" + urlValue(entry.historyId), historyId: entry.historyId }, "onRemoved")
 end sub
 
 sub onRemoved(event as object)
@@ -109,7 +109,11 @@ sub onRemoved(event as object)
         if not uiFailed(answer) then uiMessage("That didn't work", [answer.message])
         return
     end if
-    m.content.removeChildIndex(event.getRoSGNode().spec.at)
+    ' By its id: rows taken out meanwhile moved the others.
+    gone = event.getRoSGNode().spec.historyId
+    for i = m.content.getChildCount() - 1 to 0 step -1
+        if m.content.getChild(i).historyId = gone then m.content.removeChildIndex(i)
+    end for
     m.total = m.total - 1
     m.offset = m.offset - 1
     showCount()
