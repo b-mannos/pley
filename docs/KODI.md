@@ -97,8 +97,8 @@ side by side with Kodi's were the reference):
   seasons as tabs and their episodes, Extras, Cast & Crew and More Like
   This; the info block says which episode focus is on.
 - **A library**: Recommended (its rows), Library (every title in a grid,
-  more loading as focus nears the end) and Collections. It opens on
-  Recommended or Library as it was last left: the add-on remembers that
+  more loading as focus nears the end) and Collections. It opens on the
+  tab it was last left on, as on the other TVs: the add-on remembers that
   for each server, profile and library in its data folder
   (`remembered.json`), and opens on Library the first time. Library's chips
   sort it and filter it: Filter (all, unwatched or watched titles, the

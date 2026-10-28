@@ -264,10 +264,11 @@ class WindowTest(unittest.TestCase):
         self.addCleanup(lambda: (settings.clear(), settings.update(before)))
         settings.update({"_profile": profile, "server_id": "srv-1"})
         movies, shows = {"id": 4, "kind": "movies", "name": "Movies"}, {"id": 5, "kind": "shows", "name": "TV Shows"}
+        music = {"id": 6, "kind": "music", "name": "Music"}
 
         def opened(library, me=7):
             win = FakeWindow()
-            win.libraries, win.me = [movies, shows], {"id": me}
+            win.libraries, win.me = [movies, shows, music], {} if me is None else {"id": me}
             page = window.Library(win, library, None)
             page.load = lambda: None
             page.show = lambda filled: None
@@ -283,14 +284,25 @@ class WindowTest(unittest.TestCase):
         settings["server_id"] = "srv-2"
         self.assertEqual(opened(movies).tab, "all")
         settings["server_id"] = "srv-1"
-        # Collections is a visit: the tab before stays.
         opened(movies).switch("collections")
-        self.assertEqual(opened(movies).tab, "recommended")
+        self.assertEqual(opened(movies).tab, "collections")
+        # Music has no Collections: Library instead.
+        opened(music).switch("recommended")
+        self.assertEqual(opened(music).tab, "recommended")
+        with open(os.path.join(profile, window.kodi.REMEMBERED), encoding="utf-8") as f:
+            kept = json.load(f)
+        kept["library_tab/srv-1/7/6"] = "collections"
+        with open(os.path.join(profile, window.kodi.REMEMBERED), "w", encoding="utf-8") as f:
+            json.dump(kept, f)
+        self.assertEqual(opened(music).tab, "all")
+        # Without a profile, nothing is read or kept.
+        self.assertEqual(opened(movies, me=None).tab, "all")
+        opened(movies, me=None).switch("recommended")
         opened(movies).switch("all")
         self.assertEqual(opened(movies).tab, "all")
         # Kept in the add-on's data folder, so a restarted Kodi has it.
         with open(os.path.join(profile, window.kodi.REMEMBERED), encoding="utf-8") as f:
-            self.assertEqual(json.load(f), {"library_tab/srv-1/7/4": "all"})
+            self.assertEqual(json.load(f), {"library_tab/srv-1/7/4": "all", "library_tab/srv-1/7/6": "collections"})
         # A file that isn't one opens on Library.
         with open(os.path.join(profile, window.kodi.REMEMBERED), "w", encoding="utf-8") as f:
             f.write("{")
