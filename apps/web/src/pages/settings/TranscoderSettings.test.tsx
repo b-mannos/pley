@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { Settings } from "@/api/types";
@@ -165,7 +165,7 @@ describe("TranscoderSettings on this server's hardware", () => {
     expect(screen.getByText("On Linux only: transcodes are encoded in software instead.")).toBeInTheDocument();
     // The transcoder isn't running: what its FFmpeg can do isn't known, so nothing else is greyed out.
     expect(option(/^NVIDIA NVENC$/)).toBeEnabled();
-    expect(option(/^Automatic$/)).toBeEnabled();
+    expect(within(screen.getByLabelText("Hardware acceleration")).getByRole("option", { name: /^Automatic$/ })).toBeEnabled();
     expect(screen.getByRole("switch", { name: "Throttle transcodes" })).toBeEnabled();
   });
 
