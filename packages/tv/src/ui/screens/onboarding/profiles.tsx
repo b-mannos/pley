@@ -333,7 +333,13 @@ function PinPad(p: {
         pressed.current = true;
         const k: PadKey = digit ? { kind: "text", text: key.slice(5) } : { kind: "delete" };
         setFlash({ key: keyId(k), n: Date.now() });
+        const enough = digit && digitsRef.current.length + 1 >= PIN_MIN;
         press(k);
+        // A PIN typed with the number keys is sent with OK: ✓ takes focus once it could be sent, rather than 5 typing a 5.
+        if (enough && !lockedRef.current) {
+          const ok = document.querySelector<HTMLElement>('.pin-pad [data-fid="pin/ok"]');
+          if (ok) ui.focus.focus(ok);
+        }
         return true;
       }),
     [],
