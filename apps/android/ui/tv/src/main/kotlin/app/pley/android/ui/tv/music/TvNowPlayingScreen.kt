@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -320,10 +322,12 @@ private fun Queue(state: NowPlayingState, onPick: (Int) -> Unit) {
     if (state.queue.size <= 1) return
     val current = state.queue.indexOfFirst { it.current }.coerceAtLeast(0)
     val list = rememberLazyListState(initialFirstVisibleItemIndex = current)
-    LaunchedEffect(current) { list.scrollToItem(current) }
+    // The next track comes to the top, unless someone is looking down the queue: what has focus stays in view.
+    var browsing by remember { mutableStateOf(false) }
+    LaunchedEffect(current) { if (!browsing) list.scrollToItem(current) }
     BasicText(stringResource(R.string.tv_music_queue), style = PleyType.Tv.Label.copy(color = PleyColors.Subtle), modifier = Modifier.padding(start = 12.dp, bottom = 4.dp))
     LazyColumn(
-        Modifier.fillMaxSize().focusRestorer().focusGroup().testTag(TV_QUEUE),
+        Modifier.fillMaxSize().onFocusChanged { browsing = it.hasFocus }.focusRestorer().focusGroup().testTag(TV_QUEUE),
         state = list,
         contentPadding = PaddingValues(bottom = TvSafeArea.Vertical + 60.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
