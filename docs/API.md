@@ -1801,7 +1801,7 @@ interface Settings {
   tonemapping: "auto" | "libplacebo" | "opencl" | "zscale" | "none"; // HDR10/HLG/Dolby Vision → SDR
   max_transcodes: number;
   transcode_preset: "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" | "medium";
-  throttle_transcodes: boolean;     // limit ffmpeg to ~2× realtime once a buffer is built
+  throttle_transcodes: boolean;     // ~2× realtime once a buffer is built, paused 90 s ahead of the player
   scan_interval_minutes: number;    // 0 disables periodic scans
   watch_libraries: boolean;         // pick up file changes automatically
   detect_markers: boolean;          // find intros and credits in the background (default true)

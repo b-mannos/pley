@@ -228,7 +228,7 @@ unsafe extern "system" {
 /// Suspend (`true`) or resume a child process that hasn't been waited for;
 /// whether that was done. Only between polls of its `wait`, so that its pid
 /// can't have been reaped and given to another process meanwhile.
-fn pause(child: &Child, suspend: bool) -> bool {
+pub(crate) fn pause(child: &Child, suspend: bool) -> bool {
     #[cfg(windows)]
     {
         let Some(handle) = child.raw_handle() else { return false };

@@ -557,7 +557,7 @@ ${form.tvdb_pin}`}
             </Note>
           ) : null}
         </Row>
-        <Row label="Throttle transcodes" hint="Limit ffmpeg to ~2× realtime once a buffer is built (saves CPU/GPU and disk).">
+        <Row label="Throttle transcodes" hint="Once a buffer is built, convert at most 2× real time and pause 90 s ahead of the player: no work lost when it stops or seeks, more left for other playbacks (saves CPU/GPU and disk).">
           <Toggle
             checked={form.throttle_transcodes}
             disabled={noThrottling}

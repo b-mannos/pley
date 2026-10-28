@@ -1806,7 +1806,8 @@ mod tests {
         };
         let mappers = [Tonemapper::Libplacebo, Tonemapper::Opencl, Tonemapper::Zscale];
         let mappers = mappers.into_iter().filter(|m| vulkan || *m != Tonemapper::Libplacebo).collect();
-        let mut ff = ffmpeg_with(vec![hw(VideoCodec::H264, false), hw(VideoCodec::Hevc, true), x264(), x265()], mappers);
+        let mut ff =
+            ffmpeg_with(vec![hw(VideoCodec::H264, false), hw(VideoCodec::Hevc, true), x264(), x265()], mappers);
         ff.caps.hwaccels = ["d3d11va", "qsv", "vaapi", "vulkan"].map(String::from).to_vec();
         let codecs: Vec<String> = ["h264", "hevc", "hevc10"].map(String::from).to_vec();
         ff.caps.gpu_pipelines = vec![pley_transcoder_api::GpuPipeline { accel, codecs: codecs.clone() }];
@@ -1827,8 +1828,11 @@ mod tests {
             let v = plan.video.as_ref().unwrap();
             assert_eq!(v.pipeline, Pipeline::Gpu(accel));
             let args = args_string(&plan, 0, 2);
-            let scaler =
-                if accel == HwAccel::Qsv { "vpp_qsv=w=1920:h=1080:format=nv12" } else { "scale_vaapi=w=1920:h=1080:format=nv12" };
+            let scaler = if accel == HwAccel::Qsv {
+                "vpp_qsv=w=1920:h=1080:format=nv12"
+            } else {
+                "scale_vaapi=w=1920:h=1080:format=nv12"
+            };
             assert!(args.contains(&format!("[0:0]{scaler}[vout]")), "{args}");
             assert!(args.contains(&format!("-c:v {encoder}")), "{args}");
 
@@ -1836,7 +1840,10 @@ mod tests {
             // one download of the 1080p frame to the encoder.
             let plan = Plan::build(&request(), &ten_bit(media(DynamicRange::Hdr10, None)), &ff, None).unwrap();
             let v = plan.video.as_ref().unwrap();
-            assert_eq!((v.pipeline, v.tonemap), (Pipeline::Vulkan { encode_on_gpu: false }, Some(Tonemapper::Libplacebo)));
+            assert_eq!(
+                (v.pipeline, v.tonemap),
+                (Pipeline::Vulkan { encode_on_gpu: false }, Some(Tonemapper::Libplacebo))
+            );
             let args = args_string(&plan, 0, 2);
             assert!(args.contains("libplacebo=w=1920:h=1080:format=nv12"), "{args}");
             assert!(args.contains("hwdownload,format=nv12"), "{args}");

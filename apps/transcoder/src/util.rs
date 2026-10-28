@@ -235,6 +235,26 @@ pub fn kill_children_on_exit() {
     }
 }
 
+/// The logical processors the transcoder (and the FFmpeg it starts) may
+/// run on. On Windows the standard library counts them all, whatever the
+/// process's affinity (`start /affinity`, a job object) says; FFmpeg counts
+/// what the affinity allows, and so does this.
+pub fn processors() -> u32 {
+    let all = std::thread::available_parallelism().map_or(4, |n| n.get() as u32);
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessAffinityMask};
+        let (mut process, mut system) = (0usize, 0usize);
+        // SAFETY: plain Win32 call with the pseudo handle of this process.
+        let ok = unsafe { GetProcessAffinityMask(GetCurrentProcess(), &mut process, &mut system) } != 0;
+        let allowed = process.count_ones();
+        if ok && allowed > 0 {
+            return all.min(allowed);
+        }
+    }
+    all
+}
+
 /// Total size of all files below `dir`.
 pub fn dir_size(dir: &Path) -> u64 {
     let mut total = 0;

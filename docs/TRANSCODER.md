@@ -210,9 +210,20 @@ half-made ones are deleted.
    woken request never sees it still owing that segment). ffmpeg's `-progress` output on stderr supplies the
    live metrics: fps, speed, bitrate and position.
 4. **Throttling.** Once a 60 s buffer exists, ffmpeg reads at most 2× realtime
-   (`-readrate`), which saves CPU, GPU and disk. This applies when supported
-   and enabled. How fast a process goes is measured over its last 4 s of
-   progress, since FFmpeg's own `speed` averages in the burst.
+   (`-readrate`), which saves CPU, GPU and disk. And once a process is 90 s
+   ahead of the last segment the player asked for (players hold their own
+   buffer ahead of the picture, so minutes ahead of it), it is paused, its
+   process suspended (`NtSuspendProcess` on Windows, `SIGSTOP` on Linux),
+   until it is less than 60 s ahead, or a request waits for a segment it is
+   to make. Without the pause a process went on at twice real time to the
+   end of the film, minutes or an hour ahead: work lost when the player
+   stops or seeks, taken from other playbacks meanwhile (on a small
+   computer, what lets two play at once), and segments on the disk. Both
+   apply when the request's `throttle` is on (`throttle_transcodes`, on by
+   default) and the read rate when FFmpeg supports it. How fast a process
+   goes is measured over its last 4 s of progress (since it last went on,
+   after a pause), since FFmpeg's own `speed` averages in the burst and the
+   pauses.
 5. **Housekeeping.**
    - A process idle for 60 s (paused player) is stopped.
    - A job idle for 20 minutes expires.
@@ -272,7 +283,10 @@ half-made ones are deleted.
   - `libplacebo` on the GPU through Vulkan. It also applies Dolby Vision RPU
     reshaping, so **profile 5** (IPTPQc2) renders with correct colors.
   - `tonemap_opencl` on the GPU.
-  - `zscale` plus `tonemap` on the CPU.
+  - `zscale` plus `tonemap` on the CPU. The first `zscale` scales to the
+    output's size as it makes the picture linear, so the tone mapping (in
+    32-bit floats, three planes) works on the output's pixels: 4K to 1080p,
+    a quarter of them.
 
   When Vulkan only runs on the CPU (Mesa's llvmpipe, with no GPU),
   libplacebo comes last: it is several times slower than zscale there, and
@@ -324,8 +338,9 @@ half-made ones are deleted.
   Vulkan device that went away, say), the frame is grabbed as it is rather
   than not at all.
 - **Subtitle burn-in.**
-  - Bitmap subtitles (PGS, VobSub, DVB, `.sup` files) are overlaid at source
-    resolution, after tone mapping and before scaling.
+  - Bitmap subtitles (PGS, VobSub, DVB, `.sup` files) are overlaid on the
+    scaled, tone-mapped frame, their canvas fitted to its width: for 4K to
+    1080p, a quarter of the pixels to blend.
   - Text subtitles (SRT, ASS) are rendered by libass from an `.ass` file
     extracted into the job folder while the job is created. An embedded
     track's extraction reads the whole file, so it gives up after 20
@@ -587,6 +602,37 @@ and memory's use that the server samples itself every 2 s
 (`GET /api/system/resources`, docs/API.md): a managed transcoder and its
 FFmpeg processes count there as pley's (the server's process tree); an
 external one doesn't.
+
+## Benchmark
+
+`scripts/bench-transcoder.py` (Python 3.9 or later, no modules to install)
+runs the transcoder as it is built, over its API, on local files, and
+reports for each job: the wait for the first segment and, for a seek, for
+the one asked for; the speed (× real time); the processor time per media
+second and the processors' use; the largest process's peak memory (on
+Windows its private commit, on Linux its resident set) and all of
+theirs (Windows); the bytes made. `--make-clips DIR --source <4K HDR file>`
+cuts the clips it needs from a film (1080p H.264 with AAC, TrueHD and DTS
+copies, ten-minute loops, a minute of PGS subtitles from FFmpeg's FATE
+sample, an SRT). Cases: 4K HDR10 to 1080p SDR, 1080p to 720p, TrueHD to
+AAC and DTS to AC-3 with the video copied, a remux, a seek, text and
+picture subtitles drawn on 1080p and 4K HDR, and playbacks watched in real
+time (`session-*`, `--session` seconds) with throttling on, which count
+what was made and whether the player waited.
+
+Cheaper computers are played with `--variants`: `gpu` (what the machine
+has), `sw` (no GPU), `sw4` and `sw2` (no GPU, four or two processors: a
+Windows job object's affinity, `sched_setaffinity` on Linux, one logical
+processor per core); on Windows `--mem-mb` sets a memory limit. Several
+builds (`--bin name=path`, repeated) run in turns that change order each
+round, so a machine busy with other work weighs on each alike.
+
+```
+python scripts/bench-transcoder.py --make-clips D:/bench --source 4k-hdr10.mkv
+python scripts/bench-transcoder.py --media D:/bench --hdr 4k-hdr10.mkv \
+    --bin before=old/pley-transcoder.exe --bin after=target/release/pley-transcoder.exe \
+    --variants gpu,sw,sw4 --repeat 3 --out results.jsonl
+```
 
 ## License
 

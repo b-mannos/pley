@@ -24,7 +24,7 @@ use tokio::process::{ChildStderr, ChildStdout};
 use tokio::sync::{Notify, oneshot, watch};
 
 use crate::adaptive;
-use crate::background::{Background, Starting};
+use crate::background::{self, Background, Starting};
 use crate::error::{ApiError, ApiResult};
 use crate::extract::Extractor;
 use crate::ffmpeg::Ffmpeg;
@@ -66,6 +66,13 @@ const HARDWARE_FAILURES: u32 = 3;
 /// until it has made this many segments: what players buffer before they
 /// play.
 const STARTED_AFTER: u32 = 3;
+/// Throttling: a process this far ahead of the last segment the player
+/// asked for is paused (suspended), until it is less than [`RESUME_AHEAD`]
+/// ahead. Players buffer ahead of what they show, so that is a few minutes
+/// ahead of the picture. What is made beyond goes to waste when the player
+/// stops or seeks, and takes the processor from other playbacks meanwhile.
+const PAUSE_AHEAD: Duration = Duration::from_secs(90);
+const RESUME_AHEAD: Duration = Duration::from_secs(60);
 
 /// Concurrency budget shared by all jobs.
 pub struct Slots {
@@ -213,6 +220,9 @@ struct Proc {
     pace: Arc<Mutex<Pace>>,
     exited: watch::Receiver<bool>,
     kill: Option<oneshot::Sender<()>>,
+    /// Whether it is paused (see [`PAUSE_AHEAD`]): its task suspends or
+    /// resumes it as this changes. Its segment reader pauses it too.
+    pause: Arc<watch::Sender<bool>>,
 }
 
 /// How fast a process has been going over the last few seconds. FFmpeg's
@@ -263,6 +273,20 @@ impl Proc {
             let _ = kill.send(());
         }
         let _ = tokio::time::timeout(Duration::from_secs(10), self.exited.wait_for(|exited| *exited)).await;
+    }
+
+    fn paused(&self) -> bool {
+        *self.pause.borrow()
+    }
+
+    /// Pauses or resumes the process; whether that changed anything. Its
+    /// speed is measured anew after a pause.
+    fn set_paused(&self, on: bool) -> bool {
+        let changed = self.pause.send_if_modified(|paused| std::mem::replace(paused, on) != on);
+        if changed && !on {
+            self.pace.lock().samples.clear();
+        }
+        changed
     }
 }
 
@@ -472,6 +496,8 @@ impl JobManager {
             return Ok(());
         }
         if let Some(p) = guard.as_ref().filter(|p| p.running()) {
+            // A segment the player waits for: a paused process goes on at once.
+            p.set_paused(false);
             if p.will_produce(n) {
                 match job.throttled_wait(p, n) {
                     None => return Ok(()),
@@ -532,12 +558,7 @@ impl JobManager {
             .as_ref()
             .map_or((0, false), |v| (v.width.max(0) as u64 * v.height.max(0) as u64, v.codec == VideoCodec::Hevc));
         let others = self.list().iter().filter(|j| j.id != job.id && j.encodes_in_software()).count() as u32;
-        adaptive::Load {
-            software_jobs: others + 1,
-            cores: std::thread::available_parallelism().map_or(4, |n| n.get() as u32),
-            pixels,
-            hevc,
-        }
+        adaptive::Load { software_jobs: others + 1, cores: crate::util::processors(), pixels, hevc }
     }
 
     /// Moves jobs on the automatic preset a step faster or slower when their
@@ -550,11 +571,15 @@ impl JobManager {
         for job in self.list() {
             let Some((current, moved_at)) = job.runtime.lock().preset else { continue };
             let Ok(mut guard) = job.process.try_lock() else { continue };
-            let Some(next) = guard.as_ref().filter(|p| p.running()).map(|p| p.next.load(Relaxed)) else { continue };
-            if guard.as_ref().is_some_and(|p| next >= p.end) {
+            // A paused process is far ahead already: it moves once it goes on.
+            let Some(proc) = guard.as_ref().filter(|p| p.running() && !p.paused()) else { continue };
+            let next = proc.next.load(Relaxed);
+            if next >= proc.end {
                 continue;
             }
-            let speed = job.runtime.lock().process.as_ref().and_then(|p| p.speed);
+            // How fast it goes lately (FFmpeg's own speed averages in its
+            // burst, and the time it was paused).
+            let speed = proc.pace.lock().speed().or_else(|| job.runtime.lock().process.as_ref().and_then(|p| p.speed));
             let lead = job.lead_secs(next);
             let target = adaptive::target(self.load_for(&job));
             let to = match adaptive::decide(current, target, lead, speed, moved_at.elapsed()) {
@@ -679,19 +704,44 @@ impl JobManager {
         let next = Arc::new(AtomicU32::new(start));
         let tail = Arc::new(Mutex::new(VecDeque::new()));
         let pace = Arc::new(Mutex::new(Pace::default()));
-        let lister =
-            tokio::spawn(read_segment_list(job.clone(), stdout, next.clone(), spawned, starting, self.metrics.clone()));
+        let (pause_tx, mut pause_rx) = watch::channel(false);
+        let pause_tx = Arc::new(pause_tx);
+        let lister = tokio::spawn(read_segment_list(
+            job.clone(),
+            stdout,
+            next.clone(),
+            spawned,
+            starting,
+            self.metrics.clone(),
+            pause_tx.clone(),
+        ));
         tokio::spawn(read_progress(job.clone(), stderr, start_ms, tail.clone(), pace.clone()));
 
         let (exit_tx, exit_rx) = watch::channel(false);
-        let (kill_tx, kill_rx) = oneshot::channel::<()>();
+        let (kill_tx, mut kill_rx) = oneshot::channel::<()>();
         let metrics = self.metrics.clone();
         let job_ref = job.clone();
         let next_ref = next.clone();
         tokio::spawn(async move {
-            let waited = tokio::select! {
-                status = child.wait() => Some(status),
-                _ = kill_rx => None,
+            // What was done to it: Windows counts suspensions.
+            let mut suspended = false;
+            let waited = loop {
+                tokio::select! {
+                    status = child.wait() => break Some(status),
+                    _ = &mut kill_rx => break None,
+                    // Between polls of `wait`: the pid is still the child's.
+                    Ok(()) = pause_rx.changed() => {
+                        let on = *pause_rx.borrow_and_update();
+                        if on != suspended && background::pause(&child, on) {
+                            suspended = on;
+                            tracing::debug!(
+                                job = %job_ref.id,
+                                "ffmpeg {}",
+                                if on { "paused: far enough ahead of the player" } else { "resumed" }
+                            );
+                        }
+                    }
+                }
             };
             let (status, killed) = match waited {
                 Some(status) => (status, false),
@@ -719,6 +769,7 @@ impl JobManager {
             pace,
             exited: exit_rx,
             kill: Some(kill_tx),
+            pause: pause_tx,
         })
     }
 
@@ -765,6 +816,11 @@ impl JobManager {
                 if let Some(p) = guard.take() {
                     p.stop().await;
                 }
+            }
+            if let Ok(guard) = job.process.try_lock()
+                && let Some(p) = guard.as_ref().filter(|p| p.running())
+            {
+                job.pace_lead(p);
             }
             let pruned = job.clone();
             let _ = tokio::task::spawn_blocking(move || pruned.prune()).await;
@@ -849,6 +905,30 @@ impl Job {
         };
         let others = self.is_awaited(|m| m as usize != n && p.will_produce(m));
         (wait > restart && !others).then_some(wait)
+    }
+
+    /// Throttling (see [`PAUSE_AHEAD`]): pauses process `p` once it is far
+    /// enough ahead of the player, and resumes it when the player comes
+    /// closer. Never while a request waits for a segment it is to make.
+    fn pace_lead(&self, p: &Proc) {
+        let next = p.next.load(Relaxed);
+        if !self.plan.throttle || next >= p.end {
+            return;
+        }
+        let lead = self.lead_secs(next);
+        let awaited = self.is_awaited(|m| p.will_produce(m));
+        let ahead = if p.paused() { RESUME_AHEAD } else { PAUSE_AHEAD };
+        let on = !awaited && lead >= ahead.as_secs_f64();
+        if p.set_paused(on) {
+            tracing::debug!(job = %self.id, "{} {lead:.0} s ahead of the player", if on { "pausing" } else { "resuming" });
+        }
+    }
+
+    /// Whether a process at segment `next` is far enough ahead of the
+    /// player to pause (see [`PAUSE_AHEAD`]), and no request waits for a
+    /// segment it has yet to make.
+    fn far_ahead(&self, next: u32) -> bool {
+        self.plan.throttle && self.lead_secs(next) >= PAUSE_AHEAD.as_secs_f64() && !self.is_awaited(|m| m >= next)
     }
 
     /// How many of this job's segments last `span` (at least one).
@@ -1086,6 +1166,7 @@ async fn read_segment_list(
     spawned: Instant,
     starting: Starting,
     metrics: Arc<Metrics>,
+    pause: Arc<watch::Sender<bool>>,
 ) {
     let mut lines = BufReader::new(stdout).lines();
     let mut first = true;
@@ -1103,6 +1184,11 @@ async fn read_segment_list(
             }
             segment_written(&job, &next, n);
             Metrics::inc(&metrics.segments_produced);
+            // Throttling: far enough ahead, it pauses (see `PAUSE_AHEAD`)
+            // right away rather than at the reaper's next look.
+            if job.far_ahead(n + 1) {
+                pause.send_if_modified(|paused| !std::mem::replace(paused, true));
+            }
             made += 1;
             if made == STARTED_AFTER {
                 // Started: background work goes on.
@@ -1296,6 +1382,7 @@ mod tests {
             pace: Arc::default(),
             exited,
             kill: None,
+            pause: Arc::new(watch::channel(false).0),
         };
         assert!(!p.will_produce(9), "already passed (pruned or skipped): must restart");
         assert!(p.will_produce(10));
@@ -1323,6 +1410,64 @@ mod tests {
     }
 
     #[test]
+    fn a_throttled_process_pauses_far_ahead_of_the_player() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut job = job(dir.path(), (0..=500).map(|i| i * 2_000).collect());
+        job.plan.segment_seconds = 2.0;
+        let (_exit_tx, exited) = watch::channel(false);
+        let p = Proc {
+            start: 0,
+            end: 500,
+            started: Instant::now(),
+            next: Arc::new(AtomicU32::new(10)),
+            lookahead: 6,
+            pace: Arc::default(),
+            exited,
+            kill: None,
+            pause: Arc::new(watch::channel(false).0),
+        };
+        let at = |next: u32, asked: u32| {
+            p.next.store(next, Relaxed);
+            job.last_requested.store(asked, Relaxed);
+        };
+
+        // Without throttling it never pauses.
+        at(100, 0);
+        job.pace_lead(&p);
+        assert!(!p.paused());
+        assert!(!job.far_ahead(100));
+
+        job.plan.throttle = true;
+        at(40, 0);
+        job.pace_lead(&p);
+        assert!(!p.paused(), "78 s ahead: on it goes");
+        at(47, 0);
+        assert!(job.far_ahead(47));
+        job.pace_lead(&p);
+        assert!(p.paused(), "92 s ahead: paused");
+
+        // It stays paused until the player is within a minute of it.
+        at(47, 5);
+        job.pace_lead(&p);
+        assert!(p.paused(), "82 s ahead");
+        at(47, 17);
+        job.pace_lead(&p);
+        assert!(!p.paused(), "58 s ahead: it goes on");
+        p.pace.lock().record(Instant::now(), 0);
+        assert!(p.set_paused(true));
+        assert!(!p.set_paused(true), "once");
+        assert!(p.set_paused(false));
+        assert!(p.pace.lock().samples.is_empty(), "its speed is measured anew");
+
+        // A request waiting for a segment it is to make keeps it going.
+        at(60, 0);
+        let _waiting = Waiting::register(&job, 61);
+        assert!(!job.far_ahead(60));
+        job.pace_lead(&p);
+        assert!(!p.paused());
+    }
+
+    #[test]
     fn seeks_just_past_a_throttled_process_restart_it() {
         let dir = tempfile::tempdir().unwrap();
         let mut job = job(dir.path(), (0..=100).map(|i| i * 2_000).collect());
@@ -1338,6 +1483,7 @@ mod tests {
             pace: Arc::default(),
             exited,
             kill: None,
+            pause: Arc::new(watch::channel(false).0),
         };
         let going = |speed: f64| {
             let at = Instant::now();
