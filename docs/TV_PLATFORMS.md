@@ -490,21 +490,19 @@ the TV draws it differently from the app's own (measured on a canvas
 once): a TV without a serif face offers no Serif.
 Picture subtitles keep the place their file gives them.
 
-The Subtitles menu finds subtitles (`GET
-/api/items/{id}/subtitles/search`): what OpenSubtitles has for the file,
-those made for this very file first, in the profile's subtitle language
-or another picked there. One picked is added on the server for everyone
-and shows at once in the session playing, as a text track picked in the
-menu does (on the TVs the panel opens for a video without subtitles too).
-The web also adds a subtitle file from the computer (.srt, .vtt, .ass,
-.ssa, up to 2 MB) in the language picked, and an added track has a
-delete button for an administrator, for the profile the server says
-added it (`added_by`), and otherwise for whoever added it in that
-player. A server without OpenSubtitles set up answers 503 with `setup:
-false`: the search says so, an administrator is pointed to Settings →
-Server, and other profiles no longer see the entry; a server too old to
-search (404) loses it for everyone until the page or app starts over.
-The TVs have no file picker, and no delete.
+The Subtitles menu finds subtitles (`GET /api/items/{id}/subtitles/search`):
+what OpenSubtitles has for the file, those made for this very file first, in
+the profile's subtitle language or another picked there. One picked is added
+on the server for everyone and shows at once in the session playing, as a
+text track picked in the menu does (on the TVs the panel opens for a video
+without subtitles too). The web also adds a subtitle file from the computer
+(.srt, .vtt, .ass, .ssa, up to 2 MB) in the language picked, and an added
+track has a delete button where the server says the profile may delete it
+(`deletable`: an administrator, or whoever added it). A server without
+OpenSubtitles set up answers 503 with `setup: false`: the search says so, an
+administrator is pointed to Settings → Server, and other profiles no longer
+see the entry; a server too old to search (404) loses it for everyone until
+the page or app starts over. The TVs have no file picker, and no delete.
 
 Signing in, finding the server on the network (a sweep of the TV's own
 subnet), the player's keys and panels, and the offline behaviour follow

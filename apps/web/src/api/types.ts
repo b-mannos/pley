@@ -404,8 +404,8 @@ export interface MediaStream {
   text_based?: boolean;
   /** Added on the server (a file uploaded, or one found on OpenSubtitles), not in or beside the media file. */
   added?: boolean;
-  /** Who added it, when the server says. */
-  added_by?: Id | null;
+  /** This profile may delete it (an added track, and an administrator or whoever added it). */
+  deletable?: boolean;
 }
 
 export interface Hub {
@@ -427,8 +427,8 @@ export interface SubtitleTrack {
   url: string | null;
   /** Added on the server (a file uploaded, or one found on OpenSubtitles). */
   added?: boolean;
-  /** Who added it, when the server says. */
-  added_by?: Id | null;
+  /** This profile may delete it (an added track, and an administrator or whoever added it). */
+  deletable?: boolean;
 }
 
 /** A subtitle file found for an item (GET /api/items/{id}/subtitles/search). */

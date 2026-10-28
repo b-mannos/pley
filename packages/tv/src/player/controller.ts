@@ -1232,7 +1232,7 @@ export class PlaybackController {
       external: true,
       text_based: track.text_based,
       added: true,
-      added_by: track.added_by,
+      deletable: track.deletable,
     };
     const updated: MediaFile = { ...file, streams: file.streams.filter((s) => !(s.kind === "subtitle" && s.index === track.index)).concat([stream]) };
     this.file = updated;

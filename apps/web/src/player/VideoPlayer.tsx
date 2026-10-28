@@ -1541,7 +1541,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     void qc.invalidateQueries({ queryKey: keys.item(item.id), refetchType: "none" });
   };
   const canDeleteSubtitle = (s: MediaStream) =>
-    me.is_admin || (s.added_by != null ? s.added_by === me.id : addedHere.includes(s.index));
+    me.is_admin ||
+    addedHere.includes(s.index) ||
+    [...addedTracks, ...(info?.subtitles ?? [])].some((t) => t.index === s.index && t.deletable);
   const removeSubtitle = (index: number) => {
     deleteSubtitle(item.id, index).then(
       () => {

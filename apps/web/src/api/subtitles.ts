@@ -67,6 +67,6 @@ export function trackStream(track: SubtitleTrack): MediaStream {
     external: true,
     text_based: track.text_based,
     added: track.added ?? true,
-    added_by: track.added_by,
+    deletable: track.deletable,
   };
 }

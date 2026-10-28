@@ -203,7 +203,7 @@ export interface MediaStream {
   text_based?: boolean;
   /** Added on the server (an uploaded file, or one found on OpenSubtitles). */
   added?: boolean;
-  added_by?: Id | null;
+  deletable?: boolean;
 }
 
 export interface Hub {
@@ -250,8 +250,8 @@ export interface SubtitleTrack {
   url: string | null;
   /** Added on the server (a file uploaded, or found on OpenSubtitles), not in or beside the media file. */
   added?: boolean;
-  /** Who added it, when the server says. */
-  added_by?: Id | null;
+  /** This profile may delete it (an added track, and an administrator or whoever added it). */
+  deletable?: boolean;
 }
 
 /** What the server knows of the network a client plays on (GET/PUT /api/playback/network). */
