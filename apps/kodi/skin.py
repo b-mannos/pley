@@ -656,6 +656,7 @@ def item() -> ET.Element:
         L.BUTTON + L.BUTTON_LABEL_ROOM,
         [
             pill(L.ITEM_PLAY, "play"),
+            round_button(L.ITEM_SHUFFLE, "shuffle", "$ADDON[plugin.video.pley 30214]"),
             round_button(L.ITEM_FROM_START, "rotate-ccw", "$ADDON[plugin.video.pley 30101]"),
             round_button(L.ITEM_WATCHED, "circle-check", "$ADDON[plugin.video.pley 30019]"),
             round_button(L.ITEM_UNWATCHED, "eye-off", "$ADDON[plugin.video.pley 30020]"),
@@ -729,7 +730,7 @@ def item() -> ET.Element:
         0,
         L.WIDTH,
         L.HEIGHT,
-        [hero, info, seasons] + rows(L.ITEM_ROWS, L.ITEM_SLOTS, ("poster", "landscape", "episode", "person"), str(L.ITEM_SEASONS)),
+        [hero, info, seasons] + rows(L.ITEM_ROWS, L.ITEM_SLOTS, ("poster", "landscape", "episode", "person", "square"), str(L.ITEM_SEASONS)),
         visible=is_("pley.screen", "item"),
     )
 

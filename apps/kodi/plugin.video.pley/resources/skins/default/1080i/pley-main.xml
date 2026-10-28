@@ -11786,6 +11786,45 @@
               <label />
               <width min="256" max="900">auto</width>
             </control>
+            <control type="group" id="3088">
+              <width>80</width>
+              <height>128</height>
+              <control type="button" id="3028">
+                <left>0</left>
+                <top>0</top>
+                <height>80</height>
+                <animation effect="zoom" start="100" end="108" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
+                <texturefocus border="0">button-shuffle-focus.png</texturefocus>
+                <texturenofocus border="0">button-shuffle.png</texturenofocus>
+                <font>font27</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <focusedcolor>FF03131F</focusedcolor>
+                <disabledcolor>FFE9EBEF</disabledcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <textoffsetx>40</textoffsetx>
+                <label />
+                <width>80</width>
+                <onleft>3019</onleft>
+                <onright>3080</onright>
+                <ondown>3060</ondown>
+              </control>
+              <control type="label" id="3098">
+                <left>-110</left>
+                <top>92</top>
+                <width>300</width>
+                <height>34</height>
+                <visible>Control.HasFocus(3028)</visible>
+                <animation effect="fade" start="0" end="100" time="150">Visible</animation>
+                <animation effect="fade" start="100" end="0" time="150">Hidden</animation>
+                <font>font12</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$ADDON[plugin.video.pley 30214]</label>
+              </control>
+            </control>
             <control type="group" id="3080">
               <width>80</width>
               <height>128</height>
@@ -11805,7 +11844,7 @@
                 <textoffsetx>40</textoffsetx>
                 <label />
                 <width>80</width>
-                <onleft>3019</onleft>
+                <onleft>3088</onleft>
                 <onright>3081</onright>
                 <ondown>3060</ondown>
               </control>
@@ -13593,6 +13632,405 @@
           <ondown>3210</ondown>
           <onleft>100</onleft>
         </control>
+        <control type="fixedlist" id="3204">
+          <left>-100</left>
+          <top>46</top>
+          <width>2020</width>
+          <height>390</height>
+          <orientation>horizontal</orientation>
+          <focusposition>1</focusposition>
+          <movement>0</movement>
+          <scrolltime tween="cubic" easing="out">200</scrolltime>
+          <itemlayout width="292" height="390">
+            <control type="group">
+              <left>0</left>
+              <top>30</top>
+              <width>264</width>
+              <height>264</height>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png">$INFO[ListItem.Property(ph)]</texture>
+              </control>
+              <control type="textbox">
+                <left>16</left>
+                <top>86</top>
+                <width>232</width>
+                <height>92</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <autoscroll>false</autoscroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
+                <aspectratio scalediffuse="false">scale</aspectratio>
+                <fadetime>150</fadetime>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture border="10">hairline.png</texture>
+              </control>
+              <control type="progress">
+                <left>0</left>
+                <top>256</top>
+                <width>264</width>
+                <height>8</height>
+                <visible>ListItem.IsResumable</visible>
+                <texturebg colordiffuse="99000000">pley-white.png</texturebg>
+                <midtexture colordiffuse="FF38BDF8">pley-white.png</midtexture>
+                <info>ListItem.PercentPlayed</info>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>40</height>
+                <visible>String.IsEqual(ListItem.Property(state),watched)</visible>
+                <texture>tick.png</texture>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FF191D24" border="10">round8.png</texture>
+              </control>
+              <control type="image">
+                <left>108</left>
+                <top>68</top>
+                <width>48</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FFE9EBEF">icon-arrow-right.png</texture>
+              </control>
+              <control type="label">
+                <left>0</left>
+                <top>132</top>
+                <width>264</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>322</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>356</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFA1A9B6</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label2]</label>
+            </control>
+          </itemlayout>
+          <focusedlayout width="292" height="390">
+            <control type="group">
+              <left>0</left>
+              <top>30</top>
+              <width>264</width>
+              <height>264</height>
+              <animation effect="zoom" start="100" end="108" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png">$INFO[ListItem.Property(ph)]</texture>
+              </control>
+              <control type="textbox">
+                <left>16</left>
+                <top>86</top>
+                <width>232</width>
+                <height>92</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <autoscroll>false</autoscroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
+                <aspectratio scalediffuse="false">scale</aspectratio>
+                <fadetime>150</fadetime>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture border="10">hairline.png</texture>
+              </control>
+              <control type="progress">
+                <left>0</left>
+                <top>256</top>
+                <width>264</width>
+                <height>8</height>
+                <visible>ListItem.IsResumable</visible>
+                <texturebg colordiffuse="99000000">pley-white.png</texturebg>
+                <midtexture colordiffuse="FF38BDF8">pley-white.png</midtexture>
+                <info>ListItem.PercentPlayed</info>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>40</height>
+                <visible>String.IsEqual(ListItem.Property(state),watched)</visible>
+                <texture>tick.png</texture>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FF191D24" border="10">round8.png</texture>
+              </control>
+              <control type="image">
+                <left>108</left>
+                <top>68</top>
+                <width>48</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FFE9EBEF">icon-arrow-right.png</texture>
+              </control>
+              <control type="label">
+                <left>0</left>
+                <top>132</top>
+                <width>264</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+              <control type="image">
+                <left>-12</left>
+                <top>-12</top>
+                <width>288</width>
+                <height>288</height>
+                <visible>Control.HasFocus(3204)</visible>
+                <texture border="24">ring.png</texture>
+              </control>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>322</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>Control.HasFocus(3204) + String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font25_title</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>322</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>!Control.HasFocus(3204) + String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>356</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFA1A9B6</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label2]</label>
+            </control>
+          </focusedlayout>
+          <onup>3060</onup>
+          <ondown>3210</ondown>
+          <onleft>100</onleft>
+        </control>
       </control>
       <control type="group" id="3210">
         <left>0</left>
@@ -14603,6 +15041,405 @@
               <font>font12</font>
               <textcolor>FFA1A9B6</textcolor>
               <align>center</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label2]</label>
+            </control>
+          </focusedlayout>
+          <onup>3200</onup>
+          <ondown>3220</ondown>
+          <onleft>100</onleft>
+        </control>
+        <control type="fixedlist" id="3214">
+          <left>-100</left>
+          <top>46</top>
+          <width>2020</width>
+          <height>390</height>
+          <orientation>horizontal</orientation>
+          <focusposition>1</focusposition>
+          <movement>0</movement>
+          <scrolltime tween="cubic" easing="out">200</scrolltime>
+          <itemlayout width="292" height="390">
+            <control type="group">
+              <left>0</left>
+              <top>30</top>
+              <width>264</width>
+              <height>264</height>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png">$INFO[ListItem.Property(ph)]</texture>
+              </control>
+              <control type="textbox">
+                <left>16</left>
+                <top>86</top>
+                <width>232</width>
+                <height>92</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <autoscroll>false</autoscroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
+                <aspectratio scalediffuse="false">scale</aspectratio>
+                <fadetime>150</fadetime>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture border="10">hairline.png</texture>
+              </control>
+              <control type="progress">
+                <left>0</left>
+                <top>256</top>
+                <width>264</width>
+                <height>8</height>
+                <visible>ListItem.IsResumable</visible>
+                <texturebg colordiffuse="99000000">pley-white.png</texturebg>
+                <midtexture colordiffuse="FF38BDF8">pley-white.png</midtexture>
+                <info>ListItem.PercentPlayed</info>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>40</height>
+                <visible>String.IsEqual(ListItem.Property(state),watched)</visible>
+                <texture>tick.png</texture>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FF191D24" border="10">round8.png</texture>
+              </control>
+              <control type="image">
+                <left>108</left>
+                <top>68</top>
+                <width>48</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FFE9EBEF">icon-arrow-right.png</texture>
+              </control>
+              <control type="label">
+                <left>0</left>
+                <top>132</top>
+                <width>264</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>322</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>356</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFA1A9B6</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label2]</label>
+            </control>
+          </itemlayout>
+          <focusedlayout width="292" height="390">
+            <control type="group">
+              <left>0</left>
+              <top>30</top>
+              <width>264</width>
+              <height>264</height>
+              <animation effect="zoom" start="100" end="108" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png">$INFO[ListItem.Property(ph)]</texture>
+              </control>
+              <control type="textbox">
+                <left>16</left>
+                <top>86</top>
+                <width>232</width>
+                <height>92</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <autoscroll>false</autoscroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
+                <aspectratio scalediffuse="false">scale</aspectratio>
+                <fadetime>150</fadetime>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture border="10">hairline.png</texture>
+              </control>
+              <control type="progress">
+                <left>0</left>
+                <top>256</top>
+                <width>264</width>
+                <height>8</height>
+                <visible>ListItem.IsResumable</visible>
+                <texturebg colordiffuse="99000000">pley-white.png</texturebg>
+                <midtexture colordiffuse="FF38BDF8">pley-white.png</midtexture>
+                <info>ListItem.PercentPlayed</info>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>40</height>
+                <visible>String.IsEqual(ListItem.Property(state),watched)</visible>
+                <texture>tick.png</texture>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FF191D24" border="10">round8.png</texture>
+              </control>
+              <control type="image">
+                <left>108</left>
+                <top>68</top>
+                <width>48</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FFE9EBEF">icon-arrow-right.png</texture>
+              </control>
+              <control type="label">
+                <left>0</left>
+                <top>132</top>
+                <width>264</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+              <control type="image">
+                <left>-12</left>
+                <top>-12</top>
+                <width>288</width>
+                <height>288</height>
+                <visible>Control.HasFocus(3214)</visible>
+                <texture border="24">ring.png</texture>
+              </control>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>322</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>Control.HasFocus(3214) + String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font25_title</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>322</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>!Control.HasFocus(3214) + String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>356</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFA1A9B6</textcolor>
+              <align>left</align>
               <aligny>center</aligny>
               <scroll>false</scroll>
               <label>$INFO[ListItem.Label2]</label>
@@ -15631,6 +16468,405 @@
           <ondown>3230</ondown>
           <onleft>100</onleft>
         </control>
+        <control type="fixedlist" id="3224">
+          <left>-100</left>
+          <top>46</top>
+          <width>2020</width>
+          <height>390</height>
+          <orientation>horizontal</orientation>
+          <focusposition>1</focusposition>
+          <movement>0</movement>
+          <scrolltime tween="cubic" easing="out">200</scrolltime>
+          <itemlayout width="292" height="390">
+            <control type="group">
+              <left>0</left>
+              <top>30</top>
+              <width>264</width>
+              <height>264</height>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png">$INFO[ListItem.Property(ph)]</texture>
+              </control>
+              <control type="textbox">
+                <left>16</left>
+                <top>86</top>
+                <width>232</width>
+                <height>92</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <autoscroll>false</autoscroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
+                <aspectratio scalediffuse="false">scale</aspectratio>
+                <fadetime>150</fadetime>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture border="10">hairline.png</texture>
+              </control>
+              <control type="progress">
+                <left>0</left>
+                <top>256</top>
+                <width>264</width>
+                <height>8</height>
+                <visible>ListItem.IsResumable</visible>
+                <texturebg colordiffuse="99000000">pley-white.png</texturebg>
+                <midtexture colordiffuse="FF38BDF8">pley-white.png</midtexture>
+                <info>ListItem.PercentPlayed</info>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>40</height>
+                <visible>String.IsEqual(ListItem.Property(state),watched)</visible>
+                <texture>tick.png</texture>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FF191D24" border="10">round8.png</texture>
+              </control>
+              <control type="image">
+                <left>108</left>
+                <top>68</top>
+                <width>48</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FFE9EBEF">icon-arrow-right.png</texture>
+              </control>
+              <control type="label">
+                <left>0</left>
+                <top>132</top>
+                <width>264</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>322</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>356</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFA1A9B6</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label2]</label>
+            </control>
+          </itemlayout>
+          <focusedlayout width="292" height="390">
+            <control type="group">
+              <left>0</left>
+              <top>30</top>
+              <width>264</width>
+              <height>264</height>
+              <animation effect="zoom" start="100" end="108" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png">$INFO[ListItem.Property(ph)]</texture>
+              </control>
+              <control type="textbox">
+                <left>16</left>
+                <top>86</top>
+                <width>232</width>
+                <height>92</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <autoscroll>false</autoscroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
+                <aspectratio scalediffuse="false">scale</aspectratio>
+                <fadetime>150</fadetime>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture border="10">hairline.png</texture>
+              </control>
+              <control type="progress">
+                <left>0</left>
+                <top>256</top>
+                <width>264</width>
+                <height>8</height>
+                <visible>ListItem.IsResumable</visible>
+                <texturebg colordiffuse="99000000">pley-white.png</texturebg>
+                <midtexture colordiffuse="FF38BDF8">pley-white.png</midtexture>
+                <info>ListItem.PercentPlayed</info>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>40</height>
+                <visible>String.IsEqual(ListItem.Property(state),watched)</visible>
+                <texture>tick.png</texture>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FF191D24" border="10">round8.png</texture>
+              </control>
+              <control type="image">
+                <left>108</left>
+                <top>68</top>
+                <width>48</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FFE9EBEF">icon-arrow-right.png</texture>
+              </control>
+              <control type="label">
+                <left>0</left>
+                <top>132</top>
+                <width>264</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+              <control type="image">
+                <left>-12</left>
+                <top>-12</top>
+                <width>288</width>
+                <height>288</height>
+                <visible>Control.HasFocus(3224)</visible>
+                <texture border="24">ring.png</texture>
+              </control>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>322</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>Control.HasFocus(3224) + String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font25_title</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>322</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>!Control.HasFocus(3224) + String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>356</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFA1A9B6</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label2]</label>
+            </control>
+          </focusedlayout>
+          <onup>3210</onup>
+          <ondown>3230</ondown>
+          <onleft>100</onleft>
+        </control>
       </control>
       <control type="group" id="3230">
         <left>0</left>
@@ -16637,6 +17873,404 @@
               <font>font12</font>
               <textcolor>FFA1A9B6</textcolor>
               <align>center</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label2]</label>
+            </control>
+          </focusedlayout>
+          <onup>3220</onup>
+          <onleft>100</onleft>
+        </control>
+        <control type="fixedlist" id="3234">
+          <left>-100</left>
+          <top>46</top>
+          <width>2020</width>
+          <height>390</height>
+          <orientation>horizontal</orientation>
+          <focusposition>1</focusposition>
+          <movement>0</movement>
+          <scrolltime tween="cubic" easing="out">200</scrolltime>
+          <itemlayout width="292" height="390">
+            <control type="group">
+              <left>0</left>
+              <top>30</top>
+              <width>264</width>
+              <height>264</height>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png">$INFO[ListItem.Property(ph)]</texture>
+              </control>
+              <control type="textbox">
+                <left>16</left>
+                <top>86</top>
+                <width>232</width>
+                <height>92</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <autoscroll>false</autoscroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
+                <aspectratio scalediffuse="false">scale</aspectratio>
+                <fadetime>150</fadetime>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture border="10">hairline.png</texture>
+              </control>
+              <control type="progress">
+                <left>0</left>
+                <top>256</top>
+                <width>264</width>
+                <height>8</height>
+                <visible>ListItem.IsResumable</visible>
+                <texturebg colordiffuse="99000000">pley-white.png</texturebg>
+                <midtexture colordiffuse="FF38BDF8">pley-white.png</midtexture>
+                <info>ListItem.PercentPlayed</info>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>40</height>
+                <visible>String.IsEqual(ListItem.Property(state),watched)</visible>
+                <texture>tick.png</texture>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FF191D24" border="10">round8.png</texture>
+              </control>
+              <control type="image">
+                <left>108</left>
+                <top>68</top>
+                <width>48</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FFE9EBEF">icon-arrow-right.png</texture>
+              </control>
+              <control type="label">
+                <left>0</left>
+                <top>132</top>
+                <width>264</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>322</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>356</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFA1A9B6</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label2]</label>
+            </control>
+          </itemlayout>
+          <focusedlayout width="292" height="390">
+            <control type="group">
+              <left>0</left>
+              <top>30</top>
+              <width>264</width>
+              <height>264</height>
+              <animation effect="zoom" start="100" end="108" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png">$INFO[ListItem.Property(ph)]</texture>
+              </control>
+              <control type="textbox">
+                <left>16</left>
+                <top>86</top>
+                <width>232</width>
+                <height>92</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <autoscroll>false</autoscroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture diffuse="mask-square.png" background="true">$INFO[ListItem.Art(tile)]</texture>
+                <aspectratio scalediffuse="false">scale</aspectratio>
+                <fadetime>150</fadetime>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture border="10">hairline.png</texture>
+              </control>
+              <control type="progress">
+                <left>0</left>
+                <top>256</top>
+                <width>264</width>
+                <height>8</height>
+                <visible>ListItem.IsResumable</visible>
+                <texturebg colordiffuse="99000000">pley-white.png</texturebg>
+                <midtexture colordiffuse="FF38BDF8">pley-white.png</midtexture>
+                <info>ListItem.PercentPlayed</info>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>40</height>
+                <visible>String.IsEqual(ListItem.Property(state),watched)</visible>
+                <texture>tick.png</texture>
+              </control>
+              <control type="image">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>212</left>
+                <top>12</top>
+                <width>40</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),1)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>200</left>
+                <top>12</top>
+                <width>52</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),2)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <texture colordiffuse="FF38BDF8" border="6">round4.png</texture>
+              </control>
+              <control type="label">
+                <left>188</left>
+                <top>12</top>
+                <width>64</width>
+                <height>36</height>
+                <visible>String.IsEqual(ListItem.Property(countsize),3)</visible>
+                <font>font20_title</font>
+                <textcolor>FF03131F</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Property(count)]</label>
+              </control>
+              <control type="image">
+                <left>0</left>
+                <top>0</top>
+                <width>264</width>
+                <height>264</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FF191D24" border="10">round8.png</texture>
+              </control>
+              <control type="image">
+                <left>108</left>
+                <top>68</top>
+                <width>48</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <texture colordiffuse="FFE9EBEF">icon-arrow-right.png</texture>
+              </control>
+              <control type="label">
+                <left>0</left>
+                <top>132</top>
+                <width>264</width>
+                <height>48</height>
+                <visible>!String.IsEmpty(ListItem.Property(seeall))</visible>
+                <font>font32_title</font>
+                <textcolor>FFE9EBEF</textcolor>
+                <align>center</align>
+                <aligny>center</aligny>
+                <scroll>false</scroll>
+                <label>$INFO[ListItem.Label]</label>
+              </control>
+              <control type="image">
+                <left>-12</left>
+                <top>-12</top>
+                <width>288</width>
+                <height>288</height>
+                <visible>Control.HasFocus(3234)</visible>
+                <texture border="24">ring.png</texture>
+              </control>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>322</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>Control.HasFocus(3234) + String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font25_title</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>322</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>!Control.HasFocus(3234) + String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFE9EBEF</textcolor>
+              <align>left</align>
+              <aligny>center</aligny>
+              <scroll>false</scroll>
+              <label>$INFO[ListItem.Label]</label>
+            </control>
+            <control type="label">
+              <left>0</left>
+              <top>356</top>
+              <width>282</width>
+              <height>34</height>
+              <visible>String.IsEmpty(ListItem.Property(seeall))</visible>
+              <font>font12</font>
+              <textcolor>FFA1A9B6</textcolor>
+              <align>left</align>
               <aligny>center</aligny>
               <scroll>false</scroll>
               <label>$INFO[ListItem.Label2]</label>

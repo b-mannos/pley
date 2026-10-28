@@ -195,12 +195,13 @@ ITEM_BUTTONS_BOX = 3030
 ITEM_PLAY, ITEM_FROM_START, ITEM_WATCHED, ITEM_UNWATCHED = 3019, 3020, 3021, 3022
 ITEM_ADD_TO_LIST, ITEM_IN_LIST, ITEM_TRAILER, ITEM_MORE = 3023, 3024, 3025, 3026
 ITEM_ADD_TO_PLAYLIST = 3027
+ITEM_SHUFFLE = 3028  # an artist's or album's tracks, shuffled
 ITEM_INFO_BLOCK = 3050
 ITEM_INFO_TITLE, ITEM_INFO_EPISODE, ITEM_INFO_META, ITEM_INFO_SUMMARY = 3051, 3052, 3150, 3054
 ITEM_INFO_LINE = 3055  # an episode's "Season 1 · Episode 3 · 45 min"
 ITEM_SEASONS = 3060  # the season tabs
 ITEM_ROWS = 3200
-ITEM_SLOTS = 4  # episodes, extras, cast, more like this
+ITEM_SLOTS = 4  # episodes (an artist's albums, an album's tracks), extras, cast, more like this
 
 # A library (TvLibraryScreen): its tabs, its controls, its grid; its
 # Recommended tab's rows.

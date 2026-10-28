@@ -96,6 +96,13 @@ side by side with Kodi's were the reference):
   (the full summary, the show or season of an episode). Then a show's
   seasons as tabs and their episodes, Extras, Cast & Crew and More Like
   This; the info block says which episode focus is on.
+- **Music** (the web's artist and album pages): an artist's page has its
+  albums and tracks counted, Play and Shuffle, then its albums, newest
+  first; an album's its artist, year, tracks and length, Play, Shuffle and
+  More (Go to artist), then its tracks, numbered with their length. A
+  track plays the album on from it. They play in Kodi's music playlist,
+  each asked of the server as Kodi comes to it (the plugin's play route),
+  so each is reported as it plays.
 - **A library**: Recommended (its rows), Library (every title in a grid,
   more loading as focus nears the end) and Collections. It opens on the
   tab it was last left on, as on the other TVs: the add-on remembers that
@@ -368,7 +375,7 @@ in `portable_data/userdata/advancedsettings.xml`.
 - "Who's watching?" and switching profiles (the `profiles` scope).
 - What the Android app's pages have below their rows: a title's Details
   (plays, versions, media info) and the library's letter bar; a person's
-  page with their photo (theirs is a grid of titles); music's own pages.
+  page with their photo (theirs is a grid of titles).
 - In Kodi's lists, a title's information page shows its synopsis, not its
   cast, genres or crew: lists don't carry them.
 - Editing playlists (renaming, reordering, taking titles out): Add to

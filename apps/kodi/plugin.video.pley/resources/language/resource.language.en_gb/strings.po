@@ -690,3 +690,23 @@ msgstr ""
 msgctxt "#30213"
 msgid "Playing at %s for a smoother picture"
 msgstr ""
+
+msgctxt "#30214"
+msgid "Shuffle"
+msgstr ""
+
+msgctxt "#30215"
+msgid "Albums"
+msgstr ""
+
+msgctxt "#30216"
+msgid "Tracks"
+msgstr ""
+
+msgctxt "#30217"
+msgid "Go to artist"
+msgstr ""
+
+msgctxt "#30218"
+msgid "No tracks found"
+msgstr ""

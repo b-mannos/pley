@@ -31,9 +31,43 @@ def executeJSONRPC(request):
     return '{"result": {"value": null}}'
 
 
+PLAYLIST_MUSIC, PLAYLIST_VIDEO = 0, 1
+# What Player.play was given: (item, listitem, startpos).
+played = []
+
+
 class Player:
     def __init__(self):
         pass
+
+    def play(self, item=None, listitem=None, windowed=False, startpos=-1):
+        played.append((item, listitem, startpos))
+
+
+class PlayList:
+    """Kodi's playlists, one of each kind: what is in them, and whether
+    they are shuffled."""
+
+    entries = {}
+    shuffled = {}
+
+    def __init__(self, kind):
+        self.kind = kind
+
+    def clear(self):
+        PlayList.entries[self.kind] = []
+
+    def add(self, url, listitem=None, index=-1):
+        PlayList.entries.setdefault(self.kind, []).append((url, listitem))
+
+    def shuffle(self):
+        PlayList.shuffled[self.kind] = True
+
+    def unshuffle(self):
+        PlayList.shuffled[self.kind] = False
+
+    def size(self):
+        return len(PlayList.entries.get(self.kind, []))
 
 
 class Monitor:

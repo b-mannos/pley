@@ -42,7 +42,8 @@ class SkinTest(unittest.TestCase):
         self.assertEqual(moves(L.ITEM_WATCHED)["onleft"], str(L.button_box(L.ITEM_FROM_START)))
         self.assertEqual(moves(L.ITEM_WATCHED)["onright"], str(L.button_box(L.ITEM_UNWATCHED)))
         self.assertEqual(moves(L.ITEM_WATCHED)["ondown"], str(L.ITEM_SEASONS))
-        self.assertEqual(moves(L.ITEM_FROM_START)["onleft"], str(L.ITEM_PLAY))
+        self.assertEqual(moves(L.ITEM_FROM_START)["onleft"], str(L.button_box(L.ITEM_SHUFFLE)))
+        self.assertEqual(moves(L.ITEM_SHUFFLE)["onleft"], str(L.ITEM_PLAY))
         self.assertIsNone(moves(L.ITEM_MORE)["onright"])
         self.assertEqual(moves(L.HOME_INFO)["onright"], str(L.button_box(L.HOME_WATCHED)))
 

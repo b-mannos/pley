@@ -170,6 +170,11 @@ TEXT = {
     "sign_out_ask": 30210,
     "sign_out_of": 30211,
     "smoother": 30213,
+    "shuffle": 30214,
+    "albums": 30215,
+    "tracks_row": 30216,
+    "go_to_artist": 30217,
+    "no_tracks": 30218,
 }
 
 

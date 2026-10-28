@@ -13,14 +13,14 @@ from __future__ import annotations
 import threading
 import time
 import unicodedata
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlencode
 
 import xbmc
 import xbmcgui
 
 from . import api, kodi, playback, tiles, tracks, words
 from . import layout as L
-from .listing import image
+from .listing import image, list_item
 
 T = kodi.text
 
@@ -52,6 +52,9 @@ PAGE = 120
 # What a playlist takes (shows, seasons, artists and albums add their
 # episodes or tracks), and of which kind.
 PLAYLIST_KINDS = {"movie": "video", "show": "video", "season": "video", "episode": "video", "artist": "audio", "album": "audio", "track": "audio"}
+# Music's own pages (the web's ArtistView and AlbumView): an artist's
+# albums, an album's tracks, and Play and Shuffle for them.
+MUSIC_PAGES = ("artist", "album")
 # A library's sort as a smart filter says it (SmartFilter.kt's, the web's).
 PLEX_SORTS = {
     "title": "titleSort",
@@ -64,6 +67,7 @@ PLEX_SORTS = {
 }
 HERO_BUTTONS = (
     L.ITEM_PLAY,
+    L.ITEM_SHUFFLE,
     L.ITEM_FROM_START,
     L.ITEM_WATCHED,
     L.ITEM_UNWATCHED,
@@ -711,7 +715,10 @@ class Window(xbmcgui.WindowXML):
     # ---------------------------------------------------------- things to do
 
     def play(self, item: dict, from_start: bool = False) -> None:
-        """Plays `item` (a show or season: the episode to watch next)."""
+        """Plays `item` (a show or season: the episode to watch next; an
+        artist or album: its tracks)."""
+        if item.get("kind") in MUSIC_PAGES:
+            return self.play_music(item)
         try:
             if item.get("kind") in ("show", "season"):
                 found = self.session.get("/api/items/%d/on-deck" % item["id"]).get("item")
@@ -725,6 +732,28 @@ class Window(xbmcgui.WindowXML):
         if start:
             li.setProperty("StartOffset", "%.3f" % (start / 1000.0))
         xbmc.Player().play(li.getPath(), li)
+
+    def play_music(self, item: dict, at: int = 0, shuffle: bool = False, tracks=None) -> None:
+        """An artist's or album's tracks in Kodi's music playlist, from
+        track `at` (the web's audio queue). Kodi asks the plugin's play
+        route for each as it comes to it, so each is reported as it plays."""
+        try:
+            if tracks is None:
+                tracks = music_tracks(self.session, item)
+        except api.ApiError as e:
+            return self.toast(T("server_error") % e.message, 6)
+        if not tracks:
+            return self.toast(T("no_tracks"))
+        queue = xbmc.PlayList(xbmc.PLAYLIST_MUSIC)
+        queue.clear()
+        for track in tracks:
+            queue.add(play_url(track["id"]), list_item(self.session.base, track))
+        if shuffle:
+            queue.shuffle()
+            at = 0
+        else:
+            queue.unshuffle()
+        xbmc.Player().play(queue, startpos=at)
 
     def set_watched(self, item: dict, watched: bool) -> None:
         self.session.client.post("/api/items/%d/%s" % (item["id"], "watched" if watched else "unwatched"))
@@ -809,6 +838,27 @@ class Window(xbmcgui.WindowXML):
         if kind == "track":
             return self.play(item, from_start=True)
         self.open(Item(self, item["id"], item))
+
+
+def play_url(item_id: int) -> str:
+    """The plugin's play route for `item_id`, which Kodi asks as it comes
+    to it in a playlist."""
+    return "plugin://%s/?%s" % (kodi.ADDON_ID, urlencode({"route": "play", "id": item_id}))
+
+
+def newest_first(albums: list) -> list:
+    """An artist's albums as the web lists them: newest first, then by title."""
+    return sorted(albums, key=lambda a: (-(a.get("year") or 0), (a.get("sort_title") or a.get("title") or "").lower()))
+
+
+def music_tracks(session, item: dict) -> list:
+    """An album's tracks, or an artist's, album by album (newest first)."""
+    children = lambda id_: session.get("/api/items/%d/children" % id_).get("items", [])  # noqa: E731
+    if item.get("kind") == "album":
+        return children(item["id"])
+    albums = newest_first(children(item["id"]))
+    lists = api.together(*[lambda a=a: children(a["id"]) for a in albums]) if albums else []
+    return [track for found in lists for track in found or []]
 
 
 def rail_view(library: dict) -> tuple:
@@ -1284,8 +1334,10 @@ class Item(Screen):
         super().__init__(win)
         self.item_id = item_id
         self.summary = summary
-        self.rows = Rows(win, L.ITEM_ROWS, L.ITEM_SLOTS, ("poster", "landscape", "episode", "person"))
+        self.rows = Rows(win, L.ITEM_ROWS, L.ITEM_SLOTS, ("poster", "landscape", "episode", "person", "square"))
         self.detail = {}
+        # An artist's albums, an album's tracks.
+        self.children = []
         self.seasons = []
         self.season = None
         self.episodes = []
@@ -1296,6 +1348,7 @@ class Item(Screen):
         self.playable = True
         self.model = []
         self.first_y = 800
+        self.first_button = L.ITEM_PLAY
 
     # -- loading
 
@@ -1322,12 +1375,17 @@ class Item(Screen):
             calls.append(("on_deck", lambda: s.get("/api/items/%d/on-deck" % self.item_id).get("item")))
         elif kind == "episode" and parent:
             calls.append(("episodes", lambda: s.get("/api/items/%d/children" % parent, summaries=1).get("items", [])))
+        elif kind in MUSIC_PAGES:
+            calls.append(("children", lambda: s.get("/api/items/%d/children" % self.item_id).get("items", [])))
         if kind in ("movie", "show"):
             calls.append(("related", lambda: s.get("/api/items/%d/related" % self.item_id).get("items", [])))
         answers = dict(zip([name for name, _ in calls], api.together(*[call for _, call in calls]))) if calls else {}
         self.detail = detail or answers["detail"]
         self.related = answers.get("related") or []
         self.on_deck = answers.get("on_deck")
+        self.children = answers.get("children") or []
+        if kind == "artist":
+            self.children = newest_first(self.children)
         if kind == "show":
             self.seasons = answers.get("seasons") or []
             wanted = (self.on_deck or {}).get("parent_id")
@@ -1340,6 +1398,10 @@ class Item(Screen):
     def rows_model(self) -> list:
         d = self.detail
         rows = []
+        if d["kind"] == "artist" and self.children:
+            rows.append({"key": "albums", "title": T("albums"), "shape": "square", "items": self.children})
+        if d["kind"] == "album" and self.children:
+            rows.append({"key": "tracks", "title": T("tracks_row"), "shape": "episode", "items": self.children})
         if self.episodes:
             title = words.season_title((self.season or {}).get("title"), (self.season or {}).get("index"))
             if d["kind"] in ("season", "episode"):
@@ -1371,6 +1433,8 @@ class Item(Screen):
         d = self.detail
         if d["kind"] in ("movie", "episode", "extra"):
             return (T("resume") if words.in_progress(d) else T("play")), d, words.in_progress(d)
+        if d["kind"] in MUSIC_PAGES:
+            return (T("play"), d, False) if self.children else (T("unavailable"), None, False)
         target = self.on_deck
         if not target:
             return T("unavailable"), None, False
@@ -1398,12 +1462,15 @@ class Item(Screen):
             context = " · ".join(p for p in (words.episode_label(d.get("parent_index"), d.get("index")), d.get("title")) if p)
         elif kind == "season" and show_title:
             context = d.get("title") or words.season_title(None, d.get("index"))
+        elif kind == "album":
+            context = d.get("parent_title") or ""
+        music = kind in MUSIC_PAGES
         label, target, resumes = self.primary()
         genres = list(d.get("genres") or [])
         info = {
             "title": show_title or d.get("title"),
             "context": context,
-            "meta": words.item_meta(d, self.seasons)[: L.META_PIECES],
+            "meta": self.meta_line(),
             "left": words.time_left(words.state(target).get("position_ms"), target.get("duration_ms")) if resumes and target else "",
             "genres": " · ".join(genres),
             "summary": (d.get("summary") or "").strip(),
@@ -1425,16 +1492,26 @@ class Item(Screen):
         win.put(L.ITEM_PLAY, ICON_ROOM + label)
         self.playable = target is not None
         win.c(L.ITEM_PLAY).setEnabled(self.playable)
-        win.visible(L.button_box(L.ITEM_FROM_START), resumes)
         watched = bool(words.state(d).get("watched"))
-        win.visible(L.button_box(L.ITEM_WATCHED), not watched)
-        win.visible(L.button_box(L.ITEM_UNWATCHED), watched)
         listable = kind in ("movie", "show")
-        win.visible(L.button_box(L.ITEM_ADD_TO_LIST), listable and not d.get("in_watchlist"))
-        win.visible(L.button_box(L.ITEM_IN_LIST), listable and bool(d.get("in_watchlist")))
-        win.visible(L.button_box(L.ITEM_TRAILER), self.trailer() is not None)
-        win.visible(L.button_box(L.ITEM_ADD_TO_PLAYLIST), kind in PLAYLIST_KINDS)
-        win.visible(L.button_box(L.ITEM_MORE), bool(self.more_actions()))
+        # Music is played and added to playlists; it isn't marked watched.
+        shown = {
+            L.ITEM_PLAY: self.playable,
+            L.ITEM_SHUFFLE: music and self.playable,
+            L.ITEM_FROM_START: resumes,
+            L.ITEM_WATCHED: not music and not watched,
+            L.ITEM_UNWATCHED: not music and watched,
+            L.ITEM_ADD_TO_LIST: listable and not d.get("in_watchlist"),
+            L.ITEM_IN_LIST: listable and bool(d.get("in_watchlist")),
+            L.ITEM_TRAILER: self.trailer() is not None,
+            L.ITEM_ADD_TO_PLAYLIST: kind in PLAYLIST_KINDS,
+            L.ITEM_MORE: bool(self.more_actions()),
+        }
+        for button, on in shown.items():
+            if button != L.ITEM_PLAY:
+                win.visible(L.button_box(button), on)
+        # Where focus goes on the hero: Play, else the first button there is.
+        self.first_button = next((b for b in HERO_BUTTONS if shown.get(b)), L.ITEM_PLAY)
         # Season tabs, for a show of more than one season.
         tabs = win.c(L.ITEM_SEASONS)
         tabs.reset()
@@ -1456,6 +1533,11 @@ class Item(Screen):
             if current in ids_:
                 win.c(L.slot_list(L.ITEM_ROWS, 0, "episode")).selectItem(ids_.index(current))
 
+    def meta_line(self) -> list:
+        d = self.detail
+        found = words.music_meta(d, self.children) if d["kind"] in MUSIC_PAGES else words.item_meta(d, self.seasons)
+        return found[: L.META_PIECES]
+
     def trailer(self):
         return next((x for x in self.detail.get("extras") or [] if x.get("extra_type") == "trailer"), None)
 
@@ -1471,6 +1553,8 @@ class Item(Screen):
             actions.append((T("go_to_season"), lambda: self.win.open(Item(self.win, d["parent_id"]))))
         if d["kind"] == "season" and d.get("parent_id"):
             actions.append((T("go_to_show"), lambda: self.win.open(Item(self.win, d["parent_id"]))))
+        if d["kind"] == "album" and d.get("parent_id"):
+            actions.append((T("go_to_artist"), lambda: self.win.open(Item(self.win, d["parent_id"]))))
         return actions
 
     def full_summary(self) -> None:
@@ -1486,7 +1570,7 @@ class Item(Screen):
         win.visible(L.ITEM_HERO, True)
         self.rows.place(None, self.first_y)
         self.place_tabs(self.first_y)
-        win.setFocusId(L.ITEM_PLAY if self.playable else L.ITEM_WATCHED)
+        win.setFocusId(self.first_button)
 
     def place_tabs(self, episodes_y: int) -> None:
         if len(self.seasons) > 1 and self.rows.rows and self.rows.rows[0]["key"] == "episodes":
@@ -1516,7 +1600,7 @@ class Item(Screen):
         show_title = d.get("grandparent_title") if kind == "episode" else d.get("parent_title") if kind == "season" else None
         win.put(L.ITEM_INFO_TITLE, show_title or d.get("title"))
         if episode is not None:
-            win.meta(L.ITEM_INFO_META, words.item_meta(d, self.seasons)[: L.META_PIECES])
+            win.meta(L.ITEM_INFO_META, self.meta_line())
             win.put(L.ITEM_INFO_EPISODE, episode.get("title"))
             line = " · ".join(p for p in (words.episode_long_label(episode.get("parent_index"), episode.get("index")), words.runtime(episode.get("duration_ms"))) if p)
             win.put(L.ITEM_INFO_LINE, line)
@@ -1525,7 +1609,7 @@ class Item(Screen):
             win.place(L.ITEM_INFO_SUMMARY, L.GUTTER, 326)
             win.text(L.ITEM_INFO_SUMMARY, clamp(episode.get("summary") or "", 30, L.TEXT_WIDTH, 2))
         else:
-            win.meta(L.ITEM_INFO_META, words.item_meta(d, self.seasons)[: L.META_PIECES])
+            win.meta(L.ITEM_INFO_META, self.meta_line())
             win.visible(L.ITEM_INFO_EPISODE, False)
             win.visible(L.ITEM_INFO_LINE, False)
             win.place(L.ITEM_INFO_SUMMARY, L.GUTTER, 216)
@@ -1608,6 +1692,8 @@ class Item(Screen):
                 _, target, _ = self.primary()
                 if target is not None:
                     win.play(target)
+            elif control_id == L.ITEM_SHUFFLE:
+                win.play_music(d, shuffle=True, tracks=self.children if d["kind"] == "album" else None)
             elif control_id == L.ITEM_FROM_START:
                 _, target, _ = self.primary()
                 if target is not None:
@@ -1633,6 +1719,9 @@ class Item(Screen):
                     _, row, item = found
                     if row["key"] == "episodes":
                         win.open(Item(win, item["id"], item))
+                    elif row["key"] == "tracks":
+                        # The album plays on from the track.
+                        win.play_music(d, at=self.children.index(item), tracks=self.children)
                     else:
                         win.open_item(item)
         except api.ApiError as e:

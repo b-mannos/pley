@@ -60,6 +60,10 @@ def captions(item: dict, shape: str) -> tuple:
     if shape in ("episode", "wide") and item.get("kind") == "episode":
         numbered = "%d. %s" % (item["index"], title) if item.get("index") is not None else title
         return numbered, left or words.runtime(item.get("duration_ms"))
+    if shape == "episode" and item.get("kind") == "track":
+        # An album's tracks, numbered, with their length (the web's track list).
+        numbered = "%d. %s" % (item["index"], title) if item.get("index") is not None else title
+        return numbered, words.clock(item.get("duration_ms"))
     if shape == "landscape" and item.get("kind") == "episode":
         show = item.get("grandparent_title") or title
         second = left or (title if show != title else "")

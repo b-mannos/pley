@@ -89,7 +89,7 @@ add("icon-arrow-right.png", 48, 48, icon("arrow-right", 48, "#ffffff"));
 // The round buttons (TvRoundButton): 80 square, corners 12, at rest bg at
 // 80 % with the control edge and the icon in fg, focused the accent with
 // the icon in on-accent.
-for (const name of ["rotate-ccw", "circle-check", "eye-off", "bookmark-plus", "bookmark-check", "list-plus", "film", "ellipsis", "info"]) {
+for (const name of ["rotate-ccw", "circle-check", "eye-off", "bookmark-plus", "bookmark-check", "list-plus", "film", "ellipsis", "info", "shuffle"]) {
   add(`button-${name}.png`, 80, 80, box(80, 80, 12, "rgba(11,13,16,0.8)", CONTROL, 2) + icon(name, 40, FG, 20, 20));
   add(`button-${name}-focus.png`, 80, 80, box(80, 80, 12, ACCENT) + icon(name, 40, ON_ACCENT, 20, 20));
 }

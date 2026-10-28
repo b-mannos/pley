@@ -61,6 +61,12 @@ class Control:
     def setImage(self, path, use_cache=True):
         self.image = path
 
+    def setText(self, text):
+        self.label = text
+
+    def setEnabled(self, enabled):
+        self.enabled = enabled
+
 
 class FakeWindow(window.Window):
     """The window's drawing, on controls that only remember."""
@@ -219,6 +225,58 @@ class WindowTest(unittest.TestCase):
         with Dialogs(picks=[0], typed=[""]):
             win.add_to_playlist({"id": 9, "kind": "album"})
         self.assertEqual(len(win.session.client.posts), 2)
+
+    def test_an_album_and_its_tracks(self):
+        album = {"id": 40, "kind": "album", "title": "Blue Hour", "parent_id": 39, "parent_title": "Nadia Rose", "year": 2021}
+        tracks = [
+            {"id": 41, "kind": "track", "title": "Opening", "index": 1, "duration_ms": 225_000, "parent_title": "Blue Hour", "grandparent_title": "Nadia Rose"},
+            {"id": 42, "kind": "track", "title": "Long Night", "index": 2, "duration_ms": 3_723_000, "parent_title": "Blue Hour", "grandparent_title": "Nadia Rose"},
+        ]
+        win = FakeWindow()
+        win.session.client = Client({"/api/items/40": album, "/api/items/40/children": {"items": tracks}})
+        win.session.get = win.session.client.get
+        win.session.details, win.session.lock = {}, window.threading.Lock()
+        page = window.Item(win, 40, {"id": 40, "kind": "album"})
+        page.load()
+        page.show(False)
+        # The tracks, numbered with their length, under the album's line.
+        self.assertEqual([row["key"] for row in page.model], ["tracks"])
+        shown = win.made[L.slot_list(L.ITEM_ROWS, 0, "episode")].items
+        self.assertEqual([(li.label, li.label2) for li in shown], [("1. Opening", "3:45"), ("2. Long Night", "1:02:03")])
+        self.assertEqual(win.made[L.ITEM_CONTEXT].label, "Nadia Rose")
+        self.assertEqual(page.meta_line(), [("text", "2021"), ("text", "2 tracks"), ("text", "1h 6m")])
+        # Play and Shuffle; music isn't marked watched.
+        self.assertTrue(win.made[L.button_box(L.ITEM_SHUFFLE)].visible)
+        self.assertFalse(win.made[L.button_box(L.ITEM_WATCHED)].visible)
+        self.assertFalse(win.made[L.button_box(L.ITEM_UNWATCHED)].visible)
+        self.assertEqual(win.focused, L.ITEM_PLAY)
+        self.assertIn((window.T("go_to_artist")), [name for name, _ in page.more_actions()])
+        # A track plays the album on from it, each asked of the plugin as Kodi comes to it.
+        queue = window.xbmc.PlayList.entries
+        del window.xbmc.played[:]
+        win.made[L.slot_list(L.ITEM_ROWS, 0, "episode")].selected = 1
+        page.click(L.slot_list(L.ITEM_ROWS, 0, "episode"))
+        self.assertEqual([url for url, _ in queue[window.xbmc.PLAYLIST_MUSIC]], ["plugin://plugin.video.pley/?route=play&id=41", "plugin://plugin.video.pley/?route=play&id=42"])
+        self.assertEqual(window.xbmc.played[-1][2], 1)
+        self.assertFalse(window.xbmc.PlayList.shuffled[window.xbmc.PLAYLIST_MUSIC])
+        page.click(L.ITEM_SHUFFLE)
+        self.assertTrue(window.xbmc.PlayList.shuffled[window.xbmc.PLAYLIST_MUSIC])
+        self.assertEqual(window.xbmc.played[-1][2], 0)
+
+    def test_an_artist_plays_album_by_album(self):
+        albums = [{"id": 50, "kind": "album", "title": "Early", "year": 2001}, {"id": 51, "kind": "album", "title": "Late", "year": 2020}]
+        answers = {
+            "/api/items/49/children": {"items": albums},
+            "/api/items/50/children": {"items": [{"id": 60, "kind": "track", "title": "One"}]},
+            "/api/items/51/children": {"items": [{"id": 61, "kind": "track", "title": "Two"}]},
+        }
+        session = Client(answers)
+        # Newest first, as the artist's page lists them.
+        self.assertEqual([t["id"] for t in window.music_tracks(session, {"id": 49, "kind": "artist"})], [61, 60])
+        win = FakeWindow()
+        win.session.get = Client({"/api/items/52/children": {"items": []}}).get
+        win.play({"id": 52, "kind": "album"})
+        self.assertEqual(win.toasts, [window.T("no_tracks")])
 
     def test_library_filters(self):
         win = FakeWindow()

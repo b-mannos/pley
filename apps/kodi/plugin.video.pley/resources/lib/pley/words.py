@@ -34,6 +34,16 @@ def runtime(ms) -> str:
     return "%d min" % minutes if 1 <= minutes <= 59 else duration(ms)
 
 
+def clock(ms) -> str:
+    """A track's length as the web's formatClock: "3:45", "1:02:03"."""
+    if not ms or ms <= 0:
+        return ""
+    seconds = int(ms / 1000 + 0.5)
+    h, rest = divmod(seconds, 3600)
+    m, s = divmod(rest, 60)
+    return "%d:%02d:%02d" % (h, m, s) if h else "%d:%02d" % (m, s)
+
+
 def time_left(position_ms, duration_ms) -> str:
     """"26 min left"; "" without a duration or once nothing is left."""
     if not duration_ms or duration_ms <= 0:
@@ -278,6 +288,30 @@ def item_meta(detail: dict, seasons=None) -> list:
     if detail.get("rating"):
         parts.append(("rating", rating(detail["rating"])))
     parts += [("quality", b) for b in quality_badges(files[0] if files else None)]
+    return parts
+
+
+def music_meta(detail: dict, children=None) -> list:
+    """An artist's or album's line (the web's MusicViews): an artist's
+    albums and tracks; an album's year, tracks and length (its artist is
+    the line above). As item_meta's pieces."""
+    parts = []
+    if detail.get("kind") == "artist":
+        if detail.get("child_count") is not None:
+            parts.append(("text", plural(detail["child_count"], "album")))
+        if detail.get("leaf_count") is not None:
+            parts.append(("text", plural(detail["leaf_count"], "track")))
+        return parts
+    tracks = children or []
+    if detail.get("year"):
+        parts.append(("text", str(detail["year"])))
+    if tracks:
+        parts.append(("text", plural(len(tracks), "track")))
+        total = sum(t.get("duration_ms") or 0 for t in tracks)
+        if total:
+            parts.append(("text", duration(total)))
+    if detail.get("rating"):
+        parts.append(("rating", rating(detail["rating"])))
     return parts
 
 
