@@ -399,5 +399,8 @@ to the store.
 - The Show screen asks for its season's episodes and its next episode
   again each time it shows; Home's row fingerprints would spare that when
   nothing changed.
+- Seek previews in Roku's own bar, which takes BIF files; rating
+  titles; putting a playlist's entries in another order;
+  "Always start as"; a music queue to change.
 - Roku's channel store: a developer account, certification, SceneGraph 1.3
   and the launch beacons' order.
