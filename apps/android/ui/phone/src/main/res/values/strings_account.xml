@@ -78,11 +78,11 @@
     <string name="settings_subtitle_style_hint">Captions turned on in Android\'s accessibility settings keep their own style until you change these.</string>
     <string name="settings_subtitle_size">Size</string>
     <string name="settings_size_small">Small</string>
-    <string name="settings_size_medium">Medium</string>
+    <string name="settings_size_medium">Normal</string>
     <string name="settings_size_large">Large</string>
-    <string name="settings_size_largest">Largest</string>
+    <string name="settings_size_largest">Huge</string>
     <string name="settings_subtitle_background">Background</string>
-    <string name="settings_background_none">None, with an outline</string>
+    <string name="settings_background_none">None</string>
     <string name="settings_background_box">Dark box</string>
     <string name="settings_display">Display</string>
     <string name="settings_grid_density">Grid density</string>

@@ -3,8 +3,8 @@
 <resources>
     <!-- The subtitles page's row that moves the subtitles in time. -->
     <string name="player_sync">Sync</string>
-    <string name="player_sync_earlier">Subtitles earlier</string>
-    <string name="player_sync_later">Subtitles later</string>
+    <string name="player_sync_earlier">Show subtitles earlier</string>
+    <string name="player_sync_later">Show subtitles later</string>
     <string name="player_sync_reset">Reset</string>
     <!-- The settings row and page of the sleep timer. -->
     <string name="player_sleep_timer">Sleep timer</string>

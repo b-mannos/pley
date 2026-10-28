@@ -106,11 +106,11 @@
     <!-- Subtitles and display. -->
     <string name="tv_settings_subtitle_size">Subtitle size</string>
     <string name="tv_settings_size_small">Small</string>
-    <string name="tv_settings_size_medium">Medium</string>
+    <string name="tv_settings_size_medium">Normal</string>
     <string name="tv_settings_size_large">Large</string>
-    <string name="tv_settings_size_largest">Largest</string>
+    <string name="tv_settings_size_largest">Huge</string>
     <string name="tv_settings_subtitle_background">Subtitle background</string>
-    <string name="tv_settings_background_none">None, with an outline</string>
+    <string name="tv_settings_background_none">None</string>
     <string name="tv_settings_background_box">Dark box</string>
 
     <!-- Server, Diagnostics, About. -->

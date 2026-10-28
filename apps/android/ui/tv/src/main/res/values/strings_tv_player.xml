@@ -34,7 +34,7 @@
     <string name="tv_player_burn_in">Drawn into the picture by the server</string>
     <string name="tv_player_play_original">Play original</string>
     <string name="tv_player_play_original_hint">Try the file as it is again</string>
-    <string name="tv_player_info_title">Playback info</string>
+    <string name="tv_player_info_title">Playback details</string>
     <string name="tv_player_info_how">How it plays</string>
     <string name="tv_player_info_device">This TV</string>
     <string name="tv_player_info_video_decoder">Video decoder</string>
