@@ -251,13 +251,15 @@ object PlaybackPlan {
 }
 
 /**
- * The Dolby Vision guards, until the server sends Dolby Vision in its
- * streams (S4/S5): a session that would show wrong colours is asked for
- * again another way.
+ * The Dolby Vision guards: a session that would show wrong colours is
+ * asked for again another way.
  *
- * - A remux of profile 5: TS segments lose its Dolby Vision signalling, and
- *   profile 5 has no base layer to fall back to, so the picture comes out
- *   green and purple. It is transcoded instead (tone-mapped).
+ * - A remux of profile 5 that doesn't name its Dolby Vision (an older
+ *   server, or none in its master playlist): TS segments lose the
+ *   signalling, and profile 5 has no base layer to fall back to, so the
+ *   picture comes out green and purple. It is transcoded instead
+ *   (tone-mapped). One whose answer says it stays Dolby Vision
+ *   ([PlaybackInfo.videoRange], "Dolby Vision P5") plays as it comes.
  * - Direct play of profile 7 without a profile 7 decoder (or a quirk that
  *   adds one): Media3 has no fallback for its dual layer. A remux sends the
  *   HEVC base layer, HDR10, when the screen shows HDR10; else a transcode.
@@ -268,7 +270,7 @@ object DvGuards {
         val video = PlaybackPlan.videoStream(file) ?: return null
         if (PlaybackPlan.rangeOf(video) != DynamicRange.DolbyVision) return null
         return when (video.dvProfile) {
-            5 -> if (info.method == PlaybackMethod.Remux) PlaybackMode.Transcode else null
+            5 -> if (info.method == PlaybackMethod.Remux && !keepsDolbyVision(info)) PlaybackMode.Transcode else null
             7 -> {
                 val report = caps?.report
                 // Quirks (the Shield's) are in the snapshot's profiles already.
@@ -282,4 +284,8 @@ object DvGuards {
             else -> null
         }
     }
+
+    /** The session's stream names its Dolby Vision, so the screen gets it ("Dolby Vision P5", not "… base layer"). */
+    private fun keepsDolbyVision(info: PlaybackInfo): Boolean =
+        info.videoRange?.let { it.startsWith("Dolby Vision") && "not decoded" !in it } == true
 }

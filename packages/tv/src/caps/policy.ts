@@ -12,6 +12,7 @@ export type CapsDecision =
 const BL_HDR10 = 1;
 const BL_SDR = 2;
 const BL_HLG = 4;
+const BL_BLU_RAY = 6;
 const RATE_SLACK = 0.01;
 
 /** Profiles both ffprobe and the TVs name the same way: missing from a decoder's list, they refuse a stream. */
@@ -79,7 +80,9 @@ function dolbyVision(video: MediaStream, caps: ClientCaps): CapsDecision {
   const base = profile === 9 ? "h264" : profile === 10 ? "av1" : video.codec === "dvhe" || video.codec === "dvh1" ? "hevc" : video.codec;
   if (profile === 5) return { kind: "server_tone_maps" };
   if (profile === 7) return types.indexOf("hdr10") >= 0 ? { kind: "remux_base_layer" } : { kind: "server_tone_maps" };
-  const compat = video.dv_bl_compat ?? (profile === 8 ? BL_HDR10 : null);
+  // The Blu-ray's HDR10 id in profile 8 (a profile 7 converted elsewhere): HDR10.
+  const said = profile === 8 && video.dv_bl_compat === BL_BLU_RAY ? BL_HDR10 : video.dv_bl_compat;
+  const compat = said ?? (profile === 8 ? BL_HDR10 : null);
   if (compat === BL_HDR10) return types.indexOf("hdr10") >= 0 ? fits(video, base, caps, true) : { kind: "server_tone_maps" };
   if (compat === BL_HLG) return types.indexOf("hlg") >= 0 ? fits(video, base, caps, true) : { kind: "server_tone_maps" };
   if (compat === BL_SDR) return fits(video, base, caps, false);

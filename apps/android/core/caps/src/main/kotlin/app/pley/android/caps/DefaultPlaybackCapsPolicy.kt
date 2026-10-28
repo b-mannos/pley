@@ -84,7 +84,8 @@ object DefaultPlaybackCapsPolicy : PlaybackCapsPolicy {
             5 -> CapsDecision.ServerToneMaps
             // Media3 has no profile 7 fallback: the server sends the HDR10 base layer.
             7 -> if (DynamicRange.Hdr10 in types) CapsDecision.RemuxBaseLayer else CapsDecision.ServerToneMaps
-            else -> when (video.dvBlCompat ?: if (profile == 8) BL_HDR10 else null) {
+            // The Blu-ray's HDR10 id in profile 8 (a profile 7 converted elsewhere): HDR10.
+            else -> when (video.dvBlCompat?.takeUnless { profile == 8 && it == BL_BLU_RAY } ?: if (profile == 8) BL_HDR10 else null) {
                 BL_HDR10 -> if (DynamicRange.Hdr10 in types) fits(video, base, caps, hdr = true) else CapsDecision.ServerToneMaps
                 BL_HLG -> if (DynamicRange.Hlg in types) fits(video, base, caps, hdr = true) else CapsDecision.ServerToneMaps
                 BL_SDR -> fits(video, base, caps, hdr = false)
@@ -141,6 +142,7 @@ object DefaultPlaybackCapsPolicy : PlaybackCapsPolicy {
     private const val BL_HDR10 = 1
     private const val BL_SDR = 2
     private const val BL_HLG = 4
+    private const val BL_BLU_RAY = 6
 
     private val KNOWN_PROFILES = setOf(
         "main", "main 10", "main still picture", "rext", "baseline", "constrained baseline", "high", "high 10",

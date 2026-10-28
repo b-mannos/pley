@@ -172,6 +172,11 @@ class PlaybackPlanTest {
         val p8 = file.copy(streams = listOf(video.copy(dynamicRange = DynamicRange.DolbyVision, dvProfile = 8, dvBlCompat = 1), ac3))
         fun info(method: PlaybackMethod) = PlaybackInfo("s", method, "/x", method != PlaybackMethod.Direct, 7)
         assertEquals(PlaybackMode.Transcode, DvGuards.retryMode(info(PlaybackMethod.Remux), p5, tv))
+        // A remux that names its Dolby Vision (the master playlist) keeps it: never tone-mapped instead.
+        val named = info(PlaybackMethod.Remux).copy(videoRange = "Dolby Vision P5")
+        assertNull(DvGuards.retryMode(named, p5, TestCaps.hdrTv(dv = listOf(5))))
+        val unnamed = info(PlaybackMethod.Remux).copy(videoRange = "Dolby Vision P5 not decoded (wrong colours)")
+        assertEquals(PlaybackMode.Transcode, DvGuards.retryMode(unnamed, p5, tv))
         assertNull(DvGuards.retryMode(info(PlaybackMethod.Direct), p5, TestCaps.hdrTv(dv = listOf(5))))
         assertNull(DvGuards.retryMode(info(PlaybackMethod.Transcode), p5, tv))
         assertEquals(PlaybackMode.Remux, DvGuards.retryMode(info(PlaybackMethod.Direct), p7, tv))
