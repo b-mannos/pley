@@ -20,11 +20,15 @@ import app.pley.android.player.PlayRequest
  * and what goes in the body of POST /api/playback. Pure: it reads the item,
  * the device's capabilities and the choices, nothing else.
  *
- * Track indexes go to the server only when the server has to act on them
- * (PleyApi.kt:116-120 of the old player sent them always, which forced
- * remuxes and burn-ins of files that play as they are):
- * - `audio_index` when the audio can't be played here (neither decoded nor
- *   passed through), or the session streams HLS (one audio track);
+ * The audio is the server's to choose unless the person picked a track: it
+ * knows the profile's language and, from the capabilities, which of that
+ * language's tracks this device plays best, and says which one plays
+ * ([PlaybackInfo.audioIndex]). Track indexes go to the server only when the
+ * server has to act on them (PleyApi.kt:116-120 of the old player sent them
+ * always, which forced remuxes and burn-ins of files that play as they are):
+ * - `audio_index` for a track picked, or playing already, when it can't be
+ *   played here (neither decoded nor passed through), the session streams
+ *   HLS (one audio track), or it isn't the track the item's details give;
  * - `subtitle_index` only to burn subtitles shown as pictures into HLS,
  *   and never when this player side-loads them (the server's .mks).
  * In direct play both are switched here, by the engine.
@@ -65,29 +69,49 @@ object PlaybackPlan {
     }
 
     /**
-     * The audio to start with: as asked, else [serverAudio]. When that one
-     * doesn't play here (TrueHD or DTS on a TV whose output takes neither)
-     * and another track in its language does, that one: the file then plays
-     * as it is (a remux's E-AC-3 keeps its Atmos), instead of the server
-     * converting the first. Never a commentary.
+     * The audio to start with: the track asked for, else `null`, automatic:
+     * the server picks the track this device plays best, in the profile's
+     * language, and its answer says which ([PlaybackInfo.audioIndex]).
      */
-    fun initialAudio(file: MediaFile?, requested: Long?, caps: CapsSnapshot? = null): MediaStream? {
+    fun initialAudio(file: MediaFile?, requested: Long?): MediaStream? =
+        requested?.let { r -> audioStreams(file).firstOrNull { it.index.toLong() == r } }
+
+    /**
+     * The audio [file] plays with track [index], as a session's answer
+     * names it ([PlaybackInfo.audioIndex]): that track, else the file's
+     * default, else the first.
+     */
+    fun playedAudio(file: MediaFile?, index: Int?): MediaStream? {
         val audio = audioStreams(file)
-        requested?.let { r -> audio.firstOrNull { it.index.toLong() == r } }?.let { return it }
-        val chosen = serverAudio(file) ?: return null
+        return audio.firstOrNull { it.index == index }
+            ?: audio.firstOrNull { it.default }
+            ?: audio.firstOrNull()
+    }
+
+    /**
+     * The audio a download starts with when none was asked for, chosen here
+     * as no server is asked: [detailsAudio]. When that one doesn't play here
+     * (TrueHD or DTS on a TV whose output takes neither) and another track
+     * in its language does, that one: the file then plays as it is (a
+     * remux's E-AC-3 keeps its Atmos). Never a commentary.
+     */
+    fun localAudio(file: MediaFile?, caps: CapsSnapshot?): MediaStream? {
+        val chosen = detailsAudio(file) ?: return null
         if (caps?.report == null || audioPlaysHere(chosen, caps)) return chosen
-        return audio
+        return audioStreams(file)
             .filter { it !== chosen && it.language == chosen.language && !isCommentary(it) && audioPlaysHere(it, caps) }
             .maxWithOrNull(compareBy<MediaStream>({ it.channels ?: 0 }, { it.default }, { -it.index }))
             ?: chosen
     }
 
     /**
-     * The audio the server plays when a request names none: the profile's
-     * choice (`selected_audio`, which its defaults fill in), else the file's
-     * default, else the first.
+     * The audio the item's details give: the profile's choice
+     * (`selected_audio`, which its defaults fill in), else the file's
+     * default, else the first. The details don't know the device: a request
+     * that names no track gets that one, or a track of its language this
+     * device plays better.
      */
-    fun serverAudio(file: MediaFile?): MediaStream? {
+    fun detailsAudio(file: MediaFile?): MediaStream? {
         val audio = audioStreams(file)
         return audio.firstOrNull { it.index == file?.selectedAudio }
             ?: audio.firstOrNull { it.default }
@@ -142,7 +166,9 @@ object PlaybackPlan {
     /**
      * Whether the session will surely be a stream (HLS), before asking:
      * another mode than auto, a video this device doesn't play as it is, a
-     * container it doesn't open, or audio it can't play.
+     * container it doesn't open, or audio it can't play. Automatic audio
+     * (`null`) doesn't count: the server picks a track that plays here when
+     * it can.
      */
     fun streams(mode: PlaybackMode, decision: CapsDecision?, file: MediaFile?, audio: MediaStream?, caps: CapsSnapshot?): Boolean =
         mode == PlaybackMode.Remux || mode == PlaybackMode.Transcode ||
@@ -154,6 +180,7 @@ object PlaybackPlan {
     data class Choices(
         val file: MediaFile,
         val startMs: Long,
+        /** `null`: automatic, the server picks the track. */
         val audio: MediaStream?,
         val subtitle: MediaStream?,
         val quality: QualityPreset,
@@ -164,16 +191,20 @@ object PlaybackPlan {
         val sideload: Boolean = false,
     )
 
-    /** The body of POST /api/playback for [choices]. */
+    /**
+     * The body of POST /api/playback for [choices]. Automatic audio names no
+     * track, even for a stream: the server picks it.
+     */
     fun request(itemId: Long, choices: Choices, clientId: String, caps: CapsSnapshot?): PlaybackRequest {
         val audioHere = audioPlaysHere(choices.audio, caps)
         // Named when the server must convert it, or when it isn't the one the
-        // server would play (it judges a file played as it is by that one).
-        val notTheServers = choices.audio != null && choices.audio.index != serverAudio(choices.file)?.index
+        // details give (without a track named, the server plays that one or
+        // one of its language, and judges a file played as it is by it).
+        val notTheDetails = choices.audio != null && choices.audio.index != detailsAudio(choices.file)?.index
         return PlaybackRequest(
             itemId = itemId,
             fileId = choices.file.id,
-            audioIndex = choices.audio?.index?.takeIf { choices.streaming || !audioHere || notTheServers },
+            audioIndex = choices.audio?.index?.takeIf { choices.streaming || !audioHere || notTheDetails },
             subtitleIndex = choices.subtitle?.index?.takeIf { choices.streaming && isImage(choices.subtitle) && !choices.sideload },
             maxBitrate = choices.quality.maxBitrateKbps,
             maxHeight = choices.quality.maxHeight,
@@ -187,7 +218,8 @@ object PlaybackPlan {
     /**
      * Whether [info]'s session must be asked again with the track indexes:
      * it streams, though it wasn't expected to, and its audio isn't the one
-     * chosen, or the subtitles chosen are pictures to burn in.
+     * chosen, or the subtitles chosen are pictures to burn in. Automatic
+     * audio is whatever the server chose: never asked again for it.
      */
     fun needsIndexes(info: PlaybackInfo, sent: PlaybackRequest, choices: Choices): Boolean {
         if (!info.hls) return false

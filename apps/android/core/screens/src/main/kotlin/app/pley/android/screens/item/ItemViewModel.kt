@@ -60,8 +60,10 @@ sealed interface ItemEvent {
  *
  * Playing goes through [PlayItem][app.pley.android.data.PlayItem] (movies and
  * episodes resume, shows play their next episode) and the [PlayerLauncher],
- * with the version and tracks chosen here. Choosing an audio or subtitle
- * track is saved for the item (PUT /api/items/{id}/streams), as on the web.
+ * with the version and tracks chosen here; an audio track only when picked
+ * here, else the server picks the one the device plays best. Choosing an
+ * audio or subtitle track is saved for the item (PUT /api/items/{id}/streams),
+ * as on the web.
  * Watched marks, ratings and My List show at once and are undone if the server
  * refuses.
  */
@@ -212,17 +214,20 @@ class ItemViewModel(
         }
     }
 
-    /** The request for [target]: this item's own choices when it is the item played. */
+    /**
+     * The request for [target]: this item's own choices when it is the item
+     * played. The audio only when picked here: otherwise the server picks
+     * the track this device plays best.
+     */
     private fun request(d: ItemDetail, target: PlayTarget.Video, fromStart: Boolean): PlayRequest {
         if (target.itemId != d.id) return PlayRequest(itemId = target.itemId, startMs = target.startMs, fromStart = fromStart)
         val playing = playing(d, pick.value)
-        val audio = playing.audioIndex?.takeIf { it != playing.defaultAudio?.index }
         return PlayRequest(
             itemId = d.id,
             fileId = playing.file?.id?.takeIf { d.files.size > 1 },
             startMs = target.startMs,
             fromStart = fromStart,
-            audioIndex = audio?.toLong(),
+            audioIndex = playing.pickedAudio?.toLong(),
             subtitleIndex = playing.subtitleIndex?.toLong(),
         )
     }
@@ -269,13 +274,16 @@ class ItemViewModel(
         remember(d, file.id, index, playing(d, pick.value).subtitleIndex)
     }
 
-    /** Shows subtitle track [index] (`null`: off), and keeps it for the item. */
+    /**
+     * Shows subtitle track [index] (`null`: off), and keeps it for the item,
+     * with the audio picked here, if any: else the audio chosen before stays.
+     */
     fun chooseSubtitle(index: Int?) {
         val d = shown ?: return
-        val file = playing(d, pick.value).file ?: return
-        val audio = playing(d, pick.value).audioIndex
+        val playing = playing(d, pick.value)
+        val file = playing.file ?: return
         pick.update { it.copy(subtitleFile = file.id, subtitle = index) }
-        remember(d, file.id, audio, index)
+        remember(d, file.id, playing.pickedAudio, index)
     }
 
     private fun remember(d: ItemDetail, fileId: Long, audio: Int?, subtitle: Int?) {

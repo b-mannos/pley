@@ -13,7 +13,11 @@ data class PlayRequest(
     /** Where to start; `null` resumes where the profile left off, unless it was watched. */
     val startMs: Long? = null,
     val fromStart: Boolean = false,
-    /** The server's audio stream index; `null` keeps the remembered or default one. */
+    /**
+     * The server's audio stream index, as the person picked it; `null`: the
+     * server picks, in the remembered or default language, the track this
+     * device plays best.
+     */
     val audioIndex: Long? = null,
     /** The server's subtitle stream index; `null` keeps the remembered or default one. */
     val subtitleIndex: Long? = null,

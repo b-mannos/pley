@@ -8,6 +8,7 @@ import app.pley.android.model.StreamKind
 import app.pley.android.player.PlayRequest
 import app.pley.android.testing.caps.TestDevices
 import app.pley.android.testing.caps.capsOf
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -41,7 +42,8 @@ class TracksTest {
         val c = h.play(PlayRequest(movie.id))
         assertFalse(h.engine.source!!.hls)
         assertEquals("video/x-matroska", h.engine.source!!.mimeType)
-        // The starting audio is chosen in the engine too, by its order in the file.
+        // No track named: the server picks; the one its answer names is chosen in the engine, by its order in the file.
+        assertNull(h.playbackRequests().single().audioIndex)
         assertEquals(0 to audio[0].language, h.engine.audioChoices.single())
         assertEquals(listOf(true, false), c.state.value.audio.map { it.selected })
 
@@ -51,6 +53,34 @@ class TracksTest {
         assertEquals(1, h.playbackRequests().size)
         assertEquals(listOf(StreamChoice(file.id, audio[1].index, null)), streamChoices(movie.id))
         assertEquals(listOf(false, true), c.state.value.audio.map { it.selected })
+        // Picked, the audio goes with a subtitle change too.
+        val text = file.streams.first { it.kind == StreamKind.Subtitle && it.textBased == true }
+        c.selectSubtitle(text.index.toLong())
+        h.settle()
+        assertEquals(StreamChoice(file.id, audio[1].index, text.index), streamChoices(movie.id).last())
+    }
+
+    @Test
+    fun `the server's audio plays in direct play, and subtitles changed alone don't save it`() {
+        val movie = Catalogue.movieWithTracks(h.api)
+        val file = movie.files.first()
+        val audio = file.streams.filter { it.kind == StreamKind.Audio }
+        // The French E-AC-3 picked on another device: remembered, not the file's default.
+        val french = audio.first { it.codec == "eac3" }
+        runBlocking { h.api.setStreams(movie.id, StreamChoice(file.id, french.index, null)) }
+        val c = h.play(PlayRequest(movie.id))
+        assertNull(h.playbackRequests().single().audioIndex)
+        assertFalse(h.engine.source!!.hls)
+        // The server's answer names it: the engine switches to it, the menu marks it.
+        assertEquals(audio.indexOf(french) to french.language, h.engine.audioChoices.last())
+        assertTrue(c.state.value.audio.first { it.index == french.index.toLong() }.selected)
+
+        val text = file.streams.first { it.kind == StreamKind.Subtitle && it.textBased == true }
+        c.selectSubtitle(text.index.toLong())
+        h.settle()
+        val body = h.journal.writes("PUT", "/api/items/${movie.id}/streams").last().body
+        assertFalse(body, body.contains("audio_index"))
+        assertEquals(StreamChoice(file.id, null, text.index), streamChoices(movie.id).last())
     }
 
     @Test
@@ -60,8 +90,9 @@ class TracksTest {
         val audio = movie.files.first().streams.filter { it.kind == StreamKind.Audio }
         val c = h.play(PlayRequest(movie.id))
         assertTrue(h.engine.source!!.hls)
-        // A stream: the server is told which audio.
-        assertEquals(audio[0].index, h.playbackRequests().single().audioIndex)
+        // A stream: the server picks the audio, and says which.
+        assertNull(h.playbackRequests().single().audioIndex)
+        assertTrue(c.state.value.audio.first { it.index == audio[0].index.toLong() }.selected)
         val from = h.playbackRequests().single().startMs!!
         h.engine.ready()
         h.advance(2_000)

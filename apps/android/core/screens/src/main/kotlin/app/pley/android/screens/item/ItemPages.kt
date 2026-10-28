@@ -70,17 +70,30 @@ data class PageInput(
     val locale: Locale = Locale.getDefault(),
 )
 
-/** The file the page plays, and the tracks it starts with. */
-internal data class Playing(val file: MediaFile?, val audioIndex: Int?, val subtitleIndex: Int?, val defaultAudio: MediaStream?)
+/**
+ * The file the page plays, and the tracks it starts with. [pickedAudio] is
+ * the audio picked on the page for that file, the only one the player and
+ * the saved choice are told of: otherwise the server picks the track each
+ * device plays best, and [audioIndex] is the details' choice, made for no
+ * device in particular.
+ */
+internal data class Playing(
+    val file: MediaFile?,
+    val audioIndex: Int?,
+    val subtitleIndex: Int?,
+    val defaultAudio: MediaStream?,
+    val pickedAudio: Int? = null,
+)
 
 /** The version and tracks [pick] comes to on [detail], as the web works them out. */
 internal fun playing(detail: ItemDetail, pick: StreamPick): Playing {
     val file = detail.files.firstOrNull { it.id == pick.fileId } ?: detail.files.firstOrNull()
     val audio = file?.streams?.filter { it.kind == StreamKind.Audio }.orEmpty()
     val defaultAudio = audio.firstOrNull { it.default } ?: audio.firstOrNull()
-    val audioIndex = if (file != null && pick.audioFile == file.id) pick.audio else file?.selectedAudio
+    val audioPicked = file != null && pick.audioFile == file.id
+    val audioIndex = if (audioPicked) pick.audio else file?.selectedAudio
     val subtitleIndex = if (file != null && pick.subtitleFile == file.id) pick.subtitle else file?.selectedSubtitle
-    return Playing(file, audioIndex, subtitleIndex, defaultAudio)
+    return Playing(file, audioIndex, subtitleIndex, defaultAudio, pickedAudio = if (audioPicked) pick.audio else null)
 }
 
 /** The page of [input]'s item. */

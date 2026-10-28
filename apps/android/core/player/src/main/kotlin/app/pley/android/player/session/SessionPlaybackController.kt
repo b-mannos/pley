@@ -79,9 +79,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   on closing and before any new session, through the app-scoped
  *   [SessionReporter]. One server session at a time.
  * - **Recovery.** [Recovery]'s ladder for errors, 12 s stalls and dropped frames.
- * - **Tracks.** Switched by the engine in direct play; a new session when a
- *   stream needs other audio or subtitles burned in; choices are saved
- *   with PUT /api/items/{id}/streams.
+ * - **Tracks.** The audio is the server's choice for this device unless the
+ *   person picks a track. Switched by the engine in direct play; a new
+ *   session when a stream needs other audio or subtitles burned in; choices
+ *   are saved with PUT /api/items/{id}/streams, the audio only when picked.
  * - **Markers and Up Next.** Skip Intro and Skip Credits; entering credits,
  *   or the end, brings up what plays next with a 10 s countdown.
  * - **Subtitles.** The server's WebVTT for streams and files beside the
@@ -123,7 +124,16 @@ class SessionPlaybackController(
 
     /** The item's files downloaded here, of the same file ([downloadedFiles]). */
     private var downloads: Set<Long> = emptySet()
+
+    /** The audio playing; `null` while automatic, until the session says which track the server chose. */
     private var audio: MediaStream? = null
+
+    /**
+     * The person named [audio] (the request, or the audio menu), so saved
+     * choices carry it; otherwise it is the server's choice for this
+     * device, and they leave it out.
+     */
+    private var audioPicked = false
     private var subtitle: MediaStream? = null
     private var quality: QualityPreset = Qualities.ORIGINAL
     private var markers: List<Marker> = emptyList()
@@ -240,7 +250,8 @@ class SessionPlaybackController(
         val downloaded = req.fileId ?: detail.files.firstOrNull { it.id in downloads }?.id
         val chosen = PlaybackPlan.file(detail, downloaded, caps, env.policy)
         file = chosen
-        audio = PlaybackPlan.initialAudio(chosen, req.audioIndex, caps)
+        audio = PlaybackPlan.initialAudio(chosen, req.audioIndex)
+        audioPicked = audio != null
         subtitle = PlaybackPlan.initialSubtitle(chosen, req.subtitleIndex)
         val remembered = try {
             env.quality.remembered()
@@ -355,6 +366,8 @@ class SessionPlaybackController(
         sessionState.value = started
         live = null
         val info = started.info
+        // Automatic: the track the server chose plays, switched to by the engine in direct play.
+        if (audio == null) audio = PlaybackPlan.playedAudio(chosen, info.audioIndex)
         ui.update {
             it.copy(
                 method = texts.method(info),
@@ -390,6 +403,8 @@ class SessionPlaybackController(
      * beside the file.
      */
     private fun beginLocal(detail: ItemDetail, chosen: MediaFile, local: LocalFile, atMs: Long) {
+        // No server to choose the audio: the download's own choice.
+        if (audio == null) audio = PlaybackPlan.localAudio(chosen, caps)
         val info = PlaybackInfo(
             sessionId = "local-${UUID.randomUUID()}",
             method = PlaybackMethod.Direct,
@@ -899,6 +914,7 @@ class SessionPlaybackController(
         val chosen = PlaybackPlan.audioStreams(file).firstOrNull { it.index.toLong() == index } ?: return
         if (chosen.index == audio?.index) return
         audio = chosen
+        audioPicked = true
         saveStreams()
         publishChoices()
         val s = session ?: return
@@ -1055,7 +1071,8 @@ class SessionPlaybackController(
         itemId = item?.id ?: current.itemId,
         fileId = file?.id ?: current.fileId,
         positionMs = livePosition(),
-        audioIndex = audio?.index?.toLong(),
+        // Only a picked track: the server chooses again otherwise.
+        audioIndex = audio?.takeIf { audioPicked }?.index?.toLong(),
         subtitleIndex = subtitle?.index?.toLong(),
         quality = quality.id,
         queue = current.queue,
@@ -1261,10 +1278,14 @@ class SessionPlaybackController(
         }
     }
 
-    /** PUT /api/items/{id}/streams: the next episode, or the next viewing, starts with the same tracks. */
+    /**
+     * PUT /api/items/{id}/streams: the next episode, or the next viewing,
+     * starts with the same tracks. The audio only when picked: left out,
+     * the audio chosen before stays, as subtitles alone were picked.
+     */
     private fun saveStreams() {
         val itemId = item?.id ?: return
-        val choice = StreamChoice(fileId = file?.id, audioIndex = audio?.index, subtitleIndex = subtitle?.index)
+        val choice = StreamChoice(fileId = file?.id, audioIndex = audio?.takeIf { audioPicked }?.index, subtitleIndex = subtitle?.index)
         env.reporter.send { env.api.setStreams(itemId, choice) }
         env.tracksChosen(itemId, choice)
         // The next episode's details, asked for before, name the tracks it

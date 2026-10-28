@@ -24,6 +24,7 @@ import app.pley.android.model.SubtitleTrack
 import app.pley.android.model.TrackDefaults
 import app.pley.android.model.TranscodeInfo
 import app.pley.android.model.TrickplayInfo
+import app.pley.android.model.caps.ClientCaps
 import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonNull
@@ -106,8 +107,10 @@ internal class PlayRoutes(private val s: State) {
 
     /**
      * POST /api/playback: direct when the caps play the file as it is
-     * (container, codecs, dynamic range, default audio, nothing burned in,
-     * bitrate), else HLS: remux when the video plays, else transcode.
+     * (container, codecs, dynamic range, the default audio or a player that
+     * switches tracks itself, nothing burned in, bitrate), else HLS: remux
+     * when the video plays, else transcode. Without `audio_index`, the
+     * profile's audio ([audioFor]), which `audio_index` names.
      */
     private fun start(call: Call, caller: Caller): MockResponse {
         val request = call.body(PlaybackRequest.serializer()) ?: return Reply.badRequest("the body isn't a playback request")
@@ -116,12 +119,13 @@ internal class PlayRoutes(private val s: State) {
             ?: item.files.firstOrNull() ?: return Reply.notFound("the item has no file")
         val audio = file.streams.filter { it.kind == StreamKind.Audio }
         val defaultAudio = audio.firstOrNull { it.default } ?: audio.firstOrNull()
-        val audioIndex = request.audioIndex ?: defaultAudio?.index
         if (request.audioIndex != null && audio.none { it.index == request.audioIndex }) return Reply.badRequest("no such audio track")
+        val audioIndex = request.audioIndex ?: audioFor(item, file, caller.profile, request.caps)?.index
         val burn = request.subtitleIndex?.let { index -> file.streams.firstOrNull { it.index == index && it.kind == StreamKind.Subtitle && it.textBased == false } }
 
         val reasons = mutableListOf<String>()
         val caps = request.caps
+        val switchesTracks = caps.capsVersion == ClientCaps.VERSION_2 && caps.audioTrackSwitching == true
         val video = file.streams.firstOrNull { it.kind == StreamKind.Video }
         val chosenAudio = audio.firstOrNull { it.index == audioIndex }
         val containerOk = file.container in caps.containers || (file.container == "mkv" && "matroska" in caps.containers)
@@ -133,7 +137,7 @@ internal class PlayRoutes(private val s: State) {
         }
         val audioOk = chosenAudio == null || chosenAudio.codec in caps.audioCodecs
         if (!audioOk) reasons += "${chosenAudio.codec.uppercase()} audio isn't supported by this player."
-        if (chosenAudio != null && chosenAudio != defaultAudio) reasons += "Another audio track than the file's default is played."
+        if (chosenAudio != null && chosenAudio != defaultAudio && !switchesTracks) reasons += "Another audio track than the file's default is played."
         if (burn != null) reasons += "Image subtitles are burned in."
         val bitrateOk = request.maxBitrate == null || (file.bitrate ?: 0L) <= request.maxBitrate!! * 1_000L
         if (!bitrateOk) reasons += "The file's bitrate is over the quality asked for."
@@ -186,6 +190,23 @@ internal class PlayRoutes(private val s: State) {
             autoQuality = if (method == PlaybackMethod.Transcode && request.maxBitrate == null) "8m" else null,
         )
         return Reply.json(PlaybackInfo.serializer(), info)
+    }
+
+    /**
+     * The audio of a request that names none, as pley picks it (docs/API.md,
+     * "The audio track"), in short: the profile's track for the item (its
+     * choice, else its audio language's, else the file's default); when the
+     * player can't play that one as it is, another of its language it can,
+     * not a commentary.
+     */
+    private fun audioFor(item: ItemDetail, file: MediaFile, profile: Profile, caps: ClientCaps): MediaStream? {
+        val audio = file.streams.filter { it.kind == StreamKind.Audio }
+        val selected = s.views.withChoices(item, file, profile).selectedAudio
+        val chosen = audio.firstOrNull { it.index == selected } ?: audio.firstOrNull { it.default } ?: audio.firstOrNull() ?: return null
+        if (chosen.codec in caps.audioCodecs) return chosen
+        return audio.firstOrNull { other ->
+            other.language == chosen.language && other.codec in caps.audioCodecs && other.title?.contains("commentary", ignoreCase = true) != true
+        } ?: chosen
     }
 
     private fun rangePlays(video: MediaStream, hdr: Boolean, dolbyVision: Boolean): Boolean = when (video.dynamicRange) {
@@ -434,12 +455,18 @@ internal class PlayRoutes(private val s: State) {
     /** [item], then its parent and grandparent: what `user_state_changed` names. */
     private fun lineage(item: ItemDetail): List<Long> = listOfNotNull(item.id, item.parentId, item.grandparentId)
 
-    /** PUT /api/items/{id}/streams: remembered for the movie, or for the whole show. */
+    /**
+     * PUT /api/items/{id}/streams: remembered for the movie, or for the
+     * whole show. Without `audio_index` the audio chosen before stays:
+     * subtitles alone were picked.
+     */
     private fun streams(call: Call, caller: Caller, id: String): MockResponse {
         val item = playable(id) ?: return Reply.notFound("no such item")
         val choice = call.body(StreamChoice.serializer()) ?: return Reply.badRequest("the body isn't a track choice")
         val owner = if (item.kind == ItemKind.Episode) item.grandparentId ?: item.id else item.id
-        caller.profile.streamChoices[owner] = choice
+        val audioNamed = call.body(JsonObject.serializer())?.containsKey("audio_index") == true
+        val before = caller.profile.streamChoices[owner]
+        caller.profile.streamChoices[owner] = if (audioNamed) choice else choice.copy(audioIndex = before?.audioIndex)
         caller.profile.version++
         return Reply.noContent()
     }

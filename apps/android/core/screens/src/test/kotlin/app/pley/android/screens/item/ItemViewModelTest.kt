@@ -113,6 +113,28 @@ class ItemViewModelTest {
     }
 
     @Test
+    fun `the audio goes to the player and the saved choice only when picked here`() = runTest(dispatcher) {
+        val model = model(1)
+        val streams = arrayOf(
+            stream(0, app.pley.android.model.StreamKind.Video, "hevc"),
+            stream(1, app.pley.android.model.StreamKind.Audio, "truehd", "eng", default = true, channels = 8),
+            stream(2, app.pley.android.model.StreamKind.Audio, "ac3", "fra", channels = 6),
+            stream(3, app.pley.android.model.StreamKind.Subtitle, "subrip", "eng"),
+        )
+        // The details' audio is the profile's, chosen for no device: the server picks for this one.
+        data.set(movie(files = listOf(file(11, *streams, selectedAudio = 2))))
+        assertEquals(2, model.page.tracks?.audioIndex)
+        model.play()
+        assertEquals(null, launcher.played.single().audioIndex)
+        // Subtitles alone: the audio chosen before stays.
+        model.chooseSubtitle(3)
+        assertEquals(FakeData.StreamWrite(1, 11, null, 3), data.streams.last())
+        model.play()
+        assertEquals(3L, launcher.played.last().subtitleIndex)
+        assertEquals(null, launcher.played.last().audioIndex)
+    }
+
+    @Test
     fun `the streams body is the server's wire format`() {
         val body = PleyJson.encodeToString(app.pley.android.model.StreamChoice.serializer(), app.pley.android.model.StreamChoice(11, 2, null))
         assertTrue(body, body.contains("\"file_id\":11") && body.contains("\"audio_index\":2"))

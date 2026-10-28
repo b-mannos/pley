@@ -43,14 +43,15 @@ enum class PlaybackMethod(override val wire: String) : WireEnum {
 /**
  * The body of POST /api/playback (apps/server/src/playback.rs,
  * `PlaybackRequest`). Fields left `null` are left out, and the server
- * picks: the item's first file, the file's default audio, no subtitles
- * burned in, the original quality, the start.
+ * picks: the item's first file, the audio this player plays best in the
+ * profile's language, no subtitles burned in, the original quality, the
+ * start.
  */
 @Serializable
 data class PlaybackRequest(
     val itemId: Long,
     val fileId: Long? = null,
-    /** [MediaStream.index] of the audio. */
+    /** [MediaStream.index] of the audio; `null`: the server's choice, which [PlaybackInfo.audioIndex] names. */
     val audioIndex: Int? = null,
     /** Only for subtitles shown as pictures (PGS, VobSub), which are burned in by a transcode. */
     val subtitleIndex: Int? = null,
@@ -132,6 +133,7 @@ data class PlaybackInfo(
     val hls: Boolean = false,
     val fileId: Long,
     val durationMs: Long = 0,
+    /** The audio track that plays: the one asked for, else the server's choice for this player. */
     val audioIndex: Int? = null,
     /** The subtitle burned in, only when [burnSubtitles]. */
     val subtitleIndex: Int? = null,
@@ -294,8 +296,14 @@ data class ProgressReport(
 data class StreamChoice(
     /** The file the indexes are of; `null`: the item's first. */
     val fileId: Long? = null,
+    /**
+     * The audio track the person picked. `null` is left out of the body
+     * ([PleyJson] writes no nulls), which keeps the audio chosen before:
+     * subtitles alone were picked. Without a pick, the server chooses the
+     * audio for each device.
+     */
     val audioIndex: Int? = null,
-    /** `null`: subtitles off. */
+    /** `null`: subtitles off (left out, which the server reads the same). */
     val subtitleIndex: Int? = null,
 )
 

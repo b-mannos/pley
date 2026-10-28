@@ -51,7 +51,11 @@ interface WatchStateRepository {
     /** Stars out of 10 (halves allowed), or none when [rating] is `null`. */
     suspend fun rate(itemId: Long, rating: Double?)
 
-    /** The version and tracks to play [itemId] with next time. */
+    /**
+     * The version and tracks to play [itemId] with next time. [audioIndex]
+     * only for a track the person picked: `null` keeps the audio chosen
+     * before (subtitles alone were picked). [subtitleIndex] `null` is off.
+     */
     suspend fun chooseStreams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?)
 
     /**

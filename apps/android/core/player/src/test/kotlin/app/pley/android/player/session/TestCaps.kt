@@ -17,8 +17,9 @@ object TestCaps {
 
     /**
      * A TV on an HDR10 screen and a receiver that takes AC-3 and E-AC-3:
-     * the HDR10 movies play as they are. [dv] Dolby Vision profiles decoded
-     * (with a Dolby Vision screen when any).
+     * the HDR10 movies play as they are, with any of their audio tracks (the
+     * player switches them itself, as the app's reports say). [dv] Dolby
+     * Vision profiles decoded (with a Dolby Vision screen when any).
      */
     fun hdrTv(dv: List<Int> = emptyList(), passthrough: List<String> = listOf("ac3", "eac3")): CapsSnapshot {
         val types = listOf(DynamicRange.Hdr10, DynamicRange.Hlg) + if (dv.isNotEmpty()) listOf(DynamicRange.DolbyVision) else emptyList()
@@ -36,6 +37,7 @@ object TestCaps {
                 audioDecode = listOf("aac", "mp3", "opus", "flac"),
                 audioPassthrough = passthrough,
                 audioChannels = 8,
+                audioTrackSwitching = true,
             ),
             lines = emptyList(),
         )

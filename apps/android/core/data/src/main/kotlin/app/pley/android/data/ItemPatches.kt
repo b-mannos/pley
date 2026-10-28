@@ -171,7 +171,10 @@ internal class ItemPatch(
             detail = { d -> if (d.id == itemId) d.copy(userState = d.userState.copy(rating = rating)) else d },
         )
 
-        /** The version and tracks [itemId] starts with next time: on [fileId], or its first file. */
+        /**
+         * The version and tracks [itemId] starts with next time: on [fileId],
+         * or its first file. [audioIndex] `null` keeps the audio it had.
+         */
         fun streams(itemId: Long, fileId: Long?, audioIndex: Int?, subtitleIndex: Int?): ItemPatch = ItemPatch(
             summary = { it },
             detail = { d ->
@@ -181,7 +184,7 @@ internal class ItemPatch(
                     val file = fileId ?: d.files.first().id
                     d.copy(
                         files = d.files.map { f ->
-                            if (f.id == file) f.copy(selectedAudio = audioIndex, selectedSubtitle = subtitleIndex) else f
+                            if (f.id == file) f.copy(selectedAudio = audioIndex ?: f.selectedAudio, selectedSubtitle = subtitleIndex) else f
                         },
                     )
                 }
