@@ -383,10 +383,20 @@ impl IntoResponse for Node {
     }
 }
 
-async fn render(request: Request, next: Next) -> Response {
+/// Whether the caller is an administrator, once [`PlexUser`] knows: others
+/// get files' names, not where the server keeps them.
+#[derive(Clone, Default)]
+struct Viewer(Arc<std::sync::OnceLock<bool>>);
+
+async fn render(mut request: Request, next: Next) -> Response {
     let json = wants_json(request.headers());
+    let viewer = Viewer::default();
+    request.extensions_mut().insert(viewer.clone());
     let mut response = next.run(request).await;
-    if let Some(NodeBody(node)) = response.extensions_mut().remove::<NodeBody>() {
+    if let Some(NodeBody(mut node)) = response.extensions_mut().remove::<NodeBody>() {
+        if viewer.0.get() != Some(&true) {
+            Arc::make_mut(&mut node).names_only();
+        }
         let (content_type, body) =
             if json { ("application/json", node.to_json()) } else { ("text/xml;charset=utf-8", node.to_xml()) };
         response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
@@ -486,12 +496,18 @@ impl FromRequestParts<AppState> for PlexUser {
     type Rejection = PlexError;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
-        if let Some(user) = parts.extensions.get::<AuthUser>() {
-            return Ok(PlexUser(user.clone()));
+        let user = match parts.extensions.get::<AuthUser>() {
+            Some(user) => user.clone(),
+            None => {
+                let token = request_token(parts).ok_or(PlexError::Unauthorized)?;
+                let user = state.auth.validate(&token).await.ok_or(PlexError::Unauthorized)?;
+                parts.extensions.insert(user.clone());
+                user
+            }
+        };
+        if let Some(Viewer(admin)) = parts.extensions.get::<Viewer>() {
+            let _ = admin.set(user.is_admin);
         }
-        let token = request_token(parts).ok_or(PlexError::Unauthorized)?;
-        let user = state.auth.validate(&token).await.ok_or(PlexError::Unauthorized)?;
-        parts.extensions.insert(user.clone());
         Ok(PlexUser(user))
     }
 }

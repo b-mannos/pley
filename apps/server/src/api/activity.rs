@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use axum::Json;
@@ -15,7 +15,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use crate::access;
 use crate::auth::{AuthUser, CurrentToken};
 use crate::catalog::{self, ItemSummary};
-use crate::error::ApiResult;
+use crate::error::{ApiResult, AppError};
 use crate::library::scanner::ScanStatus;
 use crate::markers::AnalysisStatus;
 use crate::playback::{Method, TranscodeInfo, transcode_info};
@@ -86,11 +86,43 @@ pub async fn activity(State(state): State<AppState>, user: AuthUser) -> ApiResul
     Ok(Json(Activity { scans, sessions: out, analysis, previews_pending }))
 }
 
+/// Event streams one session (or app token) may keep open: a few tabs and
+/// devices' worth, not a connection and a task each without end.
+const MAX_STREAMS_EACH: usize = 16;
+
+/// Event streams open, by the hash of the token that opened them.
+static STREAMS: LazyLock<dashmap::DashMap<String, usize>> = LazyLock::new(dashmap::DashMap::new);
+
+/// One of a token's event streams, counted while it lasts.
+struct StreamSlot(String);
+
+impl StreamSlot {
+    fn take(token: Option<&str>) -> ApiResult<Self> {
+        let key = crate::auth::hash_token(token.unwrap_or_default());
+        let mut open = STREAMS.entry(key.clone()).or_insert(0);
+        if *open >= MAX_STREAMS_EACH {
+            return Err(AppError::TooManyRequests("too many open event streams: close a tab".into()));
+        }
+        *open += 1;
+        Ok(Self(key))
+    }
+}
+
+impl Drop for StreamSlot {
+    fn drop(&mut self) {
+        STREAMS.remove_if_mut(&self.0, |_, open| {
+            *open = open.saturating_sub(1);
+            *open == 0
+        });
+    }
+}
+
 pub async fn events(
     State(state): State<AppState>,
     user: AuthUser,
     CurrentToken(token): CurrentToken,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
+    let slot = StreamSlot::take(token.as_deref())?;
     // Events about libraries the user can't open aren't theirs to see.
     let libraries = Arc::new(parking_lot::RwLock::new(access::library_ids(&state.db, &user).await?));
     // The session or app token is checked again every so often
@@ -133,7 +165,7 @@ pub async fn events(
             _ => true,
         })
         .map(move |event| {
-            let _ = &gone;
+            let _ = (&gone, &slot);
             Ok(Event::default().json_data(event).unwrap_or_else(|_| Event::default().comment("encode error")))
         });
     // The stream never ends on its own and the web UI keeps one open while

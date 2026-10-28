@@ -179,8 +179,10 @@ fn default_work_dir() -> PathBuf {
     cache.unwrap_or_else(std::env::temp_dir).join("pley-transcoder")
 }
 
-/// Keeps a folder of the transcoder's (decoded video, subtitles) to this
-/// account: on Unix, a folder another user made first can't be taken over.
+/// Keeps a folder of the transcoder's (decoded video, subtitles, converted
+/// downloads) to this account: on Unix, a folder another user made first
+/// can't be taken over; on Windows, a folder on another drive doesn't let
+/// every account in, as a drive's own permissions do.
 fn keep_private(dir: &Path) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
@@ -189,9 +191,147 @@ fn keep_private(dir: &Path) -> anyhow::Result<()> {
             anyhow::anyhow!("{} isn't this account's to use ({err}): choose a folder with --work-dir", dir.display())
         })?;
     }
-    #[cfg(not(unix))]
+    // A drive that keeps no permissions (FAT, some shares) goes without.
+    #[cfg(windows)]
+    if let Err(err) = windows_private::keep(dir) {
+        tracing::warn!("other accounts on this computer may reach {}: {err}", dir.display());
+    }
+    #[cfg(not(any(unix, windows)))]
     let _ = dir;
     Ok(())
+}
+
+/// [`keep_private`] on Windows: this account, SYSTEM and the administrators
+/// (who can take any folder anyway), nothing inherited. A folder whose
+/// permissions are its own already (set by hand, or by an earlier start) is
+/// left as it is.
+#[cfg(windows)]
+mod windows_private {
+    use std::io;
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::Path;
+    use std::ptr::null_mut;
+
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE, LocalFree};
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT, SetNamedSecurityInfoW,
+    };
+    use windows_sys::Win32::Security::{
+        ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorControl, GetSecurityDescriptorDacl, GetTokenInformation,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
+        TokenUser,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    pub fn keep(dir: &Path) -> io::Result<()> {
+        let path: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
+        if is_protected(&path)? {
+            return Ok(());
+        }
+        let sddl = format!("D:P(A;OICI;FA;;;{})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", own_sid()?);
+        let sddl: Vec<u16> = sddl.encode_utf16().chain(Some(0)).collect();
+        let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+        // SAFETY: a NUL-terminated string; Windows allocates the descriptor, freed below.
+        let made = unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_ptr(),
+                SDDL_REVISION_1,
+                &mut descriptor,
+                null_mut(),
+            )
+        };
+        if made == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let (mut present, mut defaulted, mut dacl) = (0, 0, null_mut::<ACL>());
+        // SAFETY: the descriptor made above, which the DACL points into.
+        let status = unsafe {
+            if GetSecurityDescriptorDacl(descriptor, &mut present, &mut dacl, &mut defaulted) == 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(SetNamedSecurityInfoW(
+                    path.as_ptr(),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                    null_mut(),
+                    null_mut(),
+                    dacl,
+                    null_mut(),
+                ))
+            }
+        };
+        // SAFETY: allocated by Windows with LocalAlloc.
+        unsafe { LocalFree(descriptor) };
+        match status? {
+            ERROR_SUCCESS => Ok(()),
+            code => Err(io::Error::from_raw_os_error(code as i32)),
+        }
+    }
+
+    /// Whether the folder `path` (NUL-terminated) has permissions of its
+    /// own, not those of the folder it is in.
+    pub(super) fn is_protected(path: &[u16]) -> io::Result<bool> {
+        let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+        // SAFETY: a NUL-terminated path; Windows allocates the descriptor, freed below.
+        let status = unsafe {
+            GetNamedSecurityInfoW(
+                path.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                &mut descriptor,
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Err(io::Error::from_raw_os_error(status as i32));
+        }
+        let (mut control, mut revision) = (0u16, 0u32);
+        // SAFETY: the descriptor read above.
+        let ok = unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) };
+        // SAFETY: allocated by Windows with LocalAlloc.
+        unsafe { LocalFree(descriptor) };
+        Ok(ok != 0 && control & SE_DACL_PROTECTED != 0)
+    }
+
+    /// The SID of the account the transcoder runs as.
+    fn own_sid() -> io::Result<String> {
+        let mut token: HANDLE = null_mut();
+        // SAFETY: this process's pseudo-handle; the token is closed below.
+        if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // Aligned for TOKEN_USER, and large enough for any SID.
+        let mut buf = [0u64; 64];
+        let mut len = 0u32;
+        // SAFETY: a buffer of the size given.
+        let ok = unsafe {
+            GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), size_of_val(&buf) as u32, &mut len)
+        };
+        let error = io::Error::last_os_error();
+        // SAFETY: the token opened above.
+        unsafe { CloseHandle(token) };
+        if ok == 0 {
+            return Err(error);
+        }
+        // SAFETY: GetTokenInformation wrote a TOKEN_USER at the start of `buf`.
+        let sid = unsafe { (*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid };
+        let mut text = null_mut();
+        // SAFETY: a valid SID; Windows allocates the string, freed below.
+        if unsafe { ConvertSidToStringSidW(sid, &mut text) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: a NUL-terminated string from Windows.
+        let len = (0..).take_while(|&i| unsafe { *text.add(i) } != 0).count();
+        // SAFETY: the `len` units just read.
+        let sid = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(text, len) });
+        // SAFETY: allocated by Windows with LocalAlloc.
+        unsafe { LocalFree(text.cast()) };
+        Ok(sid)
+    }
 }
 
 /// Makes the work folder ready, and says where the jobs go: the folders
@@ -459,6 +599,37 @@ mod tests {
         assert_eq!(mode(&made), 0o700);
         prepare_work_dir(&shared, true).unwrap();
         assert_eq!(mode(&shared), 0o700);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_work_folder_there_already_keeps_its_permissions_on_windows_too() {
+        let dir = tempfile::tempdir().unwrap();
+        // A folder every account may use, as one at the top of another drive.
+        let shared = dir.path().join("shared");
+        std::fs::create_dir(&shared).unwrap();
+        let status = std::process::Command::new("icacls")
+            .arg(&shared)
+            .args(["/grant", "*S-1-5-11:(OI)(CI)M", "/Q"])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let jobs = prepare_work_dir(&shared, false).unwrap();
+        let own = |path: &Path| windows_private::is_protected(&wide(path)).unwrap();
+        assert!(!own(&shared));
+        assert!(own(&jobs) && own(&shared.join("conversions")), "what it keeps there is its own");
+        let made = dir.path().join("made");
+        prepare_work_dir(&made, false).unwrap();
+        assert!(own(&made));
+        // Still the transcoder's to use.
+        std::fs::write(jobs.join("segment.ts"), b"").unwrap();
+        prepare_work_dir(&shared, false).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn wide(path: &Path) -> Vec<u16> {
+        use std::os::windows::ffi::OsStrExt;
+        path.as_os_str().encode_wide().chain(Some(0)).collect()
     }
 
     #[test]

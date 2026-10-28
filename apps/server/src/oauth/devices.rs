@@ -49,6 +49,9 @@ pub const INTERVAL: Duration = Duration::from_secs(5);
 const SLOWER: Duration = Duration::from_secs(5);
 /// Requests in progress from one address.
 pub const MAX_PER_ADDRESS: usize = 20;
+/// Requests in progress from one IPv6 site (a /56, what a home is usually
+/// given): its 256 networks of /64 couldn't fill [`MAX_REQUESTS`] then.
+pub const MAX_PER_SITE: usize = 50;
 /// Requests in progress in all.
 pub const MAX_REQUESTS: usize = 1_000;
 /// How long a wrong code counts.
@@ -106,6 +109,15 @@ fn network(address: IpAddr) -> IpAddr {
     match address.to_canonical() {
         IpAddr::V6(v6) => IpAddr::V6(Ipv6Addr::from(u128::from(v6) & (u128::MAX << 64))),
         v4 => v4,
+    }
+}
+
+/// The IPv6 site (/56) of a network, which counts against [`MAX_PER_SITE`]
+/// too; an IPv4 address has none.
+fn site(network: Option<IpAddr>) -> Option<Ipv6Addr> {
+    match network? {
+        IpAddr::V6(v6) => Some(Ipv6Addr::from(u128::from(v6) & (u128::MAX << 72))),
+        IpAddr::V4(_) => None,
     }
 }
 
@@ -298,8 +310,9 @@ pub struct Devices {
 impl Devices {
     /// Starts a request of `app` for `scopes`, made by `asker`: what the
     /// device shows and keeps. Refused while its address (its /64 for IPv6)
-    /// has 20 in progress or everyone 1,000: only requests that are over make
-    /// room. Requests from unknown addresses count together.
+    /// has 20 in progress, its IPv6 /56 50, or everyone 1,000: only requests
+    /// that are over make room. Requests from unknown addresses count
+    /// together.
     pub fn create(&self, app: AppSnapshot, scopes: Scopes, asker: impl Into<Asker>) -> Result<Started, Full> {
         self.create_drawing(app, scopes, asker.into(), new_user_code)
     }
@@ -319,7 +332,11 @@ impl Devices {
             state.drop_over(now);
         }
         let from_there = state.requests.values().filter(|entry| entry.alive(now) && entry.network == network).count();
-        if state.requests.len() >= MAX_REQUESTS || from_there >= MAX_PER_ADDRESS {
+        let site = site(network);
+        let from_site = site.map_or(0, |site| {
+            state.requests.values().filter(|entry| entry.alive(now) && self::site(entry.network) == Some(site)).count()
+        });
+        if state.requests.len() >= MAX_REQUESTS || from_there >= MAX_PER_ADDRESS || from_site >= MAX_PER_SITE {
             return Err(Full);
         }
         // Unique among the codes kept: a clash, which practically never
@@ -829,9 +846,15 @@ mod tests {
         }
         assert_eq!(create(ip("2001:db8:1:2:ffff:ffff:ffff:ffff")), Err(Full));
         create(ip("2001:db8:1:3::1")).unwrap();
+        // A home's /56 holds 256 of those: 50 at most from all of them.
+        for i in 0..MAX_PER_SITE - MAX_PER_ADDRESS - 1 {
+            create(ip(&format!("2001:db8:1:{:x}::1", 0x10 + i))).unwrap();
+        }
+        assert_eq!(create(ip("2001:db8:1:ff::1")), Err(Full), "the /56 is full");
+        create(ip("2001:db8:1:100::1")).unwrap();
 
         // 1,000 in all.
-        let made = 3 * MAX_PER_ADDRESS + 2;
+        let made = 3 * MAX_PER_ADDRESS + 2 + (MAX_PER_SITE - MAX_PER_ADDRESS - 1) + 1;
         for i in 0..MAX_REQUESTS - made {
             create(ip(&format!("198.51.100.{}", i / MAX_PER_ADDRESS))).unwrap();
         }

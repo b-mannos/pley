@@ -143,6 +143,25 @@ impl Node {
         self.children.extend(children);
     }
 
+    /// Leaves files' and folders' names (`Part`'s `file`, `Location`'s
+    /// `path`), not where the server keeps them.
+    pub fn names_only(&mut self) {
+        let key = match self.tag {
+            "Part" => Some("file"),
+            "Location" => Some("path"),
+            _ => None,
+        };
+        if let Some(key) = key
+            && let Some(Value::Str(path)) = self.get(key)
+        {
+            let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned());
+            self.set(key, name.unwrap_or_default());
+        }
+        for child in &mut self.children {
+            child.names_only();
+        }
+    }
+
     pub fn children(&self) -> &[Node] {
         &self.children
     }

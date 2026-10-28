@@ -315,3 +315,18 @@ async fn apps_allowed_by_someone_end_with_their_sign_ins() {
     assert_ended(&app, &(access, refresh)).await;
     assert_eq!(app.get("/api/auth/me", &app.login("bo", "test-pass-1").await).await.status, StatusCode::OK, "Bo stays");
 }
+
+#[tokio::test]
+async fn a_signed_out_apps_number_is_never_given_again() {
+    // A TV's keyed media addresses carry its grant's number: once the app is
+    // signed out, the next app to sign in must not get that number back.
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let me: i64 = app.get("/api/auth/me", &admin).await.body["id"].as_i64().unwrap();
+    let first = app.app_token(me, "library").await;
+    let gone = last_grant(&app).await;
+    assert_eq!(app.delete(&format!("/api/me/apps/{gone}"), &admin).await.status, StatusCode::NO_CONTENT);
+    assert_ended(&app, &first).await;
+    app.app_token(me, "library").await;
+    assert!(last_grant(&app).await > gone, "the next app has a number of its own");
+}

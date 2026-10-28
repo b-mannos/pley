@@ -147,6 +147,7 @@ pub(crate) fn wait_until_stopped(timeout: Duration) -> bool {
 /// `pley serve`: run the server on a new runtime, with a tray icon when `tray`
 /// is set and this is an interactive desktop session.
 pub fn serve(config: Config, tray: bool) -> anyhow::Result<()> {
+    http::raise_open_files_limit();
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().thread_name("pley-worker").build()?;
     watch_shutdown();
     let tray = tray && desktop::interactive_session();
@@ -254,7 +255,96 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     Ok(())
 }
 
-/// `pley reset-password <user> <password>`: recovery path for a lost admin password.
+/// The password for `pley reset-password <user>`: typed twice, unseen, in a
+/// terminal; else the first line of standard input (`echo … | pley …`).
+pub fn read_password(username: &str) -> anyhow::Result<String> {
+    use std::io::{BufRead, IsTerminal, Write};
+    let read_line = || -> anyhow::Result<String> {
+        let mut line = String::new();
+        std::io::stdin().lock().read_line(&mut line)?;
+        Ok(line.trim_end_matches(['\r', '\n']).to_owned())
+    };
+    if !std::io::stdin().is_terminal() {
+        return read_line();
+    }
+    let ask = |prompt: &str| -> anyhow::Result<String> {
+        eprint!("{prompt}");
+        std::io::stderr().flush()?;
+        let echo = Echo::off();
+        let line = read_line();
+        drop(echo);
+        eprintln!();
+        line
+    };
+    let password = ask(&format!("New password for {username}: "))?;
+    if ask("The same again: ")? != password {
+        anyhow::bail!("the two passwords differ");
+    }
+    Ok(password)
+}
+
+/// The terminal doesn't show what is typed while this lasts.
+struct Echo {
+    #[cfg(unix)]
+    was: Option<libc::termios>,
+    #[cfg(windows)]
+    was: Option<u32>,
+}
+
+impl Echo {
+    fn off() -> Self {
+        #[cfg(unix)]
+        {
+            // SAFETY: termios is plain data, read from and written back to standard input.
+            unsafe {
+                let mut now: libc::termios = std::mem::zeroed();
+                if libc::tcgetattr(libc::STDIN_FILENO, &mut now) != 0 {
+                    return Self { was: None };
+                }
+                let was = now;
+                now.c_lflag &= !libc::ECHO;
+                libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &now);
+                Self { was: Some(was) }
+            }
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::System::Console::{
+                ENABLE_ECHO_INPUT, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode,
+            };
+            // SAFETY: the console's own handle, and its mode read into a local.
+            unsafe {
+                let input = GetStdHandle(STD_INPUT_HANDLE);
+                let mut mode = 0;
+                if GetConsoleMode(input, &mut mode) == 0 {
+                    return Self { was: None };
+                }
+                SetConsoleMode(input, mode & !ENABLE_ECHO_INPUT);
+                Self { was: Some(mode) }
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
+        Self {}
+    }
+}
+
+impl Drop for Echo {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(was) = &self.was {
+            // SAFETY: the settings read in `off`, written back.
+            unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, was) };
+        }
+        #[cfg(windows)]
+        if let Some(was) = self.was {
+            use windows_sys::Win32::System::Console::{GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode};
+            // SAFETY: the console's own handle, its mode put back.
+            unsafe { SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), was) };
+        }
+    }
+}
+
+/// `pley reset-password <user> [password]`: recovery path for a lost admin password.
 pub async fn reset_password(config: Config, username: &str, password: &str, admin: bool) -> anyhow::Result<()> {
     auth::validate_password(password, username).map_err(|e| anyhow::anyhow!("{e}"))?;
     std::fs::create_dir_all(&config.data_dir)?;

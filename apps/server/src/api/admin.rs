@@ -238,6 +238,94 @@ pub async fn put_network(
 
 // ------------------------------------------------------------------ system
 
+/// The managed transcoder's work folder (Settings → Server).
+#[derive(Serialize)]
+pub struct TranscodeDir {
+    /// The folder it works in now.
+    in_use: String,
+    /// The one pley's next start uses, when that is another.
+    next: Option<String>,
+    /// `transcode` in the data folder: used when none is chosen, or the one
+    /// chosen can't be.
+    default: String,
+    /// The folder chosen, when it couldn't be used at start, and why.
+    problem: Option<TranscodeDirProblem>,
+    /// The command line or the environment chooses it: Settings can't.
+    fixed: bool,
+}
+
+#[derive(Serialize)]
+pub struct TranscodeDirProblem {
+    folder: String,
+    reason: String,
+}
+
+fn transcode_dir(state: &AppState) -> TranscodeDir {
+    let config = &state.config;
+    let default = config.default_transcode_dir();
+    let saved = || crate::config::saved_transcode_dir(&config.config_file).unwrap_or_else(|| default.clone());
+    let failed = config.transcode_dir_problem.as_ref().map(|(dir, _)| dir);
+    let next =
+        (!config.transcode_dir_fixed).then(saved).filter(|next| *next != config.transcode_dir && Some(next) != failed);
+    TranscodeDir {
+        in_use: config.transcode_dir.to_string_lossy().into_owned(),
+        next: next.map(|dir| dir.to_string_lossy().into_owned()),
+        default: default.to_string_lossy().into_owned(),
+        problem: config.transcode_dir_problem.as_ref().map(|(dir, reason)| TranscodeDirProblem {
+            folder: dir.to_string_lossy().into_owned(),
+            reason: reason.clone(),
+        }),
+        fixed: config.transcode_dir_fixed,
+    }
+}
+
+#[derive(Deserialize)]
+pub struct TranscodeDirChange {
+    /// `null` (or blank): the default one.
+    path: Option<String>,
+}
+
+/// Chooses the transcoder's work folder from pley's next start: the
+/// transcoder can't move what it is making while it runs.
+pub async fn put_transcode_dir(
+    State(state): State<AppState>,
+    AdminUser(user): AdminUser,
+    Json(change): Json<TranscodeDirChange>,
+) -> ApiResult<Json<TranscodeDir>> {
+    let config = &state.config;
+    if config.transcode_dir_fixed {
+        return Err(AppError::bad_request("the command line or the environment sets that: change it there"));
+    }
+    let default = config.default_transcode_dir();
+    let dir = change.path.as_deref().map(str::trim).filter(|path| !path.is_empty()).map(PathBuf::from);
+    let dir = dir.filter(|dir| *dir != default);
+    if let Some(dir) = &dir {
+        if !dir.is_absolute() {
+            return Err(AppError::bad_request("give the folder's whole path"));
+        }
+        if dir.parent().is_none() {
+            return Err(AppError::bad_request(
+                "choose a folder, not a whole drive: the transcoder keeps several folders of its own in it",
+            ));
+        }
+        if *dir == config.data_dir {
+            return Err(AppError::bad_request("choose a folder of its own, not pley's data folder"));
+        }
+        let check = dir.clone();
+        tokio::task::spawn_blocking(move || crate::config::usable_folder(&check))
+            .await
+            .map_err(|err| AppError::Internal(err.into()))?
+            .map_err(|err| AppError::bad_request(format!("pley can't write in {}: {err}", dir.display())))?;
+    }
+    crate::config::save_transcode_dir(&config.config_file, dir.as_deref())?;
+    tracing::info!(
+        "{} chose {} as the transcode folder, from pley's next start",
+        user.username,
+        dir.as_deref().unwrap_or(&default).display()
+    );
+    Ok(Json(transcode_dir(&state)))
+}
+
 #[derive(Serialize)]
 pub struct TranscoderSummary {
     available: bool,
@@ -326,6 +414,7 @@ pub async fn system(State(state): State<AppState>, _admin: AdminUser) -> ApiResu
         "arch": std::env::consts::ARCH,
         "uptime_secs": state.started_at.elapsed().as_secs(),
         "data_dir": state.config.data_dir.to_string_lossy(),
+        "transcode_dir": transcode_dir(&state),
         "database": state.backups.health(),
         "transcoder": transcoder,
         "counts": counts,

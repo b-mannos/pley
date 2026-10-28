@@ -711,6 +711,30 @@ async fn a_conversion_stops_when_its_download_goes_unless_its_file_is_made() {
     assert_eq!(app.get(&path, admin).await.body["state"], json!("running"));
 }
 
+#[tokio::test]
+async fn a_conversion_two_people_wait_for_stops_only_when_both_give_it_up() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let feature = w.movies["Feature"];
+    let (ann, _) = app.user(admin, "ann", json!({"all_libraries": true})).await;
+    let (bob, _) = app.user(admin, "bob", json!({"all_libraries": true})).await;
+    for token in [&ann, &bob] {
+        let asked = app.post("/api/conversions", token, json!({"item_id": feature, "caps": phone()})).await;
+        assert_eq!(asked.status, StatusCode::OK, "{}", asked.body);
+    }
+    w.fake.conversion_running.store(true, Ordering::SeqCst);
+    let path = format!("/api/conversions/{CONVERSION}");
+
+    // Ann deleting her download doesn't stop Bob's.
+    assert_eq!(app.delete(&path, &ann).await.status, StatusCode::NO_CONTENT);
+    assert!(w.fake.conversions_deleted.lock().is_empty());
+    assert_eq!(app.get(&path, &bob).await.status, StatusCode::OK);
+
+    // Bob was the last to want it.
+    assert_eq!(app.delete(&path, &bob).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(*w.fake.conversions_deleted.lock(), [CONVERSION]);
+}
+
 fn browser() -> Value {
     json!({"containers": ["mp4", "webm"], "video_codecs": ["h264"], "audio_codecs": ["aac", "mp3"]})
 }

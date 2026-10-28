@@ -36,6 +36,7 @@ import type {
   Settings,
   StorageUsage,
   SystemInfo,
+  TranscodeDir,
   TranscoderStatus,
   Trickplay,
   TwoStepSetup,
@@ -1083,6 +1084,17 @@ export function useSaveNetwork() {
   return useMutation({
     mutationFn: (body: ListenChoice) => api.put<NetworkSettings>("/api/network", body),
     onSuccess: (data) => qc.setQueryData(keys.network, data),
+  });
+}
+
+/** Chooses the transcoder's work folder from pley's next start (`null`: the default one). */
+export function useSaveTranscodeDir() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (path: string | null) => api.put<TranscodeDir>("/api/system/transcode-dir", { path }),
+    onSuccess: (data) => {
+      qc.setQueryData<SystemInfo>(keys.system, (system) => (system ? { ...system, transcode_dir: data } : system));
+    },
   });
 }
 

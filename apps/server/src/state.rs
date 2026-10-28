@@ -70,7 +70,8 @@ impl AppState {
         crate::plex::PlexInfo::load(&self.config.data_dir).machine_id
     }
 
-    pub async fn init(config: Config) -> anyhow::Result<Self> {
+    pub async fn init(mut config: Config) -> anyhow::Result<Self> {
+        config.check_transcode_dir();
         for dir in [
             config.data_dir.clone(),
             config.cache_dir(),
@@ -81,6 +82,7 @@ impl AppState {
             std::fs::create_dir_all(&dir).map_err(|e| anyhow::anyhow!("cannot create {}: {e}", dir.display()))?;
         }
         crate::util::keep_private(&config.data_dir);
+        crate::util::check_program_folder();
         // A transcode folder of its own choosing (`/tmp`, say) stays as it
         // is: the transcoder keeps what it makes there private.
         if config.transcode_dir.starts_with(&config.data_dir) {

@@ -87,6 +87,54 @@ describe("ServerSettings", () => {
   });
 });
 
+describe("ServerSettings' transcoder", () => {
+  const transcoder = { available: true, managed: true, encoders: [], hwaccels: [], tonemapping: ["zscale"], dolby_vision: false };
+  const folders = { in_use: "C:\\pley\\transcode", default: "C:\\pley\\transcode", problem: null, fixed: false };
+
+  it("chooses the transcode folder for pley's next start, and goes back to the default", async () => {
+    const user = userEvent.setup();
+    const requests = mockApi({
+      "GET /api/settings": () => SETTINGS,
+      "GET /api/system": () => ({ transcoder, transcode_dir: { ...folders, next: "D:\\fast" } }),
+      "PUT /api/system/transcode-dir": () => ({ ...folders, next: null }),
+    });
+    renderWithProviders(<ServerSettings />);
+    expect(await screen.findByText("D:\\fast")).toBeInTheDocument();
+    expect(screen.getByText(/From pley's next start/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Use the default" }));
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ path: null });
+    expect(screen.queryByText(/From pley's next start/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use the default" })).not.toBeInTheDocument();
+  });
+
+  it("says why the folder chosen isn't used, and where to get Dolby Vision", async () => {
+    mockApi({
+      "GET /api/settings": () => SETTINGS,
+      "GET /api/system": () => ({
+        transcoder,
+        transcode_dir: { ...folders, next: null, problem: { folder: "E:\\gone", reason: "The device is not ready." } },
+      }),
+    });
+    renderWithProviders(<ServerSettings />);
+    expect(await screen.findByText("E:\\gone")).toBeInTheDocument();
+    expect(screen.getByText(/The device is not ready\./)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use the default" })).toBeInTheDocument();
+    expect(screen.getByText(/Dolby Vision needs an FFmpeg with libplacebo/)).toBeInTheDocument();
+  });
+
+  it("leaves a folder the command line chooses alone", async () => {
+    mockApi({
+      "GET /api/settings": () => SETTINGS,
+      "GET /api/system": () => ({ transcoder, transcode_dir: { ...folders, next: null, fixed: true } }),
+    });
+    renderWithProviders(<ServerSettings />);
+    expect(await screen.findByText(/PLEY_TRANSCODE_DIR/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Change…" })).not.toBeInTheDocument();
+  });
+});
+
 describe("TestButton", () => {
   it("tests the key as typed and says how it went", async () => {
     const user = userEvent.setup();

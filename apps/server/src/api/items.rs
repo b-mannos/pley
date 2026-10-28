@@ -70,8 +70,9 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
             }
         }
     }
-    // Apps get the file names, not where the server keeps them.
-    if user.app.is_some() {
+    // Apps and non-administrators get the file names, not where the server
+    // keeps them.
+    if user.app.is_some() || !user.is_admin {
         for file in &mut detail.files {
             file.path = std::path::Path::new(&file.path)
                 .file_name()

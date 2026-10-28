@@ -5,7 +5,7 @@
 mod common;
 
 use axum::http::StatusCode;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use common::TestApp;
 
@@ -82,4 +82,43 @@ async fn what_the_command_line_sets_stays() {
     let saved = std::fs::read_to_string(&app.state.config.config_file).unwrap();
     assert!(!saved.lines().any(|line| line.starts_with("bind")), "{saved}");
     assert!(saved.contains("plex_bind = \"127.0.0.1:32400\""), "{saved}");
+}
+
+#[tokio::test]
+async fn the_transcode_folder_is_chosen_for_the_next_start() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let config = &app.state.config;
+    let default = config.default_transcode_dir().to_string_lossy().into_owned();
+    let folder = |reply: &common::Reply| reply.body["transcode_dir"].clone();
+    let system = app.get("/api/system", &admin).await;
+    assert_eq!(
+        folder(&system),
+        json!({"in_use": default, "next": null, "default": default, "problem": null, "fixed": false})
+    );
+
+    let put = |path: Value| app.put("/api/system/transcode-dir", &admin, json!({"path": path}));
+    for refused in [json!("relative/folder"), json!(config.data_dir.to_string_lossy())] {
+        assert_eq!(put(refused.clone()).await.status, StatusCode::BAD_REQUEST, "{refused}");
+    }
+    let blocked = config.data_dir.join("a file");
+    std::fs::write(&blocked, "").unwrap();
+    let cannot = put(json!(blocked.join("transcode").to_string_lossy())).await;
+    assert_eq!(cannot.status, StatusCode::BAD_REQUEST, "pley can't write there");
+
+    let chosen = app.media.path().join("fast disk");
+    let saved = put(json!(chosen.to_string_lossy())).await;
+    assert_eq!((saved.status, &saved.body["next"]), (StatusCode::OK, &json!(chosen.to_string_lossy())));
+    assert_eq!(saved.body["in_use"], json!(default), "the transcoder goes on where it is");
+    assert_eq!(pley::config::saved_transcode_dir(&config.config_file), Some(chosen));
+    assert_eq!(folder(&app.get("/api/system", &admin).await)["next"], saved.body["next"]);
+
+    let (viewer, _) = app.user(&admin, "viewer", json!({})).await;
+    assert_eq!(
+        app.put("/api/system/transcode-dir", &viewer, json!({"path": null})).await.status,
+        StatusCode::FORBIDDEN
+    );
+    let back = put(Value::Null).await;
+    assert_eq!((back.status, &back.body["next"]), (StatusCode::OK, &Value::Null));
+    assert_eq!(pley::config::saved_transcode_dir(&config.config_file), None);
 }

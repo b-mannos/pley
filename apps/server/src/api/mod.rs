@@ -150,6 +150,7 @@ pub fn router(state: AppState) -> Router {
         .route("/system/storage", get(admin::storage))
         .route("/system/backups", get(admin::backups).post(admin::create_backup))
         .route("/system/storage/clean", post(admin::clean_storage))
+        .route("/system/transcode-dir", put(admin::put_transcode_dir))
         .route("/transcoder", get(admin::transcoder_status))
         .route("/settings", get(admin::get_settings).put(admin::put_settings))
         .route("/settings/test", post(admin::test_service))

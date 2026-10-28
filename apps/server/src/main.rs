@@ -28,7 +28,11 @@ fn main() -> anyhow::Result<ExitCode> {
     runtime.block_on(async move {
         match command {
             Command::ResetPassword { username, password, admin } => {
-                pley::reset_password(config, username, password, *admin).await
+                let password = match password {
+                    Some(password) => password.clone(),
+                    None => pley::read_password(username)?,
+                };
+                pley::reset_password(config, username, &password, *admin).await
             }
             Command::Health => pley::health(&config).await,
             Command::Serve | Command::SaveConfig { .. } => unreachable!(),

@@ -1364,8 +1364,16 @@ pub struct Sessions {
     /// Sessions stopped from elsewhere, by id (see [`Sessions::stop`]).
     stopped: Mutex<HashMap<String, Stopped>>,
     /// Conversions asked for (converted downloads), by id: the file each is
-    /// made of. Whoever may see that file may fetch it.
-    conversions: Mutex<HashMap<String, i64>>,
+    /// made of, and who asked. Whoever may see that file may fetch it.
+    conversions: Mutex<HashMap<String, Conversion>>,
+}
+
+/// A conversion asked for: the same file and plan make the same one, so
+/// several people may wait for it.
+#[derive(Debug, Default)]
+struct Conversion {
+    file_id: i64,
+    asked_by: std::collections::HashSet<i64>,
 }
 
 /// A session stopped from elsewhere (an administrator, or its owner on
@@ -1452,15 +1460,27 @@ pub const STARTING_SECS: i64 = 30;
 const MAX_DIRECT_PER_USER: usize = 20;
 
 impl Sessions {
-    /// Conversion `id` is made of file `file_id`.
-    pub fn note_conversion(&self, id: &str, file_id: i64) {
-        self.conversions.lock().insert(id.to_owned(), file_id);
+    /// Conversion `id` is made of file `file_id`, and `user_id` asked for it.
+    pub fn note_conversion(&self, id: &str, file_id: i64, user_id: i64) {
+        let mut conversions = self.conversions.lock();
+        let conversion = conversions.entry(id.to_owned()).or_default();
+        conversion.file_id = file_id;
+        conversion.asked_by.insert(user_id);
     }
 
     /// The file conversion `id` is made of; `None` for one not asked for
     /// since the server started (asked again, it is known again).
     pub fn conversion_file(&self, id: &str) -> Option<i64> {
-        self.conversions.lock().get(id).copied()
+        self.conversions.lock().get(id).map(|c| c.file_id)
+    }
+
+    /// `user_id` doesn't want conversion `id` any more: whether nobody else
+    /// does either (it may be stopped then).
+    pub fn give_up_conversion(&self, id: &str, user_id: i64) -> bool {
+        let mut conversions = self.conversions.lock();
+        let Some(conversion) = conversions.get_mut(id) else { return true };
+        conversion.asked_by.remove(&user_id);
+        conversion.asked_by.is_empty()
     }
 
     /// Conversion `id` was stopped: unknown until asked for again.

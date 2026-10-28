@@ -1030,14 +1030,14 @@ async fn a_replayed_code_ends_only_the_grant_it_made() {
     let code = code_for(&app, &admin, ANDROID_APP, ANDROID_BACK).await;
     let (access, _) = pair(&exchange(&app, &code, ANDROID_APP, ANDROID_BACK, VERIFIER).await);
     let first: i64 = sqlx::query_scalar("SELECT id FROM app_grants").fetch_one(&app.state.db.read).await.unwrap();
-    // The app signs out, and someone else's app signs in: SQLite gives it
-    // the number the first one had.
+    // The app signs out, and someone else's app signs in: it gets a number
+    // of its own, not the first one's (as SQLite would give it).
     let revoked =
         app.form_post("/api/oauth/revoke", &form(&[("token", &access), ("client_id", ANDROID_APP)]), &[]).await;
     assert_eq!(revoked.status, StatusCode::OK);
     let (bobs, _) = app.app_token(bob, "library").await;
     let second: i64 = sqlx::query_scalar("SELECT id FROM app_grants").fetch_one(&app.state.db.read).await.unwrap();
-    assert_eq!(second, first, "the number was given again");
+    assert_ne!(second, first, "the number isn't given again");
 
     // The code shown again ends nothing of Bob's.
     let replay = exchange(&app, &code, ANDROID_APP, ANDROID_BACK, VERIFIER).await;

@@ -40,6 +40,11 @@ pub struct Cli {
     #[arg(long, env = "PLEY_DATA_DIR", global = true)]
     pub data_dir: Option<PathBuf>,
 
+    /// Folder the transcoder works in: stream segments, converted downloads, its caches
+    /// (default: `transcode` in the data folder, which is used when this one can't be)
+    #[arg(long, env = "PLEY_TRANSCODE_DIR", global = true)]
+    pub transcode_dir: Option<PathBuf>,
+
     /// Address to listen on, e.g. `0.0.0.0:7539` or just a port; several separated by commas,
     /// such as `127.0.0.1:7539,192.168.1.10:7539` (one adapter's address, and this computer)
     #[arg(long, env = "PLEY_BIND", global = true)]
@@ -94,15 +99,18 @@ pub enum Command {
     /// Set a user's password, creating the user if it does not exist
     ResetPassword {
         username: String,
-        password: String,
+        /// The new password; asked for when left out (or read from standard
+        /// input), so it isn't kept in the shell's history or shown in the
+        /// list of processes
+        password: Option<String>,
         /// Grant administrator rights
         #[arg(long)]
         admin: bool,
     },
     /// Exit with status 0 when the server on this machine answers (for container health checks)
     Health,
-    /// Save the options given before it (--bind, --plex-bind, --ffmpeg, --ffprobe,
-    /// --no-discovery) in pley.toml in the data folder, for every later start
+    /// Save the options given before it (--bind, --plex-bind, --transcode-dir, --ffmpeg,
+    /// --ffprobe, --no-discovery) in pley.toml in the data folder, for every later start
     SaveConfig {
         /// Whether to answer the pley apps looking for servers on the local network
         #[arg(long, value_name = "true|false")]
@@ -147,8 +155,15 @@ pub struct Config {
     /// [`crate::plex::on_web_port`]).
     pub plex_on_web: bool,
     pub data_dir: PathBuf,
-    /// Work directory handed to the managed transcoder (segments, caches).
+    /// Work directory handed to the managed transcoder (segments, caches):
+    /// the one chosen, or [`Config::default_transcode_dir`] when it can't
+    /// be used (see [`Config::check_transcode_dir`]).
     pub transcode_dir: PathBuf,
+    /// The transcode folder chosen, when it isn't the one in use, and why.
+    pub transcode_dir_problem: Option<(PathBuf, String)>,
+    /// The command line or the environment chooses the transcode folder:
+    /// the web app can't change it.
+    pub transcode_dir_fixed: bool,
     /// ffmpeg/ffprobe are only passed through to the managed transcoder.
     pub ffmpeg: PathBuf,
     pub ffprobe: PathBuf,
@@ -208,7 +223,12 @@ impl Config {
             Some(value) if !is_off(&value) && !is_web(&value) => parse_binds(&value)?,
             _ => Vec::new(),
         };
-        let transcode_dir = file.transcode_dir.map(|p| absolutize(&p)).unwrap_or_else(|| data_dir.join("transcode"));
+        let transcode_dir = cli
+            .transcode_dir
+            .clone()
+            .or(file.transcode_dir)
+            .map(|p| absolutize(&p))
+            .unwrap_or_else(|| data_dir.join("transcode"));
 
         Ok(Self {
             bind: binds[0],
@@ -237,6 +257,8 @@ impl Config {
             config_file,
             data_dir,
             transcode_dir,
+            transcode_dir_problem: None,
+            transcode_dir_fixed: cli.transcode_dir.is_some(),
         })
     }
 
@@ -251,6 +273,8 @@ impl Config {
             plex_on_web: true,
             data_dir: data_dir.to_path_buf(),
             transcode_dir: data_dir.join("transcode"),
+            transcode_dir_problem: None,
+            transcode_dir_fixed: false,
             ffmpeg: PathBuf::from("ffmpeg"),
             ffprobe: PathBuf::from("ffprobe"),
             web_dir: None,
@@ -271,6 +295,31 @@ impl Config {
 
     pub fn db_path(&self) -> PathBuf {
         self.data_dir.join("pley.db")
+    }
+
+    /// The transcode folder when none is chosen, or the one chosen can't be
+    /// used: `transcode` in the data folder.
+    pub fn default_transcode_dir(&self) -> PathBuf {
+        self.data_dir.join("transcode")
+    }
+
+    /// Falls back to [`Config::default_transcode_dir`] when the transcode
+    /// folder chosen can't be made or written to (a drive that isn't
+    /// there, a share without the right to write), saying why in
+    /// `transcode_dir_problem`: transcodes and downloads go on working.
+    pub fn check_transcode_dir(&mut self) {
+        let default = self.default_transcode_dir();
+        if self.transcode_dir == default {
+            return;
+        }
+        if let Err(problem) = usable_folder(&self.transcode_dir) {
+            tracing::warn!(
+                "the transcode folder {} can't be used ({problem}): {} is, until it can",
+                self.transcode_dir.display(),
+                default.display()
+            );
+            self.transcode_dir_problem = Some((std::mem::replace(&mut self.transcode_dir, default), problem));
+        }
     }
 
     /// Server log, rotated by size (see [`crate::logging`]).
@@ -323,9 +372,9 @@ pub fn save_config(cli: &Cli, path: &Path, discovery: Option<bool>) -> anyhow::R
         }
         values.push(("plex_bind", plex_bind.trim().into()));
     }
-    for (key, program) in [("ffmpeg", &cli.ffmpeg), ("ffprobe", &cli.ffprobe)] {
-        if let Some(program) = program {
-            values.push((key, program.to_string_lossy().into_owned().into()));
+    for (key, path) in [("transcode_dir", &cli.transcode_dir), ("ffmpeg", &cli.ffmpeg), ("ffprobe", &cli.ffprobe)] {
+        if let Some(path) = path {
+            values.push((key, path.to_string_lossy().into_owned().into()));
         }
     }
     if let Some(discovery) = discovery.or(cli.no_discovery.then_some(false)) {
@@ -359,16 +408,57 @@ pub fn save_listen(path: &Path, listen: &crate::network::Listen, fixed: crate::n
     write_keys(path, &values)
 }
 
+/// Saves the transcode folder chosen in Settings → Server in the config
+/// file `path`, for pley's next start; `None` goes back to the default one.
+pub fn save_transcode_dir(path: &Path, dir: Option<&Path>) -> anyhow::Result<()> {
+    match dir {
+        Some(dir) => write_keys(path, &[("transcode_dir", dir.to_string_lossy().into_owned().into())]),
+        None => {
+            let text = read_config_text(path)?;
+            let kept: Vec<&str> = text.lines().filter(|line| !defines(line, "transcode_dir")).collect();
+            if kept.len() == text.lines().count() {
+                return Ok(());
+            }
+            replace_config(path, kept.join("\n") + "\n")
+        }
+    }
+}
+
+/// The transcode folder the config file `path` chooses: pley's next start
+/// uses it (unless the command line or the environment says otherwise).
+pub fn saved_transcode_dir(path: &Path) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(path).ok()?;
+    toml::from_str::<FileConfig>(&text).ok()?.transcode_dir.map(|dir| absolutize(&dir))
+}
+
+/// Whether pley can make files in the folder `dir` (made if missing): why
+/// not, if it can't.
+pub fn usable_folder(dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|err| err.to_string())?;
+    let probe = dir.join(format!(".pley-{}", crate::auth::new_token()));
+    std::fs::write(&probe, b"").map_err(|err| err.to_string())?;
+    let _ = std::fs::remove_file(&probe);
+    Ok(())
+}
+
+fn read_config_text(path: &Path) -> anyhow::Result<String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(err) => Err(err).with_context(|| format!("reading config file {}", path.display())),
+    }
+}
+
 /// Sets `values` in the config file `path` (made if missing), whose other
-/// lines and comments stay. The file is replaced whole: pley never reads
-/// half of it.
+/// lines and comments stay.
 fn write_keys(path: &Path, values: &[(&str, toml::Value)]) -> anyhow::Result<()> {
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(err) => return Err(err).with_context(|| format!("reading config file {}", path.display())),
-    };
-    let text = set_keys(&text, values);
+    let text = set_keys(&read_config_text(path)?, values);
+    replace_config(path, text)
+}
+
+/// Replaces the config file `path` with `text`, once it is known to be
+/// valid. The file is replaced whole: pley never reads half of it.
+fn replace_config(path: &Path, text: String) -> anyhow::Result<()> {
     toml::from_str::<FileConfig>(&text).with_context(|| format!("checking the new {}", path.display()))?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -518,6 +608,7 @@ mod tests {
             command: None,
             config: None,
             data_dir: Some(data_dir.to_path_buf()),
+            transcode_dir: None,
             bind: None,
             plex_bind: None,
             ffmpeg: None,
@@ -575,6 +666,41 @@ mod tests {
         assert_eq!(config.bind, SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 9000));
         assert_eq!(config.plex_bind, Some("127.0.0.1:32401".parse().unwrap()));
         assert_eq!(config.ffmpeg, PathBuf::from("ffmpeg7"));
+    }
+
+    #[test]
+    fn the_transcode_folder_is_chosen_saved_and_falls_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("pley.toml");
+        let chosen = dir.path().join("fast disk");
+        std::fs::write(&file, "# mine\nbind = \"7539\"\n").unwrap();
+        save_transcode_dir(&file, Some(&chosen)).unwrap();
+        assert_eq!(saved_transcode_dir(&file), Some(chosen.clone()));
+        let mut config = Config::load(&cli(dir.path())).unwrap();
+        config.check_transcode_dir();
+        assert_eq!((config.transcode_dir.as_path(), config.transcode_dir_fixed), (chosen.as_path(), false));
+        assert!(chosen.is_dir() && config.transcode_dir_problem.is_none());
+
+        // One that can't be made (a file is in the way): the default one is used.
+        let blocked = dir.path().join("a file");
+        std::fs::write(&blocked, "").unwrap();
+        save_transcode_dir(&file, Some(&blocked.join("transcode"))).unwrap();
+        let mut config = Config::load(&cli(dir.path())).unwrap();
+        config.check_transcode_dir();
+        assert_eq!(config.transcode_dir, dir.path().join("transcode"));
+        let problem = config.transcode_dir_problem.map(|(dir, _)| dir);
+        assert_eq!(problem, Some(blocked.join("transcode")), "the one chosen is tried again next time");
+
+        // Back to the default: the key goes, the rest stays.
+        save_transcode_dir(&file, None).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "# mine\nbind = \"7539\"\n");
+        assert_eq!(saved_transcode_dir(&file), None);
+
+        // The command line wins, and the web app can't change it.
+        let mut args = cli(dir.path());
+        args.transcode_dir = Some(chosen.clone());
+        let config = Config::load(&args).unwrap();
+        assert_eq!((config.transcode_dir, config.transcode_dir_fixed), (chosen, true));
     }
 
     #[test]

@@ -101,6 +101,29 @@ pub fn keep_private(dir: &Path) {
     let _ = dir;
 }
 
+/// Warns when every account on this computer may change the folder pley's
+/// programs are in (pley and its transcoder): any of them could replace
+/// them, and run as pley's account, a service's included. Unpacked to the
+/// top of a drive (`C:\pley`), a folder inherits the drive's permissions,
+/// which let every account add and change files; Program Files and a user's
+/// own folders don't.
+pub fn check_program_folder() {
+    #[cfg(windows)]
+    {
+        let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)) else {
+            return;
+        };
+        if windows_acl::dacl(&dir).is_ok_and(|sddl| windows_acl::writable_by_everyone(&sddl)) {
+            tracing::warn!(
+                "every account on this computer can change the programs in {}: any of them could replace pley \
+                 with its own and run as pley's account. Install pley to Program Files, or take away the \
+                 Users' and Authenticated Users' right to change that folder",
+                dir.display()
+            );
+        }
+    }
+}
+
 #[cfg(windows)]
 mod windows_acl {
     use std::os::windows::ffi::OsStrExt;
@@ -151,6 +174,49 @@ mod windows_acl {
                 .next()
                 .is_some_and(|trustee| EVERYONE.iter().any(|(name, sid)| trustee == *name || trustee == *sid))
         })
+    }
+
+    /// Whether an entry of `sddl` (a folder's DACL) that applies to the
+    /// folder itself lets every account on the computer change it: add or
+    /// replace files in it (writing, deleting them), or its permissions.
+    pub(super) fn writable_by_everyone(sddl: &str) -> bool {
+        sddl.split(['(', ')']).filter(|ace| ace.starts_with("A;")).any(|ace| {
+            let fields: Vec<&str> = ace.split(';').collect();
+            let [_, flags, rights, .., trustee] = fields[..] else { return false };
+            !flags.contains("IO")
+                && EVERYONE.iter().any(|(name, sid)| trustee == *name || trustee == *sid)
+                && access_mask(rights) & CHANGES != 0
+        })
+    }
+
+    /// Rights that change a folder or what is in it: add a file
+    /// (`FILE_ADD_FILE`), delete one (`FILE_DELETE_CHILD`), delete or
+    /// rename the folder, rewrite its permissions or owner, and the generic
+    /// rights that include them.
+    const CHANGES: u32 = 0x2 | 0x40 | 0x1_0000 | 0x4_0000 | 0x8_0000 | 0x1000_0000 | 0x4000_0000;
+
+    /// An SDDL access mask: hexadecimal, or two-letter rights.
+    fn access_mask(rights: &str) -> u32 {
+        if let Some(hex) = rights.strip_prefix("0x") {
+            return u32::from_str_radix(hex, 16).unwrap_or(0);
+        }
+        rights
+            .as_bytes()
+            .chunks(2)
+            .map(|right| match right {
+                b"GA" => 0x1000_0000,
+                b"GW" => 0x4000_0000,
+                b"FA" => 0x1F_01FF,
+                b"FW" => 0x12_0116,
+                b"SD" => 0x1_0000,
+                b"WD" => 0x4_0000,
+                b"WO" => 0x8_0000,
+                b"DC" => 0x2,
+                b"LC" => 0x4,
+                b"DT" => 0x40,
+                _ => 0,
+            })
+            .fold(0, |mask, right| mask | right)
     }
 
     fn icacls(dir: &Path, args: &[&str]) -> anyhow::Result<()> {
@@ -331,6 +397,31 @@ mod tests {
         assert!(!open_to_everyone(&after), "{after}");
         // Still pley's own.
         std::fs::write(dir.path().join("pley.toml"), "").unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_program_folder_anyone_may_change_is_found() {
+        use windows_acl::{dacl, writable_by_everyone};
+        // Unpacked to C:\pley: the drive's Modify for Authenticated Users, inherited.
+        assert!(writable_by_everyone("D:AI(A;OICIID;FA;;;BA)(A;OICIID;0x1301bf;;;AU)"));
+        assert!(writable_by_everyone("D:(A;;GA;;;WD)"));
+        // Program Files: everyone may read and run what is there, only.
+        assert!(!writable_by_everyone(
+            "D:PAI(A;OICIIO;GA;;;CO)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;0x1200a9;;;BU)(A;OICIIO;GXGR;;;BU)"
+        ));
+        // The drive itself: everyone's Modify is for what is made in it, not for it.
+        assert!(!writable_by_everyone("D:PAI(A;OICIIO;SDGXGWGR;;;AU)(A;;0x1200a9;;;AU)(A;OICI;FA;;;BA)"));
+
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!writable_by_everyone(&dacl(dir.path()).unwrap()), "a user's own temporary folder");
+        let status = std::process::Command::new("icacls")
+            .arg(dir.path())
+            .args(["/grant", "*S-1-5-11:(OI)(CI)M", "/Q"])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert!(writable_by_everyone(&dacl(dir.path()).unwrap()));
     }
 
     #[cfg(unix)]

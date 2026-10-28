@@ -748,6 +748,20 @@ export interface NetworkSettings extends ListenChoice {
   windows: boolean;
 }
 
+/** The managed transcoder's work folder (Settings → Server). */
+export interface TranscodeDir {
+  /** The folder it works in now. */
+  in_use: string;
+  /** The one pley's next start uses, when that is another. */
+  next: string | null;
+  /** `transcode` in the data folder: used when none is chosen, or the one chosen can't be. */
+  default: string;
+  /** The folder chosen, when it couldn't be used at start, and why. */
+  problem: { folder: string; reason: string } | null;
+  /** The command line or the environment chooses it. */
+  fixed: boolean;
+}
+
 export interface SystemInfo {
   name: string;
   version: string;
@@ -756,6 +770,7 @@ export interface SystemInfo {
   arch: string;
   uptime_secs: number;
   data_dir: string;
+  transcode_dir: TranscodeDir;
   transcoder: TranscoderInfo;
   counts: {
     libraries: number;

@@ -935,6 +935,7 @@ async fn administration_endpoints() {
         (Method::GET, "/api/system/resources"),
         (Method::GET, "/api/system/storage"),
         (Method::POST, "/api/system/storage/clean"),
+        (Method::PUT, "/api/system/transcode-dir"),
         (Method::GET, "/api/system/backups"),
         (Method::POST, "/api/system/backups"),
         (Method::GET, "/api/transcoder"),

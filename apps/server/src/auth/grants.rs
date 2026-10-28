@@ -213,9 +213,9 @@ pub async fn issue(db: &Db, grant: NewGrant) -> Result<(Issued, Vec<i64>), Issue
         }
     }
     let grant_id: i64 = sqlx::query_scalar(
-        "INSERT INTO app_grants (user_id, approved_by, client_id, client_name, scope, created_at, last_used_at,
+        "INSERT INTO app_grants (id, user_id, approved_by, client_id, client_name, scope, created_at, last_used_at,
                                  expires_at, ends_at, user_agent, last_ip)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+         VALUES ((SELECT last + 1 FROM grant_ids), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(grant.user_id)
     .bind(grant.approved_by)

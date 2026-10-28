@@ -113,9 +113,9 @@ pub async fn get(State(state): State<AppState>, user: AuthUser, Path(id): Path<i
     Ok(Json(for_user(&user, to_dto(&state, &lib, Some(&user)).await?)))
 }
 
-/// Apps aren't told where the server keeps its media.
+/// Apps and non-administrators aren't told where the server keeps its media.
 fn for_user(user: &AuthUser, mut dto: LibraryDto) -> LibraryDto {
-    if user.app.is_some() {
+    if user.app.is_some() || !user.is_admin {
         dto.paths.clear();
     }
     dto

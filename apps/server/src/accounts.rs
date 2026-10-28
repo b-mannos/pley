@@ -233,6 +233,12 @@ impl Throttle {
         if self.attempts.len() >= MAX_KEYS && !self.attempts.contains_key(key) {
             self.purge();
             if self.attempts.len() >= MAX_KEYS {
+                // Full of counts that lock nobody out yet (one address trying
+                // that many usernames, say): they go and the lockouts stay,
+                // rather than everyone waiting for the window to end.
+                self.attempts.retain(|_, a| a.in_flight > 0 || a.failures >= MAX_FAILURES);
+            }
+            if self.attempts.len() >= MAX_KEYS {
                 return Err(AppError::TooManyRequests("too many attempts, try again later".into()));
             }
         }
@@ -472,6 +478,22 @@ mod tests {
         assert_eq!(device_name(Some(tizen)), "Samsung TV");
         let webos = "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.128 Safari/537.36 WebAppManager";
         assert_eq!(device_name(Some(webos)), "LG TV");
+    }
+
+    #[test]
+    fn a_full_table_keeps_its_lockouts_and_lets_others_in() {
+        let t = Throttle::default();
+        for _ in 0..MAX_FAILURES {
+            t.begin("login:owner").expect("allowed").failed();
+        }
+        // One address tries as many usernames as the table holds, once each.
+        for i in 1..MAX_KEYS {
+            t.begin(&format!("login:name{i}")).expect("allowed").failed();
+        }
+        assert_eq!(t.attempts.len(), MAX_KEYS);
+        // Someone else still signs in, and the lockout stays.
+        assert!(t.begin("login:someone").is_ok(), "counts that lock nobody out made room");
+        assert!(t.begin("login:owner").is_err(), "the lockout stays");
     }
 
     #[test]

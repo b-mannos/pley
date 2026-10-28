@@ -564,7 +564,7 @@ pub async fn convert(
         AppError::NotFound(_) => AppError::Unavailable("this title's file can't be read right now".into()),
         err => for_viewer(&user, err),
     })?;
-    state.sessions.note_conversion(&status.id, file.id);
+    state.sessions.note_conversion(&status.id, file.id, user.id);
     Ok(Json(DownloadInfo::for_viewer(&status, &user)))
 }
 
@@ -595,6 +595,11 @@ pub async fn cancel_conversion(
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
     conversion_of(&state, &user, &id).await?;
+    // Someone else waiting for the same file goes on getting it: only the
+    // last to give it up (or an administrator) stops it.
+    if !state.sessions.give_up_conversion(&id, user.id) && !user.is_admin {
+        return Ok(StatusCode::NO_CONTENT);
+    }
     let status = state.transcoder.conversion(&id).await.map_err(|err| for_viewer(&user, err))?;
     if status.state != ConversionState::Done {
         state.transcoder.delete_conversion(&id).await.map_err(|err| for_viewer(&user, err))?;

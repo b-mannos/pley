@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { CircleAlert, CircleCheck, Eye, EyeOff, Save } from "lucide-react";
+import { CircleAlert, CircleCheck, Eye, EyeOff, FolderOpen, Save } from "lucide-react";
 import { appKeys } from "@/api/apps";
 import { errorMessage } from "@/api/client";
-import { useSaveSettings, useSettings, useSystemInfo, useTestService } from "@/api/hooks";
-import type { HwAccel, ServiceTest, Settings, ToneMapping, TranscodePreset, TvMetadata } from "@/api/types";
+import { useSaveSettings, useSaveTranscodeDir, useSettings, useSystemInfo, useTestService } from "@/api/hooks";
+import type { HwAccel, ServiceTest, Settings, ToneMapping, TranscodeDir, TranscodePreset, TvMetadata } from "@/api/types";
+import { FolderPicker } from "@/components/FolderPicker";
 import { useToast } from "@/components/Toast";
 import { Button, Card, EmptyState, IconButton, PageSpinner, Select, TextInput, Toggle } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -172,6 +173,77 @@ function Row({ label, hint, children, htmlFor }: { label: string; hint?: ReactNo
       </div>
       <div className="min-w-0">{children}</div>
     </div>
+  );
+}
+
+/**
+ * Where the transcoder works. Saved in pley.toml for pley's next start: the
+ * transcoder can't move what it is making while it runs.
+ */
+function TranscodeFolder({ dir }: { dir: TranscodeDir }) {
+  const save = useSaveTranscodeDir();
+  const toast = useToast();
+  const [picking, setPicking] = useState(false);
+  // The folder pley's next start tries: the one saved, even if it couldn't be used this time.
+  const chosen = dir.next ?? dir.problem?.folder ?? dir.in_use;
+  const choose = (path: string | null) =>
+    save.mutate(path, {
+      onSuccess: (saved) => toast.success(saved.next ? "Saved: pley uses it from its next start" : "Saved"),
+      onError: (e) => toast.error(errorMessage(e)),
+    });
+
+  return (
+    <Row
+      label="Transcode folder"
+      hint="Stream segments, converted downloads and the transcoder's caches: a fast local disk with room to spare. If the folder can't be used when pley starts, the default one in the data folder is."
+    >
+      <div className="space-y-2">
+        <div className="break-all font-mono text-xs text-fg/80">{dir.in_use}</div>
+        {dir.problem ? (
+          <p className="flex items-start gap-1.5 text-xs text-danger">
+            <CircleAlert className="mt-px size-3.5 shrink-0" />
+            <span>
+              <span className="break-all font-mono">{dir.problem.folder}</span> couldn't be used ({dir.problem.reason}), so the
+              default folder is. pley tries it again when it next starts.
+            </span>
+          </p>
+        ) : null}
+        {dir.next ? (
+          <p className="text-xs text-accent">
+            From pley's next start: <span className="break-all font-mono">{dir.next}</span>
+          </p>
+        ) : null}
+        {dir.fixed ? (
+          <p className="text-xs text-subtle">Chosen on pley's command line or in its environment (PLEY_TRANSCODE_DIR).</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              icon={<FolderOpen className="size-4" />}
+              loading={save.isPending}
+              onClick={() => setPicking(true)}
+            >
+              Change…
+            </Button>
+            {chosen !== dir.default ? (
+              <Button size="sm" variant="ghost" disabled={save.isPending} onClick={() => choose(null)}>
+                Use the default
+              </Button>
+            ) : null}
+          </div>
+        )}
+      </div>
+      <FolderPicker
+        open={picking}
+        onClose={() => setPicking(false)}
+        initialPath={chosen}
+        onSelect={(path) => {
+          setPicking(false);
+          choose(path);
+        }}
+      />
+    </Row>
   );
 }
 
@@ -357,6 +429,8 @@ ${form.tvdb_pin}`}
         <Row label="Connection" hint={tc?.managed === false ? `External transcoder at ${tc.url ?? "?"}` : "Started by pley on this computer."}>
           <TestButton label="Test the transcoder" test={{ service: "transcoder" }} className="" />
         </Row>
+        {/* An external transcoder keeps a folder of its own. */}
+        {system.data?.transcode_dir && tc?.managed !== false ? <TranscodeFolder dir={system.data.transcode_dir} /> : null}
         <Row
           label="Hardware acceleration"
           htmlFor="hwaccel"
@@ -377,9 +451,19 @@ ${form.tvdb_pin}`}
           label="HDR tone mapping"
           htmlFor="tonemap"
           hint={
-            tc && tc.tonemapping.length
-              ? `Available: ${tc.tonemapping.join(", ")}${tc.dolby_vision ? " · Dolby Vision supported" : ""}`
-              : "Convert HDR10, HLG and Dolby Vision to SDR when transcoding."
+            <>
+              {tc && tc.tonemapping.length
+                ? `Available: ${tc.tonemapping.join(", ")}${tc.dolby_vision ? " · Dolby Vision supported" : ""}`
+                : "Convert HDR10, HLG and Dolby Vision to SDR when transcoding."}
+              {tc?.available && !tc.dolby_vision ? (
+                <span className="mt-1 block">
+                  Dolby Vision needs an FFmpeg with libplacebo, and a GPU it reaches through Vulkan:{" "}
+                  <Link href="https://www.gyan.dev/ffmpeg/builds/">gyan.dev's full build</Link> on Windows,{" "}
+                  <Link href="https://github.com/jellyfin/jellyfin-ffmpeg/releases">jellyfin-ffmpeg</Link> on Windows and Linux, or
+                  Homebrew's ffmpeg-full on a Mac. Point pley at it with --ffmpeg and --ffprobe, or in pley.toml.
+                </span>
+              ) : null}
+            </>
           }
         >
           <Select id="tonemap" value={form.tonemapping} onChange={(e) => set("tonemapping", e.target.value as ToneMapping)} className="w-full">

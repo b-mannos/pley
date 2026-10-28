@@ -102,6 +102,7 @@ const ADMIN: &[(&str, &str)] = &[
     ("GET", "/api/system/backups"),
     ("POST", "/api/system/backups"),
     ("POST", "/api/system/storage/clean"),
+    ("PUT", "/api/system/transcode-dir"),
     ("GET", "/api/transcoder"),
     ("GET", "/api/settings"),
     ("PUT", "/api/settings"),
@@ -560,7 +561,7 @@ async fn an_administrators_app_sees_everything_but_administers_nothing() {
 }
 
 #[tokio::test]
-async fn apps_dont_see_folders_or_file_paths() {
+async fn apps_and_non_administrators_dont_see_folders_or_file_paths() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
     app.media_file("movies/Film (2020)/Film (2020).mkv", 2048);
@@ -577,6 +578,18 @@ async fn apps_dont_see_folders_or_file_paths() {
     let detail = app.get(&format!("/api/items/{film}"), &token).await;
     assert_eq!(detail.body["files"][0]["path"], "Film (2020).mkv");
     assert!(!detail.mentions(&folder.replace('\\', "\\\\")) && !detail.mentions(&folder));
+
+    // Nor do people who aren't administrators, on either API.
+    let (viewer, _) = app.user(&admin, "viewer", json!({"all_libraries": true})).await;
+    assert_eq!(app.get("/api/libraries", &viewer).await.body[0]["paths"], json!([]));
+    let detail = app.get(&format!("/api/items/{film}"), &viewer).await;
+    assert_eq!(detail.body["files"][0]["path"], "Film (2020).mkv");
+    let sections = app.plex_json("/library/sections", &viewer).await;
+    assert_eq!(sections["Directory"][0]["Location"][0]["path"], "movies");
+    let item = app.plex_json(&format!("/library/metadata/{film}"), &viewer).await;
+    assert_eq!(item["Metadata"][0]["Media"][0]["Part"][0]["file"], "Film (2020).mkv");
+    let sections = app.plex_json("/library/sections", &admin).await;
+    assert_eq!(sections["Directory"][0]["Location"][0]["path"], json!(folder), "administrators see where");
 }
 
 #[tokio::test]
