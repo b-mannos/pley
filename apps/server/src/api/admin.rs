@@ -27,6 +27,20 @@ pub async fn put_settings(
     Json(patch): Json<SettingsPatch>,
 ) -> ApiResult<Json<Settings>> {
     let before = state.settings.get();
+    // A choice that can't work here is refused; one saved before (another
+    // GPU, another FFmpeg) stays, and the transcoder does without it.
+    let caps = state.transcoder.info().map(|info| info.capabilities);
+    let os = transcoder_os(&state);
+    if let Some(hwaccel) = patch.hwaccel.filter(|v| *v != before.hwaccel)
+        && let Some(why) = crate::settings::hwaccel_problem(hwaccel, os, caps.as_ref())
+    {
+        return Err(AppError::bad_request(why));
+    }
+    if let Some(mode) = patch.tonemapping.filter(|v| *v != before.tonemapping)
+        && let Some(why) = crate::settings::tonemap_problem(mode, caps.as_ref())
+    {
+        return Err(AppError::bad_request(why));
+    }
     let after = state.settings.update(&state.db, patch).await?;
     if before.watch_libraries != after.watch_libraries {
         state.watcher.reload().await;
@@ -42,6 +56,12 @@ pub async fn put_settings(
         state.scanner.enqueue_all(false).await?;
     }
     Ok(Json(Settings::clone(&after)))
+}
+
+/// The transcoder's operating system, when known: a managed one runs on
+/// pley's computer, an external one anywhere.
+fn transcoder_os(state: &AppState) -> Option<&'static str> {
+    state.transcoder.is_managed().then_some(std::env::consts::OS)
 }
 
 /// A service the settings can test.
@@ -338,8 +358,17 @@ pub struct TranscoderSummary {
     encoders: Vec<String>,
     active_encoder: Option<String>,
     hwaccels: Vec<String>,
+    /// Hardware accelerations with a working H.264 encoder, best first:
+    /// the first is the one Automatic uses.
+    accels: Vec<pley_transcoder_api::HwAccel>,
+    /// Some video is decoded on a GPU: `hardware_decoding` changes something.
+    hardware_decoding: bool,
     tonemapping: Vec<String>,
     dolby_vision: bool,
+    /// Audio fingerprints, which find intros and credits that chapters don't name.
+    chromaprint: bool,
+    /// FFmpeg can hold transcodes back (6.1 and newer).
+    throttling: bool,
     max_jobs: u32,
     active_jobs: u32,
     error: Option<String>,
@@ -381,11 +410,26 @@ pub async fn system(State(state): State<AppState>, _admin: AdminUser) -> ApiResu
             .map(|e| e.name.clone())
         }),
         hwaccels: info.as_ref().map(|i| i.capabilities.hwaccels.clone()).unwrap_or_default(),
+        accels: info
+            .as_ref()
+            .map(|i| {
+                let mut accels = Vec::new();
+                for e in &i.capabilities.encoders {
+                    if e.hardware && e.codec == pley_transcoder_api::VideoCodec::H264 && !accels.contains(&e.accel) {
+                        accels.push(e.accel);
+                    }
+                }
+                accels
+            })
+            .unwrap_or_default(),
+        hardware_decoding: info.as_ref().is_some_and(|i| crate::settings::decodes_on_gpu(&i.capabilities)),
         tonemapping: info
             .as_ref()
             .map(|i| i.capabilities.tonemappers.iter().map(|t| t.as_str().to_owned()).collect())
             .unwrap_or_default(),
         dolby_vision: info.as_ref().is_some_and(|i| i.capabilities.dolby_vision),
+        chromaprint: info.as_ref().is_some_and(|i| i.capabilities.chromaprint),
+        throttling: info.as_ref().is_some_and(|i| i.capabilities.readrate),
         max_jobs: info.as_ref().map(|i| i.limits.max_jobs).unwrap_or(0),
         active_jobs,
         error: state.transcoder.last_error(),

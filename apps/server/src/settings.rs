@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use pley_transcoder_api::{HwAccel, TonemapMode, TranscodeOptions};
+use pley_transcoder_api::{Capabilities, HwAccel, TonemapMode, Tonemapper, TranscodeOptions, VideoCodec};
 use serde::{Deserialize, Serialize};
 
 use crate::db::Db;
@@ -129,6 +129,91 @@ impl Settings {
             throttle: self.throttle_transcodes,
         }
     }
+}
+
+/// The name Settings shows for a hardware acceleration.
+fn accel_name(accel: HwAccel) -> &'static str {
+    match accel {
+        HwAccel::Auto => "Automatic",
+        HwAccel::None => "Software encoding",
+        HwAccel::Nvenc => "NVIDIA NVENC",
+        HwAccel::Qsv => "Intel Quick Sync",
+        HwAccel::Amf => "AMD AMF",
+        HwAccel::Vaapi => "VAAPI",
+        HwAccel::Videotoolbox => "VideoToolbox",
+        HwAccel::Vulkan => "Vulkan",
+    }
+}
+
+/// Why `hwaccel` can't work here, or `None` when it can (or nobody can
+/// tell). `os` is the transcoder's operating system when known (a managed
+/// transcoder runs on pley's), `caps` what it found. Without its encoder,
+/// the transcoder encodes in software instead.
+pub fn hwaccel_problem(hwaccel: HwAccel, os: Option<&str>, caps: Option<&Capabilities>) -> Option<String> {
+    let name = accel_name(hwaccel);
+    match (hwaccel, os) {
+        (HwAccel::Auto | HwAccel::None, _) => return None,
+        (HwAccel::Vaapi, Some(os)) if os != "linux" => return Some(format!("{name} works on Linux only")),
+        (HwAccel::Videotoolbox, Some(os)) if os != "macos" => return Some(format!("{name} works on macOS only")),
+        (HwAccel::Nvenc | HwAccel::Qsv | HwAccel::Amf, Some("macos")) => {
+            return Some(format!("{name} doesn't work on macOS"));
+        }
+        _ => {}
+    }
+    // An FFmpeg that isn't there can't say what the GPU could do.
+    let caps = caps.filter(|caps| caps.ffmpeg_available)?;
+    let works = match hwaccel {
+        HwAccel::Vulkan => caps.vulkan_encode,
+        accel => caps.encoders.iter().any(|e| e.hardware && e.codec == VideoCodec::H264 && e.accel == accel),
+    };
+    let needs = match hwaccel {
+        HwAccel::Nvenc => "an NVIDIA graphics card",
+        HwAccel::Qsv => "an Intel graphics chip",
+        HwAccel::Amf => "an AMD graphics card",
+        HwAccel::Vaapi => "an Intel or AMD graphics chip",
+        HwAccel::Videotoolbox => "an FFmpeg built with VideoToolbox",
+        _ => "a GPU that FFmpeg encodes on through Vulkan",
+    };
+    (!works).then(|| format!("{name} isn't available here: it needs {needs}, and the transcoder found none"))
+}
+
+/// Why the tone mapper `mode` names can't work here, or `None` when it can
+/// (or nobody can tell). Without it, the transcoder tone maps as Automatic
+/// does.
+pub fn tonemap_problem(mode: TonemapMode, caps: Option<&Capabilities>) -> Option<String> {
+    let wanted = match mode {
+        TonemapMode::Libplacebo => Tonemapper::Libplacebo,
+        TonemapMode::Opencl => Tonemapper::Opencl,
+        TonemapMode::Zscale => Tonemapper::Zscale,
+        TonemapMode::Auto | TonemapMode::None => return None,
+    };
+    let caps = caps.filter(|caps| caps.ffmpeg_available)?;
+    let why = match wanted {
+        Tonemapper::Libplacebo => {
+            "libplacebo isn't available here: it needs an FFmpeg with libplacebo and a GPU it reaches through Vulkan"
+        }
+        Tonemapper::Opencl => "OpenCL tone mapping isn't available here: it needs a GPU with OpenCL drivers",
+        Tonemapper::Zscale => "zscale isn't available here: this FFmpeg was built without zimg",
+    };
+    (!caps.tonemappers.contains(&wanted)).then(|| why.to_owned())
+}
+
+/// Whether some video is decoded on a GPU here, so that
+/// [`Settings::hardware_decoding`] changes something: as the transcoder's
+/// planner chooses, through a GPU pipeline, Vulkan (for libplacebo) or the
+/// decoder that goes with a hardware encoder.
+pub fn decodes_on_gpu(caps: &Capabilities) -> bool {
+    let has = |name: &str| caps.hwaccels.iter().any(|h| h == name);
+    !caps.gpu_pipelines.is_empty()
+        || !caps.vulkan_decode.is_empty()
+        || has("videotoolbox")
+        || caps.encoders.iter().filter(|e| e.hardware).any(|e| match e.accel {
+            HwAccel::Nvenc => has("cuda"),
+            HwAccel::Vaapi => has("vaapi"),
+            HwAccel::Qsv => has("d3d11va") || has("vaapi"),
+            HwAccel::Amf => has("d3d11va"),
+            _ => false,
+        })
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -421,6 +506,78 @@ mod tests {
         assert!(s.third_party_apps);
         let s = store.update(&db, patch(serde_json::json!({"third_party_apps": false}))).await.unwrap();
         assert!(!s.third_party_apps);
+    }
+
+    fn encoder(name: &str, accel: HwAccel) -> pley_transcoder_api::EncoderInfo {
+        pley_transcoder_api::EncoderInfo {
+            name: name.into(),
+            codec: if name.starts_with("hevc") { VideoCodec::Hevc } else { VideoCodec::H264 },
+            hardware: accel != HwAccel::None,
+            accel,
+            main10: false,
+        }
+    }
+
+    /// An FFmpeg on a computer with an Intel graphics chip, on Windows.
+    fn intel() -> Capabilities {
+        Capabilities {
+            ffmpeg_available: true,
+            encoders: vec![encoder("h264_qsv", HwAccel::Qsv), encoder("libx264", HwAccel::None)],
+            hwaccels: ["cuda", "qsv", "d3d11va", "vulkan"].map(String::from).to_vec(),
+            tonemappers: vec![Tonemapper::Opencl, Tonemapper::Zscale],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_hardware_acceleration_needs_its_encoder_and_system() {
+        let caps = intel();
+        let problem = |accel, os| hwaccel_problem(accel, os, Some(&caps));
+        for fine in [HwAccel::Auto, HwAccel::None, HwAccel::Qsv] {
+            assert_eq!(problem(fine, Some("windows")), None, "{fine:?}");
+        }
+        let nvenc = problem(HwAccel::Nvenc, Some("windows")).unwrap();
+        assert!(nvenc.contains("NVIDIA graphics card"), "{nvenc}");
+        assert!(problem(HwAccel::Amf, Some("windows")).unwrap().contains("AMD graphics card"));
+        assert_eq!(problem(HwAccel::Vaapi, Some("windows")).unwrap(), "VAAPI works on Linux only");
+        assert_eq!(problem(HwAccel::Videotoolbox, Some("linux")).unwrap(), "VideoToolbox works on macOS only");
+        assert_eq!(problem(HwAccel::Qsv, Some("macos")).unwrap(), "Intel Quick Sync doesn't work on macOS");
+        // A transcoder elsewhere (its own system unknown) is judged by its encoders only.
+        assert!(problem(HwAccel::Vaapi, None).unwrap().contains("Intel or AMD graphics chip"));
+        assert!(problem(HwAccel::Vulkan, None).is_some());
+        let vulkan = Capabilities { vulkan_encode: true, ..intel() };
+        assert_eq!(hwaccel_problem(HwAccel::Vulkan, None, Some(&vulkan)), None);
+        // HEVC alone doesn't make H.264 transcodes: they'd be encoded in software.
+        let hevc = Capabilities { encoders: vec![encoder("hevc_nvenc", HwAccel::Nvenc)], ..intel() };
+        assert!(hwaccel_problem(HwAccel::Nvenc, Some("linux"), Some(&hevc)).is_some());
+        // Without the transcoder or its FFmpeg, nothing is known but the system.
+        assert_eq!(hwaccel_problem(HwAccel::Nvenc, Some("windows"), None), None);
+        let missing = Capabilities { ffmpeg_available: false, ..Default::default() };
+        assert_eq!(hwaccel_problem(HwAccel::Nvenc, Some("windows"), Some(&missing)), None);
+        assert!(hwaccel_problem(HwAccel::Vaapi, Some("windows"), None).is_some());
+    }
+
+    #[test]
+    fn a_tone_mapper_needs_to_work() {
+        let caps = intel();
+        for fine in [TonemapMode::Auto, TonemapMode::None, TonemapMode::Opencl, TonemapMode::Zscale] {
+            assert_eq!(tonemap_problem(fine, Some(&caps)), None, "{fine:?}");
+        }
+        assert!(tonemap_problem(TonemapMode::Libplacebo, Some(&caps)).unwrap().contains("Vulkan"));
+        assert_eq!(tonemap_problem(TonemapMode::Libplacebo, None), None);
+        let none = Capabilities { tonemappers: vec![], ..intel() };
+        assert!(tonemap_problem(TonemapMode::Zscale, Some(&none)).unwrap().contains("zimg"));
+    }
+
+    #[test]
+    fn decoding_on_a_gpu_goes_with_an_encoder_or_a_pipeline() {
+        assert!(decodes_on_gpu(&intel()), "Quick Sync decodes through D3D11");
+        let software = Capabilities { encoders: vec![encoder("libx264", HwAccel::None)], ..intel() };
+        assert!(!decodes_on_gpu(&software), "FFmpeg lists cuda, but there's no NVIDIA card");
+        let vulkan = Capabilities { vulkan_decode: vec!["hevc10".into()], ..software.clone() };
+        assert!(decodes_on_gpu(&vulkan));
+        let mac = Capabilities { hwaccels: vec!["videotoolbox".into()], ..software };
+        assert!(decodes_on_gpu(&mac));
     }
 
     #[tokio::test]

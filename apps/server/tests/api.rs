@@ -491,12 +491,14 @@ async fn settings_validation_and_folder_browser() {
     assert_eq!(settings.body["hwaccel"], json!("auto"));
     assert_eq!(settings.body["tonemapping"], json!("auto"));
 
+    // One this computer's system has (tests/settings_caps.rs has the rest).
+    let accel = if cfg!(target_os = "macos") { "videotoolbox" } else { "nvenc" };
     let updated = app
-        .call(Method::PUT, "/api/settings", Some(&token), Some(json!({"max_transcodes": 2, "hwaccel": "nvenc"})), &[])
+        .call(Method::PUT, "/api/settings", Some(&token), Some(json!({"max_transcodes": 2, "hwaccel": accel})), &[])
         .await;
     assert_eq!(updated.status, StatusCode::OK);
     assert_eq!(updated.body["max_transcodes"], json!(2));
-    assert_eq!(updated.body["hwaccel"], json!("nvenc"));
+    assert_eq!(updated.body["hwaccel"], json!(accel));
     let bad = app.call(Method::PUT, "/api/settings", Some(&token), Some(json!({"max_transcodes": 0})), &[]).await;
     assert_eq!(bad.status, StatusCode::BAD_REQUEST);
     let bad = app.call(Method::PUT, "/api/settings", Some(&token), Some(json!({"hwaccel": "magic"})), &[]).await;

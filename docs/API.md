@@ -1762,7 +1762,7 @@ type ServerEvent =
 | POST | `/api/system/backups` | – | the new backup (a checked `VACUUM INTO` copy; the last 3 are kept) |
 | GET | `/api/transcoder` | – | `TranscoderStatus` – live metrics of the transcoder component (all jobs, counters) |
 | GET | `/api/settings` | – | `Settings` |
-| PUT | `/api/settings` | partial `Settings` | `Settings` |
+| PUT | `/api/settings` | partial `Settings` | `Settings`. `400` for a `hwaccel` or `tonemapping` that can't work here, changed from what is saved: VAAPI off Linux, VideoToolbox off macOS, NVENC, Quick Sync or AMF on macOS (for a managed transcoder, which runs on pley's system), or one the transcoder found no working encoder or tone mapper for (`transcoder.accels`, `transcoder.tonemapping`; not checked while it isn't running). A value saved before stays and saves with the rest; the transcoder does without it (software encoding, Automatic's tone mapper) |
 | POST | `/api/settings/test` | `{ service: "tmdb" \| "tvdb" \| "tvmaze" \| "musicbrainz" \| "transcoder", api_key?, pin? }` | `{ ok, message, ms }`: one request to the service, with the key and PIN given (not saved) or else the saved ones. `message` says what happened, for people |
 | GET | `/api/fs` | `path` (omit for roots/drives) | `{ path: string \| null, parent: string \| null, entries: { name: string, path: string }[] }` – directories only |
 | GET | `/api/network` | – | `Network`: where pley listens, and could |
@@ -1796,7 +1796,7 @@ interface Settings {
   tvdb_api_key: string;             // TheTVDB v4 key, "" = not set
   tvdb_pin: string;                 // TheTVDB subscriber PIN, for user-supported keys
   music_metadata: boolean;          // MusicBrainz + Cover Art Archive for music libraries (default true)
-  hwaccel: "auto" | "none" | "nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox";
+  hwaccel: "auto" | "none" | "nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox" | "vulkan";
   hardware_decoding: boolean;       // decode on the GPU when possible
   tonemapping: "auto" | "libplacebo" | "opencl" | "zscale" | "none"; // HDR10/HLG/Dolby Vision → SDR
   max_transcodes: number;
@@ -1833,9 +1833,14 @@ interface SystemInfo {
     ffmpeg_version: string | null;
     encoders: string[];             // working video encoders, e.g. ["h264_nvenc", "libx264"]
     active_encoder: string | null;  // encoder used for new transcodes with current settings
-    hwaccels: string[];
+    hwaccels: string[];             // FFmpeg's decoding hwaccels (`ffmpeg -hwaccels`, built in, not tried)
+    accels: ("nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox")[]; // with a working H.264 encoder, best
+                                    // first: the first is the one "auto" uses ([] while unavailable)
+    hardware_decoding: boolean;     // some video is decoded on a GPU, so the setting changes something
     tonemapping: string[];          // available tone mappers, e.g. ["libplacebo", "opencl", "zscale"]
     dolby_vision: boolean;          // Dolby Vision profile 5 can be tone-mapped correctly
+    chromaprint: boolean;           // audio fingerprints find intros and credits; without, only chapters
+    throttling: boolean;            // FFmpeg can throttle transcodes (6.1 and newer)
     max_jobs: number;
     active_jobs: number;
     error: string | null;
