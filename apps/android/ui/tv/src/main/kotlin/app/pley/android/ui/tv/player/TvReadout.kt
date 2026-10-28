@@ -185,7 +185,7 @@ internal object TvReadout {
 
     private fun playback(r: Resources, d: PlaybackDetailsUi, quality: String): List<MediaFact> = buildList {
         add(MediaFact(r.getString(R.string.tv_readout_playback), d.method + (d.pipeline?.let { " · $it" } ?: "")))
-        if (d.why.isNotBlank()) add(MediaFact(r.getString(R.string.tv_readout_why), d.why))
+        d.why?.takeIf { it.isNotBlank() }?.let { add(MediaFact(r.getString(R.string.tv_readout_why), it)) }
         d.rows.forEach { add(MediaFact(it.label, it.value)) }
         if (quality.isNotBlank()) add(MediaFact(r.getString(R.string.tv_readout_quality), quality))
     }

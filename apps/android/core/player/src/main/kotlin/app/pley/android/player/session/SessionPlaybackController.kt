@@ -388,7 +388,7 @@ class SessionPlaybackController(
         syncAutoOriginal(info)
         if (autoNoticePending) {
             autoNoticePending = false
-            playingPreset(info).takeIf { !it.original }?.let { notice(texts.loweredNotice(it)) }
+            playingPreset(info).takeIf { !it.original }?.let { notice(texts.loweredNotice(label(it))) }
         }
         ui.update {
             it.copy(
@@ -871,7 +871,7 @@ class SessionPlaybackController(
         val file = AutoFile(
             offered = Qualities.forFile(f),
             originalKbps = Qualities.fileKbps(f),
-            lines = Qualities.linesOf(f),
+            lines = Qualities.linesClassOf(f),
             cap = Qualities.closest(f),
         )
         return autoQuality.begin(file, env.now())
@@ -888,6 +888,9 @@ class SessionPlaybackController(
     /** The quality the server converts the original at in [info]; `null` when it doesn't, or plays a quality asked for. */
     private fun serverQuality(info: PlaybackInfo?): QualityPreset? =
         info?.autoQuality?.takeIf { quality.original }?.let { Qualities.byId(it) }?.takeIf { !it.original && !it.automatic }
+
+    /** [preset]'s name for the file playing: one taller than the file goes by the file's lines ("8 Mbps 720p"). */
+    private fun label(preset: QualityPreset): String = texts.quality(preset, Qualities.linesClassOf(file))
 
     /** What plays in [info]: the quality, or the original's conversion at the server's quality. */
     private fun playingPreset(info: PlaybackInfo?): QualityPreset = serverQuality(info) ?: quality
@@ -1398,7 +1401,7 @@ class SessionPlaybackController(
         // Text moves always; pictures only when drawn here from the server's .mks.
         val syncable = sub != null && (!PlaybackPlan.isImage(sub) || (streaming && sideload && info?.burnSubtitles != true))
         val auto = serverQuality(info)
-        val playing = texts.quality(auto ?: quality)
+        val playing = label(auto ?: quality)
         val fileHint = chosenFile?.let { f ->
             listOfNotNull(resolutionLabel(f.width, f.height), formatBitrate(f.bitrate).ifEmpty { null }).joinToString(" · ").ifEmpty { null }
         }
@@ -1407,11 +1410,11 @@ class SessionPlaybackController(
         val qualities = if (downloaded) emptyList() else Qualities.forFile(chosenFile).map { preset ->
             QualityChoice(
                 id = preset.id,
-                label = texts.quality(preset),
+                label = label(preset),
                 hint = when {
                     preset.automatic -> if (automatic && (auto != null || !quality.original)) texts.automaticNow(playing) else texts.automaticHint
                     !preset.original -> texts.converted
-                    auto != null -> texts.playsAs(auto, fileHint)
+                    auto != null -> texts.playsAs(label(auto), fileHint)
                     else -> fileHint
                 },
                 selected = preset.id == picked.id,
@@ -1424,8 +1427,8 @@ class SessionPlaybackController(
                 qualities = qualities,
                 quality = when {
                     automatic -> texts.automatic(playing)
-                    auto != null -> texts.autoQuality(auto)
-                    else -> texts.quality(quality)
+                    auto != null -> texts.autoQuality(label(auto))
+                    else -> label(quality)
                 },
                 subtitleSync = syncable,
                 subtitleOffsetMs = offset.value,

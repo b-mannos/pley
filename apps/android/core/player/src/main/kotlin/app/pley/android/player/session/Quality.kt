@@ -54,6 +54,9 @@ object Qualities {
     /** The menu, as on every app: Original, Automatic, then the transcodes. */
     val ALL: List<QualityPreset> = listOf(ORIGINAL, AUTOMATIC) + TRANSCODES
 
+    /** A quality is offered for a file's bitrate when it is at most this share of it. */
+    const val LIGHTER = 0.8
+
     /** The lowest quality Automatic plays. */
     val LOWEST: QualityPreset = TRANSCODES.last()
 
@@ -61,19 +64,29 @@ object Qualities {
     fun byId(id: String?): QualityPreset = ALL.firstOrNull { it.id == id } ?: ORIGINAL
 
     /**
-     * The qualities worth offering for [file]: the original and Automatic,
-     * then those that make it smaller (every one when its bitrate and size
-     * are unknown).
+     * The qualities worth offering for [file] (docs/QUALITY.md): the
+     * original and Automatic, then those that make it smaller, with fewer
+     * lines or at most 80 % of its bitrate (a copy a little lighter plays no
+     * better). Two that come to the same bitrate and lines for it show once.
+     * Every one when its bitrate and size are unknown.
      */
     fun forFile(file: MediaFile?): List<QualityPreset> {
         val kbps = file?.bitrate?.takeIf { it > 0 }?.let { it / 1000.0 }
-        val height = linesOf(file)
-        if (kbps == null && height == null) return ALL
+        val lines = linesClassOf(file)
+        if (kbps == null && lines == null) return ALL
+        val seen = HashSet<Pair<Int, Int?>>()
         return ALL.filter { q ->
-            q.original || q.automatic ||
-                (kbps != null && (q.maxBitrateKbps ?: 0) < kbps) ||
-                (height != null && (q.maxHeight ?: 0) < height)
+            q.original || q.automatic || (
+                ((kbps != null && (q.maxBitrateKbps ?: 0) <= kbps * LIGHTER) || (lines != null && (q.maxHeight ?: 0) < lines)) &&
+                    seen.add((q.maxBitrateKbps ?: 0) to linesFor(q, lines))
+                )
         }
+    }
+
+    /** The lines [preset] gives a file of [fileLines]: never more than the file's. */
+    fun linesFor(preset: QualityPreset, fileLines: Int?): Int? {
+        val most = preset.maxHeight ?: return fileLines
+        return if (fileLines != null && fileLines < most) fileLines else most
     }
 
     /**
@@ -101,6 +114,24 @@ object Qualities {
         file?.height?.takeIf { it > 0 } ?: file?.streams?.firstOrNull { it.kind == StreamKind.Video }?.height?.takeIf { it > 0 }
 
     /**
+     * The file's lines as qualities name them (2160, 1080, 720 or 480), by
+     * its width or height as the server tells them apart: a 1920×800 film
+     * is 1080p. `null` when neither is known.
+     */
+    fun linesClassOf(file: MediaFile?): Int? {
+        val video = file?.streams?.firstOrNull { it.kind == StreamKind.Video }
+        val w = file?.width ?: video?.width ?: 0
+        val h = linesOf(file) ?: 0
+        if (w <= 0 && h <= 0) return null
+        return when {
+            w >= 3800 || h >= 2100 -> 2160
+            w >= 1800 || h >= 1000 -> 1080
+            w >= 1200 || h >= 700 -> 720
+            else -> 480
+        }
+    }
+
+    /**
      * What the server converts [file] at when it converts the original
      * (apps/server/src/playback.rs, closest_quality): its own size's
      * quality, with the highest bitrate up to 1.5 times the file's, or
@@ -108,15 +139,7 @@ object Qualities {
      * when it converts; Automatic needs it before.
      */
     fun closest(file: MediaFile?): QualityPreset {
-        val video = file?.streams?.firstOrNull { it.kind == StreamKind.Video }
-        val w = file?.width ?: video?.width ?: 0
-        val h = linesOf(file) ?: 0
-        val lines = when {
-            w >= 3800 || h >= 2100 -> 2160
-            w >= 1800 || h >= 1000 || (w <= 0 && h <= 0) -> 1080
-            w >= 1200 || h >= 700 -> 720
-            else -> 480
-        }
+        val lines = linesClassOf(file) ?: 1080
         val cap = file?.bitrate?.takeIf { it > 0 }?.let { it * 1.5 / 1000.0 }
         val tier = TRANSCODES.filter { it.maxHeight == lines }.sortedByDescending { it.maxBitrateKbps }
         return tier.firstOrNull { cap == null || (it.maxBitrateKbps ?: 0) <= cap } ?: tier.lastOrNull() ?: byId("8m")

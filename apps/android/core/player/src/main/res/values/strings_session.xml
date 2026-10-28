@@ -11,6 +11,8 @@
     <string name="session_quality_8m">8 Mbps 1080p</string>
     <string name="session_quality_4m">4 Mbps 720p</string>
     <string name="session_quality_2m">2 Mbps 480p</string>
+    <!-- A quality taller than the file, named by the file's lines: "8 Mbps 720p". -->
+    <string name="session_quality_named">%1$d Mbps %2$s</string>
     <!-- The original, converted at the closest quality the server chose: "8 Mbps 1080p (auto)". -->
     <string name="session_quality_auto">%1$s (auto)</string>
     <!-- The original's hint when the server converts it: "Plays as 8 Mbps 1080p here". -->
@@ -52,7 +54,6 @@
     <string name="session_method_remux">Direct stream</string>
     <string name="session_method_transcode">Transcoding</string>
     <string name="session_method_remux_audio">Direct stream · Audio transcoding</string>
-    <string name="session_why_direct">The original file, as it is.</string>
     <string name="session_why_remux">The original video, in a format this player opens.</string>
     <string name="session_why_transcode">Converted for this player.</string>
     <string name="session_fallback_unplayable">This device couldn\'t play the original file.</string>

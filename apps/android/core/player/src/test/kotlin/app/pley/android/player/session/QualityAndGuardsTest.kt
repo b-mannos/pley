@@ -118,7 +118,7 @@ class QualityAndGuardsTest {
         h.settle()
         val details = c.state.value.details!!
         assertEquals("Transcoding", details.method)
-        assertTrue(details.why, details.why.contains("converted to SDR"))
+        assertTrue(details.why, details.why!!.contains("converted to SDR"))
         assertEquals("CPU", details.pipeline)
         val rows = details.rows.associate { it.label to it.value }
         assertEquals("HEVC 4K → H.264 1080p", rows["Video"])
@@ -140,7 +140,8 @@ class QualityAndGuardsTest {
         c.setDetailsOpen(true)
         h.advance(4_000)
         assertEquals("Direct play", c.state.value.details?.method)
-        assertEquals("The original file, as it is.", c.state.value.details?.why)
+        // The file as it is needs no reason.
+        assertNull(c.state.value.details!!.why)
         assertEquals(0, h.api.count("playbackStatus"))
     }
 }

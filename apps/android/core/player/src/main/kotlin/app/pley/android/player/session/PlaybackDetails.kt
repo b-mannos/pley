@@ -96,8 +96,9 @@ object PlaybackDetails {
         val video = streams.firstOrNull { it.kind == StreamKind.Video }
         val audios = streams.filter { it.kind == StreamKind.Audio }
         val audio = audios.firstOrNull { it.index == (audioIndex ?: info.audioIndex) } ?: audios.firstOrNull { it.default } ?: audios.firstOrNull()
+        // The file as it is needs no reason; a fallback's says why it plays so.
         val why = if (info.method == PlaybackMethod.Direct) {
-            texts.why(PlaybackMethod.Direct)
+            note
         } else {
             note ?: info.reasons.joinToString(" ").ifEmpty { null } ?: info.reason ?: texts.why(info.method)
         }

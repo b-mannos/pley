@@ -68,8 +68,8 @@ data class DetailRow(val label: String, val value: String)
 data class PlaybackDetailsUi(
     /** "Direct play", "Direct stream", "Transcoding", "Direct stream · Audio transcoding". */
     val method: String,
-    /** Why, in a sentence or two. */
-    val why: String,
+    /** Why, in a sentence or two; `null` for a direct play that needs no reason. */
+    val why: String?,
     /** Where a transcode runs ("GPU", "CPU"…), for its badge; `null` otherwise. */
     val pipeline: String?,
     val rows: List<DetailRow>,

@@ -8,13 +8,25 @@ import app.pley.android.player.R
 
 /** What the session says to people, from strings_session.xml. */
 interface PlayerTexts {
+    /** A quality by the menu's name: "Original", "8 Mbps 1080p". */
     fun quality(preset: QualityPreset): String
 
-    /** "8 Mbps 1080p (auto)": the original, converted at the quality the server chose. */
-    fun autoQuality(preset: QualityPreset): String
+    /**
+     * A quality as offered for a file of [fileLines]: one taller than the
+     * file is named by the file's lines ("8 Mbps 720p" for a 720p file).
+     */
+    fun quality(preset: QualityPreset, fileLines: Int?): String {
+        val most = preset.maxHeight
+        val kbps = preset.maxBitrateKbps
+        if (most == null || kbps == null || fileLines == null || fileLines >= most) return quality(preset)
+        return "${kbps / 1000} Mbps ${linesLabel(fileLines)}"
+    }
 
-    /** The original's hint in the quality menu when the server converts it; [file] is the original's "4K · 62 Mbps". */
-    fun playsAs(preset: QualityPreset, file: String?): String
+    /** "8 Mbps 1080p (auto)": the original, converted at the quality the server chose, by its [label]. */
+    fun autoQuality(label: String): String
+
+    /** The original's hint in the quality menu when the server converts it at [label]; [file] is the original's "4K · 62 Mbps". */
+    fun playsAs(label: String, file: String?): String
 
     /** Every quality but the original. */
     val converted: String
@@ -28,8 +40,8 @@ interface PlayerTexts {
     /** Automatic's hint while it plays [playing], below the original: "Now 8 Mbps 1080p". */
     fun automaticNow(playing: String): String = "Now $playing"
 
-    /** Said once when Automatic goes down to [preset]. */
-    fun loweredNotice(preset: QualityPreset): String = "Playing at ${quality(preset)} for a smoother picture"
+    /** Said once when Automatic goes down to the quality named [label]. */
+    fun loweredNotice(label: String): String = "Playing at $label for a smoother picture"
 
     /** Why Automatic plays lower, for the details. */
     fun lowered(reason: LoweredFor): String = when (reason) {
@@ -58,7 +70,7 @@ interface PlayerTexts {
     /** The server out of reach, for [reason] ("no answer in time"): what to check. */
     fun unreachable(reason: String): String = "${asSentence(reason)} Check that the server is on and that this device is on its network."
 
-    /** What [method] means, when nothing more specific is known. */
+    /** What a remux or a transcode means, when nothing more specific is known (a direct play needs no reason). */
     fun why(method: PlaybackMethod): String
     fun fallback(reason: FallbackReason): String
     val slowServer: String
@@ -101,13 +113,20 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
         },
     )
 
-    override fun autoQuality(preset: QualityPreset): String = res.getString(R.string.session_quality_auto, quality(preset))
+    override fun quality(preset: QualityPreset, fileLines: Int?): String {
+        val most = preset.maxHeight
+        val kbps = preset.maxBitrateKbps
+        if (most == null || kbps == null || fileLines == null || fileLines >= most) return quality(preset)
+        return res.getString(R.string.session_quality_named, kbps / 1000, linesLabel(fileLines))
+    }
 
-    override fun playsAs(preset: QualityPreset, file: String?): String =
+    override fun autoQuality(label: String): String = res.getString(R.string.session_quality_auto, label)
+
+    override fun playsAs(label: String, file: String?): String =
         if (file.isNullOrEmpty()) {
-            res.getString(R.string.session_quality_plays_as, quality(preset))
+            res.getString(R.string.session_quality_plays_as, label)
         } else {
-            res.getString(R.string.session_quality_plays_as_file, quality(preset), file)
+            res.getString(R.string.session_quality_plays_as_file, label, file)
         }
 
     override val converted: String get() = s(R.string.session_quality_converted)
@@ -118,7 +137,7 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
 
     override fun automaticNow(playing: String): String = res.getString(R.string.session_quality_automatic_now, playing)
 
-    override fun loweredNotice(preset: QualityPreset): String = res.getString(R.string.session_quality_lowered_notice, quality(preset))
+    override fun loweredNotice(label: String): String = res.getString(R.string.session_quality_lowered_notice, label)
 
     override fun lowered(reason: LoweredFor): String = s(
         when (reason) {
@@ -146,8 +165,7 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
     override fun why(method: PlaybackMethod): String = s(
         when (method) {
             PlaybackMethod.Remux -> R.string.session_why_remux
-            PlaybackMethod.Transcode -> R.string.session_why_transcode
-            else -> R.string.session_why_direct
+            else -> R.string.session_why_transcode
         },
     )
 
@@ -194,3 +212,6 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
     override fun speed(speed: String, readySeconds: Int): String =
         if (readySeconds > 0) res.getString(R.string.session_speed_ready, speed, readySeconds) else res.getString(R.string.session_speed, speed)
 }
+
+/** Lines as qualities name them: "4K", "1080p", "720p". */
+internal fun linesLabel(lines: Int): String = if (lines >= 2160) "4K" else "${lines}p"

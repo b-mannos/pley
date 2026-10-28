@@ -102,9 +102,13 @@ class PiecesTest {
             ),
             remux.rows.map { it.label to it.value },
         )
-        val direct = PlaybackDetails.build(texts, info.copy(method = PlaybackMethod.Direct, hls = false), file, null, "ignored", 0, null, emptyList())
+        val direct = PlaybackDetails.build(texts, info.copy(method = PlaybackMethod.Direct, hls = false), file, null, null, 0, null, emptyList())
         assertEquals("Direct play", direct.method)
-        assertEquals("The original file, as it is.", direct.why)
+        // The file as it is needs no reason.
+        assertNull(direct.why)
+        // A fallback's reason still shows.
+        val back = PlaybackDetails.build(texts, info.copy(method = PlaybackMethod.Direct, hls = false), file, null, "This device couldn't play the original file.", 0, null, emptyList())
+        assertEquals("This device couldn't play the original file.", back.why)
         assertEquals(listOf("Video", "Audio", "Bitrate"), direct.rows.map { it.label })
         // A transcode the player fell back to says why.
         val fallback = PlaybackDetails.build(texts, info.copy(method = PlaybackMethod.Transcode, audioConverted = false), file, null, "The original didn't play smoothly on this device.", 0, null, emptyList())
@@ -164,7 +168,11 @@ class PiecesTest {
     fun `the texts are the web's words`() {
         assertEquals("30 Mbps 4K", texts.quality(Qualities.byId("30m")))
         assertEquals("Original", texts.quality(Qualities.ORIGINAL))
-        assertEquals("8 Mbps 1080p (auto)", texts.autoQuality(Qualities.byId("8m")))
+        assertEquals("8 Mbps 1080p (auto)", texts.autoQuality(texts.quality(Qualities.byId("8m"))))
+        // Taller than the file: named by its lines.
+        assertEquals("8 Mbps 720p", texts.quality(Qualities.byId("8m"), 720))
+        assertEquals("8 Mbps 1080p", texts.quality(Qualities.byId("8m"), 2160))
+        assertEquals("15 Mbps 1080p", texts.quality(Qualities.byId("15m"), 1080))
         assertEquals("Up next · S1 E2", texts.upNext("S1 E2"))
         assertEquals("Up next", texts.upNext(null))
         assertEquals("Playback failed (ERROR_CODE_DECODING_FAILED).", texts.failure(Failure.Engine, "ERROR_CODE_DECODING_FAILED: boom"))

@@ -35,7 +35,7 @@ class TvReadoutTest {
 
     private fun details(method: PlaybackMethod = PlaybackMethod.Direct, transcode: TranscodeInfo? = null) = PlaybackDetailsUi(
         method = if (method == PlaybackMethod.Direct) "Direct play" else "Transcoding",
-        why = "The original file, as it is.",
+        why = null,
         pipeline = null,
         rows = emptyList(),
         engine = emptyList(),
@@ -61,6 +61,8 @@ class TvReadoutTest {
         val display = DisplayNow(3840, 2160, 23.976f, listOf(Display.HdrCapabilities.HDR_TYPE_HDR10))
         val s = facts(ReadoutInput(details(), stats, bufferedMs = 45_000, quality = "Original", display = display))
         assertEquals("Direct play", s.getValue("How it plays")["Playback"])
+        // The file as it is needs no reason.
+        assertEquals(null, s.getValue("How it plays")["Why"])
         assertEquals("MKV", s.getValue("File")["Container"])
         assertEquals("62 Mbps", s.getValue("File")["Overall bitrate"])
         val v = s.getValue("Video")

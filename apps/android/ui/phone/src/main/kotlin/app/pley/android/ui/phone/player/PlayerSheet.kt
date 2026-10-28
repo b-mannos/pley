@@ -308,7 +308,7 @@ private fun DetailsPage(state: PlayerScreenState) {
                 )
             }
         }
-        Text(details.why, style = MaterialTheme.typography.bodySmall, color = PleyColors.Muted, modifier = Modifier.padding(top = 4.dp))
+        details.why?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = PleyColors.Muted, modifier = Modifier.padding(top = 4.dp)) }
         Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             details.rows.forEach { DetailLine(it.label, it.value) }
         }

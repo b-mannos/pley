@@ -4,6 +4,7 @@ import app.pley.android.model.MediaFile
 import app.pley.android.model.PlaybackMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -38,7 +39,7 @@ class QualityTest {
         assertTrue(Qualities.AUTOMATIC.automatic)
         assertFalse(Qualities.AUTOMATIC.original)
         assertFalse(Qualities.ORIGINAL.automatic)
-        assertEquals(null, Qualities.AUTOMATIC.maxBitrateKbps)
+        assertNull(Qualities.AUTOMATIC.maxBitrateKbps)
     }
 
     @Test
@@ -49,18 +50,44 @@ class QualityTest {
     }
 
     @Test
-    fun `offers only the qualities that make a file smaller, the original and Automatic always`() {
-        assertEquals(listOf("original", "auto", "8m", "4m", "2m"), ids(9_000_000, 1080))
+    fun `offers only the qualities with fewer lines or at most 80 percent of the bitrate, the original and Automatic always`() {
+        // 1080p at 9 Mbps: 8 Mbps is barely lighter, and plays no better.
+        assertEquals(listOf("original", "auto", "4m", "2m"), ids(9_000_000, 1080))
+        // 1080p at 10 Mbps: 8 Mbps is 80 %.
+        assertEquals(listOf("original", "auto", "8m", "4m", "2m"), ids(10_000_000, 1080))
         assertEquals(listOf("original", "auto", "2m"), ids(3_000_000, 720))
         assertEquals(listOf("original", "auto"), ids(1_500_000, 480))
         // A 4K file at a low bitrate still gets smaller at 1080p.
         assertEquals(listOf("original", "auto", "20m", "12m", "8m", "4m", "2m"), ids(6_000_000, 2160))
         // A 4K remux: 4K at 30 Mbps too.
         assertEquals(listOf("original", "auto", "30m", "15m", "20m", "12m", "8m", "4m", "2m"), ids(60_000_000, 2160))
-        // 4K at 20 Mbps: 4K at 15 is smaller, 4K at 30 isn't.
+        // 4K at 20 Mbps: 4K at 15 is 75 %, 4K at 30 isn't smaller.
         assertEquals(listOf("original", "auto", "15m", "20m", "12m", "8m", "4m", "2m"), ids(20_000_000, 2160))
+        // A 720p file at 12 Mbps: 8 Mbps and lower.
+        assertEquals(listOf("original", "auto", "8m", "4m", "2m"), ids(12_000_000, 720))
         assertEquals(Qualities.ALL.size, ids(null, null).size)
         assertEquals(Qualities.ALL.size, Qualities.forFile(null).size)
+    }
+
+    @Test
+    fun `a file's lines are the server's, so a scope film is 1080p`() {
+        assertEquals(1080, Qualities.linesClassOf(MediaFile(id = 1, path = "a", width = 1920, height = 800)))
+        assertEquals(2160, Qualities.linesClassOf(MediaFile(id = 1, path = "a", width = 3840, height = 1600)))
+        assertEquals(720, Qualities.linesClassOf(MediaFile(id = 1, path = "a", height = 720)))
+        assertNull(Qualities.linesClassOf(MediaFile(id = 1, path = "a")))
+        // 1920×800 at 30 Mbps: 20 Mbps 1080p has no fewer lines, but is 67 % of the bitrate.
+        val scope = MediaFile(id = 1, path = "a", bitrate = 30_000_000, width = 1920, height = 800)
+        assertEquals(listOf("original", "auto", "15m", "20m", "12m", "8m", "4m", "2m"), Qualities.forFile(scope).map { it.id })
+    }
+
+    @Test
+    fun `qualities that come to the same bitrate and lines show once`() {
+        assertEquals(1080, Qualities.linesFor(Qualities.byId("15m"), 1080))
+        assertEquals(720, Qualities.linesFor(Qualities.byId("4m"), 1080))
+        assertEquals(1080, Qualities.linesFor(Qualities.ORIGINAL, 1080))
+        val offered = Qualities.forFile(MediaFile(id = 1, path = "a", bitrate = 80_000_000, height = 1080))
+        val keys = offered.filter { it.maxBitrateKbps != null }.map { it.maxBitrateKbps to Qualities.linesFor(it, 1080) }
+        assertEquals(keys.distinct(), keys)
     }
 
     @Test
