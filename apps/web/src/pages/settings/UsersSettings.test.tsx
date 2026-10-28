@@ -277,7 +277,7 @@ describe("UsersSettings", () => {
     expect(await within(dialog).findByText("No apps use this account.")).toBeInTheDocument();
   });
 
-  it("says that signing out everywhere signs the apps out too", async () => {
+  it("asks before signing a profile out everywhere, apps too", async () => {
     const user = userEvent.setup();
     const requests = renderUsers();
     await user.click(await screen.findByRole("button", { name: /Kiddo/ }));
@@ -285,7 +285,7 @@ describe("UsersSettings", () => {
     await within(dialog).findByText("pley for Android");
 
     await user.click(within(dialog).getByRole("button", { name: "Sign out everywhere" }));
-    expect(within(dialog).getByText(/will be signed out on every device and in every app/)).toBeInTheDocument();
+    expect(within(dialog).getByText("Sign out Kiddo everywhere?")).toBeInTheDocument();
     expect(requests.some((r) => r.method === "DELETE")).toBe(false);
 
     await user.click(within(dialog).getByRole("button", { name: "Sign out everywhere" }));

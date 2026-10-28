@@ -118,9 +118,7 @@ function UserDevices({ user, self }: { user: User; self: boolean }) {
       </div>
       {confirming ? (
         <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-surface-2 px-3 py-2.5">
-          <p className="text-xs text-muted">
-            <strong className="text-fg">{user.name}</strong> will be signed out on every device and in every app.
-          </p>
+          <p className="text-sm text-fg">Sign out {user.name} everywhere?</p>
           <div className="flex shrink-0 gap-1">
             <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} disabled={signOut.isPending}>
               Cancel

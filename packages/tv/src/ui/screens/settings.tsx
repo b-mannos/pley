@@ -4,7 +4,6 @@ import { errorMessage, isApiError } from "../../api/client";
 import type { HistoryEntry, SubtitleMode } from "../../api/types";
 import { displayAddress } from "../../auth/addresses";
 import { episodeLabel } from "../../format/format";
-import { initMusic } from "../../player/music";
 import { PRESETS } from "../../player/quality";
 import type { AppState, Settings } from "../../state";
 import { useUi } from "../context";
@@ -462,35 +461,20 @@ export function SettingsScreen(p: { entry: Entry }) {
         </SidePanel>
       )}
       {signOut && (
-        <Dialog
-          title="Sign out?"
-          body={`pley signs this TV out of ${server ? displayAddress(server) : "the server"} and deletes what it saved from it.${initMusic(app).now.value ? " The music stops." : ""}`}
-          onDismiss={() => {
+        <SignOutDialog
+          server={server ? displayAddress(server) : null}
+          onCancel={() => {
             setSignOut(false);
             focusRow("category-signout");
           }}
-          buttons={[
-            {
-              label: "Cancel",
-              initial: true,
-              onSelect: () => {
-                setSignOut(false);
-                focusRow("category-signout");
-              },
-            },
-            {
-              label: "Sign out",
-              color: "var(--danger-text)",
-              onSelect: () => {
-                setSignOut(false);
-                setSigningOut(true);
-                void app.signOut().then(() => {
-                  if (server) ui.nav.restart({ name: "link", server });
-                  else ui.nav.restart({ name: "servers" });
-                });
-              },
-            },
-          ]}
+          onSignOut={() => {
+            setSignOut(false);
+            setSigningOut(true);
+            void app.signOut().then(() => {
+              if (server) ui.nav.restart({ name: "link", server });
+              else ui.nav.restart({ name: "servers" });
+            });
+          }}
         />
       )}
       {web && server && (
@@ -825,4 +809,19 @@ export function DiagnosticsScreen() {
 export function buildLabel(version: string): string {
   const commit = typeof __PLEY_COMMIT__ === "string" ? __PLEY_COMMIT__ : "";
   return commit && commit !== "unknown" ? `${version} (${commit})` : version;
+}
+
+/** Asks before signing out, plainly, naming the server (as on Roku): Cancel comes first, so OK pressed twice doesn't sign out. */
+export function SignOutDialog(p: { server: string | null; onCancel: () => void; onSignOut: () => void }) {
+  return (
+    <Dialog
+      title="Sign out?"
+      body={p.server ? `This TV signs out of ${p.server}.` : undefined}
+      onDismiss={p.onCancel}
+      buttons={[
+        { label: "Cancel", initial: true, onSelect: p.onCancel },
+        { label: "Sign out", color: "var(--danger-text)", onSelect: p.onSignOut },
+      ]}
+    />
+  );
 }
