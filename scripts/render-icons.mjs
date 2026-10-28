@@ -33,7 +33,7 @@
 //                                           shows it as the app's icon
 //   deploy/stores/                          the stores' listing pictures (README.md
 //                                           there): icons, Play's feature graphic,
-//                                           the TV banner
+//                                           the TV banner, Fire TV's background
 //
 // Chrome comes from $CHROME, else the usual place on Windows, macOS or Linux
 // (svg-render.mjs).
@@ -81,6 +81,21 @@ function banner(width, height) {
     <g transform="translate(${68 - 17 * g} ${54 - 14 * g}) scale(${g})">${glyph}</g>
     <text x="160" y="107" font-family="Roboto, 'Segoe UI', system-ui, sans-serif" font-size="63" font-weight="700" letter-spacing="-1" fill="#e9ebef">pley</text>
   </g></svg>`;
+}
+
+/**
+ * The Amazon Appstore's Fire TV background, 1920 × 1080: the store's words and buttons cover its left
+ * and bottom, so the P stands alone in the top right (the 882 × 448 Amazon keeps clear), on the banner's
+ * colours.
+ */
+function fireTvBackground() {
+  const s = 300 / 41; // the P 300 high, its middle (33, 34.5) at (1480, 260)
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">${defs}
+  <radialGradient id="corner" cx="1920" cy="0" r="1100" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#0369a1" stop-opacity="0.3"/><stop offset="1" stop-color="#0369a1" stop-opacity="0"/>
+  </radialGradient>
+  <rect width="1920" height="1080" fill="${TILE}"/><rect width="1920" height="1080" fill="url(#corner)"/>
+  <g transform="translate(${1480 - 33 * s} ${260 - 34.5 * s}) scale(${s})">${glyph}</g></svg>`;
 }
 
 /** A splash screen: the logo, a fifth of the height, in the middle of the app's background [bg]. */
@@ -284,6 +299,7 @@ try {
   writeFileSync(join(stores, "icon-114.png"), rgb72(await r.png(maskable(114, (114 / 512) * 7.449), 114)));
   writeFileSync(join(stores, "feature-graphic-1024x500.png"), rgb72(await r.png(banner(1024, 500), 1024, 500)));
   writeFileSync(join(stores, "tv-banner-1280x720.png"), rgb72(await r.png(banner(1280, 720), 1280, 720)));
+  writeFileSync(join(stores, "fire-tv-background-1920x1080.jpg"), await r.jpeg(fireTvBackground(), 1920, 1080, 90));
   console.log("rendered the web's maskable icon and PNG favicon, the desktop's .ico and .icns, the Samsung and LG apps' icons and LG's splash, Kodi's icon and fanart, Roku's icons and splash screens, the Android TV banner, and the stores' pictures");
 } finally {
   r.close();

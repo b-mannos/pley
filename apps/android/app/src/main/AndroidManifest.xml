@@ -38,10 +38,13 @@
       allowed. Nothing is backed up or moved to a new device: the sign-in
       module holds the app's tokens, sealed by this device's Keystore. Back
       goes through the system's callbacks (Fire OS 16 can skip onBackPressed).
+      Its category is video: Android files it with the video apps (data and
+      battery use, the launcher's groups).
     -->
     <application
         android:name=".PleyApplication"
         android:allowBackup="false"
+        android:appCategory="video"
         android:enableOnBackInvokedCallback="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"

@@ -10,6 +10,7 @@ The pictures and words the app stores ask for besides the app itself.
 | `icon-114.png` | 114 × 114 | The Amazon Appstore's small icon |
 | `feature-graphic-1024x500.png` | 1024 × 500 | Google Play's feature graphic |
 | `tv-banner-1280x720.png` | 1280 × 720 | Google Play's Android TV banner, the Amazon Appstore's Fire TV icon |
+| `fire-tv-background-1920x1080.jpg` | 1920 × 1080 | The Amazon Appstore's Fire TV background, behind the app's page (the P top right, clear of the store's words) |
 
 `screenshots/` has the apps' screenshots, phones' at 1080 × 1920 (the
 player 1920 × 1080) and TVs' at 1920 × 1080, JPEGs as Google Play takes
@@ -28,7 +29,9 @@ them. They show a made-up library, with no real title's artwork, which
 
 ## The app
 
-- **Package**: `com.formandelement.pley` (Google Play and the Amazon Appstore),
+- **Package**: `com.formandelement.pley` (Google Play, and the Amazon Appstore
+  for Fire TV and Fire tablets: since August 2025 it takes no apps for other
+  Android phones and tablets),
   the bundle from the release, `pley-android-<version>-play.aab`
   (docs/ANDROID.md, Releases).
 - **Version code**: the version's (0.2.0 is 20000). The stores take each

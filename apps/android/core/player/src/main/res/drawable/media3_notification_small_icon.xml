@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The music notification's status bar icon: pley's P in one colour, as
+  Android draws it, in place of Media3's note (its default notification
+  provider takes the drawable of this name).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <group
+        android:scaleX="0.4878"
+        android:scaleY="0.4878"
+        android:translateX="-4.09"
+        android:translateY="-4.83">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M17 19a5 5 0 0 1 5-5h13a14 14 0 0 1 0 28h-8v8a5 5 0 0 1-10 0zM30 21v14l12-7z" />
+    </group>
+</vector>
