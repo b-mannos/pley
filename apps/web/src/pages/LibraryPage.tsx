@@ -21,7 +21,7 @@ import { pluralize } from "@/lib/format";
 import { smartFilterOf } from "@/lib/smartFilter";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
 import { idParam } from "@/lib/ids";
-import { keepView, leftView, viewOf, viewStorageKey, withView } from "@/lib/libraryView";
+import { keepTab, keepView, leftTab, leftView, tabOf, tabStorageKey, viewOf, viewStorageKey, withTab, withView } from "@/lib/libraryView";
 
 const SORT_LABELS: Record<LibrarySort, string> = {
   title: "Title",
@@ -57,17 +57,23 @@ export function LibraryPage() {
   const lib = useLibrary(libId);
   const user = useAuth();
   const [params, setParams] = useSearchParams();
-  const rawTab = params.get("tab");
-  const tab = rawTab === "recommended" || rawTab === "collections" ? rawTab : "library";
+  const tab = tabOf(params);
   useDocumentTitle(lib.data?.name);
 
-  // Opened without a sort or filters in its address (from the sidebar), a
-  // library shows the ones it was left in, before it lists anything.
+  // Opened without a tab, sort or filters in its address (from the sidebar),
+  // a library opens on the tab it was last on, in the view it was left in,
+  // before it lists anything.
   const viewKey = viewStorageKey(user.id, libId);
-  const restore = withView(params, leftView(viewKey))?.toString() ?? "";
+  const tabKey = tabStorageKey(user.id, libId);
+  const tabbed = withTab(params, leftTab(tabKey));
+  const restore = (withView(tabbed ?? params, leftView(viewKey)) ?? tabbed)?.toString() ?? "";
   useEffect(() => {
     if (restore) setParams(new URLSearchParams(restore), { replace: true });
   }, [restore, setParams]);
+  // The tab shown is the one to open on next time (one chosen here is kept as it's chosen).
+  useEffect(() => {
+    if (!restore && Number.isFinite(libId)) keepTab(tabKey, tab);
+  }, [restore, tab, tabKey, libId]);
 
   const setParam = (updates: Record<string, string | null>) => {
     const next = new URLSearchParams(params);
@@ -76,6 +82,7 @@ export function LibraryPage() {
       else next.set(k, v);
     }
     keepView(viewKey, viewOf(next));
+    keepTab(tabKey, tabOf(next));
     setParams(next, { replace: true });
   };
 

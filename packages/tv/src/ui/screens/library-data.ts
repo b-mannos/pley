@@ -2,6 +2,7 @@ import type { Api } from "../../api/client";
 import type { ItemSummary, LibraryKind, LibrarySort } from "../../api/types";
 import type { KeyValue } from "../../auth/tokens";
 import { Cancel } from "../../net/transport";
+import type { LibraryTab } from "../shell/navigator";
 
 /** How a library is listed: sort, order and filters (the web's query string). */
 export interface LibraryParams {
@@ -210,6 +211,45 @@ export class ParamsStore {
   set(id: number, p: LibraryParams): void {
     const key = this.key(id);
     if (key !== null) this.store.set(key, JSON.stringify(p));
+  }
+}
+
+/**
+ * The tab each library was last on (Recommended, Library or Collections),
+ * so it opens on it again, after a restart too: one per server, profile and
+ * library, kept on the TV. Without a profile nothing is read or kept.
+ */
+export class TabStore {
+  private readonly store: KeyValue;
+  private readonly server: string;
+  private readonly profile: number | null;
+  constructor(store: KeyValue, server: string, profile: number | null) {
+    this.store = store;
+    this.server = server;
+    this.profile = profile;
+  }
+  private key(id: number): string | null {
+    return this.profile === null ? null : `pley.libraryTab.${this.server}.${this.profile}.${id}`;
+  }
+  /** The tab library `id` was last on; `null` when none (or not one of the tabs) was kept. */
+  get(id: number): LibraryTab | null {
+    const key = this.key(id);
+    let value: string | null = null;
+    try {
+      value = key === null ? null : this.store.get(key);
+    } catch {
+      value = null;
+    }
+    return value === "recommended" || value === "library" || value === "collections" ? value : null;
+  }
+  set(id: number, tab: LibraryTab): void {
+    const key = this.key(id);
+    if (key === null) return;
+    try {
+      if (this.store.get(key) !== tab) this.store.set(key, tab);
+    } catch {
+      // Storage full or unavailable: the library opens on Library next time.
+    }
   }
 }
 

@@ -7,7 +7,8 @@ import { NetworkError } from "../../src/net/transport";
 import { shuffled } from "../../src/player/music";
 import { heroOf, rowKind, seeAllOf } from "../../src/ui/screens/home";
 import { castAndCrew } from "../../src/ui/screens/item";
-import { AlphaIndex, countLabel, defaultOrder, describeSmartFilter, fitParams, letterOf, ParamsStore, showsJump, smartFilterOf, sortsFor } from "../../src/ui/screens/library-data";
+import { openingTab } from "../../src/ui/screens/library";
+import { AlphaIndex, countLabel, defaultOrder, describeSmartFilter, fitParams, letterOf, ParamsStore, showsJump, TabStore, smartFilterOf, sortsFor } from "../../src/ui/screens/library-data";
 import { codeHalves, displayCode, typedAddress } from "../../src/ui/screens/onboarding/link";
 import { switchRefusal } from "../../src/ui/screens/onboarding/profiles";
 import { relativeTime } from "../../src/ui/screens/settings";
@@ -82,6 +83,41 @@ describe("a library's sort and filters", () => {
     // Without a profile nothing is read or kept.
     new ParamsStore(kv, "http://nas:7539", null).set(4, added);
     expect(kept.size).toBe(1);
+  });
+});
+
+describe("a library's tab", () => {
+  const kv = () => {
+    const kept = new Map<string, string>();
+    return { kept, get: (k: string) => kept.get(k) ?? null, set: (k: string, v: string) => void kept.set(k, v), remove: (k: string) => void kept.delete(k) };
+  };
+
+  it("is kept for each server, profile and library", () => {
+    const store = kv();
+    new TabStore(store, "http://nas:7539", 1).set(3, "recommended");
+    expect(new TabStore(store, "http://nas:7539", 1).get(3)).toBe("recommended");
+    expect(new TabStore(store, "http://nas:7539", 1).get(4)).toBeNull();
+    expect(new TabStore(store, "http://nas:7539", 2).get(3)).toBeNull();
+    expect(new TabStore(store, "http://other:7539", 1).get(3)).toBeNull();
+    // Without a profile nothing is read or kept.
+    new TabStore(store, "http://nas:7539", null).set(3, "collections");
+    expect(store.kept.size).toBe(1);
+  });
+
+  it("reads nothing from a value that isn't a tab", () => {
+    const store = kv();
+    store.set("pley.libraryTab.http://nas:7539.1.3", "upcoming");
+    expect(new TabStore(store, "http://nas:7539", 1).get(3)).toBeNull();
+  });
+
+  it("opens on the tab shown before, else asked for, else last on, else Library", () => {
+    const tabs: Parameters<typeof openingTab>[0] = ["recommended", "library", "collections"];
+    expect(openingTab(tabs, undefined, undefined, "recommended")).toBe("recommended");
+    expect(openingTab(tabs, undefined, "library", "recommended")).toBe("library");
+    expect(openingTab(tabs, "collections", "library", "recommended")).toBe("collections");
+    expect(openingTab(tabs, undefined, undefined, null)).toBe("library");
+    // Music has no Collections tab.
+    expect(openingTab(["recommended", "library"], undefined, undefined, "collections")).toBe("library");
   });
 });
 

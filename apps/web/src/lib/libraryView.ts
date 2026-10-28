@@ -42,3 +42,42 @@ export function leftView(key: string): string {
 export function keepView(key: string, view: string) {
   writeStorage(key, view);
 }
+
+/** A library page's tabs; "library" is the one an address without `tab` shows. */
+export type LibraryTab = "recommended" | "library" | "collections";
+
+/**
+ * Where this browser keeps the tab profile `userId` was last on in library
+ * `libraryId`. Each server is its own site, so its pages keep their own.
+ */
+export const tabStorageKey = (userId: number, libraryId: number) => `pley.libraryTab.${userId}.${libraryId}`;
+
+/** The tab an address shows. */
+export function tabOf(params: URLSearchParams): LibraryTab {
+  const tab = params.get("tab");
+  return tab === "recommended" || tab === "collections" ? tab : "library";
+}
+
+/** The tab the library at `key` was last on; `null` when none (or not one of the tabs) was kept. */
+export function leftTab(key: string): LibraryTab | null {
+  const value = getStored<unknown>(key, null);
+  return value === "recommended" || value === "library" || value === "collections" ? value : null;
+}
+
+/** Remembers that the library at `key` is on `tab`. */
+export function keepTab(key: string, tab: LibraryTab) {
+  writeStorage(key, tab);
+}
+
+/**
+ * The address a library page opened at `params` moves to: on the tab it was
+ * last on, when the address names no tab and no view (a library opened from
+ * the sidebar; a sort or filter in it is for the Library tab). `null` when
+ * it stays as it is.
+ */
+export function withTab(params: URLSearchParams, left: LibraryTab | null): URLSearchParams | null {
+  if (!left || left === "library" || params.has("tab") || VIEW_KEYS.some((key) => params.has(key))) return null;
+  const next = new URLSearchParams(params);
+  next.set("tab", left);
+  return next;
+}

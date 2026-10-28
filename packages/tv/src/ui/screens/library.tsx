@@ -32,6 +32,7 @@ import {
   Listing,
   moved,
   ParamsStore,
+  TabStore,
   sameOrder,
   showsJump,
   smartFilterOf,
@@ -63,6 +64,16 @@ export function collectionCount(c: Collection, kind: LibraryKind | null): string
 }
 
 /**
+ * The tab a library shows: the one shown before on this page, else the one
+ * asked for (See all asks for Library), else the one it was last on, else
+ * Library; one the library hasn't is Library.
+ */
+export function openingTab(tabs: LibraryTab[], before: LibraryTab | undefined, asked: LibraryTab | undefined, kept: LibraryTab | null): LibraryTab {
+  const wanted = before ?? asked ?? kept ?? "library";
+  return tabs.indexOf(wanted) >= 0 ? wanted : "library";
+}
+
+/**
  * A library (TvLibraryScreen): Recommended rows, the whole library as a
  * grid with its sort, filters and A–Z, and its collections.
  */
@@ -73,9 +84,14 @@ export function LibraryScreen(p: { entry: Entry; id: number; tab?: LibraryTab })
   const library = libraries?.filter((l) => l.id === p.id)[0] ?? null;
   const entry = p.entry;
   const tabs = library ? tabsFor(library.kind) : ["library" as LibraryTab];
-  // A library opens on the whole of it, as on Android; music's Collections is its Library.
-  const wanted = (entry.state.tab as LibraryTab | undefined) ?? p.tab ?? "library";
-  const shown: LibraryTab = tabs.indexOf(wanted) >= 0 ? wanted : "library";
+  // A library opens on the tab it was last on, else on the whole of it, as on
+  // Android; music's Collections is its Library.
+  const profile = app.me.value?.id ?? null;
+  const tabStore = useMemo(() => new TabStore(app.store, app.server.value ?? "", profile), [app.server.value, profile]);
+  const shown = openingTab(tabs, entry.state.tab as LibraryTab | undefined, p.tab, tabStore.get(p.id));
+  useEffect(() => {
+    if (library) tabStore.set(library.id, shown);
+  }, [tabStore, library?.id, shown]);
   const opened = (entry.state.opened as LibraryTab | undefined) ?? shown;
   entry.state.opened = opened;
   const [, setTabState] = useState(0);
