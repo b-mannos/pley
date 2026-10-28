@@ -1,5 +1,5 @@
 // Lays out <out>/media (Movies, Shows) from <out>/art, and writes <out>/jobs.txt: one ffmpeg
-// job per line, "<image>|<seconds>|<video>", for the videos still to make. Usage: node media.mjs <out>
+// job per line, "<image>|<seconds>|<video>", for the videos still to make. Usage: bun media.mjs <out>
 import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { movies, shows } from "./catalog.mjs";

@@ -1,5 +1,5 @@
 // Sets up the screenshot server: the account, libraries, the made-up metadata, what's being
-// watched and My List. Usage: node setup.mjs <base url> <setup code> <out dir>
+// watched and My List. Usage: bun setup.mjs <base url> <setup code> <out dir>
 import { randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";

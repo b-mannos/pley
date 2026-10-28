@@ -1,5 +1,5 @@
 // Draws the screenshot library's artwork (posters, backdrops, season posters, episode stills)
-// through a headless Chrome, into <out>/art/. Usage: node art.mjs <out>
+// through a headless Chrome, into <out>/art/. Usage: bun art.mjs <out>
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
