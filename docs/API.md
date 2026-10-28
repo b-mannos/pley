@@ -4,6 +4,11 @@ All endpoints live under `/api`. Requests and responses are JSON (`snake_case` k
 unless stated otherwise. Timestamps are **unix seconds**; durations/positions are
 **milliseconds**. Ids are integers unless stated otherwise.
 
+The compatibility API (docs/COMPATIBILITY.md) answers on the same port by
+default, but only requests that are its own (its headers, its token in the
+query, or a path only it has): `/api/…` and `/.well-known/…` are always
+this API's.
+
 ## Authentication
 
 * `POST /api/auth/login` (or `/api/setup`, `/api/auth/switch`, accepting an
@@ -264,10 +269,19 @@ interface MediaStream {
   dv_level?: number;                // Dolby Vision level
   hdr10plus?: boolean;              // Dolby Vision and PQ streams: HDR10+ in the first frames (absent: not looked for).
                                     // On Dolby Vision, true is Dolby Vision + HDR10+
-  // How clients name the format, the same everywhere: "Dolby Vision P8.1", "Dolby Vision P8.4", "Dolby Vision P5",
-  // "Dolby Vision P7 FEL" (or MEL; "P7" when not known: never "P7.6"), "Dolby Vision P8.1 + HDR10+", "HDR10+",
-  // "HDR10", "HLG"; badges shorten "Dolby Vision" to "DV".
-  profile?: string;
+  // How clients name the dynamic range, the same everywhere: "Dolby Vision P8.1", "Dolby Vision P8.4",
+  // "Dolby Vision P5", "Dolby Vision P7 FEL" (or MEL; "P7" when not known: never "P7.6"),
+  // "Dolby Vision P8.1 + HDR10+", "HDR10+", "HDR10", "HLG"; badges shorten "Dolby Vision" to "DV".
+  level?: number;                   // codec level, as ffprobe gives it (HEVC 5.1 = 153)
+  pix_fmt?: string;                 // "yuv420p10le", …
+  interlaced?: boolean;
+  has_b_frames?: boolean;
+  color_transfer?: string;          // "smpte2084", "arib-std-b67", …
+  color_primaries?: string;
+  color_space?: string;
+  // video and audio
+  profile?: string;                 // codec profile as ffprobe names it: "Main 10", "High", "DTS-HD MA",
+                                    // "Dolby TrueHD + Dolby Atmos"
   // audio
   channels?: number;
   channel_layout?: string;
@@ -317,8 +331,10 @@ interface PlaybackInfo {
                                     // "Dolby Vision P8.1", "Dolby Vision P7 FEL", "HDR10+", "HLG",
                                     // "HDR10 (Dolby Vision base layer)", "HDR10+ (Dolby Vision base layer)",
                                     // "Dolby Vision P8.1 (converted from P7 FEL)", "Dolby Vision P8.1 (HDR10+ left out)",
-                                    // "HDR10 (this screen doesn't show HDR10+)", "HDR10 (converted from HLG)",
-                                    // "SDR (tone-mapped)". Version 1 players don't say which HDR formats their
+                                    // "HDR10 (this screen doesn't show HDR10+)", "HDR10 (HDR10+ left out)",
+                                    // "HDR10 (converted from HLG)", "SDR (tone-mapped)", and "Dolby Vision P5 not
+                                    // decoded (wrong colours)" for a direct play the player insisted on.
+                                    // Version 1 players don't say which HDR formats their
                                     // screen shows: their HDR10+ is named as it is
 }
 ```
@@ -969,7 +985,7 @@ may open only some libraries see those, in that order.
 | POST | `/api/items/{id}/artwork/{kind}/upload` *(admin)* | raw image bytes (≤ 25 MB) | `ItemDetail`; stored as JPEG and locked |
 | DELETE | `/api/items/{id}/artwork/{kind}` *(admin)* | – | `204`; back to local or downloaded artwork |
 | PUT | `/api/items/{id}/rating` | `{ rating: number \| null }` (0-10, rounded to half stars; `null` clears it) | `204`; the user's own rating, shown as `user_state.rating` |
-| PUT | `/api/items/{id}/streams` | `{ file_id?, audio_index?, subtitle_index }` (`subtitle_index: null` = off) | `204`. Remembers the choice for the whole show (episodes) or the movie, as language/title/forced, so every episode starts with its own matching tracks. `audio_index` left out keeps the audio chosen before (subtitles alone were picked); `null` remembers none, so each play chooses it as for a title without a choice. Players send it only when the person picked an audio track. |
+| PUT | `/api/items/{id}/streams` | `{ file_id?, audio_index?, subtitle_index? }` (`subtitle_index` `null` or left out = off; `file_id` defaults to the item's first file) | `204`. Remembers the choice for the whole show (episodes) or the movie, as language/title/forced, so every episode starts with its own matching tracks. `audio_index` left out keeps the audio chosen before (subtitles alone were picked); `null` remembers none, so each play chooses it as for a title without a choice. Players send it only when the person picked an audio track. |
 | POST | `/api/items/{id}/unwatched` | – | `204`; `user_state_changed` to the user's streams, unless nothing changed |
 | POST | `/api/items/{id}/refresh` *(admin)* | – | `202` re-fetch metadata from the item's source (movies: TMDB; shows, seasons, episodes: the TV source; artists, albums, tracks: MusicBrainz). `400` when that source is off or lacks its key. |
 | POST | `/api/items/{id}/analyze` *(admin)* | – | `202` find the intro and credits again: a movie's chapters, or every episode of an episode's season, a season or a show. `400` for other kinds. |
@@ -1149,6 +1165,7 @@ queue.
 | Method | Path | Body | Response |
 |---|---|---|---|
 | POST | `/api/playback` | see below | `PlaybackInfo` |
+| GET | `/api/playback/{session_id}` | – | `{ session_id, method, transcode: TranscodeInfo \| null }`: the player's details, how the session plays now (`transcode` is null for a direct play). `403` for someone else's session (administrators see any), `404` "playback session expired" once it is gone, `410` when it was stopped |
 | DELETE | `/api/playback/{session_id}` | – | `204` (stops any transcode) |
 | GET | `/api/playback/{session_id}/index.m3u8` | – | HLS VOD playlist (`application/vnd.apple.mpegurl`) |
 | GET | `/api/playback/{session_id}/master.m3u8` | – | multivariant playlist naming the codecs (see [Dolby Vision remuxes](#dolby-vision-remuxes)), one variant: `index.m3u8` |
@@ -1231,7 +1248,9 @@ description, unless picked), then the one this player plays best:
 4. as many channels as `audio_channels` says the output takes, mixed for
    no more than that (a stereo mix beats a 5.1 one folded down on
    stereo), lossless (TrueHD, DTS-HD MA, FLAC, PCM), Atmos or DTS:X when
-   passed through, the bitrate;
+   passed through, the bitrate. A track passed through counts its own
+   channels, since the receiver decodes it: a 2.0 player passing AC-3 to
+   a receiver gets the AC-3 5.1, not the stereo mix;
 5. the file's default, then the first.
 
 Tracks whose language is undetermined (`und`) or missing are never
@@ -1443,11 +1462,12 @@ For those players, the Dolby Vision rules of version 2 become:
   TV devices) is **converted to 8.1** while repackaged: the enhancement
   layer is left out and each RPU rewritten (no residual, no enhancement
   layer resampling, P8.1 colour coefficients; a full enhancement layer's
-  curves become no-ops), as `dovi_tool`'s mode 2 does. The reason says
-  "Dolby Vision P7 is converted to profile 8.1 for this player.", with
-  ", without its enhancement layer" for a full one (`dv_el: "fel"`, whose
-  12-bit detail is lost). Profile 8 must take the stream's level; otherwise
-  the HDR10 base layer, as before.
+  curves become no-ops), as `dovi_tool`'s mode 2 does. The reason names the format as clients
+  do, "Dolby Vision P7 FEL is converted to profile 8.1 for this
+  player.", ending ", without its enhancement layer" for a full one
+  (`dv_el: "fel"`, whose 12-bit detail is lost), ", without its HDR10+"
+  for Dolby Vision + HDR10+ (below), or both. Profile 8 must take the
+  stream's level; otherwise the HDR10 base layer, as before.
 - **Dolby Vision + HDR10+** (`hdr10plus: true` on the stream, found when the
   file is analysed) never plays as it is for a player that would decode it
   as Dolby Vision, on any model: Dolby Vision decoders show black or freeze
@@ -1577,7 +1597,7 @@ interface HistoryEntry {
 
 | Method | Path | Response |
 |---|---|---|
-| GET | `/api/activity` | `{ scans: ScanStatus[], sessions: SessionInfo[], analysis: AnalysisStatus \| null }` (non-admins only see their own sessions and no analysis) |
+| GET | `/api/activity` | `{ scans: ScanStatus[], sessions: SessionInfo[], analysis: AnalysisStatus \| null, previews_pending: number }` (`previews_pending`: files waiting for seek previews. Non-admins only see their own sessions and the scans of libraries they may open, with no analysis and `previews_pending` 0) |
 | DELETE | `/api/sessions/{id}` | `204`; body optional `{ message?: string }` (at most 200 characters, else `400`). Stops a playback session at once (see below) |
 | GET | `/api/events` | Server-Sent Events, `data:` is JSON `ServerEvent` |
 
@@ -1674,6 +1694,7 @@ interface TranscodeInfo {
   audio_in: string | null;      // e.g. "EAC3 5.1"
   audio_out: string | null;     // e.g. "AAC 2.0"
   encoder: string | null;       // e.g. "h264_nvenc", "libx264"
+  preset: string | null;        // the software encoder's preset now (the automatic one changes)
   decoder: string | null;       // "cuda", "vulkan", "cpu", …
   pipeline: string | null;      // "gpu" (zero-copy), "hybrid", "cpu" or "copy"
   tonemap: string | null;       // "libplacebo" | "opencl" | "zscale" when HDR/DV is tone-mapped to SDR
@@ -1685,6 +1706,7 @@ interface TranscodeInfo {
   transcoded_ms: number;        // how far ffmpeg got (absolute media position)
   segments_ready: number;
   segments_total: number;
+  bitrate_out: number | null;   // what a conversion aims for, video and audio together (bits per second); null for copied video
   last_error: string | null;
 }
 
@@ -1729,7 +1751,7 @@ type ServerEvent =
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
 | GET | `/api/system` | – | `SystemInfo` (with `database: { ok, problem?, checked_at }`, the integrity check made at start) |
-| GET | `/api/system/resources` | `since` | `{ available, interval_ms, cpus, memory_total, samples: [{ at, cpu, pley_cpu, memory, pley_memory }] }`: the processors' and memory's use, sampled every 2 s for the last five minutes (only the samples after `since`, in Unix milliseconds, when given). `cpu` and `pley_cpu` are shares of all the processors' time, 0–100; `memory` and `pley_memory` bytes. pley is the server and every process it started: a managed transcoder and its FFmpegs. `available` is false where the system can't be sampled (Windows, Linux and macOS can) |
+| GET | `/api/system/resources` | `since` | `{ available, interval_ms, cpus, memory_total, samples: [{ at, cpu, pley_cpu, memory, pley_memory }] }`: the processors' and memory's use, sampled every 2 s for the last five minutes, oldest first (only the samples after `since`, in Unix milliseconds, when given; `at` is in Unix milliseconds too). `cpu` and `pley_cpu` are shares of all the processors' time, 0–100; `memory` (in use on the machine, without what only caches files) and `pley_memory` (its processes' resident memory) bytes, `memory_total` the machine's, `cpus` its logical processors. pley is the server and every process it started: a managed transcoder and its FFmpegs. `available` is false where the system can't be sampled (Windows, Linux and macOS can) |
 | GET | `/api/system/storage` | – | `{ blobs, blob_bytes, media_folders, media_bytes, cache_bytes }`: space used by stored pictures, generated media files and the cache (docs/STORAGE.md) |
 | POST | `/api/system/storage/clean` | – | `{ blobs_removed, media_folders_removed, bytes_freed, cache_files_removed, cache_bytes_freed }`: removes what nothing uses any more, and old cache files |
 | GET | `/api/system/backups` | – | `{ health: { ok, problem?, checked_at }, backups: { name, path, bytes, created_at }[] }`, newest first |
@@ -1740,13 +1762,15 @@ type ServerEvent =
 | POST | `/api/settings/test` | `{ service: "tmdb" \| "tvdb" \| "tvmaze" \| "musicbrainz" \| "transcoder", api_key?, pin? }` | `{ ok, message, ms }`: one request to the service, with the key and PIN given (not saved) or else the saved ones. `message` says what happened, for people |
 | GET | `/api/fs` | `path` (omit for roots/drives) | `{ path: string \| null, parent: string \| null, entries: { name: string, path: string }[] }` – directories only |
 | GET | `/api/network` | – | `Network`: where pley listens, and could |
-| PUT | `/api/network` | `{ web, plex, discovery }` | `Network`, once the new listeners listen or have tried for a moment (3 s at most). Saved in the config file for the next start. `400` for addresses pley can't listen on together, and for a change of what the command line or the environment sets |
+| PUT | `/api/network` | `{ web, plex, plex_on_web?, discovery }` | `Network`, once the new listeners listen or have tried for a moment (3 s at most). Saved in the config file for the next start (`plex_bind`: `"web"`, `"off"` or the addresses). `400` for addresses pley can't listen on together, `plex_on_web` with `plex` addresses too, more than 32 addresses of a kind, and a change of what the command line or the environment sets |
 
 ```ts
 interface Network {
   web: string[];          // the web app and API: "127.0.0.1:7539", "192.168.1.10:7539", "0.0.0.0:7539"
-  plex: string[];         // the Plex-compatible API on addresses of its own (32400); [] = off or on pley's port
-  plex_on_web: boolean;   // the Plex-compatible API answers on pley's port, to its clients
+  plex: string[];         // the Plex-compatible API on addresses of its own ("0.0.0.0:32400"); [] = on pley's port
+                          // (plex_on_web) or off
+  plex_on_web: boolean;   // the Plex-compatible API answers on pley's port, to its clients (the default); never
+                          // with addresses in `plex`
   discovery: boolean;     // answer the pley apps on the networks (never on loopback addresses)
   fixed: { web: boolean; plex: boolean; discovery: boolean }; // set by --bind/PLEY_BIND, --plex-bind/PLEY_PLEX_BIND, --no-discovery
   listeners: { kind: "web" | "plex" | "discovery"; address: string; error: string | null }[]; // error: why not (yet); tried again every 30 s
@@ -1781,6 +1805,10 @@ interface Settings {
   previews_in_background: boolean;  // also for whole libraries after scans, one file at a time (default true)
   third_party_apps: boolean;        // apps by other publishers may sign in (default false); turning it off
                                     // signs them out. pley's own apps always may
+  proxy_addresses: string[];        // addresses with a port pley is reached at through a reverse proxy that leaves
+                                    // the port out of `Host` ("https://media.example.com:9999"; see Discovery).
+                                    // http or https with a port and no path, one per scheme and host, 16 at most;
+                                    // empty strings are dropped. Anything else → 400
 }
 
 interface SystemInfo {
