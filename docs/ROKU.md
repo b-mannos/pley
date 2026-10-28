@@ -172,25 +172,47 @@ Rules the code keeps:
     Roku can't decode is converted, as before (a media error plays the
     file again converted at the server's own quality).
 
-  On a play issue it steps down by the spec's rule: what the network
-  carried (the HLS segments' sizes over their download times in the last
-  20 s, from `downloadedSegment`, no more than the bitrate playing; half
-  of it for a file played as it is, which has no segments) times 0.75,
-  never above the server's own quality for the file (`auto_quality`),
-  always a quality lower among those the file is offered, each of less
-  bitrate than the one above (a 4K file goes 30 Mbps 4K, 15 Mbps 4K,
-  then 12 Mbps 1080p), never under 2 Mbps 480p, and not within 20 s of
-  the last change. The stream opens again where it was, as a new session
-  at that quality (`mode: "transcode"`), and "Quality lowered to 8 Mbps
-  1080p" shows at the top for 4 s once it plays. The ceiling
-  is kept 30 minutes for each server in the registry; a title started in
-  Automatic meanwhile (Up Next's too) starts at the quality under it when
-  that makes the file smaller. Back up: after 3 minutes without an issue
-  and 5 after a step down, when the segments since then (20 s of video at
-  least) carried 1.6 times the next quality up (the file's bitrate, for
-  Original), one step at a time, every 3 minutes at most, silently; back
-  at Original the ceiling is forgotten. Without segments to measure, it
-  stays where it went down to, as the spec allows.
+  On a play issue it steps down by the spec's rule: what the network carried
+  (the HLS segments' sizes over their download times in the last 20 s, from
+  `downloadedSegment`, no more than the bitrate playing; half of it for a
+  file played as it is, which has no segments) times 0.75, never above the
+  server's own quality for the file (`auto_quality`), always a quality lower
+  among those the file is offered, each of less bitrate than the one above
+  (a 4K file goes 30 Mbps 4K, 15 Mbps 4K, then 12 Mbps 1080p), never under 2
+  Mbps 480p, and not within 20 s of the last change. The stream opens again
+  where it was, as a new session at that quality (`mode: "transcode"`), and
+  "Quality lowered to 8 Mbps 1080p" shows at the top for 4 s once it plays.
+  The ceiling is kept 30 minutes for each server in the registry; a title
+  started in Automatic meanwhile (Up Next's too) starts at the quality under
+  it when that makes the file smaller. Back up: after 3 minutes without an
+  issue and 5 after a step down, when the segments since then (20 s of video
+  at least) carried 1.6 times the next quality up (the file's bitrate, for
+  Original), one step at a time, every 3 minutes at most, silently; a step
+  up to a quality keeps its bitrate as the ceiling, and back at Original the
+  ceiling is forgotten. Without segments to measure, it stays where it went
+  down to, as the spec allows.
+- Where Automatic starts: the server remembers what this Roku's network
+  carries too (`GET /api/playback/network`, docs/API.md), a day after a
+  step down and a week after a speed test. A title's first opening in
+  Automatic asks it (the API task's `network` op, 1.5 s at most), and its
+  ceiling takes the place of the one kept in the registry; without an
+  answer (out of reach, or a server from before it, 404) the registry's
+  counts, as before. Where the server asks for a speed test (a network
+  away from it that it knows nothing of), the API task fetches 8 MiB of
+  `GET /api/playback/speedtest` to a file in `tmp:` (`speedTest`):
+  roUrlTransfer gives nothing of a body before its end, so the whole
+  request is timed and told to the server with `probe_complete: false`,
+  and its answer is the ceiling (70 % of the speed when the server can't
+  keep it). The test is given up after about 3 s less the asking (1.5 s
+  at least); what came by then counts, where the Roku wrote it, and under
+  256 KiB measures nothing and the original starts. The loading circle
+  shows meanwhile; the render thread waits for none of it. The task keeps
+  the server's answer 10 minutes for each server, a 404 too, forgotten
+  with each sign-in and profile, so a play on the home network doesn't
+  wait for it. Each ceiling the registry keeps is told to the server as
+  well (`tellNetwork`, nothing waits for it): a step down's, a step up's,
+  none back at Original or with Automatic chosen again in Settings or the
+  player's menu. Original and the chosen qualities ask nothing.
 - Sort libraries (Settings), as on Android TV: OK lifts a library, up and
   down move it, OK puts it there, Back puts it back; "Use the server's
   order" goes back to the order everyone sees. Each drop saves the order

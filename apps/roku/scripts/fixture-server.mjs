@@ -470,6 +470,24 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
         reasons: [], reason: null, auto_quality: null,
       });
     }
+    // What the server knows of this Roku's network: a speed test asked for
+    // until one is told, then no limit (docs/API.md).
+    if (path === "/api/playback/network") {
+      if (req.method === "PUT") {
+        const told = JSON.parse(body);
+        fixture.networkTold.push(told);
+        if (told.probe_kbps != null) fixture.probed = true;
+      } else if (!url.searchParams.get("client_id")) {
+        return json(400, { code: "bad_request", message: "client_id is missing" });
+      }
+      return json(200, { local: false, ceiling_kbps: null, source: fixture.probed ? "probe" : null, since: null, probe: !fixture.probed });
+    }
+    if (path === "/api/playback/speedtest") {
+      const size = Math.min(Math.max(Number(url.searchParams.get("bytes") ?? 33554432), 65536), 67108864);
+      fixture.speedTests.push(size);
+      res.writeHead(200, { "Content-Type": "application/octet-stream", "Content-Length": size, "Cache-Control": "no-store" });
+      return res.end(Buffer.alloc(size, 7));
+    }
     if ((match = path.match(/^\/api\/playback\/([\w-]+)$/))) {
       if (req.method === "DELETE") {
         closed.push(match[1]);
@@ -496,7 +514,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
 
   const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [],
     household: [{ id: 1, name: "Anna", avatar_url: null, avatar_color: "#38bdf8", current: true, needs: "none" }, { id: 2, name: "Ben", avatar_url: null, avatar_color: "#f472b6", current: false, needs: "none" }],
-    switched: [], problems, requests, progress, closed, close: () => server.close() };
+    switched: [], probed: false, networkTold: [], speedTests: [], problems, requests, progress, closed, close: () => server.close() };
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       issuer = `http://127.0.0.1:${server.address().port}`;

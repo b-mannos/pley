@@ -233,7 +233,14 @@ sub onChoice(event as object)
     if at < 0 or at >= m.choice.values.Count() then return
     closeChoices()
     if m.choiceKind = "quality"
-        aqChoose(playbackSection(), m.choice.values[at])
+        value = m.choice.values[at]
+        if value = "auto" and aqChoice(playbackSection()) <> "auto"
+            ' Picked again, Automatic starts afresh at the original, here
+            ' and on the server.
+            aqRemember(playbackSection(), m.global.session.server, 0, CreateObject("roDateTime").AsSeconds())
+            uiRequest({ op: "tellNetwork", ceilingKbps: 0 }, "")
+        end if
+        aqChoose(playbackSection(), value)
         showRows()
         return
     end if

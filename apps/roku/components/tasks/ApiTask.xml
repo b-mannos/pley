@@ -22,4 +22,5 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Music.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nodes.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Transfer.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/AutoQuality.brs" />
 </component>

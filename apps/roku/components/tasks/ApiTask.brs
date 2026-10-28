@@ -33,6 +33,9 @@ sub apiRun()
     m.switchWaiting = invalid
     m.switching = false
     m.profileAsked = 0
+    ' What the server said of this Roku's network, for each server
+    ' (aqNetworkKept): forgotten with each sign-in and profile.
+    m.networkKept = {}
     apiDeviceFacts()
     m.top.ready = true
     while true
@@ -118,6 +121,12 @@ sub apiAccept(request as dynamic)
         apiSignOut(request)
     else if op = "play"
         apiPlay(request, spec)
+    else if op = "network"
+        apiNetwork(request)
+    else if op = "tellNetwork"
+        apiTellNetwork(request, spec)
+    else if op = "speedTest"
+        apiSpeedTest(request, spec)
     else if op = "switchProfile"
         apiSwitchProfile(request, spec)
     else
@@ -129,7 +138,7 @@ end sub
 
 ' A transfer to send; purpose says what its answer is for.
 function apiJob(purpose as string, method as string, url as string) as object
-    return { purpose: purpose, method: method, url: url, body: "", contentType: "", auth: false, sent: "", retried: false, request: invalid, server: m.server, timeoutMs: 30000, play: false }
+    return { purpose: purpose, method: method, url: url, body: "", contentType: "", auth: false, sent: "", retried: false, request: invalid, server: m.server, timeoutMs: 30000, play: false, network: "", toFile: "" }
 end function
 
 function apiForm(job as object, params as object) as object
@@ -200,7 +209,9 @@ sub apiSend(job as object)
     if job.auth then transfer.AddHeader("Authorization", "Bearer " + job.sent)
     if job.contentType <> "" then transfer.AddHeader("Content-Type", job.contentType)
     transfer.SetRequest(job.method)
-    if job.method = "GET"
+    if job.toFile <> ""
+        started = transfer.AsyncGetToFile(job.toFile)
+    else if job.method = "GET"
         started = transfer.AsyncGetToString()
     else
         started = transfer.AsyncPostFromString(job.body)
@@ -307,7 +318,12 @@ sub apiCallAnswered(job as object, status as integer, body as string, headers as
             return
         end if
     end if
+    if job.toFile <> ""
+        apiSpeedTestAnswered(job, status)
+        return
+    end if
     answer = httpAnswer(status, body)
+    if job.network <> "" then aqNetworkKeep(m.networkKept, job.network, answer, m.clock.TotalMilliseconds())
     if httpTrue(job.me) then apiKnowProfile(job, answer)
     if answer.ok and job.play and apiAbandoned(job.request)
         ' The player left before its session came: the server would go on
@@ -521,6 +537,7 @@ sub apiEnd(reason as string)
     if m.tokens <> invalid then tokensWipe(m.tokensSection, m.tokens.issuer)
     m.tokens = invalid
     m.lastIssued = invalid
+    m.networkKept = {}
     apiFailWaiting(apiSignedOut())
     m.session.accessToken = ""
     m.session.signOutReason = reason
@@ -554,6 +571,7 @@ sub apiSignOut(request as object)
     end if
     m.tokens = invalid
     m.lastIssued = invalid
+    m.networkKept = {}
     apiFailWaiting(apiSignedOut())
     m.session.accessToken = ""
     m.session.signOutReason = "signed_out"
@@ -611,6 +629,7 @@ end sub
 ' Who the sign-in acts as (GET /api/auth/me), for the screens: asked as a
 ' server is chosen signed in, and after each sign-in.
 sub apiAskProfile()
+    m.networkKept = {}
     m.session.profileId = 0
     m.session.profileName = ""
     if m.tokens = invalid then return
@@ -987,4 +1006,84 @@ sub apiPlay(request as object, spec as object)
     if httpNumber(spec.maxHeight, 0) > 0 then body.max_height = Int(spec.maxHeight)
     ' Starting a transcode takes the server a few seconds.
     apiCall(request, { method: "POST", path: "/api/playback", json: body, timeoutMs: 60000, play: true })
+end sub
+
+' --- Where Automatic starts (AutoQuality.brs) ---
+
+' GET /api/playback/network for this Roku, 1.5 s at most; an answer kept
+' from the last 10 minutes at once.
+sub apiNetwork(request as object)
+    if m.server = ""
+        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        return
+    end if
+    kept = aqNetworkKept(m.networkKept, m.server, m.clock.TotalMilliseconds())
+    if kept <> invalid
+        apiAnswer(request, kept)
+        return
+    end if
+    job = apiJob("call", "GET", m.server + "/api/playback/network?client_id=" + urlEncode(m.playerId))
+    job.request = request
+    job.build = ""
+    job.auth = true
+    job.timeoutMs = 1500
+    job.network = m.server
+    apiSend(job)
+end sub
+
+' PUT /api/playback/network: a speed test's result ({ probeKbps }) or
+' Automatic's ceiling ({ ceilingKbps }, 0 forgets). What is kept goes, and
+' the server's answer takes its place.
+sub apiTellNetwork(request as object, spec as object)
+    if m.server = ""
+        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        return
+    end if
+    m.networkKept.Delete(m.server)
+    job = apiJob("call", "PUT", m.server + "/api/playback/network")
+    job.request = request
+    job.build = ""
+    job.auth = true
+    job.body = aqTellBody(m.playerId, spec)
+    job.contentType = "application/json"
+    timeout = httpNumber(spec.timeoutMs, 0)
+    if timeout > 0 then job.timeoutMs = timeout
+    job.network = m.server
+    apiSend(job)
+end sub
+
+' The speed test: 8 MiB to a file in tmp:, the whole request timed, given
+' up after timeoutMs (what came by then counts, where the Roku wrote it).
+sub apiSpeedTest(request as object, spec as object)
+    if m.server = ""
+        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        return
+    end if
+    job = apiJob("call", "GET", m.server + "/api/playback/speedtest?bytes=" + urlValue(aqProbeBytes()))
+    job.request = request
+    job.build = ""
+    job.auth = true
+    job.toFile = "tmp:/pley-speedtest"
+    job.timeoutMs = Int(httpNumber(spec.timeoutMs, 3000))
+    apiSpeedTestDelete(job.toFile)
+    apiSend(job)
+end sub
+
+' { bytes, ms } of a speed test that ended (status -28: given up).
+sub apiSpeedTestAnswered(job as object, status as integer)
+    ms = m.clock.TotalMilliseconds() - job.startedAt
+    bytes = 0
+    if status = 200 or status = -28
+        found = CreateObject("roFileSystem").Stat(job.toFile)
+        if GetInterface(found, "ifAssociativeArray") <> invalid then bytes = httpNumber(found.size, 0)
+    end if
+    apiSpeedTestDelete(job.toFile)
+    answer = apiOk({ bytes: bytes, ms: ms })
+    answer.status = status
+    apiAnswer(job.request, answer)
+end sub
+
+sub apiSpeedTestDelete(path as string)
+    files = CreateObject("roFileSystem")
+    if files.Exists(path) then files.Delete(path)
 end sub

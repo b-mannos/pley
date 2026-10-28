@@ -478,3 +478,90 @@ sub aqChoose(section as object, id as string)
     section.Write("quality", aqFromSetting(id))
     section.Flush()
 end sub
+
+' --- Where Automatic starts: what the server knows of the network ---
+'
+' Before a title starts in Automatic the player asks the server what it
+' knows of this Roku's network (GET /api/playback/network, 1.5 s at most);
+' its ceiling takes the place of the one remembered here, which counts
+' only without an answer. Where the server asks for a speed test, the API
+' task fetches 8 MiB of GET /api/playback/speedtest whole (roUrlTransfer
+' gives nothing of a body before its end) and times the whole request;
+' the result goes to the server with probe_complete false, and its answer
+' is the ceiling.
+
+function aqProbeBytes() as integer
+    return 8388608
+end function
+
+' The answer's ceiling in kbps, 0 for no limit.
+function aqNetworkCeiling(answer as dynamic) as float
+    if GetInterface(answer, "ifAssociativeArray") = invalid then return 0
+    kbps = httpNumber(answer.ceiling_kbps, 0)
+    if kbps <= 0 then return 0
+    return kbps
+end function
+
+' Whether the server asks for a speed test first (never on its own network).
+function aqWantsProbe(answer as dynamic) as boolean
+    if GetInterface(answer, "ifAssociativeArray") = invalid then return false
+    if httpTrue(answer.local) then return false
+    return httpTrue(answer.probe)
+end function
+
+' What a speed test of bytes in ms tells the server: { probe_kbps,
+' probe_complete }, or invalid under 256 KiB (nothing is known then).
+' The whole request is timed, so a Roku never says it came whole in time.
+function aqProbeResult(bytes as float, ms as float) as dynamic
+    if bytes < 262144 or ms <= 0 then return invalid
+    kbps = Int(bytes * 8 / ms + 0.5)
+    if kbps < 1 then kbps = 1
+    if kbps > 10000000 then kbps = 10000000
+    return { probe_kbps: kbps, probe_complete: false }
+end function
+
+' The ceiling a speed test gives when the server didn't keep it: 70 % of
+' what it measured, as the server counts it.
+function aqProbeCeiling(result as dynamic) as float
+    if result = invalid then return 0
+    if httpTrue(result.probe_complete) then return 0
+    return result.probe_kbps * 0.7
+end function
+
+' How long the speed test may take, in ms, after asking took askedMs: the
+' whole of it holds the play back about 3.5 s at most.
+function aqProbeTimeoutMs(askedMs as integer) as integer
+    left = 3000 - askedMs
+    if left < 1500 then left = 1500
+    return left
+end function
+
+' The server's answers kept in the API task for each sign-in (server and
+' profile): { at (ms), answer }, 10 minutes, so a play on the home
+' network doesn't wait for them. A 404 (a server from before) is kept too.
+function aqNetworkKept(kept as object, key as string, nowMs as integer) as dynamic
+    entry = kept[key]
+    if entry = invalid then return invalid
+    if nowMs - entry.at > 600000 or nowMs < entry.at
+        kept.Delete(key)
+        return invalid
+    end if
+    return entry.answer
+end function
+
+sub aqNetworkKeep(kept as object, key as string, answer as object, nowMs as integer)
+    if answer.ok and GetInterface(answer.data, "ifAssociativeArray") = invalid then return
+    if not answer.ok and answer.status <> 404 then return
+    kept[key] = { at: nowMs, answer: answer }
+end sub
+
+' PUT /api/playback/network's body as JSON (ceiling_kbps null forgets):
+' { ceilingKbps } or { probeKbps } from the screens.
+function aqTellBody(clientId as string, spec as object) as string
+    if httpNumber(spec.probeKbps, 0) > 0
+        return FormatJson({ client_id: clientId, probe_kbps: Int(spec.probeKbps), probe_complete: false })
+    end if
+    kbps = Int(httpNumber(spec.ceilingKbps, 0) + 0.5)
+    if kbps <= 0 then return "{""client_id"":" + FormatJson(clientId) + ",""ceiling_kbps"":null}"
+    return FormatJson({ client_id: clientId, ceiling_kbps: kbps })
+end function

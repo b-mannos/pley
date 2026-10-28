@@ -210,3 +210,54 @@ sub test_aq_a_seek_in_the_rokus_own_controls_isnt_a_wait()
     aqState(watch, 40500, "buffering", invalid)
     tkEqual(aqTick(watch, 42600), "4m")
 end sub
+
+sub test_aq_the_servers_word_on_the_network()
+    tkEqual(aqNetworkCeiling({ local: false, ceiling_kbps: 8000, source: "playback", probe: false }), 8000)
+    tkEqual(aqNetworkCeiling({ ceiling_kbps: invalid }), 0, "no limit")
+    tkEqual(aqNetworkCeiling({ ceiling_kbps: true }), 0)
+    tkEqual(aqNetworkCeiling(invalid), 0)
+    tkEqual(aqWantsProbe({ local: false, probe: true }), true)
+    tkEqual(aqWantsProbe({ local: true, probe: true }), false, "never on the server's own network")
+    tkEqual(aqWantsProbe({ probe: 1 }), false)
+    tkEqual(aqWantsProbe(invalid), false)
+    ' Its ceiling where the remembered one would go: 9 Mbps starts at 8.
+    asked = aqAsk("auto", "", aqNetworkCeiling({ ceiling_kbps: 9000 }), { bitrate: 20000000, height: 1080 })
+    tkEqual([asked.quality, asked.lowered, asked.maxBitrate], ["8m", true, 8000])
+end sub
+
+sub test_aq_a_speed_test_fetched_whole()
+    ' 8 MiB in 2 s, the whole request timed: never "complete".
+    result = aqProbeResult(8388608, 2000)
+    tkEqual(result, { probe_kbps: 33554, probe_complete: false })
+    tkEqual(Int(aqProbeCeiling(result)), 23487, "70 % when the server can't keep it")
+    tkEqual(aqProbeCeiling({ probe_kbps: 5000, probe_complete: true }), 0)
+    tkEqual(aqProbeResult(200000, 3000), invalid, "under 256 KiB: nothing known")
+    tkEqual(aqProbeResult(1000000, 0), invalid)
+    tkEqual(aqProbeBytes(), 8388608)
+    ' About 3.5 s in all: what asking took comes off the test, 1.5 s at least.
+    tkEqual(aqProbeTimeoutMs(100), 2900)
+    tkEqual(aqProbeTimeoutMs(1400), 1600)
+    tkEqual(aqProbeTimeoutMs(2000), 1500)
+end sub
+
+sub test_aq_what_the_server_said_is_kept_ten_minutes()
+    kept = {}
+    tkEqual(aqNetworkKept(kept, "http://a", 0), invalid)
+    answer = { ok: true, status: 200, data: { ceiling_kbps: 4000 }, error: "", message: "" }
+    aqNetworkKeep(kept, "http://a", answer, 1000)
+    tkEqual(aqNetworkKept(kept, "http://a", 600000).data.ceiling_kbps, 4000)
+    tkEqual(aqNetworkKept(kept, "http://b", 600000), invalid, "each server its own")
+    tkEqual(aqNetworkKept(kept, "http://a", 601001), invalid, "ten minutes")
+    tkEqual(kept.Count(), 0)
+    ' A server from before: its 404 is kept too, other failures aren't.
+    aqNetworkKeep(kept, "http://a", { ok: false, status: 404, data: invalid, error: "not_found", message: "" }, 0)
+    tkEqual(aqNetworkKept(kept, "http://a", 10).status, 404)
+    aqNetworkKeep(kept, "http://b", { ok: false, status: -28, data: invalid, error: "network", message: "" }, 0)
+    tkEqual(aqNetworkKept(kept, "http://b", 10), invalid)
+end sub
+
+sub test_aq_what_is_told_to_the_server()
+    tkEqual(ParseJson(aqTellBody("r-1", { ceilingKbps: 8549.6 })), { client_id: "r-1", ceiling_kbps: 8550 })
+    tkEqual(aqTellBody("r-1", { ceilingKbps: 0 }), "{""client_id"":""r-1"",""ceiling_kbps"":null}", "forgotten")
+    tkEqual(ParseJson(aqTellBody("r-1", { probeKbps: 33554 })), { client_id: "r-1", probe_kbps: 33554, probe_complete: false })
+end sub

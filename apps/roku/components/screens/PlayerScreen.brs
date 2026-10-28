@@ -206,8 +206,69 @@ end sub
 
 ' POST /api/playback for the first file (the server's default too), with
 ' its picture subtitles to draw when the person's choices pick some, at the
-' quality chosen in Settings (or Automatic's).
+' quality chosen in Settings (or Automatic's). A title's first opening in
+' Automatic asks the server what it knows of the network first.
 sub askPlayback()
+    choice = aqChoice(playbackSection())
+    if choice = "auto" and m.autoQuality = ""
+        startAutomatic()
+        return
+    end if
+    requestPlayback(choice, 0)
+end sub
+
+' Where Automatic starts (AutoQuality.brs): the server's word on this
+' network, asked 1.5 s at most (the API task keeps it 10 minutes, so a play
+' at home doesn't wait), after a speed test where the server asks for one;
+' without an answer, what this Roku remembers. The loading circle shows
+' meanwhile.
+sub startAutomatic()
+    m.networkAt = m.clock.TotalMilliseconds()
+    m.probe = invalid
+    uiRequest({ op: "network", attempt: m.attempt }, "onNetwork")
+end sub
+
+sub onNetwork(event as object)
+    if not isCurrent(event) then return
+    answer = event.getData()
+    if not answer.ok
+        requestPlayback("auto", aqRemembered(playbackSection(), m.global.session.server, nowSeconds()))
+        return
+    end if
+    if aqWantsProbe(answer.data)
+        timeout = aqProbeTimeoutMs(m.clock.TotalMilliseconds() - m.networkAt)
+        uiRequest({ op: "speedTest", timeoutMs: timeout, attempt: m.attempt }, "onSpeedTest")
+        return
+    end if
+    requestPlayback("auto", aqNetworkCeiling(answer.data))
+end sub
+
+' The speed test's bytes over its time go to the server, whose answer is
+' the ceiling; too little measured starts as if nothing were known.
+sub onSpeedTest(event as object)
+    if not isCurrent(event) then return
+    answer = event.getData()
+    result = invalid
+    if answer.ok and GetInterface(answer.data, "ifAssociativeArray") <> invalid then result = aqProbeResult(httpNumber(answer.data.bytes, 0), httpNumber(answer.data.ms, 0))
+    if result = invalid
+        requestPlayback("auto", 0)
+        return
+    end if
+    m.probe = result
+    uiRequest({ op: "tellNetwork", probeKbps: result.probe_kbps, timeoutMs: 1000, attempt: m.attempt }, "onNetworkTold")
+end sub
+
+sub onNetworkTold(event as object)
+    if not isCurrent(event) then return
+    answer = event.getData()
+    ceiling = aqProbeCeiling(m.probe)
+    if answer.ok and GetInterface(answer.data, "ifAssociativeArray") <> invalid then ceiling = aqNetworkCeiling(answer.data)
+    requestPlayback("auto", ceiling)
+end sub
+
+' The session at the choice's quality; ceilingKbps is where Automatic
+' starts under (0 for none).
+sub requestPlayback(choice as string, ceilingKbps as float)
     spec = { op: "play", itemId: m.itemId, startMs: m.startMs, mode: m.mode, attempt: m.attempt }
     file = contentFile(m.item, invalid)
     if file <> invalid
@@ -215,14 +276,9 @@ sub askPlayback()
         burn = playerBurnIndex(file)
         if burn >= 0 then spec.subtitleIndex = burn
     end if
-    choice = aqChoice(playbackSection())
     again = ""
-    ceiling = 0
-    if choice = "auto"
-        again = m.autoQuality
-        if again = "" then ceiling = aqRemembered(playbackSection(), m.global.session.server, nowSeconds())
-    end if
-    m.asked = aqAsk(choice, again, ceiling, file)
+    if choice = "auto" then again = m.autoQuality
+    m.asked = aqAsk(choice, again, ceilingKbps, file)
     ' A file that failed to play as it is stays converted (broken()).
     if m.mode <> "transcode" then spec.mode = m.asked.mode
     spec.maxBitrate = m.asked.maxBitrate
@@ -238,6 +294,14 @@ end function
 function nowSeconds() as integer
     return CreateObject("roDateTime").AsSeconds()
 end function
+
+' Automatic's ceiling for the next titles (kbps, 0 forgets it): kept on
+' this Roku for 30 minutes and told to the server, which keeps it a day
+' for this Roku on this network. Nothing waits for the server's answer.
+sub keepCeiling(kbps as float)
+    aqRemember(playbackSection(), m.global.session.server, kbps, nowSeconds())
+    uiRequest({ op: "tellNetwork", ceilingKbps: kbps }, "")
+end sub
 
 ' The session asked for isn't wanted any more: the task closes it if it
 ' comes (and onPlayback does, if it came already).
@@ -399,8 +463,9 @@ sub onSegment(event as object)
 end sub
 
 ' The title again where it is, at quality: a step down says so once it
-' plays, and is remembered for 30 minutes for the next titles; back at the
-' original, that is forgotten.
+' plays, and is remembered for the next titles, as is a step up to a
+' quality (its bitrate); back at the original,
+' that is forgotten.
 sub autoSwitch(quality as string)
     was = m.watch.quality
     down = quality <> "original" and (was = "original" or aqKbps(quality) < aqKbps(was))
@@ -408,9 +473,11 @@ sub autoSwitch(quality as string)
         m.autoNotice = "Quality lowered to " + aqLabel(quality)
         ceiling = m.watch.ceiling
         if ceiling <= 0 then ceiling = aqKbps(quality)
-        aqRemember(playbackSection(), m.global.session.server, ceiling, nowSeconds())
+        keepCeiling(ceiling)
     else if quality = "original"
-        aqRemember(playbackSection(), m.global.session.server, 0, nowSeconds())
+        keepCeiling(0)
+    else
+        keepCeiling(aqKbps(quality))
     end if
     m.autoQuality = quality
     position = m.positionMs
@@ -1108,7 +1175,7 @@ sub onMenuChoice(event as object)
     if value = aqChoice(playbackSection()) then return
     aqChoose(playbackSection(), value)
     ' Picked again, Automatic starts afresh at the original.
-    if value = "auto" then aqRemember(playbackSection(), m.global.session.server, 0, nowSeconds())
+    if value = "auto" then keepCeiling(0)
     position = m.positionMs
     seconds = m.video.position
     if seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
