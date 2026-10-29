@@ -367,8 +367,8 @@ pub struct AuthService {
 #[cfg(test)]
 #[derive(Default)]
 struct Pauses {
-    /// Held after [`AuthService::validate_app`]'s query, before it caches
-    /// what it read.
+    /// Held after [`AuthService::validate_app`]'s or
+    /// [`AuthService::validate`]'s query, before it caches what it read.
     after_query: parking_lot::Mutex<Option<Arc<Gate>>>,
     /// Run by [`AuthService::remember_app`] between its first look at the
     /// epoch and the insert.
@@ -450,6 +450,9 @@ impl AuthService {
         {
             return Some(entry.user.clone());
         }
+        // Read before the database: a sign-out or a forget that lands while
+        // the query runs keeps what it read out of the cache.
+        let epoch = self.epoch.load(Ordering::SeqCst);
         #[allow(clippy::type_complexity)]
         let row: Option<(i64, String, bool, bool, Option<i64>, bool, i64, i64)> = sqlx::query_as(
             "SELECT u.id, u.username, u.is_admin, u.all_libraries, u.max_age, u.disabled, s.expires_at, s.last_seen_at
@@ -459,6 +462,14 @@ impl AuthService {
         .fetch_optional(&self.db.read)
         .await
         .ok()?;
+        #[cfg(test)]
+        {
+            let gate = self.pauses.after_query.lock().take();
+            if let Some(gate) = gate {
+                gate.reached.notify_one();
+                gate.release.notified().await;
+            }
+        }
         let Some((id, username, is_admin, all_libraries, max_age, disabled, expires_at, last_seen_at)) = row else {
             self.cache.remove(&key);
             return None;
@@ -486,14 +497,35 @@ impl AuthService {
                 .await;
             touched_at = now;
         }
-        self.cache.insert(key, CachedSession { user: user.clone(), expires_at, cached_at: Instant::now(), touched_at });
+        self.remember_session(
+            key,
+            CachedSession { user: user.clone(), expires_at, cached_at: Instant::now(), touched_at },
+            epoch,
+        );
         Some(user)
     }
 
+    /// Caches a session read while the epoch was `epoch`, unless something
+    /// was forgotten or signed out since: what was read may be gone (as
+    /// [`AuthService::remember_app`]).
+    fn remember_session(&self, key: String, entry: CachedSession, epoch: u64) {
+        if self.epoch.load(Ordering::SeqCst) != epoch {
+            return;
+        }
+        self.cache.insert(key.clone(), entry);
+        if self.epoch.load(Ordering::SeqCst) != epoch {
+            self.cache.remove(&key);
+        }
+    }
+
+    /// Signs a session out. The row goes first, then the epoch moves and
+    /// the cache forgets it: a validation that read the row before it went
+    /// doesn't cache it, whenever it looked at the epoch.
     pub async fn revoke(&self, token: &str) {
         let key = hash_token(token);
+        let _ = sqlx::query("DELETE FROM sessions WHERE token_hash = ?").bind(&key).execute(&self.db.write).await;
+        self.epoch.fetch_add(1, Ordering::SeqCst);
         self.cache.remove(&key);
-        let _ = sqlx::query("DELETE FROM sessions WHERE token_hash = ?").bind(key).execute(&self.db.write).await;
     }
 
     /// Drop cached sessions of a user (password change, deletion, role
@@ -1383,6 +1415,38 @@ mod tests {
         assert!(read.is_some(), "it read the grant before it ended");
         assert!(!auth.apps.contains_key(&hash_token(&issued.access_token)), "nothing stale is cached");
         assert!(auth.validate_app(&issued.access_token).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_sign_out_during_a_sessions_lookup_keeps_it_out_of_the_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_db, auth) = service_with_user(dir.path()).await;
+        let session = auth.create_session(1, None, None).await.unwrap();
+        let gate = Arc::new(Gate::default());
+        *auth.pauses.after_query.lock() = Some(gate.clone());
+        // Signed out while the lookup holds what it read before.
+        let signing_out = async {
+            gate.reached.notified().await;
+            auth.revoke(&session).await;
+            gate.release.notify_one();
+        };
+        let (read, ()) = tokio::join!(auth.validate(&session), signing_out);
+        assert!(read.is_some(), "it read the session before it ended");
+        assert!(!auth.cache.contains_key(&hash_token(&session)), "nothing stale is cached");
+        assert!(auth.validate(&session).await.is_none());
+
+        // A user forgotten (disabled, a password changed) likewise.
+        let other = auth.create_session(1, None, None).await.unwrap();
+        let gate = Arc::new(Gate::default());
+        *auth.pauses.after_query.lock() = Some(gate.clone());
+        let forgetting = async {
+            gate.reached.notified().await;
+            auth.forget_user(1);
+            gate.release.notify_one();
+        };
+        let (read, ()) = tokio::join!(auth.validate(&other), forgetting);
+        assert!(read.is_some());
+        assert!(!auth.cache.contains_key(&hash_token(&other)), "nothing stale is cached");
     }
 
     #[tokio::test]
