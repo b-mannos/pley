@@ -118,7 +118,7 @@ function StepButton({ label, disabled, onClick, children }: { label: string; dis
   );
 }
 
-/** Moves text subtitles earlier or later, 0.1 s at a time. */
+/** Moves subtitles (text, and pictures the player draws) earlier or later, 0.1 s at a time. */
 function SubtitleSync({ offset, onChange }: { offset: number; onChange: (offset: number) => void }) {
   const step = (by: number) => onChange(clampSubtitleOffset(offset + by));
   return (
@@ -172,9 +172,11 @@ export interface SettingsPopoverProps {
   /** How text subtitles look on this device. */
   subtitleStyle: SubtitleStyle;
   onSubtitleStyle: (style: SubtitleStyle) => void;
-  /** Seconds text subtitles are moved by (positive: later), for this file. */
+  /** Seconds subtitles are moved by (positive: later), for this file. */
   subtitleOffset: number;
   onSubtitleOffset: (offset: number) => void;
+  /** Picture subtitles are drawn by the player (not burned into the video): they move too. */
+  picturesMovable?: boolean;
   /** Finding subtitles and adding files, when the player offers it. */
   subtitleSources?: SubtitleSources | null;
   /** Whether this profile may delete an added track (an administrator, or whoever added it). */
@@ -196,7 +198,7 @@ export interface SettingsPopoverProps {
 export function SettingsPopover(props: SettingsPopoverProps) {
   const { open, setOpen, details, qualities, quality, originalHint, autoNow, autoWhy, onQuality } = props;
   const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle } = props;
-  const { subtitleStyle, onSubtitleStyle, subtitleOffset, onSubtitleOffset, speed, onSpeed } = props;
+  const { subtitleStyle, onSubtitleStyle, subtitleOffset, onSubtitleOffset, picturesMovable, speed, onSpeed } = props;
   const { sleep, sleepLeft, sleepEndLabel, onSleep } = props;
   const { subtitleSources: sources, canDeleteSubtitle, onDeleteSubtitle, onSubtitleFileRefused } = props;
   const [panel, setPanel] = useState<Panel>("root");
@@ -212,8 +214,8 @@ export function SettingsPopover(props: SettingsPopoverProps) {
 
   const currentAudio = audioStreams.find((s) => s.index === audioIndex) ?? audioStreams.find((s) => s.default) ?? audioStreams[0];
   const currentSub = subtitleStreams.find((s) => s.index === subtitleIndex);
-  // Picture subtitles are burned into the video: they can't be moved.
-  const textSub = currentSub && currentSub.text_based !== false ? currentSub : undefined;
+  // Picture subtitles burned into the video can't be moved; drawn by the player, they can.
+  const movableSub = currentSub && (currentSub.text_based !== false || picturesMovable) ? currentSub : undefined;
   const sleepValue =
     sleep === null ? "Off" : sleep === "end" ? sleepEndLabel : sleepLeft !== null ? `${formatClock(sleepLeft)} left` : `${sleep} min`;
   const qualityLabel =
@@ -277,7 +279,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
               <Nav
                 label="Subtitles"
                 value={currentSub ? streamLabel(currentSub) : subtitleStreams.length ? "Off" : "None"}
-                extra={textSub && subtitleOffset !== 0 ? formatSubtitleOffset(subtitleOffset) : undefined}
+                extra={movableSub && subtitleOffset !== 0 ? formatSubtitleOffset(subtitleOffset) : undefined}
                 onClick={() => setPanel("subtitles")}
               />
               {subtitleStreams.some((s) => s.text_based !== false) ? (
@@ -486,7 +488,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                       />
                     </>
                   ) : null}
-                  {textSub ? <SubtitleSync offset={subtitleOffset} onChange={onSubtitleOffset} /> : null}
+                  {movableSub ? <SubtitleSync offset={subtitleOffset} onChange={onSubtitleOffset} /> : null}
                 </>
               ) : null}
               {panel === "sleep"

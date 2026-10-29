@@ -482,6 +482,11 @@ export interface PlaybackInfo {
    * (`master.m3u8`): Automatic leaves the session be. Absent from older servers.
    */
   adaptive?: boolean;
+  /**
+   * Added to the player's time, the time in the file a picture subtitle
+   * track (`.mks`) shows at, in ms. Absent or 0: the same.
+   */
+  subtitle_offset_ms?: number;
 }
 
 /** `GET /api/playback/{session}`: how a session plays, with its transcode's live numbers. */
@@ -501,6 +506,10 @@ export interface ClientCaps {
   dolby_vision?: boolean;
   /** HLS: `variants` moves between a multivariant playlist's sizes by itself (adaptive bitrate). */
   hls?: { variants?: boolean };
+  /** Subtitles the player shows itself, pictures included (ffprobe's names: "hdmv_pgs_subtitle"). */
+  subtitle_codecs?: string[];
+  /** Shows picture subtitles from their `.mks` next to any stream: asks for no `subtitle_index` for them. */
+  picture_subtitles_sideload?: boolean;
 }
 
 /** `auto` lets the server pick the cheapest method the client supports. */

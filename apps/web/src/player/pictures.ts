@@ -1,0 +1,449 @@
+/**
+ * Picture subtitles (PGS, VobSub, DVB) drawn by the player rather than
+ * burned into the video by the server: the server's `.mks` of the track
+ * (docs/API.md), decoded with the TVs' decoders (packages/picture-subtitles)
+ * and drawn on a canvas over the video, at device pixels, in step with the
+ * frame on screen. Direct play, repackaged streams, Dolby Vision and HDR
+ * all stay as they are.
+ */
+import { readPictureTrack } from "pley-picture-subtitles/mks";
+import { PictureSubtitles } from "pley-picture-subtitles/picture-track";
+import type { PictureFrame } from "pley-picture-subtitles/pictures";
+
+export type { PictureSubtitles };
+
+/** Where the server serves picture track `index` of file `fileId`. */
+export function picturePath(fileId: number, index: number): string {
+  return `/api/files/${fileId}/subtitles/${index}.mks`;
+}
+
+/** A partial answer (a track still being read out of its file) is asked for again this often, as on the TVs. */
+export const PICTURES_AGAIN_MS = 3_000;
+const COMPLETE_HEADER = "X-Pley-Complete";
+
+/**
+ * How far ahead of the frame's time a cue is looked up (ms): a frame's
+ * time, a float of seconds, can land a hair before a cue that starts on
+ * that very frame.
+ */
+export const LOOKAHEAD_MS = 1;
+
+/**
+ * The time on the track (the file's, in ms) that shows at `mediaSeconds`
+ * of the player: the session's own `subtitle_offset_ms` added (absent: the
+ * player's time is the file's), and the offset the person set taken away
+ * (positive: subtitles later).
+ */
+export function trackMs(mediaSeconds: number, sessionOffsetMs: number, personOffsetSeconds: number): number {
+  return mediaSeconds * 1000 + sessionOffsetMs - personOffsetSeconds * 1000 + LOOKAHEAD_MS;
+}
+
+export interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** A `width`×`height` picture fitted inside `view`, centred (`object-fit: contain`). */
+export function contain(view: { width: number; height: number }, width: number, height: number): Box {
+  if (!(view.width > 0 && view.height > 0 && width > 0 && height > 0)) return { x: 0, y: 0, width: view.width, height: view.height };
+  const scale = Math.min(view.width / width, view.height / height);
+  const w = width * scale;
+  const h = height * scale;
+  return { x: (view.width - w) / 2, y: (view.height - h) / 2, width: w, height: h };
+}
+
+/**
+ * Where a subtitle plane goes in the video element (`view`, CSS px): over
+ * the picture (the video's content box, letterboxed or pillarboxed as the
+ * element shows it). A DVD's or SD DVB's plane (720×576, 720×480) stretches
+ * over it, as the video it came with is stored anamorphic. An HD plane of
+ * another shape than the video (a Blu-ray's 1920×1080 over a film cropped
+ * to 1920×800) keeps its own shape, fitted in the element: its lines go
+ * where the disc puts them, in the black bars when there are any, and
+ * never off the screen.
+ */
+export function planeBox(view: { width: number; height: number }, video: { width: number; height: number }, plane: { width: number; height: number }): Box {
+  const picture = contain(view, video.width || plane.width, video.height || plane.height);
+  if (!video.width || !video.height || plane.height <= 576) return picture;
+  const shapes = plane.width / plane.height / (video.width / video.height);
+  return Math.abs(shapes - 1) < 0.02 ? picture : contain(view, plane.width, plane.height);
+}
+
+// ---------------------------------------------------------------------------
+// Loading
+
+export type PictureLoad =
+  | { kind: "track"; subs: PictureSubtitles; complete: boolean }
+  /** The server doesn't make these files (404 from an old server, 503 from an old transcoder), or none this player decodes. */
+  | { kind: "unavailable" }
+  | { kind: "failed" }
+  /** Too little of a file still being made to read yet. */
+  | { kind: "early" };
+
+/**
+ * One request for the track at `url`. A partial answer (`X-Pley-Complete:
+ * 0`) comes with what the server has read out of the file so far.
+ */
+export async function fetchPictures(url: string, signal: AbortSignal, again = false): Promise<PictureLoad> {
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      credentials: "same-origin",
+      signal,
+      headers: { Accept: "video/x-matroska" },
+      // More of a file still being made: never an earlier answer kept.
+      cache: again ? "no-store" : "default",
+    });
+  } catch (err) {
+    if (signal.aborted) throw err;
+    return { kind: "failed" };
+  }
+  if (res.status === 404 || res.status === 503) return { kind: "unavailable" };
+  if (!res.ok) return { kind: "failed" };
+  const complete = (res.headers.get(COMPLETE_HEADER) ?? "").trim() !== "0";
+  let subs: PictureSubtitles | null;
+  try {
+    subs = PictureSubtitles.of(readPictureTrack(await res.arrayBuffer()));
+  } catch (err) {
+    if (signal.aborted) throw err;
+    return complete ? { kind: "failed" } : { kind: "early" };
+  }
+  if (!subs) return complete ? { kind: "unavailable" } : { kind: "early" };
+  return { kind: "track", subs, complete };
+}
+
+export interface PictureHooks {
+  /** The track, or more of it: what shows from now on. */
+  onTrack(subs: PictureSubtitles): void;
+  /** The server can't make it: the player has it burned in instead (told once). */
+  onUnavailable(): void;
+  /** It couldn't be loaded (told once). */
+  onFailed(): void;
+}
+
+/**
+ * Loads the track at `url`, asking again every `PICTURES_AGAIN_MS` while
+ * the answers are partial, as the TVs do (packages/tv/src/subs/presenter.ts).
+ * Returns what stops it.
+ */
+export function loadPictures(url: string, hooks: PictureHooks): () => void {
+  const abort = new AbortController();
+  let timer: number | undefined;
+  const load = (again: boolean) => {
+    fetchPictures(url, abort.signal, again).then(
+      (got) => {
+        if (abort.signal.aborted) return;
+        if (got.kind === "unavailable") hooks.onUnavailable();
+        else if (got.kind === "failed") hooks.onFailed();
+        else {
+          if (got.kind === "track") hooks.onTrack(got.subs);
+          if (got.kind === "early" || !got.complete) timer = window.setTimeout(() => load(true), PICTURES_AGAIN_MS);
+        }
+      },
+      () => undefined,
+    );
+  };
+  load(false);
+  return () => {
+    abort.abort();
+    window.clearTimeout(timer);
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Drawing
+
+type Image = ImageBitmap | HTMLCanvasElement;
+
+interface Decoded {
+  frame: PictureFrame;
+  images: Image[];
+}
+
+/** Frames kept decoded: the one showing and those coming up. */
+const KEPT = 8;
+/** Frames decoded ahead, while the browser is idle. */
+const AHEAD = 3;
+
+/**
+ * Draws a picture track on `canvas`, laid over `video` (the same box):
+ * backed at device pixels, sized with the element (a ResizeObserver, and
+ * the screen's pixel ratio), redrawn on each frame the video presents
+ * (`requestVideoFrameCallback`, with that frame's own time; animation
+ * frames where there is none), and on seeks, pauses and changes. The
+ * frames coming up are decoded ahead, when the browser is idle.
+ */
+export class PictureRenderer {
+  private readonly video: HTMLVideoElement;
+  private readonly canvas: HTMLCanvasElement;
+  private readonly g: CanvasRenderingContext2D | null;
+  private subs: PictureSubtitles | null = null;
+  private shiftMs = 0;
+  private personSeconds = 0;
+  private hold = false;
+  /** The sample drawn (-1: nothing), and whether it must be drawn again anyway. */
+  private shown = -1;
+  private dirty = true;
+  private readonly cache = new Map<number, Decoded | null>();
+  private frameHandle: number | null = null;
+  private animation: number | null = null;
+  private idle: number | null = null;
+  private dpr = 1;
+  private readonly off: (() => void)[] = [];
+  private stopDpr: (() => void) | null = null;
+  private gone = false;
+
+  constructor(video: HTMLVideoElement, canvas: HTMLCanvasElement) {
+    this.video = video;
+    this.canvas = canvas;
+    this.g = canvas.getContext("2d");
+    const on = (target: EventTarget, type: string, fn: () => void) => {
+      target.addEventListener(type, fn);
+      this.off.push(() => target.removeEventListener(type, fn));
+    };
+    // What the clock alone doesn't say: a jump, a stop, a new source.
+    for (const type of ["seeked", "seeking", "pause", "ratechange", "emptied", "timeupdate"]) on(video, type, () => this.fromElement());
+    for (const type of ["play", "playing", "loadeddata"]) {
+      on(video, type, () => {
+        this.follow();
+        this.redraw();
+      });
+    }
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(() => this.layout());
+      observer.observe(video);
+      this.off.push(() => observer.disconnect());
+    }
+    this.watchDpr();
+    this.layout();
+    this.follow();
+  }
+
+  /** The track to draw (`null`: none yet); more of the same track keeps nothing decoded of the last. */
+  setTrack(subs: PictureSubtitles | null): void {
+    if (subs === this.subs) return;
+    this.subs = subs;
+    this.forget();
+    this.redraw();
+  }
+
+  /** The session's `subtitle_offset_ms` (absent: 0), and the person's offset in seconds (positive: later). */
+  setOffsets(sessionMs: number, personSeconds: number): void {
+    if (sessionMs === this.shiftMs && personSeconds === this.personSeconds) return;
+    this.shiftMs = sessionMs;
+    this.personSeconds = personSeconds;
+    this.redraw();
+  }
+
+  /** While the last session's picture stands in for the next (`freezeFrame`), its subtitles stay too. */
+  setHold(hold: boolean): void {
+    if (hold === this.hold) return;
+    this.hold = hold;
+    this.redraw();
+  }
+
+  destroy(): void {
+    this.gone = true;
+    for (const f of this.off) f();
+    this.off.length = 0;
+    this.stopDpr?.();
+    if (this.frameHandle !== null) this.video.cancelVideoFrameCallback(this.frameHandle);
+    if (this.animation !== null) cancelAnimationFrame(this.animation);
+    if (this.idle !== null) window.clearTimeout(this.idle);
+    this.forget();
+    this.g?.clearRect(0, 0, this.canvas.width, this.canvas.height);
+  }
+
+  /** Draws again from the element's time, now. */
+  private redraw(): void {
+    this.dirty = true;
+    this.fromElement();
+  }
+
+  /**
+   * The element's time: what shows while paused or after a jump. Playing,
+   * frames say their own time (`follow`), which `timeupdate` would only
+   * blur (the element's time runs ahead of the frame on screen).
+   */
+  private fromElement(): void {
+    const v = this.video;
+    if (!v.paused && !v.seeking && this.frameHandle !== null && !this.dirty) return;
+    this.showAt(v.currentTime);
+  }
+
+  /** Follows the frames presented while it plays. */
+  private follow(): void {
+    if (this.gone) return;
+    const v = this.video;
+    // Firefox before 132 has none.
+    if (typeof v.requestVideoFrameCallback === "function") {
+      // Asked afresh: a new source may not answer what was asked of the last.
+      if (this.frameHandle !== null) v.cancelVideoFrameCallback(this.frameHandle);
+      const tick = (_now: number, meta: VideoFrameCallbackMetadata) => {
+        this.frameHandle = null;
+        if (this.gone) return;
+        this.showAt(meta.mediaTime);
+        this.frameHandle = v.requestVideoFrameCallback(tick);
+      };
+      this.frameHandle = v.requestVideoFrameCallback(tick);
+      return;
+    }
+    if (this.animation !== null) return;
+    const tick = () => {
+      this.animation = null;
+      if (this.gone) return;
+      this.showAt(v.currentTime);
+      if (!v.paused && !v.ended) this.animation = requestAnimationFrame(tick);
+    };
+    this.animation = requestAnimationFrame(tick);
+  }
+
+  private watchDpr(): void {
+    this.stopDpr?.();
+    this.stopDpr = null;
+    const dpr = window.devicePixelRatio || 1;
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia(`(resolution: ${dpr}dppx)`);
+    const changed = () => {
+      this.watchDpr();
+      this.layout();
+    };
+    query.addEventListener?.("change", changed);
+    this.stopDpr = () => query.removeEventListener?.("change", changed);
+  }
+
+  /** The backing store at the element's size in device pixels. */
+  private layout(): void {
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(this.video.clientWidth * dpr));
+    const h = Math.max(1, Math.round(this.video.clientHeight * dpr));
+    this.dpr = dpr;
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+    }
+    this.redraw();
+  }
+
+  private showAt(seconds: number): void {
+    const subs = this.subs;
+    const g = this.g;
+    if (!g) return;
+    const v = this.video;
+    // A reset element (a new session on its way) shows nothing: neither do its subtitles, unless held.
+    const playable = v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
+    if (!playable && this.hold) return;
+    const at = trackMs(seconds, this.shiftMs, this.personSeconds);
+    const i = subs && playable ? subs.sampleAt(at) : -1;
+    if (i === this.shown && !this.dirty) return;
+    this.shown = i;
+    this.dirty = false;
+    g.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    if (!subs) return;
+    const entry = i >= 0 ? this.decode(i, at) : null;
+    if (entry) this.draw(g, entry);
+    this.decodeAhead(at);
+  }
+
+  private draw(g: CanvasRenderingContext2D, { frame, images }: Decoded): void {
+    const v = this.video;
+    const view = { width: this.canvas.width / this.dpr, height: this.canvas.height / this.dpr };
+    const box = planeBox(view, { width: v.videoWidth, height: v.videoHeight }, { width: frame.planeWidth, height: frame.planeHeight });
+    const sx = (box.width / frame.planeWidth) * this.dpr;
+    const sy = (box.height / frame.planeHeight) * this.dpr;
+    const ox = box.x * this.dpr;
+    const oy = box.y * this.dpr;
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = "high";
+    frame.bitmaps.forEach((b, k) => {
+      // Whole device pixels at both edges: no edge blurred across two.
+      const x0 = Math.round(ox + b.x * sx);
+      const y0 = Math.round(oy + b.y * sy);
+      const x1 = Math.round(ox + (b.x + b.width) * sx);
+      const y1 = Math.round(oy + (b.y + b.height) * sy);
+      const image = images[k];
+      if (image && x1 > x0 && y1 > y0) g.drawImage(image, x0, y0, x1 - x0, y1 - y0);
+    });
+  }
+
+  /** Sample `i` (showing at `at`) decoded, from what was decoded ahead when it was. */
+  private decode(i: number, at: number): Decoded | null {
+    if (this.cache.has(i)) return this.cache.get(i) ?? null;
+    const shown = this.subs?.frameAt(at);
+    const entry = shown && shown.index === i ? decoded(shown.frame) : null;
+    this.keep(i, entry);
+    return entry;
+  }
+
+  private keep(i: number, entry: Decoded | null): void {
+    this.cache.set(i, entry);
+    while (this.cache.size > KEPT) {
+      const [oldest, old] = this.cache.entries().next().value!;
+      this.cache.delete(oldest);
+      release(old);
+    }
+  }
+
+  /** The next few frames after `at`, decoded while the browser is idle. */
+  private decodeAhead(at: number): void {
+    if (this.idle !== null) return;
+    this.idle = window.setTimeout(() => {
+      this.idle = null;
+      const subs = this.subs;
+      if (!subs || this.gone) return;
+      let t: number | null = at;
+      for (let n = 0; n < AHEAD && t !== null; n++) {
+        t = subs.nextChange(t);
+        if (t === null) break;
+        const i = subs.sampleAt(t);
+        if (i >= 0 && !this.cache.has(i)) {
+          const shown = subs.frameAt(t);
+          this.keep(i, shown ? decoded(shown.frame) : null);
+        }
+      }
+    }, 0);
+  }
+
+  private forget(): void {
+    for (const entry of this.cache.values()) release(entry);
+    this.cache.clear();
+    this.shown = -1;
+  }
+}
+
+/** A frame's bitmaps as images: canvases at once, ImageBitmaps (kept on the GPU) once made. */
+function decoded(frame: PictureFrame): Decoded {
+  const images: Image[] = frame.bitmaps.map((b) => {
+    const c = document.createElement("canvas");
+    c.width = b.width;
+    c.height = b.height;
+    const g = c.getContext("2d");
+    if (g) {
+      const data = g.createImageData(b.width, b.height);
+      data.data.set(b.rgba);
+      g.putImageData(data, 0, 0);
+    }
+    return c;
+  });
+  const entry: Decoded = { frame, images };
+  if (typeof createImageBitmap === "function") {
+    images.forEach((image, k) => {
+      createImageBitmap(image).then(
+        (bitmap) => {
+          if (entry.images.length) entry.images[k] = bitmap;
+          else bitmap.close();
+        },
+        () => undefined,
+      );
+    });
+  }
+  return entry;
+}
+
+function release(entry: Decoded | null | undefined): void {
+  if (!entry) return;
+  for (const image of entry.images) if ("close" in image) image.close();
+  entry.images.length = 0;
+}

@@ -11,6 +11,11 @@ function probe(el: HTMLMediaElement, type: string): boolean {
   }
 }
 
+/** Subtitles the server turns into WebVTT for the player (as the TVs list them). */
+const TEXT_SUBTITLES = ["subrip", "ass", "ssa", "webvtt", "mov_text"];
+/** Picture subtitles the player draws itself (player/pictures.ts): PGS, VobSub, DVB. */
+export const PICTURE_SUBTITLES = ["hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"];
+
 type MseCtor = { isTypeSupported(type: string): boolean };
 
 /** Media Source Extensions support (`ManagedMediaSource` on iOS Safari). */
@@ -87,6 +92,14 @@ export function videoCaps(): ClientCaps {
     dolby_vision: dolbyVision,
     // hls.js, and a browser's own HLS, move between a transcode's sizes as the connection allows.
     hls: { variants: true },
+    // Text subtitles come as WebVTT from the server; pictures (PGS, VobSub,
+    // DVB) from their own `.mks`, drawn over the video (player/pictures.ts),
+    // whatever the stream. These two say so without `caps_version: 2`,
+    // which would switch every other rule of the server's to the Android
+    // app's: they change none of its decisions, as the player asks for no
+    // `subtitle_index` for the pictures it draws (docs/API.md).
+    subtitle_codecs: [...TEXT_SUBTITLES, ...PICTURE_SUBTITLES],
+    picture_subtitles_sideload: true,
   };
   return videoCache;
 }

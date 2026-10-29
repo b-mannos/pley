@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PICTURE_CODECS } from "pley-picture-subtitles/picture-track";
 
 /** A browser that plays `types` (`canPlayType`) and decodes `mse` through Media Source Extensions. */
 function browser({ types = [], mse = [], hdrDisplay = false }: { types?: string[]; mse?: string[]; hdrDisplay?: boolean }) {
@@ -34,7 +35,21 @@ describe("videoCaps", () => {
       dolby_vision: false,
       // Transcodes come in several sizes, which hls.js moves between.
       hls: { variants: true },
+      // Pictures too: drawn over the video from their own file.
+      subtitle_codecs: ["subrip", "ass", "ssa", "webvtt", "mov_text", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"],
+      picture_subtitles_sideload: true,
     });
+  });
+
+  it("stays a version 1 report, whose rules the server keeps for browsers", async () => {
+    browser({ types: ["video/mp4"] });
+    const { videoCaps } = await caps();
+    expect(videoCaps()).not.toHaveProperty("caps_version");
+  });
+
+  it("names every picture subtitle codec the player decodes", async () => {
+    const { PICTURE_SUBTITLES } = await caps();
+    expect([...PICTURE_SUBTITLES].sort()).toEqual(Object.values(PICTURE_CODECS).sort());
   });
 
   it("reports HEVC, Dolby Vision and HDR where the hardware has them", async () => {
