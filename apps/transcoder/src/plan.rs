@@ -16,8 +16,8 @@ use std::path::{Path, PathBuf};
 
 use pley_transcoder_api::{
     AudioCodec, AudioMode, AudioPlan, DolbyVisionMode, DynamicRange, EncoderInfo, FileContainer, HwAccel, JobRequest,
-    MediaInfo, MediaStream, StreamKind, Tonemapper, VideoCodec, VideoMode, VideoPlan, VideoRequest, decode_key,
-    default_video_kbps, is_text_subtitle_codec,
+    MediaInfo, MediaStream, StreamKind, TonemapQuality, TonemapSpeed, Tonemapper, VideoCodec, VideoMode, VideoPlan,
+    VideoRequest, decode_key, default_video_kbps, is_text_subtitle_codec,
 };
 
 use crate::devices::vaapi_device;
@@ -63,6 +63,58 @@ pub fn zscale_tonemap(w: i64, h: i64) -> String {
 /// a test clip whose highlight changes). Without it every process makes the
 /// same frames, bit for bit, whatever it started with.
 pub const PLACEBO_STATIC_PEAK: &str = "peak_detect=0";
+
+/// libplacebo's options at each [`TonemapQuality`], besides its defaults.
+/// On a Ryzen 5 5600G's Radeon (Vega 7), 4K HDR10 to 4K SDR into AMF ran
+/// at 23 frames a second at `High`, 34 at `Balanced` and 37 at `Fast`:
+/// contrast recovery and the polar chroma upscaler take a third of the
+/// time between them, dithering, perceptual gamut mapping and the
+/// downscaler a few percent each. Side by side, `Balanced` shows a little
+/// less local contrast in skin and nothing else.
+pub fn placebo_quality_options(quality: TonemapQuality) -> &'static str {
+    match quality {
+        TonemapQuality::High => "",
+        TonemapQuality::Balanced => ":upscaler=bilinear:contrast_recovery=0",
+        TonemapQuality::Fast => {
+            ":upscaler=bilinear:downscaler=bilinear:dithering=none:gamut_mode=clip:contrast_recovery=0"
+        }
+    }
+}
+
+/// How much faster than a stream's frames come the tone mapping alone must
+/// measure ([`TonemapSpeed`]) for a quality to be taken: decoding, copies
+/// between memory and the GPU, and encoding left 0.6 of the measured speed
+/// end to end at every quality (an integrated Radeon), and 2× keeps 1.2×
+/// real time.
+const TONEMAP_HEADROOM: f64 = 2.0;
+
+/// The best quality fast enough for a transcode of `pixels_in` to
+/// `pixels_out` at `fps`, with `jobs` libplacebo transcodes on the GPU
+/// (this one included); the fastest that works when none is.
+pub fn tonemap_quality(speed: &TonemapSpeed, pixels_in: u64, pixels_out: u64, fps: f64, jobs: u32) -> TonemapQuality {
+    // libplacebo reads and upsamples the source and renders the output:
+    // 4K to 1080p takes 0.7 of the measured 4K to 4K's time.
+    let work = (0.6 * pixels_in as f64 + 0.4 * pixels_out as f64) / (3840.0 * 2160.0);
+    let need = fps * TONEMAP_HEADROOM * work * f64::from(jobs.max(1));
+    let working: Vec<TonemapQuality> = [TonemapQuality::High, TonemapQuality::Balanced, TonemapQuality::Fast]
+        .into_iter()
+        .filter(|q| speed.at(*q) > 0.0)
+        .collect();
+    working.iter().copied().find(|q| speed.at(*q) >= need).or(working.last().copied()).unwrap_or_default()
+}
+
+/// [`tonemap_quality`] for `src` made `w×h`; `High` where nothing was
+/// measured.
+fn quality_for(speed: Option<&TonemapSpeed>, src: &MediaStream, w: i64, h: i64, jobs: u32) -> TonemapQuality {
+    let Some(speed) = speed else { return TonemapQuality::High };
+    let source = src.width.unwrap_or(1920).max(1) as u64 * src.height.unwrap_or(1080).max(1) as u64;
+    let fps = src.frame_rate.filter(|f| f.is_finite() && *f > 0.0).unwrap_or(24.0).min(120.0);
+    tonemap_quality(speed, source, w.max(1) as u64 * h.max(1) as u64, fps, jobs)
+}
+
+/// The Direct3D 11 device AMF encodes on: the AMD GPU, whichever adapter
+/// it is.
+pub const AMF_D3D11_DEVICE: &str = "d3d11va=dx:,vendor_id=0x1002";
 const OPENCL_TONEMAP: &str = "format=p010,hwupload,tonemap_opencl=tonemap=hable:desat=0:t=bt709:m=bt709:p=bt709:format=nv12,hwdownload,format=nv12";
 
 /// The last filter before a VAAPI encoder, which takes frames in VAAPI's
@@ -114,6 +166,10 @@ pub enum Pipeline {
     Vulkan { encode_on_gpu: bool },
     /// Decode, scale and encode on one GPU API without any copies.
     Gpu(HwAccel),
+    /// Decode into Direct3D 11 → `scale_d3d11` → AMF (`encode_on_gpu`), or
+    /// a single download into the software encoder standing in for it
+    /// (Windows, AMD).
+    D3d11 { encode_on_gpu: bool },
 }
 
 impl Pipeline {
@@ -122,6 +178,8 @@ impl Pipeline {
     fn for_software_encoder(self) -> Pipeline {
         match self {
             Pipeline::Vulkan { .. } => Pipeline::Vulkan { encode_on_gpu: false },
+            // Tone mapped as the hardware encoder's frames are.
+            Pipeline::D3d11 { .. } => Pipeline::D3d11 { encode_on_gpu: false },
             _ => Pipeline::Software,
         }
     }
@@ -139,9 +197,18 @@ pub struct VideoOut {
     pub height: i64,
     pub bitrate_kbps: u32,
     pub tonemap: Option<Tonemapper>,
+    /// What libplacebo does of its work (see [`tonemap_quality`]).
+    pub tonemap_quality: TonemapQuality,
     /// Tags the tone mapper's input when the source leaves colours unknown
     /// ([`untagged_hdr_fix`]).
     pub tonemap_input: Option<String>,
+    /// FFmpeg uploads the frames to the AMD GPU for AMF ([`AMF_D3D11_DEVICE`]),
+    /// which copies them from memory itself several times slower.
+    pub amf_upload: bool,
+    /// The colour primaries `h264_amf`'s stream is made to say (its code in
+    /// H.264's VUI), which it leaves unsaid: players then guess, and some
+    /// take BT.2020 for 4K.
+    pub vui_primaries: Option<u8>,
     pub hw_decode: Option<String>,
     /// The GPU that decodes the frames scales them too, before they come to
     /// memory for the CPU's filters or encoder ([`VideoOut::scales_on_gpu`]):
@@ -453,7 +520,10 @@ impl Plan {
                         height: src_height,
                         bitrate_kbps: 0,
                         tonemap: None,
+                        tonemap_quality: TonemapQuality::High,
                         tonemap_input: None,
+                        amf_upload: false,
+                        vui_primaries: None,
                         hw_decode: None,
                         gpu_scale: None,
                         deinterlace: false,
@@ -512,12 +582,12 @@ impl Plan {
                         None => None,
                     };
                     let vaapi = encoder.accel == HwAccel::Vaapi;
+                    let deinterlace = src.interlaced == Some(true);
+                    let key = decode_key(&src.codec, src.bit_depth);
                     let tonemap_input = match tonemap {
                         Some(Tonemapper::Zscale | Tonemapper::Opencl) => untagged_hdr_fix(src),
                         _ => None,
                     };
-                    let deinterlace = src.interlaced == Some(true);
-                    let key = decode_key(&src.codec, src.bit_depth);
                     // Before a VAAPI encoder, Vulkan's device is made from VAAPI's.
                     let vulkan_decode = if vaapi { &ff.caps.vaapi_vulkan_decode } else { &ff.caps.vulkan_decode };
                     // Turned frames stay in memory, where FFmpeg turns them.
@@ -541,12 +611,20 @@ impl Plan {
                             .iter()
                             .filter(|p| hdr.is_none() || p.accel == HwAccel::Nvenc)
                             .find(|p| p.accel == encoder.accel && p.codecs.contains(&key))
-                            .map_or(Pipeline::Software, |p| Pipeline::Gpu(p.accel))
+                            .map_or(Pipeline::Software, |p| match p.accel {
+                                HwAccel::Amf => Pipeline::D3d11 { encode_on_gpu: true },
+                                accel => Pipeline::Gpu(accel),
+                            })
                     } else {
                         Pipeline::Software
                     };
+                    let amf_upload = ff.caps.amf_upload
+                        && encoder.accel == HwAccel::Amf
+                        && pipeline == Pipeline::Software
+                        && tonemap != Some(Tonemapper::Opencl);
                     let hw_decode = match pipeline {
                         Pipeline::Vulkan { .. } => Some("vulkan".to_owned()),
+                        Pipeline::D3d11 { .. } => Some("d3d11va".to_owned()),
                         Pipeline::Gpu(accel) => Some(gpu_decoder_name(accel).to_owned()),
                         Pipeline::Software if req.options.hardware_decoding => pick_hw_decoder(ff, &encoder),
                         Pipeline::Software => None,
@@ -583,7 +661,18 @@ impl Plan {
                         height,
                         bitrate_kbps: bitrate,
                         tonemap,
+                        // Alone on the GPU: a job counts the others (see
+                        // `Plan::share_tonemapping`).
+                        tonemap_quality: quality_for(ff.caps.tonemap_speed.as_ref(), src, width, height, 1),
                         tonemap_input,
+                        amf_upload,
+                        // BT.709 out of every tone mapper; the source's otherwise.
+                        vui_primaries: (ff.caps.h264_metadata
+                            && encoder.accel == HwAccel::Amf
+                            && vreq.codec == VideoCodec::H264
+                            && hdr.is_none())
+                        .then(|| if tonemap.is_some() { Some(1) } else { h264_primaries(src) })
+                        .flatten(),
                         hw_decode,
                         gpu_scale,
                         deinterlace,
@@ -709,6 +798,7 @@ impl Plan {
             dv_profile: src.and_then(|s| s.dv_profile),
             dv_bl_compat: src.and_then(|s| s.dv_bl_compat),
             tonemap: v.tonemap,
+            tonemap_quality: (v.tonemap == Some(Tonemapper::Libplacebo)).then_some(v.tonemap_quality),
             encoder: if v.copy { None } else { encoder_override.or(v.encoder.as_ref()).map(|e| e.name.clone()) },
             decoder: Some(if v.copy { "copy".into() } else { v.hw_decode.clone().unwrap_or_else(|| "cpu".into()) }),
             pipeline: Some(
@@ -718,8 +808,12 @@ impl Plan {
                     let pipeline =
                         if encoder_override.is_some() { v.pipeline.for_software_encoder() } else { v.pipeline };
                     match pipeline {
-                        Pipeline::Gpu(_) | Pipeline::Vulkan { encode_on_gpu: true } => "gpu",
-                        Pipeline::Vulkan { encode_on_gpu: false } => "hybrid",
+                        Pipeline::Gpu(_)
+                        | Pipeline::Vulkan { encode_on_gpu: true }
+                        | Pipeline::D3d11 { encode_on_gpu: true } => "gpu",
+                        Pipeline::Vulkan { encode_on_gpu: false } | Pipeline::D3d11 { encode_on_gpu: false } => {
+                            "hybrid"
+                        }
                         Pipeline::Software if v.hw_decode.is_some() => "hybrid",
                         Pipeline::Software => "cpu",
                     }
@@ -733,6 +827,32 @@ impl Plan {
             dv_el: src.and_then(|s| s.dv_el),
             hdr10plus: src.is_some_and(|s| s.hdr10plus == Some(true)),
         })
+    }
+
+    /// Whether libplacebo tone maps its video, on the GPU.
+    pub fn tone_maps_with_libplacebo(&self) -> bool {
+        self.video.as_ref().is_some_and(|v| !v.copy && v.tonemap == Some(Tonemapper::Libplacebo))
+    }
+
+    /// Tone maps at the best quality the GPU keeps ahead of real time with
+    /// `jobs` libplacebo transcodes on it, this one included (see
+    /// [`tonemap_quality`]). A job keeps the quality it starts with, so
+    /// that the segments of all its processes look the same.
+    pub fn share_tonemapping(&mut self, speed: Option<&TonemapSpeed>, media: &MediaInfo, jobs: u32) {
+        let Some(v) = self.video.as_mut().filter(|v| !v.copy && v.tonemap == Some(Tonemapper::Libplacebo)) else {
+            return;
+        };
+        if let Some(src) = media.stream(v.stream_index) {
+            v.tonemap_quality = quality_for(speed, src, v.width, v.height, jobs);
+        }
+    }
+
+    /// Tone maps as `other` does: a job's renditions look the same, so a
+    /// player moving between them sees no change.
+    pub fn tone_map_like(&mut self, other: &Plan) {
+        if let (Some(v), Some(o)) = (self.video.as_mut(), other.video.as_ref()) {
+            v.tonemap_quality = o.tonemap_quality;
+        }
     }
 
     /// The encoder the video is made with: none for a copy, or no video.
@@ -923,6 +1043,20 @@ impl Plan {
                     "-hwaccel_output_format",
                     "vaapi",
                 ]),
+                Pipeline::D3d11 { .. } => a.push_all([
+                    "-init_hw_device",
+                    AMF_D3D11_DEVICE,
+                    "-filter_hw_device",
+                    "dx",
+                    "-hwaccel",
+                    "d3d11va",
+                    "-hwaccel_device",
+                    "dx",
+                    "-hwaccel_output_format",
+                    "d3d11",
+                    "-extra_hw_frames",
+                    "8",
+                ]),
                 Pipeline::Gpu(HwAccel::Qsv) => a.push_all(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"]),
                 Pipeline::Gpu(HwAccel::Videotoolbox) => {
                     a.push_all(["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"])
@@ -931,8 +1065,15 @@ impl Plan {
                     a.push_all(["-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-extra_hw_frames", "8"])
                 }
                 Pipeline::Software => {
+                    // AMF's frames are uploaded to the AMD GPU by FFmpeg: its
+                    // device is the filters' then, and libplacebo makes a
+                    // Vulkan device of its own.
+                    let upload = amf_upload(v, encoder);
+                    if upload {
+                        a.push_all(["-init_hw_device", AMF_D3D11_DEVICE, "-filter_hw_device", "dx"]);
+                    }
                     match v.tonemap {
-                        Some(Tonemapper::Libplacebo) => {
+                        Some(Tonemapper::Libplacebo) if !upload => {
                             filter_device(&mut a, "vulkan=vk");
                             a.push_all(["-filter_hw_device", "vk"]);
                         }
@@ -945,6 +1086,10 @@ impl Plan {
                     }
                     if let Some(dec) = &v.hw_decode {
                         a.push_all(["-hwaccel", dec.as_str()]);
+                        // Decoded on the GPU that encodes.
+                        if upload && dec == "d3d11va" {
+                            a.push_all(["-hwaccel_device", "dx"]);
+                        }
                         // Frames kept on the GPU for its scaler.
                         match v.scales_on_gpu(pipeline) {
                             Some(HwAccel::Vaapi) => a.push_all(["-hwaccel_output_format", "vaapi"]),
@@ -1004,6 +1149,9 @@ impl Plan {
                 a.push_all(["-filter_complex", &graph, "-map", "[vout]"]);
                 if let Some(enc) = encoder {
                     a.extend(encoder_args(enc, v, ctx.preset));
+                }
+                if let Some(primaries) = v.vui_primaries.filter(|_| encoder.is_some_and(|e| e.accel == HwAccel::Amf)) {
+                    a.push_all(["-bsf:v", &format!("h264_metadata=colour_primaries={primaries}")]);
                 }
                 let keyint = format!("expr:gte(t,n_forced*{})", trim_float(self.segment_seconds));
                 a.push_all(["-force_key_frames", &keyint]);
@@ -1082,8 +1230,17 @@ impl Plan {
             };
             return format!("{input}{scaler}[vout]");
         }
-
         let scale_needed = v.width != v.src_width || v.height != v.src_height;
+        // Zero-copy on Direct3D 11: scaled into NV12 for AMF.
+        if let Pipeline::D3d11 { encode_on_gpu } = pipeline {
+            let mut steps = vec![format!("scale_d3d11=width={w}:height={h}:format=nv12")];
+            if !encode_on_gpu {
+                // x265 takes no NV12.
+                steps.push("hwdownload,format=nv12,format=yuv420p".into());
+            }
+            return format!("{input}{}[vout]", steps.join(","));
+        }
+
         // Everything is done at the output's size as early as it can be:
         // deinterlacing at the source's, then tone mapping and scaling in one
         // step where the tone mapper scales (libplacebo, zimg), picture
@@ -1105,12 +1262,15 @@ impl Plan {
             }
             None => scale_needed,
         };
+        let hardware = encoder.is_some_and(|e| e.hardware);
         match v.tonemap {
             Some(Tonemapper::Libplacebo) => {
                 let vulkan = matches!(pipeline, Pipeline::Vulkan { .. });
                 let format = match (vulkan, v.hdr.is_some()) {
                     (true, false) => "nv12",
                     (true, true) => "p010",
+                    // What hardware encoders take as it is.
+                    (false, false) if hardware => "nv12",
                     (false, false) => "yuv420p",
                     (false, true) => "p010le",
                 };
@@ -1122,8 +1282,9 @@ impl Plan {
                 // Shaders compiled by earlier processes save ~0.2 s at the
                 // start of each one.
                 let cache = shader_cache.and_then(shader_cache_option).map(|o| format!(":{o}")).unwrap_or_default();
+                let quality = placebo_quality_options(v.tonemap_quality);
                 pre.push(format!(
-                    "libplacebo=w={w}:h={h}:format={format}:{target}:range=tv:tonemapping=auto:{PLACEBO_STATIC_PEAK}{cache}"
+                    "libplacebo=w={w}:h={h}:format={format}:{target}:range=tv:tonemapping=auto:{PLACEBO_STATIC_PEAK}{quality}{cache}"
                 ));
                 match pipeline {
                     // Frames stay in Vulkan memory all the way into h264_vulkan.
@@ -1165,11 +1326,16 @@ impl Plan {
             _ if encoder.is_some_and(|e| e.accel == HwAccel::Vaapi) => {
                 post.push(format!("format={},{VAAPI_UPLOAD}", if ten_bit.is_some() { "p010" } else { "nv12" }));
             }
+            // Uploaded to the GPU for AMF (to the filters' device).
+            _ if pipeline == Pipeline::Software && amf_upload(v, encoder) => {
+                post.push(format!("format={},hwupload", if ten_bit.is_some() { "p010le" } else { "nv12" }));
+            }
             // The Vulkan path already delivers NV12, which every encoder
             // accepts; P010 for HDR, which x265 doesn't.
             None if vulkan => {}
             Some("p010le") if vulkan => {}
             Some(format) => post.push(format!("format={format}")),
+            None if hardware && v.tonemap == Some(Tonemapper::Libplacebo) => post.push("format=nv12".into()),
             None => post.push("format=yuv420p".into()),
         }
 
@@ -1349,6 +1515,27 @@ fn encoder_args(enc: &EncoderInfo, v: &VideoOut, preset: Option<&str>) -> Vec<St
         );
     }
     s
+}
+
+/// `src`'s colour primaries as H.264's VUI codes them (ITU-T H.264, table
+/// E-3), where they are known.
+fn h264_primaries(src: &MediaStream) -> Option<u8> {
+    match src.color_primaries.as_deref()? {
+        "bt709" => Some(1),
+        "bt470m" => Some(4),
+        "bt470bg" => Some(5),
+        "smpte170m" => Some(6),
+        "smpte240m" => Some(7),
+        "film" => Some(8),
+        "bt2020" => Some(9),
+        _ => None,
+    }
+}
+
+/// Whether FFmpeg uploads `v`'s frames for AMF: planned so, and AMF encodes
+/// them (not a software encoder standing in for it).
+fn amf_upload(v: &VideoOut, encoder: Option<&EncoderInfo>) -> bool {
+    v.amf_upload && encoder.is_some_and(|e| e.accel == HwAccel::Amf)
 }
 
 fn gpu_decoder_name(accel: HwAccel) -> &'static str {
@@ -1598,7 +1785,9 @@ pub fn remux_seek_points(boundaries: &[i64], keyframes: &[i64], seeks_back: bool
 mod tests {
     use super::*;
     use crate::util::MEDIA_DEMUXERS;
-    use pley_transcoder_api::{AudioRequest, Capabilities, SubtitleBurnRequest, TranscodeOptions, VideoRequest};
+    use pley_transcoder_api::{
+        AudioRequest, Capabilities, GpuPipeline, SubtitleBurnRequest, TranscodeOptions, VideoRequest,
+    };
 
     fn ffmpeg_with(encoders: Vec<EncoderInfo>, tonemappers: Vec<Tonemapper>) -> Ffmpeg {
         Ffmpeg {
@@ -2391,7 +2580,8 @@ mod tests {
         let args = args_string(&plan, 0, 2);
         assert!(args.contains("-init_hw_device vulkan=vk -filter_hw_device vk"), "{args}");
         assert!(!args.contains("-hwaccel vulkan"), "{args}");
-        assert!(args.contains("libplacebo=w=1920:h=1080:format=yuv420p"), "{args}");
+        // NV12, which AMF takes as it is.
+        assert!(args.contains("libplacebo=w=1920:h=1080:format=nv12"), "{args}");
         assert!(args.contains("-c:v h264_amf"), "{args}");
         let shown = plan.video_plan(&m, None).unwrap();
         if cfg!(windows) {
@@ -2399,6 +2589,153 @@ mod tests {
             assert!(args.contains("-hwaccel d3d11va"), "{args}");
             assert_eq!((shown.decoder.as_deref(), shown.pipeline.as_deref()), (Some("d3d11va"), Some("hybrid")));
         }
+    }
+
+    fn amf() -> EncoderInfo {
+        EncoderInfo {
+            name: "h264_amf".into(),
+            codec: VideoCodec::H264,
+            hardware: true,
+            accel: HwAccel::Amf,
+            main10: false,
+        }
+    }
+
+    /// libplacebo's speed measured on a Ryzen 5 5600G's Radeon (Vega 7).
+    const VEGA_7: TonemapSpeed = TonemapSpeed { high: 36.6, balanced: 55.9, fast: 64.2 };
+
+    #[test]
+    fn tone_mapping_does_what_the_gpu_keeps_ahead_of_real_time() {
+        let (uhd, hd) = (3840 * 2160, 1920 * 1080);
+        // An integrated Radeon keeps a 4K film ahead at Balanced, 1080p at High.
+        assert_eq!(tonemap_quality(&VEGA_7, uhd, uhd, 23.976, 1), TonemapQuality::Balanced);
+        assert_eq!(tonemap_quality(&VEGA_7, uhd, hd, 23.976, 1), TonemapQuality::High);
+        // Two 4K films at once: as fast as it goes.
+        assert_eq!(tonemap_quality(&VEGA_7, uhd, uhd, 23.976, 2), TonemapQuality::Fast);
+        // A bigger GPU does all of libplacebo's work, for two films too.
+        let big = TonemapSpeed { high: 240.0, balanced: 300.0, fast: 320.0 };
+        assert_eq!(tonemap_quality(&big, uhd, uhd, 23.976, 2), TonemapQuality::High);
+        // A quality whose options this FFmpeg refused (measured 0) is never taken.
+        let old = TonemapSpeed { high: 20.0, balanced: 0.0, fast: 0.0 };
+        assert_eq!(tonemap_quality(&old, uhd, uhd, 23.976, 1), TonemapQuality::High);
+    }
+
+    #[test]
+    fn a_job_tone_maps_at_the_quality_its_gpu_keeps_ahead_of_the_player() {
+        let mut ff = ffmpeg_with(vec![amf(), x264()], vec![Tonemapper::Libplacebo]);
+        ff.caps.tonemap_speed = Some(VEGA_7);
+        let mut req = request();
+        req.video.as_mut().unwrap().max_height = None;
+        let mut m = ten_bit(media(DynamicRange::Hdr10, None));
+        m.streams[0].frame_rate = Some(23.976);
+
+        let mut plan = Plan::build(&req, &m, &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().tonemap_quality, TonemapQuality::Balanced);
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("tonemapping=auto:peak_detect=0:upscaler=bilinear:contrast_recovery=0,"), "{args}");
+        assert_eq!(plan.video_plan(&m, None).unwrap().tonemap_quality, Some(TonemapQuality::Balanced));
+        // Another 4K film on the GPU.
+        plan.share_tonemapping(ff.caps.tonemap_speed.as_ref(), &m, 2);
+        assert_eq!(plan.video.as_ref().unwrap().tonemap_quality, TonemapQuality::Fast);
+        // Its renditions look the same.
+        let mut lower = Plan::build(&request(), &m, &ff, None).unwrap();
+        assert_eq!(lower.video.as_ref().unwrap().tonemap_quality, TonemapQuality::High);
+        lower.tone_map_like(&plan);
+        assert_eq!(lower.video.as_ref().unwrap().tonemap_quality, TonemapQuality::Fast);
+
+        // Not measured (no libplacebo on a GPU, an older cache): all of its work.
+        ff.caps.tonemap_speed = None;
+        let plan = Plan::build(&req, &m, &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().tonemap_quality, TonemapQuality::High);
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("tonemapping=auto:peak_detect=0,"), "{args}");
+    }
+
+    #[test]
+    fn amf_gets_its_frames_uploaded_to_the_gpu() {
+        let mut ff = ffmpeg_with(vec![amf(), x264()], vec![Tonemapper::Libplacebo]);
+        ff.caps.hwaccels = vec!["d3d11va".into()];
+        ff.caps.amf_upload = true;
+        let m = ten_bit(media(DynamicRange::Hdr10, None));
+        let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        let args = args_string(&plan, 0, 2);
+        // The AMD GPU is the filters' device; libplacebo makes a Vulkan one of its own.
+        assert!(args.contains("-init_hw_device d3d11va=dx:,vendor_id=0x1002 -filter_hw_device dx"), "{args}");
+        assert!(!args.contains("vulkan=vk"), "{args}");
+        assert!(args.contains("libplacebo=w=1920:h=1080:format=nv12:"), "{args}");
+        assert!(args.contains(",format=nv12,hwupload[vout]"), "{args}");
+        if cfg!(windows) {
+            assert!(args.contains("-hwaccel d3d11va -hwaccel_device dx"), "{args}");
+        }
+
+        // A software encoder standing in takes frames from memory, as before.
+        let stand_in = x264();
+        let ctx = ArgsContext {
+            input: Path::new("/media/movie.mkv"),
+            encoder: Some(&stand_in),
+            relative_split_times: true,
+            preset: None,
+            shader_cache: None,
+        };
+        let line =
+            plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" ");
+        assert!(!line.contains("d3d11va=dx") && !line.contains("hwupload"), "{line}");
+        assert!(line.contains("-init_hw_device vulkan=vk -filter_hw_device vk"), "{line}");
+        assert!(line.contains("libplacebo=w=1920:h=1080:format=yuv420p:"), "{line}");
+
+        // OpenCL uploads to its own device: AMF copies from memory then.
+        let mut ff = ffmpeg_with(vec![amf(), x264()], vec![Tonemapper::Opencl]);
+        ff.caps.amf_upload = true;
+        let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        assert!(!plan.video.as_ref().unwrap().amf_upload);
+    }
+
+    #[test]
+    fn h264_from_amf_says_its_colour_primaries() {
+        let mut ff = ffmpeg_with(vec![amf(), x264()], vec![Tonemapper::Libplacebo]);
+        ff.caps.h264_metadata = true;
+        // Tone mapped: BT.709, which h264_amf leaves unsaid.
+        let plan = Plan::build(&request(), &ten_bit(media(DynamicRange::Hdr10, None)), &ff, None).unwrap();
+        assert!(args_string(&plan, 0, 2).contains("-bsf:v h264_metadata=colour_primaries=1 "));
+        // A software encoder standing in says them itself.
+        let stand_in = x264();
+        let ctx = ArgsContext {
+            input: Path::new("/media/movie.mkv"),
+            encoder: Some(&stand_in),
+            relative_split_times: true,
+            preset: None,
+            shader_cache: None,
+        };
+        let line =
+            plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" ");
+        assert!(!line.contains("h264_metadata"), "{line}");
+        // SDR keeps the source's (a DVD's BT.601), and says nothing of unknown ones.
+        let mut sd = media(DynamicRange::Sdr, None);
+        sd.streams[0].color_primaries = Some("bt470bg".into());
+        let plan = Plan::build(&request(), &sd, &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().vui_primaries, Some(5));
+        let plan = Plan::build(&request(), &media(DynamicRange::Sdr, None), &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().vui_primaries, None);
+        // An FFmpeg without the filter: as before.
+        ff.caps.h264_metadata = false;
+        let plan = Plan::build(&request(), &ten_bit(media(DynamicRange::Hdr10, None)), &ff, None).unwrap();
+        assert!(!args_string(&plan, 0, 2).contains("h264_metadata"));
+    }
+
+    #[test]
+    fn eight_bit_video_is_scaled_on_direct3d_11_into_amf() {
+        let mut ff = ffmpeg_with(vec![amf(), x264()], vec![]);
+        ff.caps.hwaccels = vec!["d3d11va".into()];
+        ff.caps.gpu_pipelines = vec![GpuPipeline { accel: HwAccel::Amf, codecs: vec!["h264".into()] }];
+        let mut m = media(DynamicRange::Sdr, None);
+        m.streams[0].codec = "h264".into();
+        let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::D3d11 { encode_on_gpu: true });
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("[0:0]scale_d3d11=width=1920:height=1080:format=nv12[vout]"), "{args}");
+        // HEVC didn't pass the self-test: through memory.
+        let plan = Plan::build(&request(), &media(DynamicRange::Sdr, None), &ff, None).unwrap();
+        assert_eq!(plan.video.unwrap().pipeline, Pipeline::Software);
     }
 
     #[test]

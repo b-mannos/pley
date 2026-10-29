@@ -12,7 +12,9 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use pley_transcoder_api::{Capabilities, EncoderInfo, GpuPipeline, HwAccel, TonemapMode, Tonemapper, VideoCodec};
+use pley_transcoder_api::{
+    Capabilities, EncoderInfo, GpuPipeline, HwAccel, TonemapMode, TonemapQuality, TonemapSpeed, Tonemapper, VideoCodec,
+};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
@@ -21,7 +23,7 @@ use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 11;
+const DETECTION_REVISION: u32 = 12;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -59,12 +61,13 @@ impl Ffmpeg {
         let (caps, relative) = detect_capabilities(&ffmpeg, &ffprobe).await;
         if caps.ffmpeg_available {
             tracing::info!(
-                "ffmpeg {} detected in {:.1}s: encoders [{}], tone mapping [{}], dolby vision: {}",
+                "ffmpeg {} detected in {:.1}s: encoders [{}], tone mapping [{}], dolby vision: {}{}",
                 caps.ffmpeg_version.as_deref().unwrap_or("?"),
                 started.elapsed().as_secs_f32(),
                 encoder_names(&caps),
                 tonemapper_names(&caps),
                 caps.dolby_vision,
+                gpu_summary(&caps),
             );
             let file = CacheFile { key, caps: caps.clone(), segment_times_relative: relative };
             if let Ok(json) = serde_json::to_vec_pretty(&file) {
@@ -193,6 +196,18 @@ fn encoder_names(caps: &Capabilities) -> String {
         .map(|e| if e.main10 { format!("{} (main10)", e.name) } else { e.name.clone() })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// libplacebo's measured speed and the AMD paths, for the log.
+fn gpu_summary(caps: &Capabilities) -> String {
+    let mut parts = Vec::new();
+    if let Some(s) = caps.tonemap_speed {
+        parts.push(format!("libplacebo 4K at {:.0}/{:.0}/{:.0} fps (high/balanced/fast)", s.high, s.balanced, s.fast));
+    }
+    if caps.amf_upload {
+        parts.push("AMF fed from the GPU".to_owned());
+    }
+    parts.iter().map(|p| format!(", {p}")).collect()
 }
 
 fn tonemapper_names(caps: &Capabilities) -> String {
@@ -373,6 +388,105 @@ fn software_vulkan(log: &str) -> bool {
     log.lines().any(|line| line.contains(" selected: ") && line.contains("(software)"))
 }
 
+/// Whether AMF encodes frames FFmpeg uploads to the AMD GPU (Direct3D 11),
+/// as transcodes that filter in memory send them ([`crate::plan`]).
+async fn test_amf_upload(ffmpeg: &Path) -> bool {
+    let args = [
+        "-hide_banner",
+        "-nostdin",
+        "-loglevel",
+        "error",
+        "-init_hw_device",
+        crate::plan::AMF_D3D11_DEVICE,
+        "-filter_hw_device",
+        "dx",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=black:s=320x240:r=25:d=0.2",
+        "-frames:v",
+        "3",
+        "-vf",
+        "format=nv12,hwupload",
+        "-c:v",
+        "h264_amf",
+        "-f",
+        "null",
+        "-",
+    ];
+    matches!(run(ffmpeg, &args, Duration::from_secs(30)).await, Some(Output { success: true, .. }))
+}
+
+/// How long measuring libplacebo may take at most: the server waits two
+/// minutes for the transcoder to start.
+const TONEMAP_MEASURE_BUDGET: Duration = Duration::from_secs(20);
+
+/// libplacebo's speed at each quality ([`TonemapSpeed`]): synthetic 4K PQ
+/// frames from memory tone mapped to 4K SDR and back, as transcodes without
+/// Vulkan decoding do, timed over 6 and 42 frames so that FFmpeg's and
+/// Vulkan's start drop out (fewer frames gave speeds 40 % apart from one run
+/// to the next). Measured alone, after the other tests, the cheapest quality
+/// first: where a slow GPU runs out of time, the qualities left unmeasured
+/// are never taken.
+async fn measure_tonemap_speed(ffmpeg: &Path) -> Option<TonemapSpeed> {
+    let time = |quality: TonemapQuality, frames: u32| async move {
+        let vf = format!(
+            "{HDR_TAGS},libplacebo=w=3840:h=2160:format=nv12:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=auto:{}{}",
+            crate::plan::PLACEBO_STATIC_PEAK,
+            crate::plan::placebo_quality_options(quality)
+        );
+        let frames = frames.to_string();
+        let args = [
+            "-hide_banner",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-init_hw_device",
+            "vulkan=vk",
+            "-filter_hw_device",
+            "vk",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=gray:s=3840x2160:r=24,format=p010le",
+            "-vf",
+            &vf,
+            "-frames:v",
+            &frames,
+            "-f",
+            "null",
+            "-",
+        ];
+        let started = Instant::now();
+        let ok = matches!(run(ffmpeg, &args, Duration::from_secs(60)).await, Some(Output { success: true, .. }));
+        ok.then(|| started.elapsed().as_secs_f64())
+    };
+    let started = Instant::now();
+    let mut speed = TonemapSpeed::default();
+    for quality in [TonemapQuality::Fast, TonemapQuality::Balanced, TonemapQuality::High] {
+        // Twice where the time allows, the faster run counting: other work
+        // on the GPU (seek previews being made, say) only ever slows a run
+        // down. Measured alone, balanced read 37 frames a second beside a
+        // library's seek previews against 53 to 56 without.
+        for attempt in 0..2 {
+            let limit = if attempt == 0 { TONEMAP_MEASURE_BUDGET } else { TONEMAP_MEASURE_BUDGET * 3 / 4 };
+            if started.elapsed() > limit {
+                break;
+            }
+            if let (Some(short), Some(long)) = (time(quality, 6).await, time(quality, 42).await) {
+                let fps = 36.0 / (long - short).max(0.05);
+                let best = match quality {
+                    TonemapQuality::Fast => &mut speed.fast,
+                    TonemapQuality::Balanced => &mut speed.balanced,
+                    TonemapQuality::High => &mut speed.high,
+                };
+                *best = best.max(fps);
+            }
+        }
+    }
+    (speed.fast > 0.0 || speed.balanced > 0.0 || speed.high > 0.0).then_some(speed)
+}
+
 async fn test_filter(ffmpeg: &Path, pre: &[&str], vf: &str) -> bool {
     let mut args: Vec<&str> = vec!["-hide_banner", "-nostdin", "-loglevel", "error"];
     args.extend_from_slice(pre);
@@ -458,13 +572,14 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
         ..Default::default()
     };
     let timeout = Duration::from_secs(30);
-    let (version, probe, encoders, hwaccels, filters, muxers) = tokio::join!(
+    let (version, probe, encoders, hwaccels, filters, muxers, bsfs) = tokio::join!(
         run(ffmpeg, &["-hide_banner", "-version"], timeout),
         run(ffprobe, &["-hide_banner", "-version"], timeout),
         run(ffmpeg, &["-hide_banner", "-encoders"], timeout),
         run(ffmpeg, &["-hide_banner", "-hwaccels"], timeout),
         run(ffmpeg, &["-hide_banner", "-filters"], timeout),
         run(ffmpeg, &["-hide_banner", "-muxers"], timeout),
+        run(ffmpeg, &["-hide_banner", "-bsfs"], timeout),
     );
     let Some(version) = version.filter(|o| o.success) else {
         return (caps, true);
@@ -482,6 +597,8 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
     let encoder_names = second_column(encoders.map(|o| o.text).unwrap_or_default());
     let filter_names = second_column(filters.map(|o| o.text).unwrap_or_default());
     caps.chromaprint = second_column(muxers.map(|o| o.text).unwrap_or_default()).contains("chromaprint");
+    // `-bsfs` lists one name a line.
+    caps.h264_metadata = bsfs.is_some_and(|o| o.text.lines().any(|l| l.trim() == "h264_metadata"));
     caps.hwaccels = hwaccels
         .map(|o| o.text)
         .unwrap_or_default()
@@ -564,14 +681,20 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
         let readrate = reads(&[]).await;
         (readrate, readrate && reads(&["-readrate_catchup", "60"]).await)
     };
+    let amf_upload_test = async {
+        cfg!(windows) && encoder_names.contains("h264_amf") && hwaccel_listed(&caps, "d3d11va") && {
+            test_amf_upload(ffmpeg).await
+        }
+    };
 
-    let (encoder_results, (libplacebo, libplacebo_on_gpu), opencl, zscale, (readrate, catchup), relative) = tokio::join!(
+    let (encoder_results, (libplacebo, libplacebo_on_gpu), opencl, zscale, (readrate, catchup), relative, amf_upload) = tokio::join!(
         encoder_tests,
         libplacebo_test,
         opencl_test,
         zscale_test,
         readrate_test,
         test_segment_semantics(ffmpeg),
+        amf_upload_test,
     );
 
     // Hardware encoders first (in candidate order), then software.
@@ -598,6 +721,7 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
     caps.subtitle_burn_text = has("subtitles");
     caps.readrate = readrate;
     caps.readrate_catchup = catchup;
+    caps.amf_upload = amf_upload && caps.encoders.iter().any(|e| e.name == "h264_amf");
 
     // The GPU tone mappers whose frames reach VAAPI's encoder (Linux).
     if caps.encoders.iter().any(|e| e.name == "h264_vaapi") {
@@ -622,7 +746,14 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
     caps.vaapi_vulkan_decode = gpu.vaapi_vulkan_decode;
     caps.vulkan_encode = gpu.vulkan_encode;
     caps.gpu_pipelines = gpu.pipelines;
+    if libplacebo && libplacebo_on_gpu {
+        caps.tonemap_speed = measure_tonemap_speed(ffmpeg).await;
+    }
     (caps, relative)
+}
+
+fn hwaccel_listed(caps: &Capabilities, name: &str) -> bool {
+    caps.hwaccels.iter().any(|h| h == name)
 }
 
 #[derive(Default)]
@@ -710,6 +841,32 @@ async fn detect_gpu_pipelines(
             vec!["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"],
             "scale_vt=w=160:h=120",
             vec!["-c:v", "h264_videotoolbox"],
+        ));
+    }
+    // AMD on Windows: Direct3D 11 frames from the decoder to AMF. Upstream
+    // FFmpeg 9.0's scale_d3d11 makes no textures AMF takes on Vega; patched
+    // builds' does, for 8-bit video.
+    const D3D11: [&str; 12] = [
+        "-init_hw_device",
+        crate::plan::AMF_D3D11_DEVICE,
+        "-filter_hw_device",
+        "dx",
+        "-hwaccel",
+        "d3d11va",
+        "-hwaccel_device",
+        "dx",
+        "-hwaccel_output_format",
+        "d3d11",
+        "-extra_hw_frames",
+        "8",
+    ];
+    let amf = cfg!(windows) && working("h264_amf") && hwaccel("d3d11va") && filters.contains("scale_d3d11");
+    if amf {
+        candidates.push((
+            HwAccel::Amf,
+            D3D11.to_vec(),
+            "scale_d3d11=width=160:height=120:format=nv12",
+            vec!["-c:v", "h264_amf"],
         ));
     }
     let vulkan = libplacebo && hwaccel("vulkan");

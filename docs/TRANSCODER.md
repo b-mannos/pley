@@ -173,6 +173,9 @@ Errors are `{"code": "...", "message": "..."}`:
 | `gpu_pipelines` | GPU-only decode → scale → encode pipelines, with the codecs each passed for |
 | `vaapi_tonemappers` | tone mappers whose frames reach a VAAPI encoder (Linux; see [VAAPI encoders](#vaapi-encoders)) |
 | `vaapi_vulkan_decode` | `vulkan_decode` on the Vulkan device made from the VAAPI one |
+| `tonemap_speed?` | `{high, balanced, fast}`: frames a second libplacebo tone maps at each quality, 4K to 4K (see [libplacebo quality](#libplacebo-quality)) |
+| `amf_upload` | FFmpeg uploads AMF's frames to the AMD GPU (Windows; see [AMF on Windows](#amf-on-windows)) |
+| `h264_metadata` | FFmpeg has the `h264_metadata` bitstream filter, which writes the colour primaries `h264_amf` leaves out |
 | `subtitle_burn_image`, `subtitle_burn_text` | picture and text subtitles can be burned in |
 | `readrate` | `-readrate` is supported (see [Throttling](#throttling)) |
 | `readrate_catchup` | `-readrate_catchup` is supported |
@@ -577,6 +580,31 @@ the same options.
 AMF HEVC needs no `-header_insertion_mode`: with `-forced_idr 1` FFmpeg sends
 the VPS, SPS and PPS with every forced keyframe.
 
+#### AMF on Windows
+
+- FFmpeg uploads the frames to a Direct3D 11 device on the AMD GPU, whichever
+  adapter it is, rather than leaving AMF to copy them from system memory,
+  which is several times slower. The decoder uses the same device:
+
+  ```
+  -init_hw_device d3d11va=dx:,vendor_id=0x1002 -filter_hw_device dx
+  -hwaccel d3d11va -hwaccel_device dx ... format=nv12,hwupload
+  ```
+
+  libplacebo makes a Vulkan device of its own and gives NV12, as for every
+  hardware encoder. Only where the start-up test passed (`amf_upload`). A
+  software encoder standing in for AMF, and OpenCL tone mapping, take frames
+  from memory.
+- `h264_amf` writes no colour primaries, so
+  `-bsf:v h264_metadata=colour_primaries=…` adds them: BT.709 after tone
+  mapping, else the source's own, none when the source has none. Only where
+  FFmpeg has the filter (`h264_metadata`); `hevc_amf` writes them itself.
+- 8-bit SDR video stays on the GPU throughout (decoded into Direct3D 11,
+  scaled by `scale_d3d11`, encoded from there) for each codec whose pipeline
+  passed its start-up test (`gpu_pipelines`, `amf`). Upstream FFmpeg 9.0's
+  `scale_d3d11` fails that test on Vega graphics, which then use the upload
+  above.
+
 ### Hardware decoding
 
 - The decoder is paired with the encoder: `cuda` with NVENC, `d3d11va` with
@@ -633,6 +661,29 @@ available tone mapper:
   (saving about 0.2 s at every start, seek and quality switch), unless the
   folder's path holds a character FFmpeg's filter syntax reads
   (`, ; [ ] ' :`, other than a drive's colon).
+
+#### libplacebo quality
+
+libplacebo runs at one of three qualities (`video.tonemap_quality` in the
+job's plan):
+
+| Quality | Options beyond its defaults |
+|---|---|
+| `high` | none |
+| `balanced` | `upscaler=bilinear:contrast_recovery=0` |
+| `fast` | balanced's, plus `downscaler=bilinear:dithering=none:gamut_mode=clip` |
+
+- At startup, after the other tests, each quality is timed on synthetic 4K
+  PQ frames made 4K SDR (`tonemap_speed`), from `fast` to `high`, for 20 s at
+  most. A quality not reached in that time is never used. Where time allows,
+  each runs twice and the faster run counts.
+- A job takes the best quality that measured at least twice what it needs:
+  its frame rate × its size relative to 4K to 4K (0.6 × the source's pixels +
+  0.4 × the output's) × the jobs tone mapping with libplacebo when it starts,
+  itself included. When none did, the fastest.
+- Its renditions and later processes (seeks, restarts) keep that quality, so
+  its segments look alike.
+- Without a measurement (no libplacebo on a GPU), `high`.
 
 #### VAAPI encoders
 

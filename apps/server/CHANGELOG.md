@@ -38,6 +38,17 @@ describes how they are made.
 
 - Picture subtitles a player shows itself are burned in on any stream it
   asks for (Remux, Transcode), not only when the file can't play as it is.
+- AMD graphics on Windows transcode faster: the frames reach AMD's encoder
+  from the graphics card, where it copied them from system memory itself,
+  several times slower.
+- HDR tone mapping does less where the graphics card would fall behind the
+  player: Pley times it when it starts, and each transcode takes the best
+  quality that keeps ahead, counting the other HDR transcodes running.
+
+### Fixed
+
+- H.264 from AMD's encoder says its colours (BT.709), which it left out:
+  players guessed, and some took 4K video for BT.2020.
 
 ## [0.0.1] - 2026-10-29
 

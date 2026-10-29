@@ -417,6 +417,53 @@ impl Tonemapper {
     }
 }
 
+/// How much of libplacebo's work a tone mapped transcode does: all of it
+/// where the GPU has the speed, less where it would fall behind the player
+/// (see [`Capabilities::tonemap_speed`]). Ordered from the fastest.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum TonemapQuality {
+    /// Balanced, with colours outside BT.709 clipped rather than mapped,
+    /// no dithering and a bilinear downscaler.
+    Fast,
+    /// libplacebo's defaults but its two costliest steps: no contrast
+    /// recovery, and the chroma upscaled bilinearly.
+    Balanced,
+    /// libplacebo's defaults.
+    #[default]
+    High,
+}
+
+impl TonemapQuality {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TonemapQuality::Fast => "fast",
+            TonemapQuality::Balanced => "balanced",
+            TonemapQuality::High => "high",
+        }
+    }
+}
+
+/// Frames a second one FFmpeg process tone maps from 4K HDR10 to 4K SDR
+/// with libplacebo at each [`TonemapQuality`], measured on synthetic
+/// frames when the transcoder detects FFmpeg.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
+pub struct TonemapSpeed {
+    pub high: f64,
+    pub balanced: f64,
+    pub fast: f64,
+}
+
+impl TonemapSpeed {
+    pub fn at(&self, quality: TonemapQuality) -> f64 {
+        match quality {
+            TonemapQuality::Fast => self.fast,
+            TonemapQuality::Balanced => self.balanced,
+            TonemapQuality::High => self.high,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum TonemapMode {
@@ -552,6 +599,20 @@ pub struct Capabilities {
     /// /v1/jobs/{id}/bitrate`). Older transcoders keep the one asked for.
     #[serde(default)]
     pub live_bitrate: bool,
+    /// libplacebo's speed on this computer's GPU, which sets each tone
+    /// mapped transcode's [`TonemapQuality`]. Absent without libplacebo on
+    /// a GPU, and from older transcoders, which tone map at `High`.
+    #[serde(default)]
+    pub tonemap_speed: Option<TonemapSpeed>,
+    /// AMF encoders get frames FFmpeg uploaded to the AMD GPU (Direct3D 11)
+    /// rather than frames in system memory, which AMF copies over itself
+    /// several times slower (Windows).
+    #[serde(default)]
+    pub amf_upload: bool,
+    /// FFmpeg has the `h264_metadata` bitstream filter, which writes the
+    /// colour primaries `h264_amf` leaves unsaid.
+    #[serde(default)]
+    pub h264_metadata: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -958,6 +1019,9 @@ pub struct VideoPlan {
     #[serde(default)]
     pub dv_bl_compat: Option<i64>,
     pub tonemap: Option<Tonemapper>,
+    /// What libplacebo does of its work (`tonemap` libplacebo only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tonemap_quality: Option<TonemapQuality>,
     pub encoder: Option<String>,
     /// `cpu`, `cuda`, `qsv`, `vaapi`, `videotoolbox`, `d3d11va`, `vulkan`, …
     pub decoder: Option<String>,

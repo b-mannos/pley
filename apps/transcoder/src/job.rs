@@ -542,6 +542,9 @@ impl JobManager {
         };
         let mut plan = Plan::build(&req, &media, &self.ff, keyframes.as_deref().map(Vec::as_slice))
             .map_err(ApiError::BadRequest)?;
+        // libplacebo shares the GPU with the jobs tone mapping on it now.
+        let others = self.renditions().iter().filter(|job| job.tone_maps_on_gpu()).count() as u32;
+        plan.share_tonemapping(self.ff.caps.tonemap_speed.as_ref(), &media, others + 1);
 
         let id = uuid::Uuid::new_v4().simple().to_string();
         let dir = self.jobs_dir.join(&id);
@@ -629,7 +632,8 @@ impl JobManager {
                 (v.max_width, v.max_height, v.max_bitrate_kbps) =
                     (want.max_width, want.max_height, want.max_bitrate_kbps);
             }
-            let Ok(plan) = Plan::build(&variant, media, &self.ff, None) else { continue };
+            let Ok(mut plan) = Plan::build(&variant, media, &self.ff, None) else { continue };
+            plan.tone_map_like(top);
             let above = made.last().map_or(top, |(_, plan)| plan);
             let (Some(v), Some(a)) = (plan.video.as_ref(), above.video.as_ref()) else { continue };
             let lower = !v.copy && v.width * v.height <= a.width * a.height && v.bitrate_kbps < a.bitrate_kbps;
@@ -1256,6 +1260,12 @@ impl Job {
         self.last_access_ms.store(now_ms(), Relaxed);
     }
 
+    /// Whether a process of this job is tone mapping with libplacebo now.
+    fn tone_maps_on_gpu(&self) -> bool {
+        let rt = self.runtime.lock();
+        rt.state == JobState::Running && rt.process.is_some() && self.plan.tone_maps_with_libplacebo()
+    }
+
     /// Whether a process of this job is encoding video in software now.
     fn encodes_in_software(&self) -> bool {
         let rt = self.runtime.lock();
@@ -1816,7 +1826,12 @@ fn describe(created: &JobCreated) -> String {
             match (v.dynamic_range_out.filter(|r| r.is_hdr()), v.tonemap) {
                 (Some(out), Some(t)) => format!(" {} to {}", t.as_str(), out.label()),
                 (Some(out), None) => format!(" keeping {}", out.label()),
-                (None, t) => t.map(|t| format!(" tonemap {}", t.as_str())).unwrap_or_default(),
+                (None, t) => t
+                    .map(|t| {
+                        let quality = v.tonemap_quality.map(|q| format!(" ({})", q.as_str())).unwrap_or_default();
+                        format!(" tonemap {}{quality}", t.as_str())
+                    })
+                    .unwrap_or_default(),
             },
             v.dolby_vision.map(|m| format!(" dolby vision {m:?}").to_lowercase()).unwrap_or_default(),
             if v.hdr10plus_stripped { " without hdr10+" } else { "" },
