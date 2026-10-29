@@ -232,7 +232,7 @@ jobs:
         run: |
           bun scripts/release.mjs "$UNIT" notes "$VERSION" > notes.md
           if [ "$UNIT" = samsung ]; then
-            printf '\n---\n\nThe Samsung package is signed with a Samsung certificate, so it is made by hand: `bun run --cwd apps/tizen package` (docs/TV_PLATFORMS.md).\n' >> notes.md
+            printf '\n---\n\n%s\n' "The Samsung package is signed with a Samsung certificate, so it is made by hand: \`bun run --cwd apps/tizen package\` (docs/TV_PLATFORMS.md)." >> notes.md
             echo "::notice::Samsung's package is made by hand: bun run --cwd apps/tizen package, then attach it to $TAG"
           fi
           if [ "$UNIT" = android ] && [ "$SIGNED" != true ]; then
