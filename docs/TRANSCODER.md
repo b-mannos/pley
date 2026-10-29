@@ -1078,8 +1078,8 @@ throttled real-time playbacks (`session-*`) that check whether the player
 waited.
 
 ```
-python scripts/bench-transcoder.py --make-clips D:/bench --source 4k-hdr10.mkv
-python scripts/bench-transcoder.py --media D:/bench --hdr 4k-hdr10.mkv \
+python scripts/bench-transcoder.py --make-clips bench --source 4k-hdr10.mkv
+python scripts/bench-transcoder.py --media bench --hdr 4k-hdr10.mkv \
     --bin before=old/pley-transcoder.exe --bin after=target/release/pley-transcoder.exe \
     --variants gpu,sw,sw4 --repeat 3 --out results.jsonl
 ```
