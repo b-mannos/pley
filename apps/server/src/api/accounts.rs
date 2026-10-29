@@ -183,6 +183,11 @@ pub async fn update_user(
     if let Some(max_age) = body.max_age {
         check_age(max_age)?;
     }
+    if body.pin.is_some() && id == admin.id {
+        // As the password: from Account, which asks for the password. A PIN
+        // switches a profile to this one without its two-step code.
+        return Err(AppError::bad_request("change your own PIN in Account"));
+    }
     if let Some(Some(pin)) = body.pin.as_ref().map(|p| p.as_deref().filter(|p| !p.is_empty())) {
         accounts::validate_pin(pin)?;
     }

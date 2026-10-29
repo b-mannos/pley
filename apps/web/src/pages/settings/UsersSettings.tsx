@@ -445,7 +445,7 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
             </Field>
           ) : null}
           {!isNew && self ? (
-            <p className="text-xs text-subtle">Your own password and two-step sign-in change in Account, which asks for your current password.</p>
+            <p className="text-xs text-subtle">Your own password, PIN and two-step sign-in change in Account, which asks for your current password.</p>
           ) : null}
           {!isNew && !self ? (
             <Field
@@ -491,42 +491,44 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
 
         <AccessFields value={access} onChange={setAccess} idPrefix="user" />
 
-        <Field
-          label="Profile PIN"
-          htmlFor="user-pin"
-          hint={
-            user?.has_pin && !clearPin
-              ? "This profile has a PIN. Enter a new one to change it."
-              : "Optional, 4 to 8 digits. Needed to switch to this profile."
-          }
-        >
-          <div className="flex gap-2">
-            <TextInput
-              id="user-pin"
-              inputMode="numeric"
-              autoComplete="off"
-              maxLength={8}
-              placeholder={user?.has_pin && !clearPin ? "••••" : ""}
-              value={pin}
-              onChange={(e) => {
-                setPin(e.target.value.replace(/\D/g, ""));
-                setClearPin(false);
-              }}
-            />
-            {user?.has_pin ? (
-              <Button
-                variant="outline"
-                icon={<Lock className="size-4" />}
-                onClick={() => {
-                  setPin("");
-                  setClearPin(!clearPin);
+        {self ? null : (
+          <Field
+            label="Profile PIN"
+            htmlFor="user-pin"
+            hint={
+              user?.has_pin && !clearPin
+                ? "This profile has a PIN. Enter a new one to change it."
+                : "Optional, 4 to 8 digits. Needed to switch to this profile."
+            }
+          >
+            <div className="flex gap-2">
+              <TextInput
+                id="user-pin"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={8}
+                placeholder={user?.has_pin && !clearPin ? "••••" : ""}
+                value={pin}
+                onChange={(e) => {
+                  setPin(e.target.value.replace(/\D/g, ""));
+                  setClearPin(false);
                 }}
-              >
-                {clearPin ? "Keep PIN" : "Remove PIN"}
-              </Button>
-            ) : null}
-          </div>
-        </Field>
+              />
+              {user?.has_pin ? (
+                <Button
+                  variant="outline"
+                  icon={<Lock className="size-4" />}
+                  onClick={() => {
+                    setPin("");
+                    setClearPin(!clearPin);
+                  }}
+                >
+                  {clearPin ? "Keep PIN" : "Remove PIN"}
+                </Button>
+              ) : null}
+            </div>
+          </Field>
+        )}
 
         {!isNew && user?.two_step && !self ? <TwoStepReset user={user} /> : null}
         {!isNew && user ? <UserDevices key={user.id} user={user} self={self} /> : null}

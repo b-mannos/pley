@@ -45,6 +45,13 @@ async fn pley_always_keeps_an_enabled_administrator() {
     assert_eq!(demote.status, StatusCode::BAD_REQUEST, "the only administrator");
     let disable = app.patch(&format!("/api/users/{admin_id}"), &admin, json!({"disabled": true})).await;
     assert_eq!(disable.status, StatusCode::BAD_REQUEST, "nobody disables their own account");
+    // One's own PIN changes in Account, with the password: a session alone
+    // can't set one, which would switch profiles to it without two-step.
+    for pin in [json!("1234"), json!(null)] {
+        let own_pin = app.patch(&format!("/api/users/{admin_id}"), &admin, json!({ "pin": pin })).await;
+        assert_eq!(own_pin.status, StatusCode::BAD_REQUEST, "{:?}", own_pin.body);
+    }
+    assert_eq!(app.get("/api/auth/me", &admin).await.body["has_pin"], json!(false));
 
     // A second administrator who is disabled doesn't count.
     let (_, second_id) = app.user(&admin, "second", json!({"is_admin": true})).await;
@@ -318,7 +325,8 @@ async fn who_can_switch_to_whom() {
 
     // An administrator with a PIN asks for the PIN, not the password.
     let admin = app.login("admin", "secret-one").await;
-    app.patch(&format!("/api/users/{admin_id}"), &admin, json!({"pin": "2468"})).await;
+    let pin = app.put("/api/me/pin", &admin, json!({"pin": "2468", "password": "secret-one"})).await;
+    assert_eq!(pin.status, StatusCode::NO_CONTENT, "{:?}", pin.body);
     let by_password = switch(&app, &teen_token, json!({"user_id": admin_id, "password": "secret-one"})).await;
     assert_eq!(by_password.status, StatusCode::FORBIDDEN);
     let by_pin = switch(&app, &teen_token, json!({"user_id": admin_id, "pin": "2468"})).await;

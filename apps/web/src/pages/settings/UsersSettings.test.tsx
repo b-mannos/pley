@@ -227,6 +227,9 @@ describe("UsersSettings", () => {
     expect(within(dialog).getByRole("switch", { name: "Administrator" })).toBeDisabled();
     expect(within(dialog).getByRole("switch", { name: "Disabled" })).toBeDisabled();
     expect(within(dialog).queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    // Their own PIN changes in Account, with the password.
+    expect(within(dialog).queryByLabelText("Profile PIN")).not.toBeInTheDocument();
+    expect(within(dialog).getByText(/Your own password, PIN and two-step sign-in change in Account/)).toBeInTheDocument();
   });
 
   it("deletes a user after confirming", async () => {
