@@ -4,9 +4,9 @@ import android.content.Context
 import android.content.pm.PackageManager
 
 /**
- * Which build of the app this is: its version name (pley's version, VERSION
- * at the repository's root) and the commit it was made from, which the app
- * sets from its BuildConfig when it starts.
+ * Which build of the app this is: its version name (the app's own, set in
+ * app/build.gradle.kts) and the commit it was made from, which the app sets
+ * from its BuildConfig when it starts.
  */
 object AppBuild {
     /** The commit's short hash, empty until the app says or when it isn't known. */

@@ -6,7 +6,10 @@ import { fileURLToPath, URL } from "node:url";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { extname, join, resolve } from "node:path";
 import { brotliCompressSync, constants as zlib, gzipSync } from "node:zlib";
-import { commit, version } from "../../scripts/commit.mjs";
+import { commit } from "../../scripts/commit.mjs";
+
+/** The web app's version: the server's, which it is released with (scripts/version.mjs). */
+const VERSION = (JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string }).version;
 
 const COMPRESSIBLE = new Set([".js", ".mjs", ".css", ".html", ".svg", ".json", ".webmanifest", ".txt"]);
 
@@ -55,7 +58,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), precompress()],
   // Shown in Account and the dashboard (src/lib/build.ts).
   define: {
-    __PLEY_VERSION__: JSON.stringify(version()),
+    __PLEY_VERSION__: JSON.stringify(VERSION),
     __PLEY_COMMIT__: JSON.stringify(commit()),
   },
   resolve: {

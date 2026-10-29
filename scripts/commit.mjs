@@ -5,7 +5,6 @@
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFileSync } from "node:fs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -17,9 +16,4 @@ export function commit() {
   } catch {
     return "unknown";
   }
-}
-
-/** pley's version (VERSION at the repository's root). */
-export function version() {
-  return readFileSync(join(root, "VERSION"), "utf8").trim();
 }

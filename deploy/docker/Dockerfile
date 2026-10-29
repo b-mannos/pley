@@ -17,7 +17,7 @@ FROM oven/bun:1.4.4-slim AS web
 ARG PLEY_COMMIT=unknown
 ENV PLEY_COMMIT=$PLEY_COMMIT
 WORKDIR /src
-COPY VERSION package.json bun.lock bunfig.toml ./
+COPY package.json bun.lock bunfig.toml ./
 COPY scripts/commit.mjs scripts/commit.d.mts scripts/
 COPY apps/web/package.json apps/web/
 RUN bun install --frozen-lockfile
@@ -29,7 +29,7 @@ FROM rust:1-trixie AS build
 ARG PLEY_COMMIT=unknown
 ENV PLEY_COMMIT=$PLEY_COMMIT
 WORKDIR /src
-COPY VERSION Cargo.toml Cargo.lock rustfmt.toml ./
+COPY Cargo.toml Cargo.lock rustfmt.toml ./
 COPY apps/server apps/server
 COPY apps/transcoder apps/transcoder
 COPY packages packages

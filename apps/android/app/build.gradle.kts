@@ -4,19 +4,24 @@ plugins {
     alias(libs.plugins.baselineprofile)
 }
 
-// pley's version, one for every app (VERSION at the repository's root), and
-// the commit the build is made from: PLEY_COMMIT, else git's, else "unknown".
-val pleyVersion = rootProject.file("../../VERSION").readText().trim()
+// The app's version, its own (scripts/version.mjs sets it; docs/RELEASING.md),
+// and the commit the build is made from: PLEY_COMMIT, else git's, else "unknown".
+val appVersion = "0.0.1"
 val pleyCommit: String = providers.environmentVariable("PLEY_COMMIT").orNull?.trim()?.take(9)?.ifEmpty { null }
     ?: providers.exec {
         commandLine("git", "rev-parse", "--short=9", "HEAD")
         isIgnoreExitValue = true
     }.standardOutput.asText.get().trim().ifEmpty { "unknown" }
 
-/** 1.2.3 is 1020300: every release above the one before, with room for rebuilds. */
+/**
+ * 1.2.3 is 11020300: every release above the one before, with room for
+ * rebuilds. The 10,000,000 keeps the codes above those of the single version
+ * every app had before (Google Play has 20003, from 0.2.0), so 0.0.1 is
+ * 10000100. Minor and patch stay below 100 (scripts/version.mjs checks).
+ */
 fun versionCodeOf(version: String): Int {
     val (major, minor, patch) = version.split(".").map(String::toInt)
-    return major * 1_000_000 + minor * 10_000 + patch * 100
+    return 10_000_000 + major * 1_000_000 + minor * 10_000 + patch * 100
 }
 
 android {
@@ -28,9 +33,9 @@ android {
         applicationId = "com.formandelement.pley"
         // A rebuild of the same version for the stores, which take each code
         // once: PLEY_BUILD, 1 to 99, on top of the version's.
-        versionCode = versionCodeOf(pleyVersion) +
+        versionCode = versionCodeOf(appVersion) +
             (providers.environmentVariable("PLEY_BUILD").orNull?.trim()?.toIntOrNull()?.takeIf { it in 0..99 } ?: 0)
-        versionName = pleyVersion
+        versionName = appVersion
         buildConfigField("String", "COMMIT", "\"$pleyCommit\"")
     }
 

@@ -60,7 +60,7 @@ use tokio_util::sync::CancellationToken;
 pub use config::Config;
 pub use state::AppState;
 
-/// pley's version (VERSION at the repository's root).
+/// The server's version, which its transcoder and web app share (scripts/version.mjs).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The commit this build was made from, "unknown" without the repository.
 pub const COMMIT: &str = env!("PLEY_COMMIT");

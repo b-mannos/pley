@@ -1,7 +1,6 @@
 {
   "name": "pley-tv",
   "private": true,
-  "version": "0.2.0",
   "description": "What Pley's Samsung (Tizen) and LG (webOS) TV apps share: the screens, sign-in, capabilities, playback sessions and subtitles. Each app adds its platform's player and probes.",
   "type": "module",
   "exports": {
