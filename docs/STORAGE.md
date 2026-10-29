@@ -34,7 +34,7 @@ except your media and its local artwork, which Pley never moves or changes.
                              Settings → Transcoder, `--transcode-dir` or
                              `transcode_dir` in pley.toml put it elsewhere,
                              and this one is used while that one can't be).
-                             The transcoder prunes it: docs/TRANSCODER.md
+                             The transcoder prunes it (TRANSCODER.md, "Work folder")
   logs/pley.log              the server log, then pley.log.1 to .3 (10 MB each)
 ```
 
