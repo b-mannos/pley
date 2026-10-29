@@ -1,96 +1,52 @@
 # Samsung and LG TV apps
 
 Pley for Samsung TV (`apps/tizen`, a Tizen `.wgt`) and Pley for LG TV
-(`apps/webos`, a webOS `.ipk`) are one TV app in two shells. All code that
-doesn't call into the TV is in `packages/tv` (TypeScript and Preact, about
-20,000 lines with styles): the API client, sign-in, focus, the screens,
-the player's session logic and subtitles. Each shell adds its TV's player,
-remote keys, capability probe and packaging (800 lines for Samsung, 630
-for LG). Both follow the Android TV app ([ANDROID.md](ANDROID.md)): the
-same 960×540 layout, D-pad focus, screens and player features.
-
-The LG build has been driven in a desktop browser against a server.
-Neither app is in a store.
+(`apps/webos`, a webOS `.ipk`) are one TV app in two shells. Everything
+that doesn't call into the TV is in `packages/tv` (TypeScript and Preact):
+the API client, sign-in, focus, screens, the player's session logic and
+subtitles. Each shell adds its TV's player, remote keys, capability probe
+and packaging. Both follow the Android TV app ([ANDROID.md](ANDROID.md)):
+the same 960×540 layout, D-pad focus, screens and player features.
 
 ## Why packaged web apps
 
 | | Samsung | LG |
 |---|---|---|
-| Route | Packaged Tizen web app (`.wgt`) | Packaged webOS web app (`.ipk`) |
-| Player | AVPlay, Samsung's own player, on the hardware video plane | `<video src>`, which hands the address to LG's media pipeline |
-| Native apps | Closed: C/C++ apps can't be installed; .NET apps can, with no better player | Closed to anyone without an LG agreement |
-| Oldest TV | 2018 (Tizen 4.0, Chromium 56), sideloaded; the store takes new media apps for 2021 (Tizen 6.0) and later | 2018 (webOS 4.0, Chromium 53) |
+| Package | Tizen web app (`.wgt`) | webOS web app (`.ipk`) |
+| Player | AVPlay, Samsung's own player, on the hardware video plane | `<video src>`, which hands the address to LG's media pipeline (uMediaServer) |
+| Native apps | Closed: no C/C++ apps; .NET apps get no better player | Closed without an LG agreement |
+| Oldest TV | 2018 (Tizen 4.0, Chromium 56) sideloaded; the store takes new media apps for 2021 (Tizen 6.0) and later | 2018 (webOS 4.0, Chromium 53) |
 
-Neither maker lets an outside developer ship a native app, so neither app
-is native. Playback is still native: each app hands the file's address to
-the TV's own player, with its hardware decoders, HDR and sound output. No
-video goes through a JavaScript player (MSE). Both TVs run Chromium-based
-engines, so one source builds both bundles, each compiled for its oldest
-engine.
-
-- **Samsung** runs web apps (`.wgt`) only, not native `.tpk` packages
-  ([FAQ, Q25](https://developer.samsung.com/smarttv/develop/faq/application-testing.html)).
-  C/C++ runs only as WebAssembly inside a web app, on 2020 and later TVs
-  ([WebAssembly](https://developer.samsung.com/smarttv/develop/extension-libraries/webassembly/overview.html)).
-  .NET (C#) apps are accepted for 2018 and later TVs
-  ([TSO](https://developer.samsung.com/tv-seller-office/guides/applications/registering-application.html)),
-  but their guides use Xamarin.Forms, out of Microsoft support since May
-  2024 ([Microsoft](https://dotnet.microsoft.com/en-us/platform/support/policy/xamarin)),
-  the elementary-stream player is for partners only
-  ([ESPlayer](https://developer.samsung.com/smarttv/develop/api-references/tizenfx-tv-api-references/tizen.tv.multimedia/esplayer-class.html)),
-  and the public player is AVPlay. Hosted web apps (loaded from a server)
-  are for partners only
-  ([FAQ](https://developer.samsung.com/smarttv/develop/faq/hosted-applications.html)).
-  Samsung points media apps to AVPlay for 4K, adaptive streams and track
-  switching
-  ([AVPlay guide](https://developer.samsung.com/smarttv/develop/guides/multimedia/media-playback/using-avplay.html)).
-- **LG**: a store app's `type` is `web`
-  ([appinfo.json](https://webostv.developer.lge.com/develop/references/appinfo-json)).
-  LG's Seller Lounge told a developer in writing (October 2026) that
-  general developers can't register or distribute native apps
-  ([plx-native #754](https://github.com/GLinnik21/plx-native/discussions/754)).
-  LG's Flutter for webOS (2026) makes native apps only for webOS 26 and
-  later, with a Linux-only toolchain, a video player that sends no request
-  headers and picks no audio track, and no word that the store takes them
-  from non-partners
-  ([guide](https://webostv.developer.lge.com/develop/guides/flutter-for-webos),
-  [video player](https://github.com/lg-flutter-webos/plugins/blob/main/packages/video_player/API_REFERENCE.md)).
-  A `<video src>` (not MSE) goes to LG's media pipeline (uMediaServer),
-  which fetches and decodes the file itself
-  ([webOS OSE source](https://github.com/webosose/chromium108/blob/master/src/media/neva/webos/umediaclient_impl.cc)).
+Neither maker lets outside developers ship native apps, so both apps are
+web apps that hand the file's address to the TV's own player, with its
+hardware decoders, HDR and sound output. No video goes through a
+JavaScript player (MSE).
 
 ## Installing
 
-There is no store release yet: build the package (see
-[Building](#building)), then install it on a TV in developer mode.
+There is no store release: build the package ([Building](#building)), then
+install it on a TV in developer mode.
 
 ### On a Samsung TV
 
-1. **Certificate.** TVs from 2023 (Tizen 7.0) in developer mode, and the
-   TV emulator from TV Extension 7.0.1, install only packages signed with
-   a **Samsung certificate**
-   ([install policy](https://developer.samsung.com/smarttv/develop/getting-started/using-sdk/tv-emulator/application-install-policy.html),
-   [field](https://github.com/Jellyfin2Samsung/Samsung-Jellyfin-Installer/wiki/FAQ)).
-   Make one in Samsung's Certificate Manager with a Samsung account; its
-   distributor certificate lists the TVs' DUIDs
-   ([certificates](https://developer.samsung.com/smarttv/develop/getting-started/setting-up-sdk/creating-certificates.html)).
-   Older TVs take a Tizen author certificate (made by the SDK's CLI).
-   Keep the author certificate: every store update must be signed with it.
-2. **Developer mode** on the TV: Apps, then `12345` on the remote, then
-   Developer mode On with the computer's IP address, then restart the TV
-   ([TV device](https://developer.samsung.com/smarttv/develop/getting-started/using-sdk/tv-device.html)).
+1. **Certificate.** TVs from 2023 (Tizen 7.0) in developer mode, and the TV
+   emulator, install only packages signed with a **Samsung certificate**
+   ([install policy](https://developer.samsung.com/smarttv/develop/getting-started/using-sdk/tv-emulator/application-install-policy.html)).
+   Make one in Samsung's Certificate Manager with a Samsung account; it
+   lists the TVs' DUIDs. Older TVs take a Tizen author certificate. Keep
+   the author certificate: every store update must be signed with it.
+2. **Developer mode** on the TV: Apps, `12345` on the remote, Developer
+   mode On with the computer's IP address, then restart the TV.
 3. `sdb connect <TV address>`; `sdb devices` names the target.
 4. With a Samsung certificate, `tizen install-permit -t <target>` once.
 5. `tizen install -n pley.wgt -t <target> -- apps/tizen/out`.
 
 ### On an LG TV
 
-1. On the TV, install **Developer Mode** from LG's store and sign in with
-   an LG developer account. Turn Dev Mode Status on (the TV restarts),
-   then Key Server on. A session lasts about 1,000 hours and can be
-   extended; turning it off removes the apps it installed
-   ([Developer Mode](https://webostv.developer.lge.com/develop/getting-started/developer-mode-app),
-   [webosbrew](https://www.webosbrew.org/devmode/)).
+1. Install **Developer Mode** from LG's store and sign in with an LG
+   developer account. Turn Dev Mode Status on (the TV restarts), then Key
+   Server on. A session lasts about 1,000 hours and can be extended;
+   turning it off removes the apps it installed.
 2. `bunx ares-setup-device --add tv -i "host=<TV address>" -i
    "port=9922" -i "username=prisoner"`
 3. `bunx ares-novacom --device tv --getkey`, with the passphrase Developer
@@ -99,51 +55,39 @@ There is no store release yet: build the package (see
    then `bunx ares-launch -d tv app.pley.tv`. `bunx ares-inspect -d tv -a
    app.pley.tv --open` opens the web inspector.
 
-LG's command-line tools (`@webos-tools/cli` 3.2.6, a dev dependency) come
-with `bun install`: `ares-setup-device`, `ares-novacom --getkey`,
-`ares-package`, `ares-install`, `ares-launch`, `ares-inspect`
-([CLI guide](https://webostv.developer.lge.com/develop/tools/cli-dev-guide)).
-Run them with `bunx`; the packager runs through Bun's shim, on Windows
-too. LG signs store builds itself.
+LG's CLI (`@webos-tools/cli`, a dev dependency, run with `bunx`) comes with
+`bun install`. LG signs store builds itself.
 
 ### Stores
 
-- **Samsung Apps TV Seller Office.** A public seller launches in the
-  United States only; other countries need a partner contract
-  ([membership](https://developer.samsung.com/tv-seller-office/guides/membership/becoming-seller-office-member.html)).
-  Jellyfin, the closest case, got in after about two years, for 2021 and
-  later TVs, with a demo server for the reviewers
-  ([jellyfin-tizen #222](https://github.com/jellyfin/jellyfin-tizen/issues/222)).
-  Mandatory checks include: launch within 10 s (5 s ideal), no screen
+- **Samsung Apps TV Seller Office:** a public seller launches in the
+  United States only; other countries need a partner contract. Reviewers
+  need a demo server. Mandatory: launch within 10 s (5 s ideal), no screen
   saver during playback, subtitles in sync, a message when the network
-  drops, Back on the first screen asks before exiting, and the Exit key
-  always exits
-  ([mandatory features](https://developer.samsung.com/smarttv/develop/development-checklist/mandatory-features.html),
-  [Return and Exit](https://developer.samsung.com/smarttv/develop/guides/fundamentals/terminating-applications.html)).
-- **LG Seller Lounge.** Free registration; review in three stages
-  (pretest, function, content), every update re-tested. It needs an IPK,
-  a UX scenario, the self-checklist, a privacy policy, and a server the
-  reviewers can sign in to. Back on the first screen opens the TV's exit
-  popup (webOS 6 and later; older ones go Home)
-  ([approval](https://webostv.developer.lge.com/distribute/app-approval-process),
-  [self-checklist](https://webostv.developer.lge.com/distribute/app-self-checklist)).
+  drops, Back on the first screen asks before exiting, the Exit key always
+  exits
+  ([checklist](https://developer.samsung.com/smarttv/develop/development-checklist/mandatory-features.html)).
+- **LG Seller Lounge:** free registration; review in three stages
+  (pretest, function, content), every update re-tested. It needs an IPK, a
+  UX scenario, the self-checklist, a privacy policy and a server reviewers
+  can sign in to. Back on the first screen opens the TV's exit popup
+  (webOS 6 and later; older ones go Home)
+  ([self-checklist](https://webostv.developer.lge.com/distribute/app-self-checklist)).
 
 ## Samsung
 
 ### What a Samsung TV plays
 
-From Samsung's per-year media specifications
-(`developer.samsung.com/smarttv/develop/specifications/media-specifications/{year}-tv-video-specifications.html`),
-its [general](https://developer.samsung.com/smarttv/develop/specifications/general-specifications.html)
-and [web engine](https://developer.samsung.com/smarttv/develop/specifications/web-engine-specifications.html)
-specifications, and field reports where Samsung says nothing:
+From Samsung's per-year media
+[specifications](https://developer.samsung.com/smarttv/develop/specifications/general-specifications.html)
+and field reports:
 
-| Year | Tizen | Chromium | Beyond H.264 and HEVC (Main 10) | Notes |
+| Year | Tizen | Chromium | Beyond H.264 and HEVC Main 10 | Notes |
 |---|---|---|---|---|
 | 2018 | 4.0 | 56 | VP9 Profile 0 and 2 | no DTS |
 | 2019 | 5.0 | 63 | VP9; 8K HEVC on 8K sets | |
-| 2020 | 5.5 | 69 | AV1 | fMP4 in HLS ([streaming guide](https://developer.samsung.com/smarttv/develop/guides/multimedia/adaptive-streaming.html)) |
-| 2021 | 6.0 | 76 | AV1 | codec queries, HTTP status in player errors; the store's floor for new media apps |
+| 2020 | 5.5 | 69 | AV1 | fMP4 in HLS |
+| 2021 | 6.0 | 76 | AV1 | codec queries, HTTP status in player errors; the store's floor |
 | 2022 | 6.5 | 85 | AV1 | |
 | 2023 | 7.0 | 94 | AV1 | OS upgrades start; developer mode needs a Samsung certificate |
 | 2024 | 8.0 | 108 | AV1 | HLS version 10 |
@@ -152,81 +96,56 @@ specifications, and field reports where Samsung says nothing:
 
 - **Containers:** MKV, MP4, TS and older ones (AVI, MOV, ASF); HEVC only
   from MKV, MP4 and TS.
-- **HDR:** HDR10 and HDR10+ on all UHD sets from 2017
-  ([CE Pro](https://www.cepro.com/news/samsung_amazon_hdr10/2495/)); HLG
-  on HDR sets from 2018 (field practice, not stated by Samsung). **No
-  Samsung TV shows Dolby Vision**, 2026 included
-  ([BGR](https://www.bgr.com/2260222/why-samsung-tv-doesnt-support-dolby-vision/)):
-  the server sends the HDR10 base layer or converts.
-  `webapis.avinfo.isHdrTvSupport()` says whether the panel shows HDR. The
-  TV switches HDR from the stream; the app does nothing.
-- **Sound:** AAC, AC-3, E-AC-3 (5.1 decoded), Opus, AC-4 from 2018, FLAC,
-  MP3, Vorbis, PCM. **DTS** is neither decoded nor passed to a receiver on
-  2018–2026 TVs (decoded through 2017; spec pages, Samsung's
-  [eARC table](https://www.samsung.com/hk_en/support/tv-audio-video/what-is-earc-and-how-to-set-on-samsung-smart-tv/)).
-  **E-AC-3 with Atmos** reaches a soundbar or receiver as it is when the
-  TV's digital output is set to pass Dolby; an app reads that setting
-  with `tizen.tvaudiocontrol.getOutputMode()` and can't change it
-  ([FAQ, Q12](https://developer.samsung.com/smarttv/develop/faq/multimedia.html)).
-  **TrueHD** is in no app specification; owners report apps can't pass it
-  over eARC, though `webapis.systeminfo.isSupportedAudioCodec("TrueHD")`
-  exists from Tizen 6.0.
-- **`<video>` and MSE** stop H.264 at 1080p; 4K and 8K need AVPlay
-  ([FAQ](https://developer.samsung.com/smarttv/develop/faq/multimedia.html)).
-- **AVPlay sends no request headers** but a cookie and a User-Agent
-  ([AVPlay API](https://developer.samsung.com/smarttv/develop/api-references/samsung-product-api-references/avplay-api.html)),
-  so no bearer token: the app plays from keyed addresses
-  ([API.md, Keyed URLs](API.md#keyed-urls)), a token in the URL as other
-  media servers' clients do.
-- **CORS is enforced** for packaged apps, whose requests come from
-  `file://` ([Tizen CORS guide](https://github.com/Samsung/tizen-docs/blob/master/docs/application/web/guides/w3c/security/cors.md));
-  the server answers CORS for those origins ([API.md](API.md)).
-- **Subtitles:** AVPlay renders a few formats but takes external files
-  from local paths only. Pley draws its own and keeps AVPlay's silent.
+- **HDR:** HDR10 and HDR10+ on all UHD sets; HLG on HDR sets from 2018
+  (field practice). **No Samsung TV shows Dolby Vision**: the server sends
+  the HDR10 base layer or converts. The TV switches HDR from the stream;
+  `webapis.avinfo.isHdrTvSupport()` says whether the panel shows HDR.
+- **Sound:** AAC, AC-3, E-AC-3 (5.1 decoded), Opus, AC-4, FLAC, MP3,
+  Vorbis, PCM. **No DTS** on 2018–2026 TVs, decoded or passed through.
+  **E-AC-3 with Atmos** reaches a receiver as it is when the TV's digital
+  output passes Dolby; apps can read that setting
+  (`tizen.tvaudiocontrol.getOutputMode()`) but not change it.
+  **TrueHD:** apps reportedly can't pass it over eARC, though
+  `webapis.systeminfo.isSupportedAudioCodec("TrueHD")` exists from Tizen
+  6.0.
+- **`<video>` and MSE** stop H.264 at 1080p; 4K and 8K need AVPlay.
+- **AVPlay sends no request headers** but a cookie and a User-Agent, so
+  the app plays from keyed addresses ([API.md](API.md#keyed-urls)).
+- **CORS is enforced** for packaged apps (requests from `file://`); the
+  server answers CORS for those origins.
+- **Subtitles:** AVPlay takes external files from local paths only, so
+  Pley draws its own and keeps AVPlay's silent.
 
 ### How Pley plays on a Samsung TV
 
-The capabilities report (`apps/tizen/src/caps.ts`, version 2, see
-[API.md](API.md#version-2)) comes from the model year (from the Tizen
-version; each year ships one), the panel (`productinfo`: 4K, 8K; `avinfo`:
+The capabilities report (`apps/tizen/src/caps.ts`, [version 2](API.md#version-2))
+comes from the model year (from the Tizen version), the panel (4K, 8K,
 HDR), codec queries on Tizen 6.0 and later (AV1, AC-4, TrueHD), and the
 sound output:
 
-- H.264 to 4K60, HEVC Main 10 to 4K60 (8K on 8K sets), VP9 Profile 2, AV1
-  from 2020; HDR10, HDR10+ from 2017 and HLG from 2018 on HDR panels;
-  never Dolby Vision.
-- AC-3 and E-AC-3 sent to the receiver as they are when the TV's output
-  is set to Dolby (DOLBY: AC-3; DOLBY_DIGITAL_PLUS: both). TrueHD and DTS
-  only when Settings → Playback asks ("Send Dolby TrueHD as it is", "Send
-  DTS as it is").
+- H.264 and HEVC Main 10 to 4K60 (8K on 8K sets), VP9 Profile 2, AV1 from
+  2020; HDR10, HDR10+ and HLG on HDR panels; never Dolby Vision.
+- AC-3 and E-AC-3 passed through when the TV's output is set to Dolby
+  (DOLBY: AC-3; DOLBY_DIGITAL_PLUS: both). TrueHD and DTS only when
+  Settings → Playback asks ("Send Dolby TrueHD as it is", "Send DTS as it
+  is").
 - HLS with TS segments; fMP4 from 2020.
 
-AVPlay rules, from Samsung's documentation and what Moonfin and others
-learned on real sets
-([Moonfin](https://github.com/Moonfin-Client/Smart-TV/blob/main/packages/platform-tizen/src/video.js)):
-
-- One call at a time while a seek runs.
-- No seek to 0: a start before 1 s starts at the beginning.
-- Stop and close before opening the next source.
-- The picture is placed in 1920×1080 coordinates whatever the page's size.
-- 4K allowed for HLS (`FIXED_MAX_RESOLUTION=3840X2160`).
-- Its own subtitles silenced.
-- On Tizen 6.0 and later the HTTP status is read from its error messages;
-  a `410` stops playback with the server's message.
-- The screen saver is off while a video plays.
-
-When the TV hides the app (Home, another app), the session is closed; a
-new one opens at the same place when the app comes back.
+AVPlay rules the engine keeps: one call at a time while a seek runs; no
+seek to 0 (a start before 1 s starts at the beginning); stop and close
+before the next source; the picture placed in 1920×1080 coordinates; 4K
+allowed for HLS; on Tizen 6.0 and later a `410` in its error stops
+playback with the server's message; screen saver off during playback.
+When the TV hides the app, the session closes and reopens at the same
+place when it comes back.
 
 ## LG
 
 ### What an LG TV plays
 
-From LG's format pages for each webOS version
-(`webostv.developer.lge.com/develop/specifications/video-audio-{30…260}`),
-its [web engine](https://webostv.developer.lge.com/develop/specifications/web-api-and-web-engine)
-and [streaming](https://webostv.developer.lge.com/develop/specifications/streaming-protocol-drm)
-pages, and field reports:
+From LG's per-version
+[specifications](https://webostv.developer.lge.com/develop/specifications/web-api-and-web-engine)
+and field reports:
 
 | Year | webOS | Chromium | HLS | Notes |
 |---|---|---|---|---|
@@ -235,84 +154,63 @@ pages, and field reports:
 | 2020 | 5 | 68 | v7 | AV1 and VP9 at 4K; no DTS |
 | 2021 | 6 | 79 | v7 | |
 | 2022 | 22 | 87 | v7 | |
-| 2023 | 23 | 94 | v7 | DTS on some models; native HLS sends multichannel sound as stereo |
+| 2023 | 23 | 94 | v7 | DTS on some models; native HLS sends surround as stereo |
 | 2024 | 24 | 108 | v7 | same |
 | 2025 | 25 | 120 | v7 | Dolby Vision from MKV; stereo bug fixed; no DTS |
 | 2026 | 26 | 132 | v7 | stereo bug again; `requiredACG` honored |
 
-Some 2022 and later sets get newer webOS versions (webOS Re:New), so a
-2022 set may run webOS 25. The app goes by the running version, never the
-model year.
+Some 2022 and later sets get newer webOS versions (webOS Re:New), so the
+app goes by the running version, never the model year.
 
 - **Containers:** MKV, MP4, TS, AVI and older ones. H.264 and HEVC Main 10
   at 4K; AV1 and VP9 at 4K from webOS 5; 8K HEVC and AV1 on 8K sets.
 - **HDR:** HDR10 and HLG where `webOS.deviceInfo()` says `hdr10`. **Dolby
-  Vision** profiles 5 and 8 where it says `dolbyVision`; profile 7 plays
-  its HDR10 base layer. Before webOS 25, Dolby Vision shows only from MP4
-  and TS; from MKV the TV shows the base layer
-  ([jellyfin #16092](https://github.com/jellyfin/jellyfin/issues/16092),
-  [jellyfin-web](https://github.com/jellyfin/jellyfin-web/blob/master/src/scripts/browserDeviceProfile.js)).
-  **No LG TV shows HDR10+** (2026 C6 included).
+  Vision** profiles 5 and 8 where it says `dolbyVision` (profile 7 plays
+  its HDR10 base layer); before webOS 25 only from MP4 and TS. **No LG TV
+  shows HDR10+.**
 - **Sound:** AAC, AC-3, E-AC-3, Opus, FLAC (2 channels), MP3, PCM. AC-3
-  and E-AC-3, Atmos included, go to a receiver as they are when sound goes
-  out over ARC, eARC or optical and the digital output isn't PCM. Apps can
-  read these settings but not change them. Multichannel PCM never leaves
-  an app
-  ([forum 23069](https://forum.webostv.developer.lge.com/t/stereo-only-for-dolby-vision-video-with-multi-channel-audio-in-hls-streams/23069)).
-  **TrueHD** has no known path out of an app on any LG
-  ([plx-native #221](https://github.com/GLinnik21/plx-native/issues/221)).
-  **DTS**: decoded on 2018–2019 sets; not on 2020–2022; DTS, DTS-HD and
-  DTS:X to a receiver on some 2023–2024 sets; not from 2025
-  ([HDTVTest](https://www.hdtvtest.co.uk/news/lg-quitely-drops-support-for-dts-sound-on-its-2025-t-vs)).
-- **Native HLS and surround:** with LG's own HLS player, multichannel
-  sound reaches a receiver as stereo on webOS 23 and 24 (fixed in webOS
-  25's firmware) and on webOS 26, where LG promised a fix for late 2026
-  ([forum 23069](https://forum.webostv.developer.lge.com/t/stereo-only-for-dolby-vision-video-with-multi-channel-audio-in-hls-streams/23069)).
-  Files played as they are aren't affected.
-- **Start position:** pass it in the source's `mediaOption`
-  (`option.transmission.playTime.start`). Setting the time once the file
-  loads buffers from the beginning first
-  ([resuming media](https://webostv.developer.lge.com/develop/guides/resuming-media-with-mediaoption)).
-- **No request headers, no cookies.** The pipeline sends only what the
-  web engine gives it, and packaged apps have no cookies: the app plays
-  from keyed addresses ([API.md](API.md#keyed-urls)).
-- **CORS** differs between firmware versions (bypassed on some, enforced
-  on others,
-  [forum 28241](https://forum.webostv.developer.lge.com/t/how-are-we-supposted-to-handle-cors-with-a-non-hosted-app/28241)).
-  The server always answers it for `file://` and `null` origins, and the
-  app signs in with bearer tokens only. Scripts are classic bundles:
-  module scripts fail from `file://`
-  ([forum 28351](https://forum.webostv.developer.lge.com/t/module-script-loads-blocked-under-file-origin-for-installed-webos-app-no-cors-workaround-found/28351)).
-- **Subtitles:** LG lists WebVTT only, and embedded tracks don't show up
-  as text tracks. Pley draws its own.
+  and E-AC-3 (Atmos included) pass through over ARC, eARC or optical when
+  the digital output isn't PCM; apps can read these settings but not
+  change them. Multichannel PCM never leaves an app. **No TrueHD** out of
+  an app. **DTS:** decoded on 2018–2019 sets; passed through (DTS, DTS-HD,
+  DTS:X) on some 2023–2024 sets; otherwise none.
+- **LG's HLS player and surround:** on webOS 23, 24 and 26 multichannel
+  sound reaches a receiver as stereo (LG promised a webOS 26 fix for late
+  2026). Files played as they are aren't affected.
+- **Start position** goes in the source's `mediaOption`
+  (`option.transmission.playTime.start`); seeking after load buffers from
+  the start first.
+- **No request headers, no cookies:** the app plays from keyed addresses.
+- **CORS** varies by firmware, so the server always answers it for
+  `file://` and `null` origins and the app signs in with bearer tokens
+  only. Scripts are classic bundles: module scripts fail from `file://`.
+- **Subtitles:** LG lists WebVTT only and embedded tracks don't show as
+  text tracks, so Pley draws its own.
 - **Permissions:** `requiredACG` in `appinfo.json` lists the system
-  services an app calls. webOS 26 honors it; the store requires it from
-  webOS 27 ([ACG guide](https://webostv.developer.lge.com/develop/guides/acg-guide)).
-  Pley declares `systemconfig.query`, `settings.query`, `arc.query` and
-  `network.query`.
+  services an app calls (honored from webOS 26, required by the store from
+  webOS 27). Pley declares `systemconfig.query`, `settings.query`,
+  `arc.query` and `network.query`.
 
 ### How Pley plays on an LG TV
 
 The capabilities report (`apps/webos/src/caps.ts`) comes from the webOS
 version, `webOS.deviceInfo()` (panel, HDR, Dolby Vision, Atmos) and the
-sound settings (`com.webos.settingsservice`, with the HDMI sink's audio
-formats from `tv.model.edidType`):
+sound settings (`com.webos.settingsservice`; the receiver's formats from
+`tv.model.edidType`):
 
 - H.264 to 4K (60 on webOS 4.0, 30 after), HEVC Main 10 to 4K60 (8K on 8K
-  sets), VP9 Profile 2 and AV1 from webOS 5; HDR10 and HLG; Dolby Vision
+  sets), VP9 Profile 2 and AV1 from webOS 5; HDR10, HLG; Dolby Vision
   profiles 5 and 8 where the TV has it.
-- A Dolby Vision file in a container the TV won't show it from (MKV before
-  webOS 25) is asked for as a remux up front, so it keeps Dolby Vision
-  (`dvContainerMode` in `packages/tv/src/player/plan.ts`).
-- AC-3 and E-AC-3 to a receiver as above; DTS to a receiver on webOS 23
+- A Dolby Vision MKV before webOS 25 is requested as a remux, so it keeps
+  Dolby Vision (`packages/tv/src/player/plan.ts`).
+- AC-3 and E-AC-3 passed through as above; DTS passed through on webOS 23
   and 24 when the receiver takes it; TrueHD and DTS otherwise only when
   Settings asks.
 - HLS with TS segments; fMP4 from webOS 5.
 
-The `<video>` element gets one `<source>` whose type carries the
-`mediaOption`: the start position, the pipeline's reports (`umsmediainfo`,
-for Playback details) and, for HLS, 4K allowed. Frame counters aren't
-read on LG, so a struggling stream isn't judged by them.
+The `<video>` gets one `<source>` whose type carries the `mediaOption`:
+start position, the pipeline's reports (`umsmediainfo`, for Playback
+details) and, for HLS, 4K allowed.
 
 ## How the apps work
 
@@ -320,234 +218,126 @@ read on LG, so a struggling stream isn't judged by them.
 
 | Path | What |
 |---|---|
-| `api/`, `net/`, `auth/` | The HTTP API, the event stream, finding a server, signing in with a code (QR and short link), profiles and their PINs |
-| `state.ts`, `platform.ts` | What the TV keeps (servers, sign-ins, settings, a per-install player id), and what a shell provides |
-| `ui/focus.ts`, `ui/input.ts`, `ui/keys.ts` | Focus moved by the app: rows, columns, grids and free groups, remembered places, panels that keep focus; the remote's keys, held keys at most every 100 ms, long OK; LG's Magic Remote pointer and wheel |
-| `ui/shell/`, `ui/screens/`, `ui/kit/` | The rail, the back stack and the screens: Home (Continue Watching with remove, My List), libraries with A–Z (and in the profile's own order, sorted here), items (Media info closed until OK opens it), people, collections, playlists (made here, smart ones from a library's filters, entries moved and removed), search, music, Settings, Diagnostics, history |
-| `player/` | The playback session: the play request, the recovery ladder, quality, Up Next, skip markers, seek previews, the sleep timer, reports, music in the background |
-| `subs/` | Subtitles drawn by the app: text as WebVTT from the server, pictures (PGS, VobSub, DVB) decoded from the server's `.mks` and drawn on a canvas, with the offset the person sets |
-| `caps/` | The server's direct-play rules, so the player knows what a play request will get, and Playback details can say why |
+| `api/`, `net/`, `auth/` | HTTP API, event stream, server discovery, sign-in with a code (QR and short link), profiles and PINs |
+| `state.ts`, `platform.ts` | What the TV keeps (servers, sign-ins, settings, a per-install player id); what a shell provides |
+| `ui/focus.ts`, `ui/input.ts`, `ui/keys.ts` | Focus (rows, grids, remembered places), remote keys (held keys at most every 100 ms, long OK), LG's Magic Remote pointer and wheel |
+| `ui/shell/`, `ui/screens/`, `ui/kit/` | The rail, back stack and screens: Home, libraries (A–Z, the profile's order), items, people, collections, playlists (smart ones from a library's filters), search, music, Settings, Diagnostics, history |
+| `player/` | Playback: the play request, recovery, quality, Up Next, skip markers, seek previews, sleep timer, reports, background music |
+| `subs/` | Subtitles drawn by the app: text as WebVTT, pictures (PGS, VobSub, DVB) decoded from the server's `.mks` onto a canvas |
+| `caps/` | The server's direct-play rules, so Playback details can say why |
 
-Each shell has:
+Each shell has `facts.ts` (what the TV says about itself; LG's system
+services in `luna.ts`), `caps.ts` (the report, with snapshot tests),
+`engine.ts` (AVPlay, or `<video>` with `mediaOption`), `platform.ts`,
+`main.ts`, the manifest (`config.xml`, `appinfo.json`) and `scripts/`.
 
-- `facts.ts`: what the TV says about itself (on LG through its system
-  services, `luna.ts`);
-- `caps.ts`: the capabilities report, a pure function with snapshot tests;
-- `engine.ts`: the player (AVPlay on Samsung, a `<video>` with a
-  `mediaOption` on LG);
-- `platform.ts` (keys, lifecycle, storage) and `main.ts`;
-- the package's manifest (`config.xml`, `appinfo.json`);
-- `scripts/`: building, packaging, and LG's browser server.
+Sign-in, server discovery (a sweep of the TV's subnet), the player's keys
+and panels, and offline behavior follow the Android TV app.
+[API.md](API.md) has the server's side: OAuth clients `tizen.json` and
+`webos.json`, keyed addresses, CORS.
 
-Signing in, finding the server (a sweep of the TV's own subnet), the
-player's keys and panels, and offline behavior follow the Android TV app.
-[API.md](API.md) has the server's side: the built-in OAuth clients
-`tizen.json` and `webos.json`, keyed addresses, CORS.
+**Built for a 2018 TV:** one script and one stylesheet packaged with the
+fonts, and the first screen drawn from saved data before any network;
+compiled for Chrome 53 (LG) and 56 (Samsung) with small polyfills; laid
+out at 960×540 and zoomed to the TV's graphics plane; only `transform`
+and `opacity` animate; a focus move redraws only what changes; rows and
+grids draw only what is near the screen, pictures at their drawn width,
+nearest focus first; focus resting 400 ms on a title prefetches what
+playing it needs.
 
-### Keeping it fast on a 2018 TV
-
-- One script (410 KB minified, 135 KB compressed) and one stylesheet,
-  packaged with the fonts. Nothing is downloaded before the first screen,
-  which is drawn from what the TV saved, before any network.
-- Preact with signals, compiled ahead for Chrome 53 (LG) and 56
-  (Samsung), with a few small polyfills, and a prelude ahead of the script
-  for what esbuild's helpers read as the script starts.
-- The page is laid out at 960×540 and zoomed to the TV's graphics plane
-  (1920×1080, or 1280×720 on LG's HD sets).
-- Only `transform` and `opacity` animate, on the compositor. No filters,
-  blurs, big shadows or anything that lays out a frame (the rail's entries
-  and the scrubber's thumb grow by scaling). Held keys move rows without
-  animating.
-- A move redraws only what follows it. Tiles redraw only when what they
-  show changes; what follows focus (Home's backdrop and info, the episode
-  info, the A–Z jump) reads it from a signal, so the page and its rows
-  don't redraw. The player's half-second tick redraws only its clock.
-- Rows and grids draw only what is near the screen. Pictures are asked
-  for at the width they are drawn (the server's width buckets) and loaded
-  nearest-focus first, fewer at a time on low-end sets.
-- When focus rests on a title for 400 ms, what playing it needs is
-  fetched, so OK starts playback at once.
+**Remote and pointer:** Next and Previous move between a film's chapters
+(Next plays a playlist's or collection's next title). LG's Magic Remote
+works as a mouse: tiles come into view when pointed at, the wheel moves a
+row a notch, a click on the player's bar seeks there. Sorting libraries
+on an older server says "Sorting libraries needs a newer Pley on the
+server."
 
 ### Audio and subtitle tracks
 
-Audio and subtitles are the profile's.
-
-- A play request names an audio track (`audio_index`) only when the
-  person picked one, on the title's page or in the player. Otherwise the
-  server picks, in the profile's language, the track this TV plays best
-  (its receiver's channels, lossless, Atmos passed through). For a file
-  played as it is, the player switches to the track the answer names and
-  marks it in its menu.
-- Picks are saved for the show or the movie (`PUT
-  /api/items/{id}/streams`). Subtitles picked alone are saved without the
-  audio, so the server's choice is never saved as a pick.
-- Play starts with the tracks just picked on the title's page or as new
-  defaults; the next episode starts with those picked while its Up Next
-  showed.
-- Settings → Profile sets the defaults (Audio language, Subtitles,
-  Subtitle language; `PUT /api/me/track-defaults`).
-- Subtitles forced only by their title say Forced in the track menus.
-- The Subtitles panel's sync row moves subtitles in 0.1 s steps, up to
-  10 s either way, kept per file on the TV and never sent to the server.
-- Subtitle font (Default, Serif, Monospace, Casual) and position (Bottom,
-  A little higher, Higher, Highest: raised 5, 10 or 16 % of the height)
-  join size and background in Settings → Subtitles and display, kept on
-  the TV. The TVs have only the fonts they ship, so a font is offered only
-  where the TV draws it differently from the app's own (measured once on a
-  canvas): a TV without a serif face offers no Serif.
-  Picture subtitles keep the place their file gives them.
-- Find subtitles (`GET /api/items/{id}/subtitles/search`) lists what
-  OpenSubtitles has for the file, those made for this very file first, in
-  the profile's subtitle language or another picked there. One picked is
-  added on the server for everyone and shows at once in the session
-  playing. The panel opens for a video without subtitles too. A server
-  without OpenSubtitles set up answers `503` with `setup: false`: the
-  search says so, an administrator is pointed to Settings → Server, and
-  other profiles no longer see the entry. A server too old to search
-  (`404`) loses the entry for everyone until the app starts over. The TVs
-  have no file picker and no delete.
+- The server picks the audio track, in the profile's language, that this
+  TV plays best, unless the person picked one on the title's page or in
+  the player (`audio_index`).
+- Picks are saved for the show or movie (`PUT /api/items/{id}/streams`);
+  subtitles picked alone are saved without the audio. The next episode
+  starts with the tracks picked while its Up Next showed. Subtitles forced
+  only by their title say Forced in the track menus.
+- Settings → Profile sets the defaults (Audio language, Subtitles, Subtitle
+  language; `PUT /api/me/track-defaults`).
+- Subtitle sync: 0.1 s steps, up to 10 s either way, kept per file on the
+  TV.
+- Settings → Subtitles and display: size, background, font (Default,
+  Serif, Monospace, Casual) and position (Bottom, A little higher, Higher,
+  Highest: raised 5, 10 or 16 % of the height), kept on the TV. A font is
+  offered only if the TV has a face for it. Picture
+  subtitles keep their own position.
+- Find subtitles (`GET /api/items/{id}/subtitles/search`) lists
+  OpenSubtitles results in the profile's subtitle language (or another
+  picked there), those made for this file first; one picked is
+  added on the server for everyone and shows at once. Without OpenSubtitles
+  set up (`503`, `setup: false`) the search says so and points an
+  administrator to Settings → Server; other profiles lose the entry, as
+  does everyone on a server too old to search (`404`). The TVs have no
+  file upload and no delete.
 
 ### Playback speed
 
-The player's Speed plays at 0.5×, 0.75×, 1.25×, 1.5× or 2× for the title
-playing (the next one plays at normal speed). On LG it uses the `<video>`
-element's `playbackRate`, which keeps the voices' pitch. Samsung offers no
-Speed: AVPlay's `setSpeed` is trick play, documented for whole speeds of
-2 and up and for nothing under 1, with no promise about its sound.
+0.5×, 0.75×, 1.25×, 1.5× or 2× for the title playing. On LG through
+`playbackRate`, which keeps pitch. Samsung offers none: AVPlay's speeds are
+trick play, 2× and up, with no promise about sound.
 
 ### Quality
 
-The Quality menu, Original and Automatic follow
-[QUALITY.md](QUALITY.md#the-menu): the player's Quality panel and Settings
-→ Playback → Quality. Automatic is the default until a quality is picked.
-A saved Original from older settings counts only once a quality has been
-picked on this TV (`pley.qualityPicked`).
+The menu, Original and Automatic follow [QUALITY.md](QUALITY.md#the-menu),
+in the player's Quality panel and Settings → Playback → Quality. Automatic
+is the default until a quality is picked on this TV (`pley.qualityPicked`).
 
-Both TVs' players go black between streams, and may when a stream changes
-size, so they follow the
-[rules for such players](QUALITY.md#players-that-go-black-between-streams). Neither says `hls.variants`: a
-transcode comes in one size. What is specific to the TVs:
+Both TVs' players go black between streams, so Automatic follows the
+[rules for such players](QUALITY.md#players-that-go-black-between-streams),
+in `packages/tv/src/player/autoquality.ts`. A transcode comes in one size
+(neither TV says `hls.variants`). TV specifics:
 
-- **Code.** `player/autoquality.ts`, the web player's decisions plus
-  `blanks` for players that go black. The controller feeds it on its
-  half-second tick while it is meant to play, and not within 2 s of its
-  own seek.
-- **Waits:** the engine buffering while it played, as Info's Stalls
-  counts them. A pause, a seek or a new session isn't one.
-- **Delivery:** on LG from what the engine has loaded ahead
-  (`bufferedMs`). AVPlay knows only the position (`knowsBuffer: false`),
-  so on Samsung only waits reveal a slow network.
-- **Network speed:** on Samsung, AVPlay's `CURRENT_BANDWIDTH` for a
-  stream. On LG, which reports none, the buffer's fill rate while it grows
-  (seconds loaded per second times the bitrate), a lower bound. Steps up
-  need one or the other.
-- **Decoding:** an original that fails, or drops frames in the title's
-  first minute of playing, falls back once to the server's quality (the
-  recovery ladder). Later, in Automatic, it plays on and the next title
-  starts a step lower (`struggled`, through the network's memory). Dropped
-  frames in a conversion step Automatic down where the engine counts them;
-  neither TV's engine counts frames yet, so on a TV only the fallbacks
-  apply.
-- **Bitrate changed as it is sent** (`PlaybackInfo.live_bitrate`): `PUT
-  /api/playback/{id}/bitrate`, and the TV's player plays on from the same
-  playlist. A step down never goes above the stream's own bitrate (the
-  quality asked for, or the server's own for an original it converts).
-  The server's answer is the bitrate it goes on at; one lower than asked
-  is as high as that stream goes. A new stream of the same quality (a
-  recovery, a track change) starts at the bitrate the last one reached. A
-  `400` (an older transcoder) puts it back, and the stream is then treated
-  as one whose bitrate can't change.
-- **Memory on the TV:** the slow network is kept 30 minutes per TV and
-  server (`pley.autoQuality.<server>`), so Up Next, and playback that
-  restarts when the TV shows the app again, begin where it left off.
-- **What the person sees:** a step down shows a toast. The Quality row
-  reads "Automatic · 8 Mbps 1080p" ("Automatic · 4 Mbps 1080p" for that
-  stream sent on at 4 Mbps), with the reason under Automatic's row and in
-  Info. Picking Automatic again starts afresh at the original, and a
-  stream sent below its own bitrate goes back to it.
+- **Signals:** waits are the engine buffering while playing (not a pause,
+  seek or new session). LG measures delivery and network speed from its
+  buffer; Samsung has only waits and, for a stream, AVPlay's
+  `CURRENT_BANDWIDTH`. Neither TV counts dropped frames.
+- **Decoding:** an original that fails, or drops frames in its first
+  minute, falls back once to the server's quality.
+- **Bitrate changed as it is sent:** the server's answer is the bitrate it
+  goes on at; a new stream of the same quality (recovery, track change)
+  starts at the bitrate the last one reached; a `400` (older transcoder)
+  makes the stream one whose bitrate can't change.
+- **Memory on the TV:** 30 minutes per server
+  (`pley.autoQuality.<server>`), used when the server doesn't answer; an
+  older server (`404`) isn't asked again until the app restarts.
+- **Shown:** a toast on a step down; the Quality row reads "Automatic · 4
+  Mbps 1080p", with the reason under it and in Info.
+- **Speed test:** 32 MiB read through XMLHttpRequest progress, stopped 2 s
+  after the first byte (or 1 s without one), so it delays the start by at
+  most about 3.5 s; not repeated within 10 minutes. The network question
+  goes out with the item's details and capabilities probe.
 
-**Switching streams.** A change that needs a new session while a video
-plays (a quality picked, an audio track the engine can't switch itself,
-picture subtitles burned in, Automatic's step from the original, Play
-original) is made ready first, as on the web (`player/prepare.ts`):
-
-1. The new session starts beside the one playing (`keep_previous`).
-2. The controller fetches its playlist, the first size it lists (the only
-   one), and with `HEAD` the segment holding the start + 4 s. The server
-   answers once the transcoder has made it. No picture crosses the network
-   twice, since the TV's player can't use what the page fetched.
-3. It waits for that 20 s at most, deciding nothing about the stream
-   playing meanwhile (no stall ladder, no Automatic).
-4. It ends the old session and moves the engine to the new one from where
-   that one got to. The buffering ring waits 2.5 s rather than 0.5 s
-   (`switching`), so a switch whose first segment is ready shows none.
-
-With no transcode free for two at once (`503`), the old session ends
-first. Recoveries after an error or a stall, the first start and Up Next
-start at once.
-
-The screen meanwhile: AVPlay draws on a plane under the page that the page
-can't read, and closes one source before opening the next, so the picture
-is black while AVPlay opens the new stream. The `<video>` engine draws the
-last picture on a canvas over the element (`holdPicture`, at most 1920
-pixels wide) until the next source shows. That works in a desktop browser;
-LG's pipeline shows pictures on its own plane and gives the canvas
-nothing, so the screen is black as on Samsung.
-
-**The server's network memory**
-([QUALITY.md](QUALITY.md#automatic), `GET /api/playback/network`) comes
-first in Automatic:
-
-- The question goes out with the item's details and the capabilities
-  probe, so Play waits for all three at once. Nothing is asked for a
-  quality picked.
-- The speed test reads the 32 MiB through XMLHttpRequest's progress
-  (every TV engine has it; fetch's streamed bodies can't be stopped
-  cleanly before Chromium 66). It stops 2 s after the first byte, or after
-  1 s without one, and waits at most 0.5 s for the server's answer, so a
-  test never delays the start by more than about 3.5 s. It doesn't run
-  again within 10 minutes.
-- Each change of Automatic's ceiling is told to the server as it happens:
-  a step down, a step back up to a quality or to the
-  original, and Automatic picked again.
-- With no answer, or a `404` from an older server, the TV's own 30-minute
-  memory decides; an older server isn't asked or told again until the app
-  starts over.
+**Switching streams** (a quality picked, an audio track the engine can't
+switch, burned-in picture subtitles, Automatic's step from the original,
+Play original; `player/prepare.ts`): the new session starts beside the old
+one (`keep_previous`), the app waits up to 20 s for its playlist and the
+segment at start + 4 s (`HEAD`), then moves the engine there. The screen is
+black meanwhile on both TVs, and the loading ring waits 2.5 s. With no
+transcode free for two (`503`), the old session ends first.
 
 ### The web player
 
-The web player (`apps/web/src/player`) shares these rules. Its own facts,
-kept here until the web app has a doc of its own:
-
-- **Automatic:** waits come from the element's `waiting` and `playing`
-  events (not after a seek or a new session until it plays, not while the
-  tab is hidden); delivery from its buffered ranges once a second; network
-  speed from hls.js's segment loads (bytes over the time each took) or,
-  for a direct play, the buffer's fill rate. Its slow network is kept in
-  the browser for the server it was loaded from (`pley.autoQuality`), and
-  its notice shows over the picture for 4 s.
-- **Network memory:** the question goes out as the player's route loads,
-  alongside the item; the speed test reads a fetch's body stream (a
-  browser without one reads 8 MiB whole); the player's spinner shows
-  meanwhile. The browser asks as one client for good
-  (`pley.networkClient` in its storage), not by the tab's playback id,
-  which would ask for a speed test in every new tab.
-- **Playback speed:** as on LG, through `playbackRate`; `<` and `>` step it.
-- **Subtitle style:** font and position as on the TVs, in the player's
-  Subtitle style, kept in the browser; also for the iPhone's own
-  fullscreen player (a font for `::cue`, raised cues placed by their
-  `line`).
-- **Find subtitles:** also adds a subtitle file from the computer (.srt,
-  .vtt, .ass, .ssa, up to 2 MB) in the language picked. An added track has
-  a delete button where the server says the profile may delete it
-  (`deletable`: an administrator, or whoever added it). On a server too
-  old to search, the entry goes until the page reloads.
+`apps/web/src/player` shares these rules. Web-only facts: the slow network
+is kept in the browser per server (`pley.autoQuality`), the browser asks
+the server's network memory as one client (`pley.networkClient`), `<` and
+`>` step the playback speed, Subtitle style (font and position) is kept in
+the browser and applies to the iPhone's fullscreen player, and Find
+subtitles also uploads a file (.srt, .vtt, .ass, .ssa, up to 2 MB) and
+deletes added tracks where the server allows (`deletable`).
 
 ## Building
 
-With Bun, from the repository's root (`bun install` first). A
-`bunfig.toml` in each package has Bun run the tools too (TypeScript,
-Vitest, LG's CLI), whatever their shebang says:
+With Bun, from the repository root (`bun install` first). A `bunfig.toml`
+in each package has Bun run the tools (TypeScript, Vitest, LG's CLI):
 
 ```sh
 bun run tv:check                     # type checks and tests: the shared package, Samsung, LG
@@ -556,101 +346,65 @@ bun run --cwd apps/webos package     # apps/webos/out/app.pley.tv_<version>_all.
 bun run --cwd apps/webos build       # only an app's dist/ (apps/tizen too); add --dev to keep it readable
 ```
 
-The tests run in Vitest with jsdom: focus moves, keys, playback
-negotiation, the seek keys, real TVs' capabilities as snapshots, AVPlay's
-errors.
+Tests run in Vitest with jsdom.
 
-**Samsung packaging** needs the Tizen SDK's command-line tools
-(`TIZEN_STUDIO` set to the SDK's folder, or `tizen` on the PATH) and a
-security profile named by `PLEY_TIZEN_PROFILE` (default `pley-dev`); see
-[Installing](#on-a-samsung-tv) for which certificate a TV wants. Tizen Studio is
-deprecated; the Tizen SDK 10.0 CLI
-(`web-cli_Tizen_SDK_10.0_windows-64.exe` from
-[download.tizen.org](https://download.tizen.org/sdk/Installer/tizen-sdk_10.0/))
-packages and installs.
+**Samsung packaging** needs the Tizen SDK 10.0 CLI
+([download.tizen.org](https://download.tizen.org/sdk/Installer/tizen-sdk_10.0/);
+Tizen Studio is deprecated), found through `TIZEN_STUDIO` or `tizen` on the
+PATH, and a security profile named by `PLEY_TIZEN_PROFILE` (default
+`pley-dev`).
 
-**Icons.** `bun scripts/render-icons.mjs` draws the apps' pictures from
-the logo: the P on the logo's tile color (#0a1622) to the edges, as 24-bit
-RGB PNGs at 72 dpi. It makes Samsung's 512×423 icon (the format Samsung
-asks for), LG's 80 and 130 px icons (`iconColor` in `appinfo.json`
-matches them on the TV's own tile), and LG's 1920×1080 launch picture
-(`splashBackground`). The stores want their own on publication: Samsung's
-Seller Office a 512×423 and a 1920×1080 logo with its background, LG's
-Seller Lounge a 400×400 icon.
+**Icons:** `bun scripts/render-icons.mjs` draws Samsung's 512×423 icon,
+LG's 80 and 130 px icons (matched by `iconColor` in `appinfo.json`) and
+LG's 1920×1080 launch picture (`splashBackground`). The stores want their
+own on publication: Samsung a 512×423 and a 1920×1080 logo, LG a 400×400
+icon.
 
 ## Testing without a TV
 
-- **LG app in a browser.** `bun run --cwd apps/webos serve` builds the LG
-  app with `--dev`, serves it on `http://localhost:7650` (`PORT` to
-  change) and passes everything else to a Pley server (`PLEY_SERVER`,
-  default `http://127.0.0.1:7640`), so the app and the server share an
-  origin. At 960×540 it is the TV's layout; arrows, Enter and Escape
-  (Back) are the remote. It plays what the browser plays.
-  `localStorage["pley.screenReader"] = "on"` stands in for the TV's
-  screen reader setting.
-- **Samsung TV emulator 10.0**, from
-  `download.tizen.org/sdk/extensions/tv_extensions`. It can't play 4K or
-  DRM, and Samsung's installer insists on Intel HAXM, which can't run
-  beside Hyper-V. On Windows 11 with Hyper-V, unpack the emulator's
-  packages into the SDK by hand and it runs on WHPX. It installs only
-  Samsung-certificate packages.
-- **LG Simulator** (webOS 22 and later; the VirtualBox emulator stops at
-  webOS 6 and is deprecated) runs the TV's Chromium but not its media
-  pipeline, so no `mediaOption`, DRM or TV formats
-  ([Simulator](https://webostv.developer.lge.com/develop/tools/simulator-introduction)).
-  It downloads only through LG's license page.
+- **LG app in a browser:** `bun run --cwd apps/webos serve` builds with
+  `--dev`, serves on `http://localhost:7650` (`PORT` to change) and
+  proxies everything else to a Pley server (`PLEY_SERVER`, default
+  `http://127.0.0.1:7640`). Arrows, Enter and Escape (Back) are the remote.
+  It plays what the browser plays. `localStorage["pley.screenReader"] =
+  "on"` stands in for the TV's screen reader.
+- **Samsung TV emulator 10.0** (`download.tizen.org/sdk/extensions/tv_extensions`):
+  no 4K or DRM; installs only Samsung-certificate packages. Its installer
+  wants Intel HAXM, which can't run beside Hyper-V; on Windows 11 with
+  Hyper-V, unpack its packages into the SDK by hand and it runs on WHPX.
+- **LG Simulator** (webOS 22 and later): the TV's Chromium without its
+  media pipeline, so no `mediaOption`, DRM or TV formats. It downloads
+  only through LG's license page.
 
 ## What still needs a real TV
 
 Samsung, on a 2018–2019 set and a 2021 or later one:
 
-1. Install with a Samsung certificate; launch time (10 s at most, 5 s
-   ideal).
-2. Time to first frame for a 4K HEVC HDR10 film played as it is, and for
-   a transcode (HLS), against the Android TV app's 2.7 s.
-3. HDR10+ from an MKV (the TV's info shows HDR10+), HLG, and a Dolby
-   Vision profile 8 film showing as HDR10.
-4. E-AC-3 with Atmos to a receiver with the output on Dolby Digital+;
-   what TrueHD does when Settings sends it.
-5. Switching the audio track while playing, and to the server's track as
-   a file starts; AVPlay's subtitles staying silent under Pley's; picture
-   subtitles from the `.mks`.
+1. Install with a Samsung certificate; launch time.
+2. Time to first frame, direct and transcoded.
+3. HDR10+ from MKV, HLG, Dolby Vision profile 8 showing as HDR10.
+4. E-AC-3 Atmos to a receiver; TrueHD when Settings sends it.
+5. Audio track switching; AVPlay's subtitles silent; picture subtitles.
 6. fMP4 HLS on 2020–2021 sets; 4K HLS.
-7. A session stopped from the web (`410`), on Tizen 6.0 and later and on
-   older sets (no HTTP status in their errors).
-8. No screen saver during playback; Home and back (the session reopens
-   at the same place); the network dropping.
+7. A session stopped from the web (`410`), on Tizen 6.0+ and older.
+8. No screen saver; Home and back; the network dropping.
 9. D-pad smoothness and memory on a 2018 set.
-10. Automatic's speed test on a remote network: its time and figure
-    against the network's, and the start it gives.
-11. Which subtitle fonts the set has (Settings → Subtitles and display),
-    and whether AVPlay plays 2× with its sound.
+10. Automatic's speed test on a remote network.
+11. Available subtitle fonts; AVPlay at 2× with sound.
 
 LG, on a webOS 4–6 set and a webOS 23 or later one:
 
 1. Install in Developer Mode; launch time.
-2. Dolby Vision profiles 5 and 8 from MP4 and TS (and MKV on webOS 25),
-   and the remux asked for an MKV before webOS 25; the first Dolby Vision
-   film after launch sometimes showing as HDR10.
-3. A transcode's surround sound to a receiver on webOS 23–24 firmware
-   before the fix, and on webOS 26: if it comes out stereo, HLS through
+2. Dolby Vision 5 and 8 from MP4, TS (and MKV on webOS 25); the remux
+   before webOS 25.
+3. Transcoded surround on webOS 23–24 and 26; if stereo, HLS through
    hls.js.
-4. CORS on each firmware (a sign-in and the API with `Authorization`).
-5. Audio track switching while playing a file as it is (the server's
-   track as it starts too), and the order of `audioTracks` against the
-   server's.
-6. `umsmediainfo` reaching Playback details; the start position from
-   `mediaOption`.
-7. DTS to a receiver on a 2023–2024 set; what `tv.model.edidType` says.
-8. Back on the first screen (the TV's exit popup) and `requiredACG` on
-   webOS 26.
-9. The Magic Remote: OK with the pointer showing selects once, the wheel
-   moves a row a notch, and the pointer hides when webOS says it does.
-10. Audio Guidance speaking on each move; on Samsung,
-    Voice Guide the same.
-11. Speed through the media pipeline: the sound at 0.5× and 2× (pitch
-    kept or not), a stream and a file played as it is, and the speed
-    kept after a seek.
-12. Automatic's speed test on a remote network, and which subtitle fonts
-    the set has.
-
+4. CORS on each firmware.
+5. Audio track switching; `audioTracks` order against the server's.
+6. `umsmediainfo` in Playback details; start position from `mediaOption`.
+7. DTS to a receiver on 2023–2024; what `tv.model.edidType` says.
+8. Back on the first screen; `requiredACG` on webOS 26.
+9. The Magic Remote: OK selects once, wheel moves a notch, pointer hides.
+10. Audio Guidance on each move; Samsung's Voice Guide.
+11. Playback speed: pitch, streams and files, after a seek.
+12. Automatic's speed test on a remote network; available subtitle fonts.
