@@ -146,6 +146,9 @@ class PreferencesCeilings(context: Context) {
  *   too slow on this device in the last 30 minutes.
  * - [sample] watches rebuffering and delivery while the video plays, and
  *   asks to step down on a play issue, or back up after calm minutes.
+ * - It settles: a step up that a step down undoes within 10 minutes isn't
+ *   tried again during the title, and each one doubles the calm the next
+ *   step up waits for (3, 6, then 12 minutes).
  * - [deviceFellBehind] is dropped frames at a transcode; at the original,
  *   the recovery ladder switches to the server's quality and tells
  *   [deviceFellBehindAtOriginal].
@@ -193,6 +196,15 @@ class AutoQuality(
     private val bandwidths = ArrayDeque<Pair<Long, Long>>()
     private var lastBandwidth: Long? = null
 
+    // Settling: the last step up (to, when), until a step down or [SETTLE_MS] says whether it held…
+    private var lastUp: Pair<QualityPreset, Long>? = null
+
+    /** …the qualities a step down undid soon after a step up to them, not tried again this title… */
+    private val tooHigh = mutableSetOf<String>()
+
+    /** …and the calm a step up waits for: [CALM_MS], doubled by each step up undone, up to [MAX_CALM_MS]. */
+    private var calmNeededMs = CALM_MS
+
     /**
      * A new file in Automatic (a new title, Up Next's, or Automatic picked
      * in the menu): it starts afresh, at the original, or at most at the
@@ -206,6 +218,7 @@ class AutoQuality(
         originalConverted = false
         lastDownAt = null
         lastChangeAt = null
+        resetSettling()
         resetWatch()
         resetCalm()
         val ceiling = if (start is StartCeiling.Server) start.kbps else remembered(nowMs)
@@ -234,6 +247,7 @@ class AutoQuality(
         file = null
         playing = Qualities.ORIGINAL
         loweredFor = null
+        resetSettling()
         resetWatch()
         resetCalm()
     }
@@ -277,7 +291,7 @@ class AutoQuality(
         delivery(s)?.let { return it }
 
         if (s.bandwidthKbps != null && s.bandwidthKbps > 0) bandwidths.addLast(s.atMs to s.bandwidthKbps)
-        while (bandwidths.isNotEmpty() && bandwidths.first().first < s.atMs - CALM_MS) bandwidths.removeFirst()
+        while (bandwidths.isNotEmpty() && bandwidths.first().first < s.atMs - calmNeededMs) bandwidths.removeFirst()
         return stepUp(s.atMs)
     }
 
@@ -353,6 +367,7 @@ class AutoQuality(
      */
     fun deviceFellBehindAtOriginal(nowMs: Long, convertedKbps: Int?) {
         if (file == null) return
+        wentDown(nowMs)
         originalBlocked = true
         originalPlaysAt(convertedKbps, converted = true)
         loweredFor = LoweredFor.Device
@@ -366,6 +381,7 @@ class AutoQuality(
 
     /** The player plays [step] now. */
     fun applied(step: AutoStep, nowMs: Long) {
+        if (step.up) lastUp = step.to to nowMs else wentDown(nowMs)
         playing = step.to
         lastChangeAt = nowMs
         if (step.up) {
@@ -383,6 +399,19 @@ class AutoQuality(
         }
         resetWatch()
         resetCalm()
+    }
+
+    /**
+     * A step down from what plays: from where a step up went less than
+     * [SETTLE_MS] ago, that step was one too far. It isn't tried again this
+     * title, and the calm before any other step up doubles.
+     */
+    private fun wentDown(nowMs: Long) {
+        val (to, at) = lastUp ?: return
+        lastUp = null
+        if (to.id != playing.id || nowMs - at >= SETTLE_MS) return
+        tooHigh += to.id
+        calmNeededMs = min(MAX_CALM_MS, calmNeededMs * 2)
     }
 
     private fun issue(nowMs: Long, reason: LoweredFor): AutoStep? {
@@ -414,18 +443,20 @@ class AutoQuality(
     }
 
     private fun stepUp(nowMs: Long): AutoStep? {
-        if (playing.original || calmMs < CALM_MS) return null
+        if (playing.original || calmMs < calmNeededMs) return null
         lastDownAt?.let { if (nowMs - it < AFTER_DOWN_MS) return null }
-        lastChangeAt?.let { if (nowMs - it < CALM_MS) return null }
+        lastChangeAt?.let { if (nowMs - it < calmNeededMs) return null }
         val ladder = ladder()
         val at = ladder.indexOf(playing)
         val next = if (at <= 0) Qualities.ORIGINAL else ladder[at - 1]
+        // Settled: the quality above didn't hold this title.
+        if (next.id in tooHigh) return null
         if (next.original && originalBlocked) return null
         deviceTop?.let { top -> if (!next.original && ladder.indexOf(next) < top) return null }
         if (next.original && deviceTop != null) return null
         val need = if (next.original) file?.originalKbps ?: return null else kbps(next)
         // A network it can't measure: it stays where it went down to.
-        if (bandwidths.isEmpty() || bandwidths.first().first > nowMs - CALM_MS + MEASURE_SLACK_MS) return null
+        if (bandwidths.isEmpty() || bandwidths.first().first > nowMs - calmNeededMs + MEASURE_SLACK_MS) return null
         val measured = bandwidths.minOf { it.second }
         if (measured < need * HEADROOM) return null
         return AutoStep(next, reason = null)
@@ -466,6 +497,12 @@ class AutoQuality(
         deliveries.clear()
         lowSince = null
         lastWatchedAt = null
+    }
+
+    private fun resetSettling() {
+        lastUp = null
+        tooHigh.clear()
+        calmNeededMs = CALM_MS
     }
 
     private fun resetCalm() {
@@ -510,6 +547,12 @@ class AutoQuality(
 
         /** …and when the network carries this times the next quality up. */
         const val HEADROOM = 1.6
+
+        /** A step up that a step down undoes this soon was one too far: it isn't tried again this title. */
+        const val SETTLE_MS = 10 * 60_000L
+
+        /** Each step up undone doubles the calm the next one waits for, up to this. */
+        const val MAX_CALM_MS = 4 * CALM_MS
 
         /** The measurements must cover the calm minutes, give or take this. */
         const val MEASURE_SLACK_MS = 5_000L

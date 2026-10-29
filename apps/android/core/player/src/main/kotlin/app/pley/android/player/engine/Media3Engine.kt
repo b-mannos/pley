@@ -24,7 +24,9 @@ import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.source.LoadEventInfo
 import androidx.media3.exoplayer.source.MediaLoadData
+import androidx.media3.exoplayer.trackselection.AdaptiveTrackSelection
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.trackselection.ExoTrackSelection
 import app.pley.android.caps.CapsDetails
 import app.pley.android.caps.CapsGraph
 import app.pley.android.caps.CapsSnapshot
@@ -134,7 +136,7 @@ class Media3Engine(
 
     private val loadControl = PleyLoadControl(BufferPlan.of(profile))
     private val audioDelay = AudioDelay()
-    private val trackSelector = DefaultTrackSelector(app)
+    private val trackSelector = DefaultTrackSelector(app, sizeSwitching())
     private val loading = MediaLoading(app, mediaClient, now)
 
     override val player: ExoPlayer = ExoPlayer.Builder(app)
@@ -520,6 +522,22 @@ class Media3Engine(
 
         /** After a display mode change, how long an HDMI output going is still taken for its doing. */
         const val SWITCH_QUIET_MS = 4_000L
+
+        /**
+         * How much is buffered before Media3 moves up a size of a stream
+         * in several sizes (its default is 10 s): only with room to spare,
+         * so it doesn't swing between two sizes on a network near the line
+         * (docs/QUALITY.md).
+         */
+        const val MIN_BUFFER_FOR_LARGER_SIZE_MS = 20_000
+
+        /** How Media3 moves between a stream's sizes: up only with [MIN_BUFFER_FOR_LARGER_SIZE_MS] buffered, the rest as Media3's defaults. */
+        fun sizeSwitching(): ExoTrackSelection.Factory = AdaptiveTrackSelection.Factory(
+            MIN_BUFFER_FOR_LARGER_SIZE_MS,
+            AdaptiveTrackSelection.DEFAULT_MAX_DURATION_FOR_QUALITY_DECREASE_MS,
+            AdaptiveTrackSelection.DEFAULT_MIN_DURATION_TO_RETAIN_AFTER_DISCARD_MS,
+            AdaptiveTrackSelection.DEFAULT_BANDWIDTH_FRACTION,
+        )
 
         /** Media3 marks setClock for tests; the app always passes Clock.DEFAULT, tests a clock that moves by itself. */
         @SuppressLint("VisibleForTests")

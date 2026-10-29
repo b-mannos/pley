@@ -105,8 +105,13 @@ forgets goes to the server too (`NetworkStart`). A server that can't
 answer, or is too old to, leaves it to the device's own memory below. The decisions are `AutoQuality`'s (core/player), fed every
 half second: rebuffering from the player's state, delivery from the
 buffered position and the playhead, the network from Media3's bandwidth
-estimate, and dropped frames as the recovery ladder counts them. At the
-original, dropped frames are the ladder's switch to the server's quality,
+estimate, and dropped frames as the recovery ladder counts them. It
+settles as docs/QUALITY.md says: a step up that a step down undoes within
+10 minutes isn't tried again during the title (the original included),
+and each such step doubles the calm the next step up waits for (3, 6,
+then 12 minutes, the network measured over all of it); a new title, or
+a quality picked, starts afresh. At the original, dropped frames are the
+ladder's switch to the server's quality,
 as with Original (then Automatic offers Original in its menu rather than
 Play original), and it never steps back up to the original; at a lower
 quality they go to fewer lines. Automatic works out the server's quality
@@ -118,7 +123,10 @@ device's clock since it started: a ceiling from before a restart is
 forgotten. Downloads play as they are, in Automatic too. Waits while the
 server is out of reach (Reconnecting) aren't play issues. A transcode
 comes in several sizes (`hls.variants`, docs/QUALITY.md) that Media3
-moves between by itself, no bigger than the screen: in such a session
+moves between by itself, no bigger than the screen, and up a size only
+with 20 s buffered (`minDurationForQualityIncreaseMs`, Media3's default
+10 s; the rest of its `AdaptiveTrackSelection` as Media3 has it,
+`Media3Engine.sizeSwitching`): in such a session
 (`PlaybackInfo.adaptive`) the half-second feed leaves `AutoQuality` be,
 and only stalls and dropped frames can still start it again lower.
 

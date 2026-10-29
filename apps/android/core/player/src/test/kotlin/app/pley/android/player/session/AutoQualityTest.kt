@@ -341,6 +341,128 @@ class AutoQualityTest {
         assertEquals("4m", play(2 * 60_000L, bandwidth = 50_000)!!.to.id)
     }
 
+    // ---------------------------------------------------------------- it settles
+
+    /** 1080p at 18 Mbps: offered 12, 8, 4 and 2 Mbps; the server's quality is 20 Mbps 1080p. */
+    private val fhd = file(18_000_000, 1920, 1080)
+
+    /** A wait after 20 s of video arriving at [rate] seconds a second: the step it takes. */
+    private fun falters(rate: Double): AutoStep {
+        assertNull(play(20_000, rate = rate))
+        return present(play(3_000, rate = rate, waiting = true))
+    }
+
+    /** Calm with a fast network: no step for [quietMs], then [to] within the next minute. */
+    private fun upAfter(quietMs: Long, to: String) {
+        assertNull(play(quietMs, bandwidth = 50_000))
+        val up = present(play(60_000, bandwidth = 50_000))
+        assertTrue(up.up)
+        assertEquals(to, up.to.id)
+    }
+
+    @Test
+    fun `settles - a step up undone within 10 minutes isn't tried again during the title`() {
+        downTo4m()
+        upAfter(4 * 60_000L + 50_000, "8m")
+        // Two minutes on, the network can't carry 8 Mbps after all (8 × 0.8 × 0.75 = 4.8).
+        assertNull(play(100_000, bandwidth = 50_000))
+        assertEquals("4m", falters(0.8).to.id)
+        val kept = memory.read()
+        assertEquals(4_000, kept!!.first)
+        // However fast the network says it is, it stays where it held, for the rest of the title.
+        assertNull(play(60 * 60_000L, bandwidth = 80_000))
+        assertEquals("4m", auto.playing.id)
+        assertEquals(kept, memory.read())
+    }
+
+    @Test
+    fun `a step down more than 10 minutes after a step up leaves that quality open`() {
+        downTo4m()
+        upAfter(4 * 60_000L + 50_000, "8m")
+        assertNull(play(10 * 60_000L, bandwidth = 9_000))
+        assertEquals("4m", falters(0.8).to.id)
+        // 5 minutes after the step down, as before.
+        upAfter(4 * 60_000L + 50_000, "8m")
+    }
+
+    @Test
+    fun `each step up undone doubles the calm the next one waits for`() {
+        started(fhd)
+        assertEquals(listOf("12m", "8m", "4m", "2m"), ids(auto.ladder()))
+        // 18 × 0.3 × 0.75 = 4.05.
+        assertEquals("4m", falters(0.3).to.id)
+        upAfter(4 * 60_000L + 50_000, "8m")
+        upAfter(2 * 60_000L + 50_000, "12m")
+        // 12 Mbps doesn't hold (12 × 0.9 × 0.75 = 8.1): back to 8, and 12 is off for the title.
+        assertEquals("8m", falters(0.9).to.id)
+        // Later 8 Mbps falters too, more than 10 minutes after it was reached: 4, with 8 still open.
+        assertNull(play(10 * 60_000L, bandwidth = 50_000))
+        assertEquals("4m", falters(0.8).to.id)
+        // 5 minutes after the step down 3 calm minutes would have done; now it takes 6.
+        upAfter(5 * 60_000L + 50_000, "8m")
+        assertNull(play(30 * 60_000L, bandwidth = 50_000))
+        assertEquals("8m", auto.playing.id)
+    }
+
+    @Test
+    fun `the calm doubles to 12 minutes at most`() {
+        // A 4K remux at 60 Mbps: 60 × 0.3 × 0.75 = 13.5, so 12 Mbps 1080p.
+        started(uhd)
+        assertEquals("12m", falters(0.3).to.id)
+        // 20 Mbps 1080p doesn't hold (20 × 0.9 × 0.75 = 13.5): the calm is 6 minutes.
+        upAfter(4 * 60_000L + 50_000, "20m")
+        assertEquals("12m", falters(0.9).to.id)
+        assertEquals("8m", falters(0.9).to.id)
+        upAfter(5 * 60_000L + 50_000, "12m")
+        // 12 doesn't hold either: 12 minutes.
+        assertEquals("8m", falters(0.9).to.id)
+        assertEquals("4m", falters(0.8).to.id)
+        upAfter(11 * 60_000L + 50_000, "8m")
+        // Nor 8: still 12 minutes, not 24.
+        assertEquals("4m", falters(0.9).to.id)
+        assertEquals("2m", falters(0.8).to.id)
+        upAfter(11 * 60_000L + 50_000, "4m")
+    }
+
+    @Test
+    fun `a step back up to the original undone keeps the quality below, here and for the next title`() {
+        downTo4m()
+        upAfter(4 * 60_000L + 50_000, "8m")
+        val original = present(play(4 * 60_000L, bandwidth = 20_000))
+        assertTrue(original.to.original)
+        assertNull(memory.read())
+        // 10 × 1.2 × 0.75 = 9: 8 Mbps, and the original is off for the title.
+        assertEquals("8m", falters(1.2).to.id)
+        assertEquals(8_000, memory.read()!!.first)
+        assertNull(play(30 * 60_000L, bandwidth = 80_000))
+        assertEquals("8m", auto.playing.id)
+    }
+
+    @Test
+    fun `a new title tries every quality again, after the usual calm`() {
+        downTo4m()
+        upAfter(4 * 60_000L + 50_000, "8m")
+        assertEquals("4m", falters(0.8).to.id)
+        // Up Next: it starts where the network held, and steps up after 3 calm minutes.
+        assertEquals("4m", begin(hd).id)
+        settle()
+        upAfter(2 * 60_000L + 50_000, "8m")
+    }
+
+    @Test
+    fun `Automatic picked again starts afresh`() {
+        downTo4m()
+        upAfter(4 * 60_000L + 50_000, "8m")
+        assertEquals("4m", falters(0.8).to.id)
+        auto.stop()
+        // Automatic picked again: afresh, at the original.
+        auto.forgetCeiling()
+        assertSame(Qualities.ORIGINAL, begin(hd))
+        settle()
+        assertEquals("4m", falters(0.6).to.id)
+        upAfter(4 * 60_000L + 50_000, "8m")
+    }
+
     // ---------------------------------------------------------------- the memory
 
     @Test
