@@ -262,6 +262,7 @@ async fn start_fake() -> (Fake, String) {
                             main10: false,
                         }],
                         subtitle_matroska: true,
+                        subtitle_matroska_partial: true,
                         conversions: true,
                         conversions_mp4: true,
                         live_bitrate: true,
@@ -425,12 +426,21 @@ async fn start_fake() -> (Fake, String) {
         )
         .route(
             "/v1/subtitles/mks",
-            // An EBML header, then what was asked for.
+            // An EBML header, then what was asked for. Stream 3's copy takes
+            // a while: its first look has what was copied so far.
             post(|State(fake): State<Fake>, Json(req): Json<SubtitleRequest>| async move {
                 let mut mks = vec![0x1A, 0x45, 0xDF, 0xA3];
-                mks.extend(format!("{}#{:?}", req.path, req.stream_index).into_bytes());
+                let first =
+                    !fake.tracks.lock().iter().any(|r| r.stream_index == req.stream_index && r.path == req.path);
+                let slow = req.partial && req.stream_index == Some(3) && first;
+                if slow {
+                    mks.extend(b"so far");
+                } else {
+                    mks.extend(format!("{}#{:?}", req.path, req.stream_index).into_bytes());
+                }
+                let complete = HeaderName::from_static(SUBTITLES_COMPLETE_HEADER);
                 fake.tracks.lock().push(req);
-                ([(header::CONTENT_TYPE, "video/x-matroska")], mks)
+                ([(header::CONTENT_TYPE, "video/x-matroska"), (complete, if slow { "0" } else { "1" })], mks)
             }),
         )
         .route(
@@ -1126,30 +1136,143 @@ async fn picture_subtitles_come_in_files_of_their_own() {
     let w = world().await;
     let (app, admin) = (&w.app, w.admin.as_str());
     let file = app.file_of(w.movies["Feature"]).await;
-    // The PGS track: copied once by the transcoder, then from the cache.
     let uri = format!("/api/files/{file}/subtitles/3.mks");
+    // The PGS track, while the transcoder copies it: what it has copied so
+    // far, at once, kept out of caches, with ranges.
+    let so_far = app.get(&uri, admin).await;
+    assert_eq!(so_far.status, StatusCode::OK, "{}", so_far.text());
+    assert_eq!(so_far.headers[header::CONTENT_TYPE], "video/x-matroska");
+    assert_eq!(so_far.headers[SUBTITLES_COMPLETE_HEADER], "0");
+    assert_eq!(so_far.headers[header::CACHE_CONTROL], "no-store");
+    assert!(so_far.bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) && so_far.text().ends_with("so far"));
+    assert!(w.fake.tracks.lock()[0].partial, "players don't wait for the whole file");
+    // Then all of it: copied once by the transcoder, then from the cache.
     let first = app.get(&uri, admin).await;
     assert_eq!(first.status, StatusCode::OK, "{}", first.text());
-    assert_eq!(first.headers[header::CONTENT_TYPE], "video/x-matroska");
+    assert_eq!(first.headers[SUBTITLES_COMPLETE_HEADER], "1");
     assert!(first.bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]));
     assert!(first.text().ends_with("Feature (2021).mkv#Some(3)"), "{}", first.text());
-    assert_eq!(app.get(&uri, admin).await.bytes, first.bytes, "from the cache");
+    let cached = app.get(&uri, admin).await;
+    assert_eq!(cached.bytes, first.bytes, "from the cache");
+    assert_eq!(cached.headers[SUBTITLES_COMPLETE_HEADER], "1");
     let ranged = app.call(Method::GET, &uri, Some(admin), None, &[("range", "bytes=0-3")]).await;
     assert_eq!((ranged.status, ranged.bytes.len()), (StatusCode::PARTIAL_CONTENT, 4));
-    assert_eq!(w.fake.tracks.lock().len(), 1);
+    assert_eq!(w.fake.tracks.lock().len(), 2);
     // Text tracks (in the file or next to it), other streams and unknown
     // indexes: none.
     for missing in ["4.mks", "1000.mks", "0.mks", "1.mks", "77.mks", "x.mks"] {
         let reply = app.get(&format!("/api/files/{file}/subtitles/{missing}"), admin).await;
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "{missing}");
     }
-    assert_eq!(w.fake.tracks.lock().len(), 1);
+    assert_eq!(w.fake.tracks.lock().len(), 2);
     // Apps play it with the play scope.
     let me = app.get("/api/auth/me", admin).await.body["id"].as_i64().unwrap();
     let (browse, _) = app.app_token(me, "library").await;
     let (play, _) = app.app_token(me, "library play").await;
     assert_eq!(app.app_call(Method::GET, &uri, &browse, None).await.status, StatusCode::FORBIDDEN);
     assert_eq!(app.app_call(Method::GET, &uri, &play, None).await.bytes, first.bytes);
+}
+
+#[tokio::test]
+async fn pgs_subtitles_come_as_sup_files_for_kodi() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let feature = w.movies["Feature"];
+    // A German PGS file next to the film.
+    let sup = app.media_path("movies/Feature (2021)/Feature (2021).de.sup");
+    std::fs::write(&sup, b"PG\x00\x00\x00\x00\x00\x00\x00\x00\x80\x00\x00").unwrap();
+    let library = app.get(&format!("/api/items/{feature}"), admin).await.body["library_id"].as_i64().unwrap();
+    app.post(&format!("/api/libraries/{library}/scan"), admin, json!({})).await;
+    app.wait_for_scans().await;
+    let file = app.file_of(feature).await;
+    let item = app.get(&format!("/api/items/{feature}"), admin).await;
+    let streams = item.body["files"][0]["streams"].as_array().unwrap().clone();
+    let german = streams.iter().find(|s| s["codec"] == json!("hdmv_pgs_subtitle") && s["external"] == json!(true));
+    let index = german.expect("the .sup is a track")["index"].as_i64().unwrap();
+    // The file as it is, with ranges, the transcoder not asked.
+    let whole = app.get(&format!("/api/files/{file}/subtitles/{index}.sup"), admin).await;
+    assert_eq!(whole.status, StatusCode::OK);
+    assert_eq!(whole.bytes, std::fs::read(&sup).unwrap());
+    let ranged = app
+        .call(
+            Method::GET,
+            &format!("/api/files/{file}/subtitles/{index}.sup"),
+            Some(admin),
+            None,
+            &[("range", "bytes=0-1")],
+        )
+        .await;
+    assert_eq!((ranged.status, &ranged.bytes[..]), (StatusCode::PARTIAL_CONTENT, &b"PG"[..]));
+    assert!(w.fake.tracks.lock().is_empty());
+    // Anything but PGS: none.
+    for missing in ["4.sup", "1000.sup", "0.sup", "77.sup", "x.sup"] {
+        let reply = app.get(&format!("/api/files/{file}/subtitles/{missing}"), admin).await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{missing}");
+    }
+}
+
+#[tokio::test]
+async fn partial_picture_subtitles_come_with_ranges() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let file = app.file_of(w.movies["Feature"]).await;
+    let uri = format!("/api/files/{file}/subtitles/3.mks");
+    // What follows what the player has, of a file still being copied: its
+    // length isn't known yet.
+    let rest = app.call(Method::GET, &uri, Some(admin), None, &[("range", "bytes=4-")]).await;
+    assert_eq!(rest.status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(rest.headers[header::CONTENT_RANGE], "bytes 4-9/*");
+    assert_eq!(rest.text(), "so far");
+    assert_eq!(rest.headers[SUBTITLES_COMPLETE_HEADER], "0");
+}
+
+/// The web app's report: version 1, with the picture subtitles it draws.
+fn web_drawing_pictures() -> Value {
+    json!({
+        "containers": ["mp4", "webm"], "video_codecs": ["h264"], "audio_codecs": ["aac", "mp3"],
+        "subtitle_codecs": ["subrip", "ass", "webvtt", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"],
+        "picture_subtitles_sideload": true
+    })
+}
+
+#[tokio::test]
+async fn picture_subtitles_a_player_draws_are_copied_as_its_playback_starts() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let feature = w.movies["Feature"];
+    // Without its English SubRip file, which the user's choice would pick
+    // over the English PGS track (text plays everywhere).
+    std::fs::remove_file(app.media_path("movies/Feature (2021)/Feature (2021).en.srt")).unwrap();
+    let library = app.get(&format!("/api/items/{feature}"), admin).await.body["library_id"].as_i64().unwrap();
+    app.post(&format!("/api/libraries/{library}/scan"), admin, json!({})).await;
+    app.wait_for_scans().await;
+    let file = app.file_of(feature).await;
+    let copies = || w.fake.tracks.lock().iter().filter(|r| r.stream_index == Some(3)).count();
+    // Nothing chosen: nothing copied.
+    let started = play(app, admin, json!({"item_id": feature, "caps": web_drawing_pictures(), "client_id": "a"})).await;
+    assert_eq!(started.status, StatusCode::OK, "{:?}", started.body);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(copies(), 0);
+    // The English PGS track chosen for the title.
+    let chosen =
+        app.put(&format!("/api/items/{feature}/streams"), admin, json!({"file_id": file, "subtitle_index": 3})).await;
+    assert!(chosen.status.is_success(), "{:?}", chosen.body);
+    // A player that draws them: repackaged (MKV, AC-3), nothing drawn on
+    // the video, the track's copy started with the playback.
+    let started = play(app, admin, json!({"item_id": feature, "caps": web_drawing_pictures(), "client_id": "a"})).await;
+    assert_eq!(started.status, StatusCode::OK, "{:?}", started.body);
+    assert_eq!((&started.body["method"], &started.body["burn_subtitles"]), (&json!("remux"), &json!(false)));
+    assert_eq!(started.body["pts_offset_ms"], json!(1400), "the segments' timestamps: the file's, 1.4 s later");
+    eventually(|| copies() == 1).await;
+    assert!(w.fake.tracks.lock().iter().all(|r| r.partial && r.path.ends_with("Feature (2021).mkv")));
+    // A player that doesn't: nothing more.
+    let started = play(app, admin, json!({"item_id": feature, "caps": browser(), "client_id": "b"})).await;
+    assert_eq!(started.status, StatusCode::OK, "{:?}", started.body);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(copies(), 1);
+    // The player's first look finds the copy under way, then whole.
+    let uri = format!("/api/files/{file}/subtitles/3.mks");
+    assert_eq!(app.get(&uri, admin).await.headers[SUBTITLES_COMPLETE_HEADER], "1");
 }
 
 #[tokio::test]
@@ -1565,6 +1688,7 @@ async fn direct_plays_hold_the_transcoders_background_work() {
     let (app, admin) = (&w.app, w.admin.as_str());
     let clip = play(app, admin, json!({"item_id": w.movies["Clip"], "caps": browser(), "client_id": "tv"})).await;
     assert_eq!((clip.status, clip.body["method"].clone()), (StatusCode::OK, json!("direct")));
+    assert_eq!(clip.body["pts_offset_ms"], Value::Null, "the file's own times");
     eventually(|| w.fake.holds.lock().len() == 1).await;
     assert_eq!(w.fake.holds.lock()[0], 10_000);
 }

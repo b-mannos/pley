@@ -321,6 +321,8 @@ class ProxyTest(unittest.TestCase):
         self.assertEqual(api.subtitle_name("/api/files/7/subtitles/3.vtt", "x-1", False), "/api/files/7/subtitles/3.vtt")
         response, data = self.ask("GET", "/%s/api/files/7/subtitles/1003.fre.forced.vtt" % SECRET)
         self.assertEqual(json.loads(data)["path"], "/api/files/7/subtitles/1003.vtt", "the server's own name")
+        response, data = self.ask("GET", "/%s/api/files/7/subtitles/4.eng.sup" % SECRET)
+        self.assertEqual(json.loads(data)["path"], "/api/files/7/subtitles/4.sup", "PGS as .sup too")
 
     def test_the_servers_redirects_stay_behind_the_proxy(self):
         response, _ = self.ask("GET", "/%s/api/collections/4/images/poster" % SECRET)

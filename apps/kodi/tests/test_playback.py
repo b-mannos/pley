@@ -24,6 +24,10 @@ class PlaybackTest(unittest.TestCase):
         self.assertEqual(direct, [BASE + "/api/files/7/subtitles/1000.fre.forced.vtt"])
         self.assertEqual(playback.beside(BASE, {"hls": False, "subtitles": None}), [])
 
+    def test_pgs_files_are_named_for_kodi_too(self):
+        self.assertEqual(api.subtitle_name("/api/files/7/subtitles/4.sup", "eng", True), "/api/files/7/subtitles/4.eng.forced.sup")
+        self.assertEqual(api.subtitle_name("/api/files/7/subtitles/4.sup", None, False), "/api/files/7/subtitles/4.sup")
+
     def test_subtitles_only_named_forced_are_named_forced_for_kodi(self):
         # Many files flag no forced track and only name it: the server counts
         # it forced, and Kodi would list it as a second "English".

@@ -274,6 +274,29 @@ impl Transcoder {
         self.info().is_some_and(|info| info.capabilities.subtitle_matroska)
     }
 
+    /// Whether the transcoder answers for a picture track's Matroska with
+    /// what it has copied so far ([`Transcoder::subtitle_matroska_so_far`]);
+    /// older ones answer only once it is whole.
+    pub fn copies_subtitles_partially(&self) -> bool {
+        self.info().is_some_and(|info| info.capabilities.subtitle_matroska_partial)
+    }
+
+    /// A picture track's Matroska ([`Transcoder::subtitle_matroska`]) as far
+    /// as it has been copied, and whether that is all of it: the transcoder
+    /// goes on copying after answering. It answers within seconds (half a
+    /// minute while the copy waits for a playback starting, or for a
+    /// sleeping disk), always with a Matroska file players read.
+    pub async fn subtitle_matroska_so_far(
+        &self,
+        path: &str,
+        stream_index: Option<i64>,
+    ) -> TranscoderResult<(Bytes, bool)> {
+        let req = SubtitleRequest { path: path.to_owned(), stream_index, partial: true };
+        let resp = self.post("/v1/subtitles/mks", &req, Duration::from_secs(90)).await?;
+        let complete = resp.headers().get(SUBTITLES_COMPLETE_HEADER).is_none_or(|v| v.as_bytes() != b"0");
+        Ok((resp.bytes().await?, complete))
+    }
+
     /// An embedded track's subtitles as far as they have been pulled out of
     /// the file, and whether that is all of them (the transcoder goes on
     /// pulling them out after answering). The transcoder answers within a

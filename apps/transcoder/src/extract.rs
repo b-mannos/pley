@@ -14,13 +14,15 @@ use std::time::{Duration, Instant, SystemTime};
 
 use futures::future::{BoxFuture, FutureExt, Shared};
 use parking_lot::Mutex;
-use pley_transcoder_api::{MediaInfo, MediaStream, ThumbnailRequest, Tonemapper};
+use pley_transcoder_api::{MediaInfo, MediaStream, StreamKind, ThumbnailRequest, Tonemapper};
 use tokio::sync::Semaphore;
 
+use crate::background::Background;
 use crate::error::{ApiError, ApiResult};
 use crate::ffmpeg::Ffmpeg;
 use crate::matroska;
 use crate::metrics::Metrics;
+use crate::mks;
 use crate::plan::{MAX_DURATION_MS, PLACEBO_STATIC_PEAK, TextSource, ZSCALE_TONEMAP, untagged_hdr_fix};
 use crate::probe::Prober;
 use crate::util::{MEDIA_INPUT_OPTIONS, file_key, input_arg, secs, touch, write_atomically};
@@ -44,6 +46,9 @@ pub struct Extractor {
     /// requests for a track wait for its extraction, which goes on without
     /// them...
     extractions: Mutex<HashMap<String, Extraction>>,
+    /// The picture tracks being copied into Matroska files of their own, by
+    /// [`picture_track_name`], each extracted once for all its requests.
+    pictures: Mutex<HashMap<String, PictureExtraction>>,
     next_extraction: AtomicU64,
     /// ...and one FFmpeg pass per file (it writes every text track).
     file_locks: Locks,
@@ -59,6 +64,12 @@ pub struct Extractor {
     keep_fresh: Duration,
     /// How long a pass over a file may take.
     pass_time: fn(&Path) -> Duration,
+    /// How long a first answer for a picture track waits for FFmpeg to have
+    /// written its header.
+    header_wait: Duration,
+    /// Playbacks starting, which picture tracks wait for: they read the same
+    /// disk or share.
+    background: Option<Arc<Background>>,
 }
 
 /// FFmpeg passes over whole files at once: each reads a file from end to
@@ -70,6 +81,12 @@ const UNREADABLE_KEPT: usize = 1_000;
 const FAILED_PASS_KEPT: Duration = Duration::from_secs(30 * 60);
 /// How many failed passes are remembered.
 const FAILED_PASSES_KEPT: usize = 1_000;
+/// How long a first answer for a picture track waits for FFmpeg to have
+/// written its header (the extraction may wait for a playback starting,
+/// FFmpeg for a sleeping disk), before it is a Matroska file with no block.
+const HEADER_WAIT: Duration = Duration::from_secs(30);
+/// How often an answer for a picture track looks at how far it has come.
+const PICTURE_LOOK_EVERY: Duration = Duration::from_millis(100);
 
 pub struct Image {
     pub bytes: Vec<u8>,
@@ -94,13 +111,22 @@ impl Extractor {
             cue_reads: Arc::new(Semaphore::new(concurrency.max(1))),
             passes: Semaphore::new(PASSES),
             extractions: Mutex::default(),
+            pictures: Mutex::default(),
             next_extraction: AtomicU64::new(0),
             file_locks: Mutex::default(),
             unreadable: Mutex::default(),
             failed_passes: Mutex::default(),
             keep_fresh: KEEP_FRESH,
             pass_time: whole_file_timeout,
+            header_wait: HEADER_WAIT,
+            background: None,
         }
+    }
+
+    /// Picture tracks are extracted once no playback is starting.
+    pub fn with_background(mut self, background: Arc<Background>) -> Self {
+        self.background = Some(background);
+        self
     }
 
     pub async fn thumbnail(&self, req: &ThumbnailRequest) -> ApiResult<Image> {
@@ -199,44 +225,244 @@ impl Extractor {
 
     /// A subtitle track copied as it is into a Matroska file of its own, for
     /// players that show picture subtitles (PGS, VobSub, DVB) next to an HLS
-    /// stream; VobSub keeps its palette, which is in the track's codec
-    /// private data. Times are the original's from the start of the file
-    /// (FFmpeg takes the file's start time off, as the HLS streams do), so
-    /// the track lines up with the playback position. `stream = None`: `path`
-    /// is a subtitle file itself (`.sup`, `.idx`). Only subtitles come out:
-    /// any other track leaves FFmpeg nothing to write, and it fails. Copying
-    /// a track out reads the whole file, so this waits for one of the passes
-    /// over whole files. Written to a file, not a pipe, so the Matroska has
-    /// its Cues and duration and players can seek in it.
-    pub async fn subtitle_matroska(&self, path: &str, stream: Option<i64>) -> ApiResult<Vec<u8>> {
+    /// stream, whole: see [`Extractor::subtitle_matroska_so_far`].
+    pub async fn subtitle_matroska(self: &Arc<Self>, path: &str, stream: Option<i64>) -> ApiResult<Vec<u8>> {
         let path = existing(path)?;
+        let track = picture_track_name(&path, stream)?;
+        let target = self.subs_dir.join(format!("{track}.mks"));
+        if let Some(bytes) = cached_mks(&target).await {
+            return Ok(bytes);
+        }
+        self.picture_extraction(&path, &track, stream).result.await.map_err(|err| err.again())?;
+        Ok(tokio::fs::read(&target).await?)
+    }
+
+    /// A picture subtitle track (`stream`, or the subtitle file at `path`
+    /// itself: `.sup`, `.idx`) copied as it is into a Matroska file of its
+    /// own, as far as it has been copied, and whether that is all of it,
+    /// after `wait` at most. VobSub keeps its palette (the track's codec
+    /// private data). Times are the original's from the start of the file
+    /// (the file's start time taken off, as the HLS streams do it), so the
+    /// track lines up with the playback position.
+    ///
+    /// The track's extraction (started now, unless it is under way) runs on
+    /// its own, past this request, once no playback is starting. A Matroska
+    /// file whose Cues list the track's blocks is read in seconds, and the
+    /// track comes whole. Otherwise FFmpeg copies it out, reading the whole
+    /// file (minutes for a big one on a network share): meanwhile the
+    /// answer is the Matroska FFmpeg has written so far, up to its last
+    /// whole cluster, and players ask again for the rest. A first answer
+    /// waits for FFmpeg to have written the track's header (the Matroska
+    /// with no block, after [`HEADER_WAIT`]): every answer is a file
+    /// players read.
+    pub async fn subtitle_matroska_so_far(
+        self: &Arc<Self>,
+        path: &str,
+        stream: Option<i64>,
+        wait: Duration,
+    ) -> ApiResult<(Vec<u8>, bool)> {
+        let path = existing(path)?;
+        let track = picture_track_name(&path, stream)?;
+        let target = self.subs_dir.join(format!("{track}.mks"));
+        if let Some(bytes) = cached_mks(&target).await {
+            return Ok((bytes, true));
+        }
+        let done = self.picture_extraction(&path, &track, stream).result;
+        tokio::pin!(done);
+        let part = self.subs_dir.join(format!("{track}.mks.part"));
+        let started = Instant::now();
+        loop {
+            tokio::select! {
+                result = &mut done => {
+                    result.map_err(|err| err.again())?;
+                    return Ok((tokio::fs::read(&target).await?, true));
+                }
+                () = tokio::time::sleep(PICTURE_LOOK_EVERY) => {}
+            }
+            if started.elapsed() >= wait
+                && let Some(so_far) = readable_mks(&part).await
+            {
+                return Ok((so_far, false));
+            }
+            if started.elapsed() >= self.header_wait {
+                let codec = self.picture_codec(&path, stream).await;
+                return Ok((mks::header_only(codec), false));
+            }
+        }
+    }
+
+    /// The extraction of picture track `track` under way, or one started
+    /// now. It runs on its own, to the cache: requests waiting for it may go
+    /// away. A track whose pass over the file failed lately has that failure
+    /// for an answer.
+    fn picture_extraction(self: &Arc<Self>, path: &Path, track: &str, stream: Option<i64>) -> PictureExtraction {
+        let mut extractions = self.pictures.lock();
+        if let Some(running) = extractions.get(track) {
+            return running.clone();
+        }
+        let failed_key = format!("{track}.mks");
+        if let Some(err) = self.failed_pass(&failed_key) {
+            let failed = async move { Err(err) };
+            return PictureExtraction { id: u64::MAX, result: failed.boxed().shared() };
+        }
+        Metrics::inc(&self.metrics.subtitle_extractions);
+        let id = self.next_extraction.fetch_add(1, Ordering::Relaxed);
+        let (this, path, entry) = (self.clone(), path.to_owned(), track.to_owned());
+        let task = tokio::spawn(async move {
+            let _over = ForgetPictures { extractor: this.clone(), track: entry.clone(), id };
+            let mut by_ffmpeg = false;
+            let result = this.extract_pictures(&path, &entry, stream, &mut by_ffmpeg).await.map_err(Arc::new);
+            if let Err(err) = &result
+                && by_ffmpeg
+            {
+                this.remember_failed_pass(&failed_key, err.clone());
+            }
+            result
+        });
+        let result = async move { task.await.unwrap_or_else(|err| Err(Arc::new(ApiError::Internal(err.into())))) };
+        let extraction = PictureExtraction { id, result: result.boxed().shared() };
+        extractions.insert(track.to_owned(), extraction.clone());
+        extraction
+    }
+
+    /// Picture track `track` copied into `{track}.mks` in the cache: through
+    /// the Cues of a Matroska file that lists its blocks, else by FFmpeg
+    /// (`by_ffmpeg` is set then). Waits for playbacks starting first: they
+    /// read the same disk or share.
+    async fn extract_pictures(
+        &self,
+        path: &Path,
+        track: &str,
+        stream: Option<i64>,
+        by_ffmpeg: &mut bool,
+    ) -> ApiResult<()> {
+        if let Some(background) = &self.background {
+            background.wait_for_starts().await;
+        }
+        let target = self.subs_dir.join(format!("{track}.mks"));
+        if cached_mks(&target).await.is_some() {
+            return Ok(());
+        }
+        if let Some(index) = stream {
+            let media = self.prober.probe(path).await.map_err(|e| ApiError::Failed(format!("probe failed: {e:#}")))?;
+            let picture = media
+                .streams
+                .iter()
+                .any(|s| s.index == index && s.kind == StreamKind::Subtitle && !s.is_text_subtitle());
+            if !picture {
+                return Err(ApiError::BadRequest(format!("stream {index} is not a picture subtitle track")));
+            }
+            if self.pictures_through_cues(path, track, &media, index, &target).await? {
+                return Ok(());
+            }
+        }
+        *by_ffmpeg = true;
+        self.pictures_through_ffmpeg(path, track, stream, &target).await
+    }
+
+    /// Picture track `index` of a Matroska file read through its Cues and
+    /// written to `target`: whether the file allowed it (else FFmpeg has to
+    /// read it).
+    async fn pictures_through_cues(
+        &self,
+        path: &Path,
+        track: &str,
+        media: &Arc<MediaInfo>,
+        index: i64,
+        target: &Path,
+    ) -> ApiResult<bool> {
+        let matroska = media.format_name.as_deref().is_some_and(|names| names.split(',').any(|n| n == "matroska"));
+        if !matroska || self.unreadable.lock().iter().any(|t| t == track) {
+            return Ok(false);
+        }
+        let permit = self.cue_reads.clone().acquire_owned().await.map_err(|e| ApiError::Internal(e.into()))?;
+        let (file, media, target) = (path.to_owned(), media.clone(), target.to_owned());
+        let read = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            write_through_cues(&file, &media, index, &target)
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("the read through the cues failed: {e}")));
+        match read {
+            Ok(()) => Ok(true),
+            Err(reason) => {
+                tracing::debug!("picture subtitles of {} copied by ffmpeg: {reason}", path.display());
+                let mut unreadable = self.unreadable.lock();
+                if unreadable.len() == UNREADABLE_KEPT {
+                    unreadable.pop_front();
+                }
+                unreadable.push_back(track.to_owned());
+                Ok(false)
+            }
+        }
+    }
+
+    /// A picture track copied by FFmpeg, which reads the whole file: a pass,
+    /// which waits for its turn. Written cluster by cluster to
+    /// `{track}.mks.part` ([`Extractor::subtitle_matroska_so_far`] reads it
+    /// meanwhile), renamed to `target` once whole. Written to a file, not a
+    /// pipe, so the Matroska has its Cues and duration and players can seek
+    /// in it. Only subtitles come out: any other track leaves FFmpeg nothing
+    /// to write, and it fails.
+    async fn pictures_through_ffmpeg(
+        &self,
+        path: &Path,
+        track: &str,
+        stream: Option<i64>,
+        target: &Path,
+    ) -> ApiResult<()> {
         let map = match stream {
             Some(index) => format!("0:{index}"),
             None => "0:s:0".to_owned(),
         };
-        let out = self.subs_dir.join(format!(".{}.mks.tmp", uuid::Uuid::new_v4().simple()));
+        let part = self.subs_dir.join(format!("{track}.mks.part"));
         let mut cmd = self.ff.command();
         cmd.args(["-loglevel", "error"])
             .args(MEDIA_INPUT_OPTIONS)
             .arg("-i")
-            .arg(input_arg(&path))
-            .args(["-map", &map, "-vn", "-an", "-dn", "-c", "copy", "-f", "matroska", "-y"])
-            // Stopped just past the most that is read back.
+            .arg(input_arg(path))
+            .args(["-map", &map, "-vn", "-an", "-dn", "-c", "copy", "-flush_packets", "1", "-f", "matroska", "-y"])
+            // Stopped just past the most that is kept.
             .args(["-fs", &(MAX_EXTRACTED + 1).to_string()])
-            .arg(input_arg(&out));
+            .arg(input_arg(&part));
         let _permit = self.passes.acquire().await.map_err(|e| ApiError::Internal(e.into()))?;
-        Metrics::inc(&self.metrics.subtitle_extractions);
-        let result = match run_capture(cmd, (self.pass_time)(&path)).await {
-            Ok(_) => match tokio::fs::metadata(&out).await {
+        let result = kept_fresh(run_capture(cmd, (self.pass_time)(path)), &[part.as_path()], self.keep_fresh).await;
+        let result = match result {
+            Ok(_) => match tokio::fs::metadata(&part).await {
                 Ok(made) if made.len() > MAX_EXTRACTED => {
                     Err(ApiError::Failed(format!("the subtitle track is over {} MB", MAX_EXTRACTED >> 20)))
                 }
-                _ => tokio::fs::read(&out).await.map_err(ApiError::from),
+                Ok(_) => match flush(&part).await {
+                    Ok(()) => tokio::fs::rename(&part, target).await.map_err(ApiError::from),
+                    Err(err) => Err(err.into()),
+                },
+                Err(err) => Err(err.into()),
             },
             Err(err) => Err(err),
         };
-        let _ = tokio::fs::remove_file(&out).await;
+        if result.is_err() {
+            let _ = tokio::fs::remove_file(&part).await;
+        }
         result
+    }
+
+    /// The Matroska codec ID of a picture track, for a file with no block
+    /// yet: the probe's (cached), a subtitle file's by its extension; PGS
+    /// when neither says.
+    async fn picture_codec(&self, path: &Path, stream: Option<i64>) -> &'static str {
+        let codec = match stream {
+            Some(index) => match self.prober.probe(path).await {
+                Ok(media) => {
+                    media.streams.iter().find(|s| s.index == index).and_then(|s| matroska::picture_codec_id(&s.codec))
+                }
+                Err(_) => None,
+            },
+            None => {
+                let ext = path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+                matches!(ext.as_str(), "idx" | "sub").then_some("S_VOBSUB")
+            }
+        };
+        codec.unwrap_or("S_HDMV/PGS")
     }
 
     /// An embedded text track's WebVTT as far as it has been pulled out of the
@@ -621,6 +847,117 @@ impl Extraction {
     async fn done(self) -> ApiResult<String> {
         self.result.await.map(|text| String::clone(&text)).map_err(|err| err.again())
     }
+}
+
+/// A picture track's extraction under way, and which one it is.
+#[derive(Clone)]
+struct PictureExtraction {
+    id: u64,
+    result: Shared<BoxFuture<'static, Result<(), Arc<ApiError>>>>,
+}
+
+/// [`Forget`] for a picture track.
+struct ForgetPictures {
+    extractor: Arc<Extractor>,
+    track: String,
+    id: u64,
+}
+
+impl Drop for ForgetPictures {
+    fn drop(&mut self) {
+        let mut extractions = self.extractor.pictures.lock();
+        if extractions.get(&self.track).is_some_and(|extraction| extraction.id == self.id) {
+            extractions.remove(&self.track);
+        }
+    }
+}
+
+/// What a picture track's files in the cache are named after: the file's
+/// version, and the track's index (`file`: the file is a subtitle file).
+fn picture_track_name(path: &Path, stream: Option<i64>) -> ApiResult<String> {
+    let key = file_key(path)?;
+    Ok(match stream {
+        Some(index) => format!("{key}_{index}"),
+        None => format!("{key}_file"),
+    })
+}
+
+/// A cached picture track, when it is a whole Matroska file (they are
+/// renamed into place whole: the EBML header says enough).
+async fn cached_mks(path: &Path) -> Option<Vec<u8>> {
+    let bytes = tokio::fs::read(path).await.ok()?;
+    if !bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+        return None;
+    }
+    // In use: cache pruning keeps it.
+    touch(path);
+    Some(bytes)
+}
+
+/// The Matroska FFmpeg is writing at `part`, as far as it can be read
+/// ([`mks::readable`]); `None` before its header is there.
+async fn readable_mks(part: &Path) -> Option<Vec<u8>> {
+    let mut bytes = tokio::fs::read(part).await.ok()?;
+    let end = mks::readable(&bytes)?;
+    bytes.truncate(end);
+    Some(bytes)
+}
+
+/// The most a picture track read through the Cues keeps in memory (see
+/// [`matroska::Budget`]): a Blu-ray's track takes tens of megabytes, its
+/// commentary's as much again. A file whose Cues claim more is left to
+/// FFmpeg, which copies it a packet at a time.
+const PICTURE_READ_BYTES: u64 = 192 << 20;
+
+/// Picture track `index` of a Matroska file, read through its Cues as FFmpeg
+/// would have copied it (its times as [`as_webvtt`] takes them), written to
+/// `target` (to a temporary file beside it, then renamed); an error says why
+/// FFmpeg has to read the file instead. Blocking.
+fn write_through_cues(path: &Path, media: &MediaInfo, index: i64, target: &Path) -> Result<(), String> {
+    let started = Instant::now();
+    let budget = matroska::Budget::new(PICTURE_READ_BYTES, CUE_READ_TIME);
+    let found = matroska::picture_tracks(path, media, &[index], &budget)?;
+    let (tick_ns, whole_ms, reads, bytes_read) = (found.tick_ns, found.whole_ms, found.reads, found.bytes_read);
+    let track = found.tracks.into_iter().next().ok_or("no track read")?;
+    let mut blocks: Vec<mks::Block> = Vec::with_capacity(track.blocks.len());
+    for block in track.blocks {
+        let (time_ms, duration_ms) = ffmpeg_times(tick_ns, whole_ms, media, block.time, block.duration)
+            .ok_or_else(|| format!("stream {index} has a block at a time out of range"))?;
+        if time_ms < 0 || blocks.last().is_some_and(|b| b.time_ms > time_ms) {
+            return Err(format!("stream {index} has blocks before the start or out of order"));
+        }
+        blocks.push(mks::Block { time_ms, duration_ms, data: block.data });
+    }
+    let tmp = target.with_file_name(format!(".{}.mks.tmp", uuid::Uuid::new_v4().simple()));
+    let written = mks::write(&tmp, track.codec, &track.header, &blocks).and_then(|()| std::fs::rename(&tmp, target));
+    if let Err(err) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("the track couldn't be written: {err}"));
+    }
+    tracing::debug!(
+        "picture subtitles of {} read through the cues in {} ms ({} blocks, {reads} reads, {} KB)",
+        path.display(),
+        started.elapsed().as_millis(),
+        blocks.len(),
+        bytes_read / 1024
+    );
+    Ok(())
+}
+
+/// When a block of a file read through its Cues starts and how long it
+/// lasts, in milliseconds, as FFmpeg times it: the file's start time taken
+/// off (see [`as_webvtt`]), rounded the way FFmpeg rescales timestamps.
+/// `None` when that can't be told the same.
+fn ffmpeg_times(tick_ns: u64, whole_ms: bool, media: &MediaInfo, time: i64, duration: u64) -> Option<(i64, u64)> {
+    let tick = (i64::try_from(tick_ns).ok()?, 1_000_000_000);
+    let (us, ms) = ((1, 1_000_000), (1, 1000));
+    if !whole_ms && media.start_ms.is_some() {
+        return None;
+    }
+    let offset = rescale(-media.start_ms.unwrap_or(0) * 1000, us, tick)?;
+    let start = rescale(rescale(time.checked_add(offset)?, tick, us)?, us, ms)?;
+    let duration = rescale(i64::try_from(duration).ok()?, tick, ms)?;
+    Some((start, u64::try_from(duration).ok()?))
 }
 
 /// Takes a track's extraction out of those under way once it's over, however
@@ -1434,6 +1771,115 @@ mod tests {
         assert!(extractor.failed_pass(&track).is_some());
     }
 
+    /// A Matroska file of a PGS track, as FFmpeg is writing it: its
+    /// segment's size unknown, cut off `into` bytes into its second cluster;
+    /// and where that cluster starts.
+    fn mks_being_written(dir: &Path, into: usize) -> (Vec<u8>, usize) {
+        let path = dir.join("whole.mks");
+        let blocks = [
+            mks::Block { time_ms: 1_000, duration_ms: 0, data: vec![0x16, 0, 1] },
+            mks::Block { time_ms: 60_000, duration_ms: 0, data: vec![0x16, 0, 2] },
+        ];
+        mks::write(&path, "S_HDMV/PGS", &[], &blocks).unwrap();
+        let mut bytes = std::fs::read(&path).unwrap();
+        let segment = bytes.windows(4).position(|w| w == [0x18, 0x53, 0x80, 0x67]).unwrap();
+        bytes[segment + 4..segment + 12].copy_from_slice(&[0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+        let second = bytes.windows(4).enumerate().filter(|(_, w)| *w == [0x1F, 0x43, 0xB6, 0x75]).nth(1).unwrap().0;
+        bytes.truncate(second + into);
+        (bytes, second)
+    }
+
+    #[tokio::test]
+    async fn picture_tracks_the_cues_list_come_whole_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let (extractor, name, key) = with_movie(dir.path());
+        let wait = Duration::from_secs(10);
+        // The first answer is the whole track, read through the Cues, so the
+        // player stops asking...
+        let (bytes, complete) = extractor.subtitle_matroska_so_far(&name, Some(3), wait).await.unwrap();
+        assert!(complete);
+        assert_eq!(mks::readable(&bytes), Some(bytes.len()));
+        assert!(bytes.windows(10).any(|w| w == b"S_HDMV/PGS"));
+        assert!(bytes.windows(9).any(|w| w == [0xA3, 0x87, 0x81, 0, 0, 0x80, 0x16, 0, 0]), "its block, at 1 s");
+        // ...cached for every later request, whole ones too.
+        let cached = dir.path().join("subtitles").join(format!("{key}_3.mks"));
+        assert_eq!(std::fs::read(&cached).unwrap(), bytes);
+        assert_eq!(extractor.subtitle_matroska(&name, Some(3)).await.unwrap(), bytes);
+        assert_eq!(extractor.subtitle_matroska_so_far(&name, Some(3), wait).await.unwrap(), (bytes, true));
+        assert_eq!(extractions(&extractor), 1);
+        // Text isn't pictures.
+        let text = extractor.subtitle_matroska_so_far(&name, Some(2), wait).await;
+        assert!(matches!(text, Err(ApiError::BadRequest(_))), "{text:?}");
+    }
+
+    #[tokio::test]
+    async fn picture_tracks_ffmpeg_copies_come_as_far_as_they_are_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut extractor = extractor_with(dir.path(), stand_in_ffmpeg(dir.path(), true));
+        extractor.header_wait = Duration::from_millis(500);
+        let extractor = Arc::new(extractor);
+        let (name, key) = movie_in(&extractor, dir.path(), &unplaced_movie());
+        let wait = Duration::from_millis(100);
+        // FFmpeg reads the file (its Cues don't place the blocks): before it
+        // has written the track's header, a Matroska file with the track and
+        // no block...
+        let (bytes, complete) = extractor.subtitle_matroska_so_far(&name, Some(3), wait).await.unwrap();
+        assert_eq!((bytes, complete), (mks::header_only("S_HDMV/PGS"), false));
+        eventually(|| !ffmpeg_runs(dir.path()).is_empty()).await;
+        let log = std::fs::read_to_string(dir.path().join("ffmpeg.log")).unwrap();
+        assert!(log.contains("-map 0:3") && log.contains("-flush_packets 1") && log.contains(".mks.part"), "{log}");
+        // ...then what it has written, up to its last whole cluster.
+        let (written, second) = mks_being_written(dir.path(), 5);
+        std::fs::write(dir.path().join("subtitles").join(format!("{key}_3.mks.part")), &written).unwrap();
+        let (bytes, complete) = extractor.subtitle_matroska_so_far(&name, Some(3), wait).await.unwrap();
+        assert_eq!((bytes.as_slice(), complete), (&written[..second], false));
+        assert_eq!(ffmpeg_runs(dir.path()).len(), 1, "one copy for every request");
+        assert_eq!(extractions(&extractor), 1);
+    }
+
+    #[tokio::test]
+    async fn picture_tracks_wait_for_playbacks_starting() {
+        let dir = tempfile::tempdir().unwrap();
+        let background = Background::new();
+        let mut extractor = extractor_with(dir.path(), dir.path().join("no-ffmpeg"));
+        extractor.background = Some(background.clone());
+        extractor.header_wait = Duration::from_millis(300);
+        let extractor = Arc::new(extractor);
+        let (name, _) = movie_in(&extractor, dir.path(), &matroska::tests::movie());
+        let wait = Duration::from_millis(100);
+        // While a playback starts, the track isn't read (the playback reads
+        // the same disk)...
+        let starting = background.start();
+        let (bytes, complete) = extractor.subtitle_matroska_so_far(&name, Some(3), wait).await.unwrap();
+        assert_eq!((bytes, complete), (mks::header_only("S_HDMV/PGS"), false));
+        // ...then it is, from the extraction started then.
+        drop(starting);
+        let (bytes, complete) =
+            extractor.subtitle_matroska_so_far(&name, Some(3), Duration::from_secs(10)).await.unwrap();
+        assert!(complete && bytes.windows(10).any(|w| w == b"S_HDMV/PGS"));
+        assert_eq!(extractions(&extractor), 1);
+    }
+
+    #[tokio::test]
+    async fn a_failed_picture_copy_is_told_rather_than_run_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let extractor = Arc::new(extractor_with(dir.path(), stand_in_ffmpeg(dir.path(), false)));
+        let (name, key) = movie_in(&extractor, dir.path(), &unplaced_movie());
+        let wait = Duration::from_millis(100);
+        assert!(matches!(extractor.subtitle_matroska_so_far(&name, Some(3), wait).await, Err(ApiError::Failed(_))));
+        for _ in 0..3 {
+            assert!(matches!(extractor.subtitle_matroska(&name, Some(3)).await, Err(ApiError::Failed(_))));
+        }
+        assert_eq!(ffmpeg_runs(dir.path()).len(), 1);
+        assert!(!dir.path().join("subtitles").join(format!("{key}_3.mks.part")).exists(), "nothing left behind");
+        // A subtitle file of its own is copied whole by FFmpeg (which fails here).
+        let sup = dir.path().join("movie.en.sup");
+        std::fs::write(&sup, b"PG").unwrap();
+        assert!(extractor.subtitle_matroska(&sup.to_string_lossy(), None).await.is_err());
+        let log = std::fs::read_to_string(dir.path().join("ffmpeg.log")).unwrap();
+        assert!(log.lines().nth(1).is_some_and(|run| run.contains("-map 0:s:0")), "{log}");
+    }
+
     #[tokio::test]
     async fn passes_keep_their_outputs_from_being_pruned() {
         let dir = tempfile::tempdir().unwrap();
@@ -1543,7 +1989,7 @@ mod tests {
             .map(|&(time, duration, text)| matroska::TextBlock { time, duration, data: text.as_bytes().to_vec() })
             .collect();
         let track =
-            matroska::TextTrack { stream_index: 2, codec: webvtt::TextCodec::Subrip, header: Vec::new(), blocks };
+            matroska::SubtitleTrack { stream_index: 2, codec: webvtt::TextCodec::Subrip, header: Vec::new(), blocks };
         let whole_ms = tick_ns.is_multiple_of(1_000_000);
         matroska::TextTracks { tick_ns, whole_ms, tracks: vec![track], reads: 0, bytes_read: 0 }
     }

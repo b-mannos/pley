@@ -46,12 +46,26 @@ def a_file(audio=1, subtitle=None):
     return {"id": 7, "container": "mkv", "streams": STREAMS, "selected_audio": audio, "selected_subtitle": subtitle}
 
 
-def direct(audio=1):
-    return {"hls": False, "file_id": 7, "audio_index": audio, "subtitle_index": None, "burn_subtitles": False, "subtitles": subtitle_tracks()}
+def as_vobsub(file):
+    """`file` with its English pictures (4) in VobSub rather than PGS."""
+    streams = [dict(s, codec="dvd_subtitle") if s["index"] == 4 else s for s in STREAMS]
+    return dict(file, streams=streams)
 
 
-def streamed(audio=1, burned=None):
-    return {"hls": True, "file_id": 7, "audio_index": audio, "subtitle_index": burned, "burn_subtitles": burned is not None, "subtitles": subtitle_tracks()}
+def direct(audio=1, sup=False):
+    """PlaybackInfo of a file played as it is; `sup`: from a server that
+    makes `.sup` files of PGS tracks (it says `pts_offset_ms`)."""
+    info = {"hls": False, "file_id": 7, "audio_index": audio, "subtitle_index": None, "burn_subtitles": False, "subtitles": subtitle_tracks()}
+    if sup:
+        info["pts_offset_ms"] = None
+    return info
+
+
+def streamed(audio=1, burned=None, sup=False):
+    info = {"hls": True, "file_id": 7, "audio_index": audio, "subtitle_index": burned, "burn_subtitles": burned is not None, "subtitles": subtitle_tracks()}
+    if sup:
+        info["pts_offset_ms"] = 1400
+    return info
 
 
 def kodi_lists(audio=2, subtitles=5, captions=0):
@@ -168,17 +182,49 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual([(s["index"], s["forced"]) for s in tracks.layout(info, a_file())["subtitles"]], [(3, False), (4, False)])
 
     def test_picture_subtitles_drawn_on(self):
-        english_pictures = a_file(subtitle=4)
-        self.assertEqual(tracks.burn_index(english_pictures), 4)
+        # VobSub and DVB: drawn onto converted video.
+        english_vobsub = as_vobsub(a_file(subtitle=4))
+        self.assertEqual(tracks.burn_index(english_vobsub), 4)
         self.assertIsNone(tracks.burn_index(a_file(subtitle=3)))
         self.assertIsNone(tracks.burn_index(a_file()))
         # Kodi shows the file's own pictures when it plays as it is.
-        self.assertFalse(tracks.needs_burn(direct(), english_pictures))
-        self.assertTrue(tracks.needs_burn(streamed(), english_pictures))
-        self.assertFalse(tracks.needs_burn(streamed(burned=4), english_pictures))
-        # Pictures in a file next to the media are never given to Kodi.
-        self.assertTrue(tracks.needs_burn(direct(), a_file(subtitle=1001)))
+        self.assertFalse(tracks.needs_burn(direct(sup=True), english_vobsub))
+        self.assertTrue(tracks.needs_burn(streamed(sup=True), english_vobsub))
+        self.assertFalse(tracks.needs_burn(streamed(burned=4, sup=True), english_vobsub))
         self.assertFalse(tracks.needs_burn(streamed(), a_file(subtitle=3)))
+
+    def test_pgs_comes_beside_what_plays_as_a_sup_file(self):
+        # PGS isn't drawn on: Kodi gets it as a .sup file beside the stream,
+        # where the server makes one.
+        english_pgs = a_file(subtitle=4)
+        self.assertIsNone(tracks.burn_index(english_pgs))
+        self.assertFalse(tracks.needs_burn(streamed(sup=True), english_pgs))
+        self.assertEqual(
+            playback.beside(BASE, streamed(sup=True), english_pgs),
+            [BASE + p for p in ("/api/files/7/subtitles/3.eng.vtt", "/api/files/7/subtitles/4.eng.sup",
+                                "/api/files/7/subtitles/5.fre.forced.vtt", "/api/files/7/subtitles/1000.spa.vtt")],
+        )
+        lay = tracks.layout(streamed(sup=True), english_pgs)
+        self.assertEqual([s["index"] for s in lay["subtitles"]], [3, 4, 5, 1000])
+        self.assertEqual((lay["subtitle_index"], lay["burned"]), (4, None))
+        # Only the account's: Kodi reads every file it is given as it opens.
+        self.assertEqual(len(playback.beside(BASE, streamed(sup=True), a_file(subtitle=3))), 3)
+        self.assertEqual(len(playback.beside(BASE, streamed(sup=True))), 3)
+        # Pictures next to the media, played as it is: the German PGS file
+        # too, which Kodi wasn't given before.
+        german = a_file(subtitle=1001)
+        self.assertFalse(tracks.needs_burn(direct(sup=True), german))
+        self.assertEqual(
+            playback.beside(BASE, direct(sup=True), german),
+            [BASE + "/api/files/7/subtitles/1000.spa.vtt", BASE + "/api/files/7/subtitles/1001.ger.sup"],
+        )
+        self.assertEqual([s["index"] for s in tracks.layout(direct(sup=True), german)["subtitles"]], [1000, 1001, 3, 4, 5])
+        # A server before .sup files draws them on, as before.
+        self.assertTrue(tracks.needs_burn(streamed(), english_pgs))
+        self.assertTrue(tracks.needs_burn(direct(), german))
+        self.assertEqual(len(playback.beside(BASE, streamed(), english_pgs)), 3)
+        # Drawn on all the same (asked for by an older Kodi): not given.
+        self.assertEqual(len(playback.beside(BASE, streamed(burned=4, sup=True), english_pgs)), 3)
 
 
 class FollowerTest(unittest.TestCase):
@@ -335,31 +381,47 @@ class PrepareTest(unittest.TestCase):
         kodi.clear_property(kodi.PLAYING)
         shutil.rmtree(self.profile, ignore_errors=True)
 
-    def item(self, subtitle):
-        return {"id": 9, "kind": "movie", "title": "Heat", "duration_ms": 1000, "files": [a_file(subtitle=subtitle)]}
+    def item(self, subtitle, vobsub=False):
+        file = a_file(subtitle=subtitle)
+        return {"id": 9, "kind": "movie", "title": "Heat", "duration_ms": 1000, "files": [as_vobsub(file) if vobsub else file]}
 
     def test_picture_subtitles_are_asked_to_be_drawn_on(self):
         # The details known: the pictures are named at once.
-        server = Server(self.item(4), [streamed(burned=4)])
-        playback.prepare(server, BASE, 9, 0, self.item(4))
+        vobsub = self.item(4, vobsub=True)
+        server = Server(vobsub, [streamed(burned=4, sup=True)])
+        playback.prepare(server, BASE, 9, 0, vobsub)
         self.assertEqual((server.posts[0]["file_id"], server.posts[0]["subtitle_index"]), (7, 4))
         playing = json.loads(kodi.get_property(kodi.PLAYING))
         self.assertEqual(playing["tracks"]["burned"], 4)
         # Asked for with the details: the stream that came without them is
         # asked for again.
-        server = Server(self.item(4), [streamed(), streamed(burned=4)])
+        server = Server(vobsub, [streamed(sup=True), streamed(burned=4, sup=True)])
         playback.prepare(server, BASE, 9, 0)
         self.assertNotIn("subtitle_index", server.posts[0])
         self.assertEqual(server.posts[1]["subtitle_index"], 4)
         self.assertEqual(json.loads(kodi.get_property(kodi.PLAYING))["session_id"], "s2")
         # Text subtitles, and pictures Kodi shows in a file it plays as it is: once.
-        server = Server(self.item(3), [streamed()])
+        server = Server(self.item(3), [streamed(sup=True)])
         playback.prepare(server, BASE, 9, 0)
-        server = Server(self.item(4), [direct()])
+        server = Server(vobsub, [direct(sup=True)])
         playback.prepare(server, BASE, 9, 0)
         self.assertEqual(len(server.posts), 1)
         playing = json.loads(kodi.get_property(kodi.PLAYING))
         self.assertEqual((playing["tracks"]["subtitle_index"], playing["tracks"]["known"]), (4, True))
+
+    def test_pgs_is_given_to_kodi_rather_than_drawn_on(self):
+        # The details known: PGS isn't named, the stream keeps its picture,
+        # and Kodi gets the track's .sup beside it.
+        server = Server(self.item(4), [streamed(sup=True)])
+        li = playback.prepare(server, BASE, 9, 0, self.item(4))
+        self.assertNotIn("subtitle_index", server.posts[0])
+        self.assertIn(BASE + "/api/files/7/subtitles/4.eng.sup", li.subtitles)
+        self.assertIsNone(json.loads(kodi.get_property(kodi.PLAYING))["tracks"]["burned"])
+        # A server before .sup files: asked for again, drawn on.
+        server = Server(self.item(4), [streamed(), streamed(burned=4)])
+        li = playback.prepare(server, BASE, 9, 0, self.item(4))
+        self.assertEqual(server.posts[1]["subtitle_index"], 4)
+        self.assertNotIn(BASE + "/api/files/7/subtitles/4.eng.sup", li.subtitles)
 
 
 class ServicePlayer(Player):

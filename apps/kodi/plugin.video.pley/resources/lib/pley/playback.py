@@ -43,17 +43,19 @@ MIME = {
 }
 
 
-def beside(base: str, info: dict) -> list:
-    """The text subtitles Kodi is given beside what it plays, named so it
-    reads their language and whether they are forced (flagged, or only
-    named so: "English (Forced)", "Signs & Songs"): all of them beside a
+def beside(base: str, info: dict, file=None) -> list:
+    """The subtitles Kodi is given beside what it plays, named so it reads
+    their language and whether they are forced (flagged, or only named so:
+    "English (Forced)", "Signs & Songs"): every text track beside a
     converted stream, which carries none; beside a file played as it is,
     the files next to it (Kodi reads the file's own tracks itself, and an
-    address over HTTP has no folder for it to look in). Kodi lists them
-    first, in this order (tracks.py)."""
+    address over HTTP has no folder for it to look in); and the account's
+    PGS subtitles as a `.sup` file where Kodi doesn't find them itself
+    (`file`, the file's details, says which). Kodi lists them first, in
+    this order (tracks.py)."""
     return [
         path_in(base, api.subtitle_name(s["url"], s.get("language"), tracks.is_forced(s)))
-        for s in tracks.beside_tracks(info)
+        for s in tracks.beside_tracks(info, file)
     ]
 
 
@@ -79,9 +81,10 @@ def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=N
         "max_height": asked["max_height"],
         "mode": asked["mode"],
     }
-    # The account's subtitles, when they are pictures: drawn onto the video
-    # if the file is converted (the server draws nothing when Kodi shows
-    # them itself).
+    # The account's subtitles, when they are pictures Kodi can't be given
+    # as a file (VobSub, DVB): drawn onto the video if the file is
+    # converted (the server draws nothing when Kodi shows them itself). PGS
+    # comes as a `.sup` file beside the stream (`beside`).
     burn = tracks.burn_index(tracks.file_of(detail))
     if burn is not None:
         request.update(file_id=tracks.file_of(detail)["id"], subtitle_index=burn)
@@ -115,7 +118,7 @@ def prepare(client: api.Client, base: str, item_id: int, start_ms: int, detail=N
         if mime:
             li.setMimeType(mime)
             li.setContentLookup(False)
-    subtitles = beside(base, info)
+    subtitles = beside(base, info, file)
     if subtitles:
         li.setSubtitles(subtitles)
     markers = [m for m in (detail or {}).get("markers") or [] if m.get("file_id") == info.get("file_id")]

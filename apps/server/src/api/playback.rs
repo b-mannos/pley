@@ -28,8 +28,9 @@ use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
 use crate::library::sidecar::EXTERNAL_INDEX_BASE;
 use crate::playback::{
-    Decision, Delivery, Method, PlaybackInfo, PlaybackRequest, Session, SessionStatus, TranscodeSpec, decide,
-    decide_with_audio, new_media_key, sentence, subtitle_tracks, transcode_info, video_range_shown,
+    Decision, Delivery, HLS_PTS_OFFSET_MS, Method, PlaybackInfo, PlaybackRequest, Session, SessionStatus,
+    TranscodeSpec, decide, decide_with_audio, may_draw_pictures, new_media_key, picture_to_prepare, sentence,
+    subtitle_tracks, transcode_info, video_range_shown,
 };
 use crate::state::AppState;
 use crate::streams;
@@ -130,6 +131,21 @@ pub async fn start(
     // sounds on its output), or for a file that streams anyway the one its
     // stream copies. `PlaybackInfo.audio_index` tells the player.
     let decision = decide_picked(&state, user.id, &row, &file, info.as_ref(), &streams, &mut req).await?;
+    // Picture subtitles the player draws from their own file: copied out of
+    // the media file from now on, rather than once the player asks.
+    let picture = if may_draw_pictures(&streams, &req.caps) {
+        let chosen = match req.subtitle_index {
+            Some(_) => None,
+            None => {
+                let pref = streams::load(&state.db, user.id, streams::scope(&row)).await?;
+                let defaults = streams::defaults(&state.db, user.id).await?;
+                streams::resolve(pref.as_ref(), &defaults, &streams, None).subtitle
+            }
+        };
+        picture_to_prepare(&streams, &req, &decision, chosen)
+    } else {
+        None
+    };
     let mut reasons = decision.reasons.clone();
     let video_stream = info.as_ref().and_then(|i| i.video()).cloned();
     let mut subtitles = subtitle_tracks(file.id, &streams);
@@ -168,11 +184,15 @@ pub async fn start(
         session.app_grant = user.app.as_ref().map(|app| app.grant_id);
         session.media_key = req.keyed_urls.then(new_media_key);
         // The transcoder doesn't see direct plays: its background work waits
-        // for the player's first reads too.
+        // for the player's first reads too, and so do the picture subtitles.
         if state.transcoder.is_available() {
             let transcoder = state.transcoder.clone();
+            let prepare = picture.map(|index| (state.clone(), file.clone(), index));
             tokio::spawn(async move {
                 let _ = transcoder.hold_background(DIRECT_PLAY_HOLD).await;
+                if let Some((state, file, index)) = prepare {
+                    prepare_picture_track(&state, &file, index);
+                }
             });
         }
         let session = state.sessions.insert(session);
@@ -200,6 +220,7 @@ pub async fn start(
             video_range: video_stream.and_then(|v| video_range_shown(&v, &req.caps, Delivery::Direct)),
             adaptive: false,
             live_bitrate: false,
+            pts_offset_ms: None,
         }));
     }
 
@@ -232,6 +253,10 @@ pub async fn start(
         },
     };
     let created = state.transcoder.create_job(&job_request).await.map_err(|err| for_viewer(&user, err))?;
+    // Once the transcoder knows a playback starts: the copy waits for it.
+    if let Some(index) = picture {
+        prepare_picture_track(&state, &file, index);
+    }
     let method = match (&created.video, &created.audio) {
         (Some(v), _) if v.mode == VideoMode::Copy => Method::Remux,
         (Some(_), _) => Method::Transcode,
@@ -295,6 +320,7 @@ pub async fn start(
             .and_then(|(v, plan)| video_range_shown(&v, &req.caps, Delivery::of_plan(plan))),
         adaptive,
         live_bitrate: method == Method::Transcode && state.transcoder.live_bitrate(),
+        pts_offset_ms: Some(HLS_PTS_OFFSET_MS),
     }))
 }
 
@@ -1047,7 +1073,8 @@ pub struct SubtitleQuery {
 
 /// `/api/files/{id}/subtitles/{index}.vtt`: a text track (or subtitle file)
 /// as WebVTT, moved by `offset_ms` when asked; `{index}.mks`: a picture
-/// track in a Matroska file of its own.
+/// track in a Matroska file of its own; `{index}.sup`: a PGS track as a
+/// `.sup` file (Kodi's).
 pub async fn subtitles(
     State(state): State<AppState>,
     user: AuthUser,
@@ -1059,6 +1086,11 @@ pub async fn subtitles(
         let index: i64 = index.parse().map_err(|_| AppError::not_found("unknown subtitle file"))?;
         let file = visible_file(&state, &user, id).await?;
         return picture_track(&state, &user, file, index, request).await;
+    }
+    if let Some(index) = name.strip_suffix(".sup") {
+        let index: i64 = index.parse().map_err(|_| AppError::not_found("unknown subtitle file"))?;
+        let file = visible_file(&state, &user, id).await?;
+        return pgs_track(&state, &user, file, index, request).await;
     }
     let index: i64 = name
         .strip_suffix(".vtt")
@@ -1142,6 +1174,13 @@ const MATROSKA: &str = "video/x-matroska";
 /// are. Made once per file version (by the transcoder) and cached, then
 /// served from the cache with ranges. `404` for a text track or anything
 /// but subtitles.
+///
+/// While the transcoder copies it (a file whose Cues don't list it: FFmpeg
+/// reads the whole file), the answer is the Matroska copied so far, up to
+/// its last whole cluster, with `X-Pley-Complete: 0`: players ask again
+/// (every few seconds) for the rest, as for text tracks. Every answer is a
+/// Matroska file players read, its track's header at least. A whole one
+/// says `X-Pley-Complete: 1`.
 async fn picture_track(
     state: &AppState,
     user: &AuthUser,
@@ -1156,29 +1195,36 @@ async fn picture_track(
     if !picture {
         return Err(AppError::not_found("no picture subtitle track has this index"));
     }
-    let (sidecar, version) = subtitle_source(state, &file, index).await?;
-    let cache =
-        state.config.cache_dir().join("subtitles").join(format!("{}_{}_{}{version}.mks", file.id, index, file.mtime));
+    let (cache, path, stream_index) = picture_source(state, &file, index).await?;
     if !is_matroska(&cache).await {
         if !state.transcoder.copies_subtitles() {
             return Err(AppError::Unavailable("the transcoder can't copy subtitle tracks yet: update it".into()));
         }
-        let (path, stream_index) = match sidecar {
-            Some(path) => (path, None),
-            None => (file.path.clone(), Some(index)),
-        };
-        let transcoder = state.transcoder.clone();
-        let made =
-            extract_once(cache.clone(), async move { Ok(transcoder.subtitle_matroska(&path, stream_index).await?) })
+        let made = if state.transcoder.copies_subtitles_partially() {
+            let (bytes, complete) = state
+                .transcoder
+                .subtitle_matroska_so_far(&path, stream_index)
                 .await
                 .map_err(|err| for_viewer(user, err))?;
+            if !complete {
+                return Ok(held_bytes(request.headers(), bytes, false, MATROSKA));
+            }
+            cache_subtitles(&cache, &bytes).await;
+            bytes
+        } else {
+            let transcoder = state.transcoder.clone();
+            let made =
+                extract_once(
+                    cache.clone(),
+                    async move { Ok(transcoder.subtitle_matroska(&path, stream_index).await?) },
+                )
+                .await
+                .map_err(|err| for_viewer(user, err))?;
+            Bytes::from((*made).clone())
+        };
         if !is_matroska(&cache).await {
             // Not cached (a full disk): served as it is.
-            return Ok((
-                [(header::CONTENT_TYPE, MATROSKA), (header::CACHE_CONTROL, "private, max-age=3600")],
-                (*made).clone(),
-            )
-                .into_response());
+            return Ok(held_bytes(request.headers(), made, true, MATROSKA));
         }
     }
     let response =
@@ -1186,7 +1232,176 @@ async fn picture_track(
     let mut response = response.map(Body::new);
     response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(MATROSKA));
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=3600"));
+    response.headers_mut().insert(SUBTITLES_COMPLETE_HEADER, HeaderValue::from_static("1"));
     Ok(response)
+}
+
+/// How long a `.sup` answer waits for its track to be whole: Kodi reads it
+/// once, as the playback opens. A Matroska file's comes in seconds, read
+/// through its Cues; past this, what is copied so far.
+const SUP_WAIT: Duration = Duration::from_secs(8);
+
+/// A PGS track (in the file or next to it) as a `.sup` file, for players
+/// that read those next to a stream but no Matroska (Kodi): a sidecar
+/// `.sup` as it is, an embedded track made of its `.mks`
+/// ([`picture_track`]), with an empty display set at 0 first. Kodi reads
+/// it once, as the playback opens: an answer waits up to [`SUP_WAIT`] for
+/// the whole track, then has what is copied so far (`X-Pley-Complete: 0`),
+/// and the player asks again later. `404` for anything but PGS.
+async fn pgs_track(
+    state: &AppState,
+    user: &AuthUser,
+    file: catalog::FileRow,
+    index: i64,
+    request: Request,
+) -> ApiResult<Response> {
+    let pgs = file
+        .streams()
+        .iter()
+        .any(|s| s.index == index && s.kind == StreamKind::Subtitle && s.codec == "hdmv_pgs_subtitle");
+    if !pgs {
+        return Err(AppError::not_found("no PGS subtitle track has this index"));
+    }
+    let (cache, path, stream_index) = picture_source(state, &file, index).await?;
+    if stream_index.is_none() && path.to_ascii_lowercase().ends_with(".sup") {
+        let response =
+            ServeFile::new(&path).oneshot(request).await.map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
+        let mut response = response.map(Body::new);
+        response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(SUP));
+        response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=3600"));
+        return Ok(response);
+    }
+    let (mks, complete) = match tokio::fs::read(&cache).await {
+        Ok(bytes) if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) => (Bytes::from(bytes), true),
+        _ => {
+            if !state.transcoder.copies_subtitles_partially() {
+                return Err(AppError::Unavailable("the transcoder can't copy subtitle tracks yet: update it".into()));
+            }
+            let started = std::time::Instant::now();
+            loop {
+                let (bytes, complete) = state
+                    .transcoder
+                    .subtitle_matroska_so_far(&path, stream_index)
+                    .await
+                    .map_err(|err| for_viewer(user, err))?;
+                if complete {
+                    cache_subtitles(&cache, &bytes).await;
+                }
+                if complete || started.elapsed() >= SUP_WAIT {
+                    break (bytes, complete);
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    };
+    let sup = crate::pgs::from_matroska(&mks).ok_or_else(|| AppError::Internal(anyhow::anyhow!("not a PGS track")))?;
+    Ok(held_bytes(request.headers(), Bytes::from(sup), complete, SUP))
+}
+
+/// What `.sup` files are served as.
+const SUP: &str = "application/octet-stream";
+
+/// Where picture track `index` of `file` is cached, and what the transcoder
+/// copies it from: the file and the track's stream, or a sidecar (`None`).
+async fn picture_source(
+    state: &AppState,
+    file: &catalog::FileRow,
+    index: i64,
+) -> ApiResult<(PathBuf, String, Option<i64>)> {
+    let (sidecar, version) = subtitle_source(state, file, index).await?;
+    let cache =
+        state.config.cache_dir().join("subtitles").join(format!("{}_{}_{}{version}.mks", file.id, index, file.mtime));
+    Ok(match sidecar {
+        Some(path) => (cache, path, None),
+        None => (cache, file.path.clone(), Some(index)),
+    })
+}
+
+/// Picture tracks being prepared for a playback starting ([`prepare_picture_track`]), by cache file.
+static PREPARING: LazyLock<DashMap<PathBuf, ()>> = LazyLock::new(DashMap::new);
+
+/// Has the transcoder start copying picture track `index` of `file` out of
+/// its file now (a playback starts whose player will ask for it, see
+/// [`crate::playback::picture_to_prepare`]), rather than when the player
+/// asks: on a network share, a file whose Cues don't list the track takes
+/// minutes to read. The transcoder starts once the playback's own start is
+/// over, and goes on alone; a copy it finishes now is cached here.
+pub(crate) fn prepare_picture_track(state: &AppState, file: &catalog::FileRow, index: i64) {
+    if !state.transcoder.copies_subtitles_partially() {
+        return;
+    }
+    let (state, file) = (state.clone(), file.clone());
+    tokio::spawn(async move {
+        let Ok((cache, path, stream_index)) = picture_source(&state, &file, index).await else { return };
+        if is_matroska(&cache).await || PREPARING.insert(cache.clone(), ()).is_some() {
+            return;
+        }
+        match state.transcoder.subtitle_matroska_so_far(&path, stream_index).await {
+            Ok((bytes, true)) => cache_subtitles(&cache, &bytes).await,
+            Ok(_) => tracing::debug!("picture subtitles {index} of file {} are being copied", file.id),
+            Err(err) => tracing::debug!("picture subtitles {index} of file {} not copied: {err}", file.id),
+        }
+        PREPARING.remove(&cache);
+    });
+}
+
+/// A picture track's file held in memory (copied so far, or whole but not
+/// cached) as `content_type`, with what `X-Pley-Complete` says, and the
+/// range asked for in `headers` (one, as `ServeFile` serves them). Of a
+/// partial Matroska file, the bytes are what it will start with once
+/// whole, but for the sizes its header doesn't know yet (its segment's,
+/// its duration) and the seek head FFmpeg fills in last: a player may fetch
+/// only what follows what it has. Its length isn't known yet:
+/// `Content-Range` says `*` for it.
+fn held_bytes(headers: &axum::http::HeaderMap, bytes: Bytes, complete: bool, content_type: &'static str) -> Response {
+    let cache = if complete { "private, max-age=3600" } else { "no-store" };
+    let mut response = match byte_range(headers.get(header::RANGE), bytes.len() as u64) {
+        Ok(None) => (StatusCode::OK, bytes).into_response(),
+        Ok(Some((start, end))) => {
+            let total = if complete { bytes.len().to_string() } else { "*".into() };
+            let range = format!("bytes {start}-{end}/{total}");
+            let mut part = (StatusCode::PARTIAL_CONTENT, bytes.slice(start as usize..=end as usize)).into_response();
+            if let Ok(value) = HeaderValue::from_str(&range) {
+                part.headers_mut().insert(header::CONTENT_RANGE, value);
+            }
+            part
+        }
+        Err(()) => {
+            let mut none = StatusCode::RANGE_NOT_SATISFIABLE.into_response();
+            if let Ok(value) = HeaderValue::from_str(&format!("bytes */{}", bytes.len())) {
+                none.headers_mut().insert(header::CONTENT_RANGE, value);
+            }
+            none
+        }
+    };
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
+    headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    headers.insert(SUBTITLES_COMPLETE_HEADER, HeaderValue::from_static(if complete { "1" } else { "0" }));
+    response
+}
+
+/// The byte range a `Range` header asks for of `len` bytes, first and last
+/// included: `None` for all of them (no header, or one asking for several
+/// ranges or in other units, which is answered whole), an error for a
+/// range that starts past the end (nothing new yet, of a partial file).
+fn byte_range(range: Option<&HeaderValue>, len: u64) -> Result<Option<(u64, u64)>, ()> {
+    let Some(spec) = range.and_then(|r| r.to_str().ok()).and_then(|r| r.trim().strip_prefix("bytes=")) else {
+        return Ok(None);
+    };
+    if spec.contains(',') {
+        return Ok(None);
+    }
+    let Some((first, last)) = spec.split_once('-') else { return Ok(None) };
+    let (first, last) = (first.trim(), last.trim());
+    let range = match (first.parse::<u64>(), last.parse::<u64>()) {
+        (Ok(first), Ok(last)) if first <= last => (first, last.min(len.saturating_sub(1))),
+        (Ok(first), Err(_)) if last.is_empty() => (first, len.saturating_sub(1)),
+        (Err(_), Ok(suffix)) if first.is_empty() && suffix > 0 => (len.saturating_sub(suffix), len.saturating_sub(1)),
+        _ => return Ok(None),
+    };
+    if range.0 >= len { Err(()) } else { Ok(Some(range)) }
 }
 
 /// Whether `path` is a whole Matroska file (cached ones are renamed into
@@ -1279,5 +1494,49 @@ async fn cache_subtitles(path: &std::path::Path, data: &[u8]) {
     if let Err(err) = written {
         let _ = tokio::fs::remove_file(&tmp).await;
         tracing::debug!("subtitles not cached in {}: {err}", path.display());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_ranges_of_matroska_held_in_memory() {
+        let range = |r: &str, len| byte_range(Some(&HeaderValue::from_str(r).unwrap()), len);
+        assert_eq!(byte_range(None, 100), Ok(None));
+        assert_eq!(range("bytes=0-9", 100), Ok(Some((0, 9))));
+        assert_eq!(range("bytes=40-", 100), Ok(Some((40, 99))), "what follows what the player has");
+        assert_eq!(range("bytes=90-200", 100), Ok(Some((90, 99))));
+        assert_eq!(range("bytes=-10", 100), Ok(Some((90, 99))));
+        assert_eq!(range("bytes=100-", 100), Err(()), "nothing new yet");
+        assert_eq!(range("bytes=0-1,5-9", 100), Ok(None), "several: all of it");
+        assert_eq!(range("items=0-1", 100), Ok(None));
+        assert_eq!(range("bytes=9-0", 100), Ok(None));
+    }
+
+    #[tokio::test]
+    async fn partial_matroska_answers() {
+        let bytes = Bytes::from_static(b"0123456789");
+        let mut headers = axum::http::HeaderMap::new();
+        let whole = held_bytes(&headers, bytes.clone(), false, MATROSKA);
+        assert_eq!(whole.status(), StatusCode::OK);
+        assert_eq!(whole.headers()[SUBTITLES_COMPLETE_HEADER], "0");
+        assert_eq!(whole.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(whole.headers()[header::CONTENT_TYPE], MATROSKA);
+        headers.insert(header::RANGE, HeaderValue::from_static("bytes=4-"));
+        let rest = held_bytes(&headers, bytes.clone(), false, MATROSKA);
+        assert_eq!(rest.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(rest.headers()[header::CONTENT_RANGE], "bytes 4-9/*");
+        let body = axum::body::to_bytes(rest.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&body[..], b"456789");
+        let done = held_bytes(&headers, bytes.clone(), true, MATROSKA);
+        assert_eq!(done.headers()[header::CONTENT_RANGE], "bytes 4-9/10");
+        assert_eq!(done.headers()[SUBTITLES_COMPLETE_HEADER], "1");
+        headers.insert(header::RANGE, HeaderValue::from_static("bytes=10-"));
+        let none = held_bytes(&headers, bytes, false, MATROSKA);
+        assert_eq!(none.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(none.headers()[header::CONTENT_RANGE], "bytes */10");
+        assert_eq!(none.headers()[SUBTITLES_COMPLETE_HEADER], "0");
     }
 }

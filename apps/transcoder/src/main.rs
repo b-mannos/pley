@@ -23,6 +23,7 @@ mod keyframes;
 mod matroska;
 mod memory;
 mod metrics;
+mod mks;
 mod mp4;
 mod plan;
 mod prefetch;
@@ -390,13 +391,16 @@ async fn run(args: Args) -> anyhow::Result<()> {
     let background = background::Background::new();
     let keyframes =
         keyframes::KeyframeStore::new(ff.clone(), metrics.clone(), background.clone(), work_dir.join("keyframes"));
-    let extractor = Arc::new(extract::Extractor::new(
-        ff.clone(),
-        prober.clone(),
-        metrics.clone(),
-        work_dir.join("subtitles"),
-        args.probe_concurrency.div_ceil(2),
-    ));
+    let extractor = Arc::new(
+        extract::Extractor::new(
+            ff.clone(),
+            prober.clone(),
+            metrics.clone(),
+            work_dir.join("subtitles"),
+            args.probe_concurrency.div_ceil(2),
+        )
+        .with_background(background.clone()),
+    );
     let fingerprinter = Arc::new(fingerprint::Fingerprinter::new(ff.clone(), background.clone(), 2));
     let trickplay =
         Arc::new(trickplay::Trickplay::new(ff.clone(), prober.clone(), background.clone(), work_dir.join("trickplay")));
@@ -449,6 +453,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         capabilities: pley_transcoder_api::Capabilities {
             hls_master_playlist: true,
             subtitle_matroska: true,
+            subtitle_matroska_partial: true,
             conversions: true,
             conversions_mp4: true,
             hls_variants: true,

@@ -281,6 +281,19 @@ async fn subtitles(State(state): Shared, Json(req): Json<SubtitleRequest>) -> Ap
 }
 
 async fn subtitles_matroska(State(state): Shared, Json(req): Json<SubtitleRequest>) -> ApiResult<Response> {
+    if req.partial {
+        let (bytes, complete) =
+            state.extractor.subtitle_matroska_so_far(&req.path, req.stream_index, Duration::from_secs(2)).await?;
+        let complete = if complete { "1" } else { "0" };
+        return Ok((
+            [
+                (header::CONTENT_TYPE, "video/x-matroska"),
+                (HeaderName::from_static(SUBTITLES_COMPLETE_HEADER), complete),
+            ],
+            bytes,
+        )
+            .into_response());
+    }
     let bytes = state.extractor.subtitle_matroska(&req.path, req.stream_index).await?;
     Ok(([(header::CONTENT_TYPE, "video/x-matroska")], bytes).into_response())
 }

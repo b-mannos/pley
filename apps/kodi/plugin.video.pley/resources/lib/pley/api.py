@@ -350,16 +350,17 @@ def local_request(base: str, method: str, target: str, headers: dict, body, time
 
 
 def subtitle_name(url: str, language, forced: bool) -> str:
-    """The server's subtitle address `url` (/api/files/7/subtitles/3.vtt)
-    named for Kodi: 3.eng.forced.vtt."""
+    """The server's subtitle address `url` (/api/files/7/subtitles/3.vtt,
+    3.sup) named for Kodi: 3.eng.forced.vtt."""
     parts = []
     if language and str(language).isalpha():
         parts.append(str(language).lower())
     if forced:
         parts.append("forced")
-    if not parts or not url.endswith(".vtt"):
+    extension = url[-4:]
+    if not parts or extension not in (".vtt", ".sup"):
         return url
-    return url[: -len(".vtt")] + "." + ".".join(parts) + ".vtt"
+    return url[: -len(extension)] + "." + ".".join(parts) + extension
 
 
 def together(*calls):

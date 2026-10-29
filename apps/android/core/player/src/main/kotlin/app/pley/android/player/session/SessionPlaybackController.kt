@@ -704,6 +704,12 @@ class SessionPlaybackController(
                     engineLink.selectText(null, null)
                     hideServerSubtitles()
                 }
+                // Pictures next to the media: the server's .mks of them (it
+                // makes no WebVTT of pictures).
+                sub.external && PlaybackPlan.isImage(sub) -> {
+                    engineLink.selectText(null, null)
+                    if (sideload) showPictures(sub) else hideServerSubtitles()
+                }
                 sub.external || (offset.value != 0L && !PlaybackPlan.isImage(sub)) -> {
                     engineLink.selectText(null, null)
                     showServerSubtitles(sub)

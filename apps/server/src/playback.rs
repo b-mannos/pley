@@ -204,6 +204,16 @@ impl Caps {
         self.is_v2() && self.subtitle_codecs.as_deref().is_some_and(|list| listed(list, codec))
     }
 
+    /// The player draws these picture subtitles itself from their own file
+    /// (`/api/files/{id}/subtitles/{index}.mks`) next to whatever plays
+    /// ([`Caps::picture_subtitles_sideload`]). Read from players of either
+    /// version: the web app says so in a version 1 report, which these two
+    /// fields change nothing else of.
+    pub fn sideloads_pictures(&self, codec: &str) -> bool {
+        self.picture_subtitles_sideload == Some(true)
+            && self.subtitle_codecs.as_deref().is_some_and(|list| listed(list, codec))
+    }
+
     /// A version 2 player that reads multivariant playlists: its HLS
     /// sessions start at `master.m3u8`, whose `CODECS` can name Dolby
     /// Vision, so its remuxes keep it (docs/API.md, "Dolby Vision
@@ -363,7 +373,20 @@ pub struct PlaybackInfo {
     /// (`PUT /api/playback/{id}/bitrate`): Automatic's steps need no new
     /// stream (docs/QUALITY.md, "Players that go black between streams").
     pub live_bitrate: bool,
+    /// How much later than the file's times (its start taken off, as
+    /// subtitles are timed) the stream's timestamps are: [`HLS_PTS_OFFSET_MS`]
+    /// for an HLS stream, whatever it was started at; `None` when the file
+    /// plays as it is. A player that knows the timestamp of the frame it
+    /// shows (hls.js: media time + `initPTS`) draws subtitles at that less
+    /// this; its media time alone may be off by the stream's B-frame delay
+    /// and more (docs/API.md, "Picture subtitles drawn by the player").
+    pub pts_offset_ms: Option<i64>,
 }
+
+/// What FFmpeg's MPEG-TS muxer adds to every timestamp of the transcoder's
+/// HLS segments, which otherwise keep the file's times from whatever point
+/// a process starts at (`-output_ts_offset`).
+pub const HLS_PTS_OFFSET_MS: i64 = 1_400;
 
 /// The qualities players offer (apps/web/src/player/quality.ts), highest
 /// bitrate first: id, kbps, lines.
@@ -1052,7 +1075,9 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         req.subtitle_index.and_then(|i| streams.iter().find(|s| s.index == i && s.kind == StreamKind::Subtitle));
     let pictures = burn_stream.filter(|s| !s.text_based.unwrap_or(true) && video.is_some());
     // Picture subtitles a version 2 player shows itself need drawing only
-    // when the file doesn't play as it is (HLS segments carry no subtitles).
+    // when the file doesn't play as it is (HLS segments carry no subtitles),
+    // whether that is the file's or the player's choice (Remux or Transcode
+    // asked for); see below.
     let player_draws = pictures.is_some_and(|s| !s.external && caps.shows_subtitles(&s.codec));
     let mut burn = pictures.filter(|_| !player_draws);
     let burn_reason = |s: &MediaStream| format!("{} subtitles burned in.", codec_label(&s.codec));
@@ -1147,16 +1172,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     }
 
     let audio_index = audio.map(|a| a.index);
-    let mut direct_ok =
-        container_ok && video_ok && audio_ok && audio_is_default && bitrate_ok && size_ok && burn.is_none();
-    if player_draws && !direct_ok && req.mode != PlaybackMode::Direct {
-        // Not as it is after all: the subtitles are drawn onto the video.
-        burn = pictures;
-        if let Some(s) = burn {
-            reasons.insert(0, burn_reason(s));
-        }
-        direct_ok = false;
-    }
+    let direct_ok = container_ok && video_ok && audio_ok && audio_is_default && bitrate_ok && size_ok && burn.is_none();
     let direct = match req.mode {
         PlaybackMode::Auto => direct_ok,
         // The user knows better (e.g. a browser that plays more than it
@@ -1164,6 +1180,14 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         PlaybackMode::Direct => true,
         PlaybackMode::Remux | PlaybackMode::Transcode => false,
     };
+    if player_draws && !direct {
+        // Not as it is after all (the file doesn't play so, or a stream was
+        // asked for): the subtitles are drawn onto the video.
+        burn = pictures;
+        if let Some(s) = burn {
+            reasons.insert(0, burn_reason(s));
+        }
+    }
     if direct {
         return Decision {
             method: Method::Direct,
@@ -1314,6 +1338,36 @@ pub fn decide_with_audio(
     }
     req.audio_index = streamed;
     decide(file, info, streams, req)
+}
+
+/// The picture subtitle track whose `.mks` the player of `req` will ask for
+/// (it draws them itself, [`Caps::sideloads_pictures`]), so the server has
+/// it copied out of its file at once: the track named in the request, else
+/// the one the user's choices pick (`chosen`, `streams::resolve`), when it
+/// is pictures the player draws and nothing burns them in. Not for a track
+/// in a file played as it is: a player that reads it from the file (the
+/// Android app, Kodi) needs no `.mks`, and one that doesn't asks for it at
+/// once anyway. Players change the track as they play: the `.mks` request
+/// starts the copy then.
+pub fn picture_to_prepare(
+    streams: &[MediaStream],
+    req: &PlaybackRequest,
+    decision: &Decision,
+    chosen: Option<i64>,
+) -> Option<i64> {
+    let index = req.subtitle_index.or(chosen)?;
+    let track = streams.iter().find(|s| s.index == index && s.kind == StreamKind::Subtitle)?;
+    let drawn = !track.text_based.unwrap_or(true) && req.caps.sideloads_pictures(&track.codec);
+    let streamed = decision.method != Method::Direct || track.external;
+    (drawn && streamed && decision.burn_index != Some(index)).then_some(index)
+}
+
+/// Whether a player that draws picture subtitles itself may want one of
+/// these streams' (see [`picture_to_prepare`]).
+pub fn may_draw_pictures(streams: &[MediaStream], caps: &Caps) -> bool {
+    streams
+        .iter()
+        .any(|s| s.kind == StreamKind::Subtitle && !s.text_based.unwrap_or(true) && caps.sideloads_pictures(&s.codec))
 }
 
 pub fn subtitle_tracks(file_id: i64, streams: &[MediaStream]) -> Vec<SubtitleTrack> {
@@ -2665,6 +2719,189 @@ mod tests {
         // Asked for by index, they are drawn as for any player.
         req.subtitle_index = Some(9);
         assert_eq!(decide(&f, Some(&i), &i.streams, &req).burn_index, Some(9));
+    }
+
+    #[test]
+    fn picture_subtitles_the_player_shows_are_drawn_on_any_stream_it_asks_for() {
+        // Kodi: Matroska, H.264 and AC-3 play as they are, PGS shown by the
+        // player from the file.
+        let i = info("h264", &["ac3"], DynamicRange::Sdr);
+        let f = file("mkv", 5_000_000);
+        let mut req = request();
+        req.caps = serde_json::from_value(serde_json::json!({
+            "containers": ["mkv"], "video_codecs": ["h264"], "audio_codecs": ["ac3"],
+            "caps_version": 2, "subtitle_codecs": ["hdmv_pgs_subtitle"],
+        }))
+        .unwrap();
+        req.subtitle_index = Some(9);
+        let d = decide(&f, Some(&i), &i.streams, &req);
+        assert_eq!((d.method, d.burn_index), (Method::Direct, None));
+        // A stream asked for (Remux, Transcode) carries no subtitles: they
+        // are drawn, as when the file doesn't play as it is. They were left
+        // out (the player shows none over HLS).
+        for mode in [PlaybackMode::Remux, PlaybackMode::Transcode] {
+            req.mode = mode;
+            let d = decide(&f, Some(&i), &i.streams, &req);
+            assert_eq!((d.method, d.burn_index), (Method::Transcode, Some(9)), "{mode:?}");
+            assert_eq!(d.reasons[0], "PGS subtitles burned in.");
+        }
+        // Direct asked for: as it is, the player shows them.
+        req.mode = PlaybackMode::Direct;
+        assert_eq!(decide(&f, Some(&i), &i.streams, &req).burn_index, None);
+    }
+
+    /// A version 2 web app's report (the TVs' too): Matroska, H.264 and
+    /// HEVC Main 10, HDR10 and HLG shown, master playlists, and every
+    /// picture subtitle drawn by the player from its own file.
+    fn sideloading_v2() -> Caps {
+        serde_json::from_value(serde_json::json!({
+            "containers": ["mkv", "mp4"], "video_codecs": ["h264", "hevc"], "audio_codecs": ["aac", "eac3"],
+            "hdr": true, "dolby_vision": false, "caps_version": 2,
+            "video": [
+                {"codec": "h264", "hardware": true, "profiles": ["Main", "High"], "max_width": 3840, "max_height": 2160,
+                 "max_bit_depth": 8},
+                {"codec": "hevc", "hardware": true, "profiles": ["Main", "Main 10"], "max_width": 3840, "max_height": 2160,
+                 "max_bit_depth": 10}
+            ],
+            "hdr_types": ["hdr10", "hlg"],
+            "audio_decode": ["aac", "eac3"],
+            "subtitle_codecs": ["subrip", "ass", "webvtt", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"],
+            "picture_subtitles_sideload": true,
+            "hls": {"master_playlist": true, "segments": ["ts"]}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn picture_subtitles_a_player_draws_from_their_own_file_keep_the_picture() {
+        let mut req = request();
+        req.caps = sideloading_v2();
+        req.hdr_transcodes = true;
+        let mut hdr10 = info("hevc", &["eac3"], DynamicRange::Hdr10);
+        hdr10.streams[0].bit_depth = Some(10);
+        hdr10.streams[0].profile = Some("Main 10".into());
+        // HDR10 HEVC: plays as it is, PGS drawn by the player.
+        let d = decide(&file("mkv", 20_000_000), Some(&hdr10), &hdr10.streams, &req);
+        assert_eq!((d.method, d.burn_index), (Method::Direct, None));
+        // DTS the player doesn't take: repackaged, the video copied, HDR kept.
+        let mut dts = hdr10.clone();
+        dts.streams[1].codec = "dts".into();
+        let d = decide(&file("mkv", 20_000_000), Some(&dts), &dts.streams, &req);
+        assert_eq!((d.method, d.burn_index, d.subtitle.is_none()), (Method::Remux, None, true));
+        assert_eq!(d.video.as_ref().unwrap().mode, VideoMode::Copy);
+        // Dolby Vision 8.1 on a Dolby Vision screen, in a remux named by the
+        // master playlist: kept.
+        let mut p81 = dolby_vision(8, 1);
+        p81.streams[1].codec = "dts".into();
+        let mut dv = req.clone();
+        dv.caps.hdr_types.get_or_insert_with(Vec::new).push("dolby_vision".into());
+        dv.caps.dolby_vision_profiles = Some(vec![DolbyVisionDecoder { profile: 8, max_level: None }]);
+        let d = decide(&file("mkv", 20_000_000), Some(&p81), &p81.streams, &dv);
+        assert_eq!((d.method, d.burn_index), (Method::Remux, None));
+        assert_eq!(d.video.as_ref().unwrap().dolby_vision, DolbyVisionMode::Signal, "named, so shown");
+        // Converted (a lower quality): HDR10 kept, nothing drawn on it.
+        req.max_bitrate = Some(8_000);
+        let d = decide(&file("mkv", 20_000_000), Some(&hdr10), &hdr10.streams, &req);
+        assert_eq!((d.method, d.burn_index), (Method::Transcode, None));
+        assert_eq!(d.video.as_ref().unwrap().dynamic_range, OutputRange::Hdr10, "no SDR for the subtitles");
+        assert!(!d.reasons.iter().any(|r| r.contains("ubtitles")), "{:?}", d.reasons);
+    }
+
+    #[test]
+    fn picture_tracks_are_prepared_for_players_that_draw_them_beside_a_stream() {
+        let mut i = info("h264", &["dts"], DynamicRange::Sdr);
+        i.streams.push(MediaStream {
+            index: 10,
+            kind: StreamKind::Subtitle,
+            codec: "subrip".into(),
+            text_based: Some(true),
+            ..Default::default()
+        });
+        let mut f = file("mkv", 5_000_000);
+        f.media_info = Some(serde_json::to_string(&i).unwrap());
+        f.external_subs =
+            r#"[{"index":1000,"path":"/m/a.en.sup","language":"eng","codec":"hdmv_pgs_subtitle"}]"#.into();
+        let streams = f.streams();
+        let mut req = request();
+        req.caps = sideloading_v2();
+        assert!(may_draw_pictures(&streams, &req.caps));
+        let prepared = |req: &PlaybackRequest, chosen: Option<i64>| {
+            let d = decide(&f, Some(&i), &streams, req);
+            (d.method, picture_to_prepare(&streams, req, &d, chosen))
+        };
+        // DTS: repackaged, with the PGS track the user's choices pick.
+        assert_eq!(prepared(&req, Some(9)), (Method::Remux, Some(9)));
+        // Text, or nothing chosen: nothing.
+        assert_eq!(prepared(&req, Some(10)).1, None);
+        assert_eq!(prepared(&req, None).1, None);
+        // As it is, a track in the file: the player reads it there or asks
+        // at once. One next to it is prepared.
+        let mut direct = req.clone();
+        direct.caps.audio_decode = Some(vec!["dts".into()]);
+        assert_eq!(prepared(&direct, Some(9)), (Method::Direct, None));
+        assert_eq!(prepared(&direct, Some(1000)), (Method::Direct, Some(1000)));
+        // Named by the player: burned in, nothing to prepare.
+        let mut burn = req.clone();
+        burn.subtitle_index = Some(9);
+        assert_eq!(prepared(&burn, None).1, None);
+        // A player that doesn't draw them, or not these.
+        let mut android = req.clone();
+        android.caps.picture_subtitles_sideload = None;
+        assert!(!may_draw_pictures(&streams, &android.caps));
+        assert_eq!(prepared(&android, Some(9)).1, None);
+        let mut pgs_only = req.clone();
+        pgs_only.caps.subtitle_codecs = Some(vec!["dvd_subtitle".into()]);
+        assert_eq!(prepared(&pgs_only, Some(9)).1, None);
+        // The web app's version 1 report with the two fields: the same.
+        let mut web = request();
+        web.caps = serde_json::from_value(serde_json::json!({
+            "containers": ["mp4", "webm", "mkv"], "video_codecs": ["h264"], "audio_codecs": ["aac"],
+            "subtitle_codecs": ["subrip", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"],
+            "picture_subtitles_sideload": true,
+        }))
+        .unwrap();
+        assert!(!web.caps.is_v2());
+        let d = decide(&f, Some(&i), &streams, &web);
+        assert_eq!((d.method, d.burn_index), (Method::Remux, None), "DTS: repackaged, PGS not drawn on");
+        assert_eq!(picture_to_prepare(&streams, &web, &d, Some(9)), Some(9));
+    }
+
+    #[test]
+    fn the_web_apps_picture_subtitles_change_no_decision() {
+        // The web app says in its version 1 report that it draws picture
+        // subtitles from their `.mks` (apps/web/src/lib/caps.ts): whatever
+        // it plays, and with a picture track burned in or not, the server
+        // decides as without it.
+        let web = |draws: bool| {
+            let mut caps = browser();
+            caps.containers.push("mkv".into());
+            if draws {
+                let codecs = ["subrip", "ass", "ssa", "webvtt", "mov_text", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"];
+                caps.subtitle_codecs = Some(codecs.iter().map(|c| (*c).to_owned()).collect());
+                caps.picture_subtitles_sideload = Some(true);
+            }
+            caps
+        };
+        let files = [
+            ("mp4", "h264", "aac", DynamicRange::Sdr),
+            ("mkv", "h264", "ac3", DynamicRange::Sdr),
+            ("mkv", "hevc", "aac", DynamicRange::Hdr10),
+            ("mkv", "h264", "dts", DynamicRange::Sdr),
+        ];
+        for (container, video, audio, range) in files {
+            let i = info(video, &[audio], range);
+            let f = file(container, 5_000_000);
+            for subtitle_index in [None, Some(9)] {
+                for mode in [PlaybackMode::Auto, PlaybackMode::Remux, PlaybackMode::Transcode] {
+                    let mut req = request();
+                    (req.subtitle_index, req.mode, req.caps) = (subtitle_index, mode, web(false));
+                    let before = format!("{:?}", decide(&f, Some(&i), &i.streams, &req));
+                    req.caps = web(true);
+                    let after = format!("{:?}", decide(&f, Some(&i), &i.streams, &req));
+                    assert_eq!(before, after, "{container} {video} {audio} {subtitle_index:?} {mode:?}");
+                }
+            }
+        }
     }
 
     #[test]

@@ -529,6 +529,12 @@ pub struct Capabilities {
     /// Older transcoders lack it.
     #[serde(default)]
     pub subtitle_matroska: bool,
+    /// `POST /v1/subtitles/mks` takes [`SubtitleRequest::partial`]: it
+    /// answers within seconds with the Matroska copied so far, and
+    /// `X-Pley-Complete: 0` until it is whole. Older transcoders answer only
+    /// once the whole track is copied.
+    #[serde(default)]
+    pub subtitle_matroska_partial: bool,
     /// `POST /v1/conversions` makes a [`JobRequest`] into one Matroska file
     /// (a download that plays where the original doesn't). Older
     /// transcoders lack it.
@@ -1163,7 +1169,11 @@ pub struct SubtitleRequest {
     pub stream_index: Option<i64>,
     /// For an embedded track: answer within a few seconds, with the cues
     /// found so far when the track isn't all out by then, rather than wait
-    /// for the whole file; `X-Pley-Complete: 0` says more are coming.
+    /// for the whole file; `X-Pley-Complete: 0` says more are coming. For a
+    /// picture track's Matroska (any track, a subtitle file's too), the
+    /// Matroska copied so far, up to its last whole cluster: always a file
+    /// players read, its track's header at least (see
+    /// [`Capabilities::subtitle_matroska_partial`]).
     #[serde(default)]
     pub partial: bool,
 }

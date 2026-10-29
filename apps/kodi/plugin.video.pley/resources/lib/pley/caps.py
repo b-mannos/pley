@@ -86,6 +86,10 @@ def build(
         # Kodi decodes everything and mixes it down for the speakers.
         "audio_channels": max(channels, 2),
         "subtitle_codecs": SUBTITLES,
+        # PGS beside a stream or next to the media comes as a `.sup` file
+        # (tracks.beside_tracks); VobSub and DVB are drawn onto converted
+        # video, asked for with `subtitle_index`.
+        "picture_subtitles_sideload": True,
         "audio_track_switching": True,
         "hls": {"master_playlist": True, "segments": ["ts"]},
         "device": {"form": "tv", "model": model},

@@ -71,6 +71,20 @@ def is_picture(stream) -> bool:
     return bool(stream) and stream.get("text_based") is False
 
 
+def is_pgs(stream) -> bool:
+    """PGS, which Kodi draws from a `.sup` file beside what plays (the
+    server makes one of any PGS track: /api/files/{id}/subtitles/{n}.sup).
+    VobSub and DVB have no file of their own Kodi reads over HTTP."""
+    return is_picture(stream) and stream.get("codec") == "hdmv_pgs_subtitle"
+
+
+def gives_sup(info: dict) -> bool:
+    """Whether the server answering `info` makes `.sup` files of PGS tracks:
+    it says how its streams are timed (`pts_offset_ms`), which came with
+    them. An older server draws PGS onto converted video instead."""
+    return "pts_offset_ms" in (info or {})
+
+
 def file_of(detail, file_id=None):
     """The item's file `file_id`, else the first (the one the server plays
     when asked for none)."""
@@ -93,20 +107,23 @@ def chosen_subtitle(file):
 
 def burn_index(file):
     """The subtitles to ask the server to draw onto the video when the file
-    is converted: the account's, when they are pictures (Kodi shows the
-    file's own pictures when it plays as it is, and the server then draws
-    nothing)."""
+    is converted: the account's, when they are pictures other than PGS
+    (Kodi shows the file's own pictures when it plays as it is, and the
+    server then draws nothing; PGS it draws from a `.sup` file beside a
+    stream too)."""
     chosen = chosen_subtitle(file)
-    return chosen["index"] if is_picture(chosen) else None
+    return chosen["index"] if is_picture(chosen) and not is_pgs(chosen) else None
 
 
 def needs_burn(info: dict, file) -> bool:
     """Whether the session must be asked for again with the account's
     picture subtitles drawn on: it streams (whose segments carry no
     subtitles), or they are a file next to the media, which Kodi isn't
-    given; and they aren't drawn."""
+    given; and they aren't drawn, nor PGS the server makes a `.sup` of."""
     chosen = chosen_subtitle(file)
     if not is_picture(chosen) or info.get("subtitle_index") == chosen["index"]:
+        return False
+    if is_pgs(chosen) and gives_sup(info):
         return False
     return bool(info.get("hls") or chosen.get("external"))
 
@@ -120,14 +137,26 @@ def is_forced(stream) -> bool:
     return "forced" in words or "signs" in words
 
 
-def beside_tracks(info: dict) -> list:
+def beside_tracks(info: dict, file=None) -> list:
     """The subtitle tracks Kodi is given as files beside what plays: every
     text track beside a converted stream, which carries none; the text
-    files next to the media beside a file played as it is."""
-    return [
-        s for s in info.get("subtitles") or []
-        if s.get("url") and (info.get("hls") or s.get("external"))
-    ]
+    files next to the media beside a file played as it is; and the
+    account's PGS subtitles where they aren't in what plays (a stream, a
+    file next to the media), as a `.sup` file (`url` set to it), unless
+    they are drawn onto the video. Only those: Kodi reads every file it is
+    given as it opens, and the server reads the whole media file for a
+    track whose `.sup` it hasn't made yet."""
+    chosen = chosen_subtitle(file)
+    pgs = chosen["index"] if is_pgs(chosen) and gives_sup(info) and not info.get("burn_subtitles") else None
+    beside = []
+    for s in info.get("subtitles") or []:
+        if not (info.get("hls") or s.get("external")):
+            continue
+        if s.get("url"):
+            beside.append(s)
+        elif s.get("index") == pgs:
+            beside.append(dict(s, url="/api/files/%s/subtitles/%d.sup" % (info.get("file_id"), pgs)))
+    return beside
 
 
 def layout(info: dict, file) -> dict:
@@ -140,7 +169,7 @@ def layout(info: dict, file) -> dict:
     hls = bool(info.get("hls"))
     # Forced as Kodi sees them: the files given by their names (playback.beside),
     # the file's own by their flag.
-    subtitles = [dict(s, forced=is_forced(s)) for s in beside_tracks(info)]
+    subtitles = [dict(s, forced=is_forced(s)) for s in beside_tracks(info, file)]
     if not hls:
         subtitles += sorted((s for s in info.get("subtitles") or [] if not s.get("external")), key=lambda s: s["index"])
     audio = []

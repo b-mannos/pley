@@ -30,6 +30,7 @@ pub mod network;
 pub mod oauth;
 pub mod overrides;
 pub mod people;
+pub mod pgs;
 pub mod playback;
 pub mod playlists;
 pub mod plex;

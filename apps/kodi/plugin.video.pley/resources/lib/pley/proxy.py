@@ -461,9 +461,9 @@ def is_media(response: http.client.HTTPResponse) -> bool:
     return kind.startswith(("video/", "audio/")) or kind in ("application/octet-stream", "application/mp4")
 
 
-# A subtitle named for Kodi (3.eng.forced.vtt): Kodi reads a side-loaded
-# track's language and flags from its name.
-SUBTITLE_NAME = re.compile(r"^(/api/files/\d+/subtitles/\d+)\.[A-Za-z.]+(\.vtt)(\?.*)?$")
+# A subtitle named for Kodi (3.eng.forced.vtt, 4.eng.sup): Kodi reads a
+# side-loaded track's language and flags from its name.
+SUBTITLE_NAME = re.compile(r"^(/api/files/\d+/subtitles/\d+)\.[A-Za-z.]+(\.vtt|\.sup)(\?.*)?$")
 
 
 def server_path(path: str) -> str:

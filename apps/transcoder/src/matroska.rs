@@ -414,31 +414,39 @@ impl Budget {
     }
 }
 
-/// The text subtitle tracks of a file, block by block.
+/// Subtitle tracks of a file, block by block: text ([`TextTracks`]), or
+/// pictures ([`PictureTracks`]), by their codec of kind `C`.
 #[derive(Debug)]
-pub struct TextTracks {
+pub struct SubtitleTracks<C> {
     /// Nanoseconds per tick of the block times.
     pub tick_ns: u64,
     /// Whether every stream's times are whole milliseconds (ticks of whole
     /// milliseconds, no track with a timestamp scale of its own): then so is
     /// the file's start time, as FFmpeg takes it.
     pub whole_ms: bool,
-    pub tracks: Vec<TextTrack>,
+    pub tracks: Vec<SubtitleTrack<C>>,
     /// What reading the blocks took: reads, and bytes (the Cues aside).
     pub reads: usize,
     pub bytes_read: u64,
 }
 
 #[derive(Debug)]
-pub struct TextTrack {
+pub struct SubtitleTrack<C> {
     /// FFmpeg's index of the stream.
     pub stream_index: i64,
-    pub codec: TextCodec,
-    /// The track's codec private data (an ASS track's script header).
+    pub codec: C,
+    /// The track's codec private data (an ASS track's script header, a
+    /// VobSub track's palette).
     pub header: Vec<u8>,
     /// In the order FFmpeg reads them: the order of the file.
     pub blocks: Vec<TextBlock>,
 }
+
+/// The text subtitle tracks of a file.
+pub type TextTracks = SubtitleTracks<TextCodec>;
+/// The picture subtitle tracks of a file, by their Matroska codec ID
+/// (`S_HDMV/PGS`, `S_VOBSUB`, `S_DVBSUB`).
+pub type PictureTracks = SubtitleTracks<&'static str>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextBlock {
@@ -574,6 +582,21 @@ fn text_codec(codec_id: &[u8]) -> Option<TextCodec> {
     }
 }
 
+/// The Matroska codec ID of a picture subtitle track's codec, as FFmpeg
+/// names it (what a Matroska file of the track says).
+pub fn picture_codec_id(ffmpeg_name: &str) -> Option<&'static str> {
+    match ffmpeg_name {
+        "hdmv_pgs_subtitle" => Some("S_HDMV/PGS"),
+        "dvd_subtitle" => Some("S_VOBSUB"),
+        "dvb_subtitle" => Some("S_DVBSUB"),
+        _ => None,
+    }
+}
+
+fn picture_codec(codec_id: &[u8]) -> Option<&'static str> {
+    picture_codec_id(subtitle_codec_name(codec_id)?)
+}
+
 impl<'a> Track<'a> {
     fn parse(entry: &'a [u8]) -> Self {
         let mut track = Track::default();
@@ -642,6 +665,43 @@ impl<'a> Track<'a> {
 /// Cues say, it uses something not supported here, or it needs more than the
 /// budget.
 pub fn text_tracks(path: &Path, media: &MediaInfo, wanted: &[i64], budget: &Budget) -> Result<TextTracks, String> {
+    subtitle_tracks(
+        path,
+        media,
+        wanted,
+        budget,
+        Kind { codec: text_codec, name: "text", webm: |c| c == TextCodec::Webvtt },
+    )
+}
+
+/// The picture subtitle streams `wanted` of a Matroska file, read through
+/// its Cues within `budget`, as [`text_tracks`] reads text: their blocks
+/// as they are, compression undone.
+pub fn picture_tracks(
+    path: &Path,
+    media: &MediaInfo,
+    wanted: &[i64],
+    budget: &Budget,
+) -> Result<PictureTracks, String> {
+    subtitle_tracks(path, media, wanted, budget, Kind { codec: picture_codec, name: "pictures", webm: |_| false })
+}
+
+/// The subtitle tracks a read through the Cues takes: their codec (`None`
+/// for a track of another kind), the kind's name, and whether a codec's
+/// blocks are laid out as WebM's WebVTT.
+struct Kind<C> {
+    codec: fn(&[u8]) -> Option<C>,
+    name: &'static str,
+    webm: fn(C) -> bool,
+}
+
+fn subtitle_tracks<C: Copy>(
+    path: &Path,
+    media: &MediaInfo,
+    wanted: &[i64],
+    budget: &Budget,
+    kind: Kind<C>,
+) -> Result<SubtitleTracks<C>, String> {
     let mut file = BufReader::with_capacity(64 * 1024, File::open(path).map_err(|e| e.to_string())?);
     // mkvmerge and FFmpeg list the Cues in the seek head, or put them before
     // the clusters: another file's aren't looked for cluster by cluster,
@@ -678,7 +738,7 @@ pub fn text_tracks(path: &Path, media: &MediaInfo, wanted: &[i64], budget: &Budg
     let mut text = Vec::new();
     for &index in wanted {
         let track = usize::try_from(index).ok().and_then(|i| streams.get(i)).ok_or("no such stream")?;
-        let codec = text_codec(track.codec_id).ok_or_else(|| format!("stream {index} isn't text"))?;
+        let codec = (kind.codec)(track.codec_id).ok_or_else(|| format!("stream {index} isn't {}", kind.name))?;
         if track.scaled || track.codec_delay != 0 {
             return Err(format!("stream {index} has a timing of its own"));
         }
@@ -758,7 +818,7 @@ pub fn text_tracks(path: &Path, media: &MediaInfo, wanted: &[i64], budget: &Budg
         if let Some(encoding) = track.encodings.first().filter(|e| e.scope & 1 != 0) {
             data = encoding.decode(&data, budget)?;
         }
-        if *codec == TextCodec::Webvtt {
+        if (kind.webm)(*codec) {
             data = webm_cue_text(&data).ok_or("a WebVTT block isn't laid out as WebM's")?.to_vec();
         }
         if data.is_empty() {
@@ -783,10 +843,10 @@ pub fn text_tracks(path: &Path, media: &MediaInfo, wanted: &[i64], budget: &Budg
                 Err(refused) => return Err(refused.into()),
             };
         }
-        tracks.push(TextTrack { stream_index: index, codec, header, blocks });
+        tracks.push(SubtitleTrack { stream_index: index, codec, header, blocks });
     }
     let whole_ms = tick_ns % 1_000_000 == 0 && !streams.iter().any(|t| t.scaled);
-    Ok(TextTracks { tick_ns, whole_ms, tracks, reads: read.reads, bytes_read: read.bytes })
+    Ok(SubtitleTracks { tick_ns, whole_ms, tracks, reads: read.reads, bytes_read: read.bytes })
 }
 
 /// Blocks are read by this many threads at once, each with a handle of its
@@ -1937,6 +1997,34 @@ pub(crate) mod tests {
         );
         assert_eq!((ass.codec, ass.header.as_slice()), (TextCodec::Ass, b"[Script Info]\n".as_slice()));
         assert_eq!(ass.blocks, [block(1_000, 800, "0,0,Default,,0,0,0,,Hi")]);
+    }
+
+    #[test]
+    fn picture_tracks_are_read_through_the_cues() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut file = movie();
+        // A VobSub track too, its palette in its private data, compressed
+        // as mkvmerge does it.
+        let mut vobsub = TestTrack::new(7, 17, "S_VOBSUB");
+        vobsub.private = b"palette: 000000".to_vec();
+        vobsub.extra = el(&[0x6D, 0x80], &el(&[0x62, 0x40], &el(&[0x50, 0x34], &uint_el(&[0x42, 0x54], 0))));
+        file.tracks.push(vobsub);
+        let mut zlib = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        std::io::Write::write_all(&mut zlib, b"vobsub picture").unwrap();
+        file.clusters[1].1.push((7, 300, Some(2_000), zlib.finish().unwrap()));
+        let path = file.write(dir.path());
+        let mut media = movie_media();
+        media.streams.push(stream(5, StreamKind::Subtitle, "dvd_subtitle"));
+
+        let found = picture_tracks(&path, &media, &[3, 5], &plenty()).unwrap();
+        let [pgs, vobsub] = found.tracks.as_slice() else { panic!("two tracks") };
+        assert_eq!((pgs.stream_index, pgs.codec), (3, "S_HDMV/PGS"));
+        assert_eq!(pgs.blocks, [TextBlock { time: 1_000, duration: 0, data: vec![0x16, 0, 0] }]);
+        assert_eq!((vobsub.codec, vobsub.header.as_slice()), ("S_VOBSUB", b"palette: 000000".as_slice()));
+        assert_eq!(vobsub.blocks, [TextBlock { time: 5_300, duration: 2_000, data: b"vobsub picture".to_vec() }]);
+        // Text isn't pictures, nor pictures text.
+        assert!(picture_tracks(&path, &media, &[2], &plenty()).unwrap_err().contains("isn't pictures"));
+        assert!(text_tracks(&path, &media, &[3], &plenty()).unwrap_err().contains("isn't text"));
     }
 
     #[test]
