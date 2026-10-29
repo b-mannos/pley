@@ -30,9 +30,9 @@ export const LOOKAHEAD_MS = 1;
 
 /**
  * The time on the track (the file's, in ms) that shows at `mediaSeconds`
- * of the player: the session's own `subtitle_offset_ms` added (absent: the
- * player's time is the file's), and the offset the person set taken away
- * (positive: subtitles later).
+ * of the player: the session's offset added (`hlsShiftMs`; 0: the player's
+ * time is the file's), and the offset the person set taken away (positive:
+ * subtitles later).
  */
 export function trackMs(mediaSeconds: number, sessionOffsetMs: number, personOffsetSeconds: number): number {
   return mediaSeconds * 1000 + sessionOffsetMs - personOffsetSeconds * 1000 + LOOKAHEAD_MS;
@@ -56,6 +56,18 @@ export function hlsLeadMs(frag: {
   if (!video || typeof frag.playlistOffset !== "number" || !Number.isFinite(video.startPTS)) return undefined;
   const ahead = video.startPTS - frag.playlistOffset;
   return Math.abs(ahead) < 1 ? ahead * 1000 : null;
+}
+
+/**
+ * What an HLS stream's media time takes (ms) to be the file's: hls.js's
+ * time is the stream's timestamps less its `initPTS` (`initPtsMs`), and the
+ * server's timestamps are the file's plus `pts_offset_ms`, so with both
+ * known it is exact. Otherwise the lead measured from the first segment
+ * (`hlsLeadMs`) is taken off; with neither, nothing.
+ */
+export function hlsShiftMs(ptsOffsetMs: number | null | undefined, initPtsMs: number | null, leadMs: number | null): number {
+  if (typeof ptsOffsetMs === "number" && initPtsMs !== null) return initPtsMs - ptsOffsetMs;
+  return leadMs === null ? 0 : -leadMs;
 }
 
 export interface Box {
@@ -283,7 +295,7 @@ export class PictureRenderer {
     this.redraw();
   }
 
-  /** The session's `subtitle_offset_ms` (absent: 0), and the person's offset in seconds (positive: later). */
+  /** The session's offset in ms (`hlsShiftMs`), and the person's in seconds (positive: later). */
   setOffsets(sessionMs: number, personSeconds: number): void {
     if (sessionMs === this.shiftMs && personSeconds === this.personSeconds) return;
     this.shiftMs = sessionMs;

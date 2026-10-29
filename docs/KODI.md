@@ -117,8 +117,12 @@ Tracks follow the profile, not Kodi's language settings (`tracks.py`).
 - Text subtitles are handed to Kodi as WebVTT files named the Kodi way
   (`3.eng.forced.vtt`): all of them beside a converted stream, the
   external ones beside a file played as it is.
-- Picture subtitles (PGS, VobSub) chosen for a converted stream, or kept
-  as a file next to the media, are drawn onto the video by the server.
+- PGS subtitles chosen for a converted stream, or kept as a file next to
+  the media, are handed to Kodi as a `.sup` file beside it
+  (`4.eng.sup`, made by the server), so the stream keeps its picture
+  (and HDR). VobSub and DVB are drawn onto the video by the server, as is
+  PGS by a server too old to make `.sup` files (one that doesn't say
+  `pts_offset_ms`).
 - Kodi's own Subtitle offset counts the other way from Pley's other apps:
   +0.3 s shows them earlier.
 

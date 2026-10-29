@@ -23,6 +23,22 @@ describes how they are made.
 - Subtitles from OpenSubtitles download over https only.
 - ctutils 0.4.7 (RUSTSEC-2026-0385).
 
+### Added
+
+- The web app draws picture subtitles (PGS, VobSub, DVB) over the video
+  itself, so the file still plays as it is, or its stream keeps HDR,
+  rather than having them burned in.
+- A picture subtitle track still being copied out of a big file comes as
+  far as it is (`X-Pley-Complete: 0`), and its copy starts as the playback
+  does; one a Matroska file's Cues list comes whole in seconds.
+- PGS tracks as `.sup` files (`/api/files/{id}/subtitles/{index}.sup`),
+  for Kodi. Play responses say `pts_offset_ms`.
+
+### Changed
+
+- Picture subtitles a player shows itself are burned in on any stream it
+  asks for (Remux, Transcode), not only when the file can't play as it is.
+
 ## [0.0.1] - 2026-10-29
 
 ### Added

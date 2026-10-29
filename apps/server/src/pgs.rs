@@ -64,7 +64,8 @@ pub fn from_matroska(mks: &[u8]) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(blocks.iter().map(|(_, d)| d.len() + 64).sum());
     let mut first = true;
     for (ticks, data) in blocks {
-        let pts = (i128::from(ticks) * i128::from(scale_ns) * 90 / 1_000_000_000).clamp(0, 0xFFFF_FFFF) as u32;
+        // Nanoseconds to 90 kHz ticks: 90 a millisecond.
+        let pts = (i128::from(ticks) * i128::from(scale_ns) * 90 / 1_000_000).clamp(0, 0xFFFF_FFFF) as u32;
         let mut at = 0;
         while at + 3 <= data.len() {
             let len = usize::from(u16::from_be_bytes([data[at + 1], data[at + 2]]));
@@ -215,7 +216,7 @@ mod tests {
         let info = el(&[0x15, 0x49, 0xA9, 0x66], &el(&[0x2A, 0xD7, 0xB1], &[0x0F, 0x42, 0x40]));
         let mut segment = [info, tracks].concat();
         for (time, blocks) in clusters {
-            let mut body = el(&[0xE7], &time.to_be_bytes()[6..]);
+            let mut body = el(&[0xE7], &time.to_be_bytes()[5..]);
             for (relative, data) in blocks.iter() {
                 let block = [&[0x81][..], &relative.to_be_bytes(), &[0x80], data].concat();
                 body.extend(el(&[0xA3], &block));
@@ -267,7 +268,8 @@ mod tests {
             ]
         );
         // The empty one: the first's size, an epoch start, no object.
-        assert_eq!(&sup[13..13 + 3 + 11], &[0x16, 0, 11, 0x07, 0x80, 0x04, 0x38, 0x10, 0, 0, 0x80, 0, 0, 0]);
+        // After the first header (PG, PTS, DTS: 10 bytes).
+        assert_eq!(&sup[10..10 + 3 + 11], &[0x16, 0, 11, 0x07, 0x80, 0x04, 0x38, 0x10, 0, 0, 0x80, 0, 0, 0]);
         // A cluster still being written (its size unknown) counts too.
         let file = mks(&[(95_000, &[(0, display_set(1))]), (99_000, &[(0, display_set(3))])], true);
         assert_eq!(segments(&from_matroska(&file).unwrap()).len(), 6);

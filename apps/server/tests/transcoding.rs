@@ -1204,8 +1204,10 @@ async fn pgs_subtitles_come_as_sup_files_for_kodi() {
         .await;
     assert_eq!((ranged.status, &ranged.bytes[..]), (StatusCode::PARTIAL_CONTENT, &b"PG"[..]));
     assert!(w.fake.tracks.lock().is_empty());
-    // Anything but PGS: none.
-    for missing in ["4.sup", "1000.sup", "0.sup", "77.sup", "x.sup"] {
+    // Anything but PGS (the English SubRip file next to it too): none.
+    let text = streams.iter().find(|s| s["codec"] == json!("subrip") && s["external"] == json!(true));
+    let text = format!("{}.sup", text.expect("the .srt is a track")["index"]);
+    for missing in ["4.sup", text.as_str(), "0.sup", "77.sup", "x.sup"] {
         let reply = app.get(&format!("/api/files/{file}/subtitles/{missing}"), admin).await;
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "{missing}");
     }
@@ -1689,6 +1691,8 @@ async fn direct_plays_hold_the_transcoders_background_work() {
     let clip = play(app, admin, json!({"item_id": w.movies["Clip"], "caps": browser(), "client_id": "tv"})).await;
     assert_eq!((clip.status, clip.body["method"].clone()), (StatusCode::OK, json!("direct")));
     assert_eq!(clip.body["pts_offset_ms"], Value::Null, "the file's own times");
+    // Said all the same: Kodi takes it for a server that makes .sup files.
+    assert!(clip.body.as_object().is_some_and(|b| b.contains_key("pts_offset_ms")));
     eventually(|| w.fake.holds.lock().len() == 1).await;
     assert_eq!(w.fake.holds.lock()[0], 10_000);
 }

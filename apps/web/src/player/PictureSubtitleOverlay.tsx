@@ -37,7 +37,7 @@ export function usePictureTrack(url: string | null, hooks: RefObject<PictureTrac
  * Picture subtitles (PGS, VobSub, DVB) over the video, drawn by pley from
  * the server's `.mks` of the track (pictures.ts): a canvas laid over the
  * video element, inside the player, so it goes full screen with it.
- * `sessionOffsetMs` is the session's `subtitle_offset_ms`, `offset` the
+ * `sessionOffsetMs` is the session's (pictures.ts, `hlsShiftMs`), `offset` the
  * seconds the person moved subtitles by (positive: later); `hold` keeps
  * what shows while the last session's picture stands in for the next one's.
  */

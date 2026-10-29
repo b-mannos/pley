@@ -2876,7 +2876,8 @@ mod tests {
             let mut caps = browser();
             caps.containers.push("mkv".into());
             if draws {
-                let codecs = ["subrip", "ass", "ssa", "webvtt", "mov_text", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"];
+                let codecs =
+                    ["subrip", "ass", "ssa", "webvtt", "mov_text", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"];
                 caps.subtitle_codecs = Some(codecs.iter().map(|c| (*c).to_owned()).collect());
                 caps.picture_subtitles_sideload = Some(true);
             }

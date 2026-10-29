@@ -15,6 +15,11 @@ describes how they are made.
 - A stream's subtitles are never read from a file on the device that the
   server names.
 
+### Fixed
+
+- Picture subtitles in a file next to the media show over the video, from
+  the server's copy of them.
+
 ## [0.0.1] - 2026-10-29
 
 ### Added

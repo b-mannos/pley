@@ -394,6 +394,11 @@ interface PlaybackInfo {
   live_bitrate: boolean;            // the video is converted, and PUT …/bitrate changes its bitrate as it
                                     // plays. Not for a player that moves between sizes itself
                                     // (hls.variants; see Several sizes)
+  pts_offset_ms?: number | null;    // how much later than the file's times (its start taken off, as
+                                    // `.mks` picture subtitles are timed) the stream's timestamps are:
+                                    // 1400 for HLS, wherever it started; null for a direct play. A
+                                    // player that knows the timestamp of the frame it shows (hls.js:
+                                    // media time + initPTS) draws picture subtitles at that less this
 }
 ```
 
@@ -1460,6 +1465,7 @@ removed or reordered (`400`).
 | GET | `/api/files/{id}/stream` | `play` | the raw file, with `Range` (direct play) |
 | GET | `/api/files/{id}/subtitles/{index}.vtt?offset_ms=` | `play` | WebVTT of a text subtitle track |
 | GET | `/api/files/{id}/subtitles/{index}.mks` | `play` | a picture subtitle track in a Matroska file of its own (`video/x-matroska`) |
+| GET | `/api/files/{id}/subtitles/{index}.sup` | `play` | a PGS track as a `.sup` file (Kodi's) |
 | GET | `/api/files/{id}/trickplay` | `play` | seek-bar previews: `{ id, interval_ms, width, height, columns, rows, count, sheets }` |
 | GET | `/api/files/{id}/trickplay/{n}.jpg?v={id}` | `play` | preview sprite sheet `n` |
 | GET | `/api/files/{id}/chapters/{n}.jpg` | `play` | picture of chapter `n` (0-based) |
@@ -1494,10 +1500,27 @@ removed or reordered (`400`).
   to an HLS stream instead of having them burned in
   (`picture_subtitles_sideload`). Times are the original's from the start
   of the file, so it lines up with the playback position (also for an HLS
-  stream started at a seek point). Made once per file version by the
-  transcoder (which reads the whole file), cached, served with `Range`.
-  `404` for a text track or anything but subtitles; `503` with a transcoder
-  too old to make it.
+  stream started at a seek point; see `pts_offset_ms`). Made once per file
+  version by the transcoder, cached, served with `Range`. `404` for a text
+  track or anything but subtitles; `503` with a transcoder too old to make
+  it.
+  - A Matroska file whose Cues list the track's blocks is read in seconds
+    and the track comes whole. Otherwise the transcoder reads the whole
+    file (minutes for a big one on a network share): meanwhile the answer
+    is what is copied so far, up to its last whole cluster, with
+    `X-Pley-Complete: 0` and `Cache-Control: no-store`; a `Range` of it says
+    `*` for the length. Every answer is a Matroska file players read (the
+    track's header at least). Ask again for the rest, as for `.vtt`.
+  - The copy starts as a playback starts whose player draws the track
+    (`picture_subtitles_sideload`, the track picked or the profile's
+    choice), rather than when it asks, after the playback's own start.
+- **`.sup`**: a PGS track (in the file or next to it) as a `.sup` file, for
+  players that read those beside a stream but no Matroska (Kodi): a `.sup`
+  next to the media as it is, an embedded track made from its `.mks`, with
+  an empty display set at 0 first (a reader that takes a file's first time
+  for its start starts it where the video does). The answer waits up to
+  8 s for the whole track, then has what is copied so far
+  (`X-Pley-Complete: 0`). `404` for anything but PGS.
 - **`trickplay`**: `404` while previews are being made (asking, or opening
   the item, queues them). Made one file at a time, never during a
   playback's first 30 s nor while anything is transcoded: a playback that
@@ -1585,8 +1608,8 @@ Rules:
   repackaging (Safari, and Matroska) is converted instead.
 - Converted audio is stereo AAC. AAC and MP3 the player decodes are copied.
 - `mode: "direct"` always returns the original file (for a browser that
-  plays more than it reports; picture subtitles and other audio tracks are
-  then unavailable). `"remux"` and `"transcode"` force HLS; `"transcode"`
+  plays more than it reports; other audio tracks are then unavailable, and
+  so are picture subtitles unless the player draws them itself). `"remux"` and `"transcode"` force HLS; `"transcode"`
   always re-encodes the video.
 - A session started with a `client_id` ends that user's previous sessions
   on the same client (a quality or audio switch, the next episode) before
@@ -1763,7 +1786,11 @@ pseudo-random data, made as it is sent, with `Content-Length`,
 
 `caps_version: 2` turns on these rules. A report without it (the web app,
 the Android app's web view, compatibility API clients) decides as version 1,
-whatever else it sends. Version 2 reports still send the version 1 fields:
+whatever else it sends. (The web app sends `subtitle_codecs` and
+`picture_subtitles_sideload` in its version 1 report to say it draws
+picture subtitles from their `.mks`: they change no decision, since it
+asks for no `subtitle_index` of a track it draws, and with one it can't
+draw, a `404` or `503` for the `.mks`, it asks for it to be burned in.) Version 2 reports still send the version 1 fields:
 `containers` always counts; `video_codecs` and `audio_codecs` stand in only
 when `video`, or both `audio_decode` and `audio_passthrough`, are left out.
 
@@ -1799,8 +1826,9 @@ when `video`, or both `audio_decode` and `audio_passthrough`, are left out.
   `audio_passthrough`. With `audio_track_switching`, a track other than the
   file's default needs no HLS: the player switches to it itself.
 - **Picture subtitles** (PGS, VobSub, DVB) in `subtitle_codecs` are shown
-  by the player when the file plays as it is. When it doesn't, they are
-  burned in as for version 1 (HLS segments carry no subtitles). Subtitle
+  by the player when the file plays as it is. When it doesn't, or a
+  stream is asked for (`remux`, `transcode`), they are burned in as for
+  version 1 (HLS segments carry no subtitles). Subtitle
   files next to the media are always burned in. A player with
   `picture_subtitles_sideload` shows them next to the HLS stream from
   `/api/files/{id}/subtitles/{index}.mks` instead: it asks for no

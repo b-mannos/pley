@@ -483,10 +483,11 @@ export interface PlaybackInfo {
    */
   adaptive?: boolean;
   /**
-   * Added to the player's time, the time in the file a picture subtitle
-   * track (`.mks`) shows at, in ms. Absent or 0: the same.
+   * How much later than the file's times (as picture subtitles' `.mks` is
+   * timed) an HLS stream's timestamps are, in ms; null for a direct play.
+   * Absent from older servers.
    */
-  subtitle_offset_ms?: number;
+  pts_offset_ms?: number | null;
 }
 
 /** `GET /api/playback/{session}`: how a session plays, with its transcode's live numbers. */

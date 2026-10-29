@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPictureTrack } from "pley-picture-subtitles/mks";
 import { PictureSubtitles } from "pley-picture-subtitles/picture-track";
 import { pgsMks as mks } from "@/test/pictures";
-import { contain, fetchPictures, hlsLeadMs, loadPictures, LOOKAHEAD_MS, PictureRenderer, PICTURES_AGAIN_MS, planeBox, trackMs } from "./pictures";
+import { contain, fetchPictures, hlsLeadMs, hlsShiftMs, loadPictures, LOOKAHEAD_MS, PictureRenderer, PICTURES_AGAIN_MS, planeBox, trackMs } from "./pictures";
 
 const track = (cues: [number, number][]) => PictureSubtitles.of(readPictureTrack(mks(cues)))!;
 
@@ -48,6 +48,23 @@ describe("hlsLeadMs", () => {
     expect(hlsLeadMs(frag(0))).toBeUndefined();
     expect(hlsLeadMs(frag(undefined, 1))).toBeUndefined();
     expect(hlsLeadMs(frag(18.006, 19.237))).toBeNull();
+  });
+});
+
+describe("hlsShiftMs", () => {
+  it("maps hls.js's time to the file's by its initPTS and the server's timestamp offset", () => {
+    // The first picture at 1.4 s in the stream, decoded two frames earlier
+    // (hls.js starts there): at 0.0667 s of media time, 0 in the file.
+    const initPtsMs = 1400 - 66.7;
+    expect(0.0667 * 1000 + hlsShiftMs(1400, initPtsMs, 66.7)).toBeCloseTo(0, 5);
+    // A conversion started part-way, whatever its first segment's lead.
+    expect(hlsShiftMs(1400, 1400 + 18_006 - 18_723 - 66.7, 717)).toBeCloseTo(-783.7, 5);
+  });
+
+  it("takes the measured lead off without the server's offset or hls.js's initPTS", () => {
+    expect(hlsShiftMs(undefined, 1333.3, 66.7)).toBeCloseTo(-66.7, 5);
+    expect(hlsShiftMs(1400, null, 66.7)).toBeCloseTo(-66.7, 5);
+    expect(hlsShiftMs(null, null, null)).toBe(0);
   });
 });
 

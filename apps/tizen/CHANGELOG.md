@@ -15,6 +15,8 @@ describes how they are made.
 
 ### Fixed
 
+- Picture subtitles the server is still copying out of a big file show
+  as far as they are, without a picture cut in two.
 - Switching to another server no longer shows the last server's Home,
   libraries or titles, and asks "Who's watching?" as that server's
   household needs.

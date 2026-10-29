@@ -19,6 +19,7 @@ const { FakeHls, hlsInstances } = vi.hoisted(() => {
       ERROR: "hlsError",
       FRAG_LOADED: "hlsFragLoaded",
       FRAG_PARSED: "hlsFragParsed",
+      INIT_PTS_FOUND: "hlsInitPtsFound",
       MANIFEST_PARSED: "hlsManifestParsed",
       LEVEL_SWITCHED: "hlsLevelSwitched",
     };

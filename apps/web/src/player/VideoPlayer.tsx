@@ -2,7 +2,7 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } fro
 import { useLocation, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type HlsType from "hls.js";
-import type { ErrorData, FragLoadedData, FragParsedData, LevelSwitchedData, ManifestParsedData } from "hls.js";
+import type { ErrorData, FragLoadedData, FragParsedData, InitPTSFoundData, LevelSwitchedData, ManifestParsedData } from "hls.js";
 import {
   ArrowLeft,
   CircleStop,
@@ -69,7 +69,7 @@ import { fileMarkers, SkipButton, skipTarget, useSkipMarkers } from "./SkipButto
 import { carriedSleepTimer, sleepChoice, SleepNotice, useSleepTimer } from "./sleepTimer";
 import { SubtitleOverlay } from "./SubtitleOverlay";
 import { PictureSubtitleOverlay, usePictureTrack, type PictureTrackHooks } from "./PictureSubtitleOverlay";
-import { hlsLeadMs, picturePath } from "./pictures";
+import { hlsLeadMs, hlsShiftMs, picturePath } from "./pictures";
 import {
   clampSubtitleOffset,
   cueAtTop,
@@ -407,13 +407,13 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
   /**
-   * How far hls.js's time runs ahead of the file's (ms) in a session: it
-   * starts its timeline at the first segment's earliest decoding time, so a
-   * stream with B-frames shows its first picture a frame or two after its
-   * place in the playlist. Picture subtitles, timed as the file is, take
-   * it away, unless the server says by how much (`subtitle_offset_ms`).
+   * How hls.js's time relates to the file's in a session, for picture
+   * subtitles (timed as the file is; pictures.ts, `hlsShiftMs`): its
+   * `initPTS` (ms), and how far its first picture runs ahead of its place
+   * in the playlist (`hlsLeadMs`), for a server that doesn't say
+   * `pts_offset_ms`.
    */
-  const [hlsAhead, setHlsAhead] = useState<{ session: string; ms: number } | null>(null);
+  const [hlsTiming, setHlsTiming] = useState<{ session: string; initPtsMs: number | null; leadMs: number | null } | null>(null);
   const [fellBack, setFellBack] = useState(false);
   /** The fallback to a transcode came from a stall rather than an error. */
   const [stalled, setStalled] = useState(false);
@@ -886,13 +886,23 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 // Lines as a 16:9 picture's: a 1920×800 film plays at 1080p.
                 if (level && pinfo.adaptive) setLevelLines(Math.max(level.height, Math.round((level.width * 9) / 16)));
               });
+              const timing = (change: { initPtsMs?: number; leadMs?: number }) =>
+                setHlsTiming((t) => ({
+                  ...(t?.session === pinfo.session_id ? t : { initPtsMs: null, leadMs: null }),
+                  ...change,
+                  session: pinfo.session_id,
+                }));
+              hls.on(Hls.Events.INIT_PTS_FOUND, (_evt, data: InitPTSFoundData) => {
+                // The main stream's (hls.js is loaded lazily: its enum isn't at hand).
+                if ((data.id as string) === "main" && data.timescale > 0) timing({ initPtsMs: (data.initPTS / data.timescale) * 1000 });
+              });
               let measured = false;
               hls.on(Hls.Events.FRAG_PARSED, (_evt, data: FragParsedData) => {
                 if (measured || data.part) return;
                 const ahead = hlsLeadMs(data.frag);
                 if (ahead === undefined) return;
                 measured = true;
-                if (ahead !== null) setHlsAhead({ session: pinfo.session_id, ms: ahead });
+                if (ahead !== null) timing({ leadMs: ahead });
               });
               hls.on(Hls.Events.FRAG_LOADED, (_evt, data: FragLoadedData) => {
                 // Media that arrives isn't media that plays: budgets start over
@@ -1808,7 +1818,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         <PictureSubtitleOverlay
           videoRef={videoRef}
           subs={pictures.subs}
-          sessionOffsetMs={info?.subtitle_offset_ms ?? (hlsAhead && hlsAhead.session === info?.session_id ? -hlsAhead.ms : 0)}
+          sessionOffsetMs={
+            hlsTiming && hlsTiming.session === info?.session_id
+              ? hlsShiftMs(info.pts_offset_ms, hlsTiming.initPtsMs, hlsTiming.leadMs)
+              : 0
+          }
           offset={subtitleOffset}
           hold={frozen}
         />

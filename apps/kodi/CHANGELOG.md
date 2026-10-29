@@ -18,6 +18,9 @@ describes how they are made.
 
 ### Changed
 
+- PGS subtitles come to Kodi as a `.sup` file beside a converted stream,
+  or for a `.sup` file next to the media, rather than burned in: the
+  picture keeps its quality and HDR. Needs a server that makes them.
 - Buttons and rows read in sentence case, as in the other apps: "Skip intro",
   "Skip credits", "More like this", "Cast & crew", "Guest stars". Sign out
   asks "You'll be signed out of <server>."
