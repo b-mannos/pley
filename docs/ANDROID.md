@@ -2,12 +2,12 @@
 
 One app, `com.formandelement.pley`, for phones, tablets, Android TV, Google
 TV and Fire TV (Fire OS 7 and later). Android 8 is the minimum. It is
-native, in Kotlin and Compose: `MainActivity` on phones and tablets,
+native Kotlin and Compose: `MainActivity` on phones and tablets,
 `TvActivity` on TVs.
 
 ## Installing
 
-No store carries the app yet. It is sideloaded, as a debug build or a
+No store carries the app yet, so it is sideloaded, as a debug build or a
 signed release ([Releases](#releases)):
 
 - From a computer: `adb install -r app-store-debug.apk` (for a TV or Fire
@@ -18,295 +18,156 @@ signed release ([Releases](#releases)):
   "Install unknown apps" for the Downloader app, then open the APK's
   address in Downloader.
 
-The phone or tablet's launcher opens `MainActivity`; the TV home screen
-opens `TvActivity`. A TV that opens `MainActivity` (some launchers do) is
-sent on to `TvActivity`. How the TV home screen shows the app:
-
-- Android TV: the 320×180 banner.
-- Google TV: the app's icon, the P, in a circle (`TvActivity` has no icon of
-  its own, so the banner is never cut to a circle).
-- Fire TV: a sideloaded app's icon in a square between grey bars, whatever
-  the icon's shape; an app from Amazon's store by the store's pictures.
+The phone launcher opens `MainActivity` and the TV home screen
+`TvActivity`; a TV that opens `MainActivity` is sent on to `TvActivity`.
+Android TV shows the 320×180 banner, Google TV the icon in a circle, and
+Fire TV a sideloaded app's icon in a square between grey bars.
 
 ## Fire TV
 
-Fire TV runs the same APK and the same TV screens as Android TV; there is
-no Fire TV build. The app recognizes it by Amazon's `amazon.hardware.fire_tv`
-feature, and then changes only what Amazon asks of a player:
+Fire TV runs the same APK and TV screens as Android TV. The app recognizes
+it by the `amazon.hardware.fire_tv` feature and then follows Amazon's
+player guidelines: decoders queue buffers asynchronously (a per-model
+switch can turn it off), surround output follows Fire OS's audio setting,
+Alexa's play and pause reach the player, and Fire OS 16 asks for the
+nearby-devices permission before searching the network. There is no Watch
+Next row.
 
-- Decoders queue their buffers asynchronously (Fire TV's media guidelines;
-  a per-model switch can turn it off).
-- Surround output follows Fire OS's own audio setting.
-- Alexa's play and pause reach the player's media session.
-- Fire OS 16 asks for its nearby-devices permission before searching the
-  network.
-- Nothing is published to a Watch Next row: Fire OS's home screen has none.
-
-The remote works as on Android TV: Select opens, holding Select or pressing
-Menu (☰) opens a title's actions, Back goes back, and play/pause, rewind and
+The remote works as on Android TV: Select opens, holding Select or Menu
+(☰) opens a title's actions, Back goes back, and play/pause, rewind and
 fast forward work in the player.
-
-Fire OS 7 (Android 9) is the oldest supported. An `android-28` Android TV
-emulator with 1 GB of memory stands in for a Fire TV stick
-([Emulators](#emulators)), except for video: its decoders are software
-only, which the app doesn't use on TVs, so it can't play video.
 
 ## Audio and subtitles
 
-- **Audio**: the player names a track to the server (`audio_index`) only
-  when the person picked one, on the title's page or in the player's menu.
-  Otherwise the server picks the track of the profile's language this
-  device plays best, and the player switches to it and marks it in the
-  menu. Downloads, with no server to ask, choose the audio on the device.
-- **Remembered tracks**: tracks picked in the player, on another episode or
-  as new defaults are the ones the next episode and the title's page start
-  with (`PUT /api/items/{id}/streams`). Subtitles changed alone are saved
-  without the audio, so the track one device played isn't pinned for every
-  other.
-- **The profile's defaults** (Audio language, Subtitles, Subtitle language)
-  are under Me on phones and in Settings on TVs
-  (`PUT /api/me/track-defaults`).
-- **Sync** (subtitle menu) moves subtitles in 0.1 s steps, up to 10 s
-  either way, remembered for each file on the device.
-- **Subtitle style** (Settings, also in the player: the phone's menu has
-  Subtitle style, the TV's Subtitles panel lists it under the tracks):
-  size, background, font (sans serif, serif, monospace, and the system's
-  casual hand where it has one, not on every Fire OS) and position (at the
-  bottom, or raised by 5, 10 or 15 % of the picture). Choosing a font uses
-  Pley's own style over the system's captions. The position applies either
-  way, to text only (picture subtitles keep their cue's place).
-- **Find subtitles…**, at the end of the subtitle menu while the file
-  streams from the server (not a download), lists what the server finds
-  online for the file in the profile's subtitle language
-  (`GET /api/items/{id}/subtitles/search`), those made for this very file
-  first. The one picked is added on the server
-  (`POST /api/items/{id}/subtitles`), joins the file's tracks as a subtitle
-  file beside the media, and shows. A server without search set up says
-  "Subtitle search isn't set up on this server"; an older one, that it
-  can't search.
-- **Speed**: 0.5×, 0.75×, 1×, 1.25×, 1.5× or 2×, pitch kept (in the
-  phone's player settings; a button at the TV player's left).
-- **Audio delay**: the sound up to 5 s earlier or later than the picture, in
-  50 ms steps (above the audio tracks; Left and Right on the TV). It moves
-  the audio output's clock rather than the sound (`DelayedAudioSink`), so
-  it holds with passthrough too.
-- Speed and delay are the title's only: the next one plays at 1× with no
-  delay. The speed can't change for sound passed through to a receiver,
-  and neither can change with tunneled playback (where the TV keeps the
-  picture in sync with the sound itself); the menus say so.
+- The player sends an audio track (`audio_index`) only when the person
+  picked one; otherwise the server picks the profile's language in the
+  best format this device plays. Downloads choose on the device.
+- Tracks picked in the player are remembered for the title
+  (`PUT /api/items/{id}/streams`); subtitles changed alone leave the audio
+  unpinned.
+- The profile's defaults (Audio language, Subtitles, Subtitle language) are
+  under Me on phones and in Settings on TVs.
+- **Sync** (subtitle menu): 0.1 s steps, up to 10 s either way, remembered
+  per file on the device.
+- **Subtitle style** (Settings, or Subtitle style in the phone's player
+  menu and the TV's Subtitles panel): size, background, font (sans serif,
+  serif, monospace, and a casual hand where the system has one, not on
+  every Fire OS) and position (bottom, or raised 5, 10 or 15 %). A chosen
+  font overrides the system's captions style. Position applies to text
+  subtitles only.
+- **Find subtitles…** (end of the subtitle menu, while streaming, not for
+  downloads) lists what the server finds online in the profile's subtitle
+  language; the one picked is added on the server and shows. A server
+  without search set up says "Subtitle search isn't set up on this
+  server".
+- **Speed**: 0.5× to 2×, pitch kept (the phone's player settings; a button
+  at the TV player's left).
+- **Audio delay**: up to 5 s either way in 50 ms steps (above the audio
+  tracks; Left and Right on the TV). It works with passthrough.
+- Speed and delay last for the title only. Speed can't change for audio
+  passed through to a receiver, and neither can with tunneled playback; the
+  menus say so.
 
 ## Quality
 
-The menu (the phone's sheet, the TV's Quality panel), Original and
-Automatic are as in [QUALITY.md](QUALITY.md#the-menu). What is Android's
-own:
+The menu, Original and Automatic are as in
+[QUALITY.md](QUALITY.md#the-menu). On Android:
 
-- **Where it is set**: the quality is kept per device and network kind:
-  Settings → Quality on Wi-Fi and Quality on mobile data on phones, Quality
-  on TVs. Automatic until one is chosen, in the player or in Settings.
-- **Where Automatic starts**: at most at the ceiling the server keeps for
-  this player on this network (`GET /api/playback/network`, asked alongside
-  the item's details, 1.5 s at most). When the server asks for a speed test,
-  the test reads 2 s of `GET /api/playback/speedtest` from its first byte
-  and `PUT`s the result back, 3.5 s at most in all, during Preparing. Every
-  ceiling Automatic finds or forgets goes to the server too
-  (`NetworkStart`).
-- **The device's own memory**, when the server can't answer or is too old:
-  kept in the app's preferences per server, on the device's clock since it
-  started, so a ceiling from before a restart is forgotten.
-- **What it watches**: `AutoQuality` (`core/player`) is fed every half
-  second: rebuffering from the player's state, delivery from the buffered
-  position and the playhead, the network from Media3's bandwidth estimate,
-  and dropped frames as the recovery ladder counts them. Waits while the
-  server is out of reach (Reconnecting) aren't play issues.
-- **Settling** includes steps up to the original, and the network is
-  measured over the whole calm before a step up.
-- **Dropped frames**: at the original, they trigger the ladder's switch to
-  the server's quality, as with Original (then Automatic offers Original in
-  its menu rather than Play original), and it never steps back up to the
-  original. At a lower quality, they go to fewer lines.
-- **The server's quality for a file**: Automatic works it out itself (by
-  the server's rule) until the server names it, which it does only when it
-  converts. A server that converts too slowly makes Automatic step down
-  rather than offer a lower quality.
-- **Downloads** play as they are, in Automatic too.
-- **Several sizes** ([QUALITY.md](QUALITY.md#several-sizes-adaptive-bitrate)):
-  Media3 moves between them by itself, no bigger than the screen, and up a
-  size only with 20 s buffered (`minDurationForQualityIncreaseMs`; Media3's
-  default is 10 s, the rest of its `AdaptiveTrackSelection` is Media3's,
-  `Media3Engine.sizeSwitching`). In such a session
-  (`PlaybackInfo.adaptive`) the half-second feed leaves `AutoQuality` be;
-  only stalls and dropped frames can still start it again lower. Media3's
-  own moves between sizes keep their buffer: nothing in the app sets track
-  selection parameters when a size changes.
-
-### Changing streams without a pause
-
-A quality picked, an audio track the engine can't switch to itself,
-picture subtitles burned in, Automatic's steps, the switch to the server's
-quality for dropped frames and Play original each need a new session. The
-session controller starts it beside the one playing (`keep_previous`), asks
-through the engine's media client for its playlist, the first size listed
-and the segment holding the start plus 4 s (so the transcoder makes them),
-then ends the old session and moves the engine to the new one from where
-it got to.
-
-- The wait is 20 s at most; meanwhile the old session's stalls and dropped
-  frames don't count.
-- The screen keeps the last picture (`PlayerUiState.handoff` hides the
-  black shutter until the new stream's first frame); the spinner shows only
-  after 2.5 s instead of 0.4 s (0.5 s on TVs).
-- With no transcode free for two at once (`503`), the old session ends
-  first. Recoveries from errors and stalls start the new session at once:
-  the stream playing is what failed.
+- The quality is kept per device and network kind: Settings → Quality on
+  Wi-Fi and Quality on mobile data on phones, Quality on TVs. Automatic
+  until one is chosen.
+- Automatic asks the server's network memory alongside the item's details
+  and runs a speed test when the server asks for one, both during
+  Preparing. Without an answer it uses its own memory, which a restart
+  clears.
+- Waits while the server is out of reach (Reconnecting) aren't play issues.
+- Dropped frames at the original switch to the server's quality, and
+  Automatic doesn't step back up to the original during the title.
+- Downloads play as they are, in Automatic too.
+- [Several sizes](QUALITY.md#several-sizes-adaptive-bitrate): Media3 moves
+  between them, never bigger than the screen.
+- A change that needs a new session (a quality, an audio track the player
+  can't switch to itself, burned-in subtitles, Automatic's steps, Play
+  original) is prepared beside the playing one (`keep_previous`): the last
+  picture stays on screen until the new stream's first frame, and the
+  spinner shows only after 2.5 s. With no transcode free for two (`503`),
+  the old session ends first.
 
 ## Watch Next
 
 On Android TV and Google TV, the home screen's Watch Next row shows the
-profile's Continue Watching (`watchnext/`): Home's row, in its order, ten
-at most. Titles watched part way show as Continue, with their place, and
-episodes not started as Next.
-
-- It follows what the TV app already keeps current while in the foreground
-  (progress, a title finished or taken off Continue Watching, the server's
-  events), and asks the server for nothing of its own.
-- Another profile or server replaces its programs; signing out empties it.
-  A program the person takes off the row stays off.
-- Selecting one opens the title's page and plays it from where it was,
-  once its profile is the one signed in ("Who's watching?" first, if the
-  TV asks); otherwise the app just opens.
-- The home screen can't send the profile's token, so the app fetches the
-  pictures itself and hands them over from a read-only provider
-  (`WatchNextImageProvider`), under names no other app can guess.
-- Not on phones, and not on Fire TV, whose home screen has no such row.
+profile's Continue Watching (`watchnext/`, ten at most): Continue for
+titles watched part way, Next for episodes not started. It follows what
+the app already keeps current, changes with the profile or server, and is
+emptied on sign-out. A program removed from the row stays off. Selecting
+one opens the title and plays it once its profile is signed in ("Who's
+watching?" first, if asked). Not on phones or Fire TV.
 
 ## Screens
 
 - **Library order** is the profile's. On phones: Sort in the Libraries
-  tab's top bar (a handle to drag; Move up and Move down for TalkBack). On
-  TVs: Sort by the Libraries page's title, Move in a library's actions,
-  and Settings → Sort libraries (with three libraries or fewer, the rail
-  lists them and there is no Libraries page). Each move is saved at once;
-  a server too old to sort says so.
-- **See all** on a row (Recently Added, Recently Released, Top Rated), on
-  Home and in a library's Recommended tab, shows the Library tab in the
-  row's order, as the web's link does, without changing the view the
-  library was left in.
-- **On the TV**: a title's Media info stays closed until Select opens it.
-  In the player, OK while a seek is coming or within two seconds of one
-  goes there and plays on (later, OK pauses). The rail keeps its panel
-  until it has closed.
-- **Badges**: Dolby Vision profile 7 is labelled FEL or MEL, and a hybrid
-  file shows both DV and HDR10+.
-- **Large system fonts**: labels and poster titles shrink to fit rather
-  than break inside a word.
+  tab's top bar (drag, or Move up and Move down for TalkBack). On TVs: Sort
+  by the Libraries page's title, Move in a library's actions, and Settings
+  → Sort libraries (with three libraries or fewer there is no Libraries
+  page). A server too old to sort says so.
+- **See all** on a row (Recently Added, Recently Released, Top Rated) shows
+  the Library tab in that row's order without changing the library's view.
+- **On the TV player**, OK within two seconds of a seek plays on from
+  there; later, OK pauses.
+- **Badges**: Dolby Vision profile 7 is labelled FEL or MEL; a hybrid file
+  shows both DV and HDR10+.
 
 ## Offline
 
-The app needs no internet. The server signs Pley's own apps in itself
-(their client documents are built in, never fetched). On a phone whose
-Wi-Fi has no internet, traffic to the server at home goes over the Wi-Fi
-even while the phone's default network is mobile data (`LocalRoute`).
-Away from the server, phones and tablets play downloads.
+The app needs no internet: the server signs Pley's own apps in itself. On
+a phone whose Wi-Fi has no internet, traffic to the home server still goes
+over the Wi-Fi while mobile data is the default network (`LocalRoute`).
 
-**With the server out of reach**, the screens show what was saved of them,
-under "Showing what Pley had saved. Reconnecting…":
-
-- On phones, a banner under the top bar, leading to the downloads.
-- On TVs, a notice at the top right for a few seconds, then a mark on the
-  rail's avatar while it lasts (no corner is free of controls on every TV
-  screen).
-- The server's event stream keeps trying, and the screens come back on
-  their own once it answers.
-- A home address or name (`192.168.…`, `nas.local`) has 3 s to accept a
-  connection rather than OkHttp's 10, since one at home accepts at once or
-  never (`HttpRoot.homeConnectTimeout`). Pressing play with the server off
-  says "Can't reach your server" within seconds, with Try again.
-
-**A playback that loses the server** (the Wi-Fi dropping, the server
-restarting) keeps its place. It plays what it has, then shows
-"Reconnecting…" under its ring while it retries, up to 2 s apart, for 90 s
-from the first failure (`MediaRetries`; the stall ladder holds off
-meanwhile), and goes on by itself once the server answers. After that it
-says "Can't reach your server", with Try again.
+- **Server out of reach**: the screens show what was saved, under "Showing
+  what Pley had saved. Reconnecting…" (a banner leading to downloads on
+  phones; a notice, then a mark on the rail's avatar, on TVs). They come
+  back on their own once the server answers. A home address (`192.168.…`,
+  `nas.local`) gets 3 s to connect, so "Can't reach your server" comes
+  within seconds, with Try again.
+- **Playback that loses the server** keeps its place, plays what it has,
+  then shows "Reconnecting…" and retries for 90 s before "Can't reach your
+  server", with Try again.
 
 ### Downloads
 
-Downloads (`:core:downloads`) are for phones and tablets. TVs stay where
-the server is and download nothing.
+Phones and tablets only; TVs download nothing.
 
-- **What is kept**: the original file of a movie or an episode (of several
-  versions, the sharpest up to 1080p of those the device plays as they are,
-  by the player's capabilities), with its details, a picture and its text
-  subtitles as WebVTT. They live in the app's own storage (removed with
-  the app), per server and profile.
-- **Subtitles still being read**: a track the server is still reading out
-  of the file (minutes for a big one on a network share) is kept as far as
-  it goes while the file comes. It is asked for again once the file is
-  down, and when the app opens while it still falls short.
-- **Converted first**: a file the device doesn't play as it is, or every
-  file when Settings → Downloads → Quality picks a smaller one, is made by
-  the server first (`POST /api/conversions` with the player's
-  capabilities, [API.md](API.md#downloads)). The download shows "Preparing
-  on the server" with the server's progress, checks every 5 s, then
-  downloads the made file, which keeps the original's subtitle tracks. A
-  server whose transcoder can't make files gives the original, unless a
-  smaller quality was asked for.
-- **How they come**: in a foreground service of type dataSync with a
-  notification, one at a time; one cut short resumes where it stopped
-  (Range). They wait for Wi-Fi or Ethernet unless Settings → Downloads
-  allows mobile data ("Waiting for Wi-Fi"), and for the server when it
-  doesn't answer or its transcoder isn't running ("Waiting for your
-  server"). Those waiting go on when the app opens.
-- **Failures**: a failed one says why in its menu, with Try again and Delete
-  download. Deleting one the server is still making stops it there.
-- **Where**: Download sits under Play on a movie's or an episode's page,
-  beside each episode of a season, and for the whole season. They are
-  listed under Me → Downloads, which the offline banner leads to as well.
-
-Playing a download:
-
-- It plays from the device whether the server answers or not
-  ("Downloaded" in the player). A quality picked by hand streams from the
-  server instead, and so does a download whose file isn't the one the
-  server now has under that number (by name and size: a server whose
-  database was made anew numbers its files again).
-- It waits 1.5 s at most for the server's details, then starts from the
-  ones saved with it (away from home, the server's address can take long to
-  fail).
-- Progress is kept on the device while the server is out of reach, then
-  sent when it answers again (the app opening, a network coming up), each
-  report with its `age_ms`; the server keeps whatever happened to the item
-  since ([API.md](API.md)).
-- An episode played from a download goes on to the next one of its show
-  downloaded when the server doesn't say what's next within 3 s.
-- A download the device can't decode after all falls back to the server,
-  which converts it; with the server away, the player says so.
+- Download sits under Play on a movie's or episode's page, beside each
+  episode and for a whole season. They are listed under Me → Downloads.
+- A download is the original file (of several versions, the sharpest up to
+  1080p the device plays as it is) with its details, a picture and its
+  text subtitles, in the app's own storage per server and profile (removed
+  with the app).
+- A file the device can't play as it is, or every file when Settings →
+  Downloads → Quality picks a smaller one, is converted by the server first
+  (`POST /api/conversions`, [API.md](API.md#downloads)): "Preparing on the
+  server", then the download. A server whose transcoder can't make files
+  gives the original, unless a smaller quality was asked for.
+- Downloads run one at a time in a foreground service with a notification,
+  and resume where they stopped. They wait for Wi-Fi or Ethernet unless
+  Settings → Downloads allows mobile data ("Waiting for Wi-Fi"), and for
+  the server ("Waiting for your server"). A failed one says why in its
+  menu, with Try again and Delete download.
+- A download plays from the device whether the server answers or not
+  ("Downloaded" in the player). A quality picked by hand streams instead,
+  as does a download whose file the server no longer has.
+- Progress made offline is sent when the server answers again. An episode
+  goes on to the next downloaded one when the server can't say what's
+  next. A download the device can't decode falls back to the server.
 
 ## Updating from the web view app
 
-The first Android app (0.1) was a web view: a list of servers, the
-server's web app and a Media3 player. Installing this app over it:
-
-- Keeps its saved servers and its install id (the player's `client_id`, so
-  the server sees the same player), read once into the app's store
-  (`:core:data`, `WebViewMigration`). The last server used stays selected.
-- Asks to sign in again, on the server it had: the web view held a
-  full-rights browser session, this app holds app tokens with viewer
-  rights only.
-- Once, after the first frame and off the main thread
-  (`app/.../migration/WebViewCleanup`, run by AndroidX Startup), ends the
-  web view's session: its cookie on each saved server is sent to
-  `POST /api/auth/logout` as a Bearer token, ending that 90-day session
-  (best effort: a server out of reach keeps it until it expires). Then its
-  cookies, web storage and folders (`app_webview`, `app_textures`, its
-  caches and preferences) are deleted. On a fresh install the folder isn't
-  there and no web view ever starts. Nothing else in the app reads cookies
-  (`CutoverTest`).
-
-The web app keeps its hooks for the Android web view
-(`apps/web/src/lib/shell.ts` and the player hand-off) for one more release,
-then they go.
+Installing this app over the earlier web view app (0.1) keeps its saved
+servers and install id (`WebViewMigration`) and asks to sign in again. Its
+old session is ended on each server (`POST /api/auth/logout`, best effort)
+and its web view data deleted (`migration/WebViewCleanup`, checked by
+`CutoverTest`). The web app's hooks for the web view
+(`apps/web/src/lib/shell.ts`) go after one more release.
 
 ## Modules
 
@@ -315,74 +176,59 @@ sees only what it builds on.
 
 | Module | What it holds | Builds on |
 |---|---|---|
-| `:app` | `PleyApplication`, the app's parts made by hand (`AppGraph`), `MainActivity` (phones), `TvActivity` (TVs), the TV's Watch Next row (`watchnext/`), the clean-up after the web view app (`migration/`) | everything |
-| `:core:common` | server address rules, discovery, local network access, the device's profile and tier, picture sizes, trace names, test tags | nothing |
-| `:core:model` | the server's answers and request bodies (kotlinx.serialization), server events, the capability report; plain Kotlin, no Android | nothing |
-| `:core:auth` | signing in (`app.pley.android.auth`): the server's page in the browser, the TV's code, tokens and where they may go | common |
-| `:core:network` | the OkHttp clients, `PleyApi`, server events, discovery, address checks | common, model, auth |
+| `:app` | `PleyApplication`, `AppGraph`, `MainActivity`, `TvActivity`, Watch Next (`watchnext/`), the web view clean-up (`migration/`) | everything |
+| `:core:common` | address rules, discovery, local network access, device profile and tier, picture sizes, trace names, test tags | nothing |
+| `:core:model` | the server's answers and requests, events, the capability report; plain Kotlin | nothing |
+| `:core:auth` | sign-in: the browser page, the TV's code, tokens | common |
+| `:core:network` | OkHttp clients, `PleyApi`, server events, discovery | common, model, auth |
 | `:core:data` | repositories, snapshots, servers, session, settings, live updates | network, auth, model |
 | `:core:caps` | what the device plays: decoders, Dolby Vision, HDR, display modes, passthrough, quirks | common, model, Media3 |
 | `:core:player` | the Media3 engine, playback sessions, subtitles, previews, markers, queues, music | caps, data, network |
-| `:core:downloads` | downloads for watching away from the server: the queue, its foreground service, the files and their index, progress kept while offline | data |
-| `:core:designsystem` | colours, icons, the image loader, artwork and tiles; Compose foundation only, never Material | common, model |
-| `:core:screens` | one ViewModel per screen, shared by phone and TV; the routes (`PleyKey`), `Navigator`, `PlayerLauncher` | data, player, caps, auth |
-| `:core:testing` | fakes, JSON fixtures written from docs/API.md, test rules; tests only | the contracts |
-| `:ui:phone` | the phone and tablet interface: Material 3, the navigation bar or rail, the player with picture in picture | screens, designsystem, player |
-| `:ui:tv` | the TV interface: tv-material for the chrome, our own tiles, the rail, the D-pad rules, the TV player | screens, designsystem, player |
+| `:core:downloads` | downloads: the queue, its service, the files, offline progress | data |
+| `:core:designsystem` | colours, icons, image loading, artwork, tiles; Compose foundation only | common, model |
+| `:core:screens` | one ViewModel per screen, shared by phone and TV; routes (`PleyKey`), `Navigator`, `PlayerLauncher` | data, player, caps, auth |
+| `:core:testing` | fakes, JSON fixtures from docs/API.md, test rules | the contracts |
+| `:ui:phone` | the phone and tablet interface (Material 3) | screens, designsystem, player |
+| `:ui:tv` | the TV interface (tv-material, the rail, D-pad rules, the TV player) | screens, designsystem, player |
 | `:testing:fixtures` | `FixtureServer`, a fake Pley server on 127.0.0.1 | model |
 | `:benchmark` | Macrobenchmarks and the Baseline and Startup Profile generators | `:app` |
 
 Rules the build keeps:
 
-- `:ui:tv` never sees Material 3 or `:ui:phone`: each library has its own
-  `MaterialTheme`, and mixing them mixes colours, type and shapes. (Debug
-  builds' Compose previews bring Material 3 in at run time only.)
-- No screen module depends on another: screens meet through `PleyKey`
+- `:ui:tv` never sees Material 3 or `:ui:phone`; their two `MaterialTheme`s
+  would mix.
+- Screen modules don't depend on each other; they meet through `PleyKey`
   routes and the `Navigator`.
-- Contracts (the interfaces in `:core:*`) change only by adding to them.
-  Each has a stub that says what isn't built yet (`NotBuiltYet`).
-- Build files and `gradle/libs.versions.toml` are changed on purpose, in
-  one place: the convention plugins in `build-logic`
+- Contracts (the interfaces in `:core:*`) change only by adding to them;
+  unbuilt parts are stubs (`NotBuiltYet`).
+- Shared build setup lives in the convention plugins in `build-logic`
   (`pley.android.application`, `pley.android.library`,
-  `pley.android.compose`, `pley.jvm.library`, `pley.android.test`) hold
-  what modules share.
-- The app has no native code (no `.so` of its own), so it runs on Fire TV's
-  32-bit userspace.
+  `pley.android.compose`, `pley.jvm.library`, `pley.android.test`) and
+  `gradle/libs.versions.toml`.
+- No native code, so the app runs on Fire TV's 32-bit userspace.
 
 ## Builds
 
-Two flavors:
+Two flavors: `store` (Google Play and the Amazon Appstore, no self-updater)
+and `direct` (the download the Pley server will offer). Release builds are
+minified, and signed when the release key is given.
 
-- `store`: Google Play and the Amazon Appstore, no self-updater.
-- `direct`: the download the Pley server will offer, which may later hand
-  an update to the installer (it asks for that permission only once it
-  does).
+The version is `appVersion` in `app/build.gradle.kts`, set by
+`bun scripts/release.mjs android <patch|minor|major>`; the version code
+follows from it ([RELEASING.md](RELEASING.md#androids-version-code)), plus
+`PLEY_BUILD` (1 to 99) for a store rebuild of the same version. Builds show
+their commit (`PLEY_COMMIT`, else git's) in Settings and Diagnostics, as
+"0.0.1 (1a2b3c4d5)".
 
-Release builds are minified, and signed when the release key is given
-([Releases](#releases)).
-
-The version is the app's own, `appVersion` in `app/build.gradle.kts`, set
-by `bun scripts/release.mjs android <patch|minor|major>`. The version code
-follows from it ([RELEASING.md](RELEASING.md#androids-version-code)); a
-rebuild of the same version for the stores sets `PLEY_BUILD` (1 to 99).
-Builds record the commit they were made from (`PLEY_COMMIT`, else git's),
-and Settings and Diagnostics show both, as "0.0.1 (1a2b3c4d5)".
-
-The launchers are the same in every build: "Pley" on phones and tablets
-(`MainActivity`, `LAUNCHER`) and on TV home screens (`TvActivity`,
-`LEANBACK_LAUNCHER`, with the 320×180 banner). Besides these two, the only
-exported components are the sign-in's return address
-(`SignInRedirectActivity`), the music service (`MusicService`) and the
-Watch Next row's pictures (`WatchNextImageProvider`); `CutoverTest` holds
-the project's manifests to that.
+The only exported components are the two launchers (`MainActivity`,
+`TvActivity`), the sign-in's return address (`SignInRedirectActivity`),
+`MusicService` and `WatchNextImageProvider`; `CutoverTest` enforces it.
 
 ### Releases
 
-The shared process (versions, changelogs, the Release workflow) is in
-[RELEASING.md](RELEASING.md). Android's own part is signing.
-
-Release builds are signed with the key these environment variables name,
-and unsigned without them:
+The shared process is in [RELEASING.md](RELEASING.md). Release builds are
+signed with the key these environment variables name, and unsigned
+without them:
 
 | Variable | |
 |---|---|
@@ -396,15 +242,13 @@ $env:PLEY_KEYSTORE = "$HOME\keys\pley-release.keystore"   # and the others
 .\gradlew.bat :app:assembleDirectRelease :app:bundleStoreRelease
 ```
 
-- The APK to sideload (phones, Android TV, Fire TV):
-  `app/build/outputs/apk/direct/release/app-direct-release.apk`.
-- The bundle for the stores (`:app:bundleStoreRelease`):
-  `app/build/outputs/bundle/storeRelease/app-store-release.aab`.
-
-An Android release (Actions → Release, `android`) builds both, with the key
-from the repository's secrets: `ANDROID_KEYSTORE_BASE64` (the keystore,
-base64-encoded), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and, when
-it differs, `ANDROID_KEY_PASSWORD`.
+This gives the APK to sideload,
+`app/build/outputs/apk/direct/release/app-direct-release.apk`, and the
+store bundle, `app/build/outputs/bundle/storeRelease/app-store-release.aab`.
+The Release workflow builds both with the key from the repository's
+secrets: `ANDROID_KEYSTORE_BASE64` (the keystore, base64-encoded),
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and, when it differs,
+`ANDROID_KEY_PASSWORD`.
 
 Make the key once and keep it safe: every update must be signed with it.
 
@@ -414,13 +258,9 @@ keytool -genkeypair -v -keystore pley-release.keystore -alias pley \
 base64 -w0 pley-release.keystore   # the ANDROID_KEYSTORE_BASE64 secret
 ```
 
-- An app installed from a build signed with another key (a debug build)
-  must be uninstalled once before a release installs.
-- Google Play keeps the key that signs the app on devices (Play App
-  Signing). The key above is then the upload key, which Play can reset if
-  it is lost.
-- The stores' icon, feature graphic, TV banner and words are in
-  `deploy/stores`.
+A debug build must be uninstalled once before a release installs over it.
+With Play App Signing, this key is Google Play's upload key, which Play can
+reset if it is lost. Store pictures and listings are in `deploy/stores`.
 
 ## Commands
 
@@ -431,22 +271,20 @@ $env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
 .\gradlew.bat testDebugUnitTest lintDebug assembleDebug assembleStoreRelease
 ```
 
-- `testDebugUnitTest` and `lintDebug` cover every module, the plain Kotlin
-  ones and both flavors of the app included.
-- `-Ppley.composeReports=true` writes the Compose compiler's reports to
-  each module's `build/compose/`.
-- Gradle runs in parallel with its configuration cache.
-- The debug APKs are `app/build/outputs/apk/store/debug/app-store-debug.apk`
-  and `.../direct/debug/app-direct-debug.apk`.
+`testDebugUnitTest` and `lintDebug` cover every module and both flavors.
+`-Ppley.composeReports=true` writes Compose compiler reports to each
+module's `build/compose/`. The debug APKs are
+`app/build/outputs/apk/store/debug/app-store-debug.apk` and
+`.../direct/debug/app-direct-debug.apk`.
 
-Baseline and Startup Profiles are made on purpose, never during a build, on
-an emulator or device with API 33 or later:
+Baseline and Startup Profiles are generated by hand, on an emulator or
+device with API 33 or later, and committed
+(`app/src/main/generated/baselineProfiles`):
 
 ```powershell
 .\gradlew.bat :app:generateBaselineProfile
 ```
 
-They land in `app/src/main/generated/baselineProfiles` and are committed.
 Sideloaded installs use them only after the device's overnight compile;
 testers run `adb shell cmd package compile -m speed-profile -f
 com.formandelement.pley`.
@@ -459,7 +297,7 @@ com.formandelement.pley`.
 | `pley-tv-34` | `system-images;android-34;google-tv;x86` on `tv_1080p` | D-pad and focus tests, profile generation |
 | an API 37 phone | Android 17 | the local network permission |
 | (optional) | `system-images;android-36;google-tv;x86_64` | Fire OS 16's level: predictive Back, edge to edge |
-| (optional) | `system-images;android-28;android-tv;x86` | Fire OS 7's level |
+| (optional) | `system-images;android-28;android-tv;x86`, 1 GB | Fire OS 7's level (a Fire TV stick); can't play video |
 
 ```powershell
 sdkmanager "system-images;android-34;google-tv;x86"
@@ -467,7 +305,7 @@ avdmanager create avd -n pley-tv-34 -k "system-images;android-34;google-tv;x86" 
 emulator -avd pley-tv-34 -gpu host
 ```
 
-Emulators never count for performance, and can't show HDR, Dolby Vision,
+Emulators don't count for performance and can't show HDR, Dolby Vision,
 display-mode switching, passthrough or real decoder limits: check those on
 devices.
 
@@ -477,10 +315,9 @@ About, turn on ADB debugging in the developer options that appear, and run
 
 ## A server to test against
 
-Tests, benchmarks and manual checks never sign in to, play on or otherwise
-write to a Pley server people use: signing in creates grants and playing
-writes progress. Unit and UI tests use `FixtureServer`. For a real server,
-start a disposable one with its own data folder:
+Never test against a Pley server people use: signing in creates grants and
+playing writes progress. Unit and UI tests use `FixtureServer`. For a real
+server, start a disposable one with its own data folder:
 
 ```powershell
 $data = Join-Path $env:TEMP "pley-android-test"
@@ -494,20 +331,14 @@ computer at `http://10.0.2.2:7712`). Delete the folder afterwards.
 
 ## Performance
 
-Budgets are measured on devices: cold start, scrolling, pictures, playback
-start and memory, on a mid-range phone, a 1 GB Fire TV stick and a
-Chromecast with Google TV HD. Emulator numbers never count.
+Performance is measured on devices (a mid-range phone, a 1 GB Fire TV
+stick, a Chromecast with Google TV HD), never on emulators.
 
-### TV cold start
-
-`:benchmark`'s `TvStartupBenchmark` signs in to the demo server once, then
-starts the TV app cold ten times with its Baseline Profile. It records the
-time to the first frame, to the first screen fully drawn (the app reports
-it once Home has its rows, or at once for another first screen) and the
-app's own startup steps, with a Perfetto trace of each start.
-
-Run it with adb on one device, never as a connected Gradle task, which
-installs the app on every device attached (a phone's own Pley among them):
+`:benchmark`'s `TvStartupBenchmark` starts the TV app cold ten times
+against the demo server and records the time to the first frame and to
+Home fully drawn, with a Perfetto trace of each start. Run it with adb on
+one device, not as a connected Gradle task, which installs the app on
+every attached device:
 
 ```powershell
 .\gradlew.bat :app:assembleStoreBenchmarkRelease :benchmark:assembleBenchmarkRelease
@@ -517,19 +348,7 @@ adb -s <device> shell am instrument -w -e class app.pley.android.benchmark.TvSta
   app.pley.android.benchmark/androidx.test.runner.AndroidJUnitRunner
 ```
 
-- On an emulator, add `-e androidx.benchmark.suppressErrors EMULATOR`.
-- The traces are in
-  `/storage/emulated/0/Android/data/app.pley.android.benchmark/cache`.
-- Benchmark builds start the demo server in the app's process, and its
-  catalogue takes CPU and memory a release never spends.
-
-What a cold start does, in order:
-
-1. The startup read (the server, its tokens, Home's snapshot) and the
-   graph's warm-up start in the background as the app starts.
-2. The TV's start facts (that read, "Always start as" and the household's
-   size) are read together as its activity is made, so the first frame is
-   the first screen.
-3. The libraries' initializers that would run on the main thread before it
-   (EmojiCompat's, OkHttp's) don't; OkHttp's runs where the first client is
-   made.
+On an emulator add `-e androidx.benchmark.suppressErrors EMULATOR`. Traces
+are in `/storage/emulated/0/Android/data/app.pley.android.benchmark/cache`.
+Benchmark builds run the demo server inside the app, which costs CPU and
+memory a release doesn't.
