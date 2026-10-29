@@ -10,8 +10,9 @@
 ' chapters, and the playback's details (Details.brs). Subtitles (or audio) the person picks
 ' in Roku's options are remembered on the server for the show or the movie
 ' (Tracks.brs), so the next episode starts with matching ones. The quality
-' is the one chosen in Settings or the menu; Automatic opens the stream
-' again lower where it was when it doesn't play well (AutoQuality.brs).
+' is the one chosen in Settings or the menu; when it doesn't play well,
+' Automatic lowers a conversion's bitrate as it is sent, or opens the
+' stream again lower where it was once it stopped anyway (AutoQuality.brs).
 
 sub init()
     m.video = m.top.findNode("video")
@@ -389,8 +390,9 @@ end sub
 
 ' Automatic's watch over what now plays: the title's own after a restart,
 ' told the quality it plays at now (the original when the server played
-' the file as it is), the bitrate that is, and the server's own quality
-' for the file.
+' the file as it is), the bitrate that is, the server's own quality for
+' the file, the lines the stream is named by, whether its bitrate changes
+' as it is sent (live_bitrate) and whether it comes in several sizes.
 sub watchPlayback()
     if m.asked = invalid or not m.asked.automatic or httpString(m.item.kind) = "track"
         newTitle()
@@ -410,13 +412,16 @@ sub watchPlayback()
         playing = aqKbps(quality)
         if fileKbps > 0 and fileKbps < playing then playing = fileKbps
     end if
+    live = converted and httpTrue(m.info.live_bitrate)
+    lines = aqStreamLines(quality, converted, cap, aqNamedLines(aqFileWidth(file), fileLines))
     now = m.clock.TotalMilliseconds()
     if m.watch <> invalid and m.watchItem = m.itemId
-        aqRestarted(m.watch, now, quality, playing)
+        aqRestarted(m.watch, now, quality, playing, live, lines, converted)
     else
-        m.watch = aqWatch(now, quality, playing, fileKbps, fileLines, cap, m.asked.lowered and quality <> "original")
+        m.watch = aqWatch(now, quality, playing, fileKbps, fileLines, cap, m.asked.lowered and quality <> "original", live, lines, converted)
         m.watchItem = m.itemId
     end if
+    m.watch.adaptive = adaptiveStream()
     m.autoTimer.control = "start"
 end sub
 
@@ -429,24 +434,24 @@ sub watchState(state as string)
         showToast(m.autoNotice)
         m.autoNotice = ""
     end if
-    if adaptiveStream() then return
     underrun = invalid
     if state = "buffering"
         status = m.video.bufferingStatus
         if GetInterface(status, "ifAssociativeArray") <> invalid and GetInterface(status.isUnderrun, "ifBoolean") <> invalid then underrun = status.isUnderrun
     end if
-    quality = aqState(m.watch, m.clock.TotalMilliseconds(), state, underrun)
-    if quality <> "" then autoSwitch(quality)
+    decision = aqState(m.watch, m.clock.TotalMilliseconds(), state, underrun)
+    if decision <> invalid then autoStep(decision)
 end sub
 
 sub onAutoTick()
-    if m.watch = invalid or m.info = invalid or adaptiveStream() then return
-    quality = aqTick(m.watch, m.clock.TotalMilliseconds())
-    if quality <> "" then autoSwitch(quality)
+    if m.watch = invalid or m.info = invalid then return
+    decision = aqTick(m.watch, m.clock.TotalMilliseconds())
+    if decision <> invalid then autoStep(decision)
 end sub
 
 ' The stream comes in several sizes the Video node moves between by itself,
-' as the connection allows: Automatic leaves the session be.
+' as the connection allows: Automatic leaves its waits to it, and only
+' raises where the next title starts.
 function adaptiveStream() as boolean
     if m.info = invalid then return false
     flag = m.info.adaptive
@@ -465,29 +470,57 @@ sub onSegment(event as object)
     aqSegment(m.watch, m.clock.TotalMilliseconds(), httpNumber(segment.SegSize, 0), httpNumber(segment.DownloadDuration, 0))
 end sub
 
-' The title again where it is, at quality: a step down says so once it
-' plays, and is remembered for the next titles, as is a step up to a
-' quality (its bitrate); back at the original,
-' that is forgotten.
-sub autoSwitch(quality as string)
-    was = m.watch.quality
-    down = quality <> "original" and (was = "original" or aqKbps(quality) < aqKbps(was))
-    if down
-        m.autoNotice = "Quality lowered to " + aqLabel(quality)
-        ceiling = m.watch.ceiling
-        if ceiling <= 0 then ceiling = aqKbps(quality)
-        keepCeiling(ceiling)
-    else if quality = "original"
-        keepCeiling(0)
-    else
-        keepCeiling(aqKbps(quality))
+' Carries out Automatic's step (aqStep). The network's memory follows each
+' (a step up to a quality keeps its bitrate too;
+' back at the original, it is forgotten). A step down says so: at once
+' when the stream plays on, else once the new one plays.
+sub autoStep(decision as object)
+    if decision.memory >= 0 then keepCeiling(decision.memory)
+    if decision.kind = "next" then return
+    if decision.kind = "bitrate"
+        if decision.down then showToast("Quality lowered to " + aqBitrateLabel(decision.kbps, m.watch.lines))
+        setBitrate(decision.kbps)
+        return
+    end if
+    if decision.down then m.autoNotice = "Quality lowered to " + aqLabel(decision.quality)
+    mode = m.mode
+    quality = decision.quality
+    if quality = "converted"
+        ' The original converted, at the server's own quality.
+        quality = "original"
+        mode = "transcode"
     end if
     m.autoQuality = quality
     position = m.positionMs
     seconds = m.video.position
     if seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
     m.autoTimer.control = "stop"
-    open(m.itemId, position, m.item, m.mode)
+    open(m.itemId, position, m.item, mode)
+end sub
+
+' PUT /api/playback/{session}/bitrate: the stream goes on at kbps from the
+' segments the Video node hasn't fetched yet, the same size and playlist,
+' with no new stream (docs/QUALITY.md, "Players that go black between
+' streams").
+sub setBitrate(kbps as integer)
+    if m.sessionId = "" then return
+    path = "/api/playback/" + urlEncode(m.sessionId) + "/bitrate"
+    uiRequest({ method: "PUT", path: path, json: { max_bitrate: kbps }, session: m.sessionId, kbps: kbps }, "onBitrate")
+end sub
+
+' What the stream goes on at, or that the server refused (one from before,
+' a session gone): the watch then moves it as a stream whose bitrate can't
+' change.
+sub onBitrate(event as object)
+    spec = event.getRoSGNode().spec
+    if m.watch = invalid or spec.session <> m.sessionId then return
+    answer = event.getData()
+    kbps = 0
+    if answer.ok
+        kbps = httpNumber(spec.kbps, 0)
+        if GetInterface(answer.data, "ifAssociativeArray") <> invalid then kbps = httpNumber(answer.data.bitrate, kbps)
+    end if
+    aqAnswered(m.watch, httpNumber(spec.kbps, 0), kbps)
 end sub
 
 sub showToast(text as string)
@@ -1098,7 +1131,11 @@ function qualityShown() as string
     end for
     if choice = "auto"
         now = "Original"
-        if m.watch <> invalid and labels.DoesExist(m.watch.quality) then now = labels[m.watch.quality]
+        if m.watch <> invalid and aqStepped(m.watch)
+            now = aqBitrateLabel(m.watch.playingKbps, m.watch.lines)
+        else if m.watch <> invalid and labels.DoesExist(m.watch.quality)
+            now = labels[m.watch.quality]
+        end if
         return "Automatic · " + now
     end if
     if labels.DoesExist(choice) then return labels[choice]
@@ -1224,7 +1261,7 @@ sub showDetails(live as dynamic)
     for each row in details.rows
         lines.Push(row.label + ": " + row.value)
     end for
-    if m.watch <> invalid and m.watch.quality <> "original" then lines.Push("Quality: " + qualityShown() + " · Lowered for your connection")
+    if m.watch <> invalid and aqLowered(m.watch) then lines.Push("Quality: " + qualityShown() + " · Lowered for your connection")
     m.menuText.text = lines.Join(Chr(10))
 end sub
 

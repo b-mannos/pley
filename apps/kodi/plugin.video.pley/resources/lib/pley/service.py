@@ -10,6 +10,7 @@ import os
 import queue
 import threading
 import time
+import urllib.parse
 
 import xbmc
 
@@ -296,12 +297,10 @@ class Player(xbmc.Player):
         if not auto:
             return None, None
         now = self.clock()
+        stream = dict(live=bool(auto.get("live")), lines=auto.get("lines"), converted=auto.get("converted"))
         if restarting is not None and restarting[0] == playing.get("item_id"):
             _, watch, notice = restarting
-            watch.restarted(now, auto["quality"], auto.get("playing_kbps"))
-            if auto["quality"] == autoquality.ORIGINAL:
-                # Back to the original: the network is good again.
-                self.remember(auto, None)
+            watch.restarted(now, auto["quality"], auto.get("playing_kbps"), **stream)
             return watch, notice
         watch = autoquality.Watch(
             now,
@@ -311,6 +310,7 @@ class Player(xbmc.Player):
             auto.get("file_lines"),
             auto.get("cap"),
             lowered=bool(auto.get("lowered")),
+            **stream,
         )
         return watch, None
 
@@ -346,7 +346,7 @@ class Player(xbmc.Player):
 
     def automatic(self, watch: autoquality.Watch, auto: dict, position: float, paused: bool) -> None:
         """Automatic's turn, from the loop: what Kodi says of the playback,
-        and a restart at another quality when the watch says so."""
+        and the step the watch says (take)."""
         if self.restarting is not None:
             return
         seeking = any(xbmc.getCondVisibility(c) for c in MOVING)
@@ -355,32 +355,63 @@ class Player(xbmc.Player):
         prefix = auto.get("prefix") or ""
         arriving = self.meter.arriving_kbps(prefix)
         carried = None
-        if watch.quality != autoquality.ORIGINAL:
-            carried = self.meter.carried_kbps(prefix, max(watch.issue_at, watch.changed_at))
-        was = watch.quality
-        quality = watch.tick(self.clock(), position / 1000.0, paused, seeking, caching, ahead, arriving, carried)
-        if quality is None:
-            return
+        if watch.quality != autoquality.ORIGINAL or watch.converted:
+            # Since the last issue, change or raise of where the next title starts.
+            carried = self.meter.carried_kbps(prefix, max(watch.issue_at, watch.changed_at, watch.raised_at or 0))
         with self.lock:
+            # Under the lock the server's answers to a bitrate step take.
+            step = watch.tick(self.clock(), position / 1000.0, paused, seeking, caching, ahead, arriving, carried)
             reports = self.reports
-            if reports is None or self.watch is not watch:
+            if step is None or reports is None or self.watch is not watch:
                 return
-            item_id = reports.playing["item_id"]
-        down = quality != autoquality.ORIGINAL and (was == autoquality.ORIGINAL or autoquality.kbps_of(quality) < autoquality.kbps_of(was))
-        notice = None
-        if down:
-            notice = kodi.text("smoother") % autoquality.label(quality)
-            self.remember(auto, watch.ceiling or autoquality.kbps_of(quality))
-        elif quality != autoquality.ORIGINAL:
-            # Up to a quality: the next title starts there, not under the
-            # older, lower ceiling.
-            self.remember(auto, autoquality.kbps_of(quality))
-        kodi.log(
-            "automatic: %s to %s at %d s (%s)"
-            % ("down" if down else "up", quality, position / 1000, "network" if down else "%s kbps carried" % int(carried or 0))
-        )
+            playing = reports.playing
+        self.take(watch, auto, playing, step, position, carried)
+
+    def take(self, watch: autoquality.Watch, auto: dict, playing: dict, step: autoquality.Step, position: float, carried=None) -> None:
+        """Carries out Automatic's step: the stream's bitrate changed as it
+        is sent, where the next title starts, or the title again at another
+        quality. A step down says so; the network's memory follows each."""
+        if step.memory is not None:
+            # Up to a quality keeps it too: the next title starts there, not
+            # under the older, lower ceiling.
+            self.remember(auto, step.memory or None)
+        why = "network" if step.down else "%s kbps carried" % int(carried or 0)
+        if step.kind == autoquality.NEXT:
+            kodi.log("automatic: the next title starts at %s" % step.quality)
+            return
+        if step.kind == autoquality.BITRATE:
+            kodi.log("automatic: %s to %d kbps as it is sent at %d s (%s)" % ("down" if step.down else "up", step.kbps, position / 1000, why))
+            if step.down:
+                kodi.notify(kodi.text("smoother") % autoquality.bitrate_label(step.kbps, watch.lines))
+            session = playing["session_id"]
+            self.worker.put(lambda: self.set_bitrate(watch, session, step.kbps))
+            return
+        notice = kodi.text("smoother") % autoquality.label(step.quality) if step.down else None
+        kodi.log("automatic: %s at %d s (%s)" % ("converted, as the player gave up" if step.quality == autoquality.CONVERTED else "down to " + step.quality, position / 1000, why))
+        item_id = playing["item_id"]
         self.restarting = (item_id, watch, notice)
-        self.worker.put(lambda: self.restart(item_id, position, quality))
+        self.worker.put(lambda: self.restart(item_id, position, step.quality))
+
+    def set_bitrate(self, watch: autoquality.Watch, session: str, kbps: int) -> None:
+        """PUT /api/playback/{session}/bitrate (from the worker): the stream
+        goes on at `kbps` from the segments Kodi hasn't fetched yet, the same
+        size and playlist. The watch hears what it goes on at, or that the
+        server refused (one from before, a session gone)."""
+        path = "/api/playback/%s/bitrate" % urllib.parse.quote(session, safe="")
+        response = self.call("PUT", path, {"max_bitrate": int(kbps)}, fine=(400, 404, 410))
+        got = None
+        if response is not None and response.status < 300:
+            try:
+                got = (response.json() or {}).get("bitrate")
+            except (ValueError, AttributeError):
+                got = None
+            if isinstance(got, bool) or not isinstance(got, (int, float)) or got <= 0:
+                # Changed, without saying to what: as asked.
+                got = kbps
+        else:
+            kodi.log("automatic: the bitrate of %s can't change as it plays" % session, xbmc.LOGWARNING)
+        with self.lock:
+            watch.answered(kbps, got)
 
     def restart(self, item_id: int, position_ms: float, quality: str) -> None:
         """Plays the title again where it is, at `quality` (from the
@@ -475,7 +506,27 @@ class Player(xbmc.Player):
         self.finish(ended=True)
 
     def onPlayBackError(self) -> None:
+        if self.fall_back():
+            return
         self.finish(ended=False)
+
+    def fall_back(self) -> bool:
+        """Kodi's player gave up on the original in Automatic (a decoder
+        failing): the title again where it was, converted at the server's
+        own quality, once. Whether it is played again."""
+        with self.lock:
+            watch, reports = self.watch, self.reports
+            if watch is None or reports is None or self.restarting is not None:
+                return False
+            step = watch.failed(self.clock())
+            if step is None:
+                return False
+            # Kodi stopped: the loop waits for the restart rather than
+            # ending the tracked playback (tick).
+            self.lost_since = None
+            playing, position, auto = reports.playing, reports.position_ms, self.auto
+        self.take(watch, auto, playing, step, position)
+        return True
 
     def tracked_playing(self) -> bool:
         """Whether the playback being reported is the one on screen. Kodi
@@ -536,6 +587,10 @@ class Player(xbmc.Player):
                 elif file:
                     # Something else plays: the tracked one is over.
                     self._finish_locked(ended=False)
+                elif self.restarting is not None and self.restarting[0] == self.reports.playing["item_id"]:
+                    # Automatic plays it again after Kodi's player gave up
+                    # (fall_back): over only if that fails (restart).
+                    self.lost_since = None
                 else:
                     # Nothing plays: Kodi's word on it is due; past a few
                     # seconds it was lost.

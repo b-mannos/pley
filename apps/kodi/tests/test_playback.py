@@ -98,16 +98,30 @@ class QualityTest(unittest.TestCase):
         self.assertEqual(
             found,
             {"quality": "8m", "playing_kbps": 8000, "file_kbps": 24_000, "file_lines": 2160, "cap": None, "lowered": False,
-             "server": "srv-1", "prefix": "/api/playback/s1/"},
+             "server": "srv-1", "prefix": "/api/playback/s1/", "converted": True, "lines": 1080, "live": False},
         )
+        # A server whose conversions change their bitrate as they are sent.
+        self.assertTrue(playback.automatic(asked, dict(info, live_bitrate=True), file)["live"])
         # Under a remembered ceiling the file fitted: played as it is.
         lowered = dict(playback.ask("8m"), lowered=True)
-        direct = playback.automatic(lowered, {"method": "direct", "url": "/api/files/3/stream"}, dict(file, bitrate=6_000_000))
+        direct = playback.automatic(lowered, {"method": "direct", "url": "/api/files/3/stream", "live_bitrate": False}, dict(file, bitrate=6_000_000))
         self.assertEqual((direct["quality"], direct["playing_kbps"], direct["lowered"]), ("original", 6000, False))
+        self.assertEqual((direct["converted"], direct["lines"], direct["live"]), (False, 2160, False))
         # The original converted: at the server's own quality, which caps Automatic.
-        converted = playback.automatic(playback.ask("original"), dict(info, auto_quality="15m"), file)
+        converted = playback.automatic(playback.ask("original"), dict(info, auto_quality="15m", live_bitrate=True), file)
         self.assertEqual((converted["quality"], converted["playing_kbps"], converted["cap"]), ("original", 15000, "15m"))
+        self.assertEqual((converted["converted"], converted["lines"], converted["live"]), (True, 2160, True))
+        # A wide 1080p film is named 1080p, though 800 lines tall.
+        wide = {"id": 4, "bitrate": 10_000_000, "width": 1920, "height": 800}
+        self.assertEqual(playback.automatic(playback.ask("8m"), info, wide)["lines"], 1080)
         self.assertIsNone(playback.automatic(asked, info, None)["file_kbps"], "details that didn't come")
+
+    def test_the_original_converted_after_the_player_gave_up(self):
+        self.assertEqual(
+            playback.ask("converted"),
+            dict(automatic=True, quality="original", lowered=False, mode="transcode", max_bitrate=None, max_height=None),
+            "at the server's own quality",
+        )
 
 
 class Network:

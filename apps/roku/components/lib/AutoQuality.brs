@@ -1,15 +1,17 @@
 ' The Quality menu and how Automatic chooses (docs/QUALITY.md), without
 ' SceneGraph: the player tells a watch what its Video node does, and the
-' watch answers a quality to open the stream at again, or "".
+' watch answers a step (aqStep): the title again at another quality, the
+' stream's bitrate changed as it is sent, or where the next title starts.
 '
-' Roku's own HLS adapts between a stream's variants, but pley's streams
-' have one, so stepping down is pley's. The Video node tells of waits
-' (state "buffering", bufferingStatus.isUnderrun) and of each HLS segment
-' it downloaded (downloadedSegment: its size and how long it took), which
-' measures the network. A file played as it is has no segments: a step
-' down from it halves, and nothing measures a way back up. Roku doesn't
-' tell an app of the frames it drops; what it can't decode, the server
-' converts (the player's fallback for an error).
+' Roku's own HLS moves between the sizes of a conversion that comes in
+' several (PlaybackInfo.adaptive), and Automatic leaves such a session to
+' it. The Video node tells of waits (state "buffering",
+' bufferingStatus.isUnderrun) and of each HLS segment it downloaded
+' (downloadedSegment: its size and how long it took), which measures the
+' network. A file played as it is has no segments: a step down from it
+' halves, and nothing measures a way back up. Roku doesn't tell an app of
+' the frames it drops; what it can't decode, the server converts (the
+' player's fallback for an error).
 
 function aqMenu() as object
     return [
@@ -115,16 +117,7 @@ end function
 ' qualities offered for it ([{ id, label }]), a quality taller than the
 ' file named by the file's own lines ("8 Mbps 720p" for a 720p file).
 function aqMenuFor(file as dynamic) as object
-    width = 0
-    if file <> invalid
-        width = Int(httpNumber(file.width, 0))
-        if width <= 0
-            for each stream in httpArray(file.streams)
-                if width <= 0 and GetInterface(stream, "ifAssociativeArray") <> invalid and httpString(stream.kind) = "video" then width = Int(httpNumber(stream.width, 0))
-            end for
-        end if
-    end if
-    named = aqNamedLines(width, aqFileLines(file))
+    named = aqNamedLines(aqFileWidth(file), aqFileLines(file))
     menu = [{ id: "original", label: "Original" }, { id: "auto", label: "Automatic" }]
     for each id in aqOffered(aqFileKbps(file), aqFileLines(file))
         label = aqLabel(id)
@@ -179,6 +172,19 @@ end function
 function aqFileKbps(file as dynamic) as float
     if file = invalid then return 0
     return httpNumber(file.bitrate, 0) / 1000.0
+end function
+
+function aqFileWidth(file as dynamic) as integer
+    if file = invalid then return 0
+    width = Int(httpNumber(file.width, 0))
+    if width > 0 then return width
+    for each stream in httpArray(file.streams)
+        if GetInterface(stream, "ifAssociativeArray") <> invalid and httpString(stream.kind) = "video"
+            width = Int(httpNumber(stream.width, 0))
+            if width > 0 then return width
+        end if
+    end for
+    return 0
 end function
 
 function aqFileLines(file as dynamic) as integer
@@ -276,23 +282,100 @@ function aqStepUp(current as string, fileKbps as float, fileLines as integer, ca
     return { quality: "original", kbps: need }
 end function
 
+' --- Players that go black between streams (docs/QUALITY.md) ---
+'
+' Roku's Video node replaces its content to play another stream, and the
+' screen goes black meanwhile. Automatic moves to another stream only once
+' the picture has stopped anyway (a wait of 2 s or more); a conversion whose
+' bitrate changes as it is sent (PlaybackInfo.live_bitrate) steps its
+' bitrate instead (PUT /api/playback/{id}/bitrate), keeping its size, and
+' plays on.
+
+' The least a stream of lines (as named, aqNamedLines) is stepped down to
+' as it is sent: 8 Mbps for 4K, 3 Mbps for 1080p (docs/QUALITY.md), 1.5
+' for 720p and 1 below.
+function aqFloorKbps(lines as integer) as integer
+    if lines > 1080 then return 8000
+    if lines > 720 then return 3000
+    if lines > 480 then return 1500
+    return 1000
+end function
+
+' A bitrate stepped as it is sent, as the menu names qualities: "4 Mbps
+' 1080p", "8 Mbps 4K" (lines 0: the bitrate alone).
+function aqBitrateLabel(kbps as float, lines as integer) as string
+    tenths = Int(kbps / 100)
+    words = (tenths \ 10).ToStr()
+    if tenths MOD 10 <> 0 then words = words + "." + (tenths MOD 10).ToStr()
+    words = words + " Mbps"
+    if lines >= 2160 then return words + " 4K"
+    if lines > 0 then return words + " " + lines.ToStr() + "p"
+    return words
+end function
+
+' The lines a stream is named by: a conversion's quality's (the server's
+' own, cap, for the original converted), no more than the file's
+' (fileNamed, aqNamedLines); the file's for the file as it is.
+function aqStreamLines(quality as string, converted as boolean, cap as string, fileNamed as integer) as integer
+    if not converted then return fileNamed
+    lines = aqLines(quality)
+    if quality = "original" then lines = aqLines(cap)
+    if lines > 0 and fileNamed > 0 and fileNamed < lines then return fileNamed
+    if lines > 0 then return lines
+    return fileNamed
+end function
+
+' The bitrates a stream stepped down as it is sent climbs back by, one at a
+' time, lowest first: the menu's above kbps, then its own.
+function aqRungsUp(kbps as float, own as float) as object
+    rungs = []
+    for each id in ["2m", "4m", "8m", "12m", "15m", "20m", "30m"]
+        if aqKbps(id) > kbps and aqKbps(id) < own then rungs.Push(aqKbps(id))
+    end for
+    rungs.Push(Int(own))
+    return rungs
+end function
+
+' A decision of the watch's: kind "restart" (the title again at quality, a
+' new stream; "converted" for the original converted at the server's own
+' quality), "bitrate" (the stream goes on at kbps) or "next" (only where
+' the next title starts changes); down when it is a step down to say;
+' memory what the network's memory keeps for the next title (kbps, 0 to
+' forget it, -1 to leave it).
+function aqStep(kind as string, quality as string, kbps as float, down as boolean, memory as float) as object
+    return { kind: kind, quality: quality, kbps: Int(kbps), down: down, memory: Int(memory + 0.5) }
+end function
+
 ' --- The watch over one title ---
 
 ' now is the player's clock in ms; quality what plays ("original" or a
 ' quality's id), at playingKbps (0 unknown); the file's bitrate and lines;
 ' cap the server's own quality for it; lowered when it started under a
-' remembered ceiling (counted as a step down).
-function aqWatch(now as integer, quality as string, playingKbps as float, fileKbps as float, fileLines as integer, cap as string, lowered as boolean) as object
+' remembered ceiling (counted as a step down). live: the stream is
+' converted and its bitrate changes as it is sent; lines what it is named
+' by; converted whether the video is converted (invalid: a quality is).
+function aqWatch(now as integer, quality as string, playingKbps as float, fileKbps as float, fileLines as integer, cap as string, lowered as boolean, live = false as boolean, lines = 0 as integer, converted = invalid as dynamic) as object
     watch = {
-        quality: quality,
-        playingKbps: playingKbps,
         fileKbps: fileKbps,
         fileLines: fileLines,
         cap: cap,
+        titleAt: now,
         changedAt: now,
         issueAt: now,
         downAt: -1,
         ceiling: 0.0,
+        ' It settles: the last step up (its time and what it went to) until a
+        ' step down or 10 minutes say whether it held, what didn't hold this
+        ' title, and the calm a step up waits for.
+        lastUpAt: -1,
+        lastUpKey: "",
+        tooHigh: {},
+        calmMs: 180000,
+        ' Where the next title starts, raised while this stream can't go
+        ' higher ("" for where this one plays), and when it last was.
+        nextTitle: "",
+        raisedAt: -1,
+        droppedTold: false,
         playingSince: -1,
         waitSince: -1,
         waitCounted: false,
@@ -302,17 +385,59 @@ function aqWatch(now as integer, quality as string, playingKbps as float, fileKb
         lastAt: -1
     }
     if lowered then watch.downAt = now
+    aqStream(watch, quality, playingKbps, live, lines, converted)
     return watch
 end function
 
-' Playing again at quality: a new stream of the same title.
-sub aqRestarted(watch as object, now as integer, quality as string, playingKbps as float)
+' What plays now: quality at playingKbps, its own bitrate (which a step up
+' goes back to at most), lines tall, its bitrate changing as it is sent
+' when live.
+sub aqStream(watch as object, quality as string, playingKbps as float, live as boolean, lines as integer, converted as dynamic)
+    isConverted = quality <> "original"
+    if GetInterface(converted, "ifBoolean") <> invalid then isConverted = converted
     watch.quality = quality
     watch.playingKbps = playingKbps
+    watch.ownKbps = playingKbps
+    watch.sentKbps = playingKbps
+    watch.converted = isConverted
+    watch.live = live and isConverted and playingKbps > 0
+    watch.lines = lines
+    ' The stream comes in several sizes the Video node moves between (the
+    ' player sets it): its waits are the Video node's to answer.
+    watch.adaptive = false
+end sub
+
+' Playing again at quality: a new stream of the same title.
+sub aqRestarted(watch as object, now as integer, quality as string, playingKbps as float, live = false as boolean, lines = 0 as integer, converted = invalid as dynamic)
+    aqStream(watch, quality, playingKbps, live, lines, converted)
     watch.changedAt = now
     watch.segments = []
     watch.lastPosition = -1
     aqSeeked(watch)
+end sub
+
+' Its bitrate stepped down as it is sent: below its own.
+function aqStepped(watch as object) as boolean
+    return watch.live and watch.playingKbps < watch.ownKbps
+end function
+
+' Below the original: a quality, or a bitrate stepped down.
+function aqLowered(watch as object) as boolean
+    return watch.quality <> "original" or aqStepped(watch)
+end function
+
+' The server's answer to a "bitrate" step to asked: what the stream goes on
+' at (kbps), or 0 when it refused (a server or transcoder from before, a
+' session gone). Refused, the stream is as it was, and moves as one whose
+' bitrate can't change.
+sub aqAnswered(watch as object, asked as float, kbps as float)
+    if kbps <= 0
+        watch.live = false
+        watch.playingKbps = watch.sentKbps
+        return
+    end if
+    watch.sentKbps = kbps
+    if watch.playingKbps = asked then watch.playingKbps = kbps
 end sub
 
 ' Where the video is (ms), as the Video node says each second: a jump
@@ -339,8 +464,8 @@ sub aqSeeked(watch as object)
 end sub
 
 ' The Video node's state changed. underrun is bufferingStatus.isUnderrun
-' (invalid when the Roku doesn't say). Answers a quality to restart at, or "".
-function aqState(watch as object, now as integer, state as string, underrun as dynamic) as string
+' (invalid when the Roku doesn't say). Answers a step (aqStep), or invalid.
+function aqState(watch as object, now as integer, state as string, underrun as dynamic) as dynamic
     issue = false
     if state = "playing"
         if watch.waitSince >= 0 and not watch.waitCounted
@@ -370,8 +495,8 @@ function aqState(watch as object, now as integer, state as string, underrun as d
     else
         aqSeeked(watch)
     end if
-    if issue then return aqIssue(watch, now)
-    return ""
+    if issue then return aqIssue(watch, now, false)
+    return invalid
 end function
 
 ' A segment the Video node downloaded: bytes in ms.
@@ -403,36 +528,155 @@ function aqCarried(watch as object, since as integer, least as integer) as float
 end function
 
 ' Once a second while it plays or waits: a wait of 2 s is a play issue,
-' and a quiet network may bring the quality back up. Answers a quality or "".
-function aqTick(watch as object, now as integer) as string
+' and a quiet network may bring the bitrate, or where the next title
+' starts, back up. Answers a step (aqStep), or invalid.
+function aqTick(watch as object, now as integer) as dynamic
     if watch.waitSince >= 0 and not watch.waitCounted and now - watch.waitSince >= 2000
         watch.waitCounted = true
-        return aqIssue(watch, now)
+        return aqIssue(watch, now, true)
     end if
-    if watch.quality = "original" or watch.playingSince < 0 then return ""
-    if now - watch.issueAt < 180000 or now - watch.changedAt < 180000 then return ""
-    if watch.downAt >= 0 and now - watch.downAt < 300000 then return ""
-    up = aqStepUp(watch.quality, watch.fileKbps, watch.fileLines, watch.cap)
-    if up = invalid then return ""
-    since = watch.issueAt
-    if watch.changedAt > since then since = watch.changedAt
-    ' 20 s of video at least.
-    carried = aqCarried(watch, since, 10)
-    if carried <= 0 or carried < 1.6 * up.kbps then return ""
-    watch.changedAt = now
-    return up.quality
+    if watch.playingSince < 0 then return invalid
+    return aqUp(watch, now)
 end function
 
-function aqIssue(watch as object, now as integer) as string
+' A play issue: a step down, as the stream is sent when it can be; else
+' another stream, but only once the picture has stopped anyway (waited:
+' a wait of 2 s or more), as the screen goes black between streams.
+function aqIssue(watch as object, now as integer, waited as boolean) as dynamic
     watch.issueAt = now
-    if now - watch.changedAt < 20000 then return ""
+    if watch.adaptive or now - watch.changedAt < 20000 then return invalid
     network = aqCarried(watch, now - 20000, 1)
+    if watch.live then return aqLowerBitrate(watch, now, network)
+    ' Two short waits: the picture plays on.
+    if not waited then return invalid
     down = aqStepDown(watch.quality, watch.playingKbps, network, watch.fileKbps, watch.fileLines, watch.cap)
-    if down = invalid then return ""
+    if down = invalid then return invalid
+    aqWentDown(watch, now)
+    watch.ceiling = down.ceiling
+    ' The lowest quality may be above the ceiling: that is where the next title starts.
+    memory = down.ceiling
+    if aqKbps(down.quality) > memory then memory = aqKbps(down.quality)
+    return aqStep("restart", down.quality, 0, true, memory)
+end function
+
+' The stream goes on lower, its size kept: what the network carried (the
+' bitrate playing, or the segments' speed when lower; half the bitrate
+' without them) times 0.75, rounded down to whole Mbps as on Samsung and
+' LG, no lower than its size's floor (where the network waits).
+function aqLowerBitrate(watch as object, now as integer, networkKbps as float) as dynamic
+    kbps = watch.playingKbps
+    carried = kbps * 0.5
+    if networkKbps > 0
+        carried = networkKbps
+        if kbps < carried then carried = kbps
+    end if
+    ceiling = carried * 0.75
+    target = Int(ceiling / 1000) * 1000
+    if target > watch.ownKbps then target = watch.ownKbps
+    least = aqFloorKbps(watch.lines)
+    if least > watch.ownKbps then least = watch.ownKbps
+    if target < least then target = least
+    if target >= kbps then return invalid
+    aqWentDown(watch, now)
+    watch.ceiling = ceiling
+    watch.playingKbps = target
+    memory = ceiling
+    if target > memory then memory = target
+    return aqStep("bitrate", watch.quality, target, true, memory)
+end function
+
+' A step down: one soon after a step up says that step was one too far, not
+' tried again this title, and the calm before the next one doubles (to 12
+' minutes at most). Where the next title starts goes down with it.
+sub aqWentDown(watch as object, now as integer)
+    if watch.lastUpAt >= 0 and now - watch.lastUpAt < 600000
+        watch.tooHigh[watch.lastUpKey] = true
+        watch.calmMs = watch.calmMs * 2
+        if watch.calmMs > 720000 then watch.calmMs = 720000
+    end if
+    watch.lastUpAt = -1
+    watch.lastUpKey = ""
+    watch.nextTitle = ""
     watch.changedAt = now
     watch.downAt = now
-    watch.ceiling = down.ceiling
-    return down.quality
+end sub
+
+' Long enough without an issue and since `since`, and since a step down.
+function aqCalm(watch as object, now as integer, since as integer) as boolean
+    if now - watch.issueAt < watch.calmMs or now - since < watch.calmMs then return false
+    return watch.downAt < 0 or now - watch.downAt >= 300000
+end function
+
+' After a calm spell, when the segments since (20 s of video at least)
+' carried 1.6 times it: a bitrate stepped down climbs back one step, as it
+' is sent. A stream that can't go higher without another (which would
+' blank the screen while it plays well) stays; the next title starts
+' higher instead.
+function aqUp(watch as object, now as integer) as dynamic
+    since = watch.issueAt
+    if watch.changedAt > since then since = watch.changedAt
+    if watch.raisedAt > since then since = watch.raisedAt
+    if aqStepped(watch)
+        if not aqCalm(watch, now, watch.changedAt) then return invalid
+        up = aqRungsUp(watch.playingKbps, watch.ownKbps)[0]
+        key = up.ToStr() + " kbps"
+        if watch.tooHigh.DoesExist(key) then return invalid
+        carried = aqCarried(watch, since, 10)
+        if carried <= 0 or carried < 1.6 * up then return invalid
+        watch.playingKbps = up
+        watch.changedAt = now
+        watch.lastUpAt = now
+        watch.lastUpKey = key
+        memory = up
+        if up >= watch.ownKbps
+            ' Back at its own: the quality's, or no limit for the original.
+            memory = aqKbps(watch.quality)
+            if watch.quality = "original" then memory = 0
+        end if
+        return aqStep("bitrate", watch.quality, up, false, memory)
+    end if
+    ' Frames dropped lowered where the next title starts: not raised again.
+    if watch.droppedTold then return invalid
+    calmFrom = watch.changedAt
+    if watch.raisedAt > calmFrom then calmFrom = watch.raisedAt
+    if not aqCalm(watch, now, calmFrom) then return invalid
+    current = watch.nextTitle
+    if current = "" then current = watch.quality
+    up = aqStepUp(current, watch.fileKbps, watch.fileLines, watch.cap)
+    if up = invalid then return invalid
+    if watch.tooHigh.DoesExist(up.quality) then return invalid
+    carried = aqCarried(watch, since, 10)
+    if carried <= 0 or carried < 1.6 * up.kbps then return invalid
+    watch.nextTitle = up.quality
+    watch.raisedAt = now
+    watch.lastUpAt = now
+    watch.lastUpKey = up.quality
+    memory = aqKbps(up.quality)
+    return aqStep("next", up.quality, 0, false, memory)
+end function
+
+' The device dropped frames (for a Roku that would say: none does yet). In
+' the title's first minute, a guess that it can't keep up with this stream:
+' another (the original converted at the server's own quality, a
+' conversion a quality lower). Later, only where the next title starts goes
+' a quality lower, once.
+function aqDropped(watch as object, now as integer) as dynamic
+    lower = aqStepDown(watch.quality, watch.playingKbps, watch.playingKbps, watch.fileKbps, watch.fileLines, watch.cap)
+    quality = "converted"
+    if watch.quality <> "original" or watch.converted
+        quality = ""
+        if lower <> invalid then quality = lower.quality
+    end if
+    if now - watch.titleAt < 60000
+        if quality = "" or now - watch.changedAt < 20000 then return invalid
+        watch.issueAt = now
+        aqWentDown(watch, now)
+        return aqStep("restart", quality, 0, quality <> "converted", -1)
+    end if
+    if lower = invalid or watch.droppedTold then return invalid
+    watch.droppedTold = true
+    watch.nextTitle = ""
+    return aqStep("next", lower.quality, 0, false, aqKbps(lower.quality))
 end function
 
 ' --- Remembered on this Roku ---

@@ -141,7 +141,7 @@ class PlayerTest(unittest.TestCase):
         self.assertEqual(self.player.sent, [("playing", 0), ("stopped", 20_000), ("ended", "/api/playback/s")])
 
 
-def automatic(session, quality="original", kbps=20_000, prefix=None):
+def automatic(session, quality="original", kbps=20_000, prefix=None, live=False, converted=None):
     """A playback in Automatic, as playback.prepare tells the service of it."""
     return {
         "item_id": 7,
@@ -157,6 +157,9 @@ def automatic(session, quality="original", kbps=20_000, prefix=None):
             "lowered": False,
             "server": "srv-1",
             "prefix": prefix or "/api/playback/%s/" % session,
+            "converted": quality != "original" if converted is None else converted,
+            "lines": 1080,
+            "live": live,
         },
     }
 
@@ -172,9 +175,13 @@ class AutoPlayer(KodiPlayer):
         self.meter = Meter(clock=lambda: self.now)
         self.restarts = []
         self.played = []
+        self.bitrates = []
 
     def restart(self, item_id, position_ms, quality):
         self.restarts.append((item_id, position_ms, quality))
+
+    def set_bitrate(self, watch, session, kbps):
+        self.bitrates.append((session, kbps))
 
     def play(self, path, li=None):
         self.played.append((path, li))
@@ -233,14 +240,97 @@ class AutomaticTest(unittest.TestCase):
         self.assertEqual(first.quality, "8m")
         self.assertEqual(xbmcgui.notified, [("Pley", "Quality lowered to 8 Mbps 1080p")])
 
-    def test_back_to_the_original_forgets_the_ceiling(self):
+    def test_the_next_title_starts_higher_and_back_at_the_original_forgets(self):
         player = self.player
         kodi.remember("auto_ceiling:srv-1", "6000@%d" % 10**9)
-        player.starts(automatic("s1", "4m", 4_000))
-        player.restarting = (7, player.watch, None)
-        player.starts(automatic("s2"))
-        self.assertEqual(kodi.remembered("auto_ceiling:srv-1"), "")
+        player.starts(dict(automatic("s1", "4m", 4_000), duration_ms=10_000_000))
+        watch = player.watch
+        # The network carries 40 Mbps all along.
+        watch.next_title = "15m"
+        watch.down_at = None
+        for second in range(181):
+            player.now += 1
+            player.meter.answered(player.auto["prefix"] + "%d.ts" % second, 5_000_000, 1.0)
+            player.second()
+        self.assertEqual(kodi.remembered("auto_ceiling:srv-1"), "", "no limit for the next title")
+        self.assertEqual((player.restarts, player.bitrates), ([], []), "the stream plays on")
+        self.assertEqual(watch.quality, "4m")
         self.assertEqual(xbmcgui.notified, [], "silently")
+
+    def test_a_restart_converted_keeps_the_ceiling(self):
+        player = self.player
+        kodi.remember("auto_ceiling:srv-1", "6000@%d" % 10**9)
+        player.starts(automatic("s1"))
+        player.restarting = (7, player.watch, None)
+        player.starts(automatic("s2", "original", 15_000, live=True, converted=True))
+        self.assertEqual(kodi.remembered("auto_ceiling:srv-1"), "6000@%d" % 10**9)
+        self.assertTrue(player.watch.live and player.watch.converted)
+
+    def test_a_conversion_steps_its_bitrate_as_it_is_sent(self):
+        player = self.player
+        player.starts(automatic("s1", "8m", 8_000, live=True))
+        watch = player.watch
+        # 750 KB a second through the proxy: 6 Mbps.
+        for _ in range(30):
+            player.second(arriving=750_000)
+        player.second(0.0, caching=True)
+        player.second(0.0, caching=True)
+        self.assertEqual(player.restarts, [], "no new stream: the screen stays")
+        # 6 Mbps for 19 of the last 20 s, with the margin: 4.3, in steps of 0.5.
+        self.assertEqual(player.bitrates, [("s1", 4_000)])
+        self.assertEqual((watch.quality, watch.playing_kbps, watch.lines), ("8m", 4_000, 1080))
+        self.assertEqual(xbmcgui.notified, [("Pley", "Quality lowered to 4 Mbps 1080p")], "said at once: it plays on")
+        self.assertEqual(kodi.remembered("auto_ceiling:srv-1").split("@")[0], "4275")
+
+    def test_a_short_wait_pair_leaves_the_original_be(self):
+        player = self.player
+        player.starts(automatic("s1"))
+        for _ in range(30):
+            player.second()
+        player.second(0.0, caching=True)
+        for _ in range(20):
+            player.second()
+        player.second(0.0, caching=True)
+        for _ in range(10):
+            player.second()
+        self.assertEqual((player.restarts, player.bitrates), ([], []))
+
+    def test_the_player_giving_up_on_the_original_plays_it_converted(self):
+        player = self.player
+        player.starts(automatic("s1"))
+        for _ in range(30):
+            player.second()
+        player.file = ""
+        player.onPlayBackError()
+        self.assertEqual(player.restarts, [(7, 30_000, "converted")])
+        # Nothing plays while the restart comes: the playback isn't over.
+        for _ in range(10):
+            player.second(0.0)
+        self.assertNotIn("stopped", [state for state, _ in player.sent])
+        self.assertIsNotNone(player.reports)
+        # The conversion starts, as one of Automatic's.
+        player.starts(automatic("s2", "original", 15_000, live=True, converted=True))
+        self.assertEqual(player.sent[-3:], [("stopped", 30_000), ("ended", "/api/playback/s1"), ("playing", 30_000)])
+        self.assertEqual(xbmcgui.notified, [], "nothing to say")
+        # It fails too: over.
+        player.restarting = None
+        player.file = ""
+        player.onPlayBackError()
+        self.assertEqual(len(player.restarts), 1)
+        self.assertIsNone(player.reports)
+
+    def test_a_failed_restart_after_the_player_gave_up_ends_it(self):
+        player = self.player
+        player.starts(automatic("s1"))
+        player.second()
+        player.file = ""
+        player.onPlayBackError()
+        player.restarting = None
+        player.second(0.0)
+        # Kodi's word on it is due for 3 s.
+        player.lost_since -= 5
+        player.second(0.0)
+        self.assertIsNone(player.reports)
 
     def test_a_seek_and_its_wait_arent_the_network(self):
         player = self.player
@@ -275,6 +365,64 @@ class AutomaticTest(unittest.TestCase):
         player.starts(automatic("s2"))
         self.assertIsNot(player.watch, first)
         self.assertEqual(xbmcgui.notified, [])
+
+
+class Tokens:
+    """A sign-in to the stand-in server: its token, renewed once refused."""
+
+    def __init__(self, server):
+        self.url = server
+        self.token = "t1"
+
+    def server(self):
+        return self.url
+
+    def access(self):
+        return self.token
+
+    def refreshed(self, token):
+        self.token = "t2"
+        return self.token
+
+
+class BitrateTest(unittest.TestCase):
+    """PUT /api/playback/{session}/bitrate, with the service's token."""
+
+    def setUp(self):
+        self.answers = []
+        self.server = support.FakeServer(lambda request: self.answers.pop(0))
+        self.player = Player(Tokens(self.server.url), "pleyKodi/test", Now())
+
+    def tearDown(self):
+        self.server.close()
+
+    def stepped(self, kbps=4_500):
+        from pley.autoquality import Watch
+
+        watch = Watch(0.0, "8m", 8_000, 20_000, 1080, live=True, lines=1080)
+        watch.playing_kbps = kbps
+        return watch
+
+    def test_the_stream_goes_on_at_what_the_server_says(self):
+        self.answers = [support.answer(401, {"code": "unauthorized"}), support.answer(200, {"bitrate": 5_000})]
+        watch = self.stepped()
+        self.player.set_bitrate(watch, "s 1", 4_500)
+        put = self.server.requests[-1]
+        self.assertEqual((put.method, put.path, put.json()), ("PUT", "/api/playback/s%201/bitrate", {"max_bitrate": 4_500}))
+        self.assertEqual(put.headers["authorization"], "Bearer t2", "the token renewed once refused")
+        self.assertEqual((watch.live, watch.playing_kbps, watch.sent_kbps), (True, 5_000, 5_000))
+
+    def test_refused_the_stream_is_as_it_was(self):
+        self.answers = [support.answer(400, {"code": "bad_request", "message": "this stream's bitrate can't change as it plays"})]
+        watch = self.stepped()
+        self.player.set_bitrate(watch, "s1", 4_500)
+        self.assertEqual((watch.live, watch.playing_kbps), (False, 8_000))
+
+    def test_a_session_gone_too(self):
+        self.answers = [support.answer(404, {"code": "not_found", "message": "playback session expired"})]
+        watch = self.stepped()
+        self.player.set_bitrate(watch, "s1", 4_500)
+        self.assertEqual((watch.live, watch.playing_kbps), (False, 8_000))
 
 
 class NetworkTest(unittest.TestCase):

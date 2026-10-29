@@ -98,17 +98,26 @@ class Kodi:
         self.ahead = None
         self.arriving = None
         self.carried = None
+        # What the watch said: (when, the quality restarted at, or the
+        # bitrate a stream goes on at, or "next <quality>"), and its steps.
         self.said = []
+        self.steps = []
 
     def second(self, moves=1.0, caching=False, paused=False, seeking=False, ahead=None):
         self.now += 1
         self.position += moves
         if ahead is not None:
             self.ahead = ahead
-        said = self.watch.tick(self.now, self.position, paused, seeking, caching, self.ahead, self.arriving, self.carried)
-        if said:
-            self.said.append((self.now, said))
-        return said
+        step = self.watch.tick(self.now, self.position, paused, seeking, caching, self.ahead, self.arriving, self.carried)
+        if step:
+            self.steps.append(step)
+            if step.kind == aq.BITRATE:
+                self.said.append((self.now, step.kbps))
+            elif step.kind == aq.NEXT:
+                self.said.append((self.now, "next " + step.quality))
+            else:
+                self.said.append((self.now, step.quality))
+        return step
 
     def play(self, seconds):
         for _ in range(seconds):
@@ -118,39 +127,51 @@ class Kodi:
         for _ in range(seconds):
             self.second(0.0, caching=True)
 
+    def short_waits(self):
+        """Two waits of a second, 20 s apart."""
+        self.second(0.0, caching=True)
+        self.play(20)
+        self.second(0.0, caching=True)
+        self.play(1)
+
 
 def watch(quality="original", playing=20_000, file=20_000, lines=1080, cap=None, lowered=False):
     return Watch(0.0, quality, playing, file, lines, cap, lowered)
 
 
+def live(quality="8m", playing=8_000, file=20_000, file_lines=1080, lines=1080, cap=None, lowered=False):
+    """A conversion whose bitrate changes as it is sent (live_bitrate)."""
+    return Watch(0.0, quality, playing, file, file_lines, cap, lowered, live=True, lines=lines)
+
+
 class WatchTest(unittest.TestCase):
-    def test_a_long_wait_steps_down(self):
+    def test_a_long_wait_moves_the_original_to_a_conversion(self):
         kodi = Kodi(watch())
         kodi.play(30)
         kodi.wait(1)
         self.assertEqual(kodi.said, [])
         kodi.wait(1)
         self.assertEqual(kodi.said, [(32, "4m")], "2 s: half with the margin, without a measure")
+        self.assertEqual(kodi.steps[0], aq.Step(aq.RESTART, "4m", None, True, 7_500))
         kodi.wait(5)
         self.assertEqual(len(kodi.said), 1, "one wait, one step")
 
-    def test_two_short_waits_within_a_minute_step_down(self):
-        kodi = Kodi(watch())
+    def test_two_short_waits_dont_move_the_original(self):
+        # The picture plays on: another stream would blank the screen.
+        w = watch()
+        kodi = Kodi(w)
         kodi.play(30)
-        kodi.second(0.0, caching=True)
-        kodi.play(20)
+        kodi.short_waits()
+        kodi.play(30)
         self.assertEqual(kodi.said, [])
-        kodi.second(0.0, caching=True)
-        kodi.play(1)
-        self.assertEqual([q for _, q in kodi.said], ["4m"])
+        self.assertEqual(w.issue_at, 53, "still an issue: the calm starts again")
 
-    def test_short_waits_a_minute_apart_dont(self):
+    def test_slow_delivery_doesnt_move_the_original(self):
         kodi = Kodi(watch())
-        kodi.play(30)
-        kodi.second(0.0, caching=True)
-        kodi.play(70)
-        kodi.second(0.0, caching=True)
+        kodi.second(ahead=9.0)
         kodi.play(5)
+        for _ in range(40):
+            kodi.second(ahead=max(kodi.ahead - 0.2, 0.5))
         self.assertEqual(kodi.said, [])
 
     def test_the_start_a_seek_and_a_pause_are_not_the_network(self):
@@ -173,28 +194,13 @@ class WatchTest(unittest.TestCase):
         kodi.wait(5)
         self.assertEqual(kodi.said, [])
 
-    def test_slow_delivery_steps_down_before_a_wait(self):
-        kodi = Kodi(watch())
-        kodi.second(ahead=9.0)
-        kodi.play(5)
-        # 0.8 s of video arriving each second: 0.2 s less ahead every second.
-        for _ in range(30):
-            kodi.second(ahead=kodi.ahead - 0.2)
-            if kodi.said:
-                break
-        self.assertEqual(len(kodi.said), 1)
-        when, quality = kodi.said[0]
-        # Under 1.1 for 15 s; 20 Mbps at 0.8 with the margin is 12 Mbps.
-        self.assertEqual(quality, "12m")
-        self.assertLess(when, 30)
-
     def test_plenty_ahead_or_steady_is_fine(self):
-        kodi = Kodi(watch())
+        kodi = Kodi(live())
         kodi.second(ahead=30.0)
         for _ in range(60):
             kodi.second(ahead=kodi.ahead - 0.2)
         self.assertEqual(kodi.said, [], "more than 10 s ahead")
-        kodi = Kodi(watch())
+        kodi = Kodi(live())
         for _ in range(60):
             kodi.second(ahead=4.0)
         self.assertEqual(kodi.said, [], "a full cache, read as it plays")
@@ -208,6 +214,7 @@ class WatchTest(unittest.TestCase):
         kodi.wait(2)
         self.assertEqual(kodi.said[-1][1], "8m")
         self.assertEqual(w.ceiling, 9_000)
+        # A server whose conversions keep their bitrate: another stream again.
         w.restarted(kodi.now, "8m", 8_000)
         kodi.play(5)
         kodi.wait(3)
@@ -217,34 +224,239 @@ class WatchTest(unittest.TestCase):
         kodi.wait(2)
         self.assertEqual(kodi.said[-1][1], "4m", "one quality at least")
 
-    def test_back_up_when_the_network_carries_it(self):
+    def test_no_measure_stays_down(self):
+        kodi = Kodi(watch("8m", 8_000, 20_000, 1080, lowered=True))
+        kodi.play(1200)
+        self.assertEqual(kodi.said, [])
+
+
+class LiveBitrateTest(unittest.TestCase):
+    """A conversion whose bitrate changes as it is sent: a step is a PUT
+    of its bitrate, not another stream (docs/QUALITY.md, "Players that go
+    black between streams")."""
+
+    def test_a_long_wait_lowers_the_bitrate_and_keeps_the_size(self):
+        w = live()
+        kodi = Kodi(w)
+        # 6 Mbps arriving: 4.5 with the margin, 4 in whole Mbps.
+        kodi.arriving = 6_000
+        kodi.play(30)
+        kodi.wait(2)
+        self.assertEqual(kodi.steps, [aq.Step(aq.BITRATE, "8m", 4_000, True, 4_500)])
+        self.assertEqual((w.quality, w.lines, w.playing_kbps), ("8m", 1080, 4_000), "the same stream, the same size")
+        self.assertEqual(w.label(), "4 Mbps 1080p")
+        self.assertTrue(w.lowered())
+
+    def test_never_below_its_sizes_floor(self):
+        w = live()
+        kodi = Kodi(w)
+        kodi.arriving = 6_000
+        kodi.play(30)
+        kodi.wait(2)
+        kodi.play(20)
+        kodi.wait(2)
+        self.assertEqual(kodi.said[-1][1], 3_000, "4 × 0.75 is 3: 3 Mbps for 1080p")
+        kodi.play(30)
+        kodi.wait(5)
+        self.assertEqual(len(kodi.said), 2, "at the floor the network waits")
+        # 4K goes no lower than 8 Mbps.
+        uhd = live("15m", 15_000, 40_000, 2160, 2160)
+        kodi = Kodi(uhd)
+        kodi.play(30)
+        kodi.wait(2)
+        self.assertEqual(kodi.steps, [aq.Step(aq.BITRATE, "15m", 8_000, True, 8_000)], "half, then the margin: 5.6, under 8")
+        self.assertEqual(uhd.label(), "8 Mbps 4K")
+
+    def test_two_short_waits_and_slow_delivery_lower_it(self):
+        kodi = Kodi(live())
+        kodi.play(30)
+        kodi.short_waits()
+        self.assertEqual(kodi.said, [(53, 3_000)])
+        kodi = Kodi(live("12m", 12_000))
+        kodi.second(ahead=9.0)
+        kodi.play(5)
+        # 0.8 s of video arriving each second: 0.2 s less ahead every second.
+        for _ in range(30):
+            kodi.second(ahead=kodi.ahead - 0.2)
+            if kodi.said:
+                break
+        # 12 Mbps at 0.8 with the margin: 7.2.
+        self.assertEqual(kodi.said[0][1], 7_000)
+        self.assertLess(kodi.said[0][0], 30)
+
+    def test_back_up_one_step_at_a_time_to_its_own(self):
+        w = live("20m", 20_000, 25_000, 2160)
+        kodi = Kodi(w)
+        kodi.arriving = 8_000
+        kodi.play(30)
+        kodi.wait(2)
+        self.assertEqual(kodi.said, [(32, 6_000)])
+        kodi.carried = 34_000
+        kodi.play(299)
+        self.assertEqual(len(kodi.said), 1, "not within 5 minutes of a step down")
+        kodi.play(1)
+        self.assertEqual(kodi.steps[-1], aq.Step(aq.BITRATE, "20m", 8_000, False, 8_000), "the menu's next bitrate up")
+        kodi.play(180)
+        self.assertEqual(kodi.said[-1], (512, 12_000), "3 minutes on")
+        kodi.play(180)
+        self.assertEqual(kodi.said[-1], (692, 15_000))
+        kodi.play(180)
+        self.assertEqual(kodi.said[-1], (872, 20_000), "34 Mbps carries 1.6 times 20 Mbps")
+        self.assertEqual(kodi.steps[-1].memory, 20_000, "the quality's own")
+        self.assertEqual(w.label(), "20 Mbps 1080p")
+        kodi.play(600)
+        self.assertEqual(len(kodi.said), 5, "never above its own")
+
+    def test_back_at_the_original_converted_forgets_the_ceiling(self):
+        w = Watch(0.0, "original", 15_000, 40_000, 2160, "15m", live=True, lines=2160, converted=True)
+        kodi = Kodi(w)
+        kodi.arriving = 15_000
+        kodi.play(30)
+        kodi.wait(2)
+        self.assertEqual(kodi.said, [(32, 11_000)])
+        self.assertEqual(w.label(), "11 Mbps 4K")
+        kodi.carried = 30_000
+        kodi.play(300)
+        self.assertEqual(kodi.steps[-1], aq.Step(aq.BITRATE, "original", 12_000, False, 12_000))
+        kodi.play(180)
+        self.assertEqual(kodi.steps[-1], aq.Step(aq.BITRATE, "original", 15_000, False, 0), "its own: no limit")
+        self.assertEqual(w.label(), "Original")
+        self.assertFalse(w.lowered())
+
+    def test_the_server_says_what_it_goes_on_at(self):
+        w = live()
+        kodi = Kodi(w)
+        kodi.play(30)
+        kodi.wait(2)
+        w.answered(3_000, 3_500)
+        self.assertEqual(w.playing_kbps, 3_500)
+
+    def test_refused_it_moves_as_a_stream_that_cant_change(self):
+        w = live()
+        kodi = Kodi(w)
+        kodi.play(30)
+        kodi.wait(2)
+        self.assertEqual(kodi.said, [(32, 3_000)])
+        # A transcoder from before: 400.
+        w.answered(3_000, None)
+        self.assertEqual((w.live, w.playing_kbps), (False, 8_000), "as it was")
+        kodi.play(30)
+        kodi.short_waits()
+        self.assertEqual(len(kodi.said), 1, "the picture plays on")
+        kodi.play(5)
+        kodi.wait(2)
+        self.assertEqual(kodi.said[-1][1], "2m", "another stream once it stopped: 8 Mbps halved, with the margin")
+
+
+class SettleTest(unittest.TestCase):
+    """It settles (docs/QUALITY.md): a step up undone within 10 minutes
+    isn't tried again during the title, and each such step doubles the
+    calm the next one waits for."""
+
+    def test_a_bitrate_that_didnt_hold_isnt_tried_again(self):
+        w = live()
+        kodi = Kodi(w)
+        kodi.arriving = 6_000
+        kodi.play(30)
+        kodi.wait(2)
+        kodi.carried = 13_000
+        kodi.play(300)
+        self.assertEqual(kodi.said, [(32, 4_000), (332, 8_000)])
+        # Two minutes on, 8 Mbps doesn't hold after all.
+        kodi.carried = None
+        kodi.play(120)
+        kodi.wait(2)
+        self.assertEqual(kodi.said[-1], (454, 4_000))
+        self.assertEqual(w.quiet, 360)
+        # However fast the network says it is, it stays where it held.
+        kodi.carried = 80_000
+        kodi.play(3_600)
+        self.assertEqual(kodi.said[-1], (454, 4_000))
+
+    def test_a_step_down_more_than_10_minutes_after_leaves_it_open(self):
+        w = live()
+        kodi = Kodi(w)
+        kodi.arriving = 6_000
+        kodi.play(30)
+        kodi.wait(2)
+        kodi.carried = 13_000
+        kodi.play(300)
+        kodi.carried = None
+        kodi.play(605)
+        kodi.wait(2)
+        self.assertEqual(kodi.said[-1][1], 4_000)
+        self.assertEqual(w.quiet, 180)
+        kodi.carried = 13_000
+        kodi.play(300)
+        self.assertEqual(kodi.said[-1][1], 8_000)
+
+    def test_each_step_undone_doubles_the_calm(self):
+        w = live("12m", 12_000)
+        kodi = Kodi(w)
+        kodi.arriving = 7_000
+        kodi.play(30)
+        kodi.wait(2)
+        self.assertEqual(kodi.said, [(32, 5_000)])
+        kodi.carried = 30_000
+        kodi.play(300)
+        self.assertEqual(kodi.said[-1], (332, 8_000))
+        kodi.play(180)
+        self.assertEqual(kodi.said[-1], (512, 12_000))
+        # 12 Mbps doesn't hold: back down, and it's off for the title.
+        kodi.carried = None
+        kodi.arriving = 11_000
+        kodi.play(20)
+        kodi.wait(2)
+        self.assertEqual(kodi.said[-1], (534, 8_000))
+        # Later 8 falters too, more than 10 minutes after it was reached: 8 stays open.
+        kodi.play(620)
+        kodi.arriving = 8_000
+        kodi.wait(2)
+        self.assertEqual(kodi.said[-1], (1156, 6_000))
+        # 5 minutes after the step down 3 calm minutes would have done; now it takes 6.
+        kodi.carried = 30_000
+        kodi.play(300)
+        self.assertEqual(kodi.said[-1], (1156, 6_000))
+        kodi.play(60)
+        self.assertEqual(kodi.said[-1], (1516, 8_000))
+        kodi.play(1_200)
+        self.assertEqual(kodi.said[-1], (1516, 8_000), "12 Mbps not again")
+
+    def test_the_calm_doubles_up_to_12_minutes(self):
+        w = live()
+        for _ in range(4):
+            w.last_up = (0.0, "x")
+            w.went_down(1.0)
+        self.assertEqual(w.quiet, 720)
+
+
+class NextTitleTest(unittest.TestCase):
+    """A stream that can't go higher without another stays, while the
+    network it carries raises where the next title starts."""
+
+    def test_where_the_next_title_starts_goes_up_one_quality_at_a_time(self):
         w = watch("4m", 4_000, 20_000, 1080, lowered=True)
         kodi = Kodi(w)
         kodi.carried = 13_000
         kodi.play(299)
         self.assertEqual(kodi.said, [], "not within 5 minutes of a step down")
         kodi.play(1)
-        self.assertEqual(kodi.said, [(300, "8m")], "13 Mbps carries 1.6 times 8")
-        w.restarted(kodi.now, "8m", 8_000)
+        self.assertEqual(kodi.steps, [aq.Step(aq.NEXT, "8m", None, False, 8_000)], "13 Mbps carries 1.6 times 8")
+        self.assertEqual(w.quality, "4m", "the stream plays on as it is")
         kodi.play(400)
         self.assertEqual(len(kodi.said), 1, "12 Mbps needs 19.2")
         kodi.carried = 40_000
         kodi.play(1)
-        self.assertEqual(kodi.said[-1][1], "12m")
-        w.restarted(kodi.now, "12m", 12_000)
+        self.assertEqual(kodi.said[-1][1], "next 12m")
         kodi.play(179)
         self.assertEqual(len(kodi.said), 2, "one step every 3 minutes at most")
         kodi.play(1)
         # 15 Mbps makes the 20 Mbps 1080p file smaller; 20 Mbps 1080p doesn't.
-        self.assertEqual(kodi.said[-1][1], "15m")
-        w.restarted(kodi.now, "15m", 15_000)
+        self.assertEqual(kodi.said[-1][1], "next 15m")
         kodi.play(180)
-        self.assertEqual(kodi.said[-1][1], "original", "40 Mbps carries 1.6 times the file")
-
-    def test_no_measure_stays_down(self):
-        kodi = Kodi(watch("8m", 8_000, 20_000, 1080, lowered=True))
-        kodi.play(1200)
-        self.assertEqual(kodi.said, [])
+        self.assertEqual(kodi.steps[-1], aq.Step(aq.NEXT, "original", None, False, 0), "40 Mbps carries 1.6 times the file: forgotten")
+        kodi.play(600)
+        self.assertEqual(len(kodi.said), 4)
 
     def test_an_issue_restarts_the_quiet_time(self):
         w = watch("4m", 4_000, 20_000, 1080, lowered=True)
@@ -262,7 +474,78 @@ class WatchTest(unittest.TestCase):
         kodi.play(179)
         self.assertEqual(len(kodi.said), 1, "3 minutes after the last issue, 5 after the step down")
         kodi.play(300 - 179 - 32)
-        self.assertEqual(kodi.said[-1], (552, "4m"))
+        self.assertEqual(kodi.said[-1], (552, "next 4m"))
+
+    def test_a_raise_a_step_down_undoes_isnt_made_again(self):
+        w = watch("4m", 4_000, 20_000, 1080, lowered=True)
+        kodi = Kodi(w)
+        kodi.carried = 13_000
+        kodi.play(300)
+        self.assertEqual(kodi.said, [(300, "next 8m")])
+        kodi.carried = None
+        kodi.play(60)
+        kodi.wait(2)
+        self.assertEqual(kodi.said[-1], (362, "2m"))
+        self.assertEqual(kodi.steps[-1].memory, 2_000)
+        self.assertEqual(w.quiet, 360)
+        w.restarted(kodi.now, "2m", 2_000)
+        kodi.carried = 50_000
+        kodi.play(359)
+        self.assertEqual(kodi.said[-1][1], "2m", "6 calm minutes now")
+        kodi.play(1)
+        self.assertEqual(kodi.said[-1], (722, "next 4m"))
+        kodi.play(2_000)
+        self.assertEqual(kodi.said[-1], (722, "next 4m"), "8 Mbps didn't hold this title")
+
+    def test_the_original_playing_has_nothing_to_raise(self):
+        kodi = Kodi(watch())
+        kodi.carried = 100_000
+        kodi.play(1_200)
+        self.assertEqual(kodi.said, [])
+
+
+class FramesAndDecoderTest(unittest.TestCase):
+    def test_dropped_frames_move_it_in_the_first_minute_only(self):
+        w = watch()
+        self.assertEqual(w.dropped(30.0), aq.Step(aq.RESTART, "converted", None, False, None), "the server's own quality")
+        self.assertIsNone(w.dropped(40.0), "once")
+        # A conversion: a quality lower, another stream.
+        w = live()
+        self.assertEqual(w.dropped(25.0), aq.Step(aq.RESTART, "4m", None, True, None))
+        self.assertIsNone(live().dropped(10.0), "not within 20 s of the start")
+
+    def test_later_dropped_frames_lower_where_the_next_title_starts(self):
+        w = watch()
+        self.assertEqual(w.dropped(61.0), aq.Step(aq.NEXT, "15m", None, False, 15_000))
+        self.assertEqual(w.quality, "original", "it plays on")
+        self.assertIsNone(w.dropped(90.0), "said once")
+        self.assertEqual(live().dropped(300.0), aq.Step(aq.NEXT, "4m", None, False, 4_000))
+
+    def test_the_player_giving_up_on_the_original_converts_it_once(self):
+        w = watch()
+        self.assertEqual(w.failed(12.0), aq.Step(aq.RESTART, "converted", None, False, None))
+        self.assertIsNone(w.failed(13.0))
+        w.restarted(14.0, "original", 15_000, live=True, lines=1080, converted=True)
+        self.assertIsNone(w.failed(40.0), "a conversion that fails isn't converted again")
+        self.assertIsNone(watch("8m", 8_000).failed(5.0))
+
+
+class BitrateLabelTest(unittest.TestCase):
+    def test_labels_floors_and_steps(self):
+        self.assertEqual(aq.bitrate_label(4_500, 1080), "4.5 Mbps 1080p")
+        self.assertEqual(aq.bitrate_label(8_000, 2160), "8 Mbps 4K")
+        self.assertEqual(aq.bitrate_label(3_000, None), "3 Mbps")
+        self.assertEqual([aq.floor_kbps(n) for n in (2160, 1600, 1080, 800, 720, 480, None)], [8_000, 8_000, 3_000, 3_000, 1_500, 1_000, 1_000])
+        self.assertEqual(aq.named_lines(1920, 800), 1080)
+        self.assertEqual(aq.named_lines(3840, 1600), 2160)
+        self.assertEqual(aq.named_lines(None, 536), 480)
+        self.assertIsNone(aq.named_lines(None, None))
+        self.assertEqual(aq.stream_lines("8m", True, None, 2160), 1080)
+        self.assertEqual(aq.stream_lines("8m", True, None, 720), 720, "no taller than the file")
+        self.assertEqual(aq.stream_lines("original", True, "15m", 2160), 2160)
+        self.assertEqual(aq.stream_lines("original", False, None, 1080), 1080)
+        self.assertEqual(aq.rungs_up(4_500, 20_000), [8_000, 12_000, 15_000, 20_000])
+        self.assertEqual(aq.rungs_up(3_000, 6_000), [4_000, 6_000])
 
 
 class MeterTest(unittest.TestCase):

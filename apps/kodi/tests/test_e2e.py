@@ -21,7 +21,7 @@ import time
 import unittest
 
 import support  # noqa: F401
-from pley import api, auth, caps, profiles, service
+from pley import api, auth, autoquality, caps, profiles, service
 from pley.api import path_in
 from pley.events import Events
 from pley.proxy import Proxy
@@ -199,6 +199,29 @@ class EndToEndTest(unittest.TestCase):
         segment = client.request("GET", info["url"].rsplit("/", 1)[0] + "/" + first)
         self.assertEqual(segment.status, 200)
         self.assertEqual(segment.body[:1], b"\x47", "an MPEG-TS packet")
+
+        # Automatic steps its bitrate as it is sent, with the service's
+        # token: the same stream goes on lower, and back.
+        self.assertIs(info["live_bitrate"], True)
+        watch = autoquality.Watch(0.0, "2m", 2000, None, 720, live=True, lines=480)
+        watch.playing_kbps = 1500
+        player.set_bitrate(watch, info["session_id"], 1500)
+        # The server keeps it within the session's own bitrate.
+        self.assertTrue(watch.live)
+        self.assertTrue(1000 <= watch.sent_kbps <= 1500, watch.sent_kbps)
+        self.assertEqual(watch.playing_kbps, watch.sent_kbps)
+        lowered = watch.sent_kbps
+        watch.playing_kbps = 2000
+        player.set_bitrate(watch, info["session_id"], 2000)
+        self.assertTrue(watch.live and lowered <= watch.sent_kbps <= 2000, watch.sent_kbps)
+        player.call("DELETE", "/api/playback/%s" % info["session_id"])
+
+        # A file played as it is can't: the watch hears the refusal.
+        info = client.post("/api/playback", {"item_id": item, "client_id": "kodi-e2e", "caps": report})
+        self.assertEqual((info["method"], info["live_bitrate"]), ("direct", False))
+        watch = autoquality.Watch(0.0, "2m", 2000, None, 720, live=True, lines=480)
+        player.set_bitrate(watch, info["session_id"], 1500)
+        self.assertEqual((watch.live, watch.playing_kbps), (False, 2000))
         player.call("DELETE", "/api/playback/%s" % info["session_id"])
 
         # An access token the server no longer takes is renewed once.

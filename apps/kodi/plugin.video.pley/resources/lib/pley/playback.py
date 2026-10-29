@@ -180,7 +180,10 @@ def ask(restart=None, client=None) -> dict:
     smaller). Automatic under a ceiling known for this network (the
     server's word, asked with `client`, else this Kodi's own memory)
     starts at the quality under it, the same way; the service's restart
-    at a quality converts."""
+    at a quality converts, and at CONVERTED converts the original at the
+    server's own quality."""
+    if restart == autoquality.CONVERTED:
+        return dict(automatic=True, quality=autoquality.ORIGINAL, lowered=False, mode="transcode", max_bitrate=None, max_height=None)
     if restart is not None:
         max_bitrate, max_height = autoquality.limits(restart)
         mode = "auto" if restart == autoquality.ORIGINAL else "transcode"
@@ -205,11 +208,14 @@ def automatic(asked: dict, info: dict, file) -> dict:
     """What the service's Automatic needs of a playback: the quality it
     plays at (the original when the server played the file as it is,
     under a ceiling it fits), the bitrate that is, the file's bitrate and
-    lines, and the server's own quality for the file."""
+    lines, and the server's own quality for the file; whether the video
+    is converted, the lines the stream is named by, and whether its
+    bitrate changes as it is sent (live_bitrate)."""
     file = file or {}
     video = next((s for s in file.get("streams") or [] if s.get("kind") == "video"), None) or {}
     file_kbps = (file.get("bitrate") or 0) / 1000.0 or None
     file_lines = file.get("height") or video.get("height") or None
+    file_named = autoquality.named_lines(file.get("width") or video.get("width"), file_lines)
     quality = asked["quality"]
     converted = info.get("method") == "transcode"
     if not converted:
@@ -230,6 +236,9 @@ def automatic(asked: dict, info: dict, file) -> dict:
         "lowered": asked["lowered"] and quality != autoquality.ORIGINAL,
         "server": server_key(),
         "prefix": autoquality.media_prefix(info["url"]),
+        "converted": converted,
+        "lines": autoquality.stream_lines(quality, converted, cap, file_named),
+        "live": converted and info.get("live_bitrate") is True,
     }
 
 

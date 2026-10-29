@@ -185,36 +185,69 @@ Rules the code keeps:
 - Automatic plays the original and watches it. A transcode comes in
   several sizes (`hls.variants`, docs/QUALITY.md) the Video node moves
   between by itself, so in such a session (`PlaybackInfo.adaptive`)
-  Automatic leaves it be; the original and its remuxes come in one, so
-  stepping down from them is the app's:
+  Automatic leaves its waits to it; the original, its remuxes and
+  a conversion too small for smaller sizes come in one, so stepping down
+  from them is the app's:
   - *Waits*: the Video node's state `buffering` after at least 2 s of
     playing (not a start, nor after a seek Pley made or a pause), and not
     when `bufferingStatus.isUnderrun` says it isn't for want of data. One
     of 2 s or more, or two shorter ones within a minute, is a play issue.
   - *Delivery* before a wait: Roku tells an app nothing of how much it has
-    read ahead, so this one isn't seen; nor are dropped frames. What the
-    Roku can't decode is converted, as before (a media error plays the
-    file again converted at the server's own quality).
+    read ahead, so this one isn't seen; nor are dropped frames (the watch's
+    rule for them, in the title's first minute another stream and later the
+    next title a quality lower, waits for a Roku that says). What the Roku
+    can't decode is converted, as before (a media error plays the file again
+    converted at the server's own quality).
 
-  On a play issue it steps down by the spec's rule: what the network carried
-  (the HLS segments' sizes over their download times in the last 20 s, from
-  `downloadedSegment`, no more than the bitrate playing; half of it for a
-  file played as it is, which has no segments) times 0.75, never above the
-  server's own quality for the file (`auto_quality`), always a quality lower
-  among those the file is offered, each of less bitrate than the one above
-  (a 4K file goes 30 Mbps 4K, 15 Mbps 4K, then 12 Mbps 1080p), never under 2
-  Mbps 480p, and not within 20 s of the last change. The stream opens again
-  where it was, as a new session at that quality (`mode: "transcode"`), and
-  "Quality lowered to 8 Mbps 1080p" shows at the top for 4 s once it plays.
-  The ceiling is kept 30 minutes for each server in the registry; a title
-  started in Automatic meanwhile (Up Next's too) starts at the quality under
-  it when that makes the file smaller. Back up: after 3 minutes without an
-  issue and 5 after a step down, when the segments since then (20 s of video
-  at least) carried 1.6 times the next quality up (the file's bitrate, for
-  Original), one step at a time, every 3 minutes at most, silently; a step
-  up to a quality keeps its bitrate as the ceiling, and back at Original the
-  ceiling is forgotten. Without segments to measure, it stays where it went
-  down to, as the spec allows.
+  The Video node replaces its content to play another stream, and the
+  screen is black meanwhile (docs/QUALITY.md, "Players that go black
+  between streams"), so Automatic never moves to another stream while one
+  plays well:
+  - *A conversion whose bitrate changes as it is sent*
+    (`PlaybackInfo.live_bitrate`): a play issue lowers its bitrate and
+    nothing else, to what the network carried (the HLS segments' sizes over
+    their download times in the last 20 s, from `downloadedSegment`, no more
+    than the bitrate playing; half of it without segments) times 0.75,
+    rounded down to whole Mbps as on Samsung and LG, never under its size's
+    floor (8 Mbps for 4K, 3 Mbps for 1080p, 1.5 for 720p and 1 below) nor
+    within 20 s of the last change. The player asks the server (`PUT
+    /api/playback/{session}/bitrate`) and plays on: the same playlist and
+    size, the segments the Video node hasn't fetched yet at the new bitrate.
+    "Quality lowered to 4 Mbps 1080p" shows at the top for 4 s at once; the
+    menu says "Automatic · 4 Mbps 1080p" and the details "Lowered for your
+    connection". At the floor the network waits. A refusal (a server or
+    transcoder from before, a session gone) leaves the stream as it was, and
+    it moves as one whose bitrate can't change.
+  - *The original* (direct play or remux), *or a conversion whose bitrate
+    can't change*: another stream only once the picture has stopped
+    anyway. A wait of 2 s or more steps down by the spec's rule: what the
+    network carried (as above; half the bitrate for a file played as it
+    is, which has no segments) times 0.75, never above the server's own
+    quality for the file (`auto_quality`), always a quality lower among
+    those the file is offered, each of less bitrate than the one above (a
+    4K file goes 30 Mbps 4K, 15 Mbps 4K, then 12 Mbps 1080p), never under
+    2 Mbps 480p, and not within 20 s of the last change. Two short waits
+    are an issue all the same (the calm before a step up starts again)
+    but don't move it. The stream opens again where it was, as a new
+    session at that quality (`mode: "transcode"`), and "Quality lowered
+    to 8 Mbps 1080p" shows at the top for 4 s once it plays.
+
+  The ceiling of each step is kept 30 minutes for each server in the
+  registry; a title started in Automatic meanwhile (Up Next's too) starts at
+  the quality under it when that makes the file smaller. Back up: after 3
+  minutes without an issue and since the last step, and 5 after a step down,
+  when the segments since then (20 s of video at least) carried 1.6 times
+  the step up, a bitrate lowered as it is sent climbs one step, silently:
+  the menu's next bitrate above it (2, 4, 8, 12, 15, 20, 30 Mbps), then the
+  stream's own, never more. A stream that can't go higher without another
+  (at its own bitrate, one whose bitrate can't change, or one in several
+  sizes) stays: where the next title starts goes up a quality instead, by
+  the same rule (the network's memory, in the registry and on the server, a
+  quality's bitrate; at the original it is forgotten). Without segments to
+  measure, it stays where it went down to, as the spec allows. It settles: a
+  step up, or a raise of where the next title starts, that a step down
+  undoes within 10 minutes isn't tried again during the title, and each one
+  doubles the calm a step up waits for (3, then 6, then 12 minutes).
 - Where Automatic starts: the server remembers what this Roku's network
   carries too (`GET /api/playback/network`, docs/API.md), a day after a
   step down and a week after a speed test. A title's first opening in

@@ -287,7 +287,7 @@ own views instead (below), which skins' widgets and favourites always get.
   rewinding, nor in the seconds after a seek or the start). Kodi's own
   HLS player takes one variant of a playlist and keeps it, so the add-on
   doesn't ask for transcodes in several sizes (`hls.variants`,
-  docs/QUALITY.md) and steps down itself:
+  docs/QUALITY.md) and steps itself:
   - *Waits*: Kodi buffering (`Player.Caching`), or the position not
     moving while it plays. One of 2 seconds or more, or two shorter ones
     within a minute, is a play issue.
@@ -298,20 +298,51 @@ own views instead (below), which skins' widgets and favourites always get.
     seconds ahead and falling is a play issue before it waits.
   - *Decoding*: Kodi tells add-ons nothing of dropped frames (only its
     debug overlay shows them), so a device that can't keep up isn't seen;
-    the server converts what this Kodi's caps say it can't decode.
+    the server converts what this Kodi's caps say it can't decode. Kodi's
+    player giving up on the original (`onPlayBackError`) is the one
+    decoder failure it says (below).
 
-  On a play issue it steps down by the spec's rule: the bitrate playing
-  (the file's, the quality's for a conversion) times the delivery seen
-  (else what the proxy saw arrive over the last 20 s) times 0.75, never
-  above the server's own quality for the file (`auto_quality`), always
-  a quality lower, never under 2 Mbps 480p, and not within 20 s of the
-  last change. The service asks for the title again where it is
-  (`playback.prepare` with `mode: "transcode"` and the quality's
-  `max_bitrate` and `max_height`), plays it in place from that position,
-  and says "Quality lowered to 8 Mbps 1080p" in Kodi's
-  notification once it plays. The old session ends with the usual last
-  report. The ceiling is kept for 30 minutes for each server in the
-  add-on's data (`remembered.json`); a title started in Automatic
+  Kodi's player closes one stream before it opens the next, so the screen
+  is black between them (docs/QUALITY.md, "Players that go black between
+  streams"). Automatic never moves to another stream while one plays
+  well:
+  - *A conversion whose bitrate changes as it is sent*
+    (`PlaybackInfo.live_bitrate`): a play issue, any of the above, lowers
+    its bitrate and nothing else. The new bitrate is the one playing times
+    the delivery seen (else what the proxy saw arrive over the last 20 s, no
+    more than the bitrate; else half) times 0.75, rounded down to whole Mbps
+    as on Samsung and LG, never under its size's floor (8 Mbps for 4K, 3
+    Mbps for 1080p, 1.5 for 720p and 1 below) nor within 20 s of the last
+    change. The service asks the server from its worker, with its token
+    (`PUT /api/playback/{session}/bitrate`, `service.Player.set_bitrate`),
+    and Kodi plays on: the same playlist and size, the segments it hasn't
+    fetched yet at the new bitrate. "Quality lowered to 4 Mbps 1080p" shows
+    in Kodi's notification at once. At the floor the network waits. A
+    refusal (a server or transcoder from before, 400; a session gone, 404)
+    leaves the stream as it was, and it moves as one whose bitrate can't
+    change.
+  - *The original* (direct play or remux), *or a conversion whose bitrate
+    can't change*: another stream only once the picture has stopped
+    anyway. A wait of 2 s or more steps down by the spec's rule: the
+    bitrate playing (the file's, the quality's for a conversion) times the
+    delivery seen (else what the proxy saw arrive over the last 20 s)
+    times 0.75, never above the server's own quality for the file
+    (`auto_quality`), always a quality lower, never under 2 Mbps 480p, and
+    not within 20 s of the last change. Two short waits and the delivery
+    warning are issues all the same (the calm before a step up starts
+    again) but don't move it. Kodi's player giving up on the original
+    (`onPlayBackError`, `service.Player.fall_back`) plays it again
+    converted at the server's own quality, once, where it was; Kodi's own
+    "Playback failed" box shows meanwhile. The service asks for the
+    title again where it is (`playback.prepare` with `mode: "transcode"`
+    and the quality's `max_bitrate` and `max_height`, or none of them for
+    the server's own), plays it in place from that position, and says
+    "Quality lowered to 8 Mbps 1080p" in Kodi's notification once it
+    plays. The old session ends with the usual last report; until the new
+    one plays, nothing playing doesn't end it.
+
+  The ceiling of each step down is kept for 30 minutes for each server in
+  the add-on's data (`remembered.json`); a title started in Automatic
   meanwhile, Up Next's included, asks for the quality under it as a cap
   (a file under it still plays as it is).
 
@@ -341,15 +372,26 @@ own views instead (below), which skins' widgets and favourites always get.
   every segment and file passes through it, and it times each answer
   from its first byte to its last, Kodi's taking of them included, so a
   measure is never more than the network carried. After 3 minutes
-  without an issue, and 5 after a step down, when the third fastest
-  answer of 256 KB or more since the last change or issue carried
-  1.6 times the next quality up (the file's bitrate for Original), it
-  steps up one quality, silently, at most every 3 minutes; back at
-  Original the ceiling is forgotten. Kodi reads a stream only as fast as
-  its buffers empty once they are full, so answers carry that much only
-  while it fills them (after a start, a seek or a wait); on a Kodi whose
-  buffers stay full it stays at the quality it went down to for the rest
-  of the title, as the spec allows.
+  without an issue and since the last step, and 5 after a step down,
+  when the third fastest answer of 256 KB or more since then carried
+  1.6 times the step up, a bitrate lowered as it is sent climbs one
+  step, silently: the menu's next bitrate above it (2, 4, 8, 12, 15, 20,
+  30 Mbps), then the stream's own, never more. A stream that can't go
+  higher without another (at its own bitrate, or one whose bitrate can't
+  change) stays: where the next title starts goes up a quality instead,
+  by the same rule (the network's memory, here and on the server, a
+  quality's bitrate; at the original it is forgotten). Kodi reads
+  a stream only as fast as its buffers empty once they are full, so
+  answers carry that much only while it fills them (after a start, a
+  seek or a wait); on a Kodi whose buffers stay full nothing measures a
+  way up, as the spec allows.
+
+  **It settles.** A step up, or a raise of where the next title starts,
+  that a step down undoes within 10 minutes isn't tried again during the
+  title, and each one doubles the calm a step up waits for (3, then 6,
+  then 12 minutes). The rule for dropped frames (in the title's first
+  minute another stream, later the next title a quality lower, once) is
+  in the watch for a Kodi that says how many it drops.
 - **Progress**: the service tells the server where playback is every 10
   seconds while it plays and every 30 while it is paused (the server lets a
   player it hasn't heard from for 90 seconds go, and its conversion with
@@ -513,6 +555,9 @@ in `portable_data/userdata/advancedsettings.xml`.
   the stream's keyframe, up to a second back; the notification's
   sentence is longer than Kodi's box and scrolls across once in its 5
   seconds. A step back up is unseen so far: how often a Kodi's segment
-  reads prove the network carries more.
+  reads prove the network carries more. Nor has a bitrate lowered as the
+  stream is sent been watched on a Kodi yet (only the tests and a real
+  server's answer to the add-on's `PUT`), nor Kodi's player giving up on
+  the original.
 - "Who's watching?", music's pages and editing playlists have been through
   the tests only, not a running Kodi yet.

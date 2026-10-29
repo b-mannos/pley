@@ -8,7 +8,15 @@ it plays), and how much it has read ahead (JSON-RPC's cachepercentage,
 where the player has a cache). The proxy every stream goes through counts
 what arrives (Meter). Kodi doesn't say how many frames it drops, so a
 device that can't keep up isn't seen here; the server converts what this
-Kodi can't decode before it plays.
+Kodi can't decode before it plays, and Kodi's player giving up on the
+original (onPlayBackError) plays it converted.
+
+Kodi's player closes one stream before it opens the next, so the screen
+goes black between them (docs/QUALITY.md, "Players that go black between
+streams"). Automatic moves to another stream only once the picture has
+stopped anyway: a wait of 2 s or more, or the player giving up. A
+conversion whose bitrate can change as it is sent (live_bitrate) steps
+its bitrate instead, keeping its size, and plays on.
 """
 
 from __future__ import annotations
@@ -34,6 +42,9 @@ MENU = [
 ]
 IDS = [m[0] for m in MENU]
 DEFAULT = AUTO
+# Automatic's restart of the original converted at the server's own
+# quality for it (a decoder failing): not in the menu.
+CONVERTED = "converted"
 # The setting's order before Automatic (an index): what a choice made then means now.
 OLD_ORDER = [ORIGINAL, "30m", "20m", "15m", "12m", "8m", "4m", "2m"]
 # The lowest Automatic goes, and where it goes knowing nothing of the
@@ -57,17 +68,47 @@ MARGIN = 0.75
 UNKNOWN_DELIVERY = 0.5
 # No change this soon after the last.
 SETTLE = 20.0
-# Back up: after this long without an issue, not this soon after a step
-# down, at most one step this often, when the network carried this much
-# more than the quality up.
+# Back up: after this long without an issue and since the last step (at
+# most one step this often), not this soon after a step down, when the
+# network carried this much more than the step up.
 QUIET = 180.0
 AFTER_DOWN = 300.0
-UP_EVERY = 180.0
 HEADROOM = 1.6
+# It settles: a step up a step down undoes this soon isn't tried again
+# during the title, and doubles the calm the next step up waits for, up
+# to MAX_QUIET.
+SETTLE_UP = 600.0
+MAX_QUIET = 4 * QUIET
+# Dropped frames move the stream in the title's first minute only (a guess
+# that the device can't keep up with it); later they lower where the next
+# title starts.
+FIRST_MINUTE = 60.0
 # What Automatic remembers of a network found slow, for the next title.
 REMEMBER_FOR = 30 * 60.0
 # The position moving this much less or more than the time is a seek.
 JUMP = 3.0
+
+# A conversion's bitrate stepped as it is sent (live_bitrate): never under
+# its size's floor, (lines above, kbps) from the tallest, nor above the
+# stream's own; in whole Mbps, rounded down, as on Samsung and LG.
+FLOORS = ((1080, 8000), (720, 3000), (480, 1500))
+LEAST_KBPS = 1000
+BITRATE_STEP = 1000
+
+# Step.kind: how a decision is carried out.
+RESTART = "restart"  # the title again where it is, at `quality`: a new stream
+BITRATE = "bitrate"  # the stream goes on at `kbps` (PUT /api/playback/{id}/bitrate)
+NEXT = "next"  # nothing changes now: only where the next title starts (`memory`)
+
+
+class Step(collections.namedtuple("Step", "kind quality kbps down memory")):
+    """A decision of Automatic's. `quality` is what the stream plays (for a
+    restart, what it plays next; CONVERTED for the original converted),
+    `kbps` the bitrate a BITRATE step goes on at, `down` whether it is a
+    step down to say, and `memory` what the network's memory keeps for the
+    next title: kbps, 0 to forget it, None to leave it."""
+
+    __slots__ = ()
 
 # Where Automatic starts (docs/QUALITY.md): what the server knows of this
 # Kodi's network is asked for at most this long, and a speed test is
@@ -209,10 +250,65 @@ def step_up(current: str, file_kbps: Optional[float], file_lines: Optional[int],
     return ORIGINAL, need
 
 
+def named_lines(width: Optional[int], height: Optional[int]) -> Optional[int]:
+    """The lines a picture of width × height is named by: 2160, 1080, 720
+    or 480, by its width too (a 1920 × 800 film is 1080p); None when
+    neither is known."""
+    width, height = width or 0, height or 0
+    if width <= 0 and height <= 0:
+        return None
+    if width >= 3800 or height >= 2100:
+        return 2160
+    if width >= 1800 or height >= 1000:
+        return 1080
+    if width >= 1200 or height >= 700:
+        return 720
+    return 480
+
+
+def stream_lines(quality: str, converted: bool, cap: Optional[str], file_named: Optional[int]) -> Optional[int]:
+    """The lines a stream is named by: a conversion's quality's (the
+    server's own for the original converted), no more than the file's; the
+    file's for the file as it is."""
+    if not converted:
+        return file_named
+    lines = limits(cap)[1] if quality == ORIGINAL else limits(quality)[1]
+    if lines and file_named:
+        return min(lines, file_named)
+    return lines or file_named
+
+
+def floor_kbps(lines: Optional[int]) -> int:
+    """The least a stream of `lines` is stepped down to as it is sent: 8 Mbps
+    for 4K, 3 Mbps for 1080p (docs/QUALITY.md), 1.5 for 720p and 1 below."""
+    for above, kbps in FLOORS:
+        if (lines or 0) > above:
+            return kbps
+    return LEAST_KBPS
+
+
+def bitrate_label(kbps: float, lines: Optional[int]) -> str:
+    """A bitrate stepped as it is sent, as the menu names qualities: "4.5
+    Mbps 1080p", "8 Mbps 4K"."""
+    mbps = int(kbps) // 100 / 10.0
+    words = ("%d" % mbps if mbps == int(mbps) else "%.1f" % mbps) + " Mbps"
+    if not lines:
+        return words
+    return words + (" 4K" if lines >= 2160 else " %dp" % lines)
+
+
+def rungs_up(kbps: float, own: float) -> List[float]:
+    """The bitrates a stream stepped down as it is sent climbs back by, one
+    at a time: the menu's, then its own."""
+    return sorted({k for _, _, k, _ in MENU if k and kbps < k < own} | {own})
+
+
 class Watch:
     """One title in Automatic, from its first playback to its last
     restart: `tick` once a second with what Kodi says, and it answers a
-    quality to restart at, or None. `restarted` after a restart."""
+    Step, or None. `restarted` after a restart, `answered` with the
+    server's answer to a BITRATE step, `failed` when Kodi's player gives up,
+    `dropped` for frames dropped (where Kodi would say)."""
 
     def __init__(
         self,
@@ -223,19 +319,60 @@ class Watch:
         file_lines: Optional[int],
         cap: Optional[str] = None,
         lowered: bool = False,
+        live: bool = False,
+        lines: Optional[int] = None,
+        converted: Optional[bool] = None,
     ):
-        self.quality = quality
-        self.playing_kbps = playing_kbps
         self.file_kbps = file_kbps
         self.file_lines = file_lines
         self.cap = cap
+        self.title_at = now
         self.changed_at = now
         # Started under a remembered ceiling counts as a step down.
         self.down_at = now if lowered else None
         self.issue_at = now
         # The ceiling of the last step down, for the next titles.
         self.ceiling = None
+        # It settles: the last step up, until a step down or SETTLE_UP says
+        # whether it held, what didn't hold this title, and the calm a step
+        # up waits for.
+        self.last_up = None
+        self.too_high = set()
+        self.quiet = QUIET
+        # Where the next title starts, raised while this stream can't go
+        # higher (None: where this one plays), and when it last was.
+        self.next_title = None
+        self.raised_at = None
+        self.fell_back = False
+        self.dropped_told = False
+        self.stream(quality, playing_kbps, live, lines, converted)
         self.reset(now)
+
+    def stream(self, quality: str, playing_kbps: Optional[float], live: bool, lines: Optional[int], converted: Optional[bool]) -> None:
+        """What plays now: `quality` at `playing_kbps`, `lines` tall, its
+        bitrate changing as it is sent when `live`."""
+        self.quality = quality
+        self.playing_kbps = playing_kbps
+        self.converted = quality != ORIGINAL if converted is None else bool(converted)
+        self.live = bool(live and self.converted and playing_kbps)
+        # Its own bitrate, which a step up goes back to at most, and the
+        # last the server said it goes on at.
+        self.own_kbps = playing_kbps
+        self.sent_kbps = playing_kbps
+        self.lines = lines
+
+    def floor(self) -> float:
+        return min(floor_kbps(self.lines), self.own_kbps or LEAST_KBPS)
+
+    def lowered(self) -> bool:
+        """Below the original: a quality, or a bitrate stepped down."""
+        return self.quality != ORIGINAL or bool(self.live and self.playing_kbps < self.own_kbps)
+
+    def label(self) -> str:
+        """What plays, as the menu would say it after "Automatic · "."""
+        if self.live and self.playing_kbps < self.own_kbps:
+            return bitrate_label(self.playing_kbps, self.lines)
+        return label(self.quality)
 
     def reset(self, now: float) -> None:
         self.last = None
@@ -253,10 +390,17 @@ class Watch:
         self.history.clear()
         self.slow_since = None
 
-    def restarted(self, now: float, quality: str, playing_kbps: Optional[float]) -> None:
+    def restarted(
+        self,
+        now: float,
+        quality: str,
+        playing_kbps: Optional[float],
+        live: bool = False,
+        lines: Optional[int] = None,
+        converted: Optional[bool] = None,
+    ) -> None:
         """Playing again at `quality` (a new session, the same title)."""
-        self.quality = quality
-        self.playing_kbps = playing_kbps
+        self.stream(quality, playing_kbps, live, lines, converted)
         self.changed_at = now
         self.reset(now)
 
@@ -281,7 +425,7 @@ class Watch:
         ahead: Optional[float] = None,
         arriving_kbps: Optional[float] = None,
         carried_kbps: Optional[float] = None,
-    ) -> Optional[str]:
+    ) -> Optional[Step]:
         """What Kodi says this second: `position` and `ahead` in seconds,
         `arriving_kbps` what the proxy passed on over the last 20 s,
         `carried_kbps` what it measured the network carrying since the
@@ -292,6 +436,8 @@ class Watch:
             self.seeked()
             return None
         issue = False
+        # A wait of 2 s or more: the picture stopped anyway.
+        stopped = False
         if last is not None:
             elapsed = now - last[0]
             moved = position - last[1]
@@ -307,7 +453,7 @@ class Watch:
                     self.stall_counted = False
                 if self.stall_since is not None and not self.stall_counted and now - self.stall_since >= LONG_WAIT:
                     self.stall_counted = True
-                    issue = True
+                    issue = stopped = True
             else:
                 if self.stall_since is not None and not self.stall_counted:
                     self.short_waits.append(now)
@@ -334,7 +480,7 @@ class Watch:
             else:
                 self.slow_since = None
         if issue:
-            return self.on_issue(now, delivery, arriving_kbps)
+            return self.on_issue(now, stopped, delivery, arriving_kbps)
         return self.maybe_up(now, carried_kbps)
 
     def falling(self) -> bool:
@@ -342,31 +488,148 @@ class Watch:
         aheads = [a for _, _, a in self.history if a is not None]
         return len(aheads) >= 2 and aheads[-1] < aheads[0] - 1.0
 
-    def on_issue(self, now: float, delivery: Optional[float], arriving_kbps: Optional[float]) -> Optional[str]:
+    def on_issue(self, now: float, stopped: bool, delivery: Optional[float], arriving_kbps: Optional[float]) -> Optional[Step]:
+        """A play issue: a step down, as the stream is sent when it can be;
+        else another stream, but only once the picture has stopped anyway
+        (`stopped`: a wait of 2 s or more), as the screen goes black
+        between streams."""
         self.issue_at = now
         if now - self.changed_at < SETTLE:
+            return None
+        if self.live:
+            return self.lower_bitrate(now, delivery, arriving_kbps)
+        if not stopped:
+            # Two short waits, or the delivery warning: the picture plays on.
             return None
         quality, ceiling = step_down(
             self.quality, self.playing_kbps, delivery, arriving_kbps, self.file_kbps, self.file_lines, self.cap
         )
         if quality is None:
             return None
-        self.changed_at = self.down_at = now
+        self.went_down(now)
         self.ceiling = ceiling
-        return quality
+        # The lowest quality may be above the ceiling: that is where the next title starts.
+        return Step(RESTART, quality, None, True, max(ceiling or 0, kbps_of(quality)))
 
-    def maybe_up(self, now: float, carried_kbps: Optional[float]) -> Optional[str]:
-        if self.quality == ORIGINAL or carried_kbps is None:
+    def lower_bitrate(self, now: float, delivery: Optional[float], arriving_kbps: Optional[float]) -> Optional[Step]:
+        """The stream goes on lower, its size kept: the bitrate playing times
+        the delivery seen times 0.75, no lower than its size's floor (where
+        the network waits)."""
+        kbps = self.playing_kbps
+        if delivery is not None:
+            carried = kbps * min(max(delivery, 0.05), 1.0)
+        elif arriving_kbps:
+            carried = min(arriving_kbps, kbps)
+        else:
+            carried = kbps * UNKNOWN_DELIVERY
+        ceiling = carried * MARGIN
+        target = max(self.floor(), min(self.own_kbps, ceiling // BITRATE_STEP * BITRATE_STEP))
+        if target >= kbps:
             return None
-        if now - self.issue_at < QUIET or now - self.changed_at < UP_EVERY:
+        self.went_down(now)
+        self.ceiling = ceiling
+        self.playing_kbps = target
+        return Step(BITRATE, self.quality, int(target), True, max(ceiling, target))
+
+    def went_down(self, now: float) -> None:
+        """A step down: one soon after a step up says that step was one too
+        far, not tried again this title, and the calm before the next one
+        doubles. Where the next title starts goes down with it."""
+        if self.last_up is not None and now - self.last_up[0] < SETTLE_UP:
+            self.too_high.add(self.last_up[1])
+            self.quiet = min(MAX_QUIET, self.quiet * 2)
+        self.last_up = None
+        self.next_title = None
+        self.changed_at = self.down_at = now
+
+    def calm(self, now: float, since: float) -> bool:
+        """Long enough without an issue, since `since`, and since a step down."""
+        if now - self.issue_at < self.quiet or now - since < self.quiet:
+            return False
+        return self.down_at is None or now - self.down_at >= AFTER_DOWN
+
+    def maybe_up(self, now: float, carried_kbps: Optional[float]) -> Optional[Step]:
+        """After a calm spell, when the network carries 1.6 times it: a
+        bitrate stepped down climbs back one step, as it is sent. A stream
+        that can't go higher without another stream (which would blank the
+        screen while it plays well) stays; the next title starts higher."""
+        if carried_kbps is None:
             return None
-        if self.down_at is not None and now - self.down_at < AFTER_DOWN:
+        if self.live and self.playing_kbps < self.own_kbps:
+            if not self.calm(now, self.changed_at):
+                return None
+            up = rungs_up(self.playing_kbps, self.own_kbps)[0]
+            key = "%d kbps" % up
+            if key in self.too_high or carried_kbps < HEADROOM * up:
+                return None
+            self.playing_kbps = up
+            self.changed_at = now
+            self.last_up = (now, key)
+            if up < self.own_kbps:
+                memory = up
+            else:
+                # Back at its own: the quality's, or no limit for the original.
+                memory = 0 if self.quality == ORIGINAL else kbps_of(self.quality) or up
+            return Step(BITRATE, self.quality, int(up), False, memory)
+        if self.dropped_told or not self.calm(now, max(self.changed_at, self.raised_at or self.changed_at)):
+            # Frames dropped lowered where the next title starts: not raised again.
             return None
-        quality, need = step_up(self.quality, self.file_kbps, self.file_lines, self.cap)
-        if quality is None or carried_kbps < HEADROOM * need:
+        quality, need = step_up(self.next_title or self.quality, self.file_kbps, self.file_lines, self.cap)
+        if quality is None or quality in self.too_high or carried_kbps < HEADROOM * need:
             return None
-        self.changed_at = now
-        return quality
+        self.next_title = quality
+        self.raised_at = now
+        self.last_up = (now, quality)
+        return Step(NEXT, quality, None, False, 0 if quality == ORIGINAL else kbps_of(quality))
+
+    def answered(self, asked: float, kbps: Optional[float]) -> None:
+        """The server's answer to a BITRATE step to `asked`: what the stream
+        goes on at, or None when it refused (a server or transcoder from
+        before, a session gone). Refused, the stream is as it was, and moves
+        as one whose bitrate can't change."""
+        if kbps is None:
+            self.live = False
+            self.playing_kbps = self.sent_kbps
+            return
+        self.sent_kbps = kbps
+        if self.playing_kbps == asked:
+            self.playing_kbps = kbps
+
+    def failed(self, now: float) -> Optional[Step]:
+        """Kodi's player gave up on the original (a decoder failing): the
+        title again converted, at the server's own quality for the file,
+        once."""
+        if self.quality != ORIGINAL or self.converted or self.fell_back:
+            return None
+        self.fell_back = True
+        self.issue_at = self.changed_at = now
+        return Step(RESTART, CONVERTED, None, False, None)
+
+    def dropped(self, now: float) -> Optional[Step]:
+        """The device dropped frames. In the title's first minute, a guess
+        that it can't keep up with this stream: another (the original
+        converted at the server's own quality, a conversion a quality
+        lower). Later, only where the next title starts goes a quality
+        lower, once. (Kodi tells add-ons nothing of dropped frames: for an
+        app that counts them.)"""
+        if self.quality == ORIGINAL and not self.converted:
+            quality = CONVERTED
+            lower, _ = step_down(ORIGINAL, self.playing_kbps, 1.0, None, self.file_kbps, self.file_lines, self.cap)
+        else:
+            quality, _ = step_down(self.quality, self.playing_kbps, 1.0, None, self.file_kbps, self.file_lines, self.cap)
+            lower = quality
+        if now - self.title_at < FIRST_MINUTE:
+            if quality is None or now - self.changed_at < SETTLE or self.fell_back:
+                return None
+            self.issue_at = now
+            self.fell_back = quality == CONVERTED
+            self.went_down(now)
+            return Step(RESTART, quality, None, quality != CONVERTED, None)
+        if lower is None or self.dropped_told:
+            return None
+        self.dropped_told = True
+        self.next_title = None
+        return Step(NEXT, lower, None, False, kbps_of(lower))
 
 
 class Meter:

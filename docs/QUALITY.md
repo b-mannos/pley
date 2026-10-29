@@ -155,13 +155,22 @@ plays well. It changes the stream as it is sent instead:
   network waits. On Samsung and LG a step down goes to the ceiling above
   in whole Mbps ("Automatic · 4 Mbps 1080p"), and a step up to the next of
   the file's qualities' bitrates above it, then the stream's own, never
+  above it. Kodi and Roku step down the same way, and up by the menu's
+  bitrates (2, 4, 8, 12, 15, 20, 30 Mbps), then the stream's own, never
   above it.
+- A stream that can't go higher without another (at its own bitrate, or
+  one whose bitrate can't change) stays while it plays well. On Kodi and
+  Roku, when the calm minutes find the network carrying 1.6 times the
+  next quality up, the network's memory goes up a quality instead, so the
+  next title starts there, and at the original it is forgotten.
 - Playing the original (direct play or a remux), it moves to a conversion
   only once the picture has stopped anyway: a wait for data of 2 s or
   more, or a decoder failing. Two short waits and the delivery warning
   don't move it. Dropped frames move it in a title's first minute only, a
   rough guess that this device can't keep up with the file; later they
-  lower where the next title starts.
+  lower where the next title starts. On Kodi and Roku a conversion whose
+  bitrate can't change (a server or transcoder from before) moves the
+  same way.
 - Samsung and LG get one size per stream (they don't say
   `caps.hls.variants`): a size changing inside a stream may blank their
   screens too. Roku's Video node moves between the sizes of one stream
@@ -175,7 +184,7 @@ picture (above), so they keep the rules before this section.
 A transcode comes in several sizes for a player that moves between them
 by itself, as streaming services' players do: hls.js and the browsers' own
 HLS, Media3 and Roku's Video node (each says so, `caps.hls.variants`;
-Kodi's player doesn't, and keeps the restarts above, and Samsung's and
+Kodi's player doesn't, and steps as above, and Samsung's and
 LG's don't, above). The session's `master.m3u8` lists the transcode's own size
 first, then 1080p, 720p, 540p and 360p below it, each at the bitrate its
 size gets (8, 4, 2 and 0.7 Mbps) and never more than the one above; one
