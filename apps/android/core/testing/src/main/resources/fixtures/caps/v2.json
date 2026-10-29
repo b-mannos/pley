@@ -18,7 +18,7 @@
   "audio_channels": 8,
   "subtitle_codecs": ["subrip", "ass", "webvtt", "mov_text", "hdmv_pgs_subtitle"],
   "audio_track_switching": true,
-  "hls": { "master_playlist": true, "segments": ["ts", "fmp4"] },
+  "hls": { "master_playlist": true, "segments": ["ts", "fmp4"], "variants": false },
   "display": { "width": 3840, "height": 2160, "refresh_rates": [23.976, 24.0, 50.0, 59.94, 60.0] },
   "device": { "form": "tv", "tier": "high", "fire_tv": false, "model": "Chromecast with Google TV (4K)" }
 }
