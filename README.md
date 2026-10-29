@@ -48,8 +48,10 @@ in React and TypeScript.
   tone mapping with libplacebo, including Dolby Vision profile 5.
 - Dolby Vision profile 7 (FEL or MEL) and HDR10+ are told apart from plain
   HDR10 and shown as badges; the player's details say what the screen gets.
-- Subtitles: text tracks as WebVTT, image tracks burned in, with a timing
-  offset in every player, the TV apps included.
+- Subtitles: text tracks as WebVTT; picture tracks (PGS, VobSub, DVB)
+  drawn over the video by the web, desktop, Android, Samsung and LG apps
+  (PGS by Kodi too), so the file still plays as it is, and burned in
+  elsewhere; a timing offset in every player, the TV apps included.
 - Audio and subtitle defaults per profile, on every app; a choice carries
   over to the next episode. Among tracks in the profile's language, the
   server picks the one the device plays best (as is rather than converted;

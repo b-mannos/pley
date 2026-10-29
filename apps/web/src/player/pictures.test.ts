@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPictureTrack } from "pley-picture-subtitles/mks";
 import { PictureSubtitles } from "pley-picture-subtitles/picture-track";
 import { pgsMks as mks } from "@/test/pictures";
-import { contain, fetchPictures, loadPictures, LOOKAHEAD_MS, PictureRenderer, PICTURES_AGAIN_MS, planeBox, trackMs } from "./pictures";
+import { contain, fetchPictures, hlsLeadMs, loadPictures, LOOKAHEAD_MS, PictureRenderer, PICTURES_AGAIN_MS, planeBox, trackMs } from "./pictures";
 
 const track = (cues: [number, number][]) => PictureSubtitles.of(readPictureTrack(mks(cues)))!;
 
@@ -31,6 +31,23 @@ describe("trackMs", () => {
     expect(subs.sampleAt(trackMs(frame, 0, 0))).toBe(0);
     // And it's gone on the frame its end falls on.
     expect(subs.frameAt(trackMs(4.4 - 1e-9, 0, 0))).toBeNull();
+  });
+});
+
+describe("hlsLeadMs", () => {
+  const frag = (playlistOffset: number | undefined, startPTS?: number) => ({ playlistOffset, elementaryStreams: { video: startPTS === undefined ? undefined : { startPTS } } });
+
+  it("is where the first picture lands against the segment's place in the playlist", () => {
+    // A repackaged stream with B-frames: two frames late.
+    expect(hlsLeadMs(frag(0, 0.0667))).toBeCloseTo(66.7, 5);
+    // A conversion started at 20 s, segment 9.
+    expect(hlsLeadMs(frag(18.006, 18.723))).toBeCloseTo(717, 5);
+  });
+
+  it("waits for a segment with video, and doesn't trust a lead past a second", () => {
+    expect(hlsLeadMs(frag(0))).toBeUndefined();
+    expect(hlsLeadMs(frag(undefined, 1))).toBeUndefined();
+    expect(hlsLeadMs(frag(18.006, 19.237))).toBeNull();
   });
 });
 
@@ -272,6 +289,14 @@ describe("PictureRenderer", () => {
     expect([canvas.width, canvas.height]).toEqual([3200, 1800]);
   });
 
+  it("backs the canvas afresh when the pixel ratio changes unannounced", () => {
+    const { canvas, present, renderer } = setup();
+    renderer.setTrack(track([[0, 9000]]));
+    vi.stubGlobal("devicePixelRatio", 2);
+    present(1);
+    expect([canvas.width, canvas.height]).toEqual([3200, 1800]);
+  });
+
   it("draws the cue of the frame presented, by that frame's own time, not the element's", () => {
     const { video, g, present, renderer } = setup();
     renderer.setTrack(track([[4000, 4400]]));
@@ -333,6 +358,22 @@ describe("PictureRenderer", () => {
     expect(g.drawn).toHaveLength(1);
     Object.assign(video, { seeking: false, currentTime: 8 });
     video.dispatchEvent(new Event("seeked"));
+    expect(g.drawn).toEqual([]);
+  });
+
+  it("goes by the frame on screen when paused, wherever in it the element's time falls", () => {
+    const { video, g, present, renderer } = setup();
+    renderer.setTrack(track([[3500, 3900]]));
+    Object.assign(video, { paused: true, currentTime: 3.8999 });
+    present(3.8667);
+    expect(g.drawn).toHaveLength(1);
+    // The seek's time a hair before the next frame, past the cue's end with the look-ahead.
+    Object.assign(video, { currentTime: 3.9 });
+    video.dispatchEvent(new Event("seeked"));
+    expect(g.drawn).toHaveLength(1);
+    // A jump forgets that frame.
+    Object.assign(video, { seeking: true, currentTime: 3.95 });
+    video.dispatchEvent(new Event("seeking"));
     expect(g.drawn).toEqual([]);
   });
 

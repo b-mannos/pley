@@ -2,7 +2,7 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } fro
 import { useLocation, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type HlsType from "hls.js";
-import type { ErrorData, FragLoadedData, LevelSwitchedData, ManifestParsedData } from "hls.js";
+import type { ErrorData, FragLoadedData, FragParsedData, LevelSwitchedData, ManifestParsedData } from "hls.js";
 import {
   ArrowLeft,
   CircleStop,
@@ -69,7 +69,7 @@ import { fileMarkers, SkipButton, skipTarget, useSkipMarkers } from "./SkipButto
 import { carriedSleepTimer, sleepChoice, SleepNotice, useSleepTimer } from "./sleepTimer";
 import { SubtitleOverlay } from "./SubtitleOverlay";
 import { PictureSubtitleOverlay, usePictureTrack, type PictureTrackHooks } from "./PictureSubtitleOverlay";
-import { picturePath } from "./pictures";
+import { hlsLeadMs, picturePath } from "./pictures";
 import {
   clampSubtitleOffset,
   cueAtTop,
@@ -406,6 +406,14 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const shownTextIndex = selectedSub && selectedSub.text_based !== false ? selectedSub.index : null;
 
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
+  /**
+   * How far hls.js's time runs ahead of the file's (ms) in a session: it
+   * starts its timeline at the first segment's earliest decoding time, so a
+   * stream with B-frames shows its first picture a frame or two after its
+   * place in the playlist. Picture subtitles, timed as the file is, take
+   * it away, unless the server says by how much (`subtitle_offset_ms`).
+   */
+  const [hlsAhead, setHlsAhead] = useState<{ session: string; ms: number } | null>(null);
   const [fellBack, setFellBack] = useState(false);
   /** The fallback to a transcode came from a stall rather than an error. */
   const [stalled, setStalled] = useState(false);
@@ -877,6 +885,14 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 const level = hls.levels[data.level];
                 // Lines as a 16:9 picture's: a 1920×800 film plays at 1080p.
                 if (level && pinfo.adaptive) setLevelLines(Math.max(level.height, Math.round((level.width * 9) / 16)));
+              });
+              let measured = false;
+              hls.on(Hls.Events.FRAG_PARSED, (_evt, data: FragParsedData) => {
+                if (measured || data.part) return;
+                const ahead = hlsLeadMs(data.frag);
+                if (ahead === undefined) return;
+                measured = true;
+                if (ahead !== null) setHlsAhead({ session: pinfo.session_id, ms: ahead });
               });
               hls.on(Hls.Events.FRAG_LOADED, (_evt, data: FragLoadedData) => {
                 // Media that arrives isn't media that plays: budgets start over
@@ -1792,7 +1808,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         <PictureSubtitleOverlay
           videoRef={videoRef}
           subs={pictures.subs}
-          sessionOffsetMs={info?.subtitle_offset_ms ?? 0}
+          sessionOffsetMs={info?.subtitle_offset_ms ?? (hlsAhead && hlsAhead.session === info?.session_id ? -hlsAhead.ms : 0)}
           offset={subtitleOffset}
           hold={frozen}
         />

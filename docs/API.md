@@ -336,7 +336,7 @@ interface MediaStream {
   // subtitle
   external?: boolean;               // a file next to the media, or added subtitles
   added?: boolean;                  // added subtitles (uploaded, or from OpenSubtitles); external too
-  text_based?: boolean;             // srt/ass/webvtt/mov_text: true; pgs/vobsub: false (needs burn-in)
+  text_based?: boolean;             // srt/ass/webvtt/mov_text: true; pgs/vobsub/dvb: false (drawn by players that can, else burned in)
 }
 
 interface Hub {
@@ -1518,7 +1518,8 @@ removed or reordered (`400`).
   file_id?: Id;                   // default: the item's first file
   audio_index?: number | null;    // ffprobe stream index; left out: the server picks (below).
                                   // Players name one only when the person picked it
-  subtitle_index?: number | null; // only needed for picture subtitles (forces a burn-in transcode)
+  subtitle_index?: number | null; // only for picture subtitles to burn in (forces a transcode);
+                                  // players that draw them (`picture_subtitles_sideload`) leave it out
   max_bitrate?: number | null;    // kbps; null or absent = original quality
   max_height?: number | null;     // 1080, 720, 480
   start_ms?: number;              // resume position; transcodes start producing there

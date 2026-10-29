@@ -38,6 +38,26 @@ export function trackMs(mediaSeconds: number, sessionOffsetMs: number, personOff
   return mediaSeconds * 1000 + sessionOffsetMs - personOffsetSeconds * 1000 + LOOKAHEAD_MS;
 }
 
+/**
+ * How far hls.js's time runs ahead of the file's in a session (ms), from
+ * the first segment it parsed: where its first picture lands on the
+ * element's timeline, against that segment's place in the playlist (the
+ * file's time). hls.js starts its timeline at the segment's earliest
+ * decoding time, so a stream with B-frames shows its first picture two or
+ * three frames after its place in the playlist; and a conversion started
+ * part-way into a file can be most of a second out. `undefined`: nothing
+ * to go by yet (no video); `null`: a measure past a second, not trusted.
+ */
+export function hlsLeadMs(frag: {
+  playlistOffset?: number;
+  elementaryStreams: { video?: { startPTS: number } | null };
+}): number | null | undefined {
+  const video = frag.elementaryStreams.video;
+  if (!video || typeof frag.playlistOffset !== "number" || !Number.isFinite(video.startPTS)) return undefined;
+  const ahead = video.startPTS - frag.playlistOffset;
+  return Math.abs(ahead) < 1 ? ahead * 1000 : null;
+}
+
 export interface Box {
   x: number;
   y: number;
@@ -211,6 +231,8 @@ export class PictureRenderer {
   private shiftMs = 0;
   private personSeconds = 0;
   private hold = false;
+  /** The time of the frame last presented (`requestVideoFrameCallback`), until the next jump. */
+  private presented: number | null = null;
   /** The sample drawn (-1: nothing), and whether it must be drawn again anyway. */
   private shown = -1;
   private dirty = true;
@@ -232,6 +254,8 @@ export class PictureRenderer {
       this.off.push(() => target.removeEventListener(type, fn));
     };
     // What the clock alone doesn't say: a jump, a stop, a new source.
+    // A frame from before a jump or a new source says nothing of the next.
+    for (const type of ["seeking", "emptied"]) on(video, type, () => (this.presented = null));
     for (const type of ["seeked", "seeking", "pause", "ratechange", "emptied", "timeupdate"]) on(video, type, () => this.fromElement());
     for (const type of ["play", "playing", "loadeddata"]) {
       on(video, type, () => {
@@ -244,6 +268,8 @@ export class PictureRenderer {
       observer.observe(video);
       this.off.push(() => observer.disconnect());
     }
+    // A window moved to a screen of another pixel ratio, or zoomed.
+    on(window, "resize", () => this.layout());
     this.watchDpr();
     this.layout();
     this.follow();
@@ -293,12 +319,15 @@ export class PictureRenderer {
   /**
    * The element's time: what shows while paused or after a jump. Playing,
    * frames say their own time (`follow`), which `timeupdate` would only
-   * blur (the element's time runs ahead of the frame on screen).
+   * blur (the element's time runs ahead of the frame on screen). Paused,
+   * the frame on screen's own time when it said it, as a seek's time can
+   * fall anywhere in its frame.
    */
   private fromElement(): void {
     const v = this.video;
     if (!v.paused && !v.seeking && this.frameHandle !== null && !this.dirty) return;
-    this.showAt(v.currentTime);
+    const frame = this.presented;
+    this.showAt(frame !== null && !v.seeking && Math.abs(v.currentTime - frame) < 0.1 ? frame : v.currentTime);
   }
 
   /** Follows the frames presented while it plays. */
@@ -312,6 +341,7 @@ export class PictureRenderer {
       const tick = (_now: number, meta: VideoFrameCallbackMetadata) => {
         this.frameHandle = null;
         if (this.gone) return;
+        this.presented = meta.mediaTime;
         this.showAt(meta.mediaTime);
         this.frameHandle = v.requestVideoFrameCallback(tick);
       };
@@ -359,6 +389,11 @@ export class PictureRenderer {
     const subs = this.subs;
     const g = this.g;
     if (!g) return;
+    // The pixel ratio changed without a word (not every browser says so): backed afresh first.
+    if ((window.devicePixelRatio || 1) !== this.dpr) {
+      this.layout();
+      return;
+    }
     const v = this.video;
     // A reset element (a new session on its way) shows nothing: neither do its subtitles, unless held.
     const playable = v.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
