@@ -667,7 +667,9 @@ ones easy to recognize.
 
 **`grant_type=authorization_code`**: `code`, `client_id` and
 `code_verifier` (43 to 128 of `A-Z a-z 0-9 . _ ~ -`). `redirect_uri`, when
-sent, must be the one the code was sent to. `invalid_grant` when:
+sent, must be the one the code was sent to. A code works for 60 s. A
+profile has at most 10 codes waiting (a new one drops its oldest) and 50
+within a minute; the server keeps 1,000 at most. `invalid_grant` when:
 
 - the code is unknown, expired or another app's, the return address differs
   or the verifier is wrong (the code stays usable);
