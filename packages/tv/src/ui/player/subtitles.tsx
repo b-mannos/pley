@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from "preact/hooks";
 import type { Settings } from "../../state";
 import { fontFamily, liftPx } from "../../subs/style";
-import type { PictureFrame } from "../../subs/pictures";
+import type { PictureFrame } from "pley-picture-subtitles/pictures";
 import type { Cue } from "../../subs/vtt";
 import { useUi } from "../context";
 

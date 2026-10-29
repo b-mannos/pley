@@ -80,7 +80,11 @@ interface Track {
   compressed: boolean;
 }
 
-/** Reads a whole `.mks` file. Throws [MatroskaError] for anything that isn't one. */
+/**
+ * Reads a `.mks` file, or as much of one as there is: a file cut short
+ * gives the samples before the cut. Throws [MatroskaError] for anything
+ * that isn't one.
+ */
 export function readPictureTrack(buffer: ArrayBuffer): PictureTrack {
   const bytes = new Uint8Array(buffer);
   const r = new Reader(bytes);
@@ -110,6 +114,9 @@ export function readPictureTrack(buffer: ArrayBuffer): PictureTrack {
       const el = r.element(at, end);
       if (!el) return end;
       if (unknownSize && LEVEL_ONE.has(el.id)) return at;
+      // A file still being made (a partial answer, `X-Pley-Complete: 0`)
+      // ends inside an element: a block cut short isn't read as a sample.
+      if (el.size !== null && el.dataStart + el.size > bytes.length && !MASTERS.has(el.id)) return end;
       const dataEnd = el.size === null ? end : Math.min(end, el.dataStart + el.size);
       if (el.id === ID.Cluster) clusterTime = 0;
       if (el.id === ID.TrackEntry) {

@@ -1,0 +1,372 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readPictureTrack } from "pley-picture-subtitles/mks";
+import { PictureSubtitles } from "pley-picture-subtitles/picture-track";
+import { pgsMks as mks } from "@/test/pictures";
+import { contain, fetchPictures, loadPictures, LOOKAHEAD_MS, PictureRenderer, PICTURES_AGAIN_MS, planeBox, trackMs } from "./pictures";
+
+const track = (cues: [number, number][]) => PictureSubtitles.of(readPictureTrack(mks(cues)))!;
+
+/** A box rounded to 1/100 px, for comparing. */
+const rounded = (b: { x: number; y: number; width: number; height: number }) =>
+  Object.fromEntries(Object.entries(b).map(([k, v]) => [k, Math.round(v * 100) / 100 + 0]));
+
+// ---- timing and layout
+
+describe("trackMs", () => {
+  it("is the player's time in ms, a millisecond ahead", () => {
+    expect(trackMs(4, 0, 0)).toBe(4000 + LOOKAHEAD_MS);
+  });
+
+  it("adds the session's offset and takes away the person's (positive: later)", () => {
+    expect(trackMs(4, 250, 0)).toBe(4251);
+    expect(trackMs(4, 0, 0.5)).toBe(3501);
+    expect(trackMs(4, -80, -1)).toBe(4921);
+  });
+
+  it("shows a cue from the frame it starts on, though the frame's time falls a hair before it", () => {
+    const subs = track([[4000, 4400]]);
+    // A frame's time as the browser gives it, a float a hair short of 4 s.
+    const frame = 4 - 1e-9;
+    expect(subs.sampleAt(frame * 1000)).toBe(-1);
+    expect(subs.sampleAt(trackMs(frame, 0, 0))).toBe(0);
+    // And it's gone on the frame its end falls on.
+    expect(subs.frameAt(trackMs(4.4 - 1e-9, 0, 0))).toBeNull();
+  });
+});
+
+describe("planeBox", () => {
+  const view = { width: 1600, height: 900 };
+
+  it("is the picture's box in the element: letterboxed, pillarboxed", () => {
+    expect(rounded(contain(view, 1920, 800))).toEqual({ x: 0, y: 116.67, width: 1600, height: 666.67 });
+    expect(rounded(contain({ width: 1000, height: 1000 }, 1920, 1080))).toEqual({ x: 0, y: 218.75, width: 1000, height: 562.5 });
+    expect(rounded(contain({ width: 2000, height: 900 }, 1920, 1080))).toEqual({ x: 200, y: 0, width: 1600, height: 900 });
+  });
+
+  it("puts a plane of the video's shape over the picture", () => {
+    expect(rounded(planeBox({ width: 2000, height: 900 }, { width: 1920, height: 1080 }, { width: 1920, height: 1080 }))).toEqual({
+      x: 200,
+      y: 0,
+      width: 1600,
+      height: 900,
+    });
+    // A 720p transcode of a 1080p film: the plane is the disc's.
+    expect(rounded(planeBox(view, { width: 1280, height: 720 }, { width: 1920, height: 1080 }))).toEqual({ x: 0, y: 0, width: 1600, height: 900 });
+  });
+
+  it("stretches a DVD's plane over the picture, whose pixels aren't square", () => {
+    // 720×576 stored, shown 16:9.
+    expect(rounded(planeBox(view, { width: 1024, height: 576 }, { width: 720, height: 576 }))).toEqual({ x: 0, y: 0, width: 1600, height: 900 });
+  });
+
+  it("keeps a Blu-ray's plane in its own shape over a film cropped to 2.40:1: its lines go in the bars", () => {
+    expect(rounded(planeBox(view, { width: 1920, height: 800 }, { width: 1920, height: 1080 }))).toEqual({ x: 0, y: 0, width: 1600, height: 900 });
+    // On a screen as wide as the film, the plane fits inside it, never off it.
+    const wide = planeBox({ width: 2400, height: 1000 }, { width: 1920, height: 800 }, { width: 1920, height: 1080 });
+    expect(rounded(wide)).toEqual({ x: 311.11, y: 0, width: 1777.78, height: 1000 });
+  });
+
+  it("goes by the plane before the video's size is known", () => {
+    expect(rounded(planeBox(view, { width: 0, height: 0 }, { width: 1920, height: 1080 }))).toEqual({ x: 0, y: 0, width: 1600, height: 900 });
+  });
+});
+
+// ---- loading
+
+describe("fetchPictures", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const answer = (res: Response | Error) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => (res instanceof Error ? Promise.reject(res) : Promise.resolve(res))),
+    );
+
+  it("reads the track, whole or as far as the server has got", async () => {
+    answer(new Response(mks([[1000, 2000]]), { status: 200 }));
+    const whole = await fetchPictures("/t.mks", new AbortController().signal);
+    expect(whole).toMatchObject({ kind: "track", complete: true });
+    expect(whole.kind === "track" && whole.subs.sampleAt(1500)).toBe(0);
+
+    answer(new Response(mks([[1000, 2000]]), { status: 200, headers: { "X-Pley-Complete": "0" } }));
+    expect(await fetchPictures("/t.mks", new AbortController().signal)).toMatchObject({ kind: "track", complete: false });
+  });
+
+  it("asks with the page's credentials, for Matroska, and past the cache when asking for more", async () => {
+    answer(new Response(mks([]), { status: 200 }));
+    await fetchPictures("/t.mks", new AbortController().signal, null, true);
+    const init = vi.mocked(fetch).mock.calls[0]?.[1];
+    expect(init).toMatchObject({ credentials: "same-origin", cache: "no-store", headers: { Accept: "video/x-matroska" } });
+  });
+
+  it("says when the server can't make it (an older server or transcoder)", async () => {
+    answer(new Response("{}", { status: 404 }));
+    expect(await fetchPictures("/t.mks", new AbortController().signal)).toEqual({ kind: "unavailable" });
+    answer(new Response("{}", { status: 503 }));
+    expect(await fetchPictures("/t.mks", new AbortController().signal)).toEqual({ kind: "unavailable" });
+  });
+
+  it("fails on anything else", async () => {
+    answer(new Response("{}", { status: 500 }));
+    expect(await fetchPictures("/t.mks", new AbortController().signal)).toEqual({ kind: "failed" });
+    answer(new TypeError("Failed to fetch"));
+    expect(await fetchPictures("/t.mks", new AbortController().signal)).toEqual({ kind: "failed" });
+    answer(new Response(new Uint8Array([1, 2, 3, 4]), { status: 200 }));
+    expect(await fetchPictures("/t.mks", new AbortController().signal)).toEqual({ kind: "failed" });
+  });
+
+  it("waits for more of a file too short to read yet", async () => {
+    answer(new Response(mks([]).slice(0, 40), { status: 200, headers: { "X-Pley-Complete": "0" } }));
+    expect(await fetchPictures("/t.mks", new AbortController().signal)).toMatchObject({ kind: "early" });
+  });
+
+  it("asks for the rest of what it has, and takes the whole file from a server that sends it again", async () => {
+    const file = new Uint8Array(mks([[1000, 2000], [5000, 6000]]));
+    const have = file.slice(0, file.length - 30);
+    answer(new Response(file.slice(have.length), { status: 206, headers: { "Content-Range": `bytes ${have.length}-${file.length - 1}/*`, "X-Pley-Complete": "0" } }));
+    const more = await fetchPictures("/t.mks", new AbortController().signal, have, true);
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.headers).toMatchObject({ Range: `bytes=${have.length}-` });
+    expect(more.kind === "track" && [more.bytes.length, more.subs.sampleAt(5500)]).toEqual([file.length, 2]);
+
+    answer(new Response(file, { status: 200, headers: { "X-Pley-Complete": "0" } }));
+    const again = await fetchPictures("/t.mks", new AbortController().signal, have, true);
+    expect(again.kind === "track" && again.bytes.length).toBe(file.length);
+
+    answer(new Response(null, { status: 416 }));
+    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "early", bytes: have });
+  });
+});
+
+describe("loadPictures", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function server(answers: (() => Response)[]) {
+    let n = 0;
+    const fetchFn = vi.fn(() => Promise.resolve((answers[Math.min(n++, answers.length - 1)] ?? (() => new Response(null, { status: 500 })))()));
+    vi.stubGlobal("fetch", fetchFn);
+    return fetchFn;
+  }
+  const hooks = () => ({ onTrack: vi.fn<(s: PictureSubtitles) => void>(), onUnavailable: vi.fn(), onFailed: vi.fn() });
+  const partial = (cues: [number, number][]) => () => new Response(mks(cues), { status: 200, headers: { "X-Pley-Complete": "0" } });
+  const whole = (cues: [number, number][]) => () => new Response(mks(cues), { status: 200 });
+
+  it("asks again while the answer is partial, and stops once it is whole", async () => {
+    const fetchFn = server([partial([[1000, 2000]]), partial([[1000, 2000]]), whole([[1000, 2000], [5000, 6000]])]);
+    const h = hooks();
+    loadPictures("/t.mks", h);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.onTrack).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS);
+    await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS);
+    expect(h.onTrack).toHaveBeenCalledTimes(3);
+    expect(h.onTrack.mock.calls[2]?.[0].sampleAt(5500)).toBe(2);
+    await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS * 3);
+    // The rest, then the whole file once more now that it is finished.
+    expect(fetchFn).toHaveBeenCalledTimes(4);
+    const ranges = fetchFn.mock.calls.map((c) => ((c as unknown[])[1] as RequestInit).headers as Record<string, string>).map((h) => h.Range ?? null);
+    expect(ranges[0]).toBeNull();
+    expect(ranges[1]).toMatch(/^bytes=\d+-$/);
+    expect(ranges[3]).toBeNull();
+    expect(h.onUnavailable).not.toHaveBeenCalled();
+    expect(h.onFailed).not.toHaveBeenCalled();
+  });
+
+  it("tells once when the server can't make it, and asks no more", async () => {
+    const fetchFn = server([() => new Response("{}", { status: 404 })]);
+    const h = hooks();
+    loadPictures("/t.mks", h);
+    await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS * 3);
+    expect(h.onUnavailable).toHaveBeenCalledTimes(1);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops when told, a request under way included", async () => {
+    const fetchFn = server([partial([[1000, 2000]])]);
+    const h = hooks();
+    const stop = loadPictures("/t.mks", h);
+    stop();
+    await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS * 3);
+    expect(h.onTrack).not.toHaveBeenCalled();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect((vi.mocked(fetchFn).mock.calls[0] as unknown[] | undefined)?.length).toBeGreaterThan(0);
+  });
+});
+
+// ---- drawing
+
+/** A 2D context that records what is drawn where. */
+function fakeContext() {
+  return {
+    drawn: [] as [number, number, number, number][],
+    clears: 0,
+    imageSmoothingEnabled: false,
+    imageSmoothingQuality: "low",
+    clearRect() {
+      this.clears++;
+      this.drawn.length = 0;
+    },
+    drawImage(_image: unknown, x: number, y: number, w: number, h: number) {
+      this.drawn.push([x, y, w, h]);
+    },
+    createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h }),
+    putImageData() {},
+  };
+}
+
+/** A video element that presents frames on demand (`present`), with `requestVideoFrameCallback` or without. */
+function fakeVideo({ frames = true, width = 1600, height = 900 } = {}) {
+  const video = document.createElement("video");
+  let callbacks: ((now: number, meta: VideoFrameCallbackMetadata) => void)[] = [];
+  Object.defineProperties(video, {
+    clientWidth: { value: width, configurable: true },
+    clientHeight: { value: height, configurable: true },
+    videoWidth: { value: 1920, configurable: true },
+    videoHeight: { value: 1080, configurable: true },
+    readyState: { value: 4, writable: true, configurable: true },
+    paused: { value: false, writable: true, configurable: true },
+    seeking: { value: false, writable: true, configurable: true },
+    currentTime: { value: 0, writable: true, configurable: true },
+  });
+  if (frames) {
+    Object.assign(video, {
+      requestVideoFrameCallback: (cb: (now: number, meta: VideoFrameCallbackMetadata) => void) => {
+        callbacks.push(cb);
+        return callbacks.length;
+      },
+      cancelVideoFrameCallback: () => {
+        callbacks = [];
+      },
+    });
+  } else {
+    Object.assign(video, { requestVideoFrameCallback: undefined });
+  }
+  const present = (mediaTime: number) => {
+    const now = callbacks;
+    callbacks = [];
+    for (const cb of now) cb(0, { mediaTime } as VideoFrameCallbackMetadata);
+  };
+  return { video, present };
+}
+
+function setup(opts: Parameters<typeof fakeVideo>[0] = {}) {
+  const { video, present } = fakeVideo(opts);
+  const canvas = document.createElement("canvas");
+  const g = fakeContext();
+  vi.spyOn(canvas, "getContext").mockReturnValue(g as unknown as CanvasRenderingContext2D);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(g as unknown as CanvasRenderingContext2D);
+  const renderer = new PictureRenderer(video, canvas);
+  return { video, canvas, g, present, renderer };
+}
+
+describe("PictureRenderer", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("backs the canvas with the element's device pixels", () => {
+    vi.stubGlobal("devicePixelRatio", 2);
+    const { canvas } = setup();
+    expect([canvas.width, canvas.height]).toEqual([3200, 1800]);
+  });
+
+  it("draws the cue of the frame presented, by that frame's own time, not the element's", () => {
+    const { video, g, present, renderer } = setup();
+    renderer.setTrack(track([[4000, 4400]]));
+    expect(g.drawn).toEqual([]);
+    // The element's time runs ahead of the frame on screen.
+    Object.assign(video, { currentTime: 4.02 });
+    video.dispatchEvent(new Event("timeupdate"));
+    expect(g.drawn).toEqual([]);
+    present(3.9667);
+    expect(g.drawn).toEqual([]);
+    present(4.0);
+    // 1920×1080 plane over a 1600×900 element: the object at (100, 900), 4×2.
+    expect(g.drawn).toEqual([[83, 750, 4, 2]]);
+    present(4.4);
+    expect(g.drawn).toEqual([]);
+  });
+
+  it("decodes once, and draws again only when what shows changes", () => {
+    const { g, present, renderer } = setup();
+    renderer.setTrack(track([[4000, 4400]]));
+    present(4.0);
+    const clears = g.clears;
+    present(4.033);
+    present(4.067);
+    expect(g.clears).toBe(clears);
+  });
+
+  it("lays the plane over the picture of a letterboxed element, at device pixels", () => {
+    vi.stubGlobal("devicePixelRatio", 2);
+    const { g, present, renderer } = setup({ width: 1000, height: 1000 });
+    renderer.setTrack(track([[0, 4000]]));
+    present(1);
+    // A 1000×562.5 picture 218.75 px down, at 2 device pixels a pixel.
+    const s = (1000 / 1920) * 2;
+    expect(g.drawn).toEqual([[Math.round(100 * s), Math.round(437.5 + 900 * s), Math.round(104 * s) - Math.round(100 * s), Math.round(437.5 + 902 * s) - Math.round(437.5 + 900 * s)]]);
+  });
+
+  it("moves with the session's and the person's offsets", () => {
+    const { video, g, renderer } = setup();
+    renderer.setTrack(track([[4000, 4400]]));
+    Object.assign(video, { paused: true, currentTime: 4.5 });
+    video.dispatchEvent(new Event("pause"));
+    expect(g.drawn).toEqual([]);
+    // Shown 0.5 s later: what the file has at 4.0 shows at 4.5.
+    renderer.setOffsets(0, 0.5);
+    expect(g.drawn).toHaveLength(1);
+    // The session's time is 300 ms behind the file's.
+    renderer.setOffsets(300, 0.5);
+    expect(g.drawn).toHaveLength(1);
+    renderer.setOffsets(150, 0);
+    expect(g.drawn).toEqual([]);
+  });
+
+  it("shows what a seek lands on while paused, from the element's time", () => {
+    const { video, g, renderer } = setup();
+    renderer.setTrack(track([[4000, 4400], [7000, 7400]]));
+    Object.assign(video, { paused: true, seeking: true, currentTime: 7.1 });
+    video.dispatchEvent(new Event("seeking"));
+    expect(g.drawn).toHaveLength(1);
+    Object.assign(video, { seeking: false, currentTime: 8 });
+    video.dispatchEvent(new Event("seeked"));
+    expect(g.drawn).toEqual([]);
+  });
+
+  it("clears for a reset element, unless held for the next session", () => {
+    const { video, g, present, renderer } = setup();
+    renderer.setTrack(track([[0, 9000]]));
+    present(1);
+    expect(g.drawn).toHaveLength(1);
+    renderer.setHold(true);
+    Object.assign(video, { readyState: 0, currentTime: 0 });
+    video.dispatchEvent(new Event("emptied"));
+    expect(g.drawn).toHaveLength(1);
+    renderer.setHold(false);
+    expect(g.drawn).toEqual([]);
+  });
+
+  it("follows animation frames where frames don't say their time", () => {
+    const raf: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => raf.push(cb));
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const { video, g, renderer } = setup({ frames: false });
+    renderer.setTrack(track([[4000, 4400]]));
+    video.dispatchEvent(new Event("playing"));
+    Object.assign(video, { currentTime: 4.1 });
+    raf.splice(0).forEach((cb) => cb(0));
+    expect(g.drawn).toHaveLength(1);
+    expect(raf).toHaveLength(1);
+  });
+
+  it("draws nothing once destroyed", () => {
+    const { g, present, renderer } = setup();
+    renderer.setTrack(track([[0, 9000]]));
+    renderer.destroy();
+    present(1);
+    expect(g.drawn).toEqual([]);
+  });
+});

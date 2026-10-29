@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useServerEvents } from "@/api/events";
 import type { ItemDetail, PlaybackInfo, ServerEvent } from "@/api/types";
 import { makeItem, makeStream } from "@/test/fixtures";
+import { pgsMks } from "@/test/pictures";
 import { mockApi, renderWithProviders, type FakeRequest } from "@/test/render";
 import { forgetNetwork } from "./network";
 import { VideoPlayer, startSize } from "./VideoPlayer";
@@ -505,6 +506,90 @@ describe("VideoPlayer audio", () => {
     fireEvent.keyDown(document, { key: "c" });
     await waitFor(() => expect(put(requests)).toHaveLength(1));
     expect(put(requests)[0]).toEqual({ file_id: 3, audio_index: 1, subtitle_index: 3 });
+  });
+});
+
+describe("VideoPlayer picture subtitles", () => {
+  const pgs = (index: number, language: string) =>
+    makeStream({ index, kind: "subtitle", codec: "hdmv_pgs_subtitle", language, default: false, text_based: false });
+  /** An MKV with English and French PGS subtitles. */
+  function withPictures(): ItemDetail {
+    const item = detail();
+    const file = item.files[0];
+    if (!file) throw new Error("no file");
+    file.streams = [makeStream({ index: 0, kind: "video" }), makeStream({ index: 1, kind: "audio", codec: "aac" }), pgs(4, "eng"), pgs(5, "fre")];
+    return item;
+  }
+  const starts = (requests: FakeRequest[]) =>
+    requests.filter((r) => r.method === "POST" && r.path === "/api/playback").map((r) => r.body as Record<string, unknown>);
+  const mksAnswer = () => new Response(pgsMks([[1000, 2000]]), { status: 200, headers: { "content-type": "video/x-matroska" } });
+  const direct = (id: string) => session(id, { method: "direct", hls: false, url: "/api/files/3/stream" });
+
+  it("draws them over the video from their own file: the server is asked for no subtitles, and plays the file as it is", async () => {
+    const requests = serve([direct("d1")], { "GET /api/files/3/subtitles/4.mks": mksAnswer });
+    const { container } = renderWithProviders(<VideoPlayer item={withPictures()} startMs={0} fileId={null} audio={null} sub={4} />);
+    await waitFor(() => expect(container.querySelector("video")?.getAttribute("src")).toBe("/api/files/3/stream"));
+    expect(starts(requests)[0]?.subtitle_index).toBeNull();
+    expect(starts(requests)[0]?.caps).toMatchObject({ picture_subtitles_sideload: true });
+    await waitFor(() => expect(requests.some((r) => r.path === "/api/files/3/subtitles/4.mks")).toBe(true));
+    expect(screen.getByTestId("picture-subtitles")).toBeInTheDocument();
+  });
+
+  it("changes picture tracks without a new session, and moves them as text", async () => {
+    const user = userEvent.setup();
+    const requests = serve([direct("d1")], {
+      "GET /api/files/3/subtitles/4.mks": mksAnswer,
+      "GET /api/files/3/subtitles/5.mks": mksAnswer,
+      "PUT /api/items/7/streams": () => undefined,
+    });
+    renderWithProviders(<VideoPlayer item={withPictures()} startMs={0} fileId={null} audio={null} sub={4} />);
+    await waitFor(() => expect(requests.some((r) => r.path === "/api/files/3/subtitles/4.mks")).toBe(true));
+
+    await user.click(screen.getByRole("button", { name: "Playback settings" }));
+    await user.click(screen.getByRole("button", { name: /^Subtitles/ }));
+    expect(screen.getByRole("button", { name: "Show subtitles earlier" })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitemradio", { name: /French/ }));
+
+    await waitFor(() => expect(requests.some((r) => r.path === "/api/files/3/subtitles/5.mks")).toBe(true));
+    expect(starts(requests)).toHaveLength(1);
+  });
+
+  it("has them burned in, as before, by a server that can't make their file", async () => {
+    let answer404: () => void = () => undefined;
+    const requests = serve([direct("d1"), session("s2", { burn_subtitles: true, subtitle_index: 4 })], {
+      "GET /api/files/3/subtitles/4.mks": () =>
+        new Promise<Response>((resolve) => (answer404 = () => resolve(new Response(JSON.stringify({ code: "not_found" }), { status: 404 })))),
+    });
+    const { container } = renderWithProviders(<VideoPlayer item={withPictures()} startMs={0} fileId={null} audio={null} sub={4} />);
+    await waitFor(() => expect(container.querySelector("video")?.getAttribute("src")).toBe("/api/files/3/stream"));
+    expect(starts(requests)[0]?.subtitle_index).toBeNull();
+
+    act(() => answer404());
+
+    await waitFor(() => expect(starts(requests)).toHaveLength(2));
+    expect(starts(requests)[1]?.subtitle_index).toBe(4);
+    expect(screen.queryByTestId("picture-subtitles")).not.toBeInTheDocument();
+    // Asked once: other picture tracks are burned in too, without asking.
+    expect(requests.filter((r) => r.path.endsWith(".mks"))).toHaveLength(1);
+  });
+
+  it("keeps the iPhone's own full screen, where nothing drawn over the video shows, for when none are drawn", async () => {
+    const enter = vi.fn();
+    const before = Object.getOwnPropertyDescriptor(document.documentElement, "requestFullscreen");
+    Object.defineProperty(document.documentElement, "requestFullscreen", { value: undefined, configurable: true });
+    Object.defineProperty(HTMLVideoElement.prototype, "webkitEnterFullscreen", { value: enter, configurable: true });
+    try {
+      serve([direct("d1")], { "GET /api/files/3/subtitles/4.mks": mksAnswer });
+      renderWithProviders(<VideoPlayer item={withPictures()} startMs={0} fileId={null} audio={null} sub={4} />);
+      await waitFor(() => expect(screen.getByTestId("picture-subtitles")).toBeInTheDocument());
+      expect(screen.queryByRole("button", { name: "Fullscreen" })).not.toBeInTheDocument();
+      fireEvent.keyDown(document, { key: "f" });
+      expect(enter).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(HTMLVideoElement.prototype, "webkitEnterFullscreen");
+      if (before) Object.defineProperty(document.documentElement, "requestFullscreen", before);
+      else Reflect.deleteProperty(document.documentElement, "requestFullscreen");
+    }
   });
 });
 

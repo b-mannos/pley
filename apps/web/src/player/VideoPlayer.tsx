@@ -68,6 +68,8 @@ import { speedLabel, stepSpeed } from "./speed";
 import { fileMarkers, SkipButton, skipTarget, useSkipMarkers } from "./SkipButton";
 import { carriedSleepTimer, sleepChoice, SleepNotice, useSleepTimer } from "./sleepTimer";
 import { SubtitleOverlay } from "./SubtitleOverlay";
+import { PictureSubtitleOverlay, usePictureTrack, type PictureTrackHooks } from "./PictureSubtitleOverlay";
+import { picturePath } from "./pictures";
 import {
   clampSubtitleOffset,
   cueAtTop,
@@ -93,6 +95,14 @@ const PAUSED_HEARTBEAT = 30_000;
 const HIDE_CONTROLS_AFTER = 3_000;
 
 type WebkitVideo = HTMLVideoElement & { webkitEnterFullscreen?: () => void };
+
+/**
+ * Full screen is the video element's own player only (the iPhone's
+ * Safari): it shows the video alone, so nothing pley draws over it shows.
+ */
+function videoOnlyFullscreen(): boolean {
+  return typeof document.documentElement.requestFullscreen !== "function" && "webkitEnterFullscreen" in HTMLVideoElement.prototype;
+}
 
 function rangesOf(tr: TimeRanges): [number, number][] {
   const out: [number, number][] = [];
@@ -380,7 +390,19 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   const [loadToken, setLoadToken] = useState(0);
 
   const selectedSub = subStreams.find((s) => s.index === subIndex) ?? null;
-  const burnIndex = selectedSub && selectedSub.text_based === false ? selectedSub.index : null;
+  /**
+   * Picture subtitles (PGS, VobSub, DVB) are drawn here, over the video,
+   * from their own file (`.mks`), asked for as soon as they are chosen (the
+   * server starts reading it out of the video then) and again while the
+   * answer is part of it; choosing another starts no new session. They are
+   * burned into the video, as before, only when the server can't make such
+   * files: from then on, for every picture track.
+   */
+  const pictureHooks = useRef<PictureTrackHooks>({ unavailable: () => undefined, failed: () => undefined });
+  const pictureChosen = selectedSub && selectedSub.text_based === false ? selectedSub : null;
+  const pictures = usePictureTrack(pictureChosen && file ? picturePath(file.id, pictureChosen.index) : null, pictureHooks);
+  const burnIndex = pictureChosen && pictures.unavailable ? pictureChosen.index : null;
+  const drawnPictureIndex = pictureChosen && !pictures.unavailable ? pictureChosen.index : null;
   const shownTextIndex = selectedSub && selectedSub.text_based !== false ? selectedSub.index : null;
 
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
@@ -426,7 +448,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   /** Ended on the server: nothing plays any more, and it says why. */
   const [stopped, setStopped] = useState<StoppedBy | null>(null);
   const stoppedRef = useRef(false);
-  // Text subtitles moved earlier or later, remembered for each profile and file on this device.
+  // Subtitles moved earlier or later (text, and pictures drawn here), remembered for each profile and file on this device.
   const me = useAuth();
   const userId = me.id;
   const [offsetChoice, setOffsetChoice] = useState(() => ({
@@ -1387,6 +1409,18 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     };
   }, [shownCues, nativeFullscreen, subtitleOffset, subtitlePosition]);
 
+  // A server that can't make picture subtitles' files (404, 503) has them
+  // burned in instead: a new session where it plays, prepared while this one plays on.
+  const picturesUnavailable = useEffectEvent(() => {
+    startMsRef.current = currentMs();
+    prepareNext.current = true;
+  });
+  const picturesFailed = useEffectEvent(() => toast.error("These subtitles couldn't be loaded."));
+  useEffect(() => {
+    pictureHooks.current = { unavailable: picturesUnavailable, failed: picturesFailed };
+  }, []);
+
+
   const changeSubtitleOffset = (offset: number) => {
     const value = clampSubtitleOffset(offset);
     setOffsetChoice({ file: file?.id ?? null, offset: value });
@@ -1470,9 +1504,12 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     setMuted(!muted);
   };
 
+  // On the iPhone, picture subtitles drawn here can't show in the video's
+  // own full screen: the player, which fills the window, stays as it is.
+  const fullscreenOffered = !(drawnPictureIndex !== null && videoOnlyFullscreen());
   const toggleFullscreen = () => {
     const el = containerRef.current;
-    if (!el) return;
+    if (!el || (!fullscreenOffered && !document.fullscreenElement)) return;
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
     else if (el.requestFullscreen) void el.requestFullscreen().catch(() => undefined);
     else {
@@ -1525,7 +1562,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
   };
   const changeSubtitle = (index: number | null) => {
     const s = subStreams.find((x) => x.index === index);
-    const nextBurn = s && s.text_based === false ? s.index : null;
+    const nextBurn = s && s.text_based === false && pictures.unavailable ? s.index : null;
     if (nextBurn !== burnIndex) {
       startMsRef.current = currentMs();
       prepareNext.current = true;
@@ -1751,6 +1788,15 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       >
       </video>
       <canvas ref={freezeRef} aria-hidden className={cn("pointer-events-none absolute inset-0 size-full object-contain", !frozen && "hidden")} />
+      {drawnPictureIndex !== null ? (
+        <PictureSubtitleOverlay
+          videoRef={videoRef}
+          subs={pictures.subs}
+          sessionOffsetMs={info?.subtitle_offset_ms ?? 0}
+          offset={subtitleOffset}
+          hold={frozen}
+        />
+      ) : null}
       <SubtitleOverlay cues={cues} lifted={showControls} style={subStyle} />
 
       <div
@@ -2000,6 +2046,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             onSubtitleStyle={setSubtitleStyle}
             subtitleOffset={subtitleOffset}
             onSubtitleOffset={changeSubtitleOffset}
+            picturesMovable={drawnPictureIndex !== null}
             subtitleSources={subtitleSources}
             canDeleteSubtitle={canDeleteSubtitle}
             onDeleteSubtitle={removeSubtitle}
@@ -2011,15 +2058,17 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             sleepEndLabel={sleepEndLabel}
             onSleep={sleep.choose}
           />
-          <button
-            type="button"
-            aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-            title="Fullscreen (f)"
-            onClick={toggleFullscreen}
-            className="flex size-10 items-center justify-center rounded-full transition hover:bg-white/15"
-          >
-            {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
-          </button>
+          {fullscreenOffered || fullscreen ? (
+            <button
+              type="button"
+              aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+              title="Fullscreen (f)"
+              onClick={toggleFullscreen}
+              className="flex size-10 items-center justify-center rounded-full transition hover:bg-white/15"
+            >
+              {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
+            </button>
+          ) : null}
         </div>
       </div>
 

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { readPictureTrack } from "../../src/subs/mks";
-import { decodeRle, PgsDecoder } from "../../src/subs/pgs";
-import { parseIdx, parseSpu, VobSubDecoder } from "../../src/subs/vobsub";
-import { DvbDecoder, segments } from "../../src/subs/dvb";
-import { PictureSubtitles } from "../../src/subs/picture-track";
-import { ycbcrToRgb } from "../../src/subs/pictures";
+import { readPictureTrack } from "../src/mks";
+import { decodeRle, PgsDecoder } from "../src/pgs";
+import { parseIdx, parseSpu, VobSubDecoder } from "../src/vobsub";
+import { DvbDecoder, segments } from "../src/dvb";
+import { PictureSubtitles } from "../src/picture-track";
+import { ycbcrToRgb } from "../src/pictures";
 
 // ---- builders
 
@@ -124,6 +124,22 @@ describe("Matroska", () => {
     expect(subs.nextChange(1500)).toBe(3000);
     expect(subs.nextChange(4000)).toBe(5000);
     expect(subs.nextChange(5100)).toBe(6500);
+  });
+
+  it("reads a file cut short up to the cut, without the sample cut in two", () => {
+    const set = pgsDisplaySet({ state: 0x80, objects: true, rle: [1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0] });
+    const whole = mks("S_HDMV/PGS", [
+      { time: 1000, data: set },
+      { time: 3000, data: pgsDisplaySet({ state: 0, objects: false }) },
+      { time: 5000, data: set },
+    ]);
+    // Up to the middle of the last block.
+    const cut = whole.slice(0, whole.byteLength - Math.floor(set.length / 2));
+    const track = readPictureTrack(cut);
+    expect(track.samples.map((s) => s.timeMs)).toEqual([1000, 3000]);
+    expect(track.samples[0]!.data).toEqual(set);
+    // Cut inside the track list: no track yet.
+    expect(() => readPictureTrack(whole.slice(0, 60))).toThrow(/no track/);
   });
 
   it("refuses what isn't Matroska", () => {

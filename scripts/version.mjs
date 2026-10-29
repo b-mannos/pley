@@ -88,7 +88,7 @@ export const UNITS = {
     about: "the server, its transcoder and the web app it embeds; the Docker image and the Windows installer are its packages",
     changelog: "apps/server/CHANGELOG.md",
     // What its changes are drafted from (scripts/release.mjs).
-    paths: ["apps/server", "apps/transcoder", "packages/transcoder-api", "apps/web", "deploy/docker", "deploy/windows", "deploy/systemd", "deploy/launchd"],
+    paths: ["apps/server", "apps/transcoder", "packages/transcoder-api", "apps/web", "packages/picture-subtitles", "deploy/docker", "deploy/windows", "deploy/systemd", "deploy/launchd"],
     manifests: [
       cargoPackage("apps/server/Cargo.toml"),
       cargoPackage("apps/transcoder/Cargo.toml"),
@@ -125,14 +125,14 @@ export const UNITS = {
     title: "Pley for Samsung TV",
     about: "the Samsung TV app (Tizen), built with packages/tv",
     changelog: "apps/tizen/CHANGELOG.md",
-    paths: ["apps/tizen", "packages/tv"],
+    paths: ["apps/tizen", "packages/tv", "packages/picture-subtitles"],
     manifests: [json("apps/tizen/package.json"), bunLock("apps/tizen"), xmlAttribute("apps/tizen/config.xml", "widget")],
   },
   lg: {
     title: "Pley for LG TV",
     about: "the LG TV app (webOS), built with packages/tv",
     changelog: "apps/webos/CHANGELOG.md",
-    paths: ["apps/webos", "packages/tv"],
+    paths: ["apps/webos", "packages/tv", "packages/picture-subtitles"],
     manifests: [json("apps/webos/package.json"), bunLock("apps/webos"), json("apps/webos/appinfo.json")],
   },
   kodi: {

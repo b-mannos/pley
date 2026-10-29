@@ -226,6 +226,12 @@ details) and, for HLS, 4K allowed.
 | `subs/` | Subtitles drawn by the app: text as WebVTT, pictures (PGS, VobSub, DVB) decoded from the server's `.mks` onto a canvas |
 | `caps/` | The server's direct-play rules, so Playback details can say why |
 
+The picture subtitle decoders (the `.mks` reader, PGS, VobSub, DVB, and
+the track that says what shows when) are in `packages/picture-subtitles`
+(`pley-picture-subtitles`), which the web app draws with too: plain
+TypeScript without dependencies, compiled by each TV build for its own
+engine; `bun run tv:check` runs its tests first.
+
 Each shell has `facts.ts` (what the TV says about itself; LG's system
 services in `luna.ts`), `caps.ts` (the report, with snapshot tests),
 `engine.ts` (AVPlay, or `<video>` with `mediaOption`), `platform.ts`,
