@@ -931,7 +931,7 @@ impl JobManager {
             cores,
             decoding: others.iter().map(|j| j.cpu_decode_cores()).sum(),
             software_encodes: others.iter().filter(|j| j.encodes_in_software()).count() as u32,
-            foreign: if decoding { 0.0 } else { self.cpu.foreign().unwrap_or(0.0) * f64::from(cores) },
+            foreign: if decoding { 0.0 } else { self.cpu.foreign().unwrap_or(0.0) },
         };
         let takes = job.plan.source_rate(&job.media).map_or(0.0, |(pixels, fps)| share::decode_cores(pixels, fps));
         let cpu_decode = self.cpu_decode.load(Relaxed) && !held.cpu_busy && share::cpu_decodes(gpu, cpu, takes);

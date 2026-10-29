@@ -706,8 +706,11 @@ Several jobs tone mapping with libplacebo share the GPU:
   - the CPU keeps 2 cores free after its decoders (4 cores each for 4K at
     24 fps, in proportion to pixels and frame rate) and what other programs
     keep busy, measured over the last seconds (Windows: the system's busy
-    time less the transcoder's and its FFmpeg's; Linux: `/proc/stat` less
-    the transcoder and its children). A job decoding on the CPU already
+    time less the transcoder's and its FFmpeg's; Linux: `/proc/stat` of
+    the processors the transcoder may run on, a container's
+    `--cpuset-cpus`, less the transcoder and its children, or the CPU limit
+    of its control group, a container's `--cpus` or systemd's
+    `CPUQuota=`, where that leaves less). A job decoding on the CPU already
     doesn't count other programs again, so it doesn't move back and forth;
   - no software encode runs;
   - `--cpu-decode` isn't `never`.

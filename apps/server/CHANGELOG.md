@@ -75,6 +75,10 @@ describes how they are made.
 
 - H.264 from AMD's encoder says its colours (BT.709), which it left out:
   players guessed, and some took 4K video for BT.2020.
+- In a container given part of the computer's processors (`--cpus`,
+  `--cpuset-cpus`) or under systemd's `CPUQuota=`, the transcoder counts
+  what other programs leave it of those, not of the whole computer, before
+  it decodes on the processor.
 - Automatic quality in the web app keeps the original (direct play or
   remux) unless the picture stops for want of data for 2 s or more. Short
   waits and slow delivery moved it to a transcode (30 Mbps 4K for a 4K
