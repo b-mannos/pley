@@ -2831,9 +2831,12 @@ mod tests {
         Arc::new(Mutex::new(memory::Room { size: 8 * GIB, free: 8 * GIB, memory: 16 * GIB, available: 12 * GIB }))
     }
 
-    /// A store in `dir` ("shm") whose room is `room`'s.
+    /// A store in `dir` ("shm", made as `/dev/shm` is there) whose room is
+    /// `room`'s.
     fn store(dir: &Path, room: Arc<Mutex<memory::Room>>) -> Arc<MemoryStore> {
-        MemoryStore::new(&dir.join("shm"), Box::new(move || Some(*room.lock()))).unwrap()
+        let shm = dir.join("shm");
+        std::fs::create_dir_all(&shm).unwrap();
+        MemoryStore::new(&shm, Box::new(move || Some(*room.lock()))).unwrap()
     }
 
     /// Job `id` (folder `dir/id` on disk), 4 s segments for 400 of them,
