@@ -44,11 +44,11 @@
 
 [Setup]
 AppId={{6D1B6F0C-3F1E-4C55-9A0D-2B7E3C5A9F41}
-; "Pley Server", apart from the desktop app ("Pley") in Programs, the Start
-; menu and Services; "pley-server" in its folder and a release's files.
-AppName=Pley Server
+; "Pley Media Server", apart from the desktop app ("Pley") in Programs, the
+; Start menu and Services; "pley-server" in its folder and a release's files.
+AppName=Pley Media Server
 AppVersion={#AppVersion}
-AppVerName=Pley Server {#AppVersion}
+AppVerName=Pley Media Server {#AppVersion}
 AppPublisher=the Pley authors
 AppPublisherURL=https://github.com/hhaidar/pley
 AppSupportURL=https://github.com/hhaidar/pley/issues
@@ -70,9 +70,11 @@ ArchitecturesInstallIn64BitMode={#Architectures}
 MinVersion=10.0.17763
 WizardStyle=modern dynamic
 SetupIconFile=..\..\apps\server\assets\pley.ico
-WizardSmallImageFile=..\..\apps\web\public\icon-192.png
+; The logo inset in the pages' top right corner, one per DPI
+; (scripts/render-icons.mjs).
+WizardSmallImageFile=setup-small-*.png
 UninstallDisplayIcon={app}\pley.exe
-UninstallDisplayName=Pley Server
+UninstallDisplayName=Pley Media Server
 OutputDir={#OutputDir}
 OutputBaseFilename=pley-server-{#AppVersion}{#Flavored}-windows-{#ArchName}-setup
 Compression=lzma2/max
@@ -105,15 +107,19 @@ Source: "{#FfmpegDir}\..\source\*"; DestDir: "{app}\ffmpeg\source"; Flags: ignor
 
 #ifndef Test
 [Icons]
-Name: "{autoprograms}\Pley Server"; Filename: "{app}\pley.exe"; Parameters: "--data-dir ""{code:DataDir}"""; Check: IsTray
-Name: "{autoprograms}\Pley Server"; Filename: "{code:WebAddress}"; Check: not IsTray
-Name: "{autoprograms}\Pley Server logs"; Filename: "{code:DataDir}\logs"
+Name: "{autoprograms}\Pley Media Server"; Filename: "{app}\pley.exe"; Parameters: "--data-dir ""{code:DataDir}"""; Check: IsTray
+Name: "{autoprograms}\Pley Media Server"; Filename: "{code:WebAddress}"; Check: not IsTray
+Name: "{autoprograms}\Pley Media Server logs"; Filename: "{code:DataDir}\logs"
 
 ; The other way's, when pley ran otherwise before: pley itself (a .lnk) in
 ; the notification area, its page (a .url) for a service.
 [InstallDelete]
-Type: files; Name: "{autoprograms}\Pley Server.url"; Check: IsTray
-Type: files; Name: "{autoprograms}\Pley Server.lnk"; Check: not IsTray
+Type: files; Name: "{autoprograms}\Pley Media Server.url"; Check: IsTray
+Type: files; Name: "{autoprograms}\Pley Media Server.lnk"; Check: not IsTray
+; Their names before "Pley Media Server".
+Type: files; Name: "{autoprograms}\Pley Server.url"
+Type: files; Name: "{autoprograms}\Pley Server.lnk"
+Type: files; Name: "{autoprograms}\Pley Server logs.lnk"
 ; The shortcuts' names before the capital P.
 Type: files; Name: "{autoprograms}\pley-server.url"
 Type: files; Name: "{autoprograms}\pley-server.lnk"
@@ -1208,7 +1214,7 @@ begin
     Text := 'Pley is running at ' + Running + '.';
     if not TrayRadio.Checked then
       Text := Text + ' It runs as a Windows service, in the background: no icon in the notification area. ' +
-        'Open it from the Start menu (Pley Server).';
+        'Open it from the Start menu (Pley Media Server).';
     if SetupLink <> '' then
       Text := Text + #13#10#13#10 + 'Open it to create your administrator account: the link holds the setup code (a new ' +
         'one is made each time Pley starts until then).'

@@ -1,4 +1,4 @@
-# Pley Server on Windows
+# Pley Media Server on Windows
 
 `pley-server-<version>-windows-<arch>-setup.exe`, on each release, installs
 the server as a Windows service or in the notification area, with FFmpeg,
@@ -25,7 +25,7 @@ Run the setup. Its pages:
      their network paths, such as `\\nas\media\Movies`.
    - **In the notification area, as you**: it runs while you are signed in,
      with your account, network drives included, and starts when you sign in.
-     Opening it again (the Start menu's **Pley Server**) opens its page.
+     Opening it again (the Start menu's **Pley Media Server**) opens its page.
    - **Let the service write only in its data folder** (on by default):
      Windows checks every change the service makes against its own SID,
      which only the data folder allows, and takes away the privileges it
@@ -67,7 +67,7 @@ The last page gives Pley's address and the link that creates the
 administrator account (or, with an earlier Pley's data, says to sign in as
 before), and says which encoders Pley found in FFmpeg. A service runs in the
 background, without an icon in the notification area: the Start menu's
-**Pley Server** opens it.
+**Pley Media Server** opens it.
 
 ## What Setup sets up
 
@@ -75,11 +75,11 @@ background, without an icon in the notification area: the Start menu's
 |---|---|
 | Programs | `pley.exe`, `pley-transcoder.exe` and FFmpeg (`ffmpeg\`) in the install folder |
 | Options | `pley.toml` in the data folder: the address, the Plex-compatible API, discovery and FFmpeg |
-| The service | `pley` ("Pley Server" in Services): starts with Windows (delayed), restarts when it stops on its own, has 30 s to stop as Windows shuts down, and keeps its temporary files in the data folder's `tmp` |
+| The service | `pley` ("Pley Media Server" in Services): starts with Windows (delayed), restarts when it stops on its own, has 30 s to stop as Windows shuts down, and keeps its temporary files in the data folder's `tmp` |
 | The data folder | Owned by the administrators; only SYSTEM, the administrators, the service (and its user) and you may open it |
 | The firewall | A rule named `pley` for Pley, on the kinds of network and from the devices chosen |
 | The notification area | Pley starts when you sign in (Start Pley at login, in its menu) |
-| Start menu | **Pley Server** (Pley's page, or Pley itself) and **Pley Server logs** |
+| Start menu | **Pley Media Server** (Pley's page, or Pley itself) and **Pley Media Server logs** |
 
 ## Media folders
 
@@ -110,7 +110,7 @@ Pley, replaces it and its FFmpeg, and starts it again.
 
 ## Uninstalling
 
-**Settings → Apps → Pley Server → Uninstall**. The uninstaller removes the
+**Settings → Apps → Pley Media Server → Uninstall**. The uninstaller removes the
 service, the user Setup made, the firewall rule, the start at sign-in, the
 programs and FFmpeg, and asks whether to delete the data folder
 too (no, unless you say so). A data folder with other files in it than
@@ -203,7 +203,7 @@ save-config` saves the same options for Pley outside a service.
 ## When something is wrong
 
 - **Pley's log** is `logs\pley.log` in the data folder (Start menu:
-  **Pley Server logs**). The service is **Pley Server** in Services
+  **Pley Media Server logs**). The service is **Pley Media Server** in Services
   (`services.msc`).
 - **No GPU encoder** although the computer has one: run Setup again and turn
   off **Let the service write only in its data folder**. It is on by

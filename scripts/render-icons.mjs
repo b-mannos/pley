@@ -30,6 +30,9 @@
 //   apps/android/app/src/main/res/drawable-{xhdpi,xxhdpi,xxxhdpi}/tv_banner.png
 //                                           the Android TV app's banner, 320×180 dp,
 //                                           on Android TV's home screen
+//   deploy/windows/setup-small-*.png        the logo in the corner of the Windows
+//                                           installer's pages, inset in the square
+//                                           Inno Setup gives it, one per DPI
 //   deploy/stores/                          the stores' listing pictures (README.md
 //                                           there): icons, Play's feature graphic,
 //                                           the TV banner, Fire TV's background
@@ -95,6 +98,13 @@ function fireTvBackground() {
   </radialGradient>
   <rect width="1920" height="1080" fill="${TILE}"/><rect width="1920" height="1080" fill="url(#corner)"/>
   <g transform="translate(${1480 - 33 * s} ${260 - 34.5 * s}) scale(${s})">${glyph}</g></svg>`;
+}
+
+/** The logo [inset] of a [size] square's side, in its middle, transparent around it. */
+function inset(size, inset) {
+  const side = size * inset;
+  const placed = logo.replace("<svg", `<svg x="${(size - side) / 2}" y="${(size - side) / 2}" width="${side}" height="${side}"`);
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}">${placed}</svg>`;
 }
 
 /** A splash screen: the logo, a fifth of the height, in the middle of the app's background [bg]. */
@@ -299,7 +309,11 @@ try {
   writeFileSync(join(stores, "feature-graphic-1024x500.png"), rgb72(await r.png(banner(1024, 500), 1024, 500)));
   writeFileSync(join(stores, "tv-banner-1280x720.png"), rgb72(await r.png(banner(1280, 720), 1280, 720)));
   writeFileSync(join(stores, "fire-tv-background-1920x1080.jpg"), await r.jpeg(fireTvBackground(), 1920, 1080, 90));
-  console.log("rendered the web's maskable icon and PNG favicon, the desktop's .ico and .icns, the Samsung and LG apps' icons and LG's splash, Kodi's icon and fanart, Roku's icons and splash screens, the Android TV banner, and the stores' pictures");
+  // Inno Setup's square in the top right of the installer's pages, at 100 to 250 % (its help's
+  // WizardSmallImageFile): the logo flush in it would touch the window's edge, so it's inset.
+  const setup = join(root, "deploy/windows");
+  for (const size of [58, 77, 97, 116, 124, 143, 159]) writeFileSync(join(setup, `setup-small-${size}.png`), await r.png(inset(size, 0.7), size));
+  console.log("rendered the web's maskable icon and PNG favicon, the desktop's .ico and .icns, the Samsung and LG apps' icons and LG's splash, Kodi's icon and fanart, Roku's icons and splash screens, the Android TV banner, the stores' pictures, and the Windows installer's");
 } finally {
   r.close();
 }
