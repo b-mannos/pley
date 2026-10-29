@@ -2070,6 +2070,9 @@ interface SystemInfo {
                                     // decoder where an NVIDIA card encodes, VideoToolbox's on a Mac)
       software: ("h264" | "hevc" | "hdr")[]; // what it leaves to software encoders, where one works
                                     // ("hdr": HEVC Main 10, for transcodes that keep HDR)
+      tonemappers: string[] | null; // the tone mappers that work with it, where the transcoder tried
+                                    // them: a VAAPI encoder's, whose frames reached it, and zscale;
+                                    // null: every one in `tonemapping`
     } };
     tonemapping: string[];          // available tone mappers, e.g. ["libplacebo", "opencl", "zscale"]
     dolby_vision: boolean;          // Dolby Vision profile 5 can be tone-mapped correctly

@@ -123,7 +123,7 @@ export const choiceLabel = (choice: Choice<unknown>) => (choice.reason ? `${choi
 export function tonemapChoices(system: SystemInfo | undefined, accel: HwAccel): Choice<ToneMapping>[] {
   const tc = knownTranscoder(system);
   return TONEMAPS.map((value) => {
-    const reason = tonemapReason(value, system) ?? tonemapAccelReason(value, accel);
+    const reason = tonemapReason(value, system) ?? tonemapAccelReason(value, accel, system);
     let label = TONEMAP_NAME[value];
     if (value === "auto" && tc) {
       const first = tc.tonemapping[0] as ToneMapping | undefined;
@@ -148,9 +148,16 @@ export function tonemapReason(mode: ToneMapping, system: SystemInfo | undefined)
  */
 export const tonemapGoesWith = (accel: HwAccel, mode: ToneMapping) => accel !== "vulkan" || mode === "auto" || mode === "libplacebo";
 
-/** Why the tone mapper `mode` doesn't go with `accel`, or `null`. */
-export function tonemapAccelReason(mode: ToneMapping, accel: HwAccel): string | null {
-  return tonemapGoesWith(accel, mode) ? null : `not with ${ACCEL_NAME[accel]}`;
+/**
+ * Why the tone mapper `mode` doesn't go with `accel`, or `null`: Vulkan's
+ * rule, and the tone mappers whose frames didn't reach a VAAPI encoder in
+ * the transcoder's test (it tone maps with another then).
+ */
+export function tonemapAccelReason(mode: ToneMapping, accel: HwAccel, system?: SystemInfo): string | null {
+  if (!tonemapGoesWith(accel, mode)) return `not with ${ACCEL_NAME[accel]}`;
+  const works = knownTranscoder(system)?.with_accel?.[accel]?.tonemappers;
+  if (!works || mode === "auto" || mode === "none" || works.includes(mode)) return null;
+  return `not with ${ACCEL_NAME[accel]}`;
 }
 
 /**
@@ -180,11 +187,14 @@ export interface AccelFit {
  * saves (`fit_to_accel`): a tone mapper that doesn't go with it gives way to
  * Automatic, and hardware decoding is turned on for Vulkan.
  */
-export function fitToAccel(form: Pick<Settings, "tonemapping" | "hardware_decoding">, accel: HwAccel): AccelFit {
+export function fitToAccel(form: Pick<Settings, "tonemapping" | "hardware_decoding">, accel: HwAccel, system?: SystemInfo): AccelFit {
   const fit: AccelFit = { changes: {}, notes: {} };
   if (!tonemapGoesWith(accel, form.tonemapping)) {
     fit.changes.tonemapping = "auto";
     fit.notes.tonemapping = `Set to Automatic: ${ACCEL_NAME[accel]} tone maps with libplacebo only.`;
+  } else if (tonemapAccelReason(form.tonemapping, accel, system)) {
+    fit.changes.tonemapping = "auto";
+    fit.notes.tonemapping = `Set to Automatic: ${TONEMAP_SHORT[form.tonemapping] ?? form.tonemapping} doesn't reach ${ACCEL_NAME[accel]} here.`;
   }
   if (accel === "vulkan" && !form.hardware_decoding) {
     fit.changes.hardware_decoding = true;

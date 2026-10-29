@@ -142,7 +142,7 @@ export function TranscoderSettings() {
   // What changed with the last hardware acceleration chosen, until changed again.
   const [fitted, setFitted] = useState<AccelFit["notes"]>({});
   const chooseAccel = (form: Settings, accel: HwAccel) => {
-    const fit = fitToAccel(form, accel);
+    const fit = fitToAccel(form, accel, system.data);
     draft.setForm((f) => (f ? { ...f, hwaccel: accel, ...fit.changes } : f));
     setFitted(fit.notes);
   };
@@ -160,7 +160,7 @@ export function TranscoderSettings() {
         const tonemaps = tonemapChoices(system.data, form.hwaccel);
         const tonemapProblem = tonemapReason(form.tonemapping, system.data);
         // A combination saved before: the transcoder doesn't use Vulkan then.
-        const tonemapClash = tonemapProblem ? null : tonemapAccelReason(form.tonemapping, form.hwaccel);
+        const tonemapClash = tonemapProblem ? null : tonemapAccelReason(form.tonemapping, form.hwaccel, system.data);
         const decodingProblem = decodingReason(form.hwaccel, system.data);
         // Vulkan decodes on the GPU: hardware decoding turns on with it, not off.
         const vulkanDecodes = form.hwaccel === "vulkan";
@@ -285,7 +285,10 @@ export function TranscoderSettings() {
                     {capitalize(tonemapProblem)}: {tonemapFallback(system.data)}
                   </Note>
                 ) : tonemapClash ? (
-                  <Note notice>{capitalize(tonemapClash)}: transcodes are encoded in software instead.</Note>
+                  <Note notice>
+                    {capitalize(tonemapClash)}:{" "}
+                    {form.hwaccel === "vulkan" ? "transcodes are encoded in software instead." : "transcodes tone map with another instead."}
+                  </Note>
                 ) : fittedNote("tonemapping") ? (
                   <Note>{fittedNote("tonemapping")}</Note>
                 ) : null}

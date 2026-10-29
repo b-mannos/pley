@@ -304,6 +304,10 @@ pub struct AccelUse {
     /// What it leaves to software encoders: `h264`, `hevc` and `hdr`
     /// (HEVC Main 10, for transcodes that keep HDR), where one works.
     pub software: Vec<&'static str>,
+    /// The tone mappers that work with it, where the transcoder tried them
+    /// (a VAAPI encoder takes the GPU mappers whose frames reached it in
+    /// the start-up test, and zimg); `None`: every one it has.
+    pub tonemappers: Option<Vec<Tonemapper>>,
 }
 
 /// What choosing `hwaccel` does with the transcoder's `caps`.
@@ -315,7 +319,11 @@ pub fn accel_use(caps: &Capabilities, hwaccel: HwAccel) -> AccelUse {
             .filter(|(_, codec, main10)| in_software(*codec, *main10))
             .map(|(name, ..)| name)
             .collect();
-    AccelUse { hardware_decoding: decodes_on_gpu_with(caps, hwaccel), software }
+    // A transcoder from before the test says nothing (zimg always passes).
+    let vaapi =
+        picked_encoder(caps, VideoCodec::H264, hwaccel, false).is_some_and(|e| e.hardware && e.accel == HwAccel::Vaapi);
+    let tonemappers = (vaapi && !caps.vaapi_tonemappers.is_empty()).then(|| caps.vaapi_tonemappers.clone());
+    AccelUse { hardware_decoding: decodes_on_gpu_with(caps, hwaccel), software, tonemappers }
 }
 
 /// Whether some video is decoded on a GPU with `hwaccel` chosen, as the
@@ -830,6 +838,26 @@ mod tests {
         // Vulkan's decoder feeds libplacebo whatever encodes.
         let vulkan = Capabilities { vulkan_decode: vec!["hevc10".into()], ..intel };
         assert!(ACCELS.iter().all(|accel| accel_use(&vulkan, *accel).hardware_decoding));
+        assert!(ACCELS.iter().all(|accel| accel_use(&vulkan, *accel).tonemappers.is_none()));
+    }
+
+    #[test]
+    fn vaapi_takes_the_tone_mappers_that_reached_its_encoder() {
+        let mut linux = Capabilities {
+            encoders: vec![encoder("h264_vaapi", HwAccel::Vaapi), encoder("libx264", HwAccel::None)],
+            hwaccels: vec!["vaapi".into()],
+            tonemappers: vec![Tonemapper::Libplacebo, Tonemapper::Opencl, Tonemapper::Zscale],
+            vaapi_tonemappers: vec![Tonemapper::Libplacebo, Tonemapper::Zscale],
+            ..Capabilities::default()
+        };
+        let vaapi = Some(vec![Tonemapper::Libplacebo, Tonemapper::Zscale]);
+        assert_eq!(accel_use(&linux, HwAccel::Vaapi).tonemappers, vaapi);
+        assert_eq!(accel_use(&linux, HwAccel::Auto).tonemappers, vaapi);
+        // x264 takes every tone mapper.
+        assert_eq!(accel_use(&linux, HwAccel::None).tonemappers, None);
+        // A transcoder from before the test: nothing known.
+        linux.vaapi_tonemappers.clear();
+        assert_eq!(accel_use(&linux, HwAccel::Vaapi).tonemappers, None);
     }
 
     #[test]

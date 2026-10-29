@@ -729,6 +729,8 @@ export interface AccelUse {
   hardware_decoding: boolean;
   /** What it leaves to software encoders (`hdr`: HEVC in 10 bits, for transcodes that keep HDR), where one works. */
   software: ("h264" | "hevc" | "hdr")[];
+  /** The tone mappers that work with it, where the transcoder tried them (VAAPI); `null`: every one it has. */
+  tonemappers?: string[] | null;
 }
 
 export interface TranscoderMemory {

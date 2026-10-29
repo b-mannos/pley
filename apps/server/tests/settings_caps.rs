@@ -82,10 +82,17 @@ async fn the_system_says_what_the_transcoder_can_do() {
     assert_eq!(tc["managed"], json!(false));
     assert_eq!(tc["accels"], json!(["qsv"]), "{tc}");
     assert_eq!(tc["hardware_decoding"], json!(true), "Quick Sync decodes through D3D11");
-    assert_eq!(tc["with_accel"]["qsv"], json!({"hardware_decoding": true, "software": []}), "{tc}");
+    assert_eq!(
+        tc["with_accel"]["qsv"],
+        json!({"hardware_decoding": true, "software": [], "tonemappers": null}),
+        "{tc}"
+    );
     assert_eq!(tc["with_accel"]["auto"], tc["with_accel"]["qsv"]);
     // x264 gets no GPU decoder, here or with an encoder that isn't here.
-    assert_eq!(tc["with_accel"]["none"], json!({"hardware_decoding": false, "software": ["h264"]}));
+    assert_eq!(
+        tc["with_accel"]["none"],
+        json!({"hardware_decoding": false, "software": ["h264"], "tonemappers": null})
+    );
     assert_eq!(tc["with_accel"]["nvenc"]["hardware_decoding"], json!(false));
     assert_eq!(tc["tonemapping"], json!(["zscale"]));
     assert_eq!(tc["chromaprint"], json!(false));
