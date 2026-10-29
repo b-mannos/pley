@@ -1,113 +1,161 @@
 # Pley HTTP API (v1)
 
-All endpoints live under `/api`. Requests and responses are JSON (`snake_case` keys)
-unless stated otherwise. Timestamps are **unix seconds**; durations/positions are
-**milliseconds**. Ids are integers unless stated otherwise.
+The API of the web app and Pley's own apps. The compatibility API for other
+media players is described in [COMPATIBILITY.md](COMPATIBILITY.md).
 
-The compatibility API (docs/COMPATIBILITY.md) answers on the same port by
-default, but only requests that are its own (its headers, its token in the
-query, or a path only it has): `/api/…` and `/.well-known/…` are always
-this API's.
+## Conventions
+
+- Every endpoint is under `/api`. Unknown `/api` paths answer `404`.
+- Requests and responses are JSON with `snake_case` keys, unless a row says
+  otherwise.
+- Timestamps are unix seconds. Durations and positions are milliseconds.
+  Ids are integers unless stated otherwise.
+- Optional fields are left out when they have no value: treat a missing
+  field like `null`.
+- Paging: `GET /api/libraries/{id}/items` and `GET /api/history` take
+  `offset` and `limit` and answer a `total` that counts every match, not
+  just the page.
+- API answers carry `Cache-Control: no-store` unless a row says otherwise.
+- The compatibility API answers on the same port by default, but only to
+  requests that are its own (its headers, its token in the query, or a path
+  only it has). `/api/…` and `/.well-known/…` always belong to this API.
 
 ## Authentication
 
-* `POST /api/auth/login` (or `/api/setup`, `/api/auth/switch`, accepting an
-  invitation) sets an `HttpOnly` cookie named `pley_token`.
-  Clients that aren't browsers (requests without an `Origin` header) also get
-  the token in the body; browsers keep it in the cookie only, so no script on
-  the page ever sees it.
-* Every other endpoint (except the public ones listed below) requires one of:
-  * the `pley_token` cookie (what the web UI uses — `<img>`, `<video>`, hls.js
-    requests carry it automatically because the UI is same-origin),
-  * `Authorization: Bearer <token>`,
-  * `X-Pley-Token: <token>` header,
-  * `?token=<token>` query parameter (handy for external players like VLC).
-* Missing/invalid token → `401`. Non-admin calling an admin endpoint → `403`.
-* Apps signed in on Pley's own page (see [Apps](#apps-oauth-21)) send their
-  access token (`pley_at_…`) in `Authorization: Bearer` only: never in the
-  cookie, `X-Pley-Token` or `?token=`. The compatibility API refuses it.
-  Its refusals carry `WWW-Authenticate` (RFC 6750 §3):
-  * `400` `bad_request` with `Bearer error="invalid_request"`: an app's token
-    anywhere but the Authorization header;
-  * `401` `unauthorized` with `Bearer error="invalid_token"`: an expired,
-    signed-out or unknown token, a refresh token sent as a bearer token, or a
-    disabled account;
-  * `403` `insufficient_scope` with
-    `Bearer error="insufficient_scope", scope="play"`: a route the token's
-    scopes don't open. `scope` names the scope that would; it is left out
-    when none does ("apps can't do that: use Pley's web app").
+`POST /api/auth/login` signs in (so do `/api/setup`, `/api/auth/switch` and
+accepting an invitation). The answer sets an `HttpOnly` cookie named
+`pley_token`. Clients that send no `Origin` header (not browsers) also get
+the token in the body; a browser keeps it in the cookie only, so no script
+on the page sees it.
 
-Every answer carries `X-Content-Type-Options: nosniff`, `X-Frame-Options:
-DENY`, `Referrer-Policy: same-origin` and a `Content-Security-Policy` that
-lets pages load only Pley's own scripts and styles. Password checks queue
-(a few at a time); when one has waited 10 seconds the answer is `503`.
+Every endpoint but the `public` ones takes the token in one of these:
 
-Pley's Samsung and LG TV apps are web apps their TVs load from the TV
-itself, and their web engines hold them to CORS: their requests come with
-`Origin: file://` (or `null`, or an `app://` address). A website's page
-in a sandboxed frame sends `null` too, but these answers only ever carry
-what a token in `Authorization` opens, never a cookie's. For those origins only, the API and
-`/.well-known/oauth-authorization-server` answer CORS: a preflight lets
-`Authorization`, `Content-Type`, `Accept` and `Range` through for 10
-minutes, and answers carry `Access-Control-Allow-Origin: *` and expose
-`WWW-Authenticate`, `X-Pley-Complete`, `ETag`, `Content-Range` and
-`Retry-After`. A wildcard never lets a page read an answer made with
-cookies, and the consent page's endpoints (`/api/oauth/requests…`,
-`/api/oauth/device/verify`) never answer CORS.
+| Where | Notes |
+|---|---|
+| `pley_token` cookie | the web app: `<img>`, `<video>` and hls.js requests carry it (same origin) |
+| `Authorization: Bearer <token>` | the only place an app's token may go |
+| `X-Pley-Token: <token>` | |
+| `?token=<token>` | for external players such as VLC |
+
+A missing or invalid token answers `401`; a non-administrator on an `admin`
+route, `403`.
+
+Apps sign in through OAuth ([Apps](#apps-oauth-21)). Their access tokens
+(`pley_at_…`) go in `Authorization: Bearer` only, and the compatibility API
+refuses them. Refusals of an app's token carry `WWW-Authenticate`
+(RFC 6750 §3):
+
+| Status | `code` | `WWW-Authenticate` | When |
+|---|---|---|---|
+| `400` | `bad_request` | `Bearer error="invalid_request"` | the token was sent anywhere but `Authorization` |
+| `401` | `unauthorized` | `Bearer error="invalid_token"` | expired, signed out or unknown token; a refresh token sent as a bearer token; a disabled account |
+| `403` | `insufficient_scope` | `Bearer error="insufficient_scope", scope="play"` | the token's scopes don't open the route. `scope` names the one that would; it is left out when none does ("apps can't do that: use Pley's web app") |
+
+### Who
+
+Each endpoint table has a **Who** column:
+
+| Who | May call |
+|---|---|
+| `public` | anyone, without a token |
+| `user` | any signed-in user; an app's token is refused (`403 insufficient_scope`) |
+| `any app` | any signed-in user, and every app's token |
+| `library`, `play`, `playlists`, `profiles` | any signed-in user, and an app's token with that [scope](#scopes) (`HEAD` as `GET`) |
+| `admin` | administrators only (`403` for others), never an app's token |
+| `page` | Pley's consent page only ([its endpoints](#the-consent-pages-endpoints)) |
+
+### Headers
+
+- Every answer carries `X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: same-origin` and a
+  `Content-Security-Policy` that loads only Pley's own scripts and styles.
+- Password checks queue, a few at a time. One that has waited 10 seconds
+  answers `503`.
+
+### CORS for TV apps
+
+Pley's Samsung and LG apps are web apps loaded from the TV itself, and
+their web engines apply CORS. Their requests come with `Origin: file://`,
+`null` or an `app://` address. For those origins only, the API and
+`/.well-known/oauth-authorization-server` answer CORS:
+
+- a preflight lets `Authorization`, `Content-Type`, `Accept` and `Range`
+  through, for 10 minutes;
+- answers carry `Access-Control-Allow-Origin: *` and expose
+  `WWW-Authenticate`, `X-Pley-Complete`, `ETag`, `Content-Range` and
+  `Retry-After`.
+
+A website's page in a sandboxed frame also sends `null`, but these answers
+only carry what a token in `Authorization` opens: a wildcard never lets a
+page read an answer made with cookies. The consent page's endpoints
+(`/api/oauth/requests…`, `/api/oauth/device/verify`) never answer CORS.
 
 ### Errors
 
-Non-2xx responses carry:
+Non-2xx answers carry:
 
 ```json
 { "code": "not_found", "message": "item 42 not found" }
 ```
 
-`code` is one of `bad_request`, `unauthorized`, `forbidden`, `not_found`,
-`conflict`, `too_many_requests` (sign-in, PIN, password and code attempts:
-after 5 failures in 15 minutes, counting attempts still being checked;
-sign-ins count per account from each address, and 50 from all of them),
-`two_step` (`401`: the account has two-step sign-in, and the code is missing
-or wrong), `insufficient_scope` (`403`: an app's token on a route its scopes
-don't open), `unavailable`, `internal`. The token and revocation endpoints
-of apps answer in OAuth's own form instead (see
-[Tokens](#tokens)).
+| `code` | Status | When |
+|---|---|---|
+| `bad_request` | `400` | |
+| `unauthorized` | `401` | |
+| `two_step` | `401` | the account has two-step sign-in, and the code is missing or wrong |
+| `forbidden` | `403` | |
+| `insufficient_scope` | `403` | an app's token on a route its scopes don't open |
+| `not_found` | `404` | also anything the user [may not see](#access-rules) |
+| `conflict` | `409` | |
+| `session_stopped` | `410` | a playback session stopped from elsewhere: see below |
+| `too_many_requests` | `429` | attempt limits, below |
+| `internal` | `500` | |
+| `not_implemented` | `501` | |
+| `unavailable` | `503` | |
 
-A playback session stopped from elsewhere answers its player's next
-requests with `410` `{ code: "session_stopped", error: "session_stopped",
-message }`, where `message` is what the one who stopped it wrote, or `null`
-(see [Stopping a stream](#stopping-a-stream)).
+**Attempt limits.** Sign-in, PIN, password and code attempts: 5 failures in
+15 minutes, counting attempts still being checked. Sign-ins count per
+account from each address, and 50 from all addresses together. Then `429`.
+
+**Stopped sessions.** A playback session stopped from elsewhere answers its
+player's next requests with `410`
+`{ "code": "session_stopped", "error": "session_stopped", "message" }`.
+`message` is what the person who stopped it wrote, or `null` (see
+[Stopping a stream](#stopping-a-stream)).
+
+The OAuth token and revocation endpoints answer errors in OAuth's own form
+instead (see [Tokens](#tokens)).
 
 ---
 
 ## Types
 
 ```ts
-type Id = number;        // a library's, item's, file's or user's is never given to another, also once deleted
+type Id = number;        // a library's, item's, file's or user's id is never reused, also once deleted
 type Timestamp = number; // unix seconds
 
 interface User {
   id: Id;
   username: string;
-  name: string;                    // display name, or the username
+  name: string;                     // display name, or the username
   display_name: string | null;
   is_admin: boolean;
-  managed: boolean;                // profile without a password, reached by switching
-  home: boolean;                   // listed in the household's profile switcher
+  managed: boolean;                 // profile without a password, reached by switching
+  home: boolean;                    // listed in the household's profile switcher
   has_pin: boolean;
   avatar_url: string | null;
-  avatar_color: string | null;     // "#38bdf8"
-  all_libraries: boolean;          // false: only `library_ids`
+  avatar_color: string | null;      // "#38bdf8"
+  all_libraries: boolean;           // false: only `library_ids`
   library_ids: Id[];
-  max_age: number | null;          // age limit for movies and shows; null = none
+  max_age: number | null;           // age limit for movies and shows; null = none
   disabled: boolean;
   created_at: Timestamp;
-  // Default tracks for titles without a remembered choice:
+  // Default tracks for titles without a remembered choice (see Your account):
   audio_language: string | null;    // ISO 639 code ("eng", "fr"); null = the file's default track
   subtitle_language: string | null; // null = the audio language
   subtitle_mode: "off" | "forced" | "foreign" | "always";
-  has_password: boolean;           // false: a managed profile, or an account without a password
-  two_step: boolean;               // signs in with a code from an authenticator app after the password
+  has_password: boolean;            // false: a managed profile, or an account without a password
+  two_step: boolean;                // two-step sign-in is on
 }
 
 type LibraryKind = "movies" | "shows" | "music";
@@ -116,25 +164,23 @@ interface Library {
   id: Id;
   name: string;
   kind: LibraryKind;
-  paths: string[];              // empty but for administrators (not their apps' tokens)
-  item_count: number;           // top-level items (movies / shows / artists) this user can see
+  paths: string[];                  // empty except for administrators (not their apps' tokens)
+  item_count: number;               // top-level items (movies, shows, artists) this user can see
   created_at: Timestamp;
   scanned_at: Timestamp | null;
-  scanning: boolean;            // a scan is queued or running right now
+  scanning: boolean;                // a scan is queued or running
 }
 
 type ItemKind = "movie" | "show" | "season" | "episode" | "artist" | "album" | "track";
 
 interface UserState {
-  position_ms: number;          // resume position, 0 if none
-  watched: boolean;             // containers: true when every leaf is watched
+  position_ms: number;              // resume position, 0 if none
+  watched: boolean;                 // containers: every leaf is watched
   play_count: number;
   last_played_at?: Timestamp;
   rating?: number;                  // the user's own rating, 0-10 (two points per star)
 }
 
-// Optional fields are left out when they have no value, which keeps big
-// listings small; treat a missing field like null.
 interface ItemSummary {
   id: Id;
   library_id: Id;
@@ -142,33 +188,34 @@ interface ItemSummary {
   title: string;
   sort_title: string;
   year?: number;
-  index?: number;                   // season number / episode number / track number
-  parent_id?: Id;                   // season for episodes, show for seasons, album for tracks, artist for albums
+  index?: number;                   // season, episode or track number
+  parent_id?: Id;                   // episode: season; season: show; track: album; album: artist
   parent_title?: string;
-  parent_index?: number;            // season number for episodes, disc number for tracks
-  grandparent_id?: Id;              // show for episodes, artist for tracks
+  parent_index?: number;            // episode: season number; track: disc number
+  grandparent_id?: Id;              // episode: show; track: artist
   grandparent_title?: string;
   duration_ms?: number;
   rating?: number;                  // 0..10
   added_at: Timestamp;
-  poster_url?: string;              // e.g. "/api/items/12/images/poster?v=1729600000" (append &w=<px>)
+  poster_url?: string;              // "/api/items/12/images/poster?v=1729600000" (append &w=<px>)
   backdrop_url?: string;
-  thumb_url?: string;               // episode stills / video frame grabs (16:9)
+  thumb_url?: string;               // episode stills, video frame grabs (16:9)
   user_state: UserState;
-  leaf_count?: number;              // show/season: #episodes, artist/album: #tracks
-  viewed_leaf_count?: number;       // show/season: #watched episodes
-  child_count?: number;             // show: #seasons, artist: #albums
-  summary?: string;                 // in lists only for episodes, every kind's with `summaries=1` (below); always in ItemDetail
+  leaf_count?: number;              // show, season: episodes; artist, album: tracks
+  viewed_leaf_count?: number;       // show, season: watched episodes
+  child_count?: number;             // show: seasons; artist: albums
+  summary?: string;                 // lists: episodes only, or every kind with `summaries=1`; always in ItemDetail
   release_date?: string;            // "YYYY-MM-DD"
-  extra_type?: string;              // kind "extra": trailer | featurette | behind_the_scenes | deleted_scene | interview | scene | short | other
+  extra_type?: string;              // kind "extra": trailer | featurette | behind_the_scenes | deleted_scene |
+                                    // interview | scene | short | other
   media?: MediaSummary;             // only in library listings sorted by bitrate
 }
 
-interface MediaSummary {            // what a title's files are like: a movie's best file, a show's episodes together
-  bitrate: number | null;           // bits per second (a show: its episodes' average)
-  size: number | null;              // bytes (a show: all its episodes)
+interface MediaSummary {            // a movie's best file, or a show's episodes together
+  bitrate: number | null;           // bits per second (show: its episodes' average)
+  size: number | null;              // bytes (show: all its episodes)
   width: number | null;
-  height: number | null;            // a show: its largest episode
+  height: number | null;            // show: its largest episode
   video_codec: string | null;       // null for shows
   dynamic_range: "sdr" | "hdr10" | "hdr10plus" | "hlg" | "dolby_vision" | null; // null for shows
 }
@@ -178,12 +225,13 @@ interface ItemDetail extends ItemSummary {
   tagline: string | null;
   genres: string[];
   studio: string | null;
-  content_rating: string | null;    // e.g. "PG-13"
+  content_rating: string | null;    // "PG-13"
   tmdb_id: number | null;
   imdb_id: string | null;
-  files: MediaFile[];               // empty for containers (show/season/artist/album)
-  markers: Marker[];                // intro and credits of the files (Skip Intro / Skip Credits)
-  extras: ItemSummary[];            // movies and shows: trailers and other bonus material (kind "extra"), trailers first
+  locked_fields: string[];          // fields an administrator edited (PATCH /api/items/{id})
+  files: MediaFile[];               // empty for containers (show, season, artist, album)
+  markers: Marker[];                // intro and credits (Skip Intro, Skip Credits)
+  extras: ItemSummary[];            // movies and shows: trailers first, then other bonus material (kind "extra")
   cast: Credit[];                   // actors in billing order; episodes: guest stars; seasons: the show's
   crew: Credit[];                   // creators, directors, writers, producers
   in_watchlist: boolean;            // in the user's My List (movies and shows)
@@ -220,7 +268,7 @@ interface Marker {
 
 interface MediaFile {
   id: Id;
-  path: string;                     // the file name only but for administrators (not their apps' tokens)
+  path: string;                     // the file name only, except for administrators (not their apps' tokens)
   size: number;                     // bytes
   container: string | null;         // "mkv" | "mp4" | "webm" | "avi" | "mp3" | "flac" | ...
   duration_ms: number | null;
@@ -231,13 +279,13 @@ interface MediaFile {
   audio_codec: string | null;       // codec of the default audio stream
   streams: MediaStream[];
   edition: string | null;           // from `{edition-Final Cut}` in the file's or its folder's name
-  selected_audio: number | null;    // tracks to start with for this user (remembered
-  selected_subtitle: number | null; // choice or their defaults); null = default / off. The audio
-                                    // for an unknown player: a play request picks the track of
-                                    // that language its player plays best (`audio_index` below)
-  audio_picked: boolean;            // selected_audio is a track the user picked for the show or
-                                    // movie; false: automatic, each player gets its best of that
-                                    // language, so a title's page names the language, not a track
+  selected_audio: number | null;    // track to start with for this user (their choice, else their
+                                    // defaults); null = the file's default. Not player-specific:
+                                    // a play request picks that language's best track for its
+                                    // player (see The audio track)
+  selected_subtitle: number | null; // likewise; null = off
+  audio_picked: boolean;            // true: the user picked selected_audio for the show or movie;
+                                    // false: automatic, so a title's page names the language, not a track
   chapters: Chapter[];              // from the container, by start time (empty if none)
 }
 
@@ -249,11 +297,11 @@ interface Chapter {
 }
 
 interface MediaStream {
-  index: number;                    // ffprobe stream index (below 1000); subtitle files next to the video 1000-8999,
-                                    // added subtitles 9000-9999 (see [Added subtitles](#added-subtitles))
+  index: number;                    // ffprobe stream index (below 1000); subtitle files next to the video
+                                    // 1000-8999; added subtitles 9000-9999 (see Added subtitles)
   kind: "video" | "audio" | "subtitle";
   codec: string;
-  language: string | null;          // ISO 639-2 as found in the file, e.g. "eng"
+  language: string | null;          // ISO 639-2 as found in the file: "eng"
   title: string | null;
   default: boolean;
   forced: boolean;
@@ -266,17 +314,18 @@ interface MediaStream {
   hdr?: boolean;
   dynamic_range?: "sdr" | "hdr10" | "hdr10plus" | "hlg" | "dolby_vision"; // "hdr10plus": PQ with HDR10+ in its frames
   dv_profile?: number;              // Dolby Vision profile (5, 7, 8, …)
-  dv_bl_compat?: number;            // DV base-layer compatibility id (1 = HDR10, 2 = SDR, 4 = HLG, 6 = Blu-ray HDR10
-                                    // (profile 7), 0 = none)
-  dv_el?: "fel" | "mel";            // profile 7's enhancement layer: full (picture data) or minimal (absent: not known)
-  decode_order_times?: boolean;     // frames timed as they're decoded, not as they're shown: the video is converted
+  dv_bl_compat?: number;            // DV base-layer compatibility id: 1 = HDR10, 2 = SDR, 4 = HLG,
+                                    // 6 = Blu-ray HDR10 (profile 7), 0 = none
+  dv_el?: "fel" | "mel";            // profile 7's enhancement layer: full (picture data) or minimal;
+                                    // absent: not known
+  decode_order_times?: boolean;     // frames timed in decode order, not display order: the video is converted
   dv_level?: number;                // Dolby Vision level
-  hdr10plus?: boolean;              // Dolby Vision and PQ streams: HDR10+ in the first frames (absent: not looked for).
-                                    // On Dolby Vision, true is Dolby Vision + HDR10+
-  // How clients name the dynamic range, the same everywhere: "Dolby Vision P8.1", "Dolby Vision P8.4",
-  // "Dolby Vision P5", "Dolby Vision P7 FEL" (or MEL; "P7" when not known: never "P7.6"),
-  // "Dolby Vision P8.1 + HDR10+", "HDR10+", "HDR10", "HLG"; badges shorten "Dolby Vision" to "DV".
-  level?: number;                   // codec level, as ffprobe gives it (HEVC 5.1 = 153)
+  hdr10plus?: boolean;              // Dolby Vision and PQ streams: HDR10+ in the first frames (absent: not
+                                    // looked for). On Dolby Vision, true means Dolby Vision + HDR10+
+  // Clients name the dynamic range the same way everywhere: "Dolby Vision P8.1", "Dolby Vision P8.4",
+  // "Dolby Vision P5", "Dolby Vision P7 FEL" (or MEL; "P7" when not known, never "P7.6"),
+  // "Dolby Vision P8.1 + HDR10+", "HDR10+", "HDR10", "HLG". Badges shorten "Dolby Vision" to "DV".
+  level?: number;                   // codec level as ffprobe gives it (HEVC 5.1 = 153)
   pix_fmt?: string;                 // "yuv420p10le", …
   interlaced?: boolean;
   has_b_frames?: boolean;
@@ -291,9 +340,9 @@ interface MediaStream {
   channel_layout?: string;
   sample_rate?: number;
   // subtitle
-  external?: boolean;               // sidecar file next to the media, or added subtitles
-  added?: boolean;                  // added subtitles (uploaded, or from OpenSubtitles): external too
-  text_based?: boolean;             // srt/ass/webvtt/mov_text (true) vs pgs/vobsub (false, needs burn-in)
+  external?: boolean;               // a file next to the media, or added subtitles
+  added?: boolean;                  // added subtitles (uploaded, or from OpenSubtitles); external too
+  text_based?: boolean;             // srt/ass/webvtt/mov_text: true; pgs/vobsub: false (needs burn-in)
 }
 
 interface Hub {
@@ -312,122 +361,164 @@ interface SubtitleTrack {
   forced: boolean;
   external: boolean;                // a file next to the video, or added subtitles
   text_based: boolean;
-  url: string | null;               // WebVTT url for text-based subs, null for image subs
-  added: boolean;                   // added subtitles (see [Added subtitles](#added-subtitles))
-  deletable?: true;                 // added subtitles this user may delete (an administrator, or whoever added
+  url: string | null;               // WebVTT url for text subtitles; null for picture subtitles
+  added: boolean;                   // added subtitles (see Added subtitles)
+  deletable?: true;                 // added subtitles this user may delete (an administrator, or who added
                                     // them); left out otherwise
 }
 
 interface PlaybackInfo {
   session_id: string;
   method: "direct" | "remux" | "transcode";
-  url: string;                      // direct: file url; otherwise HLS playlist url (master.m3u8 for
-                                    // version 2 players with hls.master_playlist and for an
-                                    // adaptive stream, else index.m3u8)
+  url: string;                      // direct: the file's url. Otherwise the HLS playlist: master.m3u8 for
+                                    // version 2 players with hls.master_playlist and for an adaptive
+                                    // stream, else index.m3u8
   hls: boolean;
   file_id: Id;
   duration_ms: number;
   audio_index: number | null;
-  subtitle_index: number | null;    // the subtitle that is burned in (only when burn_subtitles)
+  subtitle_index: number | null;    // the subtitle burned in (only when burn_subtitles)
   burn_subtitles: boolean;
   audio_converted: boolean;         // the audio is converted (also in a remux, where the video is copied)
-  subtitles: SubtitleTrack[];       // all subtitle tracks of the file
+  subtitles: SubtitleTrack[];       // every subtitle track of the file
   reasons: string[];                // why it isn't played as it is, one short sentence each
   reason: string | null;            // the same in one line
-  auto_quality: string | null;      // the original converted: the closest quality players offer ("30m" = 30 Mbps 4K,
-                                    // "20m", "15m" = 15 Mbps 4K, "12m", "8m", "4m", "2m"); null when a quality was asked for
-  video_range: string | null;       // what the screen gets of HDR video, for the player's details (null for SDR):
-                                    // "Dolby Vision P8.1", "Dolby Vision P7 FEL", "HDR10+", "HLG",
+  auto_quality: string | null;      // the original converted: the closest quality players offer ("30m" =
+                                    // 30 Mbps 4K, "20m", "15m" = 15 Mbps 4K, "12m", "8m", "4m", "2m");
+                                    // null when a quality was asked for
+  video_range: string | null;       // what the screen gets of HDR video, for the player's details (null for
+                                    // SDR): "Dolby Vision P8.1", "Dolby Vision P7 FEL", "HDR10+", "HLG",
                                     // "HDR10 (Dolby Vision base layer)", "HDR10+ (Dolby Vision base layer)",
-                                    // "Dolby Vision P8.1 (converted from P7 FEL)", "Dolby Vision P8.1 (HDR10+ left out)",
+                                    // "Dolby Vision P8.1 (converted from P7 FEL)",
+                                    // "Dolby Vision P8.1 (HDR10+ left out)",
                                     // "HDR10 (this screen doesn't show HDR10+)", "HDR10 (HDR10+ left out)",
-                                    // "HDR10 (converted from HLG)", "SDR (tone-mapped)", and "Dolby Vision P5 not
-                                    // decoded (wrong colours)" for a direct play the player insisted on.
-                                    // Version 1 players don't say which HDR formats their
-                                    // screen shows: their HDR10+ is named as it is
+                                    // "HDR10 (converted from HLG)", "SDR (tone-mapped)", and
+                                    // "Dolby Vision P5 not decoded (wrong colours)" for a direct play the
+                                    // player insisted on. Version 1 players don't say which HDR formats
+                                    // their screen shows, so their HDR10+ is named as it is
   adaptive: boolean;                // the transcode comes in several sizes the player moves between
-  live_bitrate: boolean;            // the video is converted, and PUT …/bitrate changes its bitrate as it plays
-                                    // by itself (hls.variants; see Several sizes): its own Automatic
-                                    // leaves the session be
+  live_bitrate: boolean;            // the video is converted, and PUT …/bitrate changes its bitrate as it
+                                    // plays. Not for a player that moves between sizes itself
+                                    // (hls.variants; see Several sizes)
 }
 ```
 
-Lists leave out the synopses of movies, shows, seasons and the rest: a big
-library's would be several times larger. `summaries=1` in the query of
-`GET /api/hubs/home`, `/api/libraries/{id}/items`, `/api/items/{id}/children`,
-`/api/collections/{id}`, `/api/playlists/{id}` and `/api/search` brings every
-item's `summary`, for a client that shows nothing more of a title than its
-lists carry (Kodi's information page).
+**`summaries=1`.** Lists leave out synopses (a big library's would be
+several times larger). `summaries=1` in the query of `GET /api/hubs/home`,
+`/api/libraries/{id}/items`, `/api/items/{id}/children`,
+`/api/collections/{id}`, `/api/playlists/{id}` and `/api/search` brings
+every item's `summary`, for clients whose information page shows only what
+lists carry (Kodi).
 
 ---
 
 ## Public endpoints
 
-| Method | Path | Body | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/health` | – | `{ "status": "ok" }` |
-| GET | `/api/server` | – | `{ name: string, version: string, commit: string, setup_required: boolean, setup_code_required: boolean }`; `commit` is the build's short hash, `"unknown"` when built without the repository. Setup takes the code from the server's log |
-| GET | `/api/oauth/device/qr?code=` | – | where to type a TV's code, as a QR code (PNG): see [TVs](#tvs) |
-| POST | `/api/setup` | `{ username, password, setup_code }` | `{ user: User, token? }` — creates the first (admin) account and signs in. `409` once a user exists, `403` without the right `setup_code` (5 tries per 15 minutes from each address, 1000 from all of them, then `429`) |
-| POST | `/api/auth/login` | `{ username, password, code? }` | `{ user: User, token? }` (`401` on bad credentials). With two-step sign-in, `code` is a code from the authenticator app or a recovery code: without it, or with a wrong one, `401` with `code: "two_step"` |
+| GET | `/api/health` | `public` | `{ "status": "ok" }` |
+| GET | `/api/server` | `public` | `{ name, version, commit, setup_required, setup_code_required }` |
+| GET | `/api/oauth/device/qr?code=` | `public` | where to type a TV's code, as a QR code (PNG): see [TVs](#tvs) |
+| POST | `/api/setup` | `public` | `{ username, password, setup_code }` → `{ user: User, token? }`: creates the first (admin) account and signs in |
+| POST | `/api/auth/login` | `public` | `{ username, password, code? }` → `{ user: User, token? }` |
+
+- `/api/server`: `commit` is the build's short hash, `"unknown"` when built
+  without the repository. The setup code is in the server's log.
+- `/api/setup`: `409` once a user exists; `403` without the right
+  `setup_code`. 5 tries per 15 minutes from each address and 1000 from all
+  addresses, then `429`.
+- `/api/auth/login`: `401` for bad credentials. With two-step sign-in,
+  `code` is a code from the authenticator app or a recovery code; without
+  it, or with a wrong one, `401` with `code: "two_step"`. Attempts are
+  limited as in [Errors](#errors) (5 failures per username from each
+  address per 15 minutes, 50 from all). A disabled account gets `403`, and
+  its sessions stop working.
 
 ## Auth
 
-| Method | Path | Body | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| POST | `/api/auth/logout` | – | `204`, cookie cleared. With an app's token, wherever it was sent, that app is signed out (its whole grant ends) |
-| GET | `/api/auth/me` | – | `User`. With an app's token, `User & { scope: string }`: `scope` is what the app was allowed (`"library play"`), and `is_admin`, `all_libraries` and `max_age` are the app's rights (`is_admin` always false) |
-| PUT | `/api/auth/password` | `{ current_password, new_password }` | `204`; signs the user out everywhere but this device, and every app using the account or allowed by it |
-| GET | `/api/auth/profiles` | – | `User[]`: home profiles this user can switch to (empty for non-home users) |
-| POST | `/api/auth/switch` | `{ user_id, pin?, password?, code? }` | `{ user, token? }`: this device becomes that profile (old session ends). A profile with a PIN needs it; after 100 wrong PINs in a row it stops working until it is set again. Without one, a profile that can see more than yours (an administrator, a higher age limit, libraries yours can't open) needs its password, and its `code` with two-step sign-in, unless you are an administrator; a managed one can't be switched to until it has a PIN. `429` after 5 wrong tries in 15 min. |
+| POST | `/api/auth/logout` | `public` | `204`, cookie cleared; ends the session of the token sent, if any. With an app's token, wherever it was sent, signs that app out (its whole grant ends) |
+| GET | `/api/auth/me` | `any app` | `User` |
+| PUT | `/api/auth/password` | `user` | `{ current_password, new_password }` → `204` |
+| GET | `/api/auth/profiles` | `user` | `User[]`: home profiles this user can switch to (empty for non-home users) |
+| POST | `/api/auth/switch` | `user` | `{ user_id, pin?, password?, code? }` → `{ user, token? }`: this device becomes that profile |
 
-Login attempts are throttled the same way (5 failures per username from each address per 15 min, 50 from all addresses).
-Disabled accounts get `403` at login and their sessions stop working.
+- `GET /api/auth/me` with an app's token: `User & { scope: string }`.
+  `scope` is what the app was allowed (`"library play"`); `is_admin`,
+  `all_libraries` and `max_age` are the app's rights (`is_admin` is always
+  false).
+- `PUT /api/auth/password` signs the user out everywhere but this device,
+  and signs out every app using the account or allowed by it.
+- `POST /api/auth/switch` ends this device's old session. What the switch
+  needs:
+  - a profile with a PIN: the PIN. After 100 wrong PINs in a row it stops
+    working until it is set again;
+  - a profile without a PIN that can see more than yours (an administrator,
+    a higher age limit, libraries yours can't open): its password, and its
+    `code` with two-step sign-in, unless you are an administrator;
+  - a managed profile without a PIN can't be switched to.
+
+  `429` after 5 wrong tries in 15 minutes.
 
 ### Two-step sign-in
 
-Optional for each account with a password: after the password, a 6-digit
-code from an authenticator app (TOTP: SHA-1, 30-second steps), or one of ten
-recovery codes. Each code works once; wrong ones count like wrong passwords,
-and after 100 in a row only a recovery code signs in. `pley reset-password`
-turns it off.
+Optional for each account with a password. After the password comes a
+6-digit code from an authenticator app (TOTP: SHA-1, 30-second steps) or one
+of ten recovery codes. Each code works once. Wrong codes count like wrong
+passwords; after 100 in a row only a recovery code signs in.
+`pley reset-password` turns it off.
 
-| Method | Path | Body | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/me/two-step` | – | `{ enabled, since: Timestamp \| null, recovery_codes_left }` |
-| POST | `/api/me/two-step/setup` | `{ password }` | `{ secret, uri, qr: { size, path }, expires_at }`: a new secret (base32), its `otpauth://` URI and a QR code of it (`path` draws its dark modules on a `size`-wide grid). `409` when it is on already |
-| POST | `/api/me/two-step` | `{ code }` | `{ recovery_codes: string[] }`: a code from the new secret turns it on (within 30 minutes, 5 tries); the codes are shown once |
-| DELETE | `/api/me/two-step` | `{ password, code }` | `204`, off |
-| POST | `/api/me/two-step/recovery-codes` | `{ password }` | `{ recovery_codes }`: new ones; the old ones stop working |
+| GET | `/api/me/two-step` | `user` | `{ enabled, since: Timestamp \| null, recovery_codes_left }` |
+| POST | `/api/me/two-step/setup` | `user` | `{ password }` → `{ secret, uri, qr: { size, path }, expires_at }`; `409` when it is on already |
+| POST | `/api/me/two-step` | `user` | `{ code }` → `{ recovery_codes: string[] }`: turns it on |
+| DELETE | `/api/me/two-step` | `user` | `{ password, code }` → `204`: turns it off |
+| POST | `/api/me/two-step/recovery-codes` | `user` | `{ password }` → `{ recovery_codes }`: new codes; the old ones stop working |
+
+- `setup` makes a new secret: `secret` is base32, `uri` its `otpauth://`
+  URI, and `qr` a QR code of it (`path` draws its dark modules on a
+  `size`-wide grid).
+- `POST /api/me/two-step` takes a code from the new secret within 30
+  minutes, 5 tries. Recovery codes are shown once.
 
 ## Your account
 
-| Method | Path | Body | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| PATCH | `/api/me` | `{ display_name?, avatar_color?, audio_language?, subtitle_language?, subtitle_mode? }` (`null` clears) | `User` |
-| PUT | `/api/me/track-defaults` | `{ audio_language?, subtitle_language?, subtitle_mode? }`: all three at once; a language left out is `null`, a mode left out is `forced` | the profile as [`GET /api/auth/me`](#auth) shows it; `400` for a language that isn't 2 or 3 lower-case letters, or another mode. For apps allowed `play` too |
-| PUT | `/api/me/pin` | `{ pin: string \| null, password }` | `204`; 4–8 digits, `null` removes it (`403` with a wrong password) |
-| PUT | `/api/me/avatar` | raw image bytes (JPEG, PNG, WebP, GIF, BMP; ≤ 10 MB) | `User`; stored as a 256 px square JPEG |
-| DELETE | `/api/me/avatar` | – | `204` |
-| GET | `/api/users/{id}/avatar` | – | `image/jpeg` (any signed-in user, for the profile switcher; apps: their own profile's and their household's, else `404`) |
-| GET | `/api/me/devices` | – | `Device[]`: `{ id, name, user_agent, ip, created_at, last_seen_at, current }` |
-| DELETE | `/api/me/devices/{id}` | – | `204`, signs that device out |
+| PATCH | `/api/me` | `user` | `{ display_name?, avatar_color?, audio_language?, subtitle_language?, subtitle_mode? }` (`null` clears) → `User` |
+| PUT | `/api/me/track-defaults` | `play` | `{ audio_language?, subtitle_language?, subtitle_mode? }` → the profile as [`GET /api/auth/me`](#auth) shows it |
+| PUT | `/api/me/pin` | `user` | `{ pin: string \| null, password }` → `204`. 4–8 digits; `null` removes it; `403` for a wrong password |
+| PUT | `/api/me/avatar` | `user` | raw image bytes (JPEG, PNG, WebP, GIF, BMP; ≤ 10 MB) → `User`. Stored as a 256 px square JPEG |
+| DELETE | `/api/me/avatar` | `user` | `204` |
+| GET | `/api/users/{id}/avatar` | `any app` | `image/jpeg`, for the profile switcher. Apps: only their own profile's and their household's, else `404` |
+| GET | `/api/me/devices` | `user` | `Device[]`: `{ id, name, user_agent, ip, created_at, last_seen_at, current }` |
+| DELETE | `/api/me/devices/{id}` | `user` | `204`, signs that device out |
 
-Titles you haven't picked tracks for start with your defaults: the main
-audio track in `audio_language` (the file's default without one), and
-subtitles as `subtitle_mode` says: `off` never; `forced` (the default) only
-forced subtitles in the language of the audio, which translate foreign
-dialogue; `foreign` full subtitles in `subtitle_language` (or the audio
-language) when the audio is tagged with another language; `always` in that
-language whenever the file has them. Every mode but `off` falls back to the
-forced ones. A choice made for a show or a movie wins over these.
-Subtitles count as forced when flagged so, or when only their title says
-so (the word "forced", or "signs" as in "Signs & Songs"), as many files
-have them. Languages match in any of their ISO 639 forms (`en`, `eng`;
-`fr`, `fre`, `fra`); an untagged or `und` track is in no language.
+`PUT /api/me/track-defaults` sets all three at once: a language left out is
+`null`, a mode left out is `forced`. `400` for a language that isn't 2 or 3
+lower-case letters, or an unknown mode. Apps use it, never `PATCH /api/me`
+(name and picture stay in the web app).
 
-Apps change these with `PUT /api/me/track-defaults`, never with `PATCH
-/api/me`, which also changes the name and picture: those stay in the web app.
+**Track defaults.** Titles without a track choice start with:
+
+- audio: the main track in `audio_language`, else the file's default;
+- subtitles, by `subtitle_mode`:
+
+  | Mode | Subtitles shown |
+  |---|---|
+  | `off` | never |
+  | `forced` (default) | forced subtitles in the audio's language (they translate foreign dialogue) |
+  | `foreign` | full subtitles in `subtitle_language` (or the audio language) when the audio is in another language |
+  | `always` | full subtitles in that language whenever the file has them |
+
+  Every mode but `off` falls back to forced subtitles.
+
+A choice made for a show or movie wins over these defaults. Subtitles count
+as forced when flagged so, or when their title says so ("forced", or
+"signs" as in "Signs & Songs"). Languages match in any ISO 639 form (`en`,
+`eng`; `fr`, `fre`, `fra`); an untagged or `und` track has no language.
 
 ## Apps (OAuth 2.1)
 
