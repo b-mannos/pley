@@ -1056,92 +1056,172 @@ artwork, streams and the compatibility API.
 
 ## Libraries
 
-Libraries are listed in one order, the same for every user: the one
-administrators choose (new libraries go last). Lists of libraries, the home
-page's rows and the compatibility API's sections all follow it; users who
-may open only some libraries see those, in that order.
-
-| Method | Path | Body / Query | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/libraries` | query: `order=shared` | `Library[]` in the user's own order when they chose one (the ones it places first, any others after them in the shared order), else in the shared order; `order=shared`: in the shared order whatever the user chose (Settings → Libraries) |
-| POST | `/api/libraries` *(admin)* | `{ name, kind, paths: string[] }` | `Library` (a scan is queued automatically) |
-| PUT | `/api/libraries/order` *(admin)* | `{ ids: Id[] }` (every library, once) | `Library[]` in the new order: the shared order, which everyone who hasn't chosen their own sees. `400` when an id is listed twice, `409` when `ids` aren't the libraries there are (one was added or deleted since they were listed) |
-| PUT | `/api/me/libraries/order` | `{ ids: Id[] }` (every library the user may open, once) | `Library[]` in the new order: the user's own, on every list of their libraries (Home's rows and the Plex-compatible API's sections too), whatever the shared order becomes. Libraries they are given later, and new ones, come after it. `400` when an id is listed twice, `409` when `ids` aren't the libraries the user may open. `libraries_changed` to the user's streams. For apps allowed `play` too |
-| DELETE | `/api/me/libraries/order` | – | `Library[]` in the shared order, which the user sees again; `libraries_changed` to the user's streams |
-| GET | `/api/libraries/{id}` | – | `Library` |
-| PATCH | `/api/libraries/{id}` *(admin)* | `{ name?, paths? }` | `Library` |
-| DELETE | `/api/libraries/{id}` *(admin)* | – | `204` |
-| POST | `/api/libraries/{id}/scan` *(admin)* | `{ force?: boolean }` (force = re-probe files and refresh metadata) | `202` |
-| POST | `/api/libraries/scan` *(admin)* | – | `202` (scan all) |
-| GET | `/api/libraries/{id}/items` | query: `sort=title\|year\|added\|rating\|user_rating\|release\|duration\|last_played\|bitrate` (default `title`), `order=asc\|desc`, `watched=true\|false`, `genre=<name>`, `year=<yyyy>`, `offset`, `limit`, `summaries=1` (with synopses, see ItemSummary) | `{ total: number, items: ItemSummary[] }` — top-level items only; `total` counts every match, not just the page; `watched=true` matches shows whose every episode is watched. Items leave out `backdrop_url` and `thumb_url` (grids show posters). Answers carry an `ETag` and `Cache-Control: private, no-cache`; `If-None-Match` with the same tag answers `304` while the library, the user's watch state and their access are unchanged |
-| GET | `/api/libraries/{id}/filters` | – | `{ genres: string[], years: number[] }` |
-| GET | `/api/libraries/{id}/hubs` | – | `{ hubs: Hub[] }` (continue watching, recently added, recently released, top rated – empty hubs omitted) |
+| GET | `/api/libraries` | `library` | `Library[]` in the user's order (query `order=shared`: the shared order) |
+| POST | `/api/libraries` | `admin` | `{ name, kind, paths: string[] }` → `Library`; queues a scan |
+| PUT | `/api/libraries/order` | `admin` | `{ ids: Id[] }` (every library, once) → `Library[]` in the new shared order |
+| PUT | `/api/me/libraries/order` | `play` | `{ ids: Id[] }` (every library the user may open, once) → `Library[]` in the user's own new order |
+| DELETE | `/api/me/libraries/order` | `play` | `Library[]` in the shared order, which the user sees again |
+| GET | `/api/libraries/{id}` | `library` | `Library` |
+| PATCH | `/api/libraries/{id}` | `admin` | `{ name?, paths? }` → `Library` |
+| DELETE | `/api/libraries/{id}` | `admin` | `204` |
+| POST | `/api/libraries/{id}/scan` | `admin` | `{ force?: boolean }` → `202`. `force` re-probes files and refreshes metadata |
+| POST | `/api/libraries/scan` | `admin` | `202`: scans every library |
+| GET | `/api/libraries/{id}/items` | `library` | `{ total, items: ItemSummary[] }`: top-level items, paged |
+| GET | `/api/libraries/{id}/filters` | `library` | `{ genres: string[], years: number[] }` |
+| GET | `/api/libraries/{id}/hubs` | `library` | `{ hubs: Hub[] }`: continue watching, recently added, recently released, top rated (empty hubs left out) |
+
+**Order.** Libraries have one shared order, chosen by administrators (new
+libraries go last). A user may choose their own (Settings → Libraries).
+Lists of libraries, Home's rows and the compatibility API's sections follow
+the user's order when there is one (libraries it doesn't name, and new
+ones, after it in the shared order), else the shared order. Users who may
+open only some libraries see those, in that order.
+
+- `PUT /api/libraries/order`: `400` when an id is listed twice, `409` when
+  `ids` aren't the libraries there are (one was added or deleted since they
+  were listed).
+- `PUT /api/me/libraries/order`: `400` when an id is listed twice, `409`
+  when `ids` aren't the libraries the user may open. It and `DELETE` send
+  `libraries_changed` to the user's event streams.
+
+**`GET /api/libraries/{id}/items`** query:
+
+| Parameter | Values |
+|---|---|
+| `sort` | `title` (default), `year`, `added`, `rating`, `user_rating`, `release`, `duration`, `last_played`, `bitrate` |
+| `order` | `asc`, `desc` |
+| `watched` | `true`, `false`; `true` matches shows whose every episode is watched |
+| `genre` | a genre name |
+| `year` | `yyyy` |
+| `offset`, `limit` | paging |
+| `summaries` | `1`: with synopses ([`summaries=1`](#types)) |
+
+Items leave out `backdrop_url` and `thumb_url` (grids show posters).
+Answers carry an `ETag` and `Cache-Control: private, no-cache`;
+`If-None-Match` with the same tag answers `304` while the library, the
+user's watch state and their access are unchanged.
 
 ## Items
 
-| Method | Path | Body / Query | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/items/{id}` | – | `ItemDetail`. For a movie or episode, the server also reads its video files ahead from where *Play* starts for the user (as `POST …/prefetch` does), without waiting for it |
-| POST | `/api/items/{id}/prefetch` | – | `202` at once. *Play* is about to be pressed (a card's Play button has the pointer or the focus): the transcoder reads ahead the parts of the video a playback from the user's resume point reads first (see `POST /v1/prefetch` in TRANSCODER.md), so they come from a cache when it starts; worth up to seconds for files on a network share. Movies, episodes and extras; a show or season: its on-deck episode; other kinds: nothing. At most once every two minutes per file. |
-| GET | `/api/items/{id}/children` | – | `{ items: ItemSummary[] }` (seasons of a show, episodes of a season, albums of an artist, tracks of an album), ordered by index |
-| GET | `/api/items/{id}/on-deck` | – | `{ item: ItemSummary \| null }` – for show/season: the episode to play when pressing *Play* (in progress, else next up as in [Continue Watching](#continue-watching), else the first unwatched, else the first) |
-| GET | `/api/items/{id}/related` | `limit` (default 20, max 60) | `{ items: ItemSummary[] }` – "More Like This" for movies and shows: the same library's titles sharing collections, directors, creators and top-billed cast, genres and a period, best first (empty for other kinds) |
-| GET | `/api/items/{id}/next` | – | `{ item: ItemSummary \| null }` – episode/track following this one (for autoplay) |
-| POST | `/api/items/{id}/progress` | `{ position_ms, duration_ms?, state: "playing"\|"paused"\|"stopped", session_id?, age_ms? }` | `204`. ≥ 90 % marks the item watched and clears the resume point. `age_ms`: how long ago a report sent late was made (a download played while the server was out of reach, up to 90 days); it changes nothing when the item's state changed since (played elsewhere, marked watched). A report that changes what the user's devices show (watched, a resume point started, cleared, or moved by a pause or stop) sends `user_state_changed` (see "Activity & events") |
-| POST | `/api/items/{id}/watched` | – | `204` (containers: all leaves); `user_state_changed` to the user's streams, unless nothing changed |
-| PATCH | `/api/items/{id}` *(admin)* | `{ title?, sort_title?, original_title?, year?, summary?, tagline?, studio?, content_rating?, release_date?, genres? }` | `ItemDetail`. A value edits and locks the field (refreshes and scans keep it); `null` unlocks it. `locked_fields` in `ItemDetail` lists locked fields. |
-| GET | `/api/items/{id}/matches?title=&year=` *(admin)* | – | TMDB candidates `{ tmdb_id, title, original_title, year, overview, poster_url }[]` for movies and shows (needs a TMDB key) |
-| POST | `/api/items/{id}/match` *(admin)* | `{ tmdb_id }` | `ItemDetail` after re-matching and refreshing. A show whose TV source is TVmaze or TheTVDB is found there by the chosen entry's IMDb and TheTVDB ids. |
-| GET | `/api/items/{id}/artwork/{poster\|backdrop\|thumb}` *(admin)* | – | TMDB images `{ url, preview_url, width, height, language, votes }[]` |
-| PUT | `/api/items/{id}/artwork/{kind}` *(admin)* | `{ url }` (a TMDB image) | `ItemDetail`; the picture is downloaded and locked |
-| POST | `/api/items/{id}/artwork/{kind}/upload` *(admin)* | raw image bytes (≤ 25 MB) | `ItemDetail`; stored as JPEG and locked |
-| DELETE | `/api/items/{id}/artwork/{kind}` *(admin)* | – | `204`; back to local or downloaded artwork |
-| PUT | `/api/items/{id}/rating` | `{ rating: number \| null }` (0-10, rounded to half stars; `null` clears it) | `204`; the user's own rating, shown as `user_state.rating` |
-| PUT | `/api/items/{id}/streams` | `{ file_id?, audio_index?, subtitle_index? }` (`subtitle_index` `null` or left out = off; `file_id` defaults to the item's first file) | `204`. Remembers the choice for the whole show (episodes) or the movie, as language/title/forced, so every episode starts with its own matching tracks. `audio_index` left out keeps the audio chosen before (subtitles alone were picked); `null` remembers none, so each play chooses it as for a title without a choice. Players send it only when the person picked an audio track. |
-| POST | `/api/items/{id}/unwatched` | – | `204`; `user_state_changed` to the user's streams, unless nothing changed |
-| POST | `/api/items/{id}/refresh` *(admin)* | – | `202` re-fetch metadata from the item's source (movies: TMDB; shows, seasons, episodes: the TV source; artists, albums, tracks: MusicBrainz). `400` when that source is off or lacks its key. |
-| POST | `/api/items/{id}/analyze` *(admin)* | – | `202` find the intro and credits again: a movie's chapters, or every episode of an episode's season, a season or a show. `400` for other kinds. |
-| GET | `/api/items/{id}/images/{poster\|backdrop\|thumb}` | query: `w=<px>` (optional resize, bucketed), `v=` (cache buster, ignored) | image bytes (`image/jpeg`), long-lived cache headers. Falls back to parent artwork (season → show). `404` if none. |
-| GET | `/api/items/{id}/subtitles/search` | query: `file_id`, `language` | `{ results: SubtitleResult[] }`: subtitles for the file on OpenSubtitles (see [Added subtitles](#added-subtitles)) |
-| POST | `/api/items/{id}/subtitles` | `{ result, file_id? }`, or `multipart/form-data` | `201` `SubtitleTrack`: subtitles added to the file (see [Added subtitles](#added-subtitles)) |
-| DELETE | `/api/items/{id}/subtitles/{index}` | – | `204`; an added track of the title, by an administrator or whoever added it |
+| GET | `/api/items/{id}` | `library` | `ItemDetail` |
+| GET | `/api/items/{id}/children` | `library` | `{ items: ItemSummary[] }` by index: a show's seasons, a season's episodes, an artist's albums, an album's tracks |
+| GET | `/api/items/{id}/on-deck` | `library` | `{ item: ItemSummary \| null }`: the episode a show's or season's *Play* starts |
+| GET | `/api/items/{id}/next` | `library` | `{ item: ItemSummary \| null }`: the episode or track after this one (autoplay) |
+| GET | `/api/items/{id}/related?limit=` | `library` | `{ items: ItemSummary[] }`: "More Like This" (default 20, max 60) |
+| GET | `/api/items/{id}/images/{poster\|backdrop\|thumb}` | `library` | `image/jpeg`; query `w=<px>` (optional resize, bucketed), `v=` (cache buster, ignored) |
+| POST | `/api/items/{id}/prefetch` | `play` | `202` at once: read ahead what *Play* reads first |
+| POST | `/api/items/{id}/progress` | `play` | `{ position_ms, duration_ms?, state, session_id?, age_ms? }` → `204` |
+| POST | `/api/items/{id}/watched` | `play` | `204`; containers: every leaf |
+| POST | `/api/items/{id}/unwatched` | `play` | `204` |
+| PUT | `/api/items/{id}/rating` | `play` | `{ rating: number \| null }` → `204`: the user's own rating (`user_state.rating`) |
+| PUT | `/api/items/{id}/streams` | `play` | `{ file_id?, audio_index?, subtitle_index? }` → `204`: remembers track choices |
+| PATCH | `/api/items/{id}` | `admin` | `{ title?, sort_title?, original_title?, year?, summary?, tagline?, studio?, content_rating?, release_date?, genres? }` → `ItemDetail` |
+| GET | `/api/items/{id}/matches?title=&year=` | `admin` | TMDB candidates `{ tmdb_id, title, original_title, year, overview, poster_url }[]` for movies and shows (needs a TMDB key) |
+| POST | `/api/items/{id}/match` | `admin` | `{ tmdb_id }` → `ItemDetail`, re-matched and refreshed |
+| GET | `/api/items/{id}/artwork/{poster\|backdrop\|thumb}` | `admin` | TMDB images `{ url, preview_url, width, height, language, votes }[]` |
+| PUT | `/api/items/{id}/artwork/{kind}` | `admin` | `{ url }` (a TMDB image) → `ItemDetail`; downloaded and locked |
+| POST | `/api/items/{id}/artwork/{kind}/upload` | `admin` | raw image bytes (≤ 25 MB) → `ItemDetail`; stored as JPEG and locked |
+| DELETE | `/api/items/{id}/artwork/{kind}` | `admin` | `204`; back to local or downloaded artwork |
+| POST | `/api/items/{id}/refresh` | `admin` | `202`: re-fetch metadata from the item's source |
+| POST | `/api/items/{id}/analyze` | `admin` | `202`: find the intro and credits again |
+| GET | `/api/items/{id}/subtitles/search` | `play` | `{ results: SubtitleResult[] }` ([Added subtitles](#added-subtitles)) |
+| POST | `/api/items/{id}/subtitles` | `play` | `201` `SubtitleTrack` ([Added subtitles](#added-subtitles)) |
+| DELETE | `/api/items/{id}/subtitles/{index}` | `play` | `204`; an added track of the title, by an administrator or whoever added it |
+
+- **`GET /api/items/{id}`** of a movie or episode also starts reading its
+  video ahead from where *Play* starts for the user, as `prefetch` does,
+  without waiting.
+- **`prefetch`**: *Play* is about to be pressed (a card's Play button has
+  the pointer or focus). The transcoder reads ahead the parts a playback
+  from the user's resume point reads first (`POST /v1/prefetch` in
+  [TRANSCODER.md](TRANSCODER.md)), so they come from a cache; worth up to
+  seconds for files on a network share. Movies, episodes and extras; a show
+  or season: its on-deck episode; other kinds: nothing. At most once every
+  two minutes per file.
+- **`on-deck`**: the episode in progress, else next up (as in
+  [Continue Watching](#continue-watching)), else the first unwatched, else
+  the first.
+- **`related`**: movies and shows of the same library sharing collections,
+  directors, creators, top-billed cast, genres and a period, best first.
+  Empty for other kinds.
+- **`images`**: long-lived cache headers. Falls back to the parent's
+  artwork (season → show); `404` if none.
+- **`progress`**: `state` is `playing`, `paused` or `stopped`.
+  - At 90 % or more the item is marked watched and the resume point
+    cleared.
+  - `age_ms`: how long ago a late report was made (a download played while
+    the server was out of reach, up to 90 days). It changes nothing when
+    the item's state changed since (played elsewhere, marked watched).
+  - A report that changes what the user's devices show sends
+    `user_state_changed` ([Watch state on other devices](#watch-state-on-other-devices)).
+  - When to send it: see [Playback](#playback).
+- **`watched`, `unwatched`** send `user_state_changed` to the user's
+  streams, unless nothing changed.
+- **`rating`**: 0-10, rounded to half stars; `null` clears it.
+- **`streams`** remembers the choice for the whole show (episodes) or the
+  movie, as language, title and forced flag, so every episode starts with
+  its own matching tracks.
+  - `file_id` defaults to the item's first file.
+  - `subtitle_index` `null` or left out: off.
+  - `audio_index` left out keeps the audio chosen before (only subtitles
+    were picked); `null` remembers none, so each play chooses as for a
+    title without a choice. Players send it only when the person picked an
+    audio track.
+- **`PATCH`**: a value edits and locks the field (refreshes and scans keep
+  it); `null` unlocks it. `ItemDetail.locked_fields` lists locked fields.
+- **`match`**: a show whose TV source is TVmaze or TheTVDB is found there by
+  the chosen entry's IMDb and TheTVDB ids.
+- **`refresh`** sources: movies, TMDB; shows, seasons and episodes, the TV
+  source; artists, albums and tracks, MusicBrainz. `400` when that source
+  is off or lacks its key.
+- **`analyze`**: a movie's chapters, or every episode of the season of an
+  episode, a season or a show. `400` for other kinds.
 
 ### Added subtitles
 
-Subtitles anyone who can see a movie, episode or extra adds to one of its
-files: a file uploaded from the web app, or one found on OpenSubtitles. Pley
-keeps them in its data folder (`subtitles/`, see docs/STORAGE.md), never
-next to the media, and every client gets them as it gets a subtitle file
-next to the video: an external text track (`external: true`, `text_based:
-true`, `added: true`) in `PlaybackInfo.subtitles` and the file's
-`MediaStream`s, with a WebVTT `url`, chosen by `subtitle_index` in `POST
-/api/playback` and `PUT /api/items/{id}/streams`, listed by the
-Plex-compatible API (`/library/streams/{id}` serves them as they are), and
-shown by the player like any text track (a transcode that is to draw one onto
-the video is given its file).
+Anyone who can see a movie, episode or extra may add subtitles to one of its
+files: a file uploaded from the web app, or one found on OpenSubtitles.
 
-Track indexes don't collide: a file's own tracks are below 1000 (FFmpeg
-opens no more streams), subtitle files next to the video take 1000 to 8999
-(in path order; more aren't listed) and added ones 9000 to 9999 (the
-Plex-compatible API's stream ids, `file_id × 10000 + index`, hold four
-digits). An added track's index is given once among the files of its title,
-counting on from the highest (the lowest free one once 9999 is taken), so
-`DELETE /api/items/{id}/subtitles/{index}` needs no file; ids are never given
-twice, so a new track never shows an old one's cached WebVTT.
+- Pley keeps them in its data folder (`subtitles/`, see
+  [STORAGE.md](STORAGE.md)), never next to the media.
+- Clients get them like a subtitle file next to the video: an external text
+  track (`external: true`, `text_based: true`, `added: true`) in
+  `PlaybackInfo.subtitles` and the file's `MediaStream`s, with a WebVTT
+  `url`. They are chosen by `subtitle_index` in `POST /api/playback` and
+  `PUT /api/items/{id}/streams`, listed by the compatibility API
+  (`/library/streams/{id}` serves them as they are), and shown like any text
+  track (a transcode that burns one in is given its file).
+- Track indexes: a file's own tracks are below 1000 (FFmpeg opens no more
+  streams), subtitle files next to the video 1000 to 8999 (in path order;
+  more aren't listed), added ones 9000 to 9999 (the compatibility API's
+  stream ids, `file_id × 10000 + index`, hold four digits).
+- An added track's index is unique among the files of its title, counting
+  on from the highest (the lowest free one once 9999 is taken), so
+  `DELETE /api/items/{id}/subtitles/{index}` needs no file. Indexes are
+  never reused, so a new track never shows an old one's cached WebVTT.
 
-`GET /api/items/{id}/subtitles/search?file_id=&language=`: `file_id` the
-title's file (default: its first), `language` OpenSubtitles' or Pley's
-language codes, comma separated (`en,fr`, `eng`, `pt-BR`; Portuguese and
-Chinese ask for both of their regions; default: the user's subtitle language
-from their track choices, else their audio language, else `en`; `400` for
-anything that isn't a language code, or more than 20). OpenSubtitles is asked
-by the file's OpenSubtitles hash and the film's IMDb and TMDB ids (an
-episode: its show's, with its season and number), or else by title and year.
+**Search**: `GET /api/items/{id}/subtitles/search?file_id=&language=`
+
+- `file_id`: the title's file (default: its first).
+- `language`: OpenSubtitles' or Pley's language codes, comma separated
+  (`en,fr`, `eng`, `pt-BR`; Portuguese and Chinese ask for both of their
+  regions). Default: the user's subtitle language from their track
+  choices, else their audio language, else `en`. `400` for anything that
+  isn't a language code, or more than 20.
+- OpenSubtitles is asked by the file's OpenSubtitles hash and the film's
+  IMDb and TMDB ids (an episode: its show's, with its season and number),
+  else by title and year.
+- Results made for the file come first, then the most downloaded.
+  Subtitles split over several files (CDs) are left out.
 
 ```ts
 interface SubtitleResult {
-  id: string;                 // opaque, passed back to POST: "opensubtitles:1923552:en" (and ":hi", ":forced",
-                              // ":srt" when they apply)
+  id: string;                 // opaque, passed back to POST: "opensubtitles:1923552:en"
+                              // (plus ":hi", ":forced", ":srt" when they apply)
   provider: "opensubtitles";
   language: string;           // OpenSubtitles' code: "en", "pt-BR"
   name: string;               // the release it was made for, or its file's name
@@ -1153,116 +1233,129 @@ interface SubtitleResult {
 }
 ```
 
-Results made for the file come first, then the most downloaded; subtitles
-split over several files (CDs) are left out. When the server has no
-OpenSubtitles API key, search and adding a result answer `503 { code:
-"unavailable", message, setup: false }`, for clients to say "Subtitle search
-isn't set up on this server" (and point administrators to Settings → Server);
-other `503`s (OpenSubtitles rejects the key or account, or can't be reached)
-say `setup: true`. When the day's downloads are used up, adding a result
-answers `429` with OpenSubtitles' words (when the quota renews).
-
-`POST /api/items/{id}/subtitles` adds:
+**Add**: `POST /api/items/{id}/subtitles` takes either:
 
 - a search result: `application/json` `{ "result": "<id>", "file_id"?: n }`.
-  It is downloaded from OpenSubtitles (with the account in the settings when
-  there is one, for its larger quota) and added in the result's language,
-  named after its release.
+  It is downloaded from OpenSubtitles (with the account in the settings, if
+  any, for its larger quota) and added in the result's language, named
+  after its release;
 - a file: `multipart/form-data` with `file` (`.srt`, `.vtt`, `.ass` or
-  `.ssa`, 2 MiB at most), `language` (a language code or English name:
-  `en`, `eng`, `English`, `pt-BR`), and if need be `hearing_impaired` and
-  `forced` (`true`/`false`) and `file_id`. Named after the file.
+  `.ssa`, at most 2 MiB), `language` (a code or English name: `en`, `eng`,
+  `English`, `pt-BR`), and optionally `hearing_impaired`, `forced`
+  (`true`/`false`) and `file_id`. Named after the file.
 
-Either way the text is made UTF-8 (UTF-16 by its byte order mark, else UTF-8
-when it reads as such, else Windows-1252), checked to be the subtitles it
-says (SRT cues, WebVTT with its header and cues, ASS/SSA with events; a
-WebVTT file named `.srt` is taken as WebVTT), and its language kept as ISO
-639-2 where Pley knows the language (`eng`), as other tracks have it. `400`
-when it isn't, `404` for a title the user can't see, `409` once a title has
-1000 added tracks. The answer is the new `SubtitleTrack`, `deletable` for its
-adder.
+Either way the text is converted to UTF-8 (UTF-16 by its byte order mark,
+else UTF-8 when valid, else Windows-1252) and checked to be the subtitles
+it says (SRT cues; WebVTT with its header and cues; ASS/SSA with events; a
+WebVTT file named `.srt` is taken as WebVTT). Its language is kept as ISO
+639-2 where Pley knows it (`eng`). The answer is the new `SubtitleTrack`,
+`deletable` for whoever added it.
+
+| Status | When |
+|---|---|
+| `400` | not valid subtitles |
+| `404` | a title the user can't see |
+| `409` | the title has 1000 added tracks |
+| `429` | adding a result when the day's OpenSubtitles downloads are used up (with OpenSubtitles' words: when the quota renews) |
+| `503` | search or adding a result. `{ code: "unavailable", message, setup: false }` when the server has no OpenSubtitles API key: clients say "Subtitle search isn't set up on this server" (and point administrators to Settings → Server). `setup: true` when OpenSubtitles rejects the key or account, or can't be reached |
 
 ## Home & search
 
-| Method | Path | Query | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/hubs/home` | – | `{ hubs: Hub[] }` – `continue_watching` (in-progress + next up), then `my_list` ("My List", its 20 newest), then `recently_added:<library_id>` per library, in the libraries' order. Empty hubs are left out |
-| DELETE | `/api/continue-watching/{id}` | – | `204`. Takes a row out of the user's Continue Watching (see below) |
-| GET | `/api/search` | `q`, `limit` (default 40) | `{ items: ItemSummary[], people: PersonSummary[] }`: items ranked by relevance; people whose name has words starting with each word of `q`, most credited first |
+| GET | `/api/hubs/home` | `library` | `{ hubs: Hub[] }` |
+| DELETE | `/api/continue-watching/{id}` | `play` | `204`: takes a title out of the user's Continue Watching |
+| GET | `/api/search?q=&limit=` | `library` | `{ items: ItemSummary[], people: PersonSummary[] }` (`limit` default 40) |
+
+- **Home** hubs, empty ones left out: `continue_watching` (in progress and
+  next up), then `my_list` ("My List", its 20 newest), then
+  `recently_added:<library_id>` per library in the libraries' order.
+- **Search**: items ranked by relevance; people whose name has words
+  starting with each word of `q`, most credited first.
 
 ### Continue Watching
 
 Continue Watching holds the movies and episodes the user is part way
-through, and for each show they've been watching lately its *next up*
-episode, which is also what the show's *Play* starts (`on-deck`) when no
-episode is in progress. Next up is the episode right after the one watched
-most recently, when that one is unwatched. When it was seen before:
+through, plus the *next up* episode of each show they've watched lately.
+Next up is also what the show's *Play* starts (`on-deck`) when no episode
+is in progress.
 
-- **a rewatch goes on in order:** the episode watched most recently was a
-  rewatch (seen twice or more), and either nothing after it is unwatched or
-  the episode before it was rewatched too, after anything later was seen.
-  Next up is then the episode right after it, seen or not, so going through
-  a show again never jumps over episodes;
-- **otherwise** (a gap filled, or one favourite seen again): the first
+Next up is the episode right after the one watched most recently, when
+that one is unwatched. When it was seen before:
+
+- **A rewatch goes on in order**: the episode watched most recently was a
+  rewatch (seen twice or more), and either nothing after it is unwatched,
+  or the episode before it was rewatched too, after anything later was
+  seen. Next up is the episode right after it, seen or not, so going
+  through a show again never skips episodes.
+- **Otherwise** (a gap filled, or one favorite seen again): the first
   unwatched episode after it, where the user had got to.
 
-A seen episode stopped part of the way stays out of the in-progress rows
-(apps play a seen episode from its start), and can still be next up.
+A seen episode stopped part way stays out of the in-progress rows (apps
+play a seen episode from its start), and can still be next up.
 
-`DELETE /api/continue-watching/{id}` takes what a Continue Watching row
-shows out of the user's own Continue Watching: a movie, or for an episode
-(in progress or next up) its whole show (a show's or a season's id does the
-same). It stays out of every Continue Watching (Home's, the libraries' hubs,
-the compatibility API's On Deck and `continueWatching` hubs) until the user plays
-that movie or any episode of that show again: a progress report, or a
-watched mark, newer than the hide. Then it comes back as it would have.
-Progress and watched marks stay as they are. Other kinds answer `400`. The
-compatibility API's `PUT /actions/removeFromContinueWatching?ratingKey=` does the
-same. Either sends `user_state_changed` for the movie or show to the
-user's event streams, so their other devices fetch Home again.
+**`DELETE /api/continue-watching/{id}`** takes a movie, or for an episode
+(in progress or next up) its whole show, out of the user's Continue
+Watching. A show's or season's id does the same; other kinds answer `400`.
+
+- It stays out of every Continue Watching (Home's, the libraries' hubs, the
+  compatibility API's On Deck and `continueWatching` hubs) until the user
+  plays that movie or any episode of that show again: a progress report or
+  watched mark newer than the hide.
+- Progress and watched marks are kept.
+- The compatibility API's `PUT /actions/removeFromContinueWatching?ratingKey=`
+  does the same.
+- Either sends `user_state_changed` for the movie or show to the user's
+  event streams, so their other devices fetch Home again.
 
 ### My List
 
-| Method | Path | Body | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/watchlist` | – | `{ items: ItemSummary[] }`, newest added first |
-| PUT | `/api/watchlist/{id}` | – | `204`; adds a movie or a show (again: nothing changes). Other kinds: `400` |
-| DELETE | `/api/watchlist/{id}` | – | `204`; takes it out (not there: nothing changes) |
+| GET | `/api/watchlist` | `library` | `{ items: ItemSummary[] }`, newest added first |
+| PUT | `/api/watchlist/{id}` | `play` | `204`: adds a movie or show (already there: no change). Other kinds: `400` |
+| DELETE | `/api/watchlist/{id}` | `play` | `204`: takes it out (not there: no change) |
 
-Each user's own list. Titles the user can't see (library access, age
-limit) are left out of it, and come back when they can again. A movie
-leaves it once it is watched (played to the end, or marked watched here or
-through the compatibility API); a show stays until it is removed. `ItemDetail` says
-`in_watchlist`. Every change, a movie leaving by itself included, sends
-`watchlist_changed` to the user's event streams (only theirs), so their
-other devices fetch Home again.
+- Each user has their own list. Titles the user can't see (library access,
+  age limit) are left out, and come back when they can again.
+- A movie leaves the list once watched (played to the end, or marked
+  watched here or through the compatibility API). A show stays until
+  removed.
+- `ItemDetail.in_watchlist` says whether a title is on it.
+- Every change, a movie leaving by itself included, sends
+  `watchlist_changed` to the user's own event streams.
 
 ## Cast and crew
 
-Credits come with the rest of the metadata. From TMDB: movies' cast and
-crew; shows' everyone in any episode and the creators; episodes' guest stars,
-directors and writers. From TVmaze or TheTVDB: shows' main cast and creators.
-A person is known by the id of the source that credited them, so the same
-actor from two sources is two people. Items matched before an upgrade get
-theirs fetched in the background once. People only appear where the user can
-see an item they are credited in.
-
-| Method | Path | Query | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/people/{id}` | – | `PersonDetail`; `404` when the person has no credits this user can see |
-| GET | `/api/people/{id}/photo` | `w=<px>`, `v=` | image bytes; downloaded from the source (TMDB, TVmaze, TheTVDB) the first time. `404` without a photo |
+| GET | `/api/people/{id}` | `library` | `PersonDetail`; `404` when the person has no credits this user can see |
+| GET | `/api/people/{id}/photo` | `library` | image bytes; query `w=<px>`, `v=`. `404` without a photo |
+
+- Credits come with the rest of the metadata. TMDB: movies' cast and crew;
+  shows' everyone in any episode, and the creators; episodes' guest stars,
+  directors and writers. TVmaze or TheTVDB: shows' main cast and creators.
+- A person is known by the id of the source that credited them, so the same
+  actor from two sources is two people.
+- Items matched by an older Pley get their credits fetched once, in the
+  background.
+- People appear only where the user can see an item they are credited in.
+- Photos are downloaded from the source (TMDB, TVmaze, TheTVDB) the first
+  time.
 
 ## Collections
 
-Groups of movies or shows of one library, shared by every user. *Automatic*
-collections mirror TMDB's movie collections: the metadata agent files each
-matched movie under its `belongs_to_collection` (with that collection's
-poster and backdrop) and drops collections left empty; one is listed once two
-of its movies are visible to the user. Administrators make their own and can
-edit either kind; an edited title is kept over TMDB's. The [access
-rules](#access-rules) apply: hidden items are left out, and a collection with
-nothing left to show answers `404` (empty manual collections are shown to
-administrators only).
+Groups of movies or shows of one library, shared by every user.
+
+- *Automatic* collections mirror TMDB's movie collections: each matched
+  movie is filed under its `belongs_to_collection` (with that collection's
+  poster and backdrop), and collections left empty are dropped. One is
+  listed once two of its movies are visible to the user.
+- Administrators make their own and can edit either kind; an edited title
+  is kept over TMDB's.
+- The [access rules](#access-rules) apply: hidden items are left out, and a
+  collection with nothing left to show answers `404` (empty manual
+  collections are shown to administrators only).
 
 ```ts
 interface Collection {
@@ -1281,34 +1374,39 @@ interface Collection {
 }
 ```
 
-| Method | Path | Body | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/libraries/{id}/collections` | – | `{ collections: Collection[] }` by title |
-| POST | `/api/libraries/{id}/collections` *(admin)* | `{ title, summary?, item_ids?: Id[], smart_filter? }` | `201` `Collection & { items: ItemSummary[] }`; `400` for music libraries |
-| GET | `/api/collections/{id}` | – | `Collection & { items: ItemSummary[] }` in the collection's order |
-| PATCH | `/api/collections/{id}` *(admin)* | `{ title?, summary? (null clears), sort?, smart_filter? }` | `Collection & { items }` |
-| DELETE | `/api/collections/{id}` *(admin)* | – | `204` (an automatic one comes back when its movies are refreshed) |
-| POST | `/api/collections/{id}/items` *(admin)* | `{ item_ids: Id[] }` | `{ added: number }`; only movies and shows of the same library, `400` if none could be added |
-| DELETE | `/api/collections/{id}/items/{item_id}` *(admin)* | – | `204` |
-| PUT | `/api/collections/{id}/order` *(admin)* | `{ item_ids: Id[] }` | `204`; these first in this order, the rest after; switches `sort` to `custom` |
-| GET | `/api/collections/{id}/images/{poster\|backdrop}` | `w`, `v` as for items | image bytes, or a `307` to the item artwork it falls back to |
-| GET | `/api/items/{id}/collections` | – | `{ collections: { id, title }[] }` the movie or show is in ("Part of …") |
+| GET | `/api/libraries/{id}/collections` | `library` | `{ collections: Collection[] }` by title |
+| POST | `/api/libraries/{id}/collections` | `admin` | `{ title, summary?, item_ids?: Id[], smart_filter? }` → `201` `Collection & { items: ItemSummary[] }`; `400` for music libraries |
+| GET | `/api/collections/{id}` | `library` | `Collection & { items: ItemSummary[] }` in the collection's order |
+| PATCH | `/api/collections/{id}` | `admin` | `{ title?, summary? (null clears), sort?, smart_filter? }` → `Collection & { items }` |
+| DELETE | `/api/collections/{id}` | `admin` | `204` (an automatic one comes back when its movies are refreshed) |
+| POST | `/api/collections/{id}/items` | `admin` | `{ item_ids: Id[] }` → `{ added: number }`. Only movies and shows of the same library; `400` if none could be added |
+| DELETE | `/api/collections/{id}/items/{item_id}` | `admin` | `204` |
+| PUT | `/api/collections/{id}/order` | `admin` | `{ item_ids: Id[] }` → `204`: these first in this order, the rest after; sets `sort` to `custom` |
+| GET | `/api/collections/{id}/images/{poster\|backdrop}` | `library` | image bytes (`w`, `v` as for items), or a `307` to the item artwork it falls back to |
+| GET | `/api/items/{id}/collections` | `library` | `{ collections: { id, title }[] }` the movie or show is in ("Part of …") |
 
-Smart collections hold no items: `smart_filter` is a library listing in the
-compatibility API's syntax (the query string of
-`/library/sections/{id}/all`, such as `genre=Comedy&unwatched=1&sort=year:desc`;
-see docs/COMPATIBILITY.md), and the collection shows what it finds, in its order, as
-each user may see it. Their items can't be added, removed or reordered
-(`400`); the filter is changed instead.
+**Smart collections** hold no items. `smart_filter` is a library listing in
+the compatibility API's syntax: the query string of
+`/library/sections/{id}/all`, such as `genre=Comedy&unwatched=1&sort=year:desc`
+(see [COMPATIBILITY.md](COMPATIBILITY.md)). The collection shows what it
+finds, in its order, as each user may see it. Its items can't be added,
+removed or reordered (`400`); change the filter instead.
 
 ## Playlists
 
-Ordered lists of a user's own, private to them (administrators included).
-A playlist is for `video` (movies and episodes) or `audio` (tracks); adding a
-show, season, album or artist adds its episodes or tracks in playing order,
-and the same item can be in a playlist more than once. Entries the user can
-no longer see are skipped in every response but kept, so they come back if
-access is restored. At most 5 000 entries.
+Ordered lists of a user's own, private to them (administrators included):
+another user's playlist answers `404`.
+
+- A playlist is for `video` (movies and episodes) or `audio` (tracks).
+  Adding a show, season, album or artist adds its episodes or tracks in
+  playing order. An item may be in a playlist more than once.
+- Entries the user can no longer see are skipped in every answer but kept,
+  so they come back if access is restored.
+- At most 5,000 entries.
+- The web player plays a video playlist in order (its *Next* is the next
+  entry); music playlists go to the audio queue.
 
 ```ts
 interface Playlist {
@@ -1330,26 +1428,22 @@ interface PlaylistEntry {
 }
 ```
 
-| Method | Path | Body | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/playlists` | – | `{ playlists: Playlist[] }` by title |
-| POST | `/api/playlists` | `{ title, kind?, item_ids?: Id[] }`, or `{ title, library_id, smart_filter }` | `201` `Playlist & { entries: PlaylistEntry[] }`; without `kind`, the first visible item decides |
-| GET | `/api/playlists/{id}` | – | `Playlist & { entries }` |
-| PATCH | `/api/playlists/{id}` | `{ title?, smart_filter? }` | `Playlist & { entries }` |
-| DELETE | `/api/playlists/{id}` | – | `204` |
-| POST | `/api/playlists/{id}/items` | `{ item_ids: Id[] }` | `{ added: number }`; `400` when an item doesn't fit the playlist's kind |
-| DELETE | `/api/playlists/{id}/items/{entry_id}` | – | `204` |
-| PUT | `/api/playlists/{id}/order` | `{ entry_ids: Id[] }` | `Playlist & { entries }`; these first in this order, the rest after |
+| GET | `/api/playlists` | `library` | `{ playlists: Playlist[] }` by title |
+| POST | `/api/playlists` | `playlists` | `{ title, kind?, item_ids?: Id[] }` or `{ title, library_id, smart_filter }` → `201` `Playlist & { entries: PlaylistEntry[] }`. Without `kind`, the first visible item decides |
+| GET | `/api/playlists/{id}` | `library` | `Playlist & { entries }` |
+| PATCH | `/api/playlists/{id}` | `playlists` | `{ title?, smart_filter? }` → `Playlist & { entries }` |
+| DELETE | `/api/playlists/{id}` | `playlists` | `204` |
+| POST | `/api/playlists/{id}/items` | `playlists` | `{ item_ids: Id[] }` → `{ added: number }`; `400` when an item doesn't fit the playlist's kind |
+| DELETE | `/api/playlists/{id}/items/{entry_id}` | `playlists` | `204` |
+| PUT | `/api/playlists/{id}/order` | `playlists` | `{ entry_ids: Id[] }` → `Playlist & { entries }`: these first in this order, the rest after |
 
-A smart playlist plays what a listing of its library finds (`smart_filter`,
-the same syntax as smart collections'), shows and albums as their episodes
-and tracks, in the filter's order, at most 5,000 entries, as its owner may
-see them. Its entries are keyed by item and can't be added, removed or
-reordered (`400`).
-
-Another user's playlist answers `404`. The web player plays a video playlist
-in order (its *Next* is the next entry); music playlists go to the audio
-queue.
+**Smart playlists** play what a listing of their library finds
+(`smart_filter`, the syntax of smart collections), shows and albums as their
+episodes and tracks, in the filter's order, at most 5,000 entries, as the
+owner may see them. Their entries are keyed by item and can't be added,
+removed or reordered (`400`).
 
 ## Playback
 
