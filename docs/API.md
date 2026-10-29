@@ -522,21 +522,36 @@ as forced when flagged so, or when their title says so ("forced", or
 
 ## Apps (OAuth 2.1)
 
-Apps sign in on Pley's own page, and get tokens that open only what the
-person allowed. Pley is an OAuth 2.1 authorization server for them
-(draft-ietf-oauth-v2-1-16), with PKCE and client metadata documents
-(draft-ietf-oauth-client-id-metadata-document-02). It lets apps use Pley: it
-is no OpenID Connect provider and signs nobody in to other sites.
+Apps sign in on Pley's own page and get tokens that open only what the
+person allowed. Pley is an OAuth 2.1 authorization server
+(draft-ietf-oauth-v2-1-16) with PKCE and client metadata documents
+(draft-ietf-oauth-client-id-metadata-document-02). It is not an OpenID
+Connect provider: it signs nobody in to other sites. The security design is
+summarized in [SECURITY.md](../SECURITY.md#what-pley-does).
 
-Every app is public: no client secrets, no registration. An app is known by
-its client ID, the https address of a JSON document that describes it.
-Pley's own apps are built in; apps by other publishers sign in only when an
-administrator allows them (see [below](#apps-by-other-publishers)).
+- Every app is public: no client secrets, no registration.
+- An app's client ID is the https address of a JSON document that describes
+  it.
+- [Pley's own apps](#pleys-own-apps) are built in. [Apps by other
+  publishers](#apps-by-other-publishers) sign in only when an administrator
+  allows them.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | `/.well-known/oauth-authorization-server` | `public` | server metadata ([Discovery](#discovery)) |
+| GET | `/oauth/authorize` | `public` | the web app's consent page ([Signing in](#signing-in)) |
+| POST | `/api/oauth/token` | `public` | tokens for a code, a refresh, a profile switch or a TV ([Tokens](#tokens)) |
+| POST | `/api/oauth/revoke` | `public` | signs an app out ([Tokens](#tokens)) |
+| POST | `/api/oauth/device` | `public` | a TV's code ([TVs](#tvs)) |
+| GET | `/api/oauth/device/qr?code=` | `public` | the code's address as a QR code ([TVs](#tvs)) |
+| GET | `/link` | `public` | the web app's page where a TV's code is typed ([TVs](#tvs)) |
+| GET | `/api/oauth/profiles` | `profiles` | the household's profiles ([Profiles](#profiles)) |
 
 ### Discovery
 
 `GET /.well-known/oauth-authorization-server` (RFC 8414) says where
-everything is, for the address it was asked at (`Cache-Control: no-store`):
+everything is, for the address it was asked at (`Cache-Control: no-store`).
+Every other `/.well-known/` path answers `404`.
 
 ```json
 {
@@ -560,83 +575,87 @@ everything is, for the address it was asked at (`Cache-Control: no-store`):
 }
 ```
 
-The issuer is the address the request came to: `https` when the first
-`X-Forwarded-Proto` value says so (else `http`), then the `Host` header,
-with a lower-case host, no default port and no trailing slash. A server
-reached at its home and its public address has a different issuer at each.
-Apps check that the issuer is the address they used (RFC 8414 §3.3), so a
-reverse proxy must pass the original `Host` (deploy/README.md). One that
-leaves its port out gets it back for the addresses in the settings'
-`proxy_addresses` (`https://media.example.com:9999`): a `Host` without a
-port, for that scheme and host name, takes that port. A missing
-`Host`, or one with a path or a user name, answers `400`.
-`client_id_metadata_document_supported` is the setting for apps by other
-publishers. Every other `/.well-known/` path answers `404`.
+- `issuer` is the address the request came to: `https` when the first
+  `X-Forwarded-Proto` value says so (else `http`), then the `Host` header,
+  with a lower-case host, no default port and no trailing slash. A server
+  reached at a home and a public address has a different issuer at each.
+- Apps check that the issuer is the address they used (RFC 8414 §3.3), so a
+  reverse proxy must pass the original `Host` (deploy/README.md). For a
+  proxy that drops the port, list the public address in the settings'
+  `proxy_addresses` (`https://media.example.com:9999`): a `Host` without a
+  port, for that scheme and host name, takes that port.
+- A missing `Host`, or one with a path or a user name: `400`.
+- `client_id_metadata_document_supported` is the
+  [apps by other publishers](#apps-by-other-publishers) setting.
 
 ### Signing in
 
-1. The app opens `/oauth/authorize`, a page of the web app, in the browser,
-   with these query parameters, each at most once (one sent without a value
-   is as if left out, OAuth 2.1 §3.1):
+1. The app opens `/oauth/authorize` (a web app page) in the browser with
+   these query parameters, each at most once. A parameter without a value
+   counts as left out (OAuth 2.1 §3.1); other parameters are ignored, but
+   `request` and `request_uri` are refused.
 
-   | Parameter | |
+   | Parameter | Value |
    |---|---|
    | `response_type` | `code` |
    | `client_id` | the app's client ID |
    | `redirect_uri` | one of the app's return addresses, exactly as registered; a loopback one (`http://127.0.0.1/…`, `http://[::1]/…`) with any port |
    | `code_challenge` | `BASE64URL(SHA-256(code_verifier))`: 43 characters (PKCE, RFC 7636) |
-   | `code_challenge_method` | `S256`, the only one |
+   | `code_challenge_method` | `S256` (the only one) |
    | `scope` | optional: scopes separated by spaces; none means `library` |
    | `state` | optional, at most 1,024 bytes; sent back as it came |
    | `resource` | optional: this server's issuer, with or without a trailing `/` (RFC 8707) |
    | `response_mode` | optional: `query` |
 
-   Other parameters are ignored, given twice or not, but `request` and
-   `request_uri` are refused.
-2. The page signs the person in first when they aren't (two-step sign-in
-   included), then shows the app, the profile it will act as (with "Use
-   another profile"), what it will be able to do and where it goes back to.
-   People are asked every time, for Pley's own apps too, and allow all that
-   was asked for or nothing. Allow works once the page has been seen for a
-   second.
-3. The browser goes back to the return address by a `303`, the address's
-   own query kept, with `code`, `state` (when the app sent one) and `iss`
-   (the issuer, RFC 9207) when the person allowed the app, or with
-   `error=access_denied`, `state` and `iss` when they didn't.
+2. The page signs the person in if needed (two-step sign-in included). It
+   shows the app, the profile it will act as (with "Use another profile"),
+   what it will be able to do and where it goes back to. People are asked
+   every time, for Pley's own apps too, and allow all that was asked or
+   nothing. Allow works once the page has been seen for a second.
+3. The browser goes back to the return address by a `303`, keeping the
+   address's own query, with:
+   - allowed: `code`, `state` (when the app sent one) and `iss` (the
+     issuer, RFC 9207);
+   - refused: `error=access_denied`, `state` and `iss`.
 4. The app exchanges the code at the [token endpoint](#tokens) within 60
    seconds.
 
 An app Pley can't accept (unknown, refused, or apps by other publishers
-off) or a return address it didn't register is shown on the page and never
-sent to the app: Pley can't know the address is the app's. Other mistakes go
-back to the app, with `error`, `error_description`, `state` and `iss`, but
-only when the person clicks "Back to the app", on a page that says where
-that goes (RFC 9700 §4.11.2):
+off), or a return address it didn't register, is shown on the page and
+never sent to the app. Other mistakes go back to the app with `error`,
+`error_description`, `state` and `iss`, but only when the person clicks
+"Back to the app" on a page that says where that goes (RFC 9700 §4.11.2):
 
 | `error` | When |
 |---|---|
-| `unsupported_response_type` | `response_type` is something other than `code` |
-| `invalid_request` | `response_type` is missing; `response_mode` isn't `query`; `request` or `request_uri` is given; the challenge is missing or not S256; `state` is longer than 1,024 bytes |
-| `invalid_scope` | a scope Pley doesn't offer (`openid` among them); `profiles` for an app that isn't Pley's own; more than the app's description allows |
+| `unsupported_response_type` | `response_type` is not `code` |
+| `invalid_request` | `response_type` is missing; `response_mode` isn't `query`; `request` or `request_uri` is given; the challenge is missing or not S256; `state` is over 1,024 bytes |
+| `invalid_scope` | a scope Pley doesn't offer (`openid` included); `profiles` for an app that isn't Pley's own; more than the app's description allows |
 | `invalid_target` | `resource` names another server |
 
 ### Tokens
 
 `POST /api/oauth/token`, `POST /api/oauth/revoke` and
-[`POST /api/oauth/device`](#tvs) take a form
-(`application/x-www-form-urlencoded`) of at most 16 KiB and never read
-cookies. Each parameter Pley reads comes at most once; one sent without a
-value is as if left out, and others are ignored (OAuth 2.1 §3.2). They
-answer with `Cache-Control: no-store` and `Pragma: no-cache`, and errors as
-`{ "error": "invalid_grant", "error_description": "…" }` (RFC 6749 §5.2),
-`400` unless said otherwise. A `client_secret` answers `400`
-`invalid_client`, and an `Authorization: Basic` header `401`
-`invalid_client` with `WWW-Authenticate: Basic realm="pley"`: Pley's apps
-have no secrets. `resource`, when sent, must be this server
-(`invalid_target`). A missing `grant_type` is `invalid_request`; another one
-is `unsupported_grant_type`.
+[`POST /api/oauth/device`](#tvs):
 
-Tokens look like this:
+- take a form (`application/x-www-form-urlencoded`) of at most 16 KiB and
+  never read cookies;
+- read each parameter at most once; one without a value counts as left out,
+  unknown ones are ignored (OAuth 2.1 §3.2);
+- answer with `Cache-Control: no-store` and `Pragma: no-cache`;
+- answer errors as `{ "error": "invalid_grant", "error_description": "…" }`
+  (RFC 6749 §5.2), `400` unless said otherwise;
+- refuse a `client_secret` (`400 invalid_client`) and an
+  `Authorization: Basic` header (`401 invalid_client` with
+  `WWW-Authenticate: Basic realm="pley"`): Pley's apps have no secrets;
+- take `resource` only for this server (else `invalid_target`);
+- answer `invalid_request` without a `grant_type`, `unsupported_grant_type`
+  for an unknown one;
+- have no rate limit: codes and tokens carry 256 random bits, and a limit
+  per address behind a reverse proxy would lock every app out. TVs have
+  [their own limits](#tvs).
+
+A token answer:
 
 ```json
 {
@@ -650,89 +669,86 @@ Tokens look like this:
 
 `scope` is everything the app was allowed. `refresh_token` comes only for
 apps whose description lists the `refresh_token` grant type (Pley's own
-apps do). Pley keeps tokens as SHA-256 hashes; the prefixes make leaked ones
-easy to recognise.
+apps do). Pley stores tokens as SHA-256 hashes; the prefixes make leaked
+ones easy to recognize.
 
 **`grant_type=authorization_code`**: `code`, `client_id` and
-`code_verifier` (43 to 128 of `A-Z a-z 0-9 . _ ~ -`); `redirect_uri`, when
-sent, must be the one the code was sent to. An unknown or expired code,
-another app's, another return address or a wrong verifier is
-`invalid_grant` and leaves the code as it was. A code exchanged a second
-time with everything right is `invalid_grant` ("the code was used
-already"), and the access the first exchange got ends: someone else has the
-code. A code whose account was disabled in the meantime, or of an app by
-another publisher once they were turned off, is `invalid_grant` too. So is a
-code whose browser session has signed out since, or whose account's
-sign-ins ended (a new password, "Sign out everywhere"): `invalid_grant`,
-"the person who allowed it signed out since". Nothing allowed before
-those signs an app in after them.
+`code_verifier` (43 to 128 of `A-Z a-z 0-9 . _ ~ -`). `redirect_uri`, when
+sent, must be the one the code was sent to. `invalid_grant` when:
+
+- the code is unknown, expired or another app's, the return address differs
+  or the verifier is wrong (the code stays usable);
+- the code was exchanged already ("the code was used already"): the access
+  the first exchange got ends too, since someone else has the code;
+- the account was disabled since, or apps by other publishers were turned
+  off (for theirs);
+- the browser session that allowed it signed out since, or the account's
+  sign-ins ended (a new password, "Sign out everywhere"): "the person who
+  allowed it signed out since".
 
 **`grant_type=refresh_token`**: `refresh_token` and `client_id`; `scope`
-optional. Each refresh token works once: the answer has a new one. One used
-again ends the app's access (`invalid_grant`, "refresh token used again: the
-app's access is ended"), however many refreshes later, and so do two
-refreshes with the same token at once: apps refresh one at a time. A
-refresh answer lost on the network means signing in again. A wider `scope`
-than allowed is `invalid_scope`; a narrower one is ignored. An unknown,
-expired or other app's refresh token, a disabled account (the profile's or
-the one that allowed it), or apps by other publishers turned off is
-`invalid_grant`, as is a grant with 10,000 refresh tokens on record, which
-ends. Refreshes never read an app's description again.
+optional (wider than allowed: `invalid_scope`; narrower: ignored).
 
-**`grant_type=urn:pley:params:oauth:grant-type:switch-profile`**: Pley's
-own apps, allowed `profiles`, move to another profile of the household:
+- Each refresh token works once; the answer has a new one. Apps refresh one
+  at a time: a token used again, however many refreshes later, or two
+  refreshes with the same token at once, end the app's access
+  (`invalid_grant`, "refresh token used again: the app's access is ended").
+  A refresh answer lost on the network means signing in again.
+- `invalid_grant` also for an unknown, expired or other app's refresh
+  token; a disabled account (the profile's, or the one that allowed it);
+  apps by other publishers turned off; a grant with 10,000 refresh tokens on
+  record (which ends).
+- Refreshes never read an app's description again.
+
+**`grant_type=urn:pley:params:oauth:grant-type:switch-profile`**: Pley's own
+apps allowed `profiles` move to another profile of the household. Send
 `client_id`, `refresh_token`, `profile` (an id from
-[`/api/oauth/profiles`](#profiles)) and `pin` when the profile has one. The
-answer is new tokens acting as that profile; the app keeps what it was
-allowed and who allowed it, and its old tokens stop at once. The rules are
-the web app's [switch](#auth), from the rights of the profile the app acts
-as, without the administrators' exemption. A refusal spends nothing.
+[`/api/oauth/profiles`](#profiles)) and `pin` when the profile has one.
 
-The profile the app acts as already, with its `pin`, checks that PIN: a TV
-asks "Who's watching?" as it starts. The rules are a switch's to that
-profile (the same wrong-PIN answers, throttle and lock, counted with the
-switches to it), and a right PIN answers as a switch does, with a new pair,
-the same scope and the old tokens stopped. Without a `pin`, or for a
-profile that has no PIN, it is `invalid_request` without a `reason`, as
-servers before this check answered every switch to the current profile:
-apps take that to mean the server can't check it.
+- The answer is new tokens acting as that profile. The app keeps its scope
+  and who allowed it; its old tokens stop at once. A refusal spends
+  nothing.
+- The rules are the web app's [switch](#auth), from the rights of the
+  profile the app acts as, without the administrators' exemption.
+- Switching to the current profile with its `pin` checks that PIN (a TV
+  asking "Who's watching?" at start). It follows a switch's rules (the
+  same wrong-PIN answers, throttle and lock, counted with switches to it);
+  a right PIN answers as a switch does. Without a `pin`, or for a profile
+  without one, it is `invalid_request` with no `reason`, which apps read as
+  "this server can't check PINs".
 
 | Answer | When |
 |---|---|
 | `unauthorized_client` | not one of Pley's own apps, or not allowed `profiles` |
-| `invalid_request` | `profile` is missing or not an id, or the app acts as that profile already and there is no PIN to check (none given, or none on the profile) |
+| `invalid_request` | `profile` is missing or not an id, or it is the current profile and there is no PIN to check |
 | `invalid_grant`, `"reason": "wrong_pin"` | the profile has a PIN, and it is missing or wrong |
 | `invalid_grant`, `"reason": "pin_locked"` | its PIN stopped working after 100 wrong ones in a row |
 | `invalid_grant`, `"reason": "throttled"` | too many wrong PINs for it lately (5 in 15 minutes) |
 | `invalid_grant`, `"reason": "browser"` | it can see more than the app's profile and has no PIN: sign in to the app again and pick it in the browser (apps never see passwords) |
-| `invalid_grant`, `"reason": "not_allowed"` | not a profile of the household, disabled, or freer with neither PIN nor password |
+| `invalid_grant`, `"reason": "not_allowed"` | not a household profile, disabled, or can see more with neither PIN nor password |
 | `invalid_grant` | the refresh token doesn't work, as for a refresh (a spent one ends the grant) |
 
 **`POST /api/oauth/revoke`** (RFC 7009): `token` and `client_id`
-(`invalid_request` without them; `token_type_hint` is ignored). An access or
-refresh token of that app, current, spent or expired, ends its whole grant,
-and the answer is `200` with an empty body, as it is for a token Pley
-doesn't know. Another app's token is refused with `400`
-`unauthorized_client` and stays (§2.1). When the database fails, `503`
-`temporarily_unavailable` with `Retry-After`: the token still works, and the
-app tries again later (§2.2.1). `POST /api/auth/logout` with an app's token
-ends its grant too.
+(`invalid_request` without them; `token_type_hint` is ignored).
 
-There is no rate limit on the token and revocation endpoints: codes and
-tokens carry 256 random bits, and a limit per address behind a reverse
-proxy would lock every app out. TVs have [their own limits](#tvs).
+- An access or refresh token of that app, current, spent or expired, ends
+  its whole grant: `200` with an empty body. The same for a token Pley
+  doesn't know.
+- Another app's token: `400 unauthorized_client`, and it stays (§2.1).
+- A database failure: `503 temporarily_unavailable` with `Retry-After`. The
+  token still works; the app tries again later (§2.2.1).
+- `POST /api/auth/logout` with an app's token ends its grant too.
 
 ### TVs
 
 TVs and other devices without a usable browser sign in with a code they
-show (OAuth 2.0 Device Authorization Grant, RFC 8628). Pley's own apps only:
-anyone may start one, and Pley reads no app's description for someone who
-isn't signed in. Today that is Pley for Android, which also runs on Android
-TV and Fire TV, Pley for Kodi, Pley for Roku, Pley for Samsung TV and Pley
-for LG TV.
+show (OAuth 2.0 Device Authorization Grant, RFC 8628). Only Pley's own apps
+may: anyone may start one, and Pley reads no app description for someone
+not signed in. These are the Android app (also on Android TV and Fire TV),
+Pley for Kodi, Pley for Roku, and the Samsung and LG apps.
 
-1. The TV asks **`POST /api/oauth/device`** with `client_id` and an optional
-   `scope` (as at `/oauth/authorize`: none means `library`). The answer:
+1. The TV calls **`POST /api/oauth/device`** with `client_id` and an
+   optional `scope` (as at `/oauth/authorize`: none means `library`):
 
    ```json
    {
@@ -745,29 +761,30 @@ for LG TV.
    }
    ```
 
-   The TV keeps `device_code` (256 random bits) to itself and shows
-   `user_code` and `verification_uri`, or a QR code of
-   `verification_uri_complete`. A TV that can't draw one shows
-   **`GET /api/oauth/device/qr?code=BCDF-GHJK`**: that address as a PNG
-   (black on white, 8 pixels a module, with a quiet zone of 4 modules;
-   `Cache-Control: no-store`), for anyone who asks, since it looks no
-   request up; `400` for something that isn't a code. User codes are 8 of
-   RFC 8628 §6.1's 20 consonants (`BCDFGHJKLMNPQRSTVWXZ`, about 2.6 × 10¹⁰
-   codes), without vowels or digits so they spell nothing and look like
-   nothing else.
-   `invalid_client` for an app that isn't Pley's own, `unauthorized_client`
-   for one of Pley's own that doesn't sign in this way (the desktop app),
-   `invalid_scope` as at `/oauth/authorize`, `429`
-   `temporarily_unavailable` past the limits below.
-2. The person opens **`/link`**, a page of the web app, on a phone or
-   computer, signs in there if they aren't, and types the code (in any
-   case, with or without the dash and spaces). From the QR code it comes
-   filled in, and is sent only once they continue. The page shows the same
-   consent as `/oauth/authorize`, saying the answer goes to the TV showing
-   that code, what that device said it is and where it asked from (two TVs
-   with the same app look alike otherwise), and to allow it only when the
-   code is on a screen in front of them. Nothing goes back through the
-   browser.
+   - The TV keeps `device_code` (256 random bits) to itself, and shows
+     `user_code` and `verification_uri`, or a QR code of
+     `verification_uri_complete`.
+   - User codes are 8 of RFC 8628 §6.1's 20 consonants
+     (`BCDFGHJKLMNPQRSTVWXZ`, about 2.6 × 10¹⁰ codes): no vowels or digits,
+     so they spell nothing and can't be misread.
+   - Errors: `invalid_client` for an app that isn't Pley's own;
+     `unauthorized_client` for one of Pley's own that doesn't sign in this
+     way (the desktop app); `invalid_scope` as at `/oauth/authorize`;
+     `429 temporarily_unavailable` past the limits below.
+
+   A TV that can't draw a QR code shows
+   **`GET /api/oauth/device/qr?code=BCDF-GHJK`**: the address as a PNG
+   (black on white, 8 pixels a module, a quiet zone of 4 modules,
+   `Cache-Control: no-store`). It looks nothing up, so anyone may ask; `400`
+   for something that isn't a code.
+2. The person opens **`/link`** (a web app page) on a phone or computer,
+   signs in if needed, and types the code (any case, with or without the
+   dash and spaces). From the QR code it comes filled in, and is sent only
+   once they continue. The page shows the same consent as
+   `/oauth/authorize`, saying the answer goes to the TV showing that code,
+   what that device said it is and where it asked from, and to allow it only
+   when the code is on a screen in front of them. Nothing goes back through
+   the browser.
 3. Meanwhile the TV asks the token endpoint every `interval` seconds with
    **`grant_type=urn:ietf:params:oauth:grant-type:device_code`**,
    `device_code` and `client_id`:
@@ -775,21 +792,22 @@ for LG TV.
    | Answer | When |
    |---|---|
    | `authorization_pending` | nobody has answered yet |
-   | `slow_down` | it asked sooner than its interval, which is now 5 seconds longer, for good |
-   | tokens | the person allowed it: as for a code, acting as the profile they use; once |
-   | `access_denied` | the person didn't allow it, their sign-ins ended before the TV had its tokens (a new password, "Sign out everywhere", disabling, deletion), or the browser session that allowed it signed out since; once |
+   | `slow_down` | it asked sooner than its interval, which is now 5 seconds longer for good |
+   | tokens | the person allowed it: as for a code, acting as their profile; once |
+   | `access_denied` | the person refused; or their sign-ins ended before the TV had its tokens (a new password, "Sign out everywhere", disabling, deletion); or the browser session that allowed it signed out since; once |
    | `expired_token` | 10 minutes went by; once |
-   | `invalid_grant` | an unknown device code, another app's, one whose answer was given already, or a disabled account |
+   | `invalid_grant` | an unknown device code, another app's, one already answered, or a disabled account |
 
-A device code never appears in an address or a page, so one shown again
-after its answer is only unknown: nothing has to end, unlike a code.
+A device code never appears in an address or a page, so one asked about
+again after its answer is just unknown (nothing has to end, unlike a code).
 
-Limits: at most 20 sign-ins in progress from one address (an IPv6 /64
-counts as one) and 1,000 in all, and nothing in progress is dropped to make
-room. The address is the connection's, or the client's a reverse proxy on
-the same computer or network names last in `X-Forwarded-For`, never one a
-caller on the internet writes. Wrong codes count: past 10 by one person, or
-300 by everyone, in 10 minutes, no code is looked up (`429`).
+**Limits.** At most 20 sign-ins in progress from one address (an IPv6 /64
+counts as one), 50 from one IPv6 /56, and 1,000 in all; nothing in progress
+is dropped to make room. The address is the connection's or, behind a
+reverse proxy on the same computer or network, the client it names last in
+`X-Forwarded-For`: never one a caller on the internet writes. Past 10 wrong
+codes from one person, or 300 from everyone, in 10 minutes, no code is
+looked up (`429`).
 
 ### Lifetimes and limits
 
@@ -802,140 +820,78 @@ caller on the internet writes. Wrong codes count: past 10 by one person, or
 | A request on the consent page | 10 minutes (a TV's: no longer than the TV's own) |
 | A TV's code | 10 minutes, once |
 
-An access token never outlasts its grant. A grant keeps its 10 newest access
-tokens (older ones stop working) and ends with 10,000 refresh tokens on
-record. A profile has at most 100 apps signed in; past that the least
-recently used is signed out.
-
-Apps are signed out when they or the person sign them out (the
-[Apps](#signed-in-apps) lists), with a new password, "Sign out everywhere",
-`pley reset-password` and when the account is deleted: every app acting as
-the account or allowed by it, and the apps it was signing in (codes not
-exchanged yet, TVs allowed that haven't asked for their answer yet). A
-running server honors app tokens it checked in the last minute for up to a
-minute after `pley reset-password`, as it does sessions. The apps of a
-disabled account, or allowed by one, don't work while it is disabled.
-Turning apps by other publishers off signs all of them out.
+- An access token never outlasts its grant. A grant keeps its 10 newest
+  access tokens (older ones stop working) and ends with 10,000 refresh
+  tokens on record.
+- A profile has at most 100 apps signed in; past that, the least recently
+  used is signed out.
+- Apps are signed out when they or the person sign them out
+  ([Signed-in apps](#signed-in-apps)), and by a new password, "Sign out
+  everywhere", `pley reset-password` and deleting the account. That covers
+  every app acting as the account or allowed by it, and the apps it was
+  signing in (codes not exchanged yet, allowed TVs that haven't fetched
+  their answer).
+- After `pley reset-password`, a running server honors app tokens it checked
+  in the last minute for up to a minute, as it does sessions.
+- Apps of a disabled account, or allowed by one, don't work while it is
+  disabled. Turning apps by other publishers off signs all of them out.
 
 ### Scopes
 
 | Scope | Allows |
 |---|---|
 | `library` | see the profile's libraries, playlists and watch history |
-| `play` | play titles, and keep the profile's place, watched marks, ratings, track choices and library order |
+| `play` | play titles; keep the profile's place, watched marks, ratings, track choices and library order |
 | `playlists` | make, change and delete the profile's playlists |
-| `profiles` | switch to the household's other profiles; Pley's own apps only, since a profile's PIN is typed into the app |
+| `profiles` | switch to the household's other profiles. Pley's own apps only, since a profile's PIN is typed into the app |
 
-An app's token opens these routes and no other (`HEAD` as `GET`). A route
-missing here answers `403` `insufficient_scope`, administration and
-sign-in settings among them.
+An app's token opens only the routes whose **Who** is `any app` or one of
+its scopes (`HEAD` as `GET`). Every other route answers
+`403 insufficient_scope`: administration and sign-in settings among them.
+Name, picture (`PATCH /api/me`), password, PIN, two-step sign-in, devices,
+apps, activity, switching by `/api/auth/switch` and all administration stay
+in the web app.
 
-| Method | Path | Needs |
-|---|---|---|
-| GET | `/api/auth/me` | any app |
-| GET | `/api/users/{id}/avatar` | any app |
-| GET | `/api/libraries` | `library` |
-| GET | `/api/libraries/{id}` | `library` |
-| GET | `/api/libraries/{id}/items` | `library` |
-| GET | `/api/libraries/{id}/filters` | `library` |
-| GET | `/api/libraries/{id}/hubs` | `library` |
-| GET | `/api/libraries/{id}/collections` | `library` |
-| GET | `/api/collections/{id}` | `library` |
-| GET | `/api/collections/{id}/images/{kind}` | `library` |
-| GET | `/api/playlists` | `library` |
-| GET | `/api/playlists/{id}` | `library` |
-| GET | `/api/items/{id}` | `library` |
-| GET | `/api/items/{id}/children` | `library` |
-| GET | `/api/items/{id}/on-deck` | `library` |
-| GET | `/api/items/{id}/next` | `library` |
-| GET | `/api/items/{id}/related` | `library` |
-| GET | `/api/items/{id}/images/{kind}` | `library` |
-| GET | `/api/items/{id}/collections` | `library` |
-| GET | `/api/people/{id}` | `library` |
-| GET | `/api/people/{id}/photo` | `library` |
-| GET | `/api/history` | `library` |
-| GET | `/api/hubs/home` | `library` |
-| GET | `/api/watchlist` | `library` |
-| GET | `/api/search` | `library` |
-| GET | `/api/events` | `library` |
-| POST | `/api/playback` | `play` |
-| GET | `/api/playback/network` | `play` |
-| PUT | `/api/playback/network` | `play` |
-| GET | `/api/playback/speedtest` | `play` |
-| GET | `/api/playback/{session}` | `play` |
-| DELETE | `/api/playback/{session}` | `play` |
-| PUT | `/api/playback/{session}/bitrate` | `play` |
-| GET | `/api/playback/{session}/{file}` | `play` |
-| GET | `/api/files/{id}/stream` | `play` |
-| POST | `/api/conversions` | `play` |
-| GET | `/api/conversions/{id}` | `play` |
-| DELETE | `/api/conversions/{id}` | `play` |
-| GET | `/api/conversions/{id}/file` | `play` |
-| GET | `/api/files/{id}/subtitles/{file}` | `play` |
-| GET | `/api/files/{id}/trickplay` | `play` |
-| GET | `/api/files/{id}/trickplay/{sheet}` | `play` |
-| GET | `/api/files/{id}/chapters/{image}` | `play` |
-| POST | `/api/items/{id}/prefetch` | `play` |
-| POST | `/api/items/{id}/progress` | `play` |
-| POST | `/api/items/{id}/watched` | `play` |
-| POST | `/api/items/{id}/unwatched` | `play` |
-| PUT | `/api/items/{id}/streams` | `play` |
-| PUT | `/api/items/{id}/rating` | `play` |
-| DELETE | `/api/history/{id}` | `play` |
-| DELETE | `/api/continue-watching/{id}` | `play` |
-| PUT | `/api/watchlist/{id}` | `play` |
-| DELETE | `/api/watchlist/{id}` | `play` |
-| DELETE | `/api/sessions/{id}` | `play` |
-| PUT | `/api/me/track-defaults` | `play` |
-| PUT | `/api/me/libraries/order` | `play` |
-| DELETE | `/api/me/libraries/order` | `play` |
-| POST | `/api/playlists` | `playlists` |
-| PATCH | `/api/playlists/{id}` | `playlists` |
-| DELETE | `/api/playlists/{id}` | `playlists` |
-| POST | `/api/playlists/{id}/items` | `playlists` |
-| DELETE | `/api/playlists/{id}/items/{entry_id}` | `playlists` |
-| PUT | `/api/playlists/{id}/order` | `playlists` |
-| GET | `/api/oauth/profiles` | `profiles` |
+What apps see:
 
-What stays in the web app: name, picture (`PATCH /api/me`), password, PIN,
-two-step sign-in, devices, apps, activity, switching profiles by
-`/api/auth/switch`, and all administration.
-
-An app's token never has administrator rights. On an administrator's
-account it sees every library without an age limit, as the account does, and
-administers nothing: history, sessions and collections answer it as they
-would anyone else. Apps also see less: libraries' `paths` are empty, files'
-`path` is the file name only, `/api/users/{id}/avatar` shows only the
-pictures of the app's own profile and its household, and when the
-transcoder can't read a file, its words (which name the file) are replaced
-by Pley's own ("this title's file can't be read right now", and "the
-conversion failed" for a session's `last_error`). No address Pley hands out carries a token:
-players send the header with every request, HLS playlists and segments
-included. The event stream ends when its token expires or the app is signed
-out; the app connects again with a new token.
+- An app's token never has administrator rights. On an administrator's
+  account it sees every library without an age limit, as the account does,
+  and administers nothing: history, sessions and collections answer it as
+  they would anyone else.
+- Libraries' `paths` are empty, and files' `path` is the file name only.
+- `/api/users/{id}/avatar` shows only the app's own profile and its
+  household.
+- When the transcoder can't read a file, its words (which name the file)
+  are replaced by Pley's own: "this title's file can't be read right now",
+  and "the conversion failed" for a session's `last_error`.
+- No address Pley hands out carries a token: players send the header with
+  every request, HLS playlists and segments included (see
+  [Keyed URLs](#keyed-urls) for players that can't).
+- The event stream ends when its token expires or the app is signed out;
+  the app connects again with a new token.
 
 ### Signed-in apps
 
-| Method | Path | Response |
-|---|---|---|
-| GET | `/api/me/apps` | `AppGrant[]`: apps acting as you or allowed by you, most recently used first |
-| DELETE | `/api/me/apps/{id}` | `204`, signs that app out. `404` unless it acts as you or you allowed it |
-| GET | `/api/users/{id}/apps` *(admin)* | `AppGrant[]` of that user |
-| DELETE | `/api/users/{id}/apps/{grant}` *(admin)* | `204`; `404` as above |
-
-These take Pley's own sign-in only, never an app's token.
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | `/api/me/apps` | `user` | `AppGrant[]`: apps acting as you or allowed by you, most recently used first |
+| DELETE | `/api/me/apps/{id}` | `user` | `204`, signs that app out; `404` unless it acts as you or you allowed it |
+| GET | `/api/users/{id}/apps` | `admin` | that user's `AppGrant[]` |
+| DELETE | `/api/users/{id}/apps/{grant}` | `admin` | `204`; `404` as above |
 
 ```ts
 interface AppGrant {
   id: Id;
   client_id: string;
-  name: string | null;              // pley's own apps: their name; others: what the app called itself (unchecked)
-  first_party: boolean;             // one of pley's own apps
+  name: string | null;              // Pley's own apps: their name; others: what the app calls itself (unchecked)
+  first_party: boolean;             // one of Pley's own apps
   host: string;                     // the client ID's host
   scopes: string[];
   profile: { id: Id; name: string };     // the profile it acts as
   approved_by: { id: Id; name: string };
-  device: string | null;            // of its last token request, e.g. "Chrome on Windows"; pley for Android, Kodi, Roku, Samsung TV and LG TV: their platform, e.g. "Android 15", "Kodi 21.2; Windows", "Tizen 7.0", "webOS 23"
+  device: string | null;            // of its last token request: "Chrome on Windows". Pley's Android, Kodi,
+                                    // Roku, Samsung and LG apps: their platform, e.g. "Android 15",
+                                    // "Kodi 21.2; Windows", "Tizen 7.0", "webOS 23"
   ip: string | null;
   created_at: Timestamp;
   last_used_at: Timestamp;
@@ -944,13 +900,15 @@ interface AppGrant {
 
 ### Profiles
 
-`GET /api/oauth/profiles` (an app's token with `profiles`) lists the
-enabled profiles of the household when the app's profile is in it, and
-nothing otherwise:
-`{ id, name, avatar_url, avatar_color, current, needs }[]`. `current` is the
-profile the app acts as; `needs` is what switching to it takes, by the
-rules above: `none`, `pin`, `password` (in the browser) or `locked`.
-Usernames, roles, libraries, age limits and sign-in settings are left out.
+`GET /api/oauth/profiles` (Who: `profiles`) lists the household's enabled
+profiles when the app's profile is in the household, else nothing:
+`{ id, name, avatar_url, avatar_color, current, needs }[]`.
+
+- `current`: the profile the app acts as.
+- `needs`: what switching to it takes, by the rules above: `none`, `pin`,
+  `password` (in the browser) or `locked`.
+- Usernames, roles, libraries, age limits and sign-in settings are left
+  out.
 
 ### Pley's own apps
 
@@ -963,16 +921,17 @@ Usernames, roles, libraries, age limits and sign-in settings are left out.
 | Pley for Samsung TV | `https://hhaidar.github.io/pley/oauth/tizen.json` | none: a code only |
 | Pley for LG TV | `https://hhaidar.github.io/pley/oauth/webos.json` | none: a code only |
 
-Their descriptions are built into the server and never fetched, so they
-sign in to servers without internet access. All get refresh tokens and may
-ask for every scope; Pley for Android may also sign in with a code, on a TV
-(see [TVs](#tvs)), and Pley for Kodi, Roku, Samsung TV and LG TV sign in
-only that way: with no return address, `/oauth/authorize` never sends them
-a code. The Samsung and LG apps can't set their own User-Agent: the TV's
-web engine names the TV ("Samsung TV", "LG TV", and for an app's grant its
-system, "Tizen 7.0", "webOS 23").
-The consent page marks them "Pley's own app"; no other app may use a client
-ID on their host.
+- Their descriptions are built into the server and never fetched, so they
+  sign in to servers without internet access.
+- All get refresh tokens and may ask for every scope.
+- The Android app may also sign in with a code, on a TV ([TVs](#tvs)). The
+  Kodi, Roku, Samsung and LG apps sign in only that way: with no return
+  address, `/oauth/authorize` never sends them a code.
+- The Samsung and LG apps can't set their own User-Agent: the TV's web
+  engine names the TV ("Samsung TV", "LG TV"; for an app's grant its
+  system, "Tizen 7.0", "webOS 23").
+- The consent page marks them "Pley's own app". No other app may use a
+  client ID on their host.
 
 ### Apps by other publishers
 
@@ -981,74 +940,119 @@ Off until an administrator turns them on (**Settings → Server → Apps**,
 profile. Turning it off signs them all out; codes and refreshes check it
 too.
 
-The client ID must be an https address of at most 512 characters, written
-the one way an address parser writes it (lower-case host, punycode, no
-default port, no dot segments, no stray spaces), on a domain name with a dot
-(not an IP address, `localhost` or `*.localhost`), with a path other than
-`/`, and with no port, user name, query or fragment. It may not be on the
-host of Pley's own apps or on this server's.
+**Client ID.** An https address of at most 512 characters, in its standard
+form (lower-case host, punycode, no default port, no dot segments, no stray
+spaces), on a domain name with a dot (not an IP address, `localhost` or
+`*.localhost`), with a path other than `/`, and with no port, user name,
+query or fragment. It may not be on the host of Pley's own apps or on this
+server's.
 
-The description must be a JSON object of at most 5,120 bytes, no field given
-twice:
+**Description.** A JSON object of at most 5,120 bytes, no field given twice:
 
-| Field | |
+| Field | Rule |
 |---|---|
 | `client_id` | the address it was read from, exactly |
 | `redirect_uris` | 1 to 10 return addresses of at most 512 characters, each in its standard form and one of: https on exactly the client ID's host, without a port; a private-use scheme that is the client ID's host reversed (`apps.example.com` → `com.example.apps`), written `scheme:/path`; `http://127.0.0.1/…` or `http://[::1]/…`. Never `localhost`, a fragment or a user name |
-| `client_name` | optional: shown without control and direction characters, at most 64 characters, as something Pley can't check |
-| `grant_types` | optional (`["authorization_code"]`): must list `authorization_code`; refresh tokens only with `refresh_token` |
+| `client_name` | optional: at most 64 characters, shown without control and direction characters, as something Pley can't check |
+| `grant_types` | optional (default `["authorization_code"]`): must list `authorization_code`; refresh tokens only with `refresh_token` |
 | `response_types` | optional: must list `code` |
 | `token_endpoint_auth_method` | optional: `none` |
-| `scope` | optional: the most the app may ask for (`profiles` never) |
+| `scope` | optional: the most the app may ask for (never `profiles`) |
 
 `client_secret` and `client_secret_expires_at` are refused. Other fields
 (`logo_uri`, `client_uri`, `tos_uri`, `policy_uri`, `jwks`, `jwks_uri`, …)
 are ignored and never fetched.
 
-Pley reads a description only when someone signed in opens the consent
-page for the app: over https on port 443, from public addresses only (the
-check is made by the resolver, so the address checked is the one connected
-to), without a proxy, redirects, cookies or compression, with 3 seconds to
-connect and 5 in all. The answer must be a `200` of JSON (`application/json`
-or `application/*+json`) of at most 5,120 bytes. At most 4 descriptions are
-read at once, one per client ID, and 10 a minute for each person (then
-`429`). Valid descriptions are kept for their `Cache-Control: max-age`
-between 5 minutes and 24 hours (an hour without one, not at all with
-`no-store` or `no-cache`), at most 256; failures never are. Refreshes never
-read them: changes apply at the app's next sign-in.
+**Fetching.** Pley reads a description only when someone signed in opens
+the consent page for the app:
+
+- over https on port 443, from public addresses only (the resolver checks
+  the address actually connected to), without a proxy, redirects, cookies or
+  compression;
+- 3 seconds to connect, 5 in all;
+- the answer must be a `200` of JSON (`application/json` or
+  `application/*+json`) of at most 5,120 bytes;
+- at most 4 read at once (one per client ID), and 10 a minute per person
+  (then `429`);
+- valid descriptions are cached for their `Cache-Control: max-age`, between
+  5 minutes and 24 hours (an hour without one; not at all with `no-store`
+  or `no-cache`), at most 256. Failures are never cached;
+- refreshes never read them: changes apply at the app's next sign-in.
 
 The consent page names such an app by its client ID's host, then what it
 calls itself, and says it isn't one of Pley's own. Logos aren't shown.
 
 ### The consent page's endpoints
 
-Pley's own page uses these; apps never do. They take the session cookie
-only, never `Authorization`, `X-Pley-Token` or `?token=`. A `POST` needs an
-`Origin` that is this server, and `Sec-Fetch-Site: same-origin` when the
-browser sends it; the `GET` takes `Sec-Fetch-Site` `same-origin` or `none`.
-Anything else is `403` ("this page must be opened from Pley itself"). None
-of them answers CORS.
+Pley's own page uses these (Who: `page`); apps never do.
 
-| Method | Path | Body | Response |
+- They take the session cookie only, never `Authorization`, `X-Pley-Token`
+  or `?token=`.
+- A `POST` needs an `Origin` that is this server, and
+  `Sec-Fetch-Site: same-origin` when the browser sends it. The `GET` takes
+  `Sec-Fetch-Site` `same-origin` or `none`. Anything else: `403` ("this page
+  must be opened from Pley itself").
+- None of them answers CORS.
+
+| Method | Path | Who | What |
 |---|---|---|---|
-| POST | `/api/oauth/requests` | `{ query }`: the page's query without `?`, at most 8 KiB | `{ status: "consent", id, expires_at, client: { id, host, name, first_party }, redirect: { kind: "web" \| "app" \| "loopback", to }, scopes }`; or a mistake that goes back to the app, `{ status: "error", error, message, back_url, client, redirect }`, `redirect` saying where "Back to the app" goes. `400` for an app or return address Pley can't accept, `429` with too many descriptions read, `503` with too many sign-ins in progress |
-| POST | `/api/oauth/device/verify` | `{ user_code }`: the code a TV shows, as typed | the consent as above, with `redirect: { kind: "device", to: "BCDF-GHJK", device, address }`: `device` is what the TV said it is when it asked for the code (Pley's apps give their platform in their User-Agent's brackets, "Kodi 21.3; Windows"; anything else is named as the sign-ins list names it; unchecked, since anyone may ask), `address` where it asked from, each `null` when unknown. The page shows both, so the person can tell which device is signing in. `400` for something that can't be a code, `404` for a code no TV shows (it counts as a wrong one), `409` for one answered already or shown on another session's page, `429` past the wrong codes' limit, `503` with too many sign-ins in progress. A code shown on a page whose session ended since (signed out, or switched profile) goes to whoever types it next; typed again in the same session, the page before can't answer any more |
-| POST | `/api/oauth/requests/{id}` | `{ allow: boolean }` | `{ continue_url }`, or `{ done: true }` for a TV's request, whose answer the TV gets when it next asks. The same answer again gets the same reply, the other one `409`; `404` when the request is over (a TV's too once the TV's code expired) |
-| GET | `/api/oauth/requests/{id}/continue` | – | `303` to the app with the answer. It repeats while the code works and wasn't exchanged, and for a minute after a refusal or a mistake. After that a browser following the link is sent (`303`) to the web app's `/oauth/over` page, which says the request is over; a script gets `404`. Never for a TV's request |
+| POST | `/api/oauth/requests` | `page` | `{ query }` (the page's query without `?`, at most 8 KiB) → a consent request |
+| POST | `/api/oauth/device/verify` | `page` | `{ user_code }` (as typed) → a consent request for a TV |
+| POST | `/api/oauth/requests/{id}` | `page` | `{ allow: boolean }` → `{ continue_url }`, or `{ done: true }` for a TV's request |
+| GET | `/api/oauth/requests/{id}/continue` | `page` | `303` to the app with the answer |
 
-A request belongs to the person and the browser session that opened the
-page, and lasts 10 minutes. Each person has at most 10 waiting (the oldest
-goes), the server 1,000. They end with the account's sign-ins (a new
-password, "Sign out everywhere", disabling, deletion).
+**`POST /api/oauth/requests`** answers
+`{ status: "consent", id, expires_at, client: { id, host, name, first_party }, redirect: { kind: "web" | "app" | "loopback", to }, scopes }`,
+or for a mistake that goes back to the app
+`{ status: "error", error, message, back_url, client, redirect }`, where
+`redirect` says where "Back to the app" goes. `400` for an app or return
+address Pley can't accept, `429` with too many descriptions read, `503`
+with too many sign-ins in progress.
+
+**`POST /api/oauth/device/verify`** answers the consent as above, with
+`redirect: { kind: "device", to: "BCDF-GHJK", device, address }`.
+
+- `device`: what the TV said it is when it asked for the code (Pley's apps
+  give their platform in their User-Agent's brackets, "Kodi 21.3; Windows";
+  anything else is named as the sign-ins list names it). Unchecked, since
+  anyone may ask. `address`: where it asked from. Each `null` when unknown.
+  The page shows both, so the person can tell which device is signing in.
+- `400` for something that can't be a code; `404` for a code no TV shows
+  (it counts as a wrong one); `409` for one answered already or shown on
+  another session's page; `429` past the wrong codes' limit; `503` with too
+  many sign-ins in progress.
+- A code shown on a page whose session ended since (signed out, or switched
+  profile) goes to whoever types it next. Typed again in the same session,
+  the earlier page can't answer any more.
+
+**`POST /api/oauth/requests/{id}`**: a TV gets its answer when it next
+asks. The same answer again gets the same reply; the other answer `409`.
+`404` when the request is over (for a TV, also once its code expired).
+
+**`GET /api/oauth/requests/{id}/continue`** repeats while the code works and
+wasn't exchanged, and for a minute after a refusal or a mistake. After
+that, a browser following the link is sent (`303`) to the web app's
+`/oauth/over` page, which says the request is over; a script gets `404`.
+Never for a TV's request.
+
+A request belongs to the person and browser session that opened the page,
+and lasts 10 minutes. Each person has at most 10 waiting (the oldest goes),
+the server 1,000. Requests end with the account's sign-ins (a new password,
+"Sign out everywhere", disabling, deletion).
 
 ## Access rules
 
-Administrators see everything. Other users see every library or only the
-ones in `library_ids`, and with `max_age` only movies and shows whose content
-rating allows that age (US, UK, DE, FR, AU, CA and numeric certifications are
-understood; seasons and episodes go by their show; unrated titles are hidden;
-music is exempt). Hidden libraries and items answer `404` everywhere: lists,
-hubs, search, artwork, streams and the compatibility API.
+Administrators see everything. Other users see every library, or only those
+in `library_ids`. With `max_age` they see only movies and shows whose
+content rating allows that age:
+
+- US, UK, DE, FR, AU, CA and numeric certifications are understood;
+- seasons and episodes go by their show;
+- unrated titles are hidden;
+- music is exempt.
+
+Hidden libraries and items answer `404` everywhere: lists, hubs, search,
+artwork, streams and the compatibility API.
 
 ## Libraries
 
