@@ -385,6 +385,17 @@ half-made ones are deleted.
   CPU decodes. Those GPUs decode with the encoder's decoder instead. A job
   whose FFmpeg says its hardware decoder failed to start ("Failed setup for
   format …") shows `cpu` as its decoder, with a warning.
+
+  NVDEC goes without `-hwaccel_flags +unsafe_output`, which Jellyfin
+  passes to skip the copy of each decoded frame out of the decoder's
+  surface (`nvdec.c`'s `av_frame_make_writable`). Measured on an RTX 5070
+  with FFmpeg 9.0.2, a 30 s 4K HEVC clip (720 frames) to 1080p H.264,
+  seven runs each, alternating: kept on the GPU (`scale_cuda` into NVENC)
+  1.65 s median without, 1.73 s with; brought to memory (CPU scaling into
+  NVENC) 3.72 s without, 3.90 s with; the same frames either way (framemd5,
+  8 and 10 bits). Decoding sets the pace and the copy, inside the GPU,
+  costs nothing that shows; the flag also leaves the decoder's own
+  surfaces with FFmpeg's filters, which is what makes it unsafe.
 - **Tone mapping** of HDR10, HLG and Dolby Vision to SDR BT.709, best available
   first:
   - `libplacebo` on the GPU through Vulkan. It also applies Dolby Vision RPU
