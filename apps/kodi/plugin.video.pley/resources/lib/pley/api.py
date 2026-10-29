@@ -59,9 +59,68 @@ def normalize(address: str) -> str:
     return "{}://{}{}".format(parts.scheme, host, "" if port == default else ":%d" % port)
 
 
+# What the add-on can't reach a server over (the other apps' words).
+UNENCRYPTED = (
+    "this server's address isn't on your network and its connection isn't encrypted: "
+    "open it by its https address to sign in"
+)
+
+
+class Unencrypted(OSError):
+    """Plain http to an address on the internet: refused before anything
+    (a code, a token) is sent over it."""
+
+    def __init__(self):
+        super().__init__(UNENCRYPTED)
+
+
+_PRIVATE = None
+
+
+def is_private_address(address: str) -> bool:
+    """Whether `address` (as a socket names its peer) is this computer or on
+    its own network: loopback, RFC 1918, link-local, CGNAT (Tailscale) or an
+    IPv6 unique local address, where plain http is how pley is reached."""
+    import ipaddress
+
+    global _PRIVATE
+    if _PRIVATE is None:
+        _PRIVATE = [
+            ipaddress.ip_network(n)
+            for n in (
+                "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+                "100.64.0.0/10", "::1/128", "fc00::/7", "fe80::/10",
+            )
+        ]
+    try:
+        ip = ipaddress.ip_address(address.split("%", 1)[0])
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return any(ip.version == net.version and ip in net for net in _PRIVATE)
+
+
+def check_unencrypted(scheme: str, sock) -> None:
+    """Over plain http, the connection must be to a private address
+    (checked on the socket itself, so a name that turns out to be on the
+    internet is refused too): tokens and sign-in codes never cross the
+    internet unencrypted. Raises Unencrypted, the socket closed."""
+    if scheme == "https":
+        return
+    try:
+        peer = sock.getpeername()[0]
+    except (OSError, IndexError, TypeError):
+        peer = ""
+    if not is_private_address(peer):
+        sock.close()
+        raise Unencrypted()
+
+
 def connect(base: str, timeout: float = TIMEOUT):
     """An http.client connection to `base`, made within CONNECT_TIMEOUT, that
-    then waits up to `timeout` for answers."""
+    then waits up to `timeout` for answers. Plain http only to addresses on
+    this network (check_unencrypted)."""
     # Loaded when first needed: with ssl and email it is most of what a
     # listing loads, and the plugin's own requests go without it (local).
     import http.client
@@ -73,6 +132,7 @@ def connect(base: str, timeout: float = TIMEOUT):
     else:
         conn = http.client.HTTPConnection(parts.hostname, parts.port, timeout=connect_timeout)
     conn.connect()
+    check_unencrypted(parts.scheme, conn.sock)
     conn.sock.settimeout(timeout)
     return conn
 
@@ -152,6 +212,8 @@ class Client:
             answer = conn.getresponse()
             data = answer.read()
             return Response(answer.status, {k.lower(): v for k, v in answer.getheaders()}, data)
+        except Unencrypted as e:
+            raise ApiError(0, "unencrypted", str(e))
         except (OSError, http.client.HTTPException) as e:
             raise ApiError(0, "unreachable", str(e))
         finally:
@@ -189,6 +251,7 @@ class Client:
         sock = None
         try:
             sock = socket.create_connection((parts.hostname, port), timeout=min(CONNECT_TIMEOUT, left()))
+            check_unencrypted(parts.scheme, sock)
             if parts.scheme == "https":
                 sock = tls().wrap_socket(sock, server_hostname=parts.hostname)
             lines = ["GET %s HTTP/1.1" % target, "Host: %s" % parts.netloc] + ["%s: %s" % kv for kv in headers.items()]

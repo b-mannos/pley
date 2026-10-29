@@ -818,3 +818,7 @@ msgstr ""
 msgctxt "#30245"
 msgid "Finding subtitles needs a newer Pley server."
 msgstr ""
+
+msgctxt "#30246"
+msgid "%s isn't on your network and its connection isn't encrypted. Open it by its https address."
+msgstr ""

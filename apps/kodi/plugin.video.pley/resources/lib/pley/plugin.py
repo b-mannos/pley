@@ -548,7 +548,12 @@ class Plugin:
             auth.metadata(server, kodi.user_agent())
         except api.ApiError as e:
             kodi.log("%s isn't a Pley server: %s" % (server, e.message), xbmc.LOGWARNING)
-            message = kodi.text("not_reachable") if e.status == 0 and e.code == "unreachable" else kodi.text("not_pley")
+            if e.code == "unencrypted":
+                message = kodi.text("unencrypted")
+            elif e.status == 0 and e.code == "unreachable":
+                message = kodi.text("not_reachable")
+            else:
+                message = kodi.text("not_pley")
             return dialog.ok("Pley", message % server)
         current = auth.Store(os.path.join(kodi.profile_dir(), "tokens.json")).load()
         if current and current.get("server") == server:

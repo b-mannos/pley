@@ -202,6 +202,7 @@ TEXT = {
     "not_rated": 30243,
     "subtitles_not_set_up": 30244,
     "subtitles_need_newer": 30245,
+    "unencrypted": 30246,
 }
 
 

@@ -36,6 +36,44 @@ class NotPleyTest(unittest.TestCase):
             server.close()
 
 
+class UnencryptedTest(unittest.TestCase):
+    def test_only_this_network_is_private(self):
+        for private in ["127.0.0.1", "10.1.2.3", "172.20.0.5", "192.168.1.5", "169.254.9.9", "100.101.102.103",
+                        "::1", "fd12::5", "fe80::1%eth0", "::ffff:192.168.1.5"]:
+            self.assertTrue(api.is_private_address(private), private)
+        for public in ["81.2.69.160", "8.8.8.8", "172.32.0.1", "100.128.0.1", "2001:db8::1", "::ffff:81.2.69.160",
+                       "", "nas"]:
+            self.assertFalse(api.is_private_address(public), public)
+
+    def test_plain_http_to_the_internet_sends_nothing(self):
+        server = support.FakeServer(lambda request: support.answer(200, {}))
+        real = api.is_private_address
+        # The stand-in server, as if it were on the internet.
+        api.is_private_address = lambda address: False
+        try:
+            client = api.Client(server.url, "pleyKodi/test", token="pley_at_secret")
+            with self.assertRaises(api.ApiError) as refused:
+                client.get("/api/me")
+            self.assertEqual(refused.exception.code, "unencrypted")
+            with self.assertRaises(api.Unencrypted):
+                api.connect(server.url)
+            self.assertEqual(server.requests, [], "no token, no request")
+        finally:
+            api.is_private_address = real
+        # On this network it goes through.
+        self.assertEqual(api.Client(server.url, "pleyKodi/test").get("/api/me"), {})
+        server.close()
+
+    def test_https_is_never_held_to_it(self):
+        class Sock:
+            def getpeername(self):
+                return ("81.2.69.160", 443)
+
+        api.check_unencrypted("https", Sock())
+        with self.assertRaises(api.Unencrypted):
+            api.check_unencrypted("http", type("S", (Sock,), {"close": lambda self: None})())
+
+
 class ErrorsTest(unittest.TestCase):
     def test_both_kinds_of_refusal_are_read(self):
         pley = api.error_of(api.Response(404, {}, b'{"code": "not_found", "message": "item 42 not found"}'))
