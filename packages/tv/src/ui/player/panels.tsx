@@ -236,7 +236,7 @@ function FindPanel(p: { controller: PlaybackController; language: string | null;
           {found.kind === "older"
             ? "This server can't search for subtitles: it needs an update."
             : p.isAdmin
-              ? "Subtitle search isn't set up on this server. Set it up in pley on the web: Settings → Server → Subtitles."
+              ? "Subtitle search isn't set up on this server. Set it up in Pley on the web: Settings → Server → Subtitles."
               : "Subtitle search isn't set up on this server."}
         </div>
       ) : (

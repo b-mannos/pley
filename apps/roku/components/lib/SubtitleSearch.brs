@@ -92,7 +92,7 @@ function ssProblem(answer as object, searching as boolean) as string
     if answer.status = 503 and data <> invalid and GetInterface(data.setup, "ifBoolean") <> invalid and not data.setup
         return "Subtitle search isn't set up on this server. An administrator sets it up on the web, in Settings → Server."
     end if
-    if searching and answer.status = 404 then return "Finding subtitles needs a newer pley server."
+    if searching and answer.status = 404 then return "Finding subtitles needs a newer Pley server."
     if answer.error = "network" then return "The server can't be reached."
     if answer.message <> "" then return answer.message
     return "Something went wrong. Try again."

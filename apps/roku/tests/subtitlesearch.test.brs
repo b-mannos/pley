@@ -26,7 +26,7 @@ sub test_ss_what_is_said_when_it_cant_look()
     notSetUp = { ok: false, status: 503, data: { code: "unavailable", message: "No OpenSubtitles key", setup: false }, error: "unavailable", message: "No OpenSubtitles key" }
     tkEqual(ssProblem(notSetUp, true), "Subtitle search isn't set up on this server. An administrator sets it up on the web, in Settings → Server.")
     older = { ok: false, status: 404, data: { code: "not_found", message: "nothing at /api/items/1/subtitles/search" }, error: "not_found", message: "Nothing at …" }
-    tkEqual(ssProblem(older, true), "Finding subtitles needs a newer pley server.")
+    tkEqual(ssProblem(older, true), "Finding subtitles needs a newer Pley server.")
     tkEqual(ssProblem(older, false), "Nothing at …", "a result gone when adding it")
     tkEqual(ssProblem({ ok: false, status: 0, data: invalid, error: "network", message: "x" }, true), "The server can't be reached.")
     tkEqual(ssProblem({ ok: false, status: 502, data: { code: "upstream", message: "OpenSubtitles didn't answer." }, error: "upstream", message: "OpenSubtitles didn't answer." }, false), "OpenSubtitles didn't answer.")

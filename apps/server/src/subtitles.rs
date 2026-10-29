@@ -202,7 +202,7 @@ pub fn read(raw: &[u8], name: &str) -> ApiResult<(Format, String)> {
     }
     let text = to_utf8(raw);
     let format = Format::of(&text, named)
-        .ok_or_else(|| AppError::bad_request("this isn't a subtitle file pley can read (SRT, WebVTT, ASS or SSA)"))?;
+        .ok_or_else(|| AppError::bad_request("this isn't a subtitle file Pley can read (SRT, WebVTT, ASS or SSA)"))?;
     Ok((format, text))
 }
 

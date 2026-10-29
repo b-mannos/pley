@@ -158,7 +158,7 @@ describe("Find subtitles…", () => {
     const unset = () => Promise.reject(new ApiError(503, "unavailable", "no key", { code: "unavailable", setup: false }));
     const admin = setup({ panel: "find", admin: true, found: unset });
     await flush();
-    expect(admin.notes()).toEqual(["Subtitle search isn't set up on this server. Set it up in pley on the web: Settings → Server → Subtitles."]);
+    expect(admin.notes()).toEqual(["Subtitle search isn't set up on this server. Set it up in Pley on the web: Settings → Server → Subtitles."]);
     act(() => render(null, admin.root));
 
     const other = setup({ found: unset });

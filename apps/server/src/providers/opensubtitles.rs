@@ -420,7 +420,7 @@ impl OpenSubtitles {
         while let Some(chunk) = response.chunk().await.map_err(|e| anyhow!("OpenSubtitles: {e}"))? {
             bytes.extend_from_slice(&chunk);
             if bytes.len() > max_bytes {
-                return Err(anyhow!("the subtitle file is larger than pley takes").into());
+                return Err(anyhow!("the subtitle file is larger than Pley takes").into());
             }
         }
         Ok((name, bytes))

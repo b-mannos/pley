@@ -48,7 +48,7 @@ class SubtitlesTest(unittest.TestCase):
         text = kodi.text
         self.assertEqual(subtitles.problem(api.ApiError(503, "unavailable", "no key"), text),
                          "Subtitle search isn't set up on this server. An administrator sets it up on the web, in Settings → Server.")
-        self.assertEqual(subtitles.problem(api.ApiError(404, "not_found", "nothing at"), text), "Finding subtitles needs a newer pley server.")
+        self.assertEqual(subtitles.problem(api.ApiError(404, "not_found", "nothing at"), text), "Finding subtitles needs a newer Pley server.")
         self.assertIn("busy", subtitles.problem(api.ApiError(502, "upstream", "busy"), text))
 
 
