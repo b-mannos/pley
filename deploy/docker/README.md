@@ -14,12 +14,17 @@ cd pley/deploy/docker
 ./setup.sh
 ```
 
-`setup.sh` writes `.env` on its first run (Pley runs as you, with hardware
-transcoding when Docker can use a GPU), builds the image, starts Pley and
-prints a link with a one-time setup code. Open it to create the administrator
-account, then add libraries in **Settings → Libraries**, with folders under
-`/media` (`/media/Movies`, ...). Media goes in `media/` here unless `.env`
-points elsewhere; [media/README.md](media/README.md) shows how to name it.
+`setup.sh`:
+
+1. writes `.env` on its first run (Pley runs as you, with hardware
+   transcoding when Docker can use a GPU);
+2. builds the image and starts Pley;
+3. prints a link with a one-time setup code.
+
+Open the link to create the administrator account, then add libraries in
+**Settings → Libraries**, with folders under `/media` (`/media/Movies`, ...).
+Media goes in `media/` here unless `.env` points elsewhere;
+[media/README.md](media/README.md) shows how to name it.
 
 Without the script, or on Windows:
 
@@ -55,9 +60,9 @@ GPUs it finds):
 COMPOSE_FILE=compose.yaml:compose.vaapi.yaml:compose.plex.yaml
 ```
 
-Separate them with `;` instead of `:` on Windows. Your own changes go in a
+On Windows, separate them with `;` instead of `:`. Your own changes go in
 `compose.override.yaml` next to `compose.yaml` (git ignores it). Compose reads
-it by itself unless `COMPOSE_FILE` is set; then add it to the list.
+it automatically unless `COMPOSE_FILE` is set; then add it to the list.
 
 ## Settings
 
@@ -78,12 +83,12 @@ All in `.env` ([.env.example](.env.example) explains each one):
 | `PLEY_SHM_SIZE` | `2gb` | `/dev/shm`: transcodes keep their segments in half of it |
 | `PLEY_LOG` | `info` | Log detail (`debug` to look into a problem) |
 
-Settings that change at runtime are in Pley's web UI: the TMDB key in
-**Settings → Server**, hardware acceleration, tone mapping and transcode
-limits in **Settings → Transcoder**.
-**Settings → Network** only shows where Pley listens inside its container,
-which the image and `compose.yaml` fix: where it can be reached from is
-`PLEY_LISTEN` (and `PLEY_PLEX_LISTEN`) in `.env`.
+Settings that change at runtime are in Pley's web app: the TMDB key in
+**Settings → Server**; hardware acceleration, tone mapping and transcode
+limits in **Settings → Transcoder**. **Settings → Network** only shows where
+Pley listens inside the container, which the image and `compose.yaml` fix;
+where it can be reached from is `PLEY_LISTEN` (and `PLEY_PLEX_LISTEN`) in
+`.env`.
 
 ### More media folders
 
@@ -103,51 +108,19 @@ Always add `:ro`: Pley never writes to media folders.
 
 ## Behind a reverse proxy
 
-Pley serves plain HTTP; your proxy adds TLS. It must:
+Pley serves plain HTTP; your proxy adds TLS. What the proxy must pass on,
+and Caddy and nginx examples, are in
+[Apps and reverse proxies](../README.md#apps-and-reverse-proxies). Pley
+trusts `X-Forwarded-For` from a proxy on this computer, your network or a
+Docker network.
 
-- pass the original `Host` header and set `X-Forwarded-Proto`, replacing what
-  clients send: Pley names itself after the address each request came to, and
-  marks its cookies `Secure` behind HTTPS;
-- add the client's address to `X-Forwarded-For` (Pley trusts it only from a
-  proxy on this computer, your network or a Docker network);
-- not buffer responses: live updates are server-sent events, and videos
-  stream as they are read;
-- accept uploads of up to 25 MB (artwork).
+**A proxy on this computer, outside Docker:** point it at
+`http://127.0.0.1:7539` (the default `PLEY_LISTEN`).
 
-**Caddy** does all of it by default:
-
-```caddyfile
-pley.example.com {
-	reverse_proxy 127.0.0.1:7539
-}
-```
-
-**nginx:**
-
-```nginx
-server {
-    listen 443 ssl;
-    http2 on;
-    server_name pley.example.com;
-    # ssl_certificate, ssl_certificate_key ...
-
-    client_max_body_size 25m;
-
-    location / {
-        proxy_pass http://127.0.0.1:7539;
-        proxy_http_version 1.1;
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_buffering off;
-    }
-}
-```
-
-**A proxy in Docker** (Caddy, Traefik, nginx Proxy Manager): turn on
-`compose.proxy.yaml`. Pley then joins the proxy's network and publishes no
-port at all; the proxy reaches it at `http://pley:7539`. Create the network
-once (`docker network create proxy`) and attach the proxy to it, or set
+**A proxy in Docker** (Caddy, Traefik, Nginx Proxy Manager): turn on
+`compose.proxy.yaml`. Pley joins the proxy's network, publishes no port, and
+the proxy reaches it at `http://pley:7539`. Create the network once
+(`docker network create proxy`) and attach the proxy to it, or set
 `PLEY_PROXY_NETWORK` to the proxy's own. With Traefik, give Pley these labels
 in `compose.override.yaml`:
 
@@ -174,14 +147,15 @@ from the internet.
 ## Hardware transcoding
 
 - **Intel and AMD** (VAAPI, Quick Sync, Vulkan tone mapping):
-  `compose.vaapi.yaml` hands Pley one GPU's render node. `setup.sh` turns it
-  on, on its first run, for the first Intel or AMD GPU it finds, and on later
-  runs says when there is one Pley doesn't use. By hand: add it to
-  `COMPOSE_FILE` and set `PLEY_RENDER_GID` to the node's group
-  (`stat -c %g /dev/dri/renderD128`). With several GPUs, `PLEY_RENDER_DEVICE`
-  picks one (`ls -l /dev/dri/by-path` names them). Quick Sync needs an 11th
-  generation (Tiger Lake) or newer Intel GPU; older ones encode through
-  VAAPI. Intel's drivers are in the amd64 image only.
+  `compose.vaapi.yaml` hands Pley one GPU's render node.
+  - `setup.sh` turns it on at its first run for the first Intel or AMD GPU it
+    finds, and on later runs says when there is one Pley doesn't use.
+  - By hand: add it to `COMPOSE_FILE` and set `PLEY_RENDER_GID` to the node's
+    group (`stat -c %g /dev/dri/renderD128`). With several GPUs,
+    `PLEY_RENDER_DEVICE` picks one (`ls -l /dev/dri/by-path` names them).
+  - Quick Sync needs an 11th generation (Tiger Lake) or newer Intel GPU;
+    older ones encode through VAAPI. Intel's drivers are in the amd64 image
+    only.
 - **NVIDIA** (NVENC, NVDEC, CUDA scaling, Vulkan tone mapping): install the
   driver and the
   [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html),
@@ -192,8 +166,8 @@ from the internet.
 - **arm64** boards such as the Raspberry Pi have no encoder Pley uses: they
   transcode on the CPU.
 
-Pley's log names the encoders it found as it starts
-(`docker compose logs pley | grep detected`), and looks again when the GPUs
+Pley logs the encoders it found at start
+(`docker compose logs pley | grep detected`), and checks again when the GPUs
 the container sees change. **Settings → Transcoder** picks the encoder
 (Automatic takes the GPU's), and **Settings → Dashboard** shows each stream
 as GPU, hybrid or CPU.
