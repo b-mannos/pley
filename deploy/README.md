@@ -33,7 +33,7 @@ The image is based on Debian 13 and its FFmpeg 7.1: NVIDIA (NVENC, CUDA
 scaling), Intel (Quick Sync, VAAPI) and AMD (VAAPI) transcoding, and HDR tone
 mapping with libplacebo (Vulkan), OpenCL or zscale. Releases publish it to
 GitHub Container Registry for amd64 and arm64 (`ghcr.io/hhaidar/pley:latest`,
-or a version such as `:0.2`). Without Compose:
+or a server version such as `:0.0.1` or `:0.0`). Without Compose:
 
 ```sh
 docker build -f deploy/docker/Dockerfile -t pley .

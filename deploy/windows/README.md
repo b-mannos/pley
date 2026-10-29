@@ -120,7 +120,7 @@ Pley's.
 ## Installing without the wizard
 
 ```
-pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=service /LISTEN=192.168.1.10
+pley-server-0.0.1-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=service /LISTEN=192.168.1.10
 ```
 
 | Option | Values | Default |
@@ -146,7 +146,7 @@ Setup that asks for administrator rights itself starts without it):
 
 ```
 $env:PLEY_SHARE_PASSWORD = [Net.NetworkCredential]::new('', (Read-Host 'NAS password' -AsSecureString)).Password
-.\pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=user /SHARE=\\nas /SHAREUSER=media
+.\pley-server-0.0.1-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=user /SHARE=\\nas /SHAREUSER=media
 ```
 
 Setup's own options work too, such as `/DIR=` (where Pley goes) and
@@ -233,7 +233,7 @@ patched build's patch and script, which the GPL asks to go with it);
 `-Flavor fel` adds a name to the file:
 `pley-server-<version>-fel-windows-x86_64-setup.exe`. `scripts\build.ps1
 -Installer` passes both on. Releases carry gyan.dev's full build, at the
-version and checksum set in `release.yml`.
+version and checksum set in `.github/workflows/server.yml`.
 `ISCC /DTest …` builds one that installs in the notification area without
 administrator rights (no shortcuts nor start at sign-in), to try Setup's
 code on a development machine.

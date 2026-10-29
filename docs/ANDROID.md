@@ -329,14 +329,17 @@ an update to the installer; it asks for that permission only once it does).
 Release builds are minified, and signed when the release key is given
 (below).
 
-The version is Pley's, from `VERSION` at the repository's root, and the
-version code follows from it (1.2.3 is 1020300), so every release installs
-over the one before. Google Play and the Amazon Appstore take each code
-once, so a rebuild of the same version for them sets `PLEY_BUILD` (1 to
-99), which is added to the code (0.2.0 with `PLEY_BUILD=1` is 20001).
-Builds record the commit they were made from
-(`PLEY_COMMIT`, else git's); Settings and Diagnostics show both, as
-"0.2.0 (1a2b3c4d5)".
+The version is the app's own, `appVersion` in `app/build.gradle.kts`, which
+`bun scripts/release.mjs android <patch|minor|major>` sets
+([RELEASING.md](RELEASING.md)). The version code follows from it:
+10,000,000 + major × 1,000,000 + minor × 10,000 + patch × 100, so 0.0.1 is
+10000100 and 1.2.3 is 11020300, above the 20003 Google Play has from 0.2.0
+(the version every app shared before), and every release installs over the
+one before. Google Play and the Amazon Appstore take each code once, so a
+rebuild of the same version for them sets `PLEY_BUILD` (1 to 99), which is
+added to the code (0.0.1 with `PLEY_BUILD=1` is 10000101). Builds record the
+commit they were made from (`PLEY_COMMIT`, else git's); Settings and
+Diagnostics show both, as "0.0.1 (1a2b3c4d5)".
 
 ### Releases
 
@@ -360,10 +363,12 @@ The APK to sideload (phones, Android TV, Fire TV) is
 bundle for the stores (`:app:bundleStoreRelease`) is
 `app/build/outputs/bundle/storeRelease/app-store-release.aab`.
 
-A tag's release workflow builds both, with the key from the repository's
-secrets: `ANDROID_KEYSTORE_BASE64` (the keystore, base64-encoded),
+An Android release (Actions → Release, `android`; [RELEASING.md](RELEASING.md))
+builds both, with the key from the repository's secrets:
+`ANDROID_KEYSTORE_BASE64` (the keystore, base64-encoded),
 `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and, when it differs,
-`ANDROID_KEY_PASSWORD`. Without them the release has no Android app.
+`ANDROID_KEY_PASSWORD`. Without them the release has its tag and notes but
+no APK or bundle, and says so.
 A new key is made once, and kept safe: every update must be signed with it.
 
 ```sh

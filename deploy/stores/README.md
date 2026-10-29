@@ -34,11 +34,13 @@ them. They show a made-up library, with no real title's artwork, which
   Android phones and tablets),
   the bundle from the release, `pley-android-<version>-play.aab`
   (docs/ANDROID.md, Releases).
-- **Version code**: the version's (0.2.0 is 20000). The stores take each
-  code once, so a second upload of the same version is built with
-  `PLEY_BUILD` set, 1 to 99, which is added to it (`PLEY_BUILD=1` makes
-  20001): `./gradlew :app:bundleStoreRelease` in `apps/android`, with the
-  release key.
+- **Version code**: the app's version's, 10,000,000 + major × 1,000,000 +
+  minor × 10,000 + patch × 100 (0.0.1 is 10000100, above the 20003 Google
+  Play has from 0.2.0; docs/RELEASING.md). The stores take each code once,
+  so a second upload of the same version is built with `PLEY_BUILD` set, 1
+  to 99, which is added to it (`PLEY_BUILD=1` makes 10000101):
+  `./gradlew :app:bundleStoreRelease` in `apps/android`, with the release
+  key.
 - **Category**: Video Players & Editors.
 - **Name**: Pley
 

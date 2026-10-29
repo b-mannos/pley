@@ -137,7 +137,7 @@ HTTP, so the two can have different licenses
 | `packages/transcoder-api` | Protocol types shared by server and transcoder |
 | `deploy/` | Docker, systemd and launchd setups, and the Windows installer ([guide](deploy/README.md)) |
 | `docs/` | [HTTP API](docs/API.md), [compatibility API](docs/COMPATIBILITY.md), [transcoder](docs/TRANSCODER.md), [storage](docs/STORAGE.md), [Samsung and LG TVs](docs/TV_PLATFORMS.md) |
-| `scripts/` | Release build, transcoder source package, license check, the apps' icons and the stores' pictures (`render-icons.mjs`) |
+| `scripts/` | Versions and releases (`version.mjs`, `release.mjs`), release build, transcoder source package, license check, the apps' icons and the stores' pictures (`render-icons.mjs`) |
 
 ## Requirements
 
@@ -263,28 +263,26 @@ Archive belong to their owners.
   format the Rust code; `scripts/check-licenses.ps1` checks the license
   boundary.
 
-[GitHub Actions](.github/workflows/ci.yml) runs all of this on Linux, macOS and
-Windows for every push and pull request, plus a build with the oldest
-supported Rust, the license check and the Docker build. Pushing a tag such as
-`v0.2.0` runs [`release.yml`](.github/workflows/release.yml): archives for
-Linux, Windows and macOS (x86_64 and arm64) with checksums and build
-provenance, a draft GitHub release, and the Docker image on GitHub Container
-Registry. `scripts/build.ps1` (or `build.sh`) builds an archive locally.
-The release also carries the server's Windows installers, the Android app (an
-APK to sideload and a bundle for Google Play, signed with the key from the
-repository's secrets), the desktop app's installers, the LG TV app, the Kodi
-add-on and the Roku app. The stores take each Android version code once:
-a rebuild of the same version is built with `PLEY_BUILD` (1 to 99) set,
-which adds to the version's code ([deploy/stores](deploy/stores/README.md)).
+[GitHub Actions](.github/workflows) runs all of this for every push and pull
+request, each app's workflow only when that app (or what it is built from)
+changes: the server's on Linux, macOS and Windows, with a build with the
+oldest supported Rust, the license check and the Docker build.
+`scripts/build.ps1` (or `build.sh`) builds the server's archive locally.
 
-Every app has one version, Pley's, in [`VERSION`](VERSION):
-`bun scripts/version.mjs set 0.3.0` writes it into every manifest, and
-`bun scripts/version.mjs check` (which CI runs) finds any that disagree. A
-release's tag is that version (`v0.3.0`). Builds record the commit they
-were made from, which every app shows beside its version, as
-"0.2.0 (1a2b3c4d5)": `pley --version`, the web app's Account page and
-dashboard, and the apps' Settings.
+Each app has its own version, in its own manifests, and its own
+`CHANGELOG.md`: the server (with its transcoder and the web app), desktop,
+Android, Samsung, LG, Kodi and Roku. `bun scripts/release.mjs kodi patch`
+bumps one and dates its changelog's Unreleased entries; the Release workflow,
+run by hand for one app, builds it, tags it `kodi-v0.0.2` and publishes the
+GitHub release with those notes (the server's also pushes the Docker image to
+GitHub Container Registry). Builds record the commit they were made from,
+which every app shows beside its version, as "0.0.1 (1a2b3c4d5)":
+`pley --version`, the web app's Account page and dashboard, and the apps'
+Settings. [docs/RELEASING.md](docs/RELEASING.md) has the commands, the
+release files and the Android version codes; the stores take each Android
+version code once, so a store rebuild of the same version sets `PLEY_BUILD`
+([deploy/stores](deploy/stores/README.md)).
 
 ## Status
 
-Version 0.2.
+Early: each app's own version starts at 0.0.1.
