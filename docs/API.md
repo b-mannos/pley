@@ -107,7 +107,7 @@ Non-2xx answers carry:
 | `insufficient_scope` | `403` | an app's token on a route its scopes don't open |
 | `not_found` | `404` | also anything the user [may not see](#access-rules) |
 | `conflict` | `409` | |
-| `session_stopped` | `410` | a playback session stopped from elsewhere: see below |
+| `session_stopped` | `410` | the playback session was [stopped from elsewhere](#stopping-a-stream); the body also has `"error": "session_stopped"`, and `message` is what the person who stopped it wrote, or `null` |
 | `too_many_requests` | `429` | attempt limits, below |
 | `internal` | `500` | |
 | `not_implemented` | `501` | |
@@ -116,12 +116,6 @@ Non-2xx answers carry:
 **Attempt limits.** Sign-in, PIN, password and code attempts: 5 failures in
 15 minutes, counting attempts still being checked. Sign-ins count per
 account from each address, and 50 from all addresses together. Then `429`.
-
-**Stopped sessions.** A playback session stopped from elsewhere answers its
-player's next requests with `410`
-`{ "code": "session_stopped", "error": "session_stopped", "message" }`.
-`message` is what the person who stopped it wrote, or `null` (see
-[Stopping a stream](#stopping-a-stream)).
 
 The OAuth token and revocation endpoints answer errors in OAuth's own form
 instead (see [Tokens](#tokens)).
@@ -430,9 +424,8 @@ lists carry (Kodi).
 - `/api/auth/login`: `401` for bad credentials. With two-step sign-in,
   `code` is a code from the authenticator app or a recovery code; without
   it, or with a wrong one, `401` with `code: "two_step"`. Attempts are
-  limited as in [Errors](#errors) (5 failures per username from each
-  address per 15 minutes, 50 from all). A disabled account gets `403`, and
-  its sessions stop working.
+  limited as in [Errors](#errors). A disabled account gets `403`, and its
+  sessions stop working.
 
 ## Auth
 
@@ -580,7 +573,7 @@ Every other `/.well-known/` path answers `404`.
   with a lower-case host, no default port and no trailing slash. A server
   reached at a home and a public address has a different issuer at each.
 - Apps check that the issuer is the address they used (RFC 8414 §3.3), so a
-  reverse proxy must pass the original `Host` (deploy/README.md). For a
+  reverse proxy must pass the original `Host` ([deploy/README.md](../deploy/README.md)). For a
   proxy that drops the port, list the public address in the settings'
   `proxy_addresses` (`https://media.example.com:9999`): a `Host` without a
   port, for that scheme and host name, takes that port.
@@ -876,8 +869,9 @@ What apps see:
 |---|---|---|---|
 | GET | `/api/me/apps` | `user` | `AppGrant[]`: apps acting as you or allowed by you, most recently used first |
 | DELETE | `/api/me/apps/{id}` | `user` | `204`, signs that app out; `404` unless it acts as you or you allowed it |
-| GET | `/api/users/{id}/apps` | `admin` | that user's `AppGrant[]` |
-| DELETE | `/api/users/{id}/apps/{grant}` | `admin` | `204`; `404` as above |
+
+Administrators see and sign out other users' apps under
+[Users](#users-admin).
 
 ```ts
 interface AppGrant {
@@ -2016,53 +2010,63 @@ interface DownloadInfo {
 Markers come from three sources, best first:
 
 1. **Chapters** titled like an intro or credits (*Intro*, *Opening*, *OP*,
-   *Opening Credits*, *Ending*, *ED*, *Credits*, *End Credits*, …), for movies
-   and episodes. *Credits* chapters shorter than 15 s (a logo at the very end)
-   are ignored.
+   *Opening Credits*, *Ending*, *ED*, *Credits*, *End Credits*, …), for
+   movies and episodes. *Credits* chapters shorter than 15 s (a logo at the
+   very end) are ignored.
 2. **Audio fingerprints** of episodes. The transcoder computes Chromaprint
    fingerprints of the first half (at most 10 minutes) and the last 35 % (at
-   most 8 minutes) of every episode. An intro is audio of 12 s to 3 minutes
-   near the start that the nearest episodes of the season (or of the show, for
-   a season with one episode) share; credits are shared audio near the end.
-   Each episode is compared with up to eight others of its season and the
-   boundaries agreed on by most comparisons win; an episode its season shares
-   nothing with (a premiere, a short season) is compared with up to six
-   episodes of the show's other seasons whose fingerprints are cached.
-   Matching follows Jellyfin's Intro Skipper: alignments are found from
-   matching values, and parts of a title sequence split by a gag that changes
-   every episode count as one. Fingerprints are cached per file version in
-   the cache folder, so a new episode only needs its own.
+   most 8 minutes) of every episode.
+   - An intro is audio of 12 s to 3 minutes near the start that the nearest
+     episodes of the season share (of the show, for a season with one
+     episode). Credits are shared audio near the end.
+   - Each episode is compared with up to eight others of its season, and the
+     boundaries most comparisons agree on win. An episode its season shares
+     nothing with (a premiere, a short season) is compared with up to six
+     episodes of the show's other seasons whose fingerprints are cached.
+   - Matching follows Jellyfin's Intro Skipper: alignments are found from
+     matching values, and parts of a title sequence split by a gag that
+     changes every episode count as one.
+   - Fingerprints are cached per file version in the cache folder, so a new
+     episode needs only its own.
 3. **Key frames** (`source: "frames"`), for credits no other episode shares:
    the key frames of the last 35 % (at most 8 minutes) are measured, and the
    last stretch of at least 15 s that is mostly text on black, ending less
    than 2 minutes before the end of the file, is the credits.
 
-A background worker analyses one season at a time after library scans (and
+A background worker analyzes one season at a time after library scans (and
 30 s after start-up), waits while anything plays, and records the algorithm
-version so improvements re-run automatically. A season that isn't analysed
-yet goes first as soon as one of its episodes plays, during playback: the
-episodes playing first, then the rest, each followed by a `library_changed`
-event so players pick up the markers. Nothing is analysed while something is
-being transcoded (a playback's or a download's), not even that season. It is skipped when
-`detect_markers` is off or the transcoder's FFmpeg lacks Chromaprint (chapters
-are still used).
+version so improvements re-run automatically.
+
+- A season not analyzed yet goes first as soon as one of its episodes
+  plays: the episodes playing first, then the rest, each followed by a
+  `library_changed` event so players pick up the markers.
+- Nothing is analyzed while something is transcoded (a playback's or a
+  download's), not even that season.
+- Skipped when `detect_markers` is off or the transcoder's FFmpeg lacks
+  Chromaprint (chapters are still used).
 
 ## Watch history
 
-A play is recorded once it reaches the point where the item counts as watched
-(90 %), with the device it played on. Marking something watched by hand is not
-a play.
+A play is recorded, with the device it played on, once it reaches the point
+where the item counts as watched (90 %). Marking something watched by hand
+is not a play.
 
-| Method | Path | Query | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/history` | `offset`, `limit` (default 50, max 200), `item_id` (the item, or the episodes or tracks under it), `library_id`, `since` (unix seconds); administrators: `user_id=<id>` or `all=1` | `{ total: number, entries: HistoryEntry[] }`, newest first. Your own plays unless asked otherwise; entries of items you can't see are left out. |
-| DELETE | `/api/history/{id}` | – | `204`; your own entries, or any for administrators |
+| GET | `/api/history` | `library` | `{ total, entries: HistoryEntry[] }`, newest first |
+| DELETE | `/api/history/{id}` | `play` | `204`; your own entries, or any for administrators |
+
+`GET /api/history` query: `offset`, `limit` (default 50, max 200),
+`item_id` (the item, or the episodes or tracks under it), `library_id`,
+`since` (unix seconds); administrators also `user_id=<id>` or `all=1`.
+Your own plays unless asked otherwise; entries of items you can't see are
+left out.
 
 ```ts
 interface HistoryEntry {
   id: Id;
   viewed_at: Timestamp;
-  device?: string;                  // "Chrome on Windows", a compatibility API client's name
+  device?: string;                  // "Chrome on Windows", or a compatibility API client's name
   user: { id: Id; name: string; avatar_url?: string; avatar_color?: string };
   item: ItemSummary;
 }
@@ -2070,67 +2074,72 @@ interface HistoryEntry {
 
 ## Activity & events
 
-| Method | Path | Response |
-|---|---|---|
-| GET | `/api/activity` | `{ scans: ScanStatus[], sessions: SessionInfo[], analysis: AnalysisStatus \| null, previews_pending: number }` (`previews_pending`: files waiting for seek previews. Non-admins only see their own sessions and the scans of libraries they may open, with no analysis and `previews_pending` 0) |
-| DELETE | `/api/sessions/{id}` | `204`; body optional `{ message?: string }` (at most 200 characters, else `400`). Stops a playback session at once (see below) |
-| GET | `/api/events` | Server-Sent Events, `data:` is JSON `ServerEvent` |
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | `/api/activity` | `user` | `{ scans: ScanStatus[], sessions: SessionInfo[], analysis: AnalysisStatus \| null, previews_pending: number }` |
+| DELETE | `/api/sessions/{id}` | `play` | optional body `{ message?: string }` (at most 200 characters, else `400`) → `204`: stops a playback session at once |
+| GET | `/api/events` | `library` | Server-Sent Events; each `data:` is a JSON `ServerEvent` |
+
+`/api/activity`: `previews_pending` counts files waiting for seek previews.
+Non-administrators see only their own sessions and the scans of libraries
+they may open, with no `analysis` and `previews_pending` 0.
 
 ### Stopping a stream
 
-`DELETE /api/sessions/{id}` ends a playback session from elsewhere than its
-player: administrators stop any session (the dashboard's *Stop*), anyone
-else their own (another of their devices); someone else's answers `403`, an
-unknown one `404`, one stopped already `204`. Its transcode and HLS end at
-once. Then:
+`DELETE /api/sessions/{id}` ends a playback session from somewhere other
+than its player. Administrators stop any session (the dashboard's *Stop*);
+anyone else, their own (on another of their devices). Someone else's
+answers `403`, an unknown one `404`, one stopped already `204`. Its
+transcode and HLS end at once. Then:
 
 - the user's event streams get `{ type: "session_stopped", session_id,
-  message, by_admin }`: `message` is the one given (trimmed) or `null`;
+  message, by_admin }`. `message` is the one given (trimmed) or `null`;
   `by_admin` is true when an administrator stopped another user's session.
   Only that user's streams get it; `sessions_changed` goes to everyone, as
   when any session ends;
-- the session's next requests answer `410` `{ code: "session_stopped",
-  error: "session_stopped", message }` (its status, playlists and segments,
-  and progress reports naming it, which still keep the place), for 30
-  minutes, so a player without the event stream stops too. Closing it
-  (`DELETE /api/playback/{id}`) answers `204`;
+- for 30 minutes, the session's next requests answer `410`
+  `{ code: "session_stopped", error: "session_stopped", message }`: its
+  status, playlists and segments, and progress reports naming it (which
+  still keep the place). So a player without the event stream stops too.
+  Closing it (`DELETE /api/playback/{id}`) answers `204`;
 - the player stops, leaves, and says "Playback was stopped by the server's
-  administrator" with the message, if any.
+  administrator", with the message if any.
 
 The compatibility API's `GET /status/sessions/terminate?sessionId=&reason=`
-(Tautulli's) does the same for administrators, `reason` as the message. A
-player's progress reports through the compatibility API don't start its
-stopped session again.
+(Tautulli's) does the same for administrators, with `reason` as the
+message. A player's progress reports through the compatibility API don't
+restart its stopped session.
 
 ### Watch state on other devices
 
 `{ type: "user_state_changed", item_ids, children }` goes to the user's own
-event streams (only theirs, the device that made the change included) when
-their watch state changes in a way their screens show:
+event streams (the device that made the change included) when their watch
+state changes in a way their screens show:
 
 - something marked watched or unwatched (`POST /api/items/{id}/watched`,
-  `…/unwatched`, the compatibility API's `/:/scrobble` and `/:/unscrobble`), unless
-  nothing changed (marked watched again);
-- a progress report (Pley's, or a compatibility API player's `/:/timeline` and
-  `/:/progress`) that crosses 90 %, starts a resume point (15 s in) or
-  clears one, or that pauses or stops the player somewhere new: where *Play*
-  on another device starts. Not the reports that only keep the place every
+  `…/unwatched`, the compatibility API's `/:/scrobble` and `/:/unscrobble`),
+  unless nothing changed (marked watched again);
+- a progress report (Pley's, or a compatibility API player's `/:/timeline`
+  and `/:/progress`) that crosses 90 %, starts a resume point (15 s in) or
+  clears one, or pauses or stops the player somewhere new (where *Play* on
+  another device starts). Not the reports that only keep the place every
   ~10 s, nor late ones that change nothing (`age_ms`);
 - a title taken out of Continue Watching, or back in it as it plays again.
 
 `item_ids` is the item, then its parent and grandparent: an episode with its
 season and show, a track with its album and artist, whose counts and On
 Deck follow it. A show, season, album or artist marked as a whole sends one
-event for itself, with `children: true`: everything under the first id
-changed too, without listing it. Clients ask again for Home and the
-libraries' rows (Continue Watching) and for what shows those items: their
-pages, children and On Deck, and lists holding them. A play reaching 90 %
-also sends `library_changed`, as before; Pley's apps gather both for 0.3 s
-and ask once, and leave alone what they fetched since the event came (their
-own change).
+event for itself with `children: true`: everything under the first id
+changed too, unlisted.
+
+Clients then fetch Home and the libraries' rows (Continue Watching) again,
+and what shows those items: their pages, children, On Deck, and lists
+holding them. A play reaching 90 % also sends `library_changed`. Pley's apps
+gather both for 0.3 s and ask once, and leave alone what they fetched after
+the event came (their own change).
 
 ```ts
-interface AnalysisStatus {          // intro/credits detection of one season
+interface AnalysisStatus {          // intro and credits detection of one season
   item_id: Id;                      // the season
   title: string;                    // "Show — Season 1"
   done: number;                     // audio fingerprints computed
@@ -2164,26 +2173,27 @@ interface TranscodeInfo {
   state: "starting" | "running" | "idle" | "finished" | "failed";
   video: "copy" | "transcode" | "none";
   audio: "copy" | "transcode" | "none";
-  video_in: string | null;      // e.g. "HEVC 3840×2160 Dolby Vision P8.1", "… Dolby Vision P7 FEL", "… HDR10+"
-  video_out: string | null;     // e.g. "H.264 1920×1080"; "HEVC 3840×2160 HDR10" when HDR is kept
-  audio_in: string | null;      // e.g. "EAC3 5.1"
-  audio_out: string | null;     // e.g. "AAC 2.0"
-  encoder: string | null;       // e.g. "h264_nvenc", "libx264"
-  preset: string | null;        // the software encoder's preset now (the automatic one changes)
+  video_in: string | null;      // "HEVC 3840×2160 Dolby Vision P8.1", "… Dolby Vision P7 FEL", "… HDR10+"
+  video_out: string | null;     // "H.264 1920×1080"; "HEVC 3840×2160 HDR10" when HDR is kept
+  audio_in: string | null;      // "EAC3 5.1"
+  audio_out: string | null;     // "AAC 2.0"
+  encoder: string | null;       // "h264_nvenc", "libx264"
+  preset: string | null;        // the software encoder's current preset (the automatic one changes)
   decoder: string | null;       // "cuda", "vulkan", "cpu", …
   pipeline: string | null;      // "gpu" (zero-copy), "hybrid", "cpu" or "copy"
   tonemap: string | null;       // "libplacebo" | "opencl" | "zscale" when HDR/DV is tone-mapped to SDR
   dolby_vision: string | null;  // remuxes: "kept" (named in master.m3u8), "converted to 8.1" (profile 7)
   hdr10plus_stripped: boolean;  // the remux leaves out HDR10+ (Dolby Vision + HDR10+ streams)
   subtitle_burn: boolean;
-  speed: number | null;         // ffmpeg speed multiplier (2.5 = 2.5× realtime)
+  speed: number | null;         // FFmpeg speed multiplier (2.5 = 2.5× real time)
   fps: number | null;
-  transcoded_ms: number;        // how far ffmpeg got (absolute media position)
+  transcoded_ms: number;        // how far FFmpeg got (absolute media position)
   segments_ready: number;
   segments_total: number;
-  bitrate_out: number | null;   // what a conversion aims for, video and audio together (bits per second); null for copied video
+  bitrate_out: number | null;   // what a conversion aims for, video and audio together (bits per second);
+                                // null for copied video
   last_error: string | null;
-  rendition: number;            // a stream in several sizes: the one the player takes now (0 the largest; the rest is its)
+  rendition: number;            // a stream in several sizes: the one the player takes now (0 = the largest)
   variants: number;             // how many smaller sizes it has (0: one size)
 }
 
@@ -2191,132 +2201,201 @@ type ServerEvent =
   | { type: "scan_started"; library_id: Id }
   | { type: "scan_progress"; library_id: Id; phase: ScanStatus["phase"]; processed: number; total: number }
   | { type: "scan_finished"; library_id: Id; added: number; updated: number; removed: number }
-  | { type: "library_changed"; library_id: Id }      // items/metadata changed → refetch
-  | { type: "libraries_changed" }                    // library created/updated/deleted, or the order changed; to one user's streams only: their own order, or what they may see (is_admin, all_libraries, library_ids, max_age changed)
+  | { type: "library_changed"; library_id: Id }      // items or metadata changed: refetch
+  | { type: "libraries_changed" }                    // a library created, updated or deleted, or the order
+                                                     // changed. To one user's streams only: their own order,
+                                                     // or what they may see (is_admin, all_libraries,
+                                                     // library_ids, max_age changed)
   | { type: "sessions_changed" }
   | { type: "watchlist_changed" }                    // the user's My List changed (their streams only)
-  | { type: "user_state_changed"; item_ids: Id[]; children: boolean } // the user's watch state changed (their streams only)
-  | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean }; // their streams only
+  | { type: "user_state_changed"; item_ids: Id[]; children: boolean } // their watch state (their streams only)
+  | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean }; // theirs only
 ```
 
 ## Users *(admin)*
 
-| Method | Path | Body | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/users` | – | `User[]` |
-| POST | `/api/users` | `{ username, password?, display_name?, is_admin?, managed?, home? (true), all_libraries? (true), library_ids?, max_age?, pin? }` | `User`; managed profiles need no password |
-| PATCH | `/api/users/{id}` | `{ password?, display_name?, is_admin?, home?, disabled?, all_libraries?, library_ids?, max_age?, pin? }` (`null` clears nullable fields) | `User`. Pley always keeps one enabled administrator. A new `password` signs the user out on every device (an administrator's own device stays) and in every app using the account or allowed by it. A change to `is_admin`, `all_libraries`, `library_ids` or `max_age` sends `libraries_changed` to the user's streams, so their devices fetch what they may see again |
-| DELETE | `/api/users/{id}` | – | `204` (cannot delete yourself); their apps end with them |
-| GET | `/api/users/{id}/devices` | – | `Device[]` |
-| DELETE | `/api/users/{id}/devices` | – | `204`, signs the user out everywhere, apps included |
-| GET | `/api/users/{id}/apps` | – | `AppGrant[]` (see [Apps](#signed-in-apps)) |
-| DELETE | `/api/users/{id}/apps/{grant}` | – | `204`, signs that app out |
-| DELETE | `/api/users/{id}/two-step` | – | `204`, turns two-step sign-in off (someone who lost their phone and recovery codes) |
+| GET | `/api/users` | `admin` | `User[]` |
+| POST | `/api/users` | `admin` | `{ username, password?, display_name?, is_admin?, managed?, home? (true), all_libraries? (true), library_ids?, max_age?, pin? }` → `User`; managed profiles need no password |
+| PATCH | `/api/users/{id}` | `admin` | `{ password?, display_name?, is_admin?, home?, disabled?, all_libraries?, library_ids?, max_age?, pin? }` (`null` clears nullable fields) → `User` |
+| DELETE | `/api/users/{id}` | `admin` | `204` (not yourself); their apps end with them |
+| GET | `/api/users/{id}/devices` | `admin` | `Device[]` |
+| DELETE | `/api/users/{id}/devices` | `admin` | `204`: signs the user out everywhere, apps included |
+| GET | `/api/users/{id}/apps` | `admin` | `AppGrant[]` ([Signed-in apps](#signed-in-apps)) |
+| DELETE | `/api/users/{id}/apps/{grant}` | `admin` | `204`: signs that app out; `404` unless it acts as that user or they allowed it |
+| DELETE | `/api/users/{id}/two-step` | `admin` | `204`: turns two-step sign-in off (for someone who lost their phone and recovery codes) |
+
+`PATCH /api/users/{id}`:
+
+- Pley always keeps one enabled administrator.
+- A new `password` signs the user out on every device (an administrator's
+  own device stays) and in every app using the account or allowed by it.
+- A change to `is_admin`, `all_libraries`, `library_ids` or `max_age` sends
+  `libraries_changed` to the user's streams, so their devices fetch what
+  they may see again.
 
 ## Invitations
 
-| Method | Path | Body | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/invites` *(admin)* | – | `Invite[]`: `{ code, created_at, expires_at, uses_left, all_libraries, library_ids, max_age, note }` |
-| POST | `/api/invites` *(admin)* | `{ expires_in_days? (7, 0 = never), uses? (1), all_libraries?, library_ids?, max_age?, note? }` | `Invite`; share `/invite/{code}` |
-| DELETE | `/api/invites/{code}` *(admin)* | – | `204` |
-| GET | `/api/invites/{code}` | – | `{ server_name, expires_at }`, `404` when invalid, used up or expired |
-| POST | `/api/invites/{code}/accept` | `{ username, password, display_name? }` | `{ user, token }`: a new (non-home) account with the invitation's access, signed in |
+| GET | `/api/invites` | `admin` | `Invite[]`: `{ code, created_at, expires_at, uses_left, all_libraries, library_ids, max_age, note }` |
+| POST | `/api/invites` | `admin` | `{ expires_in_days? (7; 0 = never), uses? (1), all_libraries?, library_ids?, max_age?, note? }` → `Invite`; share `/invite/{code}` |
+| DELETE | `/api/invites/{code}` | `admin` | `204` |
+| GET | `/api/invites/{code}` | `public` | `{ server_name, expires_at }`; `404` when invalid, used up or expired |
+| POST | `/api/invites/{code}/accept` | `public` | `{ username, password, display_name? }` → `{ user, token }`: a new (non-home) account with the invitation's access, signed in |
 
 ## System *(admin)*
 
-| Method | Path | Body / Query | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/system` | – | `SystemInfo` (with `database: { ok, problem?, checked_at }`, the integrity check made at start, and `transcode_dir: { in_use, next, default, problem: { folder, reason } \| null, fixed }`: the transcoder's work folder, the one the next start uses when that is another, and why the one chosen couldn't be used) |
-| PUT | `/api/system/transcode-dir` | `{ path: string \| null }` | the new `transcode_dir`: saved in the config file for the next start (`null`, or the default folder, removes `transcode_dir`). `400` for a relative path, a whole drive, the data folder itself, a folder Pley can't write in, and when the command line or the environment sets it |
-| GET | `/api/system/resources` | `since` | `{ available, interval_ms, cpus, memory_total, samples: [{ at, cpu, pley_cpu, memory, pley_memory }] }`: the processors' and memory's use, sampled every 2 s for the last five minutes, oldest first (only the samples after `since`, in Unix milliseconds, when given; `at` is in Unix milliseconds too). `cpu` and `pley_cpu` are shares of all the processors' time, 0–100; `memory` (in use on the machine, without what only caches files) and `pley_memory` (its processes' resident memory) bytes, `memory_total` the machine's, `cpus` its logical processors. Pley is the server and every process it started: a managed transcoder and its FFmpegs. `available` is false where the system can't be sampled (Windows, Linux and macOS can) |
-| GET | `/api/system/storage` | – | `{ blobs, blob_bytes, media_folders, media_bytes, cache_bytes }`: space used by stored pictures, generated media files and the cache (docs/STORAGE.md) |
-| POST | `/api/system/storage/clean` | – | `{ blobs_removed, media_folders_removed, subtitles_removed, bytes_freed, cache_files_removed, cache_bytes_freed }`: removes what nothing uses any more (`subtitles_removed`: added subtitles whose media file went), and old cache files |
-| GET | `/api/system/backups` | – | `{ health: { ok, problem?, checked_at }, backups: { name, path, bytes, created_at }[] }`, newest first |
-| POST | `/api/system/backups` | – | the new backup (a checked `VACUUM INTO` copy; the last 3 are kept) |
-| GET | `/api/transcoder` | – | `TranscoderStatus` – live metrics of the transcoder component (all jobs, counters) |
-| GET | `/api/settings` | – | `Settings` (never with `opensubtitles_password`) |
-| PUT | `/api/settings` | partial `Settings` | `Settings`. `400` for a `hwaccel` or `tonemapping` that can't work here, changed from what is saved: VAAPI off Linux, VideoToolbox off macOS, NVENC, Quick Sync or AMF on macOS (for a managed transcoder, which runs on Pley's system), or one the transcoder found no working encoder or tone mapper for (`transcoder.accels`, `transcoder.tonemapping`; not checked while it isn't running). A value saved before stays and saves with the rest; the transcoder does without it (software encoding, Automatic's tone mapper). Whatever the hardware, `"vulkan"` goes with `tonemapping` `"auto"` or `"libplacebo"` only, and with `hardware_decoding` on (its pipeline decodes on Vulkan and tone maps with libplacebo; the transcoder encodes everything else in software): `400` for another asked for with it, changed from what is saved; one saved before falls back when `hwaccel` changes to `"vulkan"` (to `"auto"`, and on), and a combination saved before stays |
-| POST | `/api/settings/test` | `{ service: "tmdb" \| "tvdb" \| "tvmaze" \| "musicbrainz" \| "transcoder" \| "opensubtitles", api_key?, pin?, username?, password? }` | `{ ok, message, ms }`: one request to the service, with the key and PIN given (not saved) or else the saved ones. OpenSubtitles: its key, or with a `username` a sign-in of that account (`password` left out: the saved one, for the saved username). `message` says what happened, for people |
-| GET | `/api/fs` | `path` (omit for roots/drives) | `{ path: string \| null, parent: string \| null, entries: { name: string, path: string }[] }` – directories only |
-| GET | `/api/network` | – | `Network`: where Pley listens, and could |
-| PUT | `/api/network` | `{ web, plex, plex_on_web?, discovery }` | `Network`, once the new listeners listen or have tried for a moment (3 s at most). Saved in the config file for the next start (`plex_bind`: `"web"`, `"off"` or the addresses). `400` for addresses Pley can't listen on together, `plex_on_web` with `plex` addresses too, more than 32 addresses of a kind, and a change of what the command line or the environment sets |
+| GET | `/api/system` | `admin` | `SystemInfo` |
+| PUT | `/api/system/transcode-dir` | `admin` | `{ path: string \| null }` → the new `transcode_dir`, for the next start |
+| GET | `/api/system/resources?since=` | `admin` | CPU and memory use, sampled every 2 s for the last five minutes |
+| GET | `/api/system/storage` | `admin` | `{ blobs, blob_bytes, media_folders, media_bytes, cache_bytes }` |
+| POST | `/api/system/storage/clean` | `admin` | `{ blobs_removed, media_folders_removed, subtitles_removed, bytes_freed, cache_files_removed, cache_bytes_freed }` |
+| GET | `/api/system/backups` | `admin` | `{ health: { ok, problem?, checked_at }, backups: { name, path, bytes, created_at }[] }`, newest first |
+| POST | `/api/system/backups` | `admin` | the new backup: a checked `VACUUM INTO` copy; the last 3 are kept |
+| GET | `/api/transcoder` | `admin` | `TranscoderStatus`: the transcoder's live metrics (all jobs, counters) |
+| GET | `/api/settings` | `admin` | `Settings` (never with `opensubtitles_password`) |
+| PUT | `/api/settings` | `admin` | partial `Settings` → `Settings` |
+| POST | `/api/settings/test` | `admin` | `{ service, api_key?, pin?, username?, password? }` → `{ ok, message, ms }` |
+| GET | `/api/fs?path=` | `admin` | `{ path: string \| null, parent: string \| null, entries: { name, path }[] }`: directories only (`path` left out: roots and drives) |
+| GET | `/api/network` | `admin` | `Network`: where Pley listens, and could |
+| PUT | `/api/network` | `admin` | `{ web, plex, plex_on_web?, discovery }` → `Network` |
+
+- **`/api/system`** also carries:
+  - `database: { ok, problem?, checked_at }`: the integrity check made at
+    start;
+  - `transcode_dir: { in_use, next, default, problem: { folder, reason } | null, fixed }`:
+    the transcoder's work folder, the one the next start uses when that
+    differs, and why the chosen one couldn't be used.
+- **`transcode-dir`** is saved in the config file for the next start
+  (`null`, or the default folder, removes `transcode_dir`). `400` for a
+  relative path, a whole drive, the data folder itself, a folder Pley can't
+  write in, and when the command line or the environment sets it.
+- **`resources`** answers
+  `{ available, interval_ms, cpus, memory_total, samples: [{ at, cpu, pley_cpu, memory, pley_memory }] }`,
+  oldest first:
+  - `since` (unix ms) keeps only later samples; `at` is unix ms too;
+  - `cpu` and `pley_cpu`: shares of all processors' time, 0–100;
+  - `memory`: bytes in use on the machine, without what only caches files;
+    `pley_memory`: its processes' resident memory; `memory_total`: the
+    machine's; `cpus`: its logical processors;
+  - "Pley" is the server and every process it started (a managed
+    transcoder and its FFmpegs);
+  - `available` is false where the system can't be sampled (Windows, Linux
+    and macOS can).
+- **`storage`**: space used by stored pictures, generated media files and
+  the cache ([STORAGE.md](STORAGE.md)). **`clean`** removes what nothing
+  uses any more, and old cache files; `subtitles_removed` counts added
+  subtitles whose media file is gone.
+- **`PUT /api/settings`** answers `400` for a `hwaccel` or `tonemapping`
+  that can't work here, when changed from what is saved:
+  - VAAPI off Linux, VideoToolbox off macOS, NVENC, Quick Sync or AMF on
+    macOS (for a managed transcoder, which runs on Pley's system);
+  - one the transcoder found no working encoder or tone mapper for
+    (`transcoder.accels`, `transcoder.tonemapping`; not checked while it
+    isn't running);
+  - on any hardware, `"vulkan"` with a `tonemapping` other than `"auto"` or
+    `"libplacebo"`, or with `hardware_decoding` off. Its pipeline decodes on Vulkan and tone
+    maps with libplacebo; the transcoder encodes everything else in
+    software.
+
+  A value saved before stays and saves with the rest; the transcoder does
+  without it (software encoding, Automatic's tone mapper). Changing
+  `hwaccel` to `"vulkan"` resets a saved incompatible `tonemapping` to
+  `"auto"` and turns `hardware_decoding` on; a combination saved before
+  stays.
+- **`settings/test`** makes one request to `service` (`"tmdb"`, `"tvdb"`,
+  `"tvmaze"`, `"musicbrainz"`, `"transcoder"` or `"opensubtitles"`) with the
+  key and PIN given (not saved), else the saved ones. OpenSubtitles: its
+  key, or with a `username`, a sign-in of that account (`password` left
+  out: the saved one, for the saved username). `message` says what
+  happened, for people.
+- **`PUT /api/network`** answers once the new listeners listen or have
+  tried for a moment (3 s at most). Saved in the config file for the next
+  start (`plex_bind`: `"web"`, `"off"` or the addresses). `400` for
+  addresses Pley can't listen on together, `plex_on_web` with `plex`
+  addresses too, more than 32 addresses of a kind, and a change to what the
+  command line or the environment sets.
 
 ```ts
 interface Network {
   web: string[];          // the web app and API: "127.0.0.1:7539", "192.168.1.10:7539", "0.0.0.0:7539"
-  plex: string[];         // the Plex-compatible API on addresses of its own ("0.0.0.0:32400"); [] = on pley's port
-                          // (plex_on_web) or off
-  plex_on_web: boolean;   // the Plex-compatible API answers on pley's port, to its clients (the default); never
-                          // with addresses in `plex`
-  discovery: boolean;     // answer the pley apps on the networks (never on loopback addresses)
-  fixed: { web: boolean; plex: boolean; discovery: boolean }; // set by --bind/PLEY_BIND, --plex-bind/PLEY_PLEX_BIND, --no-discovery
-  listeners: { kind: "web" | "plex" | "discovery"; address: string; error: string | null }[]; // error: why not (yet); tried again every 30 s
-  adapters: { name: string; description: string | null; up: boolean; addresses: string[]; // IPv4, loopback left out
+  plex: string[];         // the compatibility API on addresses of its own ("0.0.0.0:32400");
+                          // [] = on Pley's port (plex_on_web) or off
+  plex_on_web: boolean;   // the compatibility API answers its clients on Pley's port (the default);
+                          // never with addresses in `plex`
+  discovery: boolean;     // answer Pley's apps on the networks (never on loopback addresses)
+  fixed: { web: boolean; plex: boolean; discovery: boolean }; // set by --bind/PLEY_BIND,
+                          // --plex-bind/PLEY_PLEX_BIND, --no-discovery
+  listeners: { kind: "web" | "plex" | "discovery"; address: string; error: string | null }[];
+                          // error: why not (yet); tried again every 30 s
+  adapters: { name: string; description: string | null; up: boolean; addresses: string[]; // IPv4, no loopback
               network: { name: string; kind: "public" | "private" | "domain" } | null }[]; // as Windows knows it
   config_file: string;    // where a change is saved
-  windows: boolean;       // Windows Firewall decides which kinds of network reach pley
+  windows: boolean;       // Windows Firewall decides which kinds of network reach Pley
 }
-```
 
-```ts
 interface Settings {
   server_name: string;
-  tmdb_api_key: string;             // "" = movies only from file names / local artwork
-  metadata_language: string;        // e.g. "en-US" (TMDB and TheTVDB; TVmaze is English)
-  tv_metadata: "auto" | "tmdb" | "tvdb" | "tvmaze"; // TV source; "auto" (default) = TMDB if it has a key,
+  tmdb_api_key: string;             // "" = movies only from file names and local artwork
+  metadata_language: string;        // "en-US" (TMDB and TheTVDB; TVmaze is English)
+  tv_metadata: "auto" | "tmdb" | "tvdb" | "tvmaze"; // TV source. "auto" (default): TMDB if it has a key,
                                     // else TheTVDB if it has one, else TVmaze (no key needed).
-                                    // "tmdb"/"tvdb" without their key → 400. A new source refetches every show.
-  tvdb_api_key: string;             // TheTVDB v4 key, "" = not set
+                                    // "tmdb" or "tvdb" without their key: 400. A new source refetches every show
+  tvdb_api_key: string;             // TheTVDB v4 key; "" = not set
   tvdb_pin: string;                 // TheTVDB subscriber PIN, for user-supported keys
   music_metadata: boolean;          // MusicBrainz + Cover Art Archive for music libraries (default true)
   hwaccel: "auto" | "none" | "nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox" | "vulkan";
   hardware_decoding: boolean;       // decode on the GPU when possible
-  tonemapping: "auto" | "libplacebo" | "opencl" | "zscale" | "none"; // HDR10/HLG/Dolby Vision → SDR
+  tonemapping: "auto" | "libplacebo" | "opencl" | "zscale" | "none"; // HDR10/HLG/Dolby Vision to SDR
   max_transcodes: number;
   transcode_preset: "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" | "medium";
-  throttle_transcodes: boolean;     // real time once a 120 s buffer is built, paused 90 s ahead of the player
-  transcode_in_memory: boolean;     // keep throttled transcodes' segments in RAM where the transcoder can (Linux's
-                                    // /dev/shm, within a budget), else on disk (default true). Turning it on where
-                                    // `transcoder.memory.available` is false → 400; saved on before, it stays
+  throttle_transcodes: boolean;     // real time once a 120 s buffer is built; paused 90 s ahead of the player
+  transcode_in_memory: boolean;     // keep throttled transcodes' segments in RAM where the transcoder can
+                                    // (Linux's /dev/shm, within a budget), else on disk (default true).
+                                    // Turning it on where `transcoder.memory.available` is false: 400;
+                                    // saved on before, it stays
   scan_interval_minutes: number;    // 0 disables periodic scans
   watch_libraries: boolean;         // pick up file changes automatically
   detect_markers: boolean;          // find intros and credits in the background (default true)
   seek_previews: boolean;           // make seek-bar thumbnails when an item is first opened (default true)
   previews_in_background: boolean;  // also for whole libraries after scans, one file at a time (default true)
   third_party_apps: boolean;        // apps by other publishers may sign in (default false); turning it off
-                                    // signs them out. pley's own apps always may
-  proxy_addresses: string[];        // addresses with a port pley is reached at through a reverse proxy that leaves
-                                    // the port out of `Host` ("https://media.example.com:9999"; see Discovery).
-                                    // http or https with a port and no path, one per scheme and host, 16 at most;
-                                    // empty strings are dropped. Anything else → 400
-  opensubtitles_api_key: string;    // OpenSubtitles.com API key, "" = subtitle search is off. Each server's
+                                    // signs them out. Pley's own apps always may
+  proxy_addresses: string[];        // addresses with a port Pley is reached at through a reverse proxy that
+                                    // drops the port from `Host` ("https://media.example.com:9999"; see
+                                    // Discovery). http or https with a port and no path, one per scheme and
+                                    // host, 16 at most; empty strings are dropped. Anything else: 400
+  opensubtitles_api_key: string;    // OpenSubtitles.com API key; "" = subtitle search is off. Each server's
                                     // administrator gets one from opensubtitles.com (Consumers)
-  opensubtitles_username: string;   // an opensubtitles.com account, for its daily download quota; "" = the API
-                                    // key's own (smaller) quota. A new username forgets the saved password
-  opensubtitles_password?: string;  // PUT only: never sent back. Left out: the saved one stays; "" = none
+  opensubtitles_username: string;   // an opensubtitles.com account, for its daily download quota; "" = the
+                                    // API key's own (smaller) quota. A new username forgets the saved password
+  opensubtitles_password?: string;  // PUT only, never sent back. Left out: the saved one stays; "" = none
   opensubtitles_password_set: boolean; // GET: a password is saved
 }
 
 interface SystemInfo {
   name: string;
   version: string;
-  commit: string;                   // the build's short hash, "unknown" without the repository
+  commit: string;                   // the build's short hash; "unknown" without the repository
   os: string;
   arch: string;
   uptime_secs: number;
   data_dir: string;
   transcoder: {
     available: boolean;
-    managed: boolean;               // spawned and supervised by pley (vs. external URL)
+    managed: boolean;               // started and supervised by Pley (vs. an external URL)
     url: string | null;
     version: string | null;
     commit: string | null;
     license: string | null;         // "LicenseRef-Restricted"
     ffmpeg_version: string | null;
-    encoders: string[];             // working video encoders, e.g. ["h264_nvenc", "libx264"]
-    active_encoder: string | null;  // encoder used for new transcodes with current settings
-    hwaccels: string[];             // FFmpeg's decoding hwaccels (`ffmpeg -hwaccels`, built in, not tried)
+    encoders: string[];             // working video encoders: ["h264_nvenc", "libx264"]
+    active_encoder: string | null;  // encoder new transcodes use with the current settings
+    hwaccels: string[];             // FFmpeg's decoding hwaccels (`ffmpeg -hwaccels`: built in, not tried)
     accels: ("nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox")[]; // with a working H.264 encoder, best
                                     // first: the first is the one "auto" uses ([] while unavailable)
     hardware_decoding: boolean;     // some video is decoded on a GPU, so the setting changes something
@@ -2325,17 +2404,17 @@ interface SystemInfo {
                                     // decoder where an NVIDIA card encodes, VideoToolbox's on a Mac)
       software: ("h264" | "hevc" | "hdr")[]; // what it leaves to software encoders, where one works
                                     // ("hdr": HEVC Main 10, for transcodes that keep HDR)
-      tonemappers: string[] | null; // the tone mappers that work with it, where the transcoder tried
-                                    // them: a VAAPI encoder's, whose frames reached it, and zscale;
+      tonemappers: string[] | null; // the tone mappers that work with it, where the transcoder tried them
+                                    // (a VAAPI encoder's, whose frames reached it, and zscale);
                                     // null: every one in `tonemapping`
     } };
-    tonemapping: string[];          // available tone mappers, e.g. ["libplacebo", "opencl", "zscale"]
+    tonemapping: string[];          // available tone mappers: ["libplacebo", "opencl", "zscale"]
     dolby_vision: boolean;          // Dolby Vision profile 5 can be tone-mapped correctly
     chromaprint: boolean;           // audio fingerprints find intros and credits; without, only chapters
     throttling: boolean;            // FFmpeg can throttle transcodes (6.1 and newer)
     memory: { available: boolean; reason?: string; path?: string; budget_bytes: number } | null;
-                                    // segments can be kept in RAM (`transcode_in_memory`), and at most how much;
-                                    // reason: why not ("works on Linux only"); null while unavailable
+                                    // segments can be kept in RAM (`transcode_in_memory`), and at most how
+                                    // much; reason: why not ("works on Linux only"); null while unavailable
     max_jobs: number;
     active_jobs: number;
     error: string | null;
@@ -2351,7 +2430,7 @@ interface TranscoderStatus {
   version: string | null;
   uptime_secs: number;
   max_jobs: number;
-  running_processes: number;        // ffmpeg processes currently running
+  running_processes: number;        // FFmpeg processes running now
   hw_processes: number;
   max_hw_jobs: number;
   work_dir_bytes: number;           // disk used by segments
