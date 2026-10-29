@@ -33,8 +33,9 @@ use crate::hls;
 use crate::keyframes::KeyframeStore;
 use crate::memory::{self, Lease, MemoryStore};
 use crate::metrics::Metrics;
-use crate::plan::{ArgsContext, Burn, MAX_DURATION_MS, PROCESS_WINDOW, Plan, READRATE, READRATE_BURST_MS};
+use crate::plan::{ArgsContext, Burn, MAX_DURATION_MS, PROCESS_WINDOW, Pipeline, Plan, READRATE, READRATE_BURST_MS};
 use crate::probe::Prober;
+use crate::share::{self, Share};
 use crate::tsedit::{self, Edits};
 use crate::util::now_ms;
 
@@ -336,6 +337,9 @@ struct Runtime {
     /// The automatic preset of the running process (index in
     /// [`adaptive::LADDER`]), and when it started or moved.
     preset: Option<(usize, Instant)>,
+    /// What the latest process does on the GPU, when libplacebo tone maps
+    /// (see [`crate::share`]).
+    share: Option<Share>,
     /// What a restart costs this job: from starting FFmpeg to its first
     /// segment (the latest process's), and stopping the one before.
     start_cost: Option<Duration>,
@@ -615,6 +619,8 @@ impl JobManager {
             }
             tracing::warn!(job = %id, "could not pre-start transcode: {err:?}");
         }
+        // The jobs already on the GPU make room for it now.
+        self.share_gpu().await;
         Ok(created)
     }
 
@@ -868,6 +874,78 @@ impl JobManager {
         }
     }
 
+    /// What the next process of `job` does on the GPU with the jobs running
+    /// now (see [`crate::share`]), `hardware` when it encodes on the GPU;
+    /// `None` when libplacebo doesn't tone map its video.
+    fn gpu_share(&self, job: &Job, hardware: bool) -> Option<Share> {
+        if !job.plan.tone_maps_with_libplacebo() {
+            return None;
+        }
+        let others: Vec<Arc<Job>> = self.renditions().into_iter().filter(|j| j.id != job.id).collect();
+        let tone_mapping = others.iter().filter(|j| j.tone_maps_on_gpu()).count() as u32;
+        let speed = self.ff.caps.tonemap_speed.as_ref();
+        let quality = job.plan.shared_quality(speed, &job.media, tone_mapping + 1)?;
+        let gpu = share::Gpu {
+            engine_shared: hardware && job.plan.decodes_on_shared_engine(),
+            others: others.iter().filter(|j| j.encodes_on_gpu()).count() as u32,
+            behind: job.plan.tonemapping_falls_behind(speed, &job.media, tone_mapping + 1),
+        };
+        let cpu = share::Cpu {
+            cores: crate::util::processors(),
+            decoding: others.iter().map(|j| j.cpu_decode_cores()).sum(),
+            software_encodes: others.iter().filter(|j| j.encodes_in_software()).count() as u32,
+        };
+        let cores = job.plan.source_rate(&job.media).map_or(0.0, |(pixels, fps)| share::decode_cores(pixels, fps));
+        Some(Share { quality, cpu_decode: share::cpu_decodes(gpu, cpu, cores) })
+    }
+
+    /// Moves the jobs tone mapping on the GPU to what its load calls for
+    /// now (see [`crate::share`]): at once to less work for the GPU when
+    /// another job starts using it, back to more once a job is left alone,
+    /// has run a while and is well ahead of its player. Each move restarts
+    /// ffmpeg where it was, between two segments.
+    async fn share_gpu(self: &Arc<Self>) {
+        for job in self.renditions() {
+            let (have, hardware) = {
+                let rt = job.runtime.lock();
+                (rt.share, rt.process.as_ref().is_some_and(|p| p.hardware))
+            };
+            let Some(have) = have else { continue };
+            let Some(want) = self.gpu_share(&job, hardware).filter(|want| *want != have) else { continue };
+            let Ok(mut guard) = job.process.try_lock() else { continue };
+            // A paused process is far ahead already: it moves once it goes on.
+            let Some(proc) = guard.as_ref().filter(|p| p.running() && !p.paused()) else { continue };
+            let next = proc.next.load(Relaxed);
+            if next >= proc.end {
+                continue;
+            }
+            if !have.relieved_by(want)
+                && (proc.started.elapsed() < share::MORE_AFTER || job.lead_secs(next) < share::MORE_LEAD_SECS)
+            {
+                continue;
+            }
+            let decoder = |s: Share| if s.cpu_decode { "CPU" } else { "GPU" };
+            tracing::info!(
+                job = %job.id,
+                "the GPU's load changed: tone mapping {} → {}, decoding on the {} → {}",
+                have.quality.as_str(),
+                want.quality.as_str(),
+                decoder(have),
+                decoder(want)
+            );
+            let preset = job.runtime.lock().preset.map(|(i, _)| i);
+            if let Some(old) = guard.take() {
+                old.stop().await;
+            }
+            match self.spawn(&job, next, preset) {
+                Ok(process) => *guard = Some(process),
+                Err(err) => tracing::warn!(job = %job.id, "could not restart for the GPU's load: {err:?}"),
+            }
+            drop(guard);
+            job.notify.notify_waiters();
+        }
+    }
+
     fn spawn(self: &Arc<Self>, job: &Arc<Job>, start: u32, preset: Option<usize>) -> ApiResult<Proc> {
         let plan = &job.plan;
         // Stop before the first segment that is already on disk: ffmpeg would
@@ -927,15 +1005,18 @@ impl JobManager {
             preset: preset_name.as_deref(),
             shader_cache: self.shader_cache.as_deref(),
         };
-        // A bitrate the player asked for since: the same plan at that bitrate.
-        let rebitrated = job.bitrate.lock().map(|kbps| {
-            let mut plan = plan.clone();
-            if let Some(v) = plan.video.as_mut() {
+        // What the GPU's load leaves it, and a bitrate the player asked for
+        // since: the same plan with them.
+        let share = self.gpu_share(job, hw && fallback.is_none());
+        let bitrate = *job.bitrate.lock();
+        let adjusted = (share.is_some() || bitrate.is_some()).then(|| {
+            let mut plan = share.map_or_else(|| plan.clone(), |s| plan.with_share(s));
+            if let (Some(kbps), Some(v)) = (bitrate, plan.video.as_mut()) {
                 v.bitrate_kbps = kbps;
             }
             plan
         });
-        let args = rebitrated.as_ref().unwrap_or(plan).ffmpeg_args(&ctx, start, end);
+        let args = adjusted.as_ref().unwrap_or(plan).ffmpeg_args(&ctx, start, end);
         tracing::debug!(job = %job.id, "ffmpeg {}", args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
         // It writes its segments where it runs.
         let place = job.choose_place();
@@ -965,6 +1046,7 @@ impl JobManager {
             rt.state = JobState::Running;
             rt.encoder_override = fallback.cloned();
             rt.preset = chosen.map(|i| (i, Instant::now()));
+            rt.share = share;
             rt.process = Some(ProcessStatus {
                 pid: child.id(),
                 start_segment: start,
@@ -1135,6 +1217,7 @@ impl JobManager {
 
     async fn reap(self: &Arc<Self>) {
         self.adapt().await;
+        self.share_gpu().await;
         self.relieve_memory().await;
         let now = now_ms();
         for job in self.list() {
@@ -1272,6 +1355,27 @@ impl Job {
         rt.state == JobState::Running
             && rt.process.as_ref().is_some_and(|p| !p.hardware)
             && self.plan.video.as_ref().is_some_and(|v| !v.copy)
+    }
+
+    /// Whether a process of this job is encoding video on the GPU now.
+    fn encodes_on_gpu(&self) -> bool {
+        let rt = self.runtime.lock();
+        rt.state == JobState::Running && rt.process.as_ref().is_some_and(|p| p.hardware)
+    }
+
+    /// The cores a process of this job takes decoding its video on the CPU
+    /// now (see [`share::decode_cores`]): none when the GPU decodes it.
+    fn cpu_decode_cores(&self) -> f64 {
+        let rt = self.runtime.lock();
+        let planned =
+            self.plan.video.as_ref().is_some_and(|v| v.pipeline == Pipeline::Software && v.hw_decode.is_none());
+        let on_cpu = planned || rt.decoded_in_software || rt.share.is_some_and(|s| s.cpu_decode);
+        match self.plan.source_rate(&self.media) {
+            Some((pixels, fps)) if on_cpu && rt.state == JobState::Running && rt.process.is_some() => {
+                share::decode_cores(pixels, fps)
+            }
+            _ => 0.0,
+        }
     }
 
     /// The wait for segment `n` from process `p`, which will produce it, when
@@ -1637,6 +1741,13 @@ impl Job {
             v.decoder = Some("cpu".into());
             if v.pipeline.as_deref() == Some("gpu") {
                 v.pipeline = Some("hybrid".into());
+            }
+        }
+        // What its latest process does on the GPU.
+        if let (Some(v), Some(share)) = (video.as_mut(), rt.share) {
+            v.tonemap_quality = Some(share.quality);
+            if share.cpu_decode {
+                v.decoder = Some("cpu".into());
             }
         }
         let mut warnings = self.plan.warnings.clone();

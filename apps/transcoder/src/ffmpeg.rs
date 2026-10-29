@@ -23,7 +23,7 @@ use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 12;
+const DETECTION_REVISION: u32 = 13;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -433,7 +433,7 @@ async fn measure_tonemap_speed(ffmpeg: &Path) -> Option<TonemapSpeed> {
         let vf = format!(
             "{HDR_TAGS},libplacebo=w=3840:h=2160:format=nv12:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=auto:{}{}",
             crate::plan::PLACEBO_STATIC_PEAK,
-            crate::plan::placebo_quality_options(quality)
+            crate::plan::placebo_quality_options(quality, (3840, 2160), (3840, 2160), true)
         );
         let frames = frames.to_string();
         let args = [

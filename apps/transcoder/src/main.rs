@@ -30,6 +30,7 @@ mod prefetch;
 mod probe;
 #[cfg(test)]
 mod remux_tests;
+mod share;
 mod trickplay;
 mod tsedit;
 mod util;

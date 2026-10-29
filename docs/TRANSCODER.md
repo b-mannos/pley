@@ -673,17 +673,44 @@ job's plan):
 | `balanced` | `upscaler=bilinear:contrast_recovery=0` |
 | `fast` | balanced's, plus `downscaler=bilinear:dithering=none:gamut_mode=clip` |
 
+- `fast` adds `skip_aa=1` where the output is at least half the source's
+  width and height: the downscaler samples the source directly (2×2 averaged
+  at exactly half). Its SDR output also adds
+  `extra_opts=force_low_bit_depth_fbos=yes`: the one picture left between
+  libplacebo's passes, the SDR output before it is split into planes, is
+  kept in 8 bits.
 - At startup, after the other tests, each quality is timed on synthetic 4K
   PQ frames made 4K SDR (`tonemap_speed`), from `fast` to `high`, for 20 s at
   most. A quality not reached in that time is never used. Where time allows,
   each runs twice and the faster run counts.
-- A job takes the best quality that measured at least twice what it needs:
-  its frame rate × its size relative to 4K to 4K (0.6 × the source's pixels +
-  0.4 × the output's) × the jobs tone mapping with libplacebo when it starts,
-  itself included. When none did, the fastest.
-- Its renditions and later processes (seeks, restarts) keep that quality, so
-  its segments look alike.
+- A process takes the best quality that measured at least twice what it
+  needs: its frame rate × its size relative to 4K to 4K (0.6 × the source's
+  pixels + 0.4 × the output's) × the jobs tone mapping with libplacebo,
+  itself included. When none did, the fastest. Renditions start at their
+  job's quality.
 - Without a measurement (no libplacebo on a GPU), `high`.
+
+#### Sharing the GPU
+
+Several jobs tone mapping with libplacebo share the GPU:
+
+- **Decoding on the CPU.** A job decodes on the CPU when all of these
+  hold, and its status then says `decoder: cpu`:
+  - its GPU would decode into memory for libplacebo and encode on the same
+    video engine (AMF, VAAPI, Quick Sync; not NVIDIA's);
+  - another job encodes on the GPU;
+  - no quality measured fast enough for the jobs tone mapping (the rule
+    above): the GPU falls behind even at `fast`;
+  - the CPU keeps 2 cores free after its decoders: 4 cores each for 4K at
+    24 fps, in proportion to pixels and frame rate;
+  - no software encode runs.
+- **Moving running jobs.** A job already running moves to the quality and
+  decoding that the GPU's load calls for. It moves at once when another job
+  starts using the GPU (checked again every 5 s). It moves back to more work
+  on the GPU only after its process has run 60 s and is at least 30 s of
+  video ahead of the player. Each move restarts FFmpeg at the next segment.
+  A paused process moves once it resumes.
+- The job's status gives its latest process's `tonemap_quality`.
 
 #### VAAPI encoders
 

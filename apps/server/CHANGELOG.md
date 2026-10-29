@@ -44,6 +44,14 @@ describes how they are made.
 - HDR tone mapping does less where the graphics card would fall behind the
   player: Pley times it when it starts, and each transcode takes the best
   quality that keeps ahead, counting the other HDR transcodes running.
+- Several HDR transcodes at once keep up: one already running moves to the
+  quality the graphics card can share as soon as another starts, and where
+  AMD or Intel graphics fall behind even so, the processor decodes the
+  video while it has cores to spare. Two 4K HDR films tone mapped to 4K at
+  once went from 0.9× to 1.2× real time each on a Ryzen 5 5600G.
+- The fastest tone mapping quality is faster where the picture shrinks by
+  half at most (4K to 4K or 1080p), with the same picture: two 4K films
+  made 1080p at once went from 1.0× to 1.65× real time each.
 
 ### Fixed
 

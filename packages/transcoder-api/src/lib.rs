@@ -424,7 +424,8 @@ impl Tonemapper {
 #[serde(rename_all = "lowercase")]
 pub enum TonemapQuality {
     /// Balanced, with colours outside BT.709 clipped rather than mapped,
-    /// no dithering and a bilinear downscaler.
+    /// no dithering and a bilinear downscaler, which samples the source
+    /// directly where the output is at least half its size.
     Fast,
     /// libplacebo's defaults but its two costliest steps: no contrast
     /// recovery, and the chroma upscaled bilinearly.
