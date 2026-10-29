@@ -583,6 +583,23 @@ half-made ones are deleted.
   from the substream mastered with those channels (`-downmix stereo` or
   `5.1`; Blu-rays carry both inside the 7.1, and without one FFmpeg
   decodes the whole).
+
+  5.0, 5.1 and 7.1 made stereo go through a matrix of their own
+  (`DOWNMIX_51`, `DOWNMIX_71` in `plan.rs`) rather than `-ac 2` alone.
+  FFmpeg's matrix gives each front whole, the centre and surrounds at
+  -3 dB and drops the LFE, unnormalized for the encoders' float samples,
+  so loud passages went past full scale. Pley's keeps it but for the
+  centre, where dialogue is, at 0 dB, and ends with a limiter at -2 dBFS
+  (`alimiter`, its look-ahead taken back out so the sound stays in time);
+  the layout is made 5.1 (or 7.1) first, so a 5.0 track or a broadcast
+  switching to stereo still finds its channels. TrueHD decoded to stereo
+  by its own decoder, other layouts and an unknown one keep `-ac 2`. A
+  30 s 5.1 test mix (speech-band noise in bursts in the centre, noise in
+  the others) encoded to AAC: dialogue -29.5 LUFS before, -26.5 after;
+  the rest -23.0 both; 12 dB louder (channels peaking at -1.3 dBFS), true
+  peak +0.4 dBTP before, -0.9 after, the whole -10.4 LUFS both times. The
+  plan's segments start their sound where they did (to the sample), from
+  0 and from a restart alike.
 - **Remux.** H.264 and HEVC video is copied into HLS, with segments cut
   exactly on the source's keyframes.
   - Matroska and WebM: the keyframe index is read instantly from the file's

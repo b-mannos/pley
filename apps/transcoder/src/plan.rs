@@ -280,6 +280,40 @@ pub struct AudioOut {
     /// A decoder option that decodes only what the conversion keeps (see
     /// [`partial_decode`]), as its name and value.
     pub partial_decode: Option<(&'static str, &'static str)>,
+    /// The filter that makes surround stereo ([`stereo_downmix`]).
+    pub downmix: Option<&'static str>,
+}
+
+/// 5.1 (and 5.0) to stereo: FFmpeg's own matrix (`-ac 2`: each front
+/// whole, the surrounds at -3 dB, no LFE, not normalized for AAC's and
+/// AC-3's float samples) with the centre, where dialogue is, at 0 dB
+/// rather than -3 dB, and a limiter at -2 dBFS (-1 dB true peak once encoded) for the peaks the sum would
+/// push past full scale, which `-ac 2` lets clip. The layout is made 5.1
+/// first (a 5.0 one gains a silent LFE, a broadcast switching to stereo a
+/// silent centre and surrounds), so the matrix always finds its channels.
+/// The limiter's look-ahead is taken back out (`latency`), keeping the
+/// sound in time with the picture.
+pub const DOWNMIX_51: &str = "aformat=channel_layouts=5.1(side)|5.1,\
+     pan=stereo|c0=c0+c2+0.707*c4|c1=c1+c2+0.707*c5,alimiter=limit=0.794:level=false:latency=1";
+/// [`DOWNMIX_51`] for 7.1: side and back surrounds at -3 dB each, as `-ac 2` has them.
+pub const DOWNMIX_71: &str = "aformat=channel_layouts=7.1,\
+     pan=stereo|c0=c0+c2+0.707*c4+0.707*c6|c1=c1+c2+0.707*c5+0.707*c7,alimiter=limit=0.794:level=false:latency=1";
+
+/// The filter that makes `src` stereo, when it is 5.0 to 7.1 and converted
+/// to 2 channels; `None` leaves it to `-ac 2`: fewer channels, layouts
+/// other than 5.0, 5.1 and 7.1, and TrueHD whose decoder makes stereo
+/// itself ([`partial_decode`]). A DTS-HD MA 7.1 decoded from its core
+/// (`core_only`), 5.1, is made 7.1 first like any other.
+fn stereo_downmix(src: &MediaStream, channels: u32, partial: Option<(&str, &str)>) -> Option<&'static str> {
+    if channels != 2 || partial.is_some_and(|(option, _)| option == "downmix") {
+        return None;
+    }
+    let layout = src.channel_layout.as_deref().unwrap_or("");
+    match (src.channels.unwrap_or(0), layout.split('(').next().unwrap_or("")) {
+        (5 | 6, "5.0" | "5.1") => Some(DOWNMIX_51),
+        (8, "7.1") if layout != "7.1(wide)" => Some(DOWNMIX_71),
+        _ => None,
+    }
 }
 
 /// What of a lossless track a conversion to `channels` needs decoded: a
@@ -600,6 +634,7 @@ impl Plan {
                 // FFmpeg's AC-3 encoders take 32, 44.1 and 48 kHz only.
                 let resample = !matches!(src.sample_rate, Some(44_100) | Some(48_000));
                 let partial_decode = (!copy).then(|| partial_decode(src, channels)).flatten();
+                let downmix = (!copy).then(|| stereo_downmix(src, channels, partial_decode)).flatten();
                 Some(AudioOut {
                     stream_index: src.index,
                     copy,
@@ -608,6 +643,7 @@ impl Plan {
                     bitrate_kbps: bitrate,
                     resample,
                     partial_decode,
+                    downmix,
                 })
             }
             (Some(_), None) if video.is_none() => return Err("file has no audio or video stream".into()),
@@ -982,6 +1018,9 @@ impl Plan {
                 if au.copy {
                     a.push_all(["-c:a", "copy"]);
                 } else {
+                    if let Some(downmix) = au.downmix {
+                        a.push_all(["-af", downmix]);
+                    }
                     a.push_all([
                         "-c:a",
                         au.codec.as_str(),
@@ -2945,6 +2984,52 @@ mod tests {
         assert_eq!(plan.warnings, ["truehd audio transcoded to E-AC-3"]);
         let (_, args) = audio_args(AudioCodec::default(), None, &truehd);
         assert!(args.contains("-c:a aac -ac 2 -b:a 192k"), "{args}");
+    }
+
+    #[test]
+    fn surround_made_stereo_keeps_dialogue_up_front_without_clipping() {
+        let track = |codec: &str, channels: i64, layout: &str| {
+            let mut m = with_audio(codec, channels, 48_000);
+            m.streams[1].channel_layout = Some(layout.into());
+            m
+        };
+        // A DTS-HD MA 7.1 is decoded from its 5.1 core, made 7.1 again first.
+        let mut ma = track("dts", 8, "7.1");
+        ma.streams[1].profile = Some("DTS-HD MA".into());
+        for (m, layout, filter) in [
+            (track("eac3", 6, "5.1(side)"), "5.1(side)", DOWNMIX_51),
+            (track("aac", 6, "5.1"), "5.1", DOWNMIX_51),
+            (track("ac3", 5, "5.0(side)"), "5.0(side)", DOWNMIX_51),
+            (track("aac", 8, "7.1"), "7.1", DOWNMIX_71),
+            (ma, "7.1 DTS-HD MA", DOWNMIX_71),
+        ] {
+            let (plan, args) = audio_args(AudioCodec::Aac, Some(2), &m);
+            assert_eq!(plan.audio.as_ref().unwrap().downmix, Some(filter), "{layout}");
+            assert!(args.contains(&format!("-map 0:1 -af {filter} -c:a aac -ac 2 -b:a 192k")), "{args}");
+        }
+        assert!(DOWNMIX_51.contains("pan=stereo|c0=c0+c2+0.707*c4|c1=c1+c2+0.707*c5,alimiter=limit=0.794:level=false"));
+        // E-AC-3 in stereo too.
+        let (_, args) = audio_args(AudioCodec::Eac3, Some(2), &track("eac3", 6, "5.1(side)"));
+        assert!(args.contains(&format!("-af {DOWNMIX_51} -c:a eac3 -ac 2")), "{args}");
+
+        // Left to -ac 2: surround kept, stereo or other layouts, TrueHD
+        // decoded to stereo by its decoder, an unknown layout, copies.
+        let none = |m: &MediaInfo, codec: AudioCodec, channels: u32| {
+            let (plan, args) = audio_args(codec, Some(channels), m);
+            assert_eq!(plan.audio.as_ref().unwrap().downmix, None, "{args}");
+            assert!(!args.contains(" -af "), "{args}");
+        };
+        none(&track("eac3", 6, "5.1(side)"), AudioCodec::Eac3, 6);
+        none(&track("aac", 2, "stereo"), AudioCodec::Aac, 2);
+        none(&track("aac", 4, "quad"), AudioCodec::Aac, 2);
+        none(&track("aac", 8, "7.1(wide)"), AudioCodec::Aac, 2);
+        none(&track("truehd", 8, "7.1"), AudioCodec::Aac, 2);
+        none(&with_audio("eac3", 6, 48_000), AudioCodec::Aac, 2);
+        let ff = ffmpeg_with(vec![x264()], vec![]);
+        let mut req = request();
+        req.audio = Some(AudioRequest { mode: AudioMode::Copy, ..Default::default() });
+        let plan = Plan::build(&req, &track("ac3", 6, "5.1(side)"), &ff, None).unwrap();
+        assert_eq!(plan.audio.as_ref().unwrap().downmix, None);
     }
 
     #[test]

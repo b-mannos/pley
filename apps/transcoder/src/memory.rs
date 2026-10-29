@@ -409,6 +409,7 @@ mod tests {
             bitrate_kbps: 192,
             resample: false,
             partial_decode: None,
+            downmix: None,
         };
         let mut plan = Plan {
             duration_ms: 60_000,
