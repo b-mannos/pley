@@ -75,24 +75,29 @@ export function planeBox(view: { width: number; height: number }, video: { width
 // Loading
 
 export type PictureLoad =
-  | { kind: "track"; subs: PictureSubtitles; complete: boolean }
+  /** `bytes`: the file as far as it has come, to ask for the rest of while it isn't `complete`. */
+  | { kind: "track"; subs: PictureSubtitles; complete: boolean; bytes: Uint8Array }
   /** The server doesn't make these files (404 from an old server, 503 from an old transcoder), or none this player decodes. */
   | { kind: "unavailable" }
   | { kind: "failed" }
-  /** Too little of a file still being made to read yet. */
-  | { kind: "early" };
+  /** Too little of a file still being made to read yet, or nothing new. */
+  | { kind: "early"; bytes: Uint8Array | null };
 
 /**
  * One request for the track at `url`. A partial answer (`X-Pley-Complete:
- * 0`) comes with what the server has read out of the file so far.
+ * 0`) comes with what the server has read out of the file so far; with
+ * `have`, the bytes of the last one, only the rest is asked for (`Range`),
+ * and a server that answers with the whole file again is fine too.
  */
-export async function fetchPictures(url: string, signal: AbortSignal, again = false): Promise<PictureLoad> {
+export async function fetchPictures(url: string, signal: AbortSignal, have: Uint8Array | null = null, again = false): Promise<PictureLoad> {
+  const headers: Record<string, string> = { Accept: "video/x-matroska" };
+  if (have?.length) headers.Range = `bytes=${have.length}-`;
   let res: Response;
   try {
     res = await fetch(url, {
       credentials: "same-origin",
       signal,
-      headers: { Accept: "video/x-matroska" },
+      headers,
       // More of a file still being made: never an earlier answer kept.
       cache: again ? "no-store" : "default",
     });
@@ -101,17 +106,36 @@ export async function fetchPictures(url: string, signal: AbortSignal, again = fa
     return { kind: "failed" };
   }
   if (res.status === 404 || res.status === 503) return { kind: "unavailable" };
+  // Nothing past what came before.
+  if (res.status === 416 && have) return { kind: "early", bytes: have };
   if (!res.ok) return { kind: "failed" };
   const complete = (res.headers.get(COMPLETE_HEADER) ?? "").trim() !== "0";
-  let subs: PictureSubtitles | null;
+  let bytes: Uint8Array;
   try {
-    subs = PictureSubtitles.of(readPictureTrack(await res.arrayBuffer()));
+    const body = new Uint8Array(await res.arrayBuffer());
+    const from = /^bytes (\d+)-/.exec(res.headers.get("Content-Range") ?? "");
+    if (res.status === 206 && have && from && Number(from[1]) === have.length) {
+      bytes = new Uint8Array(have.length + body.length);
+      bytes.set(have, 0);
+      bytes.set(body, have.length);
+    } else if (res.status === 206) {
+      // Some other part: not what was asked for.
+      return complete ? { kind: "failed" } : { kind: "early", bytes: null };
+    } else {
+      bytes = body;
+    }
   } catch (err) {
     if (signal.aborted) throw err;
-    return complete ? { kind: "failed" } : { kind: "early" };
+    return { kind: "failed" };
   }
-  if (!subs) return complete ? { kind: "unavailable" } : { kind: "early" };
-  return { kind: "track", subs, complete };
+  let subs: PictureSubtitles | null;
+  try {
+    subs = PictureSubtitles.of(readPictureTrack(bytes.buffer as ArrayBuffer));
+  } catch {
+    return complete ? { kind: "failed" } : { kind: "early", bytes };
+  }
+  if (!subs) return complete ? { kind: "unavailable" } : { kind: "early", bytes };
+  return { kind: "track", subs, complete, bytes };
 }
 
 export interface PictureHooks {
@@ -125,27 +149,31 @@ export interface PictureHooks {
 
 /**
  * Loads the track at `url`, asking again every `PICTURES_AGAIN_MS` while
- * the answers are partial, as the TVs do (packages/tv/src/subs/presenter.ts).
- * Returns what stops it.
+ * the answers are partial, as the TVs do (packages/tv/src/subs/presenter.ts),
+ * but only for what it doesn't have yet. Once the server says it has it all,
+ * the whole file is asked for once more, in case its start changed as it
+ * was finished (a Matroska muxer writes the sizes it now knows). Returns
+ * what stops it.
  */
 export function loadPictures(url: string, hooks: PictureHooks): () => void {
   const abort = new AbortController();
   let timer: number | undefined;
-  const load = (again: boolean) => {
-    fetchPictures(url, abort.signal, again).then(
+  const load = (have: Uint8Array | null, again: boolean) => {
+    fetchPictures(url, abort.signal, have, again).then(
       (got) => {
         if (abort.signal.aborted) return;
         if (got.kind === "unavailable") hooks.onUnavailable();
         else if (got.kind === "failed") hooks.onFailed();
+        else if (got.kind === "track" && got.complete && have) load(null, true);
         else {
           if (got.kind === "track") hooks.onTrack(got.subs);
-          if (got.kind === "early" || !got.complete) timer = window.setTimeout(() => load(true), PICTURES_AGAIN_MS);
+          if (got.kind === "early" || !got.complete) timer = window.setTimeout(() => load(got.bytes, true), PICTURES_AGAIN_MS);
         }
       },
       () => undefined,
     );
   };
-  load(false);
+  load(null, false);
   return () => {
     abort.abort();
     window.clearTimeout(timer);

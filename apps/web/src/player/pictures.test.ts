@@ -93,7 +93,7 @@ describe("fetchPictures", () => {
 
   it("asks with the page's credentials, for Matroska, and past the cache when asking for more", async () => {
     answer(new Response(mks([]), { status: 200 }));
-    await fetchPictures("/t.mks", new AbortController().signal, true);
+    await fetchPictures("/t.mks", new AbortController().signal, null, true);
     const init = vi.mocked(fetch).mock.calls[0]?.[1];
     expect(init).toMatchObject({ credentials: "same-origin", cache: "no-store", headers: { Accept: "video/x-matroska" } });
   });
@@ -116,7 +116,23 @@ describe("fetchPictures", () => {
 
   it("waits for more of a file too short to read yet", async () => {
     answer(new Response(mks([]).slice(0, 40), { status: 200, headers: { "X-Pley-Complete": "0" } }));
-    expect(await fetchPictures("/t.mks", new AbortController().signal)).toEqual({ kind: "early" });
+    expect(await fetchPictures("/t.mks", new AbortController().signal)).toMatchObject({ kind: "early" });
+  });
+
+  it("asks for the rest of what it has, and takes the whole file from a server that sends it again", async () => {
+    const file = new Uint8Array(mks([[1000, 2000], [5000, 6000]]));
+    const have = file.slice(0, file.length - 30);
+    answer(new Response(file.slice(have.length), { status: 206, headers: { "Content-Range": `bytes ${have.length}-${file.length - 1}/*`, "X-Pley-Complete": "0" } }));
+    const more = await fetchPictures("/t.mks", new AbortController().signal, have, true);
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.headers).toMatchObject({ Range: `bytes=${have.length}-` });
+    expect(more.kind === "track" && [more.bytes.length, more.subs.sampleAt(5500)]).toEqual([file.length, 2]);
+
+    answer(new Response(file, { status: 200, headers: { "X-Pley-Complete": "0" } }));
+    const again = await fetchPictures("/t.mks", new AbortController().signal, have, true);
+    expect(again.kind === "track" && again.bytes.length).toBe(file.length);
+
+    answer(new Response(null, { status: 416 }));
+    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "early", bytes: have });
   });
 });
 
@@ -148,7 +164,12 @@ describe("loadPictures", () => {
     expect(h.onTrack).toHaveBeenCalledTimes(3);
     expect(h.onTrack.mock.calls[2]?.[0].sampleAt(5500)).toBe(2);
     await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS * 3);
-    expect(fetchFn).toHaveBeenCalledTimes(3);
+    // The rest, then the whole file once more now that it is finished.
+    expect(fetchFn).toHaveBeenCalledTimes(4);
+    const ranges = fetchFn.mock.calls.map((c) => ((c as unknown[])[1] as RequestInit).headers as Record<string, string>).map((h) => h.Range ?? null);
+    expect(ranges[0]).toBeNull();
+    expect(ranges[1]).toMatch(/^bytes=\d+-$/);
+    expect(ranges[3]).toBeNull();
     expect(h.onUnavailable).not.toHaveBeenCalled();
     expect(h.onFailed).not.toHaveBeenCalled();
   });
