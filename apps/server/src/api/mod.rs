@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn a_proxy_that_left_the_port_out_gets_it_back() {
-        let addresses = ["https://tokyo.example.com:9999".to_owned(), "http://[fd00::5]:8096".to_owned()];
+        let addresses = ["https://media.example.com:9999".to_owned(), "http://[fd00::5]:8096".to_owned()];
         let host = |pairs: &[(&'static str, &str)]| {
             let mut headers = axum::http::HeaderMap::new();
             for (name, value) in pairs {
@@ -390,13 +390,13 @@ mod tests {
             with_proxy_port(&headers, &addresses).map(|h| h.to_str().unwrap().to_owned())
         };
         let https = ("x-forwarded-proto", "https");
-        assert_eq!(host(&[("host", "tokyo.example.com"), https]).as_deref(), Some("tokyo.example.com:9999"));
-        assert_eq!(host(&[("host", "Tokyo.Example.com"), https]).as_deref(), Some("Tokyo.Example.com:9999"));
+        assert_eq!(host(&[("host", "media.example.com"), https]).as_deref(), Some("media.example.com:9999"));
+        assert_eq!(host(&[("host", "Media.Example.com"), https]).as_deref(), Some("Media.Example.com:9999"));
         assert_eq!(host(&[("host", "[fd00::5]")]).as_deref(), Some("[fd00::5]:8096"));
         // A port of its own, another scheme or another host stays as it came.
-        assert_eq!(host(&[("host", "tokyo.example.com:443"), https]), None);
-        assert_eq!(host(&[("host", "tokyo.example.com")]), None, "came over http");
-        assert_eq!(host(&[("host", "osaka.example.com"), https]), None);
+        assert_eq!(host(&[("host", "media.example.com:443"), https]), None);
+        assert_eq!(host(&[("host", "media.example.com")]), None, "came over http");
+        assert_eq!(host(&[("host", "other.example.com"), https]), None);
         assert_eq!(host(&[("host", "[fd00::5]:7539")]), None);
         assert_eq!(host(&[https]), None, "no Host");
     }

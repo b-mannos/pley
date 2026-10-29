@@ -622,13 +622,13 @@ class WindowTest(unittest.TestCase):
         win.libraries = []
         left = []
         win.leave_for = left.append
-        window.kodi.xbmcaddon.settings["server_name"] = "Tokyo"
+        window.kodi.xbmcaddon.settings["server_name"] = "Living room"
         self.addCleanup(window.kodi.xbmcaddon.settings.pop, "server_name", None)
         # The profile's menu: Choose a server, Audio and subtitles, Sign out.
         with Dialogs(picks=[2], yes=[False]) as asked:
             win.account()
         # Short: the question, the server, and Sign out to say yes.
-        self.assertEqual(asked.asked, [("Sign out?", "Kodi signs out of Tokyo.", window.T("cancel"), window.T("sign_out"))])
+        self.assertEqual(asked.asked, [("Sign out?", "Kodi signs out of Living room.", window.T("cancel"), window.T("sign_out"))])
         self.assertEqual(left, [])
         with Dialogs(picks=[2], yes=[True]):
             win.account()

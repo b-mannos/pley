@@ -6,12 +6,12 @@ import { droppedPort, ProxyAddresses } from "./ProxyAddresses";
 
 describe("droppedPort", () => {
   it("is a proxy leaving the page's port out", () => {
-    expect(droppedPort("https://tokyo.example.com:9999", "https://tokyo.example.com")).toBe(true);
-    expect(droppedPort("https://tokyo.example.com", "https://tokyo.example.com")).toBe(false);
-    expect(droppedPort("https://tokyo.example.com:9999", "https://tokyo.example.com:9999")).toBe(false);
-    expect(droppedPort("https://tokyo.example.com:9999", "http://tokyo.example.com")).toBe(false);
-    expect(droppedPort("https://tokyo.example.com:9999", "https://osaka.example.com")).toBe(false);
-    expect(droppedPort("nonsense", "https://tokyo.example.com")).toBe(false);
+    expect(droppedPort("https://media.example.com:9999", "https://media.example.com")).toBe(true);
+    expect(droppedPort("https://media.example.com", "https://media.example.com")).toBe(false);
+    expect(droppedPort("https://media.example.com:9999", "https://media.example.com:9999")).toBe(false);
+    expect(droppedPort("https://media.example.com:9999", "http://media.example.com")).toBe(false);
+    expect(droppedPort("https://media.example.com:9999", "https://other.example.com")).toBe(false);
+    expect(droppedPort("nonsense", "https://media.example.com")).toBe(false);
   });
 });
 

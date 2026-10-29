@@ -32,7 +32,7 @@
 # caches. Put it on a fast local disk with room to spare. Settings -> Server
 # changes it too (from the next start); while it can't be written to, the
 # default one in the data folder is used.
-# transcode_dir = "D:/Pley/transcode"
+# transcode_dir = "D:/pley-transcode"
 
 # FFmpeg binaries handed to the managed transcoder (default: from PATH).
 # ffmpeg = "C:/ffmpeg/bin/ffmpeg.exe"
