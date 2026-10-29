@@ -346,6 +346,7 @@ interface PlaybackInfo {
                                     // Version 1 players don't say which HDR formats their
                                     // screen shows: their HDR10+ is named as it is
   adaptive: boolean;                // the transcode comes in several sizes the player moves between
+  live_bitrate: boolean;            // the video is converted, and PUT …/bitrate changes its bitrate as it plays
                                     // by itself (hls.variants; see Several sizes): its own Automatic
                                     // leaves the session be
 }
@@ -772,6 +773,7 @@ sign-in settings among them.
 | GET | `/api/playback/speedtest` | `play` |
 | GET | `/api/playback/{session}` | `play` |
 | DELETE | `/api/playback/{session}` | `play` |
+| PUT | `/api/playback/{session}/bitrate` | `play` |
 | GET | `/api/playback/{session}/{file}` | `play` |
 | GET | `/api/files/{id}/stream` | `play` |
 | POST | `/api/conversions` | `play` |
@@ -1261,6 +1263,7 @@ queue.
 | POST | `/api/playback` | see below | `PlaybackInfo` |
 | GET | `/api/playback/{session_id}` | – | `{ session_id, method, transcode: TranscodeInfo \| null }`: the player's details, how the session plays now (`transcode` is null for a direct play). `403` for someone else's session (administrators see any), `404` "playback session expired" once it is gone, `410` when it was stopped |
 | DELETE | `/api/playback/{session_id}` | – | `204` (stops any transcode) |
+| PUT | `/api/playback/{session_id}/bitrate` | `{ max_bitrate }` (kbps) | `{ bitrate }`: a converted video (`live_bitrate`) goes on at another bitrate from the segments its player hasn't fetched yet, the same size and playlist, so the player plays on without a new stream (docs/QUALITY.md, "Players that go black between streams"). The answer is what it goes on at: within 1 Mbps and the session's own. A job the transcoder loses comes back at it. `400` for a direct play or a remux, or a transcoder too old |
 | GET | `/api/playback/network?client_id=` | – | `NetworkAnswer`: what Automatic knows of the network this request came from (see [Network memory and speed test](#network-memory-and-speed-test)) |
 | PUT | `/api/playback/network` | `{ client_id, probe_kbps, probe_complete? }` or `{ client_id, ceiling_kbps }` | `NetworkAnswer` |
 | GET | `/api/playback/speedtest?bytes=` | – | that many bytes to time (`application/octet-stream`) |

@@ -199,6 +199,7 @@ pub async fn start(
             auto_quality: None,
             video_range: video_stream.and_then(|v| video_range_shown(&v, &req.caps, Delivery::Direct)),
             adaptive: false,
+            live_bitrate: false,
         }));
     }
 
@@ -293,7 +294,42 @@ pub async fn start(
             .zip(created.video.as_ref())
             .and_then(|(v, plan)| video_range_shown(&v, &req.caps, Delivery::of_plan(plan))),
         adaptive,
+        live_bitrate: method == Method::Transcode && state.transcoder.live_bitrate(),
     }))
+}
+
+#[derive(Deserialize)]
+pub struct BitrateBody {
+    /// kbps.
+    max_bitrate: u32,
+}
+
+#[derive(Serialize)]
+pub struct BitrateAnswer {
+    /// What the stream goes on at (kbps): the one asked for, kept within
+    /// 1 Mbps and the session's own.
+    bitrate: u32,
+}
+
+/// `PUT /api/playback/{session}/bitrate`: the session's converted video goes
+/// on at another bitrate from the segments its player hasn't fetched yet,
+/// the same size and the same playlist (docs/QUALITY.md, "Players that go
+/// black between streams").
+pub async fn set_bitrate(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+    Json(body): Json<BitrateBody>,
+) -> ApiResult<Json<BitrateAnswer>> {
+    let session = owned_session(&state, &user, &id)?;
+    if session.method != Method::Transcode || !state.transcoder.live_bitrate() {
+        return Err(AppError::bad_request("this stream's bitrate can't change as it plays"));
+    }
+    let job = session.job_id().ok_or_else(|| AppError::not_found("playback session expired"))?;
+    let bitrate = state.transcoder.set_bitrate(&job, body.max_bitrate).await.map_err(|err| for_viewer(&user, err))?;
+    *session.bitrate.lock() = Some(bitrate);
+    session.touch();
+    Ok(Json(BitrateAnswer { bitrate }))
 }
 
 /// `GET /api/playback/{session}`: how the session plays now, with the live
@@ -570,6 +606,13 @@ async fn replacement_job(state: &AppState, user: &AuthUser, session: &Session, f
         return Err(AppError::SessionStopped(stopped.message));
     }
     tracing::info!("recreated transcode job for session {}", session.id);
+    // At the bitrate its player asked for since.
+    let bitrate = *session.bitrate.lock();
+    if let Some(kbps) = bitrate
+        && let Err(err) = state.transcoder.set_bitrate(&created.id, kbps).await
+    {
+        tracing::warn!("the recreated job for session {} keeps its own bitrate: {err}", session.id);
+    }
     *session.job_id.lock() = Some(created.id.clone());
     Ok(created.id)
 }

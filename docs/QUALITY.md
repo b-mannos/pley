@@ -127,6 +127,38 @@ the bitrate the network last carried when it stepped down.
 Picking a quality in the menu, Automatic again included, starts from that
 choice afresh.
 
+## Players that go black between streams
+
+Some players can't move from one stream to another without the screen
+going black for a moment: Samsung's AVPlay and Kodi's player close one
+stream before they open the next, and Roku's Video node replaces its
+content the same way; LG's pipeline is taken to as well until a set shows
+otherwise. On them Automatic never moves to another stream while one
+plays well. It changes the stream as it is sent instead:
+
+- It starts where the speed test or the network's memory says (above).
+- Once the stream is a conversion, a step changes its bitrate, not the
+  stream: the player asks the server (`PUT /api/playback/{id}/bitrate`),
+  and the transcoder makes the segments the player hasn't fetched yet at
+  the new bitrate, the same size and the same playlist, so the player
+  plays on without a pause or a new stream. The rules above decide when
+  (a play issue steps down, calm minutes step up, it settles). A stream
+  keeps its size: 4K stays 4K and 1080p stays 1080p, at 8 Mbps at least
+  for 4K and 3 Mbps for 1080p; below that, the network waits.
+- Playing the original (direct play or a remux), it moves to a conversion
+  only once the picture has stopped anyway: a wait for data of 2 s or
+  more, or a decoder failing. Two short waits and the delivery warning
+  don't move it. Dropped frames move it in a title's first minute only, a
+  rough guess that this device can't keep up with the file; later they
+  lower where the next title starts.
+- Samsung and LG get one size per stream (they don't say
+  `caps.hls.variants`): a size changing inside a stream may blank their
+  screens too. Roku's Video node moves between the sizes of one stream
+  without a gap, as streaming services use it, and keeps them.
+
+The web player and the Android app move to a new stream on its last
+picture (above), so they keep the rules before this section.
+
 ## Several sizes (adaptive bitrate)
 
 A transcode comes in several sizes for a player that moves between them

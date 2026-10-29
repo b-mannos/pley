@@ -452,6 +452,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
             conversions: true,
             conversions_mp4: true,
             hls_variants: true,
+            live_bitrate: true,
             ..ff.caps.clone()
         },
         limits,

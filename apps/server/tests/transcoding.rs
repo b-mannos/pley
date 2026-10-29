@@ -19,10 +19,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use parking_lot::Mutex;
 use pley_transcoder_api::{
-    API_VERSION, AudioMode, AudioPlan, Capabilities, ConversionState, ConversionStatus, EncoderInfo, ErrorBody,
-    FileContainer, HoldRequest, HwAccel, JobCreated, JobRequest, JobStatus, Limits, MediaInfo, MediaStream,
-    PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER, StreamKind, SubtitleRequest, TranscoderInfo,
-    TranscoderStatus, TrickplayInfo, TrickplayRequest, VideoCodec, VideoMode, VideoPlan,
+    API_VERSION, AudioMode, AudioPlan, BitrateChanged, BitrateRequest, Capabilities, ConversionState, ConversionStatus,
+    EncoderInfo, ErrorBody, FileContainer, HoldRequest, HwAccel, JobCreated, JobRequest, JobStatus, Limits, MediaInfo,
+    MediaStream, PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER, StreamKind, SubtitleRequest,
+    TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest, VideoCodec, VideoMode, VideoPlan,
 };
 use serde_json::{Value, json};
 
@@ -36,6 +36,8 @@ const TOKEN: &str = "shared-secret";
 struct Fake {
     /// Live jobs by id.
     jobs: Arc<Mutex<HashMap<String, (JobRequest, u32)>>>,
+    /// Bitrates asked for as jobs play (job, kbps), in order.
+    bitrates: Arc<Mutex<Vec<(String, u32)>>>,
     /// Every job request, in order.
     created: Arc<Mutex<Vec<JobRequest>>>,
     deleted: Arc<Mutex<Vec<String>>>,
@@ -262,6 +264,7 @@ async fn start_fake() -> (Fake, String) {
                         subtitle_matroska: true,
                         conversions: true,
                         conversions_mp4: true,
+                        live_bitrate: true,
                         ..Default::default()
                     },
                     limits: Limits { max_jobs: 8, max_hw_jobs: 0 },
@@ -345,6 +348,16 @@ async fn start_fake() -> (Fake, String) {
                     Some(_) => StatusCode::NO_CONTENT.into_response(),
                     None => error(StatusCode::NOT_FOUND, "job_not_found"),
                 }
+            }),
+        )
+        .route(
+            "/v1/jobs/{id}/bitrate",
+            post(|State(fake): State<Fake>, Path(id): Path<String>, Json(req): Json<BitrateRequest>| async move {
+                if !fake.jobs.lock().contains_key(&id) {
+                    return error(StatusCode::NOT_FOUND, "job_not_found");
+                }
+                fake.bitrates.lock().push((id, req.max_bitrate_kbps));
+                Json(BitrateChanged { bitrate_kbps: req.max_bitrate_kbps.clamp(1_000, 8_000) }).into_response()
             }),
         )
         .route(
@@ -907,6 +920,37 @@ async fn a_lost_job_is_recreated_once_with_the_same_layout() {
     assert!(w.fake.jobs.lock().is_empty(), "the mismatched job is not left running");
     assert_eq!(app.get(&six, admin).await.status, StatusCode::NOT_FOUND);
     assert_eq!(w.fake.created(), 3, "no further attempts");
+}
+
+#[tokio::test]
+async fn a_converted_streams_bitrate_changes_as_it_plays() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let feature = w.movies["Feature"];
+    let started =
+        play(app, admin, json!({"item_id": feature, "caps": browser(), "mode": "transcode", "max_bitrate": 8000}))
+            .await;
+    assert_eq!(started.status, StatusCode::OK, "{:?}", started.body);
+    assert_eq!(started.body["live_bitrate"], json!(true));
+    let session = started.body["session_id"].as_str().unwrap().to_owned();
+    let changed = app.put(&format!("/api/playback/{session}/bitrate"), admin, json!({"max_bitrate": 3000})).await;
+    assert_eq!((changed.status, changed.body.clone()), (StatusCode::OK, json!({"bitrate": 3000})));
+    // What the transcoder makes of it is what the player hears.
+    let low = app.put(&format!("/api/playback/{session}/bitrate"), admin, json!({"max_bitrate": 200})).await;
+    assert_eq!(low.body, json!({"bitrate": 1000}));
+    assert_eq!(*w.fake.bitrates.lock(), [("job1".to_owned(), 3000), ("job1".to_owned(), 200)]);
+
+    // A job the transcoder lost comes back at the bitrate asked for since.
+    w.fake.lose_jobs();
+    assert_eq!(app.get(&format!("/api/playback/{session}/3.ts"), admin).await.status, StatusCode::OK);
+    assert_eq!(w.fake.bitrates.lock().last(), Some(&("job2".to_owned(), 1000)));
+
+    // A remux keeps the file's bitrate.
+    let remux = play(app, admin, json!({"item_id": feature, "caps": browser(), "client_id": "tv"})).await;
+    assert_eq!(remux.body["live_bitrate"], json!(false));
+    let id = remux.body["session_id"].as_str().unwrap();
+    let refused = app.put(&format!("/api/playback/{id}/bitrate"), admin, json!({"max_bitrate": 3000})).await;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

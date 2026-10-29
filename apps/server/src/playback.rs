@@ -359,6 +359,10 @@ pub struct PlaybackInfo {
     /// ([`HlsCaps::variants`]), from `master.m3u8`: its own Automatic
     /// quality leaves the session be.
     pub adaptive: bool,
+    /// The video is converted, and its bitrate can change as it is sent
+    /// (`PUT /api/playback/{id}/bitrate`): Automatic's steps need no new
+    /// stream (docs/QUALITY.md, "Players that go black between streams").
+    pub live_bitrate: bool,
 }
 
 /// The qualities players offer (apps/web/src/player/quality.ts), highest
@@ -1395,6 +1399,9 @@ pub struct Session {
     pub media_key: Option<String>,
     /// Serialises job re-creation when the transcoder lost the job.
     pub recreate: tokio::sync::Mutex<()>,
+    /// The video bitrate its player asked for since it started (kbps),
+    /// which a recreated job goes on at too.
+    pub bitrate: Mutex<Option<u32>>,
     last_transcoder_touch: AtomicI64,
     /// Not heard from for [`ACTIVE_WINDOW_SECS`] (no report, heartbeat or
     /// request for media): out of "Now playing", its transcode stopped. The
@@ -1434,6 +1441,7 @@ impl Session {
             app_grant: None,
             media_key: None,
             recreate: tokio::sync::Mutex::new(()),
+            bitrate: Mutex::new(None),
             last_transcoder_touch: AtomicI64::new(now),
             quiet: AtomicBool::new(false),
         }

@@ -131,6 +131,7 @@ pub fn router(state: AppState) -> Router {
         .route("/playback/network", get(playback::network).put(playback::report_network))
         .route("/playback/speedtest", get(playback::speed_test))
         .route("/playback/{session}", get(playback::status).delete(playback::stop))
+        .route("/playback/{session}/bitrate", put(playback::set_bitrate))
         .route("/playback/{session}/{file}", get(playback::hls_file))
         .route("/media/{key}/{file}", get(playback::keyed_media))
         .route("/files/{id}/stream", get(playback::stream_file))

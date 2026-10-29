@@ -18,10 +18,10 @@ use axum::http::HeaderValue;
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock};
 use pley_transcoder_api::{
-    Announce, ConversionStatus, CoverRequest, ErrorBody, Fingerprint, FingerprintRequest, Frames, FramesRequest,
-    HoldRequest, JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched,
-    ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo,
-    TranscoderStatus, TrickplayInfo, TrickplayRequest,
+    Announce, BitrateChanged, BitrateRequest, ConversionStatus, CoverRequest, ErrorBody, Fingerprint,
+    FingerprintRequest, Frames, FramesRequest, HoldRequest, JobCreated, JobRequest, JobStatus, KeyframesRequest,
+    MediaInfo, PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV,
+    ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -432,6 +432,23 @@ impl Transcoder {
     pub async fn touch_job(&self, id: &str) -> TranscoderResult<()> {
         self.post(&format!("/v1/jobs/{id}/touch"), &serde_json::json!({}), Duration::from_secs(10)).await?;
         Ok(())
+    }
+
+    /// Changes a job's video bitrate as it is sent: the bitrate it goes on at.
+    pub async fn set_bitrate(&self, id: &str, kbps: u32) -> TranscoderResult<u32> {
+        let changed: BitrateChanged = self
+            .post_json(
+                &format!("/v1/jobs/{id}/bitrate"),
+                &BitrateRequest { max_bitrate_kbps: kbps },
+                Duration::from_secs(30),
+            )
+            .await?;
+        Ok(changed.bitrate_kbps)
+    }
+
+    /// Whether its jobs' bitrate can change as they are sent.
+    pub fn live_bitrate(&self) -> bool {
+        self.info().is_some_and(|info| info.capabilities.live_bitrate)
     }
 
     pub async fn job_status(&self, id: &str) -> TranscoderResult<JobStatus> {

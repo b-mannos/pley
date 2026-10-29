@@ -517,6 +517,10 @@ pub struct Capabilities {
     /// ([`JobRequest::variants`]). Older transcoders make one.
     #[serde(default)]
     pub hls_variants: bool,
+    /// A job's video bitrate changes as it is sent (`POST
+    /// /v1/jobs/{id}/bitrate`). Older transcoders keep the one asked for.
+    #[serde(default)]
+    pub live_bitrate: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -1154,6 +1158,21 @@ pub struct KeyframesRequest {
 /// fingerprints, key frames, keyframe scans, probes) waits, and its FFmpeg
 /// runs under way pause, for `ms` (a minute at most). Its own jobs' starts
 /// hold it without asking. Transcoders before this answer `404`.
+/// `POST /v1/jobs/{id}/bitrate` → [`BitrateChanged`]: the job's video, a
+/// conversion, goes on at `max_bitrate_kbps` from the segments its player
+/// hasn't fetched yet, the same size and layout.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct BitrateRequest {
+    pub max_bitrate_kbps: u32,
+}
+
+/// The bitrate the job goes on at (kbps): the one asked for, kept within
+/// 1 Mbps and the job's own.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct BitrateChanged {
+    pub bitrate_kbps: u32,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct HoldRequest {
     pub ms: u64,

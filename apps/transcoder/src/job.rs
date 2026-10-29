@@ -75,6 +75,11 @@ const STARTED_AFTER: u32 = 3;
 /// ahead of the picture. What is made beyond goes to waste when the player
 /// stops or seeks, and takes the processor from other playbacks meanwhile.
 const PAUSE_AHEAD: Duration = Duration::from_secs(90);
+/// The lowest video bitrate a player may ask a job for as it plays (kbps).
+pub const MIN_BITRATE_KBPS: u32 = 1_000;
+/// Segments past the one its player asked for last that a new bitrate
+/// leaves as they are: the next is likely being fetched already.
+const REBITRATE_KEEP: u32 = 2;
 const RESUME_AHEAD: Duration = Duration::from_secs(60);
 
 /// Concurrency budget shared by all jobs.
@@ -204,6 +209,9 @@ pub struct Job {
     active: AtomicU32,
     /// Its folder in RAM, when it asked for memory and may have it.
     memory: Option<JobMemory>,
+    /// The video bitrate its player asked for since it started (kbps), in
+    /// place of the plan's: see [`JobManager::set_bitrate`].
+    bitrate: Mutex<Option<u32>>,
 }
 
 /// Where a segment is made: in the job's folder on disk, or in RAM
@@ -663,6 +671,46 @@ impl JobManager {
         Ok((rendition, path))
     }
 
+    /// Changes the video bitrate of `job` as it is sent (docs/QUALITY.md,
+    /// "Players that go black between streams"): the segments its player
+    /// hasn't fetched yet are made again at `kbps`, the same size and
+    /// layout, so the player plays on from the same playlist without a new
+    /// stream. Between [`MIN_BITRATE_KBPS`] and the job's own bitrate.
+    pub async fn set_bitrate(self: &Arc<Self>, job: &Arc<Job>, kbps: u32) -> ApiResult<u32> {
+        let planned = match job.plan.video.as_ref() {
+            Some(v) if !v.copy => v.bitrate_kbps,
+            _ => return Err(ApiError::BadRequest("the video isn't converted: its bitrate is the file's".into())),
+        };
+        let kbps = kbps.clamp(MIN_BITRATE_KBPS.min(planned), planned);
+        job.touch();
+        let mut guard = job.process.lock().await;
+        if job.closed.load(Relaxed) {
+            return Err(ApiError::JobNotFound(format!("job {} was removed", job.id)));
+        }
+        let before = job.bitrate.lock().replace(kbps).unwrap_or(planned);
+        if before == kbps {
+            return Ok(kbps);
+        }
+        // What the player may be fetching now (the one it asked for last and
+        // the next) stays; the rest is made again.
+        let from = job.last_requested.load(Relaxed).saturating_add(REBITRATE_KEEP).min(job.plan.segment_count());
+        let running = guard.as_ref().is_some_and(Proc::running);
+        if let Some(old) = guard.take() {
+            old.stop().await;
+        }
+        let forgotten = job.forget_from(from);
+        tracing::info!(
+            job = %job.id,
+            "bitrate {before} → {kbps} kbps from segment {from} ({forgotten} made again)"
+        );
+        if running && from < job.plan.segment_count() {
+            *guard = Some(self.spawn(job, from, None)?);
+        }
+        drop(guard);
+        job.notify.notify_waiters();
+        Ok(kbps)
+    }
+
     /// Path of segment `n`, waiting for or (re)starting ffmpeg as needed.
     pub async fn segment(self: &Arc<Self>, job: &Arc<Job>, n: u32) -> ApiResult<PathBuf> {
         if n >= job.plan.segment_count() {
@@ -875,7 +923,15 @@ impl JobManager {
             preset: preset_name.as_deref(),
             shader_cache: self.shader_cache.as_deref(),
         };
-        let args = plan.ffmpeg_args(&ctx, start, end);
+        // A bitrate the player asked for since: the same plan at that bitrate.
+        let rebitrated = job.bitrate.lock().map(|kbps| {
+            let mut plan = plan.clone();
+            if let Some(v) = plan.video.as_mut() {
+                v.bitrate_kbps = kbps;
+            }
+            plan
+        });
+        let args = rebitrated.as_ref().unwrap_or(plan).ffmpeg_args(&ctx, start, end);
         tracing::debug!(job = %job.id, "ffmpeg {}", args.iter().map(|a| a.to_string_lossy()).collect::<Vec<_>>().join(" "));
         // It writes its segments where it runs.
         let place = job.choose_place();
@@ -1185,6 +1241,7 @@ impl Job {
             variants: Vec::new(),
             prefix: String::new(),
             active: AtomicU32::new(0),
+            bitrate: Mutex::new(None),
             memory: None,
         }
     }
@@ -1465,6 +1522,28 @@ impl Job {
                 n += 1;
             }
         }
+    }
+
+    /// Deletes the segments made from `from` on, to be made again (a new
+    /// bitrate): how many went. One that can't be deleted (being served)
+    /// stays as it is.
+    fn forget_from(&self, from: u32) -> usize {
+        let mut ready = self.ready.lock();
+        let mut gone = 0;
+        for n in from as usize..ready.len() {
+            let Some(place) = ready[n] else { continue };
+            let path = self.path_in(place, n as u32);
+            let bytes = (place == Place::Memory).then(|| std::fs::metadata(&path).map_or(0, |m| m.len()));
+            if std::fs::remove_file(&path).is_ok() {
+                ready[n] = None;
+                self.ready_count.fetch_sub(1, Relaxed);
+                if let (Some(bytes), Some(memory)) = (bytes, &self.memory) {
+                    memory.removed(bytes);
+                }
+                gone += 1;
+            }
+        }
+        gone
     }
 
     /// Process writing to memory stopped at segment `n`, not made: what it
@@ -2318,6 +2397,60 @@ mod tests {
         // "5.400000," (with the packet's side data after it).
         let text = String::from_utf8_lossy(&out.stdout);
         text.lines().next().and_then(|l| l.split(',').next()).and_then(|t| t.trim().parse().ok()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_new_bitrate_remakes_what_the_player_has_not_fetched() {
+        use pley_transcoder_api::VideoRequest;
+        let dir = tempfile::tempdir().unwrap();
+        let Some((_, jobs)) = with_ffmpeg(dir.path(), "320x240") else { return };
+        // Noise, so that the bitrate asked for is what limits the encoder.
+        let input = dir.path().join("noisy.mkv");
+        let made = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i"])
+            .arg("testsrc2=size=1280x720:rate=25:duration=10,noise=alls=60:allf=t+u")
+            .args(["-c:v", "libx264", "-preset", "ultrafast", "-g", "25"])
+            .arg(&input)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let created = jobs
+            .create(JobRequest {
+                input: input.to_string_lossy().into_owned(),
+                video: Some(VideoRequest { max_bitrate_kbps: Some(6_000), ..Default::default() }),
+                segment_seconds: Some(2.0),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let job = jobs.get(&created.id).unwrap();
+        let size = |path: &Path| std::fs::metadata(path).unwrap().len();
+        let before: Vec<(u64, f64)> = {
+            let mut made = Vec::new();
+            for n in 0..5 {
+                let path = jobs.segment(&job, n).await.unwrap();
+                made.push((size(&path), first_video_pts(&path)));
+            }
+            made
+        };
+        // The player has asked for segment 1: from segment 3 on, the stream goes on at 1.5 Mbps.
+        job.last_requested.store(1, Relaxed);
+        assert_eq!(jobs.set_bitrate(&job, 1_500).await.unwrap(), 1_500);
+        // (A process still running restarts at once: segment 3 may be made again already.)
+        assert!(job.is_ready(1) && job.is_ready(2), "what the player may be fetching stays");
+        assert_eq!(size(&job.segment_path(2)), before[2].0, "and is the same");
+        for (n, &(old_size, old_pts)) in before.iter().enumerate().skip(3) {
+            let path = jobs.segment(&job, n as u32).await.unwrap();
+            assert!(size(&path) * 2 < old_size, "segment {n}: {} bytes, {old_size} before", size(&path));
+            // Laid out as before: the player plays on from the same playlist.
+            assert!((first_video_pts(&path) - old_pts).abs() < 0.001, "segment {n} starts where it did");
+        }
+        // Asked again, nothing changes; never above the job's own, nor below 1 Mbps.
+        assert_eq!(jobs.set_bitrate(&job, 1_500).await.unwrap(), 1_500);
+        let own = job.plan.video.as_ref().unwrap().bitrate_kbps;
+        assert_eq!(jobs.set_bitrate(&job, 50_000).await.unwrap(), own);
+        assert_eq!(jobs.set_bitrate(&job, 10).await.unwrap(), MIN_BITRATE_KBPS);
+        jobs.remove(&created.id).await;
     }
 
     #[tokio::test]

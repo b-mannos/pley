@@ -14,10 +14,10 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use pley_transcoder_api::{
-    ConversionStatus, CoverRequest, FileContainer, Fingerprint, FingerprintRequest, Frames, FramesRequest, HoldRequest,
-    JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest,
-    SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo, TranscoderStatus,
-    TrickplayInfo, TrickplayRequest,
+    BitrateChanged, BitrateRequest, ConversionStatus, CoverRequest, FileContainer, Fingerprint, FingerprintRequest,
+    Frames, FramesRequest, HoldRequest, JobCreated, JobRequest, JobStatus, KeyframesRequest, MediaInfo,
+    PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV, ThumbnailRequest,
+    TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
 };
 use tokio_util::io::ReaderStream;
 
@@ -141,6 +141,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/jobs", get(list_jobs).post(create_job))
         .route("/jobs/{id}", get(get_job).delete(delete_job))
         .route("/jobs/{id}/touch", post(touch_job))
+        .route("/jobs/{id}/bitrate", post(job_bitrate))
         .route("/jobs/{id}/{file}", get(job_file))
         .route("/conversions", post(create_conversion))
         .route("/conversions/{id}", get(get_conversion).delete(delete_conversion))
@@ -435,6 +436,17 @@ async fn touch_job(State(state): Shared, Path(id): Path<String>) -> ApiResult<St
     let job = state.jobs.get(&id).ok_or_else(|| ApiError::JobNotFound(format!("job {id} not found")))?;
     job.touch();
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /v1/jobs/{id}/bitrate`: see [`JobManager::set_bitrate`].
+async fn job_bitrate(
+    State(state): Shared,
+    Path(id): Path<String>,
+    Json(req): Json<BitrateRequest>,
+) -> ApiResult<Json<BitrateChanged>> {
+    let job = state.jobs.get(&id).ok_or_else(|| ApiError::JobNotFound(format!("job {id} not found")))?;
+    let bitrate_kbps = state.jobs.set_bitrate(&job, req.max_bitrate_kbps).await?;
+    Ok(Json(BitrateChanged { bitrate_kbps }))
 }
 
 async fn job_file(State(state): Shared, Path((id, file)): Path<(String, String)>) -> ApiResult<Response> {

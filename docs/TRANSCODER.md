@@ -100,6 +100,7 @@ with the following status codes:
 | GET | `/v1/jobs/{id}` | – | `JobStatus` |
 | DELETE | `/v1/jobs/{id}` | – | `204` (kills ffmpeg, deletes segments) |
 | POST | `/v1/jobs/{id}/touch` | – | `204` (keeps a paused session alive) |
+| POST | `/v1/jobs/{id}/bitrate` | `BitrateRequest {max_bitrate_kbps}` | `BitrateChanged {bitrate_kbps}`: a transcode goes on at another video bitrate (1 Mbps at least, the job's own at most). The segments past the one its player asked for last and the next are deleted and made again, the same size and layout, so the player plays on from the same playlist; a process running restarts there at once. `400` for a remux. Transcoders that do it say `live_bitrate: true` |
 | GET | `/v1/jobs/{id}/index.m3u8` | – | HLS VOD playlist |
 | GET | `/v1/jobs/{id}/master.m3u8` | – | multivariant playlist: the job's variant (`index.m3u8`), then its smaller renditions' (`v1.m3u8`…, see *Renditions*), each with `CODECS`, `SUPPLEMENTAL-CODECS`, `RESOLUTION`, `FRAME-RATE`, `VIDEO-RANGE` and the bandwidth (see *Dolby Vision in remuxes*). Transcoders that serve it say `hls_master_playlist: true` in their capabilities |
 | GET | `/v1/jobs/{id}/{n}.ts` | – | MPEG-TS segment `n` (waits for it, or starts ffmpeg) |
