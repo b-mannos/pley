@@ -1,6 +1,6 @@
 {
   "client_id": "https://hhaidar.github.io/pley/oauth/roku.json",
-  "client_name": "pley for Roku",
+  "client_name": "Pley for Roku",
   "client_uri": "https://github.com/hhaidar/pley",
   "redirect_uris": [],
   "grant_types": ["refresh_token", "urn:ietf:params:oauth:grant-type:device_code"],

@@ -19,7 +19,7 @@ use pley::oauth::fetch::Source;
 
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const OTHER_APP: &str = "https://apps.example.com/pley.json";
-const NOT_FROM_PLEY: &str = "this page must be opened from pley itself";
+const NOT_FROM_PLEY: &str = "this page must be opened from Pley itself";
 const BUSY: &str = "too many sign-ins in progress: try again in a minute";
 const CODE_USED: &str = "that code was already used: start again on your TV";
 const NO_SUCH_CODE: &str = "no TV is waiting for that code: check the code on your TV, or start again there";
@@ -161,7 +161,7 @@ async fn a_tv_signs_in_with_a_code_shown_on_screen() {
     assert_eq!(shown.body["status"], "consent");
     assert_eq!(
         shown.body["client"],
-        json!({"id": ANDROID_APP, "host": "hhaidar.github.io", "name": "pley for Android", "first_party": true})
+        json!({"id": ANDROID_APP, "host": "hhaidar.github.io", "name": "Pley for Android", "first_party": true})
     );
     // An agent that isn't one of pley's apps is named as the sign-ins list
     // names it; the test's connection has no address.
@@ -322,7 +322,7 @@ async fn only_pleys_own_apps_sign_in_with_a_code() {
     for client_id in [OTHER_APP, "https://apps.example.com/unknown.json", "not an address"] {
         let refused = ask(&app, client_id, None, &[]).await;
         assert_eq!(oauth_error(&refused), (StatusCode::BAD_REQUEST, "invalid_client"), "{client_id}");
-        assert_eq!(refused.body["error_description"], "only pley's own apps can sign in with a code");
+        assert_eq!(refused.body["error_description"], "only Pley's own apps can sign in with a code");
         assert_not_cached(&refused);
     }
     assert_eq!(app.state.oauth.documents.fetched(), 0, "no description was read");
@@ -374,7 +374,7 @@ async fn wrong_codes_are_throttled() {
         let reply = verify(&app, &admin, typed).await;
         assert_eq!(
             (reply.status, &reply.body["message"]),
-            (StatusCode::BAD_REQUEST, &json!("that isn't a code from a pley app: codes are 8 letters, like BCDF-GHJK")),
+            (StatusCode::BAD_REQUEST, &json!("that isn't a code from a Pley app: codes are 8 letters, like BCDF-GHJK")),
             "{typed:?}"
         );
     }
@@ -710,7 +710,7 @@ async fn device_grants_act_like_other_app_grants() {
     let grant = &listed.body[0];
     assert_eq!(
         (&grant["name"], &grant["first_party"], &grant["device"]),
-        (&json!("pley for Android"), &json!(true), &json!("pley-tv/2.0"))
+        (&json!("Pley for Android"), &json!(true), &json!("pley-tv/2.0"))
     );
     assert_eq!(grant["scopes"], json!(["library"]));
     assert_eq!((&grant["profile"]["name"], &grant["approved_by"]["name"]), (&json!("admin"), &json!("admin")));
@@ -732,8 +732,8 @@ async fn kodi_and_roku_sign_in_only_with_a_code() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
     for (client_id, name, agent, platform) in [
-        (KODI_APP, "pley for Kodi", "pleyKodi/0.1.0 (Kodi 21.2; Windows)", "Kodi 21.2; Windows"),
-        (ROKU_APP, "pley for Roku", "pleyRoku/0.1.0 (Roku OS 14.5; Roku Ultra)", "Roku OS 14.5; Roku Ultra"),
+        (KODI_APP, "Pley for Kodi", "pleyKodi/0.1.0 (Kodi 21.2; Windows)", "Kodi 21.2; Windows"),
+        (ROKU_APP, "Pley for Roku", "pleyRoku/0.1.0 (Roku OS 14.5; Roku Ultra)", "Roku OS 14.5; Roku Ultra"),
     ] {
         let asked = form(&[("client_id", client_id), ("scope", "library play")]);
         let started =

@@ -175,7 +175,7 @@ async fn one_server_per_data_directory() {
     let second = tokio::time::timeout(Duration::from_secs(10), pley::run(config(data.path()))).await;
     let message =
         format!("{:#}", second.expect("the second copy gives up at once").expect_err("the directory is taken"));
-    assert!(message.starts_with(&format!("another pley (process {}) uses", std::process::id())), "{message}");
+    assert!(message.starts_with(&format!("another Pley (process {}) uses", std::process::id())), "{message}");
 
     ctx.send(Command::Quit);
     stopped(server, Duration::from_secs(5)).await.unwrap();
@@ -221,7 +221,7 @@ async fn why_the_server_could_not_start_is_in_its_log() {
     let data = tempfile::tempdir().unwrap();
     let (status, stderr, log) = failed_start(data.path(), &[]).await;
     assert!(!status.success());
-    assert!(log.contains("ERROR pley could not start: cannot listen on 127.0.0.1:"), "{log}");
+    assert!(log.contains("ERROR Pley could not start: cannot listen on 127.0.0.1:"), "{log}");
     assert_eq!(stderr.matches("cannot listen on").count(), 1, "on the console once: {stderr}");
 
     // Another pley uses the data directory (here, this process).
@@ -229,7 +229,7 @@ async fn why_the_server_could_not_start_is_in_its_log() {
     let (_, ctx, server) = start(config(busy.path())).await;
     let (status, _, log) = failed_start(busy.path(), &[]).await;
     assert!(!status.success());
-    let holder = format!("pley could not start: another pley (process {}) uses the data", std::process::id());
+    let holder = format!("Pley could not start: another Pley (process {}) uses the data", std::process::id());
     assert!(log.contains(&holder), "{log}");
     ctx.send(Command::Quit);
     stopped(server, Duration::from_secs(5)).await.unwrap();
@@ -239,7 +239,7 @@ async fn why_the_server_could_not_start_is_in_its_log() {
     std::fs::write(broken.path().join("pley.toml"), "bindd = \"8080\"\n").unwrap();
     let (status, _, log) = failed_start(broken.path(), &[]).await;
     assert!(!status.success());
-    assert!(log.contains("ERROR pley could not start: parsing config file"), "{log}");
+    assert!(log.contains("ERROR Pley could not start: parsing config file"), "{log}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -260,7 +260,7 @@ async fn a_second_pley_stops_when_one_answers_on_its_port() {
     let output = tokio::time::timeout(Duration::from_secs(60), run).await.expect("pley exits").unwrap();
     assert!(!output.status.success());
     let log = std::fs::read_to_string(other.path().join("logs").join("pley.log")).unwrap_or_default();
-    let expected = format!("ERROR pley could not start: another pley already listens on http://localhost:{port}");
+    let expected = format!("ERROR Pley could not start: another Pley already listens on http://localhost:{port}");
     assert!(log.contains(&expected), "{log}");
     assert!(!other.path().join("pley.db").exists(), "it stopped before the database");
 

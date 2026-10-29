@@ -78,7 +78,7 @@ export async function buildApp(o) {
       "<head>",
       '<meta charset="utf-8">',
       '<meta name="viewport" content="width=1920, height=1080, initial-scale=1">',
-      "<title>pley</title>",
+      "<title>Pley</title>",
       '<link rel="stylesheet" href="app.css">',
       o.head ?? "",
       "</head>",

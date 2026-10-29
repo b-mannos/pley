@@ -144,11 +144,11 @@ describe("useDismiss", () => {
 
 describe("useDocumentTitle", () => {
   it("names the page while mounted", () => {
-    document.title = "pley";
+    document.title = "Pley";
     const { unmount } = renderHook(() => useDocumentTitle("Heat"));
-    expect(document.title).toBe("Heat · pley");
+    expect(document.title).toBe("Heat · Pley");
     unmount();
-    expect(document.title).toBe("pley");
+    expect(document.title).toBe("Pley");
   });
 });
 

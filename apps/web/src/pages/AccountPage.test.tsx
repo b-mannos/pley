@@ -102,7 +102,7 @@ const NOW = Math.floor(Date.now() / 1000);
 const android: AppGrant = {
   id: 7,
   client_id: "https://hhaidar.github.io/pley/oauth/android.json",
-  name: "pley for Android",
+  name: "Pley for Android",
   first_party: true,
   host: "hhaidar.github.io",
   scopes: ["library", "play", "playlists", "profiles"],
@@ -152,11 +152,11 @@ describe("AccountPage", () => {
 
   it("lists the apps that use the account, and what they may do", async () => {
     renderAccount(testUser, [android, other]);
-    const card = (await screen.findByText("pley for Android")).closest("ul");
+    const card = (await screen.findByText("Pley for Android")).closest("ul");
     if (!card) throw new Error("no list of apps");
     const [own, theirs] = within(card).getAllByRole("listitem");
 
-    expect(own).toHaveTextContent("pley's own app");
+    expect(own).toHaveTextContent("Pley's own app");
     expect(own).toHaveTextContent("Libraries · Play · Playlists · Profiles");
     expect(own).toHaveTextContent(/Android 15 · 192\.0\.2\.8 · last active 1 hour ago · allowed 3 days ago/);
     expect(own).not.toHaveTextContent(/Using|Allowed by/);
@@ -164,7 +164,7 @@ describe("AccountPage", () => {
     // Others by host first; the name is only what the app calls itself.
     expect(theirs).toHaveTextContent("apps.example.com");
     expect(theirs).toHaveTextContent("calls itself “Movie Night”");
-    expect(theirs).not.toHaveTextContent("pley's own app");
+    expect(theirs).not.toHaveTextContent("Pley's own app");
     expect(theirs).toHaveTextContent("Using Kiddo · Libraries");
   });
 
@@ -179,38 +179,38 @@ describe("AccountPage", () => {
   it("signs an app out", async () => {
     const user = userEvent.setup();
     const requests = renderAccount(testUser, [android, other]);
-    await user.click(await screen.findByRole("button", { name: "Sign out pley for Android" }));
+    await user.click(await screen.findByRole("button", { name: "Sign out Pley for Android" }));
 
-    expect(await screen.findByText("Signed out pley for Android")).toBeInTheDocument();
+    expect(await screen.findByText("Signed out Pley for Android")).toBeInTheDocument();
     expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/me/apps/7")).toBe(true);
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Sign out pley for Android" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Sign out Pley for Android" })).not.toBeInTheDocument());
     expect(screen.getByText("apps.example.com")).toBeInTheDocument();
   });
 
   it("leads to the page where a TV's code is typed", async () => {
     renderAccount(testUser, [android]);
-    await screen.findByText("pley for Android");
+    await screen.findByText("Pley for Android");
     expect(screen.getByRole("link", { name: "Sign in on a TV" })).toHaveAttribute("href", "/link");
   });
 
   it("lists the apps again once a new password signed them out", async () => {
     const user = userEvent.setup();
     renderAccount(testUser, [android]);
-    await screen.findByText("pley for Android");
+    await screen.findByText("Pley for Android");
     await user.type(screen.getByLabelText("Current password"), "old-password-1");
     await user.type(screen.getByLabelText("New password"), "new-password-2");
     await user.type(screen.getByLabelText("Confirm new password"), "new-password-2");
     await user.click(screen.getByRole("button", { name: "Update password" }));
     expect(await screen.findByText("Password changed")).toBeInTheDocument();
     expect(
-      await screen.findByText("No apps use your account. Apps ask on a pley page before they get access."),
+      await screen.findByText("No apps use your account. Apps ask on a Pley page before they get access."),
     ).toBeInTheDocument();
   });
 
   it("never says an app was used in the future when this device's clock is behind", async () => {
     const ahead = Math.floor(Date.now() / 1000) + 5;
     renderAccount(testUser, [{ ...android, created_at: ahead, last_used_at: ahead }]);
-    const row = (await screen.findByText("pley for Android")).closest("li");
+    const row = (await screen.findByText("Pley for Android")).closest("li");
     expect(row).toHaveTextContent(/last active now · allowed now/);
     expect(row).not.toHaveTextContent(/\bin \d+ seconds?/);
   });
@@ -218,7 +218,7 @@ describe("AccountPage", () => {
   it("says how apps get access when none has it", async () => {
     renderAccount(testUser);
     expect(
-      await screen.findByText("No apps use your account. Apps ask on a pley page before they get access."),
+      await screen.findByText("No apps use your account. Apps ask on a Pley page before they get access."),
     ).toBeInTheDocument();
   });
 });

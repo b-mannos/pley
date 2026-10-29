@@ -44,8 +44,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # ---- runtime ----------------------------------------------------------------
 FROM debian:trixie-slim
 ARG PLEY_COMMIT=unknown
-LABEL org.opencontainers.image.title="pley" \
-      org.opencontainers.image.description="pley media server, with its transcoder and FFmpeg" \
+LABEL org.opencontainers.image.title="Pley" \
+      org.opencontainers.image.description="Pley media server, with its transcoder and FFmpeg" \
       org.opencontainers.image.source="https://github.com/hhaidar/pley" \
       org.opencontainers.image.documentation="https://github.com/hhaidar/pley/blob/master/deploy/docker/README.md" \
       org.opencontainers.image.licenses="LicenseRef-Restricted" \

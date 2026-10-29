@@ -231,7 +231,7 @@ class AutomaticTest(unittest.TestCase):
         self.assertEqual(player.sent[-3:], [("stopped", 30_000), ("ended", "/api/playback/s1"), ("playing", 30_000)])
         self.assertIs(player.watch, first, "the title's watch, kept")
         self.assertEqual(first.quality, "8m")
-        self.assertEqual(xbmcgui.notified, [("pley", "Quality lowered to 8 Mbps 1080p")])
+        self.assertEqual(xbmcgui.notified, [("Pley", "Quality lowered to 8 Mbps 1080p")])
 
     def test_back_to_the_original_forgets_the_ceiling(self):
         player = self.player

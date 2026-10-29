@@ -90,7 +90,7 @@ export class DeviceSignIn {
     } catch (e) {
       if (e instanceof TokenError && (e.oauth?.error === "invalid_client" || e.oauth?.error === "unauthorized_client")) {
         // A server from before pley's TV apps were built in.
-        throw new AuthError("this server doesn't know pley's TV apps yet: update it");
+        throw new AuthError("this server doesn't know Pley's TV apps yet: update it");
       }
       if (e instanceof TokenError && e.status === 429) throw new AuthError("too many TVs are signing in here right now: try again in a minute");
       if (e instanceof NetworkError) throw new UnreachableError();
@@ -184,7 +184,7 @@ export function parseDeviceCode(body: unknown, server: string, metadata: ServerM
   const uri = o.verification_uri;
   if (typeof deviceCode !== "string" || !deviceCode || typeof userCode !== "string" || !userCode || typeof uri !== "string") throw bad;
   // The page to open must be this server's own: a code typed elsewhere would sign someone else's TV in.
-  if (origin(uri) !== metadata.issuer) throw new AuthError("this server sends people to another address to approve TVs: pley doesn't");
+  if (origin(uri) !== metadata.issuer) throw new AuthError("this server sends people to another address to approve TVs: Pley doesn't");
   const complete = typeof o.verification_uri_complete === "string" && origin(o.verification_uri_complete) === metadata.issuer
     ? o.verification_uri_complete
     : null;

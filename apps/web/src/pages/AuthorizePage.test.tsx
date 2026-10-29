@@ -18,7 +18,7 @@ const CONTINUE = "/api/oauth/requests/r1/continue";
 const android: OAuthClient = {
   id: "https://hhaidar.github.io/pley/oauth/android.json",
   host: "hhaidar.github.io",
-  name: "pley for Android",
+  name: "Pley for Android",
   first_party: true,
 };
 const other: OAuthClient = { id: "https://apps.example.com/pley.json", host: "apps.example.com", name: "Cool Player", first_party: false };
@@ -154,10 +154,10 @@ describe("AuthorizePage", () => {
     serve();
     const { container } = renderPage();
 
-    expect(await screen.findByRole("heading", { name: "pley for Android wants to use your pley account" })).toBeInTheDocument();
-    expect(screen.getByText("pley's own app")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Pley for Android wants to use your Pley account" })).toBeInTheDocument();
+    expect(screen.getByText("Pley's own app")).toBeInTheDocument();
     expect(screen.queryByText(/calls itself/)).not.toBeInTheDocument();
-    expect(screen.queryByText("This app isn't one of pley's own")).not.toBeInTheDocument();
+    expect(screen.queryByText("This app isn't one of Pley's own")).not.toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
   });
 
@@ -165,10 +165,10 @@ describe("AuthorizePage", () => {
     serve({ answer: () => consent({ client: other, redirect: { kind: "web", to: "apps.example.com" } }) });
     const { container } = renderPage();
 
-    expect(await screen.findByRole("heading", { name: "apps.example.com wants to use your pley account" })).toBeInTheDocument();
-    expect(screen.getByText("It calls itself “Cool Player” (pley can't check that name)")).toBeInTheDocument();
-    expect(screen.getByText("This app isn't one of pley's own")).toBeInTheDocument();
-    expect(screen.queryByText("pley's own app")).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "apps.example.com wants to use your Pley account" })).toBeInTheDocument();
+    expect(screen.getByText("It calls itself “Cool Player” (Pley can't check that name)")).toBeInTheDocument();
+    expect(screen.getByText("This app isn't one of Pley's own")).toBeInTheDocument();
+    expect(screen.queryByText("Pley's own app")).not.toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByText("the website apps.example.com")).toBeInTheDocument();
     expect(screen.queryByText("Only allow this if you just started signing in to the app.")).not.toBeInTheDocument();
@@ -188,7 +188,7 @@ describe("AuthorizePage", () => {
     expect(
       screen.getByText("It can't change your password, sign-in settings or devices, and it never gets administrator rights."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Your administrator rights stay in pley's web app.")).toBeInTheDocument();
+    expect(screen.getByText("Your administrator rights stay in Pley's web app.")).toBeInTheDocument();
     expect(screen.getByText("an app on this device")).toBeInTheDocument();
     expect(screen.getByText("Only allow this if you just started signing in to the app.")).toBeInTheDocument();
   });
@@ -200,7 +200,7 @@ describe("AuthorizePage", () => {
     await consentShown();
     expect(screen.getByText("See Kid's libraries, playlists and watch history.")).toBeInTheDocument();
     expect(screen.getByText("Switch to the household's other profiles. Profiles with a PIN still ask for it.")).toBeInTheDocument();
-    expect(screen.queryByText("Your administrator rights stay in pley's web app.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Your administrator rights stay in Pley's web app.")).not.toBeInTheDocument();
     expect(screen.getByText("an app on this computer")).toBeInTheDocument();
     expect(screen.getByText("Only allow this if you just started signing in to the app.")).toBeInTheDocument();
   });
@@ -267,14 +267,14 @@ describe("AuthorizePage", () => {
     fakeTimers();
     fireEvent.click(allow);
     await settle();
-    expect(screen.getByRole("heading", { name: "Returning to pley for Android…" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Returning to Pley for Android…" })).toBeInTheDocument();
     expect(posts(requests, "/api/oauth/requests/r1").map((r) => r.body)).toEqual([{ allow: true }]);
     expect(assign).toHaveBeenCalledExactlyOnceWith(CONTINUE);
 
     wait(2999);
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     wait(1);
-    expect(screen.getByRole("link", { name: "Open pley for Android" })).toHaveAttribute("href", CONTINUE);
+    expect(screen.getByRole("link", { name: "Open Pley for Android" })).toHaveAttribute("href", CONTINUE);
 
     // Only while the page is seen.
     setVisible(false);
@@ -287,7 +287,7 @@ describe("AuthorizePage", () => {
     const { deny } = await consentShown();
 
     await userEvent.setup().click(deny);
-    expect(await screen.findByRole("heading", { name: "Returning to pley for Android…" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Returning to Pley for Android…" })).toBeInTheDocument();
     expect(posts(requests, "/api/oauth/requests/r1").map((r) => r.body)).toEqual([{ allow: false }]);
     expect(assign).toHaveBeenCalledExactlyOnceWith(CONTINUE);
   });

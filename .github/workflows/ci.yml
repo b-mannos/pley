@@ -377,7 +377,7 @@ jobs:
           ports=$(docker compose -f compose.yaml -f compose.proxy.yaml config --format json | jq '.services.pley.ports // [] | length')
           test "$ports" = 0 || { echo "::error::compose.proxy.yaml leaves a port published"; exit 1; }
       # The documented setup, with the image just built.
-      - name: Start pley with setup.sh
+      - name: Start Pley with setup.sh
         env:
           PLEY_PULL_POLICY: never
         run: deploy/docker/setup.sh
@@ -398,7 +398,7 @@ jobs:
           if in_pley touch /media/x 2>/dev/null; then fail "the media is writable"; fi
           in_pley touch /config/x /tmp/x || fail "/config or /tmp isn't writable"
           test "$(stat -c %a config)" = 700 || fail "the config folder isn't private"
-      - name: pley's log
+      - name: Pley's log
         if: always()
         working-directory: deploy/docker
         run: |

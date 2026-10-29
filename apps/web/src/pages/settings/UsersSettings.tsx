@@ -197,7 +197,7 @@ function UserApps({ user }: { user: User }) {
                       {label}
                     </span>
                     {a.first_party ? (
-                      <Badge tone="accent">pley's own app</Badge>
+                      <Badge tone="accent">Pley's own app</Badge>
                     ) : a.name ? (
                       <span className="truncate text-xs text-subtle">calls itself “{a.name}”</span>
                     ) : null}

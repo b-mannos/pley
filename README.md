@@ -1,6 +1,6 @@
-# pley
+# Pley
 
-pley is a self-hosted media server. It organizes your
+Pley is a self-hosted media server. It organizes your
 movies, TV shows and music and plays them in any browser: directly when the
 browser can, transcoded on the fly when it can't, with hardware encoding and
 HDR10, HLG and Dolby Vision tone mapping. The server is written in Rust, the
@@ -61,11 +61,11 @@ web app in React and TypeScript.
   signed-in devices that can be signed out remotely.
 - Optional two-step sign-in with an authenticator app (scan a QR code), with
   recovery codes for a lost phone.
-- Apps sign in on pley's own page and get only what you allow (browsing,
+- Apps sign in on Pley's own page and get only what you allow (browsing,
   playing, playlists), never administration: OAuth 2.1 with client metadata
-  documents. pley's own apps work without internet access; apps by other
-  publishers are off until an administrator allows them. On a TV, pley's
-  app shows a code to type on pley's `/link` page. See
+  documents. Pley's own apps work without internet access; apps by other
+  publishers are off until an administrator allows them. On a TV, Pley's
+  app shows a code to type on Pley's `/link` page. See
   [docs/API.md](docs/API.md#apps-oauth-21).
 - First-run setup with a one-time code from the server's log, which the
   tray icon fills in. Passwords have at least 8 characters and can't be
@@ -75,10 +75,10 @@ web app in React and TypeScript.
 
 - Metadata editing with locked fields, Fix Match and a choice of artwork.
 - Settings with a Test button for each API key and service, a live dashboard
-  (playback, transcoder, scans, and charts of pley's and the computer's CPU
+  (playback, transcoder, scans, and charts of Pley's and the computer's CPU
   and memory) and daily database backups.
 
-**Compatibility API** on pley's own port (or 32400), for `python-plexapi`, Tautulli and
+**Compatibility API** on Pley's own port (or 32400), for `python-plexapi`, Tautulli and
 Kometa: browsing with their filters, editing, collections, playlists, play
 queues, sessions and notifications. See
 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
@@ -86,14 +86,20 @@ queues, sessions and notifications. See
 **Web app** for phones, tablets and desktops, which installs as an app from
 the browser.
 
-**Apps**: pley for Windows, macOS and Linux, which finds servers on the
+**Apps**: Pley for Windows, macOS and Linux, which finds servers on the
 local network by itself (or takes an address) and shows the server's web
-app; and pley for Android, a native app for phones, tablets, Android TV,
+app; and Pley for Android, a native app for phones, tablets, Android TV,
 Google TV and Fire TV, with its own player, which plays more files as they
 are than a browser, music in the background, and a remote-first interface
 on TVs. It signs in through the server's own page or, on a TV, with a code;
-installing it is in [docs/ANDROID.md](docs/ANDROID.md). Building and
-installing them is in [docs/TV_PLATFORMS.md](docs/TV_PLATFORMS.md).
+installing it is in [docs/ANDROID.md](docs/ANDROID.md). And Pley for Kodi,
+an add-on for Kodi 20 and newer (LibreELEC and CoreELEC boxes, Android TV
+boxes, computers) with the Android TV app's screens, that plays with Kodi's
+own player, with Skip Intro and Up Next, and signs in with a code too
+([docs/KODI.md](docs/KODI.md)); and Pley for Roku, a native app that signs
+in the same way, sideloaded for now ([docs/ROKU.md](docs/ROKU.md)).
+Building and installing them is in
+[docs/TV_PLATFORMS.md](docs/TV_PLATFORMS.md).
 
 **Offline**: on the home network everything works without the internet.
 Item pages download a file's original, which the Android app (phones and
@@ -122,11 +128,11 @@ HTTP, so the two can have different licenses
 | `apps/server` | The media server (crate `pley-server`, binary `pley`) |
 | `apps/transcoder` | The FFmpeg engine (crate and binary `pley-transcoder`) |
 | `apps/web` | The web app (React, TypeScript, Vite, Tailwind), embedded into the server |
-| `apps/desktop` | pley for Windows, macOS and Linux (Tauri) |
-| `apps/android` | pley for Android phones, tablets and TVs (Kotlin, Compose, Media3) |
-| `apps/kodi` | pley for Kodi, an add-on (Python, GPL-2.0-or-later) |
-| `apps/roku` | pley for Roku (BrightScript, SceneGraph) |
-| `apps/tizen`, `apps/webos` | pley for Samsung TV and pley for LG TV |
+| `apps/desktop` | Pley for Windows, macOS and Linux (Tauri) |
+| `apps/android` | Pley for Android phones, tablets and TVs (Kotlin, Compose, Media3) |
+| `apps/kodi` | Pley for Kodi, an add-on (Python, GPL-2.0-or-later) |
+| `apps/roku` | Pley for Roku (BrightScript, SceneGraph) |
+| `apps/tizen`, `apps/webos` | Pley for Samsung TV and Pley for LG TV |
 | `packages/tv` | The TV app both share (TypeScript, Preact) |
 | `packages/transcoder-api` | Protocol types shared by server and transcoder |
 | `deploy/` | Docker, systemd and launchd setups, and the Windows installer ([guide](deploy/README.md)) |
@@ -155,7 +161,7 @@ cargo build                                      # build pley and pley-transcode
 .\target\debug\pley.exe --data-dir .\data        # http://localhost:7539
 ```
 
-pley prints a link with a one-time setup code when it starts
+Pley prints a link with a one-time setup code when it starts
 (`http://localhost:7539/setup?code=…`; on a desktop the tray icon opens it).
 Open it, create the administrator account and add a library. Nobody without
 the code can claim a new server.
@@ -179,7 +185,7 @@ for one, is also `PLEY_PLEX_BIND` or `plex_bind`.
 | Flag | Default | |
 |---|---|---|
 | `--bind` | `0.0.0.0:7539` | Listen address (7539 spells PLEY on a keypad); several separated by commas |
-| `--plex-bind` | `web` (pley's own port) | Compatibility API: `off` turns it off; addresses of its own (`0.0.0.0:32400`), several as with `--bind` |
+| `--plex-bind` | `web` (Pley's own port) | Compatibility API: `off` turns it off; addresses of its own (`0.0.0.0:32400`), several as with `--bind` |
 | `--data-dir` | `%LOCALAPPDATA%\pley`, `~/Library/Application Support/pley`, `~/.local/share/pley` | Database, caches and artwork |
 | `--ffmpeg`, `--ffprobe` | from `PATH` | Passed to the transcoder |
 | `--transcoder-url` | | Use a transcoder running elsewhere instead of starting one |
@@ -190,12 +196,12 @@ for one, is also `PLEY_PLEX_BIND` or `plex_bind`.
 
 Everything else is set in the web app: the server name, metadata sources and
 keys and scanning under **Settings → Server**, hardware acceleration, tone
-mapping and transcode limits under **Settings → Transcoder**. Where pley listens (the networks, the port, the
+mapping and transcode limits under **Settings → Transcoder**. Where Pley listens (the networks, the port, the
 Plex-compatible API and discovery) changes in **Settings → Network** too,
-while pley runs: it is saved in `pley.toml`, unless `--bind`, `--plex-bind`
+while Pley runs: it is saved in `pley.toml`, unless `--bind`, `--plex-bind`
 or `--no-discovery` (or their `PLEY_*` variables) set it.
 
-pley stops cleanly, giving playback a few seconds to finish, on Ctrl+C,
+Pley stops cleanly, giving playback a few seconds to finish, on Ctrl+C,
 `SIGTERM`, the tray's Quit and, on Windows, `taskkill` without `/F`, closing
 its console window or signing out.
 
@@ -271,7 +277,7 @@ add-on and the Roku app. The stores take each Android version code once:
 a rebuild of the same version is built with `PLEY_BUILD` (1 to 99) set,
 which adds to the version's code ([deploy/stores](deploy/stores/README.md)).
 
-Every app has one version, pley's, in [`VERSION`](VERSION):
+Every app has one version, Pley's, in [`VERSION`](VERSION):
 `bun scripts/version.mjs set 0.3.0` writes it into every manifest, and
 `bun scripts/version.mjs check` (which CI runs) finds any that disagree. A
 release's tag is that version (`v0.3.0`). Builds record the commit they

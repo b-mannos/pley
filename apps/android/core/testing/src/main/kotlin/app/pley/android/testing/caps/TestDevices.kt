@@ -36,7 +36,7 @@ object TestDevices {
 
     /** A phone with an SDR screen: hardware AVC, HEVC and VP9; AV1 only in software. */
     val sdrPhone = ProbeInput(
-        device = phone("pley SDR phone"),
+        device = phone("Pley SDR phone"),
         decoders = listOf(
             video("c2.qti.avc.decoder", Codecs.AVC, avcHigh, PL.AVCLevel52, maxFps = 30.0, fps1080 = 120.0),
             video("c2.qti.hevc.decoder", Codecs.HEVC, hevcMain10, PL.HEVCMainTierLevel51, fps1080 = 120.0),
@@ -48,13 +48,13 @@ object TestDevices {
 
     /** The same phone with an HDR10 and HLG screen. */
     val hdr10Phone = sdrPhone.copy(
-        device = phone("pley HDR10 phone"),
+        device = phone("Pley HDR10 phone"),
         display = TestDisplays.phone(hdr = listOf(HDR10, HLG)),
     )
 
     /** A phone with a Dolby Vision screen and decoder (profiles 5 and 8), and HDR10+. */
     val dvPhone = ProbeInput(
-        device = phone("pley DV phone"),
+        device = phone("Pley DV phone"),
         decoders = listOf(
             video("c2.qti.avc.decoder", Codecs.AVC, avcHigh, PL.AVCLevel52, maxFps = 30.0, fps1080 = 120.0),
             video("c2.qti.hevc.decoder", Codecs.HEVC, hevcMain10 + PL.HEVCProfileMain10HDR10Plus, PL.HEVCMainTierLevel51, fps1080 = 120.0),

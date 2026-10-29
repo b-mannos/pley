@@ -32,7 +32,7 @@ fun describe(error: Throwable): String = when (error) {
     is java.net.UnknownHostException -> "that address isn't known on this network"
     is javax.net.ssl.SSLException -> "its secure connection failed"
     is UserFacing -> error.message ?: error.javaClass.simpleName
-    is org.json.JSONException -> "that isn't a pley server"
+    is org.json.JSONException -> "that isn't a Pley server"
     is java.io.IOException -> CONNECTION_FAILED
     else -> error.message ?: error.javaClass.simpleName
 }

@@ -126,7 +126,7 @@ async fn the_web_keeps_patch_and_apps_dont_get_it() {
     let (token, _) = app.app_token(ann, "library play playlists profiles").await;
     let refused = app.patch("/api/me", &token, json!({"display_name": "Mallory", "audio_language": "eng"})).await;
     assert_eq!((refused.status, &refused.body["code"]), (StatusCode::FORBIDDEN, &json!("insufficient_scope")));
-    assert_eq!(refused.body["message"], "apps can't do that: use pley's web app");
+    assert_eq!(refused.body["message"], "apps can't do that: use Pley's web app");
     let name: Option<String> = sqlx::query_scalar("SELECT display_name FROM users WHERE id = ?")
         .bind(ann)
         .fetch_one(&app.state.db.read)

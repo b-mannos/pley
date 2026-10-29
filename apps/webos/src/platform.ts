@@ -37,7 +37,7 @@ export function webosPlatform(): Platform {
     name: "webos",
     clientId: CLIENT_ID,
     version: __PLEY_VERSION__,
-    appName: "pley for LG TV",
+    appName: "Pley for LG TV",
     storage: localStore,
     mapKey: webosKey,
     // A desktop browser (development) plays what it plays through a plain <video>.

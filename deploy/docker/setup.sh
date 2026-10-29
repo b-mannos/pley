@@ -64,7 +64,7 @@ if [ "$os" = linux ] && ! docker info --format '{{.OperatingSystem}}' | grep -q 
 fi
 if [ -n "$render_node" ]; then
     if [ -n "$rootless" ]; then
-        render_skipped="rootless Docker can't give pley the host's render group"
+        render_skipped="rootless Docker can't give Pley the host's render group"
     elif [ "$(stat -c %g "$render_node")" = 0 ]; then
         render_skipped="$render_node belongs to root's group"
     fi
@@ -104,7 +104,7 @@ if [ ! -f .env ]; then
     sed "$@" .env.example >.env.new
     mv .env.new .env
     [ -z "${SUDO_UID-}" ] || chown "$SUDO_UID:$SUDO_GID" .env
-    say "Wrote .env (pley runs as user $uid, group $gid); edit it to change folders or ports."
+    say "Wrote .env (Pley runs as user $uid, group $gid); edit it to change folders or ports."
 else
     # A GPU added since: say how to use it, but leave .env as its owner made it.
     files=$(setting COMPOSE_FILE compose.yaml)
@@ -112,12 +112,12 @@ else
         *compose.vaapi.yaml*) ;;
         *)
             [ -z "$render_node" ] || [ -n "$render_skipped" ] ||
-                say "pley doesn't use the Intel or AMD GPU ($render_driver, $render_node): add compose.vaapi.yaml to COMPOSE_FILE and PLEY_RENDER_GID=$(stat -c %g "$render_node") to .env."
+                say "Pley doesn't use the Intel or AMD GPU ($render_driver, $render_node): add compose.vaapi.yaml to COMPOSE_FILE and PLEY_RENDER_GID=$(stat -c %g "$render_node") to .env."
             ;;
     esac
     case $files in
         *compose.nvidia.yaml*) ;;
-        *) [ -z "$nvidia" ] || say "Docker has the NVIDIA Container Toolkit, which pley doesn't use: add compose.nvidia.yaml to COMPOSE_FILE in .env." ;;
+        *) [ -z "$nvidia" ] || say "Docker has the NVIDIA Container Toolkit, which Pley doesn't use: add compose.nvidia.yaml to COMPOSE_FILE in .env." ;;
     esac
 fi
 
@@ -126,7 +126,7 @@ config_dir=$(setting PLEY_CONFIG_DIR ./config)
 media_dir=$(setting PLEY_MEDIA_DIR ./media)
 run_uid=$(setting PLEY_UID 1000)
 run_gid=$(setting PLEY_GID 1000)
-[ "$run_uid" != 0 ] || [ -n "$rootless" ] || die "PLEY_UID is 0: pley must not run as root"
+[ "$run_uid" != 0 ] || [ -n "$rootless" ] || die "PLEY_UID is 0: Pley must not run as root"
 
 if [ ! -d "$config_dir" ]; then
     mkdir -p "$config_dir" ||
@@ -147,7 +147,7 @@ if [ "$os" = linux ]; then
         # The database and the key in it are for pley alone.
         chmod 700 "$config_dir" 2>/dev/null || true
     else
-        say "Warning: $config_dir belongs to user $owner but pley runs as $host_uid, so it may not be able to"
+        say "Warning: $config_dir belongs to user $owner but Pley runs as $host_uid, so it may not be able to"
         say "write there. Fix it with: sudo chown -R $host_uid:$host_gid $config_dir"
     fi
 fi
@@ -161,7 +161,7 @@ export PLEY_COMMIT
 # Newer base images bring Debian's security fixes along with pley's changes.
 case $(setting PLEY_PULL_POLICY build) in
     build)
-        say "Building pley (the first time takes several minutes)..."
+        say "Building Pley (the first time takes several minutes)..."
         docker compose build --pull pley
         ;;
     never) ;;
@@ -170,7 +170,7 @@ esac
 docker compose up -d
 
 cid=$(docker compose ps -q pley)
-[ -n "$cid" ] || die "the pley container didn't start: docker compose logs pley"
+[ -n "$cid" ] || die "the Pley container didn't start: docker compose logs pley"
 tries=0
 while :; do
     state=$(docker inspect --format '{{.State.Status}} {{.RestartCount}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$cid")
@@ -183,7 +183,7 @@ while :; do
     tries=$((tries + 1))
     if [ "$tries" -gt 90 ]; then
         docker logs --tail 30 "$cid" >&2 || true
-        die "pley didn't start (container: $state). Its log is above; the folders' owners are a common cause."
+        die "Pley didn't start (container: $state). Its log is above; the folders' owners are a common cause."
     fi
     sleep 2
 done
@@ -199,14 +199,14 @@ code=$(docker logs --since "$started" "$cid" 2>&1 |
 
 say ""
 if [ -n "$code" ]; then
-    say "pley is running. Create the administrator account with setup code $code"
-    say "(a new code is made each time pley starts until then):"
+    say "Pley is running. Create the administrator account with setup code $code"
+    say "(a new code is made each time Pley starts until then):"
     [ -z "$addr" ] || say "  http://$addr/setup?code=$code"
     say "  https://<your domain>/setup?code=$code   through your reverse proxy"
     say ""
     say "Then add libraries from folders under /media, such as /media/Movies."
 else
-    say "pley is running${addr:+ at http://$addr}."
+    say "Pley is running${addr:+ at http://$addr}."
 fi
 if [ -n "$addr" ]; then
     say "Point your reverse proxy at http://$addr (README.md has Caddy, nginx and Traefik examples)."

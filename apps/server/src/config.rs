@@ -27,7 +27,7 @@ pub const EVENT_RECHECK: Duration = Duration::from_secs(30);
 pub const EXTRA_BIND_RETRY: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Parser)]
-#[command(name = "pley", version = crate::VERSION_AND_COMMIT, about = "pley — a fast, self-hosted media server")]
+#[command(name = "pley", version = crate::VERSION_AND_COMMIT, about = "Pley — a fast, self-hosted media server")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -50,7 +50,7 @@ pub struct Cli {
     #[arg(long, env = "PLEY_BIND", global = true)]
     pub bind: Option<String>,
 
-    /// Where the Plex-compatible API listens: `web` (default) answers on pley's own port, `off`
+    /// Where the Plex-compatible API listens: `web` (default) answers on Pley's own port, `off`
     /// turns it off, or addresses of its own (`0.0.0.0:32400`), several separated by commas
     #[arg(long, env = "PLEY_PLEX_BIND", global = true)]
     pub plex_bind: Option<String>,
@@ -87,7 +87,7 @@ pub struct Cli {
     #[arg(long, env = "PLEY_NO_TRAY", global = true)]
     pub no_tray: bool,
 
-    /// Don't answer the pley apps looking for servers on the local network
+    /// Don't answer the Pley apps looking for servers on the local network
     #[arg(long, env = "PLEY_NO_DISCOVERY", global = true)]
     pub no_discovery: bool,
 }
@@ -112,11 +112,11 @@ pub enum Command {
     /// Save the options given before it (--bind, --plex-bind, --transcode-dir, --ffmpeg,
     /// --ffprobe, --no-discovery) in pley.toml in the data folder, for every later start
     SaveConfig {
-        /// Whether to answer the pley apps looking for servers on the local network
+        /// Whether to answer the Pley apps looking for servers on the local network
         #[arg(long, value_name = "true|false")]
         discovery: Option<bool>,
     },
-    /// Run pley as a Windows service: install, start, stop or remove it
+    /// Run Pley as a Windows service: install, start, stop or remove it
     #[cfg(windows)]
     #[command(subcommand)]
     Service(crate::service::ServiceCommand),

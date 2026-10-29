@@ -309,7 +309,7 @@ def refresh_listing() -> None:
 
 def notify(message: str, error: bool = False) -> None:
     icon = xbmcgui.NOTIFICATION_ERROR if error else xbmcgui.NOTIFICATION_INFO
-    xbmcgui.Dialog().notification("pley", message, icon, 5000)
+    xbmcgui.Dialog().notification("Pley", message, icon, 5000)
 
 
 def ask_sign_out() -> bool:

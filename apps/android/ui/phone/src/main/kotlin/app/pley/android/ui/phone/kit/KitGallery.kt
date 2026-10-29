@@ -130,7 +130,7 @@ internal fun KitGallery(onBack: () -> Unit) {
     if (confirm) {
         ConfirmDialog(
             title = "Sign out?",
-            body = "pley forgets this server's sign-in on this phone.",
+            body = "Pley forgets this server's sign-in on this phone.",
             confirmLabel = "Sign out",
             onConfirm = { confirm = false },
             onDismiss = { confirm = false },

@@ -160,7 +160,7 @@ pub fn run() {
             // The picker's address is known once it loads (see `navigation`):
             // until then, the window's address is about:blank.
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("pley")
+                .title("Pley")
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(720.0, 480.0)
                 .initialization_script(INIT_SCRIPT)
@@ -206,7 +206,7 @@ pub fn run() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("pley could not start");
+        .expect("Pley could not start");
 }
 
 #[cfg(test)]

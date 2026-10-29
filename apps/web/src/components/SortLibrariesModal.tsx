@@ -96,7 +96,7 @@ export function SortLibrariesModal({ open, onClose }: { open: boolean; onClose: 
         </>
       }
     >
-      <p className="mb-4 text-sm text-muted">Your order, on every device you use pley on.</p>
+      <p className="mb-4 text-sm text-muted">Your order, on every device you use Pley on.</p>
       <ol ref={listRef} aria-label="Your libraries" className="space-y-2" {...drag.listProps}>
         {libraries.map((lib, i) => {
           const mark = drag.dropMark(i);

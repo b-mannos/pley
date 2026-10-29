@@ -6,13 +6,13 @@ folders below, or point `PLEY_MEDIA_DIR` in `.env` at the folder that holds
 your media already, laid out the same way. Git ignores everything you add
 here.
 
-In pley, add one library per kind (**Settings → Libraries**): a Movies library
+In Pley, add one library per kind (**Settings → Libraries**): a Movies library
 on `/media/Movies`, a TV Shows library on `/media/TV Shows`, a Music library on
-`/media/Music`. pley never changes or moves these files.
+`/media/Music`. Pley never changes or moves these files.
 
 ## How to name files
 
-pley reads names the way media servers commonly do. The year makes matches certain.
+Pley reads names the way media servers commonly do. The year makes matches certain.
 
 ```
 media/

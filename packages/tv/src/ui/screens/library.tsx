@@ -770,7 +770,7 @@ export function librarySorting(app: AppState): "yes" | "no" | "older" | "refused
   return noSort.get(app.server.value ?? "") ?? "yes";
 }
 
-export const SORT_NEEDS_NEWER = "Sorting libraries needs a newer pley on the server.";
+export const SORT_NEEDS_NEWER = "Sorting libraries needs a newer Pley on the server.";
 
 /**
  * Every library (TvLibrariesScreen): the rail lists three, and Libraries

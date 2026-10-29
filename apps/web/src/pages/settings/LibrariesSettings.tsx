@@ -288,7 +288,7 @@ export function LibrariesSettings() {
         <div>
           <h2 className="text-lg font-semibold">Libraries</h2>
           <p className="text-sm text-muted">
-            Folders pley watches for movies, shows and music.{reorderable ? " Everyone sees them in this order, unless they sort their own." : null}
+            Folders Pley watches for movies, shows and music.{reorderable ? " Everyone sees them in this order, unless they sort their own." : null}
           </p>
         </div>
         <div className="flex gap-2">
@@ -320,7 +320,7 @@ export function LibrariesSettings() {
           <EmptyState
             icon={<FolderPlus />}
             title="Add your first library"
-            description="Choose a type and the folders that contain your media. pley scans them and keeps them up to date."
+            description="Choose a type and the folders that contain your media. Pley scans them and keeps them up to date."
             action={
               <Button variant="primary" onClick={openAdd}>
                 Add library
@@ -379,7 +379,7 @@ export function LibrariesSettings() {
         loading={del.isPending}
         message={
           <>
-            <strong className="text-fg">{deleting?.name}</strong> and its watch history will be removed from pley. Your media files
+            <strong className="text-fg">{deleting?.name}</strong> and its watch history will be removed from Pley. Your media files
             are not touched.
           </>
         }

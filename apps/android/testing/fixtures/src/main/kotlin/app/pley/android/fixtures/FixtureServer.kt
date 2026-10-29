@@ -212,7 +212,7 @@ class FixtureServer(private val options: Options = Options()) : Closeable {
             val need = route.need
             if (need is Need.Scope && need.name !in caller.scopes) {
                 val scope = if (need.name == BrowseRoutes.WEB_ONLY) "" else ", scope=\"${need.name}\""
-                val message = if (scope.isEmpty()) "apps can't do that: use pley's web app" else "this app wasn't allowed to: it needs ${need.name}"
+                val message = if (scope.isEmpty()) "apps can't do that: use Pley's web app" else "this app wasn't allowed to: it needs ${need.name}"
                 return Reply.error(403, "insufficient_scope", message, "Bearer error=\"insufficient_scope\"$scope")
             }
             if (method != "GET" && call.path.startsWith("/api/") && !call.path.startsWith("/api/oauth/")) {

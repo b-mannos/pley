@@ -30,7 +30,7 @@
         <Label id="profile" translation="[96, 316]" width="840" color="0xEBEBEBFF" text="…" font="font:MediumSystemFont" />
         <Label translation="[1000, 170]" text="This Roku" color="0x8B95A5FF" font="font:SmallestSystemFont" />
         <Label id="device" translation="[1000, 206]" width="824" color="0xEBEBEBFF" font="font:MediumSystemFont" />
-        <Label translation="[1000, 280]" text="pley for Roku" color="0x8B95A5FF" font="font:SmallestSystemFont" />
+        <Label translation="[1000, 280]" text="Pley for Roku" color="0x8B95A5FF" font="font:SmallestSystemFont" />
         <Label id="version" translation="[1000, 316]" width="824" color="0xEBEBEBFF" font="font:MediumSystemFont" />
         <ButtonGroup id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 400]" minWidth="840" maxWidth="840" />
         <Label id="message" translation="[1000, 420]" width="824" wrap="true" maxLines="4" color="0xA1A9B6FF" font="font:SmallSystemFont" />

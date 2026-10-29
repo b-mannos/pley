@@ -1,20 +1,20 @@
 # Compatibility API
 
-Besides its own API, pley speaks a widely used media-server API, so tools
-written against it work with pley: scripts using
+Besides its own API, Pley speaks a widely used media-server API, so tools
+written against it work with Pley: scripts using
 [`python-plexapi`](https://github.com/pushingkarmaorg/python-plexapi), and
 tools built the same way (Tautulli, Kometa, direct-play clients). It answers on
-pley's own port and uses the same libraries, users, watch state and playback
-sessions as pley's own API, so anything done through it shows up in the web
+Pley's own port and uses the same libraries, users, watch state and playback
+sessions as Pley's own API, so anything done through it shows up in the web
 UI and the other way round.
 
 Apps that sign in through their vendor's cloud service and find servers
-there are out of scope: pley has no such service.
+there are out of scope: Pley has no such service.
 
 ## Enabling and port
 
-By default the API answers on pley's own port (7539), wherever pley does,
-through its reverse proxy's HTTPS too: give tools pley's address,
+By default the API answers on Pley's own port (7539), wherever Pley does,
+through its reverse proxy's HTTPS too: give tools Pley's address,
 `http://pley.local:7539` or `https://media.example.com`. The two share the
 port this way:
 
@@ -25,7 +25,7 @@ port this way:
   `/:/timeline`, a stream's `/video/:/transcode/…` segments, which players
   fetch without the headers);
 - the rest, `/`, `/search`, `/library` and `/playlists` among them, is the
-  web app's, and `/api/…` and `/.well-known/…` are always pley's own.
+  web app's, and `/api/…` and `/.well-known/…` are always Pley's own.
 
 Its answers there are sandboxed (`Content-Security-Policy: default-src
 'none'; sandbox`, `X-Frame-Options: DENY`, `Cache-Control: private` unless
@@ -41,13 +41,13 @@ Settings → Network turns it off, or gives it a port of its own:
 | `pley.toml` | `plex_bind = "web"` |
 
 Its own port suits tools that only know Plex's, 32400. If that port is taken
-(another media server uses it on the same machine), pley logs a warning,
+(another media server uses it on the same machine), Pley logs a warning,
 keeps running without it there, and tries again every 30 seconds (Settings
 → Network says why it isn't listening).
 
 ## Authentication
 
-Use a pley session token as the API's token. Get one by signing in:
+Use a Pley session token as the API's token. Get one by signing in:
 
 ```sh
 curl -s -X POST http://localhost:7539/api/auth/login \
@@ -57,10 +57,10 @@ curl -s -X POST http://localhost:7539/api/auth/login \
 ```
 
 The token is accepted as the API sends it, the `X-Plex-Token` header or
-query parameter, and the pley way (`Authorization: Bearer`, `X-Pley-Token` or
+query parameter, and the Pley way (`Authorization: Bearer`, `X-Pley-Token` or
 `?token=`). The web UI's `pley_token` cookie is refused here: browsers send
 it to this port too, and some of this API's endpoints change things on a GET.
-Tokens of apps signed in on pley's own page (`pley_at_…`) are refused as
+Tokens of apps signed in on Pley's own page (`pley_at_…`) are refused as
 well, and so are the HLS session addresses of playback those apps started:
 tools of this API use a token from `POST /api/auth/login`. Every endpoint needs a
 token except `/identity`.
@@ -85,11 +85,11 @@ parameters; containers report `size`, `totalSize` and `offset`.
 
 ## Mapping
 
-- **IDs.** `ratingKey` is the pley item id and `librarySectionID` the library
+- **IDs.** `ratingKey` is the Pley item id and `librarySectionID` the library
   id. Media and parts use the media file id. Stream ids are
   `file id × 10000 + stream index`.
 - **Order.** Sections, and the home hubs of each, come in the order
-  administrators choose in pley (Settings → Libraries); new ones come last.
+  administrators choose in Pley (Settings → Libraries); new ones come last.
 - **Types.** Movies and episodes are `Video` elements, shows, seasons, artists
   and albums are `Directory` elements, and tracks are `Track` elements, with
   the API's `type` values.
@@ -104,10 +104,10 @@ parameters; containers report `size`, `totalSize` and `offset`.
 - **Watch state.** `viewCount` is the play count of watched items and 0 once an
   item is marked unplayed. `viewOffset` is the resume position.
   `/:/scrobble`, `/:/unscrobble`, `/:/progress` and `/:/timeline` use the same
-  code as pley's player.
+  code as Pley's player.
 - **Sessions.** A client that reports `/:/timeline` while playing becomes a
-  pley playback session. It is listed in `/status/sessions` (with `User`,
-  `Player` and `Session`, plus `TranscodeSession` for HLS) and in pley's
+  Pley playback session. It is listed in `/status/sessions` (with `User`,
+  `Player` and `Session`, plus `TranscodeSession` for HLS) and in Pley's
   dashboard.
 - **Notifications.** `/:/websockets/notifications` (token as `X-Plex-Token`
   query parameter or header) streams JSON `NotificationContainer`s:
@@ -122,26 +122,26 @@ parameters; containers report `size`, `totalSize` and `offset`.
 - **Streaming.** `/library/parts/{id}/{version}/file.ext` serves the file with
   range requests (direct play; `?download=1` adds an attachment header).
   `/video/:/transcode/universal/start.m3u8` (and `/audio/…` for tracks) starts
-  a pley HLS session, remuxed when the video can be copied and transcoded
+  a Pley HLS session, remuxed when the video can be copied and transcoded
   otherwise (`directStream=0` forces transcoding). It honors `offset`,
   `maxVideoBitrate`, `videoResolution`, `audioStreamID` and burned-in
-  `subtitleStreamID`; without `audioStreamID`, pley picks the track as for
+  `subtitleStreamID`; without `audioStreamID`, Pley picks the track as for
   its own players (docs/API.md, "The audio track"). The master playlist points at
   `session/<id>/base/index.m3u8`. Session URLs need no token: the 128-bit
   session id is the credential.
 - **Preview thumbnails and chapters.** Parts of files with seek previews have
-  `indexes="sd"`; the BIF index is cut from pley's previews. Details list the
+  `indexes="sd"`; the BIF index is cut from Pley's previews. Details list the
   first version's `Chapter`s, with a `thumb` once the file has previews.
 - **Markers.** With `includeMarkers=1`, details list the intro and credits
-  pley found in the first version as `Marker`s (`type`, `startTimeOffset`,
+  Pley found in the first version as `Marker`s (`type`, `startTimeOffset`,
   `endTimeOffset` in ms; credits are `final`), for Skip Intro and Skip
   Credits in clients.
 - **Cast and crew.** Details carry `Role` (with the part as `role`),
-  `Director`, `Writer` and `Producer` tags. Their `id` is the pley person id and
+  `Director`, `Writer` and `Producer` tags. Their `id` is the Pley person id and
   `thumb` the TMDB photo.
 - **Artwork.** `thumb` and `art` attributes point at
   `/library/metadata/{id}/thumb/{version}` and `/art/{version}`.
-  `/photo/:/transcode?url=…&width=…` resizes them through pley's image cache.
+  `/photo/:/transcode?url=…&width=…` resizes them through Pley's image cache.
 
 ## Endpoints
 
@@ -167,7 +167,7 @@ Administrators edit metadata the way `python-plexapi` (and so Kometa) does:
   or `PUT /library/metadata/{id}?…`, for `title`, `titleSort`,
   `originalTitle`, `year`, `summary`, `tagline`, `studio`, `contentRating`
   and `originallyAvailableAt`. Edited fields are kept through refreshes
-  (pley's locked fields, listed in details as `Field` elements with
+  (Pley's locked fields, listed in details as `Field` elements with
   `locked="1"`); `field.locked=1` alone keeps the current value,
   `field.locked=0` gives the field back to the metadata agent, and a value
   sent with `field.locked=0` is written but not kept.
@@ -251,7 +251,7 @@ With `python-plexapi` 4.18 the following work against the test media:
 
 - The vendor's cloud service: its sign-in, server claiming, sharing and
   remote access, and the apps that depend on it.
-- Collections' order and mode are set in pley, not through this API.
+- Collections' order and mode are set in Pley, not through this API.
 - Editing episodes' and seasons' artwork from URLs other than TMDB images
   (upload the file instead), and per-item preferences (`/prefs`).
 - Filters on descendants (`episode.title` on shows) and on `resolution`, `hdr`,

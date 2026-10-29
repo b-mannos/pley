@@ -223,8 +223,8 @@ export function ApproveContent(p: { server: string; profile: { id: number; name:
   );
   const title = p.profile ? "Approve on your phone" : "Sign in as another profile";
   const intro = p.profile
-    ? `${p.profile.name}'s profile needs its password: approve this code on a phone signed in to pley, and pick ${p.profile.name} there.`
-    : "Approve this code on a phone signed in to pley, and pick the profile there.";
+    ? `${p.profile.name}'s profile needs its password: approve this code on a phone signed in to Pley, and pick ${p.profile.name} there.`
+    : "Approve this code on a phone signed in to Pley, and pick the profile there.";
   return <LinkContent status={link.status} code={link.code} onNewCode={link.newCode} title={title} intro={intro} backLabel="Use another profile" onBack={p.onBack} />;
 }
 
@@ -327,7 +327,7 @@ function LinkContent(p: {
       <div class="link-left">
         <PleyLogo height={40} />
         <div class="t-page c-fg one-line" style="margin-top:28px">
-          {p.title ?? "Sign in to pley"}
+          {p.title ?? "Sign in to Pley"}
         </div>
         {p.intro && (
           <div class="t-body c-muted lines-2" style="margin-top:6px">
@@ -363,7 +363,7 @@ function LinkContent(p: {
             <div class="link-notes t-body c-muted">
               <div class="one-line">Your phone must be on the same Wi-Fi as this TV.</div>
               <div class="one-line" style="margin-top:6px">
-                Or open pley on a signed-in device → Link a device
+                Or open Pley on a signed-in device → Link a device
               </div>
             </div>
           )}

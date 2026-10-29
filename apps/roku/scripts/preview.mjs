@@ -92,7 +92,7 @@ function press(name) {
 
 // The server the app opens on, already chosen, so it starts at sign-in.
 let serverUrl = option("--server", "");
-let serverName = "pley";
+let serverName = "Pley";
 let fixture = null;
 if (serverUrl) {
   serverUrl = serverUrl.replace(/\/+$/, "");
@@ -123,7 +123,7 @@ const page = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pley for Roku</title>
+<title>Pley for Roku</title>
 <style>
   :root { color-scheme: dark; --bg: #0e1013; --panel: #1b1e24; --line: #2c313a; --text: #e8eaee; --muted: #9aa1ad; --accent: #38bdf8; }
   * { box-sizing: border-box; }
@@ -167,7 +167,7 @@ const page = `<!doctype html>
   </div>
   <p class="hint">Click the screen, then: arrows to move, <kbd>Enter</kbd> OK, <kbd>Esc</kbd> or <kbd>Backspace</kbd> Back,
   <kbd>Space</kbd> play/pause, <kbd>[</kbd> <kbd>]</kbd> rewind and fast forward, <kbd>*</kbd> options; letters and digits type on a keyboard.
-  ${fixture ? "Server: the smoke run's fake pley server, which allows the TV code by itself." : "Server: " + serverUrl.replace(/[<&>]/g, "") + ": allow the code on its /link page."}</p>
+  ${fixture ? "Server: the smoke run's fake Pley server, which allows the TV code by itself." : "Server: " + serverUrl.replace(/[<&>]/g, "") + ": allow the code on its /link page."}</p>
 </main>
 <script>
   const screen = document.getElementById("screen");
@@ -262,5 +262,5 @@ createServer((req, res) => {
   res.writeHead(404);
   res.end();
 }).listen(port, "127.0.0.1", () => {
-  console.log(`pley for Roku, in brs-node: http://127.0.0.1:${port}/ (server: ${serverUrl})`);
+  console.log(`Pley for Roku, in brs-node: http://127.0.0.1:${port}/ (server: ${serverUrl})`);
 });

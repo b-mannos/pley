@@ -183,7 +183,7 @@ class Plugin:
             window.run(self, self.proxy_base or self.proxy())
         except api.ApiError as e:
             # Its list ended already: what went wrong is said, not listed.
-            kodi.log("pley's window: %s %s" % (e.code, e.message), xbmc.LOGWARNING)
+            kodi.log("Pley's window: %s %s" % (e.code, e.message), xbmc.LOGWARNING)
             kodi.notify(kodi.text("cant_reach") % self.server_name() if e.code == "unreachable" else kodi.text("server_error") % e.message, error=True)
 
     def signed_in(self) -> bool:
@@ -463,7 +463,7 @@ class Plugin:
     def route_choose_server(self) -> None:
         dialog = xbmcgui.Dialog()
         progress = xbmcgui.DialogProgressBG()
-        progress.create("pley", kodi.text("looking"))
+        progress.create("Pley", kodi.text("looking"))
         try:
             from . import discovery
 
@@ -483,16 +483,16 @@ class Plugin:
             try:
                 server = api.normalize(typed)
             except ValueError:
-                return dialog.ok("pley", kodi.text("not_pley") % typed)
+                return dialog.ok("Pley", kodi.text("not_pley") % typed)
             name, server_id = server.split("://", 1)[1], ""
         from . import auth
 
         try:
             auth.metadata(server, kodi.user_agent())
         except api.ApiError as e:
-            kodi.log("%s isn't a pley server: %s" % (server, e.message), xbmc.LOGWARNING)
+            kodi.log("%s isn't a Pley server: %s" % (server, e.message), xbmc.LOGWARNING)
             message = kodi.text("not_reachable") if e.status == 0 and e.code == "unreachable" else kodi.text("not_pley")
-            return dialog.ok("pley", message % server)
+            return dialog.ok("Pley", message % server)
         current = auth.Store(os.path.join(kodi.profile_dir(), "tokens.json")).load()
         if current and current.get("server") == server:
             # Signed in there already.
@@ -599,7 +599,7 @@ class Plugin:
             kodi.notify(outcome)
             xbmc.executebuiltin("Container.Refresh")
         else:
-            xbmcgui.Dialog().ok("pley", outcome)
+            xbmcgui.Dialog().ok("Pley", outcome)
 
 
 # Routes that run as actions, with no listing to end.

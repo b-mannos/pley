@@ -6,20 +6,20 @@
     <string name="shell_tab_search">Search</string>
     <string name="shell_tab_playlists">Playlists</string>
     <string name="shell_tab_me">Me</string>
-    <string name="shell_brand" translatable="false">pley</string>
+    <string name="shell_brand" translatable="false">Pley</string>
 
     <!-- Around every screen. -->
-    <string name="shell_offline">Showing what pley had saved. Reconnecting…</string>
+    <string name="shell_offline">Showing what Pley had saved. Reconnecting…</string>
     <!-- A page with nothing saved, the server out of reach: "No answer in time. Check that…". -->
     <string name="kit_offline_title">Can\'t reach your server</string>
     <string name="kit_offline_body">%1$s Check that the server is on and that this device is on its network.</string>
-    <string name="shell_scope">pley wasn\'t allowed to do that: sign in again to allow it</string>
+    <string name="shell_scope">Pley wasn\'t allowed to do that: sign in again to allow it</string>
     <string name="shell_scope_action">Sign in</string>
     <string name="shell_now_playing">Open Now Playing</string>
 
     <!-- Screens that aren't built yet. -->
     <string name="shell_placeholder_title">%1$s isn\'t built yet</string>
-    <string name="shell_placeholder_body">This is the native app, on its way. The app you use today is still on the home screen as pley.</string>
+    <string name="shell_placeholder_body">This is the native app, on its way. The app you use today is still on the home screen as Pley.</string>
     <string name="shell_placeholder_next">Open another screen</string>
     <string name="shell_placeholder_in">Continue to Home</string>
     <string name="shell_placeholder_kit">Show the phone kit</string>

@@ -64,7 +64,7 @@ describe("RequireAuth", () => {
     });
     renderApp();
 
-    expect(await screen.findByText("Can't reach the pley server")).toBeInTheDocument();
+    expect(await screen.findByText("Can't reach the Pley server")).toBeInTheDocument();
     up = true;
     await userEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Hello Admin")).toBeInTheDocument();

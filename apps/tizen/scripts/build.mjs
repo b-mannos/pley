@@ -13,7 +13,7 @@ const version = versionOf(join(root, "package.json"));
 const dist = join(root, "dist");
 
 const { bytes } = await buildApp({
-  app: "pley for Samsung TV",
+  app: "Pley for Samsung TV",
   entry: join(root, "src/main.ts"),
   outdir: dist,
   // Tizen 4.0 (2018) runs Chromium 56.
@@ -27,4 +27,4 @@ const { bytes } = await buildApp({
 });
 const config = readFileSync(join(root, "config.xml"), "utf8").replace(/(<widget[^>]*\sversion=")[^"]*"/, `$1${version}"`);
 writeFileSync(join(dist, "config.xml"), config);
-console.log(`pley for Samsung TV ${version}: dist/ (${(bytes / 1024).toFixed(0)} KB of script and styles)`);
+console.log(`Pley for Samsung TV ${version}: dist/ (${(bytes / 1024).toFixed(0)} KB of script and styles)`);

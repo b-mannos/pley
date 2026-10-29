@@ -25,7 +25,7 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Pages.brs" />
     <children>
         <Rectangle id="rail" width="380" height="1080" color="0x1E222AFF" />
-        <Label id="wordmark" translation="[64, 56]" text="pley" color="0x38BDF8FF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="wordmark" translation="[64, 56]" text="Pley" color="0x38BDF8FF" font="font:ExtraLargeBoldSystemFont" />
         <LabelList id="menu" translation="[40, 200]" itemSize="[300, 72]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus" font="font:MediumSystemFont" focusedFont="font:MediumBoldSystemFont" />
         <RowList id="rows" translation="[440, 48]" itemComponentName="Tile" itemSize="[1480, 470]" numRows="3" itemSpacing="[0, 28]" rowItemSpacing="[[28, 0]]" showRowLabel="[true]" rowLabelOffset="[[0, 12]]" rowLabelColor="0xEBEBEBFF" drawFocusFeedback="false" rowFocusAnimationStyle="floatingFocus" vertFocusAnimationStyle="floatingFocus" visible="false" rowLabelFont="font:MediumBoldSystemFont" />
         <Label id="message" translation="[440, 480]" width="1380" wrap="true" horizAlign="center" color="0xA1A9B6FF" text="Loading…" font="font:MediumSystemFont" />

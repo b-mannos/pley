@@ -42,7 +42,7 @@ msgid "Enter an address"
 msgstr ""
 
 msgctxt "#30009"
-msgid "Looking for pley servers on this network"
+msgid "Looking for Pley servers on this network"
 msgstr ""
 
 msgctxt "#30010"
@@ -54,7 +54,7 @@ msgid "Signed in as %s"
 msgstr ""
 
 msgctxt "#30013"
-msgid "Signed out of pley"
+msgid "Signed out of Pley"
 msgstr ""
 
 msgctxt "#30014"
@@ -70,11 +70,11 @@ msgid "%s doesn't answer. Check the address, and that the server is running."
 msgstr ""
 
 msgctxt "#30017"
-msgid "%s isn't a pley server, or isn't one Kodi can sign in to."
+msgid "%s isn't a Pley server, or isn't one Kodi can sign in to."
 msgstr ""
 
 msgctxt "#30018"
-msgid "pley's service isn't running: restart Kodi."
+msgid "Pley's service isn't running: restart Kodi."
 msgstr ""
 
 msgctxt "#30019"
@@ -138,7 +138,7 @@ msgid "Try again"
 msgstr ""
 
 msgctxt "#30067"
-msgid "Check that the server is on and that this device is on its network. pley doesn't need the internet."
+msgid "Check that the server is on and that this device is on its network. Pley doesn't need the internet."
 msgstr ""
 
 msgctxt "#30070"
@@ -380,7 +380,7 @@ msgid "No libraries yet"
 msgstr ""
 
 msgctxt "#30136"
-msgid "Ask whoever runs this pley server to share a library with you."
+msgid "Ask whoever runs this Pley server to share a library with you."
 msgstr ""
 
 msgctxt "#30137"
@@ -484,7 +484,7 @@ msgid "Screens"
 msgstr ""
 
 msgctxt "#30162"
-msgid "pley's look, as on its TV apps"
+msgid "Pley's look, as on its TV apps"
 msgstr ""
 
 msgctxt "#30163"
@@ -520,7 +520,7 @@ msgid "%d items"
 msgstr ""
 
 msgctxt "#30171"
-msgid "Sign in to pley"
+msgid "Sign in to Pley"
 msgstr ""
 
 msgctxt "#30172"
@@ -540,7 +540,7 @@ msgid "Your phone must be on the same Wi-Fi as this TV."
 msgstr ""
 
 msgctxt "#30176"
-msgid "Or open pley on a signed-in device: Link a device."
+msgid "Or open Pley on a signed-in device: Link a device."
 msgstr ""
 
 msgctxt "#30177"
@@ -612,7 +612,7 @@ msgid "After %s"
 msgstr ""
 
 msgctxt "#30194"
-msgid "Sorting libraries needs a newer pley on the server."
+msgid "Sorting libraries needs a newer Pley on the server."
 msgstr ""
 
 msgctxt "#30195"

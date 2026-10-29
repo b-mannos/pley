@@ -99,7 +99,7 @@ async fn hashing<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -
     static TURNS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(HASHING_AT_ONCE);
     let _turn = tokio::time::timeout(HASHING_WAIT, TURNS.acquire())
         .await
-        .map_err(|_| AppError::Unavailable("pley is busy checking passwords: try again in a moment".into()))?
+        .map_err(|_| AppError::Unavailable("Pley is busy checking passwords: try again in a moment".into()))?
         .map_err(|e| AppError::Internal(e.into()))?;
     tokio::task::spawn_blocking(work).await.map_err(|e| AppError::Internal(e.into()))
 }
@@ -911,7 +911,7 @@ async fn authenticate(parts: &Parts, state: &AppState) -> Result<AuthUser, AppEr
             _ => from_another_site(parts),
         };
         if elsewhere {
-            return Err(AppError::forbidden("this request didn't come from pley's page"));
+            return Err(AppError::forbidden("this request didn't come from Pley's page"));
         }
     }
     state.auth.validate(&token).await.ok_or(AppError::Unauthorized)

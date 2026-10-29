@@ -85,10 +85,10 @@ function check(tag) {
     if (got !== want) wrong.push(`${m.path}: ${got ?? "no version"}`);
   }
   if (wrong.length) {
-    console.error(`pley ${want}, but:\n  ${wrong.join("\n  ")}\nRun: bun scripts/version.mjs set ${want}`);
+    console.error(`Pley ${want}, but:\n  ${wrong.join("\n  ")}\nRun: bun scripts/version.mjs set ${want}`);
     process.exit(1);
   }
-  console.log(`pley ${want}: every manifest agrees`);
+  console.log(`Pley ${want}: every manifest agrees`);
 }
 
 function set(v) {
@@ -103,7 +103,7 @@ function set(v) {
     if (m.get(after) !== v) throw new Error(`${m.path}: the version wasn't found`);
     if (after !== before) write(m.path, after);
   }
-  console.log(`pley ${v}`);
+  console.log(`Pley ${v}`);
 }
 
 const [command, arg] = process.argv.slice(2);

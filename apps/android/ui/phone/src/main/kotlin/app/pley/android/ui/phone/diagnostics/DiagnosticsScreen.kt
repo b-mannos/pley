@@ -76,7 +76,7 @@ internal fun DiagnosticsScreen() {
     val list = rememberLazyListState()
     val copy: () -> Unit = {
         scope.launch {
-            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("pley caps", state.capsJson)))
+            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Pley caps", state.capsJson)))
             shell.toasts.show(resources.getString(R.string.diagnostics_copied))
         }
     }

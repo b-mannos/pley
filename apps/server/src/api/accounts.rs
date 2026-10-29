@@ -166,7 +166,7 @@ pub async fn update_user(
     }
     if let Some(is_admin) = body.is_admin {
         if !is_admin && current.is_admin && admins_left_after(&state, id).await? == 0 {
-            return Err(AppError::bad_request("pley needs at least one administrator"));
+            return Err(AppError::bad_request("Pley needs at least one administrator"));
         }
         if is_admin && current.managed {
             return Err(AppError::bad_request("a managed profile can't be an administrator"));
@@ -177,7 +177,7 @@ pub async fn update_user(
             return Err(AppError::bad_request("you can't disable your own account"));
         }
         if current.is_admin && admins_left_after(&state, id).await? == 0 {
-            return Err(AppError::bad_request("pley needs at least one administrator"));
+            return Err(AppError::bad_request("Pley needs at least one administrator"));
         }
     }
     if let Some(max_age) = body.max_age {

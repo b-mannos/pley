@@ -15,16 +15,16 @@ describe("the apps' notices", () => {
   });
 
   it("list each package, then its license in full", () => {
-    const text = noticesText("pley for LG TV", [pkg("qrcode-generator", TEXTS["qrcode-generator"]!), pkg("preact")]);
-    expect(text.startsWith("pley for LG TV includes the following open-source software")).toBe(true);
+    const text = noticesText("Pley for LG TV", [pkg("qrcode-generator", TEXTS["qrcode-generator"]!), pkg("preact")]);
+    expect(text.startsWith("Pley for LG TV includes the following open-source software")).toBe(true);
     expect(text).toContain("- Preact: preact 1.0.0 (MIT)\n- QR Code generator (Kazuhiko Arase): qrcode-generator 1.0.0 (MIT)");
     expect(text).toContain("Copyright (c) 2009 Kazuhiko Arase");
     expect(text).toContain("Copyright (c) preact");
   });
 
   it("stop the build on a package nobody named, or one without a license text", () => {
-    expect(() => noticesText("pley for LG TV", [pkg("left-pad")])).toThrow(/licenses\.ts/);
-    expect(() => noticesText("pley for LG TV", [pkg("preact", " ")])).toThrow(/no license text/);
+    expect(() => noticesText("Pley for LG TV", [pkg("left-pad")])).toThrow(/licenses\.ts/);
+    expect(() => noticesText("Pley for LG TV", [pkg("preact", " ")])).toThrow(/no license text/);
   });
 
   it("name each in About once, with its license", () => {

@@ -56,7 +56,7 @@ describe("NetworkSettings", () => {
         discovery: true,
       }),
     );
-    expect(await screen.findByText("pley listens there now")).toBeInTheDocument();
+    expect(await screen.findByText("Pley listens there now")).toBeInTheDocument();
     expect(screen.getByText("192.168.1.10:7539")).toBeInTheDocument();
   });
 
@@ -69,7 +69,7 @@ describe("NetworkSettings", () => {
     renderWithProviders(<NetworkSettings />);
     expect(await screen.findByRole("radio", { name: /Every network/ })).toHaveAttribute("aria-checked", "true");
     await user.click(screen.getByRole("switch", { name: "Plex-compatible API" }));
-    expect(screen.getByRole("radio", { name: "On pley's port (7539)" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: "On Pley's port (7539)" })).toHaveAttribute("aria-checked", "true");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(requests.filter((r) => r.method === "PUT").at(-1)?.body).toEqual({

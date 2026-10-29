@@ -285,7 +285,7 @@ export function ServersScreen() {
               </div>
             </>
           ) : searching ? (
-            <StatusLine text="Looking for pley on your network…" waiting />
+            <StatusLine text="Looking for Pley on your network…" waiting />
           ) : searched && !rows.length && !problem ? (
             <div class="t-body c-muted">No servers found. Make sure this TV and the server are on the same network.</div>
           ) : null}
@@ -296,7 +296,7 @@ export function ServersScreen() {
       {forgetting && (
         <Dialog
           title={`Forget ${forgetting.name}?`}
-          body="pley signs this TV out of it and deletes what it saved from it."
+          body="Pley signs this TV out of it and deletes what it saved from it."
           onDismiss={() => setForgetting(null)}
           buttons={[
             { label: "Cancel", initial: true, onSelect: () => setForgetting(null) },

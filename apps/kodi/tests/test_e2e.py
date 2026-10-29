@@ -126,7 +126,7 @@ class EndToEndTest(unittest.TestCase):
         flow = auth.DeviceSignIn(self.server, AGENT)
         started = flow.start()
         shown = self.browser("POST", "/api/oauth/device/verify", {"user_code": started["user_code"]})
-        self.assertEqual(shown["client"]["name"], "pley for Kodi")
+        self.assertEqual(shown["client"]["name"], "Pley for Kodi")
         self.assertEqual(shown["scopes"], ["library", "play", "playlists", "profiles"])
         self.assertEqual(self.browser("POST", "/api/oauth/requests/%s" % shown["id"], {"allow": True}), {"done": True})
         time.sleep(flow.interval)
@@ -227,7 +227,7 @@ class EndToEndTest(unittest.TestCase):
         # Listed with the account's apps, then signed out.
         apps = self.admin.get("/api/me/apps")
         kodi = [a for a in apps if a["client_id"] == auth.CLIENT_ID]
-        self.assertEqual((kodi[0]["name"], kodi[0]["device"]), ("pley for Kodi", "Kodi 21.3; Windows"))
+        self.assertEqual((kodi[0]["name"], kodi[0]["device"]), ("Pley for Kodi", "Kodi 21.3; Windows"))
         client.request("POST", "/sign-out")
         self.assertEqual([a for a in self.admin.get("/api/me/apps") if a["client_id"] == auth.CLIENT_ID], [])
         self.assertEqual(client.request("GET", "/api/libraries").status, 401)

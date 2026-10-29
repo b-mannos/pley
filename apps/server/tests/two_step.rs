@@ -70,7 +70,7 @@ async fn turning_it_on_takes_the_password_and_a_first_code() {
     assert_eq!(setup.status, StatusCode::OK, "{}", setup.text());
     let text = setup.body["secret"].as_str().unwrap();
     let uri = setup.body["uri"].as_str().unwrap();
-    assert!(uri.starts_with("otpauth://totp/pley:bob") && uri.contains(&format!("secret={text}&")), "{uri}");
+    assert!(uri.starts_with("otpauth://totp/Pley:bob") && uri.contains(&format!("secret={text}&")), "{uri}");
     assert!(setup.body["qr"]["path"].as_str().unwrap().starts_with("M0 0h7v1h-7z"));
     assert!(setup.body["expires_at"].as_i64().unwrap() > now());
     let secret = pley::two_step::base32_decode(text).unwrap();

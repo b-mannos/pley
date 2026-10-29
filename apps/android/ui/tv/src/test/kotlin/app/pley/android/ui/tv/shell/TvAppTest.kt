@@ -111,7 +111,7 @@ class TvAppTest {
     @Test
     fun linkStartsFocused() {
         app(StartFacts("http://s", false))
-        compose.onNodeWithText("Sign in to pley").assertExists()
+        compose.onNodeWithText("Sign in to Pley").assertExists()
         compose.onNodeWithText("Change server").assertIsFocused()
     }
 

@@ -104,7 +104,7 @@ fn watch_shutdown() {
         }
         drop(started);
         std::thread::sleep(SHUTDOWN_DEADLINE);
-        tracing::error!("pley did not stop within {}s of being asked to: ending it", SHUTDOWN_DEADLINE.as_secs());
+        tracing::error!("Pley did not stop within {}s of being asked to: ending it", SHUTDOWN_DEADLINE.as_secs());
         std::process::exit(0);
     });
 }
@@ -154,11 +154,11 @@ pub fn serve(config: Config, tray: bool) -> anyhow::Result<()> {
     if let Some(url) = runtime.block_on(pley_answering(config.bind)) {
         // Opening pley again (from the Start menu, say) opens the one running.
         if tray {
-            tracing::info!("pley already runs at {url}: opening it");
+            tracing::info!("Pley already runs at {url}: opening it");
             desktop::open(&url);
             return Ok(());
         }
-        anyhow::bail!("another pley already listens on {url}");
+        anyhow::bail!("another Pley already listens on {url}");
     }
     #[cfg(all(feature = "tray", target_os = "macos"))]
     if tray {
@@ -216,14 +216,14 @@ pub async fn run_with_tray(config: Config, tray: Option<desktop::TrayLauncher>) 
     let state = AppState::init(config).await?;
     state.start_background_tasks();
     let app = api::router(state.clone());
-    tracing::info!("pley {VERSION_AND_COMMIT} listening on http://{}", display_addr(addr));
+    tracing::info!("Pley {VERSION_AND_COMMIT} listening on http://{}", display_addr(addr));
     if state.network.plex_on_web() {
-        tracing::info!("the Plex-compatible API answers on pley's port, to its clients");
+        tracing::info!("the Plex-compatible API answers on Pley's port, to its clients");
     }
     LISTENING.store(true, std::sync::atomic::Ordering::SeqCst);
     if let Some(code) = state.auth.setup.shown() {
         tracing::warn!(
-            "pley isn't set up yet: open http://{}/setup?code={code} to create the administrator account \
+            "Pley isn't set up yet: open http://{}/setup?code={code} to create the administrator account \
              (the setup code is {code})",
             display_addr(addr)
         );

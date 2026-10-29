@@ -31,7 +31,7 @@ export function SetupPage() {
 
   if (server.isPending) return <Splash />;
   if (server.isError) {
-    return <ErrorScreen title="Can't reach the pley server" message={errorMessage(server.error)} onRetry={() => void server.refetch()} />;
+    return <ErrorScreen title="Can't reach the Pley server" message={errorMessage(server.error)} onRetry={() => void server.refetch()} />;
   }
   if (!server.data.setup_required && !setup.isSuccess) return <Navigate to="/login" replace />;
   const needsCode = server.data.setup_code_required !== false;
@@ -51,7 +51,7 @@ export function SetupPage() {
 
   return (
     <AuthLayout
-      title="Welcome to pley"
+      title="Welcome to Pley"
       subtitle="Create the administrator account for this server. You'll add your media libraries next."
     >
       <form onSubmit={onSubmit} className="space-y-4">
@@ -76,7 +76,7 @@ export function SetupPage() {
           <Field
             label="Setup code"
             htmlFor="setup-code"
-            hint="pley printed it in its log when it started (with Docker: docker logs pley). Opening pley from its tray icon fills it in."
+            hint="Pley printed it in its log when it started (with Docker: docker logs pley). Opening Pley from its tray icon fills it in."
           >
             <TextInput
               id="setup-code"

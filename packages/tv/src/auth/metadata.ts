@@ -95,7 +95,7 @@ export function parseMetadata(text: string, server: string): ServerMetadata {
     const url = o[name];
     if (typeof url !== "string" || !url) throw new AuthError(TOO_OLD);
     if (origin(url) !== issuer || url.indexOf(`${issuer}/`) !== 0) {
-      throw new AuthError("this server sends apps to another address to sign in: pley doesn't");
+      throw new AuthError("this server sends apps to another address to sign in: Pley doesn't");
     }
     return url;
   };

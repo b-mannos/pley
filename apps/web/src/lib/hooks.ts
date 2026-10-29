@@ -69,7 +69,7 @@ export function useDocumentTitle(title: string | null | undefined) {
   useEffect(() => {
     if (!title) return;
     const prev = document.title;
-    document.title = `${title} · pley`;
+    document.title = `${title} · Pley`;
     return () => {
       document.title = prev;
     };

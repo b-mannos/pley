@@ -29,7 +29,7 @@ export function problemText(p: ConnectProblem): string {
     case "bad_address":
       return "Enter an address such as nas, 192.168.1.20 or pley.example.com.";
     case "not_pley":
-      return `Something answers at ${p.address}, but it isn't pley.`;
+      return `Something answers at ${p.address}, but it isn't Pley.`;
     case "unreachable":
       return `Couldn't reach ${p.address}: ${p.reason}`;
   }

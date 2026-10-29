@@ -21,7 +21,7 @@ impl ksni::Tray for PleyTray {
     }
 
     fn title(&self) -> String {
-        "pley".into()
+        "Pley".into()
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
@@ -29,7 +29,7 @@ impl ksni::Tray for PleyTray {
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
-        ksni::ToolTip { title: "pley".into(), description: self.status.clone(), ..Default::default() }
+        ksni::ToolTip { title: "Pley".into(), description: self.status.clone(), ..Default::default() }
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {
@@ -40,7 +40,7 @@ impl ksni::Tray for PleyTray {
         use ksni::menu::{CheckmarkItem, MenuItem, StandardItem};
         vec![
             StandardItem {
-                label: "Open pley".into(),
+                label: "Open Pley".into(),
                 activate: Box::new(|tray: &mut Self| tray.ctx.open_web_ui()),
                 ..Default::default()
             }
@@ -61,7 +61,7 @@ impl ksni::Tray for PleyTray {
             .into(),
             MenuItem::Separator,
             CheckmarkItem {
-                label: "Start pley at login".into(),
+                label: "Start Pley at login".into(),
                 checked: self.autostart,
                 activate: Box::new(|tray: &mut Self| tray.autostart = tray.ctx.toggle_autostart(!tray.autostart)),
                 ..Default::default()
@@ -69,7 +69,7 @@ impl ksni::Tray for PleyTray {
             .into(),
             MenuItem::Separator,
             StandardItem {
-                label: "Quit pley".into(),
+                label: "Quit Pley".into(),
                 activate: Box::new(|tray: &mut Self| tray.ctx.send(Command::Quit)),
                 ..Default::default()
             }

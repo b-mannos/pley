@@ -41,7 +41,7 @@ end sub
 sub search()
     if m.searching then return
     m.searching = true
-    setStatus("Looking for pley on your network…", false)
+    setStatus("Looking for Pley on your network…", false)
     m.discovery = CreateObject("roSGNode", "DiscoveryTask")
     m.discovery.observeField("found", "onFound")
     m.discovery.observeField("done", "onSearched")
@@ -171,7 +171,7 @@ end sub
 sub askForget(row as object)
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
     dialog.title = "Forget " + row.name + "?"
-    dialog.message = ["pley signs this TV out of it and deletes what it saved from it."]
+    dialog.message = ["Pley signs this TV out of it and deletes what it saved from it."]
     dialog.buttons = ["Cancel", "Forget"]
     dialog.observeField("buttonSelected", "onForgetButton")
     m.forgetting = row

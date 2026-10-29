@@ -71,10 +71,10 @@ impl Listen {
     /// Why pley can't listen as this says, if it can't.
     pub fn check(&self) -> Result<(), String> {
         if self.web.is_empty() {
-            return Err("pley must listen on an address at least".into());
+            return Err("Pley must listen on an address at least".into());
         }
         if self.plex_on_web && !self.plex.is_empty() {
-            return Err("the Plex-compatible API is on pley's port or on addresses of its own, not both".into());
+            return Err("the Plex-compatible API is on Pley's port or on addresses of its own, not both".into());
         }
         if self.web.len() > MAX_ADDRESSES || self.plex.len() > MAX_ADDRESSES {
             return Err(format!("{MAX_ADDRESSES} addresses at most"));
@@ -123,7 +123,7 @@ pub enum Kind {
 impl Kind {
     fn what(self) -> &'static str {
         match self {
-            Kind::Web => "pley",
+            Kind::Web => "Pley",
             Kind::Plex => "the Plex-compatible API",
             Kind::Discovery => "discovery",
         }
@@ -352,7 +352,7 @@ async fn listen_on(
     match socket {
         Socket::Tcp(listener) if kind == Kind::Web => {
             if !started {
-                // Not "pley … listening on", which marks a start in the log.
+                // Not "Pley … listening on", which marks a start in the log.
                 tracing::info!("listening on http://{addr} too ({})", kind.what());
             }
             crate::http::serve(listener, app, stop.cancelled_owned()).await;

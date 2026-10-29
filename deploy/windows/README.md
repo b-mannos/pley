@@ -1,4 +1,4 @@
-# pley-server on Windows
+# Pley Server on Windows
 
 `pley-server-<version>-windows-<arch>-setup.exe`, on each release, installs
 the server as a Windows service or in the notification area, with FFmpeg,
@@ -12,8 +12,8 @@ without installing: [../README.md](../README.md#windows).
 
 Run the setup. Its pages:
 
-1. **Where pley goes**: `C:\Program Files\pley-server`.
-2. **How pley runs**
+1. **Where Pley goes**: `C:\Program Files\pley-server`.
+2. **How Pley runs**
    - **As a service with an account of its own** (recommended): it starts
      with Windows, before anyone signs in, as `NT SERVICE\pley`, an account
      with no password that can't sign in. For media on this computer.
@@ -21,53 +21,53 @@ Run the setup. Its pages:
      computer, which the first account reaches as the computer, not as a
      user. Setup creates a standard user (`pley`) with a random password
      nobody needs, and can save its sign-in to your NAS: the NAS, and a user
-     and password that may read your media there. In pley, add libraries by
+     and password that may read your media there. In Pley, add libraries by
      their network paths, such as `\\nas\media\Movies`.
    - **In the notification area, as you**: it runs while you are signed in,
      with your account, network drives included, and starts when you sign in.
-     Opening it again (the Start menu's `pley-server`) opens its page.
+     Opening it again (the Start menu's **Pley Server**) opens its page.
    - **Let the service write only in its data folder** (on by default):
      Windows checks every change the service makes against its own SID,
      which only the data folder allows, and takes away the privileges it
      doesn't need. If no GPU encoder is found (the last page says), run
      Setup again and turn this off.
 3. **Data folder**: `C:\ProgramData\pley` for a service, `%LOCALAPPDATA%\pley`
-   in the notification area. It can start with the data of the pley you used
-   until now (its accounts, libraries, watch history and artwork): that pley
+   in the notification area. It can start with the data of the Pley you used
+   until now (its accounts, libraries, watch history and artwork): that Pley
    must be stopped, and nothing is copied over existing data. When the data
    folder changes from one install to the next, Setup offers to copy it.
-4. **Network**: where pley listens.
+4. **Network**: where Pley listens.
    - **Only this computer** (the default): on `127.0.0.1`, for a reverse
      proxy on this computer that serves it with HTTPS (Caddy, nginx, IIS).
    - **This computer and these networks**: the computer's network adapters
      are listed with their addresses and the kind of network Windows takes
-     each for; pley listens on those ticked (and 127.0.0.1). An adapter
-     that isn't up yet as pley starts (Wi-Fi, a VPN such as Tailscale) is
+     each for; Pley listens on those ticked (and 127.0.0.1). An adapter
+     that isn't up yet as Pley starts (Wi-Fi, a VPN such as Tailscale) is
      tried again every 30 s.
    - **Every network**, those that come later too.
    - The port (7539), which another program mustn't have (Setup says when
      one does), and the Plex-compatible API for Plex tools, on by default on
-     pley's port too.
-   - All of it changes later in pley, while it runs: **Settings → Network**.
-5. **Windows Firewall**: which kinds of network to let pley through on
+     Pley's port too.
+   - All of it changes later in Pley, while it runs: **Settings → Network**.
+5. **Windows Firewall**: which kinds of network to let Pley through on
    (private and domain, not public, unless you say otherwise), from devices
    on those networks only or from any address (through a VPN too), and
-   whether the pley apps on the network find the server. The rule is for
-   pley wherever it listens, so a network chosen later in its settings is
+   whether the Pley apps on the network find the server. The rule is for
+   Pley wherever it listens, so a network chosen later in its settings is
    let through too, if it is of a kind chosen here.
 
-FFmpeg comes with the installer and goes next to pley: a release's carries
+FFmpeg comes with the installer and goes next to Pley: a release's carries
 gyan.dev's full build (NVENC, Quick Sync, AMF and Vulkan tone mapping), and
 an installer built with another one carries that one, such as an FFmpeg built
 for Dolby Vision FEL (see Building the installer). Each install replaces it.
 The ARM64 installer carries the same x64 build, which Windows runs
-emulated: on Windows on Arm, pley transcodes on the CPU.
+emulated: on Windows on Arm, Pley transcodes on the CPU.
 
-The last page gives pley's address and the link that creates the
-administrator account (or, with an earlier pley's data, says to sign in as
-before), and says which encoders pley found in FFmpeg. A service runs in the
+The last page gives Pley's address and the link that creates the
+administrator account (or, with an earlier Pley's data, says to sign in as
+before), and says which encoders Pley found in FFmpeg. A service runs in the
 background, without an icon in the notification area: the Start menu's
-`pley-server` opens it.
+**Pley Server** opens it.
 
 ## What Setup sets up
 
@@ -75,15 +75,15 @@ background, without an icon in the notification area: the Start menu's
 |---|---|
 | Programs | `pley.exe`, `pley-transcoder.exe` and FFmpeg (`ffmpeg\`) in the install folder |
 | Options | `pley.toml` in the data folder: the address, the Plex-compatible API, discovery and FFmpeg |
-| The service | `pley` ("pley-server" in Services): starts with Windows (delayed), restarts when it stops on its own, has 30 s to stop as Windows shuts down, and keeps its temporary files in the data folder's `tmp` |
+| The service | `pley` ("Pley Server" in Services): starts with Windows (delayed), restarts when it stops on its own, has 30 s to stop as Windows shuts down, and keeps its temporary files in the data folder's `tmp` |
 | The data folder | Owned by the administrators; only SYSTEM, the administrators, the service (and its user) and you may open it |
-| The firewall | A rule named `pley` for pley, on the kinds of network and from the devices chosen |
-| The notification area | pley starts when you sign in (Start pley at login, in its menu) |
-| Start menu | `pley-server` (pley's page, or pley itself) and `pley-server logs` |
+| The firewall | A rule named `pley` for Pley, on the kinds of network and from the devices chosen |
+| The notification area | Pley starts when you sign in (Start Pley at login, in its menu) |
+| Start menu | **Pley Server** (Pley's page, or Pley itself) and **Pley Server logs** |
 
 ## Media folders
 
-pley only reads them, as its account: a service as `NT SERVICE\pley` (or
+Pley only reads them, as its account: a service as `NT SERVICE\pley` (or
 the user of its own), in the notification area as you. A folder on another
 drive (`D:\Movies`) usually lets every user read it, services included; one
 in your user folder (`C:\Users\<you>\Videos`) doesn't. To let the service
@@ -106,16 +106,16 @@ user of its own**.
 ## Updating
 
 Run the new version's setup. It remembers the last install's choices, stops
-pley, replaces it and its FFmpeg, and starts it again.
+Pley, replaces it and its FFmpeg, and starts it again.
 
 ## Uninstalling
 
-**Settings → Apps → pley-server → Uninstall**. The uninstaller removes the
+**Settings → Apps → Pley Server → Uninstall**. The uninstaller removes the
 service, the user Setup made, the firewall rule, the start at sign-in, the
 programs and FFmpeg, and asks whether to delete the data folder
 too (no, unless you say so). A data folder with other files in it than
-pley's stays. Setup takes an empty or a new folder for pley's data, or one of
-pley's.
+Pley's stays. Setup takes an empty or a new folder for Pley's data, or one of
+Pley's.
 
 ## Installing without the wizard
 
@@ -134,10 +134,10 @@ pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=s
 | `/COPYDATA=` | A data folder to copy first | none |
 | `/LISTEN=` | `local`, `all`, or the addresses of the networks to listen on, separated by commas | `local` |
 | `/PORT=` | The port | `7539` |
-| `/PLEX=` | `yes` or `no`: the Plex-compatible API, on pley's port | `yes` |
-| `/FIREWALL=` | The kinds of network to let pley through on, wherever it listens: `private`, `domain`, `public` (separated by commas), or `none` | `private,domain` |
+| `/PLEX=` | `yes` or `no`: the Plex-compatible API, on Pley's port | `yes` |
+| `/FIREWALL=` | The kinds of network to let Pley through on, wherever it listens: `private`, `domain`, `public` (separated by commas), or `none` | `private,domain` |
 | `/FROM=` | `subnet` (devices on those networks) or `any` (a VPN too) | `subnet` |
-| `/DISCOVERY=` | `yes` or `no`: found by the pley apps, when others may reach it | `yes` |
+| `/DISCOVERY=` | `yes` or `no`: found by the Pley apps, when others may reach it | `yes` |
 
 The NAS's password comes from the environment variable
 `PLEY_SHARE_PASSWORD`, never the command line, which Setup writes in its
@@ -149,7 +149,7 @@ $env:PLEY_SHARE_PASSWORD = [Net.NetworkCredential]::new('', (Read-Host 'NAS pass
 .\pley-server-0.2.0-windows-x86_64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /MODE=user /SHARE=\\nas /SHAREUSER=media
 ```
 
-Setup's own options work too, such as `/DIR=` (where pley goes) and
+Setup's own options work too, such as `/DIR=` (where Pley goes) and
 `/LOG=<file>`. An update keeps the last choices for the options not given. A
 silent install stops when the port is taken. A silent uninstall
 (`unins000.exe /VERYSILENT`) keeps the data folder unless `/DELETEDATA`.
@@ -165,11 +165,11 @@ pley --data-dir C:\ProgramData\pley --bind 127.0.0.1:7539 --plex-bind web ^
 ```
 
 It saves the options in `pley.toml`, installs or updates the service, locks
-the data folder down, starts pley and prints its address and setup link.
+the data folder down, starts Pley and prints its address and setup link.
 `pley service install --help` lists the rest (`--account user`,
 `--unrestricted`, `--grant`, `--share`, `--copy-data-from`, `--dry-run`…);
 `pley service start`, `stop` and `uninstall` do what they say. `pley
-save-config` saves the same options for pley outside a service.
+save-config` saves the same options for Pley outside a service.
 
 ## Security
 
@@ -186,24 +186,24 @@ save-config` saves the same options for pley outside a service.
 - **The data folder** (its database, the key that seals two-step secrets,
   its logs) is owned by the administrators and closed to other users.
   Setup refuses a data folder that is, or holds, a link or junction: one
-  made in ProgramData before pley was installed could otherwise send its
+  made in ProgramData before Pley was installed could otherwise send its
   changes anywhere.
-- **The network.** pley listens on `127.0.0.1` unless told otherwise (in
+- **The network.** Pley listens on `127.0.0.1` unless told otherwise (in
   Setup, or by an administrator in **Settings → Network**), and the
   firewall lets it through on private and domain networks only, unless you
   choose public ones too.
 - **Setup isn't signed yet**: SmartScreen warns (**More info → Run anyway**).
   Each release's installer has build provenance:
   `gh attestation verify <file> --repo <owner>/<repo>`.
-- **RedirectionGuard is off** for Setup: the pley it starts would otherwise
+- **RedirectionGuard is off** for Setup: the Pley it starts would otherwise
   inherit it, and couldn't follow the links WinGet puts FFmpeg behind, nor
   junctions in media folders, until it restarted. Setup itself writes only
   in Program Files and its own temporary folder.
 
 ## When something is wrong
 
-- **pley's log** is `logs\pley.log` in the data folder (Start menu:
-  `pley-server logs`). The service is `pley-server` in Services
+- **Pley's log** is `logs\pley.log` in the data folder (Start menu:
+  **Pley Server logs**). The service is **Pley Server** in Services
   (`services.msc`).
 - **No GPU encoder** although the computer has one: run Setup again and turn
   off **Let the service write only in its data folder**. It is on by
@@ -211,13 +211,13 @@ save-config` saves the same options for pley outside a service.
 - **A NAS isn't reached**: choose **As a service, as a user of its own**,
   give the NAS by the name the library paths use (`\\nas`, not its address,
   or the other way round), and a user the NAS knows.
-- **The port is taken**: another pley, or another program, listens there.
+- **The port is taken**: another Pley, or another program, listens there.
   Stop it or choose another port.
 
 ## Building the installer
 
 With [Inno Setup](https://jrsoftware.org/isinfo.php) 6.7 or newer
-(`winget install JRSoftware.InnoSetup`), and Rust and Bun to build pley and
+(`winget install JRSoftware.InnoSetup`), and Rust and Bun to build Pley and
 its web app:
 
 ```

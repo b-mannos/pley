@@ -237,7 +237,7 @@ mod platform {
             .collect::<Vec<_>>()
             .join(" ");
         let entry = format!(
-            "[Desktop Entry]\nType=Application\nName=pley\nComment=pley media server\nExec={exec}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+            "[Desktop Entry]\nType=Application\nName=Pley\nComment=Pley media server\nExec={exec}\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
         );
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;

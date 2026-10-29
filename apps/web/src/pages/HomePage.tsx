@@ -21,7 +21,7 @@ export function HomePage() {
         title="No libraries yet"
         description={
           user.is_admin
-            ? "Point pley at the folders where your movies, shows and music live. It will scan them and build your library."
+            ? "Point Pley at the folders where your movies, shows and music live. It will scan them and build your library."
             : "Ask the server owner to add a library."
         }
         action={

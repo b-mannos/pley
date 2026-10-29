@@ -15,12 +15,12 @@ const MODES: { value: Mode; label: string; hint: string }[] = [
   {
     value: "local",
     label: "Only this computer",
-    hint: "For a reverse proxy on this computer that serves pley with HTTPS (Caddy, nginx, IIS), or for pley on its own.",
+    hint: "For a reverse proxy on this computer that serves Pley with HTTPS (Caddy, nginx, IIS), or for Pley on its own.",
   },
   {
     value: "networks",
     label: "This computer and the networks chosen",
-    hint: "Devices on those networks reach pley at this computer's address there.",
+    hint: "Devices on those networks reach Pley at this computer's address there.",
   },
   { value: "all", label: "Every network", hint: "Those that come later too: another Wi-Fi, a VPN." },
 ];
@@ -32,7 +32,7 @@ const NETWORK_KIND: Record<NonNullable<NetworkAdapter["network"]>["kind"], strin
 };
 
 const LISTENER: Record<ListenerKind, string> = {
-  web: "pley",
+  web: "Pley",
   plex: "Plex-compatible API",
   discovery: "Discovery (UDP)",
 };
@@ -96,7 +96,7 @@ const sameChoice = (a: ListenChoice, b: ListenChoice) =>
 function problemOf(form: Form): string | null {
   const port = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535;
   if (!port(form.port)) return "The port is a number from 1 to 65535.";
-  if (form.plex && !form.plexOnWeb && form.plexPort === form.port) return "pley and the Plex-compatible API need ports of their own.";
+  if (form.plex && !form.plexOnWeb && form.plexPort === form.port) return "Pley and the Plex-compatible API need ports of their own.";
   if (form.mode === "networks" && form.ips.length === 0) return "Choose a network, or Only this computer.";
   return null;
 }
@@ -218,7 +218,7 @@ function Adapters({
       {elsewhere.map((ip) => (
         <Choice key={ip} id={`network-elsewhere-${ip}`} checked disabled={disabled} onChange={() => onChange(ips.filter((x) => x !== ip))}>
           <span className="font-mono text-xs">{ip}</span>
-          <span className="block text-xs text-subtle">Not on this computer now: pley listens there once it is.</span>
+          <span className="block text-xs text-subtle">Not on this computer now: Pley listens there once it is.</span>
         </Choice>
       ))}
       {adapters.length === 0 && elsewhere.length === 0 ? <p className="px-2 py-1.5 text-sm text-subtle">No network adapters found.</p> : null}
@@ -269,7 +269,7 @@ export function NetworkSettings() {
     save.mutate(next, {
       onSuccess: (after) => {
         const waiting = after.listeners.some((l) => l.error);
-        toast.success(waiting ? "Saved: pley listens on the rest once it can" : "pley listens there now");
+        toast.success(waiting ? "Saved: Pley listens on the rest once it can" : "Pley listens there now");
         const page = movedPage(data.web, after.web, window.location.href);
         if (page) window.location.assign(page);
       },
@@ -288,7 +288,7 @@ export function NetworkSettings() {
       <div>
         <h2 className="text-lg font-semibold">Network</h2>
         <p className="text-sm text-muted">
-          Where pley listens for browsers and apps. Changes apply at once, and pley keeps them in{" "}
+          Where Pley listens for browsers and apps. Changes apply at once, and Pley keeps them in{" "}
           <code className="break-all font-mono text-xs">{data.config_file}</code>.
         </p>
       </div>
@@ -327,11 +327,11 @@ export function NetworkSettings() {
         ) : null}
         {data.windows && form.mode !== "local" ? (
           <Note icon={<Info className="size-3.5" />}>
-            Windows Firewall decides which kinds of network reach pley: pley's Setup lets it through on private and domain networks, unless you
+            Windows Firewall decides which kinds of network reach Pley: Pley's Setup lets it through on private and domain networks, unless you
             chose otherwise there (run Setup again to change that).
           </Note>
         ) : null}
-        <Row label="Port" htmlFor="network-port" hint="The web app's and the pley apps'.">
+        <Row label="Port" htmlFor="network-port" hint="The web app's and the Pley apps'.">
           <TextInput
             id="network-port"
             type="number"
@@ -352,8 +352,8 @@ export function NetworkSettings() {
             data.fixed.plex
               ? "Set by --plex-bind or PLEY_PLEX_BIND, on the command line or in the environment."
               : form.plexOnWeb
-                ? "For Plex apps and tools, on pley's own port and addresses (through your reverse proxy too): pley tells their requests from browsers'."
-                : `For Plex apps and tools, on port ${form.plexPort}, where pley listens. A Plex server on this computer keeps its port.`
+                ? "For Plex apps and tools, on Pley's own port and addresses (through your reverse proxy too): Pley tells their requests from browsers'."
+                : `For Plex apps and tools, on port ${form.plexPort}, where Pley listens. A Plex server on this computer keeps its port.`
           }
         >
           <Toggle checked={form.plex} disabled={data.fixed.plex} onChange={(v) => set({ plex: v })} label="Plex-compatible API" />
@@ -361,7 +361,7 @@ export function NetworkSettings() {
         {form.plex ? (
           <div className="grid grid-cols-2 gap-1 rounded-md bg-surface-2 p-1 text-sm" role="radiogroup" aria-label="Plex-compatible API's port">
             {[
-              { onWeb: true, label: `On pley's port (${Number.isNaN(form.port) ? DEFAULT_PORT : form.port})` },
+              { onWeb: true, label: `On Pley's port (${Number.isNaN(form.port) ? DEFAULT_PORT : form.port})` },
               { onWeb: false, label: `On port ${form.plexPort}` },
             ].map((o) => (
               <button
@@ -382,20 +382,20 @@ export function NetworkSettings() {
           </div>
         ) : null}
         <Row
-          label="Found by the pley apps"
+          label="Found by the Pley apps"
           hint={
             data.fixed.discovery
               ? "Turned off by --no-discovery or PLEY_NO_DISCOVERY."
               : form.mode === "local"
                 ? "On networks only: devices can't reach this computer's own address."
-                : "The pley apps on these networks find this server by themselves."
+                : "The Pley apps on these networks find this server by themselves."
           }
         >
           <Toggle
             checked={form.discovery && form.mode !== "local"}
             disabled={data.fixed.discovery || form.mode === "local"}
             onChange={(v) => set({ discovery: v })}
-            label="Found by the pley apps"
+            label="Found by the Pley apps"
           />
         </Row>
       </Card>
@@ -405,13 +405,13 @@ export function NetworkSettings() {
       <Card className="space-y-3">
         <div>
           <h3 className="text-base font-semibold">Listening now</h3>
-          <p className="mt-0.5 text-sm text-muted">pley retries addresses it can't listen on yet every 30 seconds.</p>
+          <p className="mt-0.5 text-sm text-muted">Pley retries addresses it can't listen on yet every 30 seconds.</p>
         </div>
         <ul className="space-y-1.5 text-sm">
           {data.plex_on_web ? (
             <li className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <CircleCheck className="size-3.5 shrink-0 text-success" />
-              <span className="text-muted">{LISTENER.plex}, on pley's port</span>
+              <span className="text-muted">{LISTENER.plex}, on Pley's port</span>
             </li>
           ) : null}
           {data.listeners.map((l) => (
@@ -427,7 +427,7 @@ export function NetworkSettings() {
 
       {unusual && !fixedAll ? (
         <Note icon={<Info className="size-3.5" />}>
-          pley listens on {[...data.web, ...data.plex].join(", ")}, which this page shows as near as it can: saving replaces them.
+          Pley listens on {[...data.web, ...data.plex].join(", ")}, which this page shows as near as it can: saving replaces them.
         </Note>
       ) : null}
 
@@ -437,7 +437,7 @@ export function NetworkSettings() {
           {edited && problem ? (
             <span className="text-xs text-danger">{problem}</span>
           ) : lost ? (
-            <span className="text-xs text-danger">pley would stop listening where this page is: it would stop working here.</span>
+            <span className="text-xs text-danger">Pley would stop listening where this page is: it would stop working here.</span>
           ) : moved ? (
             <span className="text-xs text-muted">This page moves to the new port.</span>
           ) : dirty ? (

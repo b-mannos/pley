@@ -1,4 +1,4 @@
-# pley HTTP API (v1)
+# Pley HTTP API (v1)
 
 All endpoints live under `/api`. Requests and responses are JSON (`snake_case` keys)
 unless stated otherwise. Timestamps are **unix seconds**; durations/positions are
@@ -23,7 +23,7 @@ this API's.
   * `X-Pley-Token: <token>` header,
   * `?token=<token>` query parameter (handy for external players like VLC).
 * Missing/invalid token → `401`. Non-admin calling an admin endpoint → `403`.
-* Apps signed in on pley's own page (see [Apps](#apps-oauth-21)) send their
+* Apps signed in on Pley's own page (see [Apps](#apps-oauth-21)) send their
   access token (`pley_at_…`) in `Authorization: Bearer` only: never in the
   cookie, `X-Pley-Token` or `?token=`. The compatibility API refuses it.
   Its refusals carry `WWW-Authenticate` (RFC 6750 §3):
@@ -35,14 +35,14 @@ this API's.
   * `403` `insufficient_scope` with
     `Bearer error="insufficient_scope", scope="play"`: a route the token's
     scopes don't open. `scope` names the scope that would; it is left out
-    when none does ("apps can't do that: use pley's web app").
+    when none does ("apps can't do that: use Pley's web app").
 
 Every answer carries `X-Content-Type-Options: nosniff`, `X-Frame-Options:
 DENY`, `Referrer-Policy: same-origin` and a `Content-Security-Policy` that
-lets pages load only pley's own scripts and styles. Password checks queue
+lets pages load only Pley's own scripts and styles. Password checks queue
 (a few at a time); when one has waited 10 seconds the answer is `503`.
 
-pley's Samsung and LG TV apps are web apps their TVs load from the TV
+Pley's Samsung and LG TV apps are web apps their TVs load from the TV
 itself, and their web engines hold them to CORS: their requests come with
 `Origin: file://` (or `null`, or an `app://` address). A website's page
 in a sandboxed frame sends `null` too, but these answers only ever carry
@@ -425,15 +425,15 @@ Apps change these with `PUT /api/me/track-defaults`, never with `PATCH
 
 ## Apps (OAuth 2.1)
 
-Apps sign in on pley's own page, and get tokens that open only what the
-person allowed. pley is an OAuth 2.1 authorization server for them
+Apps sign in on Pley's own page, and get tokens that open only what the
+person allowed. Pley is an OAuth 2.1 authorization server for them
 (draft-ietf-oauth-v2-1-16), with PKCE and client metadata documents
-(draft-ietf-oauth-client-id-metadata-document-02). It lets apps use pley: it
+(draft-ietf-oauth-client-id-metadata-document-02). It lets apps use Pley: it
 is no OpenID Connect provider and signs nobody in to other sites.
 
 Every app is public: no client secrets, no registration. An app is known by
 its client ID, the https address of a JSON document that describes it.
-pley's own apps are built in; apps by other publishers sign in only when an
+Pley's own apps are built in; apps by other publishers sign in only when an
 administrator allows them (see [below](#apps-by-other-publishers)).
 
 ### Discovery
@@ -499,7 +499,7 @@ publishers. Every other `/.well-known/` path answers `404`.
 2. The page signs the person in first when they aren't (two-step sign-in
    included), then shows the app, the profile it will act as (with "Use
    another profile"), what it will be able to do and where it goes back to.
-   People are asked every time, for pley's own apps too, and allow all that
+   People are asked every time, for Pley's own apps too, and allow all that
    was asked for or nothing. Allow works once the page has been seen for a
    second.
 3. The browser goes back to the return address by a `303`, the address's
@@ -509,9 +509,9 @@ publishers. Every other `/.well-known/` path answers `404`.
 4. The app exchanges the code at the [token endpoint](#tokens) within 60
    seconds.
 
-An app pley can't accept (unknown, refused, or apps by other publishers
+An app Pley can't accept (unknown, refused, or apps by other publishers
 off) or a return address it didn't register is shown on the page and never
-sent to the app: pley can't know the address is the app's. Other mistakes go
+sent to the app: Pley can't know the address is the app's. Other mistakes go
 back to the app, with `error`, `error_description`, `state` and `iss`, but
 only when the person clicks "Back to the app", on a page that says where
 that goes (RFC 9700 §4.11.2):
@@ -520,7 +520,7 @@ that goes (RFC 9700 §4.11.2):
 |---|---|
 | `unsupported_response_type` | `response_type` is something other than `code` |
 | `invalid_request` | `response_type` is missing; `response_mode` isn't `query`; `request` or `request_uri` is given; the challenge is missing or not S256; `state` is longer than 1,024 bytes |
-| `invalid_scope` | a scope pley doesn't offer (`openid` among them); `profiles` for an app that isn't pley's own; more than the app's description allows |
+| `invalid_scope` | a scope Pley doesn't offer (`openid` among them); `profiles` for an app that isn't Pley's own; more than the app's description allows |
 | `invalid_target` | `resource` names another server |
 
 ### Tokens
@@ -528,13 +528,13 @@ that goes (RFC 9700 §4.11.2):
 `POST /api/oauth/token`, `POST /api/oauth/revoke` and
 [`POST /api/oauth/device`](#tvs) take a form
 (`application/x-www-form-urlencoded`) of at most 16 KiB and never read
-cookies. Each parameter pley reads comes at most once; one sent without a
+cookies. Each parameter Pley reads comes at most once; one sent without a
 value is as if left out, and others are ignored (OAuth 2.1 §3.2). They
 answer with `Cache-Control: no-store` and `Pragma: no-cache`, and errors as
 `{ "error": "invalid_grant", "error_description": "…" }` (RFC 6749 §5.2),
 `400` unless said otherwise. A `client_secret` answers `400`
 `invalid_client`, and an `Authorization: Basic` header `401`
-`invalid_client` with `WWW-Authenticate: Basic realm="pley"`: pley's apps
+`invalid_client` with `WWW-Authenticate: Basic realm="pley"`: Pley's apps
 have no secrets. `resource`, when sent, must be this server
 (`invalid_target`). A missing `grant_type` is `invalid_request`; another one
 is `unsupported_grant_type`.
@@ -552,8 +552,8 @@ Tokens look like this:
 ```
 
 `scope` is everything the app was allowed. `refresh_token` comes only for
-apps whose description lists the `refresh_token` grant type (pley's own
-apps do). pley keeps tokens as SHA-256 hashes; the prefixes make leaked ones
+apps whose description lists the `refresh_token` grant type (Pley's own
+apps do). Pley keeps tokens as SHA-256 hashes; the prefixes make leaked ones
 easy to recognise.
 
 **`grant_type=authorization_code`**: `code`, `client_id` and
@@ -582,7 +582,7 @@ the one that allowed it), or apps by other publishers turned off is
 `invalid_grant`, as is a grant with 10,000 refresh tokens on record, which
 ends. Refreshes never read an app's description again.
 
-**`grant_type=urn:pley:params:oauth:grant-type:switch-profile`**: pley's
+**`grant_type=urn:pley:params:oauth:grant-type:switch-profile`**: Pley's
 own apps, allowed `profiles`, move to another profile of the household:
 `client_id`, `refresh_token`, `profile` (an id from
 [`/api/oauth/profiles`](#profiles)) and `pin` when the profile has one. The
@@ -602,7 +602,7 @@ apps take that to mean the server can't check it.
 
 | Answer | When |
 |---|---|
-| `unauthorized_client` | not one of pley's own apps, or not allowed `profiles` |
+| `unauthorized_client` | not one of Pley's own apps, or not allowed `profiles` |
 | `invalid_request` | `profile` is missing or not an id, or the app acts as that profile already and there is no PIN to check (none given, or none on the profile) |
 | `invalid_grant`, `"reason": "wrong_pin"` | the profile has a PIN, and it is missing or wrong |
 | `invalid_grant`, `"reason": "pin_locked"` | its PIN stopped working after 100 wrong ones in a row |
@@ -614,7 +614,7 @@ apps take that to mean the server can't check it.
 **`POST /api/oauth/revoke`** (RFC 7009): `token` and `client_id`
 (`invalid_request` without them; `token_type_hint` is ignored). An access or
 refresh token of that app, current, spent or expired, ends its whole grant,
-and the answer is `200` with an empty body, as it is for a token pley
+and the answer is `200` with an empty body, as it is for a token Pley
 doesn't know. Another app's token is refused with `400`
 `unauthorized_client` and stays (§2.1). When the database fails, `503`
 `temporarily_unavailable` with `Retry-After`: the token still works, and the
@@ -628,10 +628,10 @@ proxy would lock every app out. TVs have [their own limits](#tvs).
 ### TVs
 
 TVs and other devices without a usable browser sign in with a code they
-show (OAuth 2.0 Device Authorization Grant, RFC 8628). pley's own apps only:
-anyone may start one, and pley reads no app's description for someone who
-isn't signed in. Today that is pley for Android, which also runs on Android
-TV and Fire TV, pley for Kodi, pley for Roku, pley for Samsung TV and pley
+show (OAuth 2.0 Device Authorization Grant, RFC 8628). Pley's own apps only:
+anyone may start one, and Pley reads no app's description for someone who
+isn't signed in. Today that is Pley for Android, which also runs on Android
+TV and Fire TV, Pley for Kodi, Pley for Roku, Pley for Samsung TV and Pley
 for LG TV.
 
 1. The TV asks **`POST /api/oauth/device`** with `client_id` and an optional
@@ -658,8 +658,8 @@ for LG TV.
    RFC 8628 §6.1's 20 consonants (`BCDFGHJKLMNPQRSTVWXZ`, about 2.6 × 10¹⁰
    codes), without vowels or digits so they spell nothing and look like
    nothing else.
-   `invalid_client` for an app that isn't pley's own, `unauthorized_client`
-   for one of pley's own that doesn't sign in this way (the desktop app),
+   `invalid_client` for an app that isn't Pley's own, `unauthorized_client`
+   for one of Pley's own that doesn't sign in this way (the desktop app),
    `invalid_scope` as at `/oauth/authorize`, `429`
    `temporarily_unavailable` past the limits below.
 2. The person opens **`/link`**, a page of the web app, on a phone or
@@ -727,7 +727,7 @@ Turning apps by other publishers off signs all of them out.
 | `library` | see the profile's libraries, playlists and watch history |
 | `play` | play titles, and keep the profile's place, watched marks, ratings, track choices and library order |
 | `playlists` | make, change and delete the profile's playlists |
-| `profiles` | switch to the household's other profiles; pley's own apps only, since a profile's PIN is typed into the app |
+| `profiles` | switch to the household's other profiles; Pley's own apps only, since a profile's PIN is typed into the app |
 
 An app's token opens these routes and no other (`HEAD` as `GET`). A route
 missing here answers `403` `insufficient_scope`, administration and
@@ -807,8 +807,8 @@ would anyone else. Apps also see less: libraries' `paths` are empty, files'
 `path` is the file name only, `/api/users/{id}/avatar` shows only the
 pictures of the app's own profile and its household, and when the
 transcoder can't read a file, its words (which name the file) are replaced
-by pley's own ("this title's file can't be read right now", and "the
-conversion failed" for a session's `last_error`). No address pley hands out carries a token:
+by Pley's own ("this title's file can't be read right now", and "the
+conversion failed" for a session's `last_error`). No address Pley hands out carries a token:
 players send the header with every request, HLS playlists and segments
 included. The event stream ends when its token expires or the app is signed
 out; the app connects again with a new token.
@@ -822,7 +822,7 @@ out; the app connects again with a new token.
 | GET | `/api/users/{id}/apps` *(admin)* | `AppGrant[]` of that user |
 | DELETE | `/api/users/{id}/apps/{grant}` *(admin)* | `204`; `404` as above |
 
-These take pley's own sign-in only, never an app's token.
+These take Pley's own sign-in only, never an app's token.
 
 ```ts
 interface AppGrant {
@@ -851,26 +851,26 @@ profile the app acts as; `needs` is what switching to it takes, by the
 rules above: `none`, `pin`, `password` (in the browser) or `locked`.
 Usernames, roles, libraries, age limits and sign-in settings are left out.
 
-### pley's own apps
+### Pley's own apps
 
 | App | Client ID | Return address |
 |---|---|---|
-| pley for Android | `https://hhaidar.github.io/pley/oauth/android.json` | `app.pley.android:/oauth/callback` |
-| pley for desktop | `https://hhaidar.github.io/pley/oauth/desktop.json` | `http://127.0.0.1/oauth/callback`, `http://[::1]/oauth/callback` (any port) |
-| pley for Kodi | `https://hhaidar.github.io/pley/oauth/kodi.json` | none: a code only |
-| pley for Roku | `https://hhaidar.github.io/pley/oauth/roku.json` | none: a code only |
-| pley for Samsung TV | `https://hhaidar.github.io/pley/oauth/tizen.json` | none: a code only |
-| pley for LG TV | `https://hhaidar.github.io/pley/oauth/webos.json` | none: a code only |
+| Pley for Android | `https://hhaidar.github.io/pley/oauth/android.json` | `app.pley.android:/oauth/callback` |
+| Pley for desktop | `https://hhaidar.github.io/pley/oauth/desktop.json` | `http://127.0.0.1/oauth/callback`, `http://[::1]/oauth/callback` (any port) |
+| Pley for Kodi | `https://hhaidar.github.io/pley/oauth/kodi.json` | none: a code only |
+| Pley for Roku | `https://hhaidar.github.io/pley/oauth/roku.json` | none: a code only |
+| Pley for Samsung TV | `https://hhaidar.github.io/pley/oauth/tizen.json` | none: a code only |
+| Pley for LG TV | `https://hhaidar.github.io/pley/oauth/webos.json` | none: a code only |
 
 Their descriptions are built into the server and never fetched, so they
 sign in to servers without internet access. All get refresh tokens and may
-ask for every scope; pley for Android may also sign in with a code, on a TV
-(see [TVs](#tvs)), and pley for Kodi, Roku, Samsung TV and LG TV sign in
+ask for every scope; Pley for Android may also sign in with a code, on a TV
+(see [TVs](#tvs)), and Pley for Kodi, Roku, Samsung TV and LG TV sign in
 only that way: with no return address, `/oauth/authorize` never sends them
 a code. The Samsung and LG apps can't set their own User-Agent: the TV's
 web engine names the TV ("Samsung TV", "LG TV", and for an app's grant its
 system, "Tizen 7.0", "webOS 23").
-The consent page marks them "pley's own app"; no other app may use a client
+The consent page marks them "Pley's own app"; no other app may use a client
 ID on their host.
 
 ### Apps by other publishers
@@ -885,7 +885,7 @@ the one way an address parser writes it (lower-case host, punycode, no
 default port, no dot segments, no stray spaces), on a domain name with a dot
 (not an IP address, `localhost` or `*.localhost`), with a path other than
 `/`, and with no port, user name, query or fragment. It may not be on the
-host of pley's own apps or on this server's.
+host of Pley's own apps or on this server's.
 
 The description must be a JSON object of at most 5,120 bytes, no field given
 twice:
@@ -894,7 +894,7 @@ twice:
 |---|---|
 | `client_id` | the address it was read from, exactly |
 | `redirect_uris` | 1 to 10 return addresses of at most 512 characters, each in its standard form and one of: https on exactly the client ID's host, without a port; a private-use scheme that is the client ID's host reversed (`apps.example.com` → `com.example.apps`), written `scheme:/path`; `http://127.0.0.1/…` or `http://[::1]/…`. Never `localhost`, a fragment or a user name |
-| `client_name` | optional: shown without control and direction characters, at most 64 characters, as something pley can't check |
+| `client_name` | optional: shown without control and direction characters, at most 64 characters, as something Pley can't check |
 | `grant_types` | optional (`["authorization_code"]`): must list `authorization_code`; refresh tokens only with `refresh_token` |
 | `response_types` | optional: must list `code` |
 | `token_endpoint_auth_method` | optional: `none` |
@@ -904,7 +904,7 @@ twice:
 (`logo_uri`, `client_uri`, `tos_uri`, `policy_uri`, `jwks`, `jwks_uri`, …)
 are ignored and never fetched.
 
-pley reads a description only when someone signed in opens the consent
+Pley reads a description only when someone signed in opens the consent
 page for the app: over https on port 443, from public addresses only (the
 check is made by the resolver, so the address checked is the one connected
 to), without a proxy, redirects, cookies or compression, with 3 seconds to
@@ -917,21 +917,21 @@ between 5 minutes and 24 hours (an hour without one, not at all with
 read them: changes apply at the app's next sign-in.
 
 The consent page names such an app by its client ID's host, then what it
-calls itself, and says it isn't one of pley's own. Logos aren't shown.
+calls itself, and says it isn't one of Pley's own. Logos aren't shown.
 
 ### The consent page's endpoints
 
-pley's own page uses these; apps never do. They take the session cookie
+Pley's own page uses these; apps never do. They take the session cookie
 only, never `Authorization`, `X-Pley-Token` or `?token=`. A `POST` needs an
 `Origin` that is this server, and `Sec-Fetch-Site: same-origin` when the
 browser sends it; the `GET` takes `Sec-Fetch-Site` `same-origin` or `none`.
-Anything else is `403` ("this page must be opened from pley itself"). None
+Anything else is `403` ("this page must be opened from Pley itself"). None
 of them answers CORS.
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| POST | `/api/oauth/requests` | `{ query }`: the page's query without `?`, at most 8 KiB | `{ status: "consent", id, expires_at, client: { id, host, name, first_party }, redirect: { kind: "web" \| "app" \| "loopback", to }, scopes }`; or a mistake that goes back to the app, `{ status: "error", error, message, back_url, client, redirect }`, `redirect` saying where "Back to the app" goes. `400` for an app or return address pley can't accept, `429` with too many descriptions read, `503` with too many sign-ins in progress |
-| POST | `/api/oauth/device/verify` | `{ user_code }`: the code a TV shows, as typed | the consent as above, with `redirect: { kind: "device", to: "BCDF-GHJK", device, address }`: `device` is what the TV said it is when it asked for the code (pley's apps give their platform in their User-Agent's brackets, "Kodi 21.3; Windows"; anything else is named as the sign-ins list names it; unchecked, since anyone may ask), `address` where it asked from, each `null` when unknown. The page shows both, so the person can tell which device is signing in. `400` for something that can't be a code, `404` for a code no TV shows (it counts as a wrong one), `409` for one answered already or shown on another session's page, `429` past the wrong codes' limit, `503` with too many sign-ins in progress. A code shown on a page whose session ended since (signed out, or switched profile) goes to whoever types it next; typed again in the same session, the page before can't answer any more |
+| POST | `/api/oauth/requests` | `{ query }`: the page's query without `?`, at most 8 KiB | `{ status: "consent", id, expires_at, client: { id, host, name, first_party }, redirect: { kind: "web" \| "app" \| "loopback", to }, scopes }`; or a mistake that goes back to the app, `{ status: "error", error, message, back_url, client, redirect }`, `redirect` saying where "Back to the app" goes. `400` for an app or return address Pley can't accept, `429` with too many descriptions read, `503` with too many sign-ins in progress |
+| POST | `/api/oauth/device/verify` | `{ user_code }`: the code a TV shows, as typed | the consent as above, with `redirect: { kind: "device", to: "BCDF-GHJK", device, address }`: `device` is what the TV said it is when it asked for the code (Pley's apps give their platform in their User-Agent's brackets, "Kodi 21.3; Windows"; anything else is named as the sign-ins list names it; unchecked, since anyone may ask), `address` where it asked from, each `null` when unknown. The page shows both, so the person can tell which device is signing in. `400` for something that can't be a code, `404` for a code no TV shows (it counts as a wrong one), `409` for one answered already or shown on another session's page, `429` past the wrong codes' limit, `503` with too many sign-ins in progress. A code shown on a page whose session ended since (signed out, or switched profile) goes to whoever types it next; typed again in the same session, the page before can't answer any more |
 | POST | `/api/oauth/requests/{id}` | `{ allow: boolean }` | `{ continue_url }`, or `{ done: true }` for a TV's request, whose answer the TV gets when it next asks. The same answer again gets the same reply, the other one `409`; `404` when the request is over (a TV's too once the TV's code expired) |
 | GET | `/api/oauth/requests/{id}/continue` | – | `303` to the app with the answer. It repeats while the code works and wasn't exchanged, and for a minute after a refusal or a mistake. After that a browser following the link is sent (`303`) to the web app's `/oauth/over` page, which says the request is over; a script gets `404`. Never for a TV's request |
 
@@ -1343,7 +1343,7 @@ addresses carry a key of their own instead:
 - Logs leave the key out (`/api/media/…/12.ts`).
 
 Everything else the player asks for (subtitles, seek previews, its
-reports) goes with the token as usual. pley's Samsung and LG TV apps ask
+reports) goes with the token as usual. Pley's Samsung and LG TV apps ask
 for keyed URLs.
 
 ### Version 2
@@ -1690,7 +1690,7 @@ their watch state changes in a way their screens show:
 - something marked watched or unwatched (`POST /api/items/{id}/watched`,
   `…/unwatched`, the compatibility API's `/:/scrobble` and `/:/unscrobble`), unless
   nothing changed (marked watched again);
-- a progress report (pley's, or a compatibility API player's `/:/timeline` and
+- a progress report (Pley's, or a compatibility API player's `/:/timeline` and
   `/:/progress`) that crosses 90 %, starts a resume point (15 s in) or
   clears one, or that pauses or stops the player somewhere new: where *Play*
   on another device starts. Not the reports that only keep the place every
@@ -1704,7 +1704,7 @@ event for itself, with `children: true`: everything under the first id
 changed too, without listing it. Clients ask again for Home and the
 libraries' rows (Continue Watching) and for what shows those items: their
 pages, children and On Deck, and lists holding them. A play reaching 90 %
-also sends `library_changed`, as before; pley's apps gather both for 0.3 s
+also sends `library_changed`, as before; Pley's apps gather both for 0.3 s
 and ask once, and leave alone what they fetched since the event came (their
 own change).
 
@@ -1784,7 +1784,7 @@ type ServerEvent =
 |---|---|---|---|
 | GET | `/api/users` | – | `User[]` |
 | POST | `/api/users` | `{ username, password?, display_name?, is_admin?, managed?, home? (true), all_libraries? (true), library_ids?, max_age?, pin? }` | `User`; managed profiles need no password |
-| PATCH | `/api/users/{id}` | `{ password?, display_name?, is_admin?, home?, disabled?, all_libraries?, library_ids?, max_age?, pin? }` (`null` clears nullable fields) | `User`. pley always keeps one enabled administrator. A new `password` signs the user out on every device (an administrator's own device stays) and in every app using the account or allowed by it. A change to `is_admin`, `all_libraries`, `library_ids` or `max_age` sends `libraries_changed` to the user's streams, so their devices fetch what they may see again |
+| PATCH | `/api/users/{id}` | `{ password?, display_name?, is_admin?, home?, disabled?, all_libraries?, library_ids?, max_age?, pin? }` (`null` clears nullable fields) | `User`. Pley always keeps one enabled administrator. A new `password` signs the user out on every device (an administrator's own device stays) and in every app using the account or allowed by it. A change to `is_admin`, `all_libraries`, `library_ids` or `max_age` sends `libraries_changed` to the user's streams, so their devices fetch what they may see again |
 | DELETE | `/api/users/{id}` | – | `204` (cannot delete yourself); their apps end with them |
 | GET | `/api/users/{id}/devices` | – | `Device[]` |
 | DELETE | `/api/users/{id}/devices` | – | `204`, signs the user out everywhere, apps included |
@@ -1807,19 +1807,19 @@ type ServerEvent =
 | Method | Path | Body / Query | Response |
 |---|---|---|---|
 | GET | `/api/system` | – | `SystemInfo` (with `database: { ok, problem?, checked_at }`, the integrity check made at start, and `transcode_dir: { in_use, next, default, problem: { folder, reason } \| null, fixed }`: the transcoder's work folder, the one the next start uses when that is another, and why the one chosen couldn't be used) |
-| PUT | `/api/system/transcode-dir` | `{ path: string \| null }` | the new `transcode_dir`: saved in the config file for the next start (`null`, or the default folder, removes `transcode_dir`). `400` for a relative path, a whole drive, the data folder itself, a folder pley can't write in, and when the command line or the environment sets it |
-| GET | `/api/system/resources` | `since` | `{ available, interval_ms, cpus, memory_total, samples: [{ at, cpu, pley_cpu, memory, pley_memory }] }`: the processors' and memory's use, sampled every 2 s for the last five minutes, oldest first (only the samples after `since`, in Unix milliseconds, when given; `at` is in Unix milliseconds too). `cpu` and `pley_cpu` are shares of all the processors' time, 0–100; `memory` (in use on the machine, without what only caches files) and `pley_memory` (its processes' resident memory) bytes, `memory_total` the machine's, `cpus` its logical processors. pley is the server and every process it started: a managed transcoder and its FFmpegs. `available` is false where the system can't be sampled (Windows, Linux and macOS can) |
+| PUT | `/api/system/transcode-dir` | `{ path: string \| null }` | the new `transcode_dir`: saved in the config file for the next start (`null`, or the default folder, removes `transcode_dir`). `400` for a relative path, a whole drive, the data folder itself, a folder Pley can't write in, and when the command line or the environment sets it |
+| GET | `/api/system/resources` | `since` | `{ available, interval_ms, cpus, memory_total, samples: [{ at, cpu, pley_cpu, memory, pley_memory }] }`: the processors' and memory's use, sampled every 2 s for the last five minutes, oldest first (only the samples after `since`, in Unix milliseconds, when given; `at` is in Unix milliseconds too). `cpu` and `pley_cpu` are shares of all the processors' time, 0–100; `memory` (in use on the machine, without what only caches files) and `pley_memory` (its processes' resident memory) bytes, `memory_total` the machine's, `cpus` its logical processors. Pley is the server and every process it started: a managed transcoder and its FFmpegs. `available` is false where the system can't be sampled (Windows, Linux and macOS can) |
 | GET | `/api/system/storage` | – | `{ blobs, blob_bytes, media_folders, media_bytes, cache_bytes }`: space used by stored pictures, generated media files and the cache (docs/STORAGE.md) |
 | POST | `/api/system/storage/clean` | – | `{ blobs_removed, media_folders_removed, bytes_freed, cache_files_removed, cache_bytes_freed }`: removes what nothing uses any more, and old cache files |
 | GET | `/api/system/backups` | – | `{ health: { ok, problem?, checked_at }, backups: { name, path, bytes, created_at }[] }`, newest first |
 | POST | `/api/system/backups` | – | the new backup (a checked `VACUUM INTO` copy; the last 3 are kept) |
 | GET | `/api/transcoder` | – | `TranscoderStatus` – live metrics of the transcoder component (all jobs, counters) |
 | GET | `/api/settings` | – | `Settings` |
-| PUT | `/api/settings` | partial `Settings` | `Settings`. `400` for a `hwaccel` or `tonemapping` that can't work here, changed from what is saved: VAAPI off Linux, VideoToolbox off macOS, NVENC, Quick Sync or AMF on macOS (for a managed transcoder, which runs on pley's system), or one the transcoder found no working encoder or tone mapper for (`transcoder.accels`, `transcoder.tonemapping`; not checked while it isn't running). A value saved before stays and saves with the rest; the transcoder does without it (software encoding, Automatic's tone mapper) |
+| PUT | `/api/settings` | partial `Settings` | `Settings`. `400` for a `hwaccel` or `tonemapping` that can't work here, changed from what is saved: VAAPI off Linux, VideoToolbox off macOS, NVENC, Quick Sync or AMF on macOS (for a managed transcoder, which runs on Pley's system), or one the transcoder found no working encoder or tone mapper for (`transcoder.accels`, `transcoder.tonemapping`; not checked while it isn't running). A value saved before stays and saves with the rest; the transcoder does without it (software encoding, Automatic's tone mapper) |
 | POST | `/api/settings/test` | `{ service: "tmdb" \| "tvdb" \| "tvmaze" \| "musicbrainz" \| "transcoder", api_key?, pin? }` | `{ ok, message, ms }`: one request to the service, with the key and PIN given (not saved) or else the saved ones. `message` says what happened, for people |
 | GET | `/api/fs` | `path` (omit for roots/drives) | `{ path: string \| null, parent: string \| null, entries: { name: string, path: string }[] }` – directories only |
-| GET | `/api/network` | – | `Network`: where pley listens, and could |
-| PUT | `/api/network` | `{ web, plex, plex_on_web?, discovery }` | `Network`, once the new listeners listen or have tried for a moment (3 s at most). Saved in the config file for the next start (`plex_bind`: `"web"`, `"off"` or the addresses). `400` for addresses pley can't listen on together, `plex_on_web` with `plex` addresses too, more than 32 addresses of a kind, and a change of what the command line or the environment sets |
+| GET | `/api/network` | – | `Network`: where Pley listens, and could |
+| PUT | `/api/network` | `{ web, plex, plex_on_web?, discovery }` | `Network`, once the new listeners listen or have tried for a moment (3 s at most). Saved in the config file for the next start (`plex_bind`: `"web"`, `"off"` or the addresses). `400` for addresses Pley can't listen on together, `plex_on_web` with `plex` addresses too, more than 32 addresses of a kind, and a change of what the command line or the environment sets |
 
 ```ts
 interface Network {

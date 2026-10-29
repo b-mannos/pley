@@ -29,7 +29,7 @@ class PlayerLookTest {
         val defaults = PlayerLook.captionLook(Settings())
         assertEquals(CaptionLook.DEFAULT_FRACTION, defaults.textFraction, 0.0001f)
         assertFalse(defaults.box)
-        assertFalse("the system's captions win until pley's own style is chosen", defaults.custom)
+        assertFalse("the system's captions win until Pley's own style is chosen", defaults.custom)
 
         val huge = PlayerLook.captionLook(Settings(subtitleSize = 0.076f))
         assertEquals(0.076f, huge.textFraction, 0.0001f)

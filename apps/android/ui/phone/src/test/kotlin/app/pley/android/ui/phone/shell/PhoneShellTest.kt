@@ -56,7 +56,7 @@ class PhoneShellTest {
     private fun itemPage() = compose.onNodeWithTag(ITEM_SKELETON)
 
     /** The sign-in page (Servers, and SignIn for a server the app was signed out of). */
-    private fun signInPage() = compose.onNodeWithText("Sign in to pley")
+    private fun signInPage() = compose.onNodeWithText("Sign in to Pley")
 
     private fun tab(tab: PhoneTab) = compose.onNodeWithTag(TAB_TAG + tab.name)
 
@@ -165,7 +165,7 @@ class PhoneShellTest {
     fun aMissingScopeOffersToSignInAgainKeepingTheServer() {
         val shell = show(PhoneStart(TestGraph.SERVER, signedIn = true))
         compose.runOnIdle { shell.state.report(ApiException(403, "insufficient_scope", "not allowed", scope = "play")) }
-        compose.onNodeWithText("pley wasn't allowed to do that: sign in again to allow it").assertExists()
+        compose.onNodeWithText("Pley wasn't allowed to do that: sign in again to allow it").assertExists()
         compose.onNodeWithText("Sign in").performClick()
         signInPage().assertExists()
         tab(PhoneTab.Home).assertDoesNotExist()

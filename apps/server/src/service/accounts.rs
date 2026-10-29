@@ -214,7 +214,7 @@ fn made_by_pley(name: &str) -> anyhow::Result<Option<bool>> {
 pub fn create_or_update_user(name: &str, password: &str) -> anyhow::Result<()> {
     anyhow::ensure!(
         made_by_pley(name)? != Some(false),
-        "there is a user named {name} already, not one pley made: choose another name"
+        "there is a user named {name} already, not one Pley made: choose another name"
     );
     let mut name_w = wide(name);
     let mut password_w = wide(password);
@@ -303,7 +303,7 @@ pub fn grant_right(account: &str, right: &str) -> anyhow::Result<()> {
 pub fn delete_user(name: &str) -> anyhow::Result<()> {
     match made_by_pley(name)? {
         None => return Ok(()),
-        Some(false) => anyhow::bail!("{name} isn't a user pley made: it stays"),
+        Some(false) => anyhow::bail!("{name} isn't a user Pley made: it stays"),
         Some(true) => {}
     }
     let mut sid = lookup(&local(name))?;

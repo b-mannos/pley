@@ -23,5 +23,5 @@
     <string name="home_libraries_server_order">Use the server\'s order</string>
     <string name="home_libraries_move_up">Move up</string>
     <string name="home_libraries_move_down">Move down</string>
-    <string name="home_libraries_sort_needs_newer_server">Sorting libraries needs a newer pley on the server.</string>
+    <string name="home_libraries_sort_needs_newer_server">Sorting libraries needs a newer Pley on the server.</string>
 </resources>

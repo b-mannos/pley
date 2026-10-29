@@ -1,12 +1,12 @@
-# Running pley
+# Running Pley
 
 Release archives for Linux, macOS and Windows (x86_64 and arm64) contain the
 two programs, `pley` and `pley-transcoder`, which must stay in the same folder,
 and the Linux and macOS ones the service files below. FFmpeg and ffprobe come
-from the system (or `--ffmpeg` / `--ffprobe`); which FFmpeg decides what pley
+from the system (or `--ffmpeg` / `--ffprobe`); which FFmpeg decides what Pley
 can do with a GPU, so each section below names one.
 
-By default pley listens on port 7539 on all interfaces and keeps its data in:
+By default Pley listens on port 7539 on all interfaces and keeps its data in:
 
 | OS | Data folder |
 |---|---|
@@ -19,7 +19,7 @@ Change it with `--data-dir` or `PLEY_DATA_DIR`. Every option is listed in
 
 ## Docker
 
-`setup.sh` sets pley up with Docker Compose and starts it, locked down and
+`setup.sh` sets Pley up with Docker Compose and starts it, locked down and
 published on `127.0.0.1` for a reverse proxy:
 
 ```sh
@@ -49,7 +49,7 @@ For an Intel or AMD GPU add
 for NVIDIA, `--gpus all` (with the NVIDIA Container Toolkit).
 
 The container runs as uid 1000 (`--user` changes it), so `/config` must be
-writable by it. Setting pley up takes the code it prints at start:
+writable by it. Setting Pley up takes the code it prints at start:
 `docker logs pley` shows a link that fills it in.
 `docker exec -it pley pley reset-password <user>` recovers a lost
 password (it asks for the new one).
@@ -79,13 +79,13 @@ isn't on `PATH`. Then:
 - **Intel and AMD:** install the VAAPI driver (`intel-media-va-driver` or
   `mesa-va-drivers`) and Mesa's Vulkan driver (`mesa-vulkan-drivers`, for
   tone mapping), and uncomment `SupplementaryGroups=render video` in the
-  unit. With several GPUs pley takes the first Intel or AMD one;
+  unit. With several GPUs Pley takes the first Intel or AMD one;
   `Environment=PLEY_VAAPI_DEVICE=/dev/dri/renderD129` picks another.
 - **NVIDIA:** the proprietary driver is enough. If NVENC works by hand but
   not from the service, load `nvidia-uvm` at boot (the unit can't load
   kernel modules).
 
-pley's log names the encoders it found as it starts (`journalctl -u pley |
+Pley's log names the encoders it found as it starts (`journalctl -u pley |
 grep detected`), and looks again when the GPUs change.
 
 ## macOS (launchd)
@@ -101,14 +101,14 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/pley.server.plist
 ```
 
 It runs as your user at login. VideoToolbox hardware encoding is used
-automatically. Homebrew's `ffmpeg-full`, which pley finds by itself, has the
+automatically. Homebrew's `ffmpeg-full`, which Pley finds by itself, has the
 tone mapping and subtitle burn-in that its `ffmpeg` leaves out. Downloaded
 binaries may need `xattr -d com.apple.quarantine pley pley-transcoder` until
 releases are signed.
 
 ## Windows
 
-`pley-server-<version>-windows-<arch>-setup.exe` installs pley as a Windows
+`pley-server-<version>-windows-<arch>-setup.exe` installs Pley as a Windows
 service, locked down to its own account and data folder, or in the
 notification area, with FFmpeg, the firewall and an uninstaller:
 [windows/README.md](windows/README.md) is the whole guide (accounts, NAS
@@ -117,15 +117,15 @@ sign-ins, silent installs, `pley service`).
 Or install FFmpeg (for example `winget install Gyan.FFmpeg`), extract the
 archive and run `pley.exe`. NVENC, QSV, AMF and Vulkan tone mapping work with
 the gyan.dev "full" FFmpeg build. On Windows on Arm, FFmpeg runs emulated and
-pley transcodes on the CPU.
+Pley transcodes on the CPU.
 
 ## The tray icon
 
 On a desktop (Windows, macOS, Linux with a StatusNotifier host such as KDE or
-GNOME with the AppIndicator extension), pley shows an icon in the
+GNOME with the AppIndicator extension), Pley shows an icon in the
 notification area or menu bar while it runs: click it to open the web UI;
-its menu scans the libraries, shows the logs, turns **Start pley at login** on
-or off and quits pley. Started by double-click on Windows, pley closes its
+its menu scans the libraries, shows the logs, turns **Start Pley at login** on
+or off and quits Pley. Started by double-click on Windows, Pley closes its
 console window once the icon is up; logs are in `logs/pley.log` in the data
 folder. Services, containers and SSH sessions never show the icon, and
 `--no-tray` (or `PLEY_NO_TRAY=true`) turns it off.
@@ -139,13 +139,13 @@ servers on the local network through UDP port 7539; allow it too, or enter
 the server's address in the app. Containers only answer them with host
 networking (`--network host`), since broadcasts don't reach a bridge
 network. For access outside your network,
-put pley behind a reverse proxy with TLS (Caddy, nginx, Traefik); it serves
+put Pley behind a reverse proxy with TLS (Caddy, nginx, Traefik); it serves
 plain HTTP and works under any host name. Docker publishes ports around host
-firewalls: behind a proxy on the same host, publish pley on `127.0.0.1` only.
+firewalls: behind a proxy on the same host, publish Pley on `127.0.0.1` only.
 
 ## Apps and reverse proxies
 
-Apps sign in on pley's own page (OAuth 2.1), and pley names itself by the
+Apps sign in on Pley's own page (OAuth 2.1), and Pley names itself by the
 address each request came to. A reverse proxy must therefore pass the
 original `Host` header and set `X-Forwarded-Proto`, overwriting what
 clients send rather than adding to it (RFC 9700 §4.13). Caddy does both by
@@ -167,13 +167,13 @@ the proxy must not buffer them.
 nginx's `$host` leaves the port out. A proxy that does that (Nginx Proxy
 Manager does by default) works when the address is reached at its scheme's
 own port (`https://media.example.com`). At another
-(`https://media.example.com:9999`), pley would name itself without the
+(`https://media.example.com:9999`), Pley would name itself without the
 port, and apps would refuse it: add the address in **Settings → Network →
 Reached through a reverse proxy** (the page offers it when opened there),
-and pley puts the port back.
+and Pley puts the port back.
 
 TVs signing in with a code are limited per address. Behind a proxy on the
-same computer or network, pley counts the address the proxy adds last to
+same computer or network, Pley counts the address the proxy adds last to
 `X-Forwarded-For` (Caddy and the line above add it); without it, every TV
 counts as the proxy.
 
@@ -181,14 +181,14 @@ Otherwise apps refuse the server: its sign-in description
 (`/.well-known/oauth-authorization-server`) names another address than the
 one they used (RFC 8414 §3.3).
 
-pley's own apps can always sign in. Apps by other publishers are off until
-an administrator turns them on in **Settings → Server → Apps**; pley then
+Pley's own apps can always sign in. Apps by other publishers are off until
+an administrator turns them on in **Settings → Server → Apps**; Pley then
 reads their descriptions from the internet when someone allows one.
 
 ## Upgrading from single sign-on
 
-pley no longer signs people in through an OpenID Connect provider: if you
-set one up, delete pley's client at the provider. Upgrading removes the
+Pley no longer signs people in through an OpenID Connect provider: if you
+set one up, delete Pley's client at the provider. Upgrading removes the
 single sign-on settings and the identities linked to accounts, but the copy
 of the database made before the upgrade (`backups/pley-…-before-upgrade.db`
 in the data folder) and older backups still hold the old client secret.

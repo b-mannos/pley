@@ -54,7 +54,7 @@ WARRANTY. See the LICENSE file.";
 #[command(
     name = "pley-transcoder",
     version = concat!(env!("CARGO_PKG_VERSION"), " (", env!("PLEY_COMMIT"), ")"),
-    about = "pley transcoder — FFmpeg media engine for the pley media server"
+    about = "Pley transcoder — FFmpeg media engine for the Pley media server"
 )]
 struct Args {
     /// Address to listen on (port 0 picks a free port)
@@ -94,7 +94,7 @@ struct Args {
     #[arg(long)]
     announce: bool,
 
-    /// Exit when stdin reaches EOF (used when supervised by the pley server)
+    /// Exit when stdin reaches EOF (used when supervised by the Pley server)
     #[arg(long)]
     exit_with_parent: bool,
 
@@ -150,7 +150,7 @@ fn check_token(token: Option<&str>, listen: SocketAddr) -> anyhow::Result<()> {
     match token {
         None if listen.ip().is_loopback() => Ok(()),
         None => anyhow::bail!(
-            "listening on {listen} takes a token ({TOKEN_ENV}, and the same in pley's transcoder_token): \
+            "listening on {listen} takes a token ({TOKEN_ENV}, and the same in Pley's transcoder_token): \
              anyone who can reach this port could otherwise read any file it can. A random one: {suggestion}"
         ),
         Some(token)

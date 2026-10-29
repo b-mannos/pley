@@ -37,7 +37,7 @@ def metadata(server: str, user_agent: str) -> dict:
     issuer is the address asked (§3.3), and the endpoints are on it."""
     meta = Client(server, user_agent).get("/.well-known/oauth-authorization-server")
     if not isinstance(meta, dict):
-        raise ApiError(0, "issuer", "{} isn't a pley server".format(server))
+        raise ApiError(0, "issuer", "{} isn't a Pley server".format(server))
     if meta.get("issuer") != server:
         raise ApiError(0, "issuer", "the server says it is {}, not {}".format(meta.get("issuer"), server))
     for name in ("token_endpoint", "device_authorization_endpoint", "revocation_endpoint"):

@@ -35,13 +35,13 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "CompanyName", "the pley authors"
-      VALUE "FileDescription", "pley transcoder"
+      VALUE "CompanyName", "the Pley authors"
+      VALUE "FileDescription", "Pley transcoder"
       VALUE "FileVersion", "{version}"
       VALUE "InternalName", "pley-transcoder"
-      VALUE "LegalCopyright", "Copyright (C) 2026 the pley authors"
+      VALUE "LegalCopyright", "Copyright (C) 2026 the Pley authors"
       VALUE "OriginalFilename", "pley-transcoder.exe"
-      VALUE "ProductName", "pley"
+      VALUE "ProductName", "Pley"
       VALUE "ProductVersion", "{version} ({commit})"
     END
   END

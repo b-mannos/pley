@@ -37,7 +37,7 @@ sub onActive()
             m.intro.text = "The server ended this TV's sign-in: sign in again."
             m.intro.visible = true
         else if reason = "wider_scope"
-            m.intro.text = "The server allowed more than pley for Roku asks for, so it was signed out."
+            m.intro.text = "The server allowed more than Pley for Roku asks for, so it was signed out."
             m.intro.visible = true
         end if
         ask()

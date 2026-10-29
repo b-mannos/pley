@@ -98,7 +98,7 @@ export function tizenPlatform(): Platform {
     name: "tizen",
     clientId: CLIENT_ID,
     version: __PLEY_VERSION__,
-    appName: "pley for Samsung TV",
+    appName: "Pley for Samsung TV",
     storage: localStore,
     mapKey(e: KeyboardEvent): Key | null {
       return keys[e.keyCode] ?? standardKey(e);

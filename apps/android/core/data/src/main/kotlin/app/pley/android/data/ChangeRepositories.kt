@@ -104,4 +104,4 @@ interface TrackDefaultsRepository {
  * play): show them read-only, to change on the web.
  */
 class TrackDefaultsUnsupported(cause: Throwable? = null) :
-    UnsupportedOperationException("change these on pley's web app", cause), UserFacing
+    UnsupportedOperationException("change these on Pley's web app", cause), UserFacing

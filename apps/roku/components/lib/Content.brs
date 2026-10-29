@@ -344,7 +344,7 @@ function contentDetail(detail as object, server as string, onDeck = invalid as d
         buttons.Push("Episodes")
         actions.Push("episodes")
     else if not contentPlayable(kind)
-        note = "pley for Roku doesn't play this kind of title yet."
+        note = "Pley for Roku doesn't play this kind of title yet."
     else if files.Count() = 0
         note = "This item has no file to play."
     else if fmtResumable(position, duration)

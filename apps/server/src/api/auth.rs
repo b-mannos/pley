@@ -90,7 +90,7 @@ pub async fn setup(
     if set_up {
         // An account made elsewhere (`pley reset-password --admin`, say).
         state.auth.setup.clear();
-        return Err(AppError::conflict("pley is already set up"));
+        return Err(AppError::conflict("Pley is already set up"));
     }
     // 5 tries every 15 minutes from each address: someone guessing doesn't
     // lock the owner out (31^8 codes; a restart makes a new one).
@@ -98,7 +98,7 @@ pub async fn setup(
     if !state.auth.setup.matches(body.setup_code.as_deref().unwrap_or_default()) {
         attempt.failed();
         return Err(AppError::forbidden(
-            "enter the setup code from the server's log (opening pley from its tray icon fills it in)",
+            "enter the setup code from the server's log (opening Pley from its tray icon fills it in)",
         ));
     }
     attempt.succeeded();
@@ -117,7 +117,7 @@ pub async fn setup(
     .bind(now())
     .fetch_optional(&state.db.write)
     .await?;
-    let id = created.ok_or_else(|| AppError::conflict("pley is already set up"))?;
+    let id = created.ok_or_else(|| AppError::conflict("Pley is already set up"))?;
     state.auth.setup.clear();
     tracing::info!("created administrator account '{}'", body.username.trim());
     login_response(&state, id, &headers, ip.as_deref()).await

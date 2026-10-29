@@ -64,9 +64,9 @@ internal fun PleyLogo(modifier: Modifier = Modifier, height: Dp = 40.dp) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(height * 0.4f)) {
         Image(rememberVectorPainter(PleyMark.Tile), contentDescription = null, modifier = Modifier.size(height))
         BasicText(
-            "pley",
+            "Pley",
             style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg, fontSize = (height.value * 0.75f).sp, lineHeight = height.value.sp),
-            modifier = Modifier.semantics { contentDescription = "pley" },
+            modifier = Modifier.semantics { contentDescription = "Pley" },
         )
     }
 }

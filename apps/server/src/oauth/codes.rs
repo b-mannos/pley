@@ -281,7 +281,7 @@ mod tests {
             app: AppSnapshot {
                 id: APP.into(),
                 host: "hhaidar.github.io".into(),
-                name: Some("pley for Android".into()),
+                name: Some("Pley for Android".into()),
                 first_party: true,
                 refresh: true,
             },

@@ -12,7 +12,7 @@ const version = versionOf(join(root, "package.json"));
 const dist = join(root, "dist");
 
 const { bytes } = await buildApp({
-  app: "pley for LG TV",
+  app: "Pley for LG TV",
   entry: join(root, "src/main.ts"),
   outdir: dist,
   // webOS 4 (2018) runs Chromium 53.
@@ -29,4 +29,4 @@ const { bytes } = await buildApp({
 const appinfo = JSON.parse(readFileSync(join(root, "appinfo.json"), "utf8"));
 appinfo.version = version;
 writeFileSync(join(dist, "appinfo.json"), JSON.stringify(appinfo, null, 2) + "\n");
-console.log(`pley for LG TV ${version}: dist/ (${(bytes / 1024).toFixed(0)} KB of script and styles)`);
+console.log(`Pley for LG TV ${version}: dist/ (${(bytes / 1024).toFixed(0)} KB of script and styles)`);

@@ -104,7 +104,7 @@ export function InvitePage() {
             required
           />
         </Field>
-        <Field label="Your name" htmlFor="invite-name" hint="Optional: how pley greets you.">
+        <Field label="Your name" htmlFor="invite-name" hint="Optional: how Pley greets you.">
           <TextInput id="invite-name" autoComplete="name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         </Field>
         <Field label="Password" htmlFor="invite-password" hint={`At least ${MIN_PASSWORD_LENGTH} characters.`}>

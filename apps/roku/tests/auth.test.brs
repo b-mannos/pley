@@ -31,7 +31,7 @@ sub test_auth_refuses_metadata_of_another_address()
     tkTrue(Instr(1, meta.message, "calls itself http://pley.local:7539") > 0, meta.message)
 
     elsewhere = authTestMetadata().Replace("""token_endpoint"":""http://pley.local:7539/", """token_endpoint"":""http://evil.example.com/")
-    tkEqual(authParseMetadata(elsewhere, "http://pley.local:7539").message, "This server sends apps to another address to sign in: pley doesn't.")
+    tkEqual(authParseMetadata(elsewhere, "http://pley.local:7539").message, "This server sends apps to another address to sign in: Pley doesn't.")
 end sub
 
 sub test_auth_tells_old_servers_apart()
@@ -174,8 +174,8 @@ sub test_auth_polls_slower_after_network_failures()
 end sub
 
 sub test_auth_explains_device_refusals()
-    tkEqual(authDeviceRefusal(400, "{""error"":""invalid_client""}"), "This server doesn't know pley for Roku yet: update it.")
-    tkEqual(authDeviceRefusal(400, "{""error"":""unauthorized_client""}"), "This server doesn't let pley for Roku sign in with a code.")
+    tkEqual(authDeviceRefusal(400, "{""error"":""invalid_client""}"), "This server doesn't know Pley for Roku yet: update it.")
+    tkEqual(authDeviceRefusal(400, "{""error"":""unauthorized_client""}"), "This server doesn't let Pley for Roku sign in with a code.")
     tkEqual(authDeviceRefusal(429, "{""error"":""temporarily_unavailable""}"), "Too many sign-ins are waiting on this server: try again in a few minutes.")
     tkEqual(authDeviceRefusal(-7, ""), "The server can't be reached.")
 end sub

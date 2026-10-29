@@ -390,7 +390,7 @@ async fn each_scope_opens_only_its_routes() {
         "this app wasn't allowed to make, change and delete the profile's playlists: sign in to it again to allow it"
     );
     let settings = app.get("/api/settings", &library).await;
-    assert_eq!(settings.body["message"], "apps can't do that: use pley's web app");
+    assert_eq!(settings.body["message"], "apps can't do that: use Pley's web app");
 }
 
 #[tokio::test]

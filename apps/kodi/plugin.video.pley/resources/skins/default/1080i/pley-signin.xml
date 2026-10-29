@@ -34,7 +34,7 @@
       <align>left</align>
       <aligny>center</aligny>
       <scroll>false</scroll>
-      <label>pley</label>
+      <label>Pley</label>
     </control>
     <control type="label">
       <left>192</left>

@@ -250,7 +250,7 @@ export function App(p: ShellProps) {
         )}
         {exiting.value && (
           <Dialog
-            title="Exit pley?"
+            title="Exit Pley?"
             onDismiss={() => (exiting.value = false)}
             buttons={[
               { label: "Cancel", onSelect: () => (exiting.value = false) },

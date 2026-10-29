@@ -1,6 +1,6 @@
 # pley-transcoder
 
-`pley-transcoder` is the component of pley that does **everything involving
+`pley-transcoder` is the component of Pley that does **everything involving
 FFmpeg**:
 
 - probing media files
@@ -10,7 +10,7 @@ FFmpeg**:
 - thumbnails and embedded cover art
 - keyframe indexing
 
-It is a separate program. The pley media server
+It is a separate program. The Pley media server
 runs it as a child process, or connects to one running elsewhere, and talks to
 it only through the HTTP API described here. The request and response types
 live in the `pley-transcoder-api` crate.
@@ -151,7 +151,7 @@ half-made ones are deleted.
 1. **Layout first.** When a job is created, its segment layout is fixed and the
    whole VOD playlist is known up front, so players can seek anywhere.
    - Segments are as long as the request's `segment_seconds` (1 to 10 s, 4 s
-     by default). The pley server asks for 2 s: nothing plays before FFmpeg
+     by default). The Pley server asks for 2 s: nothing plays before FFmpeg
      has written a whole segment, so shorter ones start playback, seeks and
      quality switches sooner, for a keyframe every 2 s.
    - When transcoding, keyframes are forced on that grid.
@@ -450,7 +450,7 @@ half-made ones are deleted.
   `channels` never goes above the source's (a stereo track stays stereo),
   `bitrate_kbps` overrides the defaults within 64 to 640, and audio that
   isn't at 44.1 or 48 kHz is resampled to 48 kHz (the AC-3 encoders take
-  nothing above 48 kHz). The pley server asks for E-AC-3 5.1 for players
+  nothing above 48 kHz). The Pley server asks for E-AC-3 5.1 for players
   whose output has 6 channels or more and that decode E-AC-3 or pass it
   through, AC-3 5.1 when they take only AC-3, and AAC otherwise (docs/API.md,
   *Version 2*). The job's audio plan reports the codec as `codec_out`.
@@ -595,7 +595,7 @@ half-made ones are deleted.
     start or out of order, or is WebVTT as mkvmerge writes it
     (`S_TEXT/WEBVTT`; WebM's `D_WEBVTT` is read); the file's timestamps
     aren't whole milliseconds and it has a start time, as ffprobe gives
-    every file with audio or video (pley's media info keeps that start in
+    every file with audio or video (Pley's media info keeps that start in
     whole milliseconds, while FFmpeg takes it off to the microsecond). Then
     every text track of the file comes out in a single pass over it, which
     may take 20 minutes, or as long as reading the file at 10 MB/s takes
@@ -618,7 +618,7 @@ half-made ones are deleted.
 `POST /v1/fingerprint` runs FFmpeg's `chromaprint` muxer (`-f chromaprint
 -fp_format raw`) on part of the audio, downmixed to mono 11025 Hz, which is
 what Chromaprint analyses. Each value covers 1365 samples (0.124 s) and is
-returned as a plain number. The pley server compares the fingerprints of
+returned as a plain number. The Pley server compares the fingerprints of
 episodes to find shared intros and credits. Requests run two at a time, at
 below-normal process priority, and pause while a playback starts or a
 transcode runs (see *Background work and playback*), so they never slow down
@@ -677,7 +677,7 @@ counts the time it ran. A playback starts:
 - while a job is being created (probe, keyframe index, FFmpeg's start);
 - while one of its FFmpeg processes, at Play, a seek, a restart, hasn't
   written its first 3 segments, 20 s at most;
-- for `ms` after `POST /v1/hold`, which the pley server sends for a direct
+- for `ms` after `POST /v1/hold`, which the Pley server sends for a direct
   play (10 s): it serves those itself.
 
 Transcodes come first too. While a job's FFmpeg or a conversion runs (it
@@ -709,10 +709,10 @@ Background runs and conversions start at below-normal process priority
   duplicated frames), restarts, bytes served, warnings and the last error
 
 `GET /metrics` exposes the same data for Prometheus (`pley_transcoder_*`). The
-pley web UI shows it under *Settings → Dashboard*, next to the processors'
+Pley web UI shows it under *Settings → Dashboard*, next to the processors'
 and memory's use that the server samples itself every 2 s
 (`GET /api/system/resources`, docs/API.md): a managed transcoder and its
-FFmpeg processes count there as pley's (the server's process tree); an
+FFmpeg processes count there as Pley's (the server's process tree); an
 external one doesn't.
 
 ## Benchmark

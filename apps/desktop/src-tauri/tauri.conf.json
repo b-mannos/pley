@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "pley",
+  "productName": "Pley",
   "version": "0.2.0",
   "identifier": "app.pley.desktop",
   "build": {
@@ -18,12 +18,17 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "publisher": "the pley authors",
-    "copyright": "Copyright (c) 2026 the pley authors",
+    "publisher": "the Pley authors",
+    "copyright": "Copyright (c) 2026 the Pley authors",
     "homepage": "https://github.com/hhaidar/pley",
     "category": "Video",
-    "shortDescription": "pley for your desktop",
-    "longDescription": "A window on your pley media server: browse your movies, shows and music, play them, and download them to watch away from home.",
-    "icon": ["icons/128x128@2x.png", "icons/128x128.png", "icons/32x32.png", "icons/icon.icns", "icons/icon.ico"]
+    "shortDescription": "Pley for your desktop",
+    "longDescription": "A window on your Pley media server: browse your movies, shows and music, play them, and download them to watch away from home.",
+    "icon": ["icons/128x128@2x.png", "icons/128x128.png", "icons/32x32.png", "icons/icon.icns", "icons/icon.ico"],
+    "windows": {
+      "wix": {
+        "upgradeCode": "b02fe908-68dc-5762-aa1a-aaed8498b475"
+      }
+    }
   }
 }

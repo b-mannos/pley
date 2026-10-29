@@ -15,8 +15,8 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
     <children>
-        <Label id="wordmark" translation="[96, 72]" text="pley" color="0x38BDF8FF" font="font:ExtraLargeBoldSystemFont" />
-        <Label id="title" translation="[96, 180]" width="1500" text="Sign in to pley" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="wordmark" translation="[96, 72]" text="Pley" color="0x38BDF8FF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="title" translation="[96, 180]" width="1500" text="Sign in to Pley" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
         <Label id="server" translation="[96, 262]" width="1500" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
         <Label id="intro" translation="[96, 306]" width="1500" color="0xEB6B70FF" visible="false" font="font:SmallerSystemFont" />
         <Group id="steps">

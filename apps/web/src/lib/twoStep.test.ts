@@ -26,7 +26,7 @@ describe("two-step sign-in helpers", () => {
   it("writes the codes down with what they're for", () => {
     const text = recoveryCodesText(["aaaa-bbbb-cccc-dddd", "eeee-ffff-gggg-hhhh"], "bob", "Living room");
     expect(text.split("\n")).toEqual([
-      "pley recovery codes for bob on Living room",
+      "Pley recovery codes for bob on Living room",
       "Each code signs in once, instead of a code from your authenticator app.",
       "",
       "aaaa-bbbb-cccc-dddd",

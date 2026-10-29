@@ -51,7 +51,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
   return (
     <nav className="flex h-full flex-col overflow-y-auto px-3 pb-4 pt-4" aria-label="Main">
       <div className="mb-6 flex items-center justify-between px-2">
-        <Link to="/" aria-label="pley home">
+        <Link to="/" aria-label="Pley home">
           <Logo />
         </Link>
         {onClose ? (

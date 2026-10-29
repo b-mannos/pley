@@ -114,7 +114,7 @@ class UdpDiscoveryTest {
             answer(reply("Living Room", "abc"), "192.168.1.5")
             answer("""{"not":"pley"}""", "192.168.1.9")
             answer("garbage", "192.168.1.9")
-            answer(reply("Old pley", id = null, port = 8080), "192.168.1.7")
+            answer(reply("Old Pley", id = null, port = 8080), "192.168.1.7")
         }
         // The same server, seen from the other network.
         ports.getValue(ethernet).answer(reply("Living Room", "abc"), "192.168.50.5")
@@ -122,7 +122,7 @@ class UdpDiscoveryTest {
         assertEquals(
             listOf(
                 DiscoveryEvent.Found(FoundServer("http://192.168.1.5:7539", "Living Room", "abc", "0.42.0")),
-                DiscoveryEvent.Found(FoundServer("http://192.168.1.7:8080", "Old pley", null, "0.42.0")),
+                DiscoveryEvent.Found(FoundServer("http://192.168.1.7:8080", "Old Pley", null, "0.42.0")),
                 DiscoveryEvent.Done,
             ),
             collected.await(),

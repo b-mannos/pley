@@ -154,9 +154,9 @@ class SignInTest {
         )
         state = query(signIn.start(server.url("/").toString()))["state"]!!
         val failed = signIn.finish(
-            callback("error" to "invalid_scope", "error_description" to "this app asked for access‮ pley doesn't offer", "state" to state, "iss" to issuer),
+            callback("error" to "invalid_scope", "error_description" to "this app asked for access‮ Pley doesn't offer", "state" to state, "iss" to issuer),
         ) as SignInState.Failed
-        assertEquals("the server refused: this app asked for access pley doesn't offer", failed.message)
+        assertEquals("the server refused: this app asked for access Pley doesn't offer", failed.message)
         state = query(signIn.start(server.url("/").toString()))["state"]!!
         assertTrue(signIn.finish(callback("state" to state, "iss" to issuer)) is SignInState.Failed)
         assertEquals(0, posted("/api/oauth/token").size)

@@ -17,7 +17,7 @@ function tvRequest(): ConsentRequest {
     client: {
       id: "https://hhaidar.github.io/pley/oauth/android.json",
       host: "hhaidar.github.io",
-      name: "pley for Android",
+      name: "Pley for Android",
       first_party: true,
     },
     redirect: { kind: "device", to: "BCDF-GHJK" },
@@ -90,7 +90,7 @@ function attend() {
 }
 
 const URL_CODE = "/link?code=BCDFGHJK";
-const HEADING = "pley for Android wants to use your pley account";
+const HEADING = "Pley for Android wants to use your Pley account";
 
 /** Types `code` (null: the address brought it) and continues; the consent's buttons. */
 async function continueWith(code: string | null) {
@@ -129,13 +129,13 @@ describe("LinkPage", () => {
   it("says which device is asking: what it says it is, and where from", async () => {
     const kodi: ConsentRequest = {
       ...tvRequest(),
-      client: { id: "https://hhaidar.github.io/pley/oauth/kodi.json", host: "hhaidar.github.io", name: "pley for Kodi", first_party: true },
+      client: { id: "https://hhaidar.github.io/pley/oauth/kodi.json", host: "hhaidar.github.io", name: "Pley for Kodi", first_party: true },
       redirect: { kind: "device", to: "BCDF-GHJK", device: "Kodi 21.3; Windows", address: "192.168.1.20" },
     };
     serve({ verify: () => kodi });
     renderPage(URL_CODE);
     await userEvent.setup().click(await screen.findByRole("button", { name: "Continue" }));
-    await screen.findByRole("heading", { name: "pley for Kodi wants to use your pley account" });
+    await screen.findByRole("heading", { name: "Pley for Kodi wants to use your Pley account" });
     expect(screen.getByText("It says it is Kodi 21.3; Windows, at 192.168.1.20.")).toBeInTheDocument();
   });
 
@@ -207,7 +207,7 @@ describe("LinkPage", () => {
     const { allow, deny } = await continueWith("bcdf ghjk");
     expect(posts(requests, "/api/oauth/device/verify").map((r) => r.body)).toEqual([{ user_code: "BCDFGHJK" }]);
 
-    expect(screen.getByText("pley's own app")).toBeInTheDocument();
+    expect(screen.getByText("Pley's own app")).toBeInTheDocument();
     expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
       "See Admin's libraries, playlists and watch history.",
       "Play titles, and keep Admin's place, watched marks, ratings, track choices and library order.",
@@ -236,7 +236,7 @@ describe("LinkPage", () => {
     attend();
 
     await userEvent.setup().click(allow);
-    expect(await screen.findByRole("heading", { name: "pley for Android on your TV is signing in" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Pley for Android on your TV is signing in" })).toBeInTheDocument();
     expect(screen.getByText("You can close this page.")).toBeInTheDocument();
     expect(posts(requests, "/api/oauth/requests/d1").map((r) => r.body)).toEqual([{ allow: true }]);
     expect(assign).not.toHaveBeenCalled();
@@ -285,7 +285,7 @@ describe("LinkPage", () => {
   });
 
   it.each([
-    [400, "bad_request", "that isn't a code from a pley app: codes are 8 letters, like BCDF-GHJK"],
+    [400, "bad_request", "that isn't a code from a Pley app: codes are 8 letters, like BCDF-GHJK"],
     [404, "not_found", "no TV is waiting for that code: check the code on your TV, or start again there"],
     [409, "conflict", "that code was already used: start again on your TV"],
     [429, "too_many_requests", "too many wrong codes: wait a few minutes and try again"],

@@ -109,9 +109,9 @@ pub async fn check_server(url: String) -> Result<ServerInfo, String> {
         }
     })?;
     if !response.status().is_success() {
-        return Err(format!("it answered HTTP {}, so it isn't a pley server", response.status().as_u16()));
+        return Err(format!("it answered HTTP {}, so it isn't a Pley server", response.status().as_u16()));
     }
-    response.json::<ServerInfo>().await.map_err(|_| "that isn't a pley server".to_owned())
+    response.json::<ServerInfo>().await.map_err(|_| "that isn't a Pley server".to_owned())
 }
 
 #[cfg(test)]
@@ -173,7 +173,7 @@ mod tests {
         assert_eq!((info.name.as_str(), info.version.as_str()), ("Den", "0.1.0"));
 
         let other = answering("200 OK", "<html>router</html>").await;
-        assert_eq!(check_server(other).await.unwrap_err(), "that isn't a pley server");
+        assert_eq!(check_server(other).await.unwrap_err(), "that isn't a Pley server");
         let missing = answering("404 Not Found", "{}").await;
         assert!(check_server(missing).await.unwrap_err().contains("HTTP 404"));
 

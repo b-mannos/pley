@@ -1,6 +1,6 @@
 {
   "client_id": "https://hhaidar.github.io/pley/oauth/tizen.json",
-  "client_name": "pley for Samsung TV",
+  "client_name": "Pley for Samsung TV",
   "client_uri": "https://github.com/hhaidar/pley",
   "redirect_uris": [],
   "grant_types": ["refresh_token", "urn:ietf:params:oauth:grant-type:device_code"],

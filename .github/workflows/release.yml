@@ -359,7 +359,7 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" dist/* --draft --verify-tag --generate-notes --title "pley $TAG" --repo "$GITHUB_REPOSITORY"
+            gh release create "$TAG" dist/* --draft --verify-tag --generate-notes --title "Pley $TAG" --repo "$GITHUB_REPOSITORY"
           fi
 
   docker:

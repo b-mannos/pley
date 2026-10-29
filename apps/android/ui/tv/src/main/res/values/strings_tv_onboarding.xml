@@ -6,7 +6,7 @@
     <string name="tv_onboarding_unreachable">Can\'t reach it</string>
     <string name="tv_onboarding_lookalike">Not your saved server</string>
     <string name="tv_onboarding_unencrypted">Not encrypted</string>
-    <string name="tv_onboarding_searching">Looking for pley on your network…</string>
+    <string name="tv_onboarding_searching">Looking for Pley on your network…</string>
     <string name="tv_onboarding_none_found">No servers found. Make sure this TV and the server are on the same network.</string>
     <string name="tv_onboarding_enter_address">Enter an address</string>
     <string name="tv_onboarding_search_network">Search this network</string>
@@ -17,20 +17,20 @@
     <string name="tv_onboarding_connecting">Connecting to %1$s…</string>
     <string name="tv_onboarding_forget_hint">Hold OK on a saved server to forget it.</string>
     <string name="tv_onboarding_forget_title">Forget %1$s?</string>
-    <string name="tv_onboarding_forget_body">pley signs this TV out of it and deletes what it saved from it.</string>
+    <string name="tv_onboarding_forget_body">Pley signs this TV out of it and deletes what it saved from it.</string>
     <string name="tv_onboarding_forget">Forget</string>
     <string name="tv_onboarding_cancel">Cancel</string>
 
     <!-- Local network access (Android 17, Fire OS 16). -->
-    <string name="tv_onboarding_access_title">Allow pley on your network</string>
-    <string name="tv_onboarding_access_body">pley looks for servers on your home network. Allow it to see devices on this network.</string>
+    <string name="tv_onboarding_access_title">Allow Pley on your network</string>
+    <string name="tv_onboarding_access_body">Pley looks for servers on your home network. Allow it to see devices on this network.</string>
     <string name="tv_onboarding_continue">Continue</string>
-    <string name="tv_onboarding_access_denied">pley needs access to devices on your network to find and reach servers at home.</string>
+    <string name="tv_onboarding_access_denied">Pley needs access to devices on your network to find and reach servers at home.</string>
     <string name="tv_onboarding_open_settings">Open settings</string>
 
     <!-- What went wrong with a server. -->
     <string name="tv_onboarding_problem_unreachable">Couldn\'t reach %1$s: %2$s</string>
-    <string name="tv_onboarding_problem_not_pley">Something answers at %1$s, but it isn\'t pley.</string>
+    <string name="tv_onboarding_problem_not_pley">Something answers at %1$s, but it isn\'t Pley.</string>
     <string name="tv_onboarding_problem_unencrypted">%1$s isn\'t encrypted: what you watch could be read on the way. Use its https address if it has one, or press Connect again to go ahead anyway.</string>
     <string name="tv_onboarding_problem_address">Enter an address such as nas, 192.168.1.20 or pley.example.com.</string>
 
@@ -42,12 +42,12 @@
     <string name="tv_onboarding_checking">Checking…</string>
 
     <!-- Signing in with a code (design spec §2.8). -->
-    <string name="tv_onboarding_link_title">Sign in to pley</string>
+    <string name="tv_onboarding_link_title">Sign in to Pley</string>
     <string name="tv_onboarding_link_scan_step">Scan the code with your phone</string>
     <string name="tv_onboarding_link_go_to">or go to</string>
     <string name="tv_onboarding_link_enter_step">and enter this code</string>
     <string name="tv_onboarding_link_same_wifi">Your phone must be on the same Wi-Fi as this TV.</string>
-    <string name="tv_onboarding_link_other_device">Or open pley on a signed-in device → Link a TV</string>
+    <string name="tv_onboarding_link_other_device">Or open Pley on a signed-in device → Link a TV</string>
     <string name="tv_onboarding_link_scan">Scan with your phone camera</string>
     <string name="tv_onboarding_change_server">Change server</string>
     <string name="tv_onboarding_waiting">Waiting for approval…</string>
@@ -74,8 +74,8 @@
     <string name="tv_onboarding_ok">OK</string>
     <string name="tv_onboarding_use_another">Use another profile</string>
     <string name="tv_onboarding_approve_title">Approve on your phone</string>
-    <string name="tv_onboarding_approve_body">%1$s\'s profile needs its password: approve this code on a phone signed in to pley, and pick %1$s there.</string>
+    <string name="tv_onboarding_approve_body">%1$s\'s profile needs its password: approve this code on a phone signed in to Pley, and pick %1$s there.</string>
     <string name="tv_onboarding_another_profile">Sign in as another profile</string>
-    <string name="tv_onboarding_another_body">Approve this code on a phone signed in to pley, and pick the profile there.</string>
+    <string name="tv_onboarding_another_body">Approve this code on a phone signed in to Pley, and pick the profile there.</string>
     <string name="tv_onboarding_retry">Retry</string>
 </resources>

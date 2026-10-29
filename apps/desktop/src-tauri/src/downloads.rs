@@ -402,7 +402,7 @@ pub fn requested<R: Runtime>(app: &AppHandle<R>, server: Option<&Url>, url: &Url
                 size: None,
                 received: 0,
                 state: State::Failed,
-                error: Some("pley keeps audio and video files only."),
+                error: Some("Pley keeps audio and video files only."),
                 preparing: None,
             },
         );

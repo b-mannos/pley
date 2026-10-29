@@ -93,7 +93,7 @@ fn open(manager: &Handle, access: u32) -> anyhow::Result<Option<Handle>> {
         if std::io::Error::last_os_error().raw_os_error() == Some(ERROR_SERVICE_DOES_NOT_EXIST as i32) {
             return Ok(None);
         }
-        return Err(last_error("opening the pley service"));
+        return Err(last_error("opening the Pley service"));
     }
     Ok(Some(Handle(handle)))
 }
@@ -112,7 +112,7 @@ fn state(service: &Handle) -> anyhow::Result<SERVICE_STATUS_PROCESS> {
         )
     };
     if ok == 0 {
-        return Err(last_error("asking the pley service how it is"));
+        return Err(last_error("asking the Pley service how it is"));
     }
     Ok(status)
 }
@@ -126,7 +126,7 @@ fn wait_for(service: &Handle, wanted: u32, timeout: Duration) -> anyhow::Result<
         if status.dwCurrentState == wanted || status.dwCurrentState == SERVICE_STOPPED {
             return Ok(status);
         }
-        anyhow::ensure!(Instant::now() < deadline, "the pley service took longer than {}s", timeout.as_secs());
+        anyhow::ensure!(Instant::now() < deadline, "the Pley service took longer than {}s", timeout.as_secs());
         std::thread::sleep(Duration::from_millis(250));
     }
 }
@@ -150,7 +150,7 @@ pub fn install(definition: &Definition) -> anyhow::Result<()> {
     let account = wide(&definition.account);
     let password = definition.password.as_deref().map(wide);
     let password = password.as_ref().map_or(null(), |p| p.as_ptr());
-    let display = wide("pley-server");
+    let display = wide("Pley Server");
     let service = match open(&manager, SERVICE_ALL_ACCESS)? {
         Some(service) => {
             // SAFETY: valid handle and NUL-terminated strings; nulls leave the
@@ -171,7 +171,7 @@ pub fn install(definition: &Definition) -> anyhow::Result<()> {
                 )
             };
             if ok == 0 {
-                return Err(last_error("updating the pley service"));
+                return Err(last_error("updating the Pley service"));
             }
             service
         }
@@ -198,17 +198,17 @@ pub fn install(definition: &Definition) -> anyhow::Result<()> {
             if handle.is_null() {
                 if std::io::Error::last_os_error().raw_os_error() == Some(ERROR_SERVICE_MARKED_FOR_DELETE as i32) {
                     anyhow::bail!(
-                        "Windows is still removing the previous pley service: close the Services window and try again"
+                        "Windows is still removing the previous Pley service: close the Services window and try again"
                     );
                 }
-                return Err(last_error("creating the pley service"));
+                return Err(last_error("creating the Pley service"));
             }
             Handle(handle)
         }
     };
 
     let mut description =
-        wide("Streams your films, shows and music to the pley apps. Its options are in pley.toml in its data folder.");
+        wide("Streams your films, shows and music to the Pley apps. Its options are in pley.toml in its data folder.");
     set_config(
         &service,
         SERVICE_CONFIG_DESCRIPTION,
@@ -257,7 +257,7 @@ fn set_config<T>(service: &Handle, level: u32, info: &T) -> anyhow::Result<()> {
     // SAFETY: `info` is the structure that `level` takes.
     let ok = unsafe { ChangeServiceConfig2W(service.0, level, (info as *const T).cast()) };
     if ok == 0 {
-        return Err(last_error("configuring the pley service"));
+        return Err(last_error("configuring the Pley service"));
     }
     Ok(())
 }
@@ -273,7 +273,7 @@ impl ServiceKey {
         let status = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, path.as_ptr(), 0, KEY_SET_VALUE, &mut key) };
         if status != ERROR_SUCCESS {
             anyhow::bail!(
-                "opening the pley service's registry key: {}",
+                "opening the Pley service's registry key: {}",
                 std::io::Error::from_raw_os_error(status as i32)
             );
         }
@@ -289,7 +289,7 @@ impl ServiceKey {
         };
         if status != ERROR_SUCCESS {
             anyhow::bail!(
-                "setting the pley service's environment: {}",
+                "setting the Pley service's environment: {}",
                 std::io::Error::from_raw_os_error(status as i32)
             );
         }
@@ -308,16 +308,16 @@ impl Drop for ServiceKey {
 pub fn start(timeout: Duration) -> anyhow::Result<()> {
     let manager = manager(SC_MANAGER_CONNECT)?;
     let service = open(&manager, SERVICE_START | SERVICE_QUERY_STATUS)?
-        .ok_or_else(|| anyhow::anyhow!("the pley service isn't installed: pley service install"))?;
+        .ok_or_else(|| anyhow::anyhow!("the Pley service isn't installed: pley service install"))?;
     // SAFETY: valid handle, no arguments.
     if unsafe { StartServiceW(service.0, 0, null()) } == 0
         && std::io::Error::last_os_error().raw_os_error() != Some(ERROR_SERVICE_ALREADY_RUNNING as i32)
     {
-        return Err(last_error("starting the pley service"));
+        return Err(last_error("starting the Pley service"));
     }
     let status = wait_for(&service, SERVICE_RUNNING, timeout)?;
     if status.dwCurrentState != SERVICE_RUNNING {
-        anyhow::bail!("the pley service stopped as it started ({}): its log says why", exit_code(&status));
+        anyhow::bail!("the Pley service stopped as it started ({}): its log says why", exit_code(&status));
     }
     Ok(())
 }
@@ -340,7 +340,7 @@ fn stop_service(service: &Handle, timeout: Duration) -> anyhow::Result<()> {
     if unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut status) } == 0
         && std::io::Error::last_os_error().raw_os_error() != Some(ERROR_SERVICE_NOT_ACTIVE as i32)
     {
-        return Err(last_error("stopping the pley service"));
+        return Err(last_error("stopping the Pley service"));
     }
     wait_for(service, SERVICE_STOPPED, timeout)?;
     Ok(())
@@ -355,14 +355,14 @@ pub fn uninstall() -> anyhow::Result<()> {
     if unsafe { DeleteService(service.0) } == 0
         && std::io::Error::last_os_error().raw_os_error() != Some(ERROR_SERVICE_MARKED_FOR_DELETE as i32)
     {
-        return Err(last_error("removing the pley service"));
+        return Err(last_error("removing the Pley service"));
     }
     Ok(())
 }
 
 fn exit_code(status: &SERVICE_STATUS_PROCESS) -> String {
     if status.dwWin32ExitCode == ERROR_SERVICE_SPECIFIC_ERROR {
-        format!("pley's exit code {}", status.dwServiceSpecificExitCode)
+        format!("Pley's exit code {}", status.dwServiceSpecificExitCode)
     } else {
         std::io::Error::from_raw_os_error(status.dwWin32ExitCode as i32).to_string()
     }
@@ -389,7 +389,7 @@ pub fn dispatch(cli: &Cli) -> ExitCode {
         Ok(config) => config,
         Err(err) => {
             crate::logging::init(&cli.log, Some(&Config::fallback_log_file(cli)));
-            tracing::error!("pley could not start: {err:#}");
+            tracing::error!("Pley could not start: {err:#}");
             return ExitCode::FAILURE;
         }
     };
@@ -439,7 +439,7 @@ unsafe extern "system" fn service_main(_argc: u32, _argv: *mut windows_sys::core
     let code = match crate::serve(config, false) {
         Ok(()) => 0,
         Err(err) => {
-            tracing::error!("pley could not start: {err:#}");
+            tracing::error!("Pley could not start: {err:#}");
             1
         }
     };

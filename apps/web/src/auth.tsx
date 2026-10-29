@@ -64,7 +64,7 @@ export function RequireAuth() {
   if (server.isError) {
     return (
       <ErrorScreen
-        title="Can't reach the pley server"
+        title="Can't reach the Pley server"
         message={errorMessage(server.error)}
         onRetry={() => void server.refetch()}
       />

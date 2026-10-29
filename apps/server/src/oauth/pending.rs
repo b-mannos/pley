@@ -342,7 +342,7 @@ mod tests {
             app: AppSnapshot {
                 id: "https://hhaidar.github.io/pley/oauth/desktop.json".into(),
                 host: "hhaidar.github.io".into(),
-                name: Some("pley for desktop".into()),
+                name: Some("Pley for desktop".into()),
                 first_party: true,
                 refresh: true,
             },

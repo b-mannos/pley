@@ -80,7 +80,7 @@ class PhoneOnboardingUiTest {
     @Test
     fun foundServersAreCardsAndContinueSignsInToTheChosenOne() {
         signIn(ServersUiState(rows = listOf(nas, office), selected = nas.url, searched = true))
-        compose.onNodeWithText("Choose your server. pley found these on your network.").assertExists()
+        compose.onNodeWithText("Choose your server. Pley found these on your network.").assertExists()
         compose.onNodeWithTag(SERVER_CARD_TAG + nas.url).assertIsSelected()
         compose.onNodeWithText("192.168.1.42:7539").assertExists()
         compose.onNodeWithTag(SERVER_CARD_TAG + office.url).performClick()
@@ -93,7 +93,7 @@ class PhoneOnboardingUiTest {
     @Test
     fun anAddressIsTypedAndConnected() {
         signIn(ServersUiState(searched = true))
-        compose.onNodeWithText("No server answered. Check that pley is running on it, or enter its address.").assertExists()
+        compose.onNodeWithText("No server answered. Check that Pley is running on it, or enter its address.").assertExists()
         compose.onNodeWithTag(CONTINUE_TAG).assertIsNotEnabled()
         compose.onNodeWithTag(ENTER_ADDRESS_TAG).performClick()
         compose.onNodeWithTag(ADDRESS_FIELD_TAG).performTextInput("pley.example.com")
@@ -118,7 +118,7 @@ class PhoneOnboardingUiTest {
             ServersUiState(rows = listOf(nas), selected = nas.url),
             BrowserSignIn.Failed(nas.url, SignInProblem.TooOld, "this server is too old for this app"),
         )
-        compose.onNodeWithText("Update pley on Living room NAS to sign in from the app").assertExists()
+        compose.onNodeWithText("Update Pley on Living room NAS to sign in from the app").assertExists()
         compose.onNodeWithText("Open in browser").performClick()
         compose.onNodeWithText("Retry").performClick()
         assertEquals(listOf("browser ${nas.url}", "retry"), events)

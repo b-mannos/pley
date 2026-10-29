@@ -72,7 +72,7 @@ impl Default for Settings {
     fn default() -> Self {
         let host = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).unwrap_or_default();
         Self {
-            server_name: if host.is_empty() { "pley".into() } else { host },
+            server_name: if host.is_empty() { "Pley".into() } else { host },
             tmdb_api_key: String::new(),
             metadata_language: "en-US".into(),
             tv_metadata: TvMetadata::Auto,
@@ -119,7 +119,7 @@ fn proxy_address(value: &str) -> Result<String, AppError> {
     }
     if url.port().is_none() {
         return Err(AppError::bad_request(format!(
-            "{value} has no port of its own: pley needs nothing to be reached there"
+            "{value} has no port of its own: Pley needs nothing to be reached there"
         )));
     }
     Ok(url.origin().ascii_serialization())

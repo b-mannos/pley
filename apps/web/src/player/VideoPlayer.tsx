@@ -174,7 +174,7 @@ const pleyTracks = new WeakMap<HTMLVideoElement, TextTrack>();
 function pleyTrack(video: HTMLVideoElement): TextTrack {
   let track = pleyTracks.get(video);
   if (!track) {
-    track = video.addTextTrack("subtitles", "pley");
+    track = video.addTextTrack("subtitles", "Pley");
     pleyTracks.set(video, track);
   }
   return track;

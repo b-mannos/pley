@@ -44,16 +44,16 @@
 
 [Setup]
 AppId={{6D1B6F0C-3F1E-4C55-9A0D-2B7E3C5A9F41}
-; "pley-server", apart from the desktop app (also "pley") in Programs, the
-; Start menu and a release's files.
-AppName=pley-server
+; "Pley Server", apart from the desktop app ("Pley") in Programs, the Start
+; menu and Services; "pley-server" in its folder and a release's files.
+AppName=Pley Server
 AppVersion={#AppVersion}
-AppVerName=pley-server {#AppVersion}
-AppPublisher=the pley authors
+AppVerName=Pley Server {#AppVersion}
+AppPublisher=the Pley authors
 AppPublisherURL=https://github.com/hhaidar/pley
 AppSupportURL=https://github.com/hhaidar/pley/issues
 AppUpdatesURL=https://github.com/hhaidar/pley/releases
-AppCopyright=Copyright (c) 2026 the pley authors
+AppCopyright=Copyright (c) 2026 the Pley authors
 DefaultDirName={autopf}\pley-server
 DisableProgramGroupPage=yes
 #ifdef Test
@@ -72,7 +72,7 @@ WizardStyle=modern dynamic
 SetupIconFile=..\..\apps\server\assets\pley.ico
 WizardSmallImageFile=..\..\apps\web\public\icon-192.png
 UninstallDisplayIcon={app}\pley.exe
-UninstallDisplayName=pley-server
+UninstallDisplayName=Pley Server
 OutputDir={#OutputDir}
 OutputBaseFilename=pley-server-{#AppVersion}{#Flavored}-windows-{#ArchName}-setup
 Compression=lzma2/max
@@ -105,19 +105,23 @@ Source: "{#FfmpegDir}\..\source\*"; DestDir: "{app}\ffmpeg\source"; Flags: ignor
 
 #ifndef Test
 [Icons]
-Name: "{autoprograms}\pley-server"; Filename: "{app}\pley.exe"; Parameters: "--data-dir ""{code:DataDir}"""; Check: IsTray
-Name: "{autoprograms}\pley-server"; Filename: "{code:WebAddress}"; Check: not IsTray
-Name: "{autoprograms}\pley-server logs"; Filename: "{code:DataDir}\logs"
+Name: "{autoprograms}\Pley Server"; Filename: "{app}\pley.exe"; Parameters: "--data-dir ""{code:DataDir}"""; Check: IsTray
+Name: "{autoprograms}\Pley Server"; Filename: "{code:WebAddress}"; Check: not IsTray
+Name: "{autoprograms}\Pley Server logs"; Filename: "{code:DataDir}\logs"
 
 ; The other way's, when pley ran otherwise before: pley itself (a .lnk) in
 ; the notification area, its page (a .url) for a service.
 [InstallDelete]
-Type: files; Name: "{autoprograms}\pley-server.url"; Check: IsTray
-Type: files; Name: "{autoprograms}\pley-server.lnk"; Check: not IsTray
+Type: files; Name: "{autoprograms}\Pley Server.url"; Check: IsTray
+Type: files; Name: "{autoprograms}\Pley Server.lnk"; Check: not IsTray
+; The shortcuts' names before the capital P.
+Type: files; Name: "{autoprograms}\pley-server.url"
+Type: files; Name: "{autoprograms}\pley-server.lnk"
+Type: files; Name: "{autoprograms}\pley-server logs.lnk"
 #endif
 
 [Run]
-Filename: "{code:OpenLink}"; Description: "Open pley in the browser"; Flags: postinstall shellexec nowait skipifsilent runasoriginaluser; Check: HasOpenLink
+Filename: "{code:OpenLink}"; Description: "Open Pley in the browser"; Flags: postinstall shellexec nowait skipifsilent runasoriginaluser; Check: HasOpenLink
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\ffmpeg"
@@ -419,7 +423,7 @@ end;
 
 procedure CopyButtonClick(Sender: TObject);
 begin
-  Browse(CopyEdit, 'The data folder of the pley you used until now:');
+  Browse(CopyEdit, 'The data folder of the Pley you used until now:');
   CopyCheck.Checked := True;
 end;
 
@@ -497,7 +501,7 @@ var
   PortLabel: TNewStaticText;
   Networks: String;
 begin
-  ModePage := CreateCustomPage(wpSelectDir, 'How pley runs', 'When pley starts and which account it runs as.');
+  ModePage := CreateCustomPage(wpSelectDir, 'How Pley runs', 'When Pley starts and which account it runs as.');
   Top := 0;
   ServiceRadio := AddRadio(ModePage, Top, 'As a service with an account of its own (recommended)',
     'Starts with Windows, before anyone signs in. Its account, NT SERVICE\pley, has no password and can''t sign in. ' +
@@ -510,34 +514,34 @@ begin
   RestrictCheck := AddCheck(ModePage, Top, 'Let the service write only in its data folder (recommended)',
     'Windows stops it changing anything else and takes away privileges it doesn''t need. ' +
     'If hardware transcoding doesn''t work, run Setup again and turn this off.');
-  AutostartCheck := AddCheck(ModePage, Top, 'Start pley when I sign in', '');
+  AutostartCheck := AddCheck(ModePage, Top, 'Start Pley when I sign in', '');
   ServiceRadio.OnClick := @UpdateControls;
   UserRadio.OnClick := @UpdateControls;
   TrayRadio.OnClick := @UpdateControls;
 
-  UserPage := CreateInputQueryPage(ModePage.ID, 'pley''s user', 'The user the service runs as, and its sign-in to your NAS',
+  UserPage := CreateInputQueryPage(ModePage.ID, 'Pley''s user', 'The user the service runs as, and its sign-in to your NAS',
     'Setup creates this standard user, or updates the one it made before. Its password is random: nobody signs in as it.' + #13#10#13#10 +
     'For media on a NAS, enter the NAS, and a user and password that may read your media there. ' +
-    'In pley, add libraries by their network paths, such as \\nas\media\Movies.');
+    'In Pley, add libraries by their network paths, such as \\nas\media\Movies.');
   UserPage.Add('&User:', False);
   UserPage.Add('&NAS or computer with your media (optional), such as \\nas:', False);
   UserPage.Add('User &name there:', False);
   UserPage.Add('&Password there:', True);
 
-  DataPage := CreateInputDirPage(UserPage.ID, 'Data folder', 'Where pley keeps its database, artwork and settings',
-    'pley keeps its database, artwork, logs and options (pley.toml) in this folder. For a service, only the service, ' +
+  DataPage := CreateInputDirPage(UserPage.ID, 'Data folder', 'Where Pley keeps its database, artwork and settings',
+    'Pley keeps its database, artwork, logs and options (pley.toml) in this folder. For a service, only the service, ' +
     'administrators and you can open it.', False, '');
   DataPage.Add('');
   Top := DataPage.Buttons[0].Top + DataPage.Buttons[0].Height + ScaleY(16);
-  CopyCheck := AddCheck(DataPage, Top, 'Copy the data of the pley I used until now, from this folder:',
-    'Its accounts, libraries, watch history and artwork. That pley must be stopped. Nothing is copied over existing data.');
+  CopyCheck := AddCheck(DataPage, Top, 'Copy the data of the Pley I used until now, from this folder:',
+    'Its accounts, libraries, watch history and artwork. That Pley must be stopped. Nothing is copied over existing data.');
   AddFolder(DataPage, Top, CopyEdit, CopyButton, @CopyButtonClick);
   CopyCheck.OnClick := @UpdateControls;
 
-  NetworkPage := CreateCustomPage(DataPage.ID, 'Network', 'Where pley listens');
+  NetworkPage := CreateCustomPage(DataPage.ID, 'Network', 'Where Pley listens');
   Top := 0;
   LocalRadio := AddRadio(NetworkPage, Top, 'Only this computer (recommended with a reverse proxy)',
-    'On 127.0.0.1, for a reverse proxy here that serves pley to others with HTTPS.');
+    'On 127.0.0.1, for a reverse proxy here that serves Pley to others with HTTPS.');
   AdaptersRadio := AddRadio(NetworkPage, Top, 'This computer and these networks:', '');
   Top := Top - ScaleY(4);
   AdapterList := TNewCheckListBox.Create(NetworkPage);
@@ -567,9 +571,9 @@ begin
   PortEdit.Width := ScaleX(60);
   PortLabel.FocusControl := PortEdit;
   Top := Top + PortEdit.Height + ScaleY(14);
-  PlexCheck := AddCheck(NetworkPage, Top, 'Plex-compatible API, for Plex tools (on pley''s port)', '');
+  PlexCheck := AddCheck(NetworkPage, Top, 'Plex-compatible API, for Plex tools (on Pley''s port)', '');
 
-  FirewallPage := CreateCustomPage(NetworkPage.ID, 'Windows Firewall', 'Which devices may reach pley');
+  FirewallPage := CreateCustomPage(NetworkPage.ID, 'Windows Firewall', 'Which devices may reach Pley');
   Top := 0;
   Networks := '';
   for I := 0 to AdapterIps.Count - 1 do
@@ -578,7 +582,7 @@ begin
         KindText(AdapterKinds.Strings[I]);
   if Networks <> '' then
     AddText(FirewallPage, Top, 0, 'This computer''s networks:' + Networks);
-  AddText(FirewallPage, Top, 0, 'Where pley listens on networks, chosen here or later in pley (Settings, Network), ' +
+  AddText(FirewallPage, Top, 0, 'Where Pley listens on networks, chosen here or later in Pley (Settings, Network), ' +
     'let it through on networks Windows takes for:');
   PrivateCheck := AddCheck(FirewallPage, Top, 'Private (home)', '');
   DomainCheck := AddCheck(FirewallPage, Top, 'Domain (a workplace''s)', '');
@@ -586,7 +590,7 @@ begin
   AddText(FirewallPage, Top, 0, 'From:');
   SubnetRadio := AddRadio(FirewallPage, Top, 'Devices on those networks only', '');
   AnyRadio := AddRadio(FirewallPage, Top, 'Any address, through a VPN such as Tailscale too', '');
-  DiscoveryCheck := AddCheck(FirewallPage, Top, 'Let the pley apps on the network find this server', '');
+  DiscoveryCheck := AddCheck(FirewallPage, Top, 'Let the Pley apps on the network find this server', '');
 end;
 
 // Ticks the networks of Ips (addresses separated by commas), adding those
@@ -811,7 +815,7 @@ begin
   Owner := PortOwner(Port);
   Taken := Port;
   if Owner <> '' then
-    Result := SuppressibleMsgBox('Port ' + Taken + ' is taken by ' + Owner + '. pley can''t listen there while it is: ' +
+    Result := SuppressibleMsgBox('Port ' + Taken + ' is taken by ' + Owner + '. Pley can''t listen there while it is: ' +
       'stop that program, or choose another port.' + #13#10#13#10 + 'Go on anyway?', mbError, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES;
 end;
 
@@ -832,12 +836,12 @@ begin
   begin
     if Trim(UserPage.Values[0]) = '' then
     begin
-      SuppressibleMsgBox('Enter the name of the user pley runs as, such as pley.', mbError, MB_OK, IDOK);
+      SuppressibleMsgBox('Enter the name of the user Pley runs as, such as pley.', mbError, MB_OK, IDOK);
       Result := False;
     end
     else if (ShareServer <> '') and (Trim(UserPage.Values[2]) = '') then
     begin
-      SuppressibleMsgBox('Enter the user name pley signs in to ' + ShareServer + ' with.', mbError, MB_OK, IDOK);
+      SuppressibleMsgBox('Enter the user name Pley signs in to ' + ShareServer + ' with.', mbError, MB_OK, IDOK);
       Result := False;
     end;
   end
@@ -847,29 +851,29 @@ begin
     Other := RemoveBackslashUnlessRoot(Trim(CopyEdit.Text));
     if (Length(Dir) <= 3) then
     begin
-      SuppressibleMsgBox('Choose a folder for pley''s data, not a whole drive.', mbError, MB_OK, IDOK);
+      SuppressibleMsgBox('Choose a folder for Pley''s data, not a whole drive.', mbError, MB_OK, IDOK);
       Result := False;
     end
     else if not DataDirFree(Dir) then
     begin
-      SuppressibleMsgBox(Dir + ' has other files in it than pley''s: choose an empty or a new folder for pley''s data.',
+      SuppressibleMsgBox(Dir + ' has other files in it than Pley''s: choose an empty or a new folder for Pley''s data.',
         mbError, MB_OK, IDOK);
       Result := False;
     end
     else if CopyCheck.Checked and not FileExists(AddBackslash(Other) + 'pley.db') then
     begin
-      SuppressibleMsgBox(Other + ' isn''t a pley data folder: it has no pley.db.', mbError, MB_OK, IDOK);
+      SuppressibleMsgBox(Other + ' isn''t a Pley data folder: it has no pley.db.', mbError, MB_OK, IDOK);
       Result := False;
     end
     else if CopyCheck.Checked and ((CompareText(Other, Dir) = 0) or FileExists(AddBackslash(Dir) + 'pley.db')) then
     begin
-      SuppressibleMsgBox(Dir + ' has pley''s data already: nothing is copied over it. Choose another data folder.', mbError, MB_OK, IDOK);
+      SuppressibleMsgBox(Dir + ' has Pley''s data already: nothing is copied over it. Choose another data folder.', mbError, MB_OK, IDOK);
       Result := False;
     end
     else if not CopyCheck.Checked and (PrevDataDir <> '') and (CompareText(PrevDataDir, Dir) <> 0)
       and FileExists(AddBackslash(PrevDataDir) + 'pley.db') and not FileExists(AddBackslash(Dir) + 'pley.db') then
     begin
-      if SuppressibleMsgBox('pley kept its data in ' + PrevDataDir + ' until now. Copy it into ' + Dir + '?',
+      if SuppressibleMsgBox('Pley kept its data in ' + PrevDataDir + ' until now. Copy it into ' + Dir + '?',
         mbConfirmation, MB_YESNO, IDNO) = IDYES then
       begin
         CopyEdit.Text := PrevDataDir;
@@ -882,7 +886,7 @@ begin
   begin
     if AdaptersRadio.Checked and (ChosenIps = '') then
     begin
-      SuppressibleMsgBox('Tick the networks pley listens on, or choose "Only this computer".', mbError, MB_OK, IDOK);
+      SuppressibleMsgBox('Tick the networks Pley listens on, or choose "Only this computer".', mbError, MB_OK, IDOK);
       Result := False;
     end
     else if not ValidPort then
@@ -894,7 +898,7 @@ begin
       Result := PortsFree;
   end
   else if (CurPageID = FirewallPage.ID) and (Profiles = '') then
-    Result := SuppressibleMsgBox('pley won''t be let through Windows Firewall, so only this computer will reach it ' +
+    Result := SuppressibleMsgBox('Pley won''t be let through Windows Firewall, so only this computer will reach it ' +
       '(unless another rule lets it). Go on?', mbConfirmation, MB_YESNO, IDYES) = IDYES;
 end;
 
@@ -902,7 +906,7 @@ function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoType
 var
   S: String;
 begin
-  S := MemoDirInfo + NewLine + NewLine + 'How pley runs:' + NewLine + Space;
+  S := MemoDirInfo + NewLine + NewLine + 'How Pley runs:' + NewLine + Space;
   if ServiceRadio.Checked then
     S := S + 'As a service, as NT SERVICE\pley'
   else if UserRadio.Checked then
@@ -926,7 +930,7 @@ begin
   else
     S := S + 'This computer only (127.0.0.1:' + Port + ')';
   if PlexCheck.Checked then
-    S := S + NewLine + Space + 'Plex-compatible API, on pley''s port';
+    S := S + NewLine + Space + 'Plex-compatible API, on Pley''s port';
   if Profiles = '' then
     S := S + NewLine + Space + 'Not let through Windows Firewall'
   else if AnyRadio.Checked then
@@ -934,7 +938,7 @@ begin
   else
     S := S + NewLine + Space + 'Let through Windows Firewall on ' + Profiles + ' networks, from devices on them';
   if Reachable and Discovery then
-    S := S + NewLine + Space + 'Found by the pley apps on the network';
+    S := S + NewLine + Space + 'Found by the Pley apps on the network';
   S := S + NewLine + NewLine + 'FFmpeg:' + NewLine + Space + '{#FfmpegLabel}';
   Result := S;
 end;
@@ -967,7 +971,7 @@ begin
   // open: stopped, so that they can be replaced.
   ExtractTemporaryFile('pley.exe');
   if not Exec(ExpandConstant('{tmp}\pley.exe'), 'service stop', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
-    Result := 'The pley service didn''t stop. Stop it in Services (services.msc), then try again.';
+    Result := 'The Pley service didn''t stop. Stop it in Services (services.msc), then try again.';
   if (Result = '') and FileExists(ExpandConstant('{app}\pley.exe')) then
     StopProgramsIn(ExpandConstant('{app}'));
 end;
@@ -1067,7 +1071,7 @@ procedure InstallService(const Options: String);
 var
   Params, User: String;
 begin
-  SetStatus('Setting up the pley service...');
+  SetStatus('Setting up the Pley service...');
   RemoveAutostart;
   User := Trim(UserPage.Values[0]);
   Params := Options + ' service install --discovery ' + TrueFalse(Discovery) + ' --grant ' + AddQuotes(GetUserNameString);
@@ -1095,7 +1099,7 @@ procedure InstallTray(const Options: String);
 var
   Code: Integer;
 begin
-  SetStatus('Setting up pley...');
+  SetStatus('Setting up Pley...');
   if (PrevMode = 'service') or (PrevMode = 'user') then
   begin
     if PrevUser <> '' then
@@ -1116,11 +1120,11 @@ begin
   else
     RemoveAutostart;
 #endif
-  SetStatus('Starting pley...');
+  SetStatus('Starting Pley...');
   if ExecAsOriginalUser(ExpandConstant('{app}\pley.exe'), '--data-dir ' + AddQuotes(DataDir('')), '', SW_HIDE, ewNoWait, Code) then
     Failure := RunPley('--data-dir ' + AddQuotes(DataDir('')) + ' service report')
   else
-    Failure := 'pley didn''t start: ' + SysErrorMessage(Code);
+    Failure := 'Pley didn''t start: ' + SysErrorMessage(Code);
 end;
 
 procedure SaveState;
@@ -1158,7 +1162,7 @@ begin
   if Failure = '' then
     SaveState
   else
-    SuppressibleMsgBox('pley is installed, but it isn''t running:' + #13#10#13#10 + Failure, mbError, MB_OK, IDOK);
+    SuppressibleMsgBox('Pley is installed, but it isn''t running:' + #13#10#13#10 + Failure, mbError, MB_OK, IDOK);
 end;
 
 // What the finish page says about FFmpeg: its encoders, and a hint when
@@ -1173,7 +1177,7 @@ begin
     Exit;
   if Pos('not found', FfmpegInfo) > 0 then
   begin
-    Result := 'pley''s FFmpeg doesn''t work here, so pley can''t transcode: its log says why.';
+    Result := 'Pley''s FFmpeg doesn''t work here, so Pley can''t transcode: its log says why.';
     Exit;
   end;
   Start := Pos('encoders [', FfmpegInfo);
@@ -1197,19 +1201,19 @@ begin
   if CurPageID <> wpFinished then
     Exit;
   if Failure <> '' then
-    Text := 'pley is installed, but it isn''t running:' + #13#10#13#10 + Failure + #13#10 +
+    Text := 'Pley is installed, but it isn''t running:' + #13#10#13#10 + Failure + #13#10 +
       'Its log is in ' + DataDir('') + '\logs.'
   else
   begin
-    Text := 'pley is running at ' + Running + '.';
+    Text := 'Pley is running at ' + Running + '.';
     if not TrayRadio.Checked then
       Text := Text + ' It runs as a Windows service, in the background: no icon in the notification area. ' +
-        'Open it from the Start menu (pley-server).';
+        'Open it from the Start menu (Pley Server).';
     if SetupLink <> '' then
       Text := Text + #13#10#13#10 + 'Open it to create your administrator account: the link holds the setup code (a new ' +
-        'one is made each time pley starts until then).'
+        'one is made each time Pley starts until then).'
     else if HasAccounts then
-      Text := Text + #13#10#13#10 + 'Sign in with your pley account: this pley is set up already.'
+      Text := Text + #13#10#13#10 + 'Sign in with your Pley account: this Pley is set up already.'
     else
       Text := Text + #13#10#13#10 + 'Its setup code is in its log: ' + DataDir('') + '\logs\pley.log ("setup?code=").';
     if FfmpegSummary <> '' then
@@ -1240,11 +1244,11 @@ begin
   else if (PrevDataDir <> '') and DirExists(PrevDataDir) then
   begin
     if HoldsOnlyPleys(PrevDataDir, True) then
-      DeleteData := MsgBox('Delete pley''s data too?' + #13#10#13#10 + PrevDataDir + ' holds its database (accounts, libraries, ' +
+      DeleteData := MsgBox('Delete Pley''s data too?' + #13#10#13#10 + PrevDataDir + ' holds its database (accounts, libraries, ' +
         'watch history), artwork and settings. Choose No to keep it for a later install.',
         mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES
     else
-      MsgBox(PrevDataDir + ', pley''s data folder, holds other files too, so it stays as it is. Delete pley''s ' +
+      MsgBox(PrevDataDir + ', Pley''s data folder, holds other files too, so it stays as it is. Delete Pley''s ' +
         'files there (pley.db and the rest) yourself if you no longer need them.', mbInformation, MB_OK);
   end;
   Result := True;
@@ -1276,7 +1280,7 @@ begin
       if HoldsOnlyPleys(PrevDataDir, True) then
         DelTree(PrevDataDir, True, True, True)
       else
-        Log(PrevDataDir + ' holds other files than pley''s: it stays');
+        Log(PrevDataDir + ' holds other files than Pley''s: it stays');
     end;
     RegDeleteKeyIncludingSubkeys(HKA, StateKey);
     RegDeleteKeyIfEmpty(HKA, 'Software\pley');

@@ -40,15 +40,15 @@ them. They show a made-up library, with no real title's artwork, which
   20001): `./gradlew :app:bundleStoreRelease` in `apps/android`, with the
   release key.
 - **Category**: Video Players & Editors.
-- **Name**: pley
+- **Name**: Pley
 
 **Short description** (80 characters at most):
 
-> Your own movies, shows and music, from your pley server, on phones and TVs.
+> Your own movies, shows and music, from your Pley server, on phones and TVs.
 
 **Full description**:
 
-> pley plays the movies, shows and music on your own pley media server, at
+> Pley plays the movies, shows and music on your own Pley media server, at
 > home or away.
 >
 > - Continue Watching, My List and every library, with posters, plots and
@@ -62,4 +62,4 @@ them. They show a made-up library, with no real title's artwork, which
 > - One app for phones, tablets, Android TV, Google TV and Fire TV.
 > - Signs in with a code shown on the TV, typed on your phone or computer.
 >
-> pley needs a pley server, which runs on Windows, macOS, Linux and Docker.
+> Pley needs a Pley server, which runs on Windows, macOS, Linux and Docker.

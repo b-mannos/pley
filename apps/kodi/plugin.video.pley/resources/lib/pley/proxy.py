@@ -256,7 +256,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                     upstream = _Upstream(proxy, server)
                     response = upstream.send(self.command, rest, body, headers, token)
             except SignedOut:
-                return self.answer(401, {"code": "signed_out", "message": "pley is signed out"})
+                return self.answer(401, {"code": "signed_out", "message": "Pley is signed out"})
             except (api.ApiError, OSError, http.client.HTTPException) as e:
                 return self.answer(502, {"code": "unreachable", "message": str(e)})
             self.relay(response, rest)
@@ -277,7 +277,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         try:
             self.proxy.tokens.switch_profile(profile, str(pin) if pin else None)
         except SignedOut:
-            return self.answer(401, {"code": "signed_out", "message": "pley is signed out"})
+            return self.answer(401, {"code": "signed_out", "message": "Pley is signed out"})
         except api.ApiError as e:
             if e.status == 0:
                 return self.answer(502, {"code": "unreachable", "message": e.message})

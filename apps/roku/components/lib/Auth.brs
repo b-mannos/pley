@@ -40,7 +40,7 @@ function authParseMetadata(text as dynamic, server as string) as object
         url = httpString(data[names[key]])
         if url = "" then return { ok: false, message: authNoCodes() }
         if urlOrigin(url) <> issuer or Left(url, Len(issuer) + 1) <> issuer + "/"
-            return { ok: false, message: "This server sends apps to another address to sign in: pley doesn't." }
+            return { ok: false, message: "This server sends apps to another address to sign in: Pley doesn't." }
         end if
         result[key] = url
     end for
@@ -317,9 +317,9 @@ function authDeviceRefusal(status as integer, text as dynamic) as string
     data = httpObject(httpJson(text))
     error = ""
     if data <> invalid then error = httpString(data.error)
-    if error = "invalid_client" then return "This server doesn't know pley for Roku yet: update it."
-    if error = "unauthorized_client" then return "This server doesn't let pley for Roku sign in with a code."
-    if error = "invalid_scope" then return "This server doesn't offer what pley for Roku asks for: update it."
+    if error = "invalid_client" then return "This server doesn't know Pley for Roku yet: update it."
+    if error = "unauthorized_client" then return "This server doesn't let Pley for Roku sign in with a code."
+    if error = "invalid_scope" then return "This server doesn't offer what Pley for Roku asks for: update it."
     if status = 429 then return "Too many sign-ins are waiting on this server: try again in a few minutes."
     if status = 404 then return authNoCodes()
     if status <= 0 then return "The server can't be reached."

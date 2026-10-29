@@ -1,6 +1,6 @@
-# pley for Roku
+# Pley for Roku
 
-A native SceneGraph app for Roku players and Roku TVs. It finds pley
+A native SceneGraph app for Roku players and Roku TVs. It finds Pley
 servers on the local network (or takes an address), signs in with a code
 shown on the TV and approved on the server's `/link` page (or a QR code of
 it, which the server draws), asks "Who's watching?" as it starts when the
@@ -27,10 +27,10 @@ keyboard too), Remove from Continue Watching and Go to show. The player
 plays files as they are whenever the Roku can (it reports what it
 decodes, from `roDeviceInfo`), HLS otherwise, reports progress, offers
 Skip Intro and Skip Credits as the web player does, the next episode at
-the credits of one (a playlist's next entry), and pley's menu (Down):
+the credits of one (a playlist's next entry), and Pley's menu (Down):
 Quality, subtitle sync, the file's chapters and the playback's details.
 
-It talks to the pley server and nothing else, so it works on a home network
+It talks to the Pley server and nothing else, so it works on a home network
 without internet: pictures come from the server, the fonts are the Roku's
 own, and the client ID (`https://hhaidar.github.io/pley/oauth/roku.json`) is
 only a name the server knows; nobody fetches it.
@@ -84,9 +84,9 @@ Rules the code keeps:
   VobSub, DVB) the person's choices pick are sent as `subtitle_index`, which
   the server draws onto the video, as the web player asks. Roku shows a
   subtitle track only with captions on, a setting of the whole Roku: when
-  pley picks one, it turns captions on for that playback and back as they
+  Pley picks one, it turns captions on for that playback and back as they
   were after, unless the person changed them meanwhile.
-- pley's menu: Down while a title plays opens it at the right, over the
+- Pley's menu: Down while a title plays opens it at the right, over the
   video, which plays on (play, fast forward and rewind still work): Quality
   ("Automatic · Original"), Subtitle sync for a file with text subtitles,
   Chapters for a file that has them (OK goes to one; the one playing is
@@ -98,7 +98,7 @@ Rules the code keeps:
   Back goes back in it, then closes it. Subtitles and audio stay in
   Roku's own options (the Options key), which know the Video node's
   tracks.
-- Subtitle sync, as the Android TV player's Sync: chosen in pley's menu
+- Subtitle sync, as the Android TV player's Sync: chosen in Pley's menu
   for a file with text subtitles, it shows at the top of the screen; left and
   right (rewind and fast forward too) move the subtitles 0.1 s, from 10 s
   earlier to 10 s later, shown as "+0.3 s"; Reset puts them back, Done or
@@ -115,7 +115,7 @@ Rules the code keeps:
   /api/items/{id}/streams`, the file, its audio and its subtitles or `null`
   for off), so the next episode, or the movie next time, starts with
   matching tracks. What shows until the stream has played two seconds is
-  pley's choice or the Roku's own, and so is what shows as subtitle sync
+  Pley's choice or the Roku's own, and so is what shows as subtitle sync
   opens the stream again: neither is saved. A subtitle track is told by its
   address (subtitle sync's `offset_ms` taken off); captions only on replay
   or on mute, and captions in the video itself, are left alone. Roku's
@@ -164,7 +164,7 @@ Rules the code keeps:
   Automatic leaves it be; the original and its remuxes come in one, so
   stepping down from them is the app's:
   - *Waits*: the Video node's state `buffering` after at least 2 s of
-    playing (not a start, nor after a seek pley made or a pause), and not
+    playing (not a start, nor after a seek Pley made or a pause), and not
     when `bufferingStatus.isUnderrun` says it isn't for want of data. One
     of 2 s or more, or two shorter ones within a minute, is a play issue.
   - *Delivery* before a wait: Roku tells an app nothing of how much it has
@@ -198,7 +198,7 @@ Rules the code keeps:
   open, so music ones are listed too though Roku shows none), and the
   server's answer becomes the list; Home asks for its menu and rows again
   when it shows next. A server from before says sorting needs a newer
-  pley, and nothing moves.
+  Pley, and nothing moves.
 - Every request says `pleyRoku/<version> (Roku OS <version>; <model>)`, the
   model being `roDeviceInfo`'s display name: the server's `/link` page shows
   that part to whoever types the code.
@@ -332,7 +332,7 @@ runs it against a real one instead, whose `/link` page allows the code.
 The unit tests run `components/lib` and `tests/*.test.brs` in brs-node
 (lvcabral's BrightScript engine, whose command line and Node library moved
 from `brs-engine` to `brs-node`): each `sub test_…()` is a test.
-`bun run smoke` starts a fake pley server on 127.0.0.1
+`bun run smoke` starts a fake Pley server on 127.0.0.1
 (`scripts/fixture-server.mjs`, answers written from docs/API.md) and walks
 the app with the remote: sign-in with a code and its QR code, Home, a
 title's details after a refused token, Back while the player starts (the
@@ -363,9 +363,9 @@ and then, and can't stand in for a Roku's speed.
 (`scripts/make_images.py`, Python's standard library only): nine-patch
 pictures, so the app's buttons are focused in its accent, as its lists
 are, not in Roku's own grey. The home screen icons (540 × 405 and
-290 × 218, the P and the wordmark on pley's tile, as the Android TV app's
+290 × 218, the P and the wordmark on Pley's tile, as the Android TV app's
 banner) and the splash screens (the logo on the app's background) are
-rendered from pley's logo with the other apps' icons:
+rendered from Pley's logo with the other apps' icons:
 `bun scripts/render-icons.mjs` at the repository's root.
 
 ## Installing on a Roku
@@ -379,7 +379,7 @@ There is no channel in Roku's store yet; the app is sideloaded:
    runtime (`source/bslib.brs`, MIT) to every package and has no switch to
    leave it out; its notice goes along in `licenses/bslib.txt`.
 3. Open the Roku's address in a browser, sign in as `rokudev` with that
-   password, upload the zip and press Install. pley appears on the Home
+   password, upload the zip and press Install. Pley appears on the Home
    screen as a developer app; installing again replaces it.
 
 `bunx bsc --deploy --host <address> --password <password>` packages and

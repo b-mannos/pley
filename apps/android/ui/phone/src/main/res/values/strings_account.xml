@@ -20,7 +20,7 @@
     <string name="account_sign_out">Sign out</string>
     <string name="account_sign_out_title">Sign out?</string>
     <string name="account_sign_out_body">You\'ll be signed out of %1$s.</string>
-    <string name="account_version">pley %1$s for Android</string>
+    <string name="account_version">Pley %1$s for Android</string>
 
     <!-- Track defaults (AccountPage.tsx PlaybackCard). -->
     <string name="account_audio_and_subtitles">Audio and subtitles</string>
@@ -103,12 +103,12 @@
     <!-- Diagnostics. -->
     <string name="diagnostics_device">This device</string>
     <string name="diagnostics_app">App</string>
-    <string name="diagnostics_app_value">pley %1$s</string>
+    <string name="diagnostics_app_value">Pley %1$s</string>
     <string name="diagnostics_plays">What it plays</string>
     <string name="diagnostics_probing">Checking what this device plays…</string>
     <string name="diagnostics_probe_failed">The check of this device failed.</string>
     <string name="diagnostics_probe_again">Check again</string>
-    <string name="diagnostics_report">What pley tells the server</string>
+    <string name="diagnostics_report">What Pley tells the server</string>
     <string name="diagnostics_copy">Copy</string>
     <string name="diagnostics_copied">Copied</string>
 </resources>

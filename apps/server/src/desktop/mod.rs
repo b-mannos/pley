@@ -108,7 +108,7 @@ impl TrayContext {
 
     /// Tooltip / hover text.
     pub fn tooltip(&self) -> String {
-        format!("pley: {}", self.status())
+        format!("Pley: {}", self.status())
     }
 
     pub fn send(&self, command: Command) {

@@ -125,7 +125,7 @@ impl AppError {
 fn scope_message(scope: Option<&str>) -> String {
     match scope.and_then(crate::auth::scopes::Scope::from_name) {
         Some(scope) => format!("this app wasn't allowed to {}: sign in to it again to allow it", scope.words()),
-        None => "apps can't do that: use pley's web app".to_owned(),
+        None => "apps can't do that: use Pley's web app".to_owned(),
     }
 }
 
@@ -218,7 +218,7 @@ mod tests {
             (
                 AppError::InsufficientScope(None),
                 Some(r#"Bearer error="insufficient_scope""#),
-                Some("apps can't do that: use pley's web app"),
+                Some("apps can't do that: use Pley's web app"),
             ),
             (
                 AppError::InsufficientScope(Some("playlists")),

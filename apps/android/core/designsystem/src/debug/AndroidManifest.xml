@@ -5,7 +5,7 @@
         <activity
             android:name=".gallery.DesignGalleryActivity"
             android:exported="true"
-            android:label="pley design gallery"
+            android:label="Pley design gallery"
             android:theme="@style/Theme.PleyGallery" />
     </application>
 </manifest>

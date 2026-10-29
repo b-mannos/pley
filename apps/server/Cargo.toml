@@ -3,7 +3,7 @@ name = "pley-server"
 version = "0.2.0"
 edition = "2024"
 rust-version = "1.95"
-description = "pley media server: libraries, metadata, users, playback sessions and the web UI"
+description = "Pley media server: libraries, metadata, users, playback sessions and the web UI"
 license = "LicenseRef-Restricted"
 publish = false
 

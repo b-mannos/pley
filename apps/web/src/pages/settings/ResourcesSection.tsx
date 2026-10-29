@@ -232,7 +232,7 @@ export function ResourcesSection() {
           detail={`${data.cpus} ${data.cpus === 1 ? "processor" : "processors"}`}
           data={data}
           series={[
-            { label: "pley", color: PLEY, value: (s) => s.pley_cpu / 100, text: (s) => percent(s.pley_cpu), title: PLEY_HINT },
+            { label: "Pley", color: PLEY, value: (s) => s.pley_cpu / 100, text: (s) => percent(s.pley_cpu), title: PLEY_HINT },
             { label: "System", color: SYSTEM, value: (s) => s.cpu / 100, text: (s) => percent(s.cpu) },
           ]}
         />
@@ -241,7 +241,7 @@ export function ResourcesSection() {
           detail={`${formatBytes(data.memory_total)} in all`}
           data={data}
           series={[
-            { label: "pley", color: PLEY, value: (s) => s.pley_memory / total, text: (s) => formatBytes(s.pley_memory), title: PLEY_HINT },
+            { label: "Pley", color: PLEY, value: (s) => s.pley_memory / total, text: (s) => formatBytes(s.pley_memory), title: PLEY_HINT },
             { label: "System", color: SYSTEM, value: (s) => s.memory / total, text: (s) => formatBytes(s.memory) },
           ]}
         />

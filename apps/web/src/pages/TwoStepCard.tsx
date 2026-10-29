@@ -80,7 +80,7 @@ function Status({
     return (
       <>
         <p className="text-sm text-muted">
-          After your password, pley asks for a code from an authenticator app on your phone, so a password alone can't
+          After your password, Pley asks for a code from an authenticator app on your phone, so a password alone can't
           sign in to your account.
         </p>
         <div className="mt-4 flex justify-end">
@@ -209,13 +209,13 @@ function ScanStep({ setup, onCancel, onOn }: { setup: TwoStepSetup; onCancel: ()
         <QrCode
           size={setup.qr.size}
           path={setup.qr.path}
-          label="QR code that adds pley to an authenticator app"
+          label="QR code that adds Pley to an authenticator app"
           className="mx-auto size-44 shrink-0 sm:mx-0"
         />
         <div className="min-w-0 space-y-3 text-sm">
           <ol className="list-decimal space-y-1.5 pl-5 text-muted">
             <li>Scan this QR code with your authenticator app.</li>
-            <li>Enter the 6-digit code the app shows for pley.</li>
+            <li>Enter the 6-digit code the app shows for Pley.</li>
           </ol>
           {touch ? (
             <a href={setup.uri} className="inline-block font-medium text-accent hover:text-accent-hover">

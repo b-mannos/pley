@@ -1,17 +1,17 @@
-# pley with Docker Compose. From this folder:
+# Pley with Docker Compose. From this folder:
 #
-#   ./setup.sh                     prepares everything and starts pley, or:
+#   ./setup.sh                     prepares everything and starts Pley, or:
 #   cp .env.example .env           then edit it, and
 #   docker compose up -d           (`docker compose logs pley` shows the setup link)
 #
 # Settings come from .env (see .env.example); each has a default, so this file
 # also runs as it is. Hardware transcoding, a reverse proxy in Docker and the
 # Plex-compatible API on a port of its own are add-ons (compose.*.yaml, see
-# README.md); that API answers on pley's port anyway.
+# README.md); that API answers on Pley's port anyway.
 #
 # The container is locked down: it runs as an ordinary user, with no Linux
 # capabilities, a read-only image and the media read-only, so the config
-# folder is the only place it can write; and pley is published on this
+# folder is the only place it can write; and Pley is published on this
 # computer only (127.0.0.1), for a reverse proxy in front of it.
 name: pley
 
@@ -25,12 +25,12 @@ services:
       args:
         PLEY_COMMIT: ${PLEY_COMMIT:-unknown}
     # "build": `up` builds the image from this checkout (unchanged layers are
-    # cached), so `git pull && docker compose up -d` updates pley. With a
+    # cached), so `git pull && docker compose up -d` updates Pley. With a
     # published image (PLEY_IMAGE), use "missing" and `docker compose pull`.
     pull_policy: ${PLEY_PULL_POLICY:-build}
     container_name: pley
     restart: unless-stopped
-    # pley lets requests in progress finish for 5 s, then stops the
+    # Pley lets requests in progress finish for 5 s, then stops the
     # transcoder and closes the database: give it room (Docker's default
     # is 10 s before it kills the container).
     stop_grace_period: 30s
@@ -59,7 +59,7 @@ services:
       PLEY_LOG: ${PLEY_LOG:-info}
 
     ports:
-      # 127.0.0.1: only this computer (a reverse proxy here) reaches pley.
+      # 127.0.0.1: only this computer (a reverse proxy here) reaches Pley.
       # Docker's port rules go around host firewalls such as ufw, so publish
       # it on every address (0.0.0.0:7539) only on purpose.
       - "${PLEY_LISTEN:-127.0.0.1:7539}:7539"

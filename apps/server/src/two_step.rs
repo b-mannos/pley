@@ -182,7 +182,7 @@ impl TwoStep {
         } else {
             format!("{username}@{server}")
         };
-        let uri = otpauth_uri("pley", &account, &encoded);
+        let uri = otpauth_uri("Pley", &account, &encoded);
         let qr = qr(&uri).ok_or_else(|| AppError::Internal(anyhow::anyhow!("the QR code of a secret doesn't fit")))?;
         Ok(Setup { secret: encoded, uri, qr, expires_at: now() + SETUP_TTL.as_secs() as i64 })
     }
@@ -383,7 +383,7 @@ fn load_key(path: &Path) -> Result<[u8; 32], String> {
         Ok(text) => hex::decode(text.trim())
             .ok()
             .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
-            .ok_or_else(|| "it isn't a key pley made".to_owned()),
+            .ok_or_else(|| "it isn't a key Pley made".to_owned()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             let mut key = [0u8; 32];
             getrandom::fill(&mut key).expect("the system's random numbers");

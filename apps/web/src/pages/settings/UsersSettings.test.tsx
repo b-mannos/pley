@@ -32,7 +32,7 @@ const libraries: Library[] = [
 const kidsApp: AppGrant = {
   id: 9,
   client_id: "https://hhaidar.github.io/pley/oauth/android.json",
-  name: "pley for Android",
+  name: "Pley for Android",
   first_party: true,
   host: "hhaidar.github.io",
   scopes: ["library", "play"],
@@ -249,15 +249,15 @@ describe("UsersSettings", () => {
     await user.click(await screen.findByRole("button", { name: /Kiddo/ }));
     const dialog = screen.getByRole("dialog", { name: "Edit Kiddo" });
 
-    const app = (await within(dialog).findByText("pley for Android")).closest("li");
+    const app = (await within(dialog).findByText("Pley for Android")).closest("li");
     if (!app) throw new Error("no row for the app");
-    expect(app).toHaveTextContent("pley's own app");
+    expect(app).toHaveTextContent("Pley's own app");
     // What it may do on one line, where it was used from on the next.
     expect(within(app).getByText("Allowed by Ann · Libraries · Play")).toBeInTheDocument();
     expect(within(app).getByText(/^Android 15 · 192\.0\.2\.9 · last active /)).toBeInTheDocument();
 
-    await user.click(within(app).getByRole("button", { name: "Sign out pley for Android" }));
-    expect(await screen.findByText("Signed out pley for Android")).toBeInTheDocument();
+    await user.click(within(app).getByRole("button", { name: "Sign out Pley for Android" }));
+    expect(await screen.findByText("Signed out Pley for Android")).toBeInTheDocument();
     expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/users/2/apps/9")).toBe(true);
     expect(await within(dialog).findByText("No apps use this account.")).toBeInTheDocument();
   });
@@ -267,7 +267,7 @@ describe("UsersSettings", () => {
     const requests = renderUsers();
     await user.click(await screen.findByRole("button", { name: /Ann/ }));
     const dialog = screen.getByRole("dialog", { name: "Edit Ann" });
-    await within(dialog).findByText("pley for Android");
+    await within(dialog).findByText("Pley for Android");
     expect(within(dialog).getByText("No signed-in devices.")).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole("button", { name: "Sign out everywhere" }));
@@ -282,7 +282,7 @@ describe("UsersSettings", () => {
     const requests = renderUsers();
     await user.click(await screen.findByRole("button", { name: /Kiddo/ }));
     const dialog = screen.getByRole("dialog", { name: "Edit Kiddo" });
-    await within(dialog).findByText("pley for Android");
+    await within(dialog).findByText("Pley for Android");
 
     await user.click(within(dialog).getByRole("button", { name: "Sign out everywhere" }));
     expect(within(dialog).getByText("Sign out Kiddo everywhere?")).toBeInTheDocument();

@@ -22,7 +22,7 @@ export function groupSecret(secret: string): string {
 /** The recovery codes as a text file. */
 export function recoveryCodesText(codes: string[], username: string, server?: string): string {
   return [
-    `pley recovery codes for ${username}${server ? ` on ${server}` : ""}`,
+    `Pley recovery codes for ${username}${server ? ` on ${server}` : ""}`,
     "Each code signs in once, instead of a code from your authenticator app.",
     "",
     ...codes,

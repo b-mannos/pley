@@ -704,7 +704,7 @@ sub apiCheckAnswered(job as object, status as integer, body as string)
         job.url = job.candidates[job.index] + "/api/server"
         apiSend(job)
     else if job.answered
-        apiAnswer(job.request, apiFail("not_pley", "Something answers at " + job.address + ", but it isn't pley."))
+        apiAnswer(job.request, apiFail("not_pley", "Something answers at " + job.address + ", but it isn't Pley."))
     else
         apiAnswer(job.request, apiFail("unreachable", "Couldn't reach " + job.address + ". Check the address, and that the server is on."))
     end if
@@ -864,7 +864,7 @@ sub apiSignedIn(signIn as object, body as string)
     fresh = tokensFrom(answer, meta.issuer, meta.tokenEndpoint, meta.revocationEndpoint)
     if authExtraScopes(fresh.scope, httpScope()).Count() > 0
         apiRevoke(fresh)
-        apiSignInUpdate(signIn, { status: "failed", message: "The server allowed more than pley for Roku asks for, so it was signed out again." })
+        apiSignInUpdate(signIn, { status: "failed", message: "The server allowed more than Pley for Roku asks for, so it was signed out again." })
         return
     end if
     previous = tokensLoad(m.tokensSection, fresh.issuer)

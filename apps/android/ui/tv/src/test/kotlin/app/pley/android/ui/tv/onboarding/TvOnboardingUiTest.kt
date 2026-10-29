@@ -184,7 +184,7 @@ class TvOnboardingUiTest {
                 TvAddressPad(ServersUiState(addressProblem = ServersProblem.NotPley("router:7539")), onConnect = {}, onEdited = {})
             }
         }
-        compose.onNodeWithText("Something answers at router:7539, but it isn't pley.").assertExists()
+        compose.onNodeWithText("Something answers at router:7539, but it isn't Pley.").assertExists()
     }
 
     // ---------------------------------------------------------------- the link screen

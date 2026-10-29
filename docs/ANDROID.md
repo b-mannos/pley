@@ -110,14 +110,14 @@ break inside a word.
 
 ## Offline
 
-The app needs no internet: the server signs pley's own apps in itself
+The app needs no internet: the server signs Pley's own apps in itself
 (their client documents are built in, never fetched), and on a phone
 whose Wi-Fi has no internet, traffic to the server at home goes over the
 Wi-Fi even while the phone's default network is mobile data
 (`LocalRoute`). Away from the server, phones and tablets play downloads.
 
 With the server out of reach, the screens show what was saved of them,
-under "Showing what pley had saved. Reconnecting…": a banner under the
+under "Showing what Pley had saved. Reconnecting…": a banner under the
 top bar on phones (leading to the downloads); on TVs, a notice at the
 top right for a few seconds, then a mark on the rail's avatar while it
 lasts (no corner is free of controls on every TV screen). The server's event stream keeps trying, and the screens come back
@@ -223,7 +223,7 @@ startup read). Each module sees only what it builds on.
 | `:core:testing` | fakes, JSON fixtures written from docs/API.md, test rules; tests only | the contracts |
 | `:ui:phone` | the phone and tablet interface: Material 3, the navigation bar or rail, the player with picture in picture | screens, designsystem, player |
 | `:ui:tv` | the TV interface: tv-material for the chrome, our own tiles, the rail, the D-pad rules, the TV player | screens, designsystem, player |
-| `:testing:fixtures` | `FixtureServer`, a fake pley server on 127.0.0.1 | model |
+| `:testing:fixtures` | `FixtureServer`, a fake Pley server on 127.0.0.1 | model |
 | `:benchmark` | Macrobenchmarks and the Baseline and Startup Profile generators | `:app` |
 
 Rules the build keeps:
@@ -245,12 +245,12 @@ Rules the build keeps:
 ## Builds
 
 Two flavors, `store` (Google Play and the Amazon Appstore, no self-updater)
-and `direct` (the download the pley server will offer, which may later hand
+and `direct` (the download the Pley server will offer, which may later hand
 an update to the installer; it asks for that permission only once it does).
 Release builds are minified, and signed when the release key is given
 (below).
 
-The version is pley's, from `VERSION` at the repository's root, and the
+The version is Pley's, from `VERSION` at the repository's root, and the
 version code follows from it (1.2.3 is 1020300), so every release installs
 over the one before. Google Play and the Amazon Appstore take each code
 once, so a rebuild of the same version for them sets `PLEY_BUILD` (1 to
@@ -301,7 +301,7 @@ the key above is then the upload key, which Play can reset if it is lost.
 The store's icon, feature graphic, TV banner and words are in
 `deploy/stores`.
 
-Launchers, the same in every build: "pley" on phones and tablets
+Launchers, the same in every build: "Pley" on phones and tablets
 (`MainActivity`, `LAUNCHER`) and on TV home screens (`TvActivity`,
 `LEANBACK_LAUNCHER`, with the 320×180 banner). Exported, beside these two,
 are only the sign-in's return address (`SignInRedirectActivity`) and the
@@ -361,7 +361,7 @@ options that appear, and run `adb connect <ip>:5555`.
 ## A server to test against
 
 Nothing in tests, benchmarks or manual checks signs in to, plays on or
-otherwise writes to a pley server people use: signing in creates grants
+otherwise writes to a Pley server people use: signing in creates grants
 and playing writes progress. Unit and UI tests use `FixtureServer`. For a
 real one, start a disposable server with its own data folder:
 
@@ -390,7 +390,7 @@ the first frame, to the first screen fully drawn (the app reports it once
 Home has its rows, or at once for another first screen) and the app's own
 startup steps, with a Perfetto trace of each start. Run it with adb on one
 device, never as a connected Gradle task, which installs the app on every
-device attached (a phone's own pley among them):
+device attached (a phone's own Pley among them):
 
 ```powershell
 .\gradlew.bat :app:assembleStoreBenchmarkRelease :benchmark:assembleBenchmarkRelease

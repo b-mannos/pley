@@ -3,7 +3,7 @@ name = "pley-desktop"
 version = "0.2.0"
 edition = "2024"
 rust-version = "1.85"
-description = "pley for Windows, macOS and Linux: a window on a pley server's web app"
+description = "Pley for Windows, macOS and Linux: a window on a Pley server's web app"
 license = "LicenseRef-Restricted"
 publish = false
 

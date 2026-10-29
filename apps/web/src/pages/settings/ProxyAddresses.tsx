@@ -68,7 +68,7 @@ export function ProxyAddresses() {
         <h3 className="text-base font-semibold">Reached through a reverse proxy</h3>
         <p className="mt-0.5 text-sm text-muted">
           Some proxies pass the address on without its port (nginx's <code className="font-mono text-xs">$host</code>, Nginx Proxy Manager).
-          pley then names itself without the port, and apps refuse it. Add the addresses with a port pley is reached at that way, or have the
+          Pley then names itself without the port, and apps refuse it. Add the addresses with a port Pley is reached at that way, or have the
           proxy pass the port (<code className="font-mono text-xs">proxy_set_header Host $http_host;</code>).
         </p>
       </div>
@@ -77,7 +77,7 @@ export function ProxyAddresses() {
           <p className="flex items-start gap-2">
             <CircleAlert className="mt-0.5 size-4 shrink-0 text-danger" />
             <span>
-              You opened pley at <span className="font-mono text-xs">{here}</span>, but it is told{" "}
+              You opened Pley at <span className="font-mono text-xs">{here}</span>, but it is told{" "}
               <span className="font-mono text-xs">{hidden}</span>: apps can't sign in at this address.
             </span>
           </p>

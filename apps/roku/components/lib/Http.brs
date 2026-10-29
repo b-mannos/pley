@@ -138,7 +138,7 @@ end function
 ' What a status says when the answer doesn't.
 function httpStatusSentence(status as integer) as string
     if status = 401 then return "You were signed out: sign in again."
-    if status = 403 then return "pley for Roku isn't allowed to do that: use pley's web app."
+    if status = 403 then return "Pley for Roku isn't allowed to do that: use Pley's web app."
     if status = 404 then return "This isn't on the server any more."
     if status = 410 then return "Playback was stopped by the server's administrator."
     if status = 429 then return "The server is busy: try again in a moment."

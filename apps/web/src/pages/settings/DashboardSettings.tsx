@@ -269,7 +269,7 @@ function TranscoderCard({ tc }: { tc: TranscoderInfo }) {
         />
         <h3 className="text-base font-semibold">Transcoder</h3>
         {tc.license ? <Badge tone="info">{tc.license}</Badge> : null}
-        <span className="text-xs text-muted">{tc.managed ? "Managed by pley" : "External"}</span>
+        <span className="text-xs text-muted">{tc.managed ? "Managed by Pley" : "External"}</span>
       </div>
       {tc.error ? <p className="mb-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{tc.error}</p> : null}
       <dl>
@@ -541,7 +541,7 @@ export function DashboardSettings() {
               <Card>
                 <h3 className="mb-3 text-base font-semibold">{system.data.name}</h3>
                 <dl>
-                  <InfoRow label="Version">pley {versionLabel(system.data.version, system.data.commit)}</InfoRow>
+                  <InfoRow label="Version">Pley {versionLabel(system.data.version, system.data.commit)}</InfoRow>
                   <InfoRow label="Web app">{versionLabel(WEB_VERSION, WEB_COMMIT)}</InfoRow>
                   <InfoRow label="Platform">
                     {system.data.os} · {system.data.arch}

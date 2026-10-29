@@ -1,9 +1,9 @@
-# systemd unit for pley on Linux (deploy/README.md):
+# systemd unit for Pley on Linux (deploy/README.md):
 #   sudo useradd --system --user-group --home-dir /var/lib/pley --shell /usr/sbin/nologin pley
 #   sudo install -m755 pley pley-transcoder /usr/local/bin/
 #   sudo cp pley.service /etc/systemd/system/ && sudo systemctl enable --now pley
 [Unit]
-Description=pley media server
+Description=Pley media server
 After=network-online.target remote-fs.target
 Wants=network-online.target
 
@@ -22,7 +22,7 @@ Environment=PLEY_DATA_DIR=/var/lib/pley
 ExecStart=/usr/local/bin/pley
 Restart=on-failure
 RestartSec=5
-# pley stops its transcoder (which stops ffmpeg) before exiting.
+# Pley stops its transcoder (which stops ffmpeg) before exiting.
 TimeoutStopSec=45
 StateDirectory=pley
 StateDirectoryMode=0700

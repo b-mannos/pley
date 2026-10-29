@@ -3,7 +3,7 @@ name = "pley-transcoder-api"
 version = "0.2.0"
 edition = "2024"
 rust-version = "1.95"
-description = "Wire protocol types shared by the pley server and the pley transcoder"
+description = "Wire protocol types shared by the Pley server and the Pley transcoder"
 license = "LicenseRef-Restricted"
 publish = false
 

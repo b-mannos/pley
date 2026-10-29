@@ -56,7 +56,7 @@ function render(): void {
   const entries = mergeServers(saved, found);
   list.replaceChildren(...entries.map(row));
   if (searching) status.textContent = "Looking for servers on this network…";
-  else if (!entries.length) status.textContent = "No server answered. Check that pley is running on it, or enter its address.";
+  else if (!entries.length) status.textContent = "No server answered. Check that Pley is running on it, or enter its address.";
   else status.textContent = "";
   searchAgain.hidden = searching;
 }

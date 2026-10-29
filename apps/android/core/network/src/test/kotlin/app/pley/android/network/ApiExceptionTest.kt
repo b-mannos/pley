@@ -44,7 +44,7 @@ class ApiExceptionTest {
         assertTrue(failure(SerializationException("bad")) is UnreadableAnswerException)
         val offline = failure(IOException("connect failed: EPERM (Operation not permitted)")) as OfflineException
         assertTrue(offline.blocked)
-        assertEquals("pley isn't allowed on your home network: allow it in the app's permissions", offline.message)
+        assertEquals("Pley isn't allowed on your home network: allow it in the app's permissions", offline.message)
         val signedOut = app.pley.android.auth.SignedOutException()
         assertSame(signedOut, failure(signedOut))
     }

@@ -48,4 +48,4 @@ createServer((req, res) => {
   // The page went (a reload, a closed event stream): so does its request.
   res.on("close", () => upstream.destroy());
   req.pipe(upstream);
-}).listen(port, () => console.log(`pley for LG TV (development): http://localhost:${port} → ${target.origin}`));
+}).listen(port, () => console.log(`Pley for LG TV (development): http://localhost:${port} → ${target.origin}`));

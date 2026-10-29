@@ -369,13 +369,13 @@ pub fn device_name(user_agent: Option<&str>) -> String {
     let Some(ua) = user_agent.filter(|u| !u.is_empty()) else { return "Unknown device".into() };
     // The Android app, its web view and its player all say pleyAndroid/.
     if ua.contains("pleyAndroid/") {
-        return "pley for Android".into();
+        return "Pley for Android".into();
     }
     if ua.contains("pleyKodi/") {
-        return "pley for Kodi".into();
+        return "Pley for Kodi".into();
     }
     if ua.contains("pleyRoku/") {
-        return "pley for Roku".into();
+        return "Pley for Roku".into();
     }
     // Samsung's and LG's TV apps are web apps, which can't set their own
     // agent: the TV's web engine names the TV.
@@ -470,10 +470,10 @@ mod tests {
         assert_eq!(device_name(Some("python-requests/2.32")), "python-requests/2.32");
         assert_eq!(device_name(None), "Unknown device");
         let web_view = "Mozilla/5.0 (Linux; Android 16; Pixel 9; wv) AppleWebKit/537.36 Chrome/140.0 Mobile Safari/537.36 pleyAndroid/0.1.0";
-        assert_eq!(device_name(Some(web_view)), "pley for Android");
-        assert_eq!(device_name(Some("pleyAndroid/0.1.0 (Android 16)")), "pley for Android");
-        assert_eq!(device_name(Some("pleyKodi/0.1.0 (Kodi 21.2; Windows)")), "pley for Kodi");
-        assert_eq!(device_name(Some("pleyRoku/0.1.0 (Roku OS 14.5; Roku Ultra)")), "pley for Roku");
+        assert_eq!(device_name(Some(web_view)), "Pley for Android");
+        assert_eq!(device_name(Some("pleyAndroid/0.1.0 (Android 16)")), "Pley for Android");
+        assert_eq!(device_name(Some("pleyKodi/0.1.0 (Kodi 21.2; Windows)")), "Pley for Kodi");
+        assert_eq!(device_name(Some("pleyRoku/0.1.0 (Roku OS 14.5; Roku Ultra)")), "Pley for Roku");
         let tizen = "Mozilla/5.0 (SMART-TV; LINUX; Tizen 6.0) AppleWebKit/537.36 (KHTML, like Gecko) 76.0.3809.146/6.0 TV Safari/537.36";
         assert_eq!(device_name(Some(tizen)), "Samsung TV");
         let webos = "Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.128 Safari/537.36 WebAppManager";

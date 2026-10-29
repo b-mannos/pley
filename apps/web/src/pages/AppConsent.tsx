@@ -169,18 +169,18 @@ export function AppConsent({
   const canSwitch = (profiles.data?.length ?? 0) > 1;
 
   return (
-    <AuthLayout title={`${app} wants to use your pley account`} subtitle={server.data ? `on ${server.data.name}` : undefined}>
+    <AuthLayout title={`${app} wants to use your Pley account`} subtitle={server.data ? `on ${server.data.name}` : undefined}>
       <div className="space-y-6 text-sm">
         {client.first_party ? (
           <Badge tone="accent">
-            <ShieldCheck className="size-3.5" aria-hidden /> pley's own app
+            <ShieldCheck className="size-3.5" aria-hidden /> Pley's own app
           </Badge>
         ) : (
           <div className="flex gap-2.5 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-fg/90">
             <TriangleAlert className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden />
             <div className="space-y-1">
-              {client.name ? <p>It calls itself “{client.name}” (pley can't check that name)</p> : null}
-              <p>This app isn't one of pley's own</p>
+              {client.name ? <p>It calls itself “{client.name}” (Pley can't check that name)</p> : null}
+              <p>This app isn't one of Pley's own</p>
             </div>
           </div>
         )}
@@ -229,7 +229,7 @@ export function AppConsent({
           <p className="mt-3 text-muted">
             It can't change your password, sign-in settings or devices, and it never gets administrator rights.
           </p>
-          {user.is_admin ? <p className="mt-1 text-muted">Your administrator rights stay in pley's web app.</p> : null}
+          {user.is_admin ? <p className="mt-1 text-muted">Your administrator rights stay in Pley's web app.</p> : null}
         </div>
 
         <Destination redirect={redirect} />

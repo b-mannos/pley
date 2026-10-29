@@ -61,7 +61,7 @@ export function StorageSection() {
           <div>
             <div className="font-medium text-danger">The database is damaged</div>
             <div className="text-muted">
-              {health.problem}. Stop pley, move pley.db and its -wal and -shm files aside, and copy the latest backup in
+              {health.problem}. Stop Pley, move pley.db and its -wal and -shm files aside, and copy the latest backup in
               their place.
             </div>
           </div>

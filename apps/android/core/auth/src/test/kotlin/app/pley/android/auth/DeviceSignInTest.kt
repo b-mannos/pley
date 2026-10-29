@@ -157,7 +157,7 @@ class DeviceSignInTest {
     fun theDeviceEndpointMustBeOnTheServer() = runTest {
         deviceEndpoint = "http://elsewhere.example.com/api/oauth/device"
         val error = runCatching { grant().start(server.url("/").toString()) }.exceptionOrNull()
-        assertEquals("this server sends apps to another address to sign in: pley doesn't", error?.message)
+        assertEquals("this server sends apps to another address to sign in: Pley doesn't", error?.message)
         assertTrue(codeRequests.isEmpty())
         val metadata = ServerMetadata.parse(
             """{"issuer":"http://nas:7539","authorization_endpoint":"http://nas:7539/oauth/authorize",
@@ -286,8 +286,8 @@ class DeviceSignInTest {
         pollAnswer = { error("invalid_grant") }
         assertEquals(listOf(DevicePoll.Waiting, DevicePoll.Failed("this code doesn't work anymore: get a new one")), grant.poll(code).toList())
         polls.clear()
-        pollAnswer = { MockResponse().setResponseCode(400).setBody("""{"error":"invalid_client","error_description":"only pley's own apps"}""") }
-        assertEquals(DevicePoll.Failed("only pley's own apps"), grant.poll(code).toList().last())
+        pollAnswer = { MockResponse().setResponseCode(400).setBody("""{"error":"invalid_client","error_description":"only Pley's own apps"}""") }
+        assertEquals(DevicePoll.Failed("only Pley's own apps"), grant.poll(code).toList().last())
         assertEquals(1, polls.size)
     }
 

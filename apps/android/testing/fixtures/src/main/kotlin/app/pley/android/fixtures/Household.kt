@@ -129,7 +129,7 @@ internal class Household(catalog: Catalog) {
         }
         for ((n, id) in ((20L..80L step 3).toList() + FixtureIds.SHOW_S1E1).withIndex()) {
             val at = alex.state(id).lastPlayedAt ?: (BASE_TIME - n * 86_400L)
-            alex.history += HistoryRecord(nextHistory++, id, at, if (n % 2 == 0) "pley on Android" else "Chrome on Windows")
+            alex.history += HistoryRecord(nextHistory++, id, at, if (n % 2 == 0) "Pley on Android" else "Chrome on Windows")
         }
         alex.history.sortByDescending { it.viewedAt }
 

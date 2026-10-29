@@ -246,11 +246,11 @@ pub async fn put_network(
         let addresses =
             |list: &[std::net::SocketAddr]| list.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
         tracing::info!(
-            "{} changed where pley listens: {} (the Plex-compatible API: {}; discovery {})",
+            "{} changed where Pley listens: {} (the Plex-compatible API: {}; discovery {})",
             user.username,
             addresses(&listen.web),
             if listen.plex_on_web {
-                "on pley's port".to_owned()
+                "on Pley's port".to_owned()
             } else if listen.plex.is_empty() {
                 "off".to_owned()
             } else {
@@ -336,17 +336,17 @@ pub async fn put_transcode_dir(
             ));
         }
         if *dir == config.data_dir {
-            return Err(AppError::bad_request("choose a folder of its own, not pley's data folder"));
+            return Err(AppError::bad_request("choose a folder of its own, not Pley's data folder"));
         }
         let check = dir.clone();
         tokio::task::spawn_blocking(move || crate::config::usable_folder(&check))
             .await
             .map_err(|err| AppError::Internal(err.into()))?
-            .map_err(|err| AppError::bad_request(format!("pley can't write in {}: {err}", dir.display())))?;
+            .map_err(|err| AppError::bad_request(format!("Pley can't write in {}: {err}", dir.display())))?;
     }
     crate::config::save_transcode_dir(&config.config_file, dir.as_deref())?;
     tracing::info!(
-        "{} chose {} as the transcode folder, from pley's next start",
+        "{} chose {} as the transcode folder, from Pley's next start",
         user.username,
         dir.as_deref().unwrap_or(&default).display()
     );

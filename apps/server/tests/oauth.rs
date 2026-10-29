@@ -20,7 +20,7 @@ const ANDROID_BACK: &str = "app.pley.android:/oauth/callback";
 const DESKTOP_BACK: &str = "http://127.0.0.1:53111/oauth/callback";
 const OTHER_APP: &str = "https://apps.example.com/pley.json";
 const OTHER_BACK: &str = "https://apps.example.com/callback?from=pley";
-const NOT_FROM_PLEY: &str = "this page must be opened from pley itself";
+const NOT_FROM_PLEY: &str = "this page must be opened from Pley itself";
 
 /// The parameters of an app's authorization request.
 fn request_params(client_id: &str, redirect_uri: &str) -> Vec<(String, String)> {
@@ -183,7 +183,7 @@ async fn pleys_android_app_signs_in_without_internet() {
     assert_eq!(body["status"], "consent");
     assert_eq!(
         body["client"],
-        json!({"id": ANDROID_APP, "host": "hhaidar.github.io", "name": "pley for Android", "first_party": true})
+        json!({"id": ANDROID_APP, "host": "hhaidar.github.io", "name": "Pley for Android", "first_party": true})
     );
     assert_eq!(body["redirect"], json!({"kind": "app", "to": "app.pley.android"}));
     assert_eq!(body["scopes"], json!(["library", "play"]));
@@ -261,7 +261,7 @@ async fn the_desktop_app_signs_in_through_any_loopback_port() {
     let admin = app.setup_admin().await;
     let started = start(&app, &admin, &query(&request_params(DESKTOP_APP, DESKTOP_BACK))).await;
     assert_eq!(started.body["redirect"], json!({"kind": "loopback", "to": "127.0.0.1"}), "{}", started.text());
-    assert_eq!(started.body["client"]["name"], "pley for desktop");
+    assert_eq!(started.body["client"]["name"], "Pley for desktop");
 
     let address = allow(&app, &admin, &query(&request_params(DESKTOP_APP, DESKTOP_BACK))).await;
     assert!(address.starts_with("http://127.0.0.1:53111/oauth/callback?code="), "{address}");
@@ -417,7 +417,7 @@ async fn bad_clients_and_return_addresses_are_never_redirected_to() {
         start(&app, &admin, &query(&with(base.clone(), &[("redirect_uri", Some("app.pley.android:/x"))]))).await;
     assert_eq!(unlisted.body["message"], "this app didn't list that return address: ask the app's publisher to fix it");
     let other = start(&app, &admin, &query(&with(base, &[("client_id", Some(OTHER_APP))]))).await;
-    assert!(other.body["message"].as_str().unwrap().starts_with("only pley's own apps can sign in to this server"));
+    assert!(other.body["message"].as_str().unwrap().starts_with("only Pley's own apps can sign in to this server"));
 }
 
 #[tokio::test]
@@ -781,7 +781,7 @@ async fn apps_by_other_publishers_need_the_setting() {
     assert_eq!(refused.status, StatusCode::BAD_REQUEST);
     assert_eq!(
         refused.body["message"],
-        "only pley's own apps can sign in to this server: an administrator can allow apps by other publishers in \
+        "only Pley's own apps can sign in to this server: an administrator can allow apps by other publishers in \
          Settings → Server → Apps"
     );
 
@@ -877,7 +877,7 @@ async fn apps_lists_show_and_end_grants() {
     let grant = &list[0];
     let grant_id = grant["id"].as_i64().unwrap();
     assert_eq!(grant["client_id"], ANDROID_APP);
-    assert_eq!((&grant["name"], &grant["first_party"]), (&json!("pley for Android"), &json!(true)));
+    assert_eq!((&grant["name"], &grant["first_party"]), (&json!("Pley for Android"), &json!(true)));
     assert_eq!(grant["host"], "hhaidar.github.io");
     assert_eq!(grant["scopes"], json!(["library", "play"]));
     assert_eq!(grant["profile"], json!({"id": bob_id, "name": "bob"}));

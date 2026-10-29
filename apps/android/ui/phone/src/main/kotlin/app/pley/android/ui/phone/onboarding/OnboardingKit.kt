@@ -40,7 +40,7 @@ val LocalOnboardingSource = staticCompositionLocalOf<OnboardingSource?> { null }
 internal fun PleyWordmark(modifier: Modifier = Modifier) {
     Row(modifier.semantics { heading() }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Image(rememberVectorPainter(PleyMark.Glyph), contentDescription = null, modifier = Modifier.size(44.dp))
-        Text("pley", style = PleyType.Phone.HeadlineMedium.copy(fontSize = 30.sp, lineHeight = 36.sp), color = PleyColors.Fg)
+        Text("Pley", style = PleyType.Phone.HeadlineMedium.copy(fontSize = 30.sp, lineHeight = 36.sp), color = PleyColors.Fg)
     }
 }
 

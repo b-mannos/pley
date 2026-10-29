@@ -40,7 +40,7 @@ pub enum ServiceCommand {
     Install(InstallArgs),
     /// Stop and remove the service. Its data folder stays
     Uninstall(UninstallArgs),
-    /// Start the service and wait until pley answers
+    /// Start the service and wait until Pley answers
     Start,
     /// Stop the service and wait until it has stopped
     Stop,
@@ -51,13 +51,13 @@ pub enum ServiceCommand {
     /// installer runs it as the service's user)
     #[command(hide = true)]
     StoreCredential,
-    /// Wait for the pley that started on --data-dir in the last minutes, and
+    /// Wait for the Pley that started on --data-dir in the last minutes, and
     /// print its address, setup link and what it found FFmpeg can do (the
-    /// installer runs it for pley in the notification area)
+    /// installer runs it for Pley in the notification area)
     #[command(hide = true)]
     Report,
     /// Copy another data folder into --data-dir, which has no database yet
-    /// (the installer runs it for pley in the notification area)
+    /// (the installer runs it for Pley in the notification area)
     #[command(hide = true)]
     CopyData {
         #[arg(long, value_name = "DIR")]
@@ -88,13 +88,13 @@ pub struct InstallArgs {
     /// Create the user, a standard one, or set the password of the one an earlier install made
     #[arg(long)]
     pub create_user: bool,
-    /// Let this account open the data folder too, such as the administrator installing pley (repeatable)
+    /// Let this account open the data folder too, such as the administrator installing Pley (repeatable)
     #[arg(long, value_name = "ACCOUNT")]
     pub grant: Vec<String>,
     /// Let the service write wherever its account may and keep all of its privileges
     #[arg(long)]
     pub unrestricted: bool,
-    /// Whether to answer the pley apps looking for servers on the local network
+    /// Whether to answer the Pley apps looking for servers on the local network
     #[arg(long, value_name = "true|false")]
     pub discovery: Option<bool>,
     /// A network share's server (\\nas) to save a sign-in for, with --account user
@@ -110,8 +110,8 @@ pub struct InstallArgs {
     /// earlier install made with --create-user)
     #[arg(long, value_name = "USER")]
     pub remove_user: Option<String>,
-    /// Copy the data of the pley that kept it in this folder first, while the
-    /// data folder has no database yet (that pley must be stopped)
+    /// Copy the data of the Pley that kept it in this folder first, while the
+    /// data folder has no database yet (that Pley must be stopped)
     #[arg(long, value_name = "DIR")]
     pub copy_data_from: Option<PathBuf>,
     /// Install or update the service without starting it
@@ -141,7 +141,7 @@ pub fn main(cli: &Cli, command: &ServiceCommand) -> anyhow::Result<ExitCode> {
         ServiceCommand::Start => start(&data_dir(cli))?,
         ServiceCommand::Stop => {
             if !scm::stop(SERVICE_TIMEOUT)? {
-                println!("the pley service isn't installed");
+                println!("the Pley service isn't installed");
             }
         }
         ServiceCommand::StoreCredential => accounts::store_credential_from_env()?,
@@ -215,7 +215,7 @@ fn install(cli: &Cli, args: &InstallArgs) -> anyhow::Result<()> {
         }
     };
 
-    steps.run("stop the pley service if it runs", || scm::stop(SERVICE_TIMEOUT))?;
+    steps.run("stop the Pley service if it runs", || scm::stop(SERVICE_TIMEOUT))?;
 
     let temp = data_dir.join("tmp");
     steps.run(format!("create {}", data_dir.display()), || {
@@ -245,7 +245,7 @@ fn install(cli: &Cli, args: &InstallArgs) -> anyhow::Result<()> {
     };
     let restricted = if args.unrestricted { "" } else { ", writing only in its data folder" };
     steps
-        .run(format!("install the pley service as {}{restricted}", definition.account), || scm::install(&definition))?;
+        .run(format!("install the Pley service as {}{restricted}", definition.account), || scm::install(&definition))?;
 
     // Once Windows knows the service's account (icacls refuses SIDs it can't
     // name), and before anything is copied or saved in the folder: from
@@ -297,7 +297,7 @@ fn install(cli: &Cli, args: &InstallArgs) -> anyhow::Result<()> {
     }
 
     if !args.no_start {
-        steps.run("start the pley service", || start(&data_dir))?;
+        steps.run("start the Pley service", || start(&data_dir))?;
     }
     Ok(())
 }
@@ -312,7 +312,7 @@ fn allowed_in(accounts: &[String]) -> String {
 
 fn uninstall(args: &UninstallArgs) -> anyhow::Result<()> {
     let steps = Steps { dry_run: args.dry_run };
-    steps.run("stop and remove the pley service", scm::uninstall)?;
+    steps.run("stop and remove the Pley service", scm::uninstall)?;
     if let Some(user) = &args.delete_user {
         steps.run(format!("delete the local user {user} and its profile"), || accounts::delete_user(user))?;
     }
@@ -327,9 +327,9 @@ const NOT_COPIED: &[&str] = &["pley.lock", "logs", "transcode", "tmp"];
 /// `to`, which has no database yet. The pley using `from` must be stopped:
 /// its lock is taken while copying, so that the database is copied whole.
 fn copy_data(from: &Path, to: &Path) -> anyhow::Result<()> {
-    anyhow::ensure!(from.join("pley.db").is_file(), "{} isn't a pley data folder (it has no pley.db)", from.display());
+    anyhow::ensure!(from.join("pley.db").is_file(), "{} isn't a Pley data folder (it has no pley.db)", from.display());
     anyhow::ensure!(!to.join("pley.db").exists(), "{} has a database already: nothing is copied over it", to.display());
-    let _lock = crate::instance::InstanceLock::acquire(from).context("stop the pley using it first")?;
+    let _lock = crate::instance::InstanceLock::acquire(from).context("stop the Pley using it first")?;
     let (mut files, mut bytes) = (0u64, 0u64);
     for entry in walkdir::WalkDir::new(from).min_depth(1) {
         let entry = entry?;
@@ -385,7 +385,7 @@ fn check_data_dir(dir: &Path) -> anyhow::Result<()> {
             let entry = entry?;
             anyhow::ensure!(
                 !is_link(entry.path()),
-                "{} is a link or junction: pley's data folder and what is in it must be ordinary folders and files",
+                "{} is a link or junction: Pley's data folder and what is in it must be ordinary folders and files",
                 entry.path().display()
             );
         }
@@ -398,7 +398,7 @@ fn check_data_dir(dir: &Path) -> anyhow::Result<()> {
         let started = names.iter().all(|name| name == "logs" || name == "tmp");
         anyhow::ensure!(
             pley || started,
-            "{} has other files in it than pley's: choose an empty or a new folder for pley's data",
+            "{} has other files in it than Pley's: choose an empty or a new folder for Pley's data",
             dir.display()
         );
     }
@@ -440,11 +440,11 @@ fn report(data_dir: &Path, since: i64) -> anyhow::Result<()> {
         if let Some(error) = start_error(&log, since) {
             anyhow::bail!("{error} (its log is {})", log_file.display());
         }
-        anyhow::ensure!(Instant::now() < deadline, "pley didn't start: its log is {}", log_file.display());
+        anyhow::ensure!(Instant::now() < deadline, "Pley didn't start: its log is {}", log_file.display());
         std::thread::sleep(Duration::from_millis(500));
     };
     while !answers(addr) {
-        anyhow::ensure!(Instant::now() < deadline, "pley didn't answer on {addr}: its log is {}", log_file.display());
+        anyhow::ensure!(Instant::now() < deadline, "Pley didn't answer on {addr}: its log is {}", log_file.display());
         std::thread::sleep(Duration::from_millis(500));
     }
     println!("running: http://{addr}");
@@ -503,13 +503,14 @@ fn log_stamp(secs: i64) -> String {
 }
 
 /// What the log says from pley's last start on, if that was at unix time
-/// `since` or later. Each start logs `pley <version> listening on …`, with
-/// the time in UTC at the start of its line.
+/// `since` or later. Each start logs `Pley <version> listening on …`
+/// (`pley …` in older logs), with the time in UTC at the start of its line.
 fn since_start(log: &str, since: i64) -> Option<&str> {
     let stamp = log_stamp(since);
     let (mut offset, mut start) = (0, None);
     for line in log.split_inclusive('\n') {
-        let started = line.contains(" INFO pley ") && line.contains(" listening on http://");
+        let started =
+            (line.contains(" INFO Pley ") || line.contains(" INFO pley ")) && line.contains(" listening on http://");
         if started && line.get(..stamp.len()).is_some_and(|time| time >= stamp.as_str()) {
             start = Some(offset);
         }
@@ -523,12 +524,15 @@ fn since_start(log: &str, since: i64) -> Option<&str> {
 fn start_error(log: &str, since: i64) -> Option<String> {
     let stamp = log_stamp(since);
     log.lines().rev().find_map(|line| {
-        let error = line.split(" ERROR pley could not start: ").nth(1)?;
-        (line.get(..stamp.len())? >= stamp.as_str()).then(|| format!("pley could not start: {}", error.trim()))
+        let error = line
+            .split(" ERROR Pley could not start: ")
+            .nth(1)
+            .or_else(|| line.split(" ERROR pley could not start: ").nth(1))?;
+        (line.get(..stamp.len())? >= stamp.as_str()).then(|| format!("Pley could not start: {}", error.trim()))
     })
 }
 
-/// Where the run whose log is `run` listens, from its first line (`pley …
+/// Where the run whose log is `run` listens, from its first line (`Pley …
 /// listening on http://<addr>`; `localhost` when it listens everywhere).
 fn listening_on(run: &str) -> Option<SocketAddr> {
     let first = run.lines().next()?;
@@ -585,7 +589,7 @@ mod tests {
         assert!(accounts::sid(&me).unwrap().starts_with("S-1-5-"));
         assert!(accounts::sid("no-such-user-for-pley").is_err());
         let err = accounts::create_or_update_user(&me, "x").unwrap_err();
-        assert!(format!("{err:#}").contains("not one pley made"), "{err:#}");
+        assert!(format!("{err:#}").contains("not one Pley made"), "{err:#}");
         assert!(accounts::delete_user(&me).is_err(), "someone's own account stays");
         accounts::delete_user("no-such-user-for-pley").unwrap();
     }
@@ -668,7 +672,7 @@ mod tests {
     fn the_report_reads_the_log_from_the_last_start_on() {
         let log = "2026-10-26T18:00:00.1Z  INFO pley 0.1.0 listening on http://127.0.0.1:7539\n\
                    2026-10-26T18:00:01.2Z  INFO [transcoder] ffmpeg 7.1 (cached capabilities): encoders [libx264]\n\
-                   2026-10-26T18:50:19.9Z  INFO pley 0.1.0 listening on http://127.0.0.1:7539\n\
+                   2026-10-26T18:50:19.9Z  INFO Pley 0.1.0 listening on http://127.0.0.1:7539\n\
                    2026-10-26T18:50:20.0Z  INFO Plex-compatible API listening on http://127.0.0.1:32400\n\
                    2026-10-26T18:50:20.3Z  INFO [transcoder] pley-transcoder 0.1.0 listening on http://127.0.0.1:60494\n";
         // 2026-10-26T18:50:00Z
@@ -678,24 +682,32 @@ mod tests {
         assert!(run.starts_with("2026-10-26T18:50:19.9Z"), "{run}");
         assert_eq!(listening_on(run), Some("127.0.0.1:7539".parse().unwrap()));
         assert_eq!(
-            listening_on("t  INFO pley 1.0 listening on http://localhost:7600\n"),
+            listening_on("t  INFO Pley 1.0 listening on http://localhost:7600\n"),
             Some("127.0.0.1:7600".parse().unwrap())
         );
         assert_eq!(ffmpeg_line(run), None, "the earlier start's");
         assert_eq!(since_start(log, since + 60), None, "not started since");
+        let older = "2026-10-26T18:50:19.9Z  INFO pley 0.1.0 listening on http://127.0.0.1:7539\n";
+        assert_eq!(since_start(older, since), Some(older), "an older pley's start");
 
         let failed = "2026-10-26T18:00:00.1Z ERROR pley could not start: cannot listen on 127.0.0.1:7539: in use\n\
-                      2026-10-26T18:50:30.0Z ERROR pley could not start: cannot listen on 127.0.0.1:7539: in use\n";
+                      2026-10-26T18:50:30.0Z ERROR Pley could not start: cannot listen on 127.0.0.1:7539: in use\n";
         assert_eq!(
             start_error(failed, since).as_deref(),
-            Some("pley could not start: cannot listen on 127.0.0.1:7539: in use")
+            Some("Pley could not start: cannot listen on 127.0.0.1:7539: in use")
         );
         assert_eq!(start_error(failed, since + 60), None, "an earlier start's");
+        let older = "2026-10-26T18:50:30.0Z ERROR pley could not start: cannot listen on 127.0.0.1:7539: in use\n";
+        assert_eq!(
+            start_error(older, since).as_deref(),
+            Some("Pley could not start: cannot listen on 127.0.0.1:7539: in use"),
+            "an older pley's"
+        );
     }
 
     #[test]
     fn the_report_finds_the_setup_code_and_what_ffmpeg_can_do() {
-        let log = "2026-10-26T10:00:00Z  WARN pley isn't set up yet: open http://127.0.0.1:7539/setup?code=AB12-CD34 to \
+        let log = "2026-10-26T10:00:00Z  WARN Pley isn't set up yet: open http://127.0.0.1:7539/setup?code=AB12-CD34 to \
                    create the administrator account (the setup code is AB12-CD34)\n\
                    2026-10-26T10:00:03Z  INFO [transcoder] ffmpeg 7.1 detected in 2.9s: encoders [hevc_nvenc], tone \
                    mapping [libplacebo], dolby vision: true\n";
@@ -708,6 +720,6 @@ mod tests {
             setup_code("WARN … open http://localhost:7539/setup#code=EF56-GH78 to …\n").as_deref(),
             Some("EF56-GH78")
         );
-        assert_eq!(setup_code("INFO pley 1.0 listening on http://127.0.0.1:7539\n"), None);
+        assert_eq!(setup_code("INFO Pley 1.0 listening on http://127.0.0.1:7539\n"), None);
     }
 }

@@ -49,7 +49,7 @@ object MockPley {
     fun insufficientScope(scope: String?): MockResponse = error(
         403,
         "insufficient_scope",
-        if (scope != null) "this app wasn't allowed to do that: sign in to it again to allow it" else "apps can't do that: use pley's web app",
+        if (scope != null) "this app wasn't allowed to do that: sign in to it again to allow it" else "apps can't do that: use Pley's web app",
         challenge = if (scope != null) """Bearer error="insufficient_scope", scope="$scope"""" else """Bearer error="insufficient_scope"""",
     )
 

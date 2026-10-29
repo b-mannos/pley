@@ -31,9 +31,9 @@ export function LogoMark(p: { size: number }) {
 export function PleyLogo(p: { height: number }) {
   const h = p.height;
   return (
-    <div class="pley-logo" style={`height:${h}px`} aria-label="pley" role="img">
+    <div class="pley-logo" style={`height:${h}px`} aria-label="Pley" role="img">
       <LogoMark size={h} />
-      <span style={`margin-left:${h * 0.4}px;font-size:${h * 0.75}px;line-height:${h}px;font-weight:700;letter-spacing:-0.25px;color:var(--fg)`}>pley</span>
+      <span style={`margin-left:${h * 0.4}px;font-size:${h * 0.75}px;line-height:${h}px;font-weight:700;letter-spacing:-0.25px;color:var(--fg)`}>Pley</span>
     </div>
   );
 }

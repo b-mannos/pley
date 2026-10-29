@@ -522,7 +522,7 @@ def main() -> None:
     ap.add_argument("--variants", default="gpu,sw4", help=f"comma-separated, of {', '.join(VARIANTS)}")
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--seconds", type=float, default=30, help="media fetched per run (seconds)")
-    ap.add_argument("--segment-seconds", type=float, default=2, help="as the pley server asks")
+    ap.add_argument("--segment-seconds", type=float, default=2, help="as the Pley server asks")
     ap.add_argument("--session", type=float, default=180, help="session cases: seconds watched")
     ap.add_argument("--player-buffer", type=float, default=30, help="session cases: seconds a player holds ahead")
     ap.add_argument("--preset", default="auto", help="the server's default is auto")

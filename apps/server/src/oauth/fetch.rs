@@ -430,7 +430,7 @@ impl Documents {
     }
 
     async fn fetch(&self, client_id: &str, url: Url) -> Result<(Client, Option<Duration>), ClientError> {
-        let _permit = self.permits.acquire().await.map_err(|_| ClientError::Unreachable("pley is stopping".into()))?;
+        let _permit = self.permits.acquire().await.map_err(|_| ClientError::Unreachable("Pley is stopping".into()))?;
         self.fetched.fetch_add(1, Ordering::Relaxed);
         let response = match &self.fetcher {
             // The address is the client ID, byte for byte.

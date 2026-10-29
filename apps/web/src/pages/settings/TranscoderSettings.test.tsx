@@ -64,12 +64,12 @@ describe("TranscoderSettings' folder", () => {
     });
     renderWithProviders(<TranscoderSettings />);
     expect(await screen.findByText("D:\\fast")).toBeInTheDocument();
-    expect(screen.getByText(/From pley's next start/)).toBeInTheDocument();
+    expect(screen.getByText(/From Pley's next start/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Use the default" }));
     expect(await screen.findByText("Saved")).toBeInTheDocument();
     expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ path: null });
-    expect(screen.queryByText(/From pley's next start/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/From Pley's next start/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Use the default" })).not.toBeInTheDocument();
   });
 

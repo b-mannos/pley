@@ -70,14 +70,14 @@ function TranscodeFolder({ dir }: { dir: TranscodeDir }) {
   const chosen = dir.next ?? dir.problem?.folder ?? dir.in_use;
   const choose = (path: string | null) =>
     save.mutate(path, {
-      onSuccess: (saved) => toast.success(saved.next ? "Saved: pley uses it from its next start" : "Saved"),
+      onSuccess: (saved) => toast.success(saved.next ? "Saved: Pley uses it from its next start" : "Saved"),
       onError: (e) => toast.error(errorMessage(e)),
     });
 
   return (
     <Row
       label="Transcode folder"
-      hint="Holds stream segments, converted downloads and caches. Use a fast local disk with free space. If it can't be used, pley falls back to the data folder."
+      hint="Holds stream segments, converted downloads and caches. Use a fast local disk with free space. If it can't be used, Pley falls back to the data folder."
     >
       <div className="space-y-2">
         <div className="break-all font-mono text-xs text-fg/80">{dir.in_use}</div>
@@ -86,17 +86,17 @@ function TranscodeFolder({ dir }: { dir: TranscodeDir }) {
             <CircleAlert className="mt-px size-3.5 shrink-0" />
             <span>
               <span className="break-all font-mono">{dir.problem.folder}</span> couldn't be used ({dir.problem.reason}), so the
-              default folder is. pley tries it again when it next starts.
+              default folder is. Pley tries it again when it next starts.
             </span>
           </p>
         ) : null}
         {dir.next ? (
           <p className="text-xs text-accent">
-            From pley's next start: <span className="break-all font-mono">{dir.next}</span>
+            From Pley's next start: <span className="break-all font-mono">{dir.next}</span>
           </p>
         ) : null}
         {dir.fixed ? (
-          <p className="text-xs text-subtle">Chosen on pley's command line or in its environment (PLEY_TRANSCODE_DIR).</p>
+          <p className="text-xs text-subtle">Chosen on Pley's command line or in its environment (PLEY_TRANSCODE_DIR).</p>
         ) : (
           <div className="flex flex-wrap gap-2">
             <Button
@@ -165,7 +165,7 @@ export function TranscoderSettings() {
                   : undefined
               }
             >
-              <Row label="Connection" hint={tc?.managed === false ? `External transcoder at ${tc.url ?? "?"}` : "Started by pley on this computer."}>
+              <Row label="Connection" hint={tc?.managed === false ? `External transcoder at ${tc.url ?? "?"}` : "Started by Pley on this computer."}>
                 <TestButton label="Test the transcoder" test={{ service: "transcoder" }} className="" />
               </Row>
               {/* An external transcoder keeps a folder of its own. */}
@@ -230,7 +230,7 @@ export function TranscoderSettings() {
                     {tc?.available && !tc.dolby_vision ? (
                       <span className="mt-1 block">
                         Dolby Vision needs an FFmpeg with libplacebo, and a GPU it reaches through Vulkan: <DolbyVisionBuilds os={os} />. Point
-                        pley at it with --ffmpeg and --ffprobe, or in pley.toml.
+                        Pley at it with --ffmpeg and --ffprobe, or in pley.toml.
                       </span>
                     ) : null}
                   </>

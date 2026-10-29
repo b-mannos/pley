@@ -64,7 +64,7 @@ internal fun PhoneGallery() {
         ) {
             Image(rememberVectorPainter(PleyMark.Tile), contentDescription = null, modifier = Modifier.size(24.dp))
             Spacer(Modifier.width(10.dp))
-            Label("pley", PleyType.Phone.HeadlineSmall)
+            Label("Pley", PleyType.Phone.HeadlineSmall)
             Spacer(Modifier.weight(1f))
             Box(Modifier.size(32.dp).background(Color(0xFFE0735A), PleyShape.Circle), contentAlignment = Alignment.Center) {
                 Label("A", PleyType.Phone.TitleSmall.copy(fontWeight = PleyType.Bold), color = Color.White)

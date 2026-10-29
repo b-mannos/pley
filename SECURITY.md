@@ -4,27 +4,27 @@
 
 Report vulnerabilities privately through GitHub: **Security → Report a
 vulnerability** on this repository. Please don't open a public issue for
-them. Include the version (`pley --version`), how pley is deployed, and the
+them. Include the version (`pley --version`), how Pley is deployed, and the
 steps to reproduce.
 
 Only the latest release gets fixes.
 
-## Running pley safely
+## Running Pley safely
 
-- **Use HTTPS beyond your home network.** pley speaks plain HTTP. When it can
+- **Use HTTPS beyond your home network.** Pley speaks plain HTTP. When it can
   be reached from outside, put it behind a reverse proxy with TLS that sets
-  `X-Forwarded-Proto: https` (pley then marks its cookies `Secure`). The
+  `X-Forwarded-Proto: https` (Pley then marks its cookies `Secure`). The
   desktop app warns before connecting to an unencrypted address on the
   internet, and the Android app refuses one.
 - **Set it up before exposing it.** A new server is set up with the one-time
-  code pley prints in its log (the tray icon's "Open pley" fills it in).
+  code Pley prints in its log (the tray icon's "Open Pley" fills it in).
 - **Keep what doesn't need to be public off the internet:** any
   transcoder on another machine, and the compatibility API's own port 32400
-  if you gave it one. By default that API answers on pley's port, to its
+  if you gave it one. By default that API answers on Pley's port, to its
   clients only, with a token; give the tools that use it an account of
   their own rather than an administrator's, and turn it off
   (`plex_bind = "off"`) if no tool needs it.
-- **Mount media read-only**, run pley as an unprivileged user, and don't let
+- **Mount media read-only**, run Pley as an unprivileged user, and don't let
   untrusted people write to library folders. The Docker setup does the
   first two and more: a read-only image, no capabilities, the port on
   127.0.0.1 only ([deploy/docker/README.md](deploy/docker/README.md#security)).
@@ -37,7 +37,7 @@ Only the latest release gets fixes.
   `X-Forwarded-Proto`, overwriting what clients send (see
   [deploy/README.md](deploy/README.md#apps-and-reverse-proxies)).
 
-## What pley does
+## What Pley does
 
 **Setup.** The administrator account takes the setup code from the log,
 wherever the request seems to come from: Docker, reverse proxies and DNS
@@ -70,7 +70,7 @@ on the same page, so they take the code as well.
 
 **Sessions.** Random 256-bit tokens, stored hashed. Browsers keep them in an
 `HttpOnly`, `SameSite=Lax` cookie only: no answer gives a page's script the
-token. What changes anything with the cookie must come from pley's own page
+token. What changes anything with the cookie must come from Pley's own page
 (`Sec-Fetch-Site`, or `Origin`): a page on another port of the same host is
 the same site to the browser. Other sites' pages can't have the API fetch
 anything with it either (links, pictures), only the address bar and
@@ -83,19 +83,19 @@ through the users list. Event streams end once their session is signed out. Swit
 restricted profile to one that can see more (an administrator, a higher age
 limit, other libraries) takes that profile's PIN, or its password (and code).
 
-**Apps signing in.** Apps sign in on pley's own page with OAuth 2.1:
+**Apps signing in.** Apps sign in on Pley's own page with OAuth 2.1:
 authorization codes with PKCE (S256 only), return addresses matched exactly
 (only a loopback port may differ), codes that work once within 60 seconds,
 and `iss` in every answer. Tokens are random, stored hashed and go only in
 the `Authorization` header. Access tokens last an hour; refresh tokens are
 rotated on every use, and one used twice ends the app's access. People are
-asked every time, pley's own apps included, on a page that shows the app's
+asked every time, Pley's own apps included, on a page that shows the app's
 address first and can't be framed. Apps never get administrator rights:
 every route they may use is listed with the scope it needs, anything else
 is refused, and the compatibility API refuses their tokens. Apps, and
 people who aren't administrators, don't see library folders or file paths
 on either API (only a file's name), the transcoder's error messages
-included. pley's own apps are built in and sign in without internet access.
+included. Pley's own apps are built in and sign in without internet access.
 Descriptions of other publishers' apps are read only when an administrator
 allows those apps, for someone signed in, from public addresses only,
 without redirects, at most 5 KiB; reading one tells the app's host that this
@@ -105,12 +105,12 @@ apps it was signing in get nothing: a code is exchanged only while the
 browser session that allowed it is signed in, and codes not exchanged yet
 end with the account's sign-ins. App sign-in works over plain HTTP at home,
 as passwords do; beyond the home network it needs HTTPS like the rest of
-pley.
+Pley.
 
-**TVs signing in.** pley's own apps on a TV show a code of 8 letters (about
-2.6 × 10¹⁰ of them) that someone signed in types on pley's `/link` page,
+**TVs signing in.** Pley's own apps on a TV show a code of 8 letters (about
+2.6 × 10¹⁰ of them) that someone signed in types on Pley's `/link` page,
 where they see the same consent as other apps and are told to allow only a
-code on a screen in front of them (RFC 8628 §5.4). Only pley's own apps can
+code on a screen in front of them (RFC 8628 §5.4). Only Pley's own apps can
 start one. At most 20 are in progress from one address (an IPv6 /64), 50
 from one home's /56 and 1,000 in all, and none is dropped to make room; past 10 wrong codes from one person or 300
 from everyone in 10 minutes, no code is looked up. A TV asking too often is
@@ -119,14 +119,14 @@ sign-ins end, or from a session signed out since, gets nothing. A signed
 out app's number is never given to another, so its keyed media addresses
 stay dead.
 
-**Pages.** A `Content-Security-Policy` allows only pley's own scripts and
-styles, no other site may frame pley (`frame-ancestors 'none'`,
+**Pages.** A `Content-Security-Policy` allows only Pley's own scripts and
+styles, no other site may frame Pley (`frame-ancestors 'none'`,
 `X-Frame-Options: DENY`), and answers carry `nosniff` and
 `Referrer-Policy: same-origin`. Clients get 30 seconds to send a request's
 headers, and a body may pause for 20 seconds at most. At most 8,192
 connections are open at once, 256 from one address on the internet (a
 proxy on this computer or its network carries everyone's, so its aren't
-counted), and a session keeps at most 16 event streams; on Unix pley raises
+counted), and a session keeps at most 16 event streams; on Unix Pley raises
 its open-files limit to the most it may have.
 
 **Files.** A symbolic link in a library is followed only to a file of the
@@ -134,9 +134,9 @@ same kind (a video to a video, a picture to a picture), when the library is
 scanned and again whenever the file is used (played directly or
 transcoded, downloaded, its pictures or subtitles served): a link named like
 a film can't hand out other files. The data folder (database, backups, log,
-settings) is kept to pley's account: mode 0700 on Unix; on Windows, a
-folder every account could use (one on D:\, say) is limited to pley's
-account, SYSTEM and the administrators. pley warns at start when every
+settings) is kept to Pley's account: mode 0700 on Unix; on Windows, a
+folder every account could use (one on D:\, say) is limited to Pley's
+account, SYSTEM and the administrators. Pley warns at start when every
 account may change the folder its programs are in, since any of them could
 replace them. The Windows service takes a data
 folder only when it is new or the administrators' (one an ordinary user
@@ -151,7 +151,7 @@ real one's. Pictures come only from the metadata services' hosts over
 HTTPS, redirects included, read up to 25 MB whatever their headers say; a
 profile picture is decoded only up to 4096 pixels.
 
-**Transcoder.** The transcoder pley starts listens on `127.0.0.1` with a
+**Transcoder.** The transcoder Pley starts listens on `127.0.0.1` with a
 random token. One started on another machine refuses to listen on the
 network without a token of at least 16 characters, since it reads whatever
 files it can open, and keeps its work folder private: on Windows too, the

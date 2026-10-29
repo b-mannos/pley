@@ -51,7 +51,7 @@ fn serve(cli: &Cli) -> ExitCode {
         Ok(config) => config,
         Err(err) => {
             pley::logging::init(&cli.log, Some(&Config::fallback_log_file(cli)));
-            tracing::error!("pley could not start: {err:#}");
+            tracing::error!("Pley could not start: {err:#}");
             return ExitCode::FAILURE;
         }
     };
@@ -59,7 +59,7 @@ fn serve(cli: &Cli) -> ExitCode {
     match pley::serve(config, !cli.no_tray) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            tracing::error!("pley could not start: {err:#}");
+            tracing::error!("Pley could not start: {err:#}");
             ExitCode::FAILURE
         }
     }

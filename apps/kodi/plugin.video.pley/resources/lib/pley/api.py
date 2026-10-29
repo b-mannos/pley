@@ -166,7 +166,7 @@ class Client:
             return response.json()
         except ValueError:
             # A web page, a router's: not pley.
-            raise ApiError(response.status, "not_pley", "the answer isn't pley's")
+            raise ApiError(response.status, "not_pley", "the answer isn't Pley's")
 
     def get(self, path: str, **query):
         return self.json("GET", path, query=query or None)
@@ -218,7 +218,7 @@ def local_request(base: str, method: str, target: str, headers: dict, body, time
     try:
         status = int(status_line.split(" ")[1])
     except (IndexError, ValueError):
-        raise ApiError(0, "service_off", "no answer from pley's service")
+        raise ApiError(0, "service_off", "no answer from Pley's service")
     answer_headers = {}
     for line in header_lines:
         name, _, value = line.partition(":")

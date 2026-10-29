@@ -101,7 +101,7 @@
     <string name="tv_settings_passthrough_on">On</string>
     <string name="tv_settings_passthrough_on_hint">Always pass it through</string>
     <string name="tv_settings_passthrough_off">Off</string>
-    <string name="tv_settings_passthrough_off_hint">Never: pley converts it</string>
+    <string name="tv_settings_passthrough_off_hint">Never: Pley converts it</string>
 
     <!-- Subtitles and display. -->
     <string name="tv_settings_subtitle_size">Subtitle size</string>
@@ -124,7 +124,7 @@
     <string name="tv_diagnostics_title">Diagnostics</string>
     <string name="tv_diagnostics_device">This TV</string>
     <string name="tv_diagnostics_app">App</string>
-    <string name="tv_diagnostics_app_value">pley %1$s</string>
+    <string name="tv_diagnostics_app_value">Pley %1$s</string>
     <string name="tv_diagnostics_plays">What it plays</string>
     <string name="tv_diagnostics_probing">Checking what this TV plays…</string>
     <string name="tv_diagnostics_probe_failed">The check of this TV failed.</string>

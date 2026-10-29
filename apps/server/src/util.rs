@@ -86,14 +86,14 @@ pub fn keep_private(dir: &Path) {
         let open = std::fs::metadata(dir).is_ok_and(|meta| meta.permissions().mode() & 0o077 != 0);
         if open && let Err(err) = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)) {
             tracing::warn!(
-                "other users of this computer can read {}, and pley can't change that: {err}",
+                "other users of this computer can read {}, and Pley can't change that: {err}",
                 dir.display()
             );
         }
     }
     #[cfg(windows)]
     if let Err(err) = windows_acl::keep_private(dir) {
-        tracing::warn!("other users of this computer can reach {}, and pley can't change that: {err:#}", dir.display());
+        tracing::warn!("other users of this computer can reach {}, and Pley can't change that: {err:#}", dir.display());
     }
     #[cfg(not(any(unix, windows)))]
     let _ = dir;
@@ -113,8 +113,8 @@ pub fn check_program_folder() {
         };
         if windows_acl::dacl(&dir).is_ok_and(|sddl| windows_acl::writable_by_everyone(&sddl)) {
             tracing::warn!(
-                "every account on this computer can change the programs in {}: any of them could replace pley \
-                 with its own and run as pley's account. Install pley to Program Files, or take away the \
+                "every account on this computer can change the programs in {}: any of them could replace Pley \
+                 with its own and run as Pley's account. Install Pley to Program Files, or take away the \
                  Users' and Authenticated Users' right to change that folder",
                 dir.display()
             );
@@ -160,7 +160,7 @@ mod windows_acl {
         let mut args = vec!["/remove:g"];
         args.extend(everyone.iter().map(String::as_str));
         icacls(dir, &args)?;
-        tracing::info!("{} is now kept to the account pley runs as", dir.display());
+        tracing::info!("{} is now kept to the account Pley runs as", dir.display());
         Ok(())
     }
 

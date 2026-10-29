@@ -83,26 +83,26 @@ pub enum RedirectKind {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ClientError {
     #[error(
-        "only pley's own apps can sign in to this server: an administrator can allow apps by other publishers in \
+        "only Pley's own apps can sign in to this server: an administrator can allow apps by other publishers in \
          Settings → Server → Apps"
     )]
     NotAllowed,
-    #[error("pley can't read app descriptions here: only pley's own apps can sign in to this server")]
+    #[error("Pley can't read app descriptions here: only Pley's own apps can sign in to this server")]
     Off,
-    #[error("this app's address isn't one pley accepts ({0}): ask the app's publisher to fix it")]
+    #[error("this app's address isn't one Pley accepts ({0}): ask the app's publisher to fix it")]
     ClientId(&'static str),
     #[error(
-        "this app uses the address of pley's own apps or of this server: don't allow it, and ask the app's publisher \
+        "this app uses the address of Pley's own apps or of this server: don't allow it, and ask the app's publisher \
          about it"
     )]
     Reserved,
-    #[error("the app's description isn't one pley accepts ({0}): ask the app's publisher to fix it")]
+    #[error("the app's description isn't one Pley accepts ({0}): ask the app's publisher to fix it")]
     Document(String),
-    #[error("pley couldn't read the app's description ({0}): try again later, or ask the app's publisher")]
+    #[error("Pley couldn't read the app's description ({0}): try again later, or ask the app's publisher")]
     Unreachable(String),
     /// Its address is on a private network (it resolves to no public
     /// address), which pley never reads from: trying again doesn't help.
-    #[error("the app's description is on a private network, which pley never reads from: ask the app's publisher")]
+    #[error("the app's description is on a private network, which Pley never reads from: ask the app's publisher")]
     Private,
     #[error("too many app descriptions read: try again in a minute")]
     Busy,
@@ -816,7 +816,7 @@ mod tests {
             Client {
                 id: ANDROID_ID.into(),
                 host: "hhaidar.github.io".into(),
-                name: Some("pley for Android".into()),
+                name: Some("Pley for Android".into()),
                 first_party: true,
                 redirect_uris: vec!["app.pley.android:/oauth/callback".into()],
                 scope_cap: Some("library play playlists profiles".into()),
@@ -826,7 +826,7 @@ mod tests {
             }
         );
         let desktop = builtin(DESKTOP_ID).unwrap();
-        assert_eq!(desktop.name.as_deref(), Some("pley for desktop"));
+        assert_eq!(desktop.name.as_deref(), Some("Pley for desktop"));
         assert_eq!(desktop.redirect_uris, ["http://127.0.0.1/oauth/callback", "http://[::1]/oauth/callback"]);
         assert!(desktop.first_party && desktop.refresh);
         assert!(!desktop.device, "desktops have browsers");
@@ -847,10 +847,10 @@ mod tests {
         // return address, so no code can be sent to them, and only being
         // built in allows that.
         for (id, name, json) in [
-            (KODI_ID, "pley for Kodi", include_str!("builtin/kodi.json")),
-            (ROKU_ID, "pley for Roku", include_str!("builtin/roku.json")),
-            (TIZEN_ID, "pley for Samsung TV", include_str!("builtin/tizen.json")),
-            (WEBOS_ID, "pley for LG TV", include_str!("builtin/webos.json")),
+            (KODI_ID, "Pley for Kodi", include_str!("builtin/kodi.json")),
+            (ROKU_ID, "Pley for Roku", include_str!("builtin/roku.json")),
+            (TIZEN_ID, "Pley for Samsung TV", include_str!("builtin/tizen.json")),
+            (WEBOS_ID, "Pley for LG TV", include_str!("builtin/webos.json")),
         ] {
             let tv = builtin(id).unwrap();
             assert_eq!(tv.name.as_deref(), Some(name));
@@ -916,13 +916,13 @@ mod tests {
         ];
         for error in errors {
             let message = error.to_string();
-            assert!(message.starts_with(|c: char| c.is_lowercase()), "{message}");
+            assert!(message.starts_with(|c: char| c.is_lowercase()) || message.starts_with("Pley "), "{message}");
             assert!(message.contains(": "), "{message}");
             assert!(!message.ends_with('.'), "{message}");
         }
         assert_eq!(
             ClientError::NotAllowed.to_string(),
-            "only pley's own apps can sign in to this server: an administrator can allow apps by other publishers in \
+            "only Pley's own apps can sign in to this server: an administrator can allow apps by other publishers in \
              Settings → Server → Apps"
         );
     }

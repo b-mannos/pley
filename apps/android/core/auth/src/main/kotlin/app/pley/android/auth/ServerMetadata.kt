@@ -87,7 +87,7 @@ data class ServerMetadata(
                 val url = o.optString(name)
                 if (url.isEmpty()) throw AuthException(TOO_OLD)
                 if (Addresses.origin(url) != issuer || !url.startsWith("$issuer/")) {
-                    throw AuthException("this server sends apps to another address to sign in: pley doesn't")
+                    throw AuthException("this server sends apps to another address to sign in: Pley doesn't")
                 }
                 return url
             }

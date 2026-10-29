@@ -240,13 +240,13 @@ class ServersViewModelTest {
 
         val source = FakeOnboardingSource()
         source.demoUrl = "http://127.0.0.1:41234"
-        source.answer("http://127.0.0.1:41234", name = "pley demo")
+        source.answer("http://127.0.0.1:41234", name = "Pley demo")
         val vm = servers(source)
         advanceUntilIdle()
         assertTrue(vm.state.value.demo)
         vm.useDemo()
         advanceUntilIdle()
-        assertEquals(ChosenServer("http://127.0.0.1:41234", "pley demo", signedIn = false, profiles = 1), vm.chosen.first())
+        assertEquals(ChosenServer("http://127.0.0.1:41234", "Pley demo", signedIn = false, profiles = 1), vm.chosen.first())
     }
 
     private companion object {

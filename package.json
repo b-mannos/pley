@@ -2,7 +2,7 @@
   "name": "pley",
   "version": "0.2.0",
   "private": true,
-  "description": "pley media server monorepo (Rust apps are built with cargo, see Cargo.toml)",
+  "description": "Pley media server monorepo (Rust apps are built with cargo, see Cargo.toml)",
   "workspaces": [
     "apps/web",
     "apps/desktop",

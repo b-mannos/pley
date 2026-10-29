@@ -1,6 +1,6 @@
 # Playback quality
 
-What every pley player offers in its Quality menu, and how Automatic
+What every Pley player offers in its Quality menu, and how Automatic
 chooses. The web, Android (phones and TVs), Samsung and LG, Kodi and Roku
 follow this page; each app's doc says only where it differs.
 

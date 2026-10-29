@@ -2,7 +2,7 @@
   "name": "pley-tizen",
   "private": true,
   "version": "0.2.0",
-  "description": "pley for Samsung TVs: a Tizen web app that plays through Samsung's own player (AVPlay).",
+  "description": "Pley for Samsung TVs: a Tizen web app that plays through Samsung's own player (AVPlay).",
   "type": "module",
   "scripts": {
     "build": "bun scripts/build.mjs",

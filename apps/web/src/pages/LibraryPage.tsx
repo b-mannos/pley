@@ -324,7 +324,7 @@ function LibraryTab({
             <EmptyState
               icon={<FolderSearch />}
               title="This library is empty"
-              description="pley didn't find any media yet. Check the library folders, then scan again."
+              description="Pley didn't find any media yet. Check the library folders, then scan again."
               action={
                 user.is_admin ? (
                   <Button

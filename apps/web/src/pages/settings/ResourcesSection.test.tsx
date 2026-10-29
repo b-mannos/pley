@@ -21,14 +21,14 @@ describe("ResourcesSection", () => {
     const requests = mockApi({ "GET /api/system/resources": () => answers.shift() ?? resources([]) });
     renderWithProviders(<ResourcesSection />);
 
-    const cpu = await screen.findByRole("img", { name: "CPU: pley 12%, System 34%" });
+    const cpu = await screen.findByRole("img", { name: "CPU: Pley 12%, System 34%" });
     expect(cpu).toBeInTheDocument();
     expect(screen.getByText("8 processors")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Memory: pley 512 MB, System 8.0 GB" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Memory: Pley 512 MB, System 8.0 GB" })).toBeInTheDocument();
     expect(screen.getByText("32.0 GB in all")).toBeInTheDocument();
 
     // The next poll carries the newest sample's time, and its answer joins the others.
-    expect(await screen.findByRole("img", { name: "CPU: pley 40%, System 61%" }, { timeout: 4_000 })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "CPU: Pley 40%, System 61%" }, { timeout: 4_000 })).toBeInTheDocument();
     const polls = requests.filter((r) => r.path.startsWith("/api/system/resources"));
     expect(polls[0]?.path).toBe("/api/system/resources");
     expect(polls[1]?.path).toBe("/api/system/resources?since=3000");
@@ -41,9 +41,9 @@ describe("ResourcesSection", () => {
     const cpu = await screen.findByRole("img", { name: /^CPU/ });
     await user.click(cpu);
     await user.keyboard("{ArrowLeft}");
-    await waitFor(() => expect(cpu).toHaveTextContent("2.5%pley20%System"));
+    await waitFor(() => expect(cpu).toHaveTextContent("2.5%Pley20%System"));
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(cpu).not.toHaveTextContent("pley"));
+    await waitFor(() => expect(cpu).not.toHaveTextContent("Pley"));
   });
 
   it("says so where the system can't be measured", async () => {

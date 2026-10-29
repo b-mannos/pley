@@ -579,7 +579,7 @@ function AppsCard() {
       ) : apps.isError ? (
         <p className="text-sm text-danger">{errorMessage(apps.error)}</p>
       ) : list.length === 0 ? (
-        <p className="text-sm text-subtle">No apps use your account. Apps ask on a pley page before they get access.</p>
+        <p className="text-sm text-subtle">No apps use your account. Apps ask on a Pley page before they get access.</p>
       ) : (
         <ul className="divide-y divide-white/[0.05] rounded-md border border-border">
           {list.map((a) => {
@@ -593,7 +593,7 @@ function AppsCard() {
                       {label}
                     </span>
                     {a.first_party ? (
-                      <Badge tone="accent">pley's own app</Badge>
+                      <Badge tone="accent">Pley's own app</Badge>
                     ) : a.name ? (
                       <span className="truncate text-xs text-subtle">calls itself “{a.name}”</span>
                     ) : null}
@@ -679,7 +679,7 @@ function BuildLine() {
   const serverLabel = server ? versionLabel(server.version, server.commit) : null;
   return (
     <p className="text-center text-xs text-muted" data-testid="build">
-      {serverLabel && serverLabel !== web ? `pley ${web} · server ${serverLabel}` : `pley ${web}`}
+      {serverLabel && serverLabel !== web ? `Pley ${web} · server ${serverLabel}` : `Pley ${web}`}
     </p>
   );
 }

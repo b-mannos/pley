@@ -272,7 +272,7 @@ ${form.tvdb_pin}`}
             <Group title="Apps">
               <Row
                 label="Apps by other publishers"
-                hint="pley's own apps can always sign in. Turn this on to let people allow other publishers' apps; turning it off signs them out."
+                hint="Pley's own apps can always sign in. Turn this on to let people allow other publishers' apps; turning it off signs them out."
               >
                 {/* Off until a server that knows the setting sends it. */}
                 <Toggle

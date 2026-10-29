@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.pley" name="pley" version="0.2.0" provider-name="the pley authors">
+<addon id="plugin.video.pley" name="Pley" version="0.2.0" provider-name="the Pley authors">
   <requires>
     <import addon="xbmc.python" version="3.0.1"/>
   </requires>
@@ -10,9 +10,9 @@
   <extension point="xbmc.addon.metadata">
     <!-- One Python for every call: modules load once, not for each listing. -->
     <reuselanguageinvoker>true</reuselanguageinvoker>
-    <summary lang="en_GB">Your pley server's movies, shows and music</summary>
-    <description lang="en_GB">Browse and play what is on your pley server: Continue Watching, My List, every library, search and playlists. pley plays files as they are whenever Kodi can, and converts the rest on the server. Sign in with a code shown on screen, typed on your server's link page.</description>
-    <disclaimer lang="en_GB">pley isn't affiliated with Plex Inc. or Team Kodi.</disclaimer>
+    <summary lang="en_GB">Your Pley server's movies, shows and music</summary>
+    <description lang="en_GB">Browse and play what is on your Pley server: Continue Watching, My List, every library, search and playlists. Pley plays files as they are whenever Kodi can, and converts the rest on the server. Sign in with a code shown on screen, typed on your server's link page.</description>
+    <disclaimer lang="en_GB">Pley isn't affiliated with Plex Inc. or Team Kodi.</disclaimer>
     <platform>all</platform>
     <license>GPL-2.0-or-later AND ISC AND MIT</license>
     <source>https://github.com/hhaidar/pley</source>

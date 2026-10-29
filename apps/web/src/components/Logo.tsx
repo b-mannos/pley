@@ -27,7 +27,7 @@ export function Logo({ className }: { className?: string }) {
   return (
     <span className={cn("inline-flex h-8 items-center gap-2.5", className)}>
       <LogoMark className="h-full w-auto" />
-      <span className="text-xl font-extrabold tracking-tight text-fg">pley</span>
+      <span className="text-xl font-extrabold tracking-tight text-fg">Pley</span>
     </span>
   );
 }

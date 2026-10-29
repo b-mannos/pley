@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Signing in and choosing a server (design spec §4.7). -->
-    <string name="onboarding_title">Sign in to pley</string>
-    <string name="onboarding_found">Choose your server. pley found these on your network.</string>
+    <string name="onboarding_title">Sign in to Pley</string>
+    <string name="onboarding_found">Choose your server. Pley found these on your network.</string>
     <string name="onboarding_choose">Choose your server.</string>
-    <string name="onboarding_none">No server answered. Check that pley is running on it, or enter its address.</string>
+    <string name="onboarding_none">No server answered. Check that Pley is running on it, or enter its address.</string>
     <string name="onboarding_searching">Looking for servers on this network…</string>
     <string name="onboarding_search_again">Search the network again</string>
     <string name="onboarding_on_network">On this network</string>
@@ -21,16 +21,16 @@
     <string name="onboarding_demo">Use demo server</string>
     <string name="onboarding_forget">Forget</string>
     <string name="onboarding_forget_title">Forget %1$s?</string>
-    <string name="onboarding_forget_body">pley signs this phone out of it and deletes what it saved from it.</string>
+    <string name="onboarding_forget_body">Pley signs this phone out of it and deletes what it saved from it.</string>
     <string name="onboarding_retry">Retry</string>
 
     <!-- Local network access (Android 17). -->
-    <string name="onboarding_access_denied">pley needs access to devices on your network to find and reach servers at home.</string>
+    <string name="onboarding_access_denied">Pley needs access to devices on your network to find and reach servers at home.</string>
     <string name="onboarding_open_settings">Open settings</string>
 
     <!-- What went wrong. -->
     <string name="onboarding_problem_unreachable">Couldn\'t reach %1$s: %2$s</string>
-    <string name="onboarding_problem_not_pley">Something answers at %1$s, but it isn\'t pley.</string>
+    <string name="onboarding_problem_not_pley">Something answers at %1$s, but it isn\'t Pley.</string>
     <string name="onboarding_problem_unencrypted">%1$s isn\'t encrypted: your password and what you watch could be read on the way. Use its https address if it has one, or tap Connect again to go ahead anyway.</string>
     <string name="onboarding_problem_address">Enter an address such as nas, 192.168.1.20 or https://pley.example.com.</string>
 
@@ -38,14 +38,14 @@
     <string name="onboarding_opening">Opening your browser…</string>
     <string name="onboarding_waiting">Finish signing in in your browser.</string>
     <string name="onboarding_finishing">Signing in…</string>
-    <string name="onboarding_too_old">Update pley on %1$s to sign in from the app</string>
+    <string name="onboarding_too_old">Update Pley on %1$s to sign in from the app</string>
     <string name="onboarding_open_in_browser">Open in browser</string>
 
     <!-- Signing in with a code (a phone without a browser). -->
     <string name="onboarding_link_title">Sign in with a code</string>
     <string name="onboarding_link_go_to">On another device, go to</string>
     <string name="onboarding_link_enter">and enter this code</string>
-    <string name="onboarding_link_other_device">Or open pley on a signed-in device → Link a TV</string>
+    <string name="onboarding_link_other_device">Or open Pley on a signed-in device → Link a TV</string>
     <string name="onboarding_link_waiting">Waiting for approval…</string>
     <string name="onboarding_link_getting">Getting a code…</string>
     <string name="onboarding_link_declined">Request declined</string>

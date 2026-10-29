@@ -175,7 +175,7 @@ internal class OAuth(private val state: State) {
      */
     private fun authorize(call: Call): MockResponse {
         val issuer = issuer(call) ?: return Reply.badRequest("the Host header is missing or wrong")
-        if (call.query("client_id") != CLIENT_ID) return Reply.badRequest("pley doesn't know this app")
+        if (call.query("client_id") != CLIENT_ID) return Reply.badRequest("Pley doesn't know this app")
         val redirect = call.query("redirect_uri")
         if (redirect != REDIRECT_URI) return Reply.badRequest("this isn't one of the app's return addresses")
         val sentState = call.query("state")
@@ -195,7 +195,7 @@ internal class OAuth(private val state: State) {
             return mistake("invalid_request", "a code_challenge with S256 is needed")
         }
         if ((sentState?.toByteArray()?.size ?: 0) > 1_024) return mistake("invalid_request", "state is too long")
-        val scopes = scopes(call.query("scope")) ?: return mistake("invalid_scope", "pley doesn't offer that scope")
+        val scopes = scopes(call.query("scope")) ?: return mistake("invalid_scope", "Pley doesn't offer that scope")
         val resource = call.query("resource")
         if (resource != null && resource.removeSuffix("/") != issuer) return mistake("invalid_target", "resource names another server")
         val code = token("")
@@ -208,7 +208,7 @@ internal class OAuth(private val state: State) {
     private fun token(call: Call): MockResponse {
         val form = form(call) ?: return error("invalid_request", "each parameter may be given once")
         if (form.containsKey("client_secret") || call.header("Authorization")?.startsWith("Basic ") == true) {
-            return error("invalid_client", "pley's apps have no secrets", status = 401, basic = call.header("Authorization") != null)
+            return error("invalid_client", "Pley's apps have no secrets", status = 401, basic = call.header("Authorization") != null)
         }
         return when (form["grant_type"]) {
             null -> error("invalid_request", "grant_type is missing")
@@ -216,7 +216,7 @@ internal class OAuth(private val state: State) {
             "refresh_token" -> refreshGrant(form)
             SWITCH_PROFILE -> switchProfile(form)
             DEVICE_GRANT -> deviceGrant(form)
-            else -> error("unsupported_grant_type", "pley doesn't offer that grant")
+            else -> error("unsupported_grant_type", "Pley doesn't offer that grant")
         }
     }
 
@@ -244,7 +244,7 @@ internal class OAuth(private val state: State) {
     private fun refreshGrant(form: Map<String, String>): MockResponse {
         if (form["client_id"] != CLIENT_ID) return error("invalid_grant", "unknown refresh token")
         val grant = spend(form["refresh_token"]) ?: return spent()
-        val asked = form["scope"]?.let { scopes(it) ?: return error("invalid_scope", "pley doesn't offer that scope") }
+        val asked = form["scope"]?.let { scopes(it) ?: return error("invalid_scope", "Pley doesn't offer that scope") }
         if (asked != null && !grant.scopes.containsAll(asked)) return error("invalid_scope", "more than the app was allowed")
         return issue(grant)
     }
@@ -256,7 +256,7 @@ internal class OAuth(private val state: State) {
      * spends nothing.
      */
     private fun switchProfile(form: Map<String, String>): MockResponse {
-        if (form["client_id"] != CLIENT_ID) return error("unauthorized_client", "only pley's own apps switch profiles")
+        if (form["client_id"] != CLIENT_ID) return error("unauthorized_client", "only Pley's own apps switch profiles")
         val token = refreshTokens[form["refresh_token"]]
         if (token == null || token.spent || token.grant.ended) {
             token?.takeIf { it.spent }?.grant?.let(::end)
@@ -318,8 +318,8 @@ internal class OAuth(private val state: State) {
     private fun deviceAuthorization(call: Call): MockResponse {
         val form = form(call) ?: return error("invalid_request", "each parameter may be given once")
         val client = form["client_id"] ?: return error("invalid_request", "client_id is missing")
-        if (client != CLIENT_ID) return error("invalid_client", "only pley's own apps can sign in with a code")
-        val scopes = scopes(form["scope"]) ?: return error("invalid_scope", "pley doesn't offer that scope")
+        if (client != CLIENT_ID) return error("invalid_client", "only Pley's own apps can sign in with a code")
+        val scopes = scopes(form["scope"]) ?: return error("invalid_scope", "Pley doesn't offer that scope")
         val issuer = issuer(call) ?: return error("invalid_request", "the Host header is missing or wrong")
         val deviceCode = token("")
         val letters = (1..8).map { USER_CODE_LETTERS[random.nextInt(USER_CODE_LETTERS.length)] }.joinToString("")

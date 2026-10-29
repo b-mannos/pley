@@ -131,7 +131,7 @@ sub onSaved(event as object)
     refusal = orderRefusal(answer.status)
     if refusal = "older"
         m.older = true
-        m.message.text = "Sorting libraries needs a newer pley on the server."
+        m.message.text = "Sorting libraries needs a newer Pley on the server."
         place(m.before)
     else if refusal = "changed"
         ' A library came or went since they were listed: as they are now.

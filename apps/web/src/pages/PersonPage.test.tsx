@@ -45,7 +45,7 @@ describe("PersonPage", () => {
     expect(screen.getByText("2 movies · 1 show in your libraries")).toBeInTheDocument();
     expect(screen.getByText("1999 · as Neo")).toBeInTheDocument();
     expect(screen.getByText("2016 · Guest star (2 episodes)")).toBeInTheDocument();
-    expect(document.title).toBe("Keanu Reeves · pley");
+    expect(document.title).toBe("Keanu Reeves · Pley");
   });
 
   it("explains a missing person", async () => {

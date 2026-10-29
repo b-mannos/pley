@@ -1,8 +1,8 @@
 # Storage
 
-What pley keeps on disk, where, and how it is cleaned up. Everything lives in
+What Pley keeps on disk, where, and how it is cleaned up. Everything lives in
 the data folder (`--data-dir`, see the README) except your media and its local
-artwork, which pley never moves or changes.
+artwork, which Pley never moves or changes.
 
 ```
 <data>/
@@ -65,7 +65,7 @@ tries again.
 
 ## Database backups
 
-Once a day (and on start when the last backup is older than a day) pley
+Once a day (and on start when the last backup is older than a day) Pley
 writes a copy of the database to `backups/pley-YYYY-MM-DD-HHMM.db` with
 SQLite's `VACUUM INTO`, which reads a consistent snapshot while the server
 keeps running. The copy is checked before it counts, and the last three are
@@ -74,20 +74,20 @@ lists them with the result of the check of the live database that runs at
 every start.
 
 Before a new version changes the database (it brings the schema up to date
-when it starts), pley writes a checked copy to
+when it starts), Pley writes a checked copy to
 `backups/pley-YYYY-MM-DD-HHMM-before-upgrade.db`, and doesn't start when it
 can't (a full disk, say). The copy from the last upgrade is kept until the
 next one, apart from the daily backups.
 
-To restore one: stop pley, move `pley.db`, `pley.db-wal` and `pley.db-shm`
-aside, copy the backup to `pley.db`, and start pley again.
+To restore one: stop Pley, move `pley.db`, `pley.db-wal` and `pley.db-shm`
+aside, copy the backup to `pley.db`, and start Pley again.
 
-To move pley to another computer, copy the whole data folder. A database
+To move Pley to another computer, copy the whole data folder. A database
 without its `secret.key` can't check codes from authenticator apps: people
 with two-step sign-in then sign in with a recovery code and set it up again
 (or an administrator turns it off for them).
 
-Never copy `pley.db` while pley is running: most of the latest changes live in
+Never copy `pley.db` while Pley is running: most of the latest changes live in
 `pley.db-wal` until SQLite checkpoints them, so the copy would be stale or
 inconsistent. Use a backup instead.
 

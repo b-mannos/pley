@@ -1,8 +1,8 @@
-# pley for Kodi
+# Pley for Kodi
 
 A Kodi add-on, `plugin.video.pley`, for Kodi 20 (Nexus) and newer on any
 platform Kodi runs on: Windows, macOS, Linux, LibreELEC and CoreELEC,
-Android TV boxes. It shows a pley server in pley's own screens, drawn as
+Android TV boxes. It shows a Pley server in Pley's own screens, drawn as
 the Android TV app draws them: the rail, Home's hero and rows, a title's
 page, every library, collections, playlists and search. It plays with
 Kodi's own player: files as they are whenever Kodi can, which is nearly
@@ -25,7 +25,7 @@ python apps/kodi/package.py        # dist/plugin.video.pley-<version>.zip
 ```
 
 Its icon (512 square, solid to the corners, as Kodi's add-on checker
-wants) and fanart (1920 × 1080) are rendered from pley's logo with the
+wants) and fanart (1920 × 1080) are rendered from Pley's logo with the
 other apps' icons: `bun scripts/render-icons.mjs` at the repository's
 root.
 
@@ -35,7 +35,7 @@ the device first, or reach it over the network).
 
 ## Signing in
 
-Open the add-on and choose a server: pley servers on the local network
+Open the add-on and choose a server: Pley servers on the local network
 answer a broadcast (docs/API.md; `pley?` on UDP port 7539), and any other
 is typed in (`192.168.1.5`, `nas.local:7539`, `https://pley.example.com`).
 Kodi then shows a code, typed on the server's `/link` page from a phone
@@ -45,7 +45,7 @@ server draws, on the Android TV app's link screen (`signin.py`,
 goes back to the servers. The link page names
 this Kodi by what its User-Agent says (`pleyKodi/0.1.0 (Kodi 21.3;
 Windows)`), so two of them can be told apart. The
-add-on is one of pley's own apps (`https://hhaidar.github.io/pley/oauth/kodi.json`):
+add-on is one of Pley's own apps (`https://hhaidar.github.io/pley/oauth/kodi.json`):
 it signs in only with a code and gets a viewer's rights, whoever allows it:
 `library play playlists profiles` (browse, play, make and change the
 profile's playlists, and switch to the household's other profiles). A Kodi
@@ -65,7 +65,7 @@ profile with a PIN at the start asks its PIN too. A wrong PIN, too many of
 them, a locked PIN or a profile the app can't use says so under the faces;
 nothing is tried again by itself. A profile that needs its password is
 signed in to again with a code, chosen on the phone that approves it. Back
-leaves pley. The profile's menu (the rail's avatar) has Switch profile
+leaves Pley. The profile's menu (the rail's avatar) has Switch profile
 too, and the add-on's settings for Kodi's lists. The service switches
 (the switch-profile grant, docs/API.md) under the same lock as its
 refreshes, keeps which profile it acts as in the token file, and opens the
@@ -76,9 +76,9 @@ The same server at another address is signed in to again: anything on the
 network can answer the broadcast with a server's id, and the tokens would
 go to it.
 
-## pley's look
+## Pley's look
 
-Opened from Kodi's add-ons (or a favourite), pley shows its own screens
+Opened from Kodi's add-ons (or a favourite), Pley shows its own screens
 over Kodi, as its Android TV app does (apps/android/ui/tv, its screenshots
 side by side with Kodi's were the reference):
 
@@ -164,7 +164,7 @@ pick their colour from the title as the web's do. A mask keeps to the
 picture's place (`scalediffuse` off), so round photos stay round and
 cropped posters keep their corners. Text is in Estuary's
 fonts (Kodi lends an add-on's windows the skin's fonts, by name): with
-another skin, pley's screens use its default font.
+another skin, Pley's screens use its default font.
 
 Settings → Screens → Kodi's lists shows the add-on as folders in the skin's
 own views instead (below), which skins' widgets and favourites always get.
@@ -176,7 +176,7 @@ own views instead (below), which skins' widgets and favourites always get.
   only), and it alone renews them:
   each refresh token works once, and two renewals with the same one end
   the sign-in.
-- **The proxy.** pley takes an app's token in the `Authorization` header
+- **The proxy.** Pley takes an app's token in the `Authorization` header
   only, never in an address, and an access token lasts an hour, shorter
   than a film. Kodi's player and artwork cache only know addresses, so the
   service runs a proxy on `127.0.0.1` and everything Kodi asks for goes
@@ -185,7 +185,7 @@ own views instead (below), which skins' widgets and favourites always get.
   playlists and segments through. The secret keeps other programs and web
   pages on the device out; the port and secret are kept, so artwork stays
   cached across restarts.
-- **The plugin** (`default.py`) opens pley's window, lists pley's
+- **The plugin** (`default.py`) opens Pley's window, lists Pley's
   screens as folders (for Kodi's lists, widgets and favourites) and asks
   to play
   (`POST /api/playback`) with a report of what this Kodi plays
@@ -204,7 +204,7 @@ own views instead (below), which skins' widgets and favourites always get.
   counts them.
   Kodi's own Subtitle offset (Subtitles in the player's controls) moves
   them, and Kodi remembers it for each file played as it is; it counts the
-  other way from pley's other apps, +0.3 s showing them earlier.
+  other way from Pley's other apps, +0.3 s showing them earlier.
 - **Audio and subtitles** (`tracks.py`) are the profile's, not Kodi's
   language settings. The audio is the server's choice for this Kodi: of
   the profile's language (the choice remembered for the show or the
@@ -213,7 +213,7 @@ own views instead (below), which skins' widgets and favourites always get.
   playback's `audio_index`). The subtitles are the file's
   `selected_subtitle`, by the same rule. The service switches
   Kodi to them once Kodi lists the streams, and turns subtitles off when
-  the choice is none. pley names tracks by their index in the file, Kodi
+  the choice is none. Pley names tracks by their index in the file, Kodi
   by its place in its lists: Kodi lists the subtitle files it was given
   first, in that order, then the file's own (it adds the files as it opens
   the address, before it reads the file), and a file's audio in its
@@ -251,7 +251,7 @@ own views instead (below), which skins' widgets and favourites always get.
   chosen before Automatic came is carried over the first time the
   service or a playback reads the setting; Original can't be told from
   the setting never changed, and becomes Automatic.
-  Kodi's player has no quality menu of pley's, so the choice is made in
+  Kodi's player has no quality menu of Pley's, so the choice is made in
   the settings, before playing.
 - **Automatic** plays the original and watches it from the service, once
   a second while it plays (not paused, seeking, fast-forwarding or
@@ -306,7 +306,7 @@ own views instead (below), which skins' widgets and favourites always get.
   marks and the server's dashboard follow Kodi.
 - **Other devices**: the service keeps the server's event stream open
   (`events.py`, `GET /api/events`). When the watch state, My List or a
-  library changes, here or on another device, the pley window or listing
+  library changes, here or on another device, the Pley window or listing
   on screen is refreshed once: 0.3 s after the first event of a burst, at most every
   2 seconds, and never behind a playing video, whose end refreshes it. A
   stream stopped from elsewhere (an administrator, or another of the
@@ -323,7 +323,7 @@ own views instead (below), which skins' widgets and favourites always get.
   says which on a dark card, since a shadow alone is lost on a bright
   picture.
 - **Without the server** (switched off, or another network), every screen
-  says "Can't reach <server>" with Try again and Choose a server. pley
+  says "Can't reach <server>" with Try again and Choose a server. Pley
   needs no internet: sign-in, artwork and playback all come from the
   server, and nothing else is ever asked.
 
@@ -331,7 +331,7 @@ own views instead (below), which skins' widgets and favourites always get.
 
 Measured on Kodi 21.3 for Windows, against a server on the same computer:
 
-- pley's window is up 0.2 s after the add-on is opened: Kodi reads the
+- Pley's window is up 0.2 s after the add-on is opened: Kodi reads the
   window's XML (1.3 MB, about 150 ms), and Home's rows, the profile and
   the libraries are asked for together (30 to 40 ms). A title's page
   opens with its details, seasons, episodes and More Like This asked for
@@ -375,7 +375,7 @@ python -m unittest discover -s . -p "test_*.py"
 
 runs with any Python 3.8 or newer and nothing installed: Kodi's modules are
 stood in for (`tests/stubs`). The proxy, the token rules, the sign-in, the
-capability report, discovery, the listings, pley's window (its tiles,
+capability report, discovery, the listings, Pley's window (its tiles,
 wording, rows and lines) and its XML (as `skin.py` writes it, with every
 control the code moves) are tested there.
 `test_e2e.py` runs the add-on's code against a real server (sign-in with a
@@ -395,7 +395,7 @@ on this system) can be driven over TCP port 9090: `Files.GetDirectory` on
 plays. Kodi 21.3 on Windows has been through sign-in, every listing, direct
 play with seeking, pause and resume, a converted stream, restarts, Skip
 Intro, Up Next to the next episode, and the server going away and coming
-back; pley's window through every screen, playing from it and coming back.
+back; Pley's window through every screen, playing from it and coming back.
 Kodi only draws what changed: its screenshot of a still screen can show an
 earlier frame, so a portable Kodi taking them wants
 `<advancedsettings><gui><algorithmdirtyregions>0</algorithmdirtyregions></gui></advancedsettings>`
@@ -418,7 +418,7 @@ in `portable_data/userdata/advancedsettings.xml`.
   choice is drawn onto the video from the start). Files played as they
   are show every kind.
 - Automatic's "Automatic · 8 Mbps 1080p" and "Lowered for your connection":
-  Kodi's player has no menu or details of pley's to show them in; the
+  Kodi's player has no menu or details of Pley's to show them in; the
   notification says it once, and Kodi's own codec info (the `o` key)
   shows the stream it plays.
 - `cachepercentage` and `Player.CacheLevel` read for the converted

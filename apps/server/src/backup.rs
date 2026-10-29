@@ -73,7 +73,7 @@ impl Backups {
         if let Some(problem) = &problem {
             let latest = self.list().await.into_iter().next().map(|b| b.path).unwrap_or_else(|| "none".into());
             tracing::error!(
-                "the database is damaged ({problem}). Stop pley and replace pley.db with the latest backup ({latest})."
+                "the database is damaged ({problem}). Stop Pley and replace pley.db with the latest backup ({latest})."
             );
         }
         *self.health.lock() = Health { ok: Some(problem.is_none()), problem, checked_at: Some(now()) };

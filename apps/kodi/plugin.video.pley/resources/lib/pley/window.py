@@ -306,7 +306,7 @@ class Window(xbmcgui.WindowXML):
             self.monitor = Monitor(self)
             started = time.perf_counter()
             self.start()
-            kodi.log("pley's window ready in %d ms" % ((time.perf_counter() - started) * 1000))
+            kodi.log("Pley's window ready in %d ms" % ((time.perf_counter() - started) * 1000))
 
     def start(self) -> None:
         try:

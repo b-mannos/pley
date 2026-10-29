@@ -60,7 +60,7 @@ const REDIRECT_URI_MAX: usize = 512;
 /// The longest `state` an app may send (bytes).
 const STATE_MAX: usize = 1024;
 
-const NOT_FROM_PLEY: &str = "this page must be opened from pley itself";
+const NOT_FROM_PLEY: &str = "this page must be opened from Pley itself";
 /// A request that is over can't be told from one that never was, so the
 /// sentence fits an app's request and a TV's alike.
 const OVER: &str = "this request is over: start again from the app or the TV";
@@ -78,7 +78,7 @@ pub(crate) const SWITCH_PROFILE: &str = "urn:pley:params:oauth:grant-type:switch
 /// Each request has its own, so a server works at its home and public
 /// addresses alike; a forged Host only changes the forger's own answers.
 pub(crate) fn issuer(headers: &HeaderMap) -> ApiResult<String> {
-    let unknown = || AppError::bad_request("pley can't tell which address it was reached at: open it by its address");
+    let unknown = || AppError::bad_request("Pley can't tell which address it was reached at: open it by its address");
     let host = headers.get(header::HOST).and_then(|v| v.to_str().ok()).map(str::trim).unwrap_or_default();
     if host.is_empty() || host.contains(['/', '\\', '?', '#', '@']) {
         return Err(unknown());
@@ -370,7 +370,7 @@ fn check_request(params: &[(String, String)], client: &clients::Client, issuer: 
         Some(_) => {
             return Err(fail(
                 "unsupported_response_type",
-                "this app asked to sign in in a way pley doesn't support (response_type): ask the app's publisher to \
+                "this app asked to sign in in a way Pley doesn't support (response_type): ask the app's publisher to \
                  fix it",
             ));
         }
@@ -378,7 +378,7 @@ fn check_request(params: &[(String, String)], client: &clients::Client, issuer: 
     if param(params, "response_mode").is_some_and(|mode| mode != "query") {
         return Err(fail(
             "invalid_request",
-            "this app asked for its answer in a way pley doesn't support (response_mode): ask the app's publisher to \
+            "this app asked for its answer in a way Pley doesn't support (response_mode): ask the app's publisher to \
              fix it",
         ));
     }
@@ -390,7 +390,7 @@ fn check_request(params: &[(String, String)], client: &clients::Client, issuer: 
     if !challenge_ok {
         return Err(fail(
             "invalid_request",
-            "this app didn't protect its sign-in the way pley requires (PKCE with S256): ask the app's publisher to \
+            "this app didn't protect its sign-in the way Pley requires (PKCE with S256): ask the app's publisher to \
              fix it",
         ));
     }
@@ -421,13 +421,13 @@ fn asked_scopes(scope: Option<&str>, client: &clients::Client) -> Result<Scopes,
         Ok(asked) if asked.is_empty() => Scopes::default().with(Scope::Library),
         Ok(asked) => asked,
         Err(name) if name == "openid" => {
-            return Err(fail("pley doesn't sign people in to other sites (openid): ask the app's publisher to fix it"));
+            return Err(fail("Pley doesn't sign people in to other sites (openid): ask the app's publisher to fix it"));
         }
-        Err(_) => return Err(fail("this app asked for access pley doesn't offer: ask the app's publisher to fix it")),
+        Err(_) => return Err(fail("this app asked for access Pley doesn't offer: ask the app's publisher to fix it")),
     };
     if asked.contains(Scope::Profiles) && !client.first_party {
         // A profile's PIN is typed into the app: pley's own apps only.
-        return Err(fail("only pley's own apps can switch profiles (profiles): ask the app's publisher to fix it"));
+        return Err(fail("only Pley's own apps can switch profiles (profiles): ask the app's publisher to fix it"));
     }
     if client.scope_cap.as_deref().is_some_and(|cap| !asked.is_subset_of(Scopes::from_stored(cap))) {
         return Err(fail("this app asked for more than its description allows: ask the app's publisher to fix it"));
@@ -552,7 +552,7 @@ impl OAuthError {
         tracing::error!("an app's token request failed: {err}");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            ..Self::new("server_error", "pley couldn't answer: try again")
+            ..Self::new("server_error", "Pley couldn't answer: try again")
         }
     }
 }
@@ -591,7 +591,7 @@ impl Form {
             .is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("basic"));
         if basic {
             return Err(OAuthError::invalid_client(
-                "pley's apps have no secrets: leave out the Authorization header",
+                "Pley's apps have no secrets: leave out the Authorization header",
                 true,
             ));
         }
@@ -615,7 +615,7 @@ impl Form {
         if param(&params, "client_secret").is_some() {
             // 400: a 401 would need a challenge (RFC 9110 §15.5.2), and there
             // is no way of authenticating to offer.
-            return Err(OAuthError::new("invalid_client", "pley's apps have no secrets: leave out client_secret"));
+            return Err(OAuthError::new("invalid_client", "Pley's apps have no secrets: leave out client_secret"));
         }
         Ok(Form(params))
     }
@@ -680,7 +680,7 @@ pub async fn token(
         Some(SWITCH_PROFILE) => switch_profile(&state, &headers, ip, &form).await,
         Some(_) => Err(OAuthError::new(
             "unsupported_grant_type",
-            "pley knows authorization_code, refresh_token, the device code grant and its own apps' profile switch",
+            "Pley knows authorization_code, refresh_token, the device code grant and its own apps' profile switch",
         )),
         None => Err(OAuthError::invalid_request("grant_type is missing")),
     };
@@ -800,7 +800,7 @@ async fn refresh(
     let scope = match form.get("scope").map(Scopes::parse) {
         None => None,
         Some(Ok(scope)) => Some(scope),
-        Some(Err(_)) => return Err(OAuthError::new("invalid_scope", "the scope names something pley doesn't offer")),
+        Some(Err(_)) => return Err(OAuthError::new("invalid_scope", "the scope names something Pley doesn't offer")),
     };
     form.check_resource(headers)?;
     if clients::builtin(client_id).is_none() && !state.settings.get().third_party_apps {
@@ -825,7 +825,7 @@ async fn refresh(
 
 // ------------------------------------------------------------------ TVs (RFC 8628)
 
-const NOT_A_CODE: &str = "that isn't a code from a pley app: codes are 8 letters, like BCDF-GHJK";
+const NOT_A_CODE: &str = "that isn't a code from a Pley app: codes are 8 letters, like BCDF-GHJK";
 const NO_SUCH_CODE: &str = "no TV is waiting for that code: check the code on your TV, or start again there";
 const CODE_USED: &str = "that code was already used: start again on your TV";
 
@@ -857,7 +857,7 @@ fn start_on_device(
 ) -> Result<Response, OAuthError> {
     let client_id = form.required("client_id")?;
     let Some(client) = clients::builtin(client_id) else {
-        return Err(OAuthError::new("invalid_client", "only pley's own apps can sign in with a code"));
+        return Err(OAuthError::new("invalid_client", "only Pley's own apps can sign in with a code"));
     };
     if !client.device {
         return Err(OAuthError::new("unauthorized_client", "this app doesn't sign in with a code"));
@@ -1154,7 +1154,7 @@ async fn switch_profile(
     let holder =
         grants::holder(&state.db, token, client_id).await.map_err(|err| refused_refresh(state, client_id, err))?;
     if clients::builtin(client_id).is_none() {
-        return Err(OAuthError::new("unauthorized_client", "only pley's own apps can switch profiles"));
+        return Err(OAuthError::new("unauthorized_client", "only Pley's own apps can switch profiles"));
     }
     if !holder.scopes.contains(Scope::Profiles) {
         return Err(OAuthError::new(
@@ -1314,7 +1314,7 @@ pub async fn revoke(
         tracing::error!("an app couldn't be signed out: {err}");
         let mut answer = OAuthError {
             status: StatusCode::SERVICE_UNAVAILABLE,
-            ..OAuthError::new("temporarily_unavailable", "pley couldn't sign the app out: try again in a moment")
+            ..OAuthError::new("temporarily_unavailable", "Pley couldn't sign the app out: try again in a moment")
         }
         .into_response();
         answer.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("5"));

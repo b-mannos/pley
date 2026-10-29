@@ -1,6 +1,6 @@
 # Samsung and LG TV apps
 
-pley for Samsung TV (`apps/tizen`, a Tizen `.wgt`) and pley for LG TV
+Pley for Samsung TV (`apps/tizen`, a Tizen `.wgt`) and Pley for LG TV
 (`apps/webos`, a webOS `.ipk`) are one TV app in two shells. Everything
 that isn't a call into the TV is in `packages/tv` (TypeScript and Preact,
 about 20,000 lines with its styles): the API client, sign-in, focus, the
@@ -123,10 +123,10 @@ and field reports where Samsung says nothing:
   `file://` ([Tizen CORS guide](https://github.com/Samsung/tizen-docs/blob/master/docs/application/web/guides/w3c/security/cors.md)):
   the server answers CORS for those origins ([API.md](API.md)).
 - **Subtitles:** AVPlay renders a few formats itself but takes external
-  files from local paths only; pley draws its own (below) and keeps
+  files from local paths only; Pley draws its own (below) and keeps
   AVPlay's silent.
 
-### How pley plays on a Samsung TV
+### How Pley plays on a Samsung TV
 
 The capabilities report (`apps/tizen/src/caps.ts`, version 2, see
 [API.md](API.md#version-2)) comes from the set's model year (from its
@@ -258,14 +258,14 @@ the model year.
   since module scripts fail from `file://`
   ([forum 28351](https://forum.webostv.developer.lge.com/t/module-script-loads-blocked-under-file-origin-for-installed-webos-app-no-cors-workaround-found/28351)).
 - **Subtitles:** LG lists WebVTT only, and embedded tracks don't show up
-  as text tracks; pley draws its own.
+  as text tracks; Pley draws its own.
 - **Permissions:** `requiredACG` in `appinfo.json` lists the system
   services an app calls; webOS 26 honours it and the store requires it
   from webOS 27 ([ACG guide](https://webostv.developer.lge.com/develop/guides/acg-guide)).
-  pley declares `systemconfig.query`, `settings.query`, `arc.query` and
+  Pley declares `systemconfig.query`, `settings.query`, `arc.query` and
   `network.query`.
 
-### How pley plays on an LG TV
+### How Pley plays on an LG TV
 
 The capabilities report (`apps/webos/src/caps.ts`) comes from the webOS
 version, `webOS.deviceInfo()` (panel, HDR, Dolby Vision, Atmos) and the
@@ -512,7 +512,7 @@ itself. To install:
 
 **Without a TV.** `bun run --cwd apps/webos serve` builds the LG app with
 `--dev` and serves it on
-`http://localhost:7650` and passes everything else to a pley server
+`http://localhost:7650` and passes everything else to a Pley server
 (`PLEY_SERVER`, default `http://127.0.0.1:7640`), so the app and the
 server share an origin. At 960×540 it is the TV's layout; arrows, Enter
 and Escape (Back) are the remote. It plays what the browser plays.
@@ -531,7 +531,7 @@ Samsung, on a 2018–2019 set and a 2021 or later one:
    what TrueHD does when Settings sends it.
 5. Switching the audio track while playing, and to the server's track as
    a file starts; AVPlay's subtitles staying
-   silent under pley's; picture subtitles from the `.mks`.
+   silent under Pley's; picture subtitles from the `.mks`.
 6. fMP4 HLS on 2020–2021 sets; 4K HLS.
 7. A session stopped from the web (`410`), on Tizen 6.0 and later and on
    older sets (no HTTP status in their errors).

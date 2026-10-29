@@ -226,7 +226,7 @@ export function SettingsScreen(p: { entry: Entry }) {
             fid="row-sort-libraries"
             icon="arrow-up-down"
             label="Sort libraries"
-            value={librariesSort === "older" ? "Needs a newer pley on the server" : `Your order, on all your devices${librariesSort === "refused" ? " · change on the web" : ""}`}
+            value={librariesSort === "older" ? "Needs a newer Pley on the server" : `Your order, on all your devices${librariesSort === "refused" ? " · change on the web" : ""}`}
             chevron={librariesSort === "yes"}
             onSelect={() =>
               librariesSort === "yes" ? ui.nav.open({ name: "libraries", sort: true }) : librariesSort === "refused" ? setWeb(true) : ui.toast(SORT_NEEDS_NEWER, true)
@@ -292,7 +292,7 @@ export function SettingsScreen(p: { entry: Entry }) {
     case "audio":
       rows.push(
         <div key="intro" class="settings-intro t-body c-muted">
-          Dolby Digital, Dolby Digital Plus and Atmos are always passed through. Turn these on if your receiver supports them; otherwise pley converts them.
+          Dolby Digital, Dolby Digital Plus and Atmos are always passed through. Turn these on if your receiver supports them; otherwise Pley converts them.
         </div>,
       );
       rows.push(

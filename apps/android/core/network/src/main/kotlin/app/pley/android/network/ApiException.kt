@@ -118,11 +118,11 @@ class OfflineException(cause: IOException) : IOException(messageFor(cause), caus
 
     private companion object {
         fun messageFor(cause: IOException): String =
-            if (LocalNetwork.isPermissionBlock(cause)) "pley isn't allowed on your home network: allow it in the app's permissions"
+            if (LocalNetwork.isPermissionBlock(cause)) "Pley isn't allowed on your home network: allow it in the app's permissions"
             else describe(cause)
     }
 }
 
 /** The server answered with something that isn't what pley answers: another program, or a much older pley. */
 class UnreadableAnswerException(val status: Int, cause: Throwable) :
-    IOException("the server's answer can't be read: is it pley, and up to date?", cause), UserFacing
+    IOException("the server's answer can't be read: is it Pley, and up to date?", cause), UserFacing

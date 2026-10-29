@@ -11,7 +11,7 @@
     <string name="tv_shell_switch_profile">Switch profile</string>
 
     <!-- What shows came from what was saved: the server can't be reached. -->
-    <string name="tv_shell_offline">Showing what pley had saved. Reconnecting…</string>
+    <string name="tv_shell_offline">Showing what Pley had saved. Reconnecting…</string>
     <!-- A page with nothing saved, the server out of reach: "No answer in time. Check that…". -->
     <string name="tv_shell_offline_title">Can\'t reach your server</string>
     <string name="tv_shell_offline_body">%1$s Check that the server is on and that this device is on its network.</string>
@@ -20,6 +20,6 @@
 
     <!-- Screens not built yet. -->
     <string name="tv_shell_placeholder_title">%1$s isn\'t built yet</string>
-    <string name="tv_shell_placeholder_body">This is pley for TVs, on its way: browsing with the remote, signing in with a code and playing with the TV\'s own frame rate and HDR.</string>
+    <string name="tv_shell_placeholder_body">This is Pley for TVs, on its way: browsing with the remote, signing in with a code and playing with the TV\'s own frame rate and HDR.</string>
     <string name="tv_shell_placeholder_next">Open another screen</string>
 </resources>

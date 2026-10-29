@@ -1098,7 +1098,7 @@ def signin() -> ET.Element:
         image(0, 0, L.WIDTH, L.HEIGHT, "pley-white.png", color=L.BG),
         image(0, 0, L.WIDTH, L.HEIGHT, "glow.png"),
         image(L.GUTTER, 112, 80, 80, "logo.png"),
-        label(L.GUTTER + 112, 112, 400, 80, L.FONT_HERO, L.FG, "pley"),
+        label(L.GUTTER + 112, 112, 400, 80, L.FONT_HERO, L.FG, "Pley"),
         label(L.GUTTER, 248, 1000, 72, L.FONT_PAGE, L.FG, "$ADDON[plugin.video.pley 30171]"),
         step(L.SIGNIN_STEP_SCAN, None, 1, 352, "$ADDON[plugin.video.pley 30172]"),
         step(L.SIGNIN_STEP_GO, L.SIGNIN_NUMBER_GO, 2, 432, "", text_id=L.SIGNIN_ADDRESS),
