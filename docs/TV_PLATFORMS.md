@@ -408,3 +408,53 @@ LG, on a webOS 4–6 set and a webOS 23 or later one:
 10. Audio Guidance on each move; Samsung's Voice Guide.
 11. Playback speed: pitch, streams and files, after a seek.
 12. Automatic's speed test on a remote network; available subtitle fonts.
+
+## References
+
+Samsung:
+[testing FAQ (Q25)](https://developer.samsung.com/smarttv/develop/faq/application-testing.html),
+[hosted apps FAQ](https://developer.samsung.com/smarttv/develop/faq/hosted-applications.html),
+[multimedia FAQ](https://developer.samsung.com/smarttv/develop/faq/multimedia.html),
+[WebAssembly](https://developer.samsung.com/smarttv/develop/extension-libraries/webassembly/overview.html),
+[ESPlayer](https://developer.samsung.com/smarttv/develop/api-references/tizenfx-tv-api-references/tizen.tv.multimedia/esplayer-class.html),
+[AVPlay guide](https://developer.samsung.com/smarttv/develop/guides/multimedia/media-playback/using-avplay.html),
+[AVPlay API](https://developer.samsung.com/smarttv/develop/api-references/samsung-product-api-references/avplay-api.html),
+[adaptive streaming](https://developer.samsung.com/smarttv/develop/guides/multimedia/adaptive-streaming.html),
+[web engine](https://developer.samsung.com/smarttv/develop/specifications/web-engine-specifications.html),
+[CORS](https://github.com/Samsung/tizen-docs/blob/master/docs/application/web/guides/w3c/security/cors.md),
+[certificates](https://developer.samsung.com/smarttv/develop/getting-started/setting-up-sdk/creating-certificates.html),
+[TV device setup](https://developer.samsung.com/smarttv/develop/getting-started/using-sdk/tv-device.html),
+[Return and Exit](https://developer.samsung.com/smarttv/develop/guides/fundamentals/terminating-applications.html),
+[Seller Office membership](https://developer.samsung.com/tv-seller-office/guides/membership/becoming-seller-office-member.html),
+[registering an app](https://developer.samsung.com/tv-seller-office/guides/applications/registering-application.html),
+[eARC](https://www.samsung.com/hk_en/support/tv-audio-video/what-is-earc-and-how-to-set-on-samsung-smart-tv/).
+
+LG:
+[Developer Mode app](https://webostv.developer.lge.com/develop/getting-started/developer-mode-app),
+[CLI guide](https://webostv.developer.lge.com/develop/tools/cli-dev-guide),
+[Simulator](https://webostv.developer.lge.com/develop/tools/simulator-introduction),
+[appinfo.json](https://webostv.developer.lge.com/develop/references/appinfo-json),
+[ACG guide](https://webostv.developer.lge.com/develop/guides/acg-guide),
+[streaming protocols](https://webostv.developer.lge.com/develop/specifications/streaming-protocol-drm),
+[resuming media](https://webostv.developer.lge.com/develop/guides/resuming-media-with-mediaoption),
+[app approval](https://webostv.developer.lge.com/distribute/app-approval-process),
+[Flutter for webOS](https://webostv.developer.lge.com/develop/guides/flutter-for-webos)
+and its [video player](https://github.com/lg-flutter-webos/plugins/blob/main/packages/video_player/API_REFERENCE.md),
+[webOS OSE media client](https://github.com/webosose/chromium108/blob/master/src/media/neva/webos/umediaclient_impl.cc),
+[webosbrew developer mode](https://www.webosbrew.org/devmode/); forum threads on
+[multichannel audio with Dolby Vision](https://forum.webostv.developer.lge.com/t/stereo-only-for-dolby-vision-video-with-multi-channel-audio-in-hls-streams/23069),
+[CORS in packaged apps](https://forum.webostv.developer.lge.com/t/how-are-we-supposted-to-handle-cors-with-a-non-hosted-app/28241)
+and [module scripts under file://](https://forum.webostv.developer.lge.com/t/module-script-loads-blocked-under-file-origin-for-installed-webos-app-no-cors-workaround-found/28351).
+
+Other projects and reports:
+[Microsoft's Xamarin support policy](https://dotnet.microsoft.com/en-us/platform/support/policy/xamarin),
+[plx-native #754](https://github.com/GLinnik21/plx-native/discussions/754),
+[plx-native #221](https://github.com/GLinnik21/plx-native/issues/221),
+[jellyfin-tizen #222](https://github.com/jellyfin/jellyfin-tizen/issues/222),
+[jellyfin #16092](https://github.com/jellyfin/jellyfin/issues/16092),
+[jellyfin-web's device profile](https://github.com/jellyfin/jellyfin-web/blob/master/src/scripts/browserDeviceProfile.js),
+[Samsung Jellyfin Installer FAQ](https://github.com/Jellyfin2Samsung/Samsung-Jellyfin-Installer/wiki/FAQ),
+[Moonfin's Tizen player](https://github.com/Moonfin-Client/Smart-TV/blob/main/packages/platform-tizen/src/video.js),
+[CE Pro on HDR10+](https://www.cepro.com/news/samsung_amazon_hdr10/2495/),
+[BGR on Dolby Vision](https://www.bgr.com/2260222/why-samsung-tv-doesnt-support-dolby-vision/),
+[HDTVTest on DTS](https://www.hdtvtest.co.uk/news/lg-quitely-drops-support-for-dts-sound-on-its-2025-t-vs).
