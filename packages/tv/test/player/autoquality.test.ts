@@ -129,12 +129,22 @@ function memory(initial: Remembered | null = null): AutoMemory & { value: Rememb
   return m;
 }
 
-/** Automatic for a 4K file of `mbps`, on a clock the test moves (`t`, ms; the wall clock is 1e12 + t). */
-function auto(mbps = 60, mem = memory(), f = file(3840, 2160, mbps), known?: Remembered | null) {
+/**
+ * Automatic for a 4K file of `mbps`, on a clock the test moves (`t`, ms; the
+ * wall clock is 1e12 + t); `blanks`: on a player that goes black between streams.
+ */
+function auto(mbps = 60, mem = memory(), f = file(3840, 2160, mbps), known?: Remembered | null, blanks = false) {
   /** The ceilings told to the server, in order. */
   const told: (number | null)[] = [];
   const clock = { t: 0 };
-  const a = new AutoQuality({ ladder: autoLadder(f), originalKbps: f.bitrate ? f.bitrate / 1000 : null, memory: mem, wall: () => 1e12 + clock.t, onCeiling: (k) => told.push(k) });
+  const a = new AutoQuality({
+    ladder: autoLadder(f),
+    originalKbps: f.bitrate ? f.bitrate / 1000 : null,
+    memory: mem,
+    wall: () => 1e12 + clock.t,
+    onCeiling: (k) => told.push(k),
+    blanks,
+  });
   a.start(clock.t, known);
   /**
    * Plays `seconds` at `delivery` seconds of video a second, starting with
@@ -387,6 +397,47 @@ describe("Automatic", () => {
       expect(mem.value).toBeNull();
     });
 
+    it("settles: a step up undone within 10 minutes isn't tried again during the title", () => {
+      const { a, mem, play, wait, network } = lowered();
+      expect(network(304, 50_000)?.to).toBe("8m");
+      // Two minutes on, the network can't carry 8 Mbps after all (8 × 0.8 × 0.75 = 4.8).
+      network(120, 50_000);
+      play(20, 0.8, 9);
+      expect(wait(2_000)?.to).toBe("4m");
+      const kept = mem.value;
+      // However fast the network says it is, it stays where it held, for the rest of the title.
+      expect(network(3_600, 80_000)).toBeNull();
+      expect(a.playing).toBe("4m");
+      expect(mem.value).toBe(kept);
+    });
+
+    it("a step down more than 10 minutes after a step up leaves that quality open", () => {
+      const { a, play, wait, network } = lowered();
+      expect(network(304, 50_000)?.to).toBe("8m");
+      network(604, 9_000);
+      play(20, 0.8, 9);
+      expect(wait(2_000)?.to).toBe("4m");
+      expect(network(304, 50_000)?.to).toBe("8m");
+      expect(a.playing).toBe("8m");
+    });
+
+    it("each step up undone doubles the calm the next one waits for", () => {
+      const { a, play, wait, network } = lowered();
+      expect(network(304, 50_000)?.to).toBe("8m");
+      expect(network(184, 50_000)?.to).toBe("12m");
+      // 12 Mbps doesn't hold (12 × 0.9 × 0.75 = 8.1): back to 8, and 12 is off for the title.
+      play(20, 0.9, 9);
+      expect(wait(2_000)?.to).toBe("8m");
+      // Later 8 Mbps falters too, more than 10 minutes after it was reached: 4, with 8 still open.
+      network(604, 9_000);
+      play(20, 0.8, 9);
+      expect(wait(2_000)?.to).toBe("4m");
+      // 5 minutes after the step down 3 calm minutes would have done; now it takes 6.
+      expect(network(352, 50_000)).toBeNull();
+      expect(network(16, 50_000)?.to).toBe("8m");
+      expect(a.playing).toBe("8m");
+    });
+
     it("on LG, whose player says nothing of its network, goes up on the fastest refill the buffer showed", () => {
       const t = auto(20, memory(), file(1920, 1080, 20));
       t.play(20, 0.5, 9);
@@ -500,6 +551,203 @@ describe("Automatic", () => {
       a.decoding();
       expect(a.check(30_000)?.why).toBe("device");
       expect(told).toEqual([]);
+    });
+  });
+
+  describe("on a player that goes black between streams (Samsung, LG)", () => {
+    /** Automatic for a 1080p file of 20 Mbps (or `f`), started where `known` says. */
+    const blank = (known?: Remembered | null, f = file(1920, 1080, 20)) => auto(f.bitrate! / 1e6, memory(), f, known, true);
+
+    describe("playing the original", () => {
+      it("moves to a conversion on a wait of 2 s or more: one new stream, as anywhere", () => {
+        const { a, play, wait } = blank();
+        // 20 × 0.5 × 0.75 = 7.5 → 4 Mbps 720p.
+        play(20, 0.5, 9);
+        expect(wait(2_000)).toEqual({ to: "4m", why: "network" });
+        expect(a.playing).toBe("4m");
+      });
+
+      it("doesn't move for two short waits or slow delivery: the picture hasn't stopped", () => {
+        const { a, play, wait } = blank();
+        expect(a.patient).toBe(true);
+        expect(wait(800)).toBeNull();
+        expect(play(30, 1.2)).toBeNull();
+        expect(wait(800)).toBeNull();
+        expect(play(60, 0.8, 9)).toBeNull();
+        expect(a.playing).toBe("original");
+      });
+
+      it("never goes back up to another stream, however fast the network", () => {
+        const { a, play, wait, network } = blank();
+        play(20, 0.5, 9);
+        expect(wait(2_000)?.to).toBe("4m");
+        // A conversion whose bitrate can't change (an older server): it stays.
+        a.began(null);
+        expect(network(3_600, 80_000)).toBeNull();
+        expect(a.playing).toBe("4m");
+      });
+
+      it("plays on through dropped frames past the first minute, and starts the next title a step lower, once", () => {
+        const { a, told, mem } = blank(undefined, file(3840, 2160, 40));
+        a.struggled();
+        // 40 × 0.75 = 30 → 30 Mbps 4K next time.
+        expect(told).toEqual([30_000]);
+        expect(mem.value?.kbps).toBe(30_000);
+        a.struggled();
+        expect(told).toEqual([30_000]);
+        expect(a.playing).toBe("original");
+      });
+    });
+
+    describe("a conversion whose bitrate changes as it is sent", () => {
+      /** Started at 8 Mbps 1080p by the network's memory, its stream's bitrate changing as it is sent, at 3 Mbps at least. */
+      function live() {
+        const t = blank({ kbps: 9_000, at: 1e12 });
+        expect(t.a.playing).toBe("8m");
+        t.a.began({ top: 8_000, floor: 3_000 });
+        return t;
+      }
+
+      it("steps the bitrate down, not the stream: the same quality and size, in whole Mbps", () => {
+        const { a, told, play, wait } = live();
+        // 8 × 0.7 × 0.75 = 4.2 → 4 Mbps, still 1080p.
+        play(20, 0.7, 9);
+        expect(wait(2_000)).toEqual({ to: "8m", why: "network", bitrate: 4_000 });
+        expect([a.playing, a.liveKbps, a.lowered, a.liveLowered]).toEqual(["8m", 4_000, "network", true]);
+        expect(a.playingKbps()).toBe(4_000);
+        // The network's memory keeps what it carries, for the next title.
+        expect(told).toEqual([4_200]);
+      });
+
+      it("keeps 3 Mbps for 1080p and 8 Mbps for 4K at least; below that the network waits", () => {
+        const { a, play, wait, clock } = live();
+        // 8 × 0.3 × 0.75 = 1.8, but 1080p keeps 3.
+        play(20, 0.3, 9);
+        expect(wait(2_000)?.bitrate).toBe(3_000);
+        clock.t += 25_000;
+        play(20, 0.3, 9);
+        expect(wait(3_000)).toBeNull();
+        expect([a.playing, a.liveKbps]).toEqual(["8m", 3_000]);
+
+        const uhd = auto(60, memory(), file(3840, 2160, 60), { kbps: 16_000, at: 1e12 }, true);
+        expect(uhd.a.playing).toBe("15m");
+        uhd.a.began({ top: 15_000, floor: 8_000 });
+        uhd.play(20, 0.3, 9);
+        expect(uhd.wait(2_000)?.bitrate).toBe(8_000);
+      });
+
+      it("steps on short waits and slow delivery too, which a new bitrate doesn't black out", () => {
+        const one = live();
+        expect(one.a.patient).toBe(false);
+        expect(one.wait(800)).toBeNull();
+        expect(one.play(30, 1.2)).toBeNull();
+        // Arriving as fast as it plays: 8 × 1 × 0.75 = 6.
+        expect(one.wait(800)?.bitrate).toBe(6_000);
+
+        const slow = live();
+        // 8 × 0.8 × 0.75 = 4.8 → 4.
+        expect(slow.play(40, 0.8, 9)).toEqual({ to: "8m", why: "network", bitrate: 4_000 });
+      });
+
+      it("steps for a decoder falling behind too, without telling the network's memory", () => {
+        const { a, told, clock } = live();
+        clock.t += 1_000;
+        a.decoding();
+        expect(a.check(clock.t)).toEqual({ to: "8m", why: "device", bitrate: 6_000 });
+        expect(told).toEqual([]);
+      });
+
+      it("steps back up after calm minutes, as a new stream would: the next of the file's bitrates, then its own", () => {
+        const { a, told, play, wait, network } = live();
+        play(20, 0.3, 9);
+        expect(wait(2_000)?.bitrate).toBe(3_000);
+        // 5 minutes after the step down, the network carries 1.6 × 4 Mbps (4 Mbps 720p's bitrate, at 1080p here).
+        expect(network(304, 50_000)).toEqual({ to: "8m", why: null, bitrate: 4_000 });
+        expect(network(176, 50_000)).toBeNull();
+        expect(network(8, 50_000)).toEqual({ to: "8m", why: null, bitrate: 8_000 });
+        expect(a.liveLowered).toBe(false);
+        // Its own bitrate is as high as it goes: never another stream.
+        expect(network(3_600, 80_000)).toBeNull();
+        // Each step told as the network's ceiling: the next title starts there.
+        expect(told).toEqual([1_800, 4_000, 8_000]);
+      });
+
+      it("settles: a step up undone within 10 minutes isn't tried again, and the next calm is twice as long", () => {
+        const { a, play, wait, network } = live();
+        play(20, 0.7, 9);
+        expect(wait(2_000)?.bitrate).toBe(4_000);
+        expect(network(304, 50_000)?.bitrate).toBe(8_000);
+        // Two minutes on, 8 Mbps doesn't hold after all: 8 × 0.8 × 0.75 = 4.8 → 4.
+        network(120, 50_000);
+        play(20, 0.8, 9);
+        expect(wait(2_000)?.bitrate).toBe(4_000);
+        expect(network(3_600, 80_000)).toBeNull();
+        expect(a.liveKbps).toBe(4_000);
+        // Later 4 Mbps falters too: 3, with 4 still open, after 6 calm minutes rather than 3.
+        play(20, 0.5, 9);
+        expect(wait(2_000)?.bitrate).toBe(3_000);
+        expect(network(352, 50_000)).toBeNull();
+        expect(network(16, 50_000)?.bitrate).toBe(4_000);
+        expect(network(3_600, 80_000)).toBeNull();
+        expect(a.liveKbps).toBe(4_000);
+      });
+
+      it("steps the original the server converts as well; back at its own bitrate it is the original again", () => {
+        const { a, told, play, wait, network } = blank(undefined, file(3840, 2160, 60));
+        a.setOriginalKbps(30_000);
+        a.began({ top: 30_000, floor: 8_000 });
+        // 30 × 0.5 × 0.75 = 11.25 → 11 Mbps 4K.
+        play(20, 0.5, 9);
+        expect(wait(2_000)).toEqual({ to: "original", why: "network", bitrate: 11_000 });
+        expect([a.lowered, a.liveLowered]).toEqual(["network", true]);
+        // Up through the file's qualities' bitrates: 12, 15, then its own 30.
+        expect(network(304, 80_000)?.bitrate).toBe(12_000);
+        expect(network(184, 80_000)?.bitrate).toBe(15_000);
+        expect(network(184, 80_000)?.bitrate).toBe(30_000);
+        expect([a.playing, a.lowered, a.liveLowered]).toEqual(["original", null, false]);
+        expect(told).toEqual([11_250, 12_000, 15_000, null]);
+      });
+
+      it("goes on at the bitrate it came to in a new stream of the same quality (a recovery, a track), afresh in another", () => {
+        const { a, play, wait } = live();
+        play(20, 0.7, 9);
+        expect(wait(2_000)?.bitrate).toBe(4_000);
+        a.began({ top: 8_000, floor: 3_000 });
+        expect([a.liveKbps, a.liveLowered]).toEqual([4_000, true]);
+        a.began({ top: 12_000, floor: 3_000 });
+        expect([a.liveKbps, a.liveLowered]).toEqual([12_000, false]);
+        a.began(null);
+        expect([a.liveKbps, a.patient]).toEqual([null, true]);
+      });
+
+      it("goes by the bitrate the server says: one lower than asked is as high as the stream goes", () => {
+        const { a, play, wait, network } = live();
+        play(20, 0.7, 9);
+        expect(wait(2_000)?.bitrate).toBe(4_000);
+        a.liveAt(4_000, 4_000);
+        expect(network(304, 50_000)?.bitrate).toBe(8_000);
+        a.liveAt(6_000, 8_000);
+        expect([a.liveKbps, a.liveTop, a.liveLowered]).toEqual([6_000, 6_000, false]);
+        expect(network(3_600, 80_000)).toBeNull();
+      });
+
+      it("goes on as it was when the server doesn't change the bitrate, and stops asking when it can't", () => {
+        const { a, play, wait, clock } = live();
+        play(20, 0.7, 9);
+        expect(wait(2_000)?.bitrate).toBe(4_000);
+        a.liveRefused(false);
+        expect([a.liveKbps, a.lowered, a.liveLowered]).toEqual([8_000, "network", false]);
+        clock.t += 25_000;
+        play(20, 0.7, 9);
+        expect(wait(2_000)?.bitrate).toBe(4_000);
+        // An older transcoder: a stream whose bitrate can't change, which short waits don't move.
+        a.liveRefused(true);
+        expect([a.liveKbps, a.patient]).toEqual([null, true]);
+        clock.t += 25_000;
+        expect(wait(800)).toBeNull();
+        expect(wait(800)).toBeNull();
+        expect(a.playing).toBe("8m");
+      });
     });
   });
 });

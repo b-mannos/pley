@@ -295,6 +295,8 @@ function world(detail: ItemDetail, answer: (req: PlaybackRequest) => PlaybackInf
   /** How a stream's playlists and segments are answered (`api.media`); at once, unless a test says. */
   const media = { answer: (method: string, url: string): Promise<string> => Promise.resolve(method === "HEAD" ? "" : playlistFor(url)) };
   const answered = <T>(value: () => T): Promise<T> => (net.down ? Promise.reject(new NetworkError("Can't reach the server")) : Promise.resolve(value()));
+  /** How PUT /api/playback/{id}/bitrate is answered: what the stream goes on at, as asked unless a test says. */
+  const bitrate = { answer: (kbps: number): Promise<{ bitrate: number }> => Promise.resolve({ bitrate: kbps }) };
   const api = {
     server: "http://nas:7539",
     url: (p: string) => (/^https?:/.test(p) ? p : `http://nas:7539${p}`),
@@ -312,6 +314,7 @@ function world(detail: ItemDetail, answer: (req: PlaybackRequest) => PlaybackInf
     },
     progress: async (_id: number, pos: number, _d: number | null, state: string) => void calls.push(`progress ${state} ${Math.round(pos)}`),
     stopSession: async (id: string) => void calls.push(`delete ${id}`),
+    setBitrate: (id: string, kbps: number) => answered(() => calls.push(`bitrate ${id} ${kbps}`)).then(() => bitrate.answer(kbps)),
     sessionStatus: () => answered(() => ({ session_id: "s1", method: "direct", transcode: null })),
     reachable: () => answered(() => ({})),
     setStreams: async (_item: number, _file: number | null, audio: number | null | undefined, subtitle: number | null) => void saved.push([audio, subtitle]),
@@ -339,7 +342,7 @@ function world(detail: ItemDetail, answer: (req: PlaybackRequest) => PlaybackInf
       return () => undefined;
     },
   };
-  return { env, engine, calls, requests, saved, net, media, send: (e: ServerEvent) => listeners.forEach((l) => l(e)) };
+  return { env, engine, calls, requests, saved, net, media, bitrate, send: (e: ServerEvent) => listeners.forEach((l) => l(e)) };
 }
 
 /** A stream in two sizes, each in 4 s segments over the film's two hours. */
@@ -666,9 +669,9 @@ describe("Automatic", () => {
     );
 
   /** A playback in Automatic that has shown its picture, on a clock the test moves; `kept` is the TV's storage. */
-  async function automatic(detail = item(file()), kept = memory(), dv: string[] | null = null, network: NetworkMemory | null = null) {
+  async function automatic(detail = item(file()), kept = memory(), dv: string[] | null = null, network: NetworkMemory | null = null, answer = converted) {
     vi.useFakeTimers();
-    const w = world(detail, converted, dv);
+    const w = world(detail, answer, dv);
     w.env.now = () => Date.now();
     const picked: string[] = [];
     w.env.quality = { remembered: () => "auto", remember: (id) => void picked.push(id) };
@@ -887,6 +890,171 @@ describe("Automatic", () => {
     expect(picked).toEqual(["original"]);
     expect(c.state.value.quality).toBe("Original");
     c.close();
+  });
+
+  describe("on Samsung and LG, whose players go black between streams", () => {
+    /** As `converted`, from a server whose conversions' bitrate changes as they are sent. */
+    const liveConverted = (req: PlaybackRequest) => ({ ...converted(req), live_bitrate: req.mode !== "auto" });
+    /** The original, converted by the server at 30 Mbps 4K (a codec the TV doesn't decode), its bitrate changing as it is sent. */
+    const convertsOriginal = () => info({ method: "transcode", hls: true, url: "/api/media/pley_mk_KEY2/master.m3u8", auto_quality: "30m", live_bitrate: true });
+    /** A 1080p film of 20 Mbps. */
+    function hd(): MediaFile {
+      const f = file({ bitrate: 20_000_000, width: 1920, height: 1080 });
+      f.streams[0] = stream({ index: 0, kind: "video", codec: "hevc", width: 1920, height: 1080 });
+      return f;
+    }
+    const bitrates = (w: ReturnType<typeof world>) => w.calls.filter((x) => x.indexOf("bitrate ") === 0);
+    const noticesOf = (c: PlaybackController) => {
+      const notices: string[] = [];
+      c.state.subscribe((s) => {
+        if (s.notice && notices[notices.length - 1] !== s.notice) notices.push(s.notice);
+      });
+      return notices;
+    };
+    const autoHint = (c: PlaybackController) => c.state.value.qualities.filter((q) => q.id === "auto")[0]!.hint;
+
+    it("steps a conversion's bitrate as it is sent: no new stream, the same size, and the menu says what plays", async () => {
+      const server = serverMemory({ kbps: 9_000, at: Date.now() });
+      const { w, c, now, play, wait } = await automatic(item(hd()), memory(), null, server.network, liveConverted);
+      expect(w.requests.map((r) => [r.mode, r.max_bitrate, r.max_height])).toEqual([["transcode", 8_000, 1080]]);
+      expect(c.state.value.quality).toBe("Automatic · 8 Mbps 1080p");
+      const notices = noticesOf(c);
+      // 8 Mbps arriving at 0.7 of its pace: 8 × 0.7 × 0.75 = 4.2 → 4 Mbps, still 1080p.
+      await play(12, 0.7);
+      await wait(2_500);
+      now("ready");
+      expect(bitrates(w)).toEqual(["bitrate s8000 4000"]);
+      expect(w.requests.length).toBe(1);
+      expect(w.engine.prepared.length).toBe(1);
+      expect(c.state.value.quality).toBe("Automatic · 4 Mbps 1080p");
+      expect(c.state.value.note).toBe("Lowered for your connection");
+      expect(autoHint(c)).toBe("Now 4 Mbps 1080p · Lowered for your connection");
+      expect(notices).toEqual(["Quality lowered to 4 Mbps 1080p"]);
+      // What the network carries, for the next title.
+      expect(server.told).toEqual([4_200]);
+
+      // Again 20 s on: 4 × 0.3 × 0.75 is 0.9, but 1080p keeps 3 Mbps.
+      await play(21, 0.3);
+      await wait(2_500);
+      now("ready");
+      expect(bitrates(w)).toEqual(["bitrate s8000 4000", "bitrate s8000 3000"]);
+      // Below that, the network waits: no new stream, ever.
+      await play(21, 0.3);
+      await wait(2_500);
+      now("ready");
+      await play(21, 0.3);
+      expect(bitrates(w).length).toBe(2);
+      expect(w.requests.length).toBe(1);
+      expect(c.state.value.quality).toBe("Automatic · 3 Mbps 1080p");
+      c.close();
+    });
+
+    it("steps back up the same way after calm minutes, and a new stream of the quality goes on where it came to", async () => {
+      const { w, c, now, play, wait } = await automatic(item(hd()), memory(), null, serverMemory({ kbps: 9_000, at: Date.now() }).network, liveConverted);
+      await play(12, 0.7);
+      await wait(2_500);
+      now("ready");
+      expect(bitrates(w)).toEqual(["bitrate s8000 4000"]);
+      // A recovery's new stream goes on at 4 Mbps too.
+      w.engine.listener?.error({ kind: "network", detail: "connection reset" });
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(w.requests.map((r) => [r.mode, r.max_bitrate])).toEqual([
+        ["transcode", 8_000],
+        ["transcode", 8_000],
+      ]);
+      expect(bitrates(w)).toEqual(["bitrate s8000 4000", "bitrate s8000 4000"]);
+      now("ready");
+      // On LG the buffer refilling at 4 times its pace says the network carries 16 Mbps at least: 1.6 × 8 Mbps.
+      await play(8, 4);
+      await play(310, 1.02);
+      expect(bitrates(w)).toEqual(["bitrate s8000 4000", "bitrate s8000 4000", "bitrate s8000 8000"]);
+      expect(w.requests.length).toBe(2);
+      expect(c.state.value.quality).toBe("Automatic · 8 Mbps 1080p");
+      c.close();
+    });
+
+    it("plays on as it was when the server can't change the bitrate", async () => {
+      const { w, c, now, play, wait } = await automatic(item(hd()), memory(), null, serverMemory({ kbps: 9_000, at: Date.now() }).network, liveConverted);
+      w.bitrate.answer = () => Promise.reject(new ApiError(400, "bad_request", "this stream's bitrate can't change as it plays"));
+      await play(12, 0.7);
+      await wait(2_500);
+      now("ready");
+      expect(bitrates(w)).toEqual(["bitrate s8000 4000"]);
+      expect(c.state.value.quality).toBe("Automatic · 8 Mbps 1080p");
+      // From then on, a stream that can't change: short waits don't move it, and nothing is asked again.
+      await play(21, 1.2);
+      await wait(800);
+      now("ready");
+      await play(10, 1.2);
+      await wait(800);
+      now("ready");
+      await play(10, 1.2);
+      expect(bitrates(w).length).toBe(1);
+      expect(w.requests.length).toBe(1);
+      c.close();
+    });
+
+    it("steps the original the server converts too, and Automatic picked again sends it back to its own bitrate", async () => {
+      const { w, c, now, play, wait } = await automatic(item(file()), memory(), null, null, convertsOriginal);
+      expect(c.state.value.quality).toBe("Automatic · 30 Mbps 4K");
+      // 30 × 0.5 × 0.75 = 11.25 → 11 Mbps, still 4K.
+      await play(12, 0.5);
+      await wait(2_500);
+      now("ready");
+      expect(bitrates(w)).toEqual(["bitrate s1 11000"]);
+      expect(c.state.value.quality).toBe("Automatic · 11 Mbps 4K");
+      expect(c.state.value.note).toBe("Lowered for your connection");
+      c.selectQuality("auto");
+      await vi.advanceTimersByTimeAsync(10);
+      expect(bitrates(w)).toEqual(["bitrate s1 11000", "bitrate s1 30000"]);
+      expect(w.requests.length).toBe(1);
+      expect(c.state.value.quality).toBe("Automatic · 30 Mbps 4K");
+      expect(c.state.value.note).toBeNull();
+      c.close();
+    });
+
+    it("moves the original to a conversion only once its picture stops for 2 s, not for short waits or slow delivery", async () => {
+      const { w, c, now, play, wait } = await automatic(item(file()), memory(), null, null, liveConverted);
+      await wait(800);
+      now("ready");
+      await play(10, 1.2);
+      await wait(800);
+      now("ready");
+      await play(40, 0.8);
+      expect(w.requests.length).toBe(1);
+      // 40 Mbps arriving at 0.8 of its pace: 40 × 0.8 × 0.75 = 24 → 15 Mbps 4K, a new stream made ready beside it.
+      await wait(2_500);
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(w.requests.map((r) => [r.mode, r.max_bitrate, r.keep_previous])).toEqual([
+        ["auto", undefined, undefined],
+        ["transcode", 15_000, true],
+      ]);
+      expect(bitrates(w)).toEqual([]);
+      c.close();
+    });
+
+    it("plays the original on through dropped frames past its first minute, and starts the next title a step lower", async () => {
+      const server = serverMemory(null);
+      const { w, c, play } = await automatic(item(file()), memory(), null, server.network);
+      const frames = { dropped: 0, total: 0 };
+      w.engine.frames = frames;
+      w.engine.listener?.firstFrame();
+      const drop = async (seconds: number, dropped: number) => {
+        frames.dropped += dropped;
+        for (let i = 0; i < seconds * 2; i++) {
+          frames.total += 12;
+          await play(0.5, 1.2);
+        }
+      };
+      await drop(62, 0);
+      await drop(14, 130);
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(w.requests.length).toBe(1);
+      // 40 × 0.75 = 30 → 30 Mbps 4K, where the next title starts.
+      expect(server.told).toEqual([30_000]);
+      expect(c.state.value.quality).toBe("Automatic · Original");
+      c.close();
+    });
   });
 });
 

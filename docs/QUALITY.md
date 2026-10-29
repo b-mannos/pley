@@ -144,7 +144,11 @@ plays well. It changes the stream as it is sent instead:
   plays on without a pause or a new stream. The rules above decide when
   (a play issue steps down, calm minutes step up, it settles). A stream
   keeps its size: 4K stays 4K and 1080p stays 1080p, at 8 Mbps at least
-  for 4K and 3 Mbps for 1080p; below that, the network waits.
+  for 4K and 3 Mbps for 1080p (1.5 for 720p, 1 below); below that, the
+  network waits. On Samsung and LG a step down goes to the ceiling above
+  in whole Mbps ("Automatic · 4 Mbps 1080p"), and a step up to the next of
+  the file's qualities' bitrates above it, then the stream's own, never
+  above it.
 - Playing the original (direct play or a remux), it moves to a conversion
   only once the picture has stopped anyway: a wait for data of 2 s or
   more, or a decoder failing. Two short waits and the delivery warning
@@ -163,9 +167,9 @@ picture (above), so they keep the rules before this section.
 
 A transcode comes in several sizes for a player that moves between them
 by itself, as streaming services' players do: hls.js and the browsers' own
-HLS, Media3, Samsung's AVPlay, LG's media pipeline and Roku's Video node
-(each says so, `caps.hls.variants`; Kodi's player doesn't, and keeps the
-restarts above). The session's `master.m3u8` lists the transcode's own size
+HLS, Media3 and Roku's Video node (each says so, `caps.hls.variants`;
+Kodi's player doesn't, and keeps the restarts above, and Samsung's and
+LG's don't, above). The session's `master.m3u8` lists the transcode's own size
 first, then 1080p, 720p, 540p and 360p below it, each at the bitrate its
 size gets (8, 4, 2 and 0.7 Mbps) and never more than the one above; one
 with more than two thirds of the bits of the one above is left out. A

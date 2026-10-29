@@ -86,6 +86,10 @@ describe("Samsung capabilities, rules", () => {
     expect(tizenCaps(tv({}), { truehd: true, dts: true }).caps.audio_passthrough).toEqual(["truehd", "dts"]);
   });
 
+  it("asks for one size per stream: AVPlay may go black moving between sizes", () => {
+    for (const facts of Object.values(SETS)) expect(tizenCaps(facts).caps.hls.variants).toBeUndefined();
+  });
+
   it("keeps fMP4 HLS for 2020 sets and later", () => {
     expect(tizenCaps(tv({ year: 2019, tizen: 5 })).caps.hls.segments).toEqual(["ts"]);
     expect(tizenCaps(tv({ year: 2020, tizen: 5.5 })).caps.hls.segments).toEqual(["ts", "fmp4"]);

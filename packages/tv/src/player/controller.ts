@@ -47,10 +47,10 @@ import {
   type Choices,
   type PlayRequest,
 } from "./plan";
-import { AutoQuality, type AutoMemory, type AutoStep, type Remembered } from "./autoquality";
+import { AutoQuality, FIRST_MINUTE_MS, type AutoMemory, type AutoStep, type LiveStream, type Remembered } from "./autoquality";
 import type { NetworkMemory } from "./network";
 import { PREPARE_LEAD_MS, warmStream, type StreamFetch } from "./prepare";
-import { AUTO, autoLadder, chooseQuality, fileHint, modeOf, namedFor, ORIGINAL, presetById, PRESETS, qualitiesFor, type QualityPreset } from "./quality";
+import { AUTO, autoLadder, chooseQuality, fileHint, liveFloor, liveLabel, modeOf, namedFor, ORIGINAL, presetById, PRESETS, qualitiesFor, streamLines, type QualityPreset } from "./quality";
 import { failureText, Recovery, StruggleMeter, type EngineError, type RecoveryAction } from "./recovery";
 import type { Reporter } from "./reporter";
 import { SLEEP_OFF, SleepTimer, type SleepChoice, type SleepState } from "./sleep";
@@ -341,6 +341,9 @@ export class PlaybackController {
   /** Dropped frames aren't counted before this (an audio track switched in place). */
   private framesQuietUntil = 0;
   private sessionStartedAt = 0;
+  /** How long the title has played (its picture moving), for Automatic's first minute; and the tick that last saw it move. */
+  private titlePlayedMs = 0;
+  private movingAt: number | null = null;
   private live: TranscodeInfo | null = null;
 
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -455,6 +458,8 @@ export class PlaybackController {
     this.audioPicked = this.audio !== null;
     this.subtitle = initialSubtitle(chosen, req.subtitleIndex);
     this.quality = chooseQuality(this.env.quality.remembered(), qualitiesFor(chosen));
+    this.titlePlayedMs = 0;
+    this.movingAt = null;
     this.startAuto(known);
     this.offset = chosen ? this.env.offsets.get(this.env.api.server, chosen.id) : 0;
     this.markers = chosen ? markersOf(detail, chosen.id) : [];
@@ -643,10 +648,13 @@ export class PlaybackController {
     this.sessionEnded = false;
     this.live = null;
     if (this.auto) {
-      this.auto.began();
+      const live = this.liveStream(info);
+      this.auto.began(live);
       // The original converted (a fallback): Automatic steps down from what it plays at.
       const converted = original && info.auto_quality ? presetById(info.auto_quality) : null;
       if (converted) this.auto.setOriginalKbps(converted.maxBitrateKbps);
+      // A new stream of the same quality (a recovery, a track) goes on at the bitrate the last one had come to.
+      if (live && this.auto.liveLowered) this.sendBitrate(this.auto.liveKbps!);
     }
     this.update({
       method: methodText(info),
@@ -943,6 +951,8 @@ export class PlaybackController {
     const now = this.now();
     const status = engine.status();
     const moving = this.mediaShown && status === "ready" && engine.playing() && !this.ended;
+    if (moving && this.movingAt !== null) this.titlePlayedMs += Math.min(now - this.movingAt, 2 * TICK_MS);
+    this.movingAt = moving ? now : null;
     if (this.mediaShown && !this.ended) {
       const pos = engine.positionMs();
       this.lastPositionMs = pos;
@@ -991,12 +1001,20 @@ export class PlaybackController {
       const counts = engine.frameCounts();
       if (counts && this.struggle.sample(now, counts.dropped, counts.total)) {
         this.struggle.reset();
-        // The original falls back to a conversion once, as ever; a conversion that drops frames is Automatic's to lower.
-        const action = this.recovery.onStruggling(info.method);
-        if (action) this.act(action, false);
-        else if (this.auto) {
-          this.auto.decoding();
-          this.applyAuto(this.auto.check(now));
+        const auto = this.auto;
+        if (auto && auto.patient && this.titlePlayedMs >= FIRST_MINUTE_MS) {
+          // Automatic on a stream that can't change as it plays: dropped frames move it in the
+          // title's first minute only, a rough guess that this TV can't keep up with the file;
+          // later the picture plays on, and the next title starts lower (docs/QUALITY.md).
+          auto.struggled();
+        } else {
+          // The original falls back to a conversion once, as ever; a conversion that drops frames is Automatic's to lower.
+          const action = this.recovery.onStruggling(info.method);
+          if (action) this.act(action, false);
+          else if (auto) {
+            auto.decoding();
+            this.applyAuto(auto.check(now));
+          }
         }
       }
     }
@@ -1282,9 +1300,11 @@ export class PlaybackController {
   selectQuality(id: string): void {
     const chosen = qualitiesFor(this.file).filter((p) => p.id === presetById(id)?.id)[0];
     if (!chosen) return;
-    if (chosen.id === this.quality.id && !(this.auto && this.auto.playing !== ORIGINAL.id)) return;
+    if (chosen.id === this.quality.id && !(this.auto && (this.auto.playing !== ORIGINAL.id || this.auto.liveLowered))) return;
     const before = this.playingPreset.id;
     const fellBack = this.recovery.fallbackMode !== null;
+    // A stream Automatic had sent on at less than its own bitrate.
+    const eased = this.auto && this.auto.liveLowered ? this.auto.liveTop : null;
     this.quality = chosen;
     this.recovery.qualityChanged();
     if (chosen.id === AUTO.id) {
@@ -1295,8 +1315,16 @@ export class PlaybackController {
     this.startAuto(null);
     this.update({ suggestLowerQuality: false, note: this.noteText(), canPlayOriginal: false });
     this.env.quality.remember(chosen.id);
+    if (this.item && (this.playingPreset.id !== before || fellBack)) {
+      this.publishChoices();
+      this.restart(this.livePosition(), true);
+      return;
+    }
+    // The same stream plays on: Automatic watches it afresh, and it goes back to its own bitrate.
+    const info = this.info;
+    if (this.auto && info && !this.sessionEnded) this.auto.began(this.liveStream(info));
     this.publishChoices();
-    if (this.item && (this.playingPreset.id !== before || fellBack)) this.restart(this.livePosition(), true);
+    if (eased !== null) this.sendBitrate(eased);
   }
 
   skip(): void {
@@ -1593,8 +1621,58 @@ export class PlaybackController {
       originalKbps: file?.bitrate ? file.bitrate / 1000 : null,
       memory: this.env.autoMemory ?? null,
       onCeiling: network ? (kbps) => network.report(kbps) : undefined,
+      // Samsung's AVPlay and LG's pipeline go black between streams (docs/QUALITY.md).
+      blanks: true,
     });
     this.auto.start(this.now(), known);
+  }
+
+  /** The quality a converted stream was asked at: the one Automatic plays, or the server's own for the original; `null` for none. */
+  private streamPreset(info: PlaybackInfo): QualityPreset | null {
+    const playing = this.playingPreset;
+    const preset = playing.id === ORIGINAL.id ? presetById(info.auto_quality) : playing;
+    return preset && preset.maxBitrateKbps !== null ? namedFor(this.file, preset) : null;
+  }
+
+  /**
+   * A converted stream whose bitrate changes as it is sent
+   * (`live_bitrate`): its own bitrate, and the least its size keeps (8 Mbps
+   * for 4K, 3 for 1080p); `null` for any other.
+   */
+  private liveStream(info: PlaybackInfo): LiveStream | null {
+    if (!info.live_bitrate || info.method !== "transcode") return null;
+    const preset = this.streamPreset(info);
+    if (!preset) return null;
+    const top = preset.maxBitrateKbps!;
+    return { top, floor: Math.min(top, liveFloor(streamLines(this.file, preset))) };
+  }
+
+  /**
+   * The stream playing goes on at `kbps` from the segments the TV's player
+   * hasn't fetched yet (`PUT /api/playback/{id}/bitrate`): the same stream,
+   * so the picture plays on. Automatic hears what the server made of it.
+   */
+  private sendBitrate(kbps: number): void {
+    const info = this.info;
+    if (!info || this.sessionEnded) return;
+    const auto = this.auto;
+    const told = () => {
+      this.update({ note: this.noteText() });
+      this.publishChoices();
+    };
+    this.env.api.setBitrate(info.session_id, kbps).then(
+      (answer) => {
+        if (this.info !== info || this.closed || !auto || auto !== this.auto) return;
+        auto.liveAt(answer.bitrate, kbps);
+        told();
+      },
+      (e: unknown) => {
+        if (this.info !== info || this.closed || !auto || auto !== this.auto) return;
+        // A stream that can't change (an older transcoder, a stream no longer converted) isn't asked again.
+        auto.liveRefused(isApiError(e, 400));
+        told();
+      },
+    );
   }
 
   /**
@@ -1617,15 +1695,21 @@ export class PlaybackController {
     return this.applyAuto(auto.check(now));
   }
 
-  /** Starts again at Automatic's new quality; a step down says so, once. */
+  /**
+   * Acts on Automatic's step: the stream playing goes on at its new
+   * bitrate, or a new one starts at its new quality. A step down says so,
+   * once.
+   */
   private applyAuto(step: AutoStep | null): boolean {
     if (!step || this.closed || this.stopped) return false;
-    const to = namedFor(this.file, presetById(step.to) ?? ORIGINAL);
+    const stream = step.bitrate !== undefined && this.info ? this.streamPreset(this.info) : null;
+    const to = stream ? liveLabel(this.file, stream, step.bitrate!) : namedFor(this.file, presetById(step.to) ?? ORIGINAL).label;
     this.update({ suggestLowerQuality: false, note: this.noteText() });
     this.publishChoices();
-    if (step.why) this.notice(T.smoother(to.label));
+    if (step.why) this.notice(T.smoother(to));
     this.struggle.reset();
-    this.restart(this.livePosition(), true);
+    if (step.bitrate !== undefined) this.sendBitrate(step.bitrate);
+    else this.restart(this.livePosition(), true);
     return true;
   }
 
@@ -1633,7 +1717,7 @@ export class PlaybackController {
   private noteText(): string | null {
     if (this.recovery.fallbackReason) return fallbackText(this.recovery.fallbackReason);
     const auto = this.auto;
-    return auto && auto.lowered && auto.playing !== ORIGINAL.id ? T.lowered[auto.lowered] : null;
+    return auto && auto.lowered && (auto.playing !== ORIGINAL.id || auto.liveLowered) ? T.lowered[auto.lowered] : null;
   }
 
   // ---------------------------------------------------------------- state
@@ -1661,14 +1745,17 @@ export class PlaybackController {
     const convertedLabel = converted && converted.maxBitrateKbps !== null ? converted.label : null;
     const hint = fileHint(file) || null;
     const auto = this.auto;
-    const autoNow = playing.id === ORIGINAL.id ? convertedLabel ?? ORIGINAL.label : playing.label;
+    // A stream Automatic sends on below its own bitrate: "4 Mbps 1080p".
+    const stream = auto && auto.liveLowered && info ? this.streamPreset(info) : null;
+    const eased = stream ? liveLabel(file, stream, auto!.liveKbps!) : null;
+    const autoNow = eased ?? (playing.id === ORIGINAL.id ? convertedLabel ?? ORIGINAL.label : playing.label);
     const qualities: QualityChoice[] = qualitiesFor(file).map((p) => ({
       id: p.id,
       label: p.label,
       hint:
         p.id === AUTO.id
           ? auto
-            ? T.autoNow(autoNow, auto.lowered && playing.id !== ORIGINAL.id ? T.lowered[auto.lowered] : null)
+            ? T.autoNow(autoNow, auto.lowered && (playing.id !== ORIGINAL.id || eased) ? T.lowered[auto.lowered] : null)
             : T.autoHint
           : p.id !== ORIGINAL.id
             ? T.converted

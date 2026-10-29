@@ -400,6 +400,17 @@ export class Api {
     return this.get(`/api/playback/${encodeURIComponent(session)}`, { cancel, timeoutMs });
   }
 
+  /**
+   * The session's converted video goes on at `kbps` from the segments its
+   * player hasn't fetched yet, the same size and playlist
+   * (`PlaybackInfo.live_bitrate`); the answer is what it goes on at.
+   */
+  setBitrate(session: string, kbps: number): Promise<{ bitrate: number }> {
+    return this.send(`/api/playback/${encodeURIComponent(session)}/bitrate`, { method: "PUT", body: { max_bitrate: Math.round(kbps) }, timeoutMs: 10_000 }).then(
+      (r) => r.body as { bitrate: number },
+    );
+  }
+
   /** Whether the server answers at all (a player reconnecting without a session to ask about). */
   reachable(timeoutMs: number): Promise<unknown> {
     return this.get("/api/server", { timeoutMs });

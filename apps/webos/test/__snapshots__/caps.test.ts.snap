@@ -87,7 +87,6 @@ exports[`LG capabilities, per set > 2018 OLED C8, webOS 4, TV speakers 1`] = `
       "segments": [
         "ts",
       ],
-      "variants": true,
     },
     "picture_subtitles_sideload": true,
     "subtitle_codecs": [
@@ -273,7 +272,6 @@ exports[`LG capabilities, per set > 2019 LCD UM7300, webOS 4.5, no Dolby Vision,
       "segments": [
         "ts",
       ],
-      "variants": true,
     },
     "picture_subtitles_sideload": true,
     "subtitle_codecs": [
@@ -463,7 +461,6 @@ exports[`LG capabilities, per set > 2020 8K NanoCell, webOS 5 1`] = `
         "ts",
         "fmp4",
       ],
-      "variants": true,
     },
     "picture_subtitles_sideload": true,
     "subtitle_codecs": [
@@ -669,7 +666,6 @@ exports[`LG capabilities, per set > 2020 OLED CX, webOS 5, Atmos receiver passin
         "ts",
         "fmp4",
       ],
-      "variants": true,
     },
     "picture_subtitles_sideload": true,
     "subtitle_codecs": [
@@ -861,7 +857,6 @@ exports[`LG capabilities, per set > 2021 HD set, webOS 6, PCM output 1`] = `
         "ts",
         "fmp4",
       ],
-      "variants": true,
     },
     "picture_subtitles_sideload": true,
     "subtitle_codecs": [
@@ -1052,7 +1047,6 @@ exports[`LG capabilities, per set > 2022 OLED C2 upgraded to webOS 25, DTS recei
         "ts",
         "fmp4",
       ],
-      "variants": true,
     },
     "picture_subtitles_sideload": true,
     "subtitle_codecs": [
@@ -1261,7 +1255,6 @@ exports[`LG capabilities, per set > 2023 OLED C3, webOS 23, DTS receiver 1`] = `
         "ts",
         "fmp4",
       ],
-      "variants": true,
     },
     "picture_subtitles_sideload": true,
     "subtitle_codecs": [
@@ -1464,7 +1457,6 @@ exports[`LG capabilities, per set > 2026 OLED C6, webOS 26 1`] = `
         "ts",
         "fmp4",
       ],
-      "variants": true,
     },
     "picture_subtitles_sideload": true,
     "subtitle_codecs": [

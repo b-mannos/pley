@@ -80,8 +80,8 @@ export function tizenCaps(f: TizenFacts, o: CapsOverrides = { truehd: false, dts
     subtitle_codecs: SUBTITLES,
     audio_track_switching: true,
     picture_subtitles_sideload: true,
-    // AVPlay moves between a stream's sizes by itself (adaptive bitrate).
-    hls: { master_playlist: true, segments: y >= 2020 ? ["ts", "fmp4"] : ["ts"], variants: true },
+    // One size per stream (no `variants`): AVPlay may go black moving between sizes, as between streams (docs/QUALITY.md).
+    hls: { master_playlist: true, segments: y >= 2020 ? ["ts", "fmp4"] : ["ts"] },
     display: f.uhd8k ? { width: 7680, height: 4320, refresh_rates: [50, 60] } : f.uhd ? { width: 3840, height: 2160, refresh_rates: [50, 60] } : { width: 1920, height: 1080, refresh_rates: [50, 60] },
     device: { form: "tv", tier: tierOf(f), fire_tv: false, model: f.model },
   };

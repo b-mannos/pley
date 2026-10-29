@@ -306,6 +306,11 @@ export interface PlaybackInfo {
   video_range?: string | null;
   /** The stream comes in several sizes the TV's player moves between by itself: Automatic leaves the session be. */
   adaptive?: boolean;
+  /**
+   * The video is converted, and its bitrate changes as it is sent (`PUT
+   * /api/playback/{id}/bitrate`): Automatic's steps need no new stream.
+   */
+  live_bitrate?: boolean;
 }
 
 export interface TranscodeInfo {

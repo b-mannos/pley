@@ -4,6 +4,12 @@
  * (waits for data, how fast video arrives, how fast the network loads,
  * a decoder falling behind) and starts again at the quality it names.
  * Nothing here knows the player or the clock: times come in, in ms.
+ *
+ * The web player's (apps/web/src/player/autoQuality.ts), with what the TVs
+ * add since their players go black between streams (`blanks`, "Players
+ * that go black between streams"): a converted stream's bitrate changes as
+ * it is sent (`LiveStream`), and the original moves only once its picture
+ * has stopped.
  */
 
 export const ORIGINAL_ID = "original";
@@ -27,6 +33,12 @@ export const CALM_MS = 3 * 60_000;
 export const AFTER_DOWN_MS = 5 * 60_000;
 /** The network must carry this many times the next quality up. */
 export const HEADROOM = 1.6;
+/** A step up a step down undoes this soon was one too far: it isn't tried again during the title. */
+export const SETTLE_MS = 10 * 60_000;
+/** Each step up undone doubles the calm the next one waits for, up to this. */
+export const MAX_CALM_MS = 4 * CALM_MS;
+/** On a player that goes black, frames the original drops move it in this much of a title's playing only. */
+export const FIRST_MINUTE_MS = 60_000;
 /** A slow network is remembered this long, per device and server. */
 export const MEMORY_MS = 30 * 60_000;
 /** Network figures older than this go. */
@@ -43,12 +55,29 @@ export interface Rung {
 /** Why Automatic went below the original. */
 export type Lowered = "network" | "device";
 
-/** A change Automatic decided on: the player starts again at `to`. */
+/** A change Automatic decided on: the player starts again at `to`, or its stream goes on at `bitrate`. */
 export interface AutoStep {
   /** "original" or a rung's id. */
   to: string;
   /** Why it went down; `null` for a step back up. */
   why: Lowered | null;
+  /**
+   * A stream whose bitrate changes as it is sent (`LiveStream`): it goes
+   * on at this many kbps, the same stream and size, and `to` is where it
+   * plays still. Left out for a new stream.
+   */
+  bitrate?: number;
+}
+
+/**
+ * A converted stream whose bitrate changes as it is sent
+ * (`PlaybackInfo.live_bitrate`, `PUT /api/playback/{id}/bitrate`): its own
+ * bitrate, the most it goes back up to, and the least its size keeps
+ * (8 Mbps for 4K, 3 for 1080p), kbps.
+ */
+export interface LiveStream {
+  top: number;
+  floor: number;
 }
 
 /** What the network carried when it last stepped down (kbps), and when (ms since 1970). */
@@ -98,6 +127,14 @@ export interface AutoOptions {
    * server to keep for this network too (docs/QUALITY.md).
    */
   onCeiling?: (kbps: number | null) => void;
+  /**
+   * The player goes black between streams (Samsung's AVPlay, LG's
+   * pipeline): it never moves to another stream while one plays well. A
+   * stream whose bitrate changes as it is sent steps that; any other moves
+   * only once its picture has stopped (a wait of 2 s or more, a decoder
+   * failing), and never back up.
+   */
+  blanks?: boolean;
 }
 
 /**
@@ -109,18 +146,35 @@ export class AutoQuality {
   playing = ORIGINAL_ID;
   /** Why it plays below the original; `null` at the original. */
   lowered: Lowered | null = null;
+  /** The bitrate a stream whose bitrate changes as it is sent goes on at (kbps); `null` for any other stream. */
+  liveKbps: number | null = null;
 
   private readonly ladder: Rung[];
   private originalKbps: number | null;
   private readonly memory: AutoMemory | null;
   private readonly wall: () => number;
   private readonly onCeiling: ((kbps: number | null) => void) | null;
+  private readonly blanks: boolean;
   private begun = false;
 
   private lastChange = -1e15;
   private lastDown = -1e15;
   private lastIssue = -1e15;
   private pending: Lowered | null = null;
+  /** The last step up, until a step down or `SETTLE_MS` says whether it held. */
+  private lastUp: { at: number; to: string } | null = null;
+  /** Qualities a step down undid soon after a step up to them: not tried again this title. */
+  private readonly tooHigh = new Set<string>();
+  /** The calm a step up waits for: `CALM_MS`, doubled by each step up undone. */
+  private calmMs = CALM_MS;
+
+  /** The stream playing, when its bitrate changes as it is sent; and the quality it was asked at. */
+  private live: LiveStream | null = null;
+  private liveOf: string | null = null;
+  /** Where the last bitrate step started from, until the server says it took it. */
+  private liveUndo: { kbps: number; lowered: Lowered | null } | null = null;
+  /** Frames dropped where it doesn't move have lowered where the next title starts. */
+  private struggleKept = false;
 
   private waitFrom: number | null = null;
   private shortWaits: number[] = [];
@@ -140,6 +194,7 @@ export class AutoQuality {
     this.memory = o.memory ?? null;
     this.wall = o.wall ?? (() => Date.now());
     this.onCeiling = o.onCeiling ?? null;
+    this.blanks = !!o.blanks;
   }
 
   /** Whether `start` has said where it begins. */
@@ -169,8 +224,28 @@ export class AutoQuality {
     return this.playing;
   }
 
+  /**
+   * On a player that goes black, a stream whose bitrate can't change as it
+   * plays (the original, a remux, an older server's conversion): only a
+   * stopped picture moves it.
+   */
+  get patient(): boolean {
+    return this.blanks && this.live === null;
+  }
+
+  /** The stream playing goes on below its own bitrate. */
+  get liveLowered(): boolean {
+    return this.live !== null && this.liveKbps !== null && this.liveKbps < this.live.top;
+  }
+
+  /** The own bitrate of the stream playing, when it changes as it is sent (kbps). */
+  get liveTop(): number | null {
+    return this.live ? this.live.top : null;
+  }
+
   /** The bitrate playing now (kbps); `null` for an original of unknown bitrate. */
   playingKbps(): number | null {
+    if (this.live && this.liveKbps !== null) return this.liveKbps;
     const rung = this.rung(this.playing);
     return rung ? rung.kbps : this.originalKbps;
   }
@@ -180,12 +255,56 @@ export class AutoQuality {
     if (kbps && kbps > 0) this.originalKbps = kbps;
   }
 
-  /** A new session began (a change, a recovery): what was measured of the one before goes, but the network's speed. */
-  began(): void {
+  /**
+   * A new session began (a change, a recovery): what was measured of the
+   * one before goes, but the network's speed. `live`: its bitrate changes
+   * as it is sent. A new stream of the same quality (a recovery, a track)
+   * goes on at the bitrate the last one had come to: `liveKbps`, for the
+   * player to ask for when below its own.
+   */
+  began(live: LiveStream | null = null): void {
     this.waitFrom = null;
     this.shortWaits = [];
     this.pending = null;
     this.interrupted();
+    const kept = live && this.live && this.liveKbps !== null && this.liveOf === this.playing && this.live.top === live.top ? this.liveKbps : null;
+    this.live = live;
+    this.liveOf = live ? this.playing : null;
+    this.liveKbps = live ? (kept === null ? live.top : Math.max(live.floor, Math.min(live.top, kept))) : null;
+    this.liveUndo = null;
+  }
+
+  /**
+   * The server says what the stream goes on at (kbps) after the step that
+   * asked for `asked`. Less than asked: the stream's own bitrate is lower
+   * than its quality's, and that is as high as it goes.
+   */
+  liveAt(kbps: number, asked: number): void {
+    this.liveUndo = null;
+    const live = this.live;
+    if (!live || !(kbps > 0)) return;
+    if (kbps < asked) this.live = { top: Math.min(live.top, kbps), floor: Math.min(live.floor, kbps) };
+    this.liveKbps = kbps;
+    if (this.playing === ORIGINAL_ID && !this.liveLowered) this.lowered = null;
+  }
+
+  /**
+   * The server didn't change the bitrate: the stream goes on as it was.
+   * `final` (it can't, an older transcoder): from now on it is a stream
+   * whose bitrate can't change.
+   */
+  liveRefused(final: boolean): void {
+    const undo = this.liveUndo;
+    this.liveUndo = null;
+    if (undo && this.live) {
+      this.liveKbps = undo.kbps;
+      this.lowered = undo.lowered;
+    }
+    if (final) {
+      this.live = null;
+      this.liveOf = null;
+      this.liveKbps = null;
+    }
   }
 
   /** Paused, seeking, or out of sight: what it was measuring starts over, and a wait under way isn't one. */
@@ -210,6 +329,8 @@ export class AutoQuality {
       this.pending = this.pending || "network";
       return;
     }
+    // Short waits don't move a stream that can't change as it plays, on a player that goes black.
+    if (this.patient) return;
     const recent = this.shortWaits.filter((t) => now - t < SHORT_WAITS_WITHIN_MS);
     recent.push(now);
     if (recent.length >= 2) {
@@ -244,7 +365,8 @@ export class AutoQuality {
         this.lowFrom = now;
         this.lowAhead = ahead;
       } else if (now - this.lowFrom >= DELIVERY_LOW_FOR_MS) {
-        if (ahead < this.lowAhead) this.pending = this.pending || "network";
+        // Nor does slow delivery: the picture hasn't stopped.
+        if (ahead < this.lowAhead && !this.patient) this.pending = this.pending || "network";
         this.lowFrom = now;
         this.lowAhead = ahead;
       }
@@ -280,6 +402,21 @@ export class AutoQuality {
   /** The decoder fell behind (frames dropped, a decoder failing) while it converts. */
   decoding(): void {
     this.pending = "device";
+  }
+
+  /**
+   * Frames dropped where Automatic doesn't move for them (a player that
+   * goes black, past the title's first minute): this title plays on, and
+   * the next starts a step lower, through the network's memory. Once a title.
+   */
+  struggled(): void {
+    if (this.struggleKept) return;
+    const kbps = this.playingKbps();
+    const ceiling = kbps === null ? null : Math.round(kbps * SAFETY);
+    const target = this.highestAtMost(ceiling, kbps);
+    if (ceiling === null || !target) return;
+    this.struggleKept = true;
+    this.remember(Math.max(ceiling, target.kbps));
   }
 
   /** The player itself turned the original into a conversion (it couldn't play it well): a change, as one of its own. */
@@ -330,9 +467,12 @@ export class AutoQuality {
     this.pending = null;
     if (issue) {
       this.lastIssue = now;
-      return now - this.lastChange < CHANGE_GAP_MS ? null : this.stepDown(now, issue);
+      if (now - this.lastChange < CHANGE_GAP_MS) return null;
+      return this.live ? this.liveDown(now, issue) : this.stepDown(now, issue);
     }
-    return this.stepUp(now);
+    if (this.live) return this.liveUp(now);
+    // A player that goes black doesn't leave a stream that plays well for another.
+    return this.blanks ? null : this.stepUp(now);
   }
 
   private stepDown(now: number, why: Lowered): AutoStep | null {
@@ -354,6 +494,12 @@ export class AutoQuality {
     }
     const target = this.highestAtMost(ceiling, kbps);
     if (!target || target.id === this.playing) return null;
+    // Down again from where it just stepped up to: that was one step too far.
+    if (this.lastUp && this.lastUp.to === this.playing && now - this.lastUp.at < SETTLE_MS) {
+      this.tooHigh.add(this.playing);
+      this.calmMs = Math.min(MAX_CALM_MS, this.calmMs * 2);
+    }
+    this.lastUp = null;
     this.playing = target.id;
     this.lowered = why;
     this.lastChange = now;
@@ -366,14 +512,17 @@ export class AutoQuality {
   private stepUp(now: number): AutoStep | null {
     if (this.playing === ORIGINAL_ID) return null;
     const calmFrom = Math.max(this.lastIssue, this.lastChange);
-    if (now - calmFrom < CALM_MS || now - this.lastDown < AFTER_DOWN_MS) return null;
+    if (now - calmFrom < this.calmMs || now - this.lastDown < AFTER_DOWN_MS) return null;
     const at = this.indexOf(this.playing);
     const next = at > 0 ? this.ladder[at - 1]! : null;
+    // Settled: the step above didn't hold this title.
+    if (this.tooHigh.has(next ? next.id : ORIGINAL_ID)) return null;
     const need = next ? next.kbps : this.originalKbps;
     const net = this.network(calmFrom);
     if (need === null || net === null || net < HEADROOM * need) return null;
     this.playing = next ? next.id : ORIGINAL_ID;
     this.lastChange = now;
+    this.lastUp = { at: now, to: this.playing };
     this.interrupted();
     if (!next) {
       this.lowered = null;
@@ -383,6 +532,78 @@ export class AutoQuality {
       this.remember(next.kbps);
     }
     return { to: this.playing, why: null };
+  }
+
+  /**
+   * A step down of a stream whose bitrate changes as it is sent: the same
+   * ceiling as a new stream's, in whole Mbps, within the least its size
+   * keeps and its own bitrate. At that least already, the network waits.
+   */
+  private liveDown(now: number, why: Lowered): AutoStep | null {
+    const live = this.live!;
+    const kbps = this.liveKbps ?? live.top;
+    let delivery = 1;
+    if (why === "network") {
+      const net = this.network(now - DELIVERY_WINDOW_MS);
+      if (this.delivery !== null) delivery = this.delivery;
+      else if (net !== null) delivery = net / kbps;
+      delivery = Math.min(1, delivery);
+    }
+    const ceiling = Math.round(kbps * delivery * SAFETY);
+    const to = Math.max(live.floor, Math.min(live.top, Math.floor(ceiling / 1000) * 1000));
+    if (to >= kbps) return null;
+    // Down again from where it just stepped up to: that was one step too far.
+    if (this.lastUp && this.lastUp.to === this.place() && now - this.lastUp.at < SETTLE_MS) {
+      this.tooHigh.add(this.place());
+      this.calmMs = Math.min(MAX_CALM_MS, this.calmMs * 2);
+    }
+    this.lastUp = null;
+    this.liveUndo = { kbps, lowered: this.lowered };
+    this.liveKbps = to;
+    this.lowered = why;
+    this.lastChange = now;
+    this.lastDown = now;
+    this.interrupted();
+    // What the network carries, though the stream keeps more for its size: the next title starts by it.
+    if (why === "network") this.remember(ceiling);
+    return { to: this.playing, why, bitrate: to };
+  }
+
+  /**
+   * A step back up of a stream whose bitrate changes as it is sent, on
+   * `stepUp`'s rules: to the next of the file's qualities' bitrates above
+   * it, or to its own.
+   */
+  private liveUp(now: number): AutoStep | null {
+    const live = this.live!;
+    const kbps = this.liveKbps ?? live.top;
+    if (kbps >= live.top) return null;
+    const calmFrom = Math.max(this.lastIssue, this.lastChange);
+    if (now - calmFrom < this.calmMs || now - this.lastDown < AFTER_DOWN_MS) return null;
+    let next = live.top;
+    for (const r of this.ladder) if (r.kbps > kbps && r.kbps < next) next = r.kbps;
+    // Settled: the step above didn't hold this title.
+    if (this.tooHigh.has(this.place(next))) return null;
+    const net = this.network(calmFrom);
+    if (net === null || net < HEADROOM * next) return null;
+    this.liveUndo = { kbps, lowered: this.lowered };
+    this.liveKbps = next;
+    this.lastChange = now;
+    this.lastUp = { at: now, to: this.place() };
+    this.interrupted();
+    if (next >= live.top && this.playing === ORIGINAL_ID) {
+      // The original as this player gets it: a step back up to the original.
+      this.lowered = null;
+      this.remember(null);
+    } else if (this.lowered === "network") {
+      this.remember(next);
+    }
+    return { to: this.playing, why: null, bitrate: next };
+  }
+
+  /** Where it plays, as steps up are told apart: the quality, and the bitrate (`kbps`, else now's) of a stream that changes as it is sent. */
+  private place(kbps: number | null = this.liveKbps): string {
+    return this.live && kbps !== null ? `${this.playing}@${kbps}` : this.playing;
   }
 
   /** Remembers `kbps` as the network's ceiling (`null`: forgets it), here and on the server. */

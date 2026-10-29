@@ -150,6 +150,28 @@ export function autoLadder(file: MediaFile | null): Rung[] {
   return out;
 }
 
+/** The lines of `file` converted at `preset`: the preset's, or the file's own when fewer. */
+export function streamLines(file: MediaFile | null, preset: QualityPreset): number {
+  const lines = linesOf(file);
+  const most = preset.maxHeight ?? lines ?? 1080;
+  return lines === null ? most : Math.min(most, lines);
+}
+
+/**
+ * The least bitrate a converted stream of `lines` keeps when its bitrate
+ * changes as it is sent (docs/QUALITY.md, "Players that go black between
+ * streams"), kbps: 8 Mbps for 4K, 3 for 1080p, 1.5 for 720p, 1 below.
+ */
+export function liveFloor(lines: number): number {
+  return lines >= 2160 ? 8000 : lines >= 1080 ? 3000 : lines >= 720 ? 1500 : 1000;
+}
+
+/** "4 Mbps 1080p": the stream of `file` asked for at `preset`, going on at `kbps`. */
+export function liveLabel(file: MediaFile | null, preset: QualityPreset, kbps: number): string {
+  const lines = streamLines(file, preset);
+  return `${Math.round(kbps / 100) / 10} Mbps ${lines >= 2160 ? "4K" : `${lines}p`}`;
+}
+
 /** "1080p · 8.2 Mbps": what a file is, for the Original row's hint. */
 export function fileHint(file: MediaFile | null): string {
   if (!file) return "";

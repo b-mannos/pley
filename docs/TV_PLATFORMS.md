@@ -383,9 +383,10 @@ Settings → Playback → Quality list Original, Automatic, 30 and 15 Mbps
 is picked. Settings saved before Automatic held Original whether it was
 picked or not, so a saved Original counts only once a quality has been
 picked on the TV since (`pley.qualityPicked`). Automatic's decisions are
-`player/autoquality.ts`, the same as the web player's; the controller
-feeds it on its half-second tick, while it is meant to play and not
-within 2 s of a seek of its own:
+`player/autoquality.ts`, the same as the web player's (settling included)
+with what a player that goes black between streams adds (`blanks`, below);
+the controller feeds it on its half-second tick, while it is meant to play
+and not within 2 s of a seek of its own:
 
 - Waits: the engine buffering while it played, as Info's Stalls counts
   them; a pause, a seek or a new session isn't one.
@@ -396,23 +397,49 @@ within 2 s of a seek of its own:
   Samsung; on LG, which says nothing of it, how fast the buffer fills
   while it grows (seconds loaded a second times the bitrate), which is
   at least what the network carries. Steps back up need one or the other.
-- Decoding: the original that drops frames or fails falls back to the
-  server's quality once, as before (the recovery ladder); dropped frames
-  in a conversion, where the engine counts them, step Automatic down.
-  Neither TV's engine counts frames yet, so on a TV that is the
-  fallbacks' alone.
+- Decoding: the original that fails falls back to the server's quality
+  once, as before (the recovery ladder), and so does one that drops
+  frames in the title's first minute (of playing, counted by the tick);
+  later, in Automatic, it plays on and the next title starts a step lower
+  (`struggled`, through the network's memory). Dropped frames in a
+  conversion, where the engine counts them, step Automatic down. Neither
+  TV's engine counts frames yet, so on a TV that is the fallbacks' alone.
 
-A transcode comes in several sizes (`hls.variants`, docs/QUALITY.md),
-which AVPlay and LG's media pipeline move between by themselves: in such
-a session (`PlaybackInfo.adaptive`) the tick leaves Automatic be, and only
-the stall and dropped-frame paths above can still start it again lower.
+Both TVs' players go black between streams, and may when a stream moves
+between sizes too, so neither says `hls.variants`: a transcode comes in
+one size. Automatic follows docs/QUALITY.md, "Players that go black
+between streams":
+
+- A conversion whose bitrate changes as it is sent
+  (`PlaybackInfo.live_bitrate`) steps that: `PUT
+  /api/playback/{id}/bitrate`, and the TV's player plays on from the same
+  playlist. A step down goes to the usual ceiling (bitrate playing ×
+  delivery × 0.75) in whole Mbps, between the least its size keeps (8 Mbps
+  for 4K, 3 for 1080p, 1.5 for 720p, 1 below) and the stream's own
+  bitrate (the quality it was asked at, or the server's own for an
+  original it converts); at that least, nothing changes and the network
+  waits. A step back up, on the usual calm, goes to the next of the file's
+  qualities' bitrates above it, then to the stream's own, never further:
+  4K stays 4K, 1080p stays 1080p. The server's answer is the bitrate it
+  goes on at; one lower than asked is as high as that stream goes. A new
+  stream of the same quality (a recovery, a track change) goes on at the
+  bitrate the last one had come to. A `400` (an older transcoder) puts it
+  back as it was, and the stream is then one whose bitrate can't change.
+- Any other stream (the original played as it is or remuxed, an older
+  server's conversion) moves only once its picture has stopped: a wait of
+  2 s or more steps it down to a conversion, made ready beside it as
+  below; two short waits and slow delivery don't, and it never steps back
+  up to another stream.
+- Settling, as on the web: a step up a step down undoes within 10 minutes
+  isn't tried again during the title, and the calm before any other step
+  up doubles (3, 6, then 12 minutes).
 
 A change that needs a new session while a video plays (a quality picked,
 an audio track the engine can't switch itself, picture subtitles burned
-in, an Automatic step, Play original) is made ready first, as the web
-player does (`player/prepare.ts`). The new session starts beside the one
-playing (`keep_previous`), and the controller asks for its playlist, the
-size it lists first (where AVPlay and LG's pipeline start) and, with
+in, Automatic's step from the original, Play original) is made ready
+first, as the web player does (`player/prepare.ts`). The new session
+starts beside the one playing (`keep_previous`), and the controller asks
+for its playlist, the size it lists first (the only one now) and, with
 `HEAD`, the segment holding the start + 4 s: the server answers once the
 transcoder has made it, and no picture crosses the network twice, since
 the TV's own player can't use what the page fetched. It waits for that
@@ -438,8 +465,10 @@ The slow network is kept for 30 minutes per TV and server
 (`pley.autoQuality.<server>`), so Up Next, and the playback that starts
 again when the TV shows the app again, begin where it left off. A step
 down says so in the player's toast; the Quality row's value reads
-"Automatic · 8 Mbps 1080p", Automatic's row says why under it, and so
-does Info. Picking Automatic again starts afresh at the original.
+"Automatic · 8 Mbps 1080p" ("Automatic · 4 Mbps 1080p" for that stream
+sent on at 4 Mbps), Automatic's row says why under it, and so does Info.
+Picking Automatic again starts afresh at the original, and a stream sent
+on below its own bitrate goes back to it.
 
 The web player (`apps/web/src/player`) does the same, with what a
 browser tells: waits from the element's `waiting` and `playing` events

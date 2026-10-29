@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tierOf, webosCaps } from "../src/caps";
+import { browserCaps, tierOf, webosCaps } from "../src/caps";
 import { chromiumOf, webosOfChromium, webosOfPlatform, type WebosFacts } from "../src/facts";
 import { webosKey } from "../src/platform";
 
@@ -118,6 +118,11 @@ describe("LG capabilities, rules", () => {
   it("keeps fMP4 HLS for webOS 5 and later", () => {
     expect(webosCaps(tv({ webos: 4, chromium: 53 })).caps.hls.segments).toEqual(["ts"]);
     expect(webosCaps(tv({ webos: 6, chromium: 79 })).caps.hls.segments).toEqual(["ts", "fmp4"]);
+  });
+
+  it("asks for one size per stream: LG's pipeline may go black moving between sizes", () => {
+    for (const facts of Object.values(SETS)) expect(webosCaps(facts).caps.hls.variants).toBeUndefined();
+    expect(browserCaps().caps.hls.variants).toBeUndefined();
   });
 
   it("rates 2018–2019 and small sets low", () => {
