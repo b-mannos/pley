@@ -1,8 +1,8 @@
 # Storage
 
 What Pley keeps on disk, where, and how it is cleaned up. Everything lives in
-the data folder (`--data-dir`, see the README) except your media and its local
-artwork, which Pley never moves or changes.
+the data folder (`--data-dir`, see the [README](../README.md#configuration)),
+except your media and its local artwork, which Pley never moves or changes.
 
 ```
 <data>/
@@ -58,30 +58,31 @@ artwork.
 
 ## Generated media files (`media/`)
 
-Frame grabs, seek-bar previews and chapter images are made from a media file
-and kept in a folder named after the file's **fingerprint**: the OpenSubtitles
-hash (the file size plus a checksum of its first and last 64 KiB). They follow
-the file when it is moved or renamed, and two copies of the same file share
-them. Fingerprints are computed in the background after scans; a file that
-changes gets a new one. When they cannot be saved (a full disk, a read-only
-database) the background run stops after a few failures and the next scan
-tries again.
+Frame grabs, seek-bar previews and chapter images are kept in a folder named
+after the media file's **fingerprint**: the OpenSubtitles hash (the file size
+plus a checksum of its first and last 64 KiB).
+
+- They follow the file when it is moved or renamed, and two copies of the
+  same file share them.
+- Fingerprints are computed in the background after scans; a changed file
+  gets a new one.
+- If fingerprints can't be saved (full disk, read-only database), the
+  background run stops after a few failures and the next scan tries again.
 
 ## Database backups
 
-Once a day (and on start when the last backup is older than a day) Pley
-writes a copy of the database to `backups/pley-YYYY-MM-DD-HHMM.db` with
-SQLite's `VACUUM INTO`, which reads a consistent snapshot while the server
-keeps running. The copy is checked before it counts, and the last three are
-kept. `POST /api/system/backups` makes one on demand; `GET /api/system/backups`
-lists them with the result of the check of the live database that runs at
-every start.
-
-Before a new version changes the database (it brings the schema up to date
-when it starts), Pley writes a checked copy to
-`backups/pley-YYYY-MM-DD-HHMM-before-upgrade.db`, and doesn't start when it
-can't (a full disk, say). The copy from the last upgrade is kept until the
-next one, apart from the daily backups.
+- **Daily**: once a day, and on start when the last backup is over a day
+  old, Pley writes `backups/pley-YYYY-MM-DD-HHMM.db` with SQLite's
+  `VACUUM INTO` (a consistent snapshot while the server runs). Each copy is
+  checked before it counts; the last three are kept.
+- **Before an upgrade**: before a new version updates the database schema
+  on start, Pley writes a checked copy to
+  `backups/pley-YYYY-MM-DD-HHMM-before-upgrade.db`, and doesn't start if it
+  can't (a full disk, say). It is kept until the next upgrade, separately
+  from the daily backups.
+- `POST /api/system/backups` makes one on demand. `GET /api/system/backups`
+  lists them, with the result of the check of the live database that runs
+  at every start.
 
 To restore one: stop Pley, move `pley.db`, `pley.db-wal` and `pley.db-shm`
 aside, copy the backup to `pley.db`, and start Pley again.
@@ -104,19 +105,19 @@ never removed between being stored and being used:
 
 - Files younger than an hour are left alone.
 - So are pictures and media folders handed out in the last hour, however old
-  their files: a picture stored again or found again by its URL (a refresh,
-  a re-upload), a media folder asked for (a file moved back). This is checked
-  right before each removal, so it holds while a clean-up runs.
-- The URLs of downloads nothing uses are forgotten with their pictures, after
-  the same hour.
+  their files: a picture stored or found again by its URL (a refresh, a
+  re-upload), a media folder requested again (a file moved back). This is
+  checked right before each removal.
+- The URLs of unused downloads are forgotten with their pictures, after the
+  same hour.
 
-Added subtitles (`subtitles/`) go with their media file: once a file is
-removed from its library, the clean-ups remove its subtitles too.
+Added subtitles (`subtitles/`) are removed with their media file once it
+leaves its library.
 
 The same clean-ups remove old files from `cache/`. Cached files are named
-after what they were made from (a path, a size, a modification time), so the
-files of media that changed or went are never asked for again; the age limits
-keep the cache from growing for ever:
+after their source (a path, a size, a modification time), so files for
+changed or removed media are never requested again; age limits keep the
+cache from growing:
 
 | Folder | What | Kept for |
 |---|---|---|
@@ -125,13 +126,11 @@ keep the cache from growing for ever:
 | `cache/subtitles` | subtitles converted to WebVTT, and picture subtitles copied into Matroska (`.mks`) | 90 days |
 | `cache/fingerprints` | audio fingerprints (intro and credits detection) | 90 days |
 
-A file that is needed again later is simply made again. Subtitles are written
-to a temporary file first, so a crash or a full disk never leaves one cut
-short.
+A file needed again later is made again. Subtitles are written to a
+temporary file first, so a crash or a full disk never leaves one cut short.
 
 `GET /api/system/storage` reports the space used.
 
-Earlier versions kept pictures as files under `metadata/items`,
-`metadata/collections` and `metadata/people` with absolute paths in the
-database. They are moved into the blob store on the first start of a version
-with this layout.
+A data folder that still has pictures under `metadata/items`,
+`metadata/collections` or `metadata/people` (an older layout with absolute
+paths) is moved into `metadata/blobs` on start.
