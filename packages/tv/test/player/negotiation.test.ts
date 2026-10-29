@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Api } from "../../src/api/client";
+import { ApiError, type Api } from "../../src/api/client";
 import type { ClientCaps, ItemDetail, MediaFile, MediaStream, PlaybackInfo, PlaybackRequest, ServerEvent } from "../../src/api/types";
 import type { KeyValue } from "../../src/auth/tokens";
 import { PlaybackController, type PlayerEnv } from "../../src/player/controller";
@@ -226,6 +226,11 @@ class FakeEngine implements PlayerEngine {
     this.prepared.push(source);
     this.state = "buffering";
   }
+  /** Times it was asked to keep its picture through the next prepare. */
+  held = 0;
+  holdPicture() {
+    this.held++;
+  }
   play() {}
   pause() {}
   seekTo() {}
@@ -284,8 +289,10 @@ function world(detail: ItemDetail, answer: (req: PlaybackRequest) => PlaybackInf
   const listeners: ((e: ServerEvent) => void)[] = [];
   /** The tracks saved with PUT /api/items/{id}/streams: audio (undefined: left out), subtitles. */
   const saved: [number | null | undefined, number | null][] = [];
-  /** `down`: nothing answers (the Wi-Fi dropped, the server restarts). */
-  const net = { down: false };
+  /** `down`: nothing answers (the Wi-Fi dropped, the server restarts). `busy`: no transcode free for a session asked for beside another (503). */
+  const net = { down: false, busy: false };
+  /** How a stream's playlists and segments are answered (`api.media`); at once, unless a test says. */
+  const media = { answer: (method: string, url: string): Promise<string> => Promise.resolve(method === "HEAD" ? "" : playlistFor(url)) };
   const answered = <T>(value: () => T): Promise<T> => (net.down ? Promise.reject(new NetworkError("Can't reach the server")) : Promise.resolve(value()));
   const api = {
     server: "http://nas:7539",
@@ -295,8 +302,13 @@ function world(detail: ItemDetail, answer: (req: PlaybackRequest) => PlaybackInf
       answered(() => {
         requests.push(req);
         calls.push(`start ${req.mode}`);
+        if (net.busy && req.keep_previous) throw new ApiError(503, "unavailable", "no transcode free");
         return answer(req);
       }),
+    media: (method: string, url: string) => {
+      calls.push(`${method} ${url.replace("http://nas:7539/api/media/", "")}`);
+      return media.answer(method, url);
+    },
     progress: async (_id: number, pos: number, _d: number | null, state: string) => void calls.push(`progress ${state} ${Math.round(pos)}`),
     stopSession: async (id: string) => void calls.push(`delete ${id}`),
     sessionStatus: () => answered(() => ({ session_id: "s1", method: "direct", transcode: null })),
@@ -326,7 +338,24 @@ function world(detail: ItemDetail, answer: (req: PlaybackRequest) => PlaybackInf
       return () => undefined;
     },
   };
-  return { env, engine, calls, requests, saved, net, send: (e: ServerEvent) => listeners.forEach((l) => l(e)) };
+  return { env, engine, calls, requests, saved, net, media, send: (e: ServerEvent) => listeners.forEach((l) => l(e)) };
+}
+
+/** A stream in two sizes, each in 4 s segments over the film's two hours. */
+function playlistFor(url: string): string {
+  if (/master\.m3u8$/.test(url)) {
+    return [
+      "#EXTM3U",
+      "#EXT-X-STREAM-INF:BANDWIDTH=4400000,RESOLUTION=1280x720",
+      "v0/index.m3u8",
+      "#EXT-X-STREAM-INF:BANDWIDTH=2200000,RESOLUTION=854x480",
+      "v1/index.m3u8",
+    ].join("\n");
+  }
+  const lines = ["#EXTM3U", "#EXT-X-TARGETDURATION:4"];
+  for (let n = 0; n < 1800; n++) lines.push("#EXTINF:4.000,", `${n}.ts`);
+  lines.push("#EXT-X-ENDLIST");
+  return lines.join("\n");
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 20));
@@ -703,6 +732,9 @@ describe("Automatic", () => {
       ["transcode", 15_000, 2160],
     ]);
     expect(w.requests[1]!.start_ms).toBeGreaterThan(600_000);
+    // Made ready beside the original, which ends once the step's stream is there.
+    expect(w.requests[1]!.keep_previous).toBe(true);
+    expect(w.calls.indexOf("delete s1")).toBeGreaterThan(w.calls.indexOf("start transcode"));
     expect(notices).toEqual(["Quality lowered to 15 Mbps 4K"]);
     expect(c.state.value.quality).toBe("Automatic · 15 Mbps 4K");
     expect(c.state.value.note).toBe("Lowered for your connection");
@@ -788,6 +820,134 @@ describe("Automatic", () => {
     expect(w.requests.length).toBe(1);
     expect(picked).toEqual(["original"]);
     expect(c.state.value.quality).toBe("Original");
+    c.close();
+  });
+});
+
+describe("a change while it plays", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** The original as it is (s1); a conversion asked for (s4000, s2000…), a stream in two sizes. */
+  const answer = (req: PlaybackRequest) =>
+    info(req.max_bitrate ? { session_id: `s${req.max_bitrate}`, method: "transcode", hls: true, url: "/api/media/pley_mk_KEY2/master.m3u8" } : {});
+
+  /** A playback whose picture shows, on a clock the test moves; the calls so far forgotten. */
+  async function playing() {
+    vi.useFakeTimers();
+    const w = world(item(file()), answer);
+    w.env.now = () => Date.now();
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await vi.advanceTimersByTimeAsync(50);
+    w.engine.state = "ready";
+    w.engine.listener?.firstFrame();
+    w.engine.listener?.status("ready");
+    w.calls.length = 0;
+    return { w, c };
+  }
+
+  /** Segments the server answers only when the test says. */
+  function slowSegments(w: ReturnType<typeof world>) {
+    const made: (() => void)[] = [];
+    w.media.answer = (method, url) => (method === "HEAD" ? new Promise((r) => made.push(() => r(""))) : Promise.resolve(playlistFor(url)));
+    return made;
+  }
+
+  it("makes the new stream ready beside the one playing, then moves to it from where that one got to", async () => {
+    const { w, c } = await playing();
+    const made = slowSegments(w);
+    c.selectQuality("4m");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(w.requests[1]).toMatchObject({ keep_previous: true, max_bitrate: 4000, start_ms: 600_000 });
+    // Asked for as the TV's player will: the playlist, the size it lists first, and the segment 4 s on, made before it answers.
+    expect(w.calls).toEqual(["start transcode", "GET pley_mk_KEY2/master.m3u8", "GET pley_mk_KEY2/v0/index.m3u8", "HEAD pley_mk_KEY2/v0/151.ts"]);
+    // The one playing plays on meanwhile, without a ring.
+    expect(w.engine.prepared.length).toBe(1);
+    expect(c.state.value.phase.kind).toBe("playing");
+    w.engine.pos = 601_500;
+    made[0]!();
+    await vi.advanceTimersByTimeAsync(10);
+    // Then it ends, at where it got to, and the engine moves on from there, keeping its picture where it can.
+    expect(w.calls.slice(4)).toEqual(["progress stopped 601500", "delete s1"]);
+    expect(w.engine.held).toBe(1);
+    expect(w.engine.prepared[1]).toMatchObject({ hls: true, startMs: 601_500, url: "http://nas:7539/api/media/pley_mk_KEY2/master.m3u8" });
+    expect(c.state.value.phase.kind).toBe("preparing");
+    expect(c.state.value.switching).toBe(true);
+    w.engine.listener?.status("ready");
+    expect(c.state.value.switching).toBe(false);
+    c.close();
+  });
+
+  it("moves after 20 s at most when the stream isn't ready by then", async () => {
+    const { w, c } = await playing();
+    slowSegments(w);
+    c.selectQuality("4m");
+    await vi.advanceTimersByTimeAsync(19_000);
+    expect(w.engine.prepared.length).toBe(1);
+    expect(w.calls).not.toContain("delete s1");
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(w.engine.prepared.length).toBe(2);
+    expect(w.calls).toContain("delete s1");
+    c.close();
+  });
+
+  it("ends the one playing first, as before, when no transcode is free for two at once (503)", async () => {
+    const { w, c } = await playing();
+    w.net.busy = true;
+    c.selectQuality("4m");
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(w.requests.slice(1).map((r) => r.keep_previous)).toEqual([true, undefined]);
+    expect(w.calls).toEqual(["start transcode", "progress stopped 600000", "delete s1", "start transcode"]);
+    expect(w.engine.held).toBe(0);
+    expect(w.engine.prepared[1]).toMatchObject({ hls: true, startMs: 600_000 });
+    expect(c.state.value.switching).toBe(false);
+    expect(c.state.value.phase.kind).not.toBe("error");
+    c.close();
+  });
+
+  it("lets a session it was making ready go when another change comes first", async () => {
+    const { w, c } = await playing();
+    const made = slowSegments(w);
+    c.selectQuality("4m");
+    await vi.advanceTimersByTimeAsync(10);
+    c.selectQuality("2m");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(w.calls).toContain("delete s4000");
+    expect(w.calls).not.toContain("delete s1");
+    expect(w.requests[2]).toMatchObject({ keep_previous: true, max_bitrate: 2000 });
+    made[made.length - 1]!();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(w.engine.prepared.length).toBe(2);
+    expect(w.calls).toContain("delete s1");
+    c.close();
+  });
+
+  it("starts again at once to recover from an error, ending the one that failed first", async () => {
+    const { w, c } = await playing();
+    w.engine.listener?.error({ kind: "unsupported", audio: false, container: false, detail: "decoder" });
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(w.requests.map((r) => [r.mode, r.keep_previous])).toEqual([
+      ["auto", undefined],
+      ["transcode", undefined],
+    ]);
+    expect(w.calls.slice(0, 3)).toEqual(["progress stopped 600000", "delete s1", "start transcode"]);
+    expect(w.calls.filter((x) => x.indexOf("HEAD") === 0)).toEqual([]);
+    expect(c.state.value.switching).toBe(false);
+    c.close();
+  });
+
+  it("starts at once when nothing plays yet", async () => {
+    vi.useFakeTimers();
+    const w = world(item(file()), answer);
+    const c = new PlaybackController({ itemId: 70 }, w.env, 0);
+    c.start();
+    await vi.advanceTimersByTimeAsync(50);
+    // Its picture hasn't shown: nothing to keep playing beside the next.
+    c.selectQuality("4m");
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(w.requests.map((r) => r.keep_previous)).toEqual([undefined, undefined]);
     c.close();
   });
 });

@@ -79,6 +79,13 @@ export interface PlayerEngine {
   setListener(listener: EngineListener): void;
   /** Opens `source` and starts at `source.startMs`; plays at once when `play` is true. */
   prepare(source: EngineSource, play: boolean): void;
+  /**
+   * The next `prepare` moves to a stream made ready beside this one (a
+   * quality or track change): the picture showing now stays on screen
+   * until the new source shows its own, where the engine can keep it.
+   * AVPlay can't (it draws on a plane the page can't read), so it has none.
+   */
+  holdPicture?(): void;
   play(): void;
   pause(): void;
   seekTo(ms: number): void;

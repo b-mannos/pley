@@ -355,6 +355,8 @@ export interface PlaybackRequest {
   start_ms?: number;
   mode?: PlaybackMode;
   client_id?: string;
+  /** Started while the last session plays on, to move to it once it is ready: that one is left to the player to end. */
+  keep_previous?: boolean;
   /** The TV's own player can't send the Authorization header: its URLs carry a key (docs/API.md, "Keyed URLs"). */
   keyed_urls?: boolean;
   caps: ClientCaps;

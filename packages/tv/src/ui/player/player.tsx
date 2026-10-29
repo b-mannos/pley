@@ -23,6 +23,8 @@ import { PictureSubtitles, TextSubtitles } from "./subtitles";
 const HIDE_MS = 5_000;
 /** The buffering ring shows after this long. */
 const RING_MS = 500;
+/** The same while it moves to a stream made ready beside the last one (`switching`): that takes moments, and shows no ring. */
+const SWITCH_RING_MS = 2_500;
 /** The player leaves this long after the server stopped it. */
 const STOPPED_LEAVE_MS = 20_000;
 
@@ -170,14 +172,14 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
     return () => clearTimeout(t);
   }, [toast?.n]);
 
-  // The ring after half a second of preparing or buffering.
+  // The ring after half a second of preparing or buffering; 2.5 s for a switch to a stream made ready.
   const waiting = s.phase.kind === "preparing" || s.phase.kind === "buffering";
   useEffect(() => {
     if (!waiting) {
       setRing(false);
       return;
     }
-    const t = setTimeout(() => setRing(true), RING_MS);
+    const t = setTimeout(() => setRing(true), s.switching ? SWITCH_RING_MS : RING_MS);
     return () => clearTimeout(t);
   }, [waiting]);
 

@@ -113,7 +113,7 @@ function watched(http: Transport, req: HttpRequest, ping: string): Promise<HttpR
 }
 
 interface CallOptions {
-  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  method?: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
   query?: Record<string, string | number | boolean | null | undefined>;
   body?: unknown;
   cancel?: Cancel;
@@ -367,6 +367,24 @@ export class Api {
 
   play(req: PlaybackRequest, cancel?: Cancel): Promise<PlaybackInfo> {
     return this.send("/api/playback", { method: "POST", body: req, cancel, timeoutMs: 60_000 }).then((r) => r.body as PlaybackInfo);
+  }
+
+  /**
+   * A session's playlist (`GET`, as text) or segment (`HEAD`: answered
+   * once the transcoder has made it), asked for as its player will:
+   * keyed addresses as they are (they carry their own key), others with the
+   * token.
+   */
+  media(method: "GET" | "HEAD", url: string, cancel?: Cancel, timeoutMs?: number): Promise<string> {
+    const full = this.url(url);
+    const answered = (res: HttpResponse): string => {
+      if (res.status < 200 || res.status >= 300) throw toError(res);
+      return typeof res.body === "string" ? res.body : "";
+    };
+    if (/^(https?:\/\/[^/]+)?\/api\/media\//.test(full)) {
+      return this.http({ method, url: full, headers: { Accept: "*/*" }, responseType: "text", timeoutMs, cancel }).then(answered);
+    }
+    return this.send(full, { method, responseType: "text", headers: { Accept: "*/*" }, cancel, timeoutMs }).then(answered);
   }
 
   sessionStatus(session: string, cancel?: Cancel, timeoutMs?: number): Promise<SessionStatus> {

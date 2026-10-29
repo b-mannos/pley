@@ -1,5 +1,5 @@
 import { batch, signal, type Signal } from "@preact/signals";
-import { ApiError, errorMessage, SessionStoppedError, unreachable, type Api } from "../api/client";
+import { ApiError, errorMessage, isApiError, SessionStoppedError, unreachable, type Api } from "../api/client";
 import type {
   ClientCaps,
   ItemDetail,
@@ -10,11 +10,13 @@ import type {
   MediaStream,
   PlaybackInfo,
   PlaybackMode,
+  PlaybackRequest,
   ServerEvent,
   TranscodeInfo,
   Trickplay,
 } from "../api/types";
 import { SignedOutError } from "../auth/tokens";
+import { Cancel } from "../net/transport";
 import { episodeLabel, streamLabel } from "../format/format";
 import { decide } from "../caps/policy";
 import { NOTHING_SHOWN, SubtitlePresenter, type ShownSubtitles } from "../subs/presenter";
@@ -44,6 +46,7 @@ import {
   type PlayRequest,
 } from "./plan";
 import { AutoQuality, type AutoMemory, type AutoStep } from "./autoquality";
+import { PREPARE_LEAD_MS, warmStream, type StreamFetch } from "./prepare";
 import { AUTO, autoLadder, chooseQuality, fileHint, modeOf, namedFor, ORIGINAL, presetById, qualitiesFor, type QualityPreset } from "./quality";
 import { failureText, Recovery, StruggleMeter, type EngineError, type RecoveryAction } from "./recovery";
 import type { Reporter } from "./reporter";
@@ -127,6 +130,12 @@ export interface PlayerState {
   firstFrameMs: number | null;
   /** Times the video stopped to wait for more once it played, seeks aside (Info's Stalls). */
   stalls: number;
+  /**
+   * It moves to a session made ready beside the last one (a quality, track
+   * or Automatic change): its first picture is moments away, so the
+   * buffering ring waits longer before it shows.
+   */
+  switching: boolean;
 }
 
 export interface PlayerClock {
@@ -163,6 +172,7 @@ const INITIAL: PlayerState = {
   reconnecting: false,
   firstFrameMs: null,
   stalls: 0,
+  switching: false,
 };
 
 /** What a player needs from the app around it. */
@@ -286,6 +296,8 @@ export class PlaybackController {
   private sessionEnded = true;
   /** Bumped by every new start: what an older one finds when it resumes is no longer its own. */
   private generation = 0;
+  /** A session being made ready beside the one playing (`begin`'s `prepared`): cancelled when a newer start takes over. */
+  private preparing: Cancel | null = null;
 
   private lastPositionMs = 0;
   private startedAtMs = 0;
@@ -382,7 +394,7 @@ export class PlaybackController {
   }
 
   private async prepareFirst(): Promise<void> {
-    const generation = ++this.generation;
+    const generation = this.nextGeneration();
     try {
       const cached = this.env.cachedItem?.(this.current.itemId) ?? null;
       const [detail, caps] = await Promise.all([
@@ -443,21 +455,67 @@ export class PlaybackController {
 
   // ---------------------------------------------------------------- sessions
 
-  /** Starts a server session at `atMs`, ending the one before; an earlier start still running loses. */
-  private restart(atMs: number): void {
+  /** A new start: what an older one finds when it resumes is no longer its own, and a session it was making ready is let go. */
+  private nextGeneration(): number {
+    this.preparing?.cancel();
+    this.preparing = null;
+    return ++this.generation;
+  }
+
+  /**
+   * Starts a server session at `atMs`, ending the one before; an earlier
+   * start still running loses. `prepared`, for a change asked for while it
+   * plays (a quality, a track, an Automatic step): the new session is made
+   * ready while this one plays on (`begin`), when one plays. A recovery
+   * starts again at once.
+   */
+  private restart(atMs: number, prepared = false): void {
     if (this.stopped || this.closed) return;
-    const generation = ++this.generation;
-    this.begin(atMs, generation).catch((e) => {
+    const alongside = prepared && this.canPrepare;
+    const generation = this.nextGeneration();
+    // Settled, however it went: the stream it plays is watched again.
+    const settled = () => {
+      if (generation === this.generation) this.preparing = null;
+    };
+    this.begin(atMs, generation, alongside).then(settled, (e) => {
       if (generation !== this.generation) return;
+      settled();
       // Mid-playback, a server that doesn't answer is waited for.
       if (this.shownOnce && unreachable(e)) {
-        this.lastPositionMs = atMs;
+        this.lastPositionMs = alongside ? this.livePosition() : atMs;
         this.reachLost(true);
       } else this.failWith(e);
     });
   }
 
-  private async begin(atMs: number, generation: number): Promise<void> {
+  /** A session plays, has shown its picture, and nothing is wrong: the next can be made ready beside it. */
+  private get canPrepare(): boolean {
+    return !!this.info && !this.sessionEnded && this.mediaShown && !this.ended && !this.outage && !!this.engineRef && this.state.value.phase.kind !== "error";
+  }
+
+  /** Playlists and segments as the TV's player asks for them, for `warmStream`. */
+  private get streamFetch(): StreamFetch {
+    const api = this.env.api;
+    return {
+      text: (url, cancel, timeoutMs) => api.media("GET", url, cancel, timeoutMs),
+      head: (url, cancel, timeoutMs) => api.media("HEAD", url, cancel, timeoutMs).then(() => undefined),
+    };
+  }
+
+  /**
+   * Starts a server session at `atMs` and has the engine play it.
+   *
+   * `prepared`: the session playing plays on meanwhile. The new one is
+   * asked for with `keep_previous` (the server leaves that one to the
+   * player to end), its playlist and the segment the TV's player will
+   * start with are asked for, so the transcoder makes them (20 s at most),
+   * and only then does the session playing end and the engine move to the
+   * new one, from where the last one got to: the switch is as short as the
+   * TV's player opening a stream whose first segment is made. With no
+   * transcode free for two at once (503), the one playing ends first, as
+   * for any other start.
+   */
+  private async begin(atMs: number, generation: number, prepared = false): Promise<void> {
     const detail = this.item;
     if (!detail) return;
     const chosen = this.file;
@@ -465,20 +523,11 @@ export class PlaybackController {
       this.fail(T.noFile, false);
       return;
     }
-    // The session before ends first ("stopped", then DELETE), unless the server is slow to say so.
-    if (this.endSession(atMs)) await this.env.reporter.flush(END_WAIT_MS);
-    if (generation !== this.generation || this.closed) return;
-    this.lastPositionMs = atMs;
-    this.startedAtMs = atMs;
-    this.mediaShown = false;
-    this.ended = false;
-    this.struggle.reset();
-    this.recovery.onJump();
-    this.lastAdvanceAt = this.now();
-    this.lastAdvancePos = -1;
-    this.sessionStartedAt = this.now();
-    this.update({ phase: { kind: "preparing" }, skipLabel: null, firstFrameMs: null });
-    this.setClock({ positionMs: atMs });
+    let alongside = prepared;
+    const preparing = alongside ? new Cancel() : null;
+    this.preparing = preparing;
+    // The session before ends first, unless this one is made ready beside it.
+    if (!alongside && !(await this.leave(atMs, generation))) return;
 
     // The original, chosen or played by Automatic, gets the Dolby Vision guards and the fallbacks; a lower quality is a conversion.
     const playing = this.playingPreset;
@@ -489,19 +538,36 @@ export class PlaybackController {
     // Automatic audio is chosen again for each session: a stream (a lower
     // quality, say) has the track it copies rather than converting the one
     // the file played as it is.
-    if (!this.audioPicked) this.audio = null;
+    const audio = this.audioPicked ? this.audio : null;
     let choices: Choices = {
       file: chosen,
       startMs: atMs,
-      audio: this.audio,
+      audio,
       subtitle: this.subtitle,
       quality: playing,
       mode,
-      streaming: willStream(mode, decision, chosen, this.audio, this.caps),
+      streaming: willStream(mode, decision, chosen, audio, this.caps),
       sideload: this.sideload,
     };
-    let sent = playbackRequest(detail.id, choices, this.env.clientId, this.caps, this.env.keyedUrls);
-    let info = await this.env.api.play(sent);
+    const ask = (c: Choices): PlaybackRequest => {
+      const req = playbackRequest(detail.id, c, this.env.clientId, this.caps, this.env.keyedUrls);
+      if (alongside) req.keep_previous = true;
+      return req;
+    };
+    let sent = ask(choices);
+    let info: PlaybackInfo;
+    try {
+      info = await this.env.api.play(sent);
+    } catch (e) {
+      // No transcode free for two at once: the one playing ends first, as before.
+      if (!alongside || !isApiError(e, 503) || generation !== this.generation || this.closed) throw e;
+      alongside = false;
+      atMs = this.livePosition();
+      if (!(await this.leave(atMs, generation))) return;
+      choices = { ...choices, startMs: atMs };
+      sent = ask(choices);
+      info = await this.env.api.play(sent);
+    }
     if (generation !== this.generation || this.closed) {
       // Closed or replaced while the server made it: it never played.
       this.discard(info);
@@ -512,13 +578,13 @@ export class PlaybackController {
       this.discard(info);
       this.guardMode = guarded;
       choices = { ...choices, mode: guarded, streaming: true };
-      sent = playbackRequest(detail.id, choices, this.env.clientId, this.caps, this.env.keyedUrls);
+      sent = ask(choices);
       info = await this.env.api.play(sent);
     }
     if (needsIndexes(info, sent, choices)) {
       this.discard(info);
       choices = { ...choices, streaming: true };
-      sent = playbackRequest(detail.id, choices, this.env.clientId, this.caps, this.env.keyedUrls);
+      sent = ask(choices);
       info = await this.env.api.play(sent);
     }
     if (generation !== this.generation || this.closed) {
@@ -530,9 +596,24 @@ export class PlaybackController {
       this.fail("This server is too old to play on this TV: update it.", false);
       return;
     }
+    if (alongside && preparing) {
+      if (info.hls) await warmStream(this.streamFetch, this.env.api.url(info.url), atMs + PREPARE_LEAD_MS, preparing, this.now);
+      // Replaced or closed meanwhile, or the last one ended or failed by itself: this one never plays.
+      if (generation !== this.generation || this.closed || this.ended || this.state.value.phase.kind === "error") {
+        this.discard(info);
+        return;
+      }
+      // From where the last one got to while this one got ready. The server answered, whatever the last one found.
+      atMs = this.livePosition();
+      this.endOutage();
+      this.endSession(atMs);
+      this.reset(atMs, true);
+      this.engineRef?.holdPicture?.();
+    }
+    if (this.preparing === preparing) this.preparing = null;
     this.info = info;
     // No track picked: the one the server chose for this TV plays, and the menu says so.
-    if (!this.audio) this.audio = playingAudio(chosen, info);
+    this.audio = audio ?? playingAudio(chosen, info);
     this.sessionEnded = false;
     this.live = null;
     if (this.auto) {
@@ -590,6 +671,33 @@ export class PlaybackController {
     return true;
   }
 
+  /**
+   * Ends the session playing ("stopped", then DELETE, waited for unless the
+   * server is slow to say so) and gets ready for one at `atMs`; false when
+   * a newer start took over meanwhile.
+   */
+  private async leave(atMs: number, generation: number): Promise<boolean> {
+    if (this.endSession(atMs)) await this.env.reporter.flush(END_WAIT_MS);
+    if (generation !== this.generation || this.closed) return false;
+    this.reset(atMs, false);
+    return true;
+  }
+
+  /** What is watched of a session starts over, for one at `atMs`; `switching` to one made ready beside the last. */
+  private reset(atMs: number, switching: boolean): void {
+    this.lastPositionMs = atMs;
+    this.startedAtMs = atMs;
+    this.mediaShown = false;
+    this.ended = false;
+    this.struggle.reset();
+    this.recovery.onJump();
+    this.lastAdvanceAt = this.now();
+    this.lastAdvancePos = -1;
+    this.sessionStartedAt = this.now();
+    this.update({ phase: { kind: "preparing" }, skipLabel: null, firstFrameMs: null, switching });
+    this.setClock({ positionMs: atMs });
+  }
+
   /** Deletes a session that never played: no `stopped`, which would move the resume point. */
   private discard(info: PlaybackInfo): void {
     const api = this.env.api;
@@ -636,7 +744,7 @@ export class PlaybackController {
     if (this.closed || this.stopped) return;
     this.picturesUnavailable = true;
     this.publishChoices();
-    if (isPicture(this.subtitle) && this.info && !this.info.burn_subtitles) this.restart(this.livePosition());
+    if (isPicture(this.subtitle) && this.info && !this.info.burn_subtitles) this.restart(this.livePosition(), true);
   }
 
   // ---------------------------------------------------------------- engine events
@@ -656,6 +764,7 @@ export class PlaybackController {
       case "ready":
         this.mediaShown = true;
         this.shownOnce = true;
+        if (this.state.value.switching) this.update({ switching: false });
         this.auto?.resumed(this.now());
         if (!this.outage) this.phase(this.engineRef?.playing() ? { kind: "playing" } : { kind: "paused" });
         break;
@@ -672,6 +781,7 @@ export class PlaybackController {
     if (this.closed || !this.info) return;
     this.mediaShown = true;
     this.shownOnce = true;
+    if (this.state.value.switching) this.update({ switching: false });
     if (this.state.value.firstFrameMs === null) {
       // From the press for the first session; from the session's start after that.
       const from = this.pressedAt || this.sessionStartedAt;
@@ -829,6 +939,11 @@ export class PlaybackController {
       }
       return;
     }
+    // A session made ready beside this one: nothing more is decided about the stream it leaves.
+    if (this.preparing) {
+      this.lastAdvanceAt = now;
+      return;
+    }
     if (this.watchQuality(now, engine, moving)) return;
     // A stall: meant to play, not moving.
     const stalling = this.wantPlay && !this.ended && this.state.value.phase.kind !== "error" && status !== "idle";
@@ -937,7 +1052,7 @@ export class PlaybackController {
   private stopByServer(message: string | null, byAdmin: boolean): void {
     if (this.closed || this.stopped) return;
     this.stopped = true;
-    this.generation++;
+    this.nextGeneration();
     const position = this.livePosition();
     this.lastPositionMs = position;
     const info = this.info;
@@ -1039,7 +1154,7 @@ export class PlaybackController {
       this.quietFrames();
       return;
     }
-    this.restart(this.livePosition());
+    this.restart(this.livePosition(), true);
   }
 
   selectSubtitle(index: number | null): void {
@@ -1053,7 +1168,7 @@ export class PlaybackController {
     if (!info) return;
     // Pictures the TV can't draw are burned in: that is another session.
     const burn = isPicture(chosen) && !this.sideload;
-    if (burn !== info.burn_subtitles || (burn && info.subtitle_index !== chosen?.index)) this.restart(this.livePosition());
+    if (burn !== info.burn_subtitles || (burn && info.subtitle_index !== chosen?.index)) this.restart(this.livePosition(), true);
     else this.applyTracks();
   }
 
@@ -1098,7 +1213,7 @@ export class PlaybackController {
     this.update({ suggestLowerQuality: false, note: this.noteText(), canPlayOriginal: false });
     this.env.quality.remember(chosen.id);
     this.publishChoices();
-    if (this.item && (this.playingPreset.id !== before || fellBack)) this.restart(this.livePosition());
+    if (this.item && (this.playingPreset.id !== before || fellBack)) this.restart(this.livePosition(), true);
   }
 
   skip(): void {
@@ -1130,7 +1245,7 @@ export class PlaybackController {
     if (this.recovery.fallbackMode === null) return;
     this.recovery.playOriginal();
     this.update({ canPlayOriginal: false, note: this.noteText() });
-    this.restart(this.livePosition());
+    this.restart(this.livePosition(), true);
   }
 
   setDetailsOpen(open: boolean): void {
@@ -1214,7 +1329,7 @@ export class PlaybackController {
     if (this.closed) return;
     const position = this.livePosition();
     this.closed = true;
-    this.generation++;
+    this.nextGeneration();
     this.endOutage();
     this.endSession(position);
     this.sleep.cancel();
@@ -1334,7 +1449,7 @@ export class PlaybackController {
     const title = this.state.value.title;
     this.state.value = { ...INITIAL, itemId: target.id, title, sleep };
     this.setClock({ positionMs: req.startMs ?? 0, bufferedMs: 0 });
-    const generation = ++this.generation;
+    const generation = this.nextGeneration();
     const prefetched = this.nextDetail?.id === target.id ? this.nextDetail : null;
     (async () => {
       if (endedBefore) await this.env.reporter.flush(END_WAIT_MS);
@@ -1417,7 +1532,7 @@ export class PlaybackController {
     this.publishChoices();
     if (step.why) this.notice(T.smoother(to.label));
     this.struggle.reset();
-    this.restart(this.livePosition());
+    this.restart(this.livePosition(), true);
     return true;
   }
 

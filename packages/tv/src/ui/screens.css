@@ -761,7 +761,10 @@ html.playing .screen { background: transparent; }
 .engine-host { position: absolute; left: 0; top: 0; width: 960px; height: 540px; background: #000; }
 html.avplay .engine-host { background: transparent; }
 .engine-host > video,
-.engine-host > object { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.engine-host > object,
+.engine-host > canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+/* The last picture held over a switch to a stream made ready beside it, until the next one shows. */
+.engine-host > .engine-held { object-fit: contain; pointer-events: none; }
 .video-holder { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; }
 
 .subtitles {

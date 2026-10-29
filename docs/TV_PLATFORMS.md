@@ -407,6 +407,33 @@ which AVPlay and LG's media pipeline move between by themselves: in such
 a session (`PlaybackInfo.adaptive`) the tick leaves Automatic be, and only
 the stall and dropped-frame paths above can still start it again lower.
 
+A change that needs a new session while a video plays (a quality picked,
+an audio track the engine can't switch itself, picture subtitles burned
+in, an Automatic step, Play original) is made ready first, as the web
+player does (`player/prepare.ts`). The new session starts beside the one
+playing (`keep_previous`), and the controller asks for its playlist, the
+size it lists first (where AVPlay and LG's pipeline start) and, with
+`HEAD`, the segment holding the start + 4 s: the server answers once the
+transcoder has made it, and no picture crosses the network twice, since
+the TV's own player can't use what the page fetched. It waits for that
+20 s at most, deciding nothing about the stream it leaves meanwhile (no
+stall ladder, no Automatic), then ends the session playing and moves the
+engine to the new one from where that one got to. The buffering ring
+waits 2.5 s then rather than 0.5 s (`switching`), so a switch whose first
+segment is there shows none. With no transcode free for two at once
+(`503`), the one playing ends first, as before; recoveries after an error
+or a stall, the first start and Up Next start at once.
+
+What the screen shows meanwhile is the engine's. AVPlay draws on a plane
+under the page the page can't read, and must close one source before it
+opens the next: the picture goes black for as long as AVPlay takes to
+open a stream whose first segment is made. The `<video>` engine draws the
+last picture onto a canvas over the element (`holdPicture`, at most 1920
+pixels wide) until the next source shows its own; that holds it in a
+desktop browser, while LG's pipeline, which shows its pictures on a plane
+of its own, gives the canvas nothing, and the screen is black meanwhile
+as on Samsung.
+
 The slow network is kept for 30 minutes per TV and server
 (`pley.autoQuality.<server>`), so Up Next, and the playback that starts
 again when the TV shows the app again, begin where it left off. A step

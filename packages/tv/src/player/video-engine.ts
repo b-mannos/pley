@@ -4,6 +4,9 @@ import type { EngineError } from "./recovery";
 /** The MIME type HLS goes by on TVs. */
 export const HLS_MIME = "application/vnd.apple.mpegurl";
 
+/** A picture held across a switch (`holdPicture`) is kept at most this wide: the app's screen is 1920 pixels. */
+const HOLD_MAX_WIDTH = 1920;
+
 interface AudioTrackLike {
   enabled: boolean;
   language: string;
@@ -41,6 +44,8 @@ export class VideoEngine implements PlayerEngine {
   private pendingSeek: number | null = null;
   private generation = 0;
   private readonly off: (() => void)[] = [];
+  /** The last picture of a source left for one made ready beside it, shown until that one shows its own. */
+  private held: HTMLCanvasElement | null = null;
 
   constructor(host: HTMLElement, name = "Video element") {
     this.name = name;
@@ -137,9 +142,54 @@ export class VideoEngine implements PlayerEngine {
     this.video.currentTime = Math.max(0, ms) / 1000;
   }
 
+  /**
+   * Draws the picture showing now onto a canvas over the element, kept
+   * until the next source shows its first picture. A desktop browser
+   * draws it; where the TV's pipeline keeps its pictures to itself (LG's,
+   * on a plane of its own) nothing is drawn, and the screen is black
+   * meanwhile, as without it.
+   */
+  holdPicture(): void {
+    const v = this.video;
+    if (!v.videoWidth || !v.videoHeight || v.readyState < 2) return;
+    let canvas = this.held;
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      canvas.className = "engine-held";
+      canvas.style.display = "none";
+      v.parentNode?.insertBefore(canvas, v.nextSibling);
+      this.held = canvas;
+    }
+    const scale = Math.min(1, HOLD_MAX_WIDTH / v.videoWidth);
+    canvas.width = Math.max(1, Math.round(v.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(v.videoHeight * scale));
+    try {
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("no 2d context");
+      context.drawImage(v, 0, 0, canvas.width, canvas.height);
+    } catch {
+      this.letGo();
+      return;
+    }
+    canvas.style.display = "block";
+  }
+
+  /** The held picture goes: the new source shows, failed, or stopped. */
+  private letGo(): void {
+    const canvas = this.held;
+    if (!canvas) return;
+    canvas.style.display = "none";
+    // Its pixels go too: a 1080p picture is 8 MB a TV can use elsewhere.
+    if (canvas.width > 1) {
+      canvas.width = 1;
+      canvas.height = 1;
+    }
+  }
+
   stop(): void {
     this.generation++;
     this.wantPlay = false;
+    this.letGo();
     this.detach();
     this.source = null;
     this.set("idle");
@@ -162,6 +212,8 @@ export class VideoEngine implements PlayerEngine {
     for (const f of this.off) f();
     this.off.length = 0;
     this.video.parentNode?.removeChild(this.video);
+    this.held?.parentNode?.removeChild(this.held);
+    this.held = null;
     this.listener = null;
   }
 
@@ -255,6 +307,7 @@ export class VideoEngine implements PlayerEngine {
   protected firstPicture(): void {
     if (this.shown) return;
     this.shown = true;
+    this.letGo();
     this.listener?.firstFrame();
   }
 
@@ -262,6 +315,7 @@ export class VideoEngine implements PlayerEngine {
   protected failed(): void {
     const e = this.video.error;
     if (!e || !this.source) return;
+    this.letGo();
     this.listener?.error(mediaError(e.code, e.message || "", this.source));
   }
 }

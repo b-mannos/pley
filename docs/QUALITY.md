@@ -77,7 +77,11 @@ and the player says so once, briefly: "Quality lowered to 8 Mbps
 1080p". The web player makes the new session ready while the last one
 plays on (`keep_previous`), asking for its first segment as it will, and
 moves to it on the last one's final picture, with no spinner; so does a
-quality, audio or picture-subtitle change picked in its menus.
+quality, audio or picture-subtitle change picked in its menus. The
+Samsung and LG apps do the same (docs/TV_PLATFORMS.md), asking for the
+segment with `HEAD`; their players can't keep the last picture, so the
+screen is black for the moment the TV's player takes to open the new
+stream, and their ring waits 2.5 s.
 
 **More issues step down again**, one quality at least, but not within 20 s
 of the last change.
