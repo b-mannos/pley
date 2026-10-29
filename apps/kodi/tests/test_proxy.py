@@ -2,6 +2,7 @@ import http.client
 import json
 import os
 import shutil
+import socket
 import tempfile
 import threading
 import time
@@ -161,6 +162,19 @@ class ProxyTest(unittest.TestCase):
         ]:
             response, _ = self.ask("GET", path, host=host)
             self.assertIn(response.status, (403, 404), (host, path))
+        self.assertEqual(self.server.requests, [])
+
+    def test_a_negative_or_unreadable_length_is_refused_at_once(self):
+        # A negative one would have it read until the connection ends.
+        for length in ["-1", "1e3", "x"]:
+            for path in ["/%s/api/progress" % SECRET, "/%s/switch-profile" % SECRET]:
+                sock = socket.create_connection(("127.0.0.1", self.port), timeout=5)
+                lines = ["POST %s HTTP/1.1" % path, "Host: 127.0.0.1:%d" % self.port, "Content-Length: " + length]
+                sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("ascii"))
+                answer = sock.recv(4096)
+                sock.close()
+                status = answer.split(b"\r\n", 1)[0]
+                self.assertTrue(status.startswith(b"HTTP/1.") and b" 400 " in status, (length, path, answer))
         self.assertEqual(self.server.requests, [])
 
     def test_status_and_signing_out(self):

@@ -12,6 +12,7 @@ other programs (and web pages) on this computer out.
 from __future__ import annotations
 
 import base64
+import hmac
 import http.client
 import json
 import mimetypes
@@ -272,7 +273,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if host not in ("127.0.0.1:%d" % proxy.port, "localhost:%d" % proxy.port):
             return self.answer(403, {"code": "forbidden", "message": "not from this computer"})
         prefix = "/" + proxy.secret + "/"
-        if not self.path.startswith(prefix):
+        # In time that doesn't tell how much of it was right.
+        if not hmac.compare_digest(self.path[: len(prefix)].encode("utf-8"), prefix.encode("utf-8")):
             return self.answer(404, {"code": "not_found", "message": "not found"})
         rest = self.path[len(prefix) - 1 :]
         if rest == "/status":
@@ -288,7 +290,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if not rest.startswith("/api/"):
             return self.answer(404, {"code": "not_found", "message": "not found"})
         rest = server_path(rest)
-        length = int(self.headers.get("Content-Length") or 0)
+        length = self.body_length()
+        if length is None:
+            return self.answer(400, {"code": "bad_request", "message": "bad Content-Length"})
         if length > MAX_BODY:
             return self.answer(413, {"code": "bad_request", "message": "too large"})
         body = self.rfile.read(length) if length else None
@@ -327,11 +331,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if upstream:
                 upstream.close()
 
+    def body_length(self):
+        """The request's Content-Length: 0 without one, None when it isn't a
+        whole number from 0 (a negative one would read to the end)."""
+        given = (self.headers.get("Content-Length") or "0").strip()
+        return int(given) if given.isdigit() and len(given) <= 12 else None
+
     def switch_profile(self) -> None:
         """Acts as another profile from now on (Tokens.switch_profile): 200,
         or the refusal as {code, message}, its code the server's reason."""
-        length = int(self.headers.get("Content-Length") or 0)
+        length = self.body_length()
         try:
+            if length is None:
+                raise ValueError("bad Content-Length")
             asked = json.loads(self.rfile.read(min(length, 4096)).decode("utf-8")) if length else {}
             profile = int(asked["profile"])
         except (ValueError, KeyError, TypeError, AttributeError):
