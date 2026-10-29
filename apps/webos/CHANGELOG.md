@@ -13,6 +13,12 @@ describes how they are made.
 - The token goes only to the server's own origin, never to an address
   elsewhere that the server hands out.
 
+### Fixed
+
+- Switching to another server no longer shows the last server's Home,
+  libraries or titles, and asks "Who's watching?" as that server's
+  household needs.
+
 ## [0.0.1] - 2026-10-29
 
 ### Added

@@ -47,11 +47,13 @@ const SETTINGS_KEY = "pley.settings";
 /** Set once a quality is picked: the settings saved before Automatic held Original whether picked or not. */
 const QUALITY_PICKED_KEY = "pley.qualityPicked";
 const HOME_KEY = "pley.home";
+/** How many profiles the server's household has, as last heard; kept per server (`pley.household.<server>`). */
 const HOUSEHOLD_KEY = "pley.household";
 /** Who is watching and their libraries, as last heard: the rail and the library pages before the server answers. */
 const ME_KEY = "pley.me";
 const LIBRARIES_KEY = "pley.libraries";
 const SERVERS_KEY = "pley.servers";
+/** The household's profiles, as last heard; kept per server (`pley.householdProfiles.<server>`). */
 const PROFILES_KEY = "pley.householdProfiles";
 /** How long an item's details are kept for pages and playbacks. */
 const ITEM_TTL_MS = 5 * 60_000;
@@ -153,10 +155,24 @@ export class AppState {
     if (kept.quality === "original" && this.store.get(QUALITY_PICKED_KEY) !== "1") delete kept.quality;
     this.settings.value = { ...DEFAULT_SETTINGS, ...kept };
     const server = this.store.get(SERVER_KEY);
-    if (server) this.use(server);
-    this.home.value = readJson<Hub[]>(this.store, HOME_KEY);
-    this.me.value = readJson<User>(this.store, ME_KEY);
-    this.libraries.value = readJson<Library[]>(this.store, LIBRARIES_KEY);
+    if (server) {
+      // Kept for the server in use before they were kept per server.
+      for (const key of [HOUSEHOLD_KEY, PROFILES_KEY]) {
+        const old = this.store.get(key);
+        if (old === null) continue;
+        this.store.remove(key);
+        const home = origin(server);
+        if (home) this.store.set(`${key}.${home}`, old);
+      }
+      this.use(server);
+    }
+    // What was saved is trusted only in shape: a store another build wrote, or a damaged one, is left out.
+    const home = readJson<Hub[]>(this.store, HOME_KEY);
+    const me = readJson<User>(this.store, ME_KEY);
+    const libraries = readJson<Library[]>(this.store, LIBRARIES_KEY);
+    this.home.value = Array.isArray(home) ? home : null;
+    this.me.value = me && typeof me === "object" && typeof me.id === "number" ? me : null;
+    this.libraries.value = Array.isArray(libraries) ? libraries : null;
   }
 
   /** The first screen, from what the TV kept. */
@@ -174,6 +190,7 @@ export class AppState {
     if (this.server.value === home && this.api.value) return;
     this.events?.stop();
     this.events = null;
+    if (this.server.value && this.server.value !== home) this.leaveServer();
     this.server.value = home;
     this.store.set(SERVER_KEY, home);
     this.tokens = new Tokens(home, this.platform.clientId, this.store, this.http, () => {
@@ -194,7 +211,8 @@ export class AppState {
 
   /** The servers this TV chose, most recently used first. */
   savedServers(): SavedServer[] {
-    const list = readJson<SavedServer[]>(this.store, SERVERS_KEY) ?? [];
+    const list = readJson<SavedServer[]>(this.store, SERVERS_KEY);
+    if (!Array.isArray(list)) return [];
     return list.filter((s) => s && typeof s.url === "string").sort((a, b) => b.lastUsed - a.lastUsed);
   }
 
@@ -247,19 +265,21 @@ export class AppState {
 
   /** How many profiles the household had when last asked (1 while unknown). */
   householdSize(): number {
-    const n = Number(this.store.get(HOUSEHOLD_KEY) ?? "1");
+    const n = Number(this.store.get(`${HOUSEHOLD_KEY}.${this.server.value ?? ""}`) ?? "1");
     return n > 0 ? n : 1;
   }
 
   /** The household as last fetched, for "Who's watching?" before the server answers. */
   savedHousehold(): HouseholdProfile[] {
-    return readJson<HouseholdProfile[]>(this.store, PROFILES_KEY) ?? [];
+    const list = readJson<HouseholdProfile[]>(this.store, `${PROFILES_KEY}.${this.server.value ?? ""}`);
+    return Array.isArray(list) ? list : [];
   }
 
   keepHousehold(profiles: HouseholdProfile[]): void {
     this.profiles.value = profiles;
-    this.store.set(HOUSEHOLD_KEY, String(profiles.length));
-    this.store.set(PROFILES_KEY, JSON.stringify(profiles));
+    const server = this.server.value ?? "";
+    this.store.set(`${HOUSEHOLD_KEY}.${server}`, String(profiles.length));
+    this.store.set(`${PROFILES_KEY}.${server}`, JSON.stringify(profiles));
   }
 
   /** `fn` runs when what plays must end: a profile switch, signing out, another server, the app closing. */
@@ -300,15 +320,29 @@ export class AppState {
     this.events?.stop();
     this.events = null;
     this.store.remove(SERVER_KEY);
-    this.forgetAccount();
-    this.store.remove(HOUSEHOLD_KEY);
-    this.store.remove(PROFILES_KEY);
+    const server = this.server.value ?? "";
+    this.store.remove(`${HOUSEHOLD_KEY}.${server}`);
+    this.store.remove(`${PROFILES_KEY}.${server}`);
+    this.leaveServer();
     this.server.value = null;
     this.api.value = null;
     this.tokens = null;
+  }
+
+  /** What was shown from the server in use goes: another one comes, or none. */
+  private leaveServer(): void {
+    this.endPlayback();
+    this.forgetAccount();
+    this.items.clear();
     this.home.value = null;
+    this.homeError.value = null;
+    this.accountError.value = null;
     this.me.value = null;
     this.libraries.value = null;
+    this.profiles.value = null;
+    this.offline.value = false;
+    this.offlineNotice.value = false;
+    this.profileGatePassed = false;
   }
 
   async signOut(): Promise<void> {

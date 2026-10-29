@@ -174,6 +174,43 @@ describe("who is watching and the libraries", () => {
     expect(store.get("pley.me")).toBeNull();
     expect(store.get("pley.libraries")).toBeNull();
   });
+
+  it("go with the server when another is chosen, and each server keeps its own household", async () => {
+    const store = memoryStore();
+    store.set("pley.server", "http://a.local:7539");
+    store.set("pley.household", "3");
+    const app = signedIn(store, () => Promise.resolve());
+    expect(store.get("pley.household")).toBeNull();
+    expect(app.householdSize()).toBe(3);
+    await app.loadAccount();
+    app.keepHousehold([{ id: 1 }, { id: 2 }] as never);
+    app.keepItem(detail(42));
+    app.profileGatePassed = true;
+    app.use("http://b.local:7539");
+    expect(app.me.value).toBeNull();
+    expect(app.libraries.value).toBeNull();
+    expect(app.home.value).toBeNull();
+    expect(app.cachedItem(42)).toBeNull();
+    expect(app.profileGatePassed).toBe(false);
+    expect(store.get("pley.me")).toBeNull();
+    expect(app.householdSize()).toBe(1);
+    expect(app.savedHousehold()).toEqual([]);
+    app.use("http://a.local:7539");
+    expect(app.householdSize()).toBe(2);
+  });
+
+  it("are left out when what was saved isn't what it should be", () => {
+    const store = memoryStore();
+    store.set("pley.servers", "{}");
+    store.set("pley.me", "[1]");
+    store.set("pley.libraries", '"x"');
+    store.set("pley.home", "{}");
+    const app = signedIn(store, () => new Promise(() => undefined));
+    expect(app.savedServers()).toEqual([]);
+    expect(app.me.value).toBeNull();
+    expect(app.libraries.value).toBeNull();
+    expect(app.home.value).toBeNull();
+  });
 });
 
 describe("the quality setting", () => {
