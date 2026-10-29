@@ -152,7 +152,9 @@ class PreferencesCeilings(context: Context) {
  *   too slow on this device in the last 30 minutes.
  * - [sample] watches rebuffering and delivery while the video plays, and
  *   asks to step down on a play issue, or back up after calm minutes. The
- *   original as the file is moves only for a wait of 2 s or more.
+ *   original as the file is moves only for a wait of 2 s or more on a
+ *   network not shown to carry it; a start below it for its ceiling goes
+ *   as high as the network carries after 20 calm seconds.
  * - It settles: a step up that a step down undoes within 10 minutes isn't
  *   tried again during the title, and each one doubles the calm the next
  *   step up waits for (3, 6, then 12 minutes).
@@ -191,17 +193,32 @@ class AutoQuality(
     private var settled = false
     private var waitFrom: Long? = null
     private var waitCounted = false
+
+    /** The wait under way lasted 2 s ([longWait]): what's left of it is no short wait. */
+    private var waitLong = false
     private val shortWaits = ArrayDeque<Long>()
+
+    /** The wait under way came on a network nothing showed the speed of, and is among [originalWaits]. */
+    private var waitUnmeasured = false
+
+    /** When the original's long waits came on a network nothing showed the speed of. */
+    private val originalWaits = ArrayDeque<Long>()
 
     // Delivery: (time, buffered, playhead) over the last 20 s of watching.
     private val deliveries = ArrayDeque<Triple<Long, Long, Long>>()
     private var lowSince: Long? = null
+
+    /** What video arriving faster than it plays showed the network carries: (time, kbps), the last 2 minutes. */
+    private val filled = ArrayDeque<Pair<Long, Long>>()
 
     // Calm: watched time without an issue, and the network measured meanwhile.
     private var calmMs = 0L
     private var lastWatchedAt: Long? = null
     private val bandwidths = ArrayDeque<Pair<Long, Long>>()
     private var lastBandwidth: Long? = null
+
+    /** It began below the original for the ceiling it started at, and nothing went wrong since. */
+    private var ceilingStart = false
 
     // Settling: the last step up (to, when), until a step down or [SETTLE_MS] says whether it held…
     private var lastUp: Pair<QualityPreset, Long>? = null
@@ -237,6 +254,8 @@ class AutoQuality(
         playing = begins ?: Qualities.ORIGINAL
         loweredFor = if (begins != null) LoweredFor.Network else null
         if (begins != null) lastChangeAt = nowMs
+        ceilingStart = begins != null
+        originalWaits.clear()
         return playing
     }
 
@@ -254,6 +273,7 @@ class AutoQuality(
         file = null
         playing = Qualities.ORIGINAL
         loweredFor = null
+        ceilingStart = false
         resetSettling()
         resetWatch()
         resetCalm()
@@ -274,9 +294,10 @@ class AutoQuality(
 
     /**
      * The original as the file is (direct play or a remux): only a picture
-     * that stopped, a wait of 2 s or more, moves it. Short waits and slow
-     * delivery don't: a big file's buffer holds only seconds of it, so they
-     * say little of the network, and a conversion is a worse picture for good.
+     * that stopped, a wait of 2 s or more the network is to blame for
+     * ([longWait]), moves it. Short waits and slow delivery don't: a big
+     * file's buffer holds only seconds of it, so they say little of the
+     * network, and a conversion is a worse picture for good.
      */
     private val patient: Boolean get() = playing.original && !originalConverted
 
@@ -287,6 +308,8 @@ class AutoQuality(
             // Paused, in the background, or out of reach: nothing counts, the waits start over.
             waitFrom = null
             waitCounted = false
+            waitLong = false
+            waitUnmeasured = false
             deliveries.clear()
             lowSince = null
             lastWatchedAt = null
@@ -313,7 +336,7 @@ class AutoQuality(
     private fun rebuffering(s: AutoSample): AutoStep? {
         if (s.buffering) {
             val from = waitFrom ?: s.atMs.also { waitFrom = it }
-            if (!waitCounted && s.atMs - from >= LONG_WAIT_MS) {
+            if (!waitCounted && s.atMs - from >= LONG_WAIT_MS && longWait(s.atMs)) {
                 // Asked again while it waits, until a step is taken (one may be too soon after the last).
                 return issue(s.atMs, LoweredFor.Network, s.sizes)?.also { waitCounted = true }
             }
@@ -321,11 +344,15 @@ class AutoQuality(
         }
         val from = waitFrom ?: return null
         waitFrom = null
-        if (waitCounted) {
-            waitCounted = false
-            return null
-        }
-        if (s.atMs - from <= 0 || s.atMs - from >= LONG_WAIT_MS || patient) return null
+        val counted = waitCounted
+        waitCounted = false
+        // At the original, what loaded as it ended may show the network to blame after all.
+        val blamed = !counted && s.atMs - from >= LONG_WAIT_MS && patient && longWait(s.atMs)
+        val long = waitLong
+        waitLong = false
+        waitUnmeasured = false
+        if (blamed) return issue(s.atMs, LoweredFor.Network, s.sizes)
+        if (counted || long || s.atMs - from <= 0 || s.atMs - from >= LONG_WAIT_MS || patient) return null
         shortWaits.addLast(s.atMs)
         while (shortWaits.isNotEmpty() && shortWaits.first() < s.atMs - SHORT_WAITS_WINDOW_MS) shortWaits.removeFirst()
         if (shortWaits.size >= SHORT_WAITS) {
@@ -335,10 +362,45 @@ class AutoQuality(
         return null
     }
 
+    /**
+     * Whether the wait under way, 2 s long, is a play issue. At the original
+     * as the file is, only on a network not shown to carry [ORIGINAL_NETWORK]
+     * times the file's bitrate (on one that does, the server is why: its
+     * disk, a remux catching up, which a conversion only slows down); where
+     * nothing showed its speed, the second such wait within 5 minutes.
+     */
+    private fun longWait(nowMs: Long): Boolean {
+        waitLong = true
+        if (!patient) return true
+        val original = file?.originalKbps
+        val shown = networkShown(nowMs)
+        if (shown != null && original != null) return shown < original * ORIGINAL_NETWORK
+        if (!waitUnmeasured) {
+            waitUnmeasured = true
+            while (originalWaits.isNotEmpty() && originalWaits.first() <= nowMs - ORIGINAL_WAITS_WINDOW_MS) originalWaits.removeFirst()
+            originalWaits.addLast(nowMs)
+        }
+        return originalWaits.size >= ORIGINAL_WAITS
+    }
+
+    /**
+     * The most the network was shown to carry, in kbps: the engine's measure
+     * of its last downloads, or video arriving faster than it plays in the
+     * last 2 minutes. `null` when nothing showed.
+     */
+    private fun networkShown(nowMs: Long): Long? {
+        val arrived = filled.filter { it.first > nowMs - ORIGINAL_NETWORK_MS }.maxOfOrNull { it.second }
+        return listOfNotNull(lastBandwidth, arrived).maxOrNull()
+    }
+
     private fun delivery(s: AutoSample): AutoStep? {
         deliveries.addLast(Triple(s.atMs, s.bufferedMs, s.positionMs))
         while (deliveries.size > 2 && deliveries[1].first <= s.atMs - DELIVERY_WINDOW_MS) deliveries.removeFirst()
         val rate = deliveryRate()
+        // Filling faster than it plays: the network carries at least that much.
+        val playingKbps = playingKbps()
+        if (rate != null && rate > 1 && playingKbps != null) filled.addLast(s.atMs to (playingKbps * rate).toLong())
+        while (filled.isNotEmpty() && filled.first().first <= s.atMs - ORIGINAL_NETWORK_MS) filled.removeFirst()
         val (_, firstBuffered, firstPosition) = deliveries.first()
         val ahead = s.bufferedMs - s.positionMs
         val aheadBefore = firstBuffered - firstPosition
@@ -391,14 +453,19 @@ class AutoQuality(
         resetCalm()
     }
 
-    /** The server can't convert as fast as the video plays: a play issue like the network's. */
-    fun serverTooSlow(nowMs: Long): AutoStep? = if (file == null) null else issue(nowMs, LoweredFor.Network)
+    /**
+     * The server can't convert as fast as the video plays: a play issue like
+     * the network's. Not at the original as the file is: a remux the server
+     * can't keep up with reads all a conversion would, and does less.
+     */
+    fun serverTooSlow(nowMs: Long): AutoStep? = if (file == null || patient) null else issue(nowMs, LoweredFor.Network)
 
     /** The player plays [step] now. */
     fun applied(step: AutoStep, nowMs: Long) {
         if (step.up) lastUp = step.to to nowMs else wentDown(nowMs)
         playing = step.to
         lastChangeAt = nowMs
+        ceilingStart = false
         if (step.up) {
             if (step.to.original) {
                 loweredFor = null
@@ -432,6 +499,7 @@ class AutoQuality(
     /** A play issue: the calm starts over, and a step down, but in [sizes] for the network. */
     private fun issue(nowMs: Long, reason: LoweredFor, sizes: Boolean = false): AutoStep? {
         resetCalm()
+        ceilingStart = false
         if (sizes && reason == LoweredFor.Network) return null
         val last = lastChangeAt
         if (last != null && nowMs - last < CHANGE_GAP_MS) return null
@@ -459,24 +527,35 @@ class AutoQuality(
         return target?.let { AutoStep(it, reason) }
     }
 
+    /**
+     * A quality up after calm minutes, when the network carries it; from a
+     * start below the original for its ceiling, nothing gone wrong since,
+     * as high as the network carries after [CEILING_START_CALM_MS].
+     */
     private fun stepUp(nowMs: Long): AutoStep? {
-        if (playing.original || calmMs < calmNeededMs) return null
+        val calm = if (ceilingStart) CEILING_START_CALM_MS else calmNeededMs
+        if (playing.original || calmMs < calm) return null
         lastDownAt?.let { if (nowMs - it < AFTER_DOWN_MS) return null }
-        lastChangeAt?.let { if (nowMs - it < calmNeededMs) return null }
-        val ladder = ladder()
-        val at = ladder.indexOf(playing)
-        val next = if (at <= 0) Qualities.ORIGINAL else ladder[at - 1]
-        // Settled: the quality above didn't hold this title.
-        if (next.id in tooHigh) return null
-        if (next.original && originalBlocked) return null
-        deviceTop?.let { top -> if (!next.original && ladder.indexOf(next) < top) return null }
-        if (next.original && deviceTop != null) return null
-        val need = if (next.original) file?.originalKbps ?: return null else kbps(next)
+        lastChangeAt?.let { if (nowMs - it < calm) return null }
         // A network it can't measure: it stays where it went down to.
-        if (bandwidths.isEmpty() || bandwidths.first().first > nowMs - calmNeededMs + MEASURE_SLACK_MS) return null
-        val measured = bandwidths.minOf { it.second }
-        if (measured < need * HEADROOM) return null
-        return AutoStep(next, reason = null)
+        if (bandwidths.isEmpty() || bandwidths.first().first > nowMs - calm + MEASURE_SLACK_MS) return null
+        val measured = bandwidths.filter { it.first >= nowMs - calm }.minOfOrNull { it.second } ?: return null
+        val ladder = ladder()
+        var at = ladder.indexOf(playing).coerceAtLeast(0)
+        var to: QualityPreset? = null
+        while (at >= 0) {
+            val next = if (at == 0) Qualities.ORIGINAL else ladder[at - 1]
+            // Settled: the quality above didn't hold this title.
+            if (next.id in tooHigh) break
+            if (next.original && (originalBlocked || deviceTop != null)) break
+            if (!next.original && deviceTop?.let { top -> ladder.indexOf(next) < top } == true) break
+            val need = if (next.original) file?.originalKbps ?: break else kbps(next)
+            if (measured < need * HEADROOM) break
+            to = next
+            if (!ceilingStart) break
+            at--
+        }
+        return to?.let { AutoStep(it, reason = null) }
     }
 
     /** The bitrate playing now, in kbps; `null` for an original of unknown bitrate. */
@@ -510,6 +589,8 @@ class AutoQuality(
         settled = false
         waitFrom = null
         waitCounted = false
+        waitLong = false
+        waitUnmeasured = false
         shortWaits.clear()
         deliveries.clear()
         lowSince = null
@@ -536,6 +617,17 @@ class AutoQuality(
         /** …and so are two shorter ones within a minute. */
         const val SHORT_WAITS = 2
         const val SHORT_WAITS_WINDOW_MS = 60_000L
+
+        /** At the original as the file is, a long wait counts on a network not shown to carry this times the file (video arriving: over 2 minutes)… */
+        const val ORIGINAL_NETWORK = 1.5
+        const val ORIGINAL_NETWORK_MS = 120_000L
+
+        /** …or, where nothing showed its speed, at the second such wait within 5 minutes. */
+        const val ORIGINAL_WAITS = 2
+        const val ORIGINAL_WAITS_WINDOW_MS = 300_000L
+
+        /** A start below the original for its ceiling goes as high as the network carries after this much calm. */
+        const val CEILING_START_CALM_MS = 20_000L
 
         /** Delivery is measured over this long… */
         const val DELIVERY_WINDOW_MS = 20_000L

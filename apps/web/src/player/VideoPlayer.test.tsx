@@ -656,16 +656,25 @@ describe("VideoPlayer in Automatic", () => {
 
   beforeEach(() => forgetNetwork());
 
-  /** A 20 Mbps 1080p file, played as it is; `more`: other answers of the server's. */
-  function render20(more: Parameters<typeof mockApi>[0] = {}) {
+  /** A 20 Mbps 1080p file, played as it is (`remux`: into HLS, its audio converted); `more`: other answers of the server's. */
+  function render20(more: Parameters<typeof mockApi>[0] = {}, remux = false) {
     const item = detail();
     item.files[0]!.bitrate = 20_000_000;
-    const requests = serve([session("d1", { method: "direct", hls: false, url: "/api/files/3/stream" }), session("t2")], {
+    const first = remux ? session("r1", { method: "remux" }) : session("d1", { method: "direct", hls: false, url: "/api/files/3/stream" });
+    const requests = serve([first, session("t2")], {
       "DELETE /api/playback/d1": () => undefined,
+      "DELETE /api/playback/r1": () => undefined,
       ...more,
     });
     const view = renderWithProviders(<VideoPlayer item={item} startMs={60_000} fileId={null} audio={null} sub={null} />);
     return { requests, ...view };
+  }
+
+  /** Two segments of the remux came at `mbps` (from their first byte). */
+  function segments(mbps: number) {
+    act(() => {
+      for (let i = 0; i < 2; i++) hlsInstances[0]!.emit("hlsFragLoaded", { frag: { stats: { loaded: mbps * 125_000, loading: { start: 0, first: 0, end: 1_000 } } } });
+    });
   }
 
   /** The element plays at 60 s with `ahead` seconds loaded: what jsdom's element can't say by itself. */
@@ -696,23 +705,37 @@ describe("VideoPlayer in Automatic", () => {
     expect(screen.getByRole("button", { name: /Quality\s*Automatic · Original/ })).toBeInTheDocument();
   });
 
-  it("steps down on a 2 s wait for data, where it was, and says so once", async () => {
-    const { requests, container } = render20();
+  it("steps down on a 2 s wait for data on a network too slow for the file, where it was, and says so once", async () => {
+    const { requests, container } = render20({}, true);
     const video = container.querySelector("video")!;
-    await waitFor(() => expect(video.getAttribute("src")).toBe("/api/files/3/stream"));
-    playing(video);
+    await waitFor(() => expect(hlsInstances[0]?.calls).toContain("attachMedia"));
+    playing(video, 0);
+    segments(16);
     act(() => {
       video.dispatchEvent(new Event("waiting"));
     });
-    // 20 Mbps × 0.75 = 15 → 12 Mbps 1080p, the highest below it.
+    // 20 Mbps × 16/20 (the network's) × 0.75 = 12 → 12 Mbps 1080p.
     await waitFor(() => expect(starts(requests)).toHaveLength(2), { timeout: 4_000 });
     expect(starts(requests)[1]).toMatchObject({ mode: "transcode", max_bitrate: 12_000, max_height: 1080, start_ms: 60_000 });
     expect(await screen.findByText("Quality lowered to 12 Mbps 1080p")).toBeInTheDocument();
     expect(screen.getAllByText("Quality lowered to 12 Mbps 1080p")).toHaveLength(1);
-    expect(JSON.parse(window.localStorage.getItem("pley.autoQuality")!)).toMatchObject({ kbps: 15_000 });
+    expect(JSON.parse(window.localStorage.getItem("pley.autoQuality")!)).toMatchObject({ kbps: 12_000 });
     // Nothing was picked: the next title starts in Automatic too.
     expect(window.localStorage.getItem("pley.quality")).toBeNull();
   });
+
+  it("plays the original on through a wait for data on a network that carries it: the server is why", async () => {
+    const { requests, container } = render20({}, true);
+    const video = container.querySelector("video")!;
+    await waitFor(() => expect(hlsInstances[0]?.calls).toContain("attachMedia"));
+    playing(video, 0);
+    segments(40);
+    act(() => {
+      video.dispatchEvent(new Event("waiting"));
+    });
+    await sleep(3_100);
+    expect(starts(requests)).toHaveLength(1);
+  }, 15_000);
 
   it("doesn't count a seek's wait, nor a wait while paused", async () => {
     const { requests, container } = render20();
@@ -774,16 +797,17 @@ describe("VideoPlayer in Automatic", () => {
 
   it("tells the server the ceiling of a step down, and to forget it when Automatic is picked again", async () => {
     const nothing = { local: false, ceiling_kbps: null, source: null, since: null, probe: false };
-    const { requests, container } = render20({ "GET /api/playback/network": () => nothing, "PUT /api/playback/network": () => nothing });
+    const { requests, container } = render20({ "GET /api/playback/network": () => nothing, "PUT /api/playback/network": () => nothing }, true);
     const video = container.querySelector("video")!;
-    await waitFor(() => expect(video.getAttribute("src")).toBe("/api/files/3/stream"));
-    playing(video);
+    await waitFor(() => expect(hlsInstances[0]?.calls).toContain("attachMedia"));
+    playing(video, 0);
+    segments(16);
     act(() => {
       video.dispatchEvent(new Event("waiting"));
     });
     await waitFor(() => expect(starts(requests)).toHaveLength(2), { timeout: 4_000 });
     const puts = () => requests.filter((r) => r.method === "PUT" && r.path === "/api/playback/network").map((r) => r.body);
-    await waitFor(() => expect(puts()).toEqual([{ client_id: expect.stringMatching(/^web-/) as unknown, ceiling_kbps: 15_000 }]));
+    await waitFor(() => expect(puts()).toEqual([{ client_id: expect.stringMatching(/^web-/) as unknown, ceiling_kbps: 12_000 }]));
 
     await userEvent.click(screen.getByRole("button", { name: "Playback settings" }));
     await userEvent.click(screen.getByRole("button", { name: /Quality/ }));

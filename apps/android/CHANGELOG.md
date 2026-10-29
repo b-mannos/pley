@@ -25,6 +25,14 @@ describes how they are made.
   a big file's buffer holds only seconds of it. From a stream in several
   sizes it now steps back up after calm minutes too, to the original when
   the network carries 1.6 times it.
+- Automatic quality no longer leaves the original for a wait the server
+  caused (a slow disk, a remux catching up): a wait of 2 s or more counts
+  only on a network shown below 1.5 times the file's bitrate in the last
+  2 minutes (where nothing showed it, the second such wait within 5
+  minutes), and the server converting slower than the video plays doesn't
+  count at the original. A title that starts lower for what was
+  remembered of the network goes back up after 20 s calm, as high as the
+  network carries, the original included.
 
 ## [0.0.1] - 2026-10-29
 

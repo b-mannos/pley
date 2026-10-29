@@ -11,6 +11,23 @@ export const ORIGINAL_ID = "original";
 /** A wait for data this long is a play issue; two shorter ones within a minute are one too. */
 export const LONG_WAIT_MS = 2_000;
 export const SHORT_WAITS_WITHIN_MS = 60_000;
+/**
+ * The original as the file is moves for a wait only where the network, over
+ * the last 2 minutes, isn't shown to carry this many times its bitrate: on a
+ * network that does, the server is why it waits (its disk, a remux catching
+ * up), which a conversion only slows down.
+ */
+export const ORIGINAL_NETWORK = 1.5;
+export const ORIGINAL_NETWORK_MS = 2 * 60_000;
+/** Where nothing measured the network, the original moves at the second such wait within this. */
+export const ORIGINAL_WAITS_WITHIN_MS = 5 * 60_000;
+/** A wait that begins with this much loaded ahead (seconds) waits for its decoder, not for data. */
+export const STARVED_S = 1;
+/**
+ * A start lowered by what was remembered goes as high as the network
+ * carries after this much calm, rather than a quality at a time.
+ */
+export const REMEMBERED_CALM_MS = 20_000;
 /** Delivery is measured over this much time, once there is at least the second figure of it. */
 export const DELIVERY_WINDOW_MS = 20_000;
 export const DELIVERY_MIN_SPAN_MS = 5_000;
@@ -135,6 +152,16 @@ export class AutoQuality {
   private calmMs = CALM_MS;
 
   private waitFrom: number | null = null;
+  /** The wait under way began with little loaded ahead (`waiting`). */
+  private waitStarved = true;
+  /** The wait under way lasted 2 s (`longWait`): what's left of it is no short wait. */
+  private waitLong = false;
+  /** The wait under way came on a network nothing measured, and is among `originalWaits`. */
+  private waitUnmeasured = false;
+  /** When the original's long waits came on a network nothing measured. */
+  private originalWaits: number[] = [];
+  /** It started below the original for what was remembered, and nothing went wrong since. */
+  private remembered = false;
   private shortWaits: number[] = [];
   private fills: { at: number; end: number }[] = [];
   /** The last delivery measured, seconds of video a second; `null` while unknown. */
@@ -175,6 +202,7 @@ export class AutoQuality {
       this.playing = this.highestAtMost(kept.kbps, null)!.id;
       this.lowered = "network";
       this.lastDown = now - age;
+      this.remembered = true;
     }
     return this.playing;
   }
@@ -193,10 +221,10 @@ export class AutoQuality {
 
   /**
    * The original as the file is (direct play or a remux): only a picture
-   * that stopped, a wait of 2 s or more, moves it. Short waits and slow
-   * delivery don't: a browser keeps only seconds of a big file loaded
-   * ahead, so they say little of the network, and a conversion is a worse
-   * picture for good.
+   * that stopped, a wait of 2 s or more the network is to blame for
+   * (`longWait`), moves it. Short waits and slow delivery don't: a browser
+   * keeps only seconds of a big file loaded ahead, so they say little of the
+   * network, and a conversion is a worse picture for good.
    */
   private get patient(): boolean {
     return this.playing === ORIGINAL_ID && !this.converted;
@@ -213,14 +241,44 @@ export class AutoQuality {
   /** Paused, seeking, or out of sight: what it was measuring starts over, and a wait under way isn't one. */
   interrupted(): void {
     this.waitFrom = null;
+    this.waitLong = false;
+    this.waitUnmeasured = false;
     this.fills = [];
     this.delivery = null;
     this.lowFrom = null;
   }
 
-  /** The picture stopped for want of data while meant to play (not after a seek, a pause or a new session). */
-  waiting(now: number): void {
-    if (this.waitFrom === null) this.waitFrom = now;
+  /**
+   * The picture stopped while meant to play (not after a seek, a pause or a
+   * new session), with `ahead` seconds loaded past it (`null`: unknown).
+   */
+  waiting(now: number, ahead: number | null = null): void {
+    if (this.waitFrom !== null) return;
+    this.waitFrom = now;
+    this.waitStarved = ahead === null || ahead < STARVED_S;
+    this.waitLong = false;
+    this.waitUnmeasured = false;
+  }
+
+  /**
+   * Whether the wait under way, 2 s long by `now`, is a play issue. At the
+   * original as the file is, only a wait with little loaded ahead (another
+   * waits for its decoder) on a network not measured at `ORIGINAL_NETWORK`
+   * times its bitrate; where nothing measured the network, the second such
+   * wait within 5 minutes. Asked again as the wait goes on, with what loaded since.
+   */
+  private longWait(now: number): boolean {
+    this.waitLong = true;
+    if (!this.patient) return true;
+    if (!this.waitStarved) return false;
+    const net = this.network(now - ORIGINAL_NETWORK_MS);
+    if (net !== null && this.originalKbps !== null) return net < ORIGINAL_NETWORK * this.originalKbps;
+    if (!this.waitUnmeasured) {
+      this.waitUnmeasured = true;
+      this.originalWaits = this.originalWaits.filter((t) => now - t < ORIGINAL_WAITS_WITHIN_MS);
+      this.originalWaits.push(now);
+    }
+    return this.originalWaits.length >= 2;
   }
 
   /** It plays on after a wait. */
@@ -228,11 +286,11 @@ export class AutoQuality {
     const from = this.waitFrom;
     if (from === null) return;
     this.waitFrom = null;
-    if (now - from >= LONG_WAIT_MS) {
-      this.pending = this.pending || "network";
-      return;
-    }
-    if (this.patient) return;
+    if (now - from >= LONG_WAIT_MS && this.longWait(now)) this.pending = this.pending || "network";
+    const long = this.waitLong;
+    this.waitLong = false;
+    this.waitUnmeasured = false;
+    if (long || this.patient) return;
     const recent = this.shortWaits.filter((t) => now - t < SHORT_WAITS_WITHIN_MS);
     recent.push(now);
     if (recent.length >= 2) {
@@ -329,7 +387,7 @@ export class AutoQuality {
    * only put a step up off.
    */
   check(now: number, sizes = false): AutoStep | null {
-    if (this.waitFrom !== null && now - this.waitFrom >= LONG_WAIT_MS) {
+    if (this.waitFrom !== null && now - this.waitFrom >= LONG_WAIT_MS && this.longWait(now)) {
       this.pending = this.pending || "network";
       // Waiting on: another 2 s is another issue.
       this.waitFrom = now;
@@ -338,6 +396,7 @@ export class AutoQuality {
     this.pending = null;
     if (issue) {
       this.lastIssue = now;
+      this.remembered = false;
       if (sizes && issue === "network") return null;
       return now - this.lastChange < CHANGE_GAP_MS ? null : this.stepDown(now, issue);
     }
@@ -381,24 +440,31 @@ export class AutoQuality {
   private stepUp(now: number): AutoStep | null {
     if (this.playing === ORIGINAL_ID) return null;
     const calmFrom = Math.max(this.lastIssue, this.lastChange);
-    if (now - calmFrom < this.calmMs || now - this.lastDown < AFTER_DOWN_MS) return null;
-    const at = this.indexOf(this.playing);
-    const next = at > 0 ? this.ladder[at - 1]! : null;
-    // Settled: the step above didn't hold this title.
-    if (this.tooHigh.has(next ? next.id : ORIGINAL_ID)) return null;
-    const need = next ? next.kbps : this.originalKbps;
+    if (this.remembered ? now - calmFrom < REMEMBERED_CALM_MS : now - calmFrom < this.calmMs || now - this.lastDown < AFTER_DOWN_MS) return null;
     const net = this.network(calmFrom);
-    if (need === null || net === null || net < HEADROOM * need) return null;
-    this.playing = next ? next.id : ORIGINAL_ID;
+    if (net === null) return null;
+    // One quality up; from a start lowered by what was remembered, the highest the network carries.
+    let to: Rung | null | undefined;
+    for (let i = this.indexOf(this.playing) - 1; i >= -1; i--) {
+      const next = i >= 0 ? this.ladder[i]! : null;
+      const need = next ? next.kbps : this.originalKbps;
+      // Settled: the step above didn't hold this title.
+      if (this.tooHigh.has(next ? next.id : ORIGINAL_ID) || need === null || net < HEADROOM * need) break;
+      to = next;
+      if (!this.remembered) break;
+    }
+    if (to === undefined) return null;
+    this.remembered = false;
+    this.playing = to ? to.id : ORIGINAL_ID;
     this.lastChange = now;
     this.lastUp = { at: now, to: this.playing };
     this.interrupted();
-    if (!next) {
+    if (!to) {
       this.lowered = null;
       this.remember(null);
     } else if (this.lowered === "network") {
       // The network carries this one now: the next title starts here rather than lower.
-      this.remember(next.kbps);
+      this.remember(to.kbps);
     }
     return { to: this.playing, why: null };
   }

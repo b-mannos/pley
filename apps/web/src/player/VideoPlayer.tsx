@@ -1154,7 +1154,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const now = performance.now();
     if (kind === "waiting") {
       // The picture stops for want of data while it plays: not a seek's wait, nor a new session's.
-      if (!autoSettling.current && !v.seeking && !v.paused && mediaShown.current && !document.hidden) auto.waiting(now);
+      if (!autoSettling.current && !v.seeking && !v.paused && mediaShown.current && !document.hidden) auto.waiting(now, bufferedAhead(v));
     } else if (kind === "playing") {
       autoSettling.current = false;
       auto.resumed(now);

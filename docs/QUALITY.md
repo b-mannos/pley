@@ -95,6 +95,28 @@ little of the network, and a transcode would play a worse picture for the
 rest of the title. An Original the server converts (the device can't play
 the file) counts them all, as any quality does.
 
+Even that wait counts only when the network is to blame for it. In the web
+app, the Android app and the Samsung and LG apps:
+
+- **Measured network.** If what the player measured over the last 2 minutes
+  carries 1.5 times the file's bitrate or more, the server is why the
+  picture waits: a slow disk, a remux catching up, the server busy. A
+  transcode reads the same file and does more work, so it would only wait
+  longer. The Original plays on.
+- **Below that**, the wait counts. The measurement is taken again as the
+  wait goes on and when it ends. In the web and Android apps, a slow
+  download that arrives during the wait counts too.
+- **Nothing measured.** Where the player measured nothing, the second such
+  wait within 5 minutes counts.
+- **Data loaded ahead** (web app): a wait that began with 1 s or more loaded
+  ahead is the browser's decoder, not the network.
+- **A conversion the server falls behind on.** The Android app's warning
+  that the server converts slower than the video plays doesn't count at
+  the Original either: a remux reads as much of the file as a transcode
+  would, and does less.
+
+Kodi and Roku count every wait of 2 s or more at the Original.
+
 ### Stepping down
 
 On a play issue, the new ceiling is:
@@ -129,6 +151,13 @@ After 3 minutes without a play issue, and not within 5 minutes of a step
 down, Automatic steps up one quality if the network measured over that time
 carries 1.6 times the next quality up (or the file, for Original). At most
 one step every 3 minutes, silently.
+
+A title that started lower for what was remembered of the network
+([Starting](#starting)) needs only 20 s without a play issue (web app and
+Android app). It then goes in one step to the highest quality the network
+carries 1.6 times, the Original included: the memory may come from a
+slower moment, or from a step down the server caused. A play issue or a
+step first, and the usual rules apply.
 
 Players measure the network from what they download: an HLS segment's size
 over the time it took from its first byte (the server sends a segment once
@@ -203,7 +232,8 @@ It changes the stream as it is sent instead:
   next title starts there; at the original it is cleared.
 - **Playing the original** (direct play or remux), it moves to a conversion
   only once the picture has stopped anyway, as on every player ([Watching](#watching)):
-  a wait for data of 2 s or more, or a failing decoder. Dropped frames
+  a wait for data of 2 s or more (on Samsung and LG, only one the network
+  is to blame for), or a failing decoder. Dropped frames
   move it only in a title's first minute (a sign the device can't keep up
   with the file); later they lower where the next title starts. On Kodi and
   Roku, a conversion whose bitrate can't change (an older server or

@@ -254,6 +254,11 @@ class FakeEngine implements PlayerEngine {
   bufferedMs() {
     return this.buffered;
   }
+  /** What its player measured the network carrying (Samsung's), kbps; `null` when it can't say. */
+  bandwidth: number | null = null;
+  bandwidthKbps() {
+    return this.bandwidth;
+  }
   status() {
     return this.state;
   }
@@ -728,6 +733,8 @@ describe("Automatic", () => {
     c.state.subscribe((s) => {
       if (s.notice && notices[notices.length - 1] !== s.notice) notices.push(s.notice);
     });
+    // A network measured at 20 Mbps, under 1.5 × the file's 40.
+    w.engine.bandwidth = 20_000;
     // 40 Mbps arriving at half speed: 40 × 0.5 × 0.75 = 15 → 15 Mbps 4K.
     await play(12, 0.5);
     await wait(2_500);
@@ -745,6 +752,19 @@ describe("Automatic", () => {
     expect(c.state.value.note).toBe("Lowered for your connection");
     expect(c.state.value.qualities.filter((q) => q.id === "auto")[0]!.hint).toBe("Now 15 Mbps 4K · Lowered for your connection");
     expect(JSON.parse(kept.get("pley.autoQuality.http://nas:7539")!)).toMatchObject({ kbps: 15_000 });
+    c.close();
+  });
+
+  it("plays the original on through a wait on a network that carries 1.5 times the file: the server is why it waits", async () => {
+    const { w, c, play, wait, now } = await automatic();
+    w.engine.bandwidth = 80_000;
+    await play(12, 0.5);
+    await wait(2_500);
+    await vi.advanceTimersByTimeAsync(2_500);
+    now("ready");
+    await play(4, 0.5);
+    expect(w.requests.map((r) => r.mode)).toEqual(["auto"]);
+    expect(c.state.value.quality).toBe("Automatic · Original");
     c.close();
   });
 
@@ -801,6 +821,7 @@ describe("Automatic", () => {
   it("starts the next title at the remembered network, and picking Automatic again starts afresh", async () => {
     const kept = memory();
     const first = await automatic(item(file()), kept);
+    first.w.engine.bandwidth = 20_000;
     await first.play(12, 0.5);
     await first.wait(2_500);
     await vi.advanceTimersByTimeAsync(2_500);
@@ -872,7 +893,8 @@ describe("Automatic", () => {
 
   it("tells the server the ceiling of a step down, and to forget it when Automatic is picked again", async () => {
     const server = serverMemory(null);
-    const { c, play, wait } = await automatic(item(file()), memory(), null, server.network);
+    const { w, c, play, wait } = await automatic(item(file()), memory(), null, server.network);
+    w.engine.bandwidth = 20_000;
     await play(12, 0.5);
     await wait(2_500);
     await vi.advanceTimersByTimeAsync(2_500);

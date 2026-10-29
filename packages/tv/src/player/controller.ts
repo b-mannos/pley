@@ -648,11 +648,7 @@ export class PlaybackController {
     this.sessionEnded = false;
     this.live = null;
     if (this.auto) {
-      const live = this.liveStream(info);
-      this.auto.began(live);
-      // The original converted (a fallback): Automatic steps down from what it plays at.
-      const converted = original && info.auto_quality ? presetById(info.auto_quality) : null;
-      if (converted) this.auto.setOriginalKbps(converted.maxBitrateKbps);
+      const live = this.autoBegan(this.auto, info, original);
       // A new stream of the same quality (a recovery, a track) goes on at the bitrate the last one had come to.
       if (live && this.auto.liveLowered) this.sendBitrate(this.auto.liveKbps!);
     }
@@ -1322,7 +1318,7 @@ export class PlaybackController {
     }
     // The same stream plays on: Automatic watches it afresh, and it goes back to its own bitrate.
     const info = this.info;
-    if (this.auto && info && !this.sessionEnded) this.auto.began(this.liveStream(info));
+    if (this.auto && info && !this.sessionEnded) this.autoBegan(this.auto, info, this.playingPreset.id === ORIGINAL.id);
     this.publishChoices();
     if (eased !== null) this.sendBitrate(eased);
   }
@@ -1632,6 +1628,20 @@ export class PlaybackController {
     const playing = this.playingPreset;
     const preset = playing.id === ORIGINAL.id ? presetById(info.auto_quality) : playing;
     return preset && preset.maxBitrateKbps !== null ? namedFor(this.file, preset) : null;
+  }
+
+  /**
+   * Automatic watches the session `info` afresh: a stream whose bitrate
+   * changes as it is sent (returned), or the `original` converted (a
+   * fallback, a file the TV can't play as it is), which it steps down from
+   * what it plays at and moves for any wait of 2 s.
+   */
+  private autoBegan(auto: AutoQuality, info: PlaybackInfo, original: boolean): LiveStream | null {
+    const live = this.liveStream(info);
+    auto.began(live);
+    const converted = original && info.auto_quality ? presetById(info.auto_quality) : null;
+    if (converted) auto.setOriginalKbps(converted.maxBitrateKbps);
+    return live;
   }
 
   /**

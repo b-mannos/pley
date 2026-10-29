@@ -20,6 +20,11 @@ describes how they are made.
 - Switching to another server no longer shows the last server's Home,
   libraries or titles, and asks "Who's watching?" as that server's
   household needs.
+- Automatic quality no longer leaves the original for a wait the server
+  caused (a slow disk, a remux catching up): a wait of 2 s or more counts
+  only on a network the TV measured below 1.5 times the file's bitrate in
+  the last 2 minutes, or, where it measured nothing, the second such wait
+  within 5 minutes.
 
 ## [0.0.1] - 2026-10-29
 

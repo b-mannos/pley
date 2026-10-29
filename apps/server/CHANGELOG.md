@@ -87,6 +87,16 @@ describes how they are made.
   back up after calm minutes too, to the original when the network carries
   1.6 times it, measured from each segment's first byte rather than from
   the wait while the transcoder made it.
+- Automatic quality in the web app no longer leaves the original for a
+  wait the server caused: a remux whose audio is converted, waiting on a
+  slow disk or the server's library work, went to a transcode and then
+  between its sizes. A wait of 2 s or more at the original counts only on
+  a network measured below 1.5 times the file's bitrate over the last 2
+  minutes (where nothing measured it, the second such wait within 5
+  minutes), and not when the browser had a second or more loaded ahead.
+  A title that starts lower for what was remembered of the network goes
+  back up after 20 s calm, as high as the network carries, the original
+  included.
 
 ## [0.0.1] - 2026-10-29
 

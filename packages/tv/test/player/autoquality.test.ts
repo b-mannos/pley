@@ -559,12 +559,56 @@ describe("Automatic", () => {
     const blank = (known?: Remembered | null, f = file(1920, 1080, 20)) => auto(f.bitrate! / 1e6, memory(), f, known, true);
 
     describe("playing the original", () => {
-      it("moves to a conversion on a wait of 2 s or more: one new stream, as anywhere", () => {
-        const { a, play, wait } = blank();
+      it("moves to a conversion on a wait of 2 s or more on a network too slow for the file: one new stream, as anywhere", () => {
+        const { a, clock, play, wait } = blank();
+        // Samsung's player measured 16 Mbps: under 1.5 × the file's 20.
+        a.bandwidth(clock.t, 16_000);
         // 20 × 0.5 × 0.75 = 7.5 → 4 Mbps 720p.
         play(20, 0.5, 9);
         expect(wait(2_000)).toEqual({ to: "4m", why: "network" });
         expect(a.playing).toBe("4m");
+      });
+
+      it("plays on through waits on a network that carries 1.5 times the file: the server is why it waits", () => {
+        const { a, clock, play, wait } = blank();
+        a.bandwidth(clock.t, 30_000);
+        play(20, 0.5, 9);
+        expect(wait(2_000)).toBeNull();
+        expect(play(20, 0.5)).toBeNull();
+        expect(wait(6_000)).toBeNull();
+        expect(a.playing).toBe("original");
+      });
+
+      it("where nothing measured the network, moves at the second wait of 2 s within 5 minutes", () => {
+        const { play, wait } = blank();
+        play(20, 0.5, 9);
+        expect(wait(3_000)).toBeNull();
+        expect(play(60, 0.5, 9)).toBeNull();
+        expect(wait(2_000)).toEqual({ to: "4m", why: "network" });
+        const apart = blank();
+        expect(apart.wait(2_000)).toBeNull();
+        apart.clock.t += 5 * 60_000;
+        expect(apart.wait(2_000)).toBeNull();
+        expect(apart.a.playing).toBe("original");
+      });
+
+      it("counts a wait as one nothing measured once the network's figures run out as it goes on", () => {
+        const { a, clock, wait } = blank();
+        a.bandwidth(clock.t, 30_000);
+        // 2.5 s into this wait the figure is 2 minutes old: from then on nothing measured the network.
+        clock.t = 118_000;
+        expect(wait(5_000)).toBeNull();
+        clock.t += 10_000;
+        expect(wait(2_000)?.why).toBe("network");
+      });
+
+      it("moves the original the server converts on any wait of 2 s: a lower quality is less for it to make", () => {
+        const { a, clock, play, wait } = blank();
+        a.setOriginalKbps(15_000);
+        a.bandwidth(clock.t, 80_000);
+        // 15 × 0.5 × 0.75 = 5.6 → 4 Mbps 720p.
+        play(20, 0.5, 9);
+        expect(wait(2_000)).toEqual({ to: "4m", why: "network" });
       });
 
       it("doesn't move for two short waits or slow delivery: the picture hasn't stopped", () => {
@@ -578,7 +622,8 @@ describe("Automatic", () => {
       });
 
       it("never goes back up to another stream, however fast the network", () => {
-        const { a, play, wait, network } = blank();
+        const { a, clock, play, wait, network } = blank();
+        a.bandwidth(clock.t, 16_000);
         play(20, 0.5, 9);
         expect(wait(2_000)?.to).toBe("4m");
         // A conversion whose bitrate can't change (an older server): it stays.

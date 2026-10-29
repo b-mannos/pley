@@ -17,6 +17,16 @@ export const ORIGINAL_ID = "original";
 /** A wait for data this long is a play issue; two shorter ones within a minute are one too. */
 export const LONG_WAIT_MS = 2_000;
 export const SHORT_WAITS_WITHIN_MS = 60_000;
+/**
+ * The original as the file is moves for a wait only where the network, over
+ * the last 2 minutes, isn't shown to carry this many times its bitrate: on a
+ * network that does, the server is why it waits (its disk, a remux catching
+ * up), which a conversion only slows down.
+ */
+export const ORIGINAL_NETWORK = 1.5;
+export const ORIGINAL_NETWORK_MS = 2 * 60_000;
+/** Where nothing measured the network, the original moves at the second such wait within this. */
+export const ORIGINAL_WAITS_WITHIN_MS = 5 * 60_000;
 /** Delivery is measured over this much time, once there is at least the second figure of it. */
 export const DELIVERY_WINDOW_MS = 20_000;
 export const DELIVERY_MIN_SPAN_MS = 5_000;
@@ -151,6 +161,8 @@ export class AutoQuality {
 
   private readonly ladder: Rung[];
   private originalKbps: number | null;
+  /** The original plays converted (`setOriginalKbps`), not as the file is. */
+  private converted = false;
   private readonly memory: AutoMemory | null;
   private readonly wall: () => number;
   private readonly onCeiling: ((kbps: number | null) => void) | null;
@@ -177,6 +189,12 @@ export class AutoQuality {
   private struggleKept = false;
 
   private waitFrom: number | null = null;
+  /** The wait under way lasted 2 s (`longWait`): what's left of it is no short wait. */
+  private waitLong = false;
+  /** The wait under way came on a network nothing measured, and is among `originalWaits`. */
+  private waitUnmeasured = false;
+  /** When the original's long waits came on a network nothing measured. */
+  private originalWaits: number[] = [];
   private shortWaits: number[] = [];
   private fills: { at: number; end: number }[] = [];
   /** The last delivery measured, seconds of video a second; `null` while unknown. */
@@ -233,6 +251,11 @@ export class AutoQuality {
     return this.blanks && this.live === null;
   }
 
+  /** On a player that goes black, the original as the file is (direct play or a remux): a wait moves it only where the network is to blame (`longWait`). */
+  private get asTheFile(): boolean {
+    return this.patient && this.playing === ORIGINAL_ID && !this.converted;
+  }
+
   /** The stream playing goes on below its own bitrate. */
   get liveLowered(): boolean {
     return this.live !== null && this.liveKbps !== null && this.liveKbps < this.live.top;
@@ -250,8 +273,9 @@ export class AutoQuality {
     return rung ? rung.kbps : this.originalKbps;
   }
 
-  /** The original plays converted (a fallback of the player's), at `kbps`. */
+  /** The original plays converted (a fallback of the player's, or a file it can't play), at `kbps`. */
   setOriginalKbps(kbps: number | null): void {
+    this.converted = true;
     if (kbps && kbps > 0) this.originalKbps = kbps;
   }
 
@@ -310,6 +334,8 @@ export class AutoQuality {
   /** Paused, seeking, or out of sight: what it was measuring starts over, and a wait under way isn't one. */
   interrupted(): void {
     this.waitFrom = null;
+    this.waitLong = false;
+    this.waitUnmeasured = false;
     this.fills = [];
     this.delivery = null;
     this.lowFrom = null;
@@ -317,7 +343,30 @@ export class AutoQuality {
 
   /** The picture stopped for want of data while meant to play (not after a seek, a pause or a new session). */
   waiting(now: number): void {
-    if (this.waitFrom === null) this.waitFrom = now;
+    if (this.waitFrom !== null) return;
+    this.waitFrom = now;
+    this.waitLong = false;
+    this.waitUnmeasured = false;
+  }
+
+  /**
+   * Whether the wait under way, 2 s long by `now`, is a play issue. At the
+   * original as the file is, only on a network not measured at
+   * `ORIGINAL_NETWORK` times its bitrate; where nothing measured the
+   * network, the second such wait within 5 minutes. Asked again as the wait
+   * goes on, with what the network showed since.
+   */
+  private longWait(now: number): boolean {
+    this.waitLong = true;
+    if (!this.asTheFile) return true;
+    const net = this.network(now - ORIGINAL_NETWORK_MS);
+    if (net !== null && this.originalKbps !== null) return net < ORIGINAL_NETWORK * this.originalKbps;
+    if (!this.waitUnmeasured) {
+      this.waitUnmeasured = true;
+      this.originalWaits = this.originalWaits.filter((t) => now - t < ORIGINAL_WAITS_WITHIN_MS);
+      this.originalWaits.push(now);
+    }
+    return this.originalWaits.length >= 2;
   }
 
   /** It plays on after a wait. */
@@ -325,12 +374,12 @@ export class AutoQuality {
     const from = this.waitFrom;
     if (from === null) return;
     this.waitFrom = null;
-    if (now - from >= LONG_WAIT_MS) {
-      this.pending = this.pending || "network";
-      return;
-    }
+    if (now - from >= LONG_WAIT_MS && this.longWait(now)) this.pending = this.pending || "network";
+    const long = this.waitLong;
+    this.waitLong = false;
+    this.waitUnmeasured = false;
     // Short waits don't move a stream that can't change as it plays, on a player that goes black.
-    if (this.patient) return;
+    if (long || this.patient) return;
     const recent = this.shortWaits.filter((t) => now - t < SHORT_WAITS_WITHIN_MS);
     recent.push(now);
     if (recent.length >= 2) {
@@ -458,7 +507,7 @@ export class AutoQuality {
    * at `to`.
    */
   check(now: number): AutoStep | null {
-    if (this.waitFrom !== null && now - this.waitFrom >= LONG_WAIT_MS) {
+    if (this.waitFrom !== null && now - this.waitFrom >= LONG_WAIT_MS && this.longWait(now)) {
       this.pending = this.pending || "network";
       // Waiting on: another 2 s is another issue.
       this.waitFrom = now;

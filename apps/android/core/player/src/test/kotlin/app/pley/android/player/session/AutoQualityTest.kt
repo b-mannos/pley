@@ -133,7 +133,7 @@ class AutoQualityTest {
     @Test
     fun `a wait of 2 s steps down`() {
         started(hd)
-        assertNull(play(20_000))
+        assertNull(play(20_000, bandwidth = 8_000))
         assertNull(play(1_500, waiting = true))
         val step = present(play(1_000, waiting = true))
         assertEquals(LoweredFor.Network, step.reason)
@@ -182,14 +182,50 @@ class AutoQualityTest {
     @Test
     fun `the original as the file is moves only for a wait of 2 s, not short waits or slow delivery`() {
         started(uhd, ahead = 12_000)
-        // A big file's few seconds ahead, arriving no faster than they play.
-        assertNull(play(40_000, rate = 0.5))
+        // A big file's few seconds ahead, arriving no faster than they play, on a network measured at 40 Mbps.
+        assertNull(play(40_000, rate = 0.5, bandwidth = 40_000))
         repeat(3) {
             assertNull(play(1_000, waiting = true))
             assertNull(play(10_000))
         }
         assertSame(Qualities.ORIGINAL, auto.playing)
         assertEquals(LoweredFor.Network, present(play(3_000, waiting = true)).reason)
+    }
+
+    @Test
+    fun `the original as the file is waits on a network carrying 1_5 times the file - the server is why`() {
+        started(uhd)
+        repeat(5) {
+            assertNull(play(20_000, bandwidth = 90_000))
+            assertNull(play(8_000, waiting = true))
+            // What ended the wait came as fast.
+            assertNull(play(TICK, bandwidth = 90_000))
+        }
+        assertSame(Qualities.ORIGINAL, auto.playing)
+        // The network slower since: the next wait moves it, from what arrived (60 × 0.9 × 0.75 = 40.5).
+        assertNull(play(20_000, rate = 0.9, bandwidth = 50_000))
+        assertEquals("30m", present(play(3_000, rate = 0.9, waiting = true)).to.id)
+    }
+
+    @Test
+    fun `the original as the file is, on a network nothing measured, moves at the second long wait within 5 minutes`() {
+        started(uhd)
+        assertNull(play(10_000))
+        assertNull(play(6_000, waiting = true))
+        assertNull(play(5 * 60_000L))
+        assertNull(play(6_000, waiting = true))
+        assertSame(Qualities.ORIGINAL, auto.playing)
+        assertNull(play(4 * 60_000L))
+        assertEquals(LoweredFor.Network, present(play(3_000, waiting = true)).reason)
+    }
+
+    @Test
+    fun `the original as the file is moves when the download that ends a wait shows the network to blame`() {
+        started(uhd)
+        assertNull(play(20_000, bandwidth = 200_000))
+        assertNull(play(3_000, waiting = true))
+        // The segment it waited for came at 20 Mbps.
+        assertEquals(LoweredFor.Network, present(play(TICK, bandwidth = 20_000)).reason)
     }
 
     @Test
@@ -224,7 +260,7 @@ class AutoQualityTest {
     fun `the ceiling is the bitrate playing times the delivery seen times 0_75`() {
         started(hd)
         // 0.6 s a second for 20 s, then a wait: 10 Mbps × 0.6 × 0.75 = 4.5 Mbps.
-        assertNull(play(20_000, rate = 0.6))
+        assertNull(play(20_000, rate = 0.6, bandwidth = 6_000))
         assertEquals("4m", play(3_000, rate = 0.6, waiting = true)!!.to.id)
         assertEquals(4_000, memory.read()!!.first)
     }
@@ -233,7 +269,7 @@ class AutoQualityTest {
     fun `it plays the highest of the menu under the ceiling, 4K first`() {
         started(uhd)
         // 60 Mbps × 0.5 × 0.75 = 22.5 Mbps: 15 Mbps 4K, above 20 Mbps 1080p in the menu.
-        assertNull(play(20_000, rate = 0.5))
+        assertNull(play(20_000, rate = 0.5, bandwidth = 30_000))
         assertEquals("15m", play(3_000, rate = 0.5, waiting = true)!!.to.id)
     }
 
@@ -243,7 +279,7 @@ class AutoQualityTest {
         val file = file(18_000_000, 3840, 2160)
         started(file)
         assertEquals(listOf("12m", "8m", "4m", "2m"), ids(auto.ladder()))
-        assertNull(play(20_000))
+        assertNull(play(20_000, bandwidth = 18_000))
         assertEquals("12m", play(3_000, waiting = true)!!.to.id)
     }
 
@@ -258,7 +294,7 @@ class AutoQualityTest {
     @Test
     fun `never below 2 Mbps 480p`() {
         started(hd)
-        assertNull(play(20_000, rate = 0.1))
+        assertNull(play(20_000, rate = 0.1, bandwidth = 1_000))
         assertEquals("2m", play(3_000, rate = 0.1, waiting = true)!!.to.id)
         // Already there: nothing lower, the recovery ladder takes over.
         now += AutoQuality.CHANGE_GAP_MS
@@ -292,7 +328,7 @@ class AutoQualityTest {
     @Test
     fun `dropped frames at a transcode go to fewer lines, and never back up to it`() {
         started(uhd)
-        assertNull(play(20_000, rate = 0.5))
+        assertNull(play(20_000, rate = 0.5, bandwidth = 30_000))
         assertEquals("15m", play(3_000, rate = 0.5, waiting = true)!!.to.id)
         now += AutoQuality.CHANGE_GAP_MS
         val step = present(auto.deviceFellBehind(now))
@@ -325,11 +361,18 @@ class AutoQualityTest {
         assertEquals("8m", auto.serverTooSlow(now)!!.to.id)
     }
 
+    @Test
+    fun `a remux the server can't keep up with stays - a conversion reads as much`() {
+        started(uhd)
+        assertNull(auto.serverTooSlow(now))
+        assertSame(Qualities.ORIGINAL, auto.playing)
+    }
+
     // ---------------------------------------------------------------- stepping back up
 
     private fun downTo4m() {
         started(hd)
-        assertNull(play(20_000, rate = 0.6))
+        assertNull(play(20_000, rate = 0.6, bandwidth = 6_000))
         assertEquals("4m", play(3_000, rate = 0.6, waiting = true)!!.to.id)
     }
 
@@ -350,6 +393,25 @@ class AutoQualityTest {
         assertNull(auto.loweredFor)
         // Back at the original, the ceiling is forgotten.
         assertNull(memory.read())
+    }
+
+    @Test
+    fun `a start below the original for its ceiling goes as high as the network carries after 20 calm seconds`() {
+        assertEquals("15m", startedBelow(uhd, 15_000).id)
+        // 1.6 × 30 Mbps is 48, 1.6 × 60 is 96: the server's 4K, not the original.
+        assertNull(play(19_000, bandwidth = 60_000))
+        assertEquals("30m", present(play(2_000, bandwidth = 60_000)).to.id)
+        // From there, as after any step: 3 calm minutes, a quality at a time.
+        assertNull(play(2 * 60_000L + 50_000, bandwidth = 200_000))
+        assertSame(Qualities.ORIGINAL, present(play(60_000, bandwidth = 200_000)).to)
+    }
+
+    @Test
+    fun `a start below the original for its ceiling, a play issue first, steps up as after a step down`() {
+        assertEquals("4m", startedBelow(hd, 4_000).id)
+        assertNull(play(3_000, waiting = true, sizes = true))
+        assertNull(play(2 * 60_000L + 50_000, bandwidth = 50_000, sizes = true))
+        assertEquals("8m", present(play(60_000, bandwidth = 50_000, sizes = true)).to.id)
     }
 
     @Test
@@ -393,9 +455,9 @@ class AutoQualityTest {
     /** 1080p at 18 Mbps: offered 12, 8, 4 and 2 Mbps; the server's quality is 20 Mbps 1080p. */
     private val fhd = file(18_000_000, 1920, 1080)
 
-    /** A wait after 20 s of video arriving at [rate] seconds a second: the step it takes. */
-    private fun falters(rate: Double): AutoStep {
-        assertNull(play(20_000, rate = rate))
+    /** A wait after 20 s of video arriving at [rate] seconds a second, on a network measured at [bandwidth]: the step it takes. */
+    private fun falters(rate: Double, bandwidth: Long? = null): AutoStep {
+        assertNull(play(20_000, rate = rate, bandwidth = bandwidth))
         return present(play(3_000, rate = rate, waiting = true))
     }
 
@@ -437,7 +499,7 @@ class AutoQualityTest {
         started(fhd)
         assertEquals(listOf("12m", "8m", "4m", "2m"), ids(auto.ladder()))
         // 18 × 0.3 × 0.75 = 4.05.
-        assertEquals("4m", falters(0.3).to.id)
+        assertEquals("4m", falters(0.3, bandwidth = 6_000).to.id)
         upAfter(4 * 60_000L + 50_000, "8m")
         upAfter(2 * 60_000L + 50_000, "12m")
         // 12 Mbps doesn't hold (12 × 0.9 × 0.75 = 8.1): back to 8, and 12 is off for the title.
@@ -455,7 +517,7 @@ class AutoQualityTest {
     fun `the calm doubles to 12 minutes at most`() {
         // A 4K remux at 60 Mbps: 60 × 0.3 × 0.75 = 13.5, so 12 Mbps 1080p.
         started(uhd)
-        assertEquals("12m", falters(0.3).to.id)
+        assertEquals("12m", falters(0.3, bandwidth = 18_000).to.id)
         // 20 Mbps 1080p doesn't hold (20 × 0.9 × 0.75 = 13.5): the calm is 6 minutes.
         upAfter(4 * 60_000L + 50_000, "20m")
         assertEquals("12m", falters(0.9).to.id)
@@ -478,22 +540,23 @@ class AutoQualityTest {
         val original = present(play(4 * 60_000L, bandwidth = 20_000))
         assertTrue(original.to.original)
         assertNull(memory.read())
-        // 10 × 1.2 × 0.75 = 9: 8 Mbps, and the original is off for the title.
-        assertEquals("8m", falters(1.2).to.id)
+        // On a network measured at 12 Mbps, 10 × 1.2 × 0.75 = 9: 8 Mbps, and the original is off for the title.
+        assertEquals("8m", falters(1.2, bandwidth = 12_000).to.id)
         assertEquals(8_000, memory.read()!!.first)
         assertNull(play(30 * 60_000L, bandwidth = 80_000))
         assertEquals("8m", auto.playing.id)
     }
 
     @Test
-    fun `a new title tries every quality again, after the usual calm`() {
+    fun `a new title tries every quality again, from where the network held`() {
         downTo4m()
         upAfter(4 * 60_000L + 50_000, "8m")
         assertEquals("4m", falters(0.8).to.id)
-        // Up Next: it starts where the network held, and steps up after 3 calm minutes.
+        // Up Next: it starts where the network held, and goes as high as the network carries after 20 calm seconds.
         assertEquals("4m", begin(hd).id)
         settle()
-        upAfter(2 * 60_000L + 50_000, "8m")
+        assertNull(play(19_000, bandwidth = 50_000))
+        assertSame(Qualities.ORIGINAL, present(play(2_000, bandwidth = 50_000)).to)
     }
 
     @Test
@@ -506,7 +569,7 @@ class AutoQualityTest {
         auto.forgetCeiling()
         assertSame(Qualities.ORIGINAL, begin(hd))
         settle()
-        assertEquals("4m", falters(0.6).to.id)
+        assertEquals("4m", falters(0.6, bandwidth = 6_000).to.id)
         upAfter(4 * 60_000L + 50_000, "8m")
     }
 

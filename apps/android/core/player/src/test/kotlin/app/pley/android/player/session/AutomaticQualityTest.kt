@@ -33,10 +33,16 @@ class AutomaticQualityTest {
         h.advance(20_000)
     }
 
-    /** The video waits for data until Automatic steps down. */
+    /**
+     * The video waits for data until Automatic steps down: on a network
+     * measured slower than the file, which the original moves for. The
+     * network unmeasured after.
+     */
     private fun starveUntilLowered() {
+        h.engine.bandwidthKbps = 1_000
         h.engine.starve()
         h.advance(2_500)
+        h.engine.bandwidthKbps = null
     }
 
     @Test
@@ -135,6 +141,17 @@ class AutomaticQualityTest {
         assertEquals(PlaybackMode.Transcode, asked.mode)
         assertEquals(2_000, asked.maxBitrate)
         assertEquals("Automatic · 2 Mbps 480p", c.state.value.quality)
+    }
+
+    @Test
+    fun `a wait at the original on a network carrying the file is the server's - it plays on`() {
+        val c = playing()
+        h.engine.bandwidthKbps = 100_000
+        h.advance(2_500)
+        h.engine.starve()
+        h.advance(8_000)
+        assertEquals(1, h.playbackRequests().size)
+        assertEquals("Automatic · Original", c.state.value.quality)
     }
 
     @Test
