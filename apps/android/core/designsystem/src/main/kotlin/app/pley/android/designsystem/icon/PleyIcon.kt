@@ -98,26 +98,29 @@ fun Icon(
 }
 
 /**
- * The pley mark: a lowercase "p" whose bowl holds a play triangle, in the
- * brand gradient, on its dark tile ([PleyMark.Tile]) or alone
- * ([PleyMark.Glyph]). apps/web/src/components/Logo.tsx.
+ * The Pley mark: three posters on a shelf, play cut out of the front one,
+ * on its dark tile ([PleyMark.Tile]) or alone ([PleyMark.Glyph]).
+ * apps/web/src/components/Logo.tsx.
  */
 object PleyMark {
-    private const val GLYPH = "M17 19a5 5 0 0 1 5-5h13a14 14 0 0 1 0 28h-8v8a5 5 0 0 1-10 0zM30 21v14l12-7z"
+    private const val BACK = "M46 21.5h3a3 3 0 0 1 3 3v15a3 3 0 0 1-3 3h-3z"
+    private const val MIDDLE = "M36 18.5h4.5a3.5 3.5 0 0 1 3.5 3.5v20a3.5 3.5 0 0 1-3.5 3.5H36z"
+    private const val FRONT = "M16 15.5h14a4 4 0 0 1 4 4v25a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4v-25a4 4 0 0 1 4-4zM19 27v10a1 1 0 0 0 1.51.86l8.5-5a1 1 0 0 0 0-1.72l-8.5-5A1 1 0 0 0 19 27z"
     private const val TILE = "M15,0h34a15,15 0,0 1,15 15v34a15,15 0,0 1,-15 15h-34a15,15 0,0 1,-15 -15v-34a15,15 0,0 1,15 -15z"
 
     private fun gradient(): Brush = Brush.linearGradient(
         0f to PleyColors.BrandLight,
-        0.5f to PleyColors.Accent,
-        1f to PleyColors.BrandDeep,
-        start = androidx.compose.ui.geometry.Offset(16f, 12f),
-        end = androidx.compose.ui.geometry.Offset(48f, 54f),
+        1f to PleyColors.Accent,
+        start = androidx.compose.ui.geometry.Offset(12f, 15f),
+        end = androidx.compose.ui.geometry.Offset(34f, 49f),
     )
 
     private fun build(name: String, tile: Boolean): ImageVector {
         val builder = ImageVector.Builder(name, 64.dp, 64.dp, 64f, 64f)
         if (tile) builder.addPath(addPathNodes(TILE), fill = SolidColor(PleyColors.BrandTile))
-        builder.addPath(addPathNodes(GLYPH), pathFillType = PathFillType.EvenOdd, fill = gradient())
+        builder.addPath(addPathNodes(BACK), fill = SolidColor(PleyColors.BrandFar))
+        builder.addPath(addPathNodes(MIDDLE), fill = SolidColor(PleyColors.BrandDeep))
+        builder.addPath(addPathNodes(FRONT), pathFillType = PathFillType.EvenOdd, fill = gradient())
         return builder.build()
     }
 

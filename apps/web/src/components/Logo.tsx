@@ -1,23 +1,24 @@
 import { useId } from "react";
 import { cn } from "@/lib/cn";
 
-/** The pley mark: a lowercase "p" whose bowl holds a play triangle (cut out). */
+/** The Pley mark: three posters on a shelf, play cut out of the front one. */
 export function LogoMark({ className, tile = true }: { className?: string; tile?: boolean }) {
   const gradient = useId();
   return (
     <svg viewBox="0 0 64 64" className={cn("shrink-0", className)} aria-hidden>
       <defs>
-        <linearGradient id={gradient} x1="16" y1="12" x2="48" y2="54" gradientUnits="userSpaceOnUse">
+        <linearGradient id={gradient} x1="12" y1="15" x2="34" y2="49" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="var(--color-brand-light)" />
-          <stop offset="0.5" stopColor="var(--color-accent)" />
-          <stop offset="1" stopColor="var(--color-brand-deep)" />
+          <stop offset="1" stopColor="var(--color-accent)" />
         </linearGradient>
       </defs>
       {tile ? <rect width="64" height="64" rx="15" fill="var(--color-brand-tile)" /> : null}
+      <path fill="var(--color-brand-far)" d="M46 21.5h3a3 3 0 0 1 3 3v15a3 3 0 0 1-3 3h-3z" />
+      <path fill="var(--color-brand-deep)" d="M36 18.5h4.5a3.5 3.5 0 0 1 3.5 3.5v20a3.5 3.5 0 0 1-3.5 3.5H36z" />
       <path
         fill={`url(#${gradient})`}
         fillRule="evenodd"
-        d="M17 19a5 5 0 0 1 5-5h13a14 14 0 0 1 0 28h-8v8a5 5 0 0 1-10 0zM30 21v14l12-7z"
+        d="M16 15.5h14a4 4 0 0 1 4 4v25a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4v-25a4 4 0 0 1 4-4zM19 27v10a1 1 0 0 0 1.51.86l8.5-5a1 1 0 0 0 0-1.72l-8.5-5A1 1 0 0 0 19 27z"
       />
     </svg>
   );

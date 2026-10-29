@@ -1,11 +1,17 @@
 #!/usr/bin/env bun
-// Renders the icons the web app, the desktop app and the TV apps (Samsung,
-// LG, Kodi, Roku) ship from the logo (apps/web/public/favicon.svg), through
-// a headless Chrome or Edge:
+// Renders the icons the web app, the desktop app, the server, the transcoder
+// and the TV apps (Samsung, LG, Kodi, Roku) ship from the logo
+// (apps/web/public/favicon.svg, its mark the <g> on the tile), through a
+// headless Chrome or Edge:
 //
-//   apps/web/public/icon-maskable-512.png   full bleed, the P as big as the native
+//   apps/web/public/icon-maskable-512.png   full bleed, the mark as big as the native
 //                                           Android app's once Chrome masks it
 //   apps/web/public/favicon-32.png          for browsers without SVG favicons
+//   apps/web/public/icon-{192,512}.png      the logo, for the web app's manifest
+//   apps/web/public/apple-touch-icon.png    180 px, full bleed and opaque: iOS
+//                                           rounds the corners itself
+//   apps/desktop/src-tauri/icons/{32x32,128x128,128x128@2x,icon}.png
+//                                           the logo, for Linux
 //   apps/desktop/src-tauri/icons/icon.ico   32 px first: Windows takes the first
 //                                           for the window, the taskbar and Alt-Tab
 //   apps/desktop/src-tauri/icons/icon.icns  on Apple's grid (an 824 plate in 1024,
@@ -30,6 +36,11 @@
 //   apps/android/app/src/main/res/drawable-{xhdpi,xxhdpi,xxxhdpi}/tv_banner.png
 //                                           the Android TV app's banner, 320×180 dp,
 //                                           on Android TV's home screen
+//   apps/{server,transcoder}/assets/pley.ico
+//                                           the programs' and the installer's icon
+//   apps/server/assets/tray-{32,64}.png     the tray icon on Windows and Linux
+//   apps/server/assets/tray-template.png    macOS's menu bar icon: the mark in
+//                                           black, which macOS tints
 //   deploy/windows/setup-small-*.png        the logo in the corner of the Windows
 //                                           installer's pages, inset in the square
 //                                           Inno Setup gives it, one per DPI
@@ -52,52 +63,52 @@ import { renderer } from "./svg-render.mjs";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const logo = readFileSync(join(root, "apps/web/public/favicon.svg"), "utf8");
 const defs = logo.match(/<defs>[\s\S]*<\/defs>/)[0];
-const glyph = logo.match(/<path[\s\S]*?\/>/)[0];
+const glyph = logo.match(/<g>[\s\S]*?<\/g>/)[0];
 const TILE = "#0a1622";
 
-/** The P alone on the tile's colour to the edges, scaled [s] about the 64-unit logo's centre. */
+/** The mark alone on the tile's colour to the edges, scaled [s] about the 64-unit logo's centre. */
 function maskable(size, s) {
   const t = size / 2 - 32 * s;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}">${defs}<rect width="${size}" height="${size}" fill="${TILE}"/><g transform="translate(${t} ${t}) scale(${s})">${glyph}</g></svg>`;
 }
 
-/** The P on the tile's colour to the edges of a width × height picture, the 64-unit logo at [s] with its top left at (x, y). */
+/** The mark on the tile's colour to the edges of a width × height picture, the 64-unit logo at [s] with its top left at (x, y). */
 function onTile(width, height, s, x, y) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">${defs}<rect width="${width}" height="${height}" fill="${TILE}"/><g transform="translate(${x} ${y}) scale(${s})">${glyph}</g></svg>`;
 }
 
 /**
- * A TV home screen's tile, as the Android TV app's banner (320 × 180): the P in its gradient and the
+ * A TV home screen's tile, as the Android TV app's banner (320 × 180): the mark in its colours and the
  * wordmark on the tile's colour, the brand's deep blue glowing from the lower right corner. Other sizes
  * get the same picture scaled to fit, the colours out to the edges.
  */
 function banner(width, height) {
   const s = Math.min(width / 320, height / 180);
-  const g = 81 / 41; // the P 81 high, from (68, 54)
+  const g = 1.75; // the mark (40 × 33 of the logo's 64, from (12, 15.5)) 70 wide, from (70, 56)
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}">${defs}
   <radialGradient id="corner" cx="${width}" cy="${height}" r="${width * 0.52}" gradientUnits="userSpaceOnUse">
     <stop offset="0" stop-color="#0369a1" stop-opacity="0.3"/><stop offset="1" stop-color="#0369a1" stop-opacity="0"/>
   </radialGradient>
   <rect width="${width}" height="${height}" fill="${TILE}"/><rect width="${width}" height="${height}" fill="url(#corner)"/>
   <g transform="translate(${(width - 320 * s) / 2} ${(height - 180 * s) / 2}) scale(${s})">
-    <g transform="translate(${68 - 17 * g} ${54 - 14 * g}) scale(${g})">${glyph}</g>
+    <g transform="translate(${70 - 12 * g} ${56 - 15.5 * g}) scale(${g})">${glyph}</g>
     <text x="160" y="107" font-family="Roboto, 'Segoe UI', system-ui, sans-serif" font-size="63" font-weight="700" letter-spacing="-1" fill="#e9ebef">Pley</text>
   </g></svg>`;
 }
 
 /**
  * The Amazon Appstore's Fire TV background, 1920 × 1080: the store's words and buttons cover its left
- * and bottom, so the P stands alone in the top right (the 882 × 448 Amazon keeps clear), on the banner's
+ * and bottom, so the mark stands alone in the top right (the 882 × 448 Amazon keeps clear), on the banner's
  * colours.
  */
 function fireTvBackground() {
-  const s = 300 / 41; // the P 300 high, its middle (33, 34.5) at (1480, 260)
+  const s = 300 / 40; // the mark 300 wide, its middle (32, 32) at (1480, 260)
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">${defs}
   <radialGradient id="corner" cx="1920" cy="0" r="1100" gradientUnits="userSpaceOnUse">
     <stop offset="0" stop-color="#0369a1" stop-opacity="0.3"/><stop offset="1" stop-color="#0369a1" stop-opacity="0"/>
   </radialGradient>
   <rect width="1920" height="1080" fill="${TILE}"/><rect width="1920" height="1080" fill="url(#corner)"/>
-  <g transform="translate(${1480 - 33 * s} ${260 - 34.5 * s}) scale(${s})">${glyph}</g></svg>`;
+  <g transform="translate(${1480 - 32 * s} ${260 - 32 * s}) scale(${s})">${glyph}</g></svg>`;
 }
 
 /** The logo [inset] of a [size] square's side, in its middle, transparent around it. */
@@ -112,6 +123,12 @@ function splash(width, height, bg) {
   const size = height / 5;
   const placed = logo.replace("<svg", `<svg x="${(width - size) / 2}" y="${(height - size) / 2}" width="${size}" height="${size}"`);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}"><rect width="${width}" height="${height}" fill="${bg}"/>${placed}</svg>`;
+}
+
+/** The mark alone in black, [s] of the 64-unit logo about its centre, transparent around it: macOS tints it for the menu bar. */
+function template(size, s) {
+  const t = size / 2 - 32 * s;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}"><g transform="translate(${t} ${t}) scale(${s})">${glyph.replace(/fill="[^"]*"/g, 'fill="#000"')}</g></svg>`;
 }
 
 /** Apple's macOS grid: the plate 824 of 1024 at (100, 100), corners about 185, a shadow 10 down. */
@@ -240,14 +257,27 @@ function rgb72(png) {
 const r = await renderer();
 try {
   const web = join(root, "apps/web/public");
-  // Chrome fits the 80 % safe circle to Android's 66 dp safe zone: at 7.449 the P is the native app's 49 dp.
+  // Chrome fits the 80 % safe circle to Android's 66 dp safe zone: at 7.449 the mark is the native app's.
   writeFileSync(join(web, "icon-maskable-512.png"), await r.png(maskable(512, 7.449), 512));
   writeFileSync(join(web, "favicon-32.png"), await r.png(logo, 32));
+  for (const size of [192, 512]) writeFileSync(join(web, `icon-${size}.png`), await r.png(logo, size));
+  writeFileSync(join(web, "apple-touch-icon.png"), rgb72(await r.png(maskable(180, 180 / 64), 180)));
 
   const icons = join(root, "apps/desktop/src-tauri/icons");
   const windows = [];
   for (const size of [32, 16, 20, 24, 40, 48, 64, 128, 256]) windows.push({ size, png: await r.png(logo, size) });
   writeFileSync(join(icons, "icon.ico"), ico(windows));
+  for (const [name, size] of [["32x32.png", 32], ["128x128.png", 128], ["128x128@2x.png", 256], ["icon.png", 512]]) {
+    writeFileSync(join(icons, name), await r.png(logo, size));
+  }
+
+  // The server's and the transcoder's programs (and the installer's), smallest first; the tray's.
+  const programs = [];
+  for (const size of [16, 20, 24, 32, 40, 48, 64, 128, 256]) programs.push({ size, png: await r.png(logo, size) });
+  for (const app of ["server", "transcoder"]) writeFileSync(join(root, `apps/${app}/assets/pley.ico`), ico(programs));
+  const tray = join(root, "apps/server/assets");
+  for (const size of [32, 64]) writeFileSync(join(tray, `tray-${size}.png`), await r.png(logo, size));
+  writeFileSync(join(tray, "tray-template.png"), await r.png(template(64, 1.5), 64));
 
   const mac = {};
   for (const size of [16, 32, 64, 128, 256, 512, 1024]) mac[size] = await r.png(MAC, size);
@@ -268,19 +298,19 @@ try {
     ]),
   );
 
-  // Samsung's 512×423: the P where a 360 px logo centred in it puts it, the tile's colour to the edges.
+  // Samsung's 512×423: the mark where a 360 px logo centred in it puts it, the tile's colour to the edges.
   const tizen = join(root, "apps/tizen/assets");
   writeFileSync(join(tizen, "icon.png"), rgb72(await r.png(onTile(512, 423, 360 / 64, 76, 31.5), 512, 423)));
 
   // LG's: the logo at full size without its rounded corners, on the colour appinfo.json's iconColor
-  // gives the TV's tile; and the launch picture with the P's own middle (33, 34.5 of the logo's 64)
-  // in the middle, 205 px tall.
+  // gives the TV's tile; and the launch picture with the mark's middle (32, 32 of the logo's 64)
+  // in the middle, 200 px wide.
   const webos = join(root, "apps/webos/assets");
   writeFileSync(join(webos, "icon.png"), rgb72(await r.png(maskable(80, 80 / 64), 80)));
   writeFileSync(join(webos, "largeIcon.png"), rgb72(await r.png(maskable(130, 130 / 64), 130)));
-  writeFileSync(join(webos, "splash.png"), rgb72(await r.png(onTile(1920, 1080, 5, 960 - 33 * 5, 540 - 34.5 * 5), 1920, 1080)));
+  writeFileSync(join(webos, "splash.png"), rgb72(await r.png(onTile(1920, 1080, 5, 960 - 32 * 5, 540 - 32 * 5), 1920, 1080)));
 
-  // Kodi's: the favicon's P where it is, without the rounded corners; the fanart a JPEG (Kodi's
+  // Kodi's: the favicon's mark where it is, without the rounded corners; the fanart a JPEG (Kodi's
   // checker takes up to 1000 KB).
   const kodi = join(root, "apps/kodi/plugin.video.pley/resources");
   writeFileSync(join(kodi, "icon.png"), rgb72(await r.png(maskable(512, 8), 512)));
@@ -301,7 +331,7 @@ try {
     mkdirSync(join(res, `drawable-${density}`), { recursive: true });
     writeFileSync(join(res, `drawable-${density}`, "tv_banner.png"), rgb72(await r.png(banner(width, height), width, height)));
   }
-  // The stores': Google Play rounds the square icon's corners itself, so the P sits as on the
+  // The stores': Google Play rounds the square icon's corners itself, so the mark sits as on the
   // Android app's adaptive icon; the feature graphic and TV banner are the banner, opaque.
   const stores = join(root, "deploy/stores");
   writeFileSync(join(stores, "icon-512.png"), await r.png(maskable(512, 7.449), 512));
@@ -313,7 +343,7 @@ try {
   // WizardSmallImageFile): the logo flush in it would touch the window's edge, so it's inset.
   const setup = join(root, "deploy/windows");
   for (const size of [58, 77, 97, 116, 124, 143, 159]) writeFileSync(join(setup, `setup-small-${size}.png`), await r.png(inset(size, 0.7), size));
-  console.log("rendered the web's maskable icon and PNG favicon, the desktop's .ico and .icns, the Samsung and LG apps' icons and LG's splash, Kodi's icon and fanart, Roku's icons and splash screens, the Android TV banner, the stores' pictures, and the Windows installer's");
+  console.log("rendered the web's icons and PNG favicon, the desktop's PNGs, .ico and .icns, the server's and transcoder's .ico and the tray's, the Samsung and LG apps' icons and LG's splash, Kodi's icon and fanart, Roku's icons and splash screens, the Android TV banner, the stores' pictures, and the Windows installer's");
 } finally {
   r.close();
 }

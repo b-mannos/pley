@@ -10,7 +10,7 @@ The pictures and words the app stores ask for besides the app itself.
 | `icon-114.png` | 114 × 114 | The Amazon Appstore's small icon |
 | `feature-graphic-1024x500.png` | 1024 × 500 | Google Play's feature graphic |
 | `tv-banner-1280x720.png` | 1280 × 720 | Google Play's Android TV banner, the Amazon Appstore's Fire TV icon |
-| `fire-tv-background-1920x1080.jpg` | 1920 × 1080 | The Amazon Appstore's Fire TV background, behind the app's page (the P top right, clear of the store's words) |
+| `fire-tv-background-1920x1080.jpg` | 1920 × 1080 | The Amazon Appstore's Fire TV background, behind the app's page (the mark top right, clear of the store's words) |
 
 `screenshots/` has the apps' screenshots as JPEGs, as Google Play takes
 them: phones at 1080 × 1920 (the player at 1920 × 1080), TVs at 1920 × 1080.

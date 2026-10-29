@@ -10,9 +10,10 @@
   --color-accent-hover: #7dd3fc;
   --color-accent-fg: #03131f;
 
-  /* Logo gradient and tile. */
+  /* Logo: the front poster's gradient (light to accent), the middle and back posters, the tile. */
   --color-brand-light: #bae6fd;
   --color-brand-deep: #0284c7;
+  --color-brand-far: #0c4a6e;
   --color-brand-tile: #0a1622;
 
   --color-bg: #0b0d10;

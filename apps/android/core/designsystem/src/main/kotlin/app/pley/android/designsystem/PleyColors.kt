@@ -63,6 +63,9 @@ object PleyColors {
     /** Brand gradients only: never behind text (3.4:1 with [Fg]). */
     val BrandDeep = Color(0xFF0284C7)
 
+    /** The logo's back poster. */
+    val BrandFar = Color(0xFF0C4A6E)
+
     /** The logo's tile. */
     val BrandTile = Color(0xFF0A1622)
 
