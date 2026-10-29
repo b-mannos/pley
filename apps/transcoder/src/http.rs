@@ -27,6 +27,7 @@ use crate::extract::Extractor;
 use crate::fingerprint::Fingerprinter;
 use crate::job::{JobFile, JobManager};
 use crate::keyframes::KeyframeStore;
+use crate::live::{LiveFile, LiveManager};
 use crate::metrics::{Metrics, render_prometheus};
 use crate::prefetch::Prefetcher;
 use crate::probe::{Prober, Rejected};
@@ -35,6 +36,8 @@ use crate::util::dir_size;
 
 pub struct AppState {
     pub jobs: Arc<JobManager>,
+    /// Live channels, sharing the jobs' transcode slots.
+    pub live: Arc<LiveManager>,
     pub conversions: Arc<Conversions>,
     pub prober: Arc<Prober>,
     pub extractor: Arc<Extractor>,
@@ -66,8 +69,11 @@ impl AppState {
         token: Option<String>,
         work_dir: PathBuf,
     ) -> Self {
+        let live = LiveManager::new(jobs.ffmpeg(), jobs.slots.clone(), work_dir.join("live"));
+        live.spawn_reaper();
         Self {
             prefetcher: Prefetcher::new(jobs.clone(), keyframes.clone()),
+            live,
             jobs,
             conversions,
             prober,
@@ -116,6 +122,7 @@ impl AppState {
             background_paused: self.jobs.background.paused() as u32,
             counters: self.metrics.snapshot(),
             jobs: self.jobs.list().iter().map(|j| j.status()).collect(),
+            live: self.live.list(),
         }
     }
 }
@@ -145,7 +152,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/jobs/{id}/{file}", get(job_file))
         .route("/conversions", post(create_conversion))
         .route("/conversions/{id}", get(get_conversion).delete(delete_conversion))
-        .route("/conversions/{id}/file", get(conversion_file));
+        .route("/conversions/{id}/file", get(conversion_file))
+        .route("/live", get(list_live).post(create_live))
+        .route("/live/{id}", get(get_live).delete(delete_live))
+        .route("/live/{id}/input", axum::routing::put(live_input))
+        .route("/live/{id}/{file}", get(live_file));
     Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/metrics", get(metrics))
@@ -492,6 +503,55 @@ async fn job_file(State(state): Shared, Path((id, file)): Path<(String, String)>
         .header(header::CACHE_CONTROL, "no-cache")
         .body(body)
         .map_err(|e| ApiError::Internal(e.into()))
+}
+
+async fn list_live(State(state): Shared) -> Json<Vec<pley_transcoder_api::LiveStatus>> {
+    Json(state.live.list())
+}
+
+async fn create_live(
+    State(state): Shared,
+    Json(req): Json<pley_transcoder_api::LiveRequest>,
+) -> ApiResult<(StatusCode, Json<pley_transcoder_api::LiveCreated>)> {
+    Ok((StatusCode::CREATED, Json(state.live.create(req)?)))
+}
+
+async fn get_live(State(state): Shared, Path(id): Path<String>) -> ApiResult<Json<pley_transcoder_api::LiveStatus>> {
+    Ok(Json(state.live.get(&id)?.status()))
+}
+
+async fn delete_live(State(state): Shared, Path(id): Path<String>) -> StatusCode {
+    if state.live.remove(&id) { StatusCode::NO_CONTENT } else { StatusCode::NOT_FOUND }
+}
+
+/// The channel's MPEG-TS, as long as it lasts: answered when it ends.
+async fn live_input(State(state): Shared, Path(id): Path<String>, body: Body) -> ApiResult<StatusCode> {
+    let live = state.live.get(&id)?;
+    state.live.feed(&live, body.into_data_stream()).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn live_file(State(state): Shared, Path((id, file)): Path<(String, String)>) -> ApiResult<Response> {
+    let live = state.live.get(&id)?;
+    match live.file(&file).await? {
+        LiveFile::Playlist(text) => Ok((
+            [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl"), (header::CACHE_CONTROL, "no-cache")],
+            text,
+        )
+            .into_response()),
+        LiveFile::Segment(path) => {
+            let handle = crate::live::open_segment(&path).await?;
+            let len = handle.metadata().await?.len();
+            Metrics::inc(&state.metrics.segments_served);
+            state.metrics.bytes_served.fetch_add(len, Ordering::Relaxed);
+            Response::builder()
+                .header(header::CONTENT_TYPE, "video/mp2t")
+                .header(header::CONTENT_LENGTH, len)
+                .header(header::CACHE_CONTROL, "max-age=60")
+                .body(Body::from_stream(ReaderStream::with_capacity(handle, 256 * 1024)))
+                .map_err(|e| ApiError::Internal(e.into()))
+        }
+    }
 }
 
 #[cfg(test)]

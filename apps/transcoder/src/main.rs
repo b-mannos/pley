@@ -21,6 +21,7 @@ mod hls;
 mod http;
 mod job;
 mod keyframes;
+mod live;
 mod matroska;
 mod memory;
 mod metrics;
@@ -476,6 +477,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
             conversions_mp4: true,
             hls_variants: true,
             live_bitrate: true,
+            live: true,
             ..ff.caps.clone()
         },
         limits,
@@ -495,6 +497,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         work_dir.clone(),
     ));
     state.spawn_disk_usage();
+    let live = state.live.clone();
 
     let listener = tokio::net::TcpListener::bind(args.listen).await?;
     let addr = listener.local_addr()?;
@@ -530,6 +533,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
             // Stop ffmpeg first: requests waiting for segments then fail right
             // away instead of keeping the graceful drain open.
             conversions.shutdown();
+            live.shutdown();
             jobs.shutdown().await;
             if tokio::time::timeout(Duration::from_secs(5), &mut server).await.is_err() {
                 tracing::warn!("some requests were still running at shutdown");

@@ -614,6 +614,10 @@ pub struct Capabilities {
     /// colour primaries `h264_amf` leaves unsaid.
     #[serde(default)]
     pub h264_metadata: bool,
+    /// Live channels: an MPEG-TS stream sent in as it comes made into a
+    /// live HLS stream (`/v1/live`). Older transcoders lack it.
+    #[serde(default)]
+    pub live: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -697,6 +701,130 @@ pub struct TranscoderStatus {
     pub background_paused: u32,
     pub counters: Counters,
     pub jobs: Vec<JobStatus>,
+    /// Live channels being made ([`Capabilities::live`]).
+    #[serde(default)]
+    pub live: Vec<LiveStatus>,
+}
+
+// ---------------------------------------------------------------------------
+// Live channels (IPTV)
+// ---------------------------------------------------------------------------
+
+/// A live channel to make (`POST /v1/live`). Its MPEG-TS comes as the body
+/// of `PUT /v1/live/{id}/input`, as the channel sends it; players read
+/// `index.m3u8`, a sliding window of segments, and its segments. Every player
+/// of a channel reads the same stream, so it is made for all of them: H.264
+/// and AAC stereo, the video copied when it is H.264 already (and not
+/// interlaced, when `deinterlace`), the audio when it is AAC.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LiveRequest {
+    /// The channel's name, for status pages.
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Who watches it, for status pages.
+    #[serde(default)]
+    pub owner: Option<String>,
+    /// Transcode interlaced video into progressive (double rate where a
+    /// hardware encoder makes it), rather than copy it as it is.
+    #[serde(default = "default_true")]
+    pub deinterlace: bool,
+    /// Transcode the video even when it could be copied.
+    #[serde(default)]
+    pub force_transcode: bool,
+    /// The most lines a transcode makes (default: as many as the channel's).
+    #[serde(default)]
+    pub max_height: Option<u32>,
+    /// A transcode's video bitrate cap, kbit/s (default chosen from its size).
+    #[serde(default)]
+    pub max_bitrate_kbps: Option<u32>,
+    #[serde(default)]
+    pub hwaccel: HwAccel,
+    /// How much is kept behind the live edge for pausing and going back,
+    /// in seconds (default 300; at least 30).
+    #[serde(default)]
+    pub window_seconds: Option<u32>,
+}
+
+impl Default for LiveRequest {
+    fn default() -> Self {
+        Self {
+            label: None,
+            owner: None,
+            deinterlace: true,
+            force_transcode: false,
+            max_height: None,
+            max_bitrate_kbps: None,
+            hwaccel: HwAccel::Auto,
+            window_seconds: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LiveCreated {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveState {
+    /// No input yet, or not enough of it to tell what it is.
+    #[default]
+    Waiting,
+    /// FFmpeg is making segments.
+    Running,
+    /// The input ended or the job was stopped.
+    Ended,
+    /// FFmpeg failed, or the input isn't a stream it reads ([`LiveStatus::error`]).
+    Failed,
+}
+
+/// What a live channel's input carries and what is made of it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct LivePlan {
+    /// The input's video codec (`h264`, `mpeg2video`, `hevc`…).
+    #[serde(default)]
+    pub video_codec: Option<String>,
+    #[serde(default)]
+    pub width: Option<i64>,
+    #[serde(default)]
+    pub height: Option<i64>,
+    #[serde(default)]
+    pub frame_rate: Option<f64>,
+    #[serde(default)]
+    pub interlaced: bool,
+    /// The input's audio codec (`aac`, `mp2`, `ac3`…).
+    #[serde(default)]
+    pub audio_codec: Option<String>,
+    #[serde(default)]
+    pub audio_channels: Option<i64>,
+    /// `copy`, or the encoder transcoding it (`h264_nvenc`, `libx264`…).
+    pub video: String,
+    /// `copy` or `aac`.
+    pub audio: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct LiveStatus {
+    pub id: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub owner: Option<String>,
+    pub state: LiveState,
+    #[serde(default)]
+    pub plan: Option<LivePlan>,
+    #[serde(default)]
+    pub error: Option<String>,
+    pub created_at_ms: i64,
+    /// Bytes of input received so far.
+    pub bytes_in: u64,
+    /// Segments made so far.
+    pub segments: u64,
+    /// How far behind real time the newest segment came out, ms: what the
+    /// input or the transcode lags (0 while it keeps up).
+    #[serde(default)]
+    pub lag_ms: i64,
 }
 
 // ---------------------------------------------------------------------------

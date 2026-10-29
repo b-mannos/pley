@@ -1349,6 +1349,11 @@ impl JobManager {
         }
     }
 
+    /// FFmpeg as detected, for live channels ([`crate::live`]).
+    pub fn ffmpeg(&self) -> Arc<Ffmpeg> {
+        self.ff.clone()
+    }
+
     /// Stop every job (concurrently) and refuse new ones.
     pub async fn shutdown(&self) {
         self.closed.store(true, Relaxed);

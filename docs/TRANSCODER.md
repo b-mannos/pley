@@ -65,6 +65,7 @@ or `~/.cache/pley-transcoder` on Linux.
 |---|---|---|
 | `jobs/<id>/` | a job's segments on disk | see [Housekeeping](#housekeeping) |
 | `conversions/` | converted files | see [Conversions](#conversions) |
+| `live/<id>/` | a live channel's segments | a sliding window; the folder goes with the channel |
 | `keyframes/` | keyframe indexes | unused 90 days, then past 256 MB |
 | `subtitles/` | converted and extracted subtitles, fonts attached to files | unused 60 days, then past 512 MB |
 | `trickplay/` | seek-preview sheets | unused 1 day, then past 1 GB |
@@ -141,6 +142,13 @@ Errors are `{"code": "...", "message": "..."}`:
 | GET | `/v1/conversions/{id}` | `ConversionStatus` |
 | DELETE | `/v1/conversions/{id}` | `204`: stop its FFmpeg, delete the file |
 | GET | `/v1/conversions/{id}/file` | the converted file |
+| POST | `/v1/live` | `LiveRequest` → `201 LiveCreated`: a live channel (see [Live channels](#live-channels)) |
+| GET | `/v1/live` | every live channel's `LiveStatus` |
+| GET | `/v1/live/{id}` | one live channel's `LiveStatus` |
+| DELETE | `/v1/live/{id}` | `204`: stop it, delete its segments |
+| PUT | `/v1/live/{id}/input` | the channel's MPEG-TS as it comes; answered `204` when it ends |
+| GET | `/v1/live/{id}/index.m3u8` | its live playlist, once 2 segments are made |
+| GET | `/v1/live/{id}/s{n}.ts` | its segment `n` |
 
 `?` marks an optional field. The full types, with every response field, are in
 `packages/transcoder-api/src/lib.rs`.
@@ -382,6 +390,34 @@ decode, a picture too big for it). Capabilities `conversions`, and
   then the least recently used past 64 GB; one deleted is made again when
   asked for. After a restart the transcoder finds its files by name and
   deletes half-made ones.
+
+## Live channels
+
+A live channel (IPTV) is made from an MPEG-TS stream that the caller sends as
+it comes, as the body of `PUT /v1/live/{id}/input` (chunked). FFmpeg reads it
+from its standard input: the caller holds the one connection to the channel,
+which IPTV providers count, and the transcoder needn't reach the provider.
+
+- The first 1.5 MB, or what came in 2.5 s, is probed (`ffprobe` on a pipe).
+  Then FFmpeg starts with that and the rest after it.
+- Every player of a channel reads the same stream, so it is made for all of
+  them: H.264 and AAC. The video is copied when it is H.264 already, 8-bit,
+  no taller than `max_height` and, with `deinterlace` (the default),
+  progressive; otherwise it is transcoded, with the best H.264 encoder that
+  takes frames from system memory (NVENC, Quick Sync, AMF, VideoToolbox),
+  else x264. The audio is copied when it is AAC, else made AAC stereo.
+- Interlaced video is deinterlaced with `yadif`: each field a frame (50 or
+  60 a second) where a hardware encoder makes it, one frame of the two on
+  x264.
+- The output is a live playlist of 2 s segments, `s{n}.ts`, with a keyframe
+  at each segment's start, keeping `window_seconds` (default 300) behind
+  the live edge for pausing and going back. Older segments are deleted.
+- A transcode takes a transcode slot (`503 busy` when none is free); a copy
+  doesn't.
+- The input ending, saying nothing for 20 s, or `DELETE` ends the channel.
+  A channel nobody read anything of for 90 s is stopped (a caller gone).
+- `LiveStatus.lag_ms` is how far the segments made fall behind real time:
+  0 while the transcode keeps up.
 
 ## How HLS jobs work
 
