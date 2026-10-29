@@ -1017,6 +1017,17 @@ impl Plan {
                 a.push_all(["-map", &format!("0:{}", au.stream_index)]);
                 if au.copy {
                     a.push_all(["-c:a", "copy"]);
+                    // FFmpeg copies the packets the demuxer's seek landed
+                    // on before the seek point too (`-copypriorss` -1): up
+                    // to a keyframe interval of sound (1.5 s of E-AC-3 in
+                    // Matroska) that the previous process's segment has
+                    // already played. Beside transcoded video, which starts
+                    // at the seek point, they are left out. (A remux's video
+                    // starts at the keyframe before its seek point, and its
+                    // sound with it.)
+                    if seek_ms > 0 && !copy {
+                        a.push_all(["-copypriorss:a", "0"]);
+                    }
                 } else {
                     if let Some(downmix) = au.downmix {
                         a.push_all(["-af", downmix]);
@@ -2667,6 +2678,32 @@ mod tests {
         assert!(plan.warnings.iter().any(|w| w.contains("turned")), "{:?}", plan.warnings);
         let plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, Some(&kf)).unwrap();
         assert!(plan.video.as_ref().unwrap().copy);
+    }
+
+    /// Copied sound beside transcoded video starts at the seek point, as the
+    /// video does, not with the packets before it the seek landed on.
+    #[test]
+    fn copied_audio_after_a_restart_leaves_out_what_came_before_the_seek() {
+        let ff = ffmpeg_with(vec![x264()], vec![]);
+        let mut req = request();
+        req.audio = Some(AudioRequest { mode: AudioMode::Copy, ..Default::default() });
+        let plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, None).unwrap();
+        assert!(plan.audio.as_ref().unwrap().copy && !plan.video.as_ref().unwrap().copy);
+        let args = args_string(&plan, 3, 8);
+        assert!(args.contains("-ss 12.000") && args.contains("-c:a copy -copypriorss:a 0 -map_metadata"), "{args}");
+        // Nothing to leave out from the start.
+        assert!(!args_string(&plan, 0, 8).contains("copypriorss"));
+        // A remux keeps the sound from its keyframe, with its video.
+        req.video = Some(VideoRequest { mode: VideoMode::Copy, ..Default::default() });
+        let kf: Vec<i64> = (0..30).map(|i| i * 2_000).collect();
+        let plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, Some(&kf)).unwrap();
+        let args = args_string(&plan, 3, 8);
+        assert!(args.contains("-noaccurate_seek") && !args.contains("copypriorss"), "{args}");
+        // Converted sound has no packets to leave out.
+        let mut req = request();
+        req.audio = Some(AudioRequest::default());
+        let plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, None).unwrap();
+        assert!(!args_string(&plan, 3, 8).contains("copypriorss"));
     }
 
     #[test]

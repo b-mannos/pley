@@ -600,6 +600,17 @@ half-made ones are deleted.
   peak +0.4 dBTP before, -0.9 after, the whole -10.4 LUFS both times. The
   plan's segments start their sound where they did (to the sample), from
   0 and from a restart alike.
+
+  Copied sound beside transcoded video, in a process that starts past
+  0, leaves out the packets before the seek point (`-copypriorss:a 0`).
+  FFmpeg copies by default whatever the demuxer's seek landed on, and
+  the video, decoded, starts at the seek point: an E-AC-3 track in
+  Matroska restarted at segment 3 (12 s) began 1.57 s before its video,
+  1.47 s over the sound of the previous process's segment 2. Now it
+  begins at the first packet from the boundary (13.427 s against the
+  video's 13.400 in the segments' timeline); AAC in the same file was
+  already cut there. A remux keeps its sound from the keyframe its video
+  starts on.
 - **Remux.** H.264 and HEVC video is copied into HLS, with segments cut
   exactly on the source's keyframes.
   - Matroska and WebM: the keyframe index is read instantly from the file's
