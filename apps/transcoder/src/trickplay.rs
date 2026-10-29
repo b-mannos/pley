@@ -20,7 +20,7 @@ use crate::background::Background;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::{Lock, Locks};
 use crate::ffmpeg::Ffmpeg;
-use crate::plan::{ZSCALE_TONEMAP, untagged_hdr_fix};
+use crate::plan::{PLACEBO_STATIC_PEAK, ZSCALE_TONEMAP, untagged_hdr_fix};
 use crate::probe::Prober;
 use crate::util::{MEDIA_INPUT_OPTIONS, background_priority, file_key, input_arg, touch};
 
@@ -130,8 +130,9 @@ impl Trickplay {
         let placebo = range.is_hdr() && caps.tonemappers.contains(&Tonemapper::Libplacebo);
         let picture = if placebo {
             // Handles Dolby Vision profile 5 too (its RPU is on every keyframe).
+            // Tone mapped as the video is, by the stream's metadata.
             format!(
-                "libplacebo=w={width}:h={height}:format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=auto"
+                "libplacebo=w={width}:h={height}:format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv:tonemapping=auto:{PLACEBO_STATIC_PEAK}"
             )
         } else if range.is_hdr() && caps.tonemappers.contains(&Tonemapper::Zscale) {
             // zimg needs colours: Dolby Vision profile 5 frames have none.

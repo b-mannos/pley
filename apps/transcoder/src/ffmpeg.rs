@@ -21,7 +21,7 @@ use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 9;
+const DETECTION_REVISION: u32 = 10;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -461,7 +461,8 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
             return (false, false);
         }
         let vf = format!(
-            "{HDR_TAGS},libplacebo=w=160:h=120:format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:tonemapping=auto"
+            "{HDR_TAGS},libplacebo=w=160:h=120:format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:tonemapping=auto:{}",
+            crate::plan::PLACEBO_STATIC_PEAK
         );
         tokio::join!(
             test_filter(ffmpeg, &["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"], &vf),

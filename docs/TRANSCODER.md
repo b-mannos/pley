@@ -376,6 +376,24 @@ half-made ones are deleted.
   libplacebo comes last: it is several times slower than zscale there, and
   only profile 5 picks it, for its colors.
 
+  libplacebo tone maps by the stream's own metadata (`peak_detect=0`):
+  HDR10's mastering display and content light levels, Dolby Vision's and
+  HDR10+'s per scene. Its peak detection, on by default, follows the
+  brightest pixels of the frames it has seen, and each FFmpeg process starts
+  with none: a process started by a seek, a new process window or a size
+  switch made its first frames brighter or darker than the process before
+  it made the same frames, a jump at the seam between their segments. On a
+  test clip whose highlight brightens and dims (200 to 4000 nits every
+  3 s), a face's brightness on the first frame of a segment was 121 (of 255)
+  from a process started there and 128 from one started a segment or the
+  file earlier (PSNR 35 dB between them); without detection the three
+  processes give the same frames bit for bit, the face at 111 throughout
+  (a little darker: the curve is set for the stream's stated 4000 nits rather
+  than the 900 the frames reached). Thumbnails and seek previews tone map the
+  same way. `tonemap_opencl` has peak detection that can't be turned off
+  (63 frames, in its kernel), so it has the same seams; zimg's `tonemap`
+  has none.
+
   libplacebo keeps the shaders it compiles in the work directory's
   `libplacebo/` folder (made at start-up, with an absolute path, since FFmpeg
   runs in a job's folder), so later processes skip about 0.2 s of compiling:

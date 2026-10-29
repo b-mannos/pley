@@ -53,6 +53,16 @@ pub const ZSCALE_TONEMAP: &str = "zscale=t=linear:npl=100,format=gbrpf32le,zscal
 pub fn zscale_tonemap(w: i64, h: i64) -> String {
     ZSCALE_TONEMAP.replacen("zscale=t=linear", &format!("zscale=w={w}:h={h}:t=linear"), 1)
 }
+/// libplacebo tone maps by the stream's own metadata (HDR10's mastering
+/// display and content light levels, Dolby Vision's and HDR10+'s per scene)
+/// rather than by the peak it measures in the frames it has seen. Each
+/// FFmpeg process starts measuring afresh, so with detection on, the first
+/// frames after a seek or a process window's start came out brighter or
+/// darker than the same frames made by a process already running, a jump at
+/// the seam between their segments (measured: 5 % in a face's brightness on
+/// a test clip whose highlight changes). Without it every process makes the
+/// same frames, bit for bit, whatever it started with.
+pub const PLACEBO_STATIC_PEAK: &str = "peak_detect=0";
 const OPENCL_TONEMAP: &str = "format=p010,hwupload,tonemap_opencl=tonemap=hable:desat=0:t=bt709:m=bt709:p=bt709:format=nv12,hwdownload,format=nv12";
 
 /// A `setparams` filter giving HDR frames the colour properties they lack
@@ -949,7 +959,9 @@ impl Plan {
                 // Shaders compiled by earlier processes save ~0.2 s at the
                 // start of each one.
                 let cache = shader_cache.and_then(shader_cache_option).map(|o| format!(":{o}")).unwrap_or_default();
-                pre.push(format!("libplacebo=w={w}:h={h}:format={format}:{target}:range=tv:tonemapping=auto{cache}"));
+                pre.push(format!(
+                    "libplacebo=w={w}:h={h}:format={format}:{target}:range=tv:tonemapping=auto:{PLACEBO_STATIC_PEAK}{cache}"
+                ));
                 match pipeline {
                     // Frames stay in Vulkan memory all the way into h264_vulkan.
                     Pipeline::Vulkan { encode_on_gpu: true } => return format!("{input}{}[vout]", pre.join(",")),
@@ -1714,6 +1726,8 @@ mod tests {
         );
         assert!(args.contains("-output_ts_offset 12.000"));
         assert!(args.contains("libplacebo=w=1920:h=1080"));
+        // By the stream's metadata: every process makes the same frames.
+        assert!(args.contains("range=tv:tonemapping=auto:peak_detect=0"), "{args}");
         assert!(args.contains("-c:v h264_nvenc"));
         assert!(args.contains("-force_key_frames expr:gte(t,n_forced*4)"));
         // Splits for boundaries 16,20,24,28 s relative to the 12 s start, 0.5 s early.
@@ -1761,7 +1775,8 @@ mod tests {
         };
         let args: Vec<String> = plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
         assert!(
-            args.join(" ").contains("tonemapping=auto:shader_cache=/var/cache/pley-transcoder/libplacebo/,"),
+            args.join(" ")
+                .contains("tonemapping=auto:peak_detect=0:shader_cache=/var/cache/pley-transcoder/libplacebo/,"),
             "{args:?}"
         );
         // Other tone mappers have no such cache.
@@ -1789,7 +1804,7 @@ mod tests {
         assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Vulkan { encode_on_gpu: false });
         let args = args_string(&plan, 0, 2);
         assert!(args.contains("-hwaccel vulkan -hwaccel_device vk -hwaccel_output_format vulkan"), "{args}");
-        assert!(args.contains("tonemapping=auto,hwdownload,format=nv12[vout]"), "{args}");
+        assert!(args.contains("tonemapping=auto:peak_detect=0,hwdownload,format=nv12[vout]"), "{args}");
         assert!(args.contains("-c:v h264_nvenc"), "{args}");
         assert_eq!(plan.video_plan(&m, None).unwrap().pipeline.as_deref(), Some("hybrid"));
 
@@ -1814,7 +1829,7 @@ mod tests {
         let plan = Plan::build(&req, &m, &ff, None).unwrap();
         assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Vulkan { encode_on_gpu: false });
         let args = args_string(&plan, 0, 2);
-        assert!(args.contains("tonemapping=auto,hwdownload,format=nv12[vout]"), "{args}");
+        assert!(args.contains("tonemapping=auto:peak_detect=0,hwdownload,format=nv12[vout]"), "{args}");
         assert!(args.contains("-c:v h264_nvenc"));
         assert_eq!(plan.video_plan(&m, None).unwrap().pipeline.as_deref(), Some("hybrid"));
 
@@ -2104,7 +2119,7 @@ mod tests {
         assert!(
             args.contains(
                 "libplacebo=w=1920:h=1080:format=p010:colorspace=bt2020nc:color_primaries=bt2020:color_trc=smpte2084:\
-                 range=tv:tonemapping=auto,hwdownload,format=p010[vout]"
+                 range=tv:tonemapping=auto:peak_detect=0,hwdownload,format=p010[vout]"
             ),
             "{args}"
         );
