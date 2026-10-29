@@ -494,7 +494,7 @@ fn range_problem(v: &MediaStream, caps: &Caps) -> Option<String> {
         }
         if v.is_dolby_vision_only() {
             // No HDR10/SDR base layer: colours are wrong without DV processing.
-            return Some(format!("{label} needs a Dolby Vision screen: it's converted to SDR."));
+            return Some(format!("{label} converted to SDR."));
         }
         // Profile 7/8: an HDR10 or HLG base layer plays as plain HDR.
         if caps.hdr {
@@ -503,7 +503,7 @@ fn range_problem(v: &MediaStream, caps: &Caps) -> Option<String> {
     } else if caps.hdr {
         return None;
     }
-    Some(format!("{label} is converted to SDR for this screen."))
+    Some(format!("{label} converted to SDR."))
 }
 
 /// What a version 2 player does with a video stream.
@@ -569,7 +569,7 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool
     let label = v.dynamic_range_label();
     // What the video is converted to when the screen doesn't show it.
     let out = converted.dynamic_range().label();
-    let elsewhere = || format!("{label} is converted to {out} for this screen.");
+    let elsewhere = || format!("{label} converted to {out}.");
     match v.dynamic_range() {
         DynamicRange::Sdr => fits(v, caps),
         DynamicRange::Hdr10 if caps.shows("hdr10") => fits(v, caps),
@@ -611,9 +611,9 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool
             // player doesn't decode the profile is told apart from the rest.
             let needs_dolby_vision = || {
                 if caps.shows("dolby_vision") {
-                    format!("This player doesn't decode {}: it's converted to {out}.", v.dolby_vision_label())
+                    format!("{} converted to {out}.", v.dolby_vision_label())
                 } else {
-                    format!("{label} needs a Dolby Vision screen: it's converted to {out}.")
+                    format!("{label} converted to {out}.")
                 }
             };
             let base = match (profile, compat) {
@@ -622,7 +622,7 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool
                     let mut base = fits(v, caps);
                     if base.copy {
                         base.direct = false;
-                        base.reasons.push(format!("{label} plays as its {base_layer} base layer, repackaged."));
+                        base.reasons.push(format!("{label} plays as {base_layer}."));
                     }
                     base
                 }
@@ -643,19 +643,13 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool
                             copy: true,
                             dolby_vision: DolbyVisionMode::Signal,
                             strip_hdr10plus: true,
-                            reasons: vec![format!(
-                                "{label} plays as Dolby Vision without its HDR10+: this player's Dolby Vision \
-                                 decoder can't take both."
-                            )],
+                            reasons: vec![format!("{label} plays without HDR10+.")],
                         };
                     }
                     let mut base = base;
                     if base.direct {
                         base.direct = false;
-                        base.reasons.push(format!(
-                            "{label} plays as its {base_layer} base layer, repackaged: this player's Dolby Vision \
-                             decoder can't take both."
-                        ));
+                        base.reasons.push(format!("{label} plays as {base_layer}."));
                     }
                     base
                 }
@@ -674,20 +668,15 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool
                     dolby_vision: DolbyVisionMode::Signal,
                     strip_hdr10plus: hybrid,
                     reasons: vec![format!(
-                        "{label} is repackaged to stay Dolby Vision: its file says level {}, above this player's {}, \
-                         where its picture needs {}.",
+                        "Dolby Vision level {} relabelled {}.",
                         v.dv_level.unwrap_or_default(),
-                        d.max_level.unwrap_or_default(),
                         v.dv_level_named().unwrap_or_default(),
                     )],
                 },
-                Some(d) if !base.direct => {
+                Some(_) if !base.direct => {
                     let mut base = base;
-                    let max = d.max_level.unwrap_or_default();
-                    base.reasons.insert(
-                        0,
-                        format!("Dolby Vision level {} is above this player's {max}.", v.dv_level.unwrap_or_default()),
-                    );
+                    base.reasons
+                        .insert(0, format!("Dolby Vision level {} not supported.", v.dv_level.unwrap_or_default()));
                     base
                 }
                 // Profile 7 for a player that decodes 8.1: converted while
@@ -695,9 +684,9 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool
                 _ if profile == 7 && signal && decoder_of(8).is_some_and(takes_named) => {
                     // What profile 8.1 can't carry.
                     let left_out = match (v.dv_el == Some(DolbyVisionLayer::Fel), hybrid) {
-                        (true, true) => ", without its enhancement layer and HDR10+",
-                        (true, false) => ", without its enhancement layer",
-                        (false, true) => ", without its HDR10+",
+                        (true, true) => ", enhancement layer and HDR10+ dropped",
+                        (true, false) => ", enhancement layer dropped",
+                        (false, true) => ", HDR10+ dropped",
                         (false, false) => "",
                     };
                     VideoVerdict {
@@ -705,7 +694,7 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool
                         copy: true,
                         dolby_vision: DolbyVisionMode::To81,
                         strip_hdr10plus: hybrid,
-                        reasons: vec![format!("{label} is converted to profile 8.1 for this player{left_out}.")],
+                        reasons: vec![format!("{label} converted to P8.1{left_out}.")],
                     }
                 }
                 _ => base,
@@ -880,29 +869,26 @@ fn fits(v: &MediaStream, caps: &Caps) -> VideoVerdict {
         return if caps.video(&v.codec) {
             VideoVerdict::plays()
         } else {
-            VideoVerdict::no(format!("This player can't play {} video.", codec_label(&v.codec)))
+            VideoVerdict::no(format!("{} video not supported.", codec_label(&v.codec)))
         };
     };
     let entries: Vec<&VideoDecoder> = decoders.iter().filter(|d| d.codec.eq_ignore_ascii_case(&v.codec)).collect();
     if entries.is_empty() {
-        return VideoVerdict::no(format!("This player can't play {} video.", codec_label(&v.codec)));
+        return VideoVerdict::no(format!("{} video not supported.", codec_label(&v.codec)));
     }
     let depth = bit_depth(v);
     if entries.iter().any(|d| takes(d, v, depth)) {
         return VideoVerdict::plays();
     }
-    let mut what = match (v.width, v.height) {
-        (Some(w), Some(h)) => format!("{w}×{h}"),
-        _ => String::new(),
-    };
+    let mut what = vec![codec_label(&v.codec).to_owned()];
+    if let (Some(w), Some(h)) = (v.width, v.height) {
+        what.push(format!("{w}×{h}"));
+    }
     if let Some(fps) = v.frame_rate {
-        what.push_str(&format!(" at {} fps", trim_fps(fps)));
+        what.push(format!("{} fps", trim_fps(fps)));
     }
-    what.push_str(&format!(", {depth}-bit"));
-    if let Some(profile) = &v.profile {
-        what.push_str(&format!(" ({profile})"));
-    }
-    VideoVerdict::no(format!("This player can't play {} {}.", codec_label(&v.codec), what.trim_start()))
+    what.push(format!("{depth}-bit"));
+    VideoVerdict::no(format!("{} not supported.", what.join(" ")))
 }
 
 /// A frame rate as people write it: 23.976, 25, 59.94.
@@ -1051,7 +1037,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             subtitle: None,
             audio_index: None,
             burn_index: None,
-            reasons: if direct { vec![] } else { vec!["This file hasn't been analyzed yet.".into()] },
+            reasons: if direct { vec![] } else { vec!["File not analyzed yet.".into()] },
             quality: None,
             variants: Vec::new(),
         };
@@ -1069,15 +1055,14 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     // when the file doesn't play as it is (HLS segments carry no subtitles).
     let player_draws = pictures.is_some_and(|s| !s.external && caps.shows_subtitles(&s.codec));
     let mut burn = pictures.filter(|_| !player_draws);
-    let burn_reason =
-        |s: &MediaStream| format!("{} subtitles are pictures, drawn onto the video.", codec_label(&s.codec));
+    let burn_reason = |s: &MediaStream| format!("{} subtitles burned in.", codec_label(&s.codec));
     if let Some(s) = burn {
         reasons.push(burn_reason(s));
     }
 
     let container_ok = caps.container(container);
     if !container_ok {
-        reasons.push(format!("This player can't open {} files.", container.to_uppercase()));
+        reasons.push(format!("{} not supported.", container.to_uppercase()));
     }
     // Version 2: whether the video plays as it is, and whether it plays
     // copied into HLS (a profile 7 base layer, say), which version 1 takes
@@ -1109,7 +1094,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         Some(v) => {
             let mut ok = true;
             if !caps.video(&v.codec) {
-                reasons.push(format!("This player can't play {} video.", codec_label(&v.codec)));
+                reasons.push(format!("{} video not supported.", codec_label(&v.codec)));
                 ok = false;
             }
             if let Some(problem) = range_problem(v, caps) {
@@ -1117,7 +1102,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
                 ok = false;
             }
             if v.codec == "h264" && v.bit_depth.unwrap_or(8) > 8 {
-                reasons.push("Browsers can't play 10-bit H.264.".into());
+                reasons.push("10-bit H.264 not supported.".into());
                 ok = false;
             }
             video_copy_ok = ok;
@@ -1126,10 +1111,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             // plays only as it is, else converted.
             if ok && v.is_dolby_vision_only() {
                 video_copy_ok = false;
-                reasons.push(format!(
-                    "{} can't be repackaged for this player without losing its colours: it's converted to SDR.",
-                    v.dynamic_range_label()
-                ));
+                reasons.push(format!("{} converted to SDR.", v.dynamic_range_label()));
             }
             ok
         }
@@ -1137,7 +1119,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     // Played or copied as they are, its frames stutter: about one in five is
     // shown out of turn or dropped.
     let video_ok = if video.is_some_and(|v| v.decode_order_times) {
-        reasons.push("This file's frames carry the wrong times; converting the video puts them right.".into());
+        reasons.push("Frame timing fixed.".into());
         video_copy_ok = false;
         false
     } else {
@@ -1147,7 +1129,7 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         None => true,
         Some(a) if caps.plays_audio(&a.codec) => true,
         Some(a) => {
-            reasons.push(format!("This player can't play {} audio.", codec_label(&a.codec)));
+            reasons.push(format!("{} audio not supported.", codec_label(&a.codec)));
             false
         }
     };
@@ -1156,12 +1138,12 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
         _ => true,
     } || (v2 && caps.audio_track_switching == Some(true));
     if !audio_is_default {
-        reasons.push("This player plays only a file's main audio track.".into());
+        reasons.push("Audio track switching not supported.".into());
     }
     let bitrate_ok = req.max_bitrate.is_none_or(|max| file.bitrate.unwrap_or(0) <= max as i64 * 1000);
     let size_ok = req.max_height.is_none_or(|max| video.and_then(|v| v.height).unwrap_or(0) <= max as i64);
     if !bitrate_ok || !size_ok {
-        reasons.push("You picked a lower quality.".into());
+        reasons.push("Lower quality picked.".into());
     }
 
     let audio_index = audio.map(|a| a.index);
@@ -1197,8 +1179,8 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
     }
 
     match req.mode {
-        PlaybackMode::Remux if direct_ok => reasons.push("The player asked for the file repackaged.".into()),
-        PlaybackMode::Transcode => reasons.push("The player asked for the file converted.".into()),
+        PlaybackMode::Remux if direct_ok => reasons.push("Remux requested.".into()),
+        PlaybackMode::Transcode => reasons.push("Transcode requested.".into()),
         _ => {}
     }
     let mut quality = None;
@@ -2298,7 +2280,7 @@ mod tests {
         assert_eq!(d.method, Method::Transcode, "neither played as it is nor copied");
         assert_eq!(d.video.as_ref().unwrap().mode, VideoMode::Transcode);
         assert_eq!(d.quality, Some("8m"), "at its own size");
-        assert!(d.reasons.iter().any(|r| r.contains("wrong times")), "{:?}", d.reasons);
+        assert!(d.reasons.iter().any(|r| r.contains("Frame timing")), "{:?}", d.reasons);
         req.mode = PlaybackMode::Remux;
         assert_eq!(decide(&f, Some(&i), &i.streams, &req).method, Method::Transcode, "a copy keeps the times");
         req.mode = PlaybackMode::Direct;
@@ -2492,7 +2474,7 @@ mod tests {
         assert_eq!(d.method, Method::Remux);
         assert_eq!(d.video.unwrap().mode, VideoMode::Copy);
         assert_eq!(d.audio.unwrap().mode, AudioMode::Transcode);
-        assert_eq!(d.reasons, ["This player can't play TrueHD audio."]);
+        assert_eq!(d.reasons, ["TrueHD audio not supported."]);
 
         // HDR10 and SDR HEVC alike.
         for range in [DynamicRange::Hdr10, DynamicRange::Sdr] {
@@ -2547,7 +2529,7 @@ mod tests {
         assert_eq!((d.method, d.reasons.len()), (Method::Direct, 0));
         let d = decide(&file("mkv", 0), None, &[], &req);
         assert_eq!(d.method, Method::Transcode);
-        assert_eq!(d.reasons, ["This file hasn't been analyzed yet."]);
+        assert_eq!(d.reasons, ["File not analyzed yet."]);
         assert!(d.video.is_some() && d.audio.is_some());
         // The player claims the container: trusted.
         let mut req = request();

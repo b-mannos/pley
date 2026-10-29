@@ -881,7 +881,7 @@ impl JobManager {
             .ok_or_else(|| ApiError::Busy(format!("all {} transcode slots are in use", self.limits.max_jobs)))?;
         let hw = slot.hw;
         let fallback = if let Some(software) = retreat {
-            if job.warn("the hardware encoder failed, using software encoding") {
+            if job.warn("hardware encoder failed, using software") {
                 let failed = planned.map_or("the hardware encoder", |e| e.name.as_str());
                 tracing::warn!(
                     job = %job.id,
@@ -898,7 +898,7 @@ impl JobManager {
                     self.limits.max_hw_jobs
                 )));
             };
-            job.warn("hardware encoder sessions exhausted, using software encoding");
+            job.warn("hardware encoder busy, using software");
             Some(software)
         } else {
             None
@@ -1418,7 +1418,7 @@ impl Job {
     /// The GPU couldn't decode the video: the CPU does, which the job says.
     fn decoded_in_software(&self) {
         self.runtime.lock().decoded_in_software = true;
-        if self.warn("the GPU couldn't decode this video: it is decoded on the CPU") {
+        if self.warn("GPU decoding failed, using the CPU") {
             tracing::warn!(job = %self.id, "hardware decoding failed: decoding on the CPU");
         }
     }
@@ -1572,14 +1572,12 @@ impl Job {
             Ok(Ok(edited)) => {
                 if let Some(err) = edited.first_error.as_deref().filter(|_| edited.rpus_dropped > 0) {
                     tracing::debug!(job = %self.id, "segment {n}: {} RPUs left out: {err}", edited.rpus_dropped);
-                    self.warn(&format!(
-                        "some Dolby Vision metadata could not be made profile 8.1 and was left out ({err})"
-                    ));
+                    self.warn("some Dolby Vision metadata dropped");
                 }
             }
             Ok(Err(err)) => {
                 tracing::warn!(job = %self.id, "segment {n} could not be edited: {err}");
-                self.warn(&format!("a segment's video could not be edited: {err}"));
+                self.warn("a segment's Dolby Vision metadata dropped");
             }
             Err(err) => tracing::warn!(job = %self.id, "segment {n} could not be edited: {err}"),
         }
@@ -2740,7 +2738,7 @@ mod tests {
             frame=2\nprogress=continue\n";
         read_progress(job.clone(), stderr, 0, tail.clone(), pace).await;
         assert!(job.runtime.lock().decoded_in_software);
-        assert_eq!(job.status().warnings, ["the GPU couldn't decode this video: it is decoded on the CPU"]);
+        assert_eq!(job.status().warnings, ["GPU decoding failed, using the CPU"]);
         assert_eq!(tail.lock().len(), 1, "the line is kept for a failure's message too");
 
         let fine = Arc::new(self::job(dir.path(), vec![0, 4_000]));

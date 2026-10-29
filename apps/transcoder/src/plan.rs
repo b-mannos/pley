@@ -535,11 +535,7 @@ impl Plan {
                 let copy = areq.mode == AudioMode::Copy && copy_ok;
                 let codec = areq.codec;
                 if areq.mode == AudioMode::Copy && !copy_ok {
-                    warnings.push(format!(
-                        "{} audio cannot be copied into HLS, transcoding to {}",
-                        src.codec,
-                        codec_name(codec)
-                    ));
+                    warnings.push(format!("{} audio transcoded to {}", src.codec, codec_name(codec)));
                 }
                 let src_channels = src.channels.unwrap_or(2).max(1) as u32;
                 // AC-3 and E-AC-3 (as Dolby makes it, and FFmpeg's encoders)
@@ -2712,7 +2708,7 @@ mod tests {
         let plan = Plan::build(&req, &with_audio("ac3", 6, 48_000), &ff, None).unwrap();
         assert!(args_string(&plan, 0, 2).contains("-c:a copy"));
         let plan = Plan::build(&req, &truehd, &ff, None).unwrap();
-        assert_eq!(plan.warnings, ["truehd audio cannot be copied into HLS, transcoding to E-AC-3"]);
+        assert_eq!(plan.warnings, ["truehd audio transcoded to E-AC-3"]);
         let (_, args) = audio_args(AudioCodec::default(), None, &truehd);
         assert!(args.contains("-c:a aac -ac 2 -b:a 192k"), "{args}");
     }

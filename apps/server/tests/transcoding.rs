@@ -824,12 +824,8 @@ async fn remux_sessions_stream_hls_from_the_transcoder() {
     assert_eq!(info["audio_converted"], json!(true), "AC-3 doesn't play in browsers");
     let session = info["session_id"].as_str().unwrap().to_owned();
     assert_eq!(info["url"], json!(format!("/api/playback/{session}/index.m3u8")));
-    assert_eq!(
-        info["reasons"],
-        json!(["This player can't open MKV files.", "This player can't play AC3 audio."]),
-        "one plain sentence each"
-    );
-    assert_eq!(info["reason"], json!("This player can't open MKV files. This player can't play AC3 audio."));
+    assert_eq!(info["reasons"], json!(["MKV not supported.", "AC3 audio not supported."]), "one plain sentence each");
+    assert_eq!(info["reason"], json!("MKV not supported. AC3 audio not supported."));
 
     // The player's details: the session's transcode, live.
     let status = app.get(&format!("/api/playback/{session}"), admin).await;

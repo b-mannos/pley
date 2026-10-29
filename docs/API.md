@@ -1531,8 +1531,7 @@ always counts, and `video_codecs` or `audio_codecs` stand in only when
   `hdr10plus` or `hdr10`; HLG needs `hlg`. Without them the video is
   converted: to the HDR format the screen shows when the player takes it
   (see [HDR transcodes](#hdr-transcodes)), else tone-mapped to SDR, as for
-  an SDR screen. The reason says which ("HLG is converted to HDR10 for this
-  screen.").
+  an SDR screen. The reason says which ("HLG converted to HDR10.").
 - **Dolby Vision** plays as it is when `hdr_types` has `dolby_vision` and
   `dolby_vision_profiles` lists the profile at or above its level.
   Otherwise:

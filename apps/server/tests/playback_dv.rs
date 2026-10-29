@@ -202,28 +202,12 @@ fn the_dolby_vision_table_with_master_playlists() {
 #[test]
 fn why_dolby_vision_is_repackaged() {
     let reasons = |caps: Value, row: &str| play_in(caps, "mkv", &source(row)).reasons;
-    assert_eq!(reasons(fire_tv_4k_max(), "P7"), ["Dolby Vision P7 is converted to profile 8.1 for this player."]);
-    assert_eq!(
-        reasons(fire_tv_4k_max(), "P8.1+"),
-        [
-            "Dolby Vision P8.1 + HDR10+ plays as Dolby Vision without its HDR10+: this player's Dolby Vision decoder can't take both."
-        ]
-    );
+    assert_eq!(reasons(fire_tv_4k_max(), "P7"), ["Dolby Vision P7 converted to P8.1."]);
+    assert_eq!(reasons(fire_tv_4k_max(), "P8.1+"), ["Dolby Vision P8.1 + HDR10+ plays without HDR10+."]);
     // The 4K Max shows HDR10+: the base layer keeps it.
-    assert_eq!(
-        reasons(without_master(fire_tv_4k_max()), "P8.1+"),
-        [
-            "Dolby Vision P8.1 + HDR10+ plays as its HDR10+ base layer, repackaged: this player's Dolby Vision decoder can't take both."
-        ]
-    );
-    assert_eq!(
-        reasons(without_master(fire_tv_4k_max()), "P7"),
-        ["Dolby Vision P7 plays as its HDR10 base layer, repackaged."]
-    );
-    assert_eq!(
-        reasons(fire_tv_4k_max(), "P7+"),
-        ["Dolby Vision P7 + HDR10+ is converted to profile 8.1 for this player, without its HDR10+."]
-    );
+    assert_eq!(reasons(without_master(fire_tv_4k_max()), "P8.1+"), ["Dolby Vision P8.1 + HDR10+ plays as HDR10+."]);
+    assert_eq!(reasons(without_master(fire_tv_4k_max()), "P7"), ["Dolby Vision P7 plays as HDR10."]);
+    assert_eq!(reasons(fire_tv_4k_max(), "P7+"), ["Dolby Vision P7 + HDR10+ converted to P8.1, HDR10+ dropped."]);
 }
 
 /// What profile 7's enhancement layer holds is said where it matters: a
@@ -238,16 +222,10 @@ fn profile_7_says_which_layer() {
     let reasons = |caps: Value, info: &MediaInfo| play_in(caps, "mkv", info).reasons;
     assert_eq!(
         reasons(fire_tv_4k_max(), &p7(DolbyVisionLayer::Fel)),
-        ["Dolby Vision P7 FEL is converted to profile 8.1 for this player, without its enhancement layer."]
+        ["Dolby Vision P7 FEL converted to P8.1, enhancement layer dropped."]
     );
-    assert_eq!(
-        reasons(fire_tv_4k_max(), &p7(DolbyVisionLayer::Mel)),
-        ["Dolby Vision P7 MEL is converted to profile 8.1 for this player."]
-    );
-    assert_eq!(
-        reasons(google_tv_streamer(), &p7(DolbyVisionLayer::Fel)),
-        ["Dolby Vision P7 FEL plays as its HDR10 base layer, repackaged."]
-    );
+    assert_eq!(reasons(fire_tv_4k_max(), &p7(DolbyVisionLayer::Mel)), ["Dolby Vision P7 MEL converted to P8.1."]);
+    assert_eq!(reasons(google_tv_streamer(), &p7(DolbyVisionLayer::Fel)), ["Dolby Vision P7 FEL plays as HDR10."]);
 }
 
 /// Profile 5 on a Dolby Vision screen whose player doesn't list it: the
@@ -259,9 +237,9 @@ fn profile_5_on_a_dolby_vision_screen_without_its_decoder() {
     let d = play_in(caps, "mkv", &source("P5"));
     assert_eq!(outcome(&d), "T");
     // (A transcoder that doesn't keep HDR: SDR.)
-    assert_eq!(d.reasons, ["This player doesn't decode Dolby Vision P5: it's converted to SDR."]);
+    assert_eq!(d.reasons, ["Dolby Vision P5 converted to SDR."]);
     let d = play_in(google_tv_streamer(), "mkv", &source("P5"));
-    assert_eq!(d.reasons, ["Dolby Vision P5 needs a Dolby Vision screen: it's converted to SDR."]);
+    assert_eq!(d.reasons, ["Dolby Vision P5 converted to SDR."]);
 }
 
 /// Safari decodes Dolby Vision but opens no Matroska: profile 5 repackaged
@@ -278,13 +256,7 @@ fn version_1_profile_5_is_never_repackaged() {
     });
     let d = play_in(safari.clone(), "mkv", &source("P5"));
     assert_eq!(outcome(&d), "T");
-    assert_eq!(
-        d.reasons,
-        [
-            "This player can't open MKV files.",
-            "Dolby Vision P5 can't be repackaged for this player without losing its colours: it's converted to SDR."
-        ]
-    );
+    assert_eq!(d.reasons, ["MKV not supported.", "Dolby Vision P5 converted to SDR."]);
     assert_eq!(outcome(&play_in(safari.clone(), "mp4", &source("P5"))), "D");
     for row in ["P7", "P8.1", "P8.4"] {
         assert_eq!(outcome(&play_in(safari.clone(), "mkv", &source(row))), "R", "{row}");
@@ -434,7 +406,7 @@ fn repackaged_dolby_vision_stays_dolby_vision() {
     for row in ["P5", "P8.1", "P8.4"] {
         let d = play_in(fire_tv_4k_max(), "m2ts", &source(row));
         assert_eq!(outcome(&d), "R+DV", "{row}: {:?}", d.reasons);
-        assert_eq!(d.reasons, ["This player can't open M2TS files."]);
+        assert_eq!(d.reasons, ["M2TS not supported."]);
     }
     // Without a master playlist the base layer (none for profile 5).
     let no_master = without_master(fire_tv_4k_max());
@@ -458,7 +430,7 @@ fn profile_7_needs_the_8_1_level_to_be_converted() {
     info.streams[0].dv_level = Some(10);
     let d = play_in(low, "mkv", &info);
     assert_eq!(outcome(&d), "R");
-    assert_eq!(d.reasons, ["Dolby Vision P7 plays as its HDR10 base layer, repackaged."]);
+    assert_eq!(d.reasons, ["Dolby Vision P7 plays as HDR10."]);
     // 1080p at 23.976 fps that says 10 needs 3: converted, named at 3.
     let mut info = source("P7");
     info.streams[0].dv_level = Some(10);
@@ -478,11 +450,7 @@ fn a_level_the_file_overstates_is_repackaged_to_stay_dolby_vision() {
     info.streams[0].dv_level = Some(10);
     let d = play_in(fire_tv_4k_max(), "mkv", &info);
     assert_eq!(outcome(&d), "R+DV");
-    assert_eq!(
-        d.reasons,
-        ["Dolby Vision P8.1 is repackaged to stay Dolby Vision: its file says level 10, above this player's 9, where \
-          its picture needs 6."]
-    );
+    assert_eq!(d.reasons, ["Dolby Vision level 10 relabelled 6."]);
     // Profile 5 the same, rather than converted.
     let mut p5 = source("P5");
     p5.streams[0].dv_level = Some(10);
@@ -700,7 +668,7 @@ async fn master_playlists_reach_players_that_read_them() {
     let session = info["session_id"].as_str().unwrap().to_owned();
     assert_eq!(info["method"], json!("remux"));
     assert_eq!(info["url"], json!(format!("/api/playback/{session}/master.m3u8")));
-    assert_eq!(info["reasons"], json!(["Dolby Vision P7 is converted to profile 8.1 for this player."]));
+    assert_eq!(info["reasons"], json!(["Dolby Vision P7 converted to P8.1."]));
     let job = fake.created.lock().last().cloned().unwrap();
     let video = job.video.unwrap();
     assert_eq!(
@@ -772,7 +740,7 @@ async fn older_transcoders_get_requests_as_before() {
     assert_eq!(started.status, StatusCode::OK, "{:?}", started.body);
     let session = started.body["session_id"].as_str().unwrap();
     assert_eq!(started.body["url"], json!(format!("/api/playback/{session}/index.m3u8")));
-    assert_eq!(started.body["reasons"], json!(["Dolby Vision P7 plays as its HDR10 base layer, repackaged."]));
+    assert_eq!(started.body["reasons"], json!(["Dolby Vision P7 plays as HDR10."]));
     let video = fake.created.lock().last().cloned().unwrap().video.unwrap();
     assert_eq!((video.mode, video.dolby_vision), (VideoMode::Copy, DolbyVisionMode::Copy));
 }

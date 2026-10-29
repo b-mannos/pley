@@ -155,7 +155,7 @@ impl Ffmpeg {
         };
         let choice = match mode {
             TonemapMode::None => {
-                warnings.push("tone mapping disabled: HDR video will look washed out".into());
+                warnings.push("tone mapping off".into());
                 None
             }
             TonemapMode::Auto => auto(),
@@ -178,10 +178,10 @@ impl Ffmpeg {
             }
         };
         if choice.is_none() && mode != TonemapMode::None {
-            warnings.push("no tone mapper available: HDR video will look washed out".into());
+            warnings.push("no tone mapper available".into());
         }
         if dolby_vision_p5 && choice.is_some() && choice != Some(Tonemapper::Libplacebo) {
-            warnings.push("Dolby Vision profile 5 needs libplacebo (Vulkan) for correct colors".into());
+            warnings.push("Dolby Vision P5 needs libplacebo".into());
         }
         (choice, warnings)
     }
