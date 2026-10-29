@@ -600,6 +600,20 @@ half-made ones are deleted.
     time, by reading packet headers) after `POST /v1/keyframes`, which the
     server sends when an item page is opened. Until it exists, jobs transcode.
   - Formats are recognised by content, not by file name.
+- **Turned pictures.** Phones store portrait video as landscape frames with
+  a display matrix that turns them. The probe reads its angle
+  (`MediaStream.rotation`, ffprobe's `rotation`: 90, -90, 180), and a
+  transcode is planned at the size the picture is shown (1920×1080 frames
+  turned a quarter are 1080×1920, 608×1080 within 1080p). FFmpeg turns the
+  frames it brings to memory before the filters (`-autorotate`, its
+  default), never those on a GPU, so turned video takes the CPU's filters,
+  hardware decoded into memory (not the zero-copy, Vulkan or GPU-scaled
+  ways). Before, the turned picture was scaled to the frames' own shape
+  (squashed: a square came out 3.2 times as wide as high) and on a GPU it wasn't
+  turned at all. MPEG-TS can't say a picture is turned, so a remux asked
+  for is transcoded instead, with a warning. Media info from older probes
+  says nothing of rotation: such files are planned as before until probed
+  again.
 - **Frames timed as they are decoded.** Some MP4s (FFmpeg muxing a raw H.264
   or HEVC stream) give every frame the time it is decoded at as the time it
   is shown, although B-frames are stored ahead of where they are shown.

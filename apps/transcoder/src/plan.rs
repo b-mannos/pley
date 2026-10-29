@@ -384,11 +384,22 @@ impl Plan {
         // ---- video ----
         let video = match (&req.video, media_video(media, req)) {
             (Some(vreq), Some(src)) => {
-                let src_width = src.width.unwrap_or(1920);
-                let src_height = src.height.unwrap_or(1080);
+                // A picture shown turned (a phone's portrait video, stored
+                // as landscape frames) is planned at the size it is shown:
+                // FFmpeg turns the frames that come to memory before the
+                // filters (`-autorotate`, its default), and only those.
+                let turned = src.rotation_degrees() != 0;
+                let (coded_width, coded_height) = (src.width.unwrap_or(1920), src.height.unwrap_or(1080));
+                let (src_width, src_height) =
+                    if src.shown_sideways() { (coded_height, coded_width) } else { (coded_width, coded_height) };
                 let want_copy = vreq.mode == VideoMode::Copy && burn.is_none();
-                let copy = want_copy && keyframes.is_some_and(|k| !k.is_empty());
-                if want_copy && !copy {
+                let copy = want_copy && !turned && keyframes.is_some_and(|k| !k.is_empty());
+                if want_copy && turned {
+                    // MPEG-TS has no display matrix: copied, it plays on its side.
+                    warnings.push(
+                        "the picture is turned, which HLS segments can't say: transcoding instead of remuxing".into(),
+                    );
+                } else if want_copy && !copy {
                     warnings.push("keyframe index not ready yet: transcoding instead of remuxing".into());
                 }
                 if copy {
@@ -475,7 +486,8 @@ impl Plan {
                     let key = decode_key(&src.codec, src.bit_depth);
                     // Before a VAAPI encoder, Vulkan's device is made from VAAPI's.
                     let vulkan_decode = if vaapi { &ff.caps.vaapi_vulkan_decode } else { &ff.caps.vulkan_decode };
-                    let pipeline = if !req.options.hardware_decoding || deinterlace {
+                    // Turned frames stay in memory, where FFmpeg turns them.
+                    let pipeline = if !req.options.hardware_decoding || deinterlace || turned {
                         Pipeline::Software
                     } else if tonemap == Some(Tonemapper::Libplacebo) && vulkan_decode.contains(&key) {
                         // Encoding on Vulkan too only when asked for: browsers
@@ -519,6 +531,7 @@ impl Plan {
                     }
                     .filter(|accel| {
                         !deinterlace
+                            && !turned
                             && tonemap != Some(Tonemapper::Libplacebo)
                             && ff.caps.gpu_pipelines.iter().any(|p| p.accel == *accel && p.codecs.contains(&key))
                     });
@@ -2554,6 +2567,67 @@ mod tests {
         assert!(sdr(&plan) && plan.warnings.is_empty());
         let plan = Plan::build(&hdr_request(OutputRange::Sdr), &p5, &hdr_ffmpeg(), None).unwrap();
         assert!(sdr(&plan) && plan.warnings.is_empty(), "{:?}", plan.warnings);
+    }
+
+    /// A phone's portrait video: 1920×1080 frames turned by the display
+    /// matrix. FFmpeg turns frames in memory only (`-autorotate`), so they
+    /// stay there, and the plan is made at the size they are shown.
+    #[test]
+    fn turned_video_is_planned_as_it_is_shown() {
+        let mut ff = ffmpeg_with(vec![nvenc(), x264()], vec![Tonemapper::Libplacebo]);
+        ff.caps.gpu_pipelines = vec![pley_transcoder_api::GpuPipeline {
+            accel: HwAccel::Nvenc,
+            codecs: vec!["hevc".into(), "hevc10".into()],
+        }];
+        ff.caps.vulkan_decode = vec!["hevc10".into()];
+        let phone = |range: DynamicRange, rotation: i64| {
+            let mut m = media(range, None);
+            (m.streams[0].width, m.streams[0].height, m.streams[0].rotation) = (Some(1920), Some(1080), Some(rotation));
+            m
+        };
+
+        for rotation in [90, -90, 270] {
+            let plan = Plan::build(&request(), &phone(DynamicRange::Sdr, rotation), &ff, None).unwrap();
+            let v = plan.video.as_ref().unwrap();
+            assert_eq!((v.src_width, v.src_height, v.width, v.height), (1080, 1920, 608, 1080), "{rotation}");
+            // Not the zero-copy pipeline, nor scaled by the GPU: hardware
+            // decoded into memory, turned, then scaled to the shown shape.
+            assert_eq!((v.pipeline, v.gpu_scale, v.hw_decode.as_deref()), (Pipeline::Software, None, Some("cuda")));
+            let args = args_string(&plan, 0, 2);
+            assert!(args.contains("-hwaccel cuda -readrate"), "{args}");
+            assert!(!args.contains("hwaccel_output_format") && !args.contains("noautorotate"), "{args}");
+            assert!(args.contains("[0:0]scale=608:1080:flags=bicubic,format=yuv420p[vout]"), "{args}");
+            let shown = plan.video_plan(&phone(DynamicRange::Sdr, rotation), None).unwrap();
+            assert_eq!((shown.width_in, shown.height_in), (Some(1080), Some(1920)));
+        }
+
+        // Upside down: the same size, turned in memory too.
+        let plan = Plan::build(&request(), &phone(DynamicRange::Sdr, 180), &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.width, v.height, v.pipeline), (1920, 1080, Pipeline::Software));
+
+        // HDR: libplacebo takes the frames from memory, not from Vulkan's decoder.
+        let plan = Plan::build(&request(), &ten_bit(phone(DynamicRange::Hdr10, -90)), &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.pipeline, v.tonemap), (Pipeline::Software, Some(Tonemapper::Libplacebo)));
+        let args = args_string(&plan, 0, 2);
+        assert!(!args.contains("-hwaccel vulkan") && args.contains("libplacebo=w=608:h=1080"), "{args}");
+
+        // Subtitles drawn for the picture as it is shown.
+        let mut req = request();
+        req.subtitle = Some(SubtitleBurnRequest { stream_index: Some(3), external_path: None });
+        let plan = Plan::build(&req, &phone(DynamicRange::Sdr, 90), &ff, None).unwrap();
+        assert!(args_string(&plan, 0, 2).contains(":original_size=1080x1920,"));
+
+        // Copied into MPEG-TS it would play on its side: transcoded instead.
+        let mut req = request();
+        req.video = Some(VideoRequest { mode: VideoMode::Copy, ..Default::default() });
+        let kf: Vec<i64> = (0..30).map(|i| i * 2_000).collect();
+        let plan = Plan::build(&req, &phone(DynamicRange::Sdr, 90), &ff, Some(&kf)).unwrap();
+        assert!(!plan.video.as_ref().unwrap().copy);
+        assert!(plan.warnings.iter().any(|w| w.contains("turned")), "{:?}", plan.warnings);
+        let plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, Some(&kf)).unwrap();
+        assert!(plan.video.as_ref().unwrap().copy);
     }
 
     #[test]

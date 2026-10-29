@@ -373,6 +373,17 @@ struct RawStream {
     side_data_list: Vec<serde_json::Value>,
 }
 
+/// The rotation of a stream's display matrix, as ffprobe gives it, to the
+/// nearest degree; none when it doesn't turn the picture.
+fn display_rotation(side_data: &[serde_json::Value]) -> Option<i64> {
+    side_data
+        .iter()
+        .filter(|sd| sd.get("side_data_type").and_then(|t| t.as_str()) == Some("Display Matrix"))
+        .find_map(|sd| sd.get("rotation").and_then(|r| r.as_f64()))
+        .map(|r| r.round() as i64)
+        .filter(|r| r.rem_euclid(360) != 0)
+}
+
 pub fn parse_ffprobe_json(json: &[u8], path: &Path) -> anyhow::Result<MediaInfo> {
     let raw: RawOutput = serde_json::from_slice(json).context("parsing ffprobe output")?;
     let format = raw.format.as_ref();
@@ -428,6 +439,7 @@ pub fn parse_ffprobe_json(json: &[u8], path: &Path) -> anyhow::Result<MediaInfo>
                 stream.bit_depth = bit_depth(s.pix_fmt.as_deref(), s.bits_per_raw_sample.as_deref());
                 stream.level = s.level.filter(|l| *l > 0);
                 stream.interlaced = s.field_order.as_deref().map(|f| !matches!(f, "progressive" | "unknown"));
+                stream.rotation = display_rotation(&s.side_data_list);
                 stream.has_b_frames = s.has_b_frames.map(|n| n > 0);
                 // Suspected only: the prober decodes a few frames to know.
                 stream.decode_order_times =
@@ -689,6 +701,33 @@ mod tests {
       "format": {"format_name":"matroska,webm","start_time":"1.400000","duration":"7265.123000","bit_rate":"25000000","tags":{"TITLE":"Movie"}},
       "chapters": [{"start_time":"0.000000","end_time":"300.500000","tags":{"title":"Opening"}}]
     }"#;
+
+    /// A phone's portrait video: landscape frames, turned by the display
+    /// matrix (ffprobe 9.0's output for an MP4 so tagged).
+    #[test]
+    fn reads_how_far_the_picture_is_turned() {
+        let json = |rotation: &str| {
+            format!(
+                r#"{{"streams":[{{"index":0,"codec_name":"h264","codec_type":"video","width":1920,"height":1080,
+                "side_data_list":[{{"side_data_type":"Display Matrix","displaymatrix":"\n00000000:            0      -65536           0\n",
+                "rotation":{rotation}}}]}}],"format":{{"duration":"10.0"}}}}"#
+            )
+        };
+        let rotation = |r: &str| {
+            let info = parse_ffprobe_json(json(r).as_bytes(), Path::new("/m/clip.mp4")).unwrap();
+            let video = info.video().unwrap().clone();
+            (video.rotation, video.shown_sideways())
+        };
+        assert_eq!(rotation("90"), (Some(90), true));
+        assert_eq!(rotation("-90"), (Some(-90), true));
+        assert_eq!(rotation("-90.0"), (Some(-90), true));
+        assert_eq!(rotation("180"), (Some(180), false));
+        // A matrix that only flips, or turns nothing.
+        assert_eq!(rotation("0"), (None, false));
+        assert_eq!(rotation("-0"), (None, false));
+        let info = parse_ffprobe_json(SAMPLE.as_bytes(), Path::new("/m/movie.mkv")).unwrap();
+        assert_eq!(info.video().unwrap().rotation, None);
+    }
 
     #[test]
     fn parses_streams_and_dolby_vision() {

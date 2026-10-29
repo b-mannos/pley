@@ -168,6 +168,12 @@ pub struct MediaStream {
     pub level: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interlaced: Option<bool>,
+    /// How far the picture is turned to be shown, in degrees, as ffprobe
+    /// reads the stream's display matrix (`rotation`, counterclockwise):
+    /// phones record portrait video as landscape frames turned by 90 or
+    /// -90. Absent when not turned (and in older probes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<i64>,
     /// Frames are stored out of order (B-frames). FFmpeg then seeks a little
     /// before the point asked for in containers that don't seek by
     /// presentation time (Matroska, MPEG-TS).
@@ -268,6 +274,16 @@ pub fn video_range_label(
 }
 
 impl MediaStream {
+    /// [`MediaStream::rotation`] from 0 to 359 degrees; 0 when not turned.
+    pub fn rotation_degrees(&self) -> i64 {
+        self.rotation.unwrap_or(0).rem_euclid(360)
+    }
+
+    /// Whether the picture is shown on its side: its width and height swap.
+    pub fn shown_sideways(&self) -> bool {
+        matches!(self.rotation_degrees(), 90 | 270)
+    }
+
     pub fn dynamic_range(&self) -> DynamicRange {
         self.dynamic_range.unwrap_or_default()
     }
