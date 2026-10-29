@@ -1,11 +1,11 @@
 # Changelog
 
-What changes in Pley Media Server: the server, its transcoder and the web app
-it embeds, with their Docker image and Windows installer, newest first, as
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) lists it. Versions
-follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and releases
-are tagged `server-v<version>`: [docs/RELEASING.md](../../docs/RELEASING.md)
-says how they are made.
+Notable changes to Pley Media Server: the server, its transcoder and the web app it
+embeds, with the Docker image and the Windows installer, newest first.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Releases are tagged `server-v<version>`; [docs/RELEASING.md](../../docs/RELEASING.md)
+describes how they are made.
 
 ## [Unreleased]
 

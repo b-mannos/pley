@@ -1,10 +1,10 @@
 # Changelog
 
-What changes in Pley for LG TV (webOS), newest first, as [Keep a
-Changelog](https://keepachangelog.com/en/1.1.0/) lists it. Versions follow
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html) and releases are
-tagged `lg-v<version>`: [docs/RELEASING.md](../../docs/RELEASING.md) says how
-they are made.
+Notable changes to Pley for LG TV (webOS), newest first.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Releases are tagged `lg-v<version>`; [docs/RELEASING.md](../../docs/RELEASING.md)
+describes how they are made.
 
 ## [Unreleased]
 
