@@ -708,6 +708,8 @@ export interface TranscoderInfo {
   accels: HwAccel[];
   /** Some video is decoded on a GPU here: the hardware decoding setting changes something. */
   hardware_decoding: boolean;
+  /** What each hardware acceleration choice does here (empty while unavailable). Absent from servers before it. */
+  with_accel?: Partial<Record<HwAccel, AccelUse>>;
   tonemapping: string[];
   dolby_vision: boolean;
   /** Audio fingerprints, which find intros and credits that chapters don't name. */
@@ -719,6 +721,14 @@ export interface TranscoderInfo {
   max_jobs: number;
   active_jobs: number;
   error: string | null;
+}
+
+/** What choosing a hardware acceleration does on this server, as its transcoder found. */
+export interface AccelUse {
+  /** Some video is decoded on a GPU with it: the hardware decoding setting changes something. */
+  hardware_decoding: boolean;
+  /** What it leaves to software encoders (`hdr`: HEVC in 10 bits, for transcodes that keep HDR), where one works. */
+  software: ("h264" | "hevc" | "hdr")[];
 }
 
 export interface TranscoderMemory {

@@ -23,29 +23,24 @@ fn encoder(name: &str, accel: HwAccel) -> EncoderInfo {
     EncoderInfo { name: name.into(), codec: VideoCodec::H264, hardware: accel != HwAccel::None, accel, main10: false }
 }
 
-/// A transcoder elsewhere, on a Windows computer with an Intel graphics
-/// chip, whose FFmpeg has zscale but neither libplacebo nor Chromaprint.
-async fn intel_transcoder() -> String {
+/// A transcoder elsewhere whose FFmpeg found `capabilities`.
+async fn fake_transcoder(capabilities: Capabilities) -> String {
     let app = Router::new().route(
         "/v1/info",
-        get(|| async {
-            Json(TranscoderInfo {
-                api_version: API_VERSION,
-                capabilities: Capabilities {
-                    ffmpeg_available: true,
-                    encoders: vec![encoder("h264_qsv", HwAccel::Qsv), encoder("libx264", HwAccel::None)],
-                    hwaccels: vec!["qsv".into(), "d3d11va".into()],
-                    tonemappers: vec![Tonemapper::Zscale],
-                    readrate: true,
+        get(move || {
+            let capabilities = capabilities.clone();
+            async move {
+                Json(TranscoderInfo {
+                    api_version: API_VERSION,
+                    capabilities,
+                    memory: Some(MemoryInfo {
+                        available: false,
+                        reason: Some("works on Linux only".into()),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                },
-                memory: Some(MemoryInfo {
-                    available: false,
-                    reason: Some("works on Linux only".into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            })
+                })
+            }
         }),
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -54,13 +49,30 @@ async fn intel_transcoder() -> String {
     format!("http://{addr}")
 }
 
-async fn with_intel() -> (TestApp, String) {
-    let base = intel_transcoder().await;
+/// A Windows computer with an Intel graphics chip, whose FFmpeg has zscale
+/// but neither libplacebo nor Chromaprint.
+fn intel() -> Capabilities {
+    Capabilities {
+        ffmpeg_available: true,
+        encoders: vec![encoder("h264_qsv", HwAccel::Qsv), encoder("libx264", HwAccel::None)],
+        hwaccels: vec!["qsv".into(), "d3d11va".into()],
+        tonemappers: vec![Tonemapper::Zscale],
+        readrate: true,
+        ..Default::default()
+    }
+}
+
+async fn with_transcoder(capabilities: Capabilities) -> (TestApp, String) {
+    let base = fake_transcoder(capabilities).await;
     let app = TestApp::with_config(|c| c.transcoder_url = Some(base)).await;
     app.state.transcoder.start();
     assert!(app.state.transcoder.wait_ready(Duration::from_secs(10)).await);
     let admin = app.setup_admin().await;
     (app, admin)
+}
+
+async fn with_intel() -> (TestApp, String) {
+    with_transcoder(intel()).await
 }
 
 #[tokio::test]
@@ -70,6 +82,11 @@ async fn the_system_says_what_the_transcoder_can_do() {
     assert_eq!(tc["managed"], json!(false));
     assert_eq!(tc["accels"], json!(["qsv"]), "{tc}");
     assert_eq!(tc["hardware_decoding"], json!(true), "Quick Sync decodes through D3D11");
+    assert_eq!(tc["with_accel"]["qsv"], json!({"hardware_decoding": true, "software": []}), "{tc}");
+    assert_eq!(tc["with_accel"]["auto"], tc["with_accel"]["qsv"]);
+    // x264 gets no GPU decoder, here or with an encoder that isn't here.
+    assert_eq!(tc["with_accel"]["none"], json!({"hardware_decoding": false, "software": ["h264"]}));
+    assert_eq!(tc["with_accel"]["nvenc"]["hardware_decoding"], json!(false));
     assert_eq!(tc["tonemapping"], json!(["zscale"]));
     assert_eq!(tc["chromaprint"], json!(false));
     assert_eq!(tc["throttling"], json!(true));
@@ -83,6 +100,7 @@ async fn the_system_says_what_the_transcoder_can_do() {
     let tc = app.get("/api/system", &admin).await.body["transcoder"].clone();
     assert_eq!((tc["available"].clone(), tc["accels"].clone()), (json!(false), json!([])));
     assert_eq!((tc["hardware_decoding"].clone(), tc["chromaprint"].clone()), (json!(false), json!(false)));
+    assert_eq!(tc["with_accel"], json!({}));
     assert_eq!(tc["memory"], json!(null));
 }
 
@@ -163,4 +181,41 @@ async fn a_managed_transcoder_is_on_this_computers_system() {
     let native = if cfg!(target_os = "macos") { "videotoolbox" } else { "nvenc" };
     assert_eq!(app.put("/api/settings", &admin, json!({"hwaccel": native})).await.status, StatusCode::OK);
     assert_eq!(app.put("/api/settings", &admin, json!({"tonemapping": "libplacebo"})).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn vulkan_tone_maps_with_libplacebo_and_decodes_on_the_gpu() {
+    // libplacebo on the GPU, whose Vulkan decodes and encodes too.
+    let vulkan = Capabilities {
+        hwaccels: vec!["qsv".into(), "d3d11va".into(), "vulkan".into()],
+        tonemappers: vec![Tonemapper::Libplacebo, Tonemapper::Zscale],
+        vulkan_decode: vec!["hevc10".into()],
+        vulkan_encode: true,
+        ..intel()
+    };
+    let (app, admin) = with_transcoder(vulkan).await;
+    let put = |body| app.put("/api/settings", &admin, body);
+    let saved = put(json!({"tonemapping": "zscale", "hardware_decoding": false})).await;
+    assert_eq!(saved.status, StatusCode::OK);
+
+    // Chosen, it takes Automatic tone mapping and hardware decoding instead.
+    let saved = put(json!({"hwaccel": "vulkan"})).await;
+    assert_eq!(saved.status, StatusCode::OK, "{:?}", saved.body);
+    assert_eq!(
+        (saved.body["hwaccel"].clone(), saved.body["tonemapping"].clone(), saved.body["hardware_decoding"].clone()),
+        (json!("vulkan"), json!("auto"), json!(true))
+    );
+    // Asked for with it, what doesn't go with it is refused.
+    let refused = put(json!({"tonemapping": "zscale", "server_name": "Den"})).await;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST);
+    assert!(refused.mentions("libplacebo or Automatic"), "{:?}", refused.body);
+    let refused = put(json!({"hardware_decoding": false})).await;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST);
+    assert!(refused.mentions("hardware decoding stays on"), "{:?}", refused.body);
+    let settings = app.get("/api/settings", &admin).await;
+    assert_ne!(settings.body["server_name"], json!("Den"), "nothing changed");
+    assert_eq!(put(json!({"tonemapping": "libplacebo"})).await.status, StatusCode::OK);
+    // Another acceleration takes them again.
+    let saved = put(json!({"hwaccel": "qsv", "tonemapping": "zscale", "hardware_decoding": false})).await;
+    assert_eq!(saved.status, StatusCode::OK, "{:?}", saved.body);
 }

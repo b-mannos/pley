@@ -1981,7 +1981,7 @@ type ServerEvent =
 | POST | `/api/system/backups` | – | the new backup (a checked `VACUUM INTO` copy; the last 3 are kept) |
 | GET | `/api/transcoder` | – | `TranscoderStatus` – live metrics of the transcoder component (all jobs, counters) |
 | GET | `/api/settings` | – | `Settings` (never with `opensubtitles_password`) |
-| PUT | `/api/settings` | partial `Settings` | `Settings`. `400` for a `hwaccel` or `tonemapping` that can't work here, changed from what is saved: VAAPI off Linux, VideoToolbox off macOS, NVENC, Quick Sync or AMF on macOS (for a managed transcoder, which runs on Pley's system), or one the transcoder found no working encoder or tone mapper for (`transcoder.accels`, `transcoder.tonemapping`; not checked while it isn't running). A value saved before stays and saves with the rest; the transcoder does without it (software encoding, Automatic's tone mapper) |
+| PUT | `/api/settings` | partial `Settings` | `Settings`. `400` for a `hwaccel` or `tonemapping` that can't work here, changed from what is saved: VAAPI off Linux, VideoToolbox off macOS, NVENC, Quick Sync or AMF on macOS (for a managed transcoder, which runs on Pley's system), or one the transcoder found no working encoder or tone mapper for (`transcoder.accels`, `transcoder.tonemapping`; not checked while it isn't running). A value saved before stays and saves with the rest; the transcoder does without it (software encoding, Automatic's tone mapper). Whatever the hardware, `"vulkan"` goes with `tonemapping` `"auto"` or `"libplacebo"` only, and with `hardware_decoding` on (its pipeline decodes on Vulkan and tone maps with libplacebo; the transcoder encodes everything else in software): `400` for another asked for with it, changed from what is saved; one saved before falls back when `hwaccel` changes to `"vulkan"` (to `"auto"`, and on), and a combination saved before stays |
 | POST | `/api/settings/test` | `{ service: "tmdb" \| "tvdb" \| "tvmaze" \| "musicbrainz" \| "transcoder" \| "opensubtitles", api_key?, pin?, username?, password? }` | `{ ok, message, ms }`: one request to the service, with the key and PIN given (not saved) or else the saved ones. OpenSubtitles: its key, or with a `username` a sign-in of that account (`password` left out: the saved one, for the saved username). `message` says what happened, for people |
 | GET | `/api/fs` | `path` (omit for roots/drives) | `{ path: string \| null, parent: string \| null, entries: { name: string, path: string }[] }` – directories only |
 | GET | `/api/network` | – | `Network`: where Pley listens, and could |
@@ -2065,6 +2065,12 @@ interface SystemInfo {
     accels: ("nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox")[]; // with a working H.264 encoder, best
                                     // first: the first is the one "auto" uses ([] while unavailable)
     hardware_decoding: boolean;     // some video is decoded on a GPU, so the setting changes something
+    with_accel: { [hwaccel: string]: {   // what each `hwaccel` choice does here, all eight ({} while unavailable)
+      hardware_decoding: boolean;   // some video is decoded on a GPU with it (software encoding gets CUDA's
+                                    // decoder where an NVIDIA card encodes, VideoToolbox's on a Mac)
+      software: ("h264" | "hevc" | "hdr")[]; // what it leaves to software encoders, where one works
+                                    // ("hdr": HEVC Main 10, for transcodes that keep HDR)
+    } };
     tonemapping: string[];          // available tone mappers, e.g. ["libplacebo", "opencl", "zscale"]
     dolby_vision: boolean;          // Dolby Vision profile 5 can be tone-mapped correctly
     chromaprint: boolean;           // audio fingerprints find intros and credits; without, only chapters

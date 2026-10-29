@@ -10,13 +10,17 @@ import { formatBytes } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 import { Group, Link, Note, Row, SettingsForm, TestButton, useSettingsForm } from "./SettingsForm";
 import {
+  type AccelFit,
   accelChoices,
-  accelInUse,
-  accelName,
   accelReason,
   capitalize,
+  choiceLabel,
+  decodingReason,
+  fitToAccel,
   knownTranscoder,
   memoryReason,
+  presetNote,
+  tonemapAccelReason,
   tonemapChoices,
   tonemapFallback,
   tonemapReason,
@@ -135,6 +139,13 @@ export function TranscoderSettings() {
   const system = useSystemInfo();
   const saved = draft.settings.data;
   const set = draft.set;
+  // What changed with the last hardware acceleration chosen, until changed again.
+  const [fitted, setFitted] = useState<AccelFit["notes"]>({});
+  const chooseAccel = (form: Settings, accel: HwAccel) => {
+    const fit = fitToAccel(form, accel);
+    draft.setForm((f) => (f ? { ...f, hwaccel: accel, ...fit.changes } : f));
+    setFitted(fit.notes);
+  };
 
   return (
     <SettingsForm draft={draft} title="Transcoder" description="Converts video a player can't play directly. Changes apply to new transcodes.">
@@ -145,10 +156,16 @@ export function TranscoderSettings() {
         const os = transcoderOs(system.data);
         const accels = accelChoices(saved?.hwaccel ?? form.hwaccel, system.data);
         const accelProblem = accelReason(form.hwaccel, system.data);
-        const encodesOn = accelInUse(form.hwaccel, system.data);
-        const tonemaps = tonemapChoices(system.data);
+        const preset = presetNote(form.hwaccel, system.data);
+        const tonemaps = tonemapChoices(system.data, form.hwaccel);
         const tonemapProblem = tonemapReason(form.tonemapping, system.data);
-        const noGpuDecoding = known?.hardware_decoding === false;
+        // A combination saved before: the transcoder doesn't use Vulkan then.
+        const tonemapClash = tonemapProblem ? null : tonemapAccelReason(form.tonemapping, form.hwaccel);
+        const decodingProblem = decodingReason(form.hwaccel, system.data);
+        // Vulkan decodes on the GPU: hardware decoding turns on with it, not off.
+        const vulkanDecodes = form.hwaccel === "vulkan";
+        // Shown while the changes wait to be saved.
+        const fittedNote = (key: keyof AccelFit["notes"]) => (draft.dirty ? fitted[key] : undefined);
         const noThrottling = known?.throttling === false;
         const memoryProblem = memoryReason(system.data, form.throttle_transcodes);
         const memoryBudget = tc?.memory?.available ? tc.memory.budget_bytes : 0;
@@ -178,10 +195,10 @@ export function TranscoderSettings() {
                 htmlFor="hwaccel"
                 hint={tc && tc.encoders.length ? `Detected encoders: ${tc.encoders.join(", ")}` : "Encoder used for video transcodes."}
               >
-                <Select id="hwaccel" value={form.hwaccel} onChange={(e) => set("hwaccel", e.target.value as HwAccel)} className="w-full">
+                <Select id="hwaccel" value={form.hwaccel} onChange={(e) => chooseAccel(form, e.target.value as HwAccel)} className="w-full">
                   {accels.map((o) => (
                     <option key={o.value} value={o.value} disabled={o.reason !== null}>
-                      {o.label}
+                      {choiceLabel(o)}
                     </option>
                   ))}
                 </Select>
@@ -194,11 +211,23 @@ export function TranscoderSettings() {
               <Row label="Hardware decoding" hint="Decode on the GPU when possible.">
                 <Toggle
                   checked={form.hardware_decoding}
-                  disabled={noGpuDecoding}
-                  onChange={(v) => set("hardware_decoding", v)}
+                  disabled={decodingProblem !== null || (vulkanDecodes && form.hardware_decoding)}
+                  onChange={(v) => {
+                    set("hardware_decoding", v);
+                    setFitted((f) => ({ ...f, hardware_decoding: undefined }));
+                  }}
                   label="Hardware decoding"
                 />
-                {noGpuDecoding ? <Note>No graphics card here that FFmpeg decodes on: videos are decoded on the CPU.</Note> : null}
+                {decodingProblem ? <Note>{capitalize(decodingProblem)}: videos are decoded on the CPU.</Note> : null}
+                {fittedNote("hardware_decoding") ? (
+                  <Note>{fittedNote("hardware_decoding")}</Note>
+                ) : vulkanDecodes ? (
+                  form.hardware_decoding ? (
+                    <Note>Always on with Vulkan, which decodes on the GPU.</Note>
+                  ) : (
+                    <Note notice>Vulkan needs it: transcodes are encoded in software instead.</Note>
+                  )
+                ) : null}
               </Row>
               <Row
                 label="Software encoder preset"
@@ -217,7 +246,7 @@ export function TranscoderSettings() {
                     </option>
                   ))}
                 </Select>
-                {encodesOn ? <Note>{accelName(encodesOn)} encodes here: this applies only when software encodes instead.</Note> : null}
+                {preset ? <Note>{preset}</Note> : null}
               </Row>
               <Row
                 label="HDR tone mapping"
@@ -236,10 +265,18 @@ export function TranscoderSettings() {
                   </>
                 }
               >
-                <Select id="tonemap" value={form.tonemapping} onChange={(e) => set("tonemapping", e.target.value as ToneMapping)} className="w-full">
+                <Select
+                  id="tonemap"
+                  value={form.tonemapping}
+                  onChange={(e) => {
+                    set("tonemapping", e.target.value as ToneMapping);
+                    setFitted((f) => ({ ...f, tonemapping: undefined }));
+                  }}
+                  className="w-full"
+                >
                   {tonemaps.map((o) => (
                     <option key={o.value} value={o.value} disabled={o.reason !== null}>
-                      {o.label}
+                      {choiceLabel(o)}
                     </option>
                   ))}
                 </Select>
@@ -247,6 +284,10 @@ export function TranscoderSettings() {
                   <Note notice>
                     {capitalize(tonemapProblem)}: {tonemapFallback(system.data)}
                   </Note>
+                ) : tonemapClash ? (
+                  <Note notice>{capitalize(tonemapClash)}: transcodes are encoded in software instead.</Note>
+                ) : fittedNote("tonemapping") ? (
+                  <Note>{fittedNote("tonemapping")}</Note>
                 ) : null}
               </Row>
             </Group>

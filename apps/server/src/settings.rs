@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use pley_transcoder_api::{
-    Capabilities, HwAccel, TonemapMode, Tonemapper, TranscodeOptions, TranscoderInfo, VideoCodec,
+    Capabilities, EncoderInfo, HwAccel, TonemapMode, Tonemapper, TranscodeOptions, TranscoderInfo, VideoCodec,
 };
 use serde::{Deserialize, Serialize};
 
@@ -261,6 +261,134 @@ pub fn decodes_on_gpu(caps: &Capabilities) -> bool {
             HwAccel::Amf => has("d3d11va"),
             _ => false,
         })
+}
+
+/// Every hardware acceleration Settings can choose.
+pub const ACCELS: [HwAccel; 8] = [
+    HwAccel::Auto,
+    HwAccel::Nvenc,
+    HwAccel::Qsv,
+    HwAccel::Amf,
+    HwAccel::Vaapi,
+    HwAccel::Videotoolbox,
+    HwAccel::Vulkan,
+    HwAccel::None,
+];
+
+/// The encoder transcodes in `codec` get with `hwaccel` chosen (`main10`:
+/// those that keep HDR), as the transcoder picks it (`Ffmpeg::pick`): that
+/// acceleration's, Automatic's first, else the software one. Vulkan's
+/// encoder is no transcoder encoder of its own (only its pipeline uses it),
+/// and HDR is encoded as Automatic encodes it.
+fn picked_encoder(caps: &Capabilities, codec: VideoCodec, hwaccel: HwAccel, main10: bool) -> Option<&EncoderInfo> {
+    let hwaccel = if main10 && hwaccel == HwAccel::Vulkan { HwAccel::Auto } else { hwaccel };
+    let fits = |e: &&EncoderInfo| e.codec == codec && (e.main10 || !main10);
+    let software = || caps.encoders.iter().filter(fits).find(|e| !e.hardware);
+    let hardware = |wanted: Option<HwAccel>| {
+        caps.encoders.iter().filter(fits).find(|e| e.hardware && wanted.is_none_or(|a| e.accel == a))
+    };
+    match hwaccel {
+        HwAccel::None => software(),
+        HwAccel::Auto => hardware(None).or_else(software),
+        wanted => hardware(Some(wanted)).or_else(software),
+    }
+}
+
+/// What choosing a hardware acceleration does here, by what the transcoder
+/// found: Settings → Transcoder greys out what can't be used with it.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct AccelUse {
+    /// Some video is decoded on a GPU with it: `hardware_decoding` changes
+    /// something.
+    pub hardware_decoding: bool,
+    /// What it leaves to software encoders: `h264`, `hevc` and `hdr`
+    /// (HEVC Main 10, for transcodes that keep HDR), where one works.
+    pub software: Vec<&'static str>,
+}
+
+/// What choosing `hwaccel` does with the transcoder's `caps`.
+pub fn accel_use(caps: &Capabilities, hwaccel: HwAccel) -> AccelUse {
+    let in_software = |codec, main10| picked_encoder(caps, codec, hwaccel, main10).is_some_and(|e| !e.hardware);
+    let software =
+        [("h264", VideoCodec::H264, false), ("hevc", VideoCodec::Hevc, false), ("hdr", VideoCodec::Hevc, true)]
+            .into_iter()
+            .filter(|(_, codec, main10)| in_software(*codec, *main10))
+            .map(|(name, ..)| name)
+            .collect();
+    AccelUse { hardware_decoding: decodes_on_gpu_with(caps, hwaccel), software }
+}
+
+/// Whether some video is decoded on a GPU with `hwaccel` chosen, as the
+/// transcoder's planner decides: Vulkan's decoder (for libplacebo) with any
+/// choice, else the zero-copy pipeline or the decoder that goes with the
+/// H.264 encoder it gets (`pick_hw_decoder`). A software encoder still gets
+/// CUDA's decoder where an NVIDIA card encodes, and VideoToolbox's on a Mac.
+/// The transcoder's system is told by its decoders, as [`decodes_on_gpu`]
+/// does: D3D11 on Windows, VAAPI on Linux.
+pub fn decodes_on_gpu_with(caps: &Capabilities, hwaccel: HwAccel) -> bool {
+    let has = |name: &str| caps.hwaccels.iter().any(|h| h == name);
+    let nvidia = caps.encoders.iter().any(|e| e.accel == HwAccel::Nvenc) && has("cuda");
+    let accel = picked_encoder(caps, VideoCodec::H264, hwaccel, false)
+        .filter(|e| e.hardware)
+        .map_or(HwAccel::None, |e| e.accel);
+    !caps.vulkan_decode.is_empty()
+        || caps.gpu_pipelines.iter().any(|p| p.accel == accel)
+        || match accel {
+            HwAccel::Nvenc => has("cuda"),
+            HwAccel::Vaapi => has("vaapi"),
+            HwAccel::Videotoolbox => has("videotoolbox"),
+            HwAccel::Qsv => has("d3d11va") || has("vaapi"),
+            HwAccel::Amf => has("d3d11va") || nvidia,
+            _ => nvidia || has("videotoolbox"),
+        }
+}
+
+/// Whether the tone mapper `mode` goes with `hwaccel`. Vulkan encodes on
+/// the GPU only what libplacebo tone maps there (the planner's Vulkan
+/// pipeline), and everything else in software: Automatic and libplacebo
+/// only, then. Every tone mapper goes with the others, which tone map
+/// before their encoder.
+pub fn tonemap_goes_with(hwaccel: HwAccel, mode: TonemapMode) -> bool {
+    hwaccel != HwAccel::Vulkan || matches!(mode, TonemapMode::Auto | TonemapMode::Libplacebo)
+}
+
+/// Whether hardware decoding may be `on` (or off) with `hwaccel`: Vulkan's
+/// pipeline starts with Vulkan's decoder, so it is on with Vulkan.
+pub fn decoding_goes_with(hwaccel: HwAccel, on: bool) -> bool {
+    on || hwaccel != HwAccel::Vulkan
+}
+
+/// Fits the transcoder settings in `patch` to the hardware acceleration it
+/// leaves chosen, as Settings → Transcoder does: a tone mapper or hardware
+/// decoding newly asked for that doesn't go with it is refused; one saved
+/// before that doesn't go with an acceleration newly chosen falls back
+/// (Automatic tone mapping; hardware decoding on). A combination saved
+/// before stays.
+pub fn fit_to_accel(before: &Settings, patch: &mut SettingsPatch) -> Result<(), String> {
+    let hwaccel = patch.hwaccel.unwrap_or(before.hwaccel);
+    let switched = hwaccel != before.hwaccel;
+    let name = accel_name(hwaccel);
+    match patch.tonemapping {
+        Some(mode) if mode != before.tonemapping && !tonemap_goes_with(hwaccel, mode) => {
+            return Err(format!(
+                "{name} encodes on the GPU only what libplacebo tone maps: choose libplacebo or Automatic tone mapping with it"
+            ));
+        }
+        mode if switched && !tonemap_goes_with(hwaccel, mode.unwrap_or(before.tonemapping)) => {
+            patch.tonemapping = Some(TonemapMode::Auto);
+        }
+        _ => {}
+    }
+    match patch.hardware_decoding {
+        Some(on) if on != before.hardware_decoding && !decoding_goes_with(hwaccel, on) => {
+            return Err(format!("{name} decodes on the GPU: hardware decoding stays on with it"));
+        }
+        on if switched && !decoding_goes_with(hwaccel, on.unwrap_or(before.hardware_decoding)) => {
+            patch.hardware_decoding = Some(true);
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -672,6 +800,73 @@ mod tests {
         assert!(decodes_on_gpu(&vulkan));
         let mac = Capabilities { hwaccels: vec!["videotoolbox".into()], ..software };
         assert!(decodes_on_gpu(&mac));
+    }
+
+    #[test]
+    fn each_hardware_acceleration_says_what_it_decodes_and_leaves_to_software() {
+        let hevc = |name: &str, accel, main10| EncoderInfo { codec: VideoCodec::Hevc, main10, ..encoder(name, accel) };
+        // Quick Sync encodes HEVC, but not in 10 bits; x265 does.
+        let mut intel = intel();
+        intel.encoders.extend([hevc("hevc_qsv", HwAccel::Qsv, false), hevc("libx265", HwAccel::None, true)]);
+        let qsv = accel_use(&intel, HwAccel::Qsv);
+        assert!(qsv.hardware_decoding, "Quick Sync decodes through D3D11");
+        assert_eq!(qsv.software, ["hdr"]);
+        assert_eq!(accel_use(&intel, HwAccel::Auto), qsv);
+        let software = accel_use(&intel, HwAccel::None);
+        assert!(!software.hardware_decoding, "x264 gets no decoder: FFmpeg lists cuda, but there's no NVIDIA card");
+        assert_eq!(software.software, ["h264", "hevc", "hdr"]);
+        // A choice whose encoder isn't here is software encoding.
+        assert_eq!(accel_use(&intel, HwAccel::Nvenc), software);
+        assert_eq!(accel_use(&intel, HwAccel::Vulkan), software);
+
+        // Software encoding on an NVIDIA computer still decodes with CUDA.
+        let nvidia = Capabilities {
+            encoders: vec![encoder("h264_nvenc", HwAccel::Nvenc), encoder("libx264", HwAccel::None)],
+            hwaccels: vec!["cuda".into()],
+            ..intel.clone()
+        };
+        assert!(accel_use(&nvidia, HwAccel::None).hardware_decoding);
+        assert_eq!(accel_use(&nvidia, HwAccel::Nvenc).software, Vec::<&str>::new(), "no HEVC encoder at all");
+        // Vulkan's decoder feeds libplacebo whatever encodes.
+        let vulkan = Capabilities { vulkan_decode: vec!["hevc10".into()], ..intel };
+        assert!(ACCELS.iter().all(|accel| accel_use(&vulkan, *accel).hardware_decoding));
+    }
+
+    #[test]
+    fn vulkan_tone_maps_with_libplacebo_and_decodes_on_the_gpu() {
+        let fit = |before: &Settings, json| {
+            let mut patch = patch(json);
+            fit_to_accel(before, &mut patch).map(|()| (patch.tonemapping, patch.hardware_decoding))
+        };
+        let saved = Settings { tonemapping: TonemapMode::Zscale, hardware_decoding: false, ..Settings::default() };
+        // Chosen: what doesn't go with it falls back.
+        assert_eq!(fit(&saved, serde_json::json!({"hwaccel": "vulkan"})), Ok((Some(TonemapMode::Auto), Some(true))));
+        // A form sent whole, with them as saved, too.
+        let whole = serde_json::json!({"hwaccel": "vulkan", "tonemapping": "zscale", "hardware_decoding": false});
+        assert_eq!(fit(&saved, whole), Ok((Some(TonemapMode::Auto), Some(true))));
+        // Asked for with it: refused.
+        let refused = fit(&saved, serde_json::json!({"hwaccel": "vulkan", "tonemapping": "opencl"})).unwrap_err();
+        assert!(refused.contains("libplacebo or Automatic"), "{refused}");
+        let vulkan = Settings { hwaccel: HwAccel::Vulkan, ..Settings::default() };
+        assert!(fit(&vulkan, serde_json::json!({"tonemapping": "none"})).is_err());
+        assert!(fit(&vulkan, serde_json::json!({"hardware_decoding": false})).unwrap_err().contains("stays on"));
+        assert_eq!(
+            fit(&vulkan, serde_json::json!({"tonemapping": "libplacebo"})),
+            Ok((Some(TonemapMode::Libplacebo), None))
+        );
+        // Away from Vulkan, anything goes.
+        let away = serde_json::json!({"hwaccel": "nvenc", "tonemapping": "zscale", "hardware_decoding": false});
+        assert_eq!(fit(&vulkan, away), Ok((Some(TonemapMode::Zscale), Some(false))));
+        // A combination saved before stays.
+        let stale = Settings { hwaccel: HwAccel::Vulkan, ..saved };
+        let whole = serde_json::json!({"hwaccel": "vulkan", "tonemapping": "zscale", "server_name": "Den"});
+        assert_eq!(fit(&stale, whole), Ok((Some(TonemapMode::Zscale), None)));
+        // The others take every tone mapper.
+        for accel in ACCELS.into_iter().filter(|a| *a != HwAccel::Vulkan) {
+            for mode in [TonemapMode::Opencl, TonemapMode::Zscale, TonemapMode::None] {
+                assert!(tonemap_goes_with(accel, mode) && decoding_goes_with(accel, false), "{accel:?} {mode:?}");
+            }
+        }
     }
 
     #[tokio::test]

@@ -116,20 +116,21 @@ describe("TranscoderSettings on this server's hardware", () => {
     throttling: false,
   };
   const system = (transcoder: object, os = "windows") => ({ os, transcoder });
-  const option = (name: RegExp) => screen.getByRole("option", { name });
+  const option = (name: string | RegExp) => screen.getByRole("option", { name });
 
   it("greys out what this computer can't do, and says why", async () => {
     mockApi({ "GET /api/settings": () => SETTINGS, "GET /api/system": () => system(intel) });
     renderWithProviders(<TranscoderSettings />);
     expect(await screen.findByRole("option", { name: "Automatic · Intel Quick Sync" })).toBeEnabled();
     expect(option(/^Intel Quick Sync$/)).toBeEnabled();
-    expect(option(/^NVIDIA NVENC$/)).toBeDisabled();
-    expect(option(/^AMD AMF$/)).toBeDisabled();
+    // Greyed out with what they need.
+    expect(option("NVIDIA NVENC (needs an NVIDIA graphics card)")).toBeDisabled();
+    expect(option("AMD AMF (needs an AMD graphics card)")).toBeDisabled();
     // Never on Windows: not offered at all.
     expect(screen.queryByRole("option", { name: /VAAPI|VideoToolbox/ })).not.toBeInTheDocument();
 
     expect(option(/^Automatic · OpenCL$/)).toBeEnabled();
-    expect(option(/^libplacebo$/)).toBeDisabled();
+    expect(option("libplacebo (needs libplacebo and a Vulkan GPU)")).toBeDisabled();
     expect(option(/^zscale/)).toBeEnabled();
 
     // The current values stay, greyed out with the reason.
@@ -162,7 +163,7 @@ describe("TranscoderSettings on this server's hardware", () => {
     });
     renderWithProviders(<TranscoderSettings />);
     expect(await screen.findByLabelText("Hardware acceleration")).toHaveValue("vaapi");
-    expect(option(/^VAAPI$/)).toBeDisabled();
+    expect(option("VAAPI (on Linux only)")).toBeDisabled();
     expect(screen.getByText("On Linux only: transcodes are encoded in software instead.")).toBeInTheDocument();
     // The transcoder isn't running: what its FFmpeg can do isn't known, so nothing else is greyed out.
     expect(option(/^NVIDIA NVENC$/)).toBeEnabled();
@@ -178,7 +179,7 @@ describe("TranscoderSettings on this server's hardware", () => {
     renderWithProviders(<TranscoderSettings />);
     expect(await screen.findByRole("option", { name: "Automatic · VAAPI" })).toBeEnabled();
     expect(option(/^VAAPI$/)).toBeEnabled();
-    expect(option(/^VideoToolbox$/)).toBeDisabled();
+    expect(option("VideoToolbox (needs an FFmpeg with VideoToolbox)")).toBeDisabled();
   });
 
   describe("in memory", () => {
@@ -245,6 +246,102 @@ describe("TranscoderSettings on this server's hardware", () => {
       renderWithProviders(<TranscoderSettings />);
       expect(await memorySwitch()).toBeEnabled();
       expect(screen.queryByText(/segments go to disk/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("with the hardware acceleration chosen", () => {
+    const accelSelect = () => screen.getByLabelText("Hardware acceleration");
+    const decoding = () => screen.getByRole("switch", { name: "Hardware decoding" });
+    /** Quick Sync decodes through D3D11 and encodes H.264; x264 gets no decoder here. */
+    const withAccel = {
+      ...intel,
+      with_accel: {
+        auto: { hardware_decoding: true, software: ["hevc", "hdr"] },
+        qsv: { hardware_decoding: true, software: ["hevc", "hdr"] },
+        nvenc: { hardware_decoding: false, software: ["h264", "hevc", "hdr"] },
+        none: { hardware_decoding: false, software: ["h264", "hevc", "hdr"] },
+      },
+    };
+
+    it("greys out hardware decoding where it decodes nothing on a GPU, and says what the preset applies to", async () => {
+      const user = userEvent.setup();
+      mockApi({ "GET /api/settings": () => SETTINGS, "GET /api/system": () => system(withAccel) });
+      renderWithProviders(<TranscoderSettings />);
+      expect(await screen.findByText("Intel Quick Sync encodes H.264 here: this applies to HEVC, and when software encodes instead.")).toBeInTheDocument();
+      expect(decoding()).toBeEnabled();
+
+      await user.selectOptions(accelSelect(), "none");
+      expect(decoding()).toBeDisabled();
+      expect(decoding()).toBeChecked();
+      expect(screen.getByText("Not with software encoding: videos are decoded on the CPU.")).toBeInTheDocument();
+      expect(screen.queryByText(/encodes H\.264 here/)).not.toBeInTheDocument();
+
+      await user.selectOptions(accelSelect(), "qsv");
+      expect(decoding()).toBeEnabled();
+      expect(screen.queryByText(/videos are decoded on the CPU/)).not.toBeInTheDocument();
+    });
+
+    it("leaves hardware decoding alone on a server that doesn't say what each choice decodes", async () => {
+      const user = userEvent.setup();
+      mockApi({ "GET /api/settings": () => SETTINGS, "GET /api/system": () => system(intel) });
+      renderWithProviders(<TranscoderSettings />);
+      await user.selectOptions(await screen.findByLabelText("Hardware acceleration"), "none");
+      expect(decoding()).toBeEnabled();
+    });
+
+    describe("Vulkan", () => {
+      const vulkan = { ...withAccel, tonemapping: ["libplacebo", "opencl", "zscale"], dolby_vision: true };
+      const vulkanSaved = { ...SETTINGS, hwaccel: "vulkan", tonemapping: "libplacebo" } satisfies Settings;
+
+      it("tone maps with libplacebo and decodes on the GPU, and what doesn't go with it falls back visibly", async () => {
+        const user = userEvent.setup();
+        const requests = mockApi({
+          "GET /api/settings": () => vulkanSaved,
+          "GET /api/system": () => system(vulkan),
+          "PUT /api/settings": (req) => ({ ...vulkanSaved, ...(req.body as Partial<Settings>) }),
+        });
+        renderWithProviders(<TranscoderSettings />);
+        expect(await screen.findByRole("option", { name: "OpenCL (not with Vulkan)" })).toBeDisabled();
+        expect(option("zscale (not with Vulkan)")).toBeDisabled();
+        expect(option("Disabled (not with Vulkan)")).toBeDisabled();
+        expect(option(/^libplacebo$/)).toBeEnabled();
+        expect(option("Automatic · libplacebo")).toBeEnabled();
+        expect(decoding()).toBeDisabled();
+        expect(decoding()).toBeChecked();
+        expect(screen.getByText("Always on with Vulkan, which decodes on the GPU.")).toBeInTheDocument();
+
+        // With another, they can be chosen.
+        await user.selectOptions(accelSelect(), "qsv");
+        expect(option(/^zscale$/)).toBeEnabled();
+        await user.selectOptions(screen.getByLabelText("HDR tone mapping"), "zscale");
+        await user.click(decoding());
+        expect(decoding()).not.toBeChecked();
+
+        // Back to Vulkan, they give way, and say so.
+        await user.selectOptions(accelSelect(), "vulkan");
+        expect(screen.getByLabelText("HDR tone mapping")).toHaveValue("auto");
+        expect(screen.getByText("Set to Automatic: Vulkan tone maps with libplacebo only.")).toBeInTheDocument();
+        expect(decoding()).toBeChecked();
+        expect(decoding()).toBeDisabled();
+        expect(screen.getByText("Turned on: Vulkan decodes on the GPU.")).toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Save" }));
+        await waitFor(() => expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ tonemapping: "auto" }));
+        expect(screen.queryByText(/Set to Automatic/)).not.toBeInTheDocument();
+      });
+
+      it("says what a combination saved before does", async () => {
+        mockApi({
+          "GET /api/settings": () => ({ ...vulkanSaved, tonemapping: "zscale", hardware_decoding: false }),
+          "GET /api/system": () => system(vulkan),
+        });
+        renderWithProviders(<TranscoderSettings />);
+        expect(await screen.findByLabelText("HDR tone mapping")).toHaveValue("zscale");
+        expect(screen.getByText("Not with Vulkan: transcodes are encoded in software instead.")).toBeInTheDocument();
+        // It can be turned on, not off.
+        expect(decoding()).toBeEnabled();
+        expect(screen.getByText("Vulkan needs it: transcodes are encoded in software instead.")).toBeInTheDocument();
+      });
     });
   });
 

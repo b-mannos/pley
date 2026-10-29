@@ -24,7 +24,7 @@ pub async fn get_settings(State(state): State<AppState>, _admin: AdminUser) -> J
 pub async fn put_settings(
     State(state): State<AppState>,
     _admin: AdminUser,
-    Json(patch): Json<SettingsPatch>,
+    Json(mut patch): Json<SettingsPatch>,
 ) -> ApiResult<Json<AdminSettings>> {
     let before = state.settings.get();
     // A choice that can't work here is refused; one saved before (another
@@ -48,6 +48,8 @@ pub async fn put_settings(
     {
         return Err(AppError::bad_request(format!("transcoding in memory isn't available here: {why}")));
     }
+    // What goes with the hardware acceleration chosen, whatever the hardware.
+    crate::settings::fit_to_accel(&before, &mut patch).map_err(AppError::bad_request)?;
     let after = state.settings.update(&state.db, patch).await?;
     if before.watch_libraries != after.watch_libraries {
         state.watcher.reload().await;
@@ -413,6 +415,9 @@ pub struct TranscoderSummary {
     accels: Vec<pley_transcoder_api::HwAccel>,
     /// Some video is decoded on a GPU: `hardware_decoding` changes something.
     hardware_decoding: bool,
+    /// What each hardware acceleration choice does here (empty while the
+    /// transcoder is unavailable).
+    with_accel: HashMap<pley_transcoder_api::HwAccel, crate::settings::AccelUse>,
     tonemapping: Vec<String>,
     dolby_vision: bool,
     /// Audio fingerprints, which find intros and credits that chapters don't name.
@@ -476,6 +481,15 @@ pub async fn system(State(state): State<AppState>, _admin: AdminUser) -> ApiResu
             })
             .unwrap_or_default(),
         hardware_decoding: info.as_ref().is_some_and(|i| crate::settings::decodes_on_gpu(&i.capabilities)),
+        with_accel: info
+            .as_ref()
+            .map(|i| {
+                crate::settings::ACCELS
+                    .into_iter()
+                    .map(|accel| (accel, crate::settings::accel_use(&i.capabilities, accel)))
+                    .collect()
+            })
+            .unwrap_or_default(),
         tonemapping: info
             .as_ref()
             .map(|i| i.capabilities.tonemappers.iter().map(|t| t.as_str().to_owned()).collect())

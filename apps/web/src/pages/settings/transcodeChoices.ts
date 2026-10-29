@@ -1,11 +1,11 @@
-import type { HwAccel, SystemInfo, ToneMapping, TranscoderInfo } from "@/api/types";
+import type { HwAccel, Settings, SystemInfo, ToneMapping, TranscoderInfo } from "@/api/types";
 
 /**
  * What Settings → Transcoder offers on this server: each choice
- * with why it can't work here, as the server judges when saving
- * (settings.rs, `hwaccel_problem` and `tonemap_problem`). A choice saved
- * before (another GPU, another FFmpeg) stays chosen and says what happens
- * instead.
+ * with why it can't work here, or with the hardware acceleration chosen, as
+ * the server judges when saving (settings.rs, `hwaccel_problem`,
+ * `tonemap_problem` and `fit_to_accel`). A choice saved before (another
+ * GPU, another FFmpeg) stays chosen and says what happens instead.
  */
 export interface Choice<T> {
   value: T;
@@ -116,13 +116,14 @@ export function accelInUse(accel: HwAccel, system: SystemInfo | undefined): HwAc
   return accelReason(accel, system) ? null : accel;
 }
 
-export const accelName = (accel: HwAccel) => ACCEL_NAME[accel];
+/** A choice's text in its menu: with why it is greyed out, when it is. */
+export const choiceLabel = (choice: Choice<unknown>) => (choice.reason ? `${choice.label} (${choice.reason})` : choice.label);
 
-/** The tone mappers to offer, each with why it can't work here. */
-export function tonemapChoices(system: SystemInfo | undefined): Choice<ToneMapping>[] {
+/** The tone mappers to offer with `accel` chosen, each with why it can't work here or with it. */
+export function tonemapChoices(system: SystemInfo | undefined, accel: HwAccel): Choice<ToneMapping>[] {
   const tc = knownTranscoder(system);
   return TONEMAPS.map((value) => {
-    const reason = tonemapReason(value, system);
+    const reason = tonemapReason(value, system) ?? tonemapAccelReason(value, accel);
     let label = TONEMAP_NAME[value];
     if (value === "auto" && tc) {
       const first = tc.tonemapping[0] as ToneMapping | undefined;
@@ -137,6 +138,75 @@ export function tonemapReason(mode: ToneMapping, system: SystemInfo | undefined)
   const tc = knownTranscoder(system);
   if (!tc || mode === "auto" || mode === "none") return null;
   return tc.tonemapping.includes(mode) ? null : (TONEMAP_NEEDS[mode] ?? null);
+}
+
+/**
+ * Whether the tone mapper `mode` goes with `accel`: Vulkan encodes on the
+ * GPU only what libplacebo tone maps there (the transcoder's Vulkan
+ * pipeline), and the rest in software. The others tone map before their
+ * encoder, with any tone mapper.
+ */
+export const tonemapGoesWith = (accel: HwAccel, mode: ToneMapping) => accel !== "vulkan" || mode === "auto" || mode === "libplacebo";
+
+/** Why the tone mapper `mode` doesn't go with `accel`, or `null`. */
+export function tonemapAccelReason(mode: ToneMapping, accel: HwAccel): string | null {
+  return tonemapGoesWith(accel, mode) ? null : `not with ${ACCEL_NAME[accel]}`;
+}
+
+/**
+ * Why hardware decoding changes nothing with `accel` chosen, or `null`: as
+ * the transcoder says each choice decodes here (a software encoder still
+ * gets CUDA's decoder on an NVIDIA computer). Vulkan's are its own: it
+ * decodes on the GPU, so hardware decoding is on with it.
+ */
+export function decodingReason(accel: HwAccel, system: SystemInfo | undefined): string | null {
+  const tc = knownTranscoder(system);
+  if (!tc || accel === "vulkan") return null;
+  if (!tc.hardware_decoding) return "no graphics card here that FFmpeg decodes on";
+  if (tc.with_accel?.[accel]?.hardware_decoding !== false) return null;
+  const encodes = accelInUse(accel, system);
+  return `not with ${encodes ? ACCEL_NAME[encodes] : "software encoding"}`;
+}
+
+/** What follows from choosing `accel`, for what `form` holds that doesn't go with it. */
+export interface AccelFit {
+  changes: Partial<Pick<Settings, "tonemapping" | "hardware_decoding">>;
+  /** What changed and why, by setting. */
+  notes: { tonemapping?: string; hardware_decoding?: string };
+}
+
+/**
+ * What `form` changes to with `accel` chosen, as the server does when it
+ * saves (`fit_to_accel`): a tone mapper that doesn't go with it gives way to
+ * Automatic, and hardware decoding is turned on for Vulkan.
+ */
+export function fitToAccel(form: Pick<Settings, "tonemapping" | "hardware_decoding">, accel: HwAccel): AccelFit {
+  const fit: AccelFit = { changes: {}, notes: {} };
+  if (!tonemapGoesWith(accel, form.tonemapping)) {
+    fit.changes.tonemapping = "auto";
+    fit.notes.tonemapping = `Set to Automatic: ${ACCEL_NAME[accel]} tone maps with libplacebo only.`;
+  }
+  if (accel === "vulkan" && !form.hardware_decoding) {
+    fit.changes.hardware_decoding = true;
+    fit.notes.hardware_decoding = `Turned on: ${ACCEL_NAME[accel]} decodes on the GPU.`;
+  }
+  return fit;
+}
+
+/**
+ * What the software encoder preset applies to with `accel` chosen, when a
+ * GPU encodes: what the transcoder leaves to software with it (HEVC, or
+ * HDR kept in 10-bit HEVC), and the transcodes software takes over.
+ * `null` with software encoding, where it applies to everything.
+ */
+export function presetNote(accel: HwAccel, system: SystemInfo | undefined): string | null {
+  const encodes = accelInUse(accel, system);
+  if (!encodes) return null;
+  const name = ACCEL_NAME[encodes];
+  const software = knownTranscoder(system)?.with_accel?.[accel]?.software ?? [];
+  if (software.includes("hevc")) return `${name} encodes H.264 here: this applies to HEVC, and when software encodes instead.`;
+  if (software.includes("hdr")) return `${name} encodes here: this applies to transcodes that keep HDR, and when software encodes instead.`;
+  return `${name} encodes here: this applies only when software encodes instead.`;
 }
 
 /**
