@@ -165,6 +165,19 @@ from the internet.
   has Vulkan, else on the CPU (zscale).
 - **arm64** boards such as the Raspberry Pi have no encoder Pley uses: they
   transcode on the CPU.
+- **Windows (Docker Desktop on WSL 2)** shows Linux the GPU as `/dev/dxg`,
+  which Mesa's D3D12 VA-API driver encodes on (AMD, Intel or NVIDIA):
+  - pass `/dev/dxg` and `/dev/dri/renderD128`, mount `/usr/lib/wsl`
+    read-only, and set `LD_LIBRARY_PATH=/usr/lib/wsl/lib` and
+    `LIBVA_DRIVER_NAME=d3d12`;
+  - the render node there is root's only (`PLEY_UID=0`);
+  - it takes Mesa 26: the image's Mesa 25.0 (Debian 13) can't open WSL's
+    render node on the 6.18 kernel Docker Desktop runs ("MESA-LOADER:
+    failed to retrieve device information"), and a newer libdrm alone
+    doesn't help;
+  - WSL has no Vulkan or OpenCL on the GPU, so HDR is tone mapped on the
+    CPU, below real time for 4K. For HDR, or AMD's encoder (AMF), install
+    Pley on Windows itself.
 
 Pley logs the encoders it found at start
 (`docker compose logs pley | grep detected`), and checks again when the GPUs
