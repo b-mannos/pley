@@ -733,7 +733,7 @@ class SessionPlaybackController(
         val info = session?.info ?: return
         pictureSubtitles?.hide()
         val path = info.subtitles.firstOrNull { it.index == sub.index }?.url ?: "/api/files/${info.fileId}/subtitles/${sub.index}.vtt"
-        serverSubtitles.show(info.fileId, sub.index, if (path.startsWith("file:")) path else env.api.url(path))
+        serverSubtitles.show(info.fileId, sub.index, if (isSavedSubtitle(path, info.url)) path else env.api.url(path))
     }
 
     /** Pictures beside a stream: the server's .mks of the track, at the stream's own positions (the file's). */
@@ -1865,3 +1865,10 @@ class SessionPlaybackController(
         const val QUIET_AFTER_DELAY_MS = 3_000L
     }
 }
+
+/**
+ * Whether a subtitle track's [path] is a file saved on this device, which
+ * only a download's own session names (its media's [sessionUrl] is a file
+ * too): a server naming one can't have the app read its files.
+ */
+internal fun isSavedSubtitle(path: String, sessionUrl: String): Boolean = path.startsWith("file:") && sessionUrl.startsWith("file:")
