@@ -477,6 +477,15 @@ pub struct Capabilities {
     /// with the input codecs each one handles.
     #[serde(default)]
     pub gpu_pipelines: Vec<GpuPipeline>,
+    /// Tone mappers whose frames reach a VAAPI encoder (Linux): libplacebo
+    /// on a Vulkan device and OpenCL on a device made from the VAAPI one,
+    /// the frames uploaded back to it. A start-up test; zimg always does.
+    #[serde(default)]
+    pub vaapi_tonemappers: Vec<Tonemapper>,
+    /// [`Capabilities::vulkan_decode`] on the Vulkan device made from the
+    /// VAAPI one, through libplacebo to a VAAPI encoder.
+    #[serde(default)]
+    pub vaapi_vulkan_decode: Vec<String>,
     pub subtitle_burn_image: bool,
     pub subtitle_burn_text: bool,
     /// `-readrate`/`-readrate_initial_burst` are supported (transcode throttling).

@@ -21,7 +21,7 @@ use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 10;
+const DETECTION_REVISION: u32 = 11;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -133,9 +133,18 @@ impl Ffmpeg {
     }
 
     /// Choose a tone mapper. `dolby_vision_p5` requests a mapper that applies
-    /// the Dolby Vision RPU (only libplacebo does).
-    pub fn pick_tonemapper(&self, mode: TonemapMode, dolby_vision_p5: bool) -> (Option<Tonemapper>, Vec<String>) {
-        let available = &self.caps.tonemappers;
+    /// the Dolby Vision RPU (only libplacebo does). With `vaapi` (a VAAPI
+    /// encoder takes the frames) only those whose frames reach it are
+    /// chosen ([`Capabilities::vaapi_tonemappers`], and zimg on the CPU).
+    pub fn pick_tonemapper(
+        &self,
+        mode: TonemapMode,
+        dolby_vision_p5: bool,
+        vaapi: bool,
+    ) -> (Option<Tonemapper>, Vec<String>) {
+        let reaches_encoder =
+            |m: &Tonemapper| !vaapi || *m == Tonemapper::Zscale || self.caps.vaapi_tonemappers.contains(m);
+        let available: &Vec<Tonemapper> = &self.caps.tonemappers.iter().copied().filter(reaches_encoder).collect();
         let mut warnings = Vec::new();
         let auto = || {
             if dolby_vision_p5 && available.contains(&Tonemapper::Libplacebo) {
@@ -158,6 +167,10 @@ impl Ffmpeg {
                 };
                 if available.contains(&wanted) {
                     Some(wanted)
+                } else if self.caps.tonemappers.contains(&wanted) {
+                    warnings
+                        .push(format!("tone mapper {} can't hand its frames to the VAAPI encoder", wanted.as_str()));
+                    auto()
                 } else {
                     warnings.push(format!("tone mapper {} is not available", wanted.as_str()));
                     auto()
@@ -280,6 +293,49 @@ async fn test_encoder(ffmpeg: &Path, name: &str, accel: HwAccel, main10: bool) -
 }
 
 const HDR_TAGS: &str = "setparams=color_trc=smpte2084:color_primaries=bt2020:colorspace=bt2020nc";
+
+/// The tone mappers' start-up tests, on HDR-tagged frames.
+fn libplacebo_test_graph() -> String {
+    format!(
+        "{HDR_TAGS},libplacebo=w=160:h=120:format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:tonemapping=auto:{}",
+        crate::plan::PLACEBO_STATIC_PEAK
+    )
+}
+
+fn opencl_test_graph() -> String {
+    format!(
+        "{HDR_TAGS},format=p010,hwupload,tonemap_opencl=tonemap=hable:desat=0:t=bt709:m=bt709:p=bt709:format=nv12,hwdownload,format=nv12"
+    )
+}
+
+/// Whether a tone mapper's frames reach a VAAPI encoder as transcodes hand
+/// them over: the mapper's device (`vulkan=vk`, `opencl=ocl`, named `name`)
+/// made from VAAPI's, the frames uploaded back to VAAPI's at the end
+/// ([`crate::plan::VAAPI_UPLOAD`]). A plain `hwupload` there would upload
+/// to the mapper's device, which the encoder can't take.
+async fn test_vaapi_chain(ffmpeg: &Path, device: &str, name: &str, graph: &str) -> bool {
+    let vf = format!("{graph},format=nv12,{}", crate::plan::VAAPI_UPLOAD);
+    let mut args: Vec<String> = ["-hide_banner", "-nostdin", "-loglevel", "error"].map(String::from).to_vec();
+    args.extend(crate::plan::vaapi_filter_devices(device, devices::vaapi_device()));
+    args.extend(
+        [
+            "-filter_hw_device",
+            name,
+            "-f",
+            "lavfi",
+            "-i",
+            "color=gray:s=320x240:r=25:d=0.2",
+            "-vf",
+            &vf,
+            "-frames:v",
+            "3",
+        ]
+        .map(String::from),
+    );
+    args.extend(["-c:v", "h264_vaapi", "-f", "null", "-"].map(String::from));
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    matches!(run(ffmpeg, &refs, Duration::from_secs(30)).await, Some(Output { success: true, .. }))
+}
 
 /// Whether FFmpeg's Vulkan device is a GPU, as far as it says: Mesa's
 /// llvmpipe (in every Mesa install, and in the Docker image) is Vulkan on
@@ -460,10 +516,7 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
         if !has("libplacebo") {
             return (false, false);
         }
-        let vf = format!(
-            "{HDR_TAGS},libplacebo=w=160:h=120:format=yuv420p:colorspace=bt709:color_primaries=bt709:color_trc=bt709:tonemapping=auto:{}",
-            crate::plan::PLACEBO_STATIC_PEAK
-        );
+        let vf = libplacebo_test_graph();
         tokio::join!(
             test_filter(ffmpeg, &["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"], &vf),
             vulkan_on_gpu(ffmpeg)
@@ -473,10 +526,7 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
         if !has("tonemap_opencl") {
             return false;
         }
-        let vf = format!(
-            "{HDR_TAGS},format=p010,hwupload,tonemap_opencl=tonemap=hable:desat=0:t=bt709:m=bt709:p=bt709:format=nv12,hwdownload,format=nv12"
-        );
-        test_filter(ffmpeg, &["-init_hw_device", "opencl=ocl", "-filter_hw_device", "ocl"], &vf).await
+        test_filter(ffmpeg, &["-init_hw_device", "opencl=ocl", "-filter_hw_device", "ocl"], &opencl_test_graph()).await
     };
     let zscale_test = async {
         if !(has("zscale") && has("tonemap")) {
@@ -543,8 +593,27 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
     caps.readrate = readrate;
     caps.readrate_catchup = catchup;
 
+    // The GPU tone mappers whose frames reach VAAPI's encoder (Linux).
+    if caps.encoders.iter().any(|e| e.name == "h264_vaapi") {
+        let (placebo, ocl) = tokio::join!(
+            async { libplacebo && test_vaapi_chain(ffmpeg, "vulkan=vk", "vk", &libplacebo_test_graph()).await },
+            async { opencl && test_vaapi_chain(ffmpeg, "opencl=ocl", "ocl", &opencl_test_graph()).await },
+        );
+        caps.vaapi_tonemappers = caps
+            .tonemappers
+            .iter()
+            .copied()
+            .filter(|m| match m {
+                Tonemapper::Libplacebo => placebo,
+                Tonemapper::Opencl => ocl,
+                Tonemapper::Zscale => true,
+            })
+            .collect();
+    }
+
     let gpu = detect_gpu_pipelines(ffmpeg, &encoder_names, &filter_names, &caps, libplacebo && libplacebo_on_gpu).await;
     caps.vulkan_decode = gpu.vulkan_decode;
+    caps.vaapi_vulkan_decode = gpu.vaapi_vulkan_decode;
     caps.vulkan_encode = gpu.vulkan_encode;
     caps.gpu_pipelines = gpu.pipelines;
     (caps, relative)
@@ -553,6 +622,7 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
 #[derive(Default)]
 struct GpuDetection {
     vulkan_decode: Vec<String>,
+    vaapi_vulkan_decode: Vec<String>,
     vulkan_encode: bool,
     pipelines: Vec<GpuPipeline>,
 }
@@ -721,6 +791,23 @@ async fn detect_gpu_pipelines(
             (key.to_string(), ok)
         }
     }));
+    // The same before a VAAPI encoder: Vulkan's device made from VAAPI's,
+    // the frames uploaded back to VAAPI's.
+    let mut vk_va: Vec<String> = crate::plan::vaapi_filter_devices("vulkan=vk", devices::vaapi_device()).to_vec();
+    vk_va.extend(VK[2..].iter().map(|s| s.to_string()));
+    let vk_va: Vec<&str> = vk_va.iter().map(String::as_str).collect();
+    let vaapi_vulkan = vulkan && working("h264_vaapi");
+    let vaapi_vulkan_tests = futures::future::join_all(clips.iter().filter(|_| vaapi_vulkan).map(|(key, clip)| {
+        let mut args = base("verbose", &vk_va, clip);
+        let vf = format!("libplacebo=w=160:h=120:format=nv12,hwdownload,format=nv12,{}", crate::plan::VAAPI_UPLOAD);
+        args.extend(["-vf".to_string(), vf]);
+        args.extend(["-c:v", "h264_vaapi", "-f", "null", "-"].map(String::from));
+        let test = run_logged(args);
+        async move {
+            let ok = test.await.is_some_and(|o| o.success && frames_arrive_in(&o.text, "vulkan"));
+            (key.to_string(), ok)
+        }
+    }));
     let vulkan_encode_test = async {
         let Some((_, clip)) = clips.iter().find(|(k, _)| *k == "hevc10").or(clips.first()) else { return false };
         if !(vulkan && encoders.contains("h264_vulkan")) {
@@ -758,14 +845,15 @@ async fn detect_gpu_pipelines(
         }));
         async move { (*accel, tests.await) }
     }));
-    let (vulkan_results, vulkan_encode, pipeline_results) =
-        tokio::join!(vulkan_tests, vulkan_encode_test, pipeline_tests);
+    let (vulkan_results, vaapi_vulkan_results, vulkan_encode, pipeline_results) =
+        tokio::join!(vulkan_tests, vaapi_vulkan_tests, vulkan_encode_test, pipeline_tests);
     let _ = std::fs::remove_dir_all(&dir);
 
     let ok_keys =
         |results: Vec<(String, bool)>| results.into_iter().filter(|(_, ok)| *ok).map(|(k, _)| k).collect::<Vec<_>>();
     GpuDetection {
         vulkan_decode: ok_keys(vulkan_results),
+        vaapi_vulkan_decode: ok_keys(vaapi_vulkan_results),
         vulkan_encode,
         pipelines: pipeline_results
             .into_iter()
@@ -922,11 +1010,36 @@ mod tests {
     #[test]
     fn tonemapper_selection_prefers_libplacebo_for_dv() {
         let ff = fake(vec![], vec![Tonemapper::Opencl, Tonemapper::Libplacebo, Tonemapper::Zscale]);
-        assert_eq!(ff.pick_tonemapper(TonemapMode::Auto, true).0, Some(Tonemapper::Libplacebo));
-        assert_eq!(ff.pick_tonemapper(TonemapMode::Auto, false).0, Some(Tonemapper::Opencl));
+        assert_eq!(ff.pick_tonemapper(TonemapMode::Auto, true, false).0, Some(Tonemapper::Libplacebo));
+        assert_eq!(ff.pick_tonemapper(TonemapMode::Auto, false, false).0, Some(Tonemapper::Opencl));
         let ff = fake(vec![], vec![Tonemapper::Zscale]);
-        let (choice, warnings) = ff.pick_tonemapper(TonemapMode::Auto, true);
+        let (choice, warnings) = ff.pick_tonemapper(TonemapMode::Auto, true, false);
         assert_eq!(choice, Some(Tonemapper::Zscale));
         assert!(warnings.iter().any(|w| w.contains("Dolby Vision")));
+    }
+
+    #[test]
+    fn a_vaapi_encoder_gets_frames_only_from_tone_mappers_that_reach_it() {
+        let mut ff = fake(vec![], vec![Tonemapper::Libplacebo, Tonemapper::Opencl, Tonemapper::Zscale]);
+        // AMD: libplacebo's Vulkan device made from VAAPI's works, OpenCL's
+        // can't be made from it.
+        ff.caps.vaapi_tonemappers = vec![Tonemapper::Libplacebo, Tonemapper::Zscale];
+        assert_eq!(ff.pick_tonemapper(TonemapMode::Auto, false, true).0, Some(Tonemapper::Libplacebo));
+        let (choice, warnings) = ff.pick_tonemapper(TonemapMode::Opencl, false, true);
+        assert_eq!(choice, Some(Tonemapper::Libplacebo));
+        assert!(warnings.iter().any(|w| w.contains("VAAPI")), "{warnings:?}");
+        // Other encoders take any.
+        assert_eq!(ff.pick_tonemapper(TonemapMode::Opencl, false, false), (Some(Tonemapper::Opencl), vec![]));
+
+        // Neither reaches it: zimg, on the CPU, always does.
+        ff.caps.vaapi_tonemappers = vec![Tonemapper::Zscale];
+        assert_eq!(ff.pick_tonemapper(TonemapMode::Auto, false, true).0, Some(Tonemapper::Zscale));
+        let (choice, warnings) = ff.pick_tonemapper(TonemapMode::Auto, true, true);
+        assert_eq!(choice, Some(Tonemapper::Zscale));
+        assert!(warnings.iter().any(|w| w.contains("Dolby Vision")), "{warnings:?}");
+        ff.caps.tonemappers = vec![Tonemapper::Opencl];
+        let (choice, warnings) = ff.pick_tonemapper(TonemapMode::Auto, false, true);
+        assert_eq!(choice, None);
+        assert!(warnings.iter().any(|w| w.contains("no tone mapper")), "{warnings:?}");
     }
 }

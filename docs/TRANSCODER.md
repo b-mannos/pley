@@ -395,6 +395,35 @@ half-made ones are deleted.
   (63 frames, in its kernel), so it has the same seams; zimg's `tonemap`
   has none.
 
+  Before a VAAPI encoder (Intel and AMD graphics on Linux) the tone
+  mapper's device is made from VAAPI's: `-init_hw_device
+  vaapi=va:<render node> -init_hw_device vulkan=vk@va` (or `opencl=ocl@va`)
+  `-filter_hw_device vk`, and the last filter is `hwupload=derive_device=vaapi`.
+  VAAPI's encoders take frames in VAAPI's memory only, and a plain
+  `hwupload` uploads to the filters' device, Vulkan's or OpenCL's: the
+  encoder couldn't start ("Impossible to convert between the formats
+  supported by the filter 'Parsed_hwupload' and the filter 'auto_scale'"),
+  and every HDR job fell back to x264. `derive_device=vaapi` finds the
+  VAAPI device the filters' was made from. A Vulkan device made from
+  VAAPI's is the same GPU where VAAPI says which it is (VA-API 1.15's PCI
+  id, or AMD's name), and Vulkan's first device otherwise; an OpenCL one
+  can only be made by Intel's OpenCL (`cl_intel_va_api_media_sharing`),
+  not AMD's. At start-up each GPU tone mapper is tried that way into
+  `h264_vaapi` (`capabilities.vaapi_tonemappers`), and Vulkan decoding
+  too, per codec (`capabilities.vaapi_vulkan_decode`). Jobs with a VAAPI
+  encoder use only the tone mappers that passed, and zimg; where none of
+  them is left, or Dolby Vision profile 5 would lose libplacebo's
+  colours, the job encodes with x264 instead, with a warning. HDR kept in
+  HEVC that libplacebo would convert is tone mapped instead when
+  libplacebo's frames don't reach VAAPI's encoder. Tried with FFmpeg 9.0.2
+  and Mesa 26.2 in Debian (Docker on WSL, VAAPI through Mesa's D3D12
+  driver on an RTX 5070, Vulkan on llvmpipe): the old arguments failed for
+  libplacebo, Vulkan decoding and OpenCL alike; the new ones made HLS
+  segments with libplacebo (the VA display's PCI id hidden, so that Vulkan
+  falls back to llvmpipe) and with zimg, and an OpenCL device that can't be
+  made from VAAPI's fails its start-up test. Not tried on Intel or AMD
+  graphics.
+
   libplacebo keeps the shaders it compiles in the work directory's
   `libplacebo/` folder (made at start-up, with an absolute path, since FFmpeg
   runs in a job's folder), so later processes skip about 0.2 s of compiling:

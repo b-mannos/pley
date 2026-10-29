@@ -65,6 +65,22 @@ pub fn zscale_tonemap(w: i64, h: i64) -> String {
 pub const PLACEBO_STATIC_PEAK: &str = "peak_detect=0";
 const OPENCL_TONEMAP: &str = "format=p010,hwupload,tonemap_opencl=tonemap=hable:desat=0:t=bt709:m=bt709:p=bt709:format=nv12,hwdownload,format=nv12";
 
+/// The last filter before a VAAPI encoder, which takes frames in VAAPI's
+/// memory only. A plain `hwupload` uploads to the filters' device, which a
+/// tone mapper makes Vulkan's or OpenCL's: it uploads to VAAPI's device
+/// instead, the one the filters' device was made from
+/// ([`vaapi_filter_devices`]), or the filters' own when it is VAAPI's.
+pub const VAAPI_UPLOAD: &str = "hwupload=derive_device=vaapi";
+
+/// The devices for filters on `device` (`vulkan=vk`, `opencl=ocl`) whose
+/// frames go on to a VAAPI encoder: VAAPI's on `node` first, then the
+/// filters' made from it (`vulkan=vk@va`), so that [`VAAPI_UPLOAD`] finds
+/// VAAPI's again. Vulkan's is then the same GPU where VAAPI says which
+/// it is. OpenCL's can only be made from VAAPI's by Intel's OpenCL.
+pub fn vaapi_filter_devices(device: &str, node: &str) -> [String; 4] {
+    ["-init_hw_device".into(), format!("vaapi=va:{node}"), "-init_hw_device".into(), format!("{device}@va")]
+}
+
 /// A `setparams` filter giving HDR frames the colour properties they lack
 /// (PQ, BT.2020), for the zimg and OpenCL tone mappers, which refuse to
 /// convert from unknown ones ("no path between colorspaces"). Dolby Vision
@@ -218,6 +234,9 @@ fn hdr_output<'a>(
     let Some(encoder) = ff.pick_main10_encoder(accel).0 else {
         return no("no 10-bit HEVC encoder works");
     };
+    if convert && encoder.accel == HwAccel::Vaapi && !ff.caps.vaapi_tonemappers.contains(&Tonemapper::Libplacebo) {
+        return no("libplacebo's frames don't reach the VAAPI encoder");
+    }
     Some((HdrOut { range: wanted, convert }, encoder))
 }
 
@@ -390,7 +409,7 @@ impl Plan {
                     let accel = req.options.hwaccel;
                     let kept = hdr_output(vreq, src, burn.is_some(), ff, accel, &mut warnings);
                     let hdr = kept.map(|(hdr, _)| hdr);
-                    let encoder = match kept {
+                    let mut encoder = match kept {
                         Some((_, encoder)) => encoder.clone(),
                         None => {
                             let (encoder, warning) = ff.pick_encoder(vreq.codec, accel);
@@ -404,21 +423,43 @@ impl Plan {
                         // is needed for frames in the output's already.
                         Some(hdr) => hdr.convert.then_some(Tonemapper::Libplacebo),
                         None if range.is_hdr() => {
-                            let (choice, w) = ff.pick_tonemapper(req.options.tonemap, src.is_dolby_vision_only());
+                            let (mode, dv5) = (req.options.tonemap, src.is_dolby_vision_only());
+                            let vaapi = encoder.accel == HwAccel::Vaapi;
+                            let (mut choice, mut w) = ff.pick_tonemapper(mode, dv5, vaapi);
+                            // A VAAPI encoder takes the frames of some tone
+                            // mappers only. Where that would lose the picture
+                            // (no tone mapping, or Dolby Vision 5's colours),
+                            // the software encoder takes them instead.
+                            let (any, any_w) = ff.pick_tonemapper(mode, dv5, false);
+                            let lost = (choice.is_none() && any.is_some())
+                                || (dv5 && any == Some(Tonemapper::Libplacebo) && choice != any);
+                            if let Some(software) = ff.software_encoder_for(vreq.codec, false).filter(|_| vaapi && lost)
+                            {
+                                let mapper = any.map_or("", |m| m.as_str());
+                                warnings.push(format!(
+                                    "{mapper}'s frames don't reach the VAAPI encoder: encoding with {}",
+                                    software.name
+                                ));
+                                encoder = software.clone();
+                                (choice, w) = (any, any_w);
+                            }
                             warnings.extend(w);
                             choice
                         }
                         None => None,
                     };
+                    let vaapi = encoder.accel == HwAccel::Vaapi;
                     let tonemap_input = match tonemap {
                         Some(Tonemapper::Zscale | Tonemapper::Opencl) => untagged_hdr_fix(src),
                         _ => None,
                     };
                     let deinterlace = src.interlaced == Some(true);
                     let key = decode_key(&src.codec, src.bit_depth);
+                    // Before a VAAPI encoder, Vulkan's device is made from VAAPI's.
+                    let vulkan_decode = if vaapi { &ff.caps.vaapi_vulkan_decode } else { &ff.caps.vulkan_decode };
                     let pipeline = if !req.options.hardware_decoding || deinterlace {
                         Pipeline::Software
-                    } else if tonemap == Some(Tonemapper::Libplacebo) && ff.caps.vulkan_decode.contains(&key) {
+                    } else if tonemap == Some(Tonemapper::Libplacebo) && vulkan_decode.contains(&key) {
                         // Encoding on Vulkan too only when asked for: browsers
                         // don't play what h264_vulkan makes of 4K (and of
                         // anything, with B-frames). The frames go to the
@@ -768,21 +809,31 @@ impl Plan {
         let mut a = Args::default();
         a.push_all(["-loglevel", "error", "-nostats", "-progress", "pipe:2", "-y"]);
 
-        // Global hardware devices and decoding.
+        // Global hardware devices and decoding. A tone mapper's device is
+        // made from VAAPI's when a VAAPI encoder takes its frames.
+        let vaapi = encoder.is_some_and(|e| e.accel == HwAccel::Vaapi);
+        let filter_device = |a: &mut Args, device: &str| {
+            if vaapi {
+                a.extend(vaapi_filter_devices(device, vaapi_device()).to_vec());
+            } else {
+                a.push_all(["-init_hw_device", device]);
+            }
+        };
         if let Some(v) = self.video.as_ref().filter(|v| !v.copy) {
             match pipeline {
-                Pipeline::Vulkan { .. } => a.push_all([
-                    "-init_hw_device",
-                    "vulkan=vk",
-                    "-filter_hw_device",
-                    "vk",
-                    "-hwaccel",
-                    "vulkan",
-                    "-hwaccel_device",
-                    "vk",
-                    "-hwaccel_output_format",
-                    "vulkan",
-                ]),
+                Pipeline::Vulkan { .. } => {
+                    filter_device(&mut a, "vulkan=vk");
+                    a.push_all([
+                        "-filter_hw_device",
+                        "vk",
+                        "-hwaccel",
+                        "vulkan",
+                        "-hwaccel_device",
+                        "vk",
+                        "-hwaccel_output_format",
+                        "vulkan",
+                    ]);
+                }
                 Pipeline::Gpu(HwAccel::Vaapi) => a.push_all([
                     "-hwaccel",
                     "vaapi",
@@ -801,15 +852,15 @@ impl Plan {
                 Pipeline::Software => {
                     match v.tonemap {
                         Some(Tonemapper::Libplacebo) => {
-                            a.push_all(["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"])
+                            filter_device(&mut a, "vulkan=vk");
+                            a.push_all(["-filter_hw_device", "vk"]);
                         }
                         Some(Tonemapper::Opencl) => {
-                            a.push_all(["-init_hw_device", "opencl=ocl", "-filter_hw_device", "ocl"])
+                            filter_device(&mut a, "opencl=ocl");
+                            a.push_all(["-filter_hw_device", "ocl"]);
                         }
+                        _ if vaapi => a.push_all(["-vaapi_device", vaapi_device()]),
                         _ => {}
-                    }
-                    if encoder.is_some_and(|e| e.accel == HwAccel::Vaapi) {
-                        a.push_all(["-vaapi_device", vaapi_device()]);
                     }
                     if let Some(dec) = &v.hw_decode {
                         a.push_all(["-hwaccel", dec.as_str()]);
@@ -1000,7 +1051,7 @@ impl Plan {
         let vulkan = matches!(pipeline, Pipeline::Vulkan { .. });
         match ten_bit {
             _ if encoder.is_some_and(|e| e.accel == HwAccel::Vaapi) => {
-                post.push(format!("format={},hwupload", if ten_bit.is_some() { "p010" } else { "nv12" }));
+                post.push(format!("format={},{VAAPI_UPLOAD}", if ten_bit.is_some() { "p010" } else { "nv12" }));
             }
             // The Vulkan path already delivers NV12, which every encoder
             // accepts; P010 for HDR, which x265 doesn't.
@@ -1893,7 +1944,14 @@ mod tests {
         let codecs: Vec<String> = ["h264", "hevc", "hevc10"].map(String::from).to_vec();
         ff.caps.gpu_pipelines = vec![pley_transcoder_api::GpuPipeline { accel, codecs: codecs.clone() }];
         if vulkan {
-            ff.caps.vulkan_decode = codecs;
+            ff.caps.vulkan_decode = codecs.clone();
+        }
+        if accel == HwAccel::Vaapi {
+            // The tone mappers' frames reach VAAPI's encoder from devices made from its.
+            ff.caps.vaapi_tonemappers = ff.caps.tonemappers.clone();
+            if vulkan {
+                ff.caps.vaapi_vulkan_decode = codecs;
+            }
         }
         ff
     }
@@ -1930,8 +1988,24 @@ mod tests {
             assert!(args.contains("hwdownload,format=nv12"), "{args}");
             assert!(args.contains(&format!("-c:v {encoder}")), "{args}");
             if accel == HwAccel::Vaapi {
-                // VAAPI's encoders take frames on the GPU only.
-                assert!(args.contains("hwdownload,format=nv12,format=nv12,hwupload[vout]"), "{args}");
+                // VAAPI's encoders take frames in VAAPI's memory only: the
+                // filters' Vulkan device is made from VAAPI's, and the frames
+                // are uploaded to that rather than to Vulkan's.
+                assert!(
+                    args.contains(
+                        "-init_hw_device vaapi=va:/dev/dri/renderD128 -init_hw_device vulkan=vk@va -filter_hw_device vk \
+                         -hwaccel vulkan -hwaccel_device vk"
+                    ),
+                    "{args}"
+                );
+                assert!(
+                    args.contains("hwdownload,format=nv12,format=nv12,hwupload=derive_device=vaapi[vout]"),
+                    "{args}"
+                );
+                assert!(!args.contains("-vaapi_device"), "{args}");
+            } else {
+                assert!(args.contains("-init_hw_device vulkan=vk -filter_hw_device vk"), "{args}");
+                assert!(!args.contains("vaapi"), "{args}");
             }
 
             // An older driver without Vulkan: hardware decoding, OpenCL's tone
@@ -1948,7 +2022,76 @@ mod tests {
             let args = args_string(&plan, 0, 2);
             assert!(args.contains(&format!("-hwaccel {decoder}")), "{args}");
             assert!(args.contains(&format!("-c:v {encoder}")), "{args}");
+            if accel == HwAccel::Vaapi {
+                // OpenCL's device made from VAAPI's (Intel's OpenCL), the
+                // frames uploaded back to it.
+                assert!(
+                    args.contains(
+                        "-init_hw_device vaapi=va:/dev/dri/renderD128 -init_hw_device opencl=ocl@va -filter_hw_device ocl"
+                    ),
+                    "{args}"
+                );
+                assert!(args.contains("format=nv12,hwupload=derive_device=vaapi[vout]"), "{args}");
+            } else {
+                assert!(args.contains("-init_hw_device opencl=ocl -filter_hw_device ocl"), "{args}");
+            }
         }
+    }
+
+    /// VAAPI's encoders where the start-up test found that no GPU tone
+    /// mapper's frames reach them (AMD's OpenCL, which can't share VAAPI's
+    /// memory, or a Vulkan device that couldn't be made from VAAPI's).
+    #[test]
+    fn vaapi_encoders_take_tone_mapped_frames_only_from_mappers_that_reach_them() {
+        let mut ff = intel(HwAccel::Vaapi, true);
+        ff.caps.vaapi_tonemappers = vec![Tonemapper::Zscale];
+        ff.caps.vaapi_vulkan_decode.clear();
+        let m = ten_bit(media(DynamicRange::Hdr10, None));
+
+        // zimg on the CPU, its frames uploaded to VAAPI's only device.
+        let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.pipeline, v.tonemap), (Pipeline::Software, Some(Tonemapper::Zscale)));
+        assert_eq!(v.encoder.as_ref().unwrap().name, "h264_vaapi");
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("-vaapi_device /dev/dri/renderD128 -hwaccel vaapi"), "{args}");
+        assert!(!args.contains("init_hw_device"), "{args}");
+        assert!(args.contains("format=yuv420p,format=nv12,hwupload=derive_device=vaapi[vout]"), "{args}");
+
+        // libplacebo's Vulkan device couldn't be made from VAAPI's: Vulkan
+        // decoding then goes without it, and the job uses zimg.
+        ff.caps.vaapi_tonemappers = vec![Tonemapper::Opencl, Tonemapper::Zscale];
+        let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.pipeline, v.tonemap), (Pipeline::Software, Some(Tonemapper::Opencl)));
+
+        // Dolby Vision 5 keeps its colours: libplacebo, and x264 since its
+        // frames don't reach VAAPI's encoder.
+        ff.caps.vaapi_tonemappers = vec![Tonemapper::Zscale];
+        let p5 = ten_bit(media(DynamicRange::DolbyVision, Some(5)));
+        let plan = Plan::build(&request(), &p5, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.tonemap, v.encoder.as_ref().unwrap().name.as_str()), (Some(Tonemapper::Libplacebo), "libx264"));
+        assert!(plan.warnings.iter().any(|w| w.contains("don't reach the VAAPI encoder")), "{:?}", plan.warnings);
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("-init_hw_device vulkan=vk -filter_hw_device vk"), "{args}");
+        assert!(!args.contains("vaapi"), "{args}");
+
+        // Only OpenCL, which doesn't reach it: tone mapped all the same, by x264.
+        ff.caps.tonemappers = vec![Tonemapper::Opencl];
+        let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.tonemap, v.encoder.as_ref().unwrap().name.as_str()), (Some(Tonemapper::Opencl), "libx264"));
+
+        // HDR kept, converted by libplacebo: not to VAAPI's encoder, so it is
+        // tone mapped (by zimg) instead.
+        ff.caps.tonemappers = vec![Tonemapper::Libplacebo, Tonemapper::Zscale];
+        ff.caps.vaapi_tonemappers = vec![Tonemapper::Zscale];
+        let hlg = ten_bit(media(DynamicRange::Hlg, None));
+        let plan = Plan::build(&hdr_request(pley_transcoder_api::OutputRange::Hdr10), &hlg, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.hdr, v.tonemap), (None, Some(Tonemapper::Zscale)));
+        assert!(plan.warnings.iter().any(|w| w.contains("libplacebo's frames")), "{:?}", plan.warnings);
     }
 
     /// AMD's Vega graphics on Windows (a Ryzen 5600U): AMF encodes and
