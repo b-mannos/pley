@@ -181,7 +181,7 @@ Errors are `{"code": "...", "message": "..."}`:
 | `readrate` | `-readrate` is supported (see [Throttling](#throttling)) |
 | `readrate_catchup` | `-readrate_catchup` is supported |
 | `chromaprint` | `POST /v1/fingerprint` works |
-| `hls_master_playlist` | jobs have `master.m3u8`, and remuxes honour `dolby_vision` and `strip_hdr10plus` |
+| `hls_master_playlist` | jobs have `master.m3u8`, and remuxes honor `dolby_vision` and `strip_hdr10plus` |
 | `hdr_transcode` | a 10-bit HEVC encoder works: transcodes can keep HDR |
 | `subtitle_matroska` | `POST /v1/subtitles/mks` works |
 | `conversions` | `POST /v1/conversions` works |
@@ -602,17 +602,12 @@ How it works:
   stay on disk.
 
 Windows and macOS keep segments on disk (`/v1/info` says
-`memory.available: false`, "works on Linux only"):
-
-- They have no folder in RAM by default.
-- FFmpeg creates the files, so they can't be marked to stay in the file cache
-  (`FILE_ATTRIBUTE_TEMPORARY`).
-- A RAM disk needs a driver (Windows) or outlives the transcoder (macOS's
-  `hdiutil`).
-- FFmpeg sending segments to the transcoder over HTTP would need the segment
-  muxer's file handling and Dolby Vision editing redone in memory.
-- Windows' file cache keeps just-written segments in memory for serving
-  anyway.
+`memory.available: false`, "works on Linux only"). They have no folder in RAM
+by default; FFmpeg creates the files, so they can't be marked to stay in the
+file cache (`FILE_ATTRIBUTE_TEMPORARY`); a RAM disk needs a driver (Windows)
+or outlives the transcoder (macOS's `hdiutil`); and segments sent over HTTP
+would need the segment muxer and Dolby Vision editing redone in memory.
+Windows' file cache keeps just-written segments in memory anyway.
 
 Memory limits:
 
@@ -719,48 +714,33 @@ sessions run out).
   libplacebo (which scales as it tone maps).
 - Mesa's D3D12 VAAPI driver (WSL) crashes in `scale_vaapi`. Its pipeline fails
   the start-up test, and VAAPI frames there come to memory whole.
-- SDR pictures are the same either way (luma PSNR 50 dB and 46.5 dB, encoder
-  noise included). HDR scaled before tone mapping is scaled in PQ rather than
-  in linear light, and differs where fine bright detail meets dark (PSNR 33 dB
-  on FFmpeg's test pattern, all hard edges), as with every tone mapper that
-  scales first (OpenCL here).
-
-Measured on an RTX 5070 and a 24-thread Ryzen: 20 s of 4K HEVC to 1080p
-H.264, the plan's own arguments, median of three runs (CPU time, then wall
-time).
-
-| Case | Frames downloaded whole | Scaled on the GPU first |
-|---|---|---|
-| Burned-in text subtitles, NVENC | 10.0 s, 2.6 s | 3.3 s, 1.4 s |
-| x264 (the stand-in) | 19.9 s, 2.7 s | 14.6 s, 2.0 s |
-| HDR10 tone mapped by zimg, NVENC | 78 s CPU; 12.1 s for 30 s of it (median of five) | 48 s CPU; 9.1 s |
+- SDR pictures are the same either way (luma PSNR 50 and 46.5 dB, encoder
+  noise included). HDR is then scaled in PQ rather than linear light, which
+  differs where fine bright detail meets dark (PSNR 33 dB on FFmpeg's test
+  pattern), as with any tone mapper that scales first (OpenCL).
+- Measured (RTX 5070, 24-thread Ryzen, 20 s of 4K HEVC to 1080p H.264, CPU
+  time, median of three): burned-in text subtitles with NVENC 10.0 → 3.3 s;
+  x264 19.9 → 14.6 s; HDR10 tone mapped by zimg into NVENC 78 → 48 s (wall
+  time 12.1 → 9.1 s for 30 s of it, median of five).
 
 #### Vulkan decoding
 
-- Vulkan decoding (into libplacebo) counts for a codec only when the start-up
-  test's frames reach the filters in Vulkan memory (`pixfmt:vulkan` in
-  FFmpeg's verbose log).
-- libplacebo also takes frames from memory, so without this check a driver
-  without Vulkan video decoding (AMD's for Vega graphics on Windows, for
-  example) would pass while the CPU decodes. Those GPUs decode with the
-  encoder's decoder instead.
+Vulkan decoding (into libplacebo) counts for a codec only when the start-up
+test's frames reach the filters in Vulkan memory (`pixfmt:vulkan` in FFmpeg's
+verbose log). libplacebo also takes frames from memory, so a driver without
+Vulkan video decoding (AMD's for Vega graphics on Windows, say) would
+otherwise pass while the CPU decodes. Those GPUs decode with the encoder's
+decoder instead.
 
 #### NVDEC frame copy
 
-- NVDEC runs without `-hwaccel_flags +unsafe_output`. That flag skips the copy
-  of each decoded frame out of the decoder's surface (`nvdec.c`'s
-  `av_frame_make_writable`), and leaves the decoder's own surfaces with
-  FFmpeg's filters, which is what makes it unsafe.
-- The copy happens inside the GPU and costs nothing measurable: decoding sets
-  the pace. RTX 5070, FFmpeg 9.0.2, 30 s of 4K HEVC (720 frames) to 1080p
-  H.264, seven alternating runs each, median:
-
-  | Pipeline | Without the flag | With it |
-  |---|---|---|
-  | Kept on the GPU (`scale_cuda` into NVENC) | 1.65 s | 1.73 s |
-  | Brought to memory (CPU scaling into NVENC) | 3.72 s | 3.90 s |
-
-  The frames are the same either way (framemd5, 8 and 10 bits).
+NVDEC runs without `-hwaccel_flags +unsafe_output`, which skips the copy of
+each decoded frame out of the decoder's surface (`nvdec.c`'s
+`av_frame_make_writable`) and is unsafe because it hands those surfaces to the
+filters. The copy, inside the GPU, costs nothing measurable (RTX 5070, FFmpeg
+9.0.2, 30 s of 4K HEVC to 1080p H.264, median of seven): 1.65 s without the
+flag against 1.73 s with it on the GPU, 3.72 s against 3.90 s through memory,
+identical frames (framemd5, 8 and 10 bits).
 
 ### Tone mapping
 
@@ -788,16 +768,15 @@ available tone mapper:
 - libplacebo tone maps by the stream's own metadata (`peak_detect=0`): HDR10's
   mastering display and content light levels, Dolby Vision's and HDR10+'s per
   scene. Thumbnails and seek previews tone map the same way.
-- Why: peak detection follows the brightest pixels of the frames seen so far,
-  and each FFmpeg process starts with none. A process started by a seek, a new
-  process window or a size switch would render the same frames brighter or
-  darker than the process before it: a jump at the seam between segments.
-- Measured on a test clip whose highlight goes from 200 to 4000 nits every 3 s:
-  with detection, a face on a segment's first frame was 121 (of 255) from a
-  process started there and 128 from one started earlier (PSNR 35 dB between
-  them). Without detection, the three processes give the same frames bit for
-  bit, the face at 111. It is a little darker because the curve is set for the
-  stream's stated 4000 nits rather than the 900 the frames reach.
+- Why: peak detection follows the brightest pixels seen so far, and each
+  FFmpeg process starts with none. A process started by a seek or a size
+  switch would render the same frames brighter or darker than the one before
+  it: a jump at the seam between segments.
+- Measured on a clip whose highlight goes from 200 to 4000 nits every 3 s:
+  with detection, a face on a segment's first frame is 121 (of 255) or 128
+  depending on where the process started; without it, every process gives the
+  same frames bit for bit, the face at 111 (a little darker: the curve follows
+  the stream's stated 4000 nits, not the 900 the frames reach).
 - `tonemap_opencl` has peak detection that can't be turned off (63 frames, in
   its kernel), so it has the same seams. zimg's `tonemap` has none.
 
@@ -975,27 +954,18 @@ encoders (in every build):
   layouts keep `-ac 2`.
 - The matrix doesn't move where a segment's sound starts (to the sample), from
   0 and after a restart alike.
-- Measured on a 30 s 5.1 test mix (speech-band noise in bursts in the center,
-  noise in the others) encoded to AAC:
-
-  | | FFmpeg's matrix | Pley's |
-  |---|---|---|
-  | Dialogue | -29.5 LUFS | -26.5 LUFS |
-  | The rest | -23.0 LUFS | -23.0 LUFS |
-  | Mix 12 dB louder (channels peaking at -1.3 dBFS): true peak | +0.4 dBTP | -0.9 dBTP |
-  | Mix 12 dB louder: loudness | -10.4 LUFS | -10.4 LUFS |
+- Measured on a 30 s 5.1 test mix (speech-band noise bursts in the center,
+  noise elsewhere) encoded to AAC, FFmpeg's matrix against Pley's: dialogue
+  -29.5 against -26.5 LUFS, the rest -23.0 both; made 12 dB louder (channels
+  peaking at -1.3 dBFS), true peak +0.4 against -0.9 dBTP at -10.4 LUFS both.
 
 **Copied sound beside transcoded video.** A process that starts past 0 leaves
-out the audio packets before the seek point (`-copypriorss:a 0`).
-
-- By default FFmpeg copies from wherever the demuxer's seek landed, while the
-  decoded video starts at the seek point. An E-AC-3 track in Matroska
-  restarted at segment 3 (12 s) would begin 1.57 s before its video, 1.47 s
-  over the sound of the previous process's segment 2.
-- With the option it begins at the first packet from the boundary (13.427 s
-  against the video's 13.400 in the segments' timeline). AAC in the same file
-  is cut there either way.
-- A remux keeps its sound from the keyframe its video starts on.
+out the audio packets before the seek point (`-copypriorss:a 0`). FFmpeg
+otherwise copies from wherever the demuxer's seek landed while the decoded
+video starts at the seek point: an E-AC-3 track in Matroska restarted at 12 s
+would begin 1.57 s early, over the previous segment's sound. With the option
+it begins at the first packet from the boundary (13.427 s against the video's
+13.400). A remux keeps its sound from the keyframe its video starts on.
 
 ### Remux
 
@@ -1175,7 +1145,10 @@ Output:
   italics, underline and line breaks; quirks included) are followed step by
   step.
 - Checked against FFmpeg on real files by an ignored test:
-  `PLEY_TEST_MKV=<file> cargo test -p pley-transcoder cues_match_ffmpeg -- --ignored --nocapture`.
+
+  ```
+  PLEY_TEST_MKV=<file> cargo test -p pley-transcoder cues_match_ffmpeg -- --ignored --nocapture
+  ```
 
 #### FFmpeg fallback
 
@@ -1222,82 +1195,121 @@ How the fallback runs:
 
 ## Audio fingerprints
 
-`POST /v1/fingerprint` runs FFmpeg's `chromaprint` muxer (`-f chromaprint
--fp_format raw`) on part of the audio, downmixed to mono 11025 Hz, which is
-what Chromaprint analyses. Each value covers 1365 samples (0.124 s) and is
-returned as a plain number. The Pley server compares the fingerprints of
-episodes to find shared intros and credits. Requests run two at a time, at
-below-normal process priority, and pause while a playback starts or a
-transcode runs (see *Background work and playback*), so they never slow down
-playback. Whether the
-FFmpeg build includes Chromaprint is reported as `capabilities.chromaprint`.
+`POST /v1/fingerprint` returns `Fingerprint {start_ms, item_seconds, data}`:
+raw Chromaprint values of part of the audio. The Pley server compares
+episodes' fingerprints to find shared intros and credits.
 
-`POST /v1/frames` decodes only the key frames of part of the first video
-stream (`-skip_frame nokey`), shrinks them to 320 pixels wide in 8 bits (HDR
-too) and measures each with `blackframe` (share of pixels at most 32) and
-`signalstats` (luma of the darkest and brightest tenth, the maximum,
-average saturation). The server finds credits in them: text on black. It
-shares the fingerprints' limit and priority.
+| Request field | Meaning |
+|---|---|
+| `path` | the file |
+| `stream_index?` | audio stream (default: the first) |
+| `start_ms` | where to start, from the beginning of the file |
+| `duration_ms` | how much to analyze; the end of the file may stop it earlier |
+
+- Runs FFmpeg's `chromaprint` muxer (`-f chromaprint -fp_format raw`) on the
+  audio downmixed to mono 11025 Hz, which is what Chromaprint analyzes.
+- Each value covers 1365 samples (0.124 s, `item_seconds`) and is returned as
+  a plain number.
+- Requests run two at a time, at below-normal process priority, and pause
+  while a playback starts or a transcode runs (see
+  [Background work and playback](#background-work-and-playback)).
+- `capabilities.chromaprint` says whether the FFmpeg build includes
+  Chromaprint.
+
+### Key frames
+
+`POST /v1/frames` takes `{path, start_ms, duration_ms}` and returns `Frames
+{frames: [{ms, black, ylow, yhigh, ymax, sat}]}`: how dark the key frames of
+part of the video are and how much contrast they have. The server looks for
+credits in them: text on black.
+
+- Decodes only the key frames of the first video stream (`-skip_frame nokey`),
+  shrunk to 320 pixels wide in 8 bits (HDR too).
+- Measures each with `blackframe` (`black`: percent of pixels at most 32) and
+  `signalstats` (`ylow`, `yhigh`: luma of the darkest and brightest tenth;
+  `ymax`: the maximum; `sat`: average saturation). Luma is 8-bit studio range
+  (black is 16).
+- Shares the fingerprints' limit and priority.
 
 ## Reading ahead
 
 `POST /v1/prefetch` reads a file the way a playback is about to, before it
-does: the server asks for it when an item's page opens, or a card's Play
-button has the pointer or the focus, at most every two minutes per file. On
-a network share a cold 4 s of video takes 0.3-3 s to read, and a few
-milliseconds once it is in the share's or this host's cache. It reads, in
-this order, each byte once (`part` in the answer):
+does. The server asks for it when an item's page opens, or a card's Play
+button has the pointer or the focus, at most every two minutes per file. On a
+network share a cold 4 s of video takes 0.3 to 3 s to read, and a few
+milliseconds once it is in the share's or this host's cache.
 
-- `head`: the first 4 MB (headers, the first clusters or chunks);
-- `index`: the Matroska Cues or the MP4 movie box (`moov`), wherever it is,
-  64 MB at most. Matroska Cues are found through the seek heads and the
-  elements before the first cluster only: never by walking the clusters;
-- `start`, for `start_ms > 0`: from the keyframe at or before the start of
-  the 4 s segment holding `start_ms` (where a transcode decodes from; a
-  remux or a direct play starts there or later) to the first keyframe 4 s
-  past `start_ms`, 2 to 40 MB. The keyframes' places come from the index:
-  the Cues' `CueClusterPosition`, or the video track's `stco`/`co64` chunk
-  offsets and `stsc` samples per chunk. Files without either get their head
-  only.
+| Request field | Meaning |
+|---|---|
+| `path` | the file |
+| `start_ms?` | where the playback would start (0 or none: the beginning) |
 
-Ranges are read in 2 MB pieces, four at a time, each reader with its own
-handle. A keyframe index for remuxing is kept from the index read. It is
-background work: one file at a time, one request per file at once (another
-answers `skipped`), ten seconds at most, waiting included. None starts
-within 5 s of a job creation or while a playback starts (`skipped`, see
-*Background work and playback*), and one that begins meanwhile stops the
-reading (`stopped`), as does the request going away.
+It reads, in this order, each byte once:
+
+| `part` | What |
+|---|---|
+| `head` | the first 4 MB (headers, the first clusters or chunks) |
+| `index` | the Matroska Cues or the MP4 movie box (`moov`), wherever it is, 64 MB at most. Matroska Cues are found through the seek heads and the elements before the first cluster only, never by walking the clusters. |
+| `start` | for `start_ms > 0`: from the keyframe at or before the start of the 4 s segment holding `start_ms` (where a transcode decodes from; a remux or a direct play starts there or later) to the first keyframe 4 s past `start_ms`, 2 to 40 MB |
+
+- The keyframes' places come from the index: the Cues' `CueClusterPosition`,
+  or the video track's `stco`/`co64` chunk offsets and `stsc` samples per
+  chunk. Files with neither get their head only.
+- Ranges are read in 2 MB pieces, four at a time, each reader with its own
+  handle.
+- A keyframe index for remuxing is kept from the index read.
+
+The answer is `Prefetched {ranges: [{part, start, end}], bytes, elapsed_ms,
+skipped?, stopped}` (`end` exclusive).
+
+It is background work:
+
+- One file at a time, one request per file at once (another answers
+  `skipped`), ten seconds at most, waiting included.
+- None starts within 5 s of a job creation or while a playback starts
+  (`skipped`).
+- A playback that begins meanwhile stops the reading (`stopped`), as does the
+  request going away.
 
 ## Background work and playback
 
-Seek previews (`/v1/trickplay`), fingerprints and key frames
-(`/v1/fingerprint`, `/v1/frames`) and keyframe scans (`/v1/keyframes`)
-read whole files or long stretches of them, and a library scan's probes
-(`/v1/probe`) the heads of many, from the disk or network share playbacks
-read too: a 4K remux on a share needs all of it to start in a second or
-two. So while a playback starts, none of them starts (probes wait), and the
-FFmpeg (or FFprobe) runs under way are paused, their process suspended
-(`NtSuspendProcess` on Windows, `SIGSTOP` on Linux; elsewhere they only
-wait to start), then resumed. Nothing is lost: a paused run's time limit
-counts the time it ran. A playback starts:
+These read whole files or long stretches of them, from the disk or network
+share that playbacks read too:
+
+- seek previews (`/v1/trickplay`)
+- fingerprints and key frames (`/v1/fingerprint`, `/v1/frames`)
+- keyframe scans (`/v1/keyframes`)
+- a library scan's probes (`/v1/probe`), which read the heads of many files
+
+A 4K remux on a share needs all of the bandwidth to start in a second or two.
+So while a playback starts, none of them starts (probes wait), and the FFmpeg
+or FFprobe runs under way are paused, then resumed. Pausing suspends the
+process (`NtSuspendProcess` on Windows, `SIGSTOP` on Linux; elsewhere runs only
+wait to start). Nothing is lost: a paused run's time limit counts only the
+time it ran.
+
+A playback is starting:
 
 - while a job is being created (probe, keyframe index, FFmpeg's start);
-- while one of its FFmpeg processes, at Play, a seek, a restart, hasn't
-  written its first 3 segments, 20 s at most;
-- for `ms` after `POST /v1/hold`, which the Pley server sends for a direct
-  play (10 s): it serves those itself.
+- while one of its FFmpeg processes (at Play, a seek, a restart) hasn't written
+  its first 3 segments, 20 s at most;
+- for `ms` after `POST /v1/hold`, which the Pley server sends for a direct play
+  (10 s), since it serves those itself.
 
-Transcodes come first too. While a job's FFmpeg or a conversion runs (it
-holds a transcode slot, `running_processes`; a job's FFmpeg paused far
-ahead of its player still counts, one stopped for an idle player doesn't),
-the same runs wait and are paused, until 5 s after the last one ends, so a
-seek's restart doesn't let them through. Probes and reading ahead wait for
-starts only: they read little, and new files or the next playback
-shouldn't wait for a film to end. The Pley server waits for transcodes as
-well before it asks for seek previews or fingerprints.
+Transcodes come first too:
 
-Background runs and conversions start at below-normal process priority
-(`nice` 10 on Linux), a job's FFmpeg at normal priority.
+- While a job's FFmpeg or a conversion runs (it holds a transcode slot,
+  `running_processes`), the same background runs wait and are paused, until
+  5 s after the last one ends, so a seek's restart doesn't let them through.
+- A job's FFmpeg paused far ahead of its player still counts; one stopped for
+  an idle player doesn't.
+- Probes and reading ahead wait for playback starts only: they read little,
+  and new files or the next playback shouldn't wait for a film to end.
+- The Pley server also waits for transcodes before it asks for seek previews
+  or fingerprints.
+
+Priorities: background runs and conversions start at below-normal process
+priority (`nice` 10 on Linux), a job's FFmpeg at normal priority.
 
 `/v1/status` counts the runs paused now (`background_paused`).
 
@@ -1309,51 +1321,79 @@ Background runs and conversions start at below-normal process priority
   produced and served, bytes served, probes (with total probe time),
   thumbnails, subtitle extractions, keyframe scans
 - running and hardware processes against their limits
-- background FFmpeg runs paused for playback
-- work-dir disk usage
+- background FFmpeg runs paused for playback (`background_paused`)
+- work folder disk use, and segments in memory (`memory_bytes`)
 - per job: state, video and audio plans (input → output, encoder, decoder,
-  tone mapper), ffmpeg progress (fps, speed, bitrate, position, dropped and
-  duplicated frames), restarts, bytes served, warnings and the last error
+  tone mapper), FFmpeg progress (fps, speed, bitrate, position, dropped and
+  duplicated frames), restarts, bytes served, warnings, the last error, and
+  whether its segments are in memory (`in_memory`, `memory_bytes`)
 
-`GET /metrics` exposes the same data for Prometheus (`pley_transcoder_*`). The
-Pley web UI shows it under *Settings → Dashboard*, next to the processors'
-and memory's use that the server samples itself every 2 s
-(`GET /api/system/resources`, docs/API.md): a managed transcoder and its
-FFmpeg processes count there as Pley's (the server's process tree); an
-external one doesn't.
+`GET /metrics` exposes the same data for Prometheus:
+
+| Metric | Type | Meaning |
+|---|---|---|
+| `pley_transcoder_jobs_created_total` | counter | jobs created |
+| `pley_transcoder_jobs_failed_total` | counter | jobs whose FFmpeg failed |
+| `pley_transcoder_processes_started_total` | counter | FFmpeg transcode processes started |
+| `pley_transcoder_process_failures_total` | counter | processes that exited with an error |
+| `pley_transcoder_segments_produced_total` | counter | HLS segments produced |
+| `pley_transcoder_segments_served_total` | counter | HLS segments served |
+| `pley_transcoder_bytes_served_total` | counter | bytes of segments served |
+| `pley_transcoder_probes_total` | counter | probes |
+| `pley_transcoder_probe_failures_total` | counter | failed probes |
+| `pley_transcoder_probe_milliseconds_total` | counter | time spent probing |
+| `pley_transcoder_thumbnails_total` | counter | thumbnails |
+| `pley_transcoder_subtitle_extractions_total` | counter | subtitle extractions |
+| `pley_transcoder_keyframe_scans_total` | counter | keyframe index scans |
+| `pley_transcoder_uptime_seconds` | gauge | seconds since start |
+| `pley_transcoder_running_processes` | gauge | FFmpeg transcode processes running |
+| `pley_transcoder_hardware_processes` | gauge | of those, using a hardware encoder |
+| `pley_transcoder_max_jobs` | gauge | `--max-jobs` |
+| `pley_transcoder_jobs` | gauge | jobs known |
+| `pley_transcoder_work_dir_bytes` | gauge | disk used by segments and caches |
+| `pley_transcoder_background_paused` | gauge | background runs paused for playback |
+| `pley_transcoder_job_speed{job}` | gauge | real-time multiplier of a running job |
+| `pley_transcoder_job_fps{job}` | gauge | frames per second of a running job |
+| `pley_transcoder_jobs_by_state{state}` | gauge | jobs per state |
+
+The Pley web app shows these under *Settings → Dashboard*, next to the
+processor and memory use the server samples itself every 2 s
+(`GET /api/system/resources`, see [API.md](API.md#system-admin)). A managed
+transcoder and its FFmpeg processes count there as Pley's (the server's
+process tree); an external one doesn't.
 
 ## Benchmark
 
 `scripts/bench-transcoder.py` (Python 3.9 or later, no modules to install)
-runs the transcoder as it is built, over its API, on local files, and
-reports for each job: the wait for the first segment and, for a seek, for
-the one asked for; the speed (× real time); the processor time per media
-second and the processors' use; the largest process's peak memory (on
-Windows its private commit, on Linux its resident set) and all of
-theirs (Windows); the bytes made. `--make-clips DIR --source <4K HDR file>`
-cuts the clips it needs from a film (1080p H.264 with AAC, TrueHD and DTS
-copies, ten-minute loops, a minute of PGS subtitles from FFmpeg's FATE
-sample, an SRT). Cases: 4K HDR10 to 1080p SDR, 1080p to 720p, TrueHD to
-AAC and DTS to AC-3 with the video copied, a remux, a seek, text and
-picture subtitles drawn on 1080p and 4K HDR, and playbacks watched in real
-time (`session-*`, `--session` seconds) with throttling on, which count
-what was made and whether the player waited.
+runs the transcoder as built, over its API, on local files.
 
-Cheaper computers are played with `--variants`: `gpu` (what the machine
-has), `sw` (no GPU), `sw4` and `sw2` (no GPU, four or two processors: a
-Windows job object's affinity, `sched_setaffinity` on Linux, one logical
-processor per core); on Windows `--mem-mb` sets a memory limit. Several
-builds (`--bin name=path`, repeated) run in turns that change order each
-round, so a machine busy with other work weighs on each alike.
+For each job it reports:
 
-What it showed (a 12-core Ryzen with an RTX 5070, `sw4` for a small
-computer): 4K HDR10 to 1080p tone mapped with zimg went from 0.3× to 1×
-real time on four processors (5.9 to 3.7 processor seconds per second of
-video) once zimg tone mapped at the output's size; picture subtitles on
-4K, from 0.23× to 0.72× (and half the processor time with the GPU's
-pipeline) once laid on the scaled frame; and three minutes watched in real
-time cost 26 to 49% less processor time with the pause 90 s ahead, the
-player never waiting.
+- the wait for the first segment and, for a seek, for the one asked for;
+- the speed (× real time);
+- processor time per media second, and the processors' use;
+- the largest process's peak memory (on Windows its private commit, on Linux
+  its resident set), and all processes' together (Windows);
+- the bytes made.
+
+Options:
+
+- `--make-clips DIR --source <4K HDR file>` cuts the clips it needs from a
+  film: 1080p H.264 with AAC, TrueHD and DTS copies, ten-minute loops, a
+  minute of PGS subtitles from FFmpeg's FATE sample, an SRT.
+- `--variants` plays cheaper computers: `gpu` (what the machine has), `sw` (no
+  GPU), `sw4` and `sw2` (no GPU, four or two processors: a Windows job
+  object's affinity or `sched_setaffinity` on Linux, one logical processor per
+  core).
+- `--mem-mb` sets a memory limit (Windows).
+- `--bin name=path` (repeated) compares builds. They run in turns that change
+  order each round, so a machine busy with other work weighs on each alike.
+- `--session` sets the seconds of the real-time playback cases.
+
+Cases: 4K HDR10 to 1080p SDR; 1080p to 720p; TrueHD to AAC and DTS to AC-3
+with the video copied; a remux; a seek; text and picture subtitles drawn on
+1080p and 4K HDR; and playbacks watched in real time (`session-*`) with
+throttling on, which count what was made and whether the player waited.
 
 ```
 python scripts/bench-transcoder.py --make-clips D:/bench --source 4k-hdr10.mkv
@@ -1362,7 +1402,20 @@ python scripts/bench-transcoder.py --media D:/bench --hdr 4k-hdr10.mkv \
     --variants gpu,sw,sw4 --repeat 3 --out results.jsonl
 ```
 
+Results on a 12-core Ryzen with an RTX 5070 (`sw4` standing in for a small
+computer):
+
+- 4K HDR10 to 1080p tone mapped with zimg at the output's size: 1× real time
+  on four processors, 3.7 processor seconds per second of video (0.3× and 5.9
+  when zimg tone mapped at full size).
+- Picture subtitles on 4K laid on the scaled frame: 0.72× (0.23× on the full
+  frame), and half the processor time with the GPU's pipeline.
+- Three minutes watched in real time: 26 to 49 % less processor time with the
+  pause 90 s ahead, the player never waiting.
+
 ## License
+
+`pley-transcoder --license` prints:
 
 ```
 pley-transcoder  Copyright (c) 2026 the Pley authors. All rights reserved.
@@ -1371,5 +1424,5 @@ modify or distribute it is granted until then. It comes with ABSOLUTELY NO
 WARRANTY. See the LICENSE file.
 ```
 
-FFmpeg is invoked as a separate program and has its own license. The FFmpeg
-build used during development (`--enable-gpl --enable-version3`) is GPLv3.
+FFmpeg is run as a separate program and has its own license. The FFmpeg build
+used during development (`--enable-gpl --enable-version3`) is GPLv3.
