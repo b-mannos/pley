@@ -9,6 +9,7 @@
 use parking_lot::Mutex;
 
 /// Processor time so far, in the system's own unit.
+#[cfg_attr(not(any(windows, target_os = "linux")), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Times {
     /// All processors' time busy, and in all.
@@ -117,6 +118,11 @@ fn read() -> Option<Times> {
 fn read() -> Option<Times> {
     let (busy, total) = parse_proc_stat(&std::fs::read_to_string("/proc/stat").ok()?)?;
     Some(Times { busy, total, ours: ours() })
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn read() -> Option<Times> {
+    None
 }
 
 /// The time this process and its children took, in clock ticks: theirs

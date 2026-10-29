@@ -316,6 +316,7 @@ pub(crate) fn pause(child: &Child, suspend: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(any(windows, target_os = "linux"))]
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     #[tokio::test(start_paused = true)]
@@ -395,6 +396,7 @@ mod tests {
     }
 
     /// Whether a line comes from `lines` within `wait`.
+    #[cfg(any(windows, target_os = "linux"))]
     async fn line_within(lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>, wait: Duration) -> bool {
         matches!(tokio::time::timeout(wait, lines.next_line()).await, Ok(Ok(Some(_))))
     }
