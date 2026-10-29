@@ -193,7 +193,7 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     ("DELETE", "/api/continue-watching/{id}", Need::Scope(Play)),
     ("PUT", "/api/watchlist/{id}", Need::Scope(Play)),
     ("DELETE", "/api/watchlist/{id}", Need::Scope(Play)),
-    // the profile's own sessions (an administrator's: any session)
+    // the profile's own sessions: an app acts as a viewer, so never another's
     ("DELETE", "/api/sessions/{id}", Need::Scope(Play)),
     // the profile's track choices for every title (its name, picture and
     // sign-in stay in the web app)
