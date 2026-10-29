@@ -78,7 +78,9 @@ and CHANGELOG agree, and stops if `<unit>-v<version>` exists. It runs the
 unit's own workflow (its tests and checks) with its release builds, then
 tags the commit, and publishes the GitHub release, with the version's
 CHANGELOG section as its notes, `SHA256SUMS`, and build provenance
-(`gh attestation verify <file> --repo hhaidar/pley`). "Keep the GitHub
+(`gh attestation verify <file> --repo hhaidar/pley`) where GitHub keeps it
+(public repositories, or GitHub Enterprise Cloud; else a warning says it is
+missing). "Keep the GitHub
 release a draft" leaves the release to publish by hand. A server release
 also pushes the Docker image, and the repository's "Latest" release is
 always the server's. If a run fails after tagging, "Re-run failed jobs"
