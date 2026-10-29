@@ -10,6 +10,7 @@ mod adaptive;
 mod background;
 mod cache;
 mod convert;
+mod cpuload;
 mod devices;
 mod dovi;
 mod error;
@@ -43,7 +44,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::parser::ValueSource;
-use clap::{CommandFactory, FromArgMatches, Parser};
+use clap::{CommandFactory, FromArgMatches, Parser, ValueEnum};
 use pley_transcoder_api::{API_VERSION, Announce, Limits, TOKEN_ENV, TranscoderInfo};
 use tokio::io::AsyncReadExt;
 
@@ -92,6 +93,11 @@ struct Args {
     #[arg(long, default_value_t = 8)]
     probe_concurrency: usize,
 
+    /// Whether HDR transcodes may decode their video on the CPU where the
+    /// GPU falls behind and the CPU has cores to spare
+    #[arg(long, env = "PLEY_TRANSCODER_CPU_DECODE", value_enum, default_value_t = CpuDecode::Auto)]
+    cpu_decode: CpuDecode,
+
     /// Print `{"event":"listening","addr":"…"}` on stdout once ready
     #[arg(long)]
     announce: bool,
@@ -111,6 +117,14 @@ struct Args {
     /// Log filter, e.g. `info` or `debug`
     #[arg(long, env = "PLEY_LOG", default_value = "info")]
     log: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum CpuDecode {
+    /// Where it keeps the transcodes ahead of their players
+    Auto,
+    /// The GPU decodes what it can, however far behind it falls
+    Never,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -418,6 +432,9 @@ async fn run(args: Args) -> anyhow::Result<()> {
         limits.clone(),
         background,
     );
+    if args.cpu_decode == CpuDecode::Never {
+        jobs.never_decode_on_cpu();
+    }
     // Segments in memory, for jobs that ask, where this system has a folder in RAM.
     let memory = memory::MemoryStore::open();
     match &memory {

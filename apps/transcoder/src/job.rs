@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use pley_transcoder_api::{
-    EncoderInfo, JobCreated, JobRequest, JobState, JobStatus, Limits, MediaInfo, ProcessStatus, VideoCodec, VideoMode,
+    EncoderInfo, JobCreated, JobRequest, JobState, JobStatus, Limits, MediaInfo, ProcessStatus, TonemapQuality,
+    VideoCodec, VideoMode,
 };
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::ChildStdout;
@@ -26,6 +27,7 @@ use tokio::sync::{Notify, oneshot, watch};
 
 use crate::adaptive;
 use crate::background::{self, Background, Starting, Transcoding};
+use crate::cpuload::CpuMeter;
 use crate::error::{ApiError, ApiResult};
 use crate::extract::Extractor;
 use crate::ffmpeg::Ffmpeg;
@@ -35,7 +37,7 @@ use crate::memory::{self, Lease, MemoryStore};
 use crate::metrics::Metrics;
 use crate::plan::{ArgsContext, Burn, MAX_DURATION_MS, PROCESS_WINDOW, Pipeline, Plan, READRATE, READRATE_BURST_MS};
 use crate::probe::Prober;
-use crate::share::{self, Share};
+use crate::share::{self, Lessons, Share};
 use crate::tsedit::{self, Edits};
 use crate::util::now_ms;
 
@@ -174,6 +176,13 @@ pub struct JobManager {
     /// (`prefetch.rs`) keeps out of a starting playback's way.
     creations: AtomicU64,
     last_creation: Mutex<Option<Instant>>,
+    /// How busy the CPU is, and with whose work.
+    cpu: CpuMeter,
+    /// What jobs falling behind their players taught (see [`crate::share`]).
+    lessons: Mutex<Lessons>,
+    /// Whether the CPU may decode for a GPU that falls behind (see
+    /// [`crate::share`]).
+    cpu_decode: AtomicBool,
 }
 
 pub struct Job {
@@ -378,19 +387,35 @@ impl Pace {
     const WINDOW: Duration = Duration::from_secs(4);
     /// The least of them that gives a speed.
     const MIN_SPAN: Duration = Duration::from_secs(2);
+    /// How long its steady speed is measured over, which judges its share
+    /// of the GPU (see [`share::verdict`]).
+    const STEADY: Duration = Duration::from_secs(20);
 
     fn record(&mut self, at: Instant, out_ms: i64) {
         self.samples.push_back((at, out_ms));
-        while self.samples.get(1).is_some_and(|(t, _)| at.saturating_duration_since(*t) >= Self::WINDOW) {
+        while self.samples.get(1).is_some_and(|(t, _)| at.saturating_duration_since(*t) >= Self::STEADY) {
             self.samples.pop_front();
         }
     }
 
     /// Media seconds made per second lately.
     fn speed(&self) -> Option<f64> {
-        let (&(t0, m0), &(t1, m1)) = (self.samples.front()?, self.samples.back()?);
+        self.speed_over(Self::WINDOW, Self::MIN_SPAN)
+    }
+
+    /// The same over the last 20 s, once there are 15.
+    fn steady_speed(&self) -> Option<f64> {
+        self.speed_over(Self::STEADY, Self::STEADY * 3 / 4)
+    }
+
+    /// The speed from the latest sample `window` old (or the oldest) to the
+    /// last, when they are `least` apart.
+    fn speed_over(&self, window: Duration, least: Duration) -> Option<f64> {
+        let &(t1, m1) = self.samples.back()?;
+        let old = self.samples.iter().rev().find(|(t, _)| t1.saturating_duration_since(*t) >= window);
+        let &(t0, m0) = old.or(self.samples.front())?;
         let span = t1.saturating_duration_since(t0);
-        (span >= Self::MIN_SPAN).then(|| (m1 - m0) as f64 / 1000.0 / span.as_secs_f64())
+        (span >= least).then(|| (m1 - m0) as f64 / 1000.0 / span.as_secs_f64())
     }
 }
 
@@ -461,7 +486,16 @@ impl JobManager {
             closed: AtomicBool::new(false),
             creations: AtomicU64::new(0),
             last_creation: Mutex::new(None),
+            cpu: CpuMeter::default(),
+            lessons: Mutex::default(),
+            cpu_decode: AtomicBool::new(true),
         })
+    }
+
+    /// The GPU decodes what it planned to, however far behind it falls (see
+    /// [`crate::share`]).
+    pub fn never_decode_on_cpu(&self) {
+        self.cpu_decode.store(false, Relaxed);
     }
 
     /// How many job creations have begun so far.
@@ -547,8 +581,7 @@ impl JobManager {
         let mut plan = Plan::build(&req, &media, &self.ff, keyframes.as_deref().map(Vec::as_slice))
             .map_err(ApiError::BadRequest)?;
         // libplacebo shares the GPU with the jobs tone mapping on it now.
-        let others = self.renditions().iter().filter(|job| job.tone_maps_on_gpu()).count() as u32;
-        plan.share_tonemapping(self.ff.caps.tonemap_speed.as_ref(), &media, others + 1);
+        plan.share_tonemapping(self.ff.caps.tonemap_speed.as_ref(), &media, self.tonemapping_load());
 
         let id = uuid::Uuid::new_v4().simple().to_string();
         let dir = self.jobs_dir.join(&id);
@@ -878,33 +911,96 @@ impl JobManager {
     /// now (see [`crate::share`]), `hardware` when it encodes on the GPU;
     /// `None` when libplacebo doesn't tone map its video.
     fn gpu_share(&self, job: &Job, hardware: bool) -> Option<Share> {
-        if !job.plan.tone_maps_with_libplacebo() {
-            return None;
-        }
+        let need = job.plan.tonemap_need(&job.media)?;
         let others: Vec<Arc<Job>> = self.renditions().into_iter().filter(|j| j.id != job.id).collect();
-        let tone_mapping = others.iter().filter(|j| j.tone_maps_on_gpu()).count() as u32;
+        let around: f64 =
+            others.iter().filter(|j| j.tone_maps_on_gpu()).filter_map(|j| j.plan.tonemap_need(&j.media)).sum();
         let speed = self.ff.caps.tonemap_speed.as_ref();
-        let quality = job.plan.shared_quality(speed, &job.media, tone_mapping + 1)?;
+        let held = self.lessons.lock().holding(need + around, Instant::now());
+        let quality = held.cap(job.plan.shared_quality(speed, &job.media, around)?);
         let gpu = share::Gpu {
             engine_shared: hardware && job.plan.decodes_on_shared_engine(),
-            others: others.iter().filter(|j| j.encodes_on_gpu()).count() as u32,
-            behind: job.plan.tonemapping_falls_behind(speed, &job.media, tone_mapping + 1),
+            behind: held.gpu_behind() || job.plan.tonemapping_falls_behind(speed, &job.media, around),
         };
+        // Other programs' work keeps a job from starting to decode on the
+        // CPU, not one decoding there from going on: that one stops when
+        // the CPU is found with no time to spare.
+        let cores = crate::util::processors();
+        let decoding = job.runtime.lock().share.is_some_and(|s| s.cpu_decode);
         let cpu = share::Cpu {
-            cores: crate::util::processors(),
+            cores,
             decoding: others.iter().map(|j| j.cpu_decode_cores()).sum(),
             software_encodes: others.iter().filter(|j| j.encodes_in_software()).count() as u32,
+            foreign: if decoding { 0.0 } else { self.cpu.foreign().unwrap_or(0.0) * f64::from(cores) },
         };
-        let cores = job.plan.source_rate(&job.media).map_or(0.0, |(pixels, fps)| share::decode_cores(pixels, fps));
-        Some(Share { quality, cpu_decode: share::cpu_decodes(gpu, cpu, cores) })
+        let takes = job.plan.source_rate(&job.media).map_or(0.0, |(pixels, fps)| share::decode_cores(pixels, fps));
+        let cpu_decode = self.cpu_decode.load(Relaxed) && !held.cpu_busy && share::cpu_decodes(gpu, cpu, takes);
+        Some(Share { quality, cpu_decode })
+    }
+
+    /// What the jobs tone mapping on the GPU now need together (see
+    /// [`Plan::tonemap_need`]).
+    fn tonemapping_load(&self) -> f64 {
+        self.renditions().iter().filter(|j| j.tone_maps_on_gpu()).filter_map(|j| j.plan.tonemap_need(&j.media)).sum()
+    }
+
+    /// Learns from the jobs tone mapping on the GPU whether they keep ahead
+    /// of their players, once their processes have run a while, each beside
+    /// what the others get done (see [`share::verdict`]).
+    fn judge(&self) {
+        let (load, cpu_busy, now) = (self.tonemapping_load(), self.cpu.busy(), Instant::now());
+        // What each process making on the GPU gets done (its speed, and the
+        // work that is), and those that have run long enough to be judged.
+        let mut going = Vec::new();
+        for job in self.renditions() {
+            let Some(share) = job.runtime.lock().share else { continue };
+            let Ok(guard) = job.process.try_lock() else { continue };
+            let Some(proc) = guard.as_ref().filter(|p| p.running() && !p.paused()) else { continue };
+            let Some(speed) = proc.pace.lock().steady_speed() else { continue };
+            let next = proc.next.load(Relaxed);
+            let judged = next < proc.end && proc.started.elapsed() >= share::JUDGE_AFTER;
+            let work = speed * job.plan.tonemap_need(&job.media).unwrap_or(1.0);
+            going.push((job.clone(), share, speed, work, judged.then(|| job.lead_secs(next))));
+        }
+        let work: Vec<(Share, f64)> = going.iter().map(|g| (g.1, g.3)).collect();
+        for (i, (job, share, speed, _, lead_secs)) in going.iter().enumerate() {
+            let (share, speed) = (*share, *speed);
+            let Some(lead_secs) = *lead_secs else { continue };
+            let others = share::others(&work, i);
+            let verdict = share::verdict(share::Measured { speed, lead_secs, cpu_busy, others });
+            if verdict == share::Verdict::Starved {
+                tracing::trace!(
+                    job = %job.id,
+                    "{speed:.2}× real time, held back by its input: another job tone mapping alike gets {others:.1} times as much done"
+                );
+            }
+            if !self.lessons.lock().learn(verdict, share, load, now) {
+                continue;
+            }
+            let learned = match verdict {
+                share::Verdict::CpuBound => "the CPU has no time to spare: the GPU decodes".to_owned(),
+                _ if share.quality == TonemapQuality::Fast => {
+                    "the GPU falls behind even at fast: the CPU decodes where it has the cores".to_owned()
+                }
+                _ => format!("the GPU falls behind at {}: a cheaper quality", share.quality.as_str()),
+            };
+            tracing::info!(
+                job = %job.id,
+                "{learned} ({speed:.2}× real time, {lead_secs:.0} s ahead of the player, the CPU {} busy)",
+                cpu_busy.map_or("?".into(), |busy| format!("{:.0} %", busy * 100.0))
+            );
+        }
     }
 
     /// Moves the jobs tone mapping on the GPU to what its load calls for
     /// now (see [`crate::share`]): at once to less work for the GPU when
-    /// another job starts using it, back to more once a job is left alone,
-    /// has run a while and is well ahead of its player. Each move restarts
-    /// ffmpeg where it was, between two segments.
+    /// another job starts using it, or for the CPU found with no time to
+    /// spare, back to more once a job is left alone, has run a while and is
+    /// well ahead of its player. Each move restarts ffmpeg where it was,
+    /// between two segments.
     async fn share_gpu(self: &Arc<Self>) {
+        self.judge();
+        let cpu_busy = self.lessons.lock().holding(self.tonemapping_load(), Instant::now()).cpu_busy;
         for job in self.renditions() {
             let (have, hardware) = {
                 let rt = job.runtime.lock();
@@ -919,7 +1015,7 @@ impl JobManager {
             if next >= proc.end {
                 continue;
             }
-            if !have.relieved_by(want)
+            if !have.moves_at_once(want, cpu_busy)
                 && (proc.started.elapsed() < share::MORE_AFTER || job.lead_secs(next) < share::MORE_LEAD_SECS)
             {
                 continue;
@@ -1216,6 +1312,9 @@ impl JobManager {
     }
 
     async fn reap(self: &Arc<Self>) {
+        // Reads /proc on Linux: a few hundred small files on a busy computer.
+        let mgr = self.clone();
+        let _ = tokio::task::spawn_blocking(move || mgr.cpu.sample()).await;
         self.adapt().await;
         self.share_gpu().await;
         self.relieve_memory().await;
@@ -1355,12 +1454,6 @@ impl Job {
         rt.state == JobState::Running
             && rt.process.as_ref().is_some_and(|p| !p.hardware)
             && self.plan.video.as_ref().is_some_and(|v| !v.copy)
-    }
-
-    /// Whether a process of this job is encoding video on the GPU now.
-    fn encodes_on_gpu(&self) -> bool {
-        let rt = self.runtime.lock();
-        rt.state == JobState::Running && rt.process.as_ref().is_some_and(|p| p.hardware)
     }
 
     /// The cores a process of this job takes decoding its video on the CPU
@@ -2071,6 +2164,12 @@ mod tests {
         }
         let speed = pace.speed().unwrap();
         assert!((speed - 2.0).abs() < 0.001, "the burst is forgotten: {speed}");
+        assert_eq!(pace.steady_speed(), None, "too short to tell steadily");
+        for s in 11..=30 {
+            pace.record(at(s * 1_000), 30_000 + (s as i64 - 1) * 2_000);
+        }
+        let steady = pace.steady_speed().unwrap();
+        assert!((steady - 2.0).abs() < 0.001, "over the last 20 s: {steady}");
     }
 
     #[test]

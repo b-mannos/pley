@@ -29,6 +29,7 @@ pley-transcoder [OPTIONS]
 | `--ffprobe <PATH>` | `PLEY_FFPROBE` | `ffprobe` from `PATH` | FFprobe binary. |
 | `--max-jobs <N>` | `PLEY_TRANSCODER_MAX_JOBS` | 8 | Concurrent FFmpeg transcodes (transcode slots). |
 | `--max-hw-jobs <N>` | `PLEY_TRANSCODER_MAX_HW_JOBS` | 8 | Concurrent hardware encoder sessions. Extra jobs fall back to software encoding. |
+| `--cpu-decode <auto\|never>` | `PLEY_TRANSCODER_CPU_DECODE` | `auto` | Whether the CPU decodes the video of jobs the GPU can't keep ahead (see [Sharing the GPU](#sharing-the-gpu)). `never`: the GPU decodes what it can. |
 | `--probe-concurrency <N>` | – | 8 | Concurrent probes and extractions. |
 | `--announce` | – | off | Print `{"event":"listening","addr":"…"}` on stdout once ready. |
 | `--exit-with-parent` | – | off | Exit when stdin closes (managed mode). |
@@ -683,11 +684,12 @@ job's plan):
   PQ frames made 4K SDR (`tonemap_speed`), from `fast` to `high`, for 20 s at
   most. A quality not reached in that time is never used. Where time allows,
   each runs twice and the faster run counts.
-- A process takes the best quality that measured at least twice what it
-  needs: its frame rate × its size relative to 4K to 4K (0.6 × the source's
-  pixels + 0.4 × the output's) × the jobs tone mapping with libplacebo,
-  itself included. When none did, the fastest. Renditions start at their
-  job's quality.
+- A process takes the best quality that measured at least twice what the
+  jobs tone mapping with libplacebo need together, itself included. Each
+  needs its frame rate × its size relative to 4K to 4K (0.6 × the source's
+  pixels + 0.4 × the output's). So a 4K film made 1080p beside one kept 4K
+  needs less of the GPU than two kept 4K. When none did, the fastest.
+  Renditions start at their job's quality.
 - Without a measurement (no libplacebo on a GPU), `high`.
 
 #### Sharing the GPU
@@ -698,19 +700,49 @@ Several jobs tone mapping with libplacebo share the GPU:
   hold, and its status then says `decoder: cpu`:
   - its GPU would decode into memory for libplacebo and encode on the same
     video engine (AMF, VAAPI, Quick Sync; not NVIDIA's);
-  - another job encodes on the GPU;
   - no quality measured fast enough for the jobs tone mapping (the rule
-    above): the GPU falls behind even at `fast`;
-  - the CPU keeps 2 cores free after its decoders: 4 cores each for 4K at
-    24 fps, in proportion to pixels and frame rate;
-  - no software encode runs.
+    above), or the jobs fell behind even at `fast` (below): the GPU falls
+    behind;
+  - the CPU keeps 2 cores free after its decoders (4 cores each for 4K at
+    24 fps, in proportion to pixels and frame rate) and what other programs
+    keep busy, measured over the last seconds (Windows: the system's busy
+    time less the transcoder's and its FFmpeg's; Linux: `/proc/stat` less
+    the transcoder and its children). A job decoding on the CPU already
+    doesn't count other programs again, so it doesn't move back and forth;
+  - no software encode runs;
+  - `--cpu-decode` isn't `never`.
+- **What the jobs make.** The start-up measurement is checked against what
+  the jobs make. A process that has run 30 s is judged by its speed over
+  the last 20 s. It falls behind under 1.05× real time with less than 8 s
+  ready past what its player asked for:
+  - with another job tone mapping alike (the same quality, decoding on the
+    same side) making at least twice as much of its own work (speed × what
+    it needs, as above), it waits for something of its own (its file's hard
+    disk, read by another program too) and teaches nothing. A job the CPU
+    decodes for gets more done for that alone, so jobs decoding on the
+    other side don't count;
+  - with the CPU at least 90 % busy, the CPU has no time to spare: the jobs
+    decode on the GPU;
+  - else the GPU fell behind at its quality: a cheaper one, and at `fast`
+    the CPU decodes where it has the cores.
+
+  A lesson holds while the jobs tone mapping need at least 0.9 of what they
+  did when it was learned, for 10 minutes after it was last confirmed. Then
+  the start-up measurement is tried again. Each is logged once, at `info`.
 - **Moving running jobs.** A job already running moves to the quality and
   decoding that the GPU's load calls for. It moves at once when another job
-  starts using the GPU (checked again every 5 s). It moves back to more work
-  on the GPU only after its process has run 60 s and is at least 30 s of
-  video ahead of the player. Each move restarts FFmpeg at the next segment.
-  A paused process moves once it resumes.
+  starts using the GPU (checked again every 5 s), when a lesson calls for
+  less work on the GPU, or back to decoding on it when the CPU has no time
+  to spare. It moves back to more work on the GPU only after its process
+  has run 60 s and is at least 30 s of video ahead of the player. Each move
+  restarts FFmpeg at the next segment. A paused process moves once it
+  resumes.
 - The job's status gives its latest process's `tonemap_quality`.
+- Measured on a Ryzen 5 5600G (Radeon Vega 7) with two 4K HDR films and a
+  player each: kept 4K, 1.20× to 1.28× real time each, decoding on the
+  CPU; made 1080p, 1.57× to 1.74×, decoding on the GPU. Three kept 4K make
+  55 to 60 frames a second together, short of real time for each: its
+  memory's bandwidth is what they share.
 
 #### VAAPI encoders
 

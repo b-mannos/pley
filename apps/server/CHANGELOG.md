@@ -52,6 +52,15 @@ describes how they are made.
 - The fastest tone mapping quality is faster where the picture shrinks by
   half at most (4K to 4K or 1080p), with the same picture: two 4K films
   made 1080p at once went from 1.0× to 1.65× real time each.
+- HDR transcodes share the graphics card by what each needs of it: a 4K
+  film made 1080p beside one kept 4K takes less than two kept 4K. The
+  processor decodes only with cores to spare beyond what other programs
+  use. Where transcodes fall behind anyway, the transcoder learns from it
+  for a while: a cheaper quality, then the processor decoding, or the
+  graphics card decoding again where the processor had no time to spare. A
+  transcode waiting for its hard disk teaches nothing.
+  `PLEY_TRANSCODER_CPU_DECODE=never` keeps the decoding on the graphics
+  card.
 
 ### Fixed
 

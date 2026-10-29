@@ -109,20 +109,18 @@ pub fn placebo_quality_options(quality: TonemapQuality, src: (i64, i64), out: (i
 const TONEMAP_HEADROOM: f64 = 2.0;
 
 /// What a quality must measure ([`TonemapSpeed`]) to keep a transcode of
-/// `pixels_in` to `pixels_out` at `fps` ahead, with `jobs` libplacebo
-/// transcodes on the GPU (this one included).
-fn tonemap_need(pixels_in: u64, pixels_out: u64, fps: f64, jobs: u32) -> f64 {
+/// `pixels_in` to `pixels_out` at `fps` ahead, alone on the GPU. With
+/// others, it must measure what they all need together.
+pub fn tonemap_need(pixels_in: u64, pixels_out: u64, fps: f64) -> f64 {
     // libplacebo reads and upsamples the source and renders the output:
     // 4K to 1080p takes 0.7 of the measured 4K to 4K's time.
     let work = (0.6 * pixels_in as f64 + 0.4 * pixels_out as f64) / (3840.0 * 2160.0);
-    fps * TONEMAP_HEADROOM * work * f64::from(jobs.max(1))
+    fps * TONEMAP_HEADROOM * work
 }
 
-/// The best quality fast enough for a transcode of `pixels_in` to
-/// `pixels_out` at `fps`, with `jobs` libplacebo transcodes on the GPU
-/// (this one included); the fastest that works when none is.
-pub fn tonemap_quality(speed: &TonemapSpeed, pixels_in: u64, pixels_out: u64, fps: f64, jobs: u32) -> TonemapQuality {
-    let need = tonemap_need(pixels_in, pixels_out, fps, jobs);
+/// The best quality fast enough for libplacebo transcodes that `need` this
+/// together ([`tonemap_need`]); the fastest that works when none is.
+pub fn tonemap_quality(speed: &TonemapSpeed, need: f64) -> TonemapQuality {
     let working: Vec<TonemapQuality> = [TonemapQuality::High, TonemapQuality::Balanced, TonemapQuality::Fast]
         .into_iter()
         .filter(|q| speed.at(*q) > 0.0)
@@ -133,28 +131,26 @@ pub fn tonemap_quality(speed: &TonemapSpeed, pixels_in: u64, pixels_out: u64, fp
 /// Whether no quality is fast enough for [`tonemap_quality`]: the GPU, not
 /// the quality, holds the transcodes back then. Not known where nothing
 /// was measured.
-pub fn tonemap_falls_behind(speed: &TonemapSpeed, pixels_in: u64, pixels_out: u64, fps: f64, jobs: u32) -> bool {
+pub fn tonemap_falls_behind(speed: &TonemapSpeed, need: f64) -> bool {
     let fastest = [TonemapQuality::High, TonemapQuality::Balanced, TonemapQuality::Fast]
         .into_iter()
         .map(|q| speed.at(q))
         .fold(0.0, f64::max);
-    fastest > 0.0 && fastest < tonemap_need(pixels_in, pixels_out, fps, jobs)
+    fastest > 0.0 && fastest < need
 }
 
-/// The pixels of `src` and of its picture made `w×h`, and its frame rate:
-/// what [`tonemap_quality`] weighs.
-fn tonemap_rate(src: &MediaStream, w: i64, h: i64) -> (u64, u64, f64) {
+/// [`tonemap_need`] of `src` made `w×h`.
+fn need_of(src: &MediaStream, w: i64, h: i64) -> f64 {
     let source = src.width.unwrap_or(1920).max(1) as u64 * src.height.unwrap_or(1080).max(1) as u64;
     let fps = src.frame_rate.filter(|f| f.is_finite() && *f > 0.0).unwrap_or(24.0).min(120.0);
-    (source, w.max(1) as u64 * h.max(1) as u64, fps)
+    tonemap_need(source, w.max(1) as u64 * h.max(1) as u64, fps)
 }
 
-/// [`tonemap_quality`] for `src` made `w×h`; `High` where nothing was
-/// measured.
-fn quality_for(speed: Option<&TonemapSpeed>, src: &MediaStream, w: i64, h: i64, jobs: u32) -> TonemapQuality {
+/// [`tonemap_quality`] for `src` made `w×h`, beside transcodes needing
+/// `others`; `High` where nothing was measured.
+fn quality_for(speed: Option<&TonemapSpeed>, src: &MediaStream, w: i64, h: i64, others: f64) -> TonemapQuality {
     let Some(speed) = speed else { return TonemapQuality::High };
-    let (pixels_in, pixels_out, fps) = tonemap_rate(src, w, h);
-    tonemap_quality(speed, pixels_in, pixels_out, fps, jobs)
+    tonemap_quality(speed, need_of(src, w, h) + others)
 }
 
 /// The Direct3D 11 device AMF encodes on: the AMD GPU, whichever adapter
@@ -708,7 +704,7 @@ impl Plan {
                         tonemap,
                         // Alone on the GPU: a job counts the others (see
                         // `Plan::share_tonemapping`).
-                        tonemap_quality: quality_for(ff.caps.tonemap_speed.as_ref(), src, width, height, 1),
+                        tonemap_quality: quality_for(ff.caps.tonemap_speed.as_ref(), src, width, height, 0.0),
                         tonemap_input,
                         amf_upload,
                         // BT.709 out of every tone mapper; the source's otherwise.
@@ -879,12 +875,12 @@ impl Plan {
         self.video.as_ref().is_some_and(|v| !v.copy && v.tonemap == Some(Tonemapper::Libplacebo))
     }
 
-    /// Tone maps at the best quality the GPU keeps ahead of real time with
-    /// `jobs` libplacebo transcodes on it, this one included (see
+    /// Tone maps at the best quality the GPU keeps ahead of real time
+    /// beside libplacebo transcodes needing `others` (see
     /// [`tonemap_quality`]): what its first process does. Later ones follow
     /// the GPU's load (see [`crate::share`]).
-    pub fn share_tonemapping(&mut self, speed: Option<&TonemapSpeed>, media: &MediaInfo, jobs: u32) {
-        if let Some(quality) = self.shared_quality(speed, media, jobs)
+    pub fn share_tonemapping(&mut self, speed: Option<&TonemapSpeed>, media: &MediaInfo, others: f64) {
+        if let Some(quality) = self.shared_quality(speed, media, others)
             && let Some(v) = self.video.as_mut()
         {
             v.tonemap_quality = quality;
@@ -893,19 +889,30 @@ impl Plan {
 
     /// The quality [`Plan::share_tonemapping`] takes; `None` when
     /// libplacebo doesn't tone map the video.
-    pub fn shared_quality(&self, speed: Option<&TonemapSpeed>, media: &MediaInfo, jobs: u32) -> Option<TonemapQuality> {
+    pub fn shared_quality(
+        &self,
+        speed: Option<&TonemapSpeed>,
+        media: &MediaInfo,
+        others: f64,
+    ) -> Option<TonemapQuality> {
         let (v, src) = self.placebo_source(media)?;
-        Some(quality_for(speed, src, v.width, v.height, jobs))
+        Some(quality_for(speed, src, v.width, v.height, others))
     }
 
-    /// Whether the GPU falls behind with `jobs` libplacebo transcodes on
-    /// it, this one included, even at the fastest quality (see
+    /// What libplacebo's tone mapping of this video asks of the GPU (see
+    /// [`tonemap_need`]); `None` when libplacebo doesn't tone map it.
+    pub fn tonemap_need(&self, media: &MediaInfo) -> Option<f64> {
+        let (v, src) = self.placebo_source(media)?;
+        Some(need_of(src, v.width, v.height))
+    }
+
+    /// Whether the GPU falls behind with this and libplacebo transcodes
+    /// needing `others` on it, even at the fastest quality (see
     /// [`tonemap_falls_behind`]): where decoding on the CPU relieves it
     /// (see [`crate::share`]). Not without a measurement.
-    pub fn tonemapping_falls_behind(&self, speed: Option<&TonemapSpeed>, media: &MediaInfo, jobs: u32) -> bool {
-        let (Some(speed), Some((v, src))) = (speed, self.placebo_source(media)) else { return false };
-        let (pixels_in, pixels_out, fps) = tonemap_rate(src, v.width, v.height);
-        tonemap_falls_behind(speed, pixels_in, pixels_out, fps, jobs)
+    pub fn tonemapping_falls_behind(&self, speed: Option<&TonemapSpeed>, media: &MediaInfo, others: f64) -> bool {
+        let (Some(speed), Some(need)) = (speed, self.tonemap_need(media)) else { return false };
+        tonemap_falls_behind(speed, need + others)
     }
 
     /// The video libplacebo tone maps, and its stream in `media`.
@@ -2711,33 +2718,37 @@ mod tests {
     #[test]
     fn tone_mapping_does_what_the_gpu_keeps_ahead_of_real_time() {
         let (uhd, hd) = (3840 * 2160, 1920 * 1080);
+        let film = tonemap_need(uhd, uhd, 23.976);
         // An integrated Radeon keeps a 4K film ahead at Balanced, 1080p at High.
-        assert_eq!(tonemap_quality(&VEGA_7, uhd, uhd, 23.976, 1), TonemapQuality::Balanced);
-        assert_eq!(tonemap_quality(&VEGA_7, uhd, hd, 23.976, 1), TonemapQuality::High);
+        assert_eq!(tonemap_quality(&VEGA_7, film), TonemapQuality::Balanced);
+        assert_eq!(tonemap_quality(&VEGA_7, tonemap_need(uhd, hd, 23.976)), TonemapQuality::High);
         // Two 4K films at once: as fast as it goes.
-        assert_eq!(tonemap_quality(&VEGA_7, uhd, uhd, 23.976, 2), TonemapQuality::Fast);
+        assert_eq!(tonemap_quality(&VEGA_7, 2.0 * film), TonemapQuality::Fast);
         // A bigger GPU does all of libplacebo's work, for two films too.
         let big = TonemapSpeed { high: 240.0, balanced: 300.0, fast: 320.0 };
-        assert_eq!(tonemap_quality(&big, uhd, uhd, 23.976, 2), TonemapQuality::High);
+        assert_eq!(tonemap_quality(&big, 2.0 * film), TonemapQuality::High);
         // A quality whose options this FFmpeg refused (measured 0) is never taken.
         let old = TonemapSpeed { high: 20.0, balanced: 0.0, fast: 0.0 };
-        assert_eq!(tonemap_quality(&old, uhd, uhd, 23.976, 1), TonemapQuality::High);
+        assert_eq!(tonemap_quality(&old, film), TonemapQuality::High);
     }
 
     #[test]
     fn the_gpu_falls_behind_where_even_the_fastest_quality_is_too_slow() {
         let (uhd, hd) = (3840 * 2160, 1920 * 1080);
+        let (film, made_hd) = (tonemap_need(uhd, uhd, 23.976), tonemap_need(uhd, hd, 23.976));
         // Fast as it measures sampling the source directly.
         let vega = TonemapSpeed { fast: 84.0, ..VEGA_7 };
-        assert!(!tonemap_falls_behind(&vega, uhd, uhd, 23.976, 1));
+        assert!(!tonemap_falls_behind(&vega, film));
         // Two 4K films at once; made 1080p, three.
-        assert!(tonemap_falls_behind(&vega, uhd, uhd, 23.976, 2));
-        assert!(!tonemap_falls_behind(&vega, uhd, hd, 23.976, 2));
-        assert!(tonemap_falls_behind(&vega, uhd, hd, 23.976, 3));
+        assert!(tonemap_falls_behind(&vega, 2.0 * film));
+        assert!(!tonemap_falls_behind(&vega, 2.0 * made_hd));
+        assert!(tonemap_falls_behind(&vega, 3.0 * made_hd));
+        // One of each: what they need together, 1080p's less than 4K's.
+        assert!(!tonemap_falls_behind(&vega, film + made_hd));
         let big = TonemapSpeed { high: 240.0, balanced: 300.0, fast: 320.0 };
-        assert!(!tonemap_falls_behind(&big, uhd, uhd, 23.976, 3));
+        assert!(!tonemap_falls_behind(&big, 3.0 * film));
         // Nothing measured: not known to.
-        assert!(!tonemap_falls_behind(&TonemapSpeed::default(), uhd, uhd, 23.976, 2));
+        assert!(!tonemap_falls_behind(&TonemapSpeed::default(), 2.0 * film));
     }
 
     #[test]
@@ -2755,7 +2766,8 @@ mod tests {
         assert!(args.contains("tonemapping=auto:peak_detect=0:upscaler=bilinear:contrast_recovery=0,"), "{args}");
         assert_eq!(plan.video_plan(&m, None).unwrap().tonemap_quality, Some(TonemapQuality::Balanced));
         // Another 4K film on the GPU.
-        plan.share_tonemapping(ff.caps.tonemap_speed.as_ref(), &m, 2);
+        let film = plan.tonemap_need(&m).unwrap();
+        plan.share_tonemapping(ff.caps.tonemap_speed.as_ref(), &m, film);
         assert_eq!(plan.video.as_ref().unwrap().tonemap_quality, TonemapQuality::Fast);
         // Its renditions look the same.
         let mut lower = Plan::build(&request(), &m, &ff, None).unwrap();
@@ -2808,9 +2820,10 @@ mod tests {
         assert_eq!(plan.source_rate(&m).map(|(pixels, _)| pixels), Some(3840 * 2160));
         // 4K made 1080p: an integrated Radeon keeps two ahead, not three.
         let vega = TonemapSpeed { fast: 84.0, ..VEGA_7 };
-        assert!(!plan.tonemapping_falls_behind(Some(&vega), &m, 2));
-        assert!(plan.tonemapping_falls_behind(Some(&vega), &m, 3));
-        assert!(!plan.tonemapping_falls_behind(None, &m, 3));
+        let film = plan.tonemap_need(&m).unwrap();
+        assert!(!plan.tonemapping_falls_behind(Some(&vega), &m, film));
+        assert!(plan.tonemapping_falls_behind(Some(&vega), &m, 2.0 * film));
+        assert!(!plan.tonemapping_falls_behind(None, &m, 2.0 * film));
 
         let shared = plan.with_share(Share { quality: TonemapQuality::Fast, cpu_decode: true });
         let args = args_string(&shared, 0, 2);
