@@ -122,6 +122,25 @@ moves between by itself, no bigger than the screen: in such a session
 (`PlaybackInfo.adaptive`) the half-second feed leaves `AutoQuality` be,
 and only stalls and dropped frames can still start it again lower.
 
+A change that needs a new session while the video plays (a quality
+picked, an audio track the engine can't switch to itself, picture
+subtitles burned in, Automatic's steps, the switch to the server's
+quality for dropped frames, Play original) doesn't stop it: the session
+controller starts the next session beside the one playing
+(`keep_previous`), asks for its playlist, the first size listed and the
+segment holding the start plus 4 s through the engine's media client, so
+the transcoder makes them, then ends the one playing and moves the engine
+to the new one from where it got to. The wait is 20 s at most; meanwhile
+the old one's stalls and dropped frames don't count. The screen keeps the
+last picture on the surface across the swap (`PlayerUiState.handoff`
+hides the black shutter until the new stream's first frame) and shows
+the spinner only after 2.5 s instead of 0.4 s (0.5 s on TVs). With no
+transcode free for two at once (`503`) the session before ends first, as
+before. Recoveries from errors and stalls start the new session at once:
+the stream playing is what failed. Media3's own moves between the sizes
+of one stream keep their buffer: nothing in the app sets track selection
+parameters when a size changes.
+
 ## Watch Next
 
 On Android TV and Google TV, the home screen's Watch Next row shows the

@@ -135,14 +135,21 @@ class ProtocolTest {
     }
 
     @Test
-    fun `one server session at a time, ended before the next starts`() {
+    fun `one server session at a time, but for the next one made ready beside it`() {
         val c = h.play(PlayRequest(FixtureIds.SAMPLE_1080P))
         h.engine.ready()
         h.advance(3_000)
         c.selectQuality("2m")
         h.settle()
-        assertEquals(listOf("start", "progress stopped", "delete", "start"), h.timeline())
+        assertEquals(listOf("start", "start", "progress stopped", "delete"), h.timeline())
+        assertEquals(listOf(null, true), h.playbackRequests().map { it.keepPrevious })
         assertEquals(2, h.engine.prepared.size)
         assertEquals(3_000L, h.engine.prepared.last().startMs)
+        // A recovery starts the next one once the one before ended: that one is what failed.
+        h.engine.ready()
+        h.engine.fail(EngineError.Http(404, "playback session expired"))
+        h.settle()
+        assertEquals(listOf("start", "start", "progress stopped", "delete", "progress stopped", "delete", "start"), h.timeline())
+        assertNull(h.playbackRequests().last().keepPrevious)
     }
 }

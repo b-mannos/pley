@@ -153,8 +153,9 @@ internal class PlayRoutes(private val s: State) {
             }
         }
         if (method == PlaybackMethod.Direct) reasons.clear()
-        // Starting with a client id ends that client's earlier sessions.
-        request.clientId?.let { client ->
+        // Starting with a client id ends that client's earlier sessions, unless it is
+        // made ready beside the one playing (keep_previous): the player ends that one.
+        request.clientId?.takeIf { request.keepPrevious != true }?.let { client ->
             s.sessions.values.removeAll { it.profileId == caller.profile.id && it.clientId == client }
         }
         val session = PlaySession(UUID.randomUUID().toString().replace("-", ""), caller.profile.id, item.id, file.id, method, request.clientId)

@@ -80,6 +80,9 @@ class PlayerScreenState(
         p == PlayerPhase.Preparing || p == PlayerPhase.Buffering || p == PlayerPhase.Switching
     }
 
+    /** A stream made ready beside the one that played takes over: its last picture stays, and the spinner waits longer. */
+    val handoff: Boolean by derivedStateOf { ui.value.handoff }
+
     /** The server is out of reach and playback keeps trying. */
     val reconnecting: Boolean by derivedStateOf { ui.value.reconnecting }
 

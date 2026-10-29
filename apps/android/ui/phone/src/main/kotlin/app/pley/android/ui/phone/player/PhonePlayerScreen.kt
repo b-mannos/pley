@@ -120,7 +120,7 @@ fun PhonePlayerScreen(
             .testTag(TAG_PLAYER),
     ) {
         val engine = rememberEngine(state, ui)
-        engine?.let { VideoPicture(it, picture) }
+        engine?.let { VideoPicture(it, picture) { state.handoff } }
         // Under the subtitles, which it mustn't dim.
         if (!inPip) ControlScrims(state)
         Captions(state, engine, picture, captions, inPip)
@@ -313,11 +313,13 @@ private fun Captions(state: PlayerScreenState, player: Player?, picture: Picture
  * The video on a SurfaceView (frames straight to the display: HDR and Dolby
  * Vision pass through), placed by [picture]: fitted, filled or zoomed, its
  * bottom kept on screen when subtitles are burned in. Black until the
- * first frame. Zooming lays it out again; nothing recomposes.
+ * first frame, except while [holding]: a stream made ready beside the one
+ * that played takes over, and the last picture stays until its first.
+ * Zooming lays it out again; nothing recomposes.
  */
 @OptIn(UnstableApi::class)
 @Composable
-private fun VideoPicture(player: Player, picture: PictureState) {
+private fun VideoPicture(player: Player, picture: PictureState, holding: () -> Boolean) {
     PlayerProbe.composed?.invoke("video")
     val presentation = rememberPresentationState(player)
     LaunchedEffect(presentation, picture) {
@@ -336,6 +338,6 @@ private fun VideoPicture(player: Player, picture: PictureState) {
                 },
             surfaceType = SURFACE_TYPE_SURFACE_VIEW,
         )
-        if (presentation.coverSurface) Box(Modifier.fillMaxSize().background(Color.Black))
+        if (presentation.coverSurface && !holding()) Box(Modifier.fillMaxSize().background(Color.Black))
     }
 }

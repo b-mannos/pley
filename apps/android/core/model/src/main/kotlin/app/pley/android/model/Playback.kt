@@ -74,6 +74,12 @@ data class PlaybackRequest(
     val mode: PlaybackMode = PlaybackMode.Auto,
     /** The player: starting a session ends this profile's earlier ones on the same client. */
     val clientId: String? = null,
+    /**
+     * Started while the client's last session plays on (a quality or track
+     * change made ready before the player moves to it): that one isn't
+     * ended, the player ends it as it moves over. `null` leaves it out.
+     */
+    val keepPrevious: Boolean? = null,
     /** What this device decodes. */
     val caps: ClientCaps = ClientCaps(),
 )

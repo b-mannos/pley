@@ -121,6 +121,7 @@ class SessionPlaybackServices(
                     events = data.liveUpdates.events,
                     local = local(),
                     tracksChosen = { itemId, c -> data.watchState.streamsChosen(itemId, c.fileId, c.audioIndex, c.subtitleIndex) },
+                    warmer = OkHttpStreamWarmer(network::media),
                 )
             })
         }

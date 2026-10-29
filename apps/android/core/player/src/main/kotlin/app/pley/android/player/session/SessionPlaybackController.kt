@@ -86,7 +86,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  * - **Reports.** Progress every 10 s while playing and every 30 s paused,
  *   on pause, and 1 s after the last seek; `stopped` then DELETE at the end,
  *   on closing and before any new session, through the app-scoped
- *   [SessionReporter]. One server session at a time.
+ *   [SessionReporter]. One server session at a time,
+ *   two only while the next is made ready beside it.
  * - **Recovery.** [Recovery]'s ladder for errors, 12 s stalls and dropped frames.
  * - **Quality.** The quality chosen plays as it is; Automatic
  *   (docs/QUALITY.md) plays the original and lets [AutoQuality] step down
@@ -96,6 +97,11 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   at most at what the server knows this network carries ([NetworkStart],
  *   asked alongside the item's details, with a speed test on a network it
  *   doesn't know), else at what this device remembers.
+ * - **Changes while it plays.** A quality picked, a track that needs a new
+ *   session, an Automatic step or dropped frames' switch: the new session
+ *   is made ready beside the one playing ([beginBeside]), and the player
+ *   moves to it on the last picture, without a spinner. Recoveries from
+ *   errors and stalls start the new session at once.
  * - **Tracks.** The audio is the server's choice for this device unless the
  *   person picks a track. Switched by the engine in direct play; a new
  *   session when a stream needs other audio or subtitles burned in; choices
@@ -180,6 +186,13 @@ class SessionPlaybackController(
     private val session: ServerPlaybackSession? get() = sessionState.value
     private var sessionJob: Job? = null
     private var startJob: Job? = null
+
+    /**
+     * The run of [beginBeside] making a session ready beside the one
+     * playing, while it does: what the one playing does (a stall, dropped
+     * frames, Automatic's watch) no longer decides anything.
+     */
+    private var preparing: Any? = null
 
     /** The playhead as last known: kept while a session (re)starts and the engine sits at 0. */
     private var lastPositionMs = 0L
@@ -373,15 +386,18 @@ class SessionPlaybackController(
 
     /**
      * Starts a server session at [atMs] and loads it, ending the one before.
-     * The previous run of this is cancelled (a new choice wins).
+     * The previous run of this is cancelled (a new choice wins). [alongside]:
+     * a quality, track or Automatic change while it plays, made ready beside
+     * the session playing ([beginBeside]). Recoveries from errors and stalls
+     * start at once: the stream playing is what failed.
      */
-    private fun restart(atMs: Long) {
+    private fun restart(atMs: Long, alongside: Boolean = false) {
         if (stopped) return
         sessionJob?.cancel()
         startJob?.cancel()
         sessionJob = scope.launch {
             try {
-                begin(atMs)
+                begin(atMs, alongside)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -390,11 +406,81 @@ class SessionPlaybackController(
         }
     }
 
-    private suspend fun begin(atMs: Long) {
+    private suspend fun begin(atMs: Long, alongside: Boolean = false) {
         val detail = item ?: return
         val chosen = file ?: return fail(texts.noFile, canRetry = false)
+        val local = localFile(chosen.id)?.takeIf { recovery.fallbackMode == null && !streamingPicked }
+        // A change while the media shows: the session playing plays on while the next one gets ready.
+        val playing = session?.takeIf { alongside && local == null && link != null && mediaShown && !ended && ui.value.phase !is PlayerPhase.Error }
+        if (playing != null) return beginBeside(playing, detail, chosen, atMs)
+
         // The session before ends first ("stopped", then DELETE), unless the server is slow to say so.
         if (endSession(atMs)) withTimeoutOrNull(END_WAIT_MS) { env.reporter.flush() }
+        reset(atMs, handoff = false)
+        playingConverted = local?.converted == true
+        if (local != null) return beginLocal(detail, chosen, local, atMs)
+        loadSession(detail, chosen, startSession(detail, chosen, choicesAt(detail, chosen, atMs), keepPrevious = false), atMs)
+    }
+
+    /**
+     * A change while it plays (a quality, a track, Automatic's step): the
+     * next session starts beside [playing] (`keep_previous`), which plays on
+     * while the next one's stream is asked for as the engine will ask for it
+     * ([StreamWarmer]), so the transcoder makes its first segment; then the
+     * player moves over from where [playing] got to, its last picture kept
+     * meanwhile ([PlayerUiState.handoff]). With no transcode free for two at
+     * once (503) it moves as before: [playing] ends first.
+     */
+    private suspend fun beginBeside(playing: ServerPlaybackSession, detail: ItemDetail, chosen: MediaFile, atMs: Long) {
+        val token = Any()
+        preparing = token
+        // The stall watch starts over: the next session is on its way.
+        lastAdvanceAt = env.now()
+        try {
+            val started = try {
+                startSession(detail, chosen, choicesAt(detail, chosen, atMs), keepPrevious = true)
+            } catch (e: ApiException) {
+                if (e.status != NO_TRANSCODE_FREE) {
+                    // As when the session before ended first: it ends, and the screen says what failed.
+                    lastPositionMs = livePosition()
+                    endSession(lastPositionMs)
+                    throw e
+                }
+                null
+            }
+            if (started == null) {
+                val at = livePosition()
+                if (endSession(at)) withTimeoutOrNull(END_WAIT_MS) { env.reporter.flush() }
+                reset(at, handoff = false)
+                playingConverted = false
+                return loadSession(detail, chosen, startSession(detail, chosen, choicesAt(detail, chosen, at), keepPrevious = false), at)
+            }
+            try {
+                if (started.info.hls) withTimeoutOrNull(PREPARE_MAX_MS) { env.warmer.warm(env.api.url(started.info.url), atMs + PREPARE_LEAD_MS) }
+            } catch (e: CancellationException) {
+                started.discard()
+                throw e
+            } catch (_: Exception) {
+                // Not asked for ahead: the player moves over all the same, and waits for it there.
+            }
+            // The session playing ended meanwhile (its end, the server's stop): this one isn't needed.
+            if (session !== playing || closed || stopped) {
+                started.discard()
+                return
+            }
+            // From where the last one got to while this one got ready.
+            val at = livePosition()
+            endSession(at)
+            reset(at, handoff = true)
+            playingConverted = false
+            loadSession(detail, chosen, started, at)
+        } finally {
+            if (preparing === token) preparing = null
+        }
+    }
+
+    /** A new session's start at [atMs]: where it is, nothing ended, shown as preparing. */
+    private fun reset(atMs: Long, handoff: Boolean) {
         lastPositionMs = atMs
         startedAtMs = atMs
         mediaShown = false
@@ -405,45 +491,59 @@ class SessionPlaybackController(
         recovery.onJump()
         lastAdvanceAt = env.now()
         lastAdvancePos = -1
-        ui.update { it.copy(phase = PlayerPhase.Preparing, positionMs = atMs, skipLabel = null) }
-
         // Automatic audio is chosen again for each session: a stream (a lower
         // quality, say) has the track it copies rather than converting the
         // one the file played as it is.
         if (!audioPicked) audio = null
-        val local = localFile(chosen.id)?.takeIf { recovery.fallbackMode == null && !streamingPicked }
-        playingConverted = local?.converted == true
-        if (local != null) return beginLocal(detail, chosen, local, atMs)
+        ui.update { it.copy(phase = PlayerPhase.Preparing, positionMs = atMs, skipLabel = null, handoff = handoff) }
+    }
 
+    /** What a session of [chosen] at [atMs] asks for, as chosen now. */
+    private fun choicesAt(detail: ItemDetail, chosen: MediaFile, atMs: Long): PlaybackPlan.Choices {
         // A lower quality is always a transcode; the original keeps a fallback's mode, or a guard's.
         val mode = if (!quality.original) PlaybackMode.Transcode else recovery.fallbackMode ?: guardMode ?: quality.mode
         val decision = caps?.let { c -> runCatching { env.policy.decide(detail, chosen.id, c) }.getOrNull() }
-        var choices = PlaybackPlan.Choices(
+        // Automatic audio names no track: the server picks it again.
+        val wanted = audio?.takeIf { audioPicked }
+        return PlaybackPlan.Choices(
             file = chosen,
             startMs = atMs,
-            audio = audio,
+            audio = wanted,
             subtitle = subtitle,
             quality = quality,
             mode = mode,
-            streaming = PlaybackPlan.streams(mode, decision, chosen, audio, caps),
+            streaming = PlaybackPlan.streams(mode, decision, chosen, wanted, caps),
             sideload = sideload,
         )
-        var sent = PlaybackPlan.request(detail.id, choices, env.clientId(), caps)
+    }
+
+    /**
+     * POST /api/playback for [first], asked again with a Dolby Vision
+     * guard's mode, or with the track indexes, when the answer needs them.
+     */
+    private suspend fun startSession(detail: ItemDetail, chosen: MediaFile, first: PlaybackPlan.Choices, keepPrevious: Boolean): ServerPlaybackSession {
+        var choices = first
+        var sent = PlaybackPlan.request(detail.id, choices, env.clientId(), caps, keepPrevious)
         var started = ServerPlaybackSession.start(env.api, sent, env.reporter)
 
         DvGuards.retryMode(started.info, chosen, caps)?.let { guarded ->
             started.discard()
             guardMode = guarded
             choices = choices.copy(mode = guarded, streaming = true)
-            sent = PlaybackPlan.request(detail.id, choices, env.clientId(), caps)
+            sent = PlaybackPlan.request(detail.id, choices, env.clientId(), caps, keepPrevious)
             started = ServerPlaybackSession.start(env.api, sent, env.reporter)
         }
         if (PlaybackPlan.needsIndexes(started.info, sent, choices)) {
             started.discard()
             choices = choices.copy(streaming = true)
-            sent = PlaybackPlan.request(detail.id, choices, env.clientId(), caps)
+            sent = PlaybackPlan.request(detail.id, choices, env.clientId(), caps, keepPrevious)
             started = ServerPlaybackSession.start(env.api, sent, env.reporter)
         }
+        return started
+    }
+
+    /** Plays [started] from [atMs]: the session playing from now on, loaded into the engine. */
+    private fun loadSession(detail: ItemDetail, chosen: MediaFile, started: ServerPlaybackSession, atMs: Long) {
         sessionState.value = started
         live = null
         val info = started.info
@@ -665,7 +765,7 @@ class SessionPlaybackController(
             picturesUnavailable = true
             if (PlaybackPlan.isImage(subtitle)) {
                 publishChoices()
-                restart(livePosition())
+                restart(livePosition(), alongside = true)
                 return
             }
         }
@@ -686,6 +786,8 @@ class SessionPlaybackController(
 
     override fun onStatus(status: EngineStatus) {
         if (session == null || closed) return
+        // The new stream shows its own picture (or won't): the last one no longer stands in.
+        if (status != EngineStatus.Buffering && ui.value.handoff) ui.update { it.copy(handoff = false) }
         when (status) {
             EngineStatus.Buffering -> if (!ended) phase(PlayerPhase.Buffering)
             EngineStatus.Ready -> {
@@ -740,13 +842,14 @@ class SessionPlaybackController(
         act(recovery.decide(error, s.info.method, videoCodec), starving = false)
     }
 
-    private fun act(action: Recovery.Action, starving: Boolean) {
+    /** Does what the recovery ladder says; [alongside]: a new session is made ready beside the one playing, which plays on. */
+    private fun act(action: Recovery.Action, starving: Boolean, alongside: Boolean = false) {
         when (action) {
             is Recovery.Action.NewSession -> {
                 if (action.reason == FallbackReason.NotSmooth && recovery.struggleSwitched && !automatic) {
                     ui.update { it.copy(canPlayOriginal = true) }
                 }
-                restart(livePosition())
+                restart(livePosition(), alongside)
             }
             Recovery.Action.CheckServer -> {
                 val s = session ?: return
@@ -854,6 +957,11 @@ class SessionPlaybackController(
             }
             credits.entered(marker)?.let { onCredits() }
         }
+        // The next session is on its way, ready within PREPARE_MAX_MS: this one's stalls and drops no longer count.
+        if (preparing != null) {
+            lastAdvanceAt = now
+            return
+        }
         // A stall: meant to play, not moving (web: STALL_MS). Not while the engine reconnects: a new
         // session wouldn't reach the server either, and the engine goes on from where it stood.
         val stalling = wantPlay.value && !ended && ui.value.phase !is PlayerPhase.Error && engineLink.status != EngineStatus.Idle &&
@@ -909,7 +1017,7 @@ class SessionPlaybackController(
                 autoQuality.deviceFellBehindAtOriginal(now, convertedKbps = null)
                 autoNoticePending = true
             }
-            act(action, starving = false)
+            act(action, starving = false, alongside = true)
         } else if (automatic) {
             autoQuality.deviceFellBehind(now)?.let(::applyAuto)
         }
@@ -927,7 +1035,7 @@ class SessionPlaybackController(
         autoNoticePending = !step.up
         ui.update { it.copy(suggestLowerQuality = false) }
         publishChoices()
-        restart(livePosition())
+        restart(livePosition(), alongside = true)
     }
 
     /** Automatic plays, streamed from the server: it watches and adapts (a download plays as it is). */
@@ -1132,7 +1240,7 @@ class SessionPlaybackController(
             autoQuality.jumped()
             engineLink.selectAudio(PlaybackPlan.audioStreams(file).indexOf(chosen), chosen.language)
         } else {
-            restart(livePosition())
+            restart(livePosition(), alongside = true)
         }
     }
 
@@ -1144,7 +1252,7 @@ class SessionPlaybackController(
         publishChoices()
         val info = session?.info ?: return
         val burn = info.hls && PlaybackPlan.isImage(chosen) && !sideload
-        if (burn != info.burnSubtitles || (burn && info.subtitleIndex != chosen?.index)) restart(livePosition()) else applyTracks()
+        if (burn != info.burnSubtitles || (burn && info.subtitleIndex != chosen?.index)) restart(livePosition(), alongside = true) else applyTracks()
     }
 
     override fun setSubtitleOffset(offsetMs: Long) {
@@ -1350,7 +1458,7 @@ class SessionPlaybackController(
         }
         publishChoices()
         refreshDetails()
-        if (item != null && !same) restart(livePosition())
+        if (item != null && !same) restart(livePosition(), alongside = true)
     }
 
     override fun skip() {
@@ -1384,7 +1492,7 @@ class SessionPlaybackController(
         if (recovery.fallbackMode == null) return
         recovery.playOriginal()
         ui.update { it.copy(canPlayOriginal = false, note = null) }
-        restart(livePosition())
+        restart(livePosition(), alongside = true)
     }
 
     override fun setDetailsOpen(open: Boolean) {
@@ -1690,7 +1798,7 @@ class SessionPlaybackController(
     private fun notice(text: String) = ui.update { it.copy(notice = text) }
 
     private fun fail(message: String, canRetry: Boolean, offline: Boolean = false) {
-        ui.update { it.copy(phase = PlayerPhase.Error(message, canRetry, offline), skipLabel = null) }
+        ui.update { it.copy(phase = PlayerPhase.Error(message, canRetry, offline), skipLabel = null, handoff = false) }
     }
 
     private fun failWith(error: Exception) {
@@ -1738,6 +1846,15 @@ class SessionPlaybackController(
 
         /** The longest a new session waits for the one before to be ended. */
         const val END_WAIT_MS = 2_000L
+
+        /** How long a session made ready beside the one playing may take before the player moves to it anyway. */
+        const val PREPARE_MAX_MS = 20_000L
+
+        /** How far past where it starts that session's first segment is asked for: where the player will be by then. */
+        const val PREPARE_LEAD_MS = 4_000L
+
+        /** The server's answer when no transcode is free for two sessions at once. */
+        private const val NO_TRANSCODE_FREE = 503
 
         /** How long a download waits for the server's details before starting from its own. */
         const val SERVER_DETAIL_WAIT_MS = 1_500L

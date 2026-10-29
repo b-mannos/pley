@@ -142,6 +142,9 @@ class PleyJsonTest {
             body.keys,
         )
         assertEquals("\"remux\"", body["mode"].toString())
+        // Asked for only beside a session playing: left out otherwise.
+        val beside = PleyJson.parseToJsonElement(PleyJson.encodeToString(PlaybackRequest.serializer(), request.copy(keepPrevious = true))).jsonObject
+        assertEquals("true", beside["keep_previous"].toString())
     }
 
     @Test

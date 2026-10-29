@@ -20,6 +20,7 @@ import app.pley.android.model.ProgressReport
 import app.pley.android.model.SessionStatus
 import app.pley.android.model.StreamChoice
 import app.pley.android.model.TrickplayInfo
+import app.pley.android.network.ApiException
 import app.pley.android.network.HttpPleyApi
 import app.pley.android.network.OfflineException
 import app.pley.android.network.PleyApi
@@ -40,6 +41,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -68,6 +70,20 @@ class CountingApi(private val delegate: PleyApi) : PleyApi by delegate {
     /** Calls (by name) that fail as if the server were away. */
     val unreachable: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
 
+    /** Sessions asked for beside the one playing (keep_previous) are refused: no transcode is free for two at once (503). */
+    @Volatile
+    var noTranscodeFreeBeside = false
+
+    /** Counts a call that isn't the API's (a warm-up's requests) until [block] returns. */
+    suspend fun <T> along(block: suspend () -> T): T {
+        inFlight.incrementAndGet()
+        try {
+            return block()
+        } finally {
+            inFlight.decrementAndGet()
+        }
+    }
+
     private suspend fun <T> counted(name: String, block: suspend () -> T): T {
         inFlight.incrementAndGet()
         names += name
@@ -90,7 +106,10 @@ class CountingApi(private val delegate: PleyApi) : PleyApi by delegate {
 
     override suspend fun collection(id: Long) = counted("collection") { delegate.collection(id) }
 
-    override suspend fun startPlayback(request: PlaybackRequest): PlaybackInfo = counted("startPlayback") { delegate.startPlayback(request) }
+    override suspend fun startPlayback(request: PlaybackRequest): PlaybackInfo = counted("startPlayback") {
+        if (request.keepPrevious == true && noTranscodeFreeBeside) throw ApiException(503, "transcode_limit", "No transcode is free")
+        delegate.startPlayback(request)
+    }
 
     override suspend fun playbackStatus(sessionId: String): SessionStatus = counted("playbackStatus") { delegate.playbackStatus(sessionId) }
 
@@ -144,6 +163,13 @@ class SessionHarness(
     private val reportScope = CoroutineScope(dispatcher + SupervisorJob())
     val api: CountingApi
     val remembered = mutableListOf<String>()
+
+    /** Streams made ready beside the one playing: their address and where they were asked for from, in order. */
+    val warmups: MutableList<Pair<String, Long>> = Collections.synchronizedList(mutableListOf())
+
+    /** How long a warm-up takes before it asks the server, in virtual ms. */
+    var warmupMs = 0L
+    private val warmer: StreamWarmer
     private var controllers = mutableListOf<SessionPlaybackController>()
 
     /** Downloads, for playbacks started from now on. */
@@ -157,6 +183,7 @@ class SessionHarness(
             .addInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("Authorization", "Bearer $token").build()) }
             .build()
         api = CountingApi(HttpPleyApi(server.url, { client }))
+        warmer = OkHttpStreamWarmer({ client }, dispatcher)
     }
 
     val reporter = SessionReporter(reportScope)
@@ -187,6 +214,11 @@ class SessionHarness(
         offsets = offsets,
         profileId = profileId,
         tracksChosen = { itemId, choice -> synchronized(tracksChosen) { tracksChosen += itemId to choice } },
+        warmer = StreamWarmer { url, startMs ->
+            warmups += url to startMs
+            delay(warmupMs)
+            api.along { warmer.warm(url, startMs) }
+        },
     )
 
     /** What the app was told of tracks the player saved (PlaybackEnvironment.tracksChosen). */

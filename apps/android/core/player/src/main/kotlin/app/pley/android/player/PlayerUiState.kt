@@ -234,4 +234,16 @@ data class PlayerUiState(
     val subtitleSearch: SubtitleSearchUi? = null,
     /** The server stopped this playback (an administrator, or another device): the error says so, and the screen leaves. */
     val stoppedByServer: Boolean = false,
-)
+    /**
+     * The player moves to a stream made ready beside the one that played (a
+     * quality, track or Automatic change): the last picture stays on screen
+     * until the new one's first, and a wait shows the spinner only after
+     * [HANDOFF_SPINNER_DELAY_MS].
+     */
+    val handoff: Boolean = false,
+) {
+    companion object {
+        /** How long a wait lasts before the spinner shows while the last picture stands in ([handoff]). */
+        const val HANDOFF_SPINNER_DELAY_MS = 2_500L
+    }
+}

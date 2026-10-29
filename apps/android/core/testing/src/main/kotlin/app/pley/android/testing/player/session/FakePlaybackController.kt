@@ -200,6 +200,7 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
                 listOf(FoundSubtitle("opensubtitles:1", "Fixture.Show.S01E01.1080p.WEB", "English · Made for this file · 1,234 downloads")),
                 message = null,
             ),
+            handoff = true,
         )
     }
 }

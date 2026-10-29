@@ -195,9 +195,11 @@ object PlaybackPlan {
 
     /**
      * The body of POST /api/playback for [choices]. Automatic audio names no
-     * track, even for a stream: the server picks it.
+     * track, even for a stream: the server picks it. [keepPrevious] when it
+     * is made ready while the session before plays on: the server leaves
+     * that one to the player to end.
      */
-    fun request(itemId: Long, choices: Choices, clientId: String, caps: CapsSnapshot?): PlaybackRequest {
+    fun request(itemId: Long, choices: Choices, clientId: String, caps: CapsSnapshot?, keepPrevious: Boolean = false): PlaybackRequest {
         val audioHere = audioPlaysHere(choices.audio, caps)
         // Named when the server must convert it, or when it isn't the one the
         // details give (without a track named, the server plays that one or
@@ -213,6 +215,7 @@ object PlaybackPlan {
             startMs = choices.startMs,
             mode = choices.mode,
             clientId = clientId,
+            keepPrevious = true.takeIf { keepPrevious },
             caps = caps?.report ?: ClientCaps(),
         )
     }

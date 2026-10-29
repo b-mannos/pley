@@ -91,6 +91,7 @@ internal fun TvPlayerScreen(
     val error = phase as? PlayerPhase.Error
     val switching by remember(engineState) { derivedStateOf { engineState.value?.switchingDisplayMode == true } }
     val reconnecting by remember(state) { derivedStateOf { state.value.reconnecting } }
+    val handoff by remember(state) { derivedStateOf { state.value.handoff } }
     val card by remember(state) { derivedStateOf { state.value.upNextCard } }
     val skipLabel by remember(state) { derivedStateOf { state.value.skipLabel } }
     val playing by remember(state) { derivedStateOf { state.value.phase.wantsToPlay() } }
@@ -396,7 +397,7 @@ internal fun TvPlayerScreen(
             .onPreviewKeyEvent(::onKey)
             .testTag(TAG_PLAYER),
     ) {
-        VideoSurface(player, Modifier.fillMaxSize())
+        VideoSurface(player, Modifier.fillMaxSize()) { handoff }
         // Under the subtitles, which the scrim mustn't dim.
         Box(Modifier.fillMaxSize().controlScrims(controlsAlpha))
         PlayerSubtitles(controller, player, captionLook, lifted = ui.controls)
@@ -424,7 +425,11 @@ internal fun TvPlayerScreen(
         TvUpNextCard(card, ui, onPlay = controller::playNext, onCancel = controller::cancelUpNext)
         if (!ui.controls) TvSeekBadge(seeker.badgeMs)
         if (switching || phase == PlayerPhase.Switching) TvSwitchingCover()
-        TvBufferingRing(waiting = phase == PlayerPhase.Buffering || phase == PlayerPhase.Preparing || switching, reconnecting = reconnecting)
+        TvBufferingRing(
+            waiting = phase == PlayerPhase.Buffering || phase == PlayerPhase.Preparing || switching,
+            reconnecting = reconnecting,
+            handoff = handoff,
+        )
         TvPlayerPanels(ui, state, engineState, controller, captionLook, onSubtitleStyle)
         if (error != null) {
             TvPlayerError(

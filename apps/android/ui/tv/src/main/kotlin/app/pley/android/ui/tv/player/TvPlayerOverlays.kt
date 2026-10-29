@@ -323,17 +323,18 @@ private val BiasCentreRightThird = androidx.compose.ui.BiasAlignment(2f / 3f, 0f
  * Buffering (design spec §2.7): after 500 ms of waiting, a 40 dp ring, a
  * 2 dp fg stroke with a turning accent arc, centred. The one thing that
  * moves with the controls hidden besides the countdowns, and only while
- * playback waits. While the server is out of reach ([reconnecting]),
+ * playback waits; 2.5 s while the last picture stands in for a stream made
+ * ready beside it ([handoff]). While the server is out of reach ([reconnecting]),
  * "Reconnecting…" 16 dp under it, on the seek badge's backing: the
  * picture behind it can be anything.
  */
 @Composable
-internal fun BoxScope.TvBufferingRing(waiting: Boolean, reconnecting: Boolean) {
+internal fun BoxScope.TvBufferingRing(waiting: Boolean, reconnecting: Boolean, handoff: Boolean = false) {
     var show by remember { mutableStateOf(false) }
-    LaunchedEffect(waiting) {
+    LaunchedEffect(waiting, handoff) {
         show = false
         if (waiting) {
-            delay(BUFFERING_DELAY_MS)
+            delay(if (handoff) PlayerUiState.HANDOFF_SPINNER_DELAY_MS else BUFFERING_DELAY_MS)
             show = true
         }
     }

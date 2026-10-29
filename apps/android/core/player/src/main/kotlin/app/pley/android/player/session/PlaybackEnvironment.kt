@@ -207,4 +207,9 @@ class PlaybackEnvironment(
      * told (WatchStateRepository.streamsChosen).
      */
     val tracksChosen: (itemId: Long, choice: StreamChoice) -> Unit = { _, _ -> },
+    /**
+     * Asks for a stream made ready beside the one playing as the engine
+     * will, so the server makes it first; [StreamWarmer.NONE] moves over at once.
+     */
+    val warmer: StreamWarmer = StreamWarmer.NONE,
 )

@@ -147,6 +147,12 @@ class HttpPleyApiTest {
                 "POST /api/playback",
                 body = PleyJson.encodeToString(PlaybackRequest.serializer(), playback),
             ) { startPlayback(playback) },
+            Golden(
+                "startPlayback (beside the session playing)",
+                json("playback/info_transcode.json"),
+                "POST /api/playback",
+                body = PleyJson.encodeToString(PlaybackRequest.serializer(), playback.copy(keepPrevious = true)),
+            ) { startPlayback(playback.copy(keepPrevious = true)) },
             Golden("playbackStatus", json("playback/status_transcode.json"), "GET /api/playback/6f1c2a9e") { playbackStatus("6f1c2a9e") },
             Golden("stopPlayback", MockPley.noContent(), "DELETE /api/playback/6f1c2a9e") { stopPlayback("6f1c2a9e") },
             Golden("playbackNetwork", jsonAnswer(NETWORK), "GET /api/playback/network?client_id=android-1") { playbackNetwork("android-1") },

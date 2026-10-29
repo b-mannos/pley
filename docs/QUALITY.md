@@ -83,14 +83,14 @@ the highest quality of the menu at or below that ceiling, and never below
 for the file, as today. The session starts again where it was
 (`mode: "transcode"` with that quality's `max_bitrate` and `max_height`),
 and the player says so once, briefly: "Quality lowered to 8 Mbps
-1080p". The web player makes the new session ready while the last one
-plays on (`keep_previous`), asking for its first segment as it will, and
-moves to it on the last one's final picture, with no spinner; so does a
-quality, audio or picture-subtitle change picked in its menus. The
-Samsung and LG apps do the same (docs/TV_PLATFORMS.md), asking for the
-segment with `HEAD`; their players can't keep the last picture, so the
-screen is black for the moment the TV's player takes to open the new
-stream, and their ring waits 2.5 s.
+1080p". The web player and the Android app make the new session ready
+while the last one plays on (`keep_previous`), asking for its first
+segment as they will, and move to it on the last one's final picture,
+with no spinner; so do a quality, audio or picture-subtitle change picked
+in their menus. The Samsung and LG apps do the same (docs/TV_PLATFORMS.md),
+asking for the segment with `HEAD`; their players can't keep the last
+picture, so the screen is black for the moment the TV's player takes to
+open the new stream, and their ring waits 2.5 s.
 
 **More issues step down again**, one quality at least, but not within 20 s
 of the last change.

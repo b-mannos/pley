@@ -73,6 +73,7 @@ import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.designsystem.reducedMotion
 import app.pley.android.player.PlayerPhase
+import app.pley.android.player.PlayerUiState
 import app.pley.android.player.UpNextUi
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.PleyTextButton
@@ -126,16 +127,21 @@ private fun Modifier.underSpinner(gap: Dp): Modifier = layout { measurable, cons
 /** The tag of "Reconnecting…", for tests. */
 internal const val TAG_RECONNECTING = "phone-player-reconnecting"
 
-/** Whether the spinner shows: waiting for longer than 400 ms. */
+/**
+ * Whether the spinner shows: waiting for longer than 400 ms, or 2.5 s while
+ * the last picture stands in for a stream made ready beside it (a quality
+ * or track change, [PlayerScreenState.handoff]).
+ */
 @Composable
 internal fun rememberSpinning(state: PlayerScreenState): Boolean {
     val waiting = state.waiting
-    val shown by produceState(false, waiting) {
+    val handoff = state.handoff
+    val shown by produceState(false, waiting, handoff) {
         if (!waiting) {
             value = false
             return@produceState
         }
-        delay(PlayerScreenState.SPINNER_DELAY_MS)
+        delay(if (handoff) PlayerUiState.HANDOFF_SPINNER_DELAY_MS else PlayerScreenState.SPINNER_DELAY_MS)
         value = true
     }
     return shown && waiting
