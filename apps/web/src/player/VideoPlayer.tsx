@@ -2019,7 +2019,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
               {methodHover && !settingsOpen ? (
                 <div
                   role="tooltip"
-                  className="absolute bottom-full right-0 mb-3 w-80 animate-pop-in rounded-xl border border-white/10 bg-black/90 py-2 text-white shadow-2xl backdrop-blur-md"
+                  className="absolute bottom-full right-0 mb-3 w-80 animate-pop-in rounded-xl border border-white/10 bg-black/90 py-2 text-white shadow-2xl"
                 >
                   <PlaybackDetails
                     info={info}

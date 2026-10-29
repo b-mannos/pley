@@ -106,6 +106,10 @@ describes how they are made.
   for its most). A stream in several sizes also comes at its own size's
   usual bitrate below such a quality (8 Mbps for 1080p), for a network
   that can't carry it.
+- The web app's menus, tooltips and buttons over the video no longer
+  change its colours as they show: their blurred backgrounds made Chrome
+  and Edge take the video off the graphics card's overlay, where the
+  driver's colour settings for video apply. They are plain dark now.
 
 ## [0.0.1] - 2026-10-29
 

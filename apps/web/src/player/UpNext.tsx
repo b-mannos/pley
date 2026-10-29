@@ -35,7 +35,7 @@ export function UpNext({
   const progress = Math.max(0, Math.min(1, (COUNTDOWN - left) / COUNTDOWN));
 
   return (
-    <div className="absolute bottom-28 right-4 z-30 w-[min(92vw,22rem)] animate-pop-in overflow-hidden rounded-xl border border-white/10 bg-black/85 text-white shadow-2xl backdrop-blur-md sm:right-8">
+    <div className="absolute bottom-28 right-4 z-30 w-[min(92vw,22rem)] animate-pop-in overflow-hidden rounded-xl border border-white/10 bg-black/90 text-white shadow-2xl sm:right-8">
       <div className="relative">
         <Artwork candidates={thumbCandidates(next)} width={352} alt="" title={next.title} className="aspect-video w-full" />
         <div className="absolute inset-0 bg-linear-to-t from-black/90 via-black/20 to-transparent" />

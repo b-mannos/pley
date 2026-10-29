@@ -268,7 +268,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
       {open ? (
         <div
           role="menu"
-          className="absolute bottom-full right-0 mb-3 max-h-[60vh] w-80 animate-pop-in overflow-y-auto rounded-xl border border-white/10 bg-black/90 py-2 text-white shadow-2xl backdrop-blur-md"
+          className="absolute bottom-full right-0 mb-3 max-h-[60vh] w-80 animate-pop-in overflow-y-auto rounded-xl border border-white/10 bg-black/90 py-2 text-white shadow-2xl"
         >
           {panel === "root" ? (
             <>

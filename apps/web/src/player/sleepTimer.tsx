@@ -77,7 +77,7 @@ export function SleepNotice({ seconds, onKeepWatching, lifted }: { seconds: numb
     <div
       role="status"
       className={cn(
-        "absolute left-4 z-20 flex animate-pop-in items-center gap-3 rounded-md border border-white/25 bg-black/70 py-1.5 pl-4 pr-1.5 text-sm text-white shadow-2xl backdrop-blur-md transition-[bottom] duration-300 sm:left-8",
+        "absolute left-4 z-20 flex animate-pop-in items-center gap-3 rounded-md border border-white/25 bg-black/80 py-1.5 pl-4 pr-1.5 text-sm text-white shadow-2xl transition-[bottom] duration-300 sm:left-8",
         lifted ? "bottom-28" : "bottom-10",
       )}
       onClick={(e) => e.stopPropagation()}
