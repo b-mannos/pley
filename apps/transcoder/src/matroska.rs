@@ -296,8 +296,13 @@ pub struct Font {
     pub data: Vec<u8>,
 }
 
-/// The fonts attached to a Matroska file, `max_bytes` of them at most (in
-/// the order they come): only the Attachments element is read, which the
+/// The most fonts taken from one file: a film's subtitles use a few dozen,
+/// and libass opens every file of the folder they are put in, so a file
+/// with hundreds of thousands of tiny ones would be read at every burn-in.
+pub const MAX_FONTS: usize = 1000;
+
+/// The fonts attached to a Matroska file, `max_bytes` of them and
+/// [`MAX_FONTS`] at most (in the order they come): only the Attachments element is read, which the
 /// seek head points to, or which comes before the first cluster (mkvmerge
 /// and FFmpeg write it there). An empty list when there are none; an error
 /// when the file isn't Matroska or can't be read. Blocking.
@@ -315,7 +320,7 @@ pub fn attached_fonts(path: &Path, max_bytes: u64) -> Result<Vec<Font>, String> 
             let mut total = 0u64;
             let mut pos = start;
             // Each attached file is read whole, one at a time.
-            while pos < end {
+            while pos < end && fonts.len() < MAX_FONTS {
                 file.seek(SeekFrom::Start(pos)).map_err(io)?;
                 let Some((id, size)) = element_header(&mut file) else { break };
                 let data = file.stream_position().map_err(io)?;
@@ -1643,6 +1648,18 @@ pub(crate) mod tests {
         assert_eq!(attached_fonts(&path, u64::MAX).unwrap(), Vec::new());
         std::fs::write(&path, b"not a matroska file").unwrap();
         assert!(attached_fonts(&path, u64::MAX).is_err());
+    }
+
+    #[test]
+    fn no_more_than_so_many_fonts_are_taken() {
+        let names: Vec<String> = (0..MAX_FONTS + 50).map(|n| format!("{n}.ttf")).collect();
+        let files: Vec<(&str, &str, &[u8])> = names.iter().map(|n| (n.as_str(), "font/ttf", b"f".as_slice())).collect();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("many.mkv");
+        std::fs::write(&path, with_attachments(&files)).unwrap();
+        let fonts = attached_fonts(&path, u64::MAX).unwrap();
+        assert_eq!(fonts.len(), MAX_FONTS);
+        assert_eq!(fonts[0].name, "0.ttf");
     }
 
     // ------------------------------------------------------------ text tracks
