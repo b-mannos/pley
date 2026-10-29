@@ -6,6 +6,7 @@
   "workspaces": [
     "apps/web",
     "apps/desktop",
+    "packages/picture-subtitles",
     "packages/tv",
     "apps/tizen",
     "apps/webos"
@@ -16,9 +17,9 @@
     "typecheck": "bun run --cwd apps/web typecheck",
     "lint": "bun run --cwd apps/web lint",
     "test": "bun run --cwd apps/web test",
-    "check": "bun run --cwd apps/web check && bun run --cwd apps/desktop check",
+    "check": "bun run --cwd packages/picture-subtitles check && bun run --cwd apps/web check && bun run --cwd apps/desktop check",
     "desktop": "bun run --cwd apps/desktop dev",
-    "tv:check": "bun run --cwd packages/tv check && bun run --cwd apps/tizen check && bun run --cwd apps/webos check",
+    "tv:check": "bun run --cwd packages/picture-subtitles check && bun run --cwd packages/tv check && bun run --cwd apps/tizen check && bun run --cwd apps/webos check",
     "tizen": "bun run --cwd apps/tizen package",
     "webos": "bun run --cwd apps/webos package"
   },

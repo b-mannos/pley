@@ -1,0 +1,19 @@
+{
+  "name": "pley-picture-subtitles",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Pley's decoders for picture subtitles (PGS, VobSub, DVB) in the server's .mks files: what the web app and the Samsung and LG apps draw over the video.",
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "check": "tsc -p tsconfig.json && vitest run"
+  },
+  "devDependencies": {
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.5"
+  }
+}

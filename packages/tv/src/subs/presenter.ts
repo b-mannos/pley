@@ -1,8 +1,8 @@
 import { ApiError, type Api } from "../api/client";
 import { Cancel } from "../net/transport";
-import { readPictureTrack } from "./mks";
-import { PictureSubtitles } from "./picture-track";
-import type { PictureFrame } from "./pictures";
+import { readPictureTrack } from "pley-picture-subtitles/mks";
+import { PictureSubtitles } from "pley-picture-subtitles/picture-track";
+import type { PictureFrame } from "pley-picture-subtitles/pictures";
 import { CueIndex, mergeCues, parseVtt, type Cue } from "./vtt";
 
 /** What shows now: text cues, or a picture frame, or nothing. */

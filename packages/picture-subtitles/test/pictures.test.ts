@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { readPictureTrack } from "../../src/subs/mks";
-import { decodeRle, PgsDecoder } from "../../src/subs/pgs";
-import { parseIdx, parseSpu, VobSubDecoder } from "../../src/subs/vobsub";
-import { DvbDecoder, segments } from "../../src/subs/dvb";
-import { PictureSubtitles } from "../../src/subs/picture-track";
-import { ycbcrToRgb } from "../../src/subs/pictures";
+import { readPictureTrack } from "../src/mks";
+import { decodeRle, PgsDecoder } from "../src/pgs";
+import { parseIdx, parseSpu, VobSubDecoder } from "../src/vobsub";
+import { DvbDecoder, segments } from "../src/dvb";
+import { PictureSubtitles } from "../src/picture-track";
+import { ycbcrToRgb } from "../src/pictures";
 
 // ---- builders
 

@@ -31,7 +31,7 @@ const firstJsonVersion = (path) => pattern(path, /("version":\s*")([^"]+)(")/);
 const cargoPackage = (path) => pattern(path, /(\[package\][^[]*?\nversion = ")([^"]+)(")/);
 const cargoLock = (path, name) => pattern(path, new RegExp(`(\\[\\[package\\]\\]\\nname = "${name}"\\nversion = ")([^"]+)(")`));
 
-const WORKSPACES = ["apps/web", "apps/desktop", "packages/tv", "apps/tizen", "apps/webos"];
+const WORKSPACES = ["apps/web", "apps/desktop", "packages/picture-subtitles", "packages/tv", "apps/tizen", "apps/webos"];
 
 /** Bun's lock records each workspace's version (not the root's), after its name. */
 const bunLock = (path, workspace) =>

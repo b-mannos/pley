@@ -327,6 +327,14 @@ counters aren't read on LG, so a struggling stream isn't judged by them.
 | `subs/` | Subtitles drawn by the app: text as WebVTT from the server, pictures (PGS, VobSub, DVB) decoded from the server's `.mks` and drawn on a canvas, with the offset the person sets |
 | `caps/` | The server's direct-play rules, so the player knows what a play request will get, and Playback details can say why |
 
+The picture subtitle decoders themselves (the `.mks` reader, PGS, VobSub,
+DVB, and the track that says what shows when) are in
+`packages/picture-subtitles` (`pley-picture-subtitles`), which the web app
+draws its picture subtitles with too. It is plain TypeScript without
+dependencies; each TV build compiles it for its own engine (Chromium 53
+and 56) as it does `packages/tv`, and `bun run tv:check` runs its tests
+first.
+
 Each shell has `facts.ts` (what the TV says about itself; on LG through
 its system services, `luna.ts`), `caps.ts` (the report, a pure function
 with snapshot tests), `engine.ts` (the player: AVPlay on Samsung, a
