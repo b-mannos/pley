@@ -9,6 +9,20 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Security
+
+- A session signed out, or whose account was disabled or changed, could
+  keep working for up to a minute when it was being checked at that
+  moment.
+- An administrator's own PIN changes only in Account, with the password,
+  no longer through the users list with the session alone.
+- The transcoder's folder for segments in memory (`/dev/shm`) is never one
+  another account on the computer made first.
+- A file's attached fonts are taken 1,000 at most.
+- An account keeps at most 200 networks remembered for Automatic quality.
+- Subtitles from OpenSubtitles download over https only.
+- ctutils 0.4.7 (RUSTSEC-2026-0385).
+
 ## [0.0.1] - 2026-10-29
 
 ### Added

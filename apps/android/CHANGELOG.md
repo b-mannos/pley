@@ -8,6 +8,13 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Security
+
+- No other app on a TV can make Pley play a title through a Watch Next
+  link: links carry this installation's signature.
+- A stream's subtitles are never read from a file on the device that the
+  server names.
+
 ## [0.0.1] - 2026-10-29
 
 ### Added

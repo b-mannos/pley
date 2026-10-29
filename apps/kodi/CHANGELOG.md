@@ -8,6 +8,14 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Security
+
+- Plain http goes only to addresses on the home network, checked on the
+  connection: sign-in codes and tokens never cross the internet
+  unencrypted. Use the server's https address from elsewhere.
+- The proxy refuses a negative or unreadable Content-Length, and checks
+  its secret in constant time.
+
 ## [0.0.1] - 2026-10-29
 
 ### Added

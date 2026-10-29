@@ -8,6 +8,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Security
+
+- The token goes only to the server's own origin, never to an address
+  elsewhere that the server hands out.
+
 ## [0.0.1] - 2026-10-29
 
 ### Added

@@ -77,9 +77,11 @@ anything with it either (links, pictures), only the address bar and
 bookmarks; a `?token=` in their address changes none of that, since the
 cookie is what would sign them in. The devices and apps lists show the
 address a request came from as the rate limits count it, which nobody on
-the internet can choose. Administrators change their own password and
+the internet can choose. Administrators change their own password, PIN and
 two-step sign-in in Account, which asks for the password (and code), not
-through the users list. Event streams end once their session is signed out. Switching from a
+through the users list. A session signed out, or whose account is disabled
+or changed, stops working at once, even one being checked at that moment.
+Event streams end once their session is signed out. Switching from a
 restricted profile to one that can see more (an administrator, a higher age
 limit, other libraries) takes that profile's PIN, or its password (and code).
 
@@ -126,7 +128,8 @@ styles, no other site may frame Pley (`frame-ancestors 'none'`,
 headers, and a body may pause for 20 seconds at most. At most 8,192
 connections are open at once, 256 from one address on the internet (a
 proxy on this computer or its network carries everyone's, so its aren't
-counted), and a session keeps at most 16 event streams; on Unix Pley raises
+counted), a session keeps at most 16 event streams, and an account at
+most 200 networks Automatic quality remembers; on Unix Pley raises
 its open-files limit to the most it may have.
 
 **Files.** A symbolic link in a library is followed only to a file of the
@@ -149,15 +152,20 @@ track is capped (64 MB, and 512 MB for an extracted track); a crafted
 file's subtitle styles and MP4 sample tables can't take more memory than a
 real one's. Pictures come only from the metadata services' hosts over
 HTTPS, redirects included, read up to 25 MB whatever their headers say; a
-profile picture is decoded only up to 4096 pixels.
+profile picture is decoded only up to 4096 pixels. Subtitles from
+OpenSubtitles come over HTTPS only, never redirected to plain HTTP. A
+file's attached fonts (for burned-in ASS) are taken up to 256 MiB and
+1,000 of them, under names of the transcoder's own.
 
 **Transcoder.** The transcoder Pley starts listens on `127.0.0.1` with a
 random token. One started on another machine refuses to listen on the
 network without a token of at least 16 characters, since it reads whatever
 files it can open, and keeps its work folder private: on Windows too, the
 folders it makes in one chosen elsewhere (segments, converted downloads, its
-caches). A converted download several people asked for stops only when the
-last of them, or an administrator, cancels it.
+caches). Segments kept in memory go in a folder of `/dev/shm` that it
+makes itself, private to its account: a name another account took first
+is refused, and they go to disk. A converted download several people asked
+for stops only when the last of them, or an administrator, cancels it.
 
 **The desktop app.** Its window shows the server's own pages only: other
 sites open in the browser. It hands only web and mail links to the system
@@ -191,5 +199,17 @@ An update over it ends that session once: the cookie it kept for each saved
 server goes to `POST /api/auth/logout` (best effort: a server out of reach
 keeps it until it expires), then the web view's cookies, storage and files
 are deleted. Nothing else in the app reads cookies. Besides its two
-launchers, the app exports only the sign-in's return address and the music
-service.
+launchers, the app exports only the sign-in's return address, the music
+service and, on TVs, the Watch Next row's pictures (read only, by names
+nobody can guess). The TV launcher plays a title from the Watch Next row
+only when the link carries the signature this installation gave it, so no
+other app can make it play. Subtitle files on the device are read for a
+download's own playback only, never because a server names one.
+
+**TV apps, Kodi and Roku** sign in with a code typed on the server's
+`/link` page, send tokens in the `Authorization` header only, and refuse
+plain http to an address beyond the home network (Kodi checks the address
+it actually connected to). The Samsung and LG apps send the token to the
+server's own origin only. Kodi's player and artwork cache reach the
+server through the add-on's proxy, on 127.0.0.1 behind a random path that
+is checked in constant time, for requests addressed to it alone.
