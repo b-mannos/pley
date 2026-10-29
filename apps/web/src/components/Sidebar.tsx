@@ -113,7 +113,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
       <div className="flex-1" />
 
       {user.is_admin ? (
-        <div className="mt-6 space-y-0.5 border-t border-border pt-3">
+        <div className="mt-6 space-y-0.5">
           <NavItem to="/settings" icon={<Settings className="size-[18px]" />}>
             Settings
           </NavItem>

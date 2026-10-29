@@ -45,6 +45,7 @@ describes how they are made.
 
 ### Changed
 
+- The web app's sidebar has no line above Settings.
 - Picture subtitles a player shows itself are burned in on any stream it
   asks for (Remux, Transcode), not only when the file can't play as it is.
 - AMD graphics on Windows transcode faster: the frames reach AMD's encoder
