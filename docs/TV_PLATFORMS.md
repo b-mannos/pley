@@ -424,8 +424,8 @@ A saved Original from older settings counts only once a quality has been
 picked on this TV (`pley.qualityPicked`).
 
 Both TVs' players go black between streams, and may when a stream changes
-size, so they follow QUALITY.md's rules for such players
-([Automatic](QUALITY.md#automatic)). Neither says `hls.variants`: a
+size, so they follow the
+[rules for such players](QUALITY.md#players-that-go-black-between-streams). Neither says `hls.variants`: a
 transcode comes in one size. What is specific to the TVs:
 
 - **Code.** `player/autoquality.ts`, the web player's decisions plus

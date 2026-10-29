@@ -108,7 +108,7 @@ lowered to 8 Mbps 1080p".
   one's last picture with no spinner. They switch the same way for a
   quality, audio or picture-subtitle change picked in their menus.
 - The Samsung and LG apps do the same, requesting the segment with `HEAD`
-  ([TV_PLATFORMS.md](TV_PLATFORMS.md)). Their players can't hold the last
+  ([TV_PLATFORMS.md](TV_PLATFORMS.md#quality)). Their players can't hold the last
   picture, so the screen is black while the TV's player opens the new
   stream, and their loading ring waits 2.5 s.
 

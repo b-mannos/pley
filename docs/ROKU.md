@@ -214,8 +214,8 @@ the code is `components/lib/AutoQuality.brs`. Roku specifics:
   server's own quality.
 
 The Video node replaces its content to play another stream and the screen
-is black meanwhile, so Roku follows QUALITY.md's rules for players that go
-black between streams ([Automatic](QUALITY.md#automatic)):
+is black meanwhile, so Roku follows the rules for
+[players that go black between streams](QUALITY.md#players-that-go-black-between-streams):
 
 - **A conversion whose bitrate changes as it is sent**
   (`PlaybackInfo.live_bitrate`): a play issue lowers its bitrate only, to
