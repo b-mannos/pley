@@ -640,444 +640,585 @@ Memory limits:
 
 ## Transcoding features
 
-- **Encoders.** At startup each candidate encoder is test-encoded rather than
-  just listed:
-  - NVENC, QSV and AMF on Windows and Linux
-  - VAAPI on Linux, on the first Intel or AMD render node
-    (`PLEY_VAAPI_DEVICE` names another)
-  - VideoToolbox on macOS
-  - libx264 and libx265 as software fallbacks
+### Encoders
 
-  `hwaccel = auto` picks the first hardware encoder that works. Forced
-  keyframes are IDR frames (`-forced-idr`), so every segment can be decoded on
-  its own. The results are cached in `capabilities.json`, keyed by the ffmpeg
-  binary's size and modification time and by the GPUs the system shows (its
-  render nodes and their drivers, NVIDIA's driver), so a GPU given later is
-  tested.
+Each candidate encoder is test-encoded at startup, not just listed:
 
-  Rate control: every encoder is capped at the job's bitrate (`-maxrate`,
-  with a buffer of two seconds of it) and may spend less on what is easy to
-  encode. NVENC is VBR by quality (`-rc vbr -cq 23`, 26 for HEVC), AMF
-  peak-constrained VBR (`-rc vbr_peak`), x264 and x265 CRF (21 and 24).
-  FFmpeg makes Quick Sync and VAAPI CBR when the bitrate and maxrate are
-  equal (`qsvenc.c`'s `select_rc_mode`, `vaapi_encode.c`'s rate control
-  selection), so VAAPI is told `-rc_mode VBR`, and Quick Sync gets a
-  maxrate one bit above the bitrate (VBR; Quick Sync counts in kbit/s, so
-  the cap is the same), with bitrate control per macroblock (`-mbbrc 1`),
-  as Jellyfin does. The start-up test encodes with the same options. On
-  Mesa's D3D12 VAAPI driver FFmpeg's log said `RC mode: CBR` before and
-  `VBR` after; a still picture came out 6 % smaller (377 against 400
-  kbit/s for 4000 asked), a noisy one the same. Quick Sync isn't tried:
-  no Intel GPU here (FFmpeg takes the options). VideoToolbox keeps
-  `-maxrate` (its `DataRateLimits`, a hard limit over one second):
-  Jellyfin leaves it out for fear of hangs, which FFmpeg's source doesn't
-  explain, and the cap matters to the bandwidth the playlist states. AMF
-  HEVC needs no `-header_insertion_mode`: with `-forced_idr 1` FFmpeg asks
+| Encoder | Platforms |
+|---|---|
+| NVENC, QSV (Quick Sync), AMF | Windows and Linux |
+| VAAPI | Linux, on the first Intel or AMD render node (`PLEY_VAAPI_DEVICE` names another) |
+| VideoToolbox | macOS |
+| libx264, libx265 | everywhere (software fallback) |
+
+- `hwaccel = auto` picks the first hardware encoder that works.
+- Forced keyframes are IDR frames (`-forced-idr`), so every segment decodes on
+  its own.
+- The results are cached in `capabilities.json`, keyed by the FFmpeg binary's
+  size and modification time and by the GPUs the system shows (its render
+  nodes and their drivers, NVIDIA's driver). A GPU added later is tested.
+  `--redetect` ignores the cache.
+
+#### Rate control
+
+Every encoder is capped at the job's bitrate (`-maxrate`, with a buffer of two
+seconds of it) and may spend less on what is easy to encode. The start-up test
+encodes with the same options.
+
+| Encoder | Rate control |
+|---|---|
+| NVENC | VBR by quality: `-rc vbr -cq 23` (26 for HEVC) |
+| AMF | peak-constrained VBR: `-rc vbr_peak` |
+| x264, x265 | CRF 21 and 24 |
+| VAAPI | `-rc_mode VBR` |
+| Quick Sync | maxrate one bit above the bitrate, and bitrate control per macroblock (`-mbbrc 1`) |
+| VideoToolbox | `-maxrate` kept (its `DataRateLimits`, a hard limit over one second) |
+
+- FFmpeg makes Quick Sync and VAAPI CBR when bitrate and maxrate are equal
+  (`qsvenc.c`'s `select_rc_mode`, `vaapi_encode.c`'s rate control selection).
+  Hence VAAPI's explicit VBR and Quick Sync's extra bit. Quick Sync counts in
+  kbit/s, so its cap is unchanged.
+- On Mesa's D3D12 VAAPI driver, FFmpeg logs `RC mode: VBR`. A still picture
+  comes out 6 % smaller than with CBR (377 against 400 kbit/s for 4000 asked);
+  a noisy one the same.
+- FFmpeg accepts the options.
+- VideoToolbox: some projects leave `-maxrate` out over reported hangs, for
+  which FFmpeg's source shows no cause. Pley keeps it because the playlist's
+  stated bandwidth relies on the cap.
+- AMF HEVC needs no `-header_insertion_mode`: with `-forced_idr 1` FFmpeg asks
   for the VPS, SPS and PPS with every forced keyframe
   (`AMF_VIDEO_ENCODER_HEVC_INSERT_HEADER`, `amfenc.c`), and every segment
   starts on one.
-- **Hardware decoding.** The decoder is paired with the encoder: `cuda` with
-  NVENC, `d3d11va` with QSV/AMF on Windows, `vaapi`, or `videotoolbox`. Frames
-  come back to system memory, and ffmpeg falls back to software decoding by
-  itself if the codec isn't supported.
 
-  Frames that come to memory to be resized (burned-in subtitles, zimg's
-  or OpenCL's tone mapping, x264 or x265, the stand-in when hardware
-  sessions run out included) are scaled by the GPU that decoded them
-  first, so only the output's pixels are copied (4K to 1080p, a quarter
-  of them): `-hwaccel cuda -hwaccel_output_format cuda` and
-  `scale_cuda=w=…:h=…:format=nv12,hwdownload,format=nv12`, in 10 bits
-  (`p010le`) for tone mapping and HDR kept; on VAAPI `scale_vaapi`, in 8
-  bits only (its start-up test makes NV12; 10 bits on the GPU were tried
-  with CUDA alone). Only where the decoder's zero-copy pipeline passed its
-  start-up test for the codec (a decoder that can't would hand the scaler
-  frames in memory), not for interlaced video (deinterlaced at its own size
-  first) nor for libplacebo, which scales as it tone maps. Measured on an
-  RTX 5070 and a Ryzen with 24 threads (busy with other work, so CPU time
-  is the steadier figure), the plan's own arguments for 20 s of 4K HEVC
-  to 1080p H.264, median of three: burned-in text subtitles with NVENC
-  took 10.0 s of CPU and 2.6 s before, 3.3 s and 1.4 s after; x264 (the
-  stand-in) 19.9 s and 2.7 s before, 14.6 s and 2.0 s after; HDR10 tone
-  mapped by zimg into NVENC 78 s of CPU before, 48 s after, and 30 s of it
-  12.1 s before, 9.1 s after (median of five). The SDR pictures are the
-  same (luma PSNR 50 dB and 46.5 dB between the old and new segments,
-  encoder noise included). zimg used to scale in linear light as it made the
-  picture linear; scaled by the GPU first, in PQ, the picture differs
-  where fine bright detail meets dark (PSNR 33 dB on FFmpeg's test pattern,
-  all hard edges), as everywhere else that scales before tone mapping
-  (Jellyfin, OpenCL here). Mesa's D3D12 VAAPI driver crashes in
-  `scale_vaapi` (WSL), so its pipeline fails the start-up test and VAAPI
-  frames there come to memory whole, as before.
+### Hardware decoding
 
-  Vulkan decoding (into libplacebo)
-  counts for a codec only when the start-up test's frames reach the filters
-  in Vulkan memory (`pixfmt:vulkan` in FFmpeg's verbose log): libplacebo
-  takes frames from memory too, so a driver without Vulkan video decoding
-  (AMD's for Vega graphics on Windows, say) would otherwise pass while the
-  CPU decodes. Those GPUs decode with the encoder's decoder instead. A job
-  whose FFmpeg says its hardware decoder failed to start ("Failed setup for
-  format …") shows `cpu` as its decoder, with a warning.
+- The decoder is paired with the encoder: `cuda` with NVENC, `d3d11va` with
+  QSV or AMF on Windows, `vaapi` with VAAPI, `videotoolbox` with VideoToolbox.
+- Frames come back to system memory. FFmpeg falls back to software decoding by
+  itself when the GPU doesn't decode the codec.
+- A job whose FFmpeg says its hardware decoder failed to start ("Failed setup
+  for format …") shows `cpu` as its decoder, with a warning.
 
-  NVDEC goes without `-hwaccel_flags +unsafe_output`, which Jellyfin
-  passes to skip the copy of each decoded frame out of the decoder's
-  surface (`nvdec.c`'s `av_frame_make_writable`). Measured on an RTX 5070
-  with FFmpeg 9.0.2, a 30 s 4K HEVC clip (720 frames) to 1080p H.264,
-  seven runs each, alternating: kept on the GPU (`scale_cuda` into NVENC)
-  1.65 s median without, 1.73 s with; brought to memory (CPU scaling into
-  NVENC) 3.72 s without, 3.90 s with; the same frames either way (framemd5,
-  8 and 10 bits). Decoding sets the pace and the copy, inside the GPU,
-  costs nothing that shows; the flag also leaves the decoder's own
-  surfaces with FFmpeg's filters, which is what makes it unsafe.
-- **Tone mapping** of HDR10, HLG and Dolby Vision to SDR BT.709, best available
-  first:
-  - `libplacebo` on the GPU through Vulkan. It also applies Dolby Vision RPU
-    reshaping, so **profile 5** (IPTPQc2) renders with correct colors.
-  - `tonemap_opencl` on the GPU.
-  - `zscale` plus `tonemap` on the CPU. The first `zscale` scales to the
-    output's size as it makes the picture linear, so the tone mapping (in
-    32-bit floats, three planes) works on the output's pixels: 4K to 1080p,
-    a quarter of them.
+#### Scaling on the GPU first
 
-  When Vulkan only runs on the CPU (Mesa's llvmpipe, with no GPU),
-  libplacebo comes last: it is several times slower than zscale there, and
-  only profile 5 picks it, for its colors.
+Frames that come to system memory to be processed are first scaled by the GPU
+that decoded them, so only the output's pixels are copied (4K to 1080p: a
+quarter of them). This covers burned-in subtitles, zimg's and OpenCL's tone
+mapping, and x264 or x265 (including the software stand-in when hardware
+sessions run out).
 
-  libplacebo tone maps by the stream's own metadata (`peak_detect=0`):
-  HDR10's mastering display and content light levels, Dolby Vision's and
-  HDR10+'s per scene. Its peak detection, on by default, follows the
-  brightest pixels of the frames it has seen, and each FFmpeg process starts
-  with none: a process started by a seek, a new process window or a size
-  switch made its first frames brighter or darker than the process before
-  it made the same frames, a jump at the seam between their segments. On a
-  test clip whose highlight brightens and dims (200 to 4000 nits every
-  3 s), a face's brightness on the first frame of a segment was 121 (of 255)
-  from a process started there and 128 from one started a segment or the
-  file earlier (PSNR 35 dB between them); without detection the three
-  processes give the same frames bit for bit, the face at 111 throughout
-  (a little darker: the curve is set for the stream's stated 4000 nits rather
-  than the 900 the frames reached). Thumbnails and seek previews tone map the
-  same way. `tonemap_opencl` has peak detection that can't be turned off
-  (63 frames, in its kernel), so it has the same seams; zimg's `tonemap`
-  has none.
+- CUDA: `-hwaccel cuda -hwaccel_output_format cuda` and
+  `scale_cuda=w=…:h=…:format=nv12,hwdownload,format=nv12`; 10 bits (`p010le`)
+  for tone mapping and kept HDR.
+- VAAPI: `scale_vaapi`, 8 bits only (its start-up test makes NV12; 10 bits on
+  the GPU is tested with CUDA only).
+- Used only where the decoder's zero-copy pipeline passed its start-up test
+  for the codec (`gpu_pipelines`). A decoder that can't would hand the scaler
+  frames in memory.
+- Not used for interlaced video (deinterlaced at its own size first) or for
+  libplacebo (which scales as it tone maps).
+- Mesa's D3D12 VAAPI driver (WSL) crashes in `scale_vaapi`. Its pipeline fails
+  the start-up test, and VAAPI frames there come to memory whole.
+- SDR pictures are the same either way (luma PSNR 50 dB and 46.5 dB, encoder
+  noise included). HDR scaled before tone mapping is scaled in PQ rather than
+  in linear light, and differs where fine bright detail meets dark (PSNR 33 dB
+  on FFmpeg's test pattern, all hard edges), as with every tone mapper that
+  scales first (OpenCL here).
 
-  Before a VAAPI encoder (Intel and AMD graphics on Linux) the tone
-  mapper's device is made from VAAPI's: `-init_hw_device
-  vaapi=va:<render node> -init_hw_device vulkan=vk@va` (or `opencl=ocl@va`)
-  `-filter_hw_device vk`, and the last filter is `hwupload=derive_device=vaapi`.
-  VAAPI's encoders take frames in VAAPI's memory only, and a plain
-  `hwupload` uploads to the filters' device, Vulkan's or OpenCL's: the
-  encoder couldn't start ("Impossible to convert between the formats
-  supported by the filter 'Parsed_hwupload' and the filter 'auto_scale'"),
-  and every HDR job fell back to x264. `derive_device=vaapi` finds the
-  VAAPI device the filters' was made from. A Vulkan device made from
-  VAAPI's is the same GPU where VAAPI says which it is (VA-API 1.15's PCI
-  id, or AMD's name), and Vulkan's first device otherwise; an OpenCL one
-  can only be made by Intel's OpenCL (`cl_intel_va_api_media_sharing`),
-  not AMD's. At start-up each GPU tone mapper is tried that way into
-  `h264_vaapi` (`capabilities.vaapi_tonemappers`), and Vulkan decoding
-  too, per codec (`capabilities.vaapi_vulkan_decode`). Jobs with a VAAPI
-  encoder use only the tone mappers that passed, and zimg; where none of
-  them is left, or Dolby Vision profile 5 would lose libplacebo's
-  colours, the job encodes with x264 instead, with a warning. HDR kept in
-  HEVC that libplacebo would convert is tone mapped instead when
-  libplacebo's frames don't reach VAAPI's encoder. Tried with FFmpeg 9.0.2
-  and Mesa 26.2 in Debian (Docker on WSL, VAAPI through Mesa's D3D12
-  driver on an RTX 5070, Vulkan on llvmpipe): the old arguments failed for
-  libplacebo, Vulkan decoding and OpenCL alike; the new ones made HLS
-  segments with libplacebo (the VA display's PCI id hidden, so that Vulkan
-  falls back to llvmpipe) and with zimg, and an OpenCL device that can't be
-  made from VAAPI's fails its start-up test. Not tried on Intel or AMD
-  graphics.
+Measured on an RTX 5070 and a 24-thread Ryzen: 20 s of 4K HEVC to 1080p
+H.264, the plan's own arguments, median of three runs (CPU time, then wall
+time).
 
-  libplacebo keeps the shaders it compiles in the work directory's
-  `libplacebo/` folder (made at start-up, with an absolute path, since FFmpeg
-  runs in a job's folder), so later processes skip about 0.2 s of compiling:
-  every start, seek and quality switch of a tone-mapped job. A work directory
-  whose path holds a character FFmpeg's filter syntax reads (`, ; [ ] ' :`
-  other than a drive's colon) goes without it.
+| Case | Frames downloaded whole | Scaled on the GPU first |
+|---|---|---|
+| Burned-in text subtitles, NVENC | 10.0 s, 2.6 s | 3.3 s, 1.4 s |
+| x264 (the stand-in) | 19.9 s, 2.7 s | 14.6 s, 2.0 s |
+| HDR10 tone mapped by zimg, NVENC | 78 s CPU; 12.1 s for 30 s of it (median of five) | 48 s CPU; 9.1 s |
 
-  Profiles 7 and 8 have an HDR10- or HLG-compatible base layer and work with any
-  of these. Profile 5 without libplacebo produces a warning: its frames carry
-  no colour properties (they only come from the RPU), so they are tagged
-  BT.2020 PQ for zimg and OpenCL. The video plays, with off colours. The
-  same tagging fills in whatever an HDR stream leaves untagged.
-- **HDR kept** (`video.codec = hevc` with `video.dynamic_range` `hdr10` or
-  `hlg`): HDR video is encoded in HEVC Main 10 instead of being tone-mapped.
-  Encoder detection test-encodes every working HEVC encoder in 10 bits too
-  (`-profile:v main10`, P010; x265 with `yuv420p10le` and `-dolbyvision 0`)
-  and marks it `main10`; `capabilities.hdr_transcode` says one passed.
-  - Video already in the asked range (HDR10, HDR10+, Dolby Vision 7 and 8.1
-    as their HDR10 base layer, HLG and 8.4 for `hlg`) isn't tone-mapped:
-    decoded, scaled to P010 (`scale_cuda` without leaving the GPU when the
-    CUDA zero-copy pipeline handles the codec, else on the CPU) and encoded.
-  - Other HDR (HLG or Dolby Vision 8.4 to HDR10, PQ to HLG, Dolby Vision
-    profile 5 to either) goes through libplacebo with a BT.2020 target in
-    10 bits (`format=p010`, `color_trc=smpte2084` or `arib-std-b67`), on the
-    Vulkan pipeline when the GPU decodes the codec into Vulkan memory.
+#### Vulkan decoding
+
+- Vulkan decoding (into libplacebo) counts for a codec only when the start-up
+  test's frames reach the filters in Vulkan memory (`pixfmt:vulkan` in
+  FFmpeg's verbose log).
+- libplacebo also takes frames from memory, so without this check a driver
+  without Vulkan video decoding (AMD's for Vega graphics on Windows, for
+  example) would pass while the CPU decodes. Those GPUs decode with the
+  encoder's decoder instead.
+
+#### NVDEC frame copy
+
+- NVDEC runs without `-hwaccel_flags +unsafe_output`. That flag skips the copy
+  of each decoded frame out of the decoder's surface (`nvdec.c`'s
+  `av_frame_make_writable`), and leaves the decoder's own surfaces with
+  FFmpeg's filters, which is what makes it unsafe.
+- The copy happens inside the GPU and costs nothing measurable: decoding sets
+  the pace. RTX 5070, FFmpeg 9.0.2, 30 s of 4K HEVC (720 frames) to 1080p
+  H.264, seven alternating runs each, median:
+
+  | Pipeline | Without the flag | With it |
+  |---|---|---|
+  | Kept on the GPU (`scale_cuda` into NVENC) | 1.65 s | 1.73 s |
+  | Brought to memory (CPU scaling into NVENC) | 3.72 s | 3.90 s |
+
+  The frames are the same either way (framemd5, 8 and 10 bits).
+
+### Tone mapping
+
+HDR10, HLG and Dolby Vision are tone mapped to SDR BT.709 by the best
+available tone mapper:
+
+| Order | Tone mapper | Runs on | Notes |
+|---|---|---|---|
+| 1 | `libplacebo` | GPU (Vulkan) | Also applies Dolby Vision RPU reshaping, so **profile 5** (IPTPQc2) has correct colors. |
+| 2 | `tonemap_opencl` | GPU (OpenCL) | |
+| 3 | `zscale` + `tonemap` (zimg) | CPU | The first `zscale` scales to the output's size as it makes the picture linear, so the tone mapping (32-bit floats, three planes) works on the output's pixels. |
+
+- When Vulkan runs only on the CPU (Mesa's llvmpipe, no GPU), libplacebo comes
+  last: it is several times slower than zimg there. Only profile 5 picks it,
+  for its colors.
+- Dolby Vision profiles 7 and 8 have an HDR10- or HLG-compatible base layer
+  and work with any tone mapper.
+- Profile 5 without libplacebo gives a warning. Its frames carry no color
+  properties (those come only from the RPU), so they are tagged BT.2020 PQ for
+  zimg and OpenCL. The video plays, with off colors.
+- The same tagging fills in whatever an HDR stream leaves untagged.
+
+#### Peak detection
+
+- libplacebo tone maps by the stream's own metadata (`peak_detect=0`): HDR10's
+  mastering display and content light levels, Dolby Vision's and HDR10+'s per
+  scene. Thumbnails and seek previews tone map the same way.
+- Why: peak detection follows the brightest pixels of the frames seen so far,
+  and each FFmpeg process starts with none. A process started by a seek, a new
+  process window or a size switch would render the same frames brighter or
+  darker than the process before it: a jump at the seam between segments.
+- Measured on a test clip whose highlight goes from 200 to 4000 nits every 3 s:
+  with detection, a face on a segment's first frame was 121 (of 255) from a
+  process started there and 128 from one started earlier (PSNR 35 dB between
+  them). Without detection, the three processes give the same frames bit for
+  bit, the face at 111. It is a little darker because the curve is set for the
+  stream's stated 4000 nits rather than the 900 the frames reach.
+- `tonemap_opencl` has peak detection that can't be turned off (63 frames, in
+  its kernel), so it has the same seams. zimg's `tonemap` has none.
+
+#### VAAPI encoders
+
+Before a VAAPI encoder (Intel and AMD graphics on Linux), the tone mapper's
+device is made from VAAPI's:
+
+```
+-init_hw_device vaapi=va:<render node> -init_hw_device vulkan=vk@va
+-filter_hw_device vk ... hwupload=derive_device=vaapi
+```
+
+(`opencl=ocl@va` in place of `vulkan=vk@va` for OpenCL.)
+
+- VAAPI's encoders take frames in VAAPI's memory only. A plain `hwupload`
+  uploads to the filters' device (Vulkan's or OpenCL's), and the encoder can't
+  start ("Impossible to convert between the formats supported by the filter
+  'Parsed_hwupload' and the filter 'auto_scale'"). `derive_device=vaapi` finds
+  the VAAPI device the filters' device was made from.
+- A Vulkan device made from VAAPI's is the same GPU where VAAPI says which it
+  is (VA-API 1.15's PCI id, or AMD's name), and Vulkan's first device
+  otherwise.
+- An OpenCL device can be made from VAAPI's only by Intel's OpenCL
+  (`cl_intel_va_api_media_sharing`), not AMD's.
+- At startup each GPU tone mapper is tried this way into `h264_vaapi`
+  (`capabilities.vaapi_tonemappers`), and Vulkan decoding too, per codec
+  (`capabilities.vaapi_vulkan_decode`).
+- Jobs with a VAAPI encoder use only the tone mappers that passed, and zimg.
+  Where none is left, or Dolby Vision profile 5 would lose libplacebo's
+  colors, the job encodes with x264 instead, with a warning.
+- HDR kept in HEVC that libplacebo would convert is tone mapped instead when
+  libplacebo's frames don't reach VAAPI's encoder.
+- Tested with FFmpeg 9.0.2 and Mesa 26.2 in Debian (Docker on WSL, VAAPI
+  through Mesa's D3D12 driver on an RTX 5070, Vulkan on llvmpipe): HLS
+  segments with libplacebo (the VA display's PCI id hidden, so Vulkan falls
+  back to llvmpipe) and with zimg; an OpenCL device that can't be made from
+  VAAPI's fails its start-up test.
+
+#### Shader cache
+
+- libplacebo keeps the shaders it compiles in the work folder's `libplacebo/`
+  (made at startup, with an absolute path, since FFmpeg runs in a job's
+  folder).
+- This saves about 0.2 s of compiling at every start, seek and quality switch
+  of a tone-mapped job.
+- A work folder whose path holds a character FFmpeg's filter syntax reads
+  (`, ; [ ] ' :`, other than a drive's colon) goes without it.
+
+### HDR kept
+
+With `video.codec = hevc` and `video.dynamic_range` `hdr10` or `hlg`, HDR
+video is encoded in HEVC Main 10 instead of being tone mapped.
+
+- **Detection.** Encoder detection also test-encodes every working HEVC
+  encoder in 10 bits (`-profile:v main10`, P010; x265 with `yuv420p10le` and
+  `-dolbyvision 0`) and marks it `main10`. `capabilities.hdr_transcode` says
+  one passed.
+- **Same range.** Video already in the asked range is decoded, scaled to P010
+  and encoded, not tone mapped: HDR10, HDR10+ and Dolby Vision 7 and 8.1 (as
+  their HDR10 base layer) for `hdr10`; HLG and Dolby Vision 8.4 for `hlg`.
+  Scaling uses `scale_cuda` on the GPU when the CUDA zero-copy pipeline
+  handles the codec, else the CPU.
+- **Other range.** Other HDR (HLG or Dolby Vision 8.4 to HDR10, PQ to HLG,
+  Dolby Vision profile 5 to either) goes through libplacebo with a BT.2020
+  target in 10 bits (`format=p010`, `color_trc=smpte2084` or `arib-std-b67`).
+  It uses the Vulkan pipeline when the GPU decodes the codec into Vulkan
+  memory.
+- **Metadata.**
   - The decoded frames' HDR10 metadata (mastering display, content light
-    levels) goes through scaling and libplacebo to the encoder, which writes
-    it as SEI messages with every frame (NVENC, and x265 with
-    `repeat-headers=1`): every segment starts with it. PQ or HLG, BT.2020
-    primaries and matrix are also set on the encoder (`-color_trc`…), so the
-    stream says them whatever the frames were tagged with. Dolby Vision RPUs
-    are never written (NVENC doesn't, x265 is told not to): Dolby Vision
-    comes out as its base layer, or converted when it has none. HDR10+
-    dynamic metadata is not kept.
-  - Where HDR can't be kept the job tone-maps to SDR as above, with a
-    warning: H.264 asked for, subtitles drawn onto the video, no `main10`
-    encoder, or a conversion without libplacebo. When hardware sessions run
-    out, the software fallback for an HDR job is a `main10` x265.
-  - The master playlist names the output `hvc1.2.4.LLL.B0` with
-    `VIDEO-RANGE=PQ` or `HLG`; the plan's `dynamic_range_out` says `hdr10`,
-    `hlg` or `sdr` for transcodes.
-- **Frame grabs** (`/v1/thumbnail` with `hdr`) tone-map Dolby Vision profile 5
-  through libplacebo and other HDR through zimg. If tone mapping fails (a
-  Vulkan device that went away, say), the frame is grabbed as it is rather
-  than not at all.
-- **Subtitle burn-in.**
-  - Bitmap subtitles (PGS, VobSub, DVB, `.sup` files) are overlaid on the
-    scaled, tone-mapped frame, their canvas fitted to its width: for 4K to
-    1080p, a quarter of the pixels to blend.
-  - They are blended on the CPU, after the one download in Vulkan pipelines
-    too: about three quarters of a Ryzen 9 5900X core for 4K, a quarter of
-    that for 1080p. FFmpeg's GPU ways don't do: libplacebo makes an output
-    frame of each frame of each of its inputs, and FFmpeg sends a subtitle
-    frame with every video frame (sub2video's heartbeat), doubling them;
-    `overlay_vulkan` takes its two inputs in one format only, and gave black
-    frames for `yuva420p` on NVIDIA. The integrated GPUs that would gain
-    most also have CPU to spare more than GPU.
-  - Text subtitles (SRT, ASS) are rendered by libass from an `.ass` file
-    extracted into the job folder while the job is created. An embedded
-    track's extraction reads the whole file, so it gives up after 20
-    minutes, inside the 25 the server waits for the job; a job folder whose
-    job isn't made after all (an error, or the request gone) is removed.
-  - They are drawn with the fonts attached to the file (styled ASS, anime
-    above all, names fonts that only the file has; without them libass
-    falls back to a system font). The fonts are read from a Matroska file's
-    Attachments element alone, which its seek head points to, while the
-    track is extracted, so they cost the start nothing, and kept in
-    `subtitles/<file key>.fonts/` (256 MB of them at most per file) for
-    the next job of the same file version; the filter gets that folder as
-    `fontsdir`. Subtitle files next to the video are drawn with the
-    video's fonts too. Rendering from the source file with the filter's
-    `si=` instead would read the whole file in every FFmpeg process, at
-    each seek.
-- **Audio.** Copied (`audio.mode = copy`) when the source is AAC, MP3, AC-3
-  or E-AC-3, which MPEG-TS carries; anything else asked to be copied is
-  converted, with a warning. Converted audio is encoded to `audio.codec`:
-  - `aac` (the default): `-c:a aac`, stereo unless `channels` says more (up
-    to 7.1), 192 kbit/s for stereo and 64 per channel above;
-  - `eac3` (Dolby Digital Plus) or `ac3` (Dolby Digital): `-c:a eac3` or
-    `-c:a ac3`, at most 5.1 (`-ac 6`), 640 kbit/s above stereo, 192 for
-    stereo. FFmpeg's own encoders, in every build.
+    levels) goes through scaling and libplacebo to the encoder. The encoder
+    writes it as SEI messages with every frame (NVENC, and x265 with
+    `repeat-headers=1`), so every segment starts with it.
+  - PQ or HLG, BT.2020 primaries and matrix are set on the encoder
+    (`-color_trc`…), so the stream states them whatever the frames were tagged
+    with.
+  - Dolby Vision RPUs are never written (NVENC doesn't, x265 is told not to):
+    Dolby Vision comes out as its base layer, or converted when it has none.
+  - HDR10+ dynamic metadata is not kept.
+- **Fallback to SDR.** The job tone maps to SDR, with a warning, when H.264 is
+  asked for, subtitles are drawn onto the video, there is no `main10` encoder,
+  or a change of range (above) needs libplacebo and it is missing.
+- When hardware sessions run out, the software fallback for an HDR job is a
+  `main10` x265.
+- **Output.** The master playlist names the output `hvc1.2.4.LLL.B0` with
+  `VIDEO-RANGE=PQ` or `HLG`. The plan's `dynamic_range_out` says `hdr10`,
+  `hlg` or `sdr` for transcodes.
 
-  `channels` never goes above the source's (a stereo track stays stereo),
-  `bitrate_kbps` overrides the defaults within 64 to 640, and audio that
-  isn't at 44.1 or 48 kHz is resampled to 48 kHz (the AC-3 encoders take
-  nothing above 48 kHz). The Pley server asks for E-AC-3 5.1 for players
-  whose output has 6 channels or more and that decode E-AC-3 or pass it
-  through, AC-3 5.1 when they take only AC-3, and AAC otherwise (docs/API.md,
-  *Version 2*). The job's audio plan reports the codec as `codec_out`.
+### Frame grabs
 
-  Lossless audio is decoded only as far as the conversion keeps: a DTS-HD
-  Master Audio track converted to 5.1 or fewer channels is decoded from
-  its lossy core (`-core_only`), and TrueHD converted to stereo or 5.1
-  from the substream mastered with those channels (`-downmix stereo` or
-  `5.1`; Blu-rays carry both inside the 7.1, and without one FFmpeg
-  decodes the whole).
+`/v1/thumbnail` with `hdr`:
 
-  5.0, 5.1 and 7.1 made stereo go through a matrix of their own
-  (`DOWNMIX_51`, `DOWNMIX_71` in `plan.rs`) rather than `-ac 2` alone.
-  FFmpeg's matrix gives each front whole, the centre and surrounds at
-  -3 dB and drops the LFE, unnormalized for the encoders' float samples,
-  so loud passages went past full scale. Pley's keeps it but for the
-  centre, where dialogue is, at 0 dB, and ends with a limiter at -2 dBFS
-  (`alimiter`, its look-ahead taken back out so the sound stays in time);
-  the layout is made 5.1 (or 7.1) first, so a 5.0 track or a broadcast
-  switching to stereo still finds its channels. TrueHD decoded to stereo
-  by its own decoder, other layouts and an unknown one keep `-ac 2`. A
-  30 s 5.1 test mix (speech-band noise in bursts in the centre, noise in
-  the others) encoded to AAC: dialogue -29.5 LUFS before, -26.5 after;
-  the rest -23.0 both; 12 dB louder (channels peaking at -1.3 dBFS), true
-  peak +0.4 dBTP before, -0.9 after, the whole -10.4 LUFS both times. The
-  plan's segments start their sound where they did (to the sample), from
-  0 and from a restart alike.
+- Dolby Vision profile 5 is tone mapped through libplacebo, other HDR through
+  zimg.
+- If tone mapping fails (a Vulkan device that went away, for example), the
+  frame is grabbed as it is rather than not at all.
 
-  Copied sound beside transcoded video, in a process that starts past
-  0, leaves out the packets before the seek point (`-copypriorss:a 0`).
-  FFmpeg copies by default whatever the demuxer's seek landed on, and
-  the video, decoded, starts at the seek point: an E-AC-3 track in
-  Matroska restarted at segment 3 (12 s) began 1.57 s before its video,
-  1.47 s over the sound of the previous process's segment 2. Now it
-  begins at the first packet from the boundary (13.427 s against the
-  video's 13.400 in the segments' timeline); AAC in the same file was
-  already cut there. A remux keeps its sound from the keyframe its video
-  starts on.
-- **Remux.** H.264 and HEVC video is copied into HLS, with segments cut
-  exactly on the source's keyframes.
-  - Matroska and WebM: the keyframe index is read instantly from the file's
-    Cues element, so remuxing works on the first play.
-  - MP4, MOV and M4V: the index is read just as quickly from the video
-    track's sample tables (`stss`, `stts`, `ctts`) and edit list, or from the
-    movie fragments' sample flags in fragmented files (CMAF, OBS
-    recordings). Times match FFmpeg's packet timestamps, edit lists included:
-    checked against ffprobe on files written by FFmpeg and by Windows Media
-    Foundation (`moov` at the end, B-frames without an edit list).
-    Files with structures this doesn't model (several edits, sync points in
-    sample groups, inconsistent tables) are left to the packet scan below,
-    as are fragmented files whose fragments take more than 2 s to walk.
-  - Other containers: the index is built in the background (one file at a
-    time, by reading packet headers) after `POST /v1/keyframes`, which the
-    server sends when an item page is opened. Until it exists, jobs transcode.
-  - Formats are recognised by content, not by file name.
-- **Turned pictures.** Phones store portrait video as landscape frames with
-  a display matrix that turns them. The probe reads its angle
-  (`MediaStream.rotation`, ffprobe's `rotation`: 90, -90, 180), and a
-  transcode is planned at the size the picture is shown (1920×1080 frames
-  turned a quarter are 1080×1920, 608×1080 within 1080p). FFmpeg turns the
-  frames it brings to memory before the filters (`-autorotate`, its
-  default), never those on a GPU, so turned video takes the CPU's filters,
-  hardware decoded into memory (not the zero-copy, Vulkan or GPU-scaled
-  ways). Before, the turned picture was scaled to the frames' own shape
-  (squashed: a square came out 3.2 times as wide as high) and on a GPU it wasn't
-  turned at all. MPEG-TS can't say a picture is turned, so a remux asked
-  for is transcoded instead, with a warning. Media info from older probes
-  says nothing of rotation: such files are planned as before until probed
-  again.
-- **Frames timed as they are decoded.** Some MP4s (FFmpeg muxing a raw H.264
-  or HEVC stream) give every frame the time it is decoded at as the time it
-  is shown, although B-frames are stored ahead of where they are shown.
-  Players that trust these times show frames out of turn or drop them
-  (Chrome drops about one in five), and copying the video keeps them. The
-  probe of an MP4 or MOV file reads the times of its first 128 packets along
-  with its streams (Matroska times frames as they are shown, MPEG-TS both
-  ways). When a stream that reorders frames (`has_b_frames`) shows every
-  packet read at its decode time, its first 48 packets are decoded, and the
-  stream is marked `decode_order_times` if more than one frame comes out
-  earlier than the frame before it. The server then converts its video:
-  decoding gives every frame its right time.
-- **Dolby Vision in remuxes.** A copied HEVC stream keeps its Dolby Vision
-  metadata (the RPU NAL units, type 62) in the MPEG-TS segments, which have
-  no way to say so (FFmpeg's MPEG-TS muxer writes no Dolby Vision
-  descriptor): `master.m3u8` does, as `VideoRequest.dolby_vision` asks.
-  - `copy` (the default, what older servers ask): nothing named, the base
-    layer's codec only (`hvc1.2.4.L153.B0`);
-  - `signal`: named for a player that decodes it. Profile 5: `dvh1.05.LL`
-    alone; profile 8: the HEVC codec with
-    `SUPPLEMENTAL-CODECS="dvh1.08.LL/db1p"` (8.1, `VIDEO-RANGE=PQ`),
-    `/db4h` (8.4, `HLG`) or `/db2g` (8.2, `SDR`); profile 7: `dvh1.07.LL`;
-  - `to81` (profile 7 only, else as `signal`): made profile 8.1 and named
-    so. FFmpeg can't: `dovi_rpu` refuses to write profile 7 RPUs and never
-    changes a profile, `dovi_split` (FFmpeg 9) drops the enhancement layer
-    but keeps profile 7 RPUs. So FFmpeg copies the stream as it is and the
-    transcoder edits each finished segment before it is ready: the
-    enhancement layer's NAL units (type 63) are left out, and each RPU is
-    rewritten as `dovi_tool`'s mode 2 does: no residual data (NLQ), no
-    enhancement-layer resampling, one partition, the P8.1 colour
-    coefficients in the display management data (BT.2020 YCbCr to RGB, RGB
-    to LMS, `signal_color_space` 0), and, for a full enhancement layer (not
-    a minimal one, whose residual is zero), no-op mapping curves, since its
-    curves only make sense with the layer. The extension blocks (levels 1 to
-    11, 254, 255; content mapping 2.9 and 4.0) and everything else stay as
-    they are, and the CRC is computed again. The RPU syntax is FFmpeg's
-    (`libavcodec/dovi_rpudec.c`) and `dovi_tool`'s; this is the transcoder's
-    own code (`src/dovi.rs`), nothing of theirs is linked or run. An RPU
-    that can't be read (or whose CRC is wrong) is left out with a warning on
-    the job, and that frame plays as its base layer. Profile 7 as MakeMKV
-    writes it is meant (one track); a disc's dual-PID streams carry the RPU
-    in the enhancement-layer PID, which isn't copied.
-  - `strip_hdr10plus`: the HDR10+ messages (ITU-T T.35, country 0xB5,
-    provider 0x003C, application 4) are taken out of the prefix SEI NAL
-    units of each segment, the other messages (mastering display, content
-    light level, captions) kept; an SEI unit with nothing else goes. For
-    Dolby Vision decoders that show black or freeze with both
-    (androidx/media#1895).
+### Subtitle burn-in
 
-  Editing a segment reads it whole, takes its video PES packets apart into
-  NAL units and packetizes the PES again: the first TS packet keeps its
-  adaptation field (PCR, random access), continuity counters run on, and
-  other PIDs' packets are left as they were (those met in the middle of a
-  PES come right after it). A 2 s segment of 4K takes milliseconds. The
-  job's video plan reports `dolby_vision` (`copy`, `signal`, `to81`) and
+Picture subtitles (PGS, VobSub, DVB, `.sup` files):
+
+- Overlaid on the scaled, tone-mapped frame, their canvas fitted to its width.
+  For 4K to 1080p, a quarter of the pixels to blend.
+- Blended on the CPU, after the one download in Vulkan pipelines too: about
+  three quarters of a Ryzen 9 5900X core for 4K, a quarter of that for 1080p.
+- FFmpeg's GPU overlays aren't used. libplacebo makes an output frame for each
+  frame of each input, and FFmpeg sends a subtitle frame with every video frame
+  (sub2video's heartbeat), doubling them. `overlay_vulkan` takes its two inputs
+  in one format only, and gave black frames for `yuva420p` on NVIDIA. The
+  integrated GPUs that would gain most also have more CPU than GPU to spare.
+
+Text subtitles (SRT, ASS):
+
+- Rendered by libass from an `.ass` file extracted into the job folder while
+  the job is created.
+- An embedded track's extraction reads the whole file, so it gives up after 20
+  minutes, inside the 25 the server waits for the job. A job folder whose job
+  isn't made after all (an error, or the request gone) is removed.
+- Drawn with the fonts attached to the file. Styled ASS (anime above all)
+  names fonts only the file has; without them libass falls back to a system
+  font.
+- The fonts are read from a Matroska file's Attachments element alone (which
+  its seek head points to) while the track is extracted, so they cost the
+  start nothing.
+- They are kept in `subtitles/<file key>.fonts/` (256 MB at most per file) for
+  the next job of the same file version, and passed to the filter as
+  `fontsdir`. Subtitle files next to the video are drawn with the video's
+  fonts too.
+- Rendering from the source file with the filter's `si=` would read the whole
+  file in every FFmpeg process, at each seek; hence the extraction.
+
+### Audio
+
+**Copy.** `audio.mode = copy` copies AAC, MP3, AC-3 and E-AC-3, which MPEG-TS
+carries. Anything else asked to be copied is converted, with a warning.
+
+**Conversion.** Converted audio is encoded to `audio.codec` with FFmpeg's own
+encoders (in every build):
+
+| `codec` | Encoder | Channels | Default bitrate |
+|---|---|---|---|
+| `aac` (default) | `-c:a aac` | stereo unless `channels` says more, up to 7.1 | 192 kbit/s stereo, 64 per channel above |
+| `eac3` (Dolby Digital Plus) | `-c:a eac3` | at most 5.1 (`-ac 6`) | 192 stereo, 640 above |
+| `ac3` (Dolby Digital) | `-c:a ac3` | at most 5.1 (`-ac 6`) | 192 stereo, 640 above |
+
+- `channels` never goes above the source's: a stereo track stays stereo.
+- `bitrate_kbps` overrides the default, within 64 to 640.
+- Audio not at 44.1 or 48 kHz is resampled to 48 kHz (the AC-3 encoders take
+  nothing above 48 kHz).
+- The job's audio plan reports the codec as `codec_out`.
+- The Pley server asks for E-AC-3 5.1 for players whose output has 6 channels
+  or more and that decode E-AC-3 or pass it through, AC-3 5.1 when they take
+  only AC-3, and AAC otherwise (see [API.md, Version 2](API.md#version-2)).
+
+**Lossless sources** are decoded only as far as the conversion needs:
+
+- DTS-HD Master Audio converted to 5.1 or fewer channels is decoded from its
+  lossy core (`-core_only`).
+- TrueHD converted to stereo or 5.1 is decoded from the substream mastered
+  with those channels (`-downmix stereo` or `5.1`). Blu-rays carry both inside
+  the 7.1; without one FFmpeg decodes the whole.
+
+**Downmix to stereo.** 5.0, 5.1 and 7.1 go through Pley's own matrix
+(`DOWNMIX_51`, `DOWNMIX_71` in `plan.rs`) rather than `-ac 2` alone.
+
+- FFmpeg's matrix gives each front channel whole, the center and surrounds at
+  -3 dB, and drops the LFE. It is unnormalized for the encoders' float
+  samples, so loud passages go past full scale.
+- Pley's matrix is the same but for the center, where dialogue is, at 0 dB.
+  It ends with a limiter at -2 dBFS (`alimiter`, its look-ahead taken back
+  out, so the sound stays in time).
+- The layout is made 5.1 (or 7.1) first, so a 5.0 track or a broadcast
+  switching to stereo still finds its channels.
+- TrueHD decoded to stereo by its own decoder, other layouts and unknown
+  layouts keep `-ac 2`.
+- The matrix doesn't move where a segment's sound starts (to the sample), from
+  0 and after a restart alike.
+- Measured on a 30 s 5.1 test mix (speech-band noise in bursts in the center,
+  noise in the others) encoded to AAC:
+
+  | | FFmpeg's matrix | Pley's |
+  |---|---|---|
+  | Dialogue | -29.5 LUFS | -26.5 LUFS |
+  | The rest | -23.0 LUFS | -23.0 LUFS |
+  | Mix 12 dB louder (channels peaking at -1.3 dBFS): true peak | +0.4 dBTP | -0.9 dBTP |
+  | Mix 12 dB louder: loudness | -10.4 LUFS | -10.4 LUFS |
+
+**Copied sound beside transcoded video.** A process that starts past 0 leaves
+out the audio packets before the seek point (`-copypriorss:a 0`).
+
+- By default FFmpeg copies from wherever the demuxer's seek landed, while the
+  decoded video starts at the seek point. An E-AC-3 track in Matroska
+  restarted at segment 3 (12 s) would begin 1.57 s before its video, 1.47 s
+  over the sound of the previous process's segment 2.
+- With the option it begins at the first packet from the boundary (13.427 s
+  against the video's 13.400 in the segments' timeline). AAC in the same file
+  is cut there either way.
+- A remux keeps its sound from the keyframe its video starts on.
+
+### Remux
+
+H.264 and HEVC video is copied into HLS, with segments cut exactly on the
+source's keyframes. The keyframe index comes from:
+
+- **Matroska and WebM:** the file's Cues element, read instantly, so remuxing
+  works on the first play.
+- **MP4, MOV and M4V:** the video track's sample tables (`stss`, `stts`,
+  `ctts`) and edit list, or the movie fragments' sample flags in fragmented
+  files (CMAF, OBS recordings), read just as quickly.
+  - Times match FFmpeg's packet timestamps, edit lists included. Checked
+    against ffprobe on files written by FFmpeg and by Windows Media Foundation
+    (`moov` at the end, B-frames without an edit list).
+  - Files with structures this doesn't model (several edits, sync points in
+    sample groups, inconsistent tables) are left to the packet scan, as are
+    fragmented files whose fragments take more than 2 s to walk.
+- **Other containers:** a packet scan in the background (one file at a time,
+  reading packet headers) after `POST /v1/keyframes`, which the server sends
+  when an item page is opened. Until the index exists, jobs transcode.
+
+Formats are recognized by content, not by file name.
+
+### Turned pictures
+
+Phones store portrait video as landscape frames with a display matrix that
+turns them.
+
+- The probe reads the angle (`MediaStream.rotation`, ffprobe's `rotation`: 90,
+  -90, 180).
+- A transcode is planned at the size the picture is shown: 1920×1080 frames
+  turned a quarter are 1080×1920, 608×1080 within 1080p.
+- FFmpeg turns frames it brings to memory before the filters (`-autorotate`,
+  its default), never frames on a GPU. So turned video takes the CPU's
+  filters, hardware decoded into memory (not the zero-copy, Vulkan or
+  GPU-scaled paths).
+- MPEG-TS can't say a picture is turned, so a remux asked for is transcoded
+  instead, with a warning.
+- Media info probed before rotation was read has no `rotation`: such files are
+  planned unturned until probed again.
+
+### Frames timed as they are decoded
+
+Some MP4s (FFmpeg muxing a raw H.264 or HEVC stream) give every frame its
+decode time as its display time, although B-frames are stored ahead of where
+they are shown. Players that trust these times show frames out of turn or drop
+them (Chrome drops about one in five), and copying the video keeps them.
+
+- The probe of an MP4 or MOV file reads the times of its first 128 packets
+  along with its streams. (Matroska times frames as they are shown; MPEG-TS
+  carries both.)
+- When a stream that reorders frames (`has_b_frames`) shows every packet read
+  at its decode time, its first 48 packets are decoded. If more than one frame
+  comes out earlier than the frame before it, the stream is marked
+  `decode_order_times`.
+- The server then transcodes its video: decoding gives every frame its right
+  time.
+
+### Dolby Vision in remuxes
+
+A copied HEVC stream keeps its Dolby Vision metadata (the RPU NAL units, type
+62) in the MPEG-TS segments. MPEG-TS can't say so (FFmpeg's MPEG-TS muxer
+writes no Dolby Vision descriptor), so `master.m3u8` does, as
+`VideoRequest.dolby_vision` asks:
+
+| `dolby_vision` | What `master.m3u8` says |
+|---|---|
+| `copy` (default) | nothing about Dolby Vision: the base layer's codec only (`hvc1.2.4.L153.B0`) |
+| `signal` | named, for a player that decodes it. Profile 5: `dvh1.05.LL` alone. Profile 8: the HEVC codec with `SUPPLEMENTAL-CODECS="dvh1.08.LL/db1p"` (8.1, `VIDEO-RANGE=PQ`), `/db4h` (8.4, `HLG`) or `/db2g` (8.2, `SDR`). Profile 7: `dvh1.07.LL`. |
+| `to81` | profile 7 made profile 8.1 and named so (below); other profiles as `signal` |
+
+`to81`:
+
+- FFmpeg can't do it: `dovi_rpu` refuses to write profile 7 RPUs and never
+  changes a profile; `dovi_split` (FFmpeg 9) drops the enhancement layer but
+  keeps profile 7 RPUs. So FFmpeg copies the stream as it is, and the
+  transcoder edits each finished segment before it is ready.
+- The enhancement layer's NAL units (type 63) are left out.
+- Each RPU is rewritten as `dovi_tool`'s mode 2 does:
+  - no residual data (NLQ), no enhancement-layer resampling, one partition;
+  - the P8.1 color coefficients in the display management data (BT.2020 YCbCr
+    to RGB, RGB to LMS, `signal_color_space` 0);
+  - for a full enhancement layer (not a minimal one, whose residual is zero),
+    no-op mapping curves, since its curves only make sense with the layer;
+  - the extension blocks (levels 1 to 11, 254, 255; content mapping 2.9 and
+    4.0) and everything else kept as they are; the CRC computed again.
+- The RPU syntax follows FFmpeg's (`libavcodec/dovi_rpudec.c`) and
+  `dovi_tool`'s. The code is the transcoder's own (`src/dovi.rs`): nothing of
+  theirs is linked or run.
+- An RPU that can't be read (or whose CRC is wrong) is left out with a warning
+  on the job, and that frame plays as its base layer.
+- Profile 7 as MakeMKV writes it (one track) is supported. A disc's dual-PID
+  streams carry the RPU in the enhancement-layer PID, which isn't copied.
+
+`strip_hdr10plus`:
+
+- The HDR10+ messages (ITU-T T.35, country 0xB5, provider 0x003C, application
+  4) are taken out of each segment's prefix SEI NAL units. Other messages
+  (mastering display, content light level, captions) are kept; an SEI unit
+  left empty goes.
+- For Dolby Vision decoders that show black or freeze with both
+  (androidx/media#1895).
+
+Segment editing:
+
+- A segment is read whole, its video PES packets taken apart into NAL units
+  and the PES packetized again.
+- The first TS packet keeps its adaptation field (PCR, random access),
+  continuity counters run on, and other PIDs' packets are left as they were
+  (those met in the middle of a PES come right after it).
+- A 2 s segment of 4K takes milliseconds.
+- The job's video plan reports `dolby_vision` (`copy`, `signal`, `to81`) and
   `hdr10plus_stripped`.
-- **HDR10+, and profile 7's enhancement layer.** Only a stream's frames say
-  whether it carries HDR10+ (ffprobe's stream side data doesn't in Matroska
-  or MP4), so the probe of a Dolby Vision or PQ stream decodes its first
-  frames (a fraction of a second; `-read_intervals %+#12 -show_entries
-  frame_side_data`) and records `MediaStream.hdr10plus`; a PQ stream with
-  HDR10+ becomes `dynamic_range: hdr10plus`. For profile 7 the same frames'
-  Dolby Vision metadata says what the enhancement layer holds
-  (`MediaStream.dv_el`): minimal (`mel`) when its residual is zero in every
-  component (no NLQ offset, an input maximum of one, no dead zone), full
-  (`fel`) otherwise, as `dovi_tool` tells them apart. Both are left out
-  (unknown) when the frames can't be read, and for other streams. The job's
-  video plan repeats them (`dv_el`, `hdr10plus`) for the input's name.
-- **Subtitle extraction.** Text tracks (SubRip, ASS/SSA, plain text and
-  WebVTT) become WebVTT, cached per file version.
-  - Matroska: mkvmerge and FFmpeg list every subtitle block in the Cues, with
-    its place in its cluster, so the track asked for is read block by block:
-    one disk seek per subtitle instead of reading the whole file. A film's
-    track takes milliseconds on a local disk and seconds on a NAS (a
-    thousand subtitles of a 77 GB remux on a disk-backed share: 5 to 12 s),
-    where reading the file takes minutes. Sixteen reads run at once. A
-    cluster's head (its timestamp) is only read where the block can't be
-    told without it; one cluster in sixteen is checked, and a file whose
-    blocks aren't where their cues say has every head read. A file's tracks
-    are read side by side (half of `--probe-concurrency` at once in all, 4
-    by default).
-  - A track's extraction runs on its own: every request for the track
-    waits for the one under way (a `partial` one a few seconds at most, and
-    not at all once FFmpeg reads the file for it), and it goes on, to the
-    cache, when they stop waiting. A track the Cues couldn't give goes
-    straight to FFmpeg the next time (the last thousand such tracks are
-    remembered).
-  - A read through the Cues runs in the transcoder itself, so it has
-    limits that FFmpeg, a process of its own, doesn't need. What it keeps
-    takes at most 64 MiB: the file's seek heads, info, tracks, Cues and
-    tags as it reads them, 256 bytes for the records of each block the Cues
-    list for the track (counted as the Cues are read, so a file listing
-    millions of tiny blocks is turned down before any is read), the blocks
-    and what they inflate to, and the WebVTT made of them. No block may be
-    bigger than 1 MiB nor inflate past 10 MB, an ASS header may define at
-    most 10,000 styles, and the read takes at most a minute, finding the
-    Cues and converting included. The Cues are looked for in the seek
-    heads and before the first cluster, never cluster by cluster. Each
-    block must lie in its cluster, after the one before.
-  - The output is what FFmpeg's `-c:s webvtt` makes of the same track, byte
-    for byte: the SubRip, ASS, plain text and WebVTT decoders and the WebVTT
-    encoder (bold, italics, underline and line breaks; its quirks included)
-    are followed step by step. This is checked against FFmpeg on real files
-    by an ignored test (`PLEY_TEST_MKV=<file> cargo test -p pley-transcoder
-    cues_match_ffmpeg -- --ignored --nocapture`).
-  - FFmpeg extracts the tracks instead when anything is out of the
-    ordinary: the file isn't Matroska; its Cues aren't found as above; its
-    tracks don't line up with ffprobe's streams; its Cues don't list the
-    subtitles, or not with their places; mkvmerge's own statistics tags
-    disagree with the Cues on how many blocks a track has; a cue points at
-    no block, at another track's, or at one that breaks the limits above;
-    the track is encrypted, compressed with bzip2 or LZO (zlib and header
-    stripping are read) or in two ways, has a timing of its own (a
-    timestamp scale or a codec delay), laced blocks or cues before the
-    start or out of order, or is WebVTT as mkvmerge writes it
-    (`S_TEXT/WEBVTT`; WebM's `D_WEBVTT` is read); the file's timestamps
-    aren't whole milliseconds and it has a start time, as ffprobe gives
-    every file with audio or video (Pley's media info keeps that start in
-    whole milliseconds, while FFmpeg takes it off to the microsecond). Then
-    every text track of the file comes out in a single pass over it, which
-    may take 20 minutes, or as long as reading the file at 10 MB/s takes
-    (two hours for 70 GB). FFmpeg writes each cue as soon as it is read: a
-    `partial` request is answered with the cues found so far. Two such
-    passes run at once, apart from the quick FFmpeg runs (thumbnails,
-    cover art, subtitle files), which never wait for them. When a pass
-    fails, one more reads the track asked for alone (another track may be
-    what FFmpeg couldn't convert), unless it ran out of time. A track whose
-    pass failed answers with that error for 30 minutes (the last thousand
-    such tracks are remembered): a player asking every few seconds hears
-    why, rather than each request reading the whole file again.
-  - External files are converted with charset detection (UTF-8, UTF-16 BOM,
-    or Windows-1252 as a fallback), told from their first megabyte. A file
-    over 64 MB is no text subtitle file (a `.sup`, say): it is refused
-    (`400`) before it is read.
+
+### HDR10+ and profile 7's enhancement layer
+
+- Only a stream's frames say whether it carries HDR10+ (ffprobe's stream side
+  data doesn't, in Matroska or MP4). So the probe of a Dolby Vision or PQ
+  stream decodes its first frames (a fraction of a second;
+  `-read_intervals %+#12 -show_entries frame_side_data`) and records
+  `MediaStream.hdr10plus`. A PQ stream with HDR10+ becomes
+  `dynamic_range: hdr10plus`.
+- For profile 7, the same frames' Dolby Vision metadata says what the
+  enhancement layer holds (`MediaStream.dv_el`), as `dovi_tool` tells them
+  apart:
+  - `mel` (minimal): its residual is zero in every component (no NLQ offset,
+    an input maximum of one, no dead zone);
+  - `fel` (full): otherwise.
+- Both are left out (unknown) when the frames can't be read, and for other
+  streams.
+- The job's video plan repeats them (`dv_el`, `hdr10plus`) for the input's
+  name.
+
+### Subtitle extraction
+
+Text tracks (SubRip, ASS/SSA, plain text and WebVTT) become WebVTT, cached per
+file version.
+
+#### Matroska, through the Cues
+
+- mkvmerge and FFmpeg list every subtitle block in the Cues, with its place in
+  its cluster. The track asked for is read block by block: one disk seek per
+  subtitle instead of reading the whole file.
+- A film's track takes milliseconds on a local disk and seconds on a NAS (a
+  thousand subtitles of a 77 GB remux on a disk-backed share: 5 to 12 s),
+  where reading the file takes minutes.
+- Sixteen reads run at once. A file's tracks are read side by side (half of
+  `--probe-concurrency` at once in all, 4 by default).
+- A cluster's head (its timestamp) is read only where the block can't be told
+  without it. One cluster in sixteen is checked; a file whose blocks aren't
+  where their cues say has every head read.
+- A track's extraction runs on its own. Every request for the track waits for
+  the one under way (a `partial` one a few seconds at most, and not at all
+  once FFmpeg reads the file for it). It goes on to the cache when they stop
+  waiting.
+- A track the Cues couldn't give goes straight to FFmpeg next time (the last
+  thousand such tracks are remembered).
+
+Limits (the read runs inside the transcoder, unlike FFmpeg's own process):
+
+- What it keeps takes at most 64 MiB: the file's seek heads, info, tracks,
+  Cues and tags as it reads them; 256 bytes per block the Cues list for the
+  track (counted as the Cues are read, so a file listing millions of tiny
+  blocks is turned down before any is read); the blocks and what they inflate
+  to; the WebVTT made of them.
+- No block may be bigger than 1 MiB or inflate past 10 MB.
+- An ASS header may define at most 10,000 styles.
+- The read takes at most a minute, finding the Cues and converting included.
+- The Cues are looked for in the seek heads and before the first cluster,
+  never cluster by cluster. Each block must lie in its cluster, after the one
+  before.
+
+Output:
+
+- Byte for byte what FFmpeg's `-c:s webvtt` makes of the same track: the
+  SubRip, ASS, plain text and WebVTT decoders and the WebVTT encoder (bold,
+  italics, underline and line breaks; quirks included) are followed step by
+  step.
+- Checked against FFmpeg on real files by an ignored test:
+  `PLEY_TEST_MKV=<file> cargo test -p pley-transcoder cues_match_ffmpeg -- --ignored --nocapture`.
+
+#### FFmpeg fallback
+
+FFmpeg extracts the tracks instead when anything is out of the ordinary:
+
+- the file isn't Matroska, or its Cues aren't found as above;
+- its tracks don't line up with ffprobe's streams;
+- its Cues don't list the subtitles, or not with their places;
+- mkvmerge's own statistics tags disagree with the Cues on how many blocks a
+  track has;
+- a cue points at no block, at another track's, or at one that breaks the
+  limits above;
+- the track is encrypted, compressed with bzip2 or LZO (zlib and header
+  stripping are read) or in two ways;
+- the track has a timing of its own (a timestamp scale or a codec delay),
+  laced blocks, or cues before the start or out of order;
+- the track is WebVTT as mkvmerge writes it (`S_TEXT/WEBVTT`; WebM's
+  `D_WEBVTT` is read);
+- the file's timestamps aren't whole milliseconds and it has a start time (as
+  ffprobe gives every file with audio or video). Pley's media info keeps that
+  start in whole milliseconds, while FFmpeg takes it off to the microsecond.
+
+How the fallback runs:
+
+- Every text track of the file comes out in a single pass over it. That may
+  take 20 minutes, or as long as reading the file at 10 MB/s takes (two hours
+  for 70 GB).
+- FFmpeg writes each cue as soon as it is read, so a `partial` request is
+  answered with the cues found so far.
+- Two such passes run at once. The quick FFmpeg runs (thumbnails, cover art,
+  subtitle files) never wait for them.
+- When a pass fails, one more reads the asked track alone (another track may
+  be what FFmpeg couldn't convert), unless it ran out of time.
+- A track whose pass failed answers with that error for 30 minutes (the last
+  thousand such tracks are remembered): a player asking every few seconds
+  hears why, rather than each request reading the whole file again.
+
+#### Subtitle files
+
+- Converted with charset detection (UTF-8, UTF-16 with BOM, or Windows-1252
+  as a fallback), judged from their first megabyte.
+- A file over 64 MB is not a text subtitle file (a `.sup`, say): it is
+  refused (`400`) before it is read.
 
 ## Audio fingerprints
 
