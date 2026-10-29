@@ -256,10 +256,12 @@ For a player that switches between sizes by itself (it sends
 node), a transcode comes in several sizes. Kodi's player and the Samsung
 and LG apps don't, and step as described above.
 
-- The session's `master.m3u8` lists the transcode's own size first, then
-  1080p, 720p, 540p and 360p below it, at 8, 4, 2 and 0.7 Mbps, never more
-  than the size above. A size with more than two thirds of the bits of the
-  one above is left out.
+- The session's `master.m3u8` lists the transcode's own size first. A
+  quality with more bits than its size usually gets (20 Mbps 1080p, 30 Mbps
+  4K) comes at that size again with the usual bits (8 Mbps for 1080p, 20
+  for 4K). Then come 1080p, 720p, 540p and 360p below it, at 8, 4, 2 and 0.7
+  Mbps, never more than the size above. One of these with more than two
+  thirds of the bits of the one above is left out.
 - A picked quality is the top size; nothing goes higher.
 - Every size is cut into the same segments, each starting with a keyframe at
   the same time, so the player can switch at any segment without a pause, a
@@ -293,6 +295,12 @@ of the sizes ("size 2 of 4").
 |---|---|
 | Original | `mode: "auto"` |
 | A quality | `mode: "transcode"` with `max_bitrate` and `max_height` |
+
+A quality is converted at its bitrate, less 192 kbps for the sound. It
+never goes above half again the file's own bitrate, nor above the highest
+quality of its lines (an app of the compatibility API asking for far more
+gets that). A file with fewer bits still gets the lowest quality
+of its lines, as the server's own quality does.
 
 The response's `auto_quality` says what the server would choose for the
 file, and `adaptive` whether the stream comes in several sizes. The network

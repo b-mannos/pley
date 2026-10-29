@@ -734,7 +734,8 @@ pub struct VideoRequest {
     pub max_width: Option<u32>,
     #[serde(default)]
     pub max_height: Option<u32>,
-    /// Target video bitrate cap in kbit/s (default chosen from the output resolution).
+    /// The video bitrate a transcode aims for and keeps under, in kbit/s
+    /// (default: its size's, [`default_video_kbps`]).
     #[serde(default)]
     pub max_bitrate_kbps: Option<u32>,
     /// What a remux does with Dolby Vision (ignored when transcoding, and
@@ -766,13 +767,15 @@ pub struct VariantRequest {
     pub max_width: Option<u32>,
     #[serde(default)]
     pub max_height: Option<u32>,
-    /// Video bitrate cap in kbit/s (default chosen from the output resolution).
+    /// The video bitrate it aims for and keeps under, in kbit/s (default:
+    /// its size's, [`default_video_kbps`]).
     #[serde(default)]
     pub max_bitrate_kbps: Option<u32>,
 }
 
-/// The video bitrate a transcode aims for at a size, in kbit/s: by its
-/// lines counted as a 16:9 picture's, so a 1920×800 film gets 1080p's.
+/// The video bitrate a transcode aims for at a size when none is asked
+/// for, in kbit/s: by its lines counted as a 16:9 picture's, so a 1920×800
+/// film gets 1080p's.
 pub fn default_video_kbps(width: i64, height: i64) -> u32 {
     match height.max(width * 9 / 16) {
         h if h >= 2000 => 20_000,

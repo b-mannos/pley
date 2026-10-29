@@ -419,16 +419,7 @@ pub fn closest_quality_within(
     bitrate: Option<i64>,
     most_lines: Option<u32>,
 ) -> (&'static str, u32, u32) {
-    let (w, h) = (width.unwrap_or(0), height.unwrap_or(0));
-    let lines = if w >= 3800 || h >= 2100 {
-        2160
-    } else if w >= 1800 || h >= 1000 || (w <= 0 && h <= 0) {
-        1080
-    } else if w >= 1200 || h >= 700 {
-        720
-    } else {
-        480
-    };
+    let lines = quality_lines(width, height);
     let lines = match most_lines {
         Some(most) => [2160, 1080, 720, 480].into_iter().find(|l| *l <= lines && *l <= most).unwrap_or(480),
         None => lines,
@@ -437,6 +428,35 @@ pub fn closest_quality_within(
     let mut tier = QUALITIES.iter().filter(|q| q.2 == lines);
     let lowest = tier.clone().next_back();
     tier.find(|q| cap.is_none_or(|cap| f64::from(q.1) <= cap)).or(lowest).copied().unwrap_or(QUALITIES[4])
+}
+
+/// The lines qualities are named by for a `width`×`height` video: 2160,
+/// 1080, 720 or 480, by its width too (a 1920×800 film is 1080p); 1080 when
+/// neither is known.
+fn quality_lines(width: Option<i64>, height: Option<i64>) -> u32 {
+    let (w, h) = (width.unwrap_or(0), height.unwrap_or(0));
+    if w >= 3800 || h >= 2100 {
+        2160
+    } else if w >= 1800 || h >= 1000 || (w <= 0 && h <= 0) {
+        1080
+    } else if w >= 1200 || h >= 700 {
+        720
+    } else {
+        480
+    }
+}
+
+/// The most a conversion of a file with `bitrate` (bits per second) to
+/// `lines` aims for, whatever is asked (kbps): half again the file's, as
+/// [`closest_quality`] has it, within the bitrates players offer at those
+/// lines (the tallest of 2160, 1080, 720 and 480 at or below them). A
+/// player asking for far more (an app of the compatibility API asking for
+/// its most) gets what the file is worth.
+fn most_kbps(lines: u32, bitrate: Option<i64>) -> u32 {
+    let tier = [2160, 1080, 720, 480].into_iter().find(|l| *l <= lines).unwrap_or(480);
+    let offered = QUALITIES.iter().filter(|q| q.2 == tier).map(|q| q.1);
+    let (low, high) = (offered.clone().min().unwrap_or(0), offered.max().unwrap_or(u32::MAX));
+    bitrate.filter(|b| *b > 0).map_or(high, |b| u32::try_from(b * 3 / 2000).unwrap_or(u32::MAX).clamp(low, high))
 }
 
 /// `GET /api/playback/{session}`: how a session plays, with its transcode's
@@ -471,10 +491,12 @@ const LADDER_LINES: [i64; 4] = [1080, 720, 540, 360];
 
 /// The lower renditions of a transcode of a `width`×`height` video as
 /// `top` asks, for a player that moves between them by itself as its
-/// connection allows: 1080p, 720p, 540p and 360p below its own size, each
-/// at the bitrate its size gets and never more than the one above
-/// ([`default_video_kbps`]). Steps of about half the bits each: one with
-/// more than two thirds of the one above is left out.
+/// connection allows: its own size at the bitrate that size gets
+/// ([`default_video_kbps`]) when `top` asks for more (a picked 20 Mbps
+/// 1080p also comes at 1080p's 8), then 1080p, 720p, 540p and 360p below
+/// its own size, each at the bitrate its size gets and never more than the
+/// one above. Below its own size, steps of about half the bits each: one
+/// with more than two thirds of the one above is left out.
 pub fn ladder(width: Option<i64>, height: Option<i64>, top: &VideoRequest) -> Vec<VariantRequest> {
     let (w, h) = (width.unwrap_or(1920).max(2), height.unwrap_or(1080).max(2));
     // The transcode's own size, as the transcoder fits it.
@@ -485,8 +507,18 @@ pub fn ladder(width: Option<i64>, height: Option<i64>, top: &VideoRequest) -> Ve
     let (w, h) = ((w as f64 * scale) as i64, (h as f64 * scale) as i64);
     let lines = h.max(w * 9 / 16);
     let cap = top.max_bitrate_kbps.unwrap_or(u32::MAX);
-    let mut above = default_video_kbps(w, h).min(cap);
+    // The top's bitrate, as the transcoder makes it.
+    let own = default_video_kbps(w, h);
+    let mut above = top.max_bitrate_kbps.map_or(own, |kbps| kbps.max(300));
     let mut rungs = Vec::new();
+    if own < above {
+        rungs.push(VariantRequest {
+            max_width: top.max_width,
+            max_height: top.max_height,
+            max_bitrate_kbps: Some(own),
+        });
+        above = own;
+    }
     for rung in LADDER_LINES.into_iter().filter(|l| *l < lines * 9 / 10) {
         let width = (rung * 16 / 9 + 1) / 2 * 2;
         let kbps = default_video_kbps(width, rung).min(cap);
@@ -1245,9 +1277,18 @@ pub fn decide(file: &FileRow, info: Option<&MediaInfo>, streams: &[MediaStream],
             quality = Some(id);
             (Some(lines), Some(kbps))
         };
-        // Nor with more bits than half again the original's: a file with
-        // fewer than its size's lowest quality would come out several times
-        // as big.
+        // A quality asked for is what the conversion aims for, up to what
+        // the file is worth at its lines.
+        let max_bitrate = match max_bitrate.filter(|_| !copy) {
+            Some(kbps) => {
+                let lines = max_height.unwrap_or_else(|| quality_lines(v.width, v.height));
+                Some(kbps.min(most_kbps(lines, file.bitrate)))
+            }
+            None => max_bitrate,
+        };
+        // A download gets no more than half again the original's, not even
+        // its size's lowest quality: a file with fewer bits would come out
+        // several times as big.
         let max_bitrate = match file.bitrate.filter(|b| *b > 0 && req.download && !copy) {
             Some(bits) => {
                 let most = u32::try_from(bits * 3 / 2000).unwrap_or(u32::MAX);
@@ -2389,18 +2430,53 @@ mod tests {
                 .map(|v| (v.max_height.unwrap(), v.max_bitrate_kbps.unwrap()))
                 .collect::<Vec<_>>()
         };
+        // More bits than 4K gets: 4K again at its own, then the smaller sizes.
         assert_eq!(
             rungs(3840, 2160, Some(2160), Some(29_808)),
+            [(2160, 20_000), (1080, 8_000), (720, 4_000), (540, 2_000), (360, 700)]
+        );
+        assert_eq!(
+            rungs(3840, 2160, Some(2160), Some(14_808)),
             [(1080, 8_000), (720, 4_000), (540, 2_000), (360, 700)]
         );
-        // A scope film is 1080p's for its width: its rungs are 720p's and below.
-        assert_eq!(rungs(1920, 800, Some(1080), Some(19_808)), [(720, 4_000), (540, 2_000), (360, 700)]);
+        // A scope film is 1080p's for its width: 1080p's 8 Mbps, then 720p's
+        // and below.
+        assert_eq!(rungs(1920, 800, Some(1080), Some(19_808)), [(1080, 8_000), (720, 4_000), (540, 2_000), (360, 700)]);
         // Below a quality picked, at most its bitrate.
+        assert_eq!(rungs(1920, 1080, Some(1080), Some(7_808)), [(720, 4_000), (540, 2_000), (360, 700)]);
         assert_eq!(rungs(1920, 1080, Some(720), Some(3_808)), [(540, 2_000), (360, 700)]);
-        assert_eq!(rungs(1920, 1080, Some(480), Some(1_808)), [(360, 700)]);
+        assert_eq!(rungs(1920, 1080, Some(480), Some(1_808)), [(480, 1_200), (360, 700)]);
         // Too close to the one above to make a difference: left out.
         assert!(rungs(1920, 1080, Some(1080), Some(1_000)).is_empty());
         assert!(rungs(640, 360, None, None).is_empty(), "nothing below 360p");
+    }
+
+    #[test]
+    fn a_quality_asked_for_is_aimed_for_up_to_what_the_file_is_worth() {
+        let mut i = info("hevc", &["aac"], DynamicRange::Sdr);
+        let mut kbps = |(w, h): (i64, i64), mbps: i64, max_bitrate: u32, max_height: Option<u32>| {
+            (i.streams[0].width, i.streams[0].height) = (Some(w), Some(h));
+            let mut req = request();
+            (req.max_bitrate, req.max_height) = (Some(max_bitrate), max_height);
+            let d = decide(&file("mkv", mbps * 1_000_000), Some(&i), &i.streams, &req);
+            d.video.unwrap().max_bitrate_kbps.unwrap()
+        };
+        // What was asked, less the audio.
+        assert_eq!(kbps((3840, 2160), 57, 30_000, Some(2160)), 29_808);
+        assert_eq!(kbps((3840, 2160), 57, 20_000, Some(1080)), 19_808);
+        assert_eq!(kbps((3840, 2160), 57, 2_000, Some(480)), 1_808);
+        // A taller quality named by the file's lines ("8 Mbps 720p").
+        assert_eq!(kbps((1280, 720), 12, 8_000, Some(1080)), 7_808);
+        // Half again the file's: H.264 needs more than HEVC, but no more.
+        assert_eq!(kbps((3840, 2160), 12, 20_000, Some(1080)), 17_808);
+        // Far more asked (the compatibility API's apps): what the file is worth
+        // at those lines, as if nothing had been asked.
+        assert_eq!(kbps((3840, 2160), 57, 200_000, Some(2160)), 29_808);
+        assert_eq!(kbps((3840, 2160), 57, 200_000, None), 29_808);
+        assert_eq!(kbps((3840, 2160), 57, 200_000, Some(720)), 3_808);
+        // Few bits: that size's lowest quality, as a conversion of the
+        // original gets.
+        assert_eq!(kbps((1920, 1080), 2, 20_000, Some(1080)), 7_808);
     }
 
     #[test]

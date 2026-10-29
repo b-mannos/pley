@@ -648,6 +648,12 @@ describe("startSize", () => {
     expect(startSize(levels, { clientWidth: 1100, clientHeight: 620 }, 0)).toBe(0);
     expect(startSize(levels, { clientWidth: 0, clientHeight: 0 }, 2), "not laid out yet").toBe(2);
   });
+  it("starts a size listed twice at its higher bitrate", () => {
+    // 20 Mbps 1080p, also at 1080p's 8 Mbps.
+    const twice = [...levels, { width: 1920, height: 1080 }];
+    expect(startSize(twice, { clientWidth: 1600, clientHeight: 900 }, 3)).toBe(3);
+    expect(startSize(twice, { clientWidth: 1100, clientHeight: 620 }, 3)).toBe(1);
+  });
 });
 
 describe("VideoPlayer in Automatic", () => {

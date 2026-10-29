@@ -21,9 +21,9 @@ describe("preparing a session's stream", () => {
 
   it("reads a multivariant playlist's sizes in its order", () => {
     expect(variantsOf(MASTER, BASE)).toEqual([
-      { uri: "http://pley.test/api/playback/s1/index.m3u8", width: 1920, height: 1080 },
-      { uri: "http://pley.test/api/playback/s1/v1.m3u8", width: 1280, height: 720 },
-      { uri: "http://pley.test/api/playback/s1/v2.m3u8", width: 640, height: 360 },
+      { uri: "http://pley.test/api/playback/s1/index.m3u8", width: 1920, height: 1080, bandwidth: 10_752_000 },
+      { uri: "http://pley.test/api/playback/s1/v1.m3u8", width: 1280, height: 720, bandwidth: 5_502_000 },
+      { uri: "http://pley.test/api/playback/s1/v2.m3u8", width: 640, height: 360, bandwidth: 1_170_750 },
     ]);
     expect(variantsOf(media(""), BASE)).toEqual([]);
   });
@@ -54,6 +54,31 @@ describe("preparing a session's stream", () => {
     });
     await warmStream(BASE, 2.5, pick, new AbortController().signal);
     expect(asked).toEqual([BASE, "http://pley.test/api/playback/s1/v1.m3u8", "http://pley.test/api/playback/s1/v1-1.ts"]);
+  });
+
+  it("gives a size listed twice at its lower bitrate first, as hls.js does", async () => {
+    const twice = [
+      "#EXTM3U",
+      '#EXT-X-STREAM-INF:BANDWIDTH=20752000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2"',
+      "index.m3u8",
+      '#EXT-X-STREAM-INF:BANDWIDTH=8752000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2"',
+      "v1.m3u8",
+      '#EXT-X-STREAM-INF:BANDWIDTH=4752000,RESOLUTION=1280x720,CODECS="avc1.64001f,mp4a.40.2"',
+      "v2.m3u8",
+    ].join("\n");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) =>
+        Promise.resolve(new Response(url.endsWith("master.m3u8") ? twice : url.endsWith(".m3u8") ? media("x-") : "segment")),
+      ),
+    );
+    const pick = vi.fn((sizes: { bandwidth: number }[], listed: number) => {
+      expect(sizes.map((s) => s.bandwidth)).toEqual([4_752_000, 8_752_000, 20_752_000]);
+      expect(listed).toBe(2);
+      return listed;
+    });
+    await warmStream(BASE, 0, pick, new AbortController().signal);
+    expect(pick).toHaveBeenCalledOnce();
   });
 
   it("fails when the server refuses", async () => {

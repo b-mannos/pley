@@ -576,10 +576,9 @@ impl Plan {
                     })
                 } else {
                     let (width, height) = fit(src_width, src_height, vreq.max_width, vreq.max_height);
-                    let mut bitrate = default_video_kbps(width, height);
-                    if let Some(max) = vreq.max_bitrate_kbps {
-                        bitrate = bitrate.min(max.max(300));
-                    }
+                    // The bitrate asked for, else the one its size gets.
+                    let bitrate =
+                        vreq.max_bitrate_kbps.map_or_else(|| default_video_kbps(width, height), |max| max.max(300));
                     let accel = req.options.hwaccel;
                     let kept = hdr_output(vreq, src, burn.is_some(), ff, accel, &mut warnings);
                     let hdr = kept.map(|(hdr, _)| hdr);
@@ -2361,6 +2360,24 @@ mod tests {
             line("h264_videotoolbox", HwAccel::Videotoolbox),
             "-c:v h264_videotoolbox -b:v 8000k -maxrate 8000k -bufsize 16000k -allow_sw 1 -realtime 1 -g 9999"
         );
+    }
+
+    /// The bitrate asked for is the one aimed for, whatever the size;
+    /// without one, the size's.
+    #[test]
+    fn the_bitrate_asked_for_is_aimed_for() {
+        let ff = ffmpeg_with(vec![x264()], vec![]);
+        let kbps = |max_height, max_bitrate_kbps| {
+            let mut req = request();
+            req.video = Some(VideoRequest { max_height, max_bitrate_kbps, ..Default::default() });
+            Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, None).unwrap().video.unwrap().bitrate_kbps
+        };
+        assert_eq!(kbps(Some(1080), None), 8_000);
+        assert_eq!(kbps(Some(1080), Some(19_808)), 19_808, "20 Mbps 1080p, not 1080p's 8");
+        assert_eq!(kbps(None, Some(29_808)), 29_808, "30 Mbps 4K, not 4K's 20");
+        assert_eq!(kbps(Some(480), Some(1_808)), 1_808);
+        assert_eq!(kbps(Some(720), Some(2_000)), 2_000, "less than the size's");
+        assert_eq!(kbps(Some(1080), Some(100)), 300, "never below 300 kbps");
     }
 
     #[test]
