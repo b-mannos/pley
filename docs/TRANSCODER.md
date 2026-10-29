@@ -364,229 +364,279 @@ state, progress, duration_ms, size?, error?, video?, audio?}` (see
 
 ## Conversions
 
-A conversion makes a `JobRequest` into one Matroska file, the whole media
-in one FFmpeg run: what a download is when the device that keeps it
-doesn't play the original as it is (sound it doesn't decode, a picture
-too big for it). Its streams are what a job's segments would be (the same
-plan: encoder, tone mapping, AAC), made at full speed (`throttle` is
-ignored) from the start (`start_ms` is too), with every subtitle track
-of the input as it is, in its order (MP4's text made SRT; teletext, which
-Matroska can't hold, left out), with its language and name: a player
-finds a track by its place among the subtitle tracks, as in the original.
-A conversion whose FFmpeg ends without error but short of the media's end
-(a share that went away) fails rather than keeping half a film. One whose
-file the janitor deleted is made again when asked for. A remux whose segments would
-be edited (Dolby Vision converted, HDR10+ left out) has its video made
-anew instead, as a file can't be edited the way segments are.
+A conversion makes a `JobRequest` into one Matroska file in a single FFmpeg
+run. It is what a download is when the device that keeps it can't play the
+original (sound it doesn't decode, a picture too big for it).
 
-With `container: "mp4"` the file is MP4, for players that open no
-Matroska (QuickTime): its text subtitles made MP4's own (`mov_text`), in
-their order, its picture subtitles left out, HEVC tagged `hvc1` (QuickTime
-plays no `hev1`), and its index ahead of the media (`+faststart`), so it
-plays as soon as it opens. It is another conversion than the Matroska one
-of the same request (its id says so), named `<id>.mp4`.
+- **Streams.** The same plan as a job's segments (encoder, tone mapping, AAC),
+  made at full speed (`throttle` is ignored) from the start (`start_ms` is
+  ignored too).
+- **Subtitles.** Every subtitle track of the input, in its order, with its
+  language and name, so a player finds a track by its place as in the
+  original. MP4's text is made SRT; teletext (which Matroska can't hold) is
+  left out.
+- **Dolby Vision and HDR10+.** A remux whose segments would be edited (Dolby
+  Vision converted, HDR10+ left out) has its video encoded instead: a file
+  can't be edited the way segments are.
+- **Short output.** An FFmpeg run that ends without error but short of the
+  media's end (a share that went away) fails rather than keeping half a film.
+- **MP4** (`container: "mp4"`), for players that open no Matroska
+  (QuickTime):
+  - text subtitles made MP4's own (`mov_text`), in their order; picture
+    subtitles left out;
+  - HEVC tagged `hvc1` (QuickTime plays no `hev1`);
+  - its index ahead of the media (`+faststart`), so it plays as soon as it
+    opens;
+  - a separate conversion from the Matroska one of the same request (its id
+    says so), named `<id>.mp4`.
 
-One conversion runs at a time, in a transcode slot like a job's process
-(a hardware session when one is free, else the software encoder), at low
-process priority so that playbacks keep the processor; while every slot
-is in use it waits. Its id comes from the input (path, size,
-modification time) and the request's video, audio and subtitle parts, so
-the same file asked for twice is made once. One nobody asks for or about
-(`GET /v1/conversions/{id}`) for an hour while it waits isn't made when
-its turn comes: the device that wanted it went, and asking again starts
-it again. Files live in `conversions/` under the work folder; the janitor
-deletes those unused for a week, and the least recently used past 64 GB.
-A transcoder that restarts knows the files it made by their names;
-half-made ones are deleted.
+Scheduling:
+
+- One conversion runs at a time, in a transcode slot like a job's process: a
+  hardware session when one is free, else the software encoder. While every
+  slot is in use it waits.
+- It runs at low process priority, so playbacks keep the processor.
+- Its id comes from the input (path, size, modification time) and the
+  request's video, audio and subtitle parts: the same file asked for twice is
+  made once.
+- A queued conversion nobody asks for or about (`GET /v1/conversions/{id}`)
+  for an hour is not made when its turn comes. Asking again starts it again.
+
+Files:
+
+- Kept in `conversions/` in the work folder. The janitor deletes those unused
+  for a week, then the least recently used past 64 GB.
+- One the janitor deleted is made again when asked for.
+- After a restart, the transcoder knows the files it made by their names.
+  Half-made ones are deleted.
 
 ## How HLS jobs work
 
-1. **Layout first.** When a job is created, its segment layout is fixed and the
-   whole VOD playlist is known up front, so players can seek anywhere.
-   - Segments are as long as the request's `segment_seconds` (1 to 10 s, 4 s
-     by default). The Pley server asks for 2 s: nothing plays before FFmpeg
-     has written a whole segment, so shorter ones start playback, seeks and
-     quality switches sooner, for a keyframe every 2 s.
-   - When transcoding, keyframes are forced on that grid.
-   - When remuxing (`video.mode = copy`), segments start on the source's
-     keyframes (as many as make at least the segment length), taken from the
-     keyframe index. Keyframe timestamps are made
-     relative to the container start time (`MediaInfo.start_ms`, often far from
-     zero in MPEG-TS), because that is what `-ss` and the output timeline use.
+Quality menus, Automatic quality and when players switch are explained from
+the user's side in [QUALITY.md](QUALITY.md). This section is how the
+transcoder serves them.
 
-   The layout is deterministic. If the transcoder restarts, the server
-   recreates the job and the same segment numbers still line up.
+### Segment layout
 
-   A job has at most 200 000 segments, so a damaged or crafted file can't
-   claim a length that costs gigabytes of memory. Durations beyond about 9
-   days are not believed: the probe then uses the streams' own durations
-   (Matroska `DURATION` tags included) or the file size over the streams'
-   bitrates, and a file with nothing plausible is refused. Media info sent
-   with a job is probed again when its duration is implausible. Files long
-   enough to need it get segments longer than requested instead of more.
-2. **Segments on demand.** A segment request is answered from disk (or
-   memory, see *Segments in memory*) if that segment already exists. If it
-   doesn't:
-   - When a running ffmpeg process is about to produce it (at most 12 s of
-     segments ahead of the process, never behind it), the request waits for
-     that process. Not when the read rate holds the process back (see
-     *Throttling*) and that wait is longer than a restart: past its burst and
-     going at the read rate (not slower: then the encoder is the limit, and a
-     new process would be no quicker), it makes a segment of 2 s in about a
-     second, so a seek a few segments past it would wait seconds. The
-     request then starts a new process at its segment, with a burst of its
-     own, when the wait (from halfway through the segment being made) is
-     longer than this job's last start to a first segment plus the stop of
-     the old process, and no other request waits for a segment the old
-     process is about to make.
-   - Otherwise a new process starts exactly at that segment, using `-ss`,
-     `-output_ts_offset`, `-segment_times` and `-segment_start_number`, so
-     timestamps stay on the absolute timeline. `avoid_negative_ts` is disabled
-     so B-frame delay can't shift one process's segments relative to another.
-   - A remux process seeks a little past its boundary keyframe. With B-frames,
-     FFmpeg moves a seek back by 3/23 s (130 ms) in every container that
-     doesn't seek by presentation time (all but MP4 and MOV): a seek right at
-     the keyframe would land on the one before it, and every segment of the
-     process would hold the GOP before its own. The seek goes 140 ms past the
-     boundary there (at most halfway to the next keyframe), 1 ms elsewhere.
-     Remuxes seek with `-noaccurate_seek`, so converted audio starts at the
-     keyframe like the copied video, not at the seek point, which would leave
-     a hole where an older process's segment plays into the new one's.
-   - A new process stops right before the next segment that already exists,
-     so segments being served are never rewritten.
-   - A process started less than 3 s ago is not replaced while another request
-     is waiting for it, so two requests far apart cannot keep restarting each
-     other. When that request goes away (served, or aborted by its player),
-     the one held back looks again at once.
-3. **Completion tracking.** ffmpeg's segment muxer writes a line to stdout as
-   each segment finishes (a remux whose video needs editing has the segment
-   edited first: see *Dolby Vision in remuxes*), which marks it ready and
-   wakes waiting requests at once, with no polling (after noting the process has moved past it, so a
-   woken request never sees it still owing that segment). ffmpeg's `-progress` output on stderr supplies the
-   live metrics: fps, speed, bitrate and position.
-4. **Throttling.** A process makes its first 120 s as fast as it can, then
-   reads at real time (`-readrate 1`), so it stays as far ahead of the
-   player as that burst took it, at a steady 1×: this saves CPU, GPU and
-   disk. A read that falls behind (a slow disk or share) catches up at 2×
-   where FFmpeg can (`-readrate_catchup`, FFmpeg 8). And once a process is 90 s
-   ahead of the last segment the player asked for (players hold their own
-   buffer ahead of the picture, so minutes ahead of it), it is paused, its
-   process suspended (`NtSuspendProcess` on Windows, `SIGSTOP` on Linux),
-   until it is less than 60 s ahead, or a request waits for a segment it is
-   to make. Without the pause a process could go on to the end of the
-   film, minutes or an hour ahead: work lost when the player
-   stops or seeks, taken from other playbacks meanwhile (on a small
-   computer, what lets two play at once), and segments on the disk. Both
-   apply when the request's `throttle` is on (`throttle_transcodes`, on by
-   default) and the read rate when FFmpeg supports it. How fast a process
-   goes is measured over its last 4 s of progress (since it last went on,
-   after a pause), since FFmpeg's own `speed` averages in the burst and the
-   pauses; a job's status says that speed, and 1× for a process held to the
-   read rate.
-5. **Housekeeping.**
-   - A process idle for 60 s (paused player) is stopped.
-   - A job idle for 20 minutes expires.
-   - Segments more than 6 minutes behind the playhead are deleted (in small
-     batches, off the async runtime); in memory, those more than a minute
-     behind it or 3 minutes ahead (see *Segments in memory*).
-   - On startup, segments left over from an earlier run are removed, in
-     memory those of transcoders gone (a crash).
-   - The caches in the work directory are pruned an hour apart (the first
-     time two minutes after start-up). Entries unused for longer than their
-     age limit go, then the least recently used ones until the folder fits its
-     budget; temporaries left by a crash go after 3 hours untouched (a
-     subtitle pass that runs longer touches its outputs every 10 minutes).
-     Reading an entry counts as using it.
+When a job is created its segment layout is fixed, and the whole VOD playlist
+is known up front, so players can seek anywhere.
 
-     | Folder | Holds | Age limit | Budget |
-     |---|---|---|---|
-     | `keyframes/` | keyframe indexes | 90 days | 256 MB |
-     | `subtitles/` | converted and extracted subtitles, the fonts attached to files | 60 days | 512 MB |
-     | `trickplay/` | seek-preview sheets | 1 day | 1 GB |
-     | `libplacebo/` | libplacebo's compiled shaders | 30 days | 128 MB |
+- Segments are `segment_seconds` long (1 to 10 s, 4 s by default). The Pley
+  server asks for 2 s: nothing plays before FFmpeg has written a whole
+  segment, so shorter ones start playback, seeks and quality switches sooner.
+- **Transcodes:** keyframes are forced on that grid (a keyframe every segment).
+- **Remuxes** (`video.mode = copy`): segments start on the source's keyframes,
+  as many as make at least the segment length, taken from the keyframe index.
+  Keyframe times are made relative to the container's start time
+  (`MediaInfo.start_ms`, often far from zero in MPEG-TS), because `-ss` and the
+  output timeline use it.
+- The layout is deterministic: if the transcoder restarts, the server
+  recreates the job and the same segment numbers still line up.
+- Limits:
+  - At most 200 000 segments per job, so a damaged or crafted file can't claim
+    a length that costs gigabytes of memory. Long files get longer segments
+    instead of more.
+  - Durations beyond about 9 days are not believed. The probe then uses the
+    streams' own durations (Matroska `DURATION` tags included), or the file
+    size over the streams' bitrates. A file with nothing plausible is refused.
+  - Media info sent with a job is probed again when its duration is
+    implausible.
 
-     A set of seek-preview sheets is also deleted as soon as every sheet in
-     it has been fetched: the server stores the sheets it fetches.
-   - ffmpeg never outlives the transcoder: on Windows the transcoder runs in a
-     kill-on-close job object, on Linux every child gets a parent-death signal.
-     On shutdown (signal, or stdin closed with `--exit-with-parent`) all jobs
-     are stopped first, then open requests get 5 s to finish.
-6. **Failure handling.** If ffmpeg fails twice at the same segment, the error is
-   returned instead of retrying forever. The job's `last_error` holds ffmpeg's
-   last log lines. A process whose hardware encoder fails before its first
-   segment (a driver update, a GPU gone, a session refused) hands the job to
-   the software encoder, as when hardware sessions run out, with a warning
-   on the job; once that happened to three jobs, `capabilities.json` is
-   deleted, so the next start tests the encoders again.
-7. **Renditions.** A transcode asked for with `variants` (adaptive
-   bitrate: a player that moves between sizes by itself) also comes
-   smaller: each variant is the job's request with its own `max_width`,
-   `max_height` and `max_bitrate_kbps`, kept when it is no bigger and has
-   fewer bits than the one above and its segments are laid out as the
-   job's (transcodes' are: the layout depends on the duration alone).
-   They are jobs of their own inside the job, in folders `v1/`…, with
-   their segments named `v1-{n}.ts`… in their playlists; burned-in text
-   subtitles are extracted once and copied to them. The job's
-   `master.m3u8` lists them after its own, largest first. A process runs
-   for the rendition the player asked last: when its requests move to
-   another, the others' processes stop (what they made stays), and one
-   asked for again starts where it is wanted. They expire, go and are
-   tidied with the job, and its status is the playing rendition's
-   (`rendition`, `variants`), with what all of them served.
+### Segments on demand
 
-   A transcode's bitrate, unless asked for less, is its size's: 20 Mbps
-   from 2000 lines, 12 from 1400, 8 from 1000, 4 from 700, 2 from 500, 1.2
-   from 400 and 0.7 below, counting the lines a 16:9 picture as wide
-   would have (a 1920×800 film is 1080p's 8 Mbps).
-8. **Segments in memory.** A job's segments live in its folder on disk,
-   `jobs/<id>/` in the work folder, or in memory when the request's
-   `options.in_memory` is on (`transcode_in_memory`, on by default), the
-   job is throttled (its lead on the player is bounded then) and the
-   transcoder has room. FFmpeg writes segments as files, so memory is a
-   folder in RAM: `/dev/shm` on Linux, when it is a tmpfs. The transcoder
-   keeps its own folder there, `pley-transcoder-<pid>/<id>/` (renditions
-   in `v1/`…), private to its user, removed at shutdown; one left by a
-   transcoder gone (a crash, its process no longer there) is removed at
-   the next start, as a tmpfs holds it in memory until then. Each process
-   runs in the folder it writes to, with a copy of the burned-in
-   subtitles there, and each segment is served, edited (Dolby Vision, see
-   *Dolby Vision in remuxes*) and pruned where its process made it.
+A segment request is answered from disk (or memory) if the segment exists.
+Otherwise:
 
-   Windows and macOS have no folder in RAM by default, and their segments
-   stay on disk (`/v1/info` says `memory.available: false`, "works on
-   Linux only"). FFmpeg creates the files, so they can't be marked to
-   stay in the file cache (`FILE_ATTRIBUTE_TEMPORARY`); a RAM disk needs a
-   driver (Windows) or stays behind when the transcoder doesn't (macOS's
-   `hdiutil`); FFmpeg sending its segments to the transcoder over HTTP
-   would need the segment muxer's file handling and Dolby Vision's
-   editing redone in memory. Windows' file cache keeps segments just
-   written in memory for serving anyway.
+- **Wait** when a running FFmpeg process is about to produce it: at most 12 s
+  of segments ahead of the process, never behind it.
+- **Restart instead of waiting** when the process is held to the read rate
+  (see [Throttling](#throttling)) and waiting would take longer than a
+  restart. Past its burst, a process makes a 2 s segment in about a second,
+  so a seek a few segments ahead would wait seconds. A new process (with a
+  burst of its own) starts at the requested segment when all of these hold:
+  - the process goes at the read rate, not slower (slower means the encoder is
+    the limit, and a new process would be no quicker);
+  - the wait, counted from halfway through the segment being made, is longer
+    than this job's last start-to-first-segment time plus stopping the old
+    process;
+  - no other request waits for a segment the old process is about to make.
+- **Otherwise start a new process** exactly at that segment, with `-ss`,
+  `-output_ts_offset`, `-segment_times` and `-segment_start_number`, so
+  timestamps stay on the absolute timeline. `avoid_negative_ts` is disabled,
+  so B-frame delay can't shift one process's segments against another's.
+- **Remux seeks** go a little past the boundary keyframe:
+  - With B-frames, FFmpeg moves a seek back by 3/23 s (130 ms) in every
+    container that doesn't seek by presentation time (all but MP4 and MOV). A
+    seek right at the keyframe would land on the one before, and every
+    segment of the process would hold the GOP before its own.
+  - The seek goes 140 ms past the boundary there (at most halfway to the next
+    keyframe), 1 ms elsewhere.
+  - Remuxes seek with `-noaccurate_seek`, so converted audio starts at the
+    keyframe like the copied video. Starting it at the seek point would leave
+    a hole where an older process's segment plays into the new one's.
+- A new process stops right before the next segment that already exists, so
+  segments being served are never rewritten.
+- A process started less than 3 s ago is not replaced while another request
+  is waiting for it, so two requests far apart can't keep restarting each
+  other. When that request goes away (served, or aborted by its player), the
+  one held back looks again at once.
 
-   Memory is bounded twice:
-   - A job keeps segments in memory a minute behind the playhead (6 on
-     disk), and those more than 3 minutes ahead of it (a seek back leaves
-     them) go too. A throttled process pauses 90 s ahead of the player.
-   - The transcoder takes at most a quarter of the computer's memory and
-     half of the folder's size (`/v1/info`'s `budget_bytes`; a budget
-     under 256 MB, as Docker's default 64 MB `/dev/shm`, is no memory:
-     give the container `--shm-size`, as deploy/docker's compose file
-     does, 2 GB). Each job (each rendition) reserves what it
-     is reckoned to take, 3 minutes of its bitrate (a transcode's with a
-     quarter to spare, a remux's the source's, 40 Mbps when unknown):
-     4K at 20 Mbps takes about 700 MB. A process goes to memory when that
-     reservation fits the budget beside the others' (or what they take,
-     when more), the folder keeps 64 MB free besides, and the computer a
-     tenth of its memory (512 MB at least, from `MemAvailable`); else to
-     disk.
-   - When memory runs short later (segments past the budget, the folder
-     or the computer short of room), the job with most in memory moves
-     to disk, one every 5 s: its reservation goes, and its process starts
-     again on disk at the segment it was making (a paused one, far ahead,
-     at the next request). What it made stays in memory, served from
-     there until pruned, so the player notices nothing.
+### Completion tracking
 
-   Conversions (`conversions/`) and the caches (keyframes, subtitles,
-   seek previews, shaders) stay on disk.
+- FFmpeg's segment muxer writes a line to stdout as each segment finishes. That
+  marks it ready and wakes waiting requests at once, with no polling. The
+  process is first noted as past that segment, so a woken request never sees
+  it still owing it.
+- A remux whose video needs editing has the segment edited first (see
+  [Dolby Vision in remuxes](#dolby-vision-in-remuxes)).
+- FFmpeg's `-progress` output on stderr supplies the live metrics: fps, speed,
+  bitrate and position.
+
+### Throttling
+
+Applies when the request's `throttle` is on (`throttle_transcodes` in the
+server, on by default). The read rate needs FFmpeg support (`readrate`).
+
+- **Burst, then real time.** A process makes its first 120 s as fast as it
+  can, then reads at real time (`-readrate 1`). It stays as far ahead of the
+  player as the burst took it, at a steady 1×. This saves CPU, GPU and disk.
+- **Catch-up.** A read that falls behind (a slow disk or share) catches up at
+  2× where FFmpeg can (`-readrate_catchup`, FFmpeg 8).
+- **Pause far ahead.** Once a process is 90 s ahead of the last segment the
+  player asked for, it is suspended (`NtSuspendProcess` on Windows, `SIGSTOP`
+  on Linux) until it is less than 60 s ahead, or a request waits for a segment
+  it is to make. Players keep their own buffer ahead of the picture, so this
+  is minutes ahead of what is shown. Without the pause a process could run to
+  the end of the film: work lost when the player stops or seeks, taken from
+  other playbacks meanwhile, and segments on the disk. On a small computer the
+  pause is what lets two playbacks run at once.
+- **Speed.** A process's speed is measured over its last 4 s of progress
+  (since it last resumed), because FFmpeg's own `speed` averages in the burst
+  and the pauses. A job's status reports that speed, and 1× for a process
+  held to the read rate.
+
+### Housekeeping
+
+- A process idle for 60 s (paused player) is stopped.
+- A job idle for 20 minutes expires.
+- Segments more than 6 minutes behind the playhead are deleted, in small
+  batches, off the async runtime. In memory: those more than a minute behind
+  it or 3 minutes ahead (see [Segments in memory](#segments-in-memory)).
+- On startup, segments left from an earlier run are removed, and in memory
+  those of transcoders that are gone (a crash).
+- Cache pruning: see [Work folder](#work-folder).
+- FFmpeg never outlives the transcoder: on Windows the transcoder runs in a
+  kill-on-close job object; on Linux every child gets a parent-death signal.
+- On shutdown (a signal, or stdin closed with `--exit-with-parent`) all jobs
+  are stopped first, then open requests get 5 s to finish.
+
+### Failure handling
+
+- If FFmpeg fails twice at the same segment, the error is returned instead of
+  retrying forever. The job's `last_error` holds FFmpeg's last log lines.
+- A process whose hardware encoder fails before its first segment (a driver
+  update, a GPU gone, a session refused) hands the job to the software
+  encoder, as when hardware sessions run out, with a warning on the job.
+- Once that happens to three jobs, `capabilities.json` is deleted, so the next
+  start tests the encoders again.
+
+### Renditions
+
+A transcode asked for with `variants` (adaptive bitrate: the player moves
+between sizes by itself) also comes in smaller renditions.
+
+- Each variant is the job's request with its own `max_width`, `max_height`
+  and `max_bitrate_kbps`.
+- A variant is kept only when it is no bigger and has fewer bits than the one
+  above, and its segments are laid out as the job's. Transcodes' are, as their
+  layout depends on the duration alone. Remuxes and conversions ignore
+  `variants`. `JobCreated.variants` says how many were kept.
+- They are jobs of their own inside the job, in folders `v1/`…, with segments
+  named `v1-{n}.ts`… in their playlists.
+- Burned-in text subtitles are extracted once and copied to them.
+- `master.m3u8` lists them after the job's own, largest first.
+- A process runs only for the rendition the player asked for last. When its
+  requests move to another, the others' processes stop (what they made
+  stays), and one asked for again starts where it is wanted.
+- They expire, go and are tidied with the job. Its status is the playing
+  rendition's (`rendition`, `variants`), with what all of them served.
+
+### Bitrates
+
+A transcode's bitrate, unless asked for less, follows its size. Lines are
+counted as a 16:9 picture of the same width would have them, so a 1920×800
+film gets 1080p's 8 Mbps.
+
+| Lines (16:9) | Bitrate |
+|---|---|
+| 2000 and up | 20 Mbps |
+| 1400 | 12 Mbps |
+| 1000 | 8 Mbps |
+| 700 | 4 Mbps |
+| 500 | 2 Mbps |
+| 400 | 1.2 Mbps |
+| below 400 | 0.7 Mbps |
+
+### Segments in memory
+
+A job's segments live on disk in `jobs/<id>/`, or in memory when all of these
+hold:
+
+- the request's `options.in_memory` is on (`transcode_in_memory` in the
+  server, on by default);
+- the job is throttled, which bounds its lead on the player;
+- the transcoder has room (below).
+
+How it works:
+
+- FFmpeg writes segments as files, so memory is a folder in RAM: `/dev/shm`
+  on Linux, when it is a tmpfs.
+- The transcoder keeps its own folder there, `pley-transcoder-<pid>/<id>/`
+  (renditions in `v1/`…), private to its user and removed at shutdown. One
+  left by a transcoder that is gone (a crash) is removed at the next start,
+  since a tmpfs holds it in memory until then.
+- Each process runs in the folder it writes to, with a copy of the burned-in
+  subtitles there. Each segment is served, edited (Dolby Vision) and pruned
+  where its process made it.
+- Conversions and the caches (keyframes, subtitles, seek previews, shaders)
+  stay on disk.
+
+Windows and macOS keep segments on disk (`/v1/info` says
+`memory.available: false`, "works on Linux only"):
+
+- They have no folder in RAM by default.
+- FFmpeg creates the files, so they can't be marked to stay in the file cache
+  (`FILE_ATTRIBUTE_TEMPORARY`).
+- A RAM disk needs a driver (Windows) or outlives the transcoder (macOS's
+  `hdiutil`).
+- FFmpeg sending segments to the transcoder over HTTP would need the segment
+  muxer's file handling and Dolby Vision editing redone in memory.
+- Windows' file cache keeps just-written segments in memory for serving
+  anyway.
+
+Memory limits:
+
+- **Per job.** Segments in memory are kept a minute behind the playhead (6 on
+  disk), and those more than 3 minutes ahead (left by a seek back) go too. A
+  throttled process pauses 90 s ahead of the player.
+- **Budget.** The transcoder takes at most a quarter of the computer's memory
+  and half of the folder's size (`/v1/info`'s `budget_bytes`). A budget under
+  256 MB counts as no memory: Docker's default 64 MB `/dev/shm` is too small,
+  so give the container `--shm-size` (deploy/docker's compose file gives
+  2 GB).
+- **Reservation.** Each job (each rendition) reserves 3 minutes of its
+  bitrate: a transcode's plus a quarter, a remux's at the source's, 40 Mbps
+  when unknown. 4K at 20 Mbps takes about 700 MB.
+- **Admission.** A process goes to memory when its reservation fits the
+  budget beside the others' (or what they actually take, when more), the
+  folder keeps 64 MB free, and the computer keeps a tenth of its memory free
+  (512 MB at least, from `MemAvailable`). Otherwise it goes to disk.
+- **Running short.** When memory runs short later (past the budget, or the
+  folder or the computer short of room), the job with the most in memory moves
+  to disk, one every 5 s. Its reservation goes, and its process starts again
+  on disk at the segment it was making (a paused one, far ahead, at the next
+  request). What it made stays in memory, served from there until pruned, so
+  the player notices nothing.
 
 ## Transcoding features
 
