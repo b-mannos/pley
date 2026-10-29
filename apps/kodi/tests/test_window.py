@@ -628,7 +628,7 @@ class WindowTest(unittest.TestCase):
         with Dialogs(picks=[2], yes=[False]) as asked:
             win.account()
         # Short: the question, the server, and Sign out to say yes.
-        self.assertEqual(asked.asked, [("Sign out?", "Kodi signs out of Living room.", window.T("cancel"), window.T("sign_out"))])
+        self.assertEqual(asked.asked, [("Sign out?", "You'll be signed out of Living room.", window.T("cancel"), window.T("sign_out"))])
         self.assertEqual(left, [])
         with Dialogs(picks=[2], yes=[True]):
             win.account()

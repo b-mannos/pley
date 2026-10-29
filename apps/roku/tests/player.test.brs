@@ -125,8 +125,8 @@ sub test_player_shows_a_skip_button_until_a_second_before_the_end()
     tkEqual(playerActiveMarker(markers, 68999).key, "intro:10000")
     tkInvalid(playerActiveMarker(markers, 69000), "a second before the intro ends")
     tkEqual(playerActiveMarker(markers, 1250000).key, "credits:1200000")
-    tkEqual(playerSkipLabel(markers[0]), "Skip Intro")
-    tkEqual(playerSkipLabel(markers[1]), "Skip Credits")
+    tkEqual(playerSkipLabel(markers[0]), "Skip intro")
+    tkEqual(playerSkipLabel(markers[1]), "Skip credits")
 end sub
 
 sub test_player_leaves_an_episodes_credits_to_up_next()

@@ -8,6 +8,12 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- "Can't reach" offers Try again, as the other apps do, and the skip
+  buttons read "Skip intro" and "Skip credits". Sign out asks "You'll be
+  signed out of <server>."
+
 ## [0.0.1] - 2026-10-29
 
 ### Added

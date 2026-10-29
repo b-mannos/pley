@@ -141,7 +141,7 @@ sub onButton(event as object)
     end if
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
     dialog.title = "Sign out?"
-    dialog.message = ["This TV signs out of " + m.global.session.serverName + "."]
+    dialog.message = ["You'll be signed out of " + m.global.session.serverName + "."]
     dialog.buttons = ["Sign out", "Cancel"]
     dialog.observeField("buttonSelected", "onSignOutButton")
     m.dialog = dialog

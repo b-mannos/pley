@@ -77,8 +77,8 @@ over Kodi, after the Android TV app's.
   backdrop follow the focused tile.
 - **A title's page**: Resume, From start, Watched, My List, Trailer, Add to
   playlist and More (full summary, the show or season, Your rating: five
-  stars, halves allowed). Then seasons and episodes, Extras, Cast & Crew and
-  More Like This.
+  stars, halves allowed). Then seasons and episodes, Extras, Cast & crew and
+  More like this.
 - **Music**: artist and album pages with Play and Shuffle. A track plays
   the album on from it in Kodi's music playlist, each track reported as it
   plays.
@@ -93,7 +93,7 @@ over Kodi, after the Android TV app's.
   music.
 - **A tile's menu** (the remote's menu key): mark watched, My List, add to a
   playlist, remove from Continue Watching, go to the show.
-- **Playing**: Kodi plays, with Skip Intro, Skip Credits and Up Next. Pages
+- **Playing**: Kodi plays, with Skip intro, Skip credits and Up Next. Pages
   update when playback ends and when other devices change something.
 
 **Kodi's lists.** Settings → Screens → Kodi's lists shows the add-on as
@@ -214,7 +214,7 @@ settings. Kodi's own:
 - **Other devices**: the service keeps the event stream open (`events.py`,
   `GET /api/events`) and refreshes what is on screen, never behind a
   playing video. A stream stopped from elsewhere ends at once.
-- **Skip Intro, Skip Credits and Up Next** follow the web player's rules
+- **Skip intro, Skip credits and Up Next** follow the web player's rules
   (`prompts.py`, `overlay.py`): a button over the video for 10 seconds at
   most; Up Next plays the next episode after 10 seconds unless cancelled.
 - **Without the server**, every screen says "Can't reach <server>" with Try

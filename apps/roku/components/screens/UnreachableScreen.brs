@@ -2,7 +2,7 @@ sub init()
     m.title = m.top.findNode("title")
     m.text = m.top.findNode("text")
     m.buttons = m.top.findNode("buttons")
-    m.buttons.buttons = ["Retry", "Switch server"]
+    m.buttons.buttons = ["Try again", "Switch server"]
     m.buttons.observeField("buttonSelected", "onButton")
     m.top.observeField("active", "onActive")
 end sub

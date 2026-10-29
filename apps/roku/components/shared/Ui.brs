@@ -81,7 +81,7 @@ sub uiOpenTile(tile as dynamic)
 end sub
 
 ' The server doesn't answer: this screen gives way to one that says so,
-' with Retry (this screen again, or retry) and Switch server. A covered
+' with Try again (this screen again, or retry) and Switch server. A covered
 ' screen leaves it be; it asks again when it shows.
 sub uiUnreachable(retry = invalid as dynamic)
     if not m.top.active then return

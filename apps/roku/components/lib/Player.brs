@@ -150,8 +150,8 @@ function playerSkipFor(markers as object, positionMs as integer, upNextComing as
 end function
 
 function playerSkipLabel(marker as object) as string
-    if marker.kind = "credits" then return "Skip Credits"
-    return "Skip Intro"
+    if marker.kind = "credits" then return "Skip credits"
+    return "Skip intro"
 end function
 
 ' Where skipping lands, in ms: just before an intro ends, so its last

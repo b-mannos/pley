@@ -110,11 +110,11 @@ msgid "Nothing found"
 msgstr ""
 
 msgctxt "#30060"
-msgid "Skip Intro"
+msgid "Skip intro"
 msgstr ""
 
 msgctxt "#30061"
-msgid "Skip Credits"
+msgid "Skip credits"
 msgstr ""
 
 msgctxt "#30062"
@@ -139,18 +139,6 @@ msgstr ""
 
 msgctxt "#30067"
 msgid "Check that the server is on and that this device is on its network. Pley doesn't need the internet."
-msgstr ""
-
-msgctxt "#30070"
-msgid "On your phone or computer, go to"
-msgstr ""
-
-msgctxt "#30071"
-msgid "and enter this code"
-msgstr ""
-
-msgctxt "#30072"
-msgid "Or scan this"
 msgstr ""
 
 msgctxt "#30073"
@@ -348,7 +336,7 @@ msgid "Cast"
 msgstr ""
 
 msgctxt "#30128"
-msgid "Cast & Crew"
+msgid "Cast & crew"
 msgstr ""
 
 msgctxt "#30129"
@@ -356,11 +344,11 @@ msgid "Crew"
 msgstr ""
 
 msgctxt "#30130"
-msgid "Guest Stars"
+msgid "Guest stars"
 msgstr ""
 
 msgctxt "#30131"
-msgid "More Like This"
+msgid "More like this"
 msgstr ""
 
 msgctxt "#30132"
@@ -491,14 +479,6 @@ msgctxt "#30163"
 msgid "Kodi's lists, in this skin's views"
 msgstr ""
 
-msgctxt "#30164"
-msgid "Part of %s"
-msgstr ""
-
-msgctxt "#30165"
-msgid "Account"
-msgstr ""
-
 msgctxt "#30166"
 msgid "This library is empty."
 msgstr ""
@@ -509,10 +489,6 @@ msgstr ""
 
 msgctxt "#30168"
 msgid "Known for"
-msgstr ""
-
-msgctxt "#30169"
-msgid "Up next"
 msgstr ""
 
 msgctxt "#30170"
@@ -680,7 +656,7 @@ msgid "Sign out?"
 msgstr ""
 
 msgctxt "#30211"
-msgid "Kodi signs out of %s."
+msgid "You'll be signed out of %s."
 msgstr ""
 
 msgctxt "#30212"

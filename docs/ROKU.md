@@ -40,7 +40,7 @@ more than one profile.
   Library sorted and filtered, Collections).
 - **A title's page:** Resume, Play from start, a show's next episode and
   episodes, Mark as watched, My List, Go to show, and rows of seasons, cast
-  and crew, extras, More Like This and collections; people's and
+  and crew, extras, More like this and collections; people's and
   collections' pages.
 - **Music:** artists, albums and tracks, in a player that keeps playing
   while the app is used. Now Playing has Previous, Pause, Next and Stop
@@ -57,7 +57,7 @@ more than one profile.
   Continue Watching, Go to show. In Watch history it removes a play; on a
   playlist entry it removes the entry (not in a smart playlist).
 - **The player** plays files as they are when the Roku can decode them,
-  HLS otherwise. It offers Skip Intro and Skip Credits, Up Next at an
+  HLS otherwise. It offers Skip intro and Skip credits, Up Next at an
   episode's credits (or a playlist's next entry), and Pley's menu.
 
 Not offered: playback speed and audio delay, which the Video node lacks.
@@ -179,7 +179,7 @@ under 256 KiB measures nothing and the original starts. The answer is kept
 
 ### Skip markers and Up Next
 
-Skip Intro and Skip Credits show from a marker's start until a second
+Skip intro and Skip credits show from a marker's start until a second
 before its end. An episode's credits bring up Up Next instead; it counts
 down only while Settings → Play the next episode by itself is on
 (otherwise it waits for Play now). While the button shows: OK skips, play
@@ -224,7 +224,7 @@ Rules the code keeps:
   asked for `profiles` says to sign in again.
 - **Scopes:** `library play playlists profiles`; an older sign-in that
   gets `403` on a playlist change is told to sign in again.
-- **Unreachable server:** "Can't reach …" with Retry and Switch server.
+- **Unreachable server:** "Can't reach …" with Try again and Switch server.
 - **Event stream** (`GET /api/events`, http:// servers only, since Roku's
   sockets have no TLS): read on a socket by `EventsTask`
   (`components/lib/Events.brs`), reconnecting from 2 s up to a minute.
@@ -274,7 +274,7 @@ bun run images    # the nine-patch focus and watched-mark images
   fails on a BrightScript error, a request without the User-Agent, a token
   in an address or sent for a QR code, a refresh token used twice, or two
   refreshes (or a refresh and a profile switch) at once.
-- **brs-node limits:** its own fonts, no video (Skip Intro and Up Next
+- **brs-node limits:** its own fonts, no video (Skip intro and Up Next
   have only unit tests), one fetch at a time, the odd dropped key, and no
   measure of a Roku's speed.
 - **Images:** `bun run images` runs `scripts/make_images.py` (Python

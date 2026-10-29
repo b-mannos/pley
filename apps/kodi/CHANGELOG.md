@@ -16,6 +16,12 @@ describes how they are made.
 - The proxy refuses a negative or unreadable Content-Length, and checks
   its secret in constant time.
 
+### Changed
+
+- Buttons and rows read in sentence case, as in the other apps: "Skip intro",
+  "Skip credits", "More like this", "Cast & crew", "Guest stars". Sign out
+  asks "You'll be signed out of <server>."
+
 ## [0.0.1] - 2026-10-29
 
 ### Added

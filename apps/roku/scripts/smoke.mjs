@@ -3,7 +3,7 @@
 // it with the remote: sign in with the TV code and its QR code, Home, a
 // title's details, the player, the Options key, a library's grid and its
 // next page, a show's page, its episodes and a person's page, Search,
-// Settings, the server gone and Retry, then signing out and in
+// Settings, the server gone and Try again, then signing out and in
 // again on a server too old for QR codes. Then it starts the app again,
 // signed in, and times how soon Home is asked for. Fails on a BrightScript
 // error or on anything the fake server found wrong; saves what the screen
@@ -515,8 +515,8 @@ async function walk() {
   shoot("unreachable");
   fixture.down = false;
   since = mark();
-  await press("select"); // Retry
-  await waitFor(/^GET \/api\/libraries\/1\/items\?.*offset=0/, since, "the library after Retry");
+  await press("select"); // Try again
+  await waitFor(/^GET \/api\/libraries\/1\/items\?.*offset=0/, since, "the library after Try again");
   shoot("retried");
   // Signed out, and in again with a server that has no QR codes yet: the
   // code shows on its own.
