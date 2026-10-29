@@ -352,6 +352,28 @@ half-made ones are deleted.
   binary's size and modification time and by the GPUs the system shows (its
   render nodes and their drivers, NVIDIA's driver), so a GPU given later is
   tested.
+
+  Rate control: every encoder is capped at the job's bitrate (`-maxrate`,
+  with a buffer of two seconds of it) and may spend less on what is easy to
+  encode. NVENC is VBR by quality (`-rc vbr -cq 23`, 26 for HEVC), AMF
+  peak-constrained VBR (`-rc vbr_peak`), x264 and x265 CRF (21 and 24).
+  FFmpeg makes Quick Sync and VAAPI CBR when the bitrate and maxrate are
+  equal (`qsvenc.c`'s `select_rc_mode`, `vaapi_encode.c`'s rate control
+  selection), so VAAPI is told `-rc_mode VBR`, and Quick Sync gets a
+  maxrate one bit above the bitrate (VBR; Quick Sync counts in kbit/s, so
+  the cap is the same), with bitrate control per macroblock (`-mbbrc 1`),
+  as Jellyfin does. The start-up test encodes with the same options. On
+  Mesa's D3D12 VAAPI driver FFmpeg's log said `RC mode: CBR` before and
+  `VBR` after; a still picture came out 6 % smaller (377 against 400
+  kbit/s for 4000 asked), a noisy one the same. Quick Sync isn't tried:
+  no Intel GPU here (FFmpeg takes the options). VideoToolbox keeps
+  `-maxrate` (its `DataRateLimits`, a hard limit over one second):
+  Jellyfin leaves it out for fear of hangs, which FFmpeg's source doesn't
+  explain, and the cap matters to the bandwidth the playlist states. AMF
+  HEVC needs no `-header_insertion_mode`: with `-forced_idr 1` FFmpeg asks
+  for the VPS, SPS and PPS with every forced keyframe
+  (`AMF_VIDEO_ENCODER_HEVC_INSERT_HEADER`, `amfenc.c`), and every segment
+  starts on one.
 - **Hardware decoding.** The decoder is paired with the encoder: `cuda` with
   NVENC, `d3d11va` with QSV/AMF on Windows, `vaapi`, or `videotoolbox`. Frames
   come back to system memory, and ffmpeg falls back to software decoding by

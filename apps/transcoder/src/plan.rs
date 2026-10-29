@@ -1121,6 +1121,12 @@ impl Args {
     }
 }
 
+/// Quick Sync's rate control besides the bitrates: bitrate control per
+/// macroblock, for the picture's sake (as Jellyfin has it).
+pub const QSV_VBR: [&str; 2] = ["-mbbrc", "1"];
+/// VAAPI's rate control: variable, capped by `-maxrate`.
+pub const VAAPI_VBR: [&str; 2] = ["-rc_mode", "VBR"];
+
 fn encoder_args(enc: &EncoderInfo, v: &VideoOut, preset: Option<&str>) -> Vec<String> {
     let br = v.bitrate_kbps;
     // `auto` is the transcoder's to choose; one it didn't is a plain default.
@@ -1154,7 +1160,19 @@ fn encoder_args(enc: &EncoderInfo, v: &VideoOut, preset: Option<&str>) -> Vec<St
         }
         HwAccel::Qsv => {
             s.extend(["-preset", "veryfast", "-look_ahead", "0", "-forced_idr", "1", "-g", "9999"].map(String::from));
-            rate(&mut s);
+            s.extend(QSV_VBR.iter().map(|o| o.to_string()));
+            // A maxrate equal to the bitrate is CBR to FFmpeg (qsvenc.c's
+            // select_rc_mode), which spends the bitrate on still pictures
+            // too: one bit more makes it VBR, capped at the same rate
+            // (Quick Sync counts in kbit/s).
+            s.extend([
+                "-b:v".into(),
+                format!("{br}k"),
+                "-maxrate".into(),
+                (u64::from(br) * 1000 + 1).to_string(),
+                "-bufsize".into(),
+                format!("{}k", br * 2),
+            ]);
             s.extend(["-profile:v", profile].map(String::from));
         }
         HwAccel::Amf => {
@@ -1166,6 +1184,9 @@ fn encoder_args(enc: &EncoderInfo, v: &VideoOut, preset: Option<&str>) -> Vec<St
             s.extend(["-profile:v", profile].map(String::from));
         }
         HwAccel::Vaapi => {
+            // VBR capped at the bitrate: with the two equal FFmpeg picks
+            // CBR (vaapi_encode.c's rate control selection).
+            s.extend(VAAPI_VBR.iter().map(|o| o.to_string()));
             rate(&mut s);
             s.extend(["-g", "9999"].map(String::from));
             if v.hdr.is_some() {
@@ -1887,6 +1908,47 @@ mod tests {
         // Codecs that failed the self-test stay on the copy-through path.
         let plan = Plan::build(&request(), &media(DynamicRange::Hdr10, None), &ff, None).unwrap();
         assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Software);
+    }
+
+    /// Each encoder's rate control: capped at the bitrate, variable below it.
+    #[test]
+    fn hardware_encoders_vary_their_bitrate_under_the_cap() {
+        let line = |name: &str, accel: HwAccel| {
+            let enc = EncoderInfo { name: name.into(), codec: VideoCodec::H264, hardware: true, accel, main10: false };
+            let plan = Plan::build(&request(), &media(DynamicRange::Sdr, None), &ffmpeg_with(vec![enc], vec![]), None)
+                .unwrap();
+            assert_eq!(plan.video.as_ref().unwrap().bitrate_kbps, 8000);
+            let args = args_string(&plan, 0, 2);
+            let from = args.find("-c:v").unwrap();
+            args[from..args.find(" -force_key_frames").unwrap()].to_owned()
+        };
+        // NVENC as it was: VBR by quality (-cq), capped.
+        assert_eq!(
+            line("h264_nvenc", HwAccel::Nvenc),
+            "-c:v h264_nvenc -preset p4 -tune hq -rc vbr -cq 23 -b:v 8000k -maxrate 8000k -bufsize 16000k \
+             -forced-idr 1 -no-scenecut 1 -spatial-aq 1 -g 9999 -profile:v high"
+        );
+        // Quick Sync: a maxrate one bit above the bitrate is VBR, equal is CBR.
+        assert_eq!(
+            line("h264_qsv", HwAccel::Qsv),
+            "-c:v h264_qsv -preset veryfast -look_ahead 0 -forced_idr 1 -g 9999 -mbbrc 1 \
+             -b:v 8000k -maxrate 8000001 -bufsize 16000k -profile:v high"
+        );
+        // VAAPI: VBR said outright (equal rates would be CBR).
+        assert_eq!(
+            line("h264_vaapi", HwAccel::Vaapi),
+            "-c:v h264_vaapi -rc_mode VBR -b:v 8000k -maxrate 8000k -bufsize 16000k -g 9999"
+        );
+        // AMF's own peak-constrained VBR, and VideoToolbox, as they were.
+        assert_eq!(
+            line("h264_amf", HwAccel::Amf),
+            "-c:v h264_amf -usage transcoding -quality balanced -rc vbr_peak -forced_idr 1 -g 9999 \
+             -b:v 8000k -maxrate 8000k -bufsize 16000k -profile:v high"
+        );
+        assert_eq!(
+            line("h264_videotoolbox", HwAccel::Videotoolbox),
+            "-c:v h264_videotoolbox -b:v 8000k -maxrate 8000k -bufsize 16000k -allow_sw 1 -realtime 1 -g 9999"
+        );
     }
 
     #[test]

@@ -280,6 +280,12 @@ async fn test_encoder(ffmpeg: &Path, name: &str, accel: HwAccel, main10: bool) -
         (_, true) => args.extend(["-pix_fmt", crate::plan::ten_bit_format(accel)]),
     }
     args.extend(["-c:v", name]);
+    // Rate control as jobs ask for it.
+    match accel {
+        HwAccel::Qsv => args.extend(crate::plan::QSV_VBR.iter().chain(&["-b:v", "1000k", "-maxrate", "1000001"])),
+        HwAccel::Vaapi => args.extend(crate::plan::VAAPI_VBR.iter().chain(&["-b:v", "1000k", "-maxrate", "1000k"])),
+        _ => {}
+    }
     if main10 {
         args.extend(["-profile:v", "main10"]);
         // libx265 would write a source's Dolby Vision metadata, which
