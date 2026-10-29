@@ -908,9 +908,11 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 // Media that arrives isn't media that plays: budgets start over
                 // when playback moves on (`onTime`).
                 lastData.current = performance.now();
-                // How fast the network brought it, for Automatic.
+                // How fast the network brought it, for Automatic: from its
+                // first byte, as the server sends a segment once it is made
+                // (the wait before is the transcoder's, not the network's).
                 const stats = data?.frag?.stats;
-                if (stats) autoLoaded(stats.loaded, stats.loading.end - stats.loading.start);
+                if (stats) autoLoaded(stats.loaded, stats.loading.end - Math.max(stats.loading.start, stats.loading.first));
               });
               hls.loadSource(pinfo.url);
               hls.attachMedia(video);
@@ -1134,14 +1136,16 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const v = videoRef.current;
     if (!auto || !v) return;
     const now = performance.now();
-    // A stream in several sizes: hls.js (or the browser) moves between them
-    // without a new session.
-    if (!sessionRef.current || sessionRef.current.adaptive || !mediaShown.current || autoSettling.current || v.paused || v.seeking || v.ended || document.hidden || error || stoppedRef.current) {
+    if (!sessionRef.current || !mediaShown.current || autoSettling.current || v.paused || v.seeking || v.ended || document.hidden || error || stoppedRef.current) {
       auto.interrupted();
       return;
     }
-    auto.sample(now, v.currentTime, v.currentTime + bufferedAhead(v));
-    applyAutoStep(auto.check(now));
+    // A stream in several sizes: hls.js (or the browser) moves between them
+    // as the network allows, without a new session. Automatic only steps
+    // back up from it, after calm minutes.
+    const sizes = sessionRef.current.adaptive;
+    if (!sizes) auto.sample(now, v.currentTime, v.currentTime + bufferedAhead(v));
+    applyAutoStep(auto.check(now, sizes));
   });
 
   const autoEvent = useEffectEvent((kind: "waiting" | "playing" | "seeking" | "pause" | "hidden") => {

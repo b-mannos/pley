@@ -87,6 +87,14 @@ issue*:
 | Delivery (seconds of video arriving per second, over the last 20 s) | Under 1.1 for 15 s, with less than 10 s buffered and falling |
 | Decoding | Dropped frames or a failing decoder, as each app counts them |
 
+Playing the Original as the file is (direct play or a remux), the network
+counts only once the picture has stopped: a wait for data of 2 s or more.
+Two short waits and slow delivery don't. A player keeps only seconds of a
+big file loaded ahead (a browser about 10 s or 50 MB of it), so they say
+little of the network, and a transcode would play a worse picture for the
+rest of the title. An Original the server converts (the device can't play
+the file) counts them all, as any quality does.
+
 ### Stepping down
 
 On a play issue, the new ceiling is:
@@ -123,8 +131,10 @@ carries 1.6 times the next quality up (or the file, for Original). At most
 one step every 3 minutes, silently.
 
 Players measure the network from what they download: an HLS segment's size
-over its download time, or a direct play's bytes read while filling its
-buffer. A player that can't measure stays where it went down to.
+over the time it took from its first byte (the server sends a segment once
+it is made, so the wait before is the transcoder's, not the network's), or
+a direct play's bytes read while filling its buffer. A player that can't
+measure stays where it went down to.
 
 ### Settling
 
@@ -192,12 +202,13 @@ It changes the stream as it is sent instead:
   the next quality up, the network memory goes up a quality instead, so the
   next title starts there; at the original it is cleared.
 - **Playing the original** (direct play or remux), it moves to a conversion
-  only once the picture has stopped anyway: a wait for data of 2 s or more,
-  or a failing decoder. Two short waits or the delivery warning don't move
-  it. Dropped frames move it only in a title's first minute (a sign the
-  device can't keep up with the file); later they lower where the next
-  title starts. On Kodi and Roku, a conversion whose bitrate can't change
-  (an older server or transcoder) moves the same way.
+  only once the picture has stopped anyway, as on every player ([Watching](#watching)):
+  a wait for data of 2 s or more, or a failing decoder. Dropped frames
+  move it only in a title's first minute (a sign the device can't keep up
+  with the file); later they lower where the next title starts. On Kodi and
+  Roku, a conversion whose bitrate can't change (an older server or
+  transcoder) moves the same way, short waits and slow delivery not
+  counting.
 - **One size per stream on Samsung and LG** (they don't send
   `caps.hls.variants`): a size change inside a stream may blank their
   screens too. Roku's Video node switches between the sizes of one stream
@@ -233,8 +244,11 @@ and LG apps don't, and step as described above.
 While a session has several sizes (`PlaybackInfo.adaptive`), the player's
 ABR moves between them and Automatic watches only for what sizes can't
 solve: dropped frames, and a stall long enough to ask the server. Both
-still restart the session lower. Automatic keeps its step down from
-Original, which is what creates such a session.
+still restart the session lower. The network's other play issues only
+start the calm over: in the web app and the Android app, Automatic steps
+back up from such a session as [above](#stepping-up), to the next quality
+or to the Original, so a step down from the Original, which is what creates
+such a session, doesn't last the title.
 
 The web app's Automatic plays no size bigger than the player is on screen;
 a picked quality plays its own size whenever the connection allows. The

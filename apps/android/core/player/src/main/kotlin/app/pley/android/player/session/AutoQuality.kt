@@ -45,6 +45,12 @@ data class AutoSample(
     val durationMs: Long,
     /** The network's speed as the engine measured it from what it downloaded; `null` when it can't tell. */
     val bandwidthKbps: Long?,
+    /**
+     * The stream comes in several sizes the engine moves between as the
+     * network allows (`PlaybackInfo.adaptive`): the network's play issues
+     * are theirs, and only hold a step back up off.
+     */
+    val sizes: Boolean = false,
 )
 
 /** A change Automatic asks for: play [to] from where it is. */
@@ -145,7 +151,8 @@ class PreferencesCeilings(context: Context) {
  *   server couldn't say, the quality the network carried when it was found
  *   too slow on this device in the last 30 minutes.
  * - [sample] watches rebuffering and delivery while the video plays, and
- *   asks to step down on a play issue, or back up after calm minutes.
+ *   asks to step down on a play issue, or back up after calm minutes. The
+ *   original as the file is moves only for a wait of 2 s or more.
  * - It settles: a step up that a step down undoes within 10 minutes isn't
  *   tried again during the title, and each one doubles the calm the next
  *   step up waits for (3, 6, then 12 minutes).
@@ -265,6 +272,14 @@ class AutoQuality(
     /** A seek, a new session, a track switched: the waits and the delivery count from where it lands. */
     fun jumped() = resetWatch()
 
+    /**
+     * The original as the file is (direct play or a remux): only a picture
+     * that stopped, a wait of 2 s or more, moves it. Short waits and slow
+     * delivery don't: a big file's buffer holds only seconds of it, so they
+     * say little of the network, and a conversion is a worse picture for good.
+     */
+    private val patient: Boolean get() = playing.original && !originalConverted
+
     /** Takes one look at the engine: a step to take, or `null`. */
     fun sample(s: AutoSample): AutoStep? {
         if (file == null) return null
@@ -300,7 +315,7 @@ class AutoQuality(
             val from = waitFrom ?: s.atMs.also { waitFrom = it }
             if (!waitCounted && s.atMs - from >= LONG_WAIT_MS) {
                 // Asked again while it waits, until a step is taken (one may be too soon after the last).
-                return issue(s.atMs, LoweredFor.Network)?.also { waitCounted = true }
+                return issue(s.atMs, LoweredFor.Network, s.sizes)?.also { waitCounted = true }
             }
             return null
         }
@@ -310,12 +325,12 @@ class AutoQuality(
             waitCounted = false
             return null
         }
-        if (s.atMs - from <= 0 || s.atMs - from >= LONG_WAIT_MS) return null
+        if (s.atMs - from <= 0 || s.atMs - from >= LONG_WAIT_MS || patient) return null
         shortWaits.addLast(s.atMs)
         while (shortWaits.isNotEmpty() && shortWaits.first() < s.atMs - SHORT_WAITS_WINDOW_MS) shortWaits.removeFirst()
         if (shortWaits.size >= SHORT_WAITS) {
             shortWaits.clear()
-            return issue(s.atMs, LoweredFor.Network)
+            return issue(s.atMs, LoweredFor.Network, s.sizes)
         }
         return null
     }
@@ -329,7 +344,7 @@ class AutoQuality(
         val aheadBefore = firstBuffered - firstPosition
         // Loaded to the end: nothing more can arrive, and nothing is late.
         val toTheEnd = s.durationMs > 0 && s.bufferedMs >= s.durationMs - END_MARGIN_MS
-        val low = rate != null && !toTheEnd && rate < LOW_DELIVERY && ahead < LOW_AHEAD_MS && ahead < aheadBefore - FALLING_MS
+        val low = rate != null && !toTheEnd && !patient && rate < LOW_DELIVERY && ahead < LOW_AHEAD_MS && ahead < aheadBefore - FALLING_MS
         if (!low) {
             lowSince = null
             return null
@@ -337,7 +352,7 @@ class AutoQuality(
         val since = lowSince ?: s.atMs.also { lowSince = it }
         if (s.atMs - since < LOW_FOR_MS) return null
         lowSince = null
-        return issue(s.atMs, LoweredFor.Network)
+        return issue(s.atMs, LoweredFor.Network, s.sizes)
     }
 
     /** Seconds of video that arrived per second, over the last 20 s; `null` before 5 s of them. */
@@ -414,8 +429,10 @@ class AutoQuality(
         calmNeededMs = min(MAX_CALM_MS, calmNeededMs * 2)
     }
 
-    private fun issue(nowMs: Long, reason: LoweredFor): AutoStep? {
+    /** A play issue: the calm starts over, and a step down, but in [sizes] for the network. */
+    private fun issue(nowMs: Long, reason: LoweredFor, sizes: Boolean = false): AutoStep? {
         resetCalm()
+        if (sizes && reason == LoweredFor.Network) return null
         val last = lastChangeAt
         if (last != null && nowMs - last < CHANGE_GAP_MS) return null
         val ladder = ladder()

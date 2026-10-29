@@ -29,6 +29,11 @@ function auto(mbps = 60, mem = memory(), f = file(3840, 2160, mbps), known?: Rem
   const clock = { t: 0 };
   const a = new AutoQuality({ ladder: autoLadder(f), originalKbps: f.bitrate ? f.bitrate / 1000 : null, memory: mem, wall: () => 1e12 + clock.t, onCeiling: (k) => told.push(k) });
   a.start(clock.t, known);
+  /** The stream comes in several sizes the player moves between (`check`'s `sizes`). */
+  let inSizes = false;
+  const sizes = (on: boolean) => {
+    inSizes = on;
+  };
   /**
    * Plays `seconds` at `delivery` seconds of video a second, starting with
    * `ahead` seconds loaded ahead; checks each second and returns the first step.
@@ -43,7 +48,7 @@ function auto(mbps = 60, mem = memory(), f = file(3840, 2160, mbps), known?: Rem
       pos += Math.max(0, Math.min(1, end - pos));
       end += delivery;
       a.sample(clock.t, pos, end);
-      const step = a.check(clock.t);
+      const step = a.check(clock.t, inSizes);
       if (step) return step;
     }
     return null;
@@ -54,10 +59,10 @@ function auto(mbps = 60, mem = memory(), f = file(3840, 2160, mbps), known?: Rem
     let step = null;
     for (let left = ms; left > 0; left -= 500) {
       clock.t += Math.min(500, left);
-      step = step ?? a.check(clock.t);
+      step = step ?? a.check(clock.t, inSizes);
     }
     a.resumed(clock.t);
-    return step ?? a.check(clock.t);
+    return step ?? a.check(clock.t, inSizes);
   };
   /** Up to `seconds` pass with segments loading at `kbps`, one every 4 s, until a step. */
   const network = (seconds: number, kbps: number) => {
@@ -65,12 +70,17 @@ function auto(mbps = 60, mem = memory(), f = file(3840, 2160, mbps), known?: Rem
       clock.t += 4000;
       const ms = 1000;
       a.loaded(clock.t, (kbps * ms) / 8, ms);
-      const step = a.check(clock.t);
+      const step = a.check(clock.t, inSizes);
       if (step) return step;
     }
     return null;
   };
-  return { a, clock, mem, told, play, wait, network };
+  return { a, clock, mem, told, play, wait, network, sizes };
+}
+
+/** Automatic for a 1080p file of 20 Mbps that starts at 12 Mbps 1080p, as the network was found a minute ago. */
+function lowFrom12() {
+  return auto(20, memory({ kbps: 12_000, at: 1e12 - 60_000 }), file(1920, 1080, 20));
 }
 
 describe("Automatic", () => {
@@ -106,16 +116,35 @@ describe("Automatic", () => {
     });
 
     it("shorter: two within a minute step down, one doesn't, nor two a minute apart", () => {
-      const one = auto();
+      const one = lowFrom12();
+      expect(one.a.playing).toBe("12m");
       expect(one.wait(800)).toBeNull();
       expect(one.play(30, 1.2)).toBeNull();
-      expect(one.wait(800)?.why).toBe("network");
+      expect(one.wait(800)).toEqual({ to: "8m", why: "network" });
 
-      const apart = auto();
+      const apart = lowFrom12();
       expect(apart.wait(800)).toBeNull();
       apart.clock.t += 61_000;
       expect(apart.wait(800)).toBeNull();
-      expect(apart.a.playing).toBe("original");
+      expect(apart.a.playing).toBe("12m");
+    });
+
+    it("shorter at the original as the file is: none, only one of 2 s moves it", () => {
+      const { a, play, wait } = auto();
+      for (let i = 0; i < 4; i++) {
+        expect(wait(800)).toBeNull();
+        expect(play(10, 1.2)).toBeNull();
+      }
+      expect(a.playing).toBe("original");
+      // 60 × 1 × 0.75 = 45 → 30 Mbps 4K.
+      expect(wait(2_000)).toEqual({ to: "30m", why: "network" });
+    });
+
+    it("shorter at an original the server converts: as at any quality", () => {
+      const { a, wait } = auto();
+      a.setOriginalKbps(30_000);
+      expect(wait(800)).toBeNull();
+      expect(wait(800)?.why).toBe("network");
     });
 
     it("isn't one when a seek, a pause or a new session ends it", () => {
@@ -140,16 +169,29 @@ describe("Automatic", () => {
 
   describe("on slow delivery", () => {
     it("steps down before it waits: under 1.1 for 15 s, under 10 s ahead and falling", () => {
-      const { a, play } = auto(20, memory(), file(1920, 1080, 20));
+      const { a, play } = lowFrom12();
       const step = play(40, 0.8, 9);
-      // 20 × 0.8 × 0.75 = 12 → 12 Mbps 1080p.
-      expect(step).toEqual({ to: "12m", why: "network" });
-      expect(a.playing).toBe("12m");
+      // 12 × 0.8 × 0.75 = 7.2 → 4 Mbps 720p.
+      expect(step).toEqual({ to: "4m", why: "network" });
+      expect(a.playing).toBe("4m");
     });
 
     it("doesn't with 10 s or more ahead, or ahead not falling", () => {
-      expect(auto().play(60, 0.9, 25)).toBeNull();
-      expect(auto().play(60, 1.05, 5)).toBeNull();
+      expect(lowFrom12().play(60, 0.9, 25)).toBeNull();
+      expect(lowFrom12().play(60, 1.05, 5)).toBeNull();
+    });
+
+    it("doesn't at the original as the file is: a browser keeps only seconds of a big file ahead", () => {
+      const { a, play } = auto(20, memory(), file(1920, 1080, 20));
+      expect(play(120, 0.8, 9)).toBeNull();
+      expect(a.playing).toBe("original");
+    });
+
+    it("does at an original the server converts, from what it plays at", () => {
+      const { a, play } = auto(20, memory(), file(1920, 1080, 20));
+      a.setOriginalKbps(20_000);
+      // 20 × 0.8 × 0.75 = 12 → 12 Mbps 1080p.
+      expect(play(40, 0.8, 9)).toEqual({ to: "12m", why: "network" });
     });
 
     it("can't tell when the player doesn't know what it has loaded", () => {
@@ -319,6 +361,29 @@ describe("Automatic", () => {
       expect(network(352, 50_000)).toBeNull();
       expect(network(16, 50_000)?.to).toBe("8m");
       expect(a.playing).toBe("8m");
+    });
+
+    it("from a stream of several sizes: their player answers the network, a wait only holds a step up back", () => {
+      const { a, mem, sizes, wait, play, network } = auto(60, memory({ kbps: 30_000, at: 1e12 - 600_000 }));
+      sizes(true);
+      expect(a.playing).toBe("30m");
+      expect(wait(3_000)).toBeNull();
+      // Slow delivery too (24 s in).
+      expect(play(30, 0.5, 5)).toBeNull();
+      expect(a.playing).toBe("30m");
+      // 3 calm minutes from the last, the network carrying 1.6 times the original: back to it.
+      expect(network(168, 200_000)).toBeNull();
+      expect(network(8, 200_000)).toEqual({ to: "original", why: null });
+      expect(a.lowered).toBeNull();
+      expect(mem.value).toBeNull();
+    });
+
+    it("from a stream of several sizes still steps down for the device", () => {
+      const { a, clock, sizes } = auto(60, memory({ kbps: 30_000, at: 1e12 - 600_000 }));
+      sizes(true);
+      a.decoding();
+      clock.t += 1_000;
+      expect(a.check(clock.t, true)).toEqual({ to: "15m", why: "device" });
     });
 
     it("measures the network from engine figures too, by their median", () => {

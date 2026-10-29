@@ -19,6 +19,12 @@ describes how they are made.
 
 - Picture subtitles in a file next to the media show over the video, from
   the server's copy of them.
+- Automatic quality keeps the original (direct play or remux) unless the
+  picture stops for want of data for 2 s or more. Short waits and slow
+  delivery moved it to a transcode though the network carried the file:
+  a big file's buffer holds only seconds of it. From a stream in several
+  sizes it now steps back up after calm minutes too, to the original when
+  the network carries 1.6 times it.
 
 ## [0.0.1] - 2026-10-29
 

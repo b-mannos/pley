@@ -116,6 +116,8 @@ export class AutoQuality {
 
   private readonly ladder: Rung[];
   private originalKbps: number | null;
+  /** The original plays converted (`setOriginalKbps`), not as the file is. */
+  private converted = false;
   private readonly memory: AutoMemory | null;
   private readonly wall: () => number;
   private readonly onCeiling: ((kbps: number | null) => void) | null;
@@ -183,9 +185,21 @@ export class AutoQuality {
     return rung ? rung.kbps : this.originalKbps;
   }
 
-  /** The original plays converted (a fallback of the player's), at `kbps`. */
+  /** The original plays converted (a fallback of the player's, or a file it can't play), at `kbps`. */
   setOriginalKbps(kbps: number | null): void {
+    this.converted = true;
     if (kbps && kbps > 0) this.originalKbps = kbps;
+  }
+
+  /**
+   * The original as the file is (direct play or a remux): only a picture
+   * that stopped, a wait of 2 s or more, moves it. Short waits and slow
+   * delivery don't: a browser keeps only seconds of a big file loaded
+   * ahead, so they say little of the network, and a conversion is a worse
+   * picture for good.
+   */
+  private get patient(): boolean {
+    return this.playing === ORIGINAL_ID && !this.converted;
   }
 
   /** A new session began (a change, a recovery): what was measured of the one before goes, but the network's speed. */
@@ -218,6 +232,7 @@ export class AutoQuality {
       this.pending = this.pending || "network";
       return;
     }
+    if (this.patient) return;
     const recent = this.shortWaits.filter((t) => now - t < SHORT_WAITS_WITHIN_MS);
     recent.push(now);
     if (recent.length >= 2) {
@@ -252,7 +267,7 @@ export class AutoQuality {
         this.lowFrom = now;
         this.lowAhead = ahead;
       } else if (now - this.lowFrom >= DELIVERY_LOW_FOR_MS) {
-        if (ahead < this.lowAhead) this.pending = this.pending || "network";
+        if (ahead < this.lowAhead && !this.patient) this.pending = this.pending || "network";
         this.lowFrom = now;
         this.lowAhead = ahead;
       }
@@ -309,9 +324,11 @@ export class AutoQuality {
   /**
    * What to do now: a step down after a play issue, a step back up after a
    * calm spell, or nothing. The step is taken here; the player starts again
-   * at `to`.
+   * at `to`. `sizes`: the stream comes in several sizes the player moves
+   * between as the network allows, which answer the network's issues: those
+   * only put a step up off.
    */
-  check(now: number): AutoStep | null {
+  check(now: number, sizes = false): AutoStep | null {
     if (this.waitFrom !== null && now - this.waitFrom >= LONG_WAIT_MS) {
       this.pending = this.pending || "network";
       // Waiting on: another 2 s is another issue.
@@ -321,6 +338,7 @@ export class AutoQuality {
     this.pending = null;
     if (issue) {
       this.lastIssue = now;
+      if (sizes && issue === "network") return null;
       return now - this.lastChange < CHANGE_GAP_MS ? null : this.stepDown(now, issue);
     }
     return this.stepUp(now);

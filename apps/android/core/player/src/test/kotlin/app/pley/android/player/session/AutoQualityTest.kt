@@ -45,6 +45,7 @@ class AutoQualityTest {
         watching: Boolean = true,
         bandwidth: Long? = null,
         apply: Boolean = true,
+        sizes: Boolean = false,
     ): AutoStep? {
         var left = ms
         while (left > 0) {
@@ -52,7 +53,7 @@ class AutoQualityTest {
             left -= TICK
             if (watching && !waiting) position += TICK
             buffered = (buffered + (rate * TICK).toLong()).coerceAtMost(duration).coerceAtLeast(position)
-            val step = auto.sample(AutoSample(now, watching, waiting, position, buffered, duration, bandwidth))
+            val step = auto.sample(AutoSample(now, watching, waiting, position, buffered, duration, bandwidth, sizes))
             if (step != null) {
                 if (apply) applied(step)
                 return step
@@ -76,6 +77,13 @@ class AutoQualityTest {
     }
 
     private fun started(f: MediaFile, ahead: Long = 30_000): QualityPreset = begin(f).also { settle(ahead) }
+
+    /** Begun below the original, at most at [kbps] as the server knows the network, 20 s ago, and settled. */
+    private fun startedBelow(f: MediaFile, kbps: Int, ahead: Long = 30_000): QualityPreset =
+        auto.begin(autoFile(f), now, StartCeiling.Server(kbps)).also {
+            now += AutoQuality.CHANGE_GAP_MS
+            settle(ahead)
+        }
 
     private fun ids(list: List<QualityPreset>) = list.map { it.id }
 
@@ -135,7 +143,7 @@ class AutoQualityTest {
 
     @Test
     fun `two short waits within a minute step down, further apart they don't`() {
-        started(hd)
+        assertEquals("8m", startedBelow(hd, 8_000).id)
         assertNull(play(10_000))
         assertNull(play(1_000, waiting = true))
         assertNull(play(70_000))
@@ -143,32 +151,71 @@ class AutoQualityTest {
         assertNull(play(TICK))
         assertNull(play(40_000))
         assertNull(play(1_000, waiting = true))
-        present(play(TICK))
+        assertEquals("4m", present(play(TICK)).to.id)
     }
 
     @Test
     fun `video arriving slower than it plays, with little ahead and falling, steps down before it waits`() {
-        started(hd, ahead = 12_000)
+        startedBelow(hd, 8_000, ahead = 12_000)
         // 0.5 s a second: ahead falls under 10 s after 4 s, and it is a play issue 15 s later.
         assertNull(play(18_000, rate = 0.5))
         val step = present(play(3_000, rate = 0.5))
         assertEquals(LoweredFor.Network, step.reason)
-        // 10 Mbps × 0.5 × 0.75 = 3.75 Mbps: 2 Mbps 480p.
+        // 8 Mbps × 0.5 × 0.75 = 3 Mbps: 2 Mbps 480p.
         assertEquals("2m", step.to.id)
     }
 
     @Test
     fun `slow delivery with plenty ahead, steady, or loaded to the end is no play issue`() {
         // 30 s ahead: it has time.
-        started(hd)
+        startedBelow(hd, 8_000)
         assertNull(play(30_000, rate = 0.8))
         // 5 s ahead and steady (a buffer full by its bytes).
-        started(hd, ahead = 5_000)
+        startedBelow(hd, 8_000, ahead = 5_000)
         assertNull(play(40_000, rate = 1.0))
         // Loaded to the end: nothing more arrives, nothing is late.
-        started(hd, ahead = 8_000)
+        startedBelow(hd, 8_000, ahead = 8_000)
         duration = buffered
         assertNull(play(7_000, rate = 0.0))
+    }
+
+    @Test
+    fun `the original as the file is moves only for a wait of 2 s, not short waits or slow delivery`() {
+        started(uhd, ahead = 12_000)
+        // A big file's few seconds ahead, arriving no faster than they play.
+        assertNull(play(40_000, rate = 0.5))
+        repeat(3) {
+            assertNull(play(1_000, waiting = true))
+            assertNull(play(10_000))
+        }
+        assertSame(Qualities.ORIGINAL, auto.playing)
+        assertEquals(LoweredFor.Network, present(play(3_000, waiting = true)).reason)
+    }
+
+    @Test
+    fun `an original the server converts moves for short waits too`() {
+        started(hd)
+        auto.originalPlaysAt(12_000, converted = true)
+        assertNull(play(10_000))
+        assertNull(play(1_000, waiting = true))
+        assertNull(play(10_000))
+        assertNull(play(1_000, waiting = true))
+        assertEquals("8m", present(play(TICK)).to.id)
+    }
+
+    @Test
+    fun `in several sizes the network is the engine's, and calm minutes step back up to the original`() {
+        assertEquals("30m", startedBelow(uhd, 30_000).id)
+        // A wait and slow delivery: the engine moves between the sizes for them.
+        assertNull(play(3_000, waiting = true, sizes = true))
+        assertNull(play(10_000, sizes = true))
+        assertEquals("30m", auto.playing.id)
+        // 3 calm minutes, the network carrying 1.6 times the original's 60 Mbps.
+        assertNull(play(165_000, bandwidth = 200_000, sizes = true))
+        val up = present(play(20_000, bandwidth = 200_000, sizes = true))
+        assertSame(Qualities.ORIGINAL, up.to)
+        assertTrue(up.up)
+        assertNull(memory.read())
     }
 
     // ---------------------------------------------------------------- the formula

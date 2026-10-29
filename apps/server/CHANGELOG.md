@@ -75,6 +75,14 @@ describes how they are made.
 
 - H.264 from AMD's encoder says its colours (BT.709), which it left out:
   players guessed, and some took 4K video for BT.2020.
+- Automatic quality in the web app keeps the original (direct play or
+  remux) unless the picture stops for want of data for 2 s or more. Short
+  waits and slow delivery moved it to a transcode (30 Mbps 4K for a 4K
+  film) though the network carried the file: a browser keeps only seconds
+  of a big file loaded ahead. From a stream in several sizes it now steps
+  back up after calm minutes too, to the original when the network carries
+  1.6 times it, measured from each segment's first byte rather than from
+  the wait while the transcoder made it.
 
 ## [0.0.1] - 2026-10-29
 
