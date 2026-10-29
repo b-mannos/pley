@@ -289,6 +289,7 @@ mod tests {
             tonemap: None,
             tonemap_input: None,
             hw_decode: None,
+            gpu_scale: None,
             deinterlace: false,
             preset: String::new(),
             pipeline: Pipeline::Software,

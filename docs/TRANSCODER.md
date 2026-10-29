@@ -377,7 +377,37 @@ half-made ones are deleted.
 - **Hardware decoding.** The decoder is paired with the encoder: `cuda` with
   NVENC, `d3d11va` with QSV/AMF on Windows, `vaapi`, or `videotoolbox`. Frames
   come back to system memory, and ffmpeg falls back to software decoding by
-  itself if the codec isn't supported. Vulkan decoding (into libplacebo)
+  itself if the codec isn't supported.
+
+  Frames that come to memory to be resized (burned-in subtitles, zimg's
+  or OpenCL's tone mapping, x264 or x265, the stand-in when hardware
+  sessions run out included) are scaled by the GPU that decoded them
+  first, so only the output's pixels are copied (4K to 1080p, a quarter
+  of them): `-hwaccel cuda -hwaccel_output_format cuda` and
+  `scale_cuda=w=…:h=…:format=nv12,hwdownload,format=nv12`, in 10 bits
+  (`p010le`) for tone mapping and HDR kept; on VAAPI `scale_vaapi`, in 8
+  bits only (its start-up test makes NV12; 10 bits on the GPU were tried
+  with CUDA alone). Only where the decoder's zero-copy pipeline passed its
+  start-up test for the codec (a decoder that can't would hand the scaler
+  frames in memory), not for interlaced video (deinterlaced at its own size
+  first) nor for libplacebo, which scales as it tone maps. Measured on an
+  RTX 5070 and a Ryzen with 24 threads (busy with other work, so CPU time
+  is the steadier figure), the plan's own arguments for 20 s of 4K HEVC
+  to 1080p H.264, median of three: burned-in text subtitles with NVENC
+  took 10.0 s of CPU and 2.6 s before, 3.3 s and 1.4 s after; x264 (the
+  stand-in) 19.9 s and 2.7 s before, 14.6 s and 2.0 s after; HDR10 tone
+  mapped by zimg into NVENC 78 s of CPU before, 48 s after, and 30 s of it
+  12.1 s before, 9.1 s after (median of five). The SDR pictures are the
+  same (luma PSNR 50 dB and 46.5 dB between the old and new segments,
+  encoder noise included). zimg used to scale in linear light as it made the
+  picture linear; scaled by the GPU first, in PQ, the picture differs
+  where fine bright detail meets dark (PSNR 33 dB on FFmpeg's test pattern,
+  all hard edges), as everywhere else that scales before tone mapping
+  (Jellyfin, OpenCL here). Mesa's D3D12 VAAPI driver crashes in
+  `scale_vaapi` (WSL), so its pipeline fails the start-up test and VAAPI
+  frames there come to memory whole, as before.
+
+  Vulkan decoding (into libplacebo)
   counts for a codec only when the start-up test's frames reach the filters
   in Vulkan memory (`pixfmt:vulkan` in FFmpeg's verbose log): libplacebo
   takes frames from memory too, so a driver without Vulkan video decoding

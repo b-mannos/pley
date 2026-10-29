@@ -106,7 +106,8 @@ pub fn untagged_hdr_fix(stream: &MediaStream) -> Option<String> {
 /// Where frames live between decode and encode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pipeline {
-    /// CPU filters. Decoding may use `-hwaccel` with frames copied to system memory.
+    /// CPU filters. Decoding may use `-hwaccel` with frames copied to system
+    /// memory, scaled by its GPU first where it can ([`VideoOut::scales_on_gpu`]).
     Software,
     /// Vulkan decode → libplacebo tone mapping → `h264_vulkan` (`encode_on_gpu`)
     /// or a single download into the selected encoder.
@@ -142,6 +143,11 @@ pub struct VideoOut {
     /// ([`untagged_hdr_fix`]).
     pub tonemap_input: Option<String>,
     pub hw_decode: Option<String>,
+    /// The GPU that decodes the frames scales them too, before they come to
+    /// memory for the CPU's filters or encoder ([`VideoOut::scales_on_gpu`]):
+    /// NVIDIA's (`scale_cuda`) or VAAPI's (`scale_vaapi`), where its
+    /// decode and scale pipeline passed the start-up test for the codec.
+    pub gpu_scale: Option<HwAccel>,
     pub deinterlace: bool,
     pub preset: String,
     pub pipeline: Pipeline,
@@ -164,6 +170,17 @@ pub struct HdrOut {
     /// to HDR10, say); otherwise the decoded frames are in it already,
     /// their HDR10 metadata going to the encoder with them.
     pub convert: bool,
+}
+
+impl VideoOut {
+    /// The GPU that scales the frames it decoded, when `pipeline` brings them
+    /// to memory (the CPU's filters, a software encoder) and their size
+    /// changes: only the output's pixels are copied and scaled no more on the
+    /// CPU (4K to 1080p, a quarter of them).
+    pub fn scales_on_gpu(&self, pipeline: Pipeline) -> Option<HwAccel> {
+        let resized = self.width != self.src_width || self.height != self.src_height;
+        self.gpu_scale.filter(|_| pipeline == Pipeline::Software && resized)
+    }
 }
 
 impl HdrOut {
@@ -393,6 +410,7 @@ impl Plan {
                         tonemap: None,
                         tonemap_input: None,
                         hw_decode: None,
+                        gpu_scale: None,
                         deinterlace: false,
                         preset: String::new(),
                         pipeline: Pipeline::Software,
@@ -487,6 +505,23 @@ impl Plan {
                         Pipeline::Software if req.options.hardware_decoding => pick_hw_decoder(ff, &encoder),
                         Pipeline::Software => None,
                     };
+                    // Frames that come to memory are scaled by the GPU that
+                    // decoded them first, where its pipeline handles the codec;
+                    // not those deinterlaced (by fields, at their own size)
+                    // nor those libplacebo scales as it tone maps. VAAPI's
+                    // scaler in 8 bits only: its start-up test makes NV12,
+                    // and 10 bits on the GPU were tried with CUDA alone.
+                    let ten_bits = tonemap.is_some() || hdr.is_some();
+                    let gpu_scale = match hw_decode.as_deref() {
+                        Some("cuda") => Some(HwAccel::Nvenc),
+                        Some("vaapi") if !ten_bits => Some(HwAccel::Vaapi),
+                        _ => None,
+                    }
+                    .filter(|accel| {
+                        !deinterlace
+                            && tonemap != Some(Tonemapper::Libplacebo)
+                            && ff.caps.gpu_pipelines.iter().any(|p| p.accel == *accel && p.codecs.contains(&key))
+                    });
                     let encoder = match pipeline {
                         Pipeline::Vulkan { encode_on_gpu: true } => vulkan_encoder(),
                         _ => encoder,
@@ -503,6 +538,7 @@ impl Plan {
                         tonemap,
                         tonemap_input,
                         hw_decode,
+                        gpu_scale,
                         deinterlace,
                         pipeline,
                         preset: req
@@ -860,6 +896,12 @@ impl Plan {
                     }
                     if let Some(dec) = &v.hw_decode {
                         a.push_all(["-hwaccel", dec.as_str()]);
+                        // Frames kept on the GPU for its scaler.
+                        match v.scales_on_gpu(pipeline) {
+                            Some(HwAccel::Vaapi) => a.push_all(["-hwaccel_output_format", "vaapi"]),
+                            Some(_) => a.push_all(["-hwaccel_output_format", "cuda", "-extra_hw_frames", "8"]),
+                            None => {}
+                        }
                     }
                 }
             }
@@ -989,6 +1031,17 @@ impl Plan {
         if v.deinterlace {
             pre.push("yadif=mode=send_frame:deint=interlaced".into());
         }
+        // Scaled by the GPU that decoded the frames, then copied to memory:
+        // in 10 bits for tone mapping and HDR kept.
+        let scale_needed = match v.scales_on_gpu(pipeline) {
+            Some(accel) => {
+                let format = if v.tonemap.is_some() || v.hdr.is_some() { "p010le" } else { "nv12" };
+                let scaler = if accel == HwAccel::Vaapi { "scale_vaapi" } else { "scale_cuda" };
+                pre.push(format!("{scaler}=w={w}:h={h}:format={format},hwdownload,format={format}"));
+                false
+            }
+            None => scale_needed,
+        };
         match v.tonemap {
             Some(Tonemapper::Libplacebo) => {
                 let vulkan = matches!(pipeline, Pipeline::Vulkan { .. });
@@ -1959,7 +2012,8 @@ mod tests {
         assert!(args.contains("[0:0]scale_cuda=w=1920:h=1080:format=nv12[vout]"));
         assert!(args.contains("-c:v h264_nvenc"));
 
-        // Hardware sessions exhausted → software encoder → no GPU frames.
+        // Hardware sessions exhausted → software encoder → frames to
+        // memory, scaled by the GPU first.
         let ctx = ArgsContext {
             input: Path::new("/media/movie.mkv"),
             encoder: Some(&ff.caps.encoders[1]),
@@ -1969,15 +2023,116 @@ mod tests {
         };
         let args: Vec<String> = plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
         let args = args.join(" ");
-        assert!(!args.contains("hwaccel_output_format"), "{args}");
-        assert!(args.contains("scale=1920:1080:flags=bicubic,format=yuv420p"));
+        assert!(args.contains("-hwaccel cuda -hwaccel_output_format cuda -extra_hw_frames 8"), "{args}");
+        assert!(
+            args.contains("[0:0]scale_cuda=w=1920:h=1080:format=nv12,hwdownload,format=nv12,format=yuv420p[vout]"),
+            "{args}"
+        );
+        assert!(!args.contains("flags=bicubic"), "{args}");
         assert!(args.contains("-c:v libx264"));
 
-        // Burn-in needs CPU frames.
+        // Burn-in needs CPU frames: scaled by the GPU, the subtitles drawn
+        // on the 1080p frame.
         let mut req = request();
+        req.subtitle = Some(SubtitleBurnRequest { stream_index: Some(3), external_path: None });
+        let plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.pipeline, v.gpu_scale), (Pipeline::Software, Some(HwAccel::Nvenc)));
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("-hwaccel cuda -hwaccel_output_format cuda -extra_hw_frames 8"), "{args}");
+        assert!(
+            args.contains(
+                "[0:0]scale_cuda=w=1920:h=1080:format=nv12,hwdownload,format=nv12,setpts=PTS+0.000/TB,subtitles="
+            ),
+            "{args}"
+        );
+        assert!(args.contains("-c:v h264_nvenc"), "{args}");
+        // Picture subtitles go over the frame the GPU scaled.
         req.subtitle = Some(SubtitleBurnRequest { stream_index: Some(2), external_path: None });
         let plan = Plan::build(&req, &media(DynamicRange::Sdr, None), &ff, None).unwrap();
-        assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Software);
+        let args = args_string(&plan, 0, 2);
+        assert!(
+            args.contains(
+                "[0:0]scale_cuda=w=1920:h=1080:format=nv12,hwdownload,format=nv12[base];[0:2]scale=1920:-1[subs]"
+            ),
+            "{args}"
+        );
+
+        // Not at the source's size: nothing to scale, frames copied as they were.
+        let mut small = media(DynamicRange::Sdr, None);
+        (small.streams[0].width, small.streams[0].height) = (Some(1920), Some(1080));
+        let plan = Plan::build(&req, &small, &ff, None).unwrap();
+        let args = args_string(&plan, 0, 2);
+        assert!(!args.contains("hwaccel_output_format") && !args.contains("scale_cuda"), "{args}");
+        // Nor a codec the GPU pipeline didn't pass, nor interlaced video,
+        // which is deinterlaced at its own size first.
+        let mut h264 = media(DynamicRange::Sdr, None);
+        h264.streams[0].codec = "h264".into();
+        let mut interlaced = media(DynamicRange::Sdr, None);
+        interlaced.streams[0].interlaced = Some(true);
+        for m in [h264, interlaced] {
+            let plan = Plan::build(&req, &m, &ff, None).unwrap();
+            assert_eq!(plan.video.as_ref().unwrap().gpu_scale, None);
+            let args = args_string(&plan, 0, 2);
+            assert!(!args.contains("hwaccel_output_format") && !args.contains("scale_cuda"), "{args}");
+            assert!(args.contains("scale=1920:1080:flags=bicubic"), "{args}");
+        }
+    }
+
+    /// HDR tone mapped by zimg or OpenCL comes to memory: the GPU scales it
+    /// in 10 bits first, and the tone mapping works at the output's size.
+    #[test]
+    fn hdr_tone_mapped_on_the_cpu_is_scaled_by_the_gpu_first() {
+        let mut ff = ffmpeg_with(vec![nvenc(), x264()], vec![Tonemapper::Zscale]);
+        ff.caps.gpu_pipelines =
+            vec![pley_transcoder_api::GpuPipeline { accel: HwAccel::Nvenc, codecs: vec!["hevc10".into()] }];
+        let plan = Plan::build(&request(), &ten_bit(media(DynamicRange::Hdr10, None)), &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!(
+            (v.pipeline, v.tonemap, v.gpu_scale),
+            (Pipeline::Software, Some(Tonemapper::Zscale), Some(HwAccel::Nvenc))
+        );
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("-hwaccel cuda -hwaccel_output_format cuda -extra_hw_frames 8"), "{args}");
+        assert!(
+            args.contains(&format!(
+                "[0:0]scale_cuda=w=1920:h=1080:format=p010le,hwdownload,format=p010le,setparams=color_trc=smpte2084\
+                 :color_primaries=bt2020:colorspace=bt2020nc,{ZSCALE_TONEMAP},format=yuv420p[vout]"
+            )),
+            "{args}"
+        );
+
+        // VAAPI (Intel and AMD graphics on Linux): its scaler makes 8 bits
+        // only here, so HDR for OpenCL's tone mapping comes to memory whole.
+        let ff = intel(HwAccel::Vaapi, false);
+        let plan = Plan::build(&request(), &ten_bit(media(DynamicRange::Hdr10, None)), &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.tonemap, v.gpu_scale), (Some(Tonemapper::Opencl), None));
+        let args = args_string(&plan, 0, 2);
+        assert!(!args.contains("hwaccel_output_format") && !args.contains("scale_vaapi"), "{args}");
+        assert!(args.contains("tonemap_opencl=") && args.contains("scale=1920:1080:flags=bicubic"), "{args}");
+        // SDR with burned-in subtitles: scaled by VAAPI, uploaded back for its encoder.
+        let mut req = request();
+        req.subtitle = Some(SubtitleBurnRequest { stream_index: Some(3), external_path: None });
+        let plan = Plan::build(&req, &ten_bit(media(DynamicRange::Sdr, None)), &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.pipeline, v.gpu_scale), (Pipeline::Software, Some(HwAccel::Vaapi)));
+        let args = args_string(&plan, 0, 2);
+        assert!(
+            args.contains("-vaapi_device /dev/dri/renderD128 -hwaccel vaapi -hwaccel_output_format vaapi"),
+            "{args}"
+        );
+        assert!(args.contains("[0:0]scale_vaapi=w=1920:h=1080:format=nv12,hwdownload,format=nv12,setpts="), "{args}");
+        assert!(args.contains("format=nv12,hwupload=derive_device=vaapi[vout]"), "{args}");
+
+        // libplacebo scales as it tone maps: its frames are left alone.
+        let mut ff = ffmpeg_with(vec![nvenc(), x264()], vec![Tonemapper::Libplacebo]);
+        ff.caps.gpu_pipelines =
+            vec![pley_transcoder_api::GpuPipeline { accel: HwAccel::Nvenc, codecs: vec!["hevc10".into()] }];
+        let plan = Plan::build(&request(), &ten_bit(media(DynamicRange::Hdr10, None)), &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.pipeline, v.hw_decode.as_deref(), v.gpu_scale), (Pipeline::Software, Some("cuda"), None));
+        assert!(!args_string(&plan, 0, 2).contains("hwaccel_output_format"));
     }
 
     /// What an Intel N100 (or any recent Intel graphics) passes at start-up:
@@ -2282,7 +2437,12 @@ mod tests {
         };
         let args: Vec<String> = plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
         let args = args.join(" ");
-        assert!(args.contains("scale=1920:1080:flags=bicubic,format=yuv420p10le[vout]"), "{args}");
+        // Scaled by the GPU in 10 bits, x265's planar format on the CPU.
+        assert!(args.contains("-hwaccel cuda -hwaccel_output_format cuda -extra_hw_frames 8"), "{args}");
+        assert!(
+            args.contains("scale_cuda=w=1920:h=1080:format=p010le,hwdownload,format=p010le,format=yuv420p10le[vout]"),
+            "{args}"
+        );
         assert!(args.contains("-c:v libx265"), "{args}");
         assert!(args.contains("repeat-headers=1 -profile:v main10 -dolbyvision 0"), "{args}");
         assert!(args.contains("-color_trc smpte2084"), "{args}");
