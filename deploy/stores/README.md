@@ -12,10 +12,10 @@ The pictures and words the app stores ask for besides the app itself.
 | `tv-banner-1280x720.png` | 1280 × 720 | Google Play's Android TV banner, the Amazon Appstore's Fire TV icon |
 | `fire-tv-background-1920x1080.jpg` | 1920 × 1080 | The Amazon Appstore's Fire TV background, behind the app's page (the P top right, clear of the store's words) |
 
-`screenshots/` has the apps' screenshots, phones' at 1080 × 1920 (the
-player 1920 × 1080) and TVs' at 1920 × 1080, JPEGs as Google Play takes
-them. They show a made-up library, with no real title's artwork, which
-`scripts/store-library` makes again (its README says how).
+`screenshots/` has the apps' screenshots as JPEGs, as Google Play takes
+them: phones at 1080 × 1920 (the player at 1920 × 1080), TVs at 1920 × 1080.
+They show a made-up library with no real title's artwork, which
+[`scripts/store-library`](../../scripts/store-library/README.md) recreates.
 
 | Phone | TV |
 |---|---|
@@ -29,16 +29,15 @@ them. They show a made-up library, with no real title's artwork, which
 
 ## The app
 
-- **Package**: `com.formandelement.pley` (Google Play, and the Amazon Appstore
-  for Fire TV and Fire tablets: since August 2025 it takes no apps for other
-  Android phones and tablets),
-  the bundle from the release, `pley-android-<version>-play.aab`
-  (docs/ANDROID.md, Releases).
-- **Version code**: the app's version's, 10,000,000 + major × 1,000,000 +
-  minor × 10,000 + patch × 100 (0.0.1 is 10000100, above the 20003 Google
-  Play has from 0.2.0; docs/RELEASING.md). The stores take each code once,
-  so a second upload of the same version is built with `PLEY_BUILD` set, 1
-  to 99, which is added to it (`PLEY_BUILD=1` makes 10000101):
+- **Package**: `com.formandelement.pley`, on Google Play and the Amazon
+  Appstore (Fire TV and Fire tablets only: the Appstore takes no apps for
+  other Android phones and tablets since August 2025). Upload the release's
+  bundle, `pley-android-<version>-play.aab`
+  ([ANDROID.md](../../docs/ANDROID.md#releases)).
+- **Version code**: derived from the version
+  ([RELEASING.md](../../docs/RELEASING.md#androids-version-code)). The stores
+  take each code once, so a second upload of the same version is built with
+  `PLEY_BUILD` (1 to 99) added (`PLEY_BUILD=1` makes 10000101):
   `./gradlew :app:bundleStoreRelease` in `apps/android`, with the release
   key.
 - **Category**: Video Players & Editors.
