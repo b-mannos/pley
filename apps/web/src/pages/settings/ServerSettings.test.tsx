@@ -113,6 +113,57 @@ describe("ServerSettings", () => {
     expect(screen.getByText(/lacks Chromaprint/)).toBeInTheDocument();
   });
 
+  it("shows when library work runs automatically, as learned, and sets hours of its own", async () => {
+    const user = userEvent.setup();
+    // Evenings watched, after midnight not seen, the night quiet.
+    const hours = Array.from({ length: 168 }, (_, at) => {
+      const h = at % 24;
+      return { playing: h >= 19 ? 0.6 : h < 2 ? null : 0, open: h >= 2 && h < 7 };
+    });
+    const requests = mockApi({
+      "GET /api/settings": () => ({ ...SETTINGS, library_work: "auto", library_work_from: 1, library_work_to: 7, library_work_max_cpu: 50 }),
+      "GET /api/system": () => ({}),
+      "GET /api/system/library-work": () => ({ mode: "auto", waiting: null, resumes_at: null, learned: true, now: 93, hours }),
+      "PUT /api/settings": (req) => ({ ...SETTINGS, library_work: "auto", ...(req.body as Partial<Settings>) }),
+    });
+    renderWithProviders(<ServerSettings />);
+    const mode = await screen.findByLabelText("When library work runs");
+    expect(mode).toHaveValue("auto");
+    // The week, an hour a cell.
+    expect(await screen.findAllByRole("img", { name: /something played 60% of the time$/ })).toHaveLength(7 * 5);
+    expect(screen.getAllByRole("img", { name: /not seen enough yet$/ })).toHaveLength(7 * 2);
+    expect(screen.getAllByRole("img", { name: /library work may begin$/ })).toHaveLength(7 * 5);
+    expect(screen.getByText(/^Learned from what played/)).toBeInTheDocument();
+
+    await user.selectOptions(mode, "hours");
+    expect(screen.queryByText("When people watch")).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("To"), "6");
+    await user.selectOptions(screen.getByLabelText("Wait for other programs"), "100");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ library_work: "hours", library_work_to: 6, library_work_max_cpu: 100 }),
+    );
+  });
+
+  it("leaves library work out on a server before it, and greys it out with nothing to run", async () => {
+    const user = userEvent.setup();
+    mockApi({ "GET /api/settings": () => SETTINGS, "GET /api/system": () => ({}) });
+    const first = renderWithProviders(<ServerSettings />);
+    expect(await screen.findByRole("switch", { name: "Detect intros and credits" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("When library work runs")).not.toBeInTheDocument();
+    first.unmount();
+
+    mockApi({ "GET /api/settings": () => ({ ...SETTINGS, library_work: "idle", library_work_max_cpu: 50 }), "GET /api/system": () => ({}) });
+    renderWithProviders(<ServerSettings />);
+    const mode = await screen.findByLabelText("When library work runs");
+    expect(mode).toBeEnabled();
+    await user.click(screen.getByRole("switch", { name: "Detect intros and credits" }));
+    await user.click(screen.getByRole("switch", { name: "Seek previews" }));
+    expect(mode).toBeDisabled();
+    expect(screen.getByLabelText("Wait for other programs")).toBeDisabled();
+    expect(screen.getByText("Needs Detect intros and credits, or Previews for whole libraries.")).toBeInTheDocument();
+  });
+
   it("sets up subtitle search, sending the password only when it changes", async () => {
     const user = userEvent.setup();
     const requests = mockApi({

@@ -27,6 +27,22 @@ pub enum TvMetadata {
     Tvmaze,
 }
 
+/// When library work runs: intro and credits detection, and seek previews
+/// of whole libraries (see [`crate::schedule`]). What plays, titles people
+/// open and analyses asked for don't wait for it.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LibraryWork {
+    /// What may be watched soon whenever nothing plays; the rest in the
+    /// hours people rarely watch, as learned from when they do.
+    #[default]
+    Auto,
+    /// Between set hours ([`Settings::library_work_from`]).
+    Hours,
+    /// Whenever nothing plays.
+    Idle,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Settings {
@@ -56,6 +72,16 @@ pub struct Settings {
     pub seek_previews: bool,
     /// Make them for whole libraries after scans, not only when a title is opened.
     pub previews_in_background: bool,
+    pub library_work: LibraryWork,
+    /// The hours library work runs between with [`LibraryWork::Hours`], in
+    /// the server's time (0 to 23): from the hour `from` begins to the hour
+    /// `to` begins, past midnight where `to` comes first; all day where
+    /// they are the same.
+    pub library_work_from: u8,
+    pub library_work_to: u8,
+    /// Library work waits while other programs keep more than this share
+    /// of the processors busy, in percent; 100: it never waits for them.
+    pub library_work_max_cpu: u8,
     /// Apps by other publishers may sign in (their client metadata documents
     /// are read from the internet: see [`crate::oauth`]). pley's own apps
     /// always may. Off by default; turning it off signs them out.
@@ -119,6 +145,10 @@ impl Default for Settings {
             detect_markers: true,
             seek_previews: true,
             previews_in_background: true,
+            library_work: LibraryWork::Auto,
+            library_work_from: 1,
+            library_work_to: 7,
+            library_work_max_cpu: 50,
             third_party_apps: false,
             proxy_addresses: Vec::new(),
             opensubtitles_api_key: String::new(),
@@ -420,6 +450,10 @@ pub struct SettingsPatch {
     pub detect_markers: Option<bool>,
     pub seek_previews: Option<bool>,
     pub previews_in_background: Option<bool>,
+    pub library_work: Option<LibraryWork>,
+    pub library_work_from: Option<u8>,
+    pub library_work_to: Option<u8>,
+    pub library_work_max_cpu: Option<u8>,
     pub third_party_apps: Option<bool>,
     pub proxy_addresses: Option<Vec<String>>,
     pub opensubtitles_api_key: Option<String>,
@@ -525,6 +559,25 @@ impl SettingsStore {
         }
         if let Some(v) = patch.previews_in_background {
             next.previews_in_background = v;
+        }
+        if let Some(v) = patch.library_work {
+            next.library_work = v;
+        }
+        for (hour, field) in
+            [(patch.library_work_from, &mut next.library_work_from), (patch.library_work_to, &mut next.library_work_to)]
+        {
+            if let Some(v) = hour {
+                if v > 23 {
+                    return Err(AppError::bad_request("library work hours are 0 to 23"));
+                }
+                *field = v;
+            }
+        }
+        if let Some(v) = patch.library_work_max_cpu {
+            if !(10..=100).contains(&v) {
+                return Err(AppError::bad_request("library work's processor limit must be between 10 and 100 %"));
+            }
+            next.library_work_max_cpu = v;
         }
         if let Some(v) = patch.third_party_apps {
             next.third_party_apps = v;
@@ -632,6 +685,9 @@ mod tests {
         assert!(bad(serde_json::json!({"max_transcodes": 0})).await);
         assert!(bad(serde_json::json!({"max_transcodes": 65})).await);
         assert!(bad(serde_json::json!({"transcode_preset": "placebo"})).await);
+        assert!(bad(serde_json::json!({"library_work_from": 24})).await);
+        assert!(bad(serde_json::json!({"library_work_max_cpu": 5})).await);
+        assert!(bad(serde_json::json!({"library_work_max_cpu": 101})).await);
 
         let s = store
             .update(
@@ -655,6 +711,11 @@ mod tests {
         assert_eq!(s.scan_interval_minutes, 7 * 24 * 60, "at most a week");
         assert_eq!(Settings::default().transcode_preset, "auto", "the transcoder chooses by default");
         assert!(!s.seek_previews);
+        // Library work after the hours people rarely watch, unless set.
+        assert_eq!(s.library_work, LibraryWork::Auto);
+        let hours = serde_json::json!({"library_work": "hours", "library_work_from": 22, "library_work_to": 6});
+        let s = store.update(&db, patch(hours)).await.unwrap();
+        assert_eq!((s.library_work, s.library_work_from, s.library_work_to), (LibraryWork::Hours, 22, 6));
         // Fields left out keep their values.
         let s = store.update(&db, patch(serde_json::json!({"watch_libraries": false}))).await.unwrap();
         assert_eq!((s.server_name.as_str(), s.max_transcodes), ("Den", 64));
@@ -695,6 +756,7 @@ mod tests {
         assert_eq!((s.server_name.as_str(), s.max_transcodes, s.hwaccel), ("Attic", 2, HwAccel::Nvenc));
         assert_eq!(s.tv_metadata, TvMetadata::Auto);
         assert!(s.music_metadata && s.seek_previews && s.previews_in_background && s.detect_markers);
+        assert_eq!((s.library_work, s.library_work_max_cpu), (LibraryWork::Auto, 50));
 
         // Unreadable settings fall back to the defaults instead of failing start-up.
         sqlx::query("UPDATE settings SET value = 'not json' WHERE key = 'server'").execute(&db.write).await.unwrap();

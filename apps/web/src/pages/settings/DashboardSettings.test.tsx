@@ -70,3 +70,29 @@ describe("DashboardSettings stopping playback", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });
+
+describe("DashboardSettings library work", () => {
+  it("says what waits and why", async () => {
+    let activity: Activity = {
+      scans: [],
+      sessions: [],
+      seasons_pending: 37,
+      previews_pending: 1,
+      library_work: { mode: "auto", waiting: "hours", resumes_at: null, learned: true },
+    };
+    mockApi({ "GET /api/activity": () => activity });
+    const { client } = renderWithProviders(<DashboardSettings />);
+    expect(await screen.findByText("37 seasons left · what's likely to be watched soon first, the rest in quieter hours")).toBeInTheDocument();
+    expect(screen.getByText("1 file left · what's likely to be watched soon first, the rest in quieter hours")).toBeInTheDocument();
+
+    // Other programs keep the processors busy: everything waits.
+    activity = { ...activity, library_work: { mode: "hours", waiting: "busy", resumes_at: null, learned: true } };
+    await client.invalidateQueries({ queryKey: ["activity"] });
+    expect(await screen.findByText("37 seasons left · waits while other programs keep the processors busy")).toBeInTheDocument();
+
+    // Nothing waits.
+    activity = { ...activity, library_work: null };
+    await client.invalidateQueries({ queryKey: ["activity"] });
+    expect(await screen.findByText("37 seasons left")).toBeInTheDocument();
+  });
+});

@@ -157,6 +157,7 @@ pub fn router(state: AppState) -> Router {
         .route("/invites/{code}/accept", post(accounts::accept_invite))
         .route("/system", get(admin::system))
         .route("/system/resources", get(admin::resources))
+        .route("/system/library-work", get(admin::library_work))
         .route("/system/storage", get(admin::storage))
         .route("/system/backups", get(admin::backups).post(admin::create_backup))
         .route("/system/storage/clean", post(admin::clean_storage))

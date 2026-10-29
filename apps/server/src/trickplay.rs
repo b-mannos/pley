@@ -4,8 +4,9 @@
 //! file when it is moved or renamed. Files are done one at a time in the
 //! background: first the titles people open (unless something is being
 //! transcoded, a playback is starting, or the title itself is playing),
-//! then whole libraries after scans
-//! when the setting allows, only while nothing plays. A playback that starts
+//! then whole libraries after scans when the setting allows, only while
+//! nothing plays: what is likely to be watched soon first, the rest at the
+//! hours [`crate::schedule`] gives library work. A playback that starts
 //! while previews are being made stops them; they are made again later. A
 //! download being converted meanwhile pauses them (the transcoder holds its
 //! FFmpeg until the conversion is done).
@@ -26,7 +27,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::catalog::{self, FileRow};
 use crate::db::Db;
-use crate::playback::{QUIET_BEFORE_BACKGROUND_SECS, Sessions};
+use crate::playback::Sessions;
+use crate::schedule::{Class, Scheduler, Soon};
 use crate::settings::SettingsStore;
 use crate::store::Store;
 use crate::transcoder::{Transcoder, TranscoderError};
@@ -45,6 +47,7 @@ pub struct TrickplayService {
     transcoder: Arc<Transcoder>,
     settings: Arc<SettingsStore>,
     sessions: Arc<Sessions>,
+    schedule: Arc<Scheduler>,
     store: Arc<Store>,
     /// Files waiting: the ones people opened first, then the libraries'.
     queues: Mutex<Queues>,
@@ -85,11 +88,13 @@ fn encode_jpeg(img: &image::RgbImage) -> anyhow::Result<Vec<u8>> {
 }
 
 impl TrickplayService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: Db,
         transcoder: Arc<Transcoder>,
         settings: Arc<SettingsStore>,
         sessions: Arc<Sessions>,
+        schedule: Arc<Scheduler>,
         store: Arc<Store>,
         legacy_cache: PathBuf,
         stopping: CancellationToken,
@@ -99,6 +104,7 @@ impl TrickplayService {
             transcoder,
             settings,
             sessions,
+            schedule,
             store,
             queues: Mutex::default(),
             queued: tokio::sync::Notify::new(),
@@ -220,6 +226,7 @@ impl TrickplayService {
             // again every 20 s, so they still show up during the play).
             let starting = self.sessions.starting_for();
             let playing = self.playing_files();
+            let (soon, later) = self.library_turn().await;
             let next = {
                 let mut queues = self.queues.lock();
                 // A title being played waits for its session to end: reading
@@ -232,12 +239,11 @@ impl TrickplayService {
                     None
                 };
                 opened.map(|id| (id, true)).or_else(|| {
-                    // A library's previews read whole files: only while nothing plays.
-                    if self.sessions.quiet_for() >= QUIET_BEFORE_BACKGROUND_SECS {
-                        queues.library.pop_front().map(|id| (id, false))
-                    } else {
-                        None
-                    }
+                    // A library's previews read whole files: what is likely
+                    // to be watched soon first.
+                    let soon = soon?;
+                    let at = queues.library.iter().position(|id| soon.files.contains(id));
+                    queues.library.remove(at.or(later.then_some(0))?).map(|id| (id, false))
                 })
             };
             let Some((file_id, opened)) = next else {
@@ -273,6 +279,16 @@ impl TrickplayService {
                 }
             }
         }
+    }
+
+    /// Whether the libraries' previews may be made now (see
+    /// [`Scheduler::turn`]): those of what is likely to be watched soon
+    /// (given then), and the rest.
+    async fn library_turn(&self) -> (Option<Arc<Soon>>, bool) {
+        if self.queues.lock().library.is_empty() || self.schedule.turn(Class::Soon).is_err() {
+            return (None, false);
+        }
+        (Some(self.schedule.soon().await), self.schedule.turn(Class::Later).is_ok())
     }
 
     /// The files sessions are playing now (paused ones included, until they go quiet).

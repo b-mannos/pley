@@ -42,6 +42,7 @@ import type {
   TwoStepSetup,
   TwoStepStatus,
   User,
+  WatchingHours,
 } from "./types";
 
 export const keys = {
@@ -1153,6 +1154,17 @@ export function useTranscoderStatus(pollMs: number | false = 2_500) {
     refetchIntervalInBackground: false,
     staleTime: 1_000,
     retry: 1,
+  });
+}
+
+/** When library work runs: the week as the server learned it, and the hours it may begin in (admins only). */
+export function useWatchingHours(enabled = true) {
+  return useQuery({
+    queryKey: ["library-work"],
+    queryFn: () => api.get<WatchingHours>("/api/system/library-work"),
+    enabled,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
   });
 }
 

@@ -1113,7 +1113,8 @@ While any transcode slot is in use (`running_processes`: a job's FFmpeg,
 even paused far ahead, or a conversion), the same runs also wait and pause,
 until 5 s after the last one ends. Probes and reading ahead wait for playback
 starts only. The Pley server also waits for transcodes before asking for seek
-previews or fingerprints.
+previews or fingerprints, and asks for those of whole libraries at the hours
+it gives library work (see Library work in [API.md](API.md)).
 
 Background runs and conversions start at below-normal process priority
 (`nice` 10 on Linux), a job's FFmpeg at normal priority. `/v1/status` counts

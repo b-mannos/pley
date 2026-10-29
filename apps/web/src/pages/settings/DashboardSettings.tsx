@@ -16,6 +16,7 @@ import {
 import { errorMessage } from "@/api/client";
 import { useActivity, useStopSession, useSystemInfo, useTranscoderStatus } from "@/api/hooks";
 import type {
+  LibraryWorkStatus,
   PlaybackMethod,
   ScanStatus,
   SessionInfo,
@@ -34,7 +35,7 @@ import { StorageSection } from "./StorageSection";
 import { Badge, Button, Card, EmptyState, Field, ProgressBar, SectionTitle, Skeleton } from "@/components/ui";
 import { versionLabel, WEB_COMMIT, WEB_VERSION } from "@/lib/build";
 import { cn } from "@/lib/cn";
-import { formatBytes, formatClock, formatUptime, fullTitle, transcodeSummary } from "@/lib/format";
+import { formatBytes, formatClock, formatTimestamp, formatUptime, fullTitle, pluralize, transcodeSummary } from "@/lib/format";
 import { thumbCandidates } from "@/lib/images";
 import { useDocumentTitle } from "@/lib/hooks";
 import { itemUrl } from "@/lib/urls";
@@ -85,6 +86,23 @@ const PHASE_LABEL: Record<ScanStatus["phase"], string> = {
   metadata: "Fetching metadata",
   done: "Finished",
 };
+
+/** Why the libraries' intros, credits and previews wait, if they do. */
+function libraryWorkWaits(work: LibraryWorkStatus | null): string {
+  if (!work) return "";
+  switch (work.waiting) {
+    case "playing":
+      return "waits while something plays";
+    case "busy":
+      return "waits while other programs keep the processors busy";
+    case "hours": {
+      const from = work.resumes_at ? ` (from ${formatTimestamp(work.resumes_at)})` : "";
+      return work.mode === "auto" ? `what's likely to be watched soon first, the rest in quieter hours${from}` : `waits for its hours${from}`;
+    }
+    default:
+      return "";
+  }
+}
 
 /** Most a stop message may say (the server's limit). */
 const STOP_MESSAGE_MAX = 200;
@@ -415,7 +433,9 @@ export function DashboardSettings() {
   const sessions = activity.data?.sessions ?? [];
   const scans = (activity.data?.scans ?? []).filter((s) => s.phase !== "done");
   const analysis = activity.data?.analysis ?? null;
+  const seasonsPending = activity.data?.seasons_pending ?? 0;
   const previewsPending = activity.data?.previews_pending ?? 0;
+  const waits = libraryWorkWaits(activity.data?.library_work ?? null);
 
   return (
     <div className="space-y-10">
@@ -493,21 +513,30 @@ export function DashboardSettings() {
         </section>
       ) : null}
 
-      {analysis ? (
+      {analysis || seasonsPending > 0 ? (
         <section>
           <SectionTitle>
             <span className="flex items-center gap-2">
               <FastForward className="size-5 text-accent" /> Finding intros and credits
             </span>
           </SectionTitle>
-          <div className="rounded-lg border border-border bg-surface px-4 py-3">
-            <div className="mb-1.5 flex items-center justify-between text-sm">
-              <span className="font-medium">{analysis.title}</span>
-              <span className="text-xs text-muted">
-                {analysis.done} / {analysis.total} audio fingerprints
-              </span>
-            </div>
-            <ProgressBar value={analysis.total > 0 ? analysis.done / analysis.total : 0} className="h-1.5" />
+          <div className="space-y-2 rounded-lg border border-border bg-surface px-4 py-3">
+            {analysis ? (
+              <div>
+                <div className="mb-1.5 flex items-center justify-between text-sm">
+                  <span className="font-medium">{analysis.title}</span>
+                  <span className="text-xs text-muted">
+                    {analysis.done} / {analysis.total} audio fingerprints
+                  </span>
+                </div>
+                <ProgressBar value={analysis.total > 0 ? analysis.done / analysis.total : 0} className="h-1.5" />
+              </div>
+            ) : null}
+            {seasonsPending > 0 ? (
+              <p className="text-sm text-muted">
+                {pluralize(seasonsPending, "season")} left{waits ? ` · ${waits}` : ""}
+              </p>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -520,7 +549,7 @@ export function DashboardSettings() {
             </span>
           </SectionTitle>
           <p className="rounded-lg border border-border bg-surface px-4 py-3 text-sm text-muted">
-            {previewsPending === 1 ? "1 file left" : `${previewsPending.toLocaleString()} files left`}
+            {pluralize(previewsPending, "file")} left{waits ? ` · ${waits}` : ""}
           </p>
         </section>
       ) : null}

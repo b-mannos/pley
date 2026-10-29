@@ -38,6 +38,7 @@ pub mod providers;
 pub mod ratings;
 pub mod related;
 pub mod resources;
+pub mod schedule;
 #[cfg(windows)]
 pub mod service;
 pub mod settings;

@@ -33,6 +33,15 @@ describes how they are made.
   does; one a Matroska file's Cues list comes whole in seconds.
 - PGS tracks as `.sup` files (`/api/files/{id}/subtitles/{index}.sup`),
   for Kodi. Play responses say `pts_offset_ms`.
+- Finding intros and credits and making previews for whole libraries run
+  when they disturb nobody. Once nothing plays, what's likely to be watched
+  soon goes first, at any hour: shows someone is watching, titles on a
+  list or begun, what's new. The rest of the libraries waits for the hours
+  people rarely watch, which the server learns from when something plays
+  (from the watch history at first). Both wait while other programs keep
+  the processors busy. Settings → Server → Library scanning sets when it
+  runs (automatically, between set hours, or whenever nothing plays), shows
+  the week as learned, and the dashboard says what waits and why.
 
 ### Changed
 

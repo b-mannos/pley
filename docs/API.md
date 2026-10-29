@@ -1524,7 +1524,8 @@ removed or reordered (`400`).
 - **`trickplay`**: `404` while previews are being made (asking, or opening
   the item, queues them). Made one file at a time, never during a
   playback's first 30 s nor while anything is transcoded: a playback that
-  starts puts off the file being done, which is made again later.
+  starts puts off the file being done, which is made again later. Those of
+  whole libraries wait for library work's hours (see Library work).
 - **Sprite sheets**: thumbnail `k` is at column `k % columns`, row
   `k / columns` of sheet `k / (columns × rows)`, and shows the video at
   `k × interval_ms`.
@@ -2054,9 +2055,8 @@ Markers come from three sources, best first:
      boundaries most comparisons agree on win. An episode its season shares
      nothing with (a premiere, a short season) is compared with up to six
      episodes of the show's other seasons whose fingerprints are cached.
-   - Matching follows Jellyfin's Intro Skipper: alignments are found from
-     matching values, and parts of a title sequence split by a gag that
-     changes every episode count as one.
+   - Alignments are found from matching values, and parts of a title
+     sequence split by a gag that changes every episode count as one.
    - Fingerprints are cached per file version in the cache folder, so a new
      episode needs only its own.
 3. **Key frames** (`source: "frames"`), for credits no other episode shares:
@@ -2071,10 +2071,74 @@ version so improvements re-run automatically.
 - A season not analyzed yet goes first as soon as one of its episodes
   plays: the episodes playing first, then the rest, each followed by a
   `library_changed` event so players pick up the markers.
+- Seasons an administrator asks for (`POST /api/items/{id}/analyze`) go
+  next. The seasons scans find wait for library work's hours (below).
 - Nothing is analyzed while something is transcoded (a playback's or a
   download's), not even that season.
 - Skipped when `detect_markers` is off or the transcoder's FFmpeg lacks
   Chromaprint (chapters are still used).
+
+## Library work
+
+Intro and credits detection and seek previews for whole libraries
+(`previews_in_background`) read whole files. They wait while anything
+plays, and for a minute after. They also wait while other programs keep
+more than `library_work_max_cpu` % of the processors busy, averaged over a
+minute (Pley and the transcoder it starts don't count; a transcoder run
+separately on the same machine does). Then `library_work` decides:
+
+- **`auto`** (the default): what is likely to be watched soon goes first,
+  at any hour:
+  - shows someone played an episode of in the last 30 days;
+  - movies someone began in that time and hasn't finished;
+  - titles on a watchlist;
+  - shows with episodes added in the last 14 days that someone watched
+    before;
+  - the 20 newest movies of the last 14 days.
+
+  The rest waits for the hours people rarely watch, learned from when
+  something plays. Each hour of the week counts the minutes something
+  played, each week weighing 0.8 of the one after it. An hour is quiet when
+  something played in less than a tenth of its minutes. Each day's four
+  quietest hours in a row are always quiet, so a server watched all day
+  still gets its libraries done (only hours the server was up count for
+  that). Work begins only where this hour and the next are quiet, so it
+  doesn't run into a busy one. Until about a week is known, any hour is
+  quiet. At first start the hours come from the last 8 weeks of watch
+  history, and they are kept in the database. Where the rest has waited
+  for quiet hours through 24 hours of the server being up (a computer on
+  only in the evening), it goes on whenever nothing plays.
+- **`hours`**: all of it from `library_work_from` to `library_work_to`
+  (hours of the day in the server's time; past midnight when `to` comes
+  first, all day when they are the same).
+- **`idle`**: whenever nothing plays.
+
+A season whose hours end is put off, and goes first at its next turn (its
+fingerprints so far are cached). The hours and the processors hold back
+only the libraries' work: a title someone opens gets its previews, a
+season being watched its markers, and an analysis an administrator asks
+for runs, at any hour.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | `/api/system/library-work` | `admin` | `WatchingHours` |
+
+```ts
+interface LibraryWorkStatus {
+  mode: "auto" | "hours" | "idle";
+  waiting: "playing" | "busy" | "hours" | null; // why the rest of the libraries waits now
+  resumes_at: Timestamp | null;     // when the hours it waits for begin
+  learned: boolean;                 // about a week of playback is known
+}
+
+interface WatchingHours extends LibraryWorkStatus {
+  now: number;                      // the hour of the week now: 0 is Sunday 0:00, server time
+  hours: {                          // 168, from Sunday 0:00
+    playing: number | null;         // share of its minutes something played in, 0-1; null: not seen enough
+    open: boolean;                  // work on the rest of the libraries may begin then
+  }[];
+}
+```
 
 ## Watch history
 
@@ -2107,13 +2171,15 @@ interface HistoryEntry {
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| GET | `/api/activity` | `user` | `{ scans: ScanStatus[], sessions: SessionInfo[], analysis: AnalysisStatus \| null, previews_pending: number }` |
+| GET | `/api/activity` | `user` | `{ scans: ScanStatus[], sessions: SessionInfo[], analysis: AnalysisStatus \| null, seasons_pending: number, previews_pending: number, library_work: LibraryWorkStatus \| null }` |
 | DELETE | `/api/sessions/{id}` | `play` | optional body `{ message?: string }` (at most 200 characters, else `400`) → `204`: stops a playback session at once |
 | GET | `/api/events` | `library` | Server-Sent Events; each `data:` is a JSON `ServerEvent` |
 
-`/api/activity`: `previews_pending` counts files waiting for seek previews.
+`/api/activity`: `seasons_pending` counts seasons waiting for intro and
+credits detection, `previews_pending` files waiting for seek previews, and
+`library_work` says why they wait while some do (see Library work).
 Non-administrators see only their own sessions and the scans of libraries
-they may open, with no `analysis` and `previews_pending` 0.
+they may open, with no `analysis` or `library_work`, and both counts 0.
 
 ### Stopping a stream
 
@@ -2283,6 +2349,7 @@ type ServerEvent =
 | GET | `/api/system` | `admin` | `SystemInfo` |
 | PUT | `/api/system/transcode-dir` | `admin` | `{ path: string \| null }` → the new `transcode_dir`, for the next start |
 | GET | `/api/system/resources?since=` | `admin` | CPU and memory use, sampled every 2 s for the last five minutes |
+| GET | `/api/system/library-work` | `admin` | `WatchingHours`: when library work runs (see Library work) |
 | GET | `/api/system/storage` | `admin` | `{ blobs, blob_bytes, media_folders, media_bytes, cache_bytes }` |
 | POST | `/api/system/storage/clean` | `admin` | `{ blobs_removed, media_folders_removed, subtitles_removed, bytes_freed, cache_files_removed, cache_bytes_freed }` |
 | GET | `/api/system/backups` | `admin` | `{ health: { ok, problem?, checked_at }, backups: { name, path, bytes, created_at }[] }`, newest first |
@@ -2394,6 +2461,11 @@ interface Settings {
   detect_markers: boolean;          // find intros and credits in the background (default true)
   seek_previews: boolean;           // make seek-bar thumbnails when an item is first opened (default true)
   previews_in_background: boolean;  // also for whole libraries after scans, one file at a time (default true)
+  library_work: "auto" | "hours" | "idle"; // when those and intro detection run (see Library work; default "auto")
+  library_work_from: number;        // hours of the day 0-23, server time, for "hours" (default 1 to 7);
+  library_work_to: number;          // past midnight when `to` comes first. Above 23: 400
+  library_work_max_cpu: number;     // library work waits while other programs use more of the processors
+                                    // (%, 10-100, default 50; 100: never). Outside: 400
   third_party_apps: boolean;        // apps by other publishers may sign in (default false); turning it off
                                     // signs them out. Pley's own apps always may
   proxy_addresses: string[];        // addresses with a port Pley is reached at through a reverse proxy that

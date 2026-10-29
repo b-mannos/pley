@@ -98,6 +98,18 @@ impl Monitor {
         samples.push_back(sample);
     }
 
+    /// The share of all the processors' time other programs took over the
+    /// last `window`, 0 to 100: everything on the machine but pley (an
+    /// external transcoder's FFmpeg on this machine counts as another
+    /// program). `None` before a sample, or where nothing is sampled.
+    pub fn others_cpu(&self, window: Duration) -> Option<f32> {
+        let since = crate::util::now_ms() - window.as_millis() as i64;
+        let samples = self.samples.lock();
+        let recent: Vec<f32> =
+            samples.iter().filter(|s| s.at >= since).map(|s| (s.cpu - s.pley_cpu).max(0.0)).collect();
+        (!recent.is_empty()).then(|| recent.iter().sum::<f32>() / recent.len() as f32)
+    }
+
     /// The samples taken after `since` (Unix milliseconds), or all of them.
     pub fn resources(&self, since: Option<i64>) -> Resources {
         let samples = self.samples.lock().iter().filter(|s| since.is_none_or(|t| s.at > t)).copied().collect();

@@ -2,13 +2,15 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff } from "lucide-react";
 import { appKeys } from "@/api/apps";
-import { useSystemInfo } from "@/api/hooks";
-import type { Settings, TvMetadata } from "@/api/types";
+import { useSystemInfo, useWatchingHours } from "@/api/hooks";
+import type { LibraryWork, Settings, TvMetadata } from "@/api/types";
 import { IconButton, Select, TextInput, Toggle } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { formatTimestamp } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 import { Group, Link, Note, Row, SettingsForm, TestButton, useSettingsForm } from "./SettingsForm";
 import { knownTranscoder } from "./transcodeChoices";
+import { hourOfDay, WatchingHoursChart } from "./WatchingHoursChart";
 
 /** The settings this page edits (the transcoder's are on their own page). */
 const KEYS = [
@@ -24,6 +26,10 @@ const KEYS = [
   "detect_markers",
   "seek_previews",
   "previews_in_background",
+  "library_work",
+  "library_work_from",
+  "library_work_to",
+  "library_work_max_cpu",
   "third_party_apps",
   "opensubtitles_api_key",
   "opensubtitles_username",
@@ -121,6 +127,10 @@ export function ServerSettings() {
     if (changes.third_party_apps === false) {
       void qc.invalidateQueries({ queryKey: appKeys.mine });
       void qc.invalidateQueries({ queryKey: ["users"] });
+    }
+    // The hours library work may begin in follow its settings.
+    if (Object.keys(changes).some((k) => k.startsWith("library_work"))) {
+      void qc.invalidateQueries({ queryKey: ["library-work"] });
     }
   };
 
@@ -323,6 +333,7 @@ ${form.opensubtitles_password ?? ""}`}
                 />
                 {form.seek_previews ? null : <Note>Needs Seek previews.</Note>}
               </Row>
+              <LibraryWorkRows form={form} set={set} />
               <Row label="Periodic scan interval" htmlFor="scan-interval" hint="Minutes between full scans. 0 disables periodic scans.">
                 <div className="flex items-center gap-2">
                   <TextInput
@@ -355,5 +366,93 @@ ${form.opensubtitles_password ?? ""}`}
         );
       }}
     </SettingsForm>
+  );
+}
+
+/** Shares of the processors other programs may keep busy before library work waits; 100: it never waits. */
+const MAX_CPU = [25, 50, 75, 100];
+
+/** When intro and credits detection and previews for whole libraries run. */
+function LibraryWorkRows({ form, set }: { form: Settings; set: <K extends keyof Settings>(key: K, value: Settings[K]) => void }) {
+  const mode = form.library_work ?? "auto";
+  const background = form.detect_markers || (form.seek_previews && form.previews_in_background);
+  const week = useWatchingHours(form.library_work !== undefined && mode === "auto" && background);
+  // A server before these settings.
+  if (form.library_work === undefined) return null;
+  const maxCpu = form.library_work_max_cpu ?? 50;
+  const hours = Array.from({ length: 24 }, (_, h) => h);
+  return (
+    <>
+      <Row
+        label="When library work runs"
+        htmlFor="library-work"
+        hint="Finding intros and credits, and previews for whole libraries. They always wait while something plays; what someone opens or is watching goes first, at any hour."
+      >
+        <Select
+          id="library-work"
+          value={mode}
+          disabled={!background}
+          onChange={(e) => set("library_work", e.target.value as LibraryWork)}
+          className="w-full"
+        >
+          <option value="auto">Automatically</option>
+          <option value="hours">Between set hours</option>
+          <option value="idle">Whenever nothing plays</option>
+        </Select>
+        {!background ? (
+          <Note>Needs Detect intros and credits, or Previews for whole libraries.</Note>
+        ) : mode === "auto" ? (
+          <Note>Shows people are watching, titles on their lists and what's new go first, at any hour. The rest waits for the hours people rarely watch, which the server learns.</Note>
+        ) : mode === "hours" ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+            <Select aria-label="From" value={form.library_work_from ?? 1} onChange={(e) => set("library_work_from", Number(e.target.value))}>
+              {hours.map((h) => (
+                <option key={h} value={h}>
+                  {hourOfDay(h)}
+                </option>
+              ))}
+            </Select>
+            <span className="text-muted">to</span>
+            <Select aria-label="To" value={form.library_work_to ?? 7} onChange={(e) => set("library_work_to", Number(e.target.value))}>
+              {hours.map((h) => (
+                <option key={h} value={h}>
+                  {hourOfDay(h)}
+                </option>
+              ))}
+            </Select>
+            <span className="text-xs text-subtle">in the server's time</span>
+          </div>
+        ) : null}
+      </Row>
+      {background && mode === "auto" && week.data ? (
+        <div className="space-y-2">
+          <div>
+            <p className="text-sm font-medium">When people watch</p>
+            <p className="mt-0.5 text-xs text-subtle">
+              {week.data.learned
+                ? "Learned from what played over the last weeks, recent ones counting most, in the server's time."
+                : "Still learning: until about a week of playback is known, the rest of the libraries goes on whenever nothing plays."}
+              {week.data.waiting === "hours" && week.data.resumes_at ? ` Next from ${formatTimestamp(week.data.resumes_at)}.` : ""}
+            </p>
+          </div>
+          <WatchingHoursChart week={week.data} />
+        </div>
+      ) : null}
+      <Row label="Wait for other programs" htmlFor="library-work-cpu" hint="Library work waits while other programs keep more of the processors busy than this.">
+        <Select
+          id="library-work-cpu"
+          value={maxCpu}
+          disabled={!background}
+          onChange={(e) => set("library_work_max_cpu", Number(e.target.value))}
+          className="w-full"
+        >
+          {(MAX_CPU.includes(maxCpu) ? MAX_CPU : [...MAX_CPU, maxCpu].sort((a, b) => a - b)).map((v) => (
+            <option key={v} value={v}>
+              {v === 100 ? "Never" : `When they use over ${v}%`}
+            </option>
+          ))}
+        </Select>
+      </Row>
+    </>
   );
 }

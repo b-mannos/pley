@@ -15,6 +15,7 @@ use crate::library::watcher::LibraryWatcher;
 use crate::markers::MarkerService;
 use crate::metadata::MetadataAgent;
 use crate::playback::Sessions;
+use crate::schedule::Scheduler;
 use crate::settings::SettingsStore;
 use crate::store::Store;
 use crate::transcoder::Transcoder;
@@ -42,6 +43,8 @@ pub struct Inner {
     pub watcher: Arc<LibraryWatcher>,
     pub images: Images,
     pub sessions: Arc<Sessions>,
+    /// When library work runs (see [`crate::schedule`]).
+    pub schedule: Arc<Scheduler>,
     pub markers: Arc<MarkerService>,
     pub trickplay: Arc<TrickplayService>,
     pub two_step: crate::two_step::TwoStep,
@@ -118,11 +121,14 @@ impl AppState {
         let images = Images::new(config.cache_dir().join("images"));
         let sessions = Arc::new(Sessions::default());
         let stopping = CancellationToken::new();
+        let resources = crate::resources::Monitor::new();
+        let schedule = Scheduler::new(db.clone(), settings.clone(), sessions.clone(), resources.clone());
         let markers = MarkerService::new(
             db.clone(),
             transcoder.clone(),
             settings.clone(),
             sessions.clone(),
+            schedule.clone(),
             events.clone(),
             config.cache_dir().join("fingerprints"),
             stopping.clone(),
@@ -132,6 +138,7 @@ impl AppState {
             transcoder.clone(),
             settings.clone(),
             sessions.clone(),
+            schedule.clone(),
             store.clone(),
             config.cache_dir().join("trickplay"),
             stopping.clone(),
@@ -149,9 +156,10 @@ impl AppState {
         Ok(Self {
             inner: Arc::new(Inner {
                 network: crate::network::Network::new(&config),
-                resources: crate::resources::Monitor::new(),
+                resources,
                 auth,
                 sessions,
+                schedule,
                 markers,
                 trickplay,
                 two_step,
@@ -180,6 +188,7 @@ impl AppState {
         self.sessions.spawn_reaper(self.transcoder.clone(), self.events.clone());
         self.markers.start();
         self.resources.start(self.stopping.clone());
+        self.schedule.start(self.stopping.clone());
         let metadata = self.metadata.clone();
         tokio::spawn(async move {
             metadata.prune_people().await;

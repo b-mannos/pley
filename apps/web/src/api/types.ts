@@ -605,8 +605,40 @@ export interface Activity {
   sessions: SessionInfo[];
   /** Intro/credits detection in progress (admins only). */
   analysis?: AnalysisStatus | null;
+  /** Seasons waiting for intro/credits detection (admins only). Absent from servers before it. */
+  seasons_pending?: number;
   /** Files waiting for seek previews (admins only). */
   previews_pending?: number;
+  /** When what waits gets done, while some does (admins only). Absent from servers before it. */
+  library_work?: LibraryWorkStatus | null;
+}
+
+/** Why library work waits: something plays (or did a minute ago), other programs keep the processors busy, or these hours aren't its own. */
+export type LibraryWorkWait = "playing" | "busy" | "hours";
+
+export interface LibraryWorkStatus {
+  mode: LibraryWork;
+  /** Why the rest of the libraries waits now; null: it doesn't. What's likely to be watched soon goes on but for `playing` and `busy`. */
+  waiting: LibraryWorkWait | null;
+  /** When the hours it waits for begin. */
+  resumes_at: Timestamp | null;
+  /** The hours people watch are known (about a week was seen). */
+  learned: boolean;
+}
+
+/** `GET /api/system/library-work`: the week as learned. */
+export interface WatchingHours extends LibraryWorkStatus {
+  /** The hour of the week now: 0 is Sunday from midnight, in the server's time. */
+  now: number;
+  /** The 168 hours of the week from Sunday midnight. */
+  hours: WatchingHour[];
+}
+
+export interface WatchingHour {
+  /** The share of its minutes something played in, 0–1; null where it wasn't seen enough to tell. */
+  playing: number | null;
+  /** Work on the rest of the libraries may begin then. */
+  open: boolean;
 }
 
 export interface AnalysisStatus {
@@ -641,6 +673,12 @@ export type TranscodePreset = "auto" | "ultrafast" | "superfast" | "veryfast" | 
 export type ToneMapping = "auto" | "libplacebo" | "opencl" | "zscale" | "none";
 /** Where TV show metadata comes from; "auto" is TMDB, else TheTVDB (when they have a key), else TVmaze. */
 export type TvMetadata = "auto" | "tmdb" | "tvdb" | "tvmaze";
+/**
+ * When library work runs: `auto`, what's likely to be watched soon at any
+ * hour and the rest in the hours people rarely watch, as learned; `hours`,
+ * all of it between set hours; `idle`, whenever nothing plays.
+ */
+export type LibraryWork = "auto" | "hours" | "idle";
 
 export interface Settings {
   server_name: string;
@@ -665,6 +703,17 @@ export interface Settings {
   detect_markers: boolean;
   seek_previews: boolean;
   previews_in_background: boolean;
+  /**
+   * When intro and credits detection and previews of whole libraries run,
+   * besides waiting while anything plays (see `LibraryWork`). Absent from
+   * servers before it, as are the three after it.
+   */
+  library_work?: LibraryWork;
+  /** The hours of the day (0–23, server time) of `hours`: past midnight when `to` comes first, all day when they're the same. */
+  library_work_from?: number;
+  library_work_to?: number;
+  /** Library work waits while other programs keep more than this share of the processors busy (%, 10–100; 100: never). */
+  library_work_max_cpu?: number;
   /** Apps by other publishers may sign in (pley's own apps always can); turning it off signs them out. */
   third_party_apps: boolean;
   /**

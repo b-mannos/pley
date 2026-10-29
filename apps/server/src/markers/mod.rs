@@ -24,7 +24,10 @@
 //! request at a time: the episodes playing before the rest of it, and their
 //! players are told when they have markers. Nothing is analysed while
 //! something is being transcoded (a playback's or a download's): the
-//! transcoder pauses what it was making until it is done.
+//! transcoder pauses what it was making until it is done. Seasons an
+//! administrator asks for go next; then those of shows likely to be watched
+//! soon, and the rest of the libraries at the hours [`crate::schedule`]
+//! gives library work.
 
 #[cfg(test)]
 mod eval;
@@ -38,13 +41,14 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use pley_transcoder_api::{Chapter, FingerprintRequest, FrameStats, FramesRequest, MediaInfo};
 use serde::Serialize;
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use crate::db::Db;
 use crate::events::{EventBus, ServerEvent};
 use crate::library::{LibraryKind, get_library};
 use crate::playback::{QUIET_BEFORE_BACKGROUND_SECS, Sessions};
+use crate::schedule::{self, Class, Scheduler};
 use crate::settings::SettingsStore;
 use crate::transcoder::{TRANSCODING_LOOK, Transcoder, TranscoderError};
 use crate::util::now;
@@ -144,20 +148,34 @@ enum Job {
     Movie(i64),
 }
 
+impl Job {
+    /// Whether it waits for the hours of library work: a season a scan
+    /// found ([`Class`]). Seasons asked for go at once, and the rest reads
+    /// only the database.
+    fn scheduled(self) -> bool {
+        matches!(self, Job::Season { force: false, .. })
+    }
+}
+
 pub struct MarkerService {
     db: Db,
     transcoder: Arc<Transcoder>,
     settings: Arc<SettingsStore>,
     sessions: Arc<Sessions>,
+    schedule: Arc<Scheduler>,
     events: EventBus,
     cache_dir: PathBuf,
-    queue: mpsc::UnboundedSender<Job>,
-    receiver: Mutex<Option<mpsc::UnboundedReceiver<Job>>>,
+    /// What waits, in the order it came (but see [`MarkerService::next_job`]).
+    queue: Mutex<VecDeque<Job>>,
+    /// Something was queued.
+    more: Notify,
     queued: Mutex<HashSet<Job>>,
     /// Seasons being watched that aren't analysed yet: before any [`Job`].
     watched: Mutex<VecDeque<i64>>,
     /// Wakes the worker for a season in `watched`.
     wake: Notify,
+    /// What library work the job in progress is, if it waits for its hours.
+    class: Mutex<Option<Class>>,
     status: Mutex<Option<AnalysisStatus>>,
     /// Cancelled when the server shuts down: the worker stops.
     stopping: CancellationToken,
@@ -238,28 +256,31 @@ enum FpError {
 }
 
 impl MarkerService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: Db,
         transcoder: Arc<Transcoder>,
         settings: Arc<SettingsStore>,
         sessions: Arc<Sessions>,
+        schedule: Arc<Scheduler>,
         events: EventBus,
         cache_dir: PathBuf,
         stopping: CancellationToken,
     ) -> Arc<Self> {
-        let (queue, receiver) = mpsc::unbounded_channel();
         Arc::new(Self {
             db,
             transcoder,
             settings,
             sessions,
+            schedule,
             events,
             cache_dir,
-            queue,
-            receiver: Mutex::new(Some(receiver)),
+            queue: Mutex::default(),
+            more: Notify::new(),
             queued: Mutex::default(),
             watched: Mutex::default(),
             wake: Notify::new(),
+            class: Mutex::default(),
             status: Mutex::default(),
             stopping,
         })
@@ -268,8 +289,7 @@ impl MarkerService {
     /// Start the worker: analyse what is missing shortly after start-up and
     /// after every library scan.
     pub fn start(self: &Arc<Self>) {
-        let Some(receiver) = self.receiver.lock().take() else { return };
-        tokio::spawn(self.clone().worker(receiver));
+        tokio::spawn(self.clone().worker());
         let this = self.clone();
         tokio::spawn(async move {
             let mut events = this.events.subscribe();
@@ -369,8 +389,23 @@ impl MarkerService {
 
     fn enqueue(&self, job: Job) {
         if self.queued.lock().insert(job) {
-            let _ = self.queue.send(job);
+            self.queue.lock().push_back(job);
+            self.more.notify_one();
         }
+    }
+
+    /// Queue a season put off again, before the rest: its fingerprints made
+    /// so far are cached, so it is soon done once its turn comes.
+    fn put_off(&self, job: Job) {
+        if self.queued.lock().insert(job) {
+            self.queue.lock().push_front(job);
+            self.more.notify_one();
+        }
+    }
+
+    /// Seasons waiting for intro and credits detection.
+    pub fn pending(&self) -> usize {
+        self.queue.lock().iter().filter(|job| matches!(job, Job::Season { .. })).count()
     }
 
     async fn enqueue_all(&self) {
@@ -390,26 +425,34 @@ impl MarkerService {
     /// Analyses what is queued until the server shuts down, which drops the
     /// job in progress (it would only fail without the database and the
     /// transcoder; its season is analysed again next time).
-    async fn worker(self: Arc<Self>, receiver: mpsc::UnboundedReceiver<Job>) {
+    async fn worker(self: Arc<Self>) {
         let stopping = self.stopping.clone();
         tokio::select! {
             () = stopping.cancelled() => {}
-            () = self.work(receiver) => {}
+            () = self.work() => {}
         }
     }
 
-    async fn work(&self, mut receiver: mpsc::UnboundedReceiver<Job>) {
+    async fn work(&self) {
         loop {
             // A season being watched first.
             let watched = self.watched.lock().pop_front();
-            let job = match watched {
-                Some(id) => Job::Season { id, force: false },
-                None => tokio::select! {
-                    job = receiver.recv() => match job {
-                        Some(job) => job,
-                        None => break,
-                    },
-                    () = self.wake.notified() => continue,
+            let (job, class) = match watched {
+                Some(id) => (Job::Season { id, force: false }, None),
+                None => match self.next_job().await {
+                    Some(next) => next,
+                    None => {
+                        // Until something is queued, a season is watched, a
+                        // playback starts or ends, or a look again (the hours,
+                        // the processors).
+                        tokio::select! {
+                            () = self.more.notified() => {}
+                            () = self.wake.notified() => {}
+                            () = self.sessions.changed() => {}
+                            () = tokio::time::sleep(schedule::LOOK) => {}
+                        }
+                        continue;
+                    }
                 },
             };
             if watched.is_none() {
@@ -418,6 +461,7 @@ impl MarkerService {
             if !self.settings.get().detect_markers {
                 continue;
             }
+            *self.class.lock() = class;
             let result = match job {
                 Job::Library(id) => self.library(id).await,
                 Job::Season { id, force } => self.season(id, force, watched.is_some()).await,
@@ -427,6 +471,32 @@ impl MarkerService {
             if let Err(err) = result {
                 tracing::warn!("intro/credits detection ({job:?}) failed: {err:#}");
             }
+        }
+    }
+
+    /// The job to do next, if one may begin now: first one that doesn't
+    /// wait for library work's hours ([`Job::scheduled`]), then a season of
+    /// a show likely to be watched soon, then the rest (see
+    /// [`Scheduler::turn`]); with the [`Class`] of a season that does.
+    async fn next_job(&self) -> Option<(Job, Option<Class>)> {
+        {
+            let mut queue = self.queue.lock();
+            if let Some(at) = queue.iter().position(|job| !job.scheduled()) {
+                return queue.remove(at).map(|job| (job, None));
+            }
+            if queue.is_empty() {
+                return None;
+            }
+        }
+        self.schedule.turn(Class::Soon).ok()?;
+        let soon = self.schedule.soon().await;
+        let later = self.schedule.turn(Class::Later).is_ok();
+        let mut queue = self.queue.lock();
+        let likely = queue.iter().position(|job| matches!(job, Job::Season { id, .. } if soon.seasons.contains(id)));
+        match likely {
+            Some(at) => queue.remove(at).map(|job| (job, Some(Class::Soon))),
+            None if later => queue.pop_front().map(|job| (job, Some(Class::Later))),
+            None => None,
         }
     }
 
@@ -562,7 +632,7 @@ impl MarkerService {
                     }
                     Err(FpError::Preempted) => {
                         // Fingerprints made so far are cached: nothing is lost.
-                        self.enqueue(Job::Season { id: season_id, force });
+                        self.put_off(Job::Season { id: season_id, force });
                         return Ok(());
                     }
                 }
@@ -708,9 +778,16 @@ impl MarkerService {
 
     /// Background work: playback has the machine to itself, except for the
     /// markers of what plays (which the transcoder holds back while a
-    /// playback starts). Transcodes come first, even for those.
+    /// playback starts). Transcodes come first, even for those. A season
+    /// whose hours end is put off until its next turn (other programs busy
+    /// meanwhile only keep the next one from beginning: an external
+    /// transcoder on this machine counts as one, fingerprinting this one).
     async fn wait_turn(&self, watched: bool) -> Result<(), FpError> {
         loop {
+            let class = if watched { None } else { *self.class.lock() };
+            if let Some(Err(schedule::Wait::Hours)) = class.map(|c| self.schedule.turn(c)) {
+                return Err(FpError::Preempted);
+            }
             let quiet = watched || self.sessions.quiet_for() >= QUIET_BEFORE_BACKGROUND_SECS;
             if quiet && !self.transcoder.transcoding().await {
                 return Ok(());

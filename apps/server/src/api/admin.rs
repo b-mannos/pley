@@ -601,6 +601,12 @@ pub async fn resources(
     Json(state.resources.resources(query.since))
 }
 
+/// When library work runs: the hours of the week people watch, as learned,
+/// and those it may begin in.
+pub async fn library_work(State(state): State<AppState>, _admin: AdminUser) -> Json<crate::schedule::WatchingHours> {
+    Json(state.schedule.watching_hours())
+}
+
 /// Space used by stored pictures, generated media files and the cache.
 pub async fn storage(State(state): State<AppState>, _admin: AdminUser) -> ApiResult<Json<crate::store::Usage>> {
     Ok(Json(state.store.usage().await.map_err(AppError::Internal)?))
