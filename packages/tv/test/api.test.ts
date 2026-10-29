@@ -84,6 +84,29 @@ describe("a server on the home network", () => {
   });
 });
 
+describe("the token", () => {
+  it("goes to the server's own origin only, never to an address elsewhere it hands out", async () => {
+    const seen: [string, string | undefined][] = [];
+    const http = (req: HttpRequest): Promise<HttpResponse> => {
+      seen.push([req.url, req.headers?.Authorization]);
+      return ok({});
+    };
+    const api = new Api("https://pley.example.com", tokens, http);
+    await api.get("/api/hubs/home");
+    await api.get("https://pley.example.com:443/api/items/1");
+    for (const elsewhere of ["https://evil.example.com/api/items/1", "http://pley.example.com/api/items/1", "https://pley.example.com:8443/x"]) {
+      await api.get(elsewhere);
+    }
+    expect(seen).toEqual([
+      ["https://pley.example.com/api/hubs/home", "Bearer token"],
+      ["https://pley.example.com:443/api/items/1", "Bearer token"],
+      ["https://evil.example.com/api/items/1", undefined],
+      ["http://pley.example.com/api/items/1", undefined],
+      ["https://pley.example.com:8443/x", undefined],
+    ]);
+  });
+});
+
 describe("no answer", () => {
   it("is a failed connection, a timeout or a gateway with nothing behind it, never a cancelled request", () => {
     expect(unreachable(new NetworkError("Can't reach the server"))).toBe(true);

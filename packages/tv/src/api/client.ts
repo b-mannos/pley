@@ -1,4 +1,4 @@
-import { atHome } from "../auth/addresses";
+import { atHome, origin } from "../auth/addresses";
 import { SignedOutError, type Tokens } from "../auth/tokens";
 import { Cancel, NetworkError, TIMED_OUT, withQuery, type HttpRequest, type HttpResponse, type Transport } from "../net/transport";
 import type {
@@ -159,7 +159,7 @@ export class Api {
     const token = await this.tokens.accessToken();
     if (!token) throw new SignedOutError();
     let res = await this.once(path, opts, token);
-    if (res.status === 401 && invalidToken(res)) {
+    if (res.status === 401 && invalidToken(res) && this.ownServer(path)) {
       // Refused just after a refresh: the server no longer takes this sign-in.
       if (await this.tokens.refusedAfterRefresh(token)) throw new SignedOutError();
       const fresh = await this.tokens.refresh(token);
@@ -169,8 +169,18 @@ export class Api {
     throw toError(res);
   }
 
+  /**
+   * Whether `path` is on this server: an address the server hands out
+   * (a picture's, a playlist's) that names another origin gets no token,
+   * as Android's (SECURITY.md).
+   */
+  private ownServer(path: string): boolean {
+    return origin(this.url(path)) === origin(this.server);
+  }
+
   private once(path: string, opts: CallOptions, token: string): Promise<HttpResponse> {
-    const headers: Record<string, string> = { Accept: "application/json", Authorization: `Bearer ${token}` };
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (this.ownServer(path)) headers.Authorization = `Bearer ${token}`;
     let body: string | null = null;
     if (opts.body !== undefined) {
       headers["Content-Type"] = "application/json";
