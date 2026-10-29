@@ -206,7 +206,9 @@ impl Listener {
             ServerEvent::WatchlistChanged { .. }
             | ServerEvent::OwnLibrariesChanged { .. }
             | ServerEvent::UserStateChanged { .. }
-            | ServerEvent::SessionStopped { .. } => Ok(Vec::new()),
+            | ServerEvent::SessionStopped { .. }
+            | ServerEvent::LiveChannelsChanged
+            | ServerEvent::LiveTunersChanged => Ok(Vec::new()),
         };
         result.unwrap_or_else(|err| {
             tracing::debug!("notification socket: {err}");

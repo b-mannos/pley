@@ -160,8 +160,22 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     ("GET", "/api/watchlist", Need::Scope(Library)),
     ("GET", "/api/search", Need::Scope(Library)),
     ("GET", "/api/events", Need::Scope(Library)),
+    // Live TV's channels and guide
+    ("GET", "/api/live", Need::Scope(Library)),
+    ("GET", "/api/live/channels", Need::Scope(Library)),
+    ("GET", "/api/live/channels/{id}", Need::Scope(Library)),
+    ("GET", "/api/live/channels/{id}/logo", Need::Scope(Library)),
+    ("GET", "/api/live/channels/{id}/programs/{start}/image", Need::Scope(Library)),
+    ("GET", "/api/live/guide", Need::Scope(Library)),
     // play
     ("POST", "/api/playback", Need::Scope(Play)),
+    // watching Live TV, and the profile's favourite channels
+    ("POST", "/api/live/channels/{id}/watch", Need::Scope(Play)),
+    ("GET", "/api/live/channels/{id}/stream.ts", Need::Scope(Play)),
+    ("GET", "/api/live/sessions/{session}/{file}", Need::Scope(Play)),
+    ("DELETE", "/api/live/sessions/{session}", Need::Scope(Play)),
+    ("PUT", "/api/live/channels/{id}/favorite", Need::Scope(Play)),
+    ("DELETE", "/api/live/channels/{id}/favorite", Need::Scope(Play)),
     // what Automatic knows of the network, and a speed test of it
     ("GET", "/api/playback/network", Need::Scope(Play)),
     ("PUT", "/api/playback/network", Need::Scope(Play)),
@@ -254,7 +268,7 @@ mod tests {
     fn every_app_route_is_on_a_real_path() {
         // Whether each names a route of api/mod.rs is checked by
         // tests/app_tokens.rs, which reads it.
-        assert_eq!(APP_ROUTES.len(), 67);
+        assert_eq!(APP_ROUTES.len(), 79);
         for (i, (method, path, _)) in APP_ROUTES.iter().enumerate() {
             assert!(["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method), "{method} {path}");
             assert!(path.starts_with("/api/") && !path.ends_with('/'), "{path}");

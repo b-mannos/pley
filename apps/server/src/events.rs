@@ -75,6 +75,12 @@ pub enum ServerEvent {
         message: Option<String>,
         by_admin: bool,
     },
+    /// Live TV's sources, channels or guide changed: apps fetch the
+    /// channels and the guide again.
+    LiveChannelsChanged,
+    /// A live channel started or stopped being pulled, or someone started
+    /// or stopped watching one: the connections in use changed.
+    LiveTunersChanged,
 }
 
 impl ServerEvent {
@@ -90,7 +96,9 @@ impl ServerEvent {
             | ServerEvent::SessionsChanged
             | ServerEvent::WatchlistChanged { .. }
             | ServerEvent::UserStateChanged { .. }
-            | ServerEvent::SessionStopped { .. } => None,
+            | ServerEvent::SessionStopped { .. }
+            | ServerEvent::LiveChannelsChanged
+            | ServerEvent::LiveTunersChanged => None,
         }
     }
 

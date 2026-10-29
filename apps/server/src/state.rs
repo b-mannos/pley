@@ -47,6 +47,8 @@ pub struct Inner {
     pub schedule: Arc<Scheduler>,
     pub markers: Arc<MarkerService>,
     pub trickplay: Arc<TrickplayService>,
+    /// Live TV: its sources, channels, guide and connections (see [`crate::livetv`]).
+    pub live: Arc<crate::livetv::LiveTv>,
     pub two_step: crate::two_step::TwoStep,
     /// What Automatic quality knows of each client's networks.
     pub bandwidth: crate::bandwidth::Bandwidth,
@@ -143,6 +145,8 @@ impl AppState {
             config.cache_dir().join("trickplay"),
             stopping.clone(),
         );
+        let live =
+            crate::livetv::LiveTv::new(db.clone(), events.clone(), transcoder.clone(), config.cache_dir()).await?;
         let auth = AuthService::new(db.clone());
         let oauth = crate::oauth::AuthorizationServer::new(&config);
         let two_step = crate::two_step::TwoStep::new(db.clone(), &config.data_dir);
@@ -162,6 +166,7 @@ impl AppState {
                 schedule,
                 markers,
                 trickplay,
+                live,
                 two_step,
                 bandwidth,
                 oauth,
@@ -189,6 +194,7 @@ impl AppState {
         self.markers.start();
         self.resources.start(self.stopping.clone());
         self.schedule.start(self.stopping.clone());
+        self.live.start(self.stopping.clone());
         let metadata = self.metadata.clone();
         tokio::spawn(async move {
             metadata.prune_people().await;

@@ -20,8 +20,9 @@ use parking_lot::{Mutex, RwLock};
 use pley_transcoder_api::{
     Announce, BitrateChanged, BitrateRequest, ConversionStatus, CoverRequest, ErrorBody, Fingerprint,
     FingerprintRequest, Frames, FramesRequest, HoldRequest, JobCreated, JobRequest, JobStatus, KeyframesRequest,
-    MediaInfo, PrefetchRequest, Prefetched, ProbeRequest, SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV,
-    ThumbnailRequest, TranscoderInfo, TranscoderStatus, TrickplayInfo, TrickplayRequest,
+    LiveCreated, LiveRequest, LiveStatus, MediaInfo, PrefetchRequest, Prefetched, ProbeRequest,
+    SUBTITLES_COMPLETE_HEADER, SubtitleRequest, TOKEN_ENV, ThumbnailRequest, TranscoderInfo, TranscoderStatus,
+    TrickplayInfo, TrickplayRequest,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -533,6 +534,72 @@ impl Transcoder {
             return Err(api_error(resp).await);
         }
         Ok(resp)
+    }
+
+    /// Whether it makes live channels (`/v1/live`).
+    pub fn makes_live(&self) -> bool {
+        self.info().is_some_and(|info| info.capabilities.live)
+    }
+
+    pub async fn create_live(&self, req: &LiveRequest) -> TranscoderResult<LiveCreated> {
+        self.post_json("/v1/live", req, Duration::from_secs(20)).await
+    }
+
+    /// Sends a live channel's MPEG-TS, `input`, as it comes: answered when
+    /// it ends (or the channel is stopped, or fails).
+    pub async fn feed_live<S>(&self, id: &str, input: S) -> TranscoderResult<()>
+    where
+        S: futures::Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static,
+    {
+        let base = self.base()?;
+        // No overall limit: it lasts as long as the channel is watched.
+        let resp = self
+            .authed(self.http.put(format!("{base}/v1/live/{id}/input")))
+            .header(reqwest::header::CONTENT_TYPE, "video/mp2t")
+            .body(reqwest::Body::wrap_stream(input))
+            .send()
+            .await?;
+        if resp.status().is_success() { Ok(()) } else { Err(api_error(resp).await) }
+    }
+
+    pub async fn live_status(&self, id: &str) -> TranscoderResult<LiveStatus> {
+        self.get_json(&format!("/v1/live/{id}"), Duration::from_secs(10)).await
+    }
+
+    /// Stops a live channel (gone already is fine).
+    pub async fn delete_live(&self, id: &str) -> TranscoderResult<()> {
+        let base = self.base()?;
+        let resp = self
+            .authed(self.http.delete(format!("{base}/v1/live/{id}")))
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await?;
+        if resp.status().is_success() || resp.status().as_u16() == 404 { Ok(()) } else { Err(api_error(resp).await) }
+    }
+
+    /// A live channel's playlist, which waits for its first segments.
+    pub async fn live_playlist(&self, id: &str) -> TranscoderResult<String> {
+        let base = self.base()?;
+        let resp = self
+            .authed(self.http.get(format!("{base}/v1/live/{id}/index.m3u8")))
+            .timeout(Duration::from_secs(40))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            return Err(api_error(resp).await);
+        }
+        Ok(resp.text().await?)
+    }
+
+    /// Streaming response of a live channel's segment (`s12.ts`).
+    pub async fn live_segment(&self, id: &str, name: &str) -> TranscoderResult<reqwest::Response> {
+        let base = self.base()?;
+        let resp = self
+            .authed(self.http.get(format!("{base}/v1/live/{id}/{name}")))
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await?;
+        if resp.status().is_success() { Ok(resp) } else { Err(api_error(resp).await) }
     }
 
     fn base(&self) -> TranscoderResult<String> {

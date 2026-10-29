@@ -1,0 +1,337 @@
+//! Live TV (`/api/live`): channels, the guide and watching for everyone
+//! Live TV is open to; sources, channels and connections for administrators.
+
+use std::collections::HashMap;
+
+use axum::Json;
+use axum::body::Body;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::{IntoResponse, Response};
+use serde::{Deserialize, Serialize};
+
+use crate::auth::{AdminUser, AuthUser};
+use crate::error::{ApiResult, AppError};
+use crate::livetv::tuner::{Tune, TunerStatus, ViewerKind, Watching};
+use crate::livetv::{AdminChannel, Channel, ChannelPatch, Guide, LiveSettings, Source, SourceInput, SourceTest};
+use crate::state::AppState;
+use crate::util::now;
+
+/// What the apps need to know to show Live TV at all.
+#[derive(Serialize)]
+pub struct Summary {
+    /// Live TV is open to this account and has channels.
+    available: bool,
+    /// Open to this account (it may have no channels yet).
+    allowed: bool,
+    channels: usize,
+    /// Sources set up (administrators: whether to show where to add one).
+    sources: usize,
+    /// The channels watched last, newest first.
+    recent: Vec<i64>,
+}
+
+pub async fn summary(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Summary>> {
+    let allowed = state.live.may_watch(&user);
+    let channels = if allowed { state.live.channels(&user).await?.len() } else { 0 };
+    let sources = if user.is_admin { state.live.sources().await?.len() } else { 0 };
+    let recent = if allowed { state.live.recent(&user, 12).await? } else { Vec::new() };
+    Ok(Json(Summary { available: allowed && channels > 0, allowed, channels, sources, recent }))
+}
+
+pub async fn channels(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<Channel>>> {
+    state.live.check_access(&user)?;
+    Ok(Json(state.live.channels(&user).await?))
+}
+
+pub async fn channel(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Json<Channel>> {
+    state.live.check_access(&user)?;
+    Ok(Json(state.live.channel(&user, id).await?))
+}
+
+pub async fn favorite(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+    state.live.check_access(&user)?;
+    state.live.set_favorite(&user, id, true).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn unfavorite(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {
+    state.live.check_access(&user)?;
+    state.live.set_favorite(&user, id, false).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub struct GuideQuery {
+    from: Option<i64>,
+    to: Option<i64>,
+}
+
+/// The guide from `from` (default: half an hour ago) to `to` (default: six
+/// hours after `from`), two days at most.
+pub async fn guide(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Query(query): Query<GuideQuery>,
+) -> ApiResult<Json<Guide>> {
+    state.live.check_access(&user)?;
+    let from = query.from.unwrap_or_else(|| now() - 1800);
+    let to = query.to.unwrap_or(from + 6 * 3600);
+    Ok(Json(state.live.guide(&user, from, to).await?))
+}
+
+async fn picture(
+    state: &AppState,
+    path: std::path::PathBuf,
+    query: &HashMap<String, String>,
+    headers: &HeaderMap,
+) -> ApiResult<Response> {
+    let width = query.get("w").and_then(|w| w.parse::<u32>().ok()).filter(|w| *w > 0);
+    let image = state.images.load(&path, width).await?;
+    if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(image.etag.as_str()) {
+        return Ok(StatusCode::NOT_MODIFIED.into_response());
+    }
+    let mut out = HeaderMap::new();
+    out.insert(header::CONTENT_TYPE, HeaderValue::from_static(image.content_type));
+    out.insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=86400"));
+    if let Ok(etag) = HeaderValue::from_str(&image.etag) {
+        out.insert(header::ETAG, etag);
+    }
+    Ok((out, image.bytes).into_response())
+}
+
+pub async fn logo(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<i64>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    state.live.check_access(&user)?;
+    let path = state.live.logo(id).await?;
+    picture(&state, path, &query, &headers).await
+}
+
+pub async fn program_image(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path((id, start)): Path<(i64, i64)>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    state.live.check_access(&user)?;
+    let path = state.live.program_image(id, start).await?;
+    picture(&state, path, &query, &headers).await
+}
+
+#[derive(Deserialize, Default)]
+pub struct WatchRequest {
+    /// The device watching: what it watched before ends.
+    #[serde(default)]
+    client_id: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct WatchInfo {
+    #[serde(flatten)]
+    watching: Watching,
+    channel: Channel,
+}
+
+async fn start_watching(
+    state: &AppState,
+    user: &AuthUser,
+    id: i64,
+    client_id: Option<String>,
+    kind: ViewerKind,
+) -> ApiResult<(Watching, Channel)> {
+    state.live.check_access(user)?;
+    let channel = state.live.channel(user, id).await?;
+    let row = state.live.channel_row(id).await?;
+    let (source_name, max_connections, user_agent) = state.live.source_of(&row).await?;
+    let watching = state
+        .live
+        .tuners
+        .watch(user, Tune { channel: &row, source_name, max_connections, user_agent }, client_id, kind)
+        .await?;
+    state.live.watched(user.id, id).await;
+    Ok((watching, channel))
+}
+
+/// Starts watching a channel: its live HLS playlist's address.
+pub async fn watch(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<i64>,
+    body: Option<Json<WatchRequest>>,
+) -> ApiResult<Json<WatchInfo>> {
+    let client_id = body.and_then(|Json(b)| b.client_id);
+    let (watching, channel) = start_watching(&state, &user, id, client_id, ViewerKind::Hls).await?;
+    Ok(Json(WatchInfo { watching, channel }))
+}
+
+/// The channel's MPEG-TS as the provider sends it, for as long as it is
+/// read: for players that read MPEG-TS themselves (VLC, Kodi, TVs).
+pub async fn stream(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<i64>,
+    Query(query): Query<HashMap<String, String>>,
+) -> ApiResult<Response> {
+    let client_id = query.get("client_id").cloned();
+    let (watching, _) = start_watching(&state, &user, id, client_id, ViewerKind::Stream).await?;
+    let body = state.live.tuners.stream(&watching.session_id, &user)?;
+    Response::builder()
+        .header(header::CONTENT_TYPE, "video/mp2t")
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::from_stream(body))
+        .map_err(|e| AppError::Internal(e.into()))
+}
+
+/// A watching session's live playlist or segment.
+pub async fn session_file(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path((session, file)): Path<(String, String)>,
+) -> ApiResult<Response> {
+    if file == "index.m3u8" {
+        let settings = state.live.settings();
+        let hwaccel = state.settings.get().hwaccel;
+        let text = state.live.tuners.playlist(&session, &user, &settings, hwaccel).await?;
+        return Ok((
+            [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl"), (header::CACHE_CONTROL, "no-cache")],
+            text,
+        )
+            .into_response());
+    }
+    let upstream = state.live.tuners.segment(&session, &user, &file).await?;
+    let mut response = Response::builder()
+        .header(header::CONTENT_TYPE, "video/mp2t")
+        .header(header::CACHE_CONTROL, "private, max-age=60");
+    if let Some(len) = upstream.content_length() {
+        response = response.header(header::CONTENT_LENGTH, len);
+    }
+    response.body(Body::from_stream(upstream.bytes_stream())).map_err(|e| AppError::Internal(e.into()))
+}
+
+/// Stops watching: the connection is let go once nobody else watches.
+pub async fn leave(State(state): State<AppState>, user: AuthUser, Path(session): Path<String>) -> StatusCode {
+    if state.live.tuners.leave(&session, &user) { StatusCode::NO_CONTENT } else { StatusCode::NOT_FOUND }
+}
+
+// ------------------------------------------------------------ administrators
+
+pub async fn get_settings(State(state): State<AppState>, _admin: AdminUser) -> Json<LiveSettings> {
+    Json((*state.live.settings()).clone())
+}
+
+pub async fn put_settings(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Json(settings): Json<LiveSettings>,
+) -> ApiResult<Json<LiveSettings>> {
+    Ok(Json((*state.live.save_settings(settings).await?).clone()))
+}
+
+pub async fn sources(State(state): State<AppState>, _admin: AdminUser) -> ApiResult<Json<Vec<Source>>> {
+    Ok(Json(state.live.sources().await?))
+}
+
+pub async fn add_source(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Json(input): Json<SourceInput>,
+) -> ApiResult<(StatusCode, Json<Source>)> {
+    Ok((StatusCode::CREATED, Json(state.live.add_source(input).await?)))
+}
+
+pub async fn update_source(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Path(id): Path<i64>,
+    Json(input): Json<SourceInput>,
+) -> ApiResult<Json<Source>> {
+    Ok(Json(state.live.update_source(id, input).await?))
+}
+
+pub async fn delete_source(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
+    state.live.delete_source(id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Reads a source's channels and guide again, now.
+pub async fn refresh_source(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Path(id): Path<i64>,
+) -> ApiResult<StatusCode> {
+    state.live.source(id).await?;
+    state.live.refresh_soon(id);
+    Ok(StatusCode::ACCEPTED)
+}
+
+#[derive(Deserialize)]
+pub struct TestRequest {
+    #[serde(flatten)]
+    input: SourceInput,
+    /// The saved source being changed: its password, when none is given.
+    #[serde(default)]
+    source_id: Option<i64>,
+}
+
+/// Reads what a source's details give without saving them.
+pub async fn test_source(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Json(req): Json<TestRequest>,
+) -> ApiResult<Json<SourceTest>> {
+    Ok(Json(state.live.test_source(req.input, req.source_id).await?))
+}
+
+#[derive(Deserialize)]
+pub struct ChannelsQuery {
+    source_id: Option<i64>,
+}
+
+pub async fn admin_channels(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Query(query): Query<ChannelsQuery>,
+) -> ApiResult<Json<Vec<AdminChannel>>> {
+    Ok(Json(state.live.admin_channels(query.source_id).await?))
+}
+
+#[derive(Deserialize)]
+pub struct ChannelsPatch {
+    ids: Vec<i64>,
+    #[serde(flatten)]
+    patch: ChannelPatch,
+}
+
+/// Hides, shows, renames or renumbers channels (`ids`), or gives them a
+/// guide channel of their own.
+pub async fn patch_channels(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Json(req): Json<ChannelsPatch>,
+) -> ApiResult<StatusCode> {
+    if req.ids.len() > 20_000 {
+        return Err(AppError::bad_request("too many channels at once"));
+    }
+    state.live.patch_channels(&req.ids, &req.patch).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn tuners(State(state): State<AppState>, _admin: AdminUser) -> Json<Vec<TunerStatus>> {
+    Json(state.live.tuners.status().await)
+}
+
+/// Stops a channel being pulled, and everyone watching it.
+pub async fn stop_tuner(State(state): State<AppState>, _admin: AdminUser, Path(id): Path<i64>) -> StatusCode {
+    state.live.tuners.stop_channel(id).await;
+    StatusCode::NO_CONTENT
+}

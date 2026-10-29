@@ -811,7 +811,10 @@ mod tests {
             {"index":3,"codec_type":"subtitle","codec_name":"dvb_teletext"}]}"#;
         let p = parse_probe(json);
         let v = p.video.unwrap();
-        assert_eq!((v.codec.as_str(), v.height, v.interlaced, v.frame_rate), ("mpeg2video", Some(1080), true, Some(25.0)));
+        assert_eq!(
+            (v.codec.as_str(), v.height, v.interlaced, v.frame_rate),
+            ("mpeg2video", Some(1080), true, Some(25.0))
+        );
         assert_eq!(p.audio.unwrap().codec, "mp2");
         assert_eq!(rate("30000/1001").map(|r| (r * 100.0).round()), Some(2997.0));
         assert_eq!(rate("0/0"), None);
@@ -845,8 +848,13 @@ mod tests {
             accel: HwAccel::Nvenc,
             main10: false,
         };
-        let x264 =
-            EncoderInfo { name: "libx264".into(), codec: VideoCodec::H264, hardware: false, accel: HwAccel::None, main10: false };
+        let x264 = EncoderInfo {
+            name: "libx264".into(),
+            codec: VideoCodec::H264,
+            hardware: false,
+            accel: HwAccel::None,
+            main10: false,
+        };
         let mut plan = Plan {
             video: Some(stream("mpeg2video", 1080, true)),
             audio: None,

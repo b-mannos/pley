@@ -23,6 +23,7 @@ pub mod images;
 pub mod instance;
 pub mod labels;
 pub mod library;
+pub mod livetv;
 pub mod logging;
 pub mod markers;
 pub mod metadata;

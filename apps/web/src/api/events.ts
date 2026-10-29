@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { connectionLost, serverAnswers, setConnectionLost } from "@/lib/connection";
 import { keys } from "./hooks";
+import { liveKeys } from "./livetv";
 import type { Activity, Id, Library, ServerEvent } from "./types";
 
 /** How long the stream may be down before the pages say the server is out of reach: a restart takes a moment. */
@@ -103,6 +104,7 @@ export function useServerEvents(enabled: boolean) {
       void qc.invalidateQueries({ queryKey: ["search"] });
       void qc.invalidateQueries({ queryKey: ["history"] });
       void qc.invalidateQueries({ queryKey: keys.watchlist });
+      void qc.invalidateQueries({ queryKey: liveKeys.all });
     };
 
     // Metadata refreshes can emit many `library_changed` events in a burst;
@@ -222,6 +224,13 @@ export function useServerEvents(enabled: boolean) {
           break;
         case "user_state_changed":
           scheduleWatchState(ev.item_ids, ev.children);
+          break;
+        case "live_channels_changed":
+          void qc.invalidateQueries({ queryKey: liveKeys.all });
+          break;
+        case "live_tuners_changed":
+          void qc.invalidateQueries({ queryKey: liveKeys.tuners });
+          void qc.invalidateQueries({ queryKey: liveKeys.sources });
           break;
       }
       for (const listener of listeners) listener(ev);

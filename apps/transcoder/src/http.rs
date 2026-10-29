@@ -534,11 +534,10 @@ async fn live_input(State(state): Shared, Path(id): Path<String>, body: Body) ->
 async fn live_file(State(state): Shared, Path((id, file)): Path<(String, String)>) -> ApiResult<Response> {
     let live = state.live.get(&id)?;
     match live.file(&file).await? {
-        LiveFile::Playlist(text) => Ok((
-            [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl"), (header::CACHE_CONTROL, "no-cache")],
-            text,
-        )
-            .into_response()),
+        LiveFile::Playlist(text) => {
+            Ok(([(header::CONTENT_TYPE, "application/vnd.apple.mpegurl"), (header::CACHE_CONTROL, "no-cache")], text)
+                .into_response())
+        }
         LiveFile::Segment(path) => {
             let handle = crate::live::open_segment(&path).await?;
             let len = handle.metadata().await?.len();

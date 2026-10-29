@@ -111,6 +111,18 @@ const ADMIN: &[(&str, &str)] = &[
     ("GET", "/api/network"),
     ("PUT", "/api/network"),
     ("GET", "/api/fs"),
+    ("GET", "/api/live/settings"),
+    ("PUT", "/api/live/settings"),
+    ("GET", "/api/live/sources"),
+    ("POST", "/api/live/sources"),
+    ("POST", "/api/live/sources/test"),
+    ("PUT", "/api/live/sources/{id}"),
+    ("DELETE", "/api/live/sources/{id}"),
+    ("POST", "/api/live/sources/{id}/refresh"),
+    ("GET", "/api/live/lineup"),
+    ("PATCH", "/api/live/lineup"),
+    ("GET", "/api/live/tuners"),
+    ("DELETE", "/api/live/tuners/{channel}"),
 ];
 
 /// Routes that take pley's own page's cookie and nothing else: allowing

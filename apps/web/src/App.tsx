@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { LoaderCircle } from "lucide-react";
 import { ApiError, setUnauthorizedHandler } from "@/api/client";
 import { queries } from "@/api/hooks";
+import { liveQueries } from "@/api/livetv";
 import { RequireAuth, Splash } from "@/auth";
 import { AppLayout } from "@/components/AppLayout";
 import { ToastProvider } from "@/components/Toast";
@@ -117,6 +118,15 @@ const router = createBrowserRouter([
         ),
       },
       {
+        path: "/live/:channelId",
+        ...onDemand(
+          () => import("@/player/live/LivePlayerPage"),
+          (m) => m.LivePlayerPage,
+          (prefetch) => [prefetch(liveQueries.channels())],
+          <PlayerFallback />,
+        ),
+      },
+      {
         element: <AppLayout />,
         children: [
           { index: true, element: <HomePage /> },
@@ -126,6 +136,14 @@ const router = createBrowserRouter([
           { path: "collection/:id", ...onDemand(() => import("@/pages/collections/CollectionPage"), (m) => m.CollectionPage) },
           { path: "playlists", ...onDemand(() => import("@/pages/playlists/PlaylistsPage"), (m) => m.PlaylistsPage) },
           { path: "playlists/:id", ...onDemand(() => import("@/pages/playlists/PlaylistPage"), (m) => m.PlaylistPage) },
+          {
+            path: "live",
+            ...onDemand(
+              () => import("@/pages/livetv/LiveTvPage"),
+              (m) => m.LiveTvPage,
+              (prefetch) => [prefetch(liveQueries.channels()), prefetch(liveQueries.summary())],
+            ),
+          },
           { path: "search", element: <SearchPage /> },
           { path: "account", element: <AccountPage /> },
           {
@@ -139,6 +157,14 @@ const router = createBrowserRouter([
                   () => import("@/pages/settings/LibrariesSettings"),
                   (m) => m.LibrariesSettings,
                   (prefetch) => [prefetch(queries.sharedLibraries()), prefetch(queries.activity())],
+                ),
+              },
+              {
+                path: "livetv",
+                ...onDemand(
+                  () => import("@/pages/settings/LiveTvSettings"),
+                  (m) => m.LiveTvSettings,
+                  (prefetch) => [prefetch(liveQueries.sources()), prefetch(liveQueries.settings())],
                 ),
               },
               {

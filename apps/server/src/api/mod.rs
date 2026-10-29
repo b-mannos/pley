@@ -10,6 +10,7 @@ pub(crate) mod editing;
 mod history;
 pub(crate) mod items;
 mod libraries;
+mod livetv;
 mod oauth;
 mod people;
 pub(crate) mod playback;
@@ -136,6 +137,25 @@ pub fn router(state: AppState) -> Router {
         .route("/media/{key}/{file}", get(playback::keyed_media))
         .route("/files/{id}/stream", get(playback::stream_file))
         .route("/conversions", post(playback::convert))
+        .route("/live", get(livetv::summary))
+        .route("/live/channels", get(livetv::channels))
+        .route("/live/channels/{id}", get(livetv::channel))
+        .route("/live/channels/{id}/favorite", put(livetv::favorite).delete(livetv::unfavorite))
+        .route("/live/channels/{id}/logo", get(livetv::logo))
+        .route("/live/channels/{id}/programs/{start}/image", get(livetv::program_image))
+        .route("/live/channels/{id}/watch", post(livetv::watch))
+        .route("/live/channels/{id}/stream.ts", get(livetv::stream))
+        .route("/live/guide", get(livetv::guide))
+        .route("/live/sessions/{session}", delete(livetv::leave))
+        .route("/live/sessions/{session}/{file}", get(livetv::session_file))
+        .route("/live/settings", get(livetv::get_settings).put(livetv::put_settings))
+        .route("/live/sources", get(livetv::sources).post(livetv::add_source))
+        .route("/live/sources/test", post(livetv::test_source))
+        .route("/live/sources/{id}", put(livetv::update_source).delete(livetv::delete_source))
+        .route("/live/sources/{id}/refresh", post(livetv::refresh_source))
+        .route("/live/lineup", get(livetv::admin_channels).patch(livetv::patch_channels))
+        .route("/live/tuners", get(livetv::tuners))
+        .route("/live/tuners/{channel}", delete(livetv::stop_tuner))
         .route("/conversions/{id}", get(playback::conversion).delete(playback::cancel_conversion))
         .route("/conversions/{id}/file", get(playback::conversion_file))
         .route("/files/{id}/subtitles/{file}", get(playback::subtitles))

@@ -25,6 +25,17 @@ describes how they are made.
 
 ### Added
 
+- Live TV: IPTV channels from an M3U playlist or an Xtream Codes account,
+  with their XMLTV guide, watched in the web and desktop apps through the
+  server, at home or away. A guide that scrolls through time, channel
+  cards with what's on, favourites, recently watched, and a player with
+  channel up and down, a channel list, pause and rewind (five minutes by
+  default) and picture in picture. The server holds the provider's
+  connections: a channel watched on several devices takes one, and when
+  all are in use the apps say which channels hold them. Interlaced and
+  non-H.264 channels are converted, on the graphics card where there is
+  one. Settings → Live TV has the sources, the lineup (hide, rename,
+  renumber, pick a guide channel) and who is watching what.
 - The web app draws picture subtitles (PGS, VobSub, DVB) over the video
   itself, so the file still plays as it is, or its stream keeps HDR,
   rather than having them burned in.

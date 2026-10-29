@@ -664,7 +664,11 @@ export type ServerEvent =
    */
   | { type: "user_state_changed"; item_ids: Id[]; children: boolean }
   /** A playback session was ended on the server (`DELETE /api/sessions/{id}`): the device playing it stops. */
-  | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean };
+  | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean }
+  /** Live TV's sources, channels or guide changed. */
+  | { type: "live_channels_changed" }
+  /** A live channel started or stopped being watched: the connections in use changed. */
+  | { type: "live_tuners_changed" };
 
 /** `vulkan` (h264_vulkan) isn't offered: it can only be set through the API. */
 export type HwAccel = "auto" | "none" | "nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox" | "vulkan";

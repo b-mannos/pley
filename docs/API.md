@@ -2306,8 +2306,101 @@ type ServerEvent =
   | { type: "sessions_changed" }
   | { type: "watchlist_changed" }                    // the user's My List changed (their streams only)
   | { type: "user_state_changed"; item_ids: Id[]; children: boolean } // their watch state (their streams only)
-  | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean }; // theirs only
+  | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean } // theirs only
+  | { type: "live_channels_changed" }                // Live TV's sources, channels or guide changed: refetch
+  | { type: "live_tuners_changed" };                 // a channel was tuned or let go, or its viewers changed
 ```
+
+## Live TV
+
+IPTV channels and their guide, watched through the server. The server holds
+the connections to the provider: a channel watched on several devices
+takes one connection, read once and given to every player of it. A source's
+`max_connections` is how many channels it may pull at once; a channel
+nobody watches any more is let go 20 s after the last viewer left (at once
+when another channel needs the connection).
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | `/api/live` | `library` | `{ available, allowed, channels, sources, recent: Id[] }`: whether to show Live TV (`allowed`: open to this account; `available`: and it has channels), the channel count, the sources set up (administrators; else 0) and the channels watched last, newest first |
+| GET | `/api/live/channels` | `library` | `LiveChannel[]`, the shown channels by number, each with what's on now and next |
+| GET | `/api/live/channels/{id}` | `library` | `LiveChannel` |
+| GET | `/api/live/channels/{id}/logo` | `library` | the logo, fetched once and kept; `?w=` resizes it |
+| GET | `/api/live/channels/{id}/programs/{start}/image` | `library` | a programme's picture; `?w=` resizes it |
+| GET | `/api/live/guide` | `library` | `?from=&to=` (unix seconds; default half an hour ago to six hours on, two days at most) → `{ from, to, programs: { [channel_id]: LiveProgram[] } }` |
+| PUT | `/api/live/channels/{id}/favorite` | `play` | `204` |
+| DELETE | `/api/live/channels/{id}/favorite` | `play` | `204` |
+| POST | `/api/live/channels/{id}/watch` | `play` | optional `{ client_id? }` → `{ session_id, url, kind: "hls", channel: LiveChannel }`: `url` is the channel's live HLS playlist |
+| GET | `/api/live/channels/{id}/stream.ts` | `play` | `?client_id=`: the channel's MPEG-TS as the provider sends it, for as long as it is read (VLC, Kodi, TVs that read MPEG-TS) |
+| GET | `/api/live/sessions/{session}/{file}` | `play` | `index.m3u8` or a segment of a watching session |
+| DELETE | `/api/live/sessions/{session}` | `play` | `204`: stops watching; `404` when not yours or already gone |
+| GET | `/api/live/settings` | `admin` | `LiveSettings` |
+| PUT | `/api/live/settings` | `admin` | `LiveSettings` → `LiveSettings` |
+| GET | `/api/live/sources` | `admin` | `LiveSource[]` |
+| POST | `/api/live/sources` | `admin` | `LiveSourceInput` → `201 LiveSource`; its channels and guide are read in the background |
+| POST | `/api/live/sources/test` | `admin` | `LiveSourceInput & { source_id? }` → `{ channels, groups, guide_url, account }` without saving; `source_id` lends a saved source's password |
+| PUT | `/api/live/sources/{id}` | `admin` | `LiveSourceInput` → `LiveSource`; no `password` keeps the saved one |
+| DELETE | `/api/live/sources/{id}` | `admin` | `204`, with its channels |
+| POST | `/api/live/sources/{id}/refresh` | `admin` | `202`: reads its channels and guide again now |
+| GET | `/api/live/lineup` | `admin` | `?source_id=` → `LiveLineupChannel[]`, hidden ones too |
+| PATCH | `/api/live/lineup` | `admin` | `{ ids: Id[], hidden?, name?, number?, guide_id? }` → `204`; `""` gives back the source's own value; 20,000 ids at most |
+| GET | `/api/live/tuners` | `admin` | `LiveTuner[]`: the channels being pulled and who watches them |
+| DELETE | `/api/live/tuners/{channel}` | `admin` | `204`: stops pulling the channel, for everyone watching it |
+
+```ts
+interface LiveChannel {
+  id: Id; source_id: Id; name: string; number: string | null; group: string;
+  logo: string | null;                 // the logo's address on this server
+  favorite: boolean; has_guide: boolean;
+  now: LiveProgram | null; next: LiveProgram | null;
+}
+interface LiveProgram {
+  channel_id: Id; start: number; stop: number; title: string;
+  subtitle: string | null; description: string | null; categories: string[];
+  image: string | null; season: number | null; episode: number | null;
+  is_new: boolean; is_live: boolean; rating: string | null;
+}
+interface LiveSourceInput {
+  name: string; kind: "m3u" | "xtream";
+  url: string;                         // the playlist (m3u) or the Xtream server
+  username?: string; password?: string; // Xtream
+  guide_url?: string;                  // XMLTV; empty: the playlist's own, or Xtream's
+  user_agent?: string; max_connections?: number /* 1 */; enabled?: boolean /* true */;
+}
+interface LiveSource extends Omit<LiveSourceInput, "password"> {
+  id: Id; password_set: boolean; created_at: number;
+  channels_at: number | null; channels_error: string | null;
+  guide_at: number | null; guide_error: string | null;
+  account: { status: string; expires_at: number | null; max_connections: number | null;
+             active_connections: number | null; trial: boolean } | null; // Xtream
+  channel_count: number; hidden_count: number; guided_count: number;
+  connections_in_use: number; refreshing: boolean;
+}
+interface LiveSettings {
+  access: "everyone" | "admins";
+  age_limited: boolean;                // profiles with an age limit see Live TV too
+  deinterlace: boolean;                // interlaced channels are made progressive
+  max_height: number | null;           // transcoded channels at most this many lines
+  timeshift_minutes: number;           // how far back a channel can be paused and rewound
+  refresh_hours: number;               // channels and guide read again this often
+  guide_days: number;                  // days of guide kept ahead
+}
+```
+
+- **Watching.** `POST …/watch` tunes the channel when nobody watches it
+  yet. `409` when every connection of its source is in use; the message
+  names the channels watched (and, to administrators, by whom). A
+  `client_id` ends what that device watched before, so zapping doesn't
+  hold two connections.
+- **The stream.** H.264 is sent as it is; other video, and interlaced
+  video while `deinterlace` is on, is made H.264 by the transcoder; audio
+  that isn't AAC is made AAC stereo. Every player of a channel reads the
+  same HLS stream, made once.
+- **Leaving.** An HLS viewer that asked for nothing for 45 s has left;
+  `DELETE /api/live/sessions/{session}` says so at once.
+- **Hidden channels** are nobody's to watch, administrators' included,
+  until shown again. Names, numbers and guide channels set in the lineup
+  stay when the source is read again.
 
 ## Users *(admin)*
 

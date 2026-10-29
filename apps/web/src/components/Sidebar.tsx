@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router";
-import { ArrowUpDown, Film, House, List, ListMusic, ListVideo, LoaderCircle, Music, Plus, Settings, Tv, X } from "lucide-react";
+import { ArrowUpDown, Film, House, List, ListMusic, ListVideo, LoaderCircle, Music, Plus, Settings, Tv, Tv2, X } from "lucide-react";
 import { useLibraries } from "@/api/hooks";
+import { useLiveSummary } from "@/api/livetv";
 import { usePlaylists } from "@/api/lists";
 import type { LibraryKind } from "@/api/types";
 import { useAuth } from "@/auth";
@@ -46,7 +47,10 @@ function NavItem({ to, icon, children, end, trailing }: { to: string; icon: Reac
 function SidebarContent({ onClose }: { onClose?: () => void }) {
   const user = useAuth();
   const libs = useLibraries();
+  const live = useLiveSummary();
   const [sorting, setSorting] = useState(false);
+  // Shown where it has channels, and to administrators to set it up.
+  const showLive = live.data ? live.data.available || (user.is_admin && live.data.allowed) : false;
 
   return (
     <nav className="flex h-full flex-col overflow-y-auto px-3 pb-4 pt-4" aria-label="Main">
@@ -65,6 +69,11 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
         <NavItem to="/" end icon={<House className="size-[18px]" />}>
           Home
         </NavItem>
+        {showLive ? (
+          <NavItem to="/live" icon={<Tv2 className="size-[18px]" />}>
+            Live TV
+          </NavItem>
+        ) : null}
       </div>
 
       <div className="mb-0.5 mt-5 flex h-7 items-center justify-between pl-3 pr-1 text-xs font-medium text-subtle">
