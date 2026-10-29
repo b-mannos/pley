@@ -1,67 +1,101 @@
 # pley-transcoder
 
-`pley-transcoder` is the component of Pley that does **everything involving
-FFmpeg**:
+`pley-transcoder` is the part of Pley that runs FFmpeg. It:
 
-- probing media files
-- HLS transcoding and remuxing
-- HDR10, HLG and Dolby Vision tone mapping, or HDR kept in HEVC Main 10
-- subtitle burn-in and extraction
-- thumbnails and embedded cover art
-- keyframe indexing
+- probes media files
+- transcodes and remuxes video into HLS, and converts whole files
+- tone maps HDR10, HLG and Dolby Vision to SDR, or keeps HDR in HEVC Main 10
+- burns in and extracts subtitles
+- makes thumbnails, seek previews and embedded cover art
+- indexes keyframes
 
-It is a separate program. The Pley media server
-runs it as a child process, or connects to one running elsewhere, and talks to
-it only through the HTTP API described here. The request and response types
-live in the `pley-transcoder-api` crate.
+It is a separate program. The Pley server runs
+it as a child process, or connects to one running elsewhere, and talks to it
+only through the HTTP API described here. The request and response types live
+in the `pley-transcoder-api` crate (`packages/transcoder-api`).
 
 ## Running
 
 ```
 pley-transcoder [OPTIONS]
-  --listen <ADDR>          default 127.0.0.1:7540 (port 0 = pick a free port)
-  --token <TOKEN>          shared secret, at least 16 characters; better given as
-                           PLEY_TRANSCODER_TOKEN in the environment (a command line is
-                           in the list of processes, for every account to read).
-                           Required unless --listen is a loopback address
-  --work-dir <DIR>         segments, caches (default: the user's cache folder,
-                           e.g. ~/.cache/pley-transcoder). The folders the transcoder
-                           keeps in it (jobs, keyframes, subtitles, trickplay,
-                           libplacebo, conversions) are its own, private to the user;
-                           so is the folder itself when the transcoder makes it, or it
-                           is the default one. One given that is there already (/tmp)
-                           keeps its permissions
-  --ffmpeg / --ffprobe     binaries (default: from PATH)
-  --max-jobs <N>           concurrent ffmpeg transcodes (default 8)
-  --max-hw-jobs <N>        concurrent hardware encoder sessions (default 8);
-                           extra jobs fall back to software encoding
-  --probe-concurrency <N>  concurrent probes/extractions (default 8)
-  --announce               print {"event":"listening","addr":"…"} once ready
-  --exit-with-parent       exit when stdin closes (used by the managed mode)
-  --redetect               ignore the cached capability detection
-  --license                print the licence notice
 ```
 
-**Managed mode (default).** The server starts
-`pley-transcoder --listen 127.0.0.1:0 --announce --exit-with-parent` from the
-folder that holds the server binary. It passes a random token through the
-environment, reads the announced address, and restarts the transcoder with
-backoff if it dies. The transcoder exits as soon as the server does.
+| Flag | Env | Default | Meaning |
+|---|---|---|---|
+| `--listen <ADDR>` | `PLEY_TRANSCODER_LISTEN` | `127.0.0.1:7540` | Address to listen on. Port 0 picks a free port. |
+| `--token <TOKEN>` | `PLEY_TRANSCODER_TOKEN` | none | Shared secret, at least 16 characters. Required unless `--listen` is a loopback address. Prefer the env var: every account can read a command line in the process list. |
+| `--work-dir <DIR>` | `PLEY_TRANSCODER_WORK_DIR` | `pley-transcoder` in the user's cache folder | Segments and caches (see [Work folder](#work-folder)). |
+| `--ffmpeg <PATH>` | `PLEY_FFMPEG` | `ffmpeg` from `PATH` | FFmpeg binary. |
+| `--ffprobe <PATH>` | `PLEY_FFPROBE` | `ffprobe` from `PATH` | FFprobe binary. |
+| `--max-jobs <N>` | `PLEY_TRANSCODER_MAX_JOBS` | 8 | Concurrent FFmpeg transcodes (transcode slots). |
+| `--max-hw-jobs <N>` | `PLEY_TRANSCODER_MAX_HW_JOBS` | 8 | Concurrent hardware encoder sessions. Extra jobs fall back to software encoding. |
+| `--probe-concurrency <N>` | – | 8 | Concurrent probes and extractions. |
+| `--announce` | – | off | Print `{"event":"listening","addr":"…"}` on stdout once ready. |
+| `--exit-with-parent` | – | off | Exit when stdin closes (managed mode). |
+| `--redetect` | – | off | Ignore the cached capability detection. |
+| `--log <FILTER>` | `PLEY_LOG` | `info` | Log filter, e.g. `info` or `debug`. |
+| `--license` | – | – | Print the license notice and exit. |
 
-**External mode.** Start the transcoder yourself, for example on a machine with
-a GPU, with its token in `PLEY_TRANSCODER_TOKEN`, then point the server at it
-with `transcoder_url = "http://host:7540"` and the same `transcoder_token` (or
-`PLEY_TRANSCODER_TOKEN` in its environment). Media paths must be identical on
-both machines, for example through the same network mount.
+Other environment variables:
 
-All endpoints except `GET /health` require `Authorization: Bearer <token>` when
-a token is configured. Without one (only on a loopback address), the
-transcoder answers only requests addressed to this computer: a `Host` of
-`localhost`, `127.0.0.1` or `[::1]`, with any port. A web page whose own
-name was pointed at 127.0.0.1 (DNS rebinding) sends that name and is
-refused. Other accounts on the same computer can still reach it: where that
-matters, give it a token. Errors are `{"code": "...", "message": "..."}`
-with the following status codes:
+- `PLEY_VAAPI_DEVICE`: the VAAPI render node to use (default: the first Intel
+  or AMD one).
+
+### Managed and external mode
+
+- **Managed (default).** The server starts
+  `pley-transcoder --listen 127.0.0.1:0 --announce --exit-with-parent` from
+  the folder that holds the server binary. It passes a random token in the
+  environment, reads the announced address, and restarts the transcoder with
+  backoff if it dies. The transcoder exits as soon as the server does.
+- **External.** Start the transcoder yourself (for example on a machine with
+  a GPU) with its token in `PLEY_TRANSCODER_TOKEN`. Point the server at it
+  with `transcoder_url = "http://host:7540"` and the same `transcoder_token`
+  (or `PLEY_TRANSCODER_TOKEN` in the server's environment). Media paths must
+  be identical on both machines, for example through the same network mount.
+
+### Work folder
+
+Default: `%LOCALAPPDATA%\pley-transcoder` on Windows,
+`~/Library/Caches/pley-transcoder` on macOS, `$XDG_CACHE_HOME/pley-transcoder`
+or `~/.cache/pley-transcoder` on Linux.
+
+| Path | Holds | Pruned |
+|---|---|---|
+| `jobs/<id>/` | a job's segments on disk | see [Housekeeping](#housekeeping) |
+| `conversions/` | converted files | see [Conversions](#conversions) |
+| `keyframes/` | keyframe indexes | unused 90 days, then past 256 MB |
+| `subtitles/` | converted and extracted subtitles, fonts attached to files | unused 60 days, then past 512 MB |
+| `trickplay/` | seek-preview sheets | unused 1 day, then past 1 GB |
+| `libplacebo/` | libplacebo's compiled shaders | unused 30 days, then past 128 MB |
+| `capabilities.json` | the cached encoder and filter detection | see [Encoders](#encoders) |
+
+- The folders the transcoder keeps here are private to its user. So is the
+  work folder itself when the transcoder creates it or it is the default. A
+  folder that already exists (such as `/tmp`) keeps its permissions.
+- The caches are pruned an hour apart, the first time two minutes after
+  start-up. Entries unused past their age limit go first, then the least
+  recently used until the folder fits its budget. Reading an entry counts as
+  using it.
+- Temporaries left by a crash go after 3 hours untouched. A subtitle pass that
+  runs longer touches its outputs every 10 minutes.
+- A set of seek-preview sheets is also deleted as soon as every sheet in it has
+  been fetched: the server stores the sheets it fetches.
+
+### Authentication
+
+- With a token, every endpoint except `GET /health` requires
+  `Authorization: Bearer <token>`.
+- Without a token (loopback addresses only), the transcoder answers only
+  requests whose `Host` is `localhost`, `127.0.0.1` or `[::1]`, with any port.
+  This refuses DNS rebinding: a web page whose own name points at 127.0.0.1
+  sends that name.
+- Other accounts on the same computer can still reach a transcoder without a
+  token. Give it one where that matters.
+
+### Errors
+
+Errors are `{"code": "...", "message": "..."}`:
 
 | Status | Code | Meaning |
 |---|---|---|
@@ -77,38 +111,256 @@ with the following status codes:
 
 ## Endpoints
 
-| Method | Path | Body | Response |
-|---|---|---|---|
-| GET | `/health` | – | `ok` |
-| GET | `/v1/info` | – | `TranscoderInfo`: version, commit (the build's short hash, when known), license, source, capabilities, limits, and `memory {available, reason?, path?, budget_bytes}`: whether segments can be kept in memory (see *Segments in memory*) |
-| GET | `/v1/status` | – | `TranscoderStatus`: counters, running processes, disk use, `memory_bytes` (segments in memory), every job with live metrics (`in_memory`, `memory_bytes`) |
-| GET | `/metrics` | – | Prometheus text format |
-| POST | `/v1/probe` | `ProbeRequest {path}` | `MediaInfo` (cached per file version) |
-| POST | `/v1/thumbnail` | `ThumbnailRequest {path, time_ms?, width?, duration_ms?, hdr}` | `image/jpeg` |
-| POST | `/v1/cover` | `CoverRequest {path}` | embedded cover art (`image/jpeg` or `image/png`) |
-| POST | `/v1/subtitles` | `SubtitleRequest {path, stream_index?, partial?}` | `text/vtt`: a text track of the file, or a subtitle file (see *Subtitle extraction*). With `partial` (embedded tracks): within a few seconds, the whole track when it's done by then (as a rule when it can be read through the file's Cues), else the cues read so far with `X-Pley-Complete: 0` while the extraction goes on in the background |
-| POST | `/v1/subtitles/mks` | `SubtitleRequest {path, stream_index?}` | `video/x-matroska`: the track (or the subtitle file, without `stream_index`) copied as it is into a Matroska file of its own, for players that show picture subtitles (PGS, VobSub with its palette, DVB) next to an HLS stream. Times are the original's from the start of the file. Anything but subtitles fails (`-vn -an -dn`). Reads the whole file, as one of the passes over whole files; not cached (the server caches it). Transcoders that serve it say `subtitle_matroska: true` in their capabilities |
-| POST | `/v1/keyframes` | `KeyframesRequest {path}` | `200` if indexed, `202` if queued |
-| POST | `/v1/hold` | `HoldRequest {ms}` | `204`: background work waits (and its FFmpeg runs pause) for `ms`, a minute at most: a playback the transcoder doesn't run, a direct play, is starting (see *Background work and playback*) |
-| POST | `/v1/prefetch` | `PrefetchRequest {path, start_ms?}` | `Prefetched {ranges: [{part, start, end}], bytes, elapsed_ms, skipped?, stopped}`: reads the parts of the file a playback starting at `start_ms` reads first, so they come from a cache when it does (see *Reading ahead*) |
-| POST | `/v1/trickplay` | `TrickplayRequest {path, interval_ms?, width?}` | `TrickplayInfo {id, interval_ms, width, height, columns, rows, count, sheets}`: seek-bar previews, cached per file version until all sheets have been fetched (or for a day). Keyframes only are decoded (seconds for a film); HDR and Dolby Vision are tone-mapped with libplacebo when available. |
-| GET | `/v1/trickplay/{id}/{n}.jpg` | – | sprite sheet `n` (`columns × rows` thumbnails); once every sheet of a set has been fetched, the set is deleted (fetch them all in one go and keep them) |
-| POST | `/v1/fingerprint` | `FingerprintRequest {path, stream_index?, start_ms, duration_ms}` | `Fingerprint {start_ms, item_seconds, data: u32[]}`: raw Chromaprint values of the audio (`400` when FFmpeg lacks Chromaprint) |
-| POST | `/v1/frames` | `FramesRequest {path, start_ms, duration_ms}` | `Frames {frames: [{ms, black, ylow, yhigh, ymax, sat}]}`: how dark the key frames of part of the video are and how much contrast they have, for credits detection |
-| POST | `/v1/jobs` | `JobRequest` | `201 JobCreated` |
-| GET | `/v1/jobs` | – | `JobStatus[]` |
-| GET | `/v1/jobs/{id}` | – | `JobStatus` |
-| DELETE | `/v1/jobs/{id}` | – | `204` (kills ffmpeg, deletes segments) |
-| POST | `/v1/jobs/{id}/touch` | – | `204` (keeps a paused session alive) |
-| POST | `/v1/jobs/{id}/bitrate` | `BitrateRequest {max_bitrate_kbps}` | `BitrateChanged {bitrate_kbps}`: a transcode goes on at another video bitrate (1 Mbps at least, the job's own at most). The segments past the one its player asked for last and the next are deleted and made again, the same size and layout, so the player plays on from the same playlist; a process running restarts there at once. `400` for a remux. Transcoders that do it say `live_bitrate: true` |
-| GET | `/v1/jobs/{id}/index.m3u8` | – | HLS VOD playlist |
-| GET | `/v1/jobs/{id}/master.m3u8` | – | multivariant playlist: the job's variant (`index.m3u8`), then its smaller renditions' (`v1.m3u8`…, see *Renditions*), each with `CODECS`, `SUPPLEMENTAL-CODECS`, `RESOLUTION`, `FRAME-RATE`, `VIDEO-RANGE` and the bandwidth (see *Dolby Vision in remuxes*). Transcoders that serve it say `hls_master_playlist: true` in their capabilities |
-| GET | `/v1/jobs/{id}/{n}.ts` | – | MPEG-TS segment `n` (waits for it, or starts ffmpeg) |
-| GET | `/v1/jobs/{id}/v{k}.m3u8`, `/v1/jobs/{id}/v{k}-{n}.ts` | – | rendition `k`'s playlist and segments (`JobRequest.variants`; transcoders that make them say `hls_variants: true`) |
-| POST | `/v1/conversions` | `JobRequest` | `ConversionStatus {id, state, progress, duration_ms, size?, error?, video?, audio?}`: the request made into one Matroska file, or MP4 with `container: "mp4"` (see *Conversions*). Asked again for the same input and request, the same conversion (or its file) answers; a failed one starts again. Transcoders that serve it say `conversions: true` in their capabilities, and `conversions_mp4: true` when they make MP4 |
-| GET | `/v1/conversions/{id}` | – | `ConversionStatus`: `queued`, `running` (with `progress`, 0 to 1), `done` (with `size`) or `failed` (with `error`) |
-| DELETE | `/v1/conversions/{id}` | – | `204` (stops ffmpeg, deletes the file) |
-| GET | `/v1/conversions/{id}/file` | – | `video/x-matroska` (or `video/mp4`), once done; one range (`bytes=a-`, `bytes=a-b`) as asked, `416` past the end |
+| Method | Path | What |
+|---|---|---|
+| GET | `/health` | `ok`. Needs no token. |
+| GET | `/v1/info` | `TranscoderInfo`: version, capabilities, limits |
+| GET | `/v1/status` | `TranscoderStatus`: counters, processes, jobs (see [Metrics](#metrics)) |
+| GET | `/metrics` | Prometheus text format (see [Metrics](#metrics)) |
+| POST | `/v1/probe` | `MediaInfo` of a file |
+| POST | `/v1/thumbnail` | one frame, `image/jpeg` |
+| POST | `/v1/cover` | embedded cover art |
+| POST | `/v1/trickplay` | make seek-bar preview sheets |
+| GET | `/v1/trickplay/{id}/{n}.jpg` | preview sheet `n` |
+| POST | `/v1/subtitles` | a text subtitle track as `text/vtt` |
+| POST | `/v1/subtitles/mks` | a subtitle track copied into a Matroska file of its own |
+| POST | `/v1/keyframes` | index a file's keyframes |
+| POST | `/v1/prefetch` | read ahead what a playback reads first |
+| POST | `/v1/hold` | pause background work while a direct play starts |
+| POST | `/v1/fingerprint` | Chromaprint values of part of the audio |
+| POST | `/v1/frames` | darkness and contrast of key frames, for credits detection |
+| POST | `/v1/jobs` | create an HLS job |
+| GET | `/v1/jobs` | every job's `JobStatus` |
+| GET | `/v1/jobs/{id}` | one job's `JobStatus` |
+| DELETE | `/v1/jobs/{id}` | `204`: kill its FFmpeg, delete its segments |
+| POST | `/v1/jobs/{id}/touch` | `204`: keep a paused session alive |
+| POST | `/v1/jobs/{id}/bitrate` | change a transcode's video bitrate as it plays |
+| GET | `/v1/jobs/{id}/index.m3u8` | HLS VOD playlist |
+| GET | `/v1/jobs/{id}/master.m3u8` | multivariant playlist |
+| GET | `/v1/jobs/{id}/{n}.ts` | MPEG-TS segment `n` |
+| GET | `/v1/jobs/{id}/v{k}.m3u8` | rendition `k`'s playlist |
+| GET | `/v1/jobs/{id}/v{k}-{n}.ts` | rendition `k`'s segment `n` |
+| POST | `/v1/conversions` | convert a whole file |
+| GET | `/v1/conversions/{id}` | `ConversionStatus` |
+| DELETE | `/v1/conversions/{id}` | `204`: stop its FFmpeg, delete the file |
+| GET | `/v1/conversions/{id}/file` | the converted file |
+
+`?` marks an optional field. The full types, with every response field, are in
+`packages/transcoder-api/src/lib.rs`.
+
+### Info and capabilities
+
+`GET /v1/info` returns `TranscoderInfo`:
+
+| Field | Meaning |
+|---|---|
+| `name`, `version`, `api_version` | the program and its API version |
+| `commit` | the build's short hash, when known |
+| `license` | `LicenseRef-Restricted` |
+| `source` | where to get the source |
+| `started_at_ms` | start time |
+| `capabilities` | what this transcoder and its FFmpeg can do (below) |
+| `limits` | `max_jobs`, `max_hw_jobs` |
+| `memory` | `{available, reason?, path?, budget_bytes}`: whether segments can be kept in memory (see [Segments in memory](#segments-in-memory)) |
+
+`capabilities`:
+
+| Field | Meaning |
+|---|---|
+| `ffmpeg_available`, `ffprobe_available`, `ffmpeg_path`, `ffprobe_path`, `ffmpeg_version` | the binaries found |
+| `encoders` | video encoders that passed a test encode, best first; `main10` on HEVC ones that passed in 10 bits too |
+| `hwaccels` | decoding hwaccels `ffmpeg -hwaccels` reports |
+| `tonemappers` | working tone mappers, best first: `libplacebo`, `opencl`, `zscale` |
+| `dolby_vision` | Dolby Vision profile 5 renders with correct colors (needs libplacebo) |
+| `vulkan_decode` | codecs the GPU decodes straight into Vulkan memory, for libplacebo |
+| `vulkan_encode` | `h264_vulkan` encodes libplacebo's output on the GPU |
+| `gpu_pipelines` | decode → scale → encode pipelines that keep frames on the GPU, with the input codecs each passed its test for |
+| `vaapi_tonemappers` | tone mappers whose frames reach a VAAPI encoder (Linux; see [VAAPI encoders](#vaapi-encoders)) |
+| `vaapi_vulkan_decode` | `vulkan_decode` on the Vulkan device made from the VAAPI one |
+| `subtitle_burn_image`, `subtitle_burn_text` | picture and text subtitles can be burned in |
+| `readrate` | `-readrate` is supported (see [Throttling](#throttling)) |
+| `readrate_catchup` | `-readrate_catchup` is supported |
+| `chromaprint` | `POST /v1/fingerprint` works |
+| `hls_master_playlist` | jobs have `master.m3u8`, and remuxes honour `dolby_vision` and `strip_hdr10plus` |
+| `hdr_transcode` | a 10-bit HEVC encoder works: transcodes can keep HDR |
+| `subtitle_matroska` | `POST /v1/subtitles/mks` works |
+| `conversions` | `POST /v1/conversions` works |
+| `conversions_mp4` | conversions can make MP4 |
+| `hls_variants` | jobs make lower renditions (`variants`) |
+| `live_bitrate` | `POST /v1/jobs/{id}/bitrate` works |
+
+### Media
+
+`POST /v1/probe` takes `{path}` and returns `MediaInfo`, cached per file
+version (path, size, modification time).
+
+`POST /v1/thumbnail` returns `image/jpeg`:
+
+| Field | Meaning |
+|---|---|
+| `path` | the file |
+| `time_ms?` | position of the frame (default: 20 % into the file) |
+| `width?` | output width in pixels (default 640) |
+| `duration_ms?` | the file's duration, to compute the default position |
+| `hdr` | tone map HDR sources (see [Frame grabs](#frame-grabs)) |
+
+`POST /v1/cover` takes `{path}` and returns the embedded cover art
+(`image/jpeg` or `image/png`).
+
+`POST /v1/trickplay` makes seek-bar previews:
+
+| Field | Meaning |
+|---|---|
+| `path` | the file |
+| `interval_ms?` | time between thumbnails (default 2 to 10 s, by the file's length) |
+| `width?` | thumbnail width in pixels (default 320) |
+
+It returns `TrickplayInfo {id, interval_ms, width, height, columns, rows,
+count, sheets}`. Thumbnail `k` shows the video at `k × interval_ms`; each
+sheet holds `columns × rows` of them, left to right, top to bottom.
+
+- Only keyframes are decoded: seconds for a film.
+- HDR and Dolby Vision are tone mapped with libplacebo when available.
+- A set is cached per file version until every sheet has been fetched, or for
+  a day. Asking again meanwhile returns at once.
+- `GET /v1/trickplay/{id}/{n}.jpg` returns sheet `n` (`0` to `sheets - 1`).
+  Once every sheet has been fetched the set is deleted: fetch them all in one
+  go and keep them.
+
+### Subtitles
+
+`POST /v1/subtitles` returns `text/vtt` (see
+[Subtitle extraction](#subtitle-extraction)):
+
+| Field | Meaning |
+|---|---|
+| `path` | the file |
+| `stream_index?` | the embedded text track. Without it, `path` is itself a subtitle file. |
+| `partial?` | embedded tracks: answer within a few seconds (below) |
+
+With `partial`, the answer is the whole track when it is done within a few
+seconds (as a rule when it can be read through the file's Cues). Otherwise it
+is the cues read so far, with `X-Pley-Complete: 0`, and the extraction goes on
+in the background.
+
+`POST /v1/subtitles/mks` takes the same `{path, stream_index?}` and returns
+`video/x-matroska`: the track (or the subtitle file, without `stream_index`)
+copied as it is into a Matroska file of its own.
+
+- For players that show picture subtitles (PGS, VobSub with its palette, DVB)
+  next to an HLS stream.
+- Times are the original's, from the start of the file.
+- Anything but subtitles fails (`-vn -an -dn`).
+- It reads the whole file, as one of the
+  [passes over whole files](#ffmpeg-fallback). It is not cached: the server
+  caches it.
+
+### Background work
+
+| Endpoint | Body | Response |
+|---|---|---|
+| `POST /v1/keyframes` | `{path}` | `200` if indexed, `202` if queued (see [Remux](#remux)) |
+| `POST /v1/prefetch` | `{path, start_ms?}` | `Prefetched` (see [Reading ahead](#reading-ahead)) |
+| `POST /v1/hold` | `{ms}` | `204`: background work waits, and its FFmpeg runs pause, for `ms` (a minute at most) while a direct play starts (see [Background work and playback](#background-work-and-playback)) |
+| `POST /v1/fingerprint` | `{path, stream_index?, start_ms, duration_ms}` | `Fingerprint` (see [Audio fingerprints](#audio-fingerprints)); `400` when FFmpeg lacks Chromaprint |
+| `POST /v1/frames` | `{path, start_ms, duration_ms}` | `Frames` (see [Key frames](#key-frames)) |
+
+### Jobs
+
+`POST /v1/jobs` takes a `JobRequest` and returns `201` with `JobCreated {id,
+duration_ms, segment_seconds, segment_count, video, audio, warnings,
+variants}`. See [How HLS jobs work](#how-hls-jobs-work).
+
+`JobRequest`:
+
+| Field | Meaning |
+|---|---|
+| `input` | absolute path of the file, as the transcoder sees it |
+| `media?` | `MediaInfo` the caller has, to skip a probe (ignored without a duration; probed again when the duration is implausible) |
+| `label?`, `owner?` | title and user, for status pages |
+| `video?` | `VideoRequest`; none drops the video |
+| `audio?` | `AudioRequest`; none drops the audio |
+| `subtitle?` | `{stream_index?, external_path?}`: an embedded track or a subtitle file (`.srt`, `.ass`, `.sup`, …) to burn in |
+| `segment_seconds?` | segment length, 1 to 10 s (default 4) |
+| `start_ms?` | start transcoding here right away (playback start or resume) |
+| `options` | `TranscodeOptions` |
+| `variants` | lower renditions, highest first: `[{max_width?, max_height?, max_bitrate_kbps?}]` (see [Renditions](#renditions)) |
+| `container?` | conversions only: `matroska` (default) or `mp4` |
+
+`VideoRequest`:
+
+| Field | Meaning |
+|---|---|
+| `stream_index?` | default: the first video stream |
+| `mode` | `transcode` (default) or `copy` (remux; falls back to transcode when it can't be done, and the plan says so) |
+| `codec` | `h264` (default) or `hevc` |
+| `max_width?`, `max_height?` | size limit |
+| `max_bitrate_kbps?` | bitrate cap (default: by the output size, see [Bitrates](#bitrates)) |
+| `dynamic_range` | transcodes of HDR: `sdr` (default), `hdr10` or `hlg` (see [HDR kept](#hdr-kept)) |
+| `dolby_vision` | remuxes: `copy` (default), `signal` or `to81` (see [Dolby Vision in remuxes](#dolby-vision-in-remuxes)) |
+| `strip_hdr10plus` | remuxes: leave out HDR10+ metadata |
+
+`AudioRequest`:
+
+| Field | Meaning |
+|---|---|
+| `stream_index?` | default: the default audio stream |
+| `mode` | `transcode` (default) or `copy` |
+| `codec` | `aac` (default), `ac3` or `eac3` |
+| `channels?` | output channels (default 2), never more than the source |
+| `bitrate_kbps?` | see [Audio](#audio) for the defaults |
+
+`TranscodeOptions`:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `hwaccel` | `auto` | `auto`, `none`, `nvenc`, `qsv`, `amf`, `vaapi`, `videotoolbox` or `vulkan` |
+| `hardware_decoding` | on | decode on the GPU paired with the encoder |
+| `tonemap` | `auto` | `auto`, `libplacebo`, `opencl`, `zscale` or `none` |
+| `preset` | `veryfast` | x264 preset for software encodes, or `auto`: chosen and changed by the transcoder from its load and its lead on the player |
+| `throttle` | on | hold FFmpeg to real time after a burst (see [Throttling](#throttling)) |
+| `in_memory` | on | keep segments in memory when possible (see [Segments in memory](#segments-in-memory)) |
+
+`JobStatus` reports the job's state (`starting`, `running`, `idle`, `finished`,
+`failed`), its video and audio plans, its FFmpeg process's progress, restarts,
+bytes served, `warnings` and `last_error`; for renditions `rendition` and
+`variants`; for memory `in_memory` and `memory_bytes`.
+
+The segment and playlist endpoints:
+
+- `GET /v1/jobs/{id}/{n}.ts` waits for the segment, or starts FFmpeg at it (see
+  [Segments on demand](#segments-on-demand)).
+- `GET /v1/jobs/{id}/master.m3u8` lists the job's variant (`index.m3u8`), then
+  its smaller renditions (`v1.m3u8`…), each with `CODECS`,
+  `SUPPLEMENTAL-CODECS`, `RESOLUTION`, `FRAME-RATE`, `VIDEO-RANGE` and its
+  bandwidth (see [Dolby Vision in remuxes](#dolby-vision-in-remuxes)).
+  Capability `hls_master_playlist`.
+- `GET /v1/jobs/{id}/v{k}.m3u8` and `v{k}-{n}.ts`: rendition `k`'s playlist
+  and segments. Capability `hls_variants`.
+
+`POST /v1/jobs/{id}/bitrate` takes `{max_bitrate_kbps}` and returns
+`{bitrate_kbps}`, the bitrate the transcode goes on at:
+
+- Kept between 1 Mbps and the job's own bitrate.
+- The segments past the last one its player asked for, and the next, are
+  deleted and made again at the same size and layout. The player plays on from
+  the same playlist.
+- A running process restarts there at once.
+- `400` for a remux. Capability `live_bitrate`.
+
+### Conversions endpoints
+
+`POST /v1/conversions` takes a `JobRequest` and returns `ConversionStatus {id,
+state, progress, duration_ms, size?, error?, video?, audio?}` (see
+[Conversions](#conversions)).
+
+- Asked again for the same input and request, the same conversion (or its
+  file) answers. A failed one starts again.
+- `GET /v1/conversions/{id}`: `state` is `queued`, `running` (with `progress`,
+  0 to 1), `done` (with `size`) or `failed` (with `error`).
+- `GET /v1/conversions/{id}/file`: `video/x-matroska` or `video/mp4`, once
+  done. One range (`bytes=a-`, `bytes=a-b`) as asked; `416` past the end.
+- Capabilities `conversions`, and `conversions_mp4` for MP4.
 
 ## Conversions
 
