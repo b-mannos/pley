@@ -14,6 +14,14 @@ describes how they are made.
   buttons read "Skip intro" and "Skip credits". Sign out asks "You'll be
   signed out of <server>."
 
+### Fixed
+
+- Automatic quality no longer leaves the original for a wait the server
+  caused (a slow disk, a remux catching up): a wait of 2 s or more counts
+  only on a network its segments showed below 1.5 times the file's
+  bitrate in the last 2 minutes, or, where none came (a direct play), the
+  second such wait within 5 minutes.
+
 ## [0.0.1] - 2026-10-29
 
 ### Added

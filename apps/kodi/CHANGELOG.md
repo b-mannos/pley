@@ -25,6 +25,14 @@ describes how they are made.
   "Skip credits", "More like this", "Cast & crew", "Guest stars". Sign out
   asks "You'll be signed out of <server>."
 
+### Fixed
+
+- Automatic quality no longer leaves the original for a wait the server
+  caused (a slow disk, a remux catching up): a wait of 2 s or more counts
+  only on a network the proxy measured below 1.5 times the file's bitrate
+  in the last 2 minutes, or, where it measured nothing (a direct play),
+  the second such wait within 5 minutes.
+
 ## [0.0.1] - 2026-10-29
 
 ### Added

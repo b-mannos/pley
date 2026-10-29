@@ -95,8 +95,7 @@ little of the network, and a transcode would play a worse picture for the
 rest of the title. An Original the server converts (the device can't play
 the file) counts them all, as any quality does.
 
-Even that wait counts only when the network is to blame for it. In the web
-app, the Android app and the Samsung and LG apps:
+Even that wait counts only when the network is to blame for it:
 
 - **Measured network.** If what the player measured over the last 2 minutes
   carries 1.5 times the file's bitrate or more, the server is why the
@@ -104,8 +103,9 @@ app, the Android app and the Samsung and LG apps:
   transcode reads the same file and does more work, so it would only wait
   longer. The Original plays on.
 - **Below that**, the wait counts. The measurement is taken again as the
-  wait goes on and when it ends. In the web and Android apps, a slow
-  download that arrives during the wait counts too.
+  wait goes on and when it ends, so a slow download that arrives during
+  the wait counts too (not on Samsung and LG, whose figures come only
+  while the video plays).
 - **Nothing measured.** Where the player measured nothing, the second such
   wait within 5 minutes counts.
 - **Data loaded ahead** (web app): a wait that began with 1 s or more loaded
@@ -115,7 +115,9 @@ app, the Android app and the Samsung and LG apps:
   the Original either: a remux reads as much of the file as a transcode
   would, and does less.
 
-Kodi and Roku count every wait of 2 s or more at the Original.
+Roku measures the network only from HLS segments, and Kodi from whole
+answers through the add-on's proxy, so a direct play there is one that
+nothing measured.
 
 ### Stepping down
 
@@ -232,8 +234,8 @@ It changes the stream as it is sent instead:
   next title starts there; at the original it is cleared.
 - **Playing the original** (direct play or remux), it moves to a conversion
   only once the picture has stopped anyway, as on every player ([Watching](#watching)):
-  a wait for data of 2 s or more (on Samsung and LG, only one the network
-  is to blame for), or a failing decoder. Dropped frames
+  a wait for data of 2 s or more the network is to blame for, or a failing
+  decoder. Dropped frames
   move it only in a title's first minute (a sign the device can't keep up
   with the file); later they lower where the next title starts. On Kodi and
   Roku, a conversion whose bitrate can't change (an older server or
