@@ -1,0 +1,487 @@
+name: Server
+
+# The server, its transcoder and the web app it embeds: one release unit
+# (docs/RELEASING.md). Runs when they, or what they are built from, change.
+# The Release workflow calls it with `release: true`, which adds the
+# release's files: the archives, the Windows installers and the Docker image.
+on:
+  push:
+    branches: [master]
+    paths:
+      - apps/server/**
+      - apps/transcoder/**
+      - packages/transcoder-api/**
+      - apps/web/**
+      - Cargo.toml
+      - Cargo.lock
+      - rustfmt.toml
+      - deny.toml
+      - package.json
+      - bun.lock
+      - bunfig.toml
+      - LICENSING.md
+      - pley.example.toml
+      - docs/TRANSCODER.md
+      - .dockerignore
+      - deploy/docker/**
+      - deploy/windows/**
+      - deploy/systemd/**
+      - deploy/launchd/**
+      - scripts/build.sh
+      - scripts/build.ps1
+      - scripts/build-installer.ps1
+      - scripts/check-licenses.ps1
+      - scripts/commit.mjs
+      - scripts/commit.d.mts
+      - .github/workflows/server.yml
+      - "!**/CHANGELOG.md"
+      - "!deploy/**/*.md"
+  pull_request:
+    paths:
+      - apps/server/**
+      - apps/transcoder/**
+      - packages/transcoder-api/**
+      - apps/web/**
+      - Cargo.toml
+      - Cargo.lock
+      - rustfmt.toml
+      - deny.toml
+      - package.json
+      - bun.lock
+      - bunfig.toml
+      - LICENSING.md
+      - pley.example.toml
+      - docs/TRANSCODER.md
+      - .dockerignore
+      - deploy/docker/**
+      - deploy/windows/**
+      - deploy/systemd/**
+      - deploy/launchd/**
+      - scripts/build.sh
+      - scripts/build.ps1
+      - scripts/build-installer.ps1
+      - scripts/check-licenses.ps1
+      - scripts/commit.mjs
+      - scripts/commit.d.mts
+      - .github/workflows/server.yml
+      - "!**/CHANGELOG.md"
+      - "!deploy/**/*.md"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release:
+        description: Build the release's files too
+        type: boolean
+        default: false
+      version:
+        description: The version released (its manifests')
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push to a pull request replaces its running checks; master runs them all.
+  group: ${{ inputs.release && 'server-release' || format('server-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+# Actions are pinned to commits.
+jobs:
+  web:
+    name: Web app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      # The server's, the transcoder's and the web app's manifests carry one
+      # version, which its CHANGELOG has (scripts/version.mjs).
+      - run: bun scripts/version.mjs check server
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run test
+      - run: bun run build
+      # The server embeds the UI: every Rust job below compiles against it.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: web-dist
+          path: apps/web/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  rust:
+    name: Rust (${{ matrix.name }})
+    needs: web
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-latest }
+          - { name: linux-arm64, os: ubuntu-24.04-arm }
+          - { name: windows-x86_64, os: windows-latest }
+          - { name: macos-arm64, os: macos-latest }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-dist
+          path: apps/web/dist
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Pull requests reuse master's cache without writing their own.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Format
+        if: matrix.name == 'linux-x86_64'
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked
+
+  msrv:
+    name: Rust 1.95 (minimum supported)
+    needs: web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-dist
+          path: apps/web/dist
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          # Keep in step with `rust-version` in the crates' Cargo.toml.
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - run: cargo check --workspace --all-targets --locked
+
+  windows-installer:
+    name: Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Inno Setup
+        run: choco install innosetup --version=6.7.1 --no-progress -y
+      # The script compiles; releases build it around the real programs.
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $release = New-Item -ItemType Directory dist/pley-server-0.0.0-windows-x86_64
+          $ffmpeg = New-Item -ItemType Directory dist/ffmpeg/bin
+          Set-Content -Path "$release/pley.exe", "$release/pley-transcoder.exe", "$ffmpeg/ffmpeg.exe", "$ffmpeg/ffprobe.exe" -Value "stand-in"
+          ./scripts/build-installer.ps1 -Release $release -Ffmpeg $ffmpeg
+
+  licenses:
+    name: License boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Server never depends on the transcoder
+        shell: pwsh
+        run: ./scripts/check-licenses.ps1
+      - name: Third-party licenses
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check licenses
+  docker:
+    name: Docker image
+    # A release builds and publishes the image itself (image, below).
+    if: ${{ !inputs.release }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          push: false
+          load: true
+          tags: pley:local
+          cache-from: type=gha
+          cache-to: ${{ github.ref == 'refs/heads/master' && 'type=gha,mode=max' || '' }}
+      # What the transcoder's hardware paths use (apps/transcoder/src/ffmpeg.rs):
+      # an FFmpeg update that drops one would quietly leave pley on the CPU.
+      - name: Check the image's FFmpeg
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          ff() { docker run --rm --entrypoint ffmpeg pley:local -hide_banner "$@"; }
+          hwaccels=$(ff -hwaccels) filters=$(ff -filters) encoders=$(ff -encoders)
+          for name in cuda vaapi qsv vulkan opencl; do
+            grep -qx "$name" <<<"$hwaccels" || fail "FFmpeg has no $name hardware acceleration"
+          done
+          for name in scale_cuda scale_vaapi vpp_qsv libplacebo tonemap_opencl zscale; do
+            grep -qw "$name" <<<"$filters" || fail "FFmpeg has no $name filter"
+          done
+          for name in h264_nvenc hevc_nvenc h264_vaapi hevc_vaapi h264_qsv hevc_qsv libx264 libx265; do
+            grep -qw "$name" <<<"$encoders" || fail "FFmpeg has no $name encoder"
+          done
+      - name: Check the compose add-ons
+        working-directory: deploy/docker
+        env:
+          PLEY_RENDER_GID: "44"
+        run: |
+          for addon in vaapi nvidia proxy plex; do
+            docker compose -f compose.yaml -f "compose.$addon.yaml" config --quiet
+          done
+          ports=$(docker compose -f compose.yaml -f compose.proxy.yaml config --format json | jq '.services.pley.ports // [] | length')
+          test "$ports" = 0 || { echo "::error::compose.proxy.yaml leaves a port published"; exit 1; }
+      # The documented setup, with the image just built.
+      - name: Start Pley with setup.sh
+        env:
+          PLEY_PULL_POLICY: never
+        run: deploy/docker/setup.sh
+      - name: Check the container's lockdown
+        working-directory: deploy/docker
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          in_pley() { docker compose exec -T pley "$@"; }
+          # grep reads all of its input: with pipefail, -q could fail the writer.
+          docker compose port pley 7539 | grep -x '127.0.0.1:7539' >/dev/null || fail "not published on 127.0.0.1 only"
+          curl -fsS http://127.0.0.1:7539/api/health
+          docker compose logs pley | grep 'setup?code=' >/dev/null || fail "no setup link in the log"
+          test "$(in_pley id -u)" = "$(id -u)" || fail "not running as the user setup.sh chose"
+          in_pley grep -q '^CapBnd:[[:space:]]*0*$' /proc/1/status || fail "capabilities left"
+          in_pley grep -q '^NoNewPrivs:[[:space:]]*1$' /proc/1/status || fail "no-new-privileges is off"
+          test -z "$(in_pley find / -xdev -perm /6000 -type f 2>/dev/null)" || fail "setuid or setgid programs in the image"
+          if in_pley touch /usr/local/bin/x 2>/dev/null; then fail "the image is writable"; fi
+          if in_pley touch /media/x 2>/dev/null; then fail "the media is writable"; fi
+          in_pley touch /config/x /tmp/x || fail "/config or /tmp isn't writable"
+          test "$(stat -c %a config)" = 700 || fail "the config folder isn't private"
+      - name: Pley's log
+        if: always()
+        working-directory: deploy/docker
+        run: |
+          docker compose logs --no-color pley || true
+          docker compose down || true
+
+  # ---- Release (called by release.yml) ---------------------------------------
+
+  # The archives: pley-server-<version>-<os>-<arch>, with the transcoder.
+  build:
+    name: Build (${{ matrix.target }})
+    if: inputs.release
+    needs: [web, rust, msrv, windows-installer, licenses]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux builds run on the oldest supported Ubuntu for broad glibc compatibility.
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+          - { target: aarch64-pc-windows-msvc, os: windows-11-arm }
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The UI built (and tested) by the web job of this run.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-dist
+          path: apps/web/dist
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+      # No build cache: release binaries are built from scratch.
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: ./scripts/build.ps1 -SkipWeb -Target $env:TARGET -Archive
+      - name: Build (Linux, macOS)
+        if: runner.os != 'Windows'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: ./scripts/build.sh --skip-web --target "$TARGET" --archive
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  # The installers, built around the Windows archives on one runner for both
+  # architectures (deploy/windows).
+  installer:
+    name: Windows installers
+    if: inputs.release
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*-pc-windows-msvc
+          path: archives
+          merge-multiple: true
+      - name: Inno Setup
+        run: choco install innosetup --version=6.7.1 --no-progress -y
+      # The FFmpeg the installers carry: gyan.dev's full build, the version
+      # and checksum set here (x64; ARM64 Windows runs it emulated).
+      - name: FFmpeg
+        shell: pwsh
+        env:
+          FFMPEG_URL: https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-full_build.7z
+          FFMPEG_SHA256: f0e46253c70dfe902bac915dfb4224f0cf1b7c6eeab9da2ccc9a5581f9a71b13
+        run: |
+          Invoke-WebRequest $env:FFMPEG_URL -OutFile ffmpeg.7z
+          if ((Get-FileHash ffmpeg.7z -Algorithm SHA256).Hash -ne $env:FFMPEG_SHA256) { throw "ffmpeg.7z isn't the build expected" }
+          7z x ffmpeg.7z -offmpeg | Out-Null
+      - name: Build the installers
+        shell: pwsh
+        run: |
+          $ffmpeg = (Get-Item ffmpeg/*/bin).FullName
+          foreach ($zip in Get-ChildItem archives/pley-*-windows-*.zip) {
+            Expand-Archive $zip -DestinationPath staging
+            ./scripts/build-installer.ps1 -Release "staging/$($zip.BaseName)" -Ffmpeg $ffmpeg
+          }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-windows-installers
+          path: dist/*-setup.exe
+          if-no-files-found: error
+
+  # The Docker image, for amd64 and arm64, on GitHub Container Registry. It
+  # is pushed before the release is published: required reviewers on the
+  # `release` environment, in the repository's settings, hold it until
+  # someone approves.
+  image:
+    name: Docker image (${{ matrix.arch }})
+    if: inputs.release
+    needs: [web, rust, msrv, windows-installer, licenses]
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Each architecture builds natively, then image-manifest joins them.
+          - { arch: amd64, os: ubuntu-24.04 }
+          - { arch: arm64, os: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write # push the image to GitHub Container Registry
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      # The labels, with the version released.
+      - id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: type=raw,value=${{ inputs.version }}
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          build-args: PLEY_COMMIT=${{ github.sha }}
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ env.IMAGE }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+      - name: Save the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  image-manifest:
+    name: Docker image
+    if: inputs.release
+    needs: image
+    environment: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write # push the image to GitHub Container Registry
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digest-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # 1.2.3, 1.2 and latest.
+      - name: Publish the multi-platform image
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          sources=()
+          for digest in *; do sources+=("$IMAGE@sha256:$digest"); done
+          docker buildx imagetools create --tag "$IMAGE:$VERSION" --tag "$IMAGE:${VERSION%.*}" --tag "$IMAGE:latest" "${sources[@]}"
+          docker buildx imagetools inspect "$IMAGE:$VERSION"

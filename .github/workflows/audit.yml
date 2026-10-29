@@ -1,28 +1,17 @@
 name: Audit
 
-# Known vulnerabilities in dependencies: whenever the lock files change,
-# and weekly, since advisories are published for versions already in use.
+# Known vulnerabilities in the Rust crates and JavaScript packages the lock
+# files hold. Run by hand (Actions -> Audit -> Run workflow), before a
+# release or after an advisory: it runs on no schedule and on no push, so an
+# advisory published for a version already in use doesn't fail anything by
+# itself. Third-party licenses are checked by the Server workflow.
 on:
-  push:
-    branches: [master]
-    paths:
-      - Cargo.lock
-      - deny.toml
-      - package-lock.json
-      - .github/workflows/audit.yml
-  pull_request:
-    paths:
-      - Cargo.lock
-      - deny.toml
-      - package-lock.json
-      - .github/workflows/audit.yml
-  schedule:
-    - cron: "23 5 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Actions are pinned to commits.
 jobs:
   rust:
     name: Rust crates (RustSec)
@@ -49,4 +38,3 @@ jobs:
           bun-version-file: package.json
       # Asks the registry about bun.lock's packages: nothing is installed.
       - run: bun audit --audit-level=moderate
-

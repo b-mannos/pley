@@ -1,342 +1,218 @@
 name: Release
+run-name: Release ${{ inputs.unit }}${{ inputs.draft && ' (draft)' || '' }}
 
-# Push a tag like v0.2.0 (the version in VERSION; scripts/version.mjs): CI
-# runs, every platform is built (the server and its Windows installers, the
-# Android, desktop, LG, Kodi and Roku apps), a draft release collects them
-# (with checksums and build provenance) and the Docker image goes to GitHub
-# Container Registry. Run by hand, it builds everything and publishes nothing.
+# Releases one unit, by hand (docs/RELEASING.md): Actions -> Release -> Run
+# workflow, on master, with the unit chosen. First `bun scripts/release.mjs
+# <unit> <patch|minor|major>` sets its version and dates its CHANGELOG, and
+# that commit is pushed. This run then checks the unit's manifests agree,
+# refuses when the tag <unit>-v<version> exists, runs the unit's workflow
+# with its release builds, tags the commit, and publishes a GitHub release
+# whose notes are the version's CHANGELOG section, with checksums and build
+# provenance. A server release also pushes the Docker image.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      unit:
+        description: What to release
+        type: choice
+        required: true
+        options: [server, desktop, android, samsung, lg, kodi, roku]
+      draft:
+        description: Keep the GitHub release a draft (the tag is made either way)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.unit }}
   cancel-in-progress: false
-
-env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: 0
 
 # Actions are pinned to commits.
 jobs:
-  ci:
-    name: CI
-    uses: ./.github/workflows/ci.yml
-
-  build:
-    name: Build (${{ matrix.target }})
-    needs: [ci, version]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Linux builds run on the oldest supported Ubuntu for broad glibc compatibility.
-          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
-          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
-          - { target: x86_64-pc-windows-msvc, os: windows-latest }
-          - { target: aarch64-pc-windows-msvc, os: windows-11-arm }
-          - { target: aarch64-apple-darwin, os: macos-latest }
-          - { target: x86_64-apple-darwin, os: macos-latest }
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      # The UI built (and tested) by the CI job of this run.
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: web-dist
-          path: apps/web/dist
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: stable
-          targets: ${{ matrix.target }}
-      # No build cache: release binaries are built from scratch.
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          TARGET: ${{ matrix.target }}
-        run: ./scripts/build.ps1 -SkipWeb -Target $env:TARGET -Archive
-      - name: Build (Linux, macOS)
-        if: runner.os != 'Windows'
-        env:
-          TARGET: ${{ matrix.target }}
-        run: ./scripts/build.sh --skip-web --target "$TARGET" --archive
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-${{ matrix.target }}
-          path: |
-            dist/*.zip
-            dist/*.tar.gz
-          if-no-files-found: error
-
-  # The tag names the version every app carries (VERSION, scripts/version.mjs).
-  version:
-    name: Version
+  prepare:
+    name: Version and notes
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      version: ${{ steps.info.outputs.version }}
+      tag: ${{ steps.info.outputs.tag }}
+      title: ${{ steps.info.outputs.title }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: package.json
-      - name: Every manifest and the tag agree
+      - name: On the default branch
         env:
-          TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-        # No argument at all off a tag.
-        run: bun scripts/version.mjs check ${TAG:+"$TAG"}
-
-  # The Android app for phones, tablets, Android TV and Fire TV: the APK to
-  # sideload and the bundle for Google Play, signed with the release key from
-  # the repository's secrets (docs/ANDROID.md, Releases). Without the key they
-  # are left out: unsigned APKs don't install.
-  android:
-    name: Android app
-    needs: [ci, version]
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    defaults:
-      run:
-        working-directory: apps/android
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with:
-          distribution: temurin
-          java-version: "21"
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
-        with:
-          cache-read-only: true
-      - name: Release key
-        id: key
-        env:
-          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          if [ -z "$KEYSTORE" ]; then
-            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret: this release has no Android app"
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          if [ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            echo "::error::Releases are made from $DEFAULT_BRANCH; this run is on $GITHUB_REF"
+            exit 1
           fi
-          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.keystore"
-          echo "PLEY_KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
-          echo "signed=true" >> "$GITHUB_OUTPUT"
-      - name: Build
-        if: steps.key.outputs.signed == 'true'
-        env:
-          PLEY_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          PLEY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          PLEY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          ./gradlew :app:assembleDirectRelease :app:bundleStoreRelease --no-daemon
-          version=$(cat ../../VERSION)
-          mkdir -p "$GITHUB_WORKSPACE/dist"
-          cp app/build/outputs/apk/direct/release/app-direct-release.apk "$GITHUB_WORKSPACE/dist/pley-android-$version.apk"
-          cp app/build/outputs/bundle/storeRelease/app-store-release.aab "$GITHUB_WORKSPACE/dist/pley-android-$version-play.aab"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: release-android
-          path: dist/*
-          if-no-files-found: ignore
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - name: The unit's version
+        id: info
+        env:
+          UNIT: ${{ inputs.unit }}
+        run: |
+          bun scripts/version.mjs check "$UNIT"
+          info=$(bun scripts/version.mjs info "$UNIT")
+          {
+            echo "version=$(jq -r .version <<< "$info")"
+            echo "tag=$(jq -r .tag <<< "$info")"
+            echo "title=$(jq -r .title <<< "$info")"
+          } >> "$GITHUB_OUTPUT"
+      - name: A new tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UNIT: ${{ inputs.unit }}
+          TAG: ${{ steps.info.outputs.tag }}
+        run: |
+          found=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" --jq "map(select(.ref == \"refs/tags/$TAG\")) | length")
+          if [ "$found" != 0 ]; then
+            echo "::error::$TAG exists already. Bump $UNIT first: bun scripts/release.mjs $UNIT <patch|minor|major>, then commit and push."
+            exit 1
+          fi
+      - name: The version's notes
+        env:
+          UNIT: ${{ inputs.unit }}
+          VERSION: ${{ steps.info.outputs.version }}
+          TAG: ${{ steps.info.outputs.tag }}
+          TITLE: ${{ steps.info.outputs.title }}
+        run: |
+          bun scripts/release.mjs "$UNIT" notes "$VERSION" > notes.md
+          {
+            echo "## $TITLE $VERSION"
+            echo
+            echo "Tag \`$TAG\` on $GITHUB_SHA."
+            echo
+            cat notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
 
-  # The desktop app's installers, unsigned: MSI and setup.exe for Windows, a
-  # disk image for macOS (Apple silicon), .deb, .rpm and AppImage for Linux.
+  # The unit's own workflow, with its release builds: each uploads the files
+  # for the release as release-* artifacts. Only the unit chosen runs.
+  server:
+    name: Server
+    needs: prepare
+    if: inputs.unit == 'server'
+    uses: ./.github/workflows/server.yml
+    with:
+      release: true
+      version: ${{ needs.prepare.outputs.version }}
+    permissions:
+      contents: read
+      packages: write # the Docker image
+
   desktop:
-    name: Desktop app (${{ matrix.os }})
-    needs: [ci, version]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-22.04]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: package.json
-      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
-        with:
-          toolchain: stable
-      - name: Linux libraries
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
-      - run: bun install --frozen-lockfile
-      - run: bun run --cwd apps/desktop build
-      # Named as the server's are: pley-desktop-<version>-<os>-<arch>, with
-      # the installer's own ending (Tauri's names differ by format).
-      - name: Collect the installers
-        shell: bash
-        run: |
-          mkdir -p dist
-          version=$(cat VERSION)
-          case "$RUNNER_OS" in Windows) os=windows ;; macOS) os=macos ;; *) os=linux ;; esac
-          case "$RUNNER_ARCH" in ARM64) arch=arm64 ;; *) arch=x86_64 ;; esac
-          name="pley-desktop-$version-$os-$arch"
-          while IFS= read -r file; do
-            case "$file" in
-              *-setup.exe) ending=-setup.exe ;;
-              *) ending=".${file##*.}" ;;
-            esac
-            cp "$file" "dist/$name$ending"
-          done < <(find apps/desktop/src-tauri/target/release/bundle -maxdepth 2 -type f \
-            \( -name '*.msi' -o -name '*-setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \))
-          ls -l dist
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-desktop-${{ runner.os }}
-          path: dist/*
-          if-no-files-found: error
+    name: Desktop
+    needs: prepare
+    if: inputs.unit == 'desktop'
+    uses: ./.github/workflows/desktop.yml
+    with:
+      release: true
+      version: ${{ needs.prepare.outputs.version }}
 
-  # pley for LG TVs, as a TV in Developer Mode installs it (LG signs store
-  # builds itself). Samsung's .wgt needs a Samsung certificate, which only
-  # its owner can make: `bun run --cwd apps/tizen package` (docs/TV_PLATFORMS.md).
-  tv:
-    name: LG TV app
-    needs: [ci, version]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: package.json
-      - run: bun install --frozen-lockfile
-      - run: bun run --cwd apps/webos package
-      - run: |
-          mkdir -p dist
-          cp apps/webos/out/*.ipk "dist/pley-lg-$(cat VERSION).ipk"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-tv
-          path: dist/*
-          if-no-files-found: error
+  android:
+    name: Android
+    needs: prepare
+    if: inputs.unit == 'android'
+    uses: ./.github/workflows/android.yml
+    with:
+      release: true
+      version: ${{ needs.prepare.outputs.version }}
+    secrets:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
-  # The Kodi add-on, as Kodi installs it from a zip file.
+  samsung:
+    name: Samsung TV
+    needs: prepare
+    if: inputs.unit == 'samsung'
+    uses: ./.github/workflows/samsung.yml
+    with:
+      release: true
+      version: ${{ needs.prepare.outputs.version }}
+
+  lg:
+    name: LG TV
+    needs: prepare
+    if: inputs.unit == 'lg'
+    uses: ./.github/workflows/lg.yml
+    with:
+      release: true
+      version: ${{ needs.prepare.outputs.version }}
+
   kodi:
-    name: Kodi add-on
-    needs: [ci, version]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - run: python3 apps/kodi/package.py
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-kodi
-          path: dist/plugin.video.pley-*.zip
-          if-no-files-found: error
+    name: Kodi
+    needs: prepare
+    if: inputs.unit == 'kodi'
+    uses: ./.github/workflows/kodi.yml
+    with:
+      release: true
+      version: ${{ needs.prepare.outputs.version }}
 
-  # pley for Roku, as a Roku in developer mode installs it, named for the
-  # version in its manifest.
   roku:
-    name: Roku app
-    needs: [ci, version]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: apps/roku
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: package.json
-      - run: bun install --frozen-lockfile
-      - run: bun run package
-      - run: |
-          version=$(awk -F= '/^major_version=/{a=$2} /^minor_version=/{b=$2} /^build_version=/{c=$2} END{print a "." b "." c}' manifest)
-          mkdir -p "$GITHUB_WORKSPACE/dist"
-          cp out/pley-roku.zip "$GITHUB_WORKSPACE/dist/pley-roku-$version.zip"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-roku
-          path: dist/*
-          if-no-files-found: error
-
-  # The server's installers, built around the Windows archives on one runner
-  # for both architectures (deploy/windows).
-  installer:
-    name: Windows installers
-    needs: build
-    runs-on: windows-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: release-*-pc-windows-msvc
-          path: archives
-          merge-multiple: true
-      - name: Inno Setup
-        run: choco install innosetup --version=6.7.1 --no-progress -y
-      # The FFmpeg the installers carry: gyan.dev's full build, the version
-      # and checksum set here (x64; ARM64 Windows runs it emulated).
-      - name: FFmpeg
-        shell: pwsh
-        env:
-          FFMPEG_URL: https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-full_build.7z
-          FFMPEG_SHA256: f0e46253c70dfe902bac915dfb4224f0cf1b7c6eeab9da2ccc9a5581f9a71b13
-        run: |
-          Invoke-WebRequest $env:FFMPEG_URL -OutFile ffmpeg.7z
-          if ((Get-FileHash ffmpeg.7z -Algorithm SHA256).Hash -ne $env:FFMPEG_SHA256) { throw "ffmpeg.7z isn't the build expected" }
-          7z x ffmpeg.7z -offmpeg | Out-Null
-      - name: Build the installers
-        shell: pwsh
-        run: |
-          $ffmpeg = (Get-Item ffmpeg/*/bin).FullName
-          foreach ($zip in Get-ChildItem archives/pley-*-windows-*.zip) {
-            Expand-Archive $zip -DestinationPath staging
-            ./scripts/build-installer.ps1 -Release "staging/$($zip.BaseName)" -Ffmpeg $ffmpeg
-          }
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-windows-installers
-          path: dist/*-setup.exe
-          if-no-files-found: error
+    name: Roku
+    needs: prepare
+    if: inputs.unit == 'roku'
+    uses: ./.github/workflows/roku.yml
+    with:
+      release: true
+      version: ${{ needs.prepare.outputs.version }}
 
   # Builds nothing: the jobs above build each file without the right to
-  # write the release, and this one only checksums, attests and drafts.
+  # write the release, and this one only checksums, attests, tags and
+  # publishes.
   publish:
-    name: Draft release
-    needs: [build, android, desktop, tv, kodi, roku, installer]
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: Publish
+    needs: [prepare, server, desktop, android, samsung, lg, kodi, roku]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs[inputs.unit].result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write # create the release and upload the archives
+      contents: write # make the tag and the release
       id-token: write # sign the provenance attestation (Sigstore)
       attestations: write # store the attestation
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      UNIT: ${{ inputs.unit }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      TITLE: ${{ needs.prepare.outputs.title }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      # Samsung's package is made by hand, and Android's only with its key.
+      - name: Files built
+        id: files
+        if: inputs.unit != 'samsung' && (inputs.unit != 'android' || needs.android.outputs.signed == 'true')
+        run: echo "any=true" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.files.outputs.any == 'true'
         with:
           pattern: release-*
           path: dist
           merge-multiple: true
       - name: Checksums
+        if: steps.files.outputs.any == 'true'
         working-directory: dist
-        run: sha256sum -- * > SHA256SUMS
-      # `gh attestation verify <archive> --repo <owner>/<repo>` proves an archive came from this workflow.
+        run: |
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+      # `gh attestation verify <file> --repo <owner>/<repo>` proves a file came from this workflow.
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: steps.files.outputs.any == 'true'
         with:
           subject-path: |
             dist/*.zip
@@ -350,118 +226,42 @@ jobs:
             dist/*.deb
             dist/*.rpm
             dist/*.AppImage
-      # A draft, for a person to read over and publish. Re-running replaces its files.
-      - name: Draft the release
+      - name: Notes
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          SIGNED: ${{ needs.android.outputs.signed }}
         run: |
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
-          else
-            gh release create "$TAG" dist/* --draft --verify-tag --generate-notes --title "Pley $TAG" --repo "$GITHUB_REPOSITORY"
+          bun scripts/release.mjs "$UNIT" notes "$VERSION" > notes.md
+          if [ "$UNIT" = samsung ]; then
+            printf '\n---\n\nThe Samsung package is signed with a Samsung certificate, so it is made by hand: `bun run --cwd apps/tizen package` (docs/TV_PLATFORMS.md).\n' >> notes.md
+            echo "::notice::Samsung's package is made by hand: bun run --cwd apps/tizen package, then attach it to $TAG"
           fi
-
-  docker:
-    name: Docker image (${{ matrix.arch }})
-    # Only for a tag that names the version (no image for a mistyped one).
-    needs: [ci, version]
-    if: startsWith(github.ref, 'refs/tags/v')
-    # Images are published as they are built (archives wait in a draft
-    # release): required reviewers on this environment, in the repository's
-    # settings, hold them until someone approves.
-    environment: release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Each architecture builds natively, then `docker-manifest` joins them.
-          - { arch: amd64, os: ubuntu-24.04 }
-          - { arch: arm64, os: ubuntu-24.04-arm }
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
-    permissions:
-      contents: read
-      packages: write # push the image to GitHub Container Registry
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Image name
-        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-      - id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ${{ env.IMAGE }}
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: deploy/docker/Dockerfile
-          platforms: linux/${{ matrix.arch }}
-          build-args: PLEY_COMMIT=${{ github.sha }}
-          labels: ${{ steps.meta.outputs.labels }}
-          tags: ${{ env.IMAGE }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
-      - name: Save the digest
-        env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          if [ "$UNIT" = android ] && [ "$SIGNED" != true ]; then
+            printf '\n---\n\nNo APK or Play bundle: the release key was not configured (docs/ANDROID.md, Releases).\n' >> notes.md
+          fi
+      # A re-run of a failed publish finds its tag on this commit and goes on.
+      - name: Tag
         run: |
-          mkdir -p "$RUNNER_TEMP/digests"
-          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: digest-${{ matrix.arch }}
-          path: ${{ runner.temp }}/digests/*
-          if-no-files-found: error
-          retention-days: 1
-
-  docker-manifest:
-    name: Docker image
-    needs: docker
-    environment: release
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: write # push the image to GitHub Container Registry
-    steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          pattern: digest-*
-          path: ${{ runner.temp }}/digests
-          merge-multiple: true
-      - name: Image name
-        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-      # 1.2.3, 1.2 and `latest` for every release (scripts/version.mjs takes no pre-releases).
-      - id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Publish the multi-platform image
-        working-directory: ${{ runner.temp }}/digests
-        run: |
-          tags=()
-          while IFS= read -r tag; do tags+=(--tag "$tag"); done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
-          sources=()
-          for digest in *; do sources+=("$IMAGE@sha256:$digest"); done
-          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
-      - name: Inspect
+          on=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" --jq "map(select(.ref == \"refs/tags/$TAG\")) | .[0].object.sha // \"\"")
+          if [ -z "$on" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$GITHUB_SHA" --silent
+            echo "Tagged $GITHUB_SHA as $TAG"
+          elif [ "$on" != "$GITHUB_SHA" ]; then
+            echo "::error::$TAG exists already, on $on"
+            exit 1
+          fi
+      # The repository's "Latest" release is the server's.
+      - name: Release
         env:
-          VERSION: ${{ steps.meta.outputs.version }}
-        run: docker buildx imagetools inspect "$IMAGE:$VERSION"
+          DRAFT: ${{ inputs.draft }}
+        run: |
+          shopt -s nullglob
+          files=(dist/*)
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            if [ ${#files[@]} -gt 0 ]; then gh release upload "$TAG" "${files[@]}" --clobber; fi
+          else
+            args=(--verify-tag --title "$TITLE $VERSION" --notes-file notes.md)
+            if [ "$DRAFT" = true ]; then args+=(--draft); fi
+            if [ "$UNIT" = server ]; then args+=(--latest); else args+=(--latest=false); fi
+            gh release create "$TAG" "${files[@]}" "${args[@]}"
+          fi
+          echo "$TITLE $VERSION: $(gh release view "$TAG" --json url --jq .url)" >> "$GITHUB_STEP_SUMMARY"

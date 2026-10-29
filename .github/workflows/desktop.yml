@@ -1,0 +1,151 @@
+name: Desktop
+
+# The desktop app (Tauri): one release unit (docs/RELEASING.md). Runs when it,
+# or what it is built from, changes. The Release workflow calls it with
+# `release: true`, which adds its installers.
+on:
+  push:
+    branches: [master]
+    paths:
+      - apps/desktop/**
+      - package.json
+      - bun.lock
+      - bunfig.toml
+      - rustfmt.toml
+      - .github/workflows/desktop.yml
+      - "!**/CHANGELOG.md"
+  pull_request:
+    paths:
+      - apps/desktop/**
+      - package.json
+      - bun.lock
+      - bunfig.toml
+      - rustfmt.toml
+      - .github/workflows/desktop.yml
+      - "!**/CHANGELOG.md"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release:
+        description: Build the release's files too
+        type: boolean
+        default: false
+      version:
+        description: The version released (its manifests')
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push to a pull request replaces its running checks; master runs them all.
+  group: ${{ inputs.release && 'desktop-release' || format('desktop-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+# Actions are pinned to commits.
+jobs:
+  desktop:
+    name: Desktop app (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-latest }
+          - { name: windows-x86_64, os: windows-latest }
+          - { name: macos-arm64, os: macos-latest }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      # Its manifests carry one version, which its CHANGELOG has (scripts/version.mjs).
+      - name: Version
+        if: matrix.name == 'linux-x86_64'
+        run: bun scripts/version.mjs check desktop
+      - name: Webview libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
+      - run: bun install --frozen-lockfile
+      # The picker's tests and its build, which the app embeds.
+      - run: bun run --cwd apps/desktop check
+      - run: bun run --cwd apps/desktop ui:build
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: apps/desktop/src-tauri
+          # Pull requests reuse master's cache without writing their own.
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Format
+        if: matrix.name == 'linux-x86_64'
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+      - name: Clippy
+        run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
+
+  # ---- Release (called by release.yml) ---------------------------------------
+
+  # The installers, unsigned: MSI and setup.exe for Windows, a disk image for
+  # macOS (Apple silicon), .deb, .rpm and AppImage for Linux.
+  installers:
+    name: Installers (${{ matrix.os }})
+    if: inputs.release
+    needs: desktop
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd apps/desktop build
+      # Named as the server's are: pley-desktop-<version>-<os>-<arch>, with
+      # the installer's own ending (Tauri's names differ by format).
+      - name: Collect the installers
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p dist
+          case "$RUNNER_OS" in Windows) os=windows ;; macOS) os=macos ;; *) os=linux ;; esac
+          case "$RUNNER_ARCH" in ARM64) arch=arm64 ;; *) arch=x86_64 ;; esac
+          name="pley-desktop-$VERSION-$os-$arch"
+          while IFS= read -r file; do
+            case "$file" in
+              *-setup.exe) ending=-setup.exe ;;
+              *) ending=".${file##*.}" ;;
+            esac
+            cp "$file" "dist/$name$ending"
+          done < <(find apps/desktop/src-tauri/target/release/bundle -maxdepth 2 -type f \
+            \( -name '*.msi' -o -name '*-setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \))
+          ls -l dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-desktop-${{ runner.os }}
+          path: dist/*
+          if-no-files-found: error

@@ -1,0 +1,97 @@
+name: LG TV
+
+# The LG TV app (apps/webos, built with packages/tv, which the Samsung app
+# shares): one release unit (docs/RELEASING.md). Runs when either changes.
+# The Release workflow calls it with `release: true`, which adds the .ipk a
+# TV in Developer Mode installs (LG signs store builds itself).
+on:
+  push:
+    branches: [master]
+    paths:
+      - apps/webos/**
+      - packages/tv/**
+      - package.json
+      - bun.lock
+      - bunfig.toml
+      - scripts/commit.mjs
+      - scripts/commit.d.mts
+      - .github/workflows/lg.yml
+      - "!**/CHANGELOG.md"
+  pull_request:
+    paths:
+      - apps/webos/**
+      - packages/tv/**
+      - package.json
+      - bun.lock
+      - bunfig.toml
+      - scripts/commit.mjs
+      - scripts/commit.d.mts
+      - .github/workflows/lg.yml
+      - "!**/CHANGELOG.md"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release:
+        description: Build the release's files too
+        type: boolean
+        default: false
+      version:
+        description: The version released (its manifests')
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push to a pull request replaces its running checks; master runs them all.
+  group: ${{ inputs.release && 'lg-release' || format('lg-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Actions are pinned to commits.
+jobs:
+  lg:
+    name: LG TV app
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      # Its manifests carry one version, which its CHANGELOG has (scripts/version.mjs).
+      - run: bun scripts/version.mjs check lg
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd packages/tv check
+      - run: bun run --cwd apps/webos check
+      - run: bun run --cwd apps/webos build
+
+  # ---- Release (called by release.yml) ---------------------------------------
+
+  package:
+    name: Package
+    if: inputs.release
+    needs: lg
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd apps/webos package
+      - env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p dist
+          cp apps/webos/out/*.ipk "dist/pley-lg-$VERSION.ipk"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-lg
+          path: dist/*
+          if-no-files-found: error

@@ -1,0 +1,108 @@
+name: Roku
+
+# The Roku app: one release unit (docs/RELEASING.md). Runs when it changes.
+# The Release workflow calls it with `release: true`, which adds the zip a
+# Roku in developer mode installs.
+on:
+  push:
+    branches: [master]
+    paths:
+      - apps/roku/**
+      - package.json
+      - .github/workflows/roku.yml
+      - "!**/CHANGELOG.md"
+  pull_request:
+    paths:
+      - apps/roku/**
+      - package.json
+      - .github/workflows/roku.yml
+      - "!**/CHANGELOG.md"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release:
+        description: Build the release's files too
+        type: boolean
+        default: false
+      version:
+        description: The version released (its manifests')
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push to a pull request replaces its running checks; master runs them all.
+  group: ${{ inputs.release && 'roku-release' || format('roku-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Actions are pinned to commits.
+jobs:
+  roku:
+    name: Roku app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/roku
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      # Its manifests carry one version, which its CHANGELOG has (scripts/version.mjs).
+      - name: Version
+        working-directory: .
+        run: bun scripts/version.mjs check roku
+      - run: bun install --frozen-lockfile
+      # Compiled by BrighterScript, linted by bslint, its logic tested in
+      # brs-node. Bun installs and runs the scripts; the tools run on the
+      # runner's Node, as bslint's plugin loader needs Node's module.require
+      # (so apps/roku has no bunfig.toml). The walk through the whole app
+      # (bun run smoke) runs by hand:
+      # brs-node's SceneGraph is in beta and drops a key now and then.
+      - name: Compile, lint and test
+        run: bun run check
+      - name: Package
+        run: bun run package
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pley-roku
+          path: apps/roku/out/pley-roku.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  # ---- Release (called by release.yml) ---------------------------------------
+
+  # pley-roku-<version>.zip, as a Roku in developer mode installs it.
+  package:
+    name: Package
+    if: inputs.release
+    needs: roku
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/roku
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run package
+      - env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp out/pley-roku.zip "$GITHUB_WORKSPACE/dist/pley-roku-$VERSION.zip"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-roku
+          path: dist/*
+          if-no-files-found: error
