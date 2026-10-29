@@ -42,6 +42,10 @@ const MAX_CLIENT_ID: usize = 128;
 pub const LOCAL: &str = "local";
 /// Hex characters kept of a network's hash: 128 bits.
 const HASH_HEX: usize = 32;
+/// The most rows one user keeps (clients times networks in a week): client
+/// ids are the clients' to choose, so one making up new ones can't grow the
+/// table without end. The least recently written go first.
+pub const MAX_ROWS_PER_USER: i64 = 200;
 
 /// A speed test's size when none is asked for: 32 MiB.
 pub const SPEED_TEST_BYTES: u64 = 32 * 1024 * 1024;
@@ -137,7 +141,8 @@ impl Bandwidth {
     }
 
     /// Keeps what a client reports, and answers as [`Bandwidth::get`].
-    /// Rows nobody wrote for 7 days go at the same time.
+    /// Rows nobody wrote for 7 days go at the same time, and a user's beyond
+    /// [`MAX_ROWS_PER_USER`].
     pub async fn report(&self, user_id: i64, client_id: &str, network: &str, report: Report) -> sqlx::Result<Answer> {
         let now = crate::util::now_ms();
         let mut tx = self.db.write.begin().await?;
@@ -163,6 +168,16 @@ impl Bandwidth {
             .bind(now - PROBE_KEPT_MS)
             .execute(&mut *tx)
             .await?;
+        sqlx::query(
+            "DELETE FROM playback_networks WHERE user_id = ? AND (client_id, network) NOT IN
+                 (SELECT client_id, network FROM playback_networks WHERE user_id = ?
+                  ORDER BY updated_at DESC LIMIT ?)",
+        )
+        .bind(user_id)
+        .bind(user_id)
+        .bind(MAX_ROWS_PER_USER)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(answer(network == LOCAL, &memory, now))
     }

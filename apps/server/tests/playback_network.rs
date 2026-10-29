@@ -211,6 +211,36 @@ async fn the_address_is_never_stored_and_old_rows_go() {
 }
 
 #[tokio::test]
+async fn made_up_client_ids_cannot_grow_the_table_without_end() {
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (ann, _) = app.user(&admin, "ann", json!({})).await;
+    put_ok(&app, &admin, json!({"client_id": "admin-tv", "probe_kbps": 9000}), Some(HOME)).await;
+    let max = pley::bandwidth::MAX_ROWS_PER_USER;
+    for n in 0..max + 5 {
+        put_ok(&app, &ann, json!({"client_id": format!("made-up-{n}"), "probe_kbps": 5000}), Some(CAFE)).await;
+    }
+    let count = |user: &'static str| {
+        let db = app.state.db.read.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM playback_networks p JOIN users u ON u.id = p.user_id WHERE u.username = ?",
+            )
+            .bind(user)
+            .fetch_one(&db)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(count("ann").await, max, "the oldest went");
+    assert_eq!(count("admin").await, 1, "another user's are kept");
+    // The newest are those kept.
+    let last = get(&app, &ann, &format!("made-up-{}", max + 4), Some(CAFE)).await;
+    assert_eq!(last["source"], json!("probe"));
+    assert_eq!(get(&app, &ann, "made-up-0", Some(CAFE)).await, nothing_known(true));
+}
+
+#[tokio::test]
 async fn wrong_requests_are_refused() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;
