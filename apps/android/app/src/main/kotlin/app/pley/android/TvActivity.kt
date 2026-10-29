@@ -17,7 +17,6 @@ import app.pley.android.ui.tv.shell.TvApp
 import app.pley.android.ui.tv.shell.TvShellDemo
 import app.pley.android.ui.tv.shell.TvShellSource
 import app.pley.android.watchnext.WatchNextLink
-import app.pley.android.watchnext.WatchNextOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -47,8 +46,8 @@ import kotlinx.coroutines.withContext
  * get the profile's Continue Watching in that row (WatchNext).
  */
 class TvActivity : ComponentActivity() {
-    /** The Watch Next program that opened the app, until it is played. */
-    private val link = MutableStateFlow<Pair<WatchNextOwner, Long>?>(null)
+    /** The Watch Next program that opened the app, until it is played: not checked yet ([WatchNextLink.verified]). */
+    private val link = MutableStateFlow<WatchNextLink.Link?>(null)
 
     /** The item of [link], once its profile is the one signed in. */
     private val opened = MutableStateFlow<Long?>(null)
@@ -105,8 +104,11 @@ class TvActivity : ComponentActivity() {
         lifecycleScope.launch {
             // The data graph is made off the main thread (the start reads it there too).
             val data = withContext(Dispatchers.Default) { graph.data }
-            combine(link, data.session.state) { wanted, state ->
+            // Any app may send this activity a link: only one this installation signed plays.
+            val key = withContext(Dispatchers.IO) { WatchNextLink.key(app) }
+            combine(link, data.session.state) { link, state ->
                 val session = (state as? SessionState.SignedIn)?.session
+                val wanted = link?.let { WatchNextLink.verified(it, key) }
                 wanted?.takeIf { (owner, _) -> session != null && session.issuer == owner.issuer && session.me?.id == owner.profileId }?.second
             }.collect { opened.value = it }
         }

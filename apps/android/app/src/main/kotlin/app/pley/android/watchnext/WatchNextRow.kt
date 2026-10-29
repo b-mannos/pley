@@ -7,6 +7,10 @@ import android.net.Uri
 import androidx.tvprovider.media.tv.TvContractCompat
 import androidx.tvprovider.media.tv.WatchNextProgram
 import app.pley.android.TvActivity
+import java.security.MessageDigest
+import java.security.SecureRandom
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 /** The system's Watch Next row, as far as pley's own programs go. */
 interface WatchNextRow {
@@ -30,6 +34,8 @@ interface WatchNextRow {
 class TvProviderRow(context: Context) : WatchNextRow {
     private val app = context.applicationContext
     private val resolver get() = app.contentResolver
+    // Read on first use, off the main thread (programs are written there).
+    private val key by lazy { WatchNextLink.key(app) }
 
     @SuppressLint("RestrictedApi")
     override fun published(): List<PublishedProgram> {
@@ -67,7 +73,7 @@ class TvProviderRow(context: Context) : WatchNextRow {
             .setLastEngagementTimeUtcMillis(entry.engagedAtMs)
             .setTitle(entry.title)
             .setInternalProviderId(entry.internalId)
-            .setIntentUri(Uri.parse(WatchNextLink.intent(app, entry).toUri(Intent.URI_INTENT_SCHEME)))
+            .setIntentUri(Uri.parse(WatchNextLink.intent(app, entry, key).toUri(Intent.URI_INTENT_SCHEME)))
         entry.episodeTitle?.let(builder::setEpisodeTitle)
         entry.season?.let { builder.setSeasonNumber(it) }
         entry.number?.let { builder.setEpisodeNumber(it) }
@@ -84,27 +90,68 @@ class TvProviderRow(context: Context) : WatchNextRow {
  * What a Watch Next program opens: [TvActivity] with the server, the
  * profile and the item, which plays it from where it was when that
  * profile is the one signed in there, and otherwise just opens the app.
+ *
+ * [TvActivity] is exported (the home screen is another app), so any app
+ * could send it this action: a link plays only with the signature this
+ * installation gave it ([sign], keyed with a secret of its own), and one
+ * without just opens the app.
  */
 object WatchNextLink {
     const val ACTION = "app.pley.android.action.WATCH_NEXT"
     private const val EXTRA_ISSUER = "watch_next_issuer"
     private const val EXTRA_PROFILE = "watch_next_profile"
     private const val EXTRA_ITEM = "watch_next_item"
+    private const val EXTRA_SIGNATURE = "watch_next_signature"
+    private const val PREFS = "watch_next"
+    private const val SECRET = "link_secret"
 
-    fun intent(context: Context, entry: WatchNextEntry): Intent = Intent(context, TvActivity::class.java)
+    /** A program's link, as an intent brought it: [verified] says whether this installation made it. */
+    data class Link(val owner: WatchNextOwner, val itemId: Long, val signature: String?)
+
+    fun intent(context: Context, entry: WatchNextEntry, key: ByteArray): Intent = Intent(context, TvActivity::class.java)
         .setAction(ACTION)
         // The app open already (a video playing, even): back to its TvActivity, which plays this.
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         .putExtra(EXTRA_ISSUER, entry.owner.issuer)
         .putExtra(EXTRA_PROFILE, entry.owner.profileId)
         .putExtra(EXTRA_ITEM, entry.itemId)
+        .putExtra(EXTRA_SIGNATURE, sign(key, entry.owner, entry.itemId))
 
-    /** The owner and the item of a program's [intent]; `null` for any other intent. */
-    fun read(intent: Intent?): Pair<WatchNextOwner, Long>? {
+    /** The link a program's [intent] carries, not checked yet; `null` for any other intent. */
+    fun read(intent: Intent?): Link? {
         if (intent?.action != ACTION) return null
         val issuer = intent.getStringExtra(EXTRA_ISSUER) ?: return null
         val profile = intent.getLongExtra(EXTRA_PROFILE, -1).takeIf { it >= 0 } ?: return null
         val item = intent.getLongExtra(EXTRA_ITEM, -1).takeIf { it >= 0 } ?: return null
-        return WatchNextOwner(issuer, profile) to item
+        return Link(WatchNextOwner(issuer, profile), item, intent.getStringExtra(EXTRA_SIGNATURE))
     }
+
+    /** The owner and the item of [link] when this installation signed it with [key]; `null` for any other. */
+    fun verified(link: Link, key: ByteArray): Pair<WatchNextOwner, Long>? {
+        val given = link.signature ?: return null
+        val expected = sign(key, link.owner, link.itemId)
+        // In time that doesn't tell how much of it was right.
+        return (link.owner to link.itemId).takeIf { MessageDigest.isEqual(given.toByteArray(), expected.toByteArray()) }
+    }
+
+    /** HMAC-SHA256 of the owner and the item, in hex. */
+    fun sign(key: ByteArray, owner: WatchNextOwner, itemId: Long): String {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(key, "HmacSHA256"))
+        val signed = mac.doFinal("${owner.issuer}\n${owner.profileId}\n$itemId".toByteArray())
+        return signed.joinToString("") { "%02x".format(it) }
+    }
+
+    /** The installation's key for links, made once (never backed up: backups are off). Blocking: off the main thread. */
+    fun key(context: Context): ByteArray {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.getString(SECRET, null)?.let(::fromHex)?.takeIf { it.size == 32 }?.let { return it }
+        return ByteArray(32).also {
+            SecureRandom().nextBytes(it)
+            prefs.edit().putString(SECRET, it.joinToString("") { b -> "%02x".format(b) }).commit()
+        }
+    }
+
+    private fun fromHex(text: String): ByteArray? =
+        if (text.length % 2 != 0) null else runCatching { ByteArray(text.length / 2) { text.substring(it * 2, it * 2 + 2).toInt(16).toByte() } }.getOrNull()
 }
