@@ -111,7 +111,7 @@ Rules the code keeps:
   remembered for each file of each server in the registry (section
   `subtitleSync`, the latest 50 files) and moves the file's subtitles from
   the start the next time.
-- Find subtitles… (pley's menu; `components/lib/SubtitleSearch.brs`):
+- Find subtitles… (Pley's menu; `components/lib/SubtitleSearch.brs`):
   the server looks for the file playing on OpenSubtitles in the person's
   subtitle language (`GET /api/items/{id}/subtitles/search?file_id=`, no
   `language`, so the server takes the profile's, English without one),

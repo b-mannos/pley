@@ -697,7 +697,7 @@ ahead of its player still counts, one stopped for an idle player doesn't),
 the same runs wait and are paused, until 5 s after the last one ends, so a
 seek's restart doesn't let them through. Probes and reading ahead wait for
 starts only: they read little, and new files or the next playback
-shouldn't wait for a film to end. The pley server waits for transcodes as
+shouldn't wait for a film to end. The Pley server waits for transcodes as
 well before it asks for seek previews or fingerprints.
 
 Background runs and conversions start at below-normal process priority

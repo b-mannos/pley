@@ -67,7 +67,7 @@ the system's casual hand where it has one: not every Fire OS) and
 position (at the bottom, or raised by 5, 10 or 15 % of the picture) are
 Settings' own, also set in the player: the phone's menu has Subtitle
 style, the TV's Subtitles panel lists them under the tracks. A font counts
-as pley's own style, over the system's captions; the position applies
+as Pley's own style, over the system's captions; the position applies
 either way, to text only (pictures keep their cue's place).
 
 Find subtitles…, at the end of the subtitle menu while the file streams

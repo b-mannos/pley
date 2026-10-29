@@ -1012,7 +1012,7 @@ may open only some libraries see those, in that order.
 ### Added subtitles
 
 Subtitles anyone who can see a movie, episode or extra adds to one of its
-files: a file uploaded from the web app, or one found on OpenSubtitles. pley
+files: a file uploaded from the web app, or one found on OpenSubtitles. Pley
 keeps them in its data folder (`subtitles/`, see docs/STORAGE.md), never
 next to the media, and every client gets them as it gets a subtitle file
 next to the video: an external text track (`external: true`, `text_based:
@@ -1033,7 +1033,7 @@ counting on from the highest (the lowest free one once 9999 is taken), so
 twice, so a new track never shows an old one's cached WebVTT.
 
 `GET /api/items/{id}/subtitles/search?file_id=&language=`: `file_id` the
-title's file (default: its first), `language` OpenSubtitles' or pley's
+title's file (default: its first), `language` OpenSubtitles' or Pley's
 language codes, comma separated (`en,fr`, `eng`, `pt-BR`; Portuguese and
 Chinese ask for both of their regions; default: the user's subtitle language
 from their track choices, else their audio language, else `en`; `400` for
@@ -1080,7 +1080,7 @@ Either way the text is made UTF-8 (UTF-16 by its byte order mark, else UTF-8
 when it reads as such, else Windows-1252), checked to be the subtitles it
 says (SRT cues, WebVTT with its header and cues, ASS/SSA with events; a
 WebVTT file named `.srt` is taken as WebVTT), and its language kept as ISO
-639-2 where pley knows the language (`eng`), as other tracks have it. `400`
+639-2 where Pley knows the language (`eng`), as other tracks have it. `400`
 when it isn't, `404` for a title the user can't see, `409` once a title has
 1000 added tracks. The answer is the new `SubtitleTrack`, `deletable` for its
 adder.

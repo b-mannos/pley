@@ -236,9 +236,9 @@ own views instead (below), which skins' widgets and favourites always get.
 - **Find subtitles** (`subtitles.py`): the add-on is one of Kodi's
   subtitle services too (`xbmc.subtitle.module` in `addon.xml`), so the
   player's Subtitles → Download lists "pley" beside any other service
-  installed, and Kodi's own dialog is the search's: pley has no menu in
+  installed, and Kodi's own dialog is the search's: Pley has no menu in
   Kodi's player, and this is where Kodi's people look for subtitles.
-  Kodi asks the plugin (`?action=search`); for a title pley plays (the
+  Kodi asks the plugin (`?action=search`); for a title Pley plays (the
   service's `pley.playing`; anything else lists nothing) it lists what
   the server found on OpenSubtitles for the file playing, in the
   profile's subtitle language (`GET /api/items/{id}/subtitles/search`,
@@ -329,7 +329,7 @@ own views instead (below), which skins' widgets and favourites always get.
   keep it). Under 256 KiB measures nothing and the original starts. The
   asking and the test hold the play back 3.5 s at most. The service's proxy
   keeps the server's answer 10 minutes for each sign-in
-  (`proxy.NetworkMemo`, a 404 too) and asks for it as pley's window opens,
+  (`proxy.NetworkMemo`, a 404 too) and asks for it as Pley's window opens,
   so a play on the home network doesn't wait for it. Every ceiling the
   service keeps here is told to the server as well (`PUT`, through the
   proxy, whose kept answer it replaces): a step down's, a step up's to a
@@ -380,8 +380,8 @@ own views instead (below), which skins' widgets and favourites always get.
 
 ## Kodi's player: speed, audio offset and the subtitles' look
 
-pley plays with Kodi's own player, whose controls have what the other
-apps' players offer pley's way, so the add-on adds none of them (it has
+Pley plays with Kodi's own player, whose controls have what the other
+apps' players offer Pley's way, so the add-on adds none of them (it has
 no menu in Kodi's player, and changes none of Kodi's settings):
 
 - **Playback speed**: the player's settings (Estuary's gear) have Play speed,
@@ -398,7 +398,7 @@ no menu in Kodi's player, and changes none of Kodi's settings):
   style, colour, opacity, border, background (its kind, colour and
   opacity), shadow, blur, where they go (the bottom or top of the video
   or the screen) and the vertical margin, as Kodi 21.3's settings list
-  them. They apply to the text subtitles pley hands Kodi (WebVTT, the
+  them. They apply to the text subtitles Pley hands Kodi (WebVTT, the
   added ones too) and to the file's own (Override ASS/SSA subtitles
   styles for styled ones). The other apps keep their subtitle look on
   the device too (the web's in the browser, Android's in its settings),
@@ -465,7 +465,7 @@ PLEY_BIN=target/debug/pley PLEY_FFMPEG_DIR=/usr/bin python -m unittest test_e2e
 ```
 
 `test_subtitles.py` walks Kodi's subtitle dialog through the plugin against
-a stand-in server: the results, search not set up, nothing for what pley
+a stand-in server: the results, search not set up, nothing for what Pley
 doesn't play, and the one picked added, saved and written for Kodi.
 
 CI runs both. By hand, a portable Kodi (`kodi.exe -p` on Windows) with the
