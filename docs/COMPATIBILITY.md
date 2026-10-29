@@ -1,12 +1,11 @@
 # Compatibility API
 
 Besides its own API, Pley speaks a widely used media-server API, so tools
-written against it work with Pley: scripts using
-[`python-plexapi`](https://github.com/pushingkarmaorg/python-plexapi), and
-tools built the same way (Tautulli, Kometa, direct-play clients). It answers on
-Pley's own port and uses the same libraries, users, watch state and playback
-sessions as Pley's own API, so anything done through it shows up in the web
-UI and the other way round.
+written for it work with Pley: scripts using
+[`python-plexapi`](https://github.com/pushingkarmaorg/python-plexapi) and
+tools built on the same API (Tautulli, Kometa, direct-play clients). It uses
+the same libraries, users, watch state and playback sessions as Pley's own
+API, so changes made through either show up in both.
 
 Apps that sign in through their vendor's cloud service and find servers
 there are out of scope: Pley has no such service.
@@ -14,25 +13,26 @@ there are out of scope: Pley has no such service.
 ## Enabling and port
 
 By default the API answers on Pley's own port (7539), wherever Pley does,
-through its reverse proxy's HTTPS too: give tools Pley's address,
-`http://pley.local:7539` or `https://media.example.com`. The two share the
-port this way:
+including behind a reverse proxy's HTTPS. Give tools Pley's address,
+`http://pley.local:7539` or `https://media.example.com`. Requests are told
+apart like this:
 
-- a request carrying this API's headers (`X-Plex-Token`,
-  `X-Plex-Client-Identifier`, …) or `X-Plex-Token` in its query is this
-  API's: its clients send them, browsers never do;
-- so is a path only this API has (`/identity`, `/library/sections/…`,
+- A request with this API's headers (`X-Plex-Token`,
+  `X-Plex-Client-Identifier`, …) or `X-Plex-Token` in its query belongs to
+  this API: its clients send them, browsers never do.
+- So does a path only this API has (`/identity`, `/library/sections/…`,
   `/:/timeline`, a stream's `/video/:/transcode/…` segments, which players
-  fetch without the headers);
-- the rest, `/`, `/search`, `/library` and `/playlists` among them, is the
-  web app's, and `/api/…` and `/.well-known/…` are always Pley's own.
+  fetch without the headers).
+- Everything else (`/`, `/search`, `/library` and `/playlists` among them)
+  is the web app's. `/api/…` and `/.well-known/…` are always Pley's own.
 
-Its answers there are sandboxed (`Content-Security-Policy: default-src
-'none'; sandbox`, `X-Frame-Options: DENY`, `Cache-Control: private` unless
-they say otherwise), since they share the web app's origin, and the paths
-both answer vary with `X-Plex-Token` and `X-Plex-Client-Identifier` for
-caches.
-Settings → Network turns it off, or gives it a port of its own:
+Because they share the web app's origin, this API's responses are sandboxed
+(`Content-Security-Policy: default-src 'none'; sandbox`,
+`X-Frame-Options: DENY`, and `Cache-Control: private` unless set otherwise).
+Paths both answer vary with `X-Plex-Token` and `X-Plex-Client-Identifier`
+for caches.
+
+Settings → Network turns the API off or gives it a port of its own:
 
 | Where | Setting |
 |---|---|
@@ -40,10 +40,10 @@ Settings → Network turns it off, or gives it a port of its own:
 | Environment | `PLEY_PLEX_BIND` |
 | `pley.toml` | `plex_bind = "web"` |
 
-Its own port suits tools that only know Plex's, 32400. If that port is taken
-(another media server uses it on the same machine), Pley logs a warning,
-keeps running without it there, and tries again every 30 seconds (Settings
-→ Network says why it isn't listening).
+A port of its own suits tools that expect port 32400. If that port is taken
+(by another media server on the same machine, say), Pley logs a warning,
+runs without it, and retries every 30 seconds; Settings → Network shows why
+it isn't listening.
 
 ## Authentication
 
@@ -56,14 +56,19 @@ curl -s -X POST http://localhost:7539/api/auth/login \
 # {"user":{…},"token":"<token>"}
 ```
 
-The token is accepted as the API sends it, the `X-Plex-Token` header or
-query parameter, and the Pley way (`Authorization: Bearer`, `X-Pley-Token` or
-`?token=`). The web UI's `pley_token` cookie is refused here: browsers send
-it to this port too, and some of this API's endpoints change things on a GET.
-Tokens of apps signed in on Pley's own page (`pley_at_…`) are refused as
-well, and so are the HLS session addresses of playback those apps started:
-tools of this API use a token from `POST /api/auth/login`. Every endpoint needs a
-token except `/identity`.
+Accepted:
+
+- this API's way: the `X-Plex-Token` header or query parameter;
+- Pley's way: `Authorization: Bearer`, `X-Pley-Token` or `?token=`.
+
+Refused:
+
+- the web app's `pley_token` cookie: browsers send it to this port too, and
+  some of this API's endpoints change things on a GET;
+- tokens of apps signed in on Pley's own page (`pley_at_…`), and the HLS
+  session addresses of playback those apps started.
+
+Every endpoint needs a token except `/identity`.
 
 ```python
 from plexapi.server import PlexServer
@@ -111,24 +116,29 @@ parameters; containers report `size`, `totalSize` and `offset`.
   dashboard.
 - **Notifications.** `/:/websockets/notifications` (token as `X-Plex-Token`
   query parameter or header) streams JSON `NotificationContainer`s:
-  `playing` when a session starts, pauses, resumes or stops, and every 10 s
-  while its position moves (`PlaySessionStateNotification` with the
-  `sessionKey` of `/status/sessions`); `timeline` for items added, first
-  `state` 0 with `metadataState` `created`, then 5 (what Tautulli's recently
-  added notifications wait for); `activity` for library scans; `status`
-  (`LIBRARY_UPDATE`) when a scan ends. Each user hears about their own
-  sessions (administrators about all) and the libraries they may open; the
-  token is checked again every 10 s and the socket closes once it is revoked.
-- **Streaming.** `/library/parts/{id}/{version}/file.ext` serves the file with
-  range requests (direct play; `?download=1` adds an attachment header).
-  `/video/:/transcode/universal/start.m3u8` (and `/audio/…` for tracks) starts
-  a Pley HLS session, remuxed when the video can be copied and transcoded
-  otherwise (`directStream=0` forces transcoding). It honors `offset`,
-  `maxVideoBitrate`, `videoResolution`, `audioStreamID` and burned-in
-  `subtitleStreamID`; without `audioStreamID`, Pley picks the track as for
-  its own players (docs/API.md, "The audio track"). The master playlist points at
-  `session/<id>/base/index.m3u8`. Session URLs need no token: the 128-bit
-  session id is the credential.
+  - `playing`: a session starts, pauses, resumes or stops, and every 10 s
+    while its position moves (`PlaySessionStateNotification` with the
+    `sessionKey` of `/status/sessions`);
+  - `timeline`: an item was added, first with `state` 0 and `metadataState`
+    `created`, then `state` 5 (what Tautulli's recently-added notifications
+    wait for);
+  - `activity`: library scans;
+  - `status` (`LIBRARY_UPDATE`): a scan ended.
+
+  Each user hears about their own sessions (administrators about all) and
+  the libraries they may open. The token is checked every 10 s and the
+  socket closes once it is revoked.
+- **Streaming.**
+  - `/library/parts/{id}/{version}/file.ext` serves the file with range
+    requests (direct play; `?download=1` adds an attachment header).
+  - `/video/:/transcode/universal/start.m3u8` (`/audio/…` for tracks) starts
+    a Pley HLS session: remuxed when the video can be copied, transcoded
+    otherwise (`directStream=0` forces transcoding). It honors `offset`,
+    `maxVideoBitrate`, `videoResolution`, `audioStreamID` and burned-in
+    `subtitleStreamID`. Without `audioStreamID`, Pley picks the track as for
+    its own players ([API.md](API.md), "The audio track").
+  - The master playlist points at `session/<id>/base/index.m3u8`. Session
+    URLs need no token: the 128-bit session id is the credential.
 - **Preview thumbnails and chapters.** Parts of files with seek previews have
   `indexes="sd"`; the BIF index is cut from Pley's previews. Details list the
   first version's `Chapter`s, with a `thumb` once the file has previews.
