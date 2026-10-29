@@ -27,6 +27,10 @@ export const CALM_MS = 3 * 60_000;
 export const AFTER_DOWN_MS = 5 * 60_000;
 /** The network must carry this many times the next quality up. */
 export const HEADROOM = 1.6;
+/** A step up a step down undoes this soon was one too far: it isn't tried again during the title. */
+export const SETTLE_MS = 10 * 60_000;
+/** Each step up undone doubles the calm the next one waits for, up to this. */
+export const MAX_CALM_MS = 4 * CALM_MS;
 /** A slow network is remembered this long, per device and server. */
 export const MEMORY_MS = 30 * 60_000;
 /** Network figures older than this go. */
@@ -121,6 +125,12 @@ export class AutoQuality {
   private lastDown = -1e15;
   private lastIssue = -1e15;
   private pending: Lowered | null = null;
+  /** The last step up, until a step down or `SETTLE_MS` says whether it held. */
+  private lastUp: { at: number; to: string } | null = null;
+  /** Qualities a step down undid soon after a step up to them: not tried again this title. */
+  private readonly tooHigh = new Set<string>();
+  /** The calm a step up waits for: `CALM_MS`, doubled by each step up undone. */
+  private calmMs = CALM_MS;
 
   private waitFrom: number | null = null;
   private shortWaits: number[] = [];
@@ -335,6 +345,12 @@ export class AutoQuality {
     }
     const target = this.highestAtMost(ceiling, kbps);
     if (!target || target.id === this.playing) return null;
+    // Down again from where it just stepped up to: that was one step too far.
+    if (this.lastUp && this.lastUp.to === this.playing && now - this.lastUp.at < SETTLE_MS) {
+      this.tooHigh.add(this.playing);
+      this.calmMs = Math.min(MAX_CALM_MS, this.calmMs * 2);
+    }
+    this.lastUp = null;
     this.playing = target.id;
     this.lowered = why;
     this.lastChange = now;
@@ -347,14 +363,17 @@ export class AutoQuality {
   private stepUp(now: number): AutoStep | null {
     if (this.playing === ORIGINAL_ID) return null;
     const calmFrom = Math.max(this.lastIssue, this.lastChange);
-    if (now - calmFrom < CALM_MS || now - this.lastDown < AFTER_DOWN_MS) return null;
+    if (now - calmFrom < this.calmMs || now - this.lastDown < AFTER_DOWN_MS) return null;
     const at = this.indexOf(this.playing);
     const next = at > 0 ? this.ladder[at - 1]! : null;
+    // Settled: the step above didn't hold this title.
+    if (this.tooHigh.has(next ? next.id : ORIGINAL_ID)) return null;
     const need = next ? next.kbps : this.originalKbps;
     const net = this.network(calmFrom);
     if (need === null || net === null || net < HEADROOM * need) return null;
     this.playing = next ? next.id : ORIGINAL_ID;
     this.lastChange = now;
+    this.lastUp = { at: now, to: this.playing };
     this.interrupted();
     if (!next) {
       this.lowered = null;

@@ -103,6 +103,14 @@ network from what they download: an HLS segment's size over the time it
 took, or a direct play's bytes read while it fills its buffer. A player
 that can't tell its network's speed stays where it went down to.
 
+**It settles.** A step up that a step down undoes within 10 minutes was
+one step too far: Automatic doesn't step up to that quality again during
+the title, and the calm it waits for before any other step up doubles
+each time (3 minutes, then 6, then 12). The network's memory keeps the
+step it settled on, so the next title starts there rather than trying
+again. Once it has found the highest quality that plays smoothly, it
+stays.
+
 **It remembers** on the server, per profile, device and network, what the
 network carries: the bitrate of its last step for 24 hours, and a speed
 test for 7 days. The next title in Automatic starts at most at that (Up
@@ -137,6 +145,12 @@ The transcoder makes only the size the player asks for: the others stop
 when it moves (what they made stays, for when it comes back). A size the
 transcoder can't make in real time arrives slower than it plays, and the
 player moves down for it as it would for a slow network.
+
+A player's own ABR moves up only with room to spare, so it doesn't swing
+between two sizes on a network near the line: hls.js counts half the
+bandwidth it measured for a move up (`abrBandWidthUpFactor` 0.5), and
+Media3 waits 20 s of buffer before moving up
+(`minDurationForQualityIncreaseMs`).
 
 While a session comes in several sizes (`PlaybackInfo.adaptive`), the
 player's own ABR moves between them and Automatic watches only for what

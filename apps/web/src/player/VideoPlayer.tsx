@@ -790,6 +790,9 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
                 // takes none bigger than the player shows (`capToPlayer`); a
                 // quality picked plays at its size whenever the connection allows.
                 capLevelToPlayerSize: false,
+                // Up a size only with room to spare, so it doesn't swing
+                // between two on a network near the line (docs/QUALITY.md).
+                abrBandWidthUpFactor: 0.5,
                 maxBufferLength: 30,
                 maxMaxBufferLength: 120,
                 backBufferLength: 60,

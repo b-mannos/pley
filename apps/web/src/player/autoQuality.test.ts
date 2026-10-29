@@ -280,6 +280,47 @@ describe("Automatic", () => {
       expect(mem.value).toBeNull();
     });
 
+    it("settles: a step up undone within 10 minutes isn't tried again during the title", () => {
+      const { a, mem, play, wait, network } = lowered();
+      expect(network(304, 50_000)?.to).toBe("8m");
+      // Two minutes on, the network can't carry 8 Mbps after all (8 × 0.8 × 0.75 = 4.8).
+      network(120, 50_000);
+      play(20, 0.8, 9);
+      expect(wait(2_000)?.to).toBe("4m");
+      const kept = mem.value;
+      // However fast the network says it is, it stays where it held, for the rest of the title.
+      expect(network(3_600, 80_000)).toBeNull();
+      expect(a.playing).toBe("4m");
+      expect(mem.value).toBe(kept);
+    });
+
+    it("a step down more than 10 minutes after a step up leaves that quality open", () => {
+      const { a, play, wait, network } = lowered();
+      expect(network(304, 50_000)?.to).toBe("8m");
+      network(604, 9_000);
+      play(20, 0.8, 9);
+      expect(wait(2_000)?.to).toBe("4m");
+      expect(network(304, 50_000)?.to).toBe("8m");
+      expect(a.playing).toBe("8m");
+    });
+
+    it("each step up undone doubles the calm the next one waits for", () => {
+      const { a, play, wait, network } = lowered();
+      expect(network(304, 50_000)?.to).toBe("8m");
+      expect(network(184, 50_000)?.to).toBe("12m");
+      // 12 Mbps doesn't hold (12 × 0.9 × 0.75 = 8.1): back to 8, and 12 is off for the title.
+      play(20, 0.9, 9);
+      expect(wait(2_000)?.to).toBe("8m");
+      // Later 8 Mbps falters too, more than 10 minutes after it was reached: 4, with 8 still open.
+      network(604, 9_000);
+      play(20, 0.8, 9);
+      expect(wait(2_000)?.to).toBe("4m");
+      // 5 minutes after the step down 3 calm minutes would have done; now it takes 6.
+      expect(network(352, 50_000)).toBeNull();
+      expect(network(16, 50_000)?.to).toBe("8m");
+      expect(a.playing).toBe("8m");
+    });
+
     it("measures the network from engine figures too, by their median", () => {
       const { a, clock } = lowered();
       clock.t += 301_000;
