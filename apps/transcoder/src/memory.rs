@@ -247,12 +247,31 @@ impl MemoryStore {
     }
 }
 
+/// Makes `dir`, a folder only this account may use. In a folder every
+/// account writes to (`/dev/shm`) the name may already be taken by another
+/// account's folder, or a link to one, which the transcoder can't remove:
+/// that is refused rather than used, or its owner could read the segments,
+/// swap them, or have FFmpeg write through links planted in it.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn make_private_dir(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::DirBuilderExt;
-        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+        std::fs::DirBuilder::new().mode(0o700).create(dir).map_err(|err| {
+            if err.kind() == std::io::ErrorKind::AlreadyExists {
+                std::io::Error::new(err.kind(), format!("{} is another account's", dir.display()))
+            } else {
+                err
+            }
+        })?;
+        // Made by this call, so this account's (in a sticky folder nobody
+        // else can rename it), but checked all the same: a folder, with
+        // nobody else's rights.
+        let made = std::fs::symlink_metadata(dir)?;
+        if !made.file_type().is_dir() || made.mode() & 0o077 != 0 {
+            return Err(std::io::Error::other(format!("{} isn't private to this account", dir.display())));
+        }
+        Ok(())
     }
     #[cfg(not(unix))]
     {
@@ -333,6 +352,30 @@ mod linux {
 mod tests {
     use super::*;
     use pley_transcoder_api::{MediaStream, StreamKind};
+
+    /// A name another account took first in a folder everyone writes to
+    /// (`/dev/shm`): neither its folder nor a link is used.
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_or_link_already_there_is_never_used() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tempfile::tempdir().unwrap();
+        let taken = base.path().join("taken");
+        std::fs::create_dir(&taken).unwrap();
+        std::fs::set_permissions(&taken, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(make_private_dir(&taken).is_err(), "a folder already there");
+        assert_eq!(std::fs::metadata(&taken).unwrap().permissions().mode() & 0o777, 0o777);
+
+        let elsewhere = base.path().join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        let link = base.path().join("link");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        assert!(make_private_dir(&link).is_err(), "a link to a folder");
+
+        let fresh = base.path().join("fresh");
+        make_private_dir(&fresh).unwrap();
+        assert_eq!(std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777, 0o700);
+    }
 
     const GIB: u64 = 1024 * MIB;
 
