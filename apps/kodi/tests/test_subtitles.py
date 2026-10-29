@@ -102,7 +102,7 @@ class RouteTest(unittest.TestCase):
         self.search = (503, {"code": "unavailable", "message": "OpenSubtitles isn't set up", "setup": False})
         items, last = self.run_plugin("action=search")
         self.assertEqual((items, last), ([], ("end", True)))
-        self.assertEqual(xbmcgui.notified, [("pley", "Subtitle search isn't set up on this server. An administrator sets it up on the web, in Settings → Server.")])
+        self.assertEqual(xbmcgui.notified, [("Pley", "Subtitle search isn't set up on this server. An administrator sets it up on the web, in Settings → Server.")])
 
     def test_the_one_picked_is_added_saved_and_handed_to_kodi(self):
         items, last = self.run_plugin("action=download&result=opensubtitles%3A1&item=9&file=7")
