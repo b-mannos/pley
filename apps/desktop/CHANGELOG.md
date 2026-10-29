@@ -8,6 +8,12 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Fixed
+
+- Searching the network finds servers on Windows computers that also have
+  virtual network adapters (Hyper-V, VirtualBox, VPNs), and no longer stops
+  short when no server runs on the computer itself.
+
 ## [0.0.1] - 2026-10-29
 
 ### Added

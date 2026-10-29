@@ -5,9 +5,11 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::task::Poll;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use tokio::io::ReadBuf;
 use tokio::net::UdpSocket;
 
 use crate::servers::check_server;
@@ -58,14 +60,25 @@ fn read_answer(bytes: &[u8], from: SocketAddr) -> Option<FoundServer> {
     })
 }
 
-/// Where to send the request: every network's broadcast address, the
-/// general one, and this computer.
-fn targets() -> Vec<SocketAddr> {
-    let mut out = vec![SocketAddr::from((Ipv4Addr::BROADCAST, PORT)), SocketAddr::from((Ipv4Addr::LOCALHOST, PORT))];
+/// Where to send the request, and from which of this computer's addresses:
+/// the general broadcast address and this computer from any, and, from each
+/// network's own address, the general broadcast address again and that
+/// network's. Windows sends a general broadcast out of one network only (often
+/// a virtual machine's), and a server whose network is set narrower than this
+/// computer's doesn't take the network's broadcast address for one.
+fn targets() -> Vec<(Ipv4Addr, SocketAddr)> {
+    let any = Ipv4Addr::UNSPECIFIED;
+    let mut out = vec![
+        (any, SocketAddr::from((Ipv4Addr::BROADCAST, PORT))),
+        (any, SocketAddr::from((Ipv4Addr::LOCALHOST, PORT))),
+    ];
     for interface in if_addrs::get_if_addrs().unwrap_or_default() {
         if let if_addrs::IfAddr::V4(v4) = interface.addr {
-            if let Some(broadcast) = v4.broadcast.filter(|_| !v4.ip.is_loopback()) {
-                let target = SocketAddr::from((broadcast, PORT));
+            if v4.ip.is_loopback() {
+                continue;
+            }
+            for target in [Some(Ipv4Addr::BROADCAST), v4.broadcast].into_iter().flatten() {
+                let target = (v4.ip, SocketAddr::from((target, PORT)));
                 if !out.contains(&target) {
                     out.push(target);
                 }
@@ -75,18 +88,50 @@ fn targets() -> Vec<SocketAddr> {
     out
 }
 
-/// Asks `targets` and gathers the answers for `wait`, one entry per server
-/// (by id): this computer's address wins over its network ones.
-pub async fn search(targets: &[SocketAddr], wait: Duration) -> Vec<FoundServer> {
-    let Ok(socket) = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).await else { return Vec::new() };
-    let _ = socket.set_broadcast(true);
-    for target in targets {
-        let _ = socket.send_to(REQUEST, target).await;
+/// The next datagram on any of `sockets`. Errors are skipped: Windows reports
+/// an earlier request's ICMP "port unreachable" (no server on this computer)
+/// as one.
+async fn recv_any(sockets: &[UdpSocket], buf: &mut [u8]) -> (usize, SocketAddr) {
+    std::future::poll_fn(|cx| {
+        for socket in sockets {
+            loop {
+                let mut read = ReadBuf::new(&mut *buf);
+                match socket.poll_recv_from(cx, &mut read) {
+                    Poll::Ready(Ok(from)) => return Poll::Ready((read.filled().len(), from)),
+                    Poll::Ready(Err(_)) => continue,
+                    Poll::Pending => break,
+                }
+            }
+        }
+        Poll::Pending
+    })
+    .await
+}
+
+/// Sends the request to each `(from, to)` of `targets`, from a socket on that
+/// address of this computer, and gathers the answers for `wait`, one entry per
+/// server (by id): this computer's address wins over its network ones.
+pub async fn search(targets: &[(Ipv4Addr, SocketAddr)], wait: Duration) -> Vec<FoundServer> {
+    let mut sources: Vec<Ipv4Addr> = Vec::new();
+    for &(from, _) in targets {
+        if !sources.contains(&from) {
+            sources.push(from);
+        }
+    }
+    let mut sockets = Vec::new();
+    for source in sources {
+        // A network that has just gone away can't be bound; the others still are.
+        let Ok(socket) = UdpSocket::bind((source, 0)).await else { continue };
+        let _ = socket.set_broadcast(true);
+        for &(_, to) in targets.iter().filter(|(from, _)| *from == source) {
+            let _ = socket.send_to(REQUEST, to).await;
+        }
+        sockets.push(socket);
     }
     let mut found: HashMap<String, FoundServer> = HashMap::new();
     let mut buf = [0u8; 1024];
     let deadline = tokio::time::Instant::now() + wait;
-    while let Ok(Ok((len, from))) = tokio::time::timeout_at(deadline, socket.recv_from(&mut buf)).await {
+    while let Ok((len, from)) = tokio::time::timeout_at(deadline, recv_any(&sockets, &mut buf)).await {
         let Some(server) = read_answer(&buf[..len], from) else { continue };
         let key = server.id.clone().unwrap_or_else(|| server.url.clone());
         let local = server.url.starts_with("http://localhost:");
@@ -135,7 +180,7 @@ mod tests {
         // Two sockets standing in for one server's two addresses, and another server.
         let same_a = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let other = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let targets = [same_a.local_addr().unwrap(), other.local_addr().unwrap()];
+        let targets = [same_a.local_addr().unwrap(), other.local_addr().unwrap()].map(|to| (Ipv4Addr::LOCALHOST, to));
         for (socket, id, name) in [(same_a, "a", "Den"), (other, "b", "Attic")] {
             tokio::spawn(async move {
                 let mut buf = [0u8; 16];
@@ -148,5 +193,23 @@ mod tests {
         }
         let found = search(&targets, Duration::from_millis(400)).await;
         assert_eq!(found.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Attic", "Den"]);
+    }
+
+    #[tokio::test]
+    async fn a_port_nobody_listens_on_doesnt_end_the_search() {
+        // On Windows the request to the closed port comes back as an error on
+        // the next receive, ahead of the server's answer.
+        let closed = UdpSocket::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap();
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let targets = [closed, server.local_addr().unwrap()].map(|to| (Ipv4Addr::LOCALHOST, to));
+        tokio::spawn(async move {
+            let mut buf = [0u8; 16];
+            let (_, from) = server.recv_from(&mut buf).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let answer = br#"{"pley":1,"id":"a","name":"Den","version":"0.1.0","port":7539}"#;
+            server.send_to(answer, from).await.unwrap();
+        });
+        let found = search(&targets, Duration::from_millis(400)).await;
+        assert_eq!(found.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Den"]);
     }
 }
