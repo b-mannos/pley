@@ -38,6 +38,13 @@ While Automatic plays, the menu says what it plays: "Automatic · Original"
 or "Automatic · 8 Mbps 1080p". The player's details say why when it went
 down: "Lowered for your connection" or "Lowered for this device".
 
+Under its name, Original gives the file's own size and bitrate ("1080p ·
+8.2 Mbps") and Automatic what it plays now ("Now 8 Mbps 1080p · Lowered
+for your connection"); the other qualities have no line. The menus don't
+say how a choice is made: an Original the server converts still reads
+"Original", and picture subtitles carry no burn-in mark. Playback details
+say that (how it plays, the server's reasons, what goes in and out).
+
 ## Original
 
 The file as it is: direct play, or a remux when the container doesn't play

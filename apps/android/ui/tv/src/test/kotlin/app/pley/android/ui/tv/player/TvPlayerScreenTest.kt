@@ -503,10 +503,10 @@ class TvPlayerScreenTest {
                 qualities = listOf(
                     QualityChoice("original", "Original", "4K · 62 Mbps", false),
                     QualityChoice("auto", "Automatic", "Now 8 Mbps 1080p", true),
-                    QualityChoice("30m", "30 Mbps 4K", "Converted", false),
-                    QualityChoice("15m", "15 Mbps 4K", "Converted", false),
-                    QualityChoice("20m", "20 Mbps 1080p", "Converted", false),
-                    QualityChoice("8m", "8 Mbps 1080p", "Converted", false),
+                    QualityChoice("30m", "30 Mbps 4K", null, false),
+                    QualityChoice("15m", "15 Mbps 4K", null, false),
+                    QualityChoice("20m", "20 Mbps 1080p", null, false),
+                    QualityChoice("8m", "8 Mbps 1080p", null, false),
                 ),
             )
         }

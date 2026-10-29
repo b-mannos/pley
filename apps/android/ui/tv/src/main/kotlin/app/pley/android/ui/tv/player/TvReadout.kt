@@ -57,7 +57,7 @@ internal data class ReadoutInput(
     val details: PlaybackDetailsUi? = null,
     val stats: PlaybackStats? = null,
     val bufferedMs: Long = 0,
-    /** "Original", "8 Mbps 1080p (auto)". */
+    /** "Original", "Automatic · 8 Mbps 1080p". */
     val quality: String = "",
     val display: DisplayNow? = null,
 )

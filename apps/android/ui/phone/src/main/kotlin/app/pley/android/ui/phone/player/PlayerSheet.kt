@@ -204,10 +204,9 @@ private fun ColumnScope.SheetContent(page: SheetPage, state: PlayerScreenState, 
                 }
             }
             SheetPage.Subtitles -> {
-                val burn = stringResource(R.string.player_burn_in)
                 if (state.subtitleSync) SyncControl(state.subtitleOffsetMs, onChange = state.controller::setSubtitleOffset)
                 state.subtitles.forEach { track ->
-                    OptionRow(track.selected, if (track.burnIn) "${track.label} $burn" else track.label) {
+                    OptionRow(track.selected, track.label) {
                         state.controller.selectSubtitle(track.index)
                         state.closeSheet()
                     }

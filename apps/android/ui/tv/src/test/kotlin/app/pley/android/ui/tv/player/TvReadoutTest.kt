@@ -85,7 +85,7 @@ class TvReadoutTest {
         val sub = s.getValue("Subtitles")
         assertEquals("SRT, text", sub["Format"])
         assertEquals("Forced", sub["Flags"])
-        assertEquals("From the file, drawn by this TV", sub["Shown"])
+        assertEquals("From the file", sub["Shown"])
         val tv = s.getValue("This TV")
         assertEquals("c2.amlogic.hevc.decoder (hardware)", tv["Video decoder"])
         assertEquals("dvhe.08.06", tv["Codec string"])

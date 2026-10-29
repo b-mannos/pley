@@ -160,10 +160,10 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
                 TrackChoice(3, "English (SRT)", true),
                 TrackChoice(4, "French (PGS)", false, burnIn = true),
             ),
-            quality = "8 Mbps 1080p (auto)",
+            quality = "4 Mbps 720p",
             qualities = listOf(
-                QualityChoice("original", "Original", "Plays as 8 Mbps 1080p here", true),
-                QualityChoice("4m", "4 Mbps 720p", "Converted", false),
+                QualityChoice("original", "Original", "4K · 62 Mbps", false),
+                QualityChoice("4m", "4 Mbps 720p", null, true),
             ),
             method = "Transcoding",
             note = "The original didn't play smoothly on this device.",

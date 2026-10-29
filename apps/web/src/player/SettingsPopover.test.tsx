@@ -43,21 +43,7 @@ describe("SettingsPopover", () => {
     expect(screen.queryByText("Playback")).not.toBeInTheDocument();
   });
 
-  it("names the quality the original is converted at", async () => {
-    const user = userEvent.setup();
-    renderPopover({
-      qualities: qualitiesFor({ bitrate: 60_000_000, width: 3840, height: 2160 }),
-      originalHint: "4K · 60 Mbps",
-      autoQuality: "30m",
-    });
-    expect(screen.getByRole("button", { name: /Quality\s*30 Mbps 4K \(auto\)/ })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Quality/ }));
-    const original = screen.getAllByRole("menuitemradio")[0];
-    expect(original).toHaveTextContent("Plays as 30 Mbps 4K here (file: 4K · 60 Mbps)");
-    expect(original).toHaveAttribute("aria-checked", "true");
-  });
-
-  it("offers the original, Automatic and the qualities that convert it", async () => {
+  it("offers the original, Automatic and the lower qualities, without saying how they're made", async () => {
     const user = userEvent.setup();
     const props = renderPopover();
     await user.click(screen.getByRole("button", { name: /Quality/ }));
@@ -66,8 +52,8 @@ describe("SettingsPopover", () => {
       "Original1080p · 9.0 Mbps",
       "AutomaticDynamically adjust to conditions",
       // 8 Mbps is too close to the file's 9 to play any better.
-      "4 Mbps 720pConverted",
-      "2 Mbps 480pConverted",
+      "4 Mbps 720p",
+      "2 Mbps 480p",
     ]);
     expect(options[0]).toHaveAttribute("aria-checked", "true");
 
@@ -170,6 +156,24 @@ describe("SettingsPopover", () => {
     await user.click(screen.getByRole("button", { name: /Subtitles/ }));
     expect(screen.getByRole("button", { name: "Show subtitles later" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reset" })).toBeEnabled();
+  });
+
+  it("lists picture subtitles by name alone", async () => {
+    const user = userEvent.setup();
+    const pgs: MediaStream = { ...english, index: 4, codec: "hdmv_pgs_subtitle", text_based: false };
+    renderPopover({ subtitleStreams: [pgs] });
+    await user.click(screen.getByRole("button", { name: /Subtitles/ }));
+    expect(screen.getAllByRole("menuitemradio")[1]).not.toHaveTextContent("burn");
+  });
+
+  it("opens the playback details from the bottom of the menu, not at its top", async () => {
+    const user = userEvent.setup();
+    renderPopover({ details: <p>Direct play</p> });
+    expect(screen.queryByText("Direct play")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Playback details" }));
+    expect(screen.getByText("Direct play")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Playback details" }));
+    expect(screen.getByRole("button", { name: /Quality/ })).toBeInTheDocument();
   });
 
   it("doesn't offer to move subtitles that are off or burned in", async () => {

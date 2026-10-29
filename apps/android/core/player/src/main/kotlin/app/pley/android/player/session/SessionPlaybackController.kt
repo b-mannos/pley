@@ -1745,9 +1745,8 @@ class SessionPlaybackController(
                 label = label(preset),
                 hint = when {
                     preset.automatic -> if (automatic && (auto != null || !quality.original)) texts.automaticNow(playing) else texts.automaticHint
-                    !preset.original -> texts.converted
-                    auto != null -> texts.playsAs(label(auto), fileHint)
-                    else -> fileHint
+                    preset.original -> fileHint
+                    else -> null
                 },
                 selected = preset.id == picked.id,
             )
@@ -1757,11 +1756,7 @@ class SessionPlaybackController(
                 audio = audioChoices,
                 subtitles = subtitleChoices,
                 qualities = qualities,
-                quality = when {
-                    automatic -> texts.automatic(playing)
-                    auto != null -> texts.autoQuality(label(auto))
-                    else -> label(quality)
-                },
+                quality = if (automatic) texts.automatic(playing) else label(quality),
                 subtitleSync = syncable,
                 subtitleOffsetMs = offset.value,
             )

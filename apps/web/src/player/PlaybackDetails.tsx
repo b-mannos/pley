@@ -15,12 +15,6 @@ export function methodLabel(info: PlaybackInfo): string {
   return info.method === "remux" && info.audio_converted ? `${METHOD_LABEL.remux} · Audio transcoding` : METHOD_LABEL[info.method];
 }
 
-/** What it means, when nothing more specific is known; direct play goes without saying. */
-const METHOD_TEXT: Record<Exclude<PlaybackMethod, "direct">, string> = {
-  remux: "The original video, in a format this player opens.",
-  transcode: "Converted for this player.",
-};
-
 const ENCODERS: Record<string, string> = {
   libx264: "x264",
   libx265: "x265",
@@ -91,9 +85,10 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 }
 
 /**
- * How this video plays, at the top of the player's menu: the way (direct
- * play, direct stream, transcoding), why in a sentence, then what goes in
- * and what comes out. A transcode's numbers come live while the menu is open.
+ * How this video plays, in the menu's Playback details and the badge's
+ * tooltip: the way (direct play, direct stream, transcoding), the server's
+ * reasons, then what goes in and what comes out. A transcode's numbers come
+ * live while it shows.
  */
 export function PlaybackDetails({
   info,
@@ -120,7 +115,8 @@ export function PlaybackDetails({
   const audios = streams.filter((s) => s.kind === "audio");
   const audio =
     audios.find((s) => s.index === (audioIndex ?? info.audio_index)) ?? audios.find((s) => s.default) ?? audios[0];
-  const why = info.method === "direct" ? note : (note ?? info.reasons?.join(" ") ?? info.reason ?? METHOD_TEXT[info.method]);
+  // Nothing more specific known: the method says it.
+  const why = info.method === "direct" ? note : (note ?? info.reasons?.join(" ") ?? info.reason ?? null);
   const pending = "…";
 
   const videoIn = live?.video_in ? simplified(live.video_in) : videoLabel(video);
@@ -154,7 +150,7 @@ export function PlaybackDetails({
         {bitrateRow ? <Row label="Bitrate">{bitrateRow}</Row> : null}
         {live?.video === "transcode" && live.encoder ? <Row label="Encoder">{encoderLabel(live)}</Row> : null}
         {shownAs ? <Row label="Shown as">{shownAs}</Row> : null}
-        {live?.subtitle_burn ? <Row label="Subtitles">Drawn onto the video</Row> : null}
+        {live?.subtitle_burn ? <Row label="Subtitles">Burned in</Row> : null}
         {live?.speed ? (
           <Row label="Speed">
             {live.speed.toFixed(1)}× real time{ahead > 0 ? ` · ${ahead} s ready` : ""}

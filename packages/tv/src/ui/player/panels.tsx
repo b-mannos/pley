@@ -71,7 +71,7 @@ export function PlayerPanels(p: {
             <PanelRow
               key={String(t.index)}
               label={t.label}
-              sub={t.burnIn ? "Drawn into the picture by the server" : t.added ? "Added" : null}
+              sub={t.added ? "Added" : null}
               checked={t.selected}
               initial={t.selected}
               onSelect={pick(() => c.selectSubtitle(t.index))}
@@ -326,15 +326,7 @@ export function readoutSections(state: PlayerState, stats: EngineStats | null, e
   else {
     subs.facts.push({ label: "Format", value: `${codecLabel(d.subtitle.codec)}, ${d.subtitle.text_based === false ? "picture" : "text"}` });
     if (d.subtitle.language) subs.facts.push({ label: "Language", value: d.subtitle.language });
-    subs.facts.push({
-      label: "Shown",
-      value:
-        d.subtitleDelivery === "burned_in"
-          ? "Burned into the picture by the server"
-          : d.subtitleDelivery === "server_pictures"
-            ? "As pictures from the server, drawn by this TV"
-            : "As WebVTT from the server, drawn by this TV",
-    });
+    subs.facts.push({ label: "Shown", value: d.subtitleDelivery === "burned_in" ? "Burned in by the server" : "Drawn by this TV" });
   }
   out.push(subs);
   const tv: FactBlock = { title: "This TV", facts: [{ label: "Player", value: engineName }] };

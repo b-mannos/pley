@@ -168,7 +168,6 @@ class PiecesTest {
     fun `the texts are the web's words`() {
         assertEquals("30 Mbps 4K", texts.quality(Qualities.byId("30m")))
         assertEquals("Original", texts.quality(Qualities.ORIGINAL))
-        assertEquals("8 Mbps 1080p (auto)", texts.autoQuality(texts.quality(Qualities.byId("8m"))))
         // Taller than the file: named by its lines.
         assertEquals("8 Mbps 720p", texts.quality(Qualities.byId("8m"), 720))
         assertEquals("8 Mbps 1080p", texts.quality(Qualities.byId("8m"), 2160))

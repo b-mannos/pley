@@ -40,7 +40,7 @@ class FakePlaybackControllerTest {
         assertEquals(listOf("seekTo", "selectSubtitle", "selectQuality", "dismissNotice"), fake.calls.map { it.name })
         assertEquals(listOf(5_000L), fake.calls("seekTo").single().args)
         assertEquals(3_000L, fake.saveState().positionMs)
-        assertEquals("original", fake.saveState().quality)
+        assertEquals("4m", fake.saveState().quality)
 
         val services = FakePlaybackServices()
         val key = services.prepare(PlayRequest(7))

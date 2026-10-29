@@ -150,7 +150,6 @@ private fun ChoicePanel(
             PlayerPanel.FindSubtitles -> R.string.tv_player_find_subtitles
         },
     )
-    val burnIn = stringResource(R.string.tv_player_burn_in)
     val original = stringResource(R.string.tv_player_play_original)
     val originalHint = stringResource(R.string.tv_player_play_original_hint)
     val style = SubtitleStyleTexts(
@@ -198,7 +197,7 @@ private fun ChoicePanel(
                     item(key = "sync") { SyncRow(s.subtitleOffsetMs, onChange = { controller.setSubtitleOffset(it) }) }
                 }
                 choices(
-                    s.subtitles.map { Row(it.label, it.selected, if (it.burnIn) burnIn else null) },
+                    s.subtitles.map { Row(it.label, it.selected, null) },
                     focus,
                 ) { i ->
                     controller.selectSubtitle(s.subtitles[i].index)

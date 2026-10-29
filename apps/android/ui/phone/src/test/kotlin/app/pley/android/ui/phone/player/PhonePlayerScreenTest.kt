@@ -84,10 +84,10 @@ class PhonePlayerScreenTest {
                 TrackChoice(3, "English (SRT)", true),
                 TrackChoice(4, "French (PGS)", false, burnIn = true),
             ),
-            quality = "8 Mbps 1080p (auto)",
+            quality = "Original",
             qualities = listOf(
-                QualityChoice("original", "Original", "Plays as 8 Mbps 1080p here", true),
-                QualityChoice("4m", "4 Mbps 720p", "Converted", false),
+                QualityChoice("original", "Original", "4K · 62 Mbps", true),
+                QualityChoice("4m", "4 Mbps 720p", null, false),
             ),
             chapters = listOf(ChapterMark("Intro", 0, 60_000, null), ChapterMark("Part 1", 60_000, 600_000, null)),
         ),
@@ -171,17 +171,16 @@ class PhonePlayerScreenTest {
     }
 
     @Test
-    fun qualityListsTheOriginalWithItsHintAndConversions() {
+    fun qualityListsTheOriginalWithItsHintAndTheLowerQualities() {
         val fake = FakePlaybackController(playing())
         show(fake)
         compose.onNodeWithText("Quality").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("Plays as 8 Mbps 1080p here").assertIsDisplayed()
-        compose.onNodeWithText("Converted").assertIsDisplayed()
+        compose.onNodeWithText("4K · 62 Mbps").assertIsDisplayed()
         compose.onNodeWithText("4 Mbps 720p").performClick()
         assertEquals(listOf<Any?>("4m"), fake.calls("selectQuality").single().args)
         compose.waitForIdle()
-        assertEquals(0, compose.onAllNodesWithTextCount("Converted"))
+        assertEquals(0, compose.onAllNodesWithTextCount("4K · 62 Mbps"))
     }
 
     @Test
@@ -194,9 +193,9 @@ class PhonePlayerScreenTest {
                     qualities = listOf(
                         QualityChoice("original", "Original", "4K · 62 Mbps", false),
                         QualityChoice("auto", "Automatic", "Now 8 Mbps 1080p", true),
-                        QualityChoice("30m", "30 Mbps 4K", "Converted", false),
-                        QualityChoice("15m", "15 Mbps 4K", "Converted", false),
-                        QualityChoice("20m", "20 Mbps 1080p", "Converted", false),
+                        QualityChoice("30m", "30 Mbps 4K", null, false),
+                        QualityChoice("15m", "15 Mbps 4K", null, false),
+                        QualityChoice("20m", "20 Mbps 1080p", null, false),
                     ),
                 )
             },
@@ -255,12 +254,12 @@ class PhonePlayerScreenTest {
     }
 
     @Test
-    fun subtitlesMarkPictureTracksThatAreBurnedIn() {
+    fun subtitlesListPictureTracksByNameAlone() {
         val fake = FakePlaybackController(playing())
         show(fake)
         compose.onNodeWithText("Subtitles").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("French (PGS) (burn-in)").performClick()
+        compose.onNodeWithText("French (PGS)").performClick()
         assertEquals(listOf<Any?>(4L), fake.calls("selectSubtitle").single().args)
     }
 
@@ -270,7 +269,7 @@ class PhonePlayerScreenTest {
         show(fake)
         compose.onNodeWithContentDescription("Playback settings").performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("8 Mbps 1080p (auto)").assertIsDisplayed()
+        compose.onNode(hasText("Quality") and hasText("Original")).assertIsDisplayed()
         compose.onNode(hasText("Audio") and hasText("English (AAC Stereo)")).performClick()
         compose.waitForIdle()
         compose.onNodeWithText("French (EAC3 5.1)").assertIsDisplayed()

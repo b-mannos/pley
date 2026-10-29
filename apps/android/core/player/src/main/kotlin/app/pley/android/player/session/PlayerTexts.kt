@@ -22,15 +22,6 @@ interface PlayerTexts {
         return "${kbps / 1000} Mbps ${linesLabel(fileLines)}"
     }
 
-    /** "8 Mbps 1080p (auto)": the original, converted at the quality the server chose, by its [label]. */
-    fun autoQuality(label: String): String
-
-    /** The original's hint in the quality menu when the server converts it at [label]; [file] is the original's "4K · 62 Mbps". */
-    fun playsAs(label: String, file: String?): String
-
-    /** Every quality but the original. */
-    val converted: String
-
     /** The menu's row while Automatic plays [playing]: "Automatic · Original", "Automatic · 8 Mbps 1080p". */
     fun automatic(playing: String): String = "Automatic · $playing"
 
@@ -70,8 +61,6 @@ interface PlayerTexts {
     /** The server out of reach, for [reason] ("no answer in time"): what to check. */
     fun unreachable(reason: String): String = "${asSentence(reason)} Check that the server is on and that this device is on its network."
 
-    /** What a remux or a transcode means, when nothing more specific is known (a direct play needs no reason). */
-    fun why(method: PlaybackMethod): String
     fun fallback(reason: FallbackReason): String
     val slowServer: String
     fun failure(failure: Failure, detail: String?): String
@@ -150,17 +139,6 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
         return res.getString(R.string.session_quality_named, kbps / 1000, linesLabel(fileLines))
     }
 
-    override fun autoQuality(label: String): String = res.getString(R.string.session_quality_auto, label)
-
-    override fun playsAs(label: String, file: String?): String =
-        if (file.isNullOrEmpty()) {
-            res.getString(R.string.session_quality_plays_as, label)
-        } else {
-            res.getString(R.string.session_quality_plays_as_file, label, file)
-        }
-
-    override val converted: String get() = s(R.string.session_quality_converted)
-
     override fun automatic(playing: String): String = res.getString(R.string.session_quality_automatic_playing, playing)
 
     override val automaticHint: String get() = s(R.string.session_quality_automatic_hint)
@@ -191,13 +169,6 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
         PlaybackMethod.Transcode -> s(R.string.session_method_transcode)
         else -> s(R.string.session_method_direct)
     }
-
-    override fun why(method: PlaybackMethod): String = s(
-        when (method) {
-            PlaybackMethod.Remux -> R.string.session_why_remux
-            else -> R.string.session_why_transcode
-        },
-    )
 
     override fun fallback(reason: FallbackReason): String = s(
         when (reason) {

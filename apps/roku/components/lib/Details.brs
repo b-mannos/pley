@@ -151,9 +151,8 @@ function detPlayback(info as object, file as dynamic, audioIndex as integer, liv
             if text <> "" then reasons.Push(text)
         end for
         why = reasons.Join(" ")
+        ' Nothing more specific known: the method says it.
         if why = "" then why = httpSentence(info.reason)
-        if why = "" and method = "remux" then why = "The original video, in a format this player opens."
-        if why = "" then why = "Converted for this player."
     end if
     rows = []
     converting = method <> "direct"
@@ -188,7 +187,7 @@ function detPlayback(info as object, file as dynamic, audioIndex as integer, liv
     shown = httpSentence(info.video_range)
     if transcode <> invalid and httpString(transcode.tonemap) <> "" then shown = "SDR (tone-mapped with " + httpSentence(transcode.tonemap) + ")"
     if video <> invalid and shown <> "" then rows.Push({ label: "Shown as", value: shown })
-    if httpTrue(info.burn_subtitles) then rows.Push({ label: "Subtitles", value: "Drawn onto the video" })
+    if httpTrue(info.burn_subtitles) then rows.Push({ label: "Subtitles", value: "Burned in" })
     if transcode <> invalid
         speed = httpNumber(transcode.speed, 0)
         if speed > 0

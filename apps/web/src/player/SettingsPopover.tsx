@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import { formatClock, streamLabel } from "@/lib/format";
 import { useDismiss } from "@/lib/hooks";
 import { AddSubtitleFile, FindSubtitles, subtitleSearchUnavailable, type SubtitleSources } from "./FindSubtitles";
-import { qualityById, type QualityOption } from "./quality";
+import type { QualityOption } from "./quality";
 import { SLEEP_MINUTES, type SleepChoice } from "./sleepTimer";
 import { SPEEDS, speedLabel } from "./speed";
 import {
@@ -21,7 +21,7 @@ import {
   type SubtitleStyle,
 } from "./subtitles";
 
-type Panel = "root" | "quality" | "audio" | "subtitles" | "find" | "upload" | "style" | "speed" | "sleep";
+type Panel = "root" | "quality" | "audio" | "subtitles" | "find" | "upload" | "style" | "speed" | "sleep" | "details";
 
 const PANEL_TITLE: Record<Exclude<Panel, "root">, string> = {
   quality: "Quality",
@@ -32,6 +32,7 @@ const PANEL_TITLE: Record<Exclude<Panel, "root">, string> = {
   style: "Subtitle style",
   speed: "Speed",
   sleep: "Sleep timer",
+  details: "Playback details",
 };
 
 function GroupLabel({ children }: { children: ReactNode }) {
@@ -85,7 +86,7 @@ function Action({ icon, hint, onClick, children }: { icon: ReactNode; hint?: str
 }
 
 /** `extra`: said after the value, never cut off ("+0.5 s"). */
-function Nav({ label, value, extra, onClick }: { label: string; value: string; extra?: string; onClick: () => void }) {
+function Nav({ label, value, extra, onClick }: { label: string; value?: string; extra?: string; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -150,15 +151,13 @@ function SubtitleSync({ offset, onChange }: { offset: number; onChange: (offset:
 export interface SettingsPopoverProps {
   open: boolean;
   setOpen: (open: boolean) => void;
-  /** How the video plays now, at the top of the menu ([`PlaybackDetails`]). */
+  /** How the video plays now ([`PlaybackDetails`]), in its own panel at the bottom of the menu. */
   details?: ReactNode;
   /** The qualities offered for this file, the original first. */
   qualities: QualityOption[];
   quality: string;
   /** What the original is ("1080p · 8.2 Mbps"). */
   originalHint: string | null;
-  /** The quality the original is converted at here, when it has to be ("30m"). */
-  autoQuality?: string | null;
   /** While Automatic plays: what it plays now ("Original", "8 Mbps 1080p"). */
   autoNow?: string | null;
   /** Why Automatic plays lower, when it does ("Lowered for your connection"). */
@@ -195,7 +194,7 @@ export interface SettingsPopoverProps {
 }
 
 export function SettingsPopover(props: SettingsPopoverProps) {
-  const { open, setOpen, details, qualities, quality, originalHint, autoQuality, autoNow, autoWhy, onQuality } = props;
+  const { open, setOpen, details, qualities, quality, originalHint, autoNow, autoWhy, onQuality } = props;
   const { audioStreams, audioIndex, onAudio, subtitleStreams, subtitleIndex, onSubtitle } = props;
   const { subtitleStyle, onSubtitleStyle, subtitleOffset, onSubtitleOffset, speed, onSpeed } = props;
   const { sleep, sleepLeft, sleepEndLabel, onSleep } = props;
@@ -217,29 +216,16 @@ export function SettingsPopover(props: SettingsPopoverProps) {
   const textSub = currentSub && currentSub.text_based !== false ? currentSub : undefined;
   const sleepValue =
     sleep === null ? "Off" : sleep === "end" ? sleepEndLabel : sleepLeft !== null ? `${formatClock(sleepLeft)} left` : `${sleep} min`;
-  // The original, converted: at the closest quality, named as the menu names it for this file.
-  const auto =
-    quality === "original" && autoQuality
-      ? (qualities.find((q) => q.id === autoQuality) ?? qualityById(autoQuality))
-      : null;
   const qualityLabel =
-    quality === "auto"
-      ? `Automatic · ${autoNow ?? "Original"}`
-      : auto && auto.id !== "original"
-        ? `${auto.label} (auto)`
-        : (qualities.find((q) => q.id === quality)?.label ?? "Original");
+    quality === "auto" ? `Automatic · ${autoNow ?? "Original"}` : (qualities.find((q) => q.id === quality)?.label ?? "Original");
   const qualityHint = (id: string): string | undefined => {
-    if (id === "original") {
-      return auto && auto.id !== "original"
-        ? `Plays as ${auto.label} here${originalHint ? ` (file: ${originalHint})` : ""}`
-        : (originalHint ?? undefined);
-    }
+    if (id === "original") return originalHint ?? undefined;
     if (id === "auto") {
       return quality === "auto" && autoNow
         ? [`Now ${autoNow}`, autoWhy].filter(Boolean).join(" · ")
         : "Dynamically adjust to conditions";
     }
-    return "Converted";
+    return undefined;
   };
 
   const close = () => {
@@ -284,12 +270,6 @@ export function SettingsPopover(props: SettingsPopoverProps) {
         >
           {panel === "root" ? (
             <>
-              {details ? (
-                <>
-                  {details}
-                  <div className="my-1 h-px bg-white/10" />
-                </>
-              ) : null}
               <Nav label="Quality" value={qualityLabel} onClick={() => setPanel("quality")} />
               {audioStreams.length > 1 ? (
                 <Nav label="Audio" value={currentAudio ? streamLabel(currentAudio) : "Default"} onClick={() => setPanel("audio")} />
@@ -309,6 +289,12 @@ export function SettingsPopover(props: SettingsPopoverProps) {
               ) : null}
               <Nav label="Speed" value={speedLabel(speed)} onClick={() => setPanel("speed")} />
               <Nav label="Sleep timer" value={sleepValue} onClick={() => setPanel("sleep")} />
+              {details ? (
+                <>
+                  <div className="my-1 h-px bg-white/10" />
+                  <Nav label="Playback details" onClick={() => setPanel("details")} />
+                </>
+              ) : null}
             </>
           ) : (
             <>
@@ -327,7 +313,6 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                       key={q.id}
                       selected={q.id === quality}
                       hint={qualityHint(q.id)}
-
                       onClick={() => {
                         onQuality(q.id);
                         close();
@@ -395,6 +380,7 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                   ))}
                 </>
               ) : null}
+              {panel === "details" ? details : null}
               {panel === "find" && sources ? <FindSubtitles sources={sources} onDone={close} /> : null}
               {panel === "upload" && sources && subtitleFile ? <AddSubtitleFile sources={sources} file={subtitleFile} onDone={close} /> : null}
               {panel === "speed"
@@ -434,7 +420,6 @@ export function SettingsPopover(props: SettingsPopoverProps) {
                         }}
                       >
                         {streamLabel(s)}
-                        {s.text_based === false ? <span className="ml-1 text-xs text-white/50">(burn-in)</span> : null}
                       </Option>
                     );
                     if (!s.added || !onDeleteSubtitle || !canDeleteSubtitle?.(s)) return option;

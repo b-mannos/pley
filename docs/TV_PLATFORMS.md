@@ -379,7 +379,9 @@ the TV and never sent to the server.
 
 Quality follows [QUALITY.md](QUALITY.md): the player's Quality panel and
 Settings → Playback → Quality list Original, Automatic, 30 and 15 Mbps
-4K, then 1080p and below, and Automatic is the default until a quality
+4K, then 1080p and below, with QUALITY.md's hints (nothing of
+conversions, nor of burn-in on the Subtitles panel: the readout and
+Playback details say it), and Automatic is the default until a quality
 is picked. Settings saved before Automatic held Original whether it was
 picked or not, so a saved Original counts only once a quality has been
 picked on the TV since (`pley.qualityPicked`). Automatic's decisions are

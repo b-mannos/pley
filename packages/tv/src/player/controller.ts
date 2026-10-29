@@ -1738,7 +1738,7 @@ export class PlaybackController {
     // Text moves always; pictures when drawn here from the server's .mks.
     const syncable = !!sub && (!isPicture(sub) || (this.sideload && info?.burn_subtitles !== true));
     const playing = this.playingPreset;
-    // The original, converted here: at the closest quality, which the menu names.
+    // The original, converted here: at the closest quality, which Automatic says it plays.
     const convertedId = info?.auto_quality && playing.id === ORIGINAL.id ? info.auto_quality : null;
     const known = convertedId ? presetById(convertedId) : null;
     const converted = known ? namedFor(file, known) : null;
@@ -1757,18 +1757,16 @@ export class PlaybackController {
           ? auto
             ? T.autoNow(autoNow, auto.lowered && (playing.id !== ORIGINAL.id || eased) ? T.lowered[auto.lowered] : null)
             : T.autoHint
-          : p.id !== ORIGINAL.id
-            ? T.converted
-            : this.quality.id === ORIGINAL.id && convertedLabel
-              ? T.playsAs(convertedLabel, hint)
-              : hint,
+          : p.id === ORIGINAL.id
+            ? hint
+            : null,
       selected: p.id === this.quality.id,
     }));
     this.update({
       audio,
       subtitles,
       qualities,
-      quality: auto ? T.automatic(autoNow) : convertedLabel ? T.autoQuality(convertedLabel) : this.quality.label,
+      quality: auto ? T.automatic(autoNow) : this.quality.label,
       subtitleSync: syncable,
       subtitleOffsetMs: this.offset,
     });

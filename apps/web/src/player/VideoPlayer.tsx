@@ -1913,7 +1913,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           <div className="flex-1" />
 
           {info ? (
-            // Hovering (or focusing) the badge shows how it plays, as at the top of the menu.
+            // Hovering (or focusing) the badge shows how it plays, as the menu's Playback details do.
             <div
               className="relative mr-1 hidden md:block"
               onMouseEnter={() => setMethodHover(true)}
@@ -1972,19 +1972,20 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             open={settingsOpen}
             setOpen={setSettingsOpen}
             details={
-              <PlaybackDetails
-                info={info}
-                file={file}
-                audioIndex={audioIndex}
-                note={note}
-                positionMs={current * 1000}
-                open={settingsOpen}
-              />
+              info ? (
+                <PlaybackDetails
+                  info={info}
+                  file={file}
+                  audioIndex={audioIndex}
+                  note={note}
+                  positionMs={current * 1000}
+                  open={settingsOpen}
+                />
+              ) : undefined
             }
             qualities={qualities}
             quality={selectedQuality.id}
             originalHint={[fileResolution(file), formatBitrate(file?.bitrate)].filter(Boolean).join(" · ") || null}
-            autoQuality={info?.auto_quality ?? null}
             autoNow={autoNow}
             autoWhy={autoWhy}
 

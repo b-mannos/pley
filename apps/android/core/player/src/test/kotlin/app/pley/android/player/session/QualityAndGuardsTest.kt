@@ -43,7 +43,7 @@ class QualityAndGuardsTest {
         assertEquals(listOf("4m"), h.remembered)
         assertEquals("4 Mbps 720p", c.state.value.quality)
         assertTrue(c.state.value.qualities.first { it.id == "4m" }.selected)
-        assertEquals("Converted", c.state.value.qualities.first { it.id == "4m" }.hint)
+        assertNull(c.state.value.qualities.first { it.id == "4m" }.hint)
 
         c.selectQuality("original")
         h.settle()
@@ -64,13 +64,13 @@ class QualityAndGuardsTest {
     }
 
     @Test
-    fun `the original converted by the server says at which quality`() {
+    fun `the original converted by the server stays the original in the menu`() {
         use(SessionHarness(caps = capsOf(TestDevices.sdrPhone)))
         val c = h.play(PlayRequest(FixtureIds.SAMPLE_HDR10))
         val state = c.state.value
         assertEquals("Transcoding", state.method)
-        assertEquals("8 Mbps 1080p (auto)", state.quality)
-        assertTrue(state.qualities.first().hint!!.startsWith("Plays as 8 Mbps 1080p here (file: 4K"))
+        assertEquals("Original", state.quality)
+        assertTrue(state.qualities.first().hint!!.startsWith("4K"))
     }
 
     @Test

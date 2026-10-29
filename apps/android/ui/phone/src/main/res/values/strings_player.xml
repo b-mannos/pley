@@ -74,7 +74,6 @@
     <string name="player_size_huge">Huge</string>
     <string name="player_background_none">None</string>
     <string name="player_background_box">Dark box</string>
-    <string name="player_burn_in">(burn-in)</string>
     <string name="player_none">None</string>
     <string name="player_default">Default</string>
     <string name="player_details_device">This device</string>

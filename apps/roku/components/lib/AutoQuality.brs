@@ -25,11 +25,11 @@ function aqMenu() as object
     ]
 end function
 
-' Each quality's hint in Settings.
+' Each quality's hint in Settings and the player's menu; the others need none.
 function aqHint(id as string) as string
     if id = "original" then return "Full quality. May buffer on a slow connection."
     if id = "auto" then return "Dynamically adjust to conditions."
-    return "Converted by the server."
+    return ""
 end function
 
 function aqFind(id as dynamic) as dynamic

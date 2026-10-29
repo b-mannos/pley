@@ -96,7 +96,7 @@ Rules the code keeps:
   plays ("Direct play", "Direct stream", "Transcoding") and why, its video
   and audio as they are and as the server converts them (`GET
   /api/playback/{session}`), its bitrate, what the screen gets of HDR,
-  subtitles drawn onto the video, and how far ahead the conversion is.
+  subtitles burned in, and how far ahead the conversion is.
   Back goes back in it, then closes it. Subtitles and audio stay in
   Roku's own options (the Options key), which know the Video node's
   tracks.
@@ -171,7 +171,8 @@ Rules the code keeps:
   `/account`.
 - Quality (Settings, docs/QUALITY.md; `components/lib/AutoQuality.brs`):
   the menu in its order, Original, Automatic, 30 Mbps 4K, 15 Mbps 4K,
-  20 Mbps 1080p and down to 2 Mbps 480p, each with its hint, kept on the
+  20 Mbps 1080p and down to 2 Mbps 480p, Original and Automatic with
+  their hint (the others need none), kept on the
   Roku (registry section `playback`), Automatic unless another was
   chosen. A quality is asked for as on Android: converted (`mode:
   "transcode"`, `max_bitrate`, `max_height`) when the file is offered it,

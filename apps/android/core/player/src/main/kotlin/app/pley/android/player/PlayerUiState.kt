@@ -47,7 +47,7 @@ data class QualityChoice(
     val id: String,
     /** "Original", "8 Mbps 1080p". */
     val label: String,
-    /** "1080p · 8.2 Mbps", "Plays as 8 Mbps 1080p here", "Converted". */
+    /** The original's "1080p · 8.2 Mbps", Automatic's "Now 8 Mbps 1080p". */
     val hint: String?,
     val selected: Boolean,
 )
@@ -187,7 +187,7 @@ data class PlayerUiState(
     val reconnecting: Boolean = false,
     val audio: List<TrackChoice> = emptyList(),
     val subtitles: List<TrackChoice> = emptyList(),
-    /** The quality chosen, as the menu's row says it: "Original", "8 Mbps 1080p", "8 Mbps 1080p (auto)". */
+    /** The quality chosen, as the menu's row says it: "Original", "8 Mbps 1080p", "Automatic · Original". */
     val quality: String = "Original",
     val qualities: List<QualityChoice> = emptyList(),
     /** "Direct play", "Direct stream", "Transcoding"; `null` before the server answered. */

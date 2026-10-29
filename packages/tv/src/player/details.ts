@@ -5,7 +5,6 @@ import type { FallbackReason } from "./recovery";
 
 /** What the player says, as the Android app's strings_session.xml does. */
 export const T = {
-  autoQuality: (label: string) => `${label} (auto)`,
   /** The menu's value while Automatic plays: "Automatic · 8 Mbps 1080p". */
   automatic: (now: string) => `Automatic · ${now}`,
   autoHint: "Dynamically adjust to conditions",
@@ -13,8 +12,6 @@ export const T = {
   lowered: { network: "Lowered for your connection", device: "Lowered for this device" },
   smoother: (label: string) => `Quality lowered to ${label}`,
 
-  playsAs: (label: string, file: string | null) => (file ? `Plays as ${label} here (the file: ${file})` : `Plays as ${label} here`),
-  converted: "Converted",
   upNext: (label: string | null) => (label ? `Up next · ${label}` : "Up next"),
   lastEpisode: "This is the last episode",
   lastInQueue: "This is the last one",
@@ -23,7 +20,7 @@ export const T = {
   subtitlesAdded: (label: string) => `Subtitles added: ${label}`,
   slowServer: "The server can't keep up with this video. Try a lower quality.",
   noFile: "This item has no file to play.",
-  burnedIn: "Drawn onto the video",
+  burnedIn: "Burned in",
   reconnecting: "Reconnecting…",
   offlineTitle: "Can't reach your server",
   offlineBody: "Check that the server is on and that this device is on its network.",
@@ -33,13 +30,6 @@ export function methodText(info: PlaybackInfo): string {
   if (info.method === "remux") return info.audio_converted ? "Direct stream · Audio transcoding" : "Direct stream";
   if (info.method === "transcode") return "Transcoding";
   return "Direct play";
-}
-
-/** Why a stream plays as it does, when nothing more specific is known; direct play goes without saying. */
-export function whyText(method: PlaybackMethod): string | null {
-  if (method === "remux") return "The original video, in a format this player opens.";
-  if (method === "transcode") return "Converted for this player.";
-  return null;
 }
 
 export function fallbackText(reason: FallbackReason): string {
@@ -141,8 +131,8 @@ export function buildDetails(opts: {
   const audios = streams.filter((s) => s.kind === "audio");
   const want = opts.audioIndex ?? info.audio_index;
   const audio = audios.filter((s) => s.index === want)[0] ?? audios.filter((s) => s.default)[0] ?? audios[0] ?? null;
-  const why =
-    info.method === "direct" ? opts.note ?? null : opts.note ?? ((info.reasons ?? []).join(" ") || null) ?? info.reason ?? whyText(info.method);
+  // Nothing more specific known: the method says it.
+  const why = info.method === "direct" ? opts.note ?? null : opts.note ?? ((info.reasons ?? []).join(" ") || null) ?? info.reason ?? null;
   const pending = "…";
   const videoIn = transcode?.video_in ? simplified(transcode.video_in) : videoLabel(video);
   const audioIn = transcode?.audio_in ?? audioLabel(audio);

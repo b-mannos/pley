@@ -92,7 +92,9 @@ the TV keeps the picture with the sound itself: the menus say so.
 
 ## Quality
 
-The menu and Automatic are docs/QUALITY.md's. The quality is kept per
+The menu and Automatic are docs/QUALITY.md's, its hints too: the phone's
+sheet and the TV's Quality panel say how a choice is made only in
+Playback details. The quality is kept per
 device and network kind (Settings → Quality on Wi-Fi and on mobile data on
 phones, Quality on TVs), Automatic until one is chosen, in the player or
 in Settings. Automatic starts at most at the ceiling the server keeps for
