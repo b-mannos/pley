@@ -1447,50 +1447,98 @@ removed or reordered (`400`).
 
 ## Playback
 
-| Method | Path | Body | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| POST | `/api/playback` | see below | `PlaybackInfo` |
-| GET | `/api/playback/{session_id}` | – | `{ session_id, method, transcode: TranscodeInfo \| null }`: the player's details, how the session plays now (`transcode` is null for a direct play). `403` for someone else's session (administrators see any), `404` "playback session expired" once it is gone, `410` when it was stopped |
-| DELETE | `/api/playback/{session_id}` | – | `204` (stops any transcode) |
-| PUT | `/api/playback/{session_id}/bitrate` | `{ max_bitrate }` (kbps) | `{ bitrate }`: a converted video (`live_bitrate`) goes on at another bitrate from the segments its player hasn't fetched yet, the same size and playlist, so the player plays on without a new stream (docs/QUALITY.md, "Players that go black between streams"). The answer is what it goes on at: within 1 Mbps and the session's own. A job the transcoder loses comes back at it. `400` for a direct play or a remux, or a transcoder too old |
-| GET | `/api/playback/network?client_id=` | – | `NetworkAnswer`: what Automatic knows of the network this request came from (see [Network memory and speed test](#network-memory-and-speed-test)) |
-| PUT | `/api/playback/network` | `{ client_id, probe_kbps, probe_complete? }` or `{ client_id, ceiling_kbps }` | `NetworkAnswer` |
-| GET | `/api/playback/speedtest?bytes=` | – | that many bytes to time (`application/octet-stream`) |
-| GET | `/api/playback/{session_id}/index.m3u8` | – | HLS VOD playlist (`application/vnd.apple.mpegurl`) |
-| GET | `/api/playback/{session_id}/master.m3u8` | – | multivariant playlist naming the codecs (see [Dolby Vision remuxes](#dolby-vision-remuxes)): `index.m3u8`, then a transcode's smaller sizes `v1.m3u8`… for a player that moves between them (see [Several sizes](#several-sizes)) |
-| GET | `/api/playback/{session_id}/{n}.ts` | – | MPEG-TS segment |
-| GET | `/api/playback/{session_id}/v{k}.m3u8`, `/api/playback/{session_id}/v{k}-{n}.ts` | – | a smaller size's playlist and segments, laid out as `index.m3u8`'s |
-| GET | `/api/files/{id}/stream` | – | raw file, supports `Range` (direct play) |
-| GET | `/api/media/{key}/{file}` | – | a keyed session's media, for a player that can't send the Authorization header: `master.m3u8`, `index.m3u8` and `{n}.ts` of a stream, `file.{ext}` of a direct play (see [Keyed URLs](#keyed-urls)). `HEAD` answers as `GET` does, without the body: a segment once it is made (the TV apps get a stream ready that way). No token |
-| GET | `/api/files/{id}/subtitles/{index}.vtt` | query: `offset_ms` | WebVTT (text subtitles; extracted/converted on demand and cached). `offset_ms` moves every cue that much later (earlier when negative, never before 0; at most ±600000), for players that can't move a track themselves (Roku's subtitle sync); `400` when it isn't a whole number. Any embedded track may come partial: one still being read out of its file comes with the cues found so far and `X-Pley-Complete: 0` (not cached), so check that header and ask again for the rest. A Matroska file's track usually comes whole at once, read through its Cues when they list it. Requests for a subtitle file being converted share that conversion, which goes on (to the cache) when they stop waiting; one that failed is tried again on the next request |
-| GET | `/api/files/{id}/subtitles/{index}.mks` | – | a picture subtitle track (PGS, VobSub with its palette, DVB; in the file or a file next to it) copied as it is into a Matroska file of its own (`video/x-matroska`), for players that show it next to an HLS stream instead of having it drawn onto the video (`picture_subtitles_sideload`). Its times are the original's from the start of the file, so it lines up with the playback position (an HLS stream started at a seek point included). Made once per file version by the transcoder (which reads the whole file for it), cached, then served with `Range` support. `404` for a text track or anything but subtitles; `503` with a transcoder too old to make it |
-| GET | `/api/files/{id}/trickplay` | – | `{ id, interval_ms, width, height, columns, rows, count, sheets }` seek-bar previews; `404` while they are being made (asking, or opening the item, queues them). They are made one file at a time, never during a playback's first 30 s nor while anything is transcoded: a playback that starts puts off the file being done, which is made again later |
-| GET | `/api/files/{id}/trickplay/{n}.jpg?v={id}` | – | sprite sheet `n`: thumbnail `k` is at column `k % columns`, row `k / columns` of sheet `k / (columns × rows)` and shows the video at `k × interval_ms` |
-| GET | `/api/files/{id}/chapters/{n}.jpg` | – | picture of chapter `n` (0-based), cut from the seek previews (a few seconds into the chapter); `404` until the file has previews |
+| POST | `/api/playback` | `play` | play request (below) → `PlaybackInfo` |
+| GET | `/api/playback/{session_id}` | `play` | `{ session_id, method, transcode: TranscodeInfo \| null }`: the player's details (`transcode` null for a direct play) |
+| DELETE | `/api/playback/{session_id}` | `play` | `204`; stops any transcode |
+| PUT | `/api/playback/{session_id}/bitrate` | `play` | `{ max_bitrate }` (kbps) → `{ bitrate }`: change a converted video's bitrate as it plays |
+| GET | `/api/playback/network?client_id=` | `play` | `NetworkAnswer` ([Network memory and speed test](#network-memory-and-speed-test)) |
+| PUT | `/api/playback/network` | `play` | `{ client_id, probe_kbps, probe_complete? }` or `{ client_id, ceiling_kbps }` → `NetworkAnswer` |
+| GET | `/api/playback/speedtest?bytes=` | `play` | that many bytes to time (`application/octet-stream`) |
+| GET | `/api/playback/{session_id}/index.m3u8` | `play` | HLS VOD playlist (`application/vnd.apple.mpegurl`) |
+| GET | `/api/playback/{session_id}/master.m3u8` | `play` | multivariant playlist naming the codecs ([Dolby Vision remuxes](#dolby-vision-remuxes)): `index.m3u8`, then a transcode's smaller sizes `v1.m3u8`… ([Several sizes](#several-sizes)) |
+| GET | `/api/playback/{session_id}/{n}.ts` | `play` | MPEG-TS segment |
+| GET | `/api/playback/{session_id}/v{k}.m3u8`, `…/v{k}-{n}.ts` | `play` | a smaller size's playlist and segments, laid out as `index.m3u8`'s |
+| GET | `/api/media/{key}/{file}` | `public` (the key) | a keyed session's media ([Keyed URLs](#keyed-urls)) |
+| GET | `/api/files/{id}/stream` | `play` | the raw file, with `Range` (direct play) |
+| GET | `/api/files/{id}/subtitles/{index}.vtt?offset_ms=` | `play` | WebVTT of a text subtitle track |
+| GET | `/api/files/{id}/subtitles/{index}.mks` | `play` | a picture subtitle track in a Matroska file of its own (`video/x-matroska`) |
+| GET | `/api/files/{id}/trickplay` | `play` | seek-bar previews: `{ id, interval_ms, width, height, columns, rows, count, sheets }` |
+| GET | `/api/files/{id}/trickplay/{n}.jpg?v={id}` | `play` | preview sprite sheet `n` |
+| GET | `/api/files/{id}/chapters/{n}.jpg` | `play` | picture of chapter `n` (0-based) |
+
+- **`GET /api/playback/{session_id}`**: `403` for someone else's session
+  (administrators see any); `404` "playback session expired" once it is
+  gone; `410` when it was stopped.
+- **`bitrate`**: for `live_bitrate` sessions. The video goes on at another
+  bitrate from the segments its player hasn't fetched yet, at the same size
+  and in the same playlist, so the player plays on without a new stream
+  ([QUALITY.md](QUALITY.md#players-that-go-black-between-streams)). The
+  answer is the bitrate it goes on at: within 1 Mbps and the session's own.
+  A job the transcoder loses comes back at it. `400` for a direct play, a
+  remux, or a transcoder too old.
+- **`/api/media/{key}/{file}`**: `master.m3u8`, `index.m3u8` and `{n}.ts`
+  of a stream, `file.{ext}` of a direct play. `HEAD` answers as `GET`
+  without the body: for a segment, once it is made (the TV apps get a stream
+  ready that way).
+- **`.vtt`**: extracted or converted on demand, and cached.
+  - `offset_ms` moves every cue that much later (earlier when negative,
+    never before 0; at most ±600000), for players that can't move a track
+    themselves (Roku's subtitle sync). `400` when it isn't a whole number.
+  - An embedded track still being read out of its file comes partial: the
+    cues found so far, with `X-Pley-Complete: 0` (not cached). Check that
+    header and ask again for the rest. A Matroska file's track usually comes
+    whole at once, read through its Cues when they list it.
+  - Requests for a track being converted share that conversion, which goes
+    on (to the cache) when they stop waiting. One that failed is tried again
+    on the next request.
+- **`.mks`**: PGS, VobSub (with its palette) or DVB, from the file or a file
+  next to it, copied as it is. For players that show picture subtitles next
+  to an HLS stream instead of having them burned in
+  (`picture_subtitles_sideload`). Times are the original's from the start
+  of the file, so it lines up with the playback position (also for an HLS
+  stream started at a seek point). Made once per file version by the
+  transcoder (which reads the whole file), cached, served with `Range`.
+  `404` for a text track or anything but subtitles; `503` with a transcoder
+  too old to make it.
+- **`trickplay`**: `404` while previews are being made (asking, or opening
+  the item, queues them). Made one file at a time, never during a
+  playback's first 30 s nor while anything is transcoded: a playback that
+  starts puts off the file being done, which is made again later.
+- **Sprite sheets**: thumbnail `k` is at column `k % columns`, row
+  `k / columns` of sheet `k / (columns × rows)`, and shows the video at
+  `k × interval_ms`.
+- **Chapter pictures** are cut from the seek previews (a few seconds into
+  the chapter); `404` until the file has previews.
+
+### Play request
 
 `POST /api/playback` body:
 
 ```ts
 {
   item_id: Id;
-  file_id?: Id;                   // default: first file of the item
-  audio_index?: number | null;    // ffprobe stream index; left out: the server picks (below). Players name one only when the person picked it
-  subtitle_index?: number | null; // only needed for image-based subs (forces burn-in transcode)
-  max_bitrate?: number | null;    // kbps, null/absent = original quality
-  max_height?: number | null;     // e.g. 1080, 720, 480
+  file_id?: Id;                   // default: the item's first file
+  audio_index?: number | null;    // ffprobe stream index; left out: the server picks (below).
+                                  // Players name one only when the person picked it
+  subtitle_index?: number | null; // only needed for picture subtitles (forces a burn-in transcode)
+  max_bitrate?: number | null;    // kbps; null or absent = original quality
+  max_height?: number | null;     // 1080, 720, 480
   start_ms?: number;              // resume position; transcodes start producing there
   mode?: "auto" | "direct" | "remux" | "transcode"; // default "auto"
   client_id?: string;             // identifies the player (browser tab, device)
-  keep_previous?: boolean;        // started while the client's last session plays on: that one isn't ended (the player ends it as it moves over)
-  keyed_urls?: boolean;           // the player can't send the Authorization header: its addresses carry a key (Keyed URLs)
-  caps: {                         // what the client can decode natively
-    containers: string[];         // e.g. ["mp4","m4v","mov","webm","mp3","m4a","flac","ogg","wav"]
-    video_codecs: string[];       // e.g. ["h264","hevc","vp9","av1"]
-    audio_codecs: string[];       // e.g. ["aac","mp3","opus","flac","vorbis"]
-    hdr?: boolean;                // shows HDR10 / HLG without tone mapping
+  keep_previous?: boolean;        // the client's last session plays on: don't end it (the player ends it
+                                  // as it moves over)
+  keyed_urls?: boolean;           // the player can't send the Authorization header: its addresses carry a
+                                  // key (Keyed URLs)
+  caps: {                         // what the client decodes natively
+    containers: string[];         // ["mp4","m4v","mov","webm","mp3","m4a","flac","ogg","wav"]
+    video_codecs: string[];       // ["h264","hevc","vp9","av1"]
+    audio_codecs: string[];       // ["aac","mp3","opus","flac","vorbis"]
+    hdr?: boolean;                // shows HDR10 and HLG without tone mapping
     dolby_vision?: boolean;       // decodes Dolby Vision (needed for profile 5)
-    // Version 2 (the native Android app); every field optional. Codec
-    // names are ffprobe's.
+    // Version 2 (the Android app); every field optional. Codec names are ffprobe's.
     caps_version?: 2;
     video?: {                     // every video decoder; a stream plays when one entry takes it
       codec: string;              // "h264", "hevc", "vp9", "av1"…
@@ -1511,7 +1559,8 @@ removed or reordered (`400`).
     picture_subtitles_sideload?: boolean; // shows picture subtitles from their `.mks` next to HLS too
     audio_track_switching?: boolean; // switches a file's audio tracks itself
     hls?: { master_playlist?: boolean; segments?: string[]; // "ts", "fmp4"
-            variants?: boolean }; // moves between a stream's sizes by itself: transcodes come in several (any version)
+            variants?: boolean }; // moves between a stream's sizes itself: transcodes come in several
+                                  // (any caps version)
     display?: { width: number; height: number; refresh_rates?: number[] };
     device?: { form?: "phone" | "tablet" | "tv" | "unknown"; tier?: "low" | "mid" | "high";
                fire_tv?: boolean; model?: string };
@@ -1519,135 +1568,146 @@ removed or reordered (`400`).
 }
 ```
 
-**The audio track.** Without `audio_index`, the server picks, and
-`PlaybackInfo.audio_index` says which track plays (a player that switches
-tracks itself plays that one in direct play). The language: the one the
-profile chose for the show or movie (a track it picked), else its audio
-language, else the language of the file's default track. Of that
-language's tracks, the main sound (never a commentary or an audio
-description, unless picked), then the one this player plays best:
+**How it plays** (`mode: "auto"`, version 1 caps; for `caps_version: 2` see
+[Version 2](#version-2)):
 
-1. as it is (decoded, or passed through), rather than converted; a track
-   that needs a stream counts as it is only when the stream copies it
-   (AAC and MP3 for version 1 players, browsers; AC-3 and E-AC-3 too for
-   version 2), so an old Fire TV app that can't play a file's TrueHD
-   default gets its stereo AAC copied, not its AC-3 5.1 converted to
-   stereo;
-2. a picked track's title (a stereo mix picked on purpose stays);
-3. with the file as it is: the file's default, or any track for a
-   player that switches tracks itself (`audio_track_switching`); other
-   tracks need a stream;
-4. as many channels as `audio_channels` says the output takes, mixed for
-   no more than that (a stereo mix beats a 5.1 one folded down on
-   stereo), lossless (TrueHD, DTS-HD MA, FLAC, PCM), Atmos or DTS:X when
-   passed through, the bitrate. A track passed through counts its own
-   channels, since the receiver decodes it: a 2.0 player passing AC-3 to
-   a receiver gets the AC-3 5.1, not the stereo mix; of tracks that are
-   converted, the channels and the mix they come out with;
-5. of converted tracks alike, the one cheapest to convert: lossy before
-   lossless, then the fewer bits (Chrome's stereo AAC comes from a file's
-   AC-3 5.1, not its TrueHD 7.1);
-6. the file's default, then the first.
+- **direct** when the container and codecs are supported, the dynamic range
+  can be shown, the requested audio track is the default one, nothing must
+  be burned in and the bitrate fits;
+- else **remux** (HLS, video stream copied) or **transcode** (HLS,
+  H.264/AAC).
 
-A file that streams anyway (its video converted: a quality lower than the
-original, which Automatic picks when the original doesn't play well, or a
-codec the player lacks) plays no track with the file as it is, so the
-track is chosen again for the stream: one the stream copies beats the one
-the file would have played, which the stream would convert (a DTS default
-next to AC-3 on a box that decodes both: the AC-3, copied).
-
-Tracks whose language is undetermined (`und`) or missing are never
-swapped for one another. A TV whose receiver takes TrueHD gets the TrueHD
-Atmos track; with a 5.1 soundbar, the Dolby Digital track as it is rather
-than the TrueHD converted; a phone, a stereo mix; Chrome, an AAC track
-copied into a stream. Item details (`selected_audio`) don't know the
-player, so they give the language's default track.
-
-Decision (`mode: "auto"`): **direct** when container + codecs are all supported,
-the dynamic range can be shown, the requested audio track is the default one,
-nothing must be burned in and the bitrate fits; otherwise **remux** (HLS, video
-stream copied) or **transcode** (HLS, H.264/AAC).
+Rules:
 
 - HDR10 and HLG need `caps.hdr`. Dolby Vision profile 5 needs
-  `caps.dolby_vision`; profiles 7 and 8 play directly with either, because their
-  base layer is HDR10 (8.1) or HLG (8.4). Otherwise the video is tone-mapped to
-  SDR. Profile 5 plays only as it is: version 1 remuxes never name Dolby
-  Vision, and unnamed it shows the wrong colours, so a profile 5 file that
-  needs repackaging (Safari and Matroska) is converted instead. (This is version 1. Media3, which the Android app plays with, has no
-  fallback for profile 7: version 2 below decides it differently.)
-- Converted audio is stereo AAC; AAC and MP3 the player decodes are copied.
-- `mode: "direct"` always returns the original file (useful when a browser plays
-  more than it reports; image subtitles and alternate audio tracks are then
-  unavailable). `"remux"` and `"transcode"` force HLS; `"transcode"` always
-  re-encodes the video.
-- Starting a session with a `client_id` ends that user's previous sessions on
-  the same client (quality or audio switch, next episode) before the transcode
-  limit is checked.
-- If the transcoder loses a job (restart, expiry), the server recreates it with
-  the same segment layout. When that is impossible, segment requests answer
-  `404 not_found` ("playback session expired") and the player should start a
-  new session at its current position.
+  `caps.dolby_vision`; profiles 7 and 8 play directly with either, since
+  their base layer is HDR10 (8.1) or HLG (8.4). Otherwise the video is
+  tone-mapped to SDR.
+- Profile 5 plays only as it is: version 1 remuxes never name Dolby Vision,
+  and unnamed it shows the wrong colors. So a profile 5 file that needs
+  repackaging (Safari, and Matroska) is converted instead.
+- Converted audio is stereo AAC. AAC and MP3 the player decodes are copied.
+- `mode: "direct"` always returns the original file (for a browser that
+  plays more than it reports; picture subtitles and other audio tracks are
+  then unavailable). `"remux"` and `"transcode"` force HLS; `"transcode"`
+  always re-encodes the video.
+- A session started with a `client_id` ends that user's previous sessions
+  on the same client (a quality or audio switch, the next episode) before
+  the transcode limit is checked.
+- If the transcoder loses a job (restart, expiry), the server recreates it
+  with the same segment layout. When it can't, segments answer `404
+  not_found` ("playback session expired"): start a new session at the
+  current position.
+- The HLS playlist covers the whole file (VOD), so seeking works natively;
+  the server restarts FFmpeg at the right segment on seeks.
+- Audio-only items (tracks) use the same endpoint and get a direct URL or an
+  audio-only HLS stream.
 
-The HLS playlist covers the whole file (VOD) so seeking works natively; the
-server restarts ffmpeg at the right segment on seeks. Audio-only items (tracks)
-use the same endpoint and get either a direct URL or an audio-only HLS stream.
+**Reporting.** The player sends `POST /api/items/{id}/progress` (with
+`session_id`) every ~10 s while playing, on pause, every ~30 s while
+paused, and with `state: "stopped"` when closing, then
+`DELETE /api/playback/{session_id}`.
 
-The player should send `POST /api/items/{id}/progress` every ~10 s while
-playing (with `session_id`), on pause and every ~30 s while paused, and with
-`state: "stopped"` when closing, then `DELETE /api/playback/{session_id}`. A
-session not heard from for 90 s has lost its player: it leaves "Now playing"
-and its conversion stops (segments then answer `404`, "playback session
-expired"); after 15 minutes it is forgotten. A downloaded file played as it is
-reports without a session; reports made while the server was out of reach are
-sent once it is back, each with its `age_ms`.
+- A session not heard from for 90 s has lost its player: it leaves "Now
+  playing" and its conversion stops (segments then answer `404`, "playback
+  session expired"). After 15 minutes it is forgotten.
+- A downloaded file played as it is reports without a session. Reports made
+  while the server was out of reach are sent once it is back, each with its
+  `age_ms`.
+
+### The audio track
+
+Without `audio_index` the server picks, and `PlaybackInfo.audio_index` says
+which track plays (a player that switches tracks itself plays that one in
+direct play).
+
+**Language**: the one the profile chose for the show or movie (a track it
+picked), else its audio language, else the language of the file's default
+track. Tracks of undetermined (`und`) or missing language are never swapped
+for one another.
+
+**Track**: of that language's tracks, the main sound (never a commentary or
+an audio description, unless picked), then the one this player plays best:
+
+1. as it is (decoded or passed through) rather than converted. A track that
+   needs a stream counts as it is only when the stream copies it (AAC and
+   MP3 for version 1 players and browsers; AC-3 and E-AC-3 too for version
+   2). So an old Fire TV app that can't play a file's TrueHD default gets
+   its stereo AAC copied, not its AC-3 5.1 converted to stereo;
+2. a picked track's title (a stereo mix picked on purpose stays);
+3. with the file as it is: the file's default, or any track for a player
+   that switches tracks itself (`audio_track_switching`); other tracks need
+   a stream;
+4. as many channels as `audio_channels` says the output takes, mixed for no
+   more than that (a stereo mix beats a 5.1 one folded down on stereo);
+   lossless (TrueHD, DTS-HD MA, FLAC, PCM); Atmos or DTS:X when passed
+   through; the bitrate. A track passed through counts its own channels,
+   since the receiver decodes it: a 2.0 player passing AC-3 to a receiver
+   gets the AC-3 5.1, not the stereo mix. Converted tracks count the
+   channels and mix they come out with;
+5. of converted tracks alike, the cheapest to convert: lossy before
+   lossless, then fewer bits (Chrome's stereo AAC comes from a file's AC-3
+   5.1, not its TrueHD 7.1);
+6. the file's default, then the first.
+
+A file whose video is converted anyway (a quality below the original,
+which Automatic picks when the original doesn't play well, or a codec the
+player lacks) plays no track as it is, so the track is chosen again for the
+stream: one the stream copies beats the one the file would have played and
+the stream would convert (a DTS default next to AC-3, on a box that decodes
+both: the AC-3, copied).
+
+Examples: a TV whose receiver takes TrueHD gets the TrueHD Atmos track;
+with a 5.1 soundbar, the Dolby Digital track as it is rather than the
+TrueHD converted; a phone, a stereo mix; Chrome, an AAC track copied into a
+stream. Item details (`selected_audio`) don't know the player, so they give
+the language's default track.
 
 ### Keyed URLs
 
-An app's token goes only in the Authorization header, and some players
-can't send headers with their media requests: Samsung's AVPlay sets only a
-cookie and a User-Agent, and LG's media pipeline only what the web engine
-gives it. A play request with `keyed_urls: true` gets a session whose
-addresses carry a key of their own instead:
+Some players can't send headers with their media requests (Samsung's AVPlay
+sets only a cookie and a User-Agent; LG's media pipeline only what the web
+engine gives it), and an app's token goes only in the Authorization header.
+A play request with `keyed_urls: true` gets a session whose addresses carry
+a key of their own instead. Pley's Samsung and LG apps ask for keyed URLs.
 
 - `PlaybackInfo.url` is `/api/media/{key}/master.m3u8` (or `index.m3u8`)
   for a stream, whose playlists name their segments relatively, so they
-  carry the key too; and `/api/media/{key}/file.mkv` for a direct play,
-  named for the file's container, with `Range` and `Cache-Control:
-  private, no-store`.
+  carry the key too; `/api/media/{key}/file.mkv` for a direct play, named
+  for the file's container, with `Range` and
+  `Cache-Control: private, no-store`.
 - The key is `pley_mk_` and 256 random bits, kept in memory only. It opens
-  that session's playlists and segments, or its file, and nothing else:
-  no API route takes it as a token.
+  that session's playlists and segments, or its file, and nothing else: no
+  API route takes it as a token.
 - It ends with the session (closed by its player, or forgotten after 15
-  quiet minutes: `404` "playback session expired", as segments say), with
-  the account (disabled) and with the app's sign-in (signed out, a new
-  password): `404`. A session stopped from elsewhere answers `410
-  session_stopped` here too, with its message.
+  quiet minutes: `404` "playback session expired"), the account (disabled)
+  and the app's sign-in (signed out, a new password): `404`. A session
+  stopped from elsewhere answers `410 session_stopped` here too, with its
+  message.
 - Logs leave the key out (`/api/media/…/12.ts`).
-
-Everything else the player asks for (subtitles, seek previews, its
-reports) goes with the token as usual. Pley's Samsung and LG TV apps ask
-for keyed URLs.
+- Everything else the player asks for (subtitles, seek previews, its
+  reports) goes with the token as usual.
 
 ### Network memory and speed test
 
-Automatic quality (docs/QUALITY.md) starts at what the network carries.
-The server remembers it per signed-in user, client and network: the
-ceiling Automatic's last change left, for 24 hours, and the last speed
-test, for 7 days. Only Automatic uses any of it; Original and a quality
-picked in the menu never do.
+Automatic quality ([QUALITY.md](QUALITY.md)) starts at what the network
+carries. The server remembers, per signed-in user, client and network, the
+ceiling Automatic's last change left (for 24 hours) and the last speed test
+(for 7 days). Only Automatic uses it; Original and a quality picked in the
+menu never do.
 
-The network is the one the request came from (the other end of its
-connection, or the client a proxy on the server's own network forwards
-for; nobody on the internet can choose it). An address on the server's
-own network (private, loopback, link-local, Tailscale) is `"local"`;
-any other is an IPv4 address as it is, or an IPv6 address by its /64,
-which a home's devices share. Only a keyed hash of the address is
-stored (HMAC-SHA256 with a key derived from the server's `secret.key`),
-never the address, and rows nobody wrote for 7 days go.
+The network is the one the request came from: the other end of the
+connection, or the client a proxy on the server's own network forwards for
+(nobody on the internet can choose it). An address on the server's own
+network (private, loopback, link-local, Tailscale) is `"local"`; any other
+is an IPv4 address as it is, or an IPv6 address by its /64 (which a home's
+devices share). Only a keyed hash of the address is stored (HMAC-SHA256
+with a key derived from the server's `secret.key`), and rows nobody wrote
+for 7 days are deleted.
 
 ```ts
 // GET /api/playback/network?client_id=<id>, and PUT's answer
-{
+interface NetworkAnswer {
   local: boolean;              // this server's own network: never a speed test
   ceiling_kbps: number | null; // the most Automatic starts at here; null = no limit known
   source: "playback" | "probe" | null; // what set it
@@ -1656,19 +1716,19 @@ never the address, and rows nobody wrote for 7 days go.
 }
 ```
 
-- `client_id` is the one the client sends in `POST /api/playback`, 1 to
-  128 characters; missing or longer: `400 bad_request`.
+- `client_id`: the one the client sends in `POST /api/playback`, 1 to 128
+  characters; missing or longer: `400 bad_request`.
 - `ceiling_kbps`: a ceiling from playback set within 24 hours wins
-  (`source: "playback"`); else a speed test within 7 days gives 70 % of
-  what it measured (`"probe"`), or no limit when the whole test arrived
-  in time (`probe_complete`); else `null`. `source` and `since` are
-  `null` whenever `ceiling_kbps` is.
-- `probe` is true only away from the server's network, with no speed
-  test (nor forget, below) from this client on this network within 7 days
-  and no ceiling from playback within 24 hours.
+  (`source: "playback"`); else a speed test within 7 days gives 70 % of what
+  it measured (`"probe"`), or no limit when the whole test arrived in time
+  (`probe_complete`); else `null`. `source` and `since` are `null` whenever
+  `ceiling_kbps` is.
+- `probe` is true only away from the server's network, with no speed test
+  (or forget, below) from this client on this network within 7 days and no
+  ceiling from playback within 24 hours.
 
-`PUT /api/playback/network` keeps what the client reports, with exactly
-one of `probe_kbps` and `ceiling_kbps`, and answers as `GET`:
+`PUT /api/playback/network` stores what the client reports, with exactly one
+of `probe_kbps` and `ceiling_kbps`, and answers as `GET`:
 
 ```ts
 { client_id, probe_kbps: 52000, probe_complete: false } // a speed test's result
@@ -1676,51 +1736,51 @@ one of `probe_kbps` and `ceiling_kbps`, and answers as `GET`:
 { client_id, ceiling_kbps: null }  // back to Original, or Automatic picked again: forget
 ```
 
-- Speeds are kbps from 1 to 10000000 (a fraction is rounded); anything
+- Speeds are kbps from 1 to 10000000 (fractions are rounded). Anything
   else, both fields, or neither: `400 bad_request`.
-- `probe_complete: true` (the whole test arrived inside the client's
-  time) says the network is at least that fast: no limit is kept.
-  Left out, it is `false`.
+- `probe_complete: true` (the whole test arrived inside the client's time)
+  says the network is at least that fast: no limit is kept. Left out, it is
+  `false`.
 - `ceiling_kbps: null` clears the ceiling from playback and counts as a
-  speed test that found no limit, for 7 days: nothing limits, and no test
-  is due.
+  speed test that found no limit, for 7 days: nothing limits, and no test is
+  due.
 
-`GET /api/playback/speedtest?bytes=<n>` answers exactly `n` bytes
-(default 33554432, 32 MiB; kept between 65536 and 67108864) of
-pseudo-random data no compression shrinks, made as it is sent, with
-`Content-Length`, `Cache-Control: no-store, no-transform`, and never
-compressed. `bytes` that isn't a whole number: `400`. A user runs two at
-a time: a third answers `429 too_many_requests` until one ends or is
-dropped. One still going after 2 minutes is cut off.
+**`GET /api/playback/speedtest?bytes=<n>`** answers exactly `n` bytes
+(default 33554432, 32 MiB; clamped to 65536–67108864) of incompressible
+pseudo-random data, made as it is sent, with `Content-Length`,
+`Cache-Control: no-store, no-transform`, never compressed.
 
-The client times it from the first byte and stops 2 s later (or when it
-has all arrived): kbps = bytes × 8 / seconds / 1000, and
-`probe_complete` when it all arrived within the 2 s. Under 256 KiB
-arrived reports nothing. A client that can't read a body as it arrives
-(Roku) fetches `bytes=8388608` whole, times the whole request, and
-reports `probe_complete: false`. All three routes take app tokens with
-the `play` scope. A server without them answers `404`: clients then use
-their own memory, as before.
+- `bytes` that isn't a whole number: `400`.
+- A user runs two at a time; a third answers `429 too_many_requests` until
+  one ends or is dropped. One still going after 2 minutes is cut off.
+- The client times it from the first byte and stops 2 s later (or when all
+  has arrived): kbps = bytes × 8 / seconds / 1000, and `probe_complete` when
+  it all arrived within the 2 s. Under 256 KiB arrived: report nothing.
+- A client that can't read a body as it arrives (Roku) fetches
+  `bytes=8388608` whole, times the whole request, and reports
+  `probe_complete: false`.
+- A server without these routes answers `404`: clients then use their own
+  memory.
 
 ### Version 2
 
-`caps_version: 2` turns on these rules; a report without it (the web app,
-the Android app's web view, compatibility API clients) decides as above, whatever else it
-sends. Version 2 reports still send the version 1 fields: `containers`
-always counts, and `video_codecs` or `audio_codecs` stand in only when
-`video`, or both `audio_decode` and `audio_passthrough`, are left out.
+`caps_version: 2` turns on these rules. A report without it (the web app,
+the Android app's web view, compatibility API clients) decides as version 1,
+whatever else it sends. Version 2 reports still send the version 1 fields:
+`containers` always counts; `video_codecs` and `audio_codecs` stand in only
+when `video`, or both `audio_decode` and `audio_passthrough`, are left out.
 
 - **Video.** Direct only when an entry of `video` takes the stream: its
-  codec; its profile, when the entry lists profiles (10-bit HEVC needs
+  codec; its profile when the entry lists profiles (10-bit HEVC needs
   `Main 10`); its size (either way round), frame rate (0.01 fps of slack),
   bit depth and level. A codec may have several entries (4K at 30 fps and
   1080p at 60): any one will do. `max_bitrate` and `max_height` in the
   request are only the quality the person picked.
 - **Dynamic range.** HDR10 needs `hdr10` in `hdr_types`; HDR10+ needs
   `hdr10plus` or `hdr10`; HLG needs `hlg`. Without them the video is
-  converted: to the HDR format the screen shows when the player takes it
-  (see [HDR transcodes](#hdr-transcodes)), else tone-mapped to SDR, as for
-  an SDR screen. The reason says which ("HLG converted to HDR10.").
+  converted: to an HDR format the screen shows when the player takes it
+  ([HDR transcodes](#hdr-transcodes)), else tone-mapped to SDR. The reason
+  says which ("HLG converted to HDR10.").
 - **Dolby Vision** plays as it is when `hdr_types` has `dolby_vision` and
   `dolby_vision_profiles` lists the profile at or above its level.
   Otherwise:
@@ -1731,27 +1791,27 @@ always counts, and `video_codecs` or `audio_codecs` stand in only when
     fallback), or is converted to 8.1 for a Dolby Vision player that reads
     master playlists (below). Converted otherwise;
   - 5, which has no base layer, is converted (to HDR10 or HLG where the
-    screen shows it, else to SDR), never repackaged without a master
-    playlist: MPEG-TS segments lose the Dolby Vision signalling, which
-    leaves its colours wrong.
+    screen shows it, else to SDR), and never repackaged without a master
+    playlist: MPEG-TS segments lose the Dolby Vision signaling, which leaves
+    its colors wrong.
 
   Players that read master playlists keep Dolby Vision in remuxes, and
   Dolby Vision + HDR10+ streams change: see
   [Dolby Vision remuxes](#dolby-vision-remuxes).
 - **Audio** plays as it is when its codec is in `audio_decode` or
-  `audio_passthrough`. With `audio_track_switching`, another track than the
-  file's default no longer needs HLS: the player switches to it itself.
-- **Picture subtitles** (PGS, VobSub, DVB) in `subtitle_codecs` are shown by
-  the player when the file plays as it is; when it doesn't, they are drawn
-  onto the video as for version 1 (HLS segments carry no subtitles).
-  Subtitle files next to the media are always drawn. A player that says
+  `audio_passthrough`. With `audio_track_switching`, a track other than the
+  file's default needs no HLS: the player switches to it itself.
+- **Picture subtitles** (PGS, VobSub, DVB) in `subtitle_codecs` are shown
+  by the player when the file plays as it is. When it doesn't, they are
+  burned in as for version 1 (HLS segments carry no subtitles). Subtitle
+  files next to the media are always burned in. A player with
   `picture_subtitles_sideload` shows them next to the HLS stream from
   `/api/files/{id}/subtitles/{index}.mks` instead: it asks for no
-  `subtitle_index`, so nothing is drawn onto the video (and HDR can stay
-  HDR). A `subtitle_index` it does send is drawn as for any player.
+  `subtitle_index`, so nothing is burned in (and HDR can stay HDR). A
+  `subtitle_index` it does send is burned in as for any player.
 - **Converting.** Video is converted to H.264, no bigger than the player's
-  largest H.264 entry (a 4K file is made in 1080p for a 1080p stick, also
-  when a higher quality is picked); HDR video the player can show stays
+  largest H.264 entry (a 4K file is made in 1080p for a 1080p stick, even
+  when a higher quality is picked). HDR video the player can show stays
   HDR, in HEVC Main 10 ([HDR transcodes](#hdr-transcodes)). Audio in AAC,
   MP3, AC-3 or E-AC-3 that the player takes is copied; anything else is
   converted to:
@@ -1763,9 +1823,9 @@ always counts, and `video_codecs` or `audio_codecs` stand in only when
 
 ### HDR transcodes
 
-HDR video that a version 2 player has converted (a lower quality picked,
-a stream its decoders don't take, Dolby Vision profile 5 or HLG its
-screen doesn't show) stays HDR when:
+HDR video a version 2 player gets converted (a lower quality picked, a
+stream its decoders don't take, Dolby Vision profile 5, or HLG its screen
+doesn't show) stays HDR when:
 
 - an entry of `video` is HEVC, `hardware`, lists `Main 10` (or no profiles)
   with a `max_bit_depth` of 10 or more (or none), and takes the video's
@@ -1774,7 +1834,7 @@ screen doesn't show) stays HDR when:
   (`hlg`);
 - the server's transcoder can (`hdr_transcode` in its capabilities: a
   10-bit HEVC encoder works);
-- no picture subtitles are drawn onto the video.
+- no picture subtitles are burned in.
 
 The video is then HEVC Main 10, no bigger than the largest such decoder
 takes:
@@ -1786,44 +1846,47 @@ takes:
 | Dolby Vision 5 | HDR10 (libplacebo applies the RPU) | HLG (libplacebo) | HDR10 |
 | HLG, Dolby Vision 8.4 | HDR10 (libplacebo) | HLG, as it is | HLG |
 
-The HDR10 static metadata of the source (mastering display, MaxCLL and
-MaxFALL) is kept; Dolby Vision's RPUs and HDR10+ are not (converted video
-never carries Dolby Vision). Video converted from HLG or Dolby Vision
-profile 5 has no static metadata unless the source had some. Everything
-else (no such decoder, an SDR screen, an older transcoder, picture
-subtitles, a transcoder without libplacebo for a conversion) is tone-mapped
-to H.264 SDR as before; version 1 players always are. The master
-playlist names it `hvc1.2.4.LLL.B0` with `VIDEO-RANGE=PQ` or `HLG`, and the
-player's details say `video_out: "HEVC 3840×2160 HDR10"`.
+- The source's HDR10 static metadata (mastering display, MaxCLL, MaxFALL)
+  is kept; Dolby Vision's RPUs and HDR10+ are not (converted video never
+  carries Dolby Vision). Video converted from HLG or Dolby Vision profile 5
+  has no static metadata unless the source had some.
+- Everything else (no such decoder, an SDR screen, an older transcoder,
+  picture subtitles, a transcoder without libplacebo for a conversion) is
+  tone-mapped to H.264 SDR. Version 1 players always are.
+- The master playlist names it `hvc1.2.4.LLL.B0` with `VIDEO-RANGE=PQ` or
+  `HLG`; the player's details say `video_out: "HEVC 3840×2160 HDR10"`.
 
 ### Several sizes
 
-A player that moves between a multivariant playlist's variants by itself
+A player that moves between a multivariant playlist's variants itself
 (`caps.hls.variants`, any caps version) gets each transcode in several
-sizes, from `master.m3u8` (`PlaybackInfo.adaptive`): the size it asked for
-(or the original's closest quality, `auto_quality`), then 1080p, 720p,
-540p and 360p below it (a film wider than 16:9 by its width: 1920×800 is
-1080p's), each at 8, 4, 2 or 0.7 Mbps and never more than the one above.
-One with more than two thirds of the bits of the one above is left out,
-and a remux, a direct play and a download come in one size. A smaller
-size's playlist is `v{k}.m3u8`, its segments `v{k}-{n}.ts`: segment `n`
-of every size starts at the same time with a keyframe, so the player
-moves at any segment. The transcoder makes only the size asked for last
-(what the others made stays), and a size it can't make in real time
-arrives slower than it plays, so the player moves down for it too.
-`TranscodeInfo.rendition` and `variants` say which size plays. A
-transcoder without `capabilities.hls_variants` makes one size, as before.
-See docs/QUALITY.md for what the players do.
+sizes from `master.m3u8` (`PlaybackInfo.adaptive`). See
+[QUALITY.md](QUALITY.md#several-sizes-adaptive-bitrate) for what players do.
+
+- Sizes: the one asked for (or the original's closest quality,
+  `auto_quality`), then 1080p, 720p, 540p and 360p below it, each at 8, 4,
+  2 or 0.7 Mbps and never more than the one above. A film wider than 16:9
+  goes by its width (1920×800 is 1080p).
+- A size with more than two thirds of the bits of the one above is left
+  out. A remux, a direct play and a download come in one size.
+- A smaller size's playlist is `v{k}.m3u8`, its segments `v{k}-{n}.ts`.
+  Segment `n` of every size starts at the same time with a keyframe, so the
+  player can move at any segment.
+- The transcoder makes only the size asked for last (what the others made
+  stays). A size it can't make in real time arrives slower than it plays, so
+  the player moves down for it too.
+- `TranscodeInfo.rendition` and `variants` say which size plays. A
+  transcoder without `capabilities.hls_variants` makes one size.
 
 ### Dolby Vision remuxes
 
 MPEG-TS segments carry a Dolby Vision stream's metadata (its RPUs) but
-can't say that they do: Media3's `TsExtractor` sees plain HEVC, which plays
-as its base layer at best and with wrong colours for profile 5. A
-multivariant playlist can say it. A version 2 player sending
+can't say so: Media3's `TsExtractor` sees plain HEVC, which plays as its
+base layer at best, with wrong colors for profile 5. A multivariant
+playlist can say it. A version 2 player sending
 `hls: { master_playlist: true }` gets `PlaybackInfo.url` pointing to
 `master.m3u8` for every HLS session, remux or transcode, with one variant
-(and a transcode's smaller sizes after it, see [Several sizes](#several-sizes)):
+(then a transcode's smaller sizes, see [Several sizes](#several-sizes)):
 
 ```
 #EXTM3U
@@ -1834,79 +1897,79 @@ index.m3u8
 ```
 
 - `CODECS` per RFC 6381: `avc1.PPCCLL`, `hvc1.P.C.LLLL.B0`, `mp4a.40.2`
-  (AAC), `mp4a.40.34` (MP3), `ac-3`, `ec-3`. Dolby Vision kept in the
-  remux is named: profile 5 as `dvh1.05.LL` alone (no base layer anything
-  else decodes), profile 8 as the HEVC codec with
+  (AAC), `mp4a.40.34` (MP3), `ac-3`, `ec-3`.
+- Dolby Vision kept in the remux is named: profile 5 as `dvh1.05.LL` alone
+  (no base layer anything else decodes); profile 8 as the HEVC codec with
   `SUPPLEMENTAL-CODECS="dvh1.08.LL/db1p"` (8.1, `VIDEO-RANGE=PQ`), `/db4h`
   (8.4, `HLG`) or `/db2g` (8.2, `SDR`), which Media3 turns into a
   `video/dolby-vision` track; profile 7 as `dvh1.07.LL`.
-- `VIDEO-RANGE` is `SDR`, `PQ` or `HLG`; `FRAME-RATE` has three decimals;
+- `VIDEO-RANGE` is `SDR`, `PQ` or `HLG`. `FRAME-RATE` has three decimals.
   `BANDWIDTH` is twice the copied video's average (discs peak about there),
   or the encoder's rate. TS segments are the same as `index.m3u8`'s.
-- Without `master_playlist` (and for every version 1 player, the web
-  player and compatibility API clients) the session starts at `index.m3u8` as before,
-  and remuxes name nothing.
+- Without `master_playlist` (and for every version 1 player, the web player
+  and compatibility API clients) the session starts at `index.m3u8`, and
+  remuxes name nothing.
 
-For those players, the Dolby Vision rules of version 2 become:
+For players with master playlists, the Dolby Vision rules of version 2
+become:
 
 - A **listed profile** (with a Dolby Vision screen, at or above the
-  stream's level) still plays as it is; when the file needs repackaging
+  stream's level) still plays as it is. When the file needs repackaging
   anyway (the container, the audio, another track), the video is copied
-  with Dolby Vision kept and named, **profile 5 included** (before, it was
-  tone-mapped).
+  with Dolby Vision kept and named, **profile 5 included**.
 - A **level the file overstates** (a re-encode that says 10 for 4K at 24
-  fps): Dolby Vision is named at the level its size and frame rate need,
-  the lowest whose pixel rate takes them in Dolby's table, when that is
+  fps): Dolby Vision is named at the level its size and frame rate need
+  (the lowest whose pixel rate takes them in Dolby's table), when that is
   below what the file says. A decoder whose level is under the file's but
   takes the one the stream needs gets the stream repackaged, Dolby Vision
-  kept and named ("…is repackaged to stay Dolby Vision: its file says
-  level 10, above this player's 9, where its picture needs 6."), where as
-  it is Media3 would refuse the level and play the base layer. A download
-  stays the file as it is.
+  kept and named ("…is repackaged to stay Dolby Vision: its file says level
+  10, above this player's 9, where its picture needs 6."). As it is, Media3
+  would refuse the level and play the base layer. A download stays the file
+  as it is.
 - **Profile 8 with compatibility id 6** (the Blu-ray's HDR10, a profile 7
   converted elsewhere with its id kept) has an HDR10 base layer, as 8.1:
   named `/db1p`, and played as HDR10 where Dolby Vision isn't shown.
 - **Profile 7** for a player that lists 8 but not 7 (every Fire TV, Google
   TV devices) is **converted to 8.1** while repackaged: the enhancement
   layer is left out and each RPU rewritten (no residual, no enhancement
-  layer resampling, P8.1 colour coefficients; a full enhancement layer's
-  curves become no-ops), as `dovi_tool`'s mode 2 does. The reason names the format as clients
-  do, "Dolby Vision P7 FEL is converted to profile 8.1 for this
-  player.", ending ", without its enhancement layer" for a full one
-  (`dv_el: "fel"`, whose 12-bit detail is lost), ", without its HDR10+"
+  layer resampling, P8.1 color coefficients; a full enhancement layer's
+  curves become no-ops), as `dovi_tool`'s mode 2 does. The reason names the
+  format as clients do: "Dolby Vision P7 FEL is converted to profile 8.1
+  for this player.", ending ", without its enhancement layer" for a full
+  one (`dv_el: "fel"`, whose 12-bit detail is lost), ", without its HDR10+"
   for Dolby Vision + HDR10+ (below), or both. Profile 8 must take the
-  stream's level; otherwise the HDR10 base layer, as before.
+  stream's level; otherwise the HDR10 base layer plays.
 - **Dolby Vision + HDR10+** (`hdr10plus: true` on the stream, found when the
-  file is analysed) never plays as it is for a player that would decode it
+  file is analyzed) never plays as it is for a player that would decode it
   as Dolby Vision, on any model: Dolby Vision decoders show black or freeze
-  with HDR10+ in the stream (androidx/media#1895). It is repackaged with the
-  HDR10+ messages taken out and Dolby Vision kept ("…plays as Dolby Vision
-  without its HDR10+…"); without a master playlist, as its base layer with
-  HDR10+ ("…plays as its HDR10+ base layer, repackaged…"). Players without Dolby
-  Vision play these files as before. Files analysed by older servers don't
-  say: they play as before until a forced scan of their library analyses
-  them again.
-- A server whose transcoder predates master playlists (its capabilities
-  lack `hls_master_playlist`) decides as if no player read them.
+  with HDR10+ in the stream (androidx/media#1895). It is repackaged with
+  the HDR10+ messages taken out and Dolby Vision kept ("…plays as Dolby
+  Vision without its HDR10+…"); without a master playlist, as its base
+  layer with HDR10+ ("…plays as its HDR10+ base layer, repackaged…").
+  Players without Dolby Vision play these files normally. Files analyzed by
+  an older server don't carry the flag until a forced scan of their library
+  analyzes them again.
+- A server whose transcoder lacks `hls_master_playlist` in its capabilities
+  decides as if no player read master playlists.
 
-The player's details (`GET /api/playback/{session}`) say what became of
-it: `transcode.dolby_vision` (`"kept"`, `"converted to 8.1"`) and
+The player's details (`GET /api/playback/{session}`) say what became of it:
+`transcode.dolby_vision` (`"kept"`, `"converted to 8.1"`) and
 `transcode.hdr10plus_stripped`.
 
 ## Downloads
 
 A device that keeps a title to play away from the server downloads its
 original (`GET /api/files/{id}/stream`, with ranges) when it plays it as it
-is, else a file the server makes for it: the streams a playback would
-stream, in one Matroska file, or MP4 for a player whose `caps.containers`
-name `mp4` but not `mkv` (QuickTime).
+is. Otherwise it downloads a file the server makes: the streams a playback
+would stream, in one Matroska file, or MP4 for a player whose
+`caps.containers` name `mp4` but not `mkv` (QuickTime).
 
-| Method | Path | Body | Response |
+| Method | Path | Who | What |
 |---|---|---|---|
-| POST | `/api/conversions` | `POST /api/playback`'s body (`item_id`, `file_id?`, `caps`, `audio_index?`, `max_height?`, `max_bitrate?`, `mode?`) | `DownloadInfo` |
-| GET | `/api/conversions/{id}` | – | `DownloadInfo` |
-| DELETE | `/api/conversions/{id}` | – | `204`: stopped, unless done |
-| GET | `/api/conversions/{id}/file` | – | the converted file (`video/x-matroska`, or `video/mp4`) once whole, with `Range` |
+| POST | `/api/conversions` | `play` | the play request's body (`item_id`, `file_id?`, `caps`, `audio_index?`, `max_height?`, `max_bitrate?`, `mode?`) → `DownloadInfo` |
+| GET | `/api/conversions/{id}` | `play` | `DownloadInfo` |
+| DELETE | `/api/conversions/{id}` | `play` | `204`: stopped, unless done |
+| GET | `/api/conversions/{id}/file` | `play` | the converted file (`video/x-matroska` or `video/mp4`) once whole, with `Range` |
 
 ```ts
 interface DownloadInfo {
@@ -1914,36 +1977,39 @@ interface DownloadInfo {
   state: "direct" | "queued" | "running" | "done" | "failed";
   progress: number;          // 0 to 1 (1 for the original)
   size: number | null;       // bytes: the original's, or the converted file's once done
-  error: string | null;      // why it failed
+  error: string | null;      // why it failed (null for apps: see below)
   url: string;               // the original, or the converted file
 }
 ```
 
-The server decides as for a playback with the same body: what the player
-plays as it is downloads as it is (`direct`); otherwise the transcoder makes
-the file (the video copied or made anew at `max_height` and `max_bitrate`,
-the sound made AAC), one conversion at a time, from the start and at full
-speed. Video made anew is no bigger than a version 2 player's screen
-(`display`: 1080p for a phone, also of a 4K film) and never has more than
-1.5 times the original's bits, which a playback's quality for a file with
-few bits would. Asked again for the same file and choices, from any
-device, the same conversion answers (or the file it made); a failed one
-is tried again. Look at `GET /api/conversions/{id}` every few seconds
-until it is `done`, then fetch `url`. Converted files are kept a week
-after their last download (a download cut short goes on with `Range`),
-within the transcoder's limit; once gone, asking again makes them again.
-A conversion is known to the server once asked for since it started (a
-`404` otherwise: ask again), and to those who may see its title. `503`
-while the transcoder isn't running or the file can't be read (ask again
-later); `501` with a transcoder too old to convert, or to make MP4. Video is copied into
-a download's file only when the player plays it as it is (a Dolby Vision
-profile it doesn't decode would stay in the file); otherwise it is made
-anew. Apps aren't told why a conversion failed (`error` is `null`): the
-reason names the server's files, and the server's log keeps it. A download deleted before its file
-is made stops the conversion (`DELETE`); a file made stays for whoever
-asks next. One nobody asks about for an hour while it waits its turn is
-dropped then (the device that wanted it went): asking again starts it
-again.
+- The server decides as for a playback with the same body: what the player
+  plays as it is downloads as it is (`direct`). Otherwise the transcoder
+  makes the file: the video copied or made anew at `max_height` and
+  `max_bitrate`, the sound made AAC. One conversion at a time, from the
+  start, at full speed.
+- Video is copied only when the player plays it as it is (a Dolby Vision
+  profile it doesn't decode would stay in the file); otherwise it is made
+  anew, no bigger than a version 2 player's screen (`display`: 1080p for a
+  phone, also of a 4K film) and never with more than 1.5 times the
+  original's bits (which a playback's quality could ask for a file with few
+  bits).
+- Asked again for the same file and choices, from any device, the same
+  conversion answers (or the file it made); a failed one is tried again.
+- Poll `GET /api/conversions/{id}` every few seconds until it is `done`,
+  then fetch `url`.
+- Converted files are kept a week after their last download (a download cut
+  short goes on with `Range`), within the transcoder's limit; once gone,
+  asking again makes them again.
+- A conversion is known to the server once asked for since it started
+  (else `404`: ask again), and to those who may see its title.
+- `503` while the transcoder isn't running or the file can't be read (ask
+  again later); `501` with a transcoder too old to convert, or to make MP4.
+- Apps aren't told why a conversion failed (`error` is `null`): the reason
+  names the server's files, and the server's log keeps it.
+- `DELETE` before the file is made stops the conversion; a file already
+  made stays for whoever asks next. A conversion nobody asks about for an
+  hour while it waits its turn is dropped (the device that wanted it went):
+  asking again starts it again.
 
 ## Intro and credits detection
 
