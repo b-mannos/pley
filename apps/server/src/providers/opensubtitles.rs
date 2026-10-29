@@ -342,6 +342,18 @@ impl OpenSubtitles {
         let http = reqwest::Client::builder()
             .user_agent(USER_AGENT)
             .timeout(Duration::from_secs(20))
+            // Never from https to plain http, wherever a download leads.
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                let downgrade =
+                    attempt.url().scheme() != "https" && attempt.previous().iter().any(|url| url.scheme() == "https");
+                if downgrade {
+                    attempt.error("a redirect from https to plain http")
+                } else if attempt.previous().len() > 5 {
+                    attempt.stop()
+                } else {
+                    attempt.follow()
+                }
+            }))
             .build()
             .expect("http client");
         Self { http, base, settings, throttle: Throttle::new(4, Duration::from_secs(1)), token: Default::default() }
@@ -408,6 +420,9 @@ impl OpenSubtitles {
             answer => answer?,
         };
         let (link, name) = parse_download(&answer)?;
+        if !link_allowed(&link, self.base.as_deref()) {
+            return Err(anyhow!("OpenSubtitles gave a download link that isn't https").into());
+        }
         let mut response = self
             .http
             .get(&link)
@@ -520,6 +535,13 @@ impl OpenSubtitles {
 }
 
 /// A host name as OpenSubtitles' sign-in names the account's API host.
+/// Whether a download `link` may be read: over https from the public
+/// service (`base`: where its API is), as pictures are; a stand-in for it
+/// (tests) may name plain http.
+fn link_allowed(link: &str, base: Option<&str>) -> bool {
+    link.starts_with("https://") || (base != Some(API) && link.starts_with("http://"))
+}
+
 fn valid_host(host: &str) -> bool {
     !host.is_empty()
         && host.len() <= 253
@@ -607,6 +629,15 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert!(matches!(parse_download(b"{}"), Err(SearchError::Other(_))));
+    }
+
+    #[test]
+    fn downloads_from_the_public_service_are_https_only() {
+        assert!(link_allowed("https://www.opensubtitles.com/download/x.srt", Some(API)));
+        assert!(!link_allowed("http://www.opensubtitles.com/download/x.srt", Some(API)));
+        assert!(!link_allowed("http://169.254.169.254/latest/meta-data", Some(API)));
+        // A stand-in for it, in tests.
+        assert!(link_allowed("http://127.0.0.1:9/os/file/1", Some("http://127.0.0.1:9/api/v1")));
     }
 
     #[test]
