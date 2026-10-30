@@ -75,6 +75,8 @@ pub enum Access {
     /// Everyone with an account (see [`LiveSettings::age_limited`]).
     #[default]
     Everyone,
+    /// The household: accounts in Home (not friends given access).
+    Home,
     /// Administrators only.
     Admins,
 }
@@ -101,6 +103,10 @@ pub struct LiveSettings {
     /// Channels that didn't play, and a provider's divider rows ("##### UK
     /// #####"), are left out of the lists.
     pub hide_offline: bool,
+    /// People who watch Live TV whatever `access` says, and people who
+    /// don't (administrators always do).
+    pub allowed_users: Vec<i64>,
+    pub denied_users: Vec<i64>,
 }
 
 impl Default for LiveSettings {
@@ -111,9 +117,11 @@ impl Default for LiveSettings {
             deinterlace: true,
             max_height: None,
             timeshift_minutes: 5,
-            refresh_hours: 12,
+            refresh_hours: 24,
             guide_days: 7,
             hide_offline: true,
+            allowed_users: Vec::new(),
+            denied_users: Vec::new(),
         }
     }
 }
@@ -663,16 +671,41 @@ impl LiveTv {
     }
 
     /// Whether `user` may watch Live TV.
-    pub fn may_watch(&self, user: &AuthUser) -> bool {
+    /// Whether `user` may watch Live TV: administrators always (whatever
+    /// signed them in), the people let in or kept out by name as they were,
+    /// and the rest as `access` says.
+    pub async fn may_watch(&self, user: &AuthUser) -> bool {
         let settings = self.settings();
+        if user.is_admin || self.account_is_admin(user.id).await {
+            return true;
+        }
+        if settings.denied_users.contains(&user.id) {
+            return false;
+        }
+        if settings.allowed_users.contains(&user.id) {
+            return true;
+        }
+        let age = user.max_age.is_none() || settings.age_limited;
         match settings.access {
-            Access::Admins => user.is_admin,
-            Access::Everyone => user.is_admin || user.max_age.is_none() || settings.age_limited,
+            Access::Admins => false,
+            Access::Home => age && self.in_home(user.id).await,
+            Access::Everyone => age,
         }
     }
 
-    pub fn check_access(&self, user: &AuthUser) -> Result<(), AppError> {
-        if self.may_watch(user) { Ok(()) } else { Err(AppError::forbidden("Live TV isn't open to this account")) }
+    pub async fn check_access(&self, user: &AuthUser) -> Result<(), AppError> {
+        if self.may_watch(user).await { Ok(()) } else { Err(AppError::forbidden("Live TV isn't open to this account")) }
+    }
+
+    /// Whether the account is one of the household's (in Home).
+    async fn in_home(&self, user_id: i64) -> bool {
+        sqlx::query_scalar::<_, bool>("SELECT home FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_optional(&self.db.read)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(false)
     }
 
     /// Reads sources that are due, every minute, until `stopping`.

@@ -37,7 +37,7 @@ pub struct Summary {
 }
 
 pub async fn summary(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Summary>> {
-    let allowed = state.live.may_watch(&user);
+    let allowed = state.live.may_watch(&user).await;
     let channels = if allowed { state.live.channel_count().await? } else { 0 };
     let sources = if user.is_admin { state.live.source_count().await? } else { 0 };
     let recent = if allowed { state.live.recent(&user, 12).await? } else { Vec::new() };
@@ -45,12 +45,12 @@ pub async fn summary(State(state): State<AppState>, user: AuthUser) -> ApiResult
 }
 
 pub async fn channels(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<Channel>>> {
-    state.live.check_access(&user)?;
+    state.live.check_access(&user).await?;
     Ok(Json(state.live.channels(&user).await?))
 }
 
 pub async fn groups(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Groups>> {
-    state.live.check_access(&user)?;
+    state.live.check_access(&user).await?;
     Ok(Json(state.live.groups(&user).await?))
 }
 
@@ -79,7 +79,7 @@ pub async fn browse(
     user: AuthUser,
     Query(query): Query<BrowseQuery>,
 ) -> ApiResult<Json<ChannelPage>> {
-    state.live.check_access(&user)?;
+    state.live.check_access(&user).await?;
     let category = match query.category.as_deref().unwrap_or("all") {
         "all" => Category::All,
         "favorites" => Category::Favorites,
@@ -102,18 +102,18 @@ pub async fn browse(
 }
 
 pub async fn channel(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Json<Channel>> {
-    state.live.check_access(&user)?;
+    state.live.check_access(&user).await?;
     Ok(Json(state.live.channel(&user, id).await?))
 }
 
 pub async fn favorite(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {
-    state.live.check_access(&user)?;
+    state.live.check_access(&user).await?;
     state.live.set_favorite(&user, id, true).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn unfavorite(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<StatusCode> {
-    state.live.check_access(&user)?;
+    state.live.check_access(&user).await?;
     state.live.set_favorite(&user, id, false).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -134,7 +134,7 @@ pub async fn guide(
     user: AuthUser,
     Query(query): Query<GuideQuery>,
 ) -> ApiResult<Json<Guide>> {
-    state.live.check_access(&user)?;
+    state.live.check_access(&user).await?;
     let from = query.from.unwrap_or_else(|| now() - 1800);
     let to = query.to.unwrap_or(from + 6 * 3600);
     let ids = query
@@ -176,7 +176,7 @@ pub async fn logo(
     Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
-    state.live.check_access(&user)?;
+    state.live.check_access(&user).await?;
     let path = state.live.logo(id).await?;
     picture(&state, path, &query, &headers).await
 }
@@ -188,7 +188,7 @@ pub async fn program_image(
     Query(query): Query<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
-    state.live.check_access(&user)?;
+    state.live.check_access(&user).await?;
     let path = state.live.program_image(id, start).await?;
     picture(&state, path, &query, &headers).await
 }
@@ -224,7 +224,7 @@ async fn start_watching(
     keyed: bool,
     take_over: Option<i64>,
 ) -> ApiResult<(Watching, Channel)> {
-    state.live.check_access(user)?;
+    state.live.check_access(user).await?;
     // An app acts as a viewer, but whose connections it may take over goes by the account.
     let admin = user.is_admin || state.live.account_is_admin(user.id).await;
     let channel = state.live.channel(user, id).await?;

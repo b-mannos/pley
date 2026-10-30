@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { FolderTree, ListVideo, Save, SlidersHorizontal, Tv2, Waypoints } from "lucide-react";
 import { errorMessage } from "@/api/client";
+import { useUsers } from "@/api/hooks";
 import { useLiveSettings, useLiveSources, useSaveLiveSettings, type LiveSettings } from "@/api/livetv";
 import { useToast } from "@/components/Toast";
 import { Button, buttonClass, EmptyState, PageSpinner, Select, Toggle } from "@/components/ui";
@@ -107,12 +108,15 @@ function OptionsForm({ saved }: { saved: LiveSettings }) {
         <Row label="Open to" htmlFor="live-access">
           <Select id="live-access" value={form.access} onChange={(e) => set("access", e.target.value as LiveSettings["access"])} className="w-full">
             <option value="everyone">Everyone</option>
+            <option value="home">Home users</option>
             <option value="admins">Administrators only</option>
           </Select>
+          {form.access === "home" ? <Note>The household: accounts in Home, not friends given access.</Note> : null}
         </Row>
         <Row label="Profiles with an age limit" hint="Channels carry no ratings, so the limit can't hold them to it.">
           <Toggle checked={form.age_limited} onChange={(v) => set("age_limited", v)} label="Profiles with an age limit watch Live TV" disabled={form.access === "admins"} />
         </Row>
+        <People form={form} set={set} />
       </Group>
 
       <Group title="Playing" description="Every player of a channel watches the same stream, made once by the transcoder.">
@@ -178,5 +182,42 @@ function OptionsForm({ saved }: { saved: LiveSettings }) {
         </div>
       </div>
     </form>
+  );
+}
+
+/** Each person's own access, whatever "Open to" says: as the rule says, always, or never. */
+function People({
+  form,
+  set,
+}: {
+  form: LiveSettings;
+  set: <K extends keyof LiveSettings>(key: K, value: LiveSettings[K]) => void;
+}) {
+  const users = useUsers();
+  const people = (users.data ?? []).filter((u) => !u.is_admin);
+  if (!people.length) return null;
+  const choice = (id: number) => (form.allowed_users.includes(id) ? "always" : form.denied_users.includes(id) ? "never" : "rule");
+  const choose = (id: number, value: string) => {
+    set("allowed_users", value === "always" ? [...form.allowed_users.filter((x) => x !== id), id] : form.allowed_users.filter((x) => x !== id));
+    set("denied_users", value === "never" ? [...form.denied_users.filter((x) => x !== id), id] : form.denied_users.filter((x) => x !== id));
+  };
+  return (
+    <Row label="People" hint="Someone may watch whatever “Open to” says, or never. Administrators always can.">
+      <ul className="divide-y divide-border/60 rounded-lg border border-border">
+        {people.map((u) => (
+          <li key={u.id} className="flex items-center gap-3 px-3 py-2">
+            <span className="min-w-0 flex-1 truncate text-sm">
+              {u.name}
+              {!u.home ? <span className="ml-2 text-xs text-subtle">not in Home</span> : null}
+            </span>
+            <Select value={choice(u.id)} onChange={(e) => choose(u.id, e.target.value)} aria-label={`Live TV for ${u.name}`} className="h-8 w-36 text-sm">
+              <option value="rule">As “Open to” says</option>
+              <option value="always">Always</option>
+              <option value="never">Never</option>
+            </Select>
+          </li>
+        ))}
+      </ul>
+    </Row>
   );
 }

@@ -396,6 +396,76 @@ async fn channels_by_group_a_page_at_a_time() {
 }
 
 #[tokio::test]
+async fn live_tv_is_open_to_the_household_or_to_people_by_name() {
+    let (base, _) = provider().await;
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (bob, bob_id) = app.user(&admin, "bob", json!({})).await;
+    let (carol, carol_id) = app.user(&admin, "carol", json!({"home": false})).await;
+    let url = format!("{base}/list.m3u");
+    app.post("/api/live/sources", &admin, json!({"name": "P", "kind": "m3u", "url": url})).await;
+    wait_until_read(&app, &admin).await;
+
+    let mut settings = app.get("/api/live/settings", &admin).await.body;
+    assert_eq!(settings["refresh_hours"], 24, "read again daily");
+    settings["access"] = json!("home");
+    assert_eq!(app.put("/api/live/settings", &admin, settings.clone()).await.status, StatusCode::OK);
+    assert!(may_watch(&app, &bob).await, "the household");
+    assert!(!may_watch(&app, &carol).await, "not a friend given access");
+
+    // By name, whatever the rule says.
+    settings["allowed_users"] = json!([carol_id]);
+    settings["denied_users"] = json!([bob_id]);
+    app.put("/api/live/settings", &admin, settings).await;
+    assert!(may_watch(&app, &carol).await);
+    assert!(!may_watch(&app, &bob).await);
+    assert!(may_watch(&app, &admin).await, "administrators always");
+}
+
+async fn may_watch(app: &TestApp, token: &str) -> bool {
+    app.get("/api/live/channels", token).await.status == StatusCode::OK
+}
+
+#[tokio::test]
+async fn a_connection_in_use_is_taken_over_by_its_watcher_or_an_administrator() {
+    let (base, _) = provider().await;
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (bob, _) = app.user(&admin, "bob", json!({})).await;
+    let url = format!("{base}/list.m3u");
+    app.post("/api/live/sources", &admin, json!({"name": "P", "kind": "m3u", "url": url, "max_connections": 1})).await;
+    wait_until_read(&app, &admin).await;
+    let channels = app.get("/api/live/channels", &bob).await.body;
+    let (one, two) = (channels[0]["id"].as_i64().unwrap(), channels[1]["id"].as_i64().unwrap());
+
+    // Bob watches One; the administrator wants Two and may take One's connection.
+    let bobs = app.post(&format!("/api/live/channels/{one}/watch"), &bob, json!({"client_id": "tv"})).await.body;
+    let refused = app.post(&format!("/api/live/channels/{two}/watch"), &admin, json!({"client_id": "pc"})).await;
+    assert_eq!(refused.status, StatusCode::CONFLICT);
+    let held = &refused.body["connections"][0];
+    assert_eq!((held["channel_id"].as_i64(), held["can_take_over"].as_bool()), (Some(one), Some(true)), "{held}");
+    assert_eq!(held["watchers"], json!(["bob"]), "named to administrators");
+
+    // Bob may not take the administrator's back.
+    let taken = app
+        .post(&format!("/api/live/channels/{two}/watch"), &admin, json!({"client_id": "pc", "take_over": one}))
+        .await;
+    assert_eq!(taken.status, StatusCode::OK, "{:?}", taken.body);
+    let refused = app.post(&format!("/api/live/channels/{one}/watch"), &bob, json!({"client_id": "tv"})).await;
+    let held = &refused.body["connections"][0];
+    assert_eq!((held["can_take_over"].as_bool(), held["watchers"].clone()), (Some(false), json!([])), "{held}");
+    let not_his =
+        app.post(&format!("/api/live/channels/{one}/watch"), &bob, json!({"client_id": "tv", "take_over": two})).await;
+    assert_eq!(not_his.status, StatusCode::FORBIDDEN);
+
+    // Bob's player is told who took the connection.
+    let session = bobs["session_id"].as_str().unwrap();
+    let gone = app.get(&format!("/api/live/sessions/{session}/index.m3u8"), &bob).await;
+    assert_eq!(gone.status, StatusCode::GONE);
+    assert!(gone.body["message"].as_str().unwrap().contains("started watching"), "{:?}", gone.body);
+}
+
+#[tokio::test]
 async fn channels_that_dont_play_and_divider_rows_are_left_out() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());

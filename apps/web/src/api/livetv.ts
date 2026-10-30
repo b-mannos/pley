@@ -117,7 +117,7 @@ export interface Watching {
 
 // ---------------------------------------------------------------- admin
 
-export type LiveAccess = "everyone" | "admins";
+export type LiveAccess = "everyone" | "home" | "admins";
 
 export interface LiveSettings {
   access: LiveAccess;
@@ -131,6 +131,9 @@ export interface LiveSettings {
   guide_days: number;
   /** Channels that didn't play, and a provider's divider rows, are left out. */
   hide_offline: boolean;
+  /** People who watch Live TV whatever `access` says, and people who don't (administrators always do). */
+  allowed_users: Id[];
+  denied_users: Id[];
 }
 
 export type SourceKind = "m3u" | "xtream";
