@@ -215,8 +215,30 @@ export interface LineupGroup extends LiveGroup {
   offline: number;
 }
 
+/** Which of the lineup's channels administrators list. */
+export type LineupState = "all" | "shown" | "hidden" | "no-guide" | "offline";
+
+/** The lineup's channels to list or change. */
+export interface LineupFilter {
+  source_id?: Id;
+  group?: string;
+  state?: LineupState;
+  /** A name, or a number's beginning. */
+  q?: string;
+}
+
+export interface LineupPage {
+  total: number;
+  /** Of `total`, how many are hidden. */
+  hidden: number;
+  offset: number;
+  channels: LineupChannel[];
+}
+
 export interface LineupPatch {
   ids: Id[];
+  /** Every channel this filter keeps too. */
+  filter?: LineupFilter;
   /** Every channel of these groups too. */
   groups?: string[];
   hidden?: boolean;
@@ -272,6 +294,7 @@ export const liveKeys = {
   sources: ["live", "admin", "sources"] as const,
   lineup: ["live", "admin", "lineup"] as const,
   lineupGroups: ["live", "admin", "lineup", "groups"] as const,
+  lineupPage: (filter: LineupFilter, page: number) => ["live", "admin", "lineup", "page", JSON.stringify(filter), page] as const,
   tuners: ["live", "admin", "tuners"] as const,
 };
 
@@ -323,9 +346,18 @@ export const liveQueries = {
     }),
   settings: () => queryOptions({ queryKey: liveKeys.settings, queryFn: () => api.get<LiveSettings>("/api/live/settings") }),
   sources: () => queryOptions({ queryKey: liveKeys.sources, queryFn: () => api.get<LiveSource[]>("/api/live/sources") }),
-  lineup: () => queryOptions({ queryKey: liveKeys.lineup, queryFn: () => api.get<LineupChannel[]>("/api/live/lineup") }),
   lineupGroups: () =>
     queryOptions({ queryKey: liveKeys.lineupGroups, queryFn: () => api.get<LineupGroup[]>("/api/live/lineup/groups") }),
+  /** Page `page` (CHANNEL_PAGE channels) of the lineup `filter` keeps. */
+  lineupPage: (filter: LineupFilter, page: number) =>
+    queryOptions({
+      queryKey: liveKeys.lineupPage(filter, page),
+      queryFn: ({ signal }) =>
+        api.get<LineupPage>(
+          `/api/live/lineup/page${qs({ ...filter, q: filter.q?.trim() || undefined, offset: page * CHANNEL_PAGE, limit: CHANNEL_PAGE })}`,
+          { signal },
+        ),
+    }),
   tuners: () => queryOptions({ queryKey: liveKeys.tuners, queryFn: () => api.get<TunerStatus[]>("/api/live/tuners") }),
 };
 
@@ -425,10 +457,6 @@ export function useTestSource() {
   });
 }
 
-export function useLineup(enabled = true) {
-  return useQuery({ ...liveQueries.lineup(), enabled });
-}
-
 export function useLineupGroups(enabled = true) {
   return useQuery({ ...liveQueries.lineupGroups(), enabled });
 }
@@ -438,11 +466,11 @@ export function usePatchLineup() {
   return useMutation({
     mutationFn: (patch: LineupPatch) => api.patch<void>("/api/live/lineup", patch),
     onMutate: async (patch) => {
+      if (patch.hidden === undefined) return;
       await qc.cancelQueries({ queryKey: liveKeys.lineup });
       const ids = new Set(patch.ids);
-      qc.setQueryData<LineupChannel[]>(liveKeys.lineup, (list) =>
-        list?.map((c) => (ids.has(c.id) && patch.hidden !== undefined ? { ...c, hidden: patch.hidden } : c)),
-      );
+      const mark = (c: LineupChannel) => (ids.has(c.id) ? { ...c, hidden: patch.hidden! } : c);
+      qc.setQueriesData<LineupPage>({ queryKey: [...liveKeys.lineup, "page"] }, (page) => page && { ...page, channels: page.channels.map(mark) });
     },
     onSettled: () => qc.invalidateQueries({ queryKey: liveKeys.all }),
   });
