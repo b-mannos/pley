@@ -33,6 +33,31 @@ sub init()
     m.gather.observeField("fire", "onGathered")
     session.observeField("accessToken", "onStream")
     session.observeField("server", "onStream")
+
+    ' Requests: what the profile may do (the summary), asked as a profile
+    ' signs in, as the stream connects, a second after request events and,
+    ' without the stream, each minute. Answers for a profile signed in
+    ' before (requestsAsked) are left out.
+    m.top.requestSummary = reqNoSummary(false)
+    m.requestsAsked = 0
+    m.requestGather = m.top.findNode("requestGather")
+    m.requestGather.observeField("fire", "onRequestsGathered")
+    m.requestPoll = m.top.findNode("requestPoll")
+    m.requestPoll.observeField("fire", "onRequestPoll")
+    ' What the gathered events changed, for the screen on top; news they
+    ' told (the summary's unseen rising without any is asked about).
+    m.requestChange = invalid
+    m.newsEvents = 0
+    ' Ready-to-watch notices waiting to show, the one shown, and what was
+    ' told already (reqLoadAnnounced's) for the profile.
+    m.notices = []
+    m.shownNotice = invalid
+    m.announced = invalid
+    session.observeField("profileId", "onProfile")
+    m.events.observeField("live", "onStreamLive")
+    m.top.observeField("requestNote", "onRequestNote")
+    m.top.observeField("dialog", "onDialog")
+
     m.events.control = "run"
     m.api.observeField("ready", "onApiReady")
     m.api.control = "run"
@@ -91,6 +116,10 @@ sub onServerEvent(event as object)
         if m.stack.Count() > 0 and m.stack.Peek().hasField("serverStopped") then m.stack.Peek().serverStopped = data
         return
     end if
+    if reqIsEvent(data)
+        onRequestEvent(data)
+        return
+    end if
     if not evChangesHome(data) then return
     m.gather.control = "stop"
     m.gather.control = "start"
@@ -99,6 +128,219 @@ end sub
 sub onGathered()
     m.top.remoteChanges = m.top.remoteChanges + 1
     if m.stack.Count() > 0 and m.stack.Peek().hasField("refresh") then m.stack.Peek().refresh = true
+end sub
+
+' --- Requests ---
+
+' A profile signed in, or none: what requests let it do is asked again,
+' and the notices start from what it was told before.
+sub onProfile()
+    session = m.global.session
+    m.requestsAsked = m.requestsAsked + 1
+    setRequestSummary(reqNoSummary(false))
+    m.requestChange = invalid
+    m.newsEvents = 0
+    m.notices = []
+    m.announced = invalid
+    if session.profileId > 0
+        m.announced = reqLoadAnnounced(requestsSection(), session.server, session.profileId)
+        askRequestSummary("start")
+    end if
+    pollRequests()
+end sub
+
+function requestsSection() as object
+    return CreateObject("roRegistrySection", "requests")
+end function
+
+' why: "start", "events", "poll" or "live".
+sub askRequestSummary(why as string)
+    if m.global.session.profileId <= 0 then return
+    uiRequest({ method: "GET", path: "/api/requests/summary", asked: m.requestsAsked, why: why }, "onRequestSummary")
+end sub
+
+sub onRequestSummary(event as object)
+    spec = event.getRoSGNode().spec
+    if spec.asked <> m.requestsAsked then return
+    summary = reqSummaryAnswer(event.getData())
+    ' The server didn't answer: as it was, asked again on the next minute.
+    if summary = invalid then return
+    before = m.top.requestSummary
+    setRequestSummary(summary)
+    pollRequests()
+    ' Changes no event told of (none came, or the stream was down): the
+    ' screen on top asks again.
+    if before.known and summary.changedAt <> before.changedAt and spec.why <> "events" then pokeRequests({ requestId: 0, kind: "", tmdbId: 0 })
+    ' News no event told of: the requests that have it.
+    unseenBefore = 0
+    if before.known then unseenBefore = before.unseen
+    if summary.unseen > unseenBefore and m.newsEvents = 0 and reqShowsRequests(summary) then askUnseen()
+    m.newsEvents = 0
+end sub
+
+' The summary, for the scene and each screen that shows what it allows.
+sub setRequestSummary(summary as object)
+    m.top.requestSummary = summary
+    for each screen in m.stack
+        if screen.hasField("requestSummary") then screen.requestSummary = summary
+    end for
+end sub
+
+' Without the event stream, the summary is asked each minute; a server
+' without requests (an older one), only as the stream connects again or
+' the app starts.
+sub pollRequests()
+    if m.global.session.profileId > 0 and not m.events.live and not m.top.requestSummary.absent
+        m.requestPoll.control = "start"
+    else
+        m.requestPoll.control = "stop"
+    end if
+end sub
+
+sub onRequestPoll()
+    askRequestSummary("poll")
+end sub
+
+' The stream is up (again): nothing it missed is told, so the summary is
+' asked again, an older server's too (it may have been updated).
+sub onStreamLive()
+    if m.events.live then askRequestSummary("live")
+    pollRequests()
+end sub
+
+' A request event: the summary is asked a second on, once for those that
+' come together, and the screen on top follows; a title ready to watch is
+' told of.
+sub onRequestEvent(data as object)
+    kind = httpString(data.type)
+    if kind = "request_available" or kind = "request_decided" then m.newsEvents = m.newsEvents + 1
+    if kind = "request_available" and m.announced <> invalid
+        told = reqAnnounceEvent(data, m.announced)
+        keepAnnounced()
+        if told.Count() > 0 and told[0].itemId > 0 then notify(reqNotice(told))
+    end if
+    if kind <> "requests_settings_changed" then gatherRequestChange(data)
+    m.requestGather.control = "stop"
+    m.requestGather.control = "start"
+end sub
+
+' What the events changed: one request ({ requestId, kind, tmdbId }), or
+' many (requestId 0). A title shown as a tile gets its request's badge.
+sub gatherRequestChange(data as object)
+    change = { requestId: httpNumber(data.request_id, 0), kind: httpString(data.kind), tmdbId: httpNumber(data.tmdb_id, 0) }
+    if change.requestId = 0 then change = { requestId: 0, kind: "", tmdbId: 0 }
+    if m.requestChange = invalid
+        m.requestChange = change
+    else if m.requestChange.requestId <> change.requestId
+        m.requestChange = { requestId: 0, kind: "", tmdbId: 0 }
+    end if
+    if change.requestId > 0 and change.tmdbId > 0 and showsTiles()
+        uiRequest({ method: "GET", path: "/api/requests/" + urlValue(change.requestId), key: reqKey(change.kind, change.tmdbId), asked: m.requestsAsked }, "onRequestStatus")
+    end if
+end sub
+
+' Whether a screen in the stack shows TMDB's titles as tiles.
+function showsTiles() as boolean
+    for each screen in m.stack
+        if screen.hasField("requestNote") then return true
+    end for
+    return false
+end function
+
+' A request's status as its title's badge says it; gone (404), no badge.
+sub onRequestStatus(event as object)
+    spec = event.getRoSGNode().spec
+    answer = event.getData()
+    if spec.asked <> m.requestsAsked or (not answer.ok and answer.status <> 404) then return
+    request = httpObject(answer.data)
+    libraryId = 0
+    if request <> invalid then libraryId = httpNumber(request.item_id, 0)
+    m.top.requestNote = { key: spec.key, status: reqStatusOfRequest(answer.status, answer.data), libraryId: libraryId }
+end sub
+
+sub onRequestsGathered()
+    askRequestSummary("events")
+    change = m.requestChange
+    m.requestChange = invalid
+    if change <> invalid then pokeRequests(change)
+end sub
+
+' The screen on top shows requests: it asks again for what changed.
+sub pokeRequests(change as object)
+    if m.stack.Count() = 0 then return
+    top = m.stack.Peek()
+    if top.hasField("requestsChanged") then top.requestsChanged = change
+end sub
+
+' A title's request changed, here or elsewhere: every screen showing its
+' tile, covered or not, gives it its new badge.
+sub onRequestNote()
+    note = m.top.requestNote
+    for each screen in m.stack
+        if screen.hasField("requestNote") then screen.requestNote = note
+    end for
+end sub
+
+' The profile's requests with news it hasn't seen: those newly ready to
+' watch are told of.
+sub askUnseen()
+    uiRequest({ method: "GET", path: "/api/requests", query: { unseen: 1, limit: 20 }, asked: m.requestsAsked }, "onUnseen")
+end sub
+
+sub onUnseen(event as object)
+    answer = event.getData()
+    if event.getRoSGNode().spec.asked <> m.requestsAsked or m.announced = invalid or not answer.ok then return
+    data = httpObject(answer.data)
+    if data = invalid then return
+    told = reqToAnnounce(data.requests, m.announced)
+    keepAnnounced()
+    if told.Count() > 0 then notify(reqNotice(told))
+end sub
+
+sub keepAnnounced()
+    session = m.global.session
+    if m.announced <> invalid and session.profileId > 0 then reqSaveAnnounced(requestsSection(), session.server, session.profileId, m.announced)
+end sub
+
+' A notice of what is ready to watch, shown when it can be: never over
+' playing video, signing in or another dialog. The last three wait.
+sub notify(notice as object)
+    m.notices.Push(notice)
+    while m.notices.Count() > 3
+        m.notices.Shift()
+    end while
+    showNotice()
+end sub
+
+sub showNotice()
+    if m.notices.Count() = 0 or m.top.dialog <> invalid or m.stack.Count() = 0 then return
+    route = m.stack.Peek().route
+    if route = "player" or route = "link" or route = "servers" or route = "profiles" or route = "unreachable" then return
+    m.shownNotice = m.notices.Shift()
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
+    dialog.title = "Ready to watch"
+    dialog.message = [m.shownNotice.text]
+    dialog.buttons = ["Open", "OK"]
+    dialog.observeField("buttonSelected", "onNoticeButton")
+    m.top.dialog = dialog
+end sub
+
+' Open: the title, or the requests when several have news.
+sub onNoticeButton(event as object)
+    notice = m.shownNotice
+    m.shownNotice = invalid
+    if m.top.dialog <> invalid then m.top.dialog.close = true
+    if event.getData() <> 0 or notice = invalid then return
+    if notice.itemId > 0
+        show({ to: "details", params: { itemId: notice.itemId } })
+    else
+        show({ to: "requests", params: { view: "mine" } })
+    end if
+end sub
+
+' A dialog closed: a notice waiting may show.
+sub onDialog()
+    if m.top.dialog = invalid then showNotice()
 end sub
 
 ' Pictures load through the scene's HTTP agent (nodes without their own
@@ -154,11 +396,13 @@ sub show(nav as object)
     if params = invalid then params = {}
     screen.route = route
     screen.params = params
+    if screen.hasField("requestSummary") then screen.requestSummary = m.top.requestSummary
     screen.observeField("navigate", "onNavigate")
     m.stack.Push(screen)
     m.screens.appendChild(screen)
     screen.active = true
     launchDialogDone()
+    showNotice()
 end sub
 
 sub pop()
@@ -168,6 +412,8 @@ sub pop()
     top.visible = true
     top.active = true
     launchDialogDone()
+    ' Played video, or signing in, ended: a notice waiting shows.
+    showNotice()
 end sub
 
 sub closeScreen(screen as object)

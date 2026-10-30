@@ -69,6 +69,13 @@ function reqSummaryAnswer(answer as object) as dynamic
     return invalid
 end function
 
+' The summary a screen was given (the scene's), or none yet: requests off.
+function reqSummaryOf(value as dynamic) as object
+    summary = httpObject(value)
+    if summary = invalid or not summary.DoesExist("signInAgain") then return reqNoSummary(false)
+    return summary
+end function
+
 ' Whether the menu has Discover: requests are on and the account may ask
 ' (a sign-in from before finds there how to sign in again).
 function reqShowsDiscover(summary as object) as boolean
@@ -424,6 +431,22 @@ end function
 ' Discover's search for query.
 function reqMoreTile(title as string, list as string, query as string) as object
     return { title: title, subtitle: "", image: "", wide: false, progress: 0.0, watched: false, itemId: 0, kind: "more", list: list, query: query, badge: "", badgeColor: "0x38BDF8FF", key: "more" }
+end function
+
+' A row's tiles while it loads: empty frames, as many as a row shows.
+function reqSkeletonTiles() as object
+    tiles = []
+    for i = 1 to 7
+        tiles.Push({ title: "", subtitle: "", image: "", wide: false, progress: 0.0, watched: false, itemId: 0, kind: "skeleton", badge: "", badgeColor: "0x38BDF8FF", key: "skeleton" })
+    end for
+    return tiles
+end function
+
+' A row's one tile instead of titles, its words in its frame: kind
+' "retry" loads the row again ("Couldn't load these…"), "note" only says
+' so ("Nothing here right now.").
+function reqNoticeTile(text as string, kind as string) as object
+    return { title: text, subtitle: "", image: "", wide: false, progress: 0.0, watched: false, itemId: 0, kind: kind, badge: "", badgeColor: "0x38BDF8FF", key: kind }
 end function
 
 ' A title's status as a request answered says it (GET /api/requests/{id},

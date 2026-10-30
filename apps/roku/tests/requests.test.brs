@@ -101,6 +101,10 @@ sub test_requests_summary_answers()
     tkTrue(reqSummaryAnswer({ ok: false, status: 403, data: { code: "insufficient_scope" }, error: "insufficient_scope" }).absent, "a build from before apps could ask")
     tkInvalid(reqSummaryAnswer({ ok: false, status: 0, data: invalid, error: "network" }), "the server away: the summary there was")
     tkInvalid(reqSummaryAnswer({ ok: false, status: 500, data: invalid, error: "" }))
+    ' A screen's field before the scene gave it one.
+    tkEqual(reqSummaryOf({}), reqNoSummary(false))
+    tkEqual(reqSummaryOf(invalid), reqNoSummary(false))
+    tkTrue(reqSummaryOf(reqTestSummary({})).enabled)
 end sub
 
 sub test_requests_entries_follow_the_summary()
