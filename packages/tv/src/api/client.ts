@@ -11,6 +11,8 @@ import type {
   ItemSummary,
   Library,
   LiveChannel,
+  LiveChannelPage,
+  LiveGroups,
   LiveGuide,
   LiveSummary,
   LiveWatching,
@@ -485,14 +487,29 @@ export class Api {
     return this.get("/api/live", { cancel });
   }
 
-  /** The channels by number, each with what's on now and next. */
-  liveChannels(cancel?: Cancel): Promise<LiveChannel[]> {
-    return this.get("/api/live/channels", { cancel });
+  /** The groups, and how many channels in all, marked and watched lately. */
+  liveGroups(cancel?: Cancel): Promise<LiveGroups> {
+    return this.get("/api/live/groups", { cancel });
   }
 
-  /** The guide between `from` and `to` (unix seconds; two days at most). */
-  liveGuide(from: number, to: number, cancel?: Cancel): Promise<LiveGuide> {
-    return this.get("/api/live/guide", { query: { from, to }, cancel });
+  /**
+   * A page of a category's channels (`limit`, 500 at most), each with
+   * what's on now and next; `around` gives the page holding that channel.
+   */
+  liveBrowse(
+    query: { category: "all" | "favorites" | "recent" | "group"; group?: string; q?: string; offset?: number; limit?: number; around?: Id },
+    cancel?: Cancel,
+  ): Promise<LiveChannelPage> {
+    return this.get("/api/live/browse", { query, cancel });
+  }
+
+  liveChannel(id: Id, cancel?: Cancel): Promise<LiveChannel> {
+    return this.get(`/api/live/channels/${id}`, { cancel });
+  }
+
+  /** The guide of channels `ids` between `from` and `to` (unix seconds; two days at most). */
+  liveGuide(from: number, to: number, ids: Id[], cancel?: Cancel): Promise<LiveGuide> {
+    return this.get("/api/live/guide", { query: { from, to, ids: ids.join(",") }, cancel });
   }
 
   setLiveFavorite(channelId: Id, favorite: boolean): Promise<unknown> {

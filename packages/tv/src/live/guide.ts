@@ -1,18 +1,22 @@
 import { signal } from "@preact/signals";
-import type { Api } from "../api/client";
-import type { LiveProgram } from "../api/types";
+import type { LiveGuide, LiveProgram } from "../api/types";
 import { chunkStarts, GUIDE_CHUNK, mergeGuide } from "./data";
 
-/** A chunk asked for this long ago is asked for again when it shows. */
+/** What the guide needs of the server (the Api; tests give their own). */
+export interface GuideSource {
+  liveGuide(from: number, to: number, ids: number[]): Promise<LiveGuide>;
+}
+
+/** A channel's chunk asked for this long ago is asked for again when it shows. */
 const STALE_MS = 5 * 60_000;
-/** A chunk that failed waits this long before it is asked for again. */
+/** One that failed waits this long before it is asked for again. */
 const RETRY_MS = 15_000;
 
 /**
- * The guide's programmes, asked for in six-hour chunks as the guide is
- * moved through time (the web's GuideGrid), counted from `origin`, where
- * the guide opens. Every channel's programmes come in each chunk, so a
- * lineup of thousands costs no more requests than one of ten.
+ * The guide's programmes, asked for in six-hour chunks as the guide moves
+ * through time, and only for the channels in view (`ids`), counted from
+ * `origin`, where the guide opens: a lineup of tens of thousands costs the
+ * rows on screen.
  */
 export class GuideStore {
   readonly origin: number;
@@ -20,39 +24,54 @@ export class GuideStore {
   readonly programs = new Map<number, LiveProgram[]>();
   /** Bumped as chunks come in: rows read `programs` again. */
   readonly version = signal(0);
-  /** No chunk asked for has come yet. */
-  readonly loading = signal(true);
-  private readonly api: Api;
-  private readonly asked = new Map<number, { at: number; ok: boolean; pending: boolean }>();
+  private readonly api: GuideSource;
+  /** When each channel's chunk was asked for (negative: failed then), by chunk start. */
+  private readonly asked = new Map<number, Map<number, { at: number; ok: boolean; pending: boolean }>>();
 
-  constructor(api: Api, origin: number) {
+  constructor(api: GuideSource, origin: number) {
     this.api = api;
     this.origin = origin;
   }
 
-  /** Asks for the chunks covering `from`–`to` (and the one after) that it doesn't have fresh. */
-  want(from: number, to: number): void {
+  /** Whether channel `id`'s programmes around `t` have been asked for and come (or failed). */
+  answered(id: number, t: number): boolean {
+    const start = chunkStarts(t, t + 1, this.origin)[0];
+    const a = start === undefined ? undefined : this.asked.get(start)?.get(id);
+    return !!a && !a.pending;
+  }
+
+  /** Asks for channels `ids`' chunks covering `from`–`to` that it doesn't have fresh. */
+  want(from: number, to: number, ids: number[]): void {
+    if (!ids.length) return;
     const now = Date.now();
-    for (const start of chunkStarts(from, to + GUIDE_CHUNK / 2, this.origin)) {
-      const a = this.asked.get(start);
-      if (a && (a.pending || now - a.at < (a.ok ? STALE_MS : RETRY_MS))) continue;
-      const entry = { at: now, ok: false, pending: true };
-      this.asked.set(start, entry);
-      this.api.liveGuide(start, start + GUIDE_CHUNK).then(
+    for (const start of chunkStarts(from, to, this.origin)) {
+      let byId = this.asked.get(start);
+      if (!byId) this.asked.set(start, (byId = new Map()));
+      const chunk = byId;
+      const missing = ids.filter((id) => {
+        const a = chunk.get(id);
+        return !a || (!a.pending && now - a.at >= (a.ok ? STALE_MS : RETRY_MS));
+      });
+      if (!missing.length) continue;
+      const entries = missing.map((id) => {
+        const e = { at: now, ok: false, pending: true };
+        chunk.set(id, e);
+        return e;
+      });
+      const done = (ok: boolean) => {
+        for (const e of entries) {
+          e.pending = false;
+          e.ok = ok;
+          e.at = Date.now();
+        }
+        this.version.value++;
+      };
+      this.api.liveGuide(start, start + GUIDE_CHUNK, missing).then(
         (guide) => {
-          entry.ok = true;
-          entry.pending = false;
-          entry.at = Date.now();
           mergeGuide(this.programs, guide);
-          this.loading.value = false;
-          this.version.value++;
+          done(true);
         },
-        () => {
-          entry.pending = false;
-          entry.at = Date.now();
-          this.loading.value = false;
-          this.version.value++;
-        },
+        () => done(false),
       );
     }
   }

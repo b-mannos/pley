@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
-import type { LiveChannel } from "../../api/types";
-import { behindText, channelByNumber, formatSpan, formatTime, LIVE_WITHIN_MS, nowAndNext, programProgress, stepChannel, timeLeft } from "../../live/data";
-import { LiveController, type LiveState } from "../../live/session";
+import type { LiveChannel, LiveGroups } from "../../api/types";
+import { behindText, categoryKey, categoryName, channelByNumber, channelName, formatSpan, formatTime, LIVE_WITHIN_MS, nowAndNext, parseCategory, programProgress, timeLeft, type LiveCategory } from "../../live/data";
+import { ChannelPages } from "../../live/pages";
+import { LiveController } from "../../live/session";
 import { initMusic } from "../../player/music";
 import type { Key } from "../keys";
 import { useUi } from "../context";
@@ -11,6 +12,7 @@ import { Icon } from "../kit/icons";
 import { useTrap } from "../kit/panel";
 import { Toast } from "../kit/toast";
 import { failedTitle, problem, sentence, useApp, useLoad } from "../screens/common";
+import { CategoryPanel } from "../screens/live-categories";
 import { ChannelLogo, NumberBox, ProgramMarks, ProgressLine, useNow, useNumberEntry } from "../screens/live-kit";
 import { PlayerButton, TimeOfDay } from "./player";
 
@@ -22,32 +24,32 @@ const BANNER_MS = 5_000;
 const RING_MS = 500;
 /** Left and Right move this far in the timeshift; held, three times as far. */
 const STEP_MS = 10_000;
-/** The scrubber's line, in canvas px (the title player's). */
-const BAR_LEFT = 48;
-const BAR_WIDTH = 864;
 
 /** Keys the player takes whatever has focus. */
 const MEDIA_KEYS: Key[] = ["playPause", "play", "pause", "stop", "fastForward", "rewind", "next", "previous", "channelUp", "channelDown", "channelList", "guide", "info"];
 
 /**
  * A live channel playing (the web's LivePlayerPage on a TV): the TV's own
- * player under the page, what's on, the Live badge and the timeshift, the
- * channel list, and changing channels with CH+ and CH−, Up and Down, or
- * the channel's number. Back leaves; the server is told at once.
+ * player under the page, what's on, Live (or how far behind it), pause and
+ * rewind in the timeshift, the channel list with the categories, and
+ * changing channels with CH+ and CH−, Up and Down within the category it
+ * was opened from, or by a channel's number among every channel. Back
+ * leaves, to the channel watched; the server is told at once.
  */
-export function LivePlayerScreen(p: { channelId: number; pressedAt: number }) {
+export function LivePlayerScreen(p: { channelId: number; category: string; pressedAt: number }) {
   const app = useApp();
   const ui = useUi();
-  const list = useLoad((c) => ui.api.liveChannels(c), [app.liveChanges.value], { initial: app.liveChannels });
-  useEffect(() => {
-    if (list.data) app.liveChannels = list.data;
-  }, [list.data]);
-  const channels = list.data;
-  const first = useRef<LiveChannel | null>(null);
-  if (!first.current && channels) first.current = channels.filter((c) => c.id === p.channelId)[0] ?? null;
-  if (!channels) {
-    if (list.error) {
-      return <Blackout title={failedTitle(list.error, "Live TV didn't load")} message={problem(list.error)} onRetry={list.reload} />;
+  const known = useMemo(() => app.knownLiveChannel(p.channelId), []);
+  const fetched = useLoad((c) => (known ? Promise.resolve(known) : ui.api.liveChannel(p.channelId, c)), [], { live: false, initial: known });
+  const first = fetched.data;
+  if (!first) {
+    if (fetched.error) {
+      const missing = (fetched.error as { status?: number }).status === 404;
+      return missing ? (
+        <Blackout title="This channel isn't here" message="It may have been hidden, or its source removed." />
+      ) : (
+        <Blackout title={failedTitle(fetched.error, "Live TV didn't load")} message={problem(fetched.error)} onRetry={fetched.reload} />
+      );
     }
     return (
       <div class="player live-player">
@@ -57,8 +59,7 @@ export function LivePlayerScreen(p: { channelId: number; pressedAt: number }) {
       </div>
     );
   }
-  if (!first.current) return <Blackout title="This channel isn't here" message="It may have been hidden, or its source removed." />;
-  return <LivePlayerView first={first.current} channels={channels} pressedAt={p.pressedAt} />;
+  return <LivePlayerView first={first} category={parseCategory(p.category)} pressedAt={p.pressedAt} />;
 }
 
 /** A message on black with Back (and Try again): the player had nothing to play. */
@@ -91,7 +92,7 @@ function Blackout(p: { title: string; message: string; onRetry?: () => void }) {
   );
 }
 
-function LivePlayerView(p: { first: LiveChannel; channels: LiveChannel[]; pressedAt: number }) {
+function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressedAt: number }) {
   const app = useApp();
   const ui = useUi();
   const host = useRef<HTMLDivElement>(null);
@@ -108,7 +109,9 @@ function LivePlayerView(p: { first: LiveChannel; channels: LiveChannel[]; presse
   const s = c.state.value;
   const clock = c.clock.value;
   const channel = s.channel;
-  const channels = p.channels.map((x) => (x.id === channel.id ? { ...x, ...channel } : x));
+  /** Channel up and down stay in this category; its order is the one it had as it opened (Recently watched changes with each channel). */
+  const [category, setCategory] = useState<LiveCategory>(p.category);
+  const zapPages = useMemo(() => new ChannelPages(ui.api, category, { frozen: true }), [categoryKey(category)]);
   const now = useNow(5_000);
   const hours24 = app.platform.clock24();
   const [controls, setControls] = useState(false);
@@ -129,6 +132,12 @@ function LivePlayerView(p: { first: LiveChannel; channels: LiveChannel[]; presse
       document.documentElement.classList.remove("playing");
     };
   }, []);
+
+  // Live TV opens back at the channel watched, in the category it was played in.
+  useEffect(() => {
+    app.keepLiveChannel(channel);
+    app.liveLastWatched = { id: channel.id, category: categoryKey(category) };
+  }, [channel.id, categoryKey(category)]);
 
   // The TV hides the app (Home, another app): watching ends on the server, and starts again from live when it shows.
   useEffect(() => {
@@ -209,17 +218,31 @@ function LivePlayerView(p: { first: LiveChannel; channels: LiveChannel[]; presse
     if (to.id !== channel.id || s.phase === "error") c.tune(to);
     else setBanner(true);
   };
-  const zap = (by: number) => tune(stepChannel(channels, channel.id, by));
+  // The channel before or after this one in the category, round its ends; one change at a time.
+  const zapping = useRef(false);
+  const zap = (by: number) => {
+    if (zapping.current) return;
+    zapping.current = true;
+    zapPages.neighbor(c.state.value.channel.id, by).then(
+      (next) => {
+        zapping.current = false;
+        tune(next);
+      },
+      () => {
+        zapping.current = false;
+        say("Couldn't find the next channel", true);
+      },
+    );
+  };
   const seek = (ms: number) => {
     if (!c.canSeek) return;
     c.seekBy(ms);
-    if (!controls) show("scrubber");
+    if (!controls) show(ms < 0 ? "back10" : "fwd10");
   };
   const toggleFavorite = () => {
     const on = !channel.favorite;
     ui.api.setLiveFavorite(channel.id, on).then(
       () => {
-        app.liveChannels = (app.liveChannels ?? []).map((x) => (x.id === channel.id ? { ...x, favorite: on } : x));
         c.state.value = { ...c.state.value, channel: { ...c.state.value.channel, favorite: on } };
         say(on ? `${channel.name} is a favourite` : `${channel.name} isn't a favourite any more`);
       },
@@ -227,10 +250,16 @@ function LivePlayerView(p: { first: LiveChannel; channels: LiveChannel[]; presse
     );
   };
 
+  // A channel's number: among every channel, as a remote's would.
   const digits = useNumberEntry((d) => {
-    const found = channelByNumber(channels, d);
-    if (found) tune(found);
-    else setMissing(d);
+    ui.api.liveBrowse({ category: "all", q: d, limit: 50 }).then(
+      (page) => {
+        const found = channelByNumber(page.channels, d);
+        if (found) tune(found);
+        else setMissing(d);
+      },
+      () => setMissing(d),
+    );
   }, !list);
 
   // The remote, in the title player's order: media keys, an error, the channel list, then the controls.
@@ -295,7 +324,6 @@ function LivePlayerView(p: { first: LiveChannel; channels: LiveChannel[]; presse
       }
       return false;
     }
-    const focused = ui.focus.current?.getAttribute("data-fid") ?? null;
     if (!controls) {
       if (key === "ok") {
         if (down) show("playpause");
@@ -325,21 +353,6 @@ function LivePlayerView(p: { first: LiveChannel; channels: LiveChannel[]; presse
         focusFid("video");
       }
       return true;
-    }
-    if (focused === "scrubber") {
-      if (key === "left" || key === "right") {
-        if (e.type === "down") seek((key === "right" ? 1 : -1) * (e.repeat ? 3 * STEP_MS : STEP_MS));
-        return true;
-      }
-      if (key === "ok") {
-        if (down) c.togglePause();
-        return true;
-      }
-      if (key === "down") {
-        if (e.type === "down") focusFid("playpause");
-        return true;
-      }
-      if (key === "up") return true;
     }
     return false;
   };
@@ -376,6 +389,7 @@ function LivePlayerView(p: { first: LiveChannel; channels: LiveChannel[]; presse
   const atLive = !clock.window || clock.behindMs < LIVE_WITHIN_MS;
   const trouble = s.phase === "error" ? s.trouble : null;
   const infoShown = (controls || banner) && !trouble && !(s.phase === "tuning" && !s.shown);
+  const name = channelName(channel, category);
   return (
     <div class="player live-player">
       <div
@@ -385,23 +399,19 @@ function LivePlayerView(p: { first: LiveChannel; channels: LiveChannel[]; presse
         class="engine-host"
       />
       <div class={`player-scrim${controls || infoShown ? " in" : ""}`} />
-      <F class="video-holder" fid="video" disabled={controls} label={`${channel.name}, live`} />
-      {s.phase === "tuning" && !s.shown && <TuningCard channel={channel} on={on} />}
-      {s.shown && s.audioOnly && !trouble && <RadioCard channel={channel} on={on} hours24={hours24} />}
+      <F class="video-holder" fid="video" disabled={controls} label={`${name}, live`} />
+      {s.phase === "tuning" && !s.shown && <TuningCard channel={channel} name={name} on={on} />}
+      {s.shown && s.audioOnly && !trouble && <RadioCard channel={channel} name={name} on={on} hours24={hours24} />}
       <div class={`live-info${infoShown ? " in" : ""}`} aria-hidden={!infoShown}>
-        <NowCard channel={channel} on={on} next={next} now={now} hours24={hours24} />
+        <NowCard channel={channel} name={name} on={on} next={next} now={now} hours24={hours24} />
       </div>
       <div class={`player-controls${controls ? " in" : ""}`} aria-hidden={!controls}>
         <div class="player-top">
           <div style="flex:1" />
           <div class="player-clock">
-            <div class="player-clock-row">
-              <LiveBadge atLive={atLive} behindMs={clock.behindMs} />
-              <TimeOfDay hours24={hours24} />
-            </div>
+            <TimeOfDay hours24={hours24} />
           </div>
         </div>
-        <LiveBar state={s} clock={clock} atLive={atLive} onSeek={(ms) => c.seekTo(ms)} />
         <G kind="row" class="player-row">
           <div class="row-left">
             <PlayerButton fid="channels" icon="list" label="Channels" onSelect={() => setList(true)} />
@@ -414,7 +424,7 @@ function LivePlayerView(p: { first: LiveChannel; channels: LiveChannel[]; presse
             {clock.window && <PlayerButton fid="fwd10" icon="rotate-cw" skipSeconds={STEP_MS / 1000} label="Forward 10 seconds" onSelect={() => seek(STEP_MS)} />}
           </div>
           <div class="row-right">
-            {!atLive && <PlayerButton fid="golive" icon="radio" label="Go live" onSelect={() => c.goLive()} />}
+            <LiveChip atLive={atLive} behindMs={clock.behindMs} onGoLive={() => c.goLive()} />
             <PlayerButton fid="chdown" icon="chevron-down" label="Previous channel" onSelect={() => zap(-1)} />
             <PlayerButton fid="chup" icon="chevron-up" label="Next channel" onSelect={() => zap(1)} />
           </div>
@@ -430,7 +440,7 @@ function LivePlayerView(p: { first: LiveChannel; channels: LiveChannel[]; presse
           <ChannelLogo channel={channel} width={128} height={72} />
           <div class="t-label c-muted" style="margin-top:12px">
             {channel.number && <span class="live-number">{channel.number}</span>}
-            {channel.name}
+            {name}
           </div>
           <div class="t-page c-fg" style="text-align:center;margin-top:16px">
             {trouble.title}
@@ -449,13 +459,13 @@ function LivePlayerView(p: { first: LiveChannel; channels: LiveChannel[]; presse
       )}
       {list && (
         <ChannelList
-          channels={channels}
+          category={category}
           current={channel.id}
           now={now}
-          hours24={hours24}
           onClose={() => setList(false)}
-          onTune={(to) => {
+          onTune={(to, inCategory) => {
             setList(false);
+            if (categoryKey(inCategory) !== categoryKey(category)) setCategory(inCategory);
             tune(to);
           }}
         />
@@ -466,18 +476,39 @@ function LivePlayerView(p: { first: LiveChannel; channels: LiveChannel[]; presse
   );
 }
 
-/** "LIVE" in red at the live edge, else how far behind it. */
-function LiveBadge(p: { atLive: boolean; behindMs: number }) {
+/**
+ * "LIVE" in red at the live edge; behind it, how far ("−0:42"), and OK
+ * goes back to live. It sits with the buttons: a live channel has no
+ * position bar.
+ */
+function LiveChip(p: { atLive: boolean; behindMs: number; onGoLive: () => void }) {
+  if (p.atLive) {
+    return (
+      <div class="live-chip-box">
+        <span class="live-badge t-badge at-live" aria-label="Live">
+          <span class="live-dot" />
+          LIVE
+        </span>
+      </div>
+    );
+  }
   return (
-    <span class={`live-badge t-badge${p.atLive ? " at-live" : ""}`}>
-      <span class="live-dot" />
-      {p.atLive ? "LIVE" : `−${behindText(p.behindMs)}`}
-    </span>
+    <div class="live-chip-box">
+      <F class="live-badge live-chip t-badge" fid="golive" label={`${behindText(p.behindMs)} behind live. Go live`} onSelect={p.onGoLive}>
+        <span class="live-dot" />
+        {`−${behindText(p.behindMs)}`}
+      </F>
+      <div class="pbtn-label t-caption" aria-hidden="true">
+        Go live
+      </div>
+    </div>
   );
 }
 
+type OnNow = ReturnType<typeof nowAndNext>["on"];
+
 /** The channel, what's on with its time and progress, and what's next. */
-function NowCard(p: { channel: LiveChannel; on: ReturnType<typeof nowAndNext>["on"]; next: ReturnType<typeof nowAndNext>["next"]; now: number; hours24: boolean }) {
+function NowCard(p: { channel: LiveChannel; name: string; on: OnNow; next: ReturnType<typeof nowAndNext>["next"]; now: number; hours24: boolean }) {
   const c = p.channel;
   return (
     <div class="live-now">
@@ -485,7 +516,7 @@ function NowCard(p: { channel: LiveChannel; on: ReturnType<typeof nowAndNext>["o
       <div class="live-now-text">
         <div class="t-label c-muted one-line">
           {c.number && <span class="live-number">{c.number}</span>}
-          {c.name}
+          {p.name}
         </div>
         {p.on ? (
           <>
@@ -508,19 +539,17 @@ function NowCard(p: { channel: LiveChannel; on: ReturnType<typeof nowAndNext>["o
   );
 }
 
-/** The channel being tuned: its logo and what's on, on black, with the ring. */
-function TuningCard(p: { channel: LiveChannel; on: ReturnType<typeof nowAndNext>["on"] }) {
+/** The channel being tuned: its logo, the spinner centred under it, and what's on, on black. */
+function TuningCard(p: { channel: LiveChannel; name: string; on: OnNow }) {
   return (
-    <div class="live-tuning" role="status" aria-label={`Tuning ${p.channel.name}`}>
-      <div style="position:relative">
-        <ChannelLogo channel={p.channel} width={192} height={108} showName />
-        <div class="live-tuning-ring">
-          <div />
-        </div>
+    <div class="live-tuning" role="status" aria-label={`Tuning ${p.name}`}>
+      <ChannelLogo channel={p.channel} width={192} height={108} showName />
+      <div class="live-tuning-ring">
+        <div />
       </div>
-      <div class="t-title c-fg" style="margin-top:24px">
+      <div class="t-title c-fg" style="margin-top:20px">
         {p.channel.number && <span class="live-number">{p.channel.number}</span>}
-        {p.channel.name}
+        {p.name}
       </div>
       <div class="t-label c-muted" style="margin-top:6px">
         {p.on ? p.on.title : "Tuning…"}
@@ -530,13 +559,13 @@ function TuningCard(p: { channel: LiveChannel; on: ReturnType<typeof nowAndNext>
 }
 
 /** A channel with sound and no picture: its logo and what's on, in place of the black. */
-function RadioCard(p: { channel: LiveChannel; on: ReturnType<typeof nowAndNext>["on"]; hours24: boolean }) {
+function RadioCard(p: { channel: LiveChannel; name: string; on: OnNow; hours24: boolean }) {
   return (
     <div class="live-radio" aria-hidden="true">
       <ChannelLogo channel={p.channel} width={240} height={135} showName />
       <div class="t-title c-fg" style="margin-top:20px">
         {p.channel.number && <span class="live-number">{p.channel.number}</span>}
-        {p.channel.name}
+        {p.name}
       </div>
       <div class="live-radio-line t-label c-muted">
         <Icon name="radio" size={18} />
@@ -546,136 +575,156 @@ function RadioCard(p: { channel: LiveChannel; on: ReturnType<typeof nowAndNext>[
   );
 }
 
-/**
- * The timeshift: the window that can be sought in (the server's minutes),
- * where it plays in it, how long it is and how far behind live. Left and
- * Right on it go 10 s; the pointer's click goes there.
- */
-function LiveBar(p: { state: LiveState; clock: { positionMs: number; window: { startMs: number; endMs: number } | null; behindMs: number }; atLive: boolean; onSeek: (ms: number) => void }) {
-  const ui = useUi();
-  const w = p.clock.window;
-  const span = w ? w.endMs - w.startMs : 0;
-  const frac = w && span > 0 ? Math.max(0, Math.min(1, (p.clock.positionMs - w.startMs) / span)) : 1;
-  const minutes = Math.round(span / 60_000);
-  const seekAt = (at: { clientX: number }) => {
-    if (!w) return;
-    p.onSeek(w.startMs + span * Math.max(0, Math.min(1, (at.clientX / ui.scale - BAR_LEFT) / BAR_WIDTH)));
-  };
-  return (
-    <>
-      <div class="player-times t-caption c-fg">
-        <span>{w && minutes >= 1 ? `−${minutes} min` : ""}</span>
-        <span class={p.atLive ? "c-fg" : "c-muted"}>{p.atLive ? "Live" : `${behindText(p.clock.behindMs)} behind live`}</span>
-      </div>
-      <F class="scrubber" fid="scrubber" label={p.atLive ? "Live" : `${behindText(p.clock.behindMs)} behind live`} onClick={seekAt}>
-        <div class="bar">
-          <div class="bar-buffered" style="width:100%" />
-          <div class="bar-played" style={`width:${frac * 100}%`} />
-        </div>
-        <div class="thumb" style={`left:${Math.max(6, Math.min(BAR_WIDTH - 6, frac * BAR_WIDTH))}px`} />
-      </F>
-    </>
-  );
-}
-
 /** A channel row's pitch in the list. */
 const LIST_PITCH = 60;
 /** Rows drawn either side of the focused one. */
 const LIST_DRAWN = 10;
 
 /**
- * The channel list over the picture (the web's ChannelPanel): every
- * channel, or the favourites, with what's on and how far it is; the one
- * playing first in focus. OK changes to the channel, Back closes it.
+ * The channel list over the picture (the web's ChannelPanel): a category's
+ * channels, a page at a time as they scroll, with what's on and how far it
+ * is; the one playing first in focus. Left opens the categories, to list
+ * another; OK changes to the channel (and channel up and down then stay in
+ * its category). Back closes it.
  */
-function ChannelList(p: { channels: LiveChannel[]; current: number; now: number; hours24: boolean; onClose: () => void; onTune: (c: LiveChannel) => void }) {
+function ChannelList(p: { category: LiveCategory; current: number; now: number; onClose: () => void; onTune: (c: LiveChannel, category: LiveCategory) => void }) {
   const ui = useUi();
   const trap = useTrap();
-  const [favorites, setFavorites] = useState(false);
-  const hasFavorites = p.channels.some((c) => c.favorite);
-  const shown = favorites ? p.channels.filter((c) => c.favorite) : p.channels;
-  const startAt = Math.max(0, shown.findIndex((c) => c.id === p.current));
-  const [at, setAt] = useState(startAt);
+  const [category, setCategory] = useState(p.category);
+  const pages = useMemo(() => new ChannelPages(ui.api, category), [categoryKey(category)]);
+  const total = pages.total.value ?? 0;
+  pages.version.value;
+  const [groups, setGroups] = useState<LiveGroups | null>(null);
+  const [cats, setCats] = useState(false);
+  const [at, setAt] = useState(0);
+  const [ready, setReady] = useState(false);
   const [inside, setInside] = useState(false);
+  const listBox = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const t = setTimeout(() => setInside(true), 16);
     const off = ui.input.push((key, e) => {
       if (key === "back") {
-        if (e.type === "down") p.onClose();
+        if (e.type === "down" && !e.repeat) p.onClose();
+        return true;
+      }
+      if (key === "left" && listBox.current?.contains(ui.focus.current)) {
+        if (e.type === "down" && !e.repeat) setCats(true);
         return true;
       }
       return false;
     });
+    void ui.api.liveGroups().then(setGroups, () => undefined);
     return () => {
       clearTimeout(t);
       off();
     };
   }, []);
-  // The list's top keeps the focused row at a third of its height.
-  const height = 540 - 120;
-  const shift = Math.max(0, Math.min(shown.length * LIST_PITCH - height, at * LIST_PITCH - height / 3));
-  const first = Math.max(0, at - LIST_DRAWN);
-  const last = Math.min(shown.length, at + LIST_DRAWN + 6);
-  const rows = [];
-  for (let i = first; i < last; i++) {
-    const ch = shown[i]!;
-    const { on } = nowAndNext(ch, p.now);
-    const playing = ch.id === p.current;
-    rows.push(
-      <F
-        key={ch.id}
-        class={`live-list-row${playing ? " current" : ""}`}
-        fid={`list/${ch.id}`}
-        initial={i === startAt}
-        label={`${ch.number ? `${ch.number} ` : ""}${ch.name}${on ? `, ${on.title}` : ""}${playing ? ", playing" : ""}`}
-        style={`top:${i * LIST_PITCH}px`}
-        onFocus={() => setAt(i)}
-        onSelect={() => p.onTune(ch)}
-      >
-        <span class="live-list-number t-label">{ch.number ?? ""}</span>
-        <ChannelLogo channel={ch} width={64} height={36} />
-        <div class="live-list-text">
-          <div class="live-list-name">
-            <span class="t-label one-line">{ch.name}</span>
-            {ch.favorite && <Icon name="star" size={12} class="live-star" />}
-          </div>
-          {on ? (
-            <>
-              <div class="t-caption one-line live-list-sub">{on.title}</div>
-              <ProgressLine fraction={programProgress(on, p.now)} />
-            </>
-          ) : (
-            <div class="t-caption one-line live-list-sub">{ch.has_guide ? "Nothing in the guide now" : "No guide"}</div>
-          )}
-        </div>
-        {playing && <Icon name="audio-lines" size={18} class="live-list-playing" />}
-      </F>,
+  // It opens on the channel playing (or the category's first, in another category).
+  useEffect(() => {
+    let live = true;
+    setReady(false);
+    pages.indexOf(p.current).then(
+      (index) => {
+        if (!live) return;
+        setAt(index ?? 0);
+        setReady(true);
+      },
+      () => live && setReady(true),
     );
+    return () => {
+      live = false;
+    };
+  }, [pages]);
+  const first = Math.max(0, at - LIST_DRAWN);
+  const last = Math.min(total, at + LIST_DRAWN + 6);
+  useEffect(() => pages.want(first, last), [first, last, pages]);
+  // The row focus was on was drawn anew (its page came): focus to it again.
+  useLayoutEffect(() => {
+    const current = ui.focus.current;
+    if (!ready || (current && current.isConnected && listBox.current?.contains(current)) || cats) return;
+    const el = listBox.current?.querySelector<HTMLElement>(`[data-fid="list/at${at}"]`);
+    if (el) ui.focus.focus(el);
+  });
+
+  const height = 540 - 120;
+  const shift = Math.max(0, Math.min(total * LIST_PITCH - height, at * LIST_PITCH - height / 3));
+  const rows = [];
+  if (ready) {
+    for (let i = first; i < last; i++) {
+      const ch = pages.at(i);
+      if (!ch) {
+        rows.push(
+          <F key={i} class="live-list-row loading" fid={`list/at${i}`} label="Loading" style={`top:${i * LIST_PITCH}px`} onFocus={() => setAt(i)}>
+            <span class="live-list-number" />
+            <div class="skeleton" style="width:64px;height:36px;border-radius:4px" />
+          </F>,
+        );
+        continue;
+      }
+      const { on } = nowAndNext(ch, p.now);
+      const playing = ch.id === p.current;
+      const name = channelName(ch, category);
+      rows.push(
+        <F
+          key={i}
+          class={`live-list-row${playing ? " current" : ""}`}
+          fid={`list/at${i}`}
+          label={`${ch.number ? `${ch.number} ` : ""}${name}${on ? `, ${on.title}` : ""}${playing ? ", playing" : ""}`}
+          style={`top:${i * LIST_PITCH}px`}
+          onFocus={() => setAt(i)}
+          onSelect={() => p.onTune(ch, category)}
+        >
+          <span class="live-list-number t-label">{ch.number ?? ""}</span>
+          <ChannelLogo channel={ch} width={64} height={36} />
+          <div class="live-list-text">
+            <div class="live-list-name">
+              <span class="t-label one-line">{name}</span>
+              {ch.favorite && <Icon name="star" size={12} class="live-star" />}
+            </div>
+            {on ? (
+              <>
+                <div class="t-caption one-line live-list-sub">{on.title}</div>
+                <ProgressLine fraction={programProgress(on, p.now)} />
+              </>
+            ) : (
+              <div class="t-caption one-line live-list-sub">{ch.has_guide ? "Nothing in the guide now" : "No guide"}</div>
+            )}
+          </div>
+          {playing && <Icon name="audio-lines" size={18} class="live-list-playing" />}
+        </F>,
+      );
+    }
   }
   return (
     <div ref={trap} class="panel-root" style="position:absolute;left:0;top:0;right:0;bottom:0;z-index:30" aria-label="Channels">
       <div class={`scrim${inside ? " in" : ""}`} onClick={p.onClose} />
       <div class={`side-panel wide live-list${inside ? " in" : ""}`}>
         <div class="live-list-head">
-          <div class="t-title c-fg">Channels</div>
-          {hasFavorites && (
-            <G kind="row" class="live-list-filter">
-              <F class={`tab t-label${!favorites ? " shown" : ""}`} fid="list/all" label="All channels" onSelect={() => (setFavorites(false), setAt(0))}>
-                <span>All</span>
-              </F>
-              <F class={`tab t-label${favorites ? " shown" : ""}`} fid="list/favorites" label="Favourites" onSelect={() => (setFavorites(true), setAt(0))}>
-                <span>Favourites</span>
-              </F>
-            </G>
-          )}
+          <div class="t-title c-fg one-line">{categoryName(category, groups?.groups)}</div>
+          <div class="t-caption c-muted live-list-hint">
+            <Icon name="chevron-left" size={14} />
+            <span>Categories</span>
+          </div>
         </div>
-        <div class="live-list-box">
-          <G kind="col" class="live-list-rows" style={`height:${shown.length * LIST_PITCH}px;transform:translateY(${-shift}px)`}>
+        <div ref={listBox} class="live-list-box">
+          <G kind="col" class="live-list-rows" style={`height:${total * LIST_PITCH}px;transform:translateY(${-shift}px)`}>
             {rows}
           </G>
-          {!shown.length && <div class="t-body c-muted" style="padding:16px">No favourites yet.</div>}
+          {ready && total === 0 && <div class="t-body c-muted" style="padding:16px">No channels here.</div>}
         </div>
       </div>
+      {cats && (
+        <CategoryPanel
+          groups={groups}
+          selected={category}
+          left={0}
+          onClose={() => setCats(false)}
+          onSelect={(next) => {
+            setCats(false);
+            setCategory(next);
+          }}
+        />
+      )}
     </div>
   );
 }

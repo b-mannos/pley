@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { LiveChannel, LiveProgram } from "../../api/types";
-import { airing, cellAt, formatGuideDay, formatSpan, formatTime, GUIDE_SPAN, guideCells, programProgress, SLOT, type GuideCell } from "../../live/data";
+import { airing, cellAt, channelName, formatGuideDay, formatSpan, formatTime, GUIDE_SPAN, guideCells, programProgress, SLOT, type GuideCell, type LiveCategory } from "../../live/data";
 import { GuideStore } from "../../live/guide";
+import type { ChannelPages } from "../../live/pages";
 import { useUi } from "../context";
 import type { Dir } from "../focus";
 import { F, G } from "../kit/focusable";
@@ -9,6 +10,7 @@ import { Icon } from "../kit/icons";
 import { memo } from "../kit/memo";
 import type { Entry } from "../shell/navigator";
 import { ChannelLogo, ProgramMarks } from "./live-kit";
+import type { Jump } from "./livetv";
 
 /** The guide's lines, in canvas px: the times' row, then a row a channel. */
 const HEAD_TOP = 132;
@@ -46,24 +48,32 @@ function slotOf(t: number): number {
  * now marked, two and a half hours in view. Up and Down keep the time
  * focus is at; Left and Right go programme by programme, the guide moving
  * through time as they leave what shows; rewind and fast-forward move it
- * two hours; Back goes back to now first. Only the rows near the screen
- * are drawn, and the guide is asked for in six-hour chunks as it moves.
+ * two hours; Back goes back to now first; Left from the channels opens
+ * the categories. Only the rows near the screen are drawn: their page of
+ * channels is asked for as they come, and the guide in six-hour chunks
+ * for those channels alone.
  */
 export function LiveGuide(p: {
   entry: Entry;
-  channels: LiveChannel[];
+  pages: ChannelPages;
+  category: LiveCategory;
   now: number;
-  jump: { id: number; n: number } | null;
+  /** The minute: the pages in view are asked for again as it changes. */
+  minute: number;
+  jump: Jump | null;
   hours24: boolean;
   onWatch: (c: LiveChannel) => void;
   onDetails: (c: LiveChannel, program: LiveProgram | null) => void;
+  onCategories: () => void;
   focusAbove: () => boolean;
   /** Bumped when the guide changed on the server. */
   version: number;
 }) {
   const ui = useUi();
   const entry = p.entry;
-  const channels = p.channels;
+  const pages = p.pages;
+  const total = pages.total.value ?? 0;
+  pages.version.value;
   // Where the guide opens: the half hour before the one now is in, so what's on shows whole.
   const origin = useMemo(() => slotOf(p.now) - SLOT, []);
   const maxFrom = origin + GUIDE_SPAN - slotOf(VIEW_SPAN);
@@ -71,7 +81,7 @@ export function LiveGuide(p: {
   const store = useMemo(() => new GuideStore(ui.api, origin), []);
   const saved = entry.state.guideFrom as number | undefined;
   const [viewFrom, setViewFromState] = useState(() => Math.max(origin, Math.min(maxFrom, saved ?? nowSlot())));
-  const [row, setRowState] = useState(() => Math.max(0, Math.min(channels.length - 1, (entry.state.guideRow as number | undefined) ?? 0)));
+  const [row, setRowState] = useState(() => Math.max(0, Math.min(Math.max(0, total - 1), (entry.state.guideRow as number | undefined) ?? 0)));
   const viewRef = useRef(viewFrom);
   viewRef.current = viewFrom;
   /** The time focus is at: Up and Down keep it. */
@@ -92,20 +102,28 @@ export function LiveGuide(p: {
 
   const drawFrom = Math.max(origin, viewFrom - DRAW_BEFORE);
   const drawTo = Math.min(origin + GUIDE_SPAN, viewFrom + VIEW_SPAN + DRAW_AFTER);
-  useEffect(() => store.want(drawFrom, drawTo), [drawFrom, drawTo]);
+  // Read for its changes: rows draw again as chunks come.
+  store.version.value;
+
+  const maxShift = Math.max(0, total * PITCH - (540 - ROWS_TOP - 12));
+  const shift = Math.max(0, Math.min(maxShift, (row - ROWS_ABOVE) * PITCH));
+  const firstRow = Math.max(0, Math.floor(shift / PITCH) - ROWS_DRAWN_ABOVE);
+  const lastRow = Math.min(total, Math.ceil(shift / PITCH) + ROWS_DRAWN_BELOW);
+  // The rows' channels, as their pages come; the guide is asked for those alone.
+  useEffect(() => pages.want(firstRow, lastRow), [firstRow, lastRow, pages, p.minute]);
+  const ids: number[] = [];
+  for (let i = firstRow; i < lastRow; i++) {
+    const c = pages.at(i);
+    if (c) ids.push(c.id);
+  }
+  const idsKey = ids.join(",");
+  useEffect(() => store.want(drawFrom, drawTo, ids), [drawFrom, drawTo, idsKey]);
   const firstVersion = useRef(p.version);
   useEffect(() => {
     if (p.version === firstVersion.current) return;
     store.forget();
-    store.want(drawFrom, drawTo);
+    store.want(drawFrom, drawTo, ids);
   }, [p.version]);
-  // Read for its changes: rows draw again as chunks come.
-  store.version.value;
-
-  const maxShift = Math.max(0, channels.length * PITCH - (540 - ROWS_TOP - 12));
-  const shift = Math.max(0, Math.min(maxShift, (row - ROWS_ABOVE) * PITCH));
-  const firstRow = Math.max(0, Math.floor(shift / PITCH) - ROWS_DRAWN_ABOVE);
-  const lastRow = Math.min(channels.length, Math.ceil(shift / PITCH) + ROWS_DRAWN_BELOW);
 
   const rowEl = (i: number) => document.querySelector<HTMLElement>(`.live-guide [data-row="${i}"]`)?.parentElement ?? null;
   /** The cell of a row at time `t` (`after`: the first that starts at it or later). */
@@ -129,12 +147,15 @@ export function LiveGuide(p: {
     const from = viewRef.current;
     const to = from + VIEW_SPAN;
     if (i !== row) setRow(i);
+    // Less than a quarter of an hour of it shows (or less than all of a shorter one): the guide moves to it.
+    const shows = Math.min(cell.stop, to) - Math.max(cell.start, from);
+    const hidden = shows < Math.min(SLOT / 2, cell.stop - cell.start);
     if (ui.focus.byPointer) {
       cursor.current = Math.max(cell.start, from);
-    } else if (cell.stop <= from + SLOT / 2) {
+    } else if (hidden && cell.start < from) {
       setViewFrom(slotOf(cell.start));
       cursor.current = Math.max(cell.start, slotOf(cell.start));
-    } else if (cell.start >= to - SLOT / 2) {
+    } else if (hidden) {
       setViewFrom(slotOf(cell.start) - SLOT);
       cursor.current = cell.start;
     } else {
@@ -152,8 +173,12 @@ export function LiveGuide(p: {
     if (inChannels.current) return el.querySelector<HTMLElement>(".guide-channel");
     return cellIn(el, cursor.current);
   };
-  // Right past the programmes drawn: the guide moves on, and focus to the next one.
+  // Right past the programmes drawn: the guide moves on, and focus to the next one. Left of the channels: the categories.
   const onRowEdge = (dir: Dir, from: HTMLElement): boolean => {
+    if (dir === "left" && from.classList.contains("guide-channel")) {
+      p.onCategories();
+      return true;
+    }
     if (dir !== "right") return false;
     const stop = Number(from.querySelector("[data-stop]")?.getAttribute("data-stop"));
     if (viewRef.current >= maxFrom) return true;
@@ -180,12 +205,10 @@ export function LiveGuide(p: {
     if (el) ui.focus.focus(el);
   });
 
-  // A channel's number typed: its row, at the time focus is at.
+  // A channel brought into view (its number typed, or back from the player): its row, at the time focus is at.
   useEffect(() => {
     if (!p.jump) return;
-    const at = channels.findIndex((c) => c.id === p.jump!.id);
-    if (at < 0) return;
-    setRow(at);
+    setRow(Math.max(0, Math.min(total - 1, p.jump.index)));
     pending.current = { at: Math.max(cursor.current, viewRef.current), after: false };
     inChannels.current = false;
   }, [p.jump?.n]);
@@ -211,7 +234,7 @@ export function LiveGuide(p: {
           case "channelDown": {
             if (!down) return true;
             const by = key === "channelDown" ? 6 : -6;
-            const to = Math.max(0, Math.min(channels.length - 1, rowRef.current + by));
+            const to = Math.max(0, Math.min(rowRef.current >= 0 ? totalRef.current - 1 : 0, rowRef.current + by));
             if (to !== rowRef.current) {
               setRow(to);
               pending.current = { at: cursor.current, after: false };
@@ -231,10 +254,12 @@ export function LiveGuide(p: {
             return false;
         }
       }),
-    [channels],
+    [],
   );
   const rowRef = useRef(row);
   rowRef.current = row;
+  const totalRef = useRef(total);
+  totalRef.current = total;
 
   const offset = (viewFrom - origin) * PX_PER_SEC;
   const nowX = (p.now - viewFrom) * PX_PER_SEC;
@@ -243,14 +268,15 @@ export function LiveGuide(p: {
   const nowMinute = Math.floor(p.now / 60) * 60;
   const rows = [];
   for (let i = firstRow; i < lastRow; i++) {
-    const c = channels[i]!;
+    const c = pages.at(i) ?? null;
     rows.push(
       <GuideRow
-        key={c.id}
+        key={i}
         channel={c}
+        name={c ? channelName(c, p.category) : ""}
         index={i}
-        programs={store.programs.get(c.id) ?? null}
-        loading={store.loading.value}
+        programs={c ? store.programs.get(c.id) ?? null : null}
+        loading={!c || !store.answered(c.id, viewFrom)}
         drawFrom={drawFrom}
         drawTo={drawTo}
         origin={origin}
@@ -295,11 +321,11 @@ export function LiveGuide(p: {
         )}
       </div>
       <div class="guide-body" style={`top:${ROWS_TOP}px`}>
-        <G kind="col" class="guide-rows" style={`transform:translateY(${-shift}px);height:${channels.length * PITCH}px`}>
+        <G kind="col" class="guide-rows" style={`transform:translateY(${-shift}px);height:${total * PITCH}px`}>
           {rows}
         </G>
         {nowX >= 0 && nowX <= PROGRAMS_W && (
-          <div class="guide-now-line" style={`left:${PROGRAMS_LEFT + nowX}px;height:${Math.max(0, channels.length * PITCH - 6 - shift)}px`} />
+          <div class="guide-now-line" style={`left:${PROGRAMS_LEFT + nowX}px;height:${Math.max(0, Math.min(total * PITCH - 6 - shift, 540 - ROWS_TOP))}px`} />
         )}
       </div>
     </div>
@@ -307,7 +333,10 @@ export function LiveGuide(p: {
 }
 
 interface RowProps {
-  channel: LiveChannel;
+  /** `null` until its page comes: the row holds its place, and focus can rest on it. */
+  channel: LiveChannel | null;
+  /** Its name as the category shows it (without the region its group says). */
+  name: string;
   index: number;
   programs: LiveProgram[] | null;
   loading: boolean;
@@ -344,24 +373,30 @@ const GuideRow = memo(function GuideRow(p: RowProps) {
       onEdge={(dir, from) => p.onRowEdge(dir, from)}
     >
       <span data-row={p.index} style="display:none" />
-      <F
-        class="guide-channel"
-        fid={`guide/${c.id}`}
-        label={`${c.number ? `${c.number} ` : ""}${c.name}. Watch`}
-        onFocus={() => p.onChannel(p.index)}
-        onSelect={() => p.onWatch(c)}
-        onLongSelect={() => p.onDetails(c, null)}
-        onMenu={() => p.onDetails(c, null)}
-      >
-        <ChannelLogo channel={c} width={64} height={36} class="guide-logo" />
-        <div class="guide-channel-text">
-          <div class="guide-channel-number t-caption">
-            {c.number ?? ""}
-            {c.favorite && <Icon name="star" size={12} class="live-star" />}
+      {c ? (
+        <F
+          class="guide-channel"
+          fid={`guide/${c.id}`}
+          label={`${c.number ? `${c.number} ` : ""}${p.name}. Watch`}
+          onFocus={() => p.onChannel(p.index)}
+          onSelect={() => p.onWatch(c)}
+          onLongSelect={() => p.onDetails(c, null)}
+          onMenu={() => p.onDetails(c, null)}
+        >
+          <ChannelLogo channel={c} width={64} height={36} class="guide-logo" />
+          <div class="guide-channel-text">
+            <div class="guide-channel-number t-caption">
+              {c.number ?? ""}
+              {c.favorite && <Icon name="star" size={12} class="live-star" />}
+            </div>
+            <div class="t-label one-line">{p.name}</div>
           </div>
-          <div class="t-label one-line">{c.name}</div>
-        </div>
-      </F>
+        </F>
+      ) : (
+        <F class="guide-channel loading" fid={`guide/at${p.index}`} label="Loading" onFocus={() => p.onChannel(p.index)}>
+          <div class="skeleton guide-logo" style="width:64px;height:36px" />
+        </F>
+      )}
       <div class="guide-cells">
         <div class="guide-track" style={`transform:translateX(${-viewLeft}px)`}>
           {cells.map((cell, i) => {
@@ -372,20 +407,21 @@ const GuideRow = memo(function GuideRow(p: RowProps) {
             const on = prog ? airing(prog, p.now + 30) : false;
             const past = cell.stop <= p.now;
             // A cell begun before the left edge keeps its words in view.
-            const indent = Math.max(0, Math.min(viewLeft - left, width - 72));
-            const label = prog ? `${prog.title}, ${formatSpan(prog, p.hours24)}${on ? ", on now" : ""}` : c.has_guide ? "No information for this time" : "No guide for this channel";
+            const indent = Math.max(0, Math.min(viewLeft - left, width - 44));
+            const noGuide = !!c && !c.has_guide;
+            const label = prog ? `${prog.title}, ${formatSpan(prog, p.hours24)}${on ? ", on now" : ""}` : !c ? "Loading" : noGuide ? `${p.name}, no guide` : "No information for this time";
             return (
               <F
-                key={cell.key}
+                key={c ? cell.key : `at/${cell.key}`}
                 class={`guide-cell${on ? " on" : ""}${past ? " past" : ""}${prog ? "" : " empty"}`}
-                fid={`guide/${c.id}/${cell.key}`}
+                fid={c ? `guide/${c.id}/${cell.key}` : `guide/at${p.index}/${cell.key}`}
                 initial={i === initial}
                 label={label}
                 style={`left:${left + 1}px;width:${width - 2}px`}
                 onFocus={() => p.onCell(p.index, cell)}
-                onSelect={() => (prog && !on ? p.onDetails(c, prog) : p.onWatch(c))}
-                onLongSelect={() => p.onDetails(c, prog)}
-                onMenu={() => p.onDetails(c, prog)}
+                onSelect={() => c && (prog && !on ? p.onDetails(c, prog) : p.onWatch(c))}
+                onLongSelect={() => c && p.onDetails(c, prog)}
+                onMenu={() => c && p.onDetails(c, prog)}
               >
                 <span data-start={cell.start} data-stop={cell.stop} style="display:none" />
                 {width > 30 && (
@@ -398,8 +434,14 @@ const GuideRow = memo(function GuideRow(p: RowProps) {
                         </div>
                         <div class="t-caption one-line guide-cell-sub">{formatSpan(prog, p.hours24)}</div>
                       </>
+                    ) : noGuide ? (
+                      // A channel without a guide shows its name across it, as the web's does.
+                      <>
+                        <div class="t-label one-line">{p.name}</div>
+                        <div class="t-caption one-line guide-cell-sub">No guide for this channel</div>
+                      </>
                     ) : (
-                      <div class="t-caption one-line guide-cell-sub">{p.loading && c.has_guide ? "" : c.has_guide ? "No information" : "No guide for this channel"}</div>
+                      <div class="t-caption one-line guide-cell-sub">{p.loading ? "" : "No information"}</div>
                     )}
                   </div>
                 )}

@@ -5,6 +5,7 @@ import type { LiveChannel, LiveGuide as Guide, LiveProgram } from "../../src/api
 import { FocusManager } from "../../src/ui/focus";
 import { Input } from "../../src/ui/input";
 import { UiContext, type Ui } from "../../src/ui/context";
+import { ChannelPages } from "../../src/live/pages";
 import { LiveGuide } from "../../src/ui/screens/live-guide";
 import type { Entry } from "../../src/ui/shell/navigator";
 
@@ -33,37 +34,45 @@ async function setup() {
   focus.setPage(root);
   const input = new Input(focus);
   const asked: string[] = [];
+  const channels = [channel(1), channel(2), channel(3, false)];
   const api = {
-    liveGuide: (from: number, to: number): Promise<Guide> => {
-      asked.push(`${from - BASE}..${to - BASE}`);
+    liveGuide: (from: number, to: number, ids: number[]): Promise<Guide> => {
+      asked.push(`${from - BASE}..${to - BASE}: ${ids.join(",")}`);
       return Promise.resolve({ from, to, programs: PROGRAMS });
     },
+    liveBrowse: () => Promise.resolve({ total: channels.length, offset: 0, channels }),
   };
+  const pages = new ChannelPages(api, { kind: "all" });
   const ui = { focus, input, api, scale: 2, claim: () => undefined, toRail: () => false } as unknown as Ui;
   const entry: Entry = { key: { name: "live" }, id: 1, memory: null, state: {} };
   const watched: number[] = [];
   const details: (string | null)[] = [];
-  act(() =>
-    render(
-      <UiContext.Provider value={ui}>
-        <LiveGuide
-          entry={entry}
-          channels={[channel(1), channel(2), channel(3, false)]}
-          now={BASE + 900}
-          jump={null}
-          hours24
-          onWatch={(c) => watched.push(c.id)}
-          onDetails={(_c, p) => details.push(p ? p.title : null)}
-          focusAbove={() => false}
-          version={0}
-        />
-      </UiContext.Provider>,
-      root,
-    ),
+  let categories = 0;
+  const page = (jump: { index: number; n: number } | null) => (
+    <UiContext.Provider value={ui}>
+      <LiveGuide
+        entry={entry}
+        pages={pages}
+        category={{ kind: "all" }}
+        now={BASE + 900}
+        minute={0}
+        jump={jump}
+        hours24
+        onWatch={(c) => watched.push(c.id)}
+        onDetails={(_c, p) => details.push(p ? p.title : null)}
+        onCategories={() => categories++}
+        focusAbove={() => false}
+        version={0}
+      />
+    </UiContext.Provider>
   );
-  await act(async () => {
-    await Promise.resolve();
-  });
+  act(() => render(page(null), root));
+  // The page of channels, then their guide.
+  for (let i = 0; i < 3; i++) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+  }
   const el = (fid: string) => root.querySelector<HTMLElement>(`[data-fid="${fid}"]`);
   const press = (key: "left" | "right" | "up" | "down" | "ok") =>
     act(() => {
@@ -71,7 +80,7 @@ async function setup() {
       input.dispatch(key, "up", false);
     });
   const at = () => focus.current?.getAttribute("data-fid");
-  return { focus, el, press, at, asked, watched, details, entry };
+  return { focus, el, press, at, asked, watched, details, entry, categories: () => categories, jump: (index: number) => act(() => render(page({ index, n: Date.now() }), root)) };
 }
 
 beforeEach(() => {
@@ -85,7 +94,20 @@ afterEach(() => {
 describe("the guide", () => {
   it("asks for its chunks from half an hour before now", async () => {
     const { asked } = await setup();
-    expect(asked[0]).toBe("-1800..19800");
+    // Only the channels shown are asked for.
+    expect(asked[0]).toBe("-1800..19800: 1,2,3");
+  });
+
+  it("opens the categories from the channels' column, and brings a channel asked for into view", async () => {
+    const { focus, el, press, at, categories, jump } = await setup();
+    act(() => void focus.focus(el("guide/1")));
+    press("left");
+    expect(categories()).toBe(1);
+    jump(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(at()).toMatch(/^guide\/3\//);
   });
 
   it("moves programme by programme, and keeps the time focus is at between channels", async () => {

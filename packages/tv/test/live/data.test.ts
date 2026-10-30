@@ -2,20 +2,19 @@ import { describe, expect, it } from "vitest";
 import type { LiveChannel, LiveProgram } from "../../src/api/types";
 import {
   behindText,
+  categoryKey,
+  categoryName,
   cellAt,
   channelByNumber,
+  channelName,
   chunkStarts,
-  effectiveFilter,
-  filterChannels,
   GUIDE_CHUNK,
-  groupsOf,
+  groupTree,
   guideCells,
   mergeGuide,
   nowAndNext,
-  parseFilter,
-  filterKey,
-  recentChannels,
-  stepChannel,
+  parseCategory,
+  splitRegion,
   timeLeft,
 } from "../../src/live/data";
 
@@ -60,40 +59,40 @@ describe("what's on", () => {
   });
 });
 
-describe("filters", () => {
-  const list = [channel(1, { group: "News" }), channel(2, { group: "Sport", favorite: true }), channel(3, { group: "News" }), channel(4, { group: "" })];
+describe("categories", () => {
+  const group = (name: string, region: string | null, label: string, count: number) => ({ name, region, label, count });
+  const groups = [group("UK| Sport", "UK", "Sport", 40), group("News", null, "News", 2), group("UK| News", "UK", "News", 10), group("FR| Films", "FR", "Films", 7)];
 
-  it("lists the groups in their order with their counts, the ungrouped left out", () => {
-    expect(groupsOf(list)).toEqual([
-      { name: "News", count: 2 },
-      { name: "Sport", count: 1 },
-    ]);
+  it("round-trip through their keys", () => {
+    for (const c of [{ kind: "all" }, { kind: "favorites" }, { kind: "recent" }, { kind: "group", group: "UK| Sport" }] as const) expect(parseCategory(categoryKey(c))).toEqual(c);
+    expect(parseCategory(null)).toEqual({ kind: "all" });
   });
 
-  it("round-trips a filter through its key, and falls back to every channel when its group or favourites went", () => {
-    for (const f of [{ kind: "all" }, { kind: "favorites" }, { kind: "group", group: "News: UK" }] as const) expect(parseFilter(filterKey(f))).toEqual(f);
-    expect(parseFilter(null)).toEqual({ kind: "all" });
-    expect(effectiveFilter({ kind: "group", group: "Films" }, list)).toEqual({ kind: "all" });
-    expect(effectiveFilter({ kind: "favorites" }, [channel(1)])).toEqual({ kind: "all" });
-    expect(filterChannels(list, { kind: "favorites" }).map((c) => c.id)).toEqual([2]);
-    expect(filterChannels(list, { kind: "group", group: "News" }).map((c) => c.id)).toEqual([1, 3]);
+  it("gather a region's groups under it, a region of one staying a group, in the provider's order", () => {
+    const tree = groupTree(groups);
+    expect(tree.map((e) => (e.kind === "group" ? e.group.name : `${e.region} (${e.groups.length}, ${e.count})`))).toEqual(["UK (2, 50)", "News", "FR| Films"]);
   });
 
-  it("keeps the channels watched last that are still here, newest first", () => {
-    expect(recentChannels(list, [3, 9, 1, 2], 2).map((c) => c.id)).toEqual([3, 1]);
+  it("are named as the web names them", () => {
+    expect(categoryName({ kind: "group", group: "UK| Sport" }, groups)).toBe("UK · Sport");
+    expect(categoryName({ kind: "group", group: "News" }, groups)).toBe("News");
+    expect(categoryName({ kind: "recent" }, groups)).toBe("Recently watched");
+    expect(categoryName({ kind: "group", group: "Gone" }, null)).toBe("Gone");
+  });
+
+  it("leave out of a channel's name, in a group, the region the group already says", () => {
+    const sport = { kind: "group", group: "UK| Sport" } as const;
+    expect(channelName({ name: "UK| Sky Sports 1", group: "UK| Sport" }, sport)).toBe("Sky Sports 1");
+    expect(channelName({ name: "[UK] Sky Sports 1", group: "UK| Sport" }, sport)).toBe("Sky Sports 1");
+    // Another region, or not in a group: the name as it is.
+    expect(channelName({ name: "AR| Sport 01", group: "BEE| Sport" }, { kind: "group", group: "BEE| Sport" })).toBe("AR| Sport 01");
+    expect(channelName({ name: "UK| Sky Sports 1", group: "UK| Sport" }, { kind: "all" })).toBe("UK| Sky Sports 1");
+    expect(splitRegion("UK: Sport")).toEqual(["UK", "Sport"]);
+    expect(splitRegion("Sport")).toBeNull();
   });
 });
 
 describe("changing channels", () => {
-  const list = [channel(1), channel(2), channel(3)];
-
-  it("goes round the ends", () => {
-    expect(stepChannel(list, 3, 1)?.id).toBe(1);
-    expect(stepChannel(list, 1, -1)?.id).toBe(3);
-    expect(stepChannel(list, 2, 1)?.id).toBe(3);
-    expect(stepChannel([], 1, 1)).toBeNull();
-  });
-
   it("finds a number typed, with or without its leading zeros", () => {
     const numbered = [channel(1, { number: "007" }), channel(2, { number: "101" }), channel(3, { number: "1.1" })];
     expect(channelByNumber(numbered, "101")?.id).toBe(2);

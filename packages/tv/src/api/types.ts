@@ -469,6 +469,32 @@ export interface LiveChannel {
   next: LiveProgram | null;
 }
 
+/** A group of channels as the provider names it. */
+export interface LiveGroup {
+  name: string;
+  /** The region its name begins with ("UK" of "UK| Sport"). */
+  region: string | null;
+  /** The name without its region ("Sport"). */
+  label: string;
+  count: number;
+}
+
+/** `GET /api/live/groups`: the groups in the lineup's order, and how many channels in all, marked and watched lately. */
+export interface LiveGroups {
+  total: number;
+  favorites: number;
+  recent: number;
+  groups: LiveGroup[];
+}
+
+/** `GET /api/live/browse`: a page of a category's channels. */
+export interface LiveChannelPage {
+  /** Channels in the whole list. */
+  total: number;
+  offset: number;
+  channels: LiveChannel[];
+}
+
 /** `GET /api/live/guide`: programmes by channel id, between `from` and `to`. */
 export interface LiveGuide {
   from: Timestamp;

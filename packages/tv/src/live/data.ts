@@ -1,4 +1,4 @@
-import type { LiveChannel, LiveGuide, LiveProgram } from "../api/types";
+import type { LiveChannel, LiveGroup, LiveGuide, LiveProgram } from "../api/types";
 import { formatTimeOfDay } from "../format/format";
 
 /**
@@ -86,69 +86,91 @@ export function channelTitle(c: Pick<LiveChannel, "number" | "name">): string {
   return c.number ? `${c.number} ${c.name}` : c.name;
 }
 
-// ---- filters
+// ---- categories
 
-export type ChannelFilter = { kind: "all" } | { kind: "favorites" } | { kind: "group"; group: string };
+/** Which channels a list has: the marked ones, every one, or a group's (the web's LiveCategory). */
+export type LiveCategory = { kind: "all" } | { kind: "favorites" } | { kind: "recent" } | { kind: "group"; group: string };
 
-export function filterKey(f: ChannelFilter): string {
-  return f.kind === "group" ? `group:${f.group}` : f.kind;
+/** Channels asked for at once. */
+export const CHANNEL_PAGE = 100;
+
+/** "all", "favorites", "recent" or "group:<name>": kept on the TV and in a page's key. */
+export function categoryKey(c: LiveCategory): string {
+  return c.kind === "group" ? `group:${c.group}` : c.kind;
 }
 
-export function parseFilter(key: string | null): ChannelFilter {
-  if (key === "favorites") return { kind: "favorites" };
+export function parseCategory(key: string | null | undefined): LiveCategory {
+  if (key === "favorites" || key === "recent") return { kind: key };
   if (key && key.indexOf("group:") === 0) return { kind: "group", group: key.slice(6) };
   return { kind: "all" };
 }
 
-/** The groups channels are in, in their order, with how many each has. */
-export function groupsOf(channels: LiveChannel[]): { name: string; count: number }[] {
-  const out: { name: string; count: number }[] = [];
-  const at: Record<string, number> = {};
-  for (const c of channels) {
-    if (!c.group) continue;
-    const i = at[c.group];
-    if (i === undefined) {
-      at[c.group] = out.length;
-      out.push({ name: c.group, count: 1 });
-    } else out[i]!.count++;
+/** A category's line in the list: a group, or a region's groups gathered under it. */
+export type CategoryEntry = { kind: "group"; group: LiveGroup } | { kind: "region"; region: string; groups: LiveGroup[]; count: number };
+
+/**
+ * Groups in the provider's order, those of a region ("UK| Sport", "UK|
+ * News"…) gathered under it, so hundreds of groups read as a few dozen.
+ * A region with one group stays a group (the web's groupTree).
+ */
+export function groupTree(groups: LiveGroup[]): CategoryEntry[] {
+  const byRegion: Record<string, LiveGroup[]> = {};
+  for (const g of groups) if (g.region) (byRegion[g.region] = byRegion[g.region] ?? []).push(g);
+  const out: CategoryEntry[] = [];
+  const placed: Record<string, true> = {};
+  for (const g of groups) {
+    const region = g.region ? byRegion[g.region]! : null;
+    if (!region || region.length < 2) out.push({ kind: "group", group: g });
+    else if (!placed[g.region!]) {
+      placed[g.region!] = true;
+      out.push({ kind: "region", region: g.region!, groups: region, count: region.reduce((n, x) => n + x.count, 0) });
+    }
   }
   return out;
 }
 
-/** The filter in force: one whose group went, or Favourites with none, shows every channel. */
-export function effectiveFilter(filter: ChannelFilter, channels: LiveChannel[]): ChannelFilter {
-  if (filter.kind === "group" && !channels.some((c) => c.group === filter.group)) return { kind: "all" };
-  if (filter.kind === "favorites" && !channels.some((c) => c.favorite)) return { kind: "all" };
-  return filter;
-}
-
-export function filterChannels(channels: LiveChannel[], filter: ChannelFilter): LiveChannel[] {
-  if (filter.kind === "favorites") return channels.filter((c) => c.favorite);
-  if (filter.kind === "group") return channels.filter((c) => c.group === filter.group);
-  return channels;
-}
-
-/** The channels watched last that are still here, newest first. */
-export function recentChannels(channels: LiveChannel[], recent: number[], max: number): LiveChannel[] {
-  const out: LiveChannel[] = [];
-  for (const id of recent) {
-    const c = channels.filter((x) => x.id === id)[0];
-    if (c) out.push(c);
-    if (out.length >= max) break;
+/** What a category is called: "Favourites", "UK · Sport". */
+export function categoryName(c: LiveCategory, groups: LiveGroup[] | null | undefined): string {
+  switch (c.kind) {
+    case "all":
+      return "All channels";
+    case "favorites":
+      return "Favourites";
+    case "recent":
+      return "Recently watched";
+    default: {
+      const g = (groups ?? []).filter((x) => x.name === c.group)[0];
+      return g?.region ? `${g.region} · ${g.label}` : g?.label ?? c.group;
+    }
   }
-  return out;
+}
+
+/**
+ * A name's region and the rest, when it begins with one the way providers
+ * write them ("UK| Sport", "[UK] Sport", "UK: Sport"), as the server splits
+ * group names.
+ */
+export function splitRegion(name: string): [string, string] | null {
+  const n = name.trim().replace(/^\|+\s*/, "");
+  const m = /^\[([^\]]{1,16})\]\s*(.+)$/.exec(n) ?? /^([^|]{1,16})\|\s*(.+)$/.exec(n) ?? /^([A-Z]{1,4}):\s*(.+)$/.exec(n);
+  if (!m) return null;
+  const rest = m[2]!.replace(/^[|:\-\s]+/, "").trim();
+  const region = m[1]!.trim();
+  return region && rest ? [region, rest] : null;
+}
+
+/**
+ * A channel's name as a list shows it: in a group, without the region its
+ * group already says ("Sky Sports 1" in UK · Sport, not "UK| Sky Sports 1").
+ */
+export function channelName(c: Pick<LiveChannel, "name" | "group">, category?: LiveCategory): string {
+  if (!category || category.kind !== "group") return c.name;
+  const name = splitRegion(c.name);
+  const group = splitRegion(c.group);
+  return name && group && name[0].toLowerCase() === group[0].toLowerCase() ? name[1] : c.name;
 }
 
 // ---- changing channels
-
-/** The channel `by` places from `id` in `list`, round the end; `null` with no list. */
-export function stepChannel(list: LiveChannel[], id: number, by: number): LiveChannel | null {
-  if (!list.length) return null;
-  const at = list.findIndex((c) => c.id === id);
-  if (at < 0) return list[0]!;
-  const n = list.length;
-  return list[(((at + by) % n) + n) % n]!;
-}
 
 /** The channel numbered `digits` ("7" finds "007" too); `null` when none is. */
 export function channelByNumber(list: LiveChannel[], digits: string): LiveChannel | null {

@@ -348,29 +348,44 @@ Live TV after Home when `GET /api/live` says `available` (kept on the TV,
 so it shows at launch); sources, the lineup and the options stay in Pley on
 the web, as the TVs' other administration does.
 
-- **The page:** Guide or Channels (kept on the TV), All, Favourites and a
-  Groups panel. The guide shows two and a half hours, four px a minute,
-  with now marked; Up and Down keep the time focus is at, Left and Right
-  go programme by programme and move the guide through time, rewind and
-  fast-forward (or Previous and Next) move it two hours, CH+ and CH− a
-  screen of channels, and Back comes back to now before it goes to the
-  rail. It is asked for in six-hour chunks as it moves; only the rows near
-  the screen are drawn. OK on what's on watches the channel; on anything
-  else (or a long OK, or the menu key) it opens the programme's details,
-  with Watch and the channel's favourite. Channels shows cards with what's
-  on, its progress and what's next, the ones watched last first. Typing a
-  channel's number goes to it.
+- **The page:** a category of channels at a time, as TiviMate shows them,
+  in the Guide or as Channels (both kept on the TV). Left from the
+  channels opens the categories: Favourites, Recently watched, All
+  channels, then the provider's groups, those of a region ("UK| Sport")
+  gathered under it (OK opens a region; a region of one group stays a
+  group). In a group, channel names leave out the region it says. The
+  channels come a page of 100 at a time (`GET /api/live/browse`) as they
+  scroll into view, and the guide only for the rows drawn (`ids`), so a
+  lineup of tens of thousands opens at once. The guide shows two and a
+  half hours, four px a minute, with now marked; Up and Down keep the time
+  focus is at, Left and Right go programme by programme and move the guide
+  through time, rewind and fast-forward (or Previous and Next) move it two
+  hours, CH+ and CH− a screen of channels, and Back comes back to now
+  before it goes to the rail. OK on what's on watches the channel; on
+  anything else (or a long OK, or the menu key) it opens the programme's
+  details, with Watch and the channel's favourite. A channel without a
+  guide shows its name across it. Channels shows cards with what's on, its
+  progress and what's next. Typing a channel's number goes to it, in the
+  category shown, else among every channel. Back from the player lands on
+  the channel watched last, in the category it was played in.
 - **The player:** `POST …/watch` with this TV's id (`pley.installId`), so
   changing channels holds one connection, and `keyed_urls`, so AVPlay and
   LG's pipeline play the playlist without the token. The app waits for the
   playlist (the server answers once the channel's first segments are
   made), then plays it from its live edge (LG: no `playTime` in the
   `mediaOption`). Up and Down, CH+ and CH−, Previous and Next change
-  channels; digits tune by number; OK shows the controls (the channel list,
-  favourite, back and forward 10 s, Play/Pause, Go live, channel down and
-  up); the menu key (and Samsung's CH LIST) opens the channel list; Info
-  shows what's on. A banner says what's on for 5 s at each channel; LIVE
-  turns grey with how far behind once paused or rewound. Pause and rewind
+  channels within the category it was opened from, round its ends (the
+  page `around` the channel, and the one before or after at its edges);
+  digits tune by number among every channel; OK shows the controls (the
+  channel list, favourite, back and forward 10 s, Play/Pause, Live or how
+  far behind it, channel down and up). A live channel has no position
+  bar: Live sits with the buttons, and behind live it is the button that
+  goes back. The menu key (and Samsung's CH LIST) opens the channel list,
+  a page at a time as it scrolls, open at the channel playing; Left in it
+  opens the categories, to list another (changing to one of its channels
+  makes CH+ and CH− follow it). Info shows what's on. A banner says what's
+  on for 5 s at each channel; tuning shows the channel's logo with the
+  spinner centred under it. Pause and rewind
   stay within the server's timeshift window, as the engine reports it
   (`video.seekable` on LG, AVPlay's `GET_LIVE_DURATION`); without one, the
   10 s buttons hide. Paused, the playlist is asked for every 20 s, as the

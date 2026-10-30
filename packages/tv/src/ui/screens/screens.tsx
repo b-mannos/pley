@@ -96,7 +96,7 @@ export function Screen(p: { entry: Entry; state: AppState }) {
       page = <LiveTvScreen entry={p.entry} />;
       break;
     case "livePlayer":
-      page = <LivePlayerScreen channelId={key.channelId} pressedAt={key.pressedAt} />;
+      page = <LivePlayerScreen channelId={key.channelId} category={key.category} pressedAt={key.pressedAt} />;
       break;
   }
   return <AppContext.Provider value={p.state}>{page}</AppContext.Provider>;

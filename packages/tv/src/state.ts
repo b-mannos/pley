@@ -105,8 +105,10 @@ export class AppState {
   readonly live = signal<LiveSummary | null>(null);
   /** Bumped when Live TV's channels or guide change on the server: its pages ask again. */
   readonly liveChanges = signal(0);
-  /** Live TV's channels as last fetched: the player starts with them, and its channel list shows them before it asks again. */
-  liveChannels: LiveChannel[] | null = null;
+  /** The live channel watched last in this launch, and the category it was in: Live TV opens back at it. */
+  liveLastWatched: { id: number; category: string } | null = null;
+  /** Live channels the pages showed lately, so the player starts with one without asking. */
+  private readonly liveKnown = new Map<number, LiveChannel>();
   readonly profiles = signal<HouseholdProfile[] | null>(null);
   readonly settings = signal<Settings>(DEFAULT_SETTINGS);
   readonly home = signal<Hub[] | null>(null);
@@ -311,7 +313,7 @@ export class AppState {
     this.items.clear();
     this.me.value = null;
     this.live.value = null;
-    this.liveChannels = null;
+    this.forgetLive();
     await this.loadAccount();
     void this.loadHome();
   }
@@ -352,7 +354,7 @@ export class AppState {
     this.me.value = null;
     this.libraries.value = null;
     this.live.value = null;
-    this.liveChannels = null;
+    this.forgetLive();
     this.profiles.value = null;
     this.offline.value = false;
     this.offlineNotice.value = false;
@@ -438,6 +440,23 @@ export class AppState {
     this.live.value = summary;
     if (summary) this.store.set(LIVE_KEY, JSON.stringify(summary));
     else this.store.remove(LIVE_KEY);
+  }
+
+  /** Live channels a page showed: the player starts with one of them at once. The 500 seen last are kept. */
+  keepLiveChannel(c: LiveChannel): void {
+    this.liveKnown.delete(c.id);
+    this.liveKnown.set(c.id, c);
+    if (this.liveKnown.size > 500) this.liveKnown.delete(this.liveKnown.keys().next().value!);
+  }
+
+  knownLiveChannel(id: number): LiveChannel | null {
+    return this.liveKnown.get(id) ?? null;
+  }
+
+  /** Another profile, sign-in or server: its Live TV goes. */
+  private forgetLive(): void {
+    this.liveKnown.clear();
+    this.liveLastWatched = null;
   }
 
   private keepLibraries(libraries: Library[]): void {

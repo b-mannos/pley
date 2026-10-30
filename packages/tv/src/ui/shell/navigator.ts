@@ -32,8 +32,8 @@ export type PageKey =
   | { name: "player"; request: PlayRequest; pressedAt: number }
   /** Live TV: the guide, or the channels as cards. */
   | { name: "live" }
-  /** A live channel playing (and the ones changed to from it). */
-  | { name: "livePlayer"; channelId: number; pressedAt: number };
+  /** A live channel playing; channel up and down stay in `category` ("all", "favorites", "recent", "group:<name>"). */
+  | { name: "livePlayer"; channelId: number; category: string; pressedAt: number };
 
 export type LibraryTab = "recommended" | "library" | "collections";
 
