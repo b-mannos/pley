@@ -163,6 +163,61 @@ shows it after Home, remembered on the TV so it shows at launch. On these TVs:
   (`GET /api/live/sessions/{id}/plan`) and shows its words; a stall of 20 s
   is a failure.
 
+### Requests
+
+Where the server takes requests ([API.md](API.md#requests)), the rail has
+Discover after Home for a profile that may ask, else Your requests
+(Requests, for administrators) for one with requests to see. Its number
+is what has news since the profile last looked, and for administrators
+also what waits for them, in red while some failed.
+
+- **What the profile may do:** `GET /api/requests/summary` at start, on
+  reconnecting and 1 s after a burst of request events, kept on the TV
+  (`pley.requests`) so the rail has its entry before the server answers.
+  A `404` (an older server) or `403` leaves requests out until the app
+  reconnects. Sign-in asks for `requests approvals` only where the server
+  lists them (`scopes_supported`); with a sign-in from before, Discover
+  says "Sign in again to ask for movies and shows".
+- **Live:** pages showing a title hear of its events 300 ms after the
+  last; while the event stream is down the summary is asked every minute,
+  and the pages when it moved. What became ready to watch pops up once
+  (`pley.requestNews.<server>.<profile>`), with the title's poster, Open
+  and Close, for 10 s; it waits while a video plays (the last three).
+  What came while the app wasn't listening (before it started, while the
+  event stream was down) is found among the 20 newest unseen requests.
+  Other news shows only as the number and in the lists.
+- **Discover:** a hero for the first trending title, then Trending this
+  week, Popular movies, Popular shows, Coming to cinemas and Popular
+  anime, each loaded as it comes near the screen, then Your requests.
+  Search at the top asks TMDB 400 ms after typing stops. Posters say In
+  library, Partly in library, Requested or Declined.
+- **A title's page:** backdrop, poster, facts, cast and seasons with their
+  state, and one main action: Request, Request more seasons, Tell me too,
+  Open (in a library), or why not (declined, with when it may be asked
+  again; the limit, with when it frees up; no access). Requested and
+  Following show the stage of the request beside them, with a download's
+  progress. A show's seasons are ticked in a panel beside the page; those
+  in a library or declined can't be.
+- **Requests:** tabs (Needs attention first for administrators, then All,
+  Pending, Approved, Available, Declined, Failed), administrators'
+  filters (movies or shows, a person, a title's words) and cards with
+  poster, seasons, stage, who asked and when. OK on a card opens what may
+  be done:
+  Withdraw, Stop following, Approve, Decline, Decline with a reason… (the
+  TV's keyboard), Mark as added by hand, Delete, Try again, Request
+  again. Approve is plain: the settings' profile and folder, the seasons
+  asked.
+- **Search:** under the libraries' results, On TMDB for a profile that
+  may ask, asked beside them so they never wait for it, with See all on
+  Discover. A movie's or show's page in a library shows its request's
+  stage, and Request more seasons for a show missing some.
+- **Answers:** a `503` with pley's `{ code }` is an answer, never the
+  server being away: "TMDB isn't answering" with Retry, "TMDB refused this
+  server's key", "Requests are off". The app writes "in 3 days" and
+  "yesterday" itself, as the TVs' engines have no
+  `Intl.RelativeTimeFormat`. Settings → About says the app uses the TMDB
+  API.
+
 ## Building and testing
 
 ### Commands
@@ -209,7 +264,8 @@ bun run --cwd apps/webos build       # only an app's dist/ (apps/tizen too); --d
 | Path | What |
 |---|---|
 | `api/`, `net/`, `auth/` | HTTP API, event stream, server discovery, sign-in with a code, profiles and PINs |
-| `state.ts`, `platform.ts` | What the TV keeps (servers, sign-ins, settings, a per-install id); what a shell provides |
+| `state.ts`, `platform.ts` | What the TV keeps (servers, sign-ins, settings, a per-install id, what requests are for the profile); what a shell provides |
+| `requests.ts` | Requests' words and rules: badges, a title's one main action, the season picker, stages, what may be done to a request, the server's answers |
 | `ui/focus.ts`, `ui/input.ts`, `ui/keys.ts` | Focus, remote keys, LG's Magic Remote pointer and wheel |
 | `ui/shell/`, `ui/screens/`, `ui/kit/` | The rail, back stack and screens |
 | `player/` | Playback: the play request, recovery, quality, Up Next, skip markers, seek previews, sleep timer, reports, music |

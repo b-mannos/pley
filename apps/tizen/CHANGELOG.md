@@ -31,6 +31,18 @@ describes how they are made.
   instead" where one may be taken over; a connection taken from the TV
   says who took it. The app's search finds channels too, in a Live TV
   row. Needs a server that gives the TV's player keyed live addresses.
+- Requests, on a server that has them turned on. Discover, in the rail,
+  shows what is trending and popular on TMDB, coming to cinemas, and
+  anime, each title marked with what the libraries have, and searches
+  TMDB. A title's page asks for a movie, or for a show's seasons picked
+  in a panel beside it, and says where its request is. Your requests
+  follows them, and a notice pops up once one is ready to watch;
+  administrators get Requests, opening on those that need attention, to
+  approve, decline (with a reason typed on the TV's keyboard), mark as
+  added by hand or delete. A number on the rail counts what needs
+  attention or has news. Search lists what TMDB has under On TMDB, and a
+  movie's or show's page in a library shows its request's stage, with
+  Request more seasons for a show missing some.
 
 ### Changed
 
@@ -40,6 +52,10 @@ describes how they are made.
 
 ### Fixed
 
+- A server answering that it can't do something right now (the
+  transcoder isn't running, a file can't be read) has its own message
+  shown, instead of "Can't reach your server", and the TV neither goes
+  offline nor reconnects for it.
 - Picture subtitles the server is still copying out of a big file show
   as far as they are, without a picture cut in two.
 - Switching to another server no longer shows the last server's Home,
