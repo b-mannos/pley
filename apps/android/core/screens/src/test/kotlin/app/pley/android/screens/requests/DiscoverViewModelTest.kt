@@ -169,6 +169,17 @@ class DiscoverViewModelTest {
         other.heroAction()
         advanceUntilIdle()
         assertEquals(RequestEvent.Open(PleyKey.DiscoverTitle(TitleKind.Show, 95396, pick = true)), opened.single())
+
+        // Partly in a library: Open goes to what the library has.
+        val partly = trending.results.first { it.tmdbId == 95396L }
+        requests.pages = { _, page -> DiscoverPage(page, 1, listOf(partly)) }
+        val third = viewModel(requests)
+        val went = mutableListOf<RequestEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { third.events.collect { went += it } }
+        advanceUntilIdle()
+        third.heroAction()
+        advanceUntilIdle()
+        assertEquals(RequestEvent.Open(PleyKey.Item(201)), went.single())
     }
 
     @Test

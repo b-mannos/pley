@@ -50,6 +50,8 @@ sealed interface TitleUiState {
         val busy: Boolean,
         /** From what was read before: the server didn't answer this time ([problem]). */
         val problem: RequestProblem?,
+        /** The summary the page was drawn with: the limits its words name. */
+        val summary: RequestSummary? = null,
     ) : TitleUiState
 }
 
@@ -123,6 +125,7 @@ class DiscoverTitleViewModel(
             origin = origin,
             busy = waiting,
             problem = (load as? Loadable.Failed)?.let { RequestProblem.of(it.error) },
+            summary = summary,
         )
     }
 

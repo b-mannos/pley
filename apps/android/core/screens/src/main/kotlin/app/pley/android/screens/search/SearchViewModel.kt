@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -73,7 +74,8 @@ sealed interface TmdbSection {
 
     data class Loading(val query: String) : TmdbSection
 
-    data class Ready(val query: String, val titles: List<DiscoverTitle>) : TmdbSection
+    /** [titles], their pictures on the server at [origin]. */
+    data class Ready(val query: String, val titles: List<DiscoverTitle>, val origin: String = "") : TmdbSection
 }
 
 /**
@@ -235,11 +237,12 @@ class SearchViewModel<T : Any>(
             emit(TmdbSection.Hidden)
             return@flow
         }
-        emit(TmdbSection.Ready(q, titles))
+        val origin = deps.origin.first().orEmpty()
+        emit(TmdbSection.Ready(q, titles, origin))
         deps.requests.changes.collect { change ->
             val patch = deps.requests.patchFor(change, titles.asSequence()) ?: return@collect
             titles = titles.map(patch)
-            emit(TmdbSection.Ready(q, titles))
+            emit(TmdbSection.Ready(q, titles, origin))
         }
     }
 

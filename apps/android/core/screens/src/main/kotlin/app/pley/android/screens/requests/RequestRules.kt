@@ -149,6 +149,10 @@ fun stagePill(request: MediaRequest, manage: Boolean): StagePill = when (request
 /** How far [request]'s download is, 0-1, while there is one: the bar under its pill (a partial one's too). */
 fun downloadProgress(request: MediaRequest): Float? = request.download?.progress?.toFloat()?.coerceIn(0f, 1f)
 
+/** Ready (some or all of it) in a library this account can open: Watch opens it there. */
+fun readyToWatch(request: MediaRequest): Boolean =
+    request.itemId != null && (request.stage == RequestStage.Available || request.stage == RequestStage.Partial)
+
 /** Ready for someone who follows it, but in no library they can open: "ask an administrator" instead of Watch. */
 fun readyElsewhere(request: MediaRequest): Boolean =
     request.itemId == null && (request.stage == RequestStage.Available || request.stage == RequestStage.Partial)

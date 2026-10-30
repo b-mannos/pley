@@ -317,6 +317,7 @@ class SearchViewModelTest {
         val ready = vm.tmdb.value as TmdbSection.Ready
         assertEquals("robot", ready.query)
         assertEquals(trending.results.map { it.tmdbId }, ready.titles.map { it.tmdbId })
+        assertEquals("http://pley", ready.origin)
     }
 
     @Test

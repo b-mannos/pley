@@ -138,6 +138,8 @@ data class RequestsUiState(
     val mayAsk: Boolean = false,
     /** Requests can't show at all: requests off, signed in before requests. */
     val problem: RequestProblem? = null,
+    /** Pulled to refresh: the list is read again. */
+    val refreshing: Boolean = false,
 )
 
 /**
@@ -163,6 +165,7 @@ class RequestsViewModel(
     private val list = MutableStateFlow<RequestListState>(RequestListState.Loading)
     private val busy = MutableStateFlow<Set<Long>>(emptySet())
     private val typedTitle = MutableStateFlow("")
+    private val refreshing = MutableStateFlow(false)
     private val reloadSoon = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     private var seen = false
     private var loading: Job? = null
@@ -195,7 +198,8 @@ class RequestsViewModel(
     val state: StateFlow<RequestsUiState> = combine(
         combine(gate, filter, list, busy, deps.origin.map { it.orEmpty() }.distinctUntilChanged(), ::Head),
         ticks,
-    ) { head, _ -> ui(head) }
+        refreshing,
+    ) { head, _, pulled -> ui(head).copy(refreshing = pulled) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_MS), RequestsUiState())
 
     private fun ui(head: Head): RequestsUiState {
@@ -282,7 +286,16 @@ class RequestsViewModel(
     fun refresh() {
         requests.refresh()
         val f = filter.value ?: return
-        if (list.value is RequestListState.Ready) viewModelScope.launch { reload(quiet = false) } else restart(f)
+        if (list.value !is RequestListState.Ready) return restart(f)
+        if (refreshing.value) return
+        refreshing.value = true
+        viewModelScope.launch {
+            try {
+                reload(quiet = false)
+            } finally {
+                refreshing.value = false
+            }
+        }
     }
 
     private fun restart(f: RequestFilter) {

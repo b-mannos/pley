@@ -12,6 +12,10 @@
     <!-- The managers' page: everyone's requests. -->
     <string name="requests_manage">Requests</string>
     <string name="requests_attention">Needs attention</string>
+    <!-- Under Discover's way in (search, Me). -->
+    <string name="requests_discover_hint">Find movies and shows to ask for</string>
+    <!-- Under Requests' way in, for managers. -->
+    <string name="requests_manage_hint">Approve, decline and follow what was asked for</string>
 
     <!-- Discover's rows, in their order. -->
     <string name="requests_row_trending">Trending this week</string>
@@ -196,8 +200,8 @@
     <string name="requests_filter_everyone">Everyone</string>
     <string name="requests_filter_mine">Yours</string>
     <string name="requests_filter_title">Search requests</string>
-    <!-- "Pending, 2", for screen readers. -->
-    <string name="requests_filter_count">%1$s, %2$d</string>
+    <!-- A view with how many it holds: "Pending · 2". -->
+    <string name="requests_filter_count">%1$s · %2$d</string>
     <string name="requests_none_title">Nothing asked for yet</string>
     <string name="requests_none_body">Find movies and shows in Discover, and ask for what the libraries don\'t have.</string>
     <string name="requests_none_body_off">Requests you made or follow show here.</string>
@@ -212,7 +216,6 @@
     <!-- Managers: where it went. "Radarr · HD-1080p · /movies". -->
     <string name="requests_sent_to_radarr">Radarr</string>
     <string name="requests_sent_to_sonarr">Sonarr</string>
-    <string name="requests_more">More</string>
 
     <!-- Notices. -->
     <string name="requests_notice_ready">“%1$s” is ready to watch.</string>
@@ -259,12 +262,22 @@
     <string name="requests_not_found">This title isn\'t on TMDB</string>
     <string name="requests_not_found_body">It may have been taken off since.</string>
     <string name="requests_retry">Retry</string>
+    <!-- Where Request would be, with access "off". -->
+    <string name="requests_no_access_line">Requests aren\'t open to this account.</string>
+    <!-- Any other failure, over the error's own sentence. -->
+    <string name="requests_discover_failed">Couldn\'t load Discover</string>
+    <string name="requests_title_failed">Couldn\'t load this title</string>
+    <string name="requests_list_failed">Couldn\'t load the requests</string>
+
+    <!-- A title page's sections. -->
+    <string name="requests_seasons_heading">Seasons</string>
+    <string name="requests_cast">Cast</string>
+    <string name="requests_more_actions">More actions</string>
 
     <!-- Global search. -->
     <string name="requests_on_tmdb">On TMDB</string>
     <string name="requests_see_all">See all on Discover</string>
     <string name="requests_nothing_in_libraries">Nothing in your libraries matches</string>
-    <string name="requests_look_in_discover">Look in Discover</string>
 
     <!-- Credits. -->
     <string name="requests_credit">Details and pictures from TMDB.</string>

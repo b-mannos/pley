@@ -348,7 +348,8 @@ class DiscoverViewModel(
 
     /**
      * The hero's main action was pressed: a movie is asked for here; a
-     * show opens its page with the picker; the rest open the title.
+     * show opens its page with the picker; what a library has (some of it)
+     * opens there; the rest open the title.
      */
     fun heroAction() {
         val hero = state.value.hero ?: return
@@ -361,7 +362,7 @@ class DiscoverViewModel(
                 title.kind == TitleKind.Movie -> ask(NewRequest(TitleKind.Movie, title.tmdbId), title.title)
                 else -> send(RequestEvent.Open(page.copy(pick = true)))
             }
-            is MainAction.Partial -> send(RequestEvent.Open(page.copy(pick = action.more == Ask.Yes)))
+            is MainAction.Partial -> send(RequestEvent.Open(action.itemId?.let { PleyKey.Item(it) } ?: page.copy(pick = action.more == Ask.Yes)))
             is MainAction.TellMeToo ->
                 if (action.ask == Ask.Yes && title.kind == TitleKind.Movie) ask(NewRequest(TitleKind.Movie, title.tmdbId), title.title)
                 else send(RequestEvent.Open(page))

@@ -8,6 +8,28 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Requests on phones and tablets, where the server takes them: Discover
+  (from Search and Me) shows what TMDB has, with trending and popular rows
+  and TMDB's search, each title marked In library, Requested or Declined.
+  A title's page asks for a movie, or for the seasons picked of a show,
+  and shows its seasons, its cast and how far its request is.
+- Your requests, under Me: each request's stage, the download's progress,
+  why one was declined, and Watch once it's ready, with Withdraw, Remove
+  and Stop following. Pull to read them again.
+- Administrators get Requests, opening on Needs attention: Approve,
+  Approve… with the quality profile, folder and seasons, Decline with an
+  optional reason, Try again, Mark as added by hand and Delete. Me's tab
+  shows how many wait, in red while one couldn't be sent.
+- Search shows what TMDB has after the libraries' results ("On TMDB", with
+  See all on Discover), and when the libraries have nothing.
+- A library's movie or show shows its request's stage, and a show partly
+  there offers Request more seasons.
+- News of requests (ready to watch, approved, declined; for administrators
+  new requests and ones that couldn't be sent) shows in a toast with Open,
+  never over the player. About credits TMDB.
+
 ## [0.1.0] - 2026-10-30
 
 ### Added
