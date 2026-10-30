@@ -53,6 +53,8 @@ sub init()
     m.notices = []
     m.shownNotice = invalid
     m.announced = invalid
+    ' The dialog last closed (one may stay in the scene's field).
+    m.closedDialog = invalid
     session.observeField("profileId", "onProfile")
     m.events.observeField("live", "onStreamLive")
     m.top.observeField("requestNote", "onRequestNote")
@@ -329,11 +331,8 @@ end sub
 
 sub showNotice()
     if m.notices.Count() = 0 or m.stack.Count() = 0 then return
-    if dialogShowing()
-        ' Shown once that one closes.
-        if m.top.dialog.hasField("wasClosed") then m.top.dialog.observeField("wasClosed", "onDialog")
-        return
-    end if
+    ' Shown once that one closes (onDialog).
+    if dialogShowing() then return
     route = m.stack.Peek().route
     if route = "player" or route = "link" or route = "servers" or route = "profiles" or route = "unreachable" then return
     m.shownNotice = m.notices.Shift()
@@ -361,8 +360,20 @@ sub onNoticeButton(event as object)
     showNotice()
 end sub
 
-' A dialog closed: a notice waiting may show.
+' A dialog shows, from any screen, or the scene lets one go: a notice
+' waiting may show once none does. Each dialog's closing is watched, the
+' Back key's too, which sets no close field.
 sub onDialog()
+    dialog = m.top.dialog
+    if dialog <> invalid
+        if m.closedDialog <> invalid and dialog.isSameNode(m.closedDialog) then m.closedDialog = invalid
+        if dialog.hasField("wasClosed") then dialog.observeField("wasClosed", "onDialogClosed")
+    end if
+    showNotice()
+end sub
+
+sub onDialogClosed(event as object)
+    m.closedDialog = event.getRoSGNode()
     showNotice()
 end sub
 
@@ -373,6 +384,7 @@ function dialogShowing() as boolean
     if dialog = invalid then return false
     if dialog.hasField("close") and httpTrue(dialog.close) then return false
     if dialog.hasField("wasClosed") and httpTrue(dialog.wasClosed) then return false
+    if m.closedDialog <> invalid and dialog.isSameNode(m.closedDialog) then return false
     return true
 end function
 
