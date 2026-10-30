@@ -91,7 +91,9 @@ over Kodi, after the Android TV app's.
   Collections. It reopens on the tab last used (kept per server, profile
   and library in `remembered.json`).
 - **Search** groups results by kind: movies, shows, episodes, people and
-  music.
+  music, and Live TV's channels (by name, number or what's on, where
+  Live TV is open to the profile): one plays, the others found in its
+  queue. Kodi's lists add them after the titles.
 - **A tile's menu** (the remote's menu key): mark watched, My List, add to a
   playlist, remove from Continue Watching, go to the show.
 - **Playing**: Kodi plays, with Skip intro, Skip credits and Up Next. Pages
@@ -265,11 +267,21 @@ what's on for the player's info. Then Kodi reads the stream under the
 same `client_id`, which ends the watch; closing it lets the channel go.
 So changing channel never holds two connections.
 
-- **409** (every connection in use): a box with the server's own words,
-  which name the channels being watched. Kodi's queue of channels is let
+- **409** (every connection in use): each connection (`connections`)
+  with its channel and who holds it: "You, on another device", the names
+  (told to administrators), "Someone else" or "3 people". Where this
+  account may take one over (`can_take_over`), Kodi's list offers "Watch
+  here instead": the watch is asked again with `take_over`, and the
+  stream carries it too; the one watching there stops. Otherwise a box
+  with the server's words and the list. Kodi's queue of channels is let
   go, or Kodi would try each one after it. A 409 to the stream itself
   (the connection taken between the two requests) is said the same way,
-  by the service's proxy.
+  by the service's proxy, which plays the channel again on Watch here
+  instead.
+- **Taken over**: a channel whose connection someone takes ends, and
+  says "The server stopped this stream." The server tells who took it to
+  HLS players (a 410 on their next segment); `stream.ts` has no session
+  of its own to ask, so Kodi can't say who.
 - **Channel up and down**: the channels of the category the channel was
   opened from, around it (those loaded, 100 each side), are Kodi's video
   queue, so the player's Next and Previous

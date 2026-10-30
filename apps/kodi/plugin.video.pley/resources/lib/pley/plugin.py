@@ -360,9 +360,18 @@ class Plugin:
             return
         found = self.client().get("/api/search", q=query, limit=100, summaries=1)
         items = found.get("items", [])
-        if not items:
+        channels = found.get("channels") or []
+        if not items and not channels:
             kodi.notify(kodi.text("nothing_found"))
         self.items(items, content="videos")
+        # Live TV's channels found by name, number or what's on: each plays.
+        now = time.time()
+        entries = []
+        for channel in channels:
+            li = livetv.list_item(self.proxy_base, channel, now)
+            li.addContextMenuItems(self.channel_menu(channel))
+            entries.append((livetv.play_url(channel["id"]), li, False))
+        xbmcplugin.addDirectoryItems(self.handle, entries, len(entries))
         self.end()
 
     def route_play(self) -> None:
@@ -536,16 +545,22 @@ class Plugin:
         channels watched; the queue of channels after it is let go."""
         client = self.client()
         install = playback.install_id()
-        try:
-            channel = livetv.watch(client, int(self.params["id"]), install)
-        except api.ApiError as e:
-            if e.status != 409:
-                raise
-            kodi.log("live channel %s: %s" % (self.params["id"], e.message), xbmc.LOGWARNING)
-            livetv.forget_queue()
-            xbmcplugin.setResolvedUrl(self.handle, False, xbmcgui.ListItem())
-            return livetv.busy(e.message)
-        li = livetv.play_item(self.proxy_base, channel, install, time.time(), self.params.get("group"))
+        take_over = self.params.get("take_over")
+        while True:
+            try:
+                channel = livetv.watch(client, int(self.params["id"]), install, take_over)
+                break
+            except api.ApiError as e:
+                if e.status != 409:
+                    raise
+                kodi.log("live channel %s: %s" % (self.params["id"], e.message), xbmc.LOGWARNING)
+                # What holds each connection; Watch here instead, where this
+                # account may take one over.
+                take_over = livetv.busy(e.message, e.details.get("connections"))
+                if take_over is None:
+                    livetv.forget_queue()
+                    return xbmcplugin.setResolvedUrl(self.handle, False, xbmcgui.ListItem())
+        li = livetv.play_item(self.proxy_base, channel, install, time.time(), self.params.get("group"), take_over)
         kodi.log("watching live channel %d" % channel["id"])
         xbmcplugin.setResolvedUrl(self.handle, True, li)
 

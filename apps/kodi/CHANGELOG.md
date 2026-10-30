@@ -19,7 +19,8 @@ describes how they are made.
   channel. Kodi's lists have the same categories. A channel plays in
   Kodi's own player as the provider sends it (Kodi deinterlaces; surround
   sound passes through), Next and Previous change channel within its
-  category, and every connection in use says so in the server's words. A
+  category, and every connection in use says what holds each, with Watch
+  here instead where it may be taken over. Search finds channels too. A
   channel has no pause, back or forward, as in every app. Lineups of tens
   of thousands of channels open at once. Needs a server with Live TV.
 

@@ -70,9 +70,11 @@ SHAPES = {
     "episode": Shape("episode", 368, 208, 36, "thumb", False),
     "square": Shape("square", 264, 264, 28, "poster", False),
     "person": Shape("person", 192, 192, 28, "photo", True),
+    # A Live TV channel: its logo kept whole on a dark well.
+    "channel": Shape("channel", 368, 208, 36, "thumb", False),
 }
 # The shapes a row of each screen can take, in the order of their lists.
-ROW_SHAPES = ("poster", "landscape", "square", "episode", "person")
+ROW_SHAPES = ("poster", "landscape", "square", "episode", "person", "channel")
 GRID_SHAPES = ("grid", "wide", "square")
 GRID = {
     # The library's posters (TileKind.LibraryGrid): 7 to a row.
@@ -237,7 +239,7 @@ LIBRARY_SLOTS = 5
 SEARCH_FIELD = 5011
 SEARCH_EMPTY_TITLE, SEARCH_EMPTY_BODY = 5012, 5013
 SEARCH_ROWS = 5200
-SEARCH_SLOTS = 5  # movies, shows, episodes, people and music
+SEARCH_SLOTS = 6  # movies, shows, episodes, people, music and Live TV's channels
 
 # A grid page: playlists, a playlist, collections, a collection, a person.
 GRID_TITLE, GRID_SUBTITLE = 6011, 6012

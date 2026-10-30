@@ -110,17 +110,25 @@ def set_favorite(client, channel_id: int, favorite: bool) -> None:
         client.delete(path)
 
 
-def watch(client, channel_id: int, client_id: str) -> dict:
+def watch(client, channel_id: int, client_id: str, take_over=None) -> dict:
     """Tunes the channel for this device (what it watched before ends):
     the channel, with what is on. Raises ApiError, 409 when every
-    connection of its source is in use."""
-    answer = client.post("%s/%d/watch" % (CHANNELS, channel_id), {"client_id": client_id}) or {}
+    connection of its source is in use (its `details` say what holds
+    each, `connections`); `take_over`, the channel whose connection to take
+    then, where the server lets this account."""
+    asked = {"client_id": client_id}
+    if take_over is not None:
+        asked["take_over"] = int(take_over)
+    answer = client.post("%s/%d/watch" % (CHANNELS, channel_id), asked) or {}
     return answer.get("channel") or {"id": channel_id, "name": ""}
 
 
-def stream_path(channel_id: int, client_id: str) -> str:
+def stream_path(channel_id: int, client_id: str, take_over=None) -> str:
     """The channel's MPEG-TS as the provider sends it, on the server."""
-    return "%s/%d/stream.ts?%s" % (CHANNELS, channel_id, urlencode({"client_id": client_id}))
+    asked = {"client_id": client_id}
+    if take_over is not None:
+        asked["take_over"] = int(take_over)
+    return "%s/%d/stream.ts?%s" % (CHANNELS, channel_id, urlencode(asked))
 
 
 def schedule(client, channel_id: int, start: float, hours: int = SCHEDULE_HOURS) -> list:
@@ -329,12 +337,14 @@ def by_number(found: list, typed: str):
 # ------------------------------------------------------------ Kodi's items
 
 
-def play_url(channel_id: int, group=None) -> str:
+def play_url(channel_id: int, group=None, take_over=None) -> str:
     """The plugin's play route for a channel (opened from `group`: its name
-    in the player is the group's)."""
+    in the player is the group's; `take_over`: the connection to take)."""
     asked = {"route": PLAY_ROUTE, "id": channel_id}
     if group:
         asked["group"] = group
+    if take_over is not None:
+        asked["take_over"] = take_over
     return "plugin://%s/?%s" % (kodi.ADDON_ID, urlencode(asked))
 
 
@@ -376,11 +386,11 @@ def list_item(base: str, channel: dict, now: float, group=None) -> xbmcgui.ListI
     return li
 
 
-def play_item(base: str, channel: dict, client_id: str, now: float, group=None) -> xbmcgui.ListItem:
+def play_item(base: str, channel: dict, client_id: str, now: float, group=None, take_over=None) -> xbmcgui.ListItem:
     """Kodi's item for playing a channel: its stream, said to be MPEG-TS,
     so Kodi asks the server nothing before it plays."""
     li = list_item(base, channel, now, group)
-    li.setPath(api.path_in(base, stream_path(channel["id"], client_id)))
+    li.setPath(api.path_in(base, stream_path(channel["id"], client_id, take_over)))
     li.setMimeType(MIME)
     li.setContentLookup(False)
     return li
@@ -416,7 +426,38 @@ def forget_queue() -> None:
         playlist.clear()
 
 
-def busy(message: str) -> None:
-    """Every connection is in use (409): the server's words, which name
-    the channels being watched, in a box that waits to be read."""
-    xbmcgui.Dialog().ok(kodi.text("all_in_use"), message or kodi.text("all_in_use"))
+def who(connection: dict) -> str:
+    """Who holds a connection: "You, on another device", the names (told
+    to administrators), "Someone else" or "3 people"."""
+    if connection.get("yours"):
+        return kodi.text("you_elsewhere")
+    if connection.get("watchers"):
+        return ", ".join(connection["watchers"])
+    people = connection.get("people") or 0
+    return kodi.text("people_watching") % people if people > 1 else kodi.text("someone_else")
+
+
+def busy(message: str, connections=()) -> object:
+    """Every connection is in use (409): the server's words, then each
+    connection with its channel and who holds it. Where this account may
+    take one over, Kodi's list offers to watch here instead of it: the
+    channel whose connection to take, or None."""
+    connections = [c for c in connections or [] if isinstance(c, dict)]
+    heading = kodi.text("all_in_use")
+    takeable = [c for c in connections if c.get("can_take_over")]
+    if not takeable:
+        lines = ["%s  ·  %s" % (c.get("channel_name") or "", who(c)) for c in connections]
+        xbmcgui.Dialog().ok(heading, "\n".join([message or heading] + ([""] + lines if lines else [])))
+        return None
+    entries = []
+    for c in connections:
+        li = xbmcgui.ListItem(c.get("channel_name") or "", offscreen=True)
+        line = who(c)
+        if c.get("can_take_over"):
+            line = "%s  ·  %s" % (line, kodi.text("watch_here"))
+        li.setLabel2(line)
+        entries.append(li)
+    chosen = xbmcgui.Dialog().select(heading, entries, useDetails=True)
+    if chosen < 0 or not connections[chosen].get("can_take_over"):
+        return None
+    return connections[chosen].get("channel_id")

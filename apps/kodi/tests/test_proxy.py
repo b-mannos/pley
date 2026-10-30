@@ -74,7 +74,8 @@ class ProxyTest(unittest.TestCase):
                 return 206, headers, part
             return 200, {"Content-Type": "video/x-matroska", "Accept-Ranges": "bytes"}, MOVIE
         if request.path.startswith("/api/live/channels/3/stream.ts"):
-            return support.answer(409, {"code": "conflict", "message": "The one connection of Test Provider is in use, watching Sport."})
+            held = [{"channel_id": 2, "channel_name": "Sport", "watchers": [], "people": 1, "yours": True, "can_take_over": True}]
+            return support.answer(409, {"code": "conflict", "message": "The one connection of Test Provider is in use, watching Sport.", "connections": held})
         if request.path == "/api/playback/s1/12.ts":
             return support.answer(410, {"code": "session_stopped", "message": "Maintenance tonight"})
         if request.path == "/api/collections/4/images/poster":
@@ -401,10 +402,13 @@ class ProxyTest(unittest.TestCase):
 
     def test_a_live_channel_without_a_connection_free_is_told(self):
         busy = []
-        self.proxy.on_busy = busy.append
+        self.proxy.on_busy = lambda *heard: busy.append(heard)
         response, data = self.ask("GET", "/%s/api/live/channels/3/stream.ts?client_id=kodi-1" % SECRET)
         self.assertEqual(response.status, 409)
-        self.assertEqual(busy, ["The one connection of Test Provider is in use, watching Sport."])
+        message, connections, path = busy[0]
+        self.assertEqual(message, "The one connection of Test Provider is in use, watching Sport.")
+        self.assertEqual([c["channel_name"] for c in connections], ["Sport"], "what holds each connection")
+        self.assertEqual(path, "/api/live/channels/3/stream.ts?client_id=kodi-1")
         self.assertEqual(self.stopped, [])
 
     def test_subtitles_are_named_for_kodi(self):

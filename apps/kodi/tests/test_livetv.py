@@ -228,6 +228,7 @@ class ServiceTest(unittest.TestCase):
         xbmc.PlayList.entries.clear()
         del xbmcgui.notified[:]
         del xbmcgui.boxes[:]
+        del xbmcgui.picks[:]
         self.player = service.Player(None, "pleyKodi/test", None)
 
     def test_a_channel_the_server_ended_doesnt_tune_the_next(self):
@@ -235,6 +236,18 @@ class ServiceTest(unittest.TestCase):
         self.player.live_ended()
         self.assertEqual(xbmc.PlayList(xbmc.PLAYLIST_VIDEO).size(), 0)
         self.assertEqual(xbmcgui.notified, [("Pley", "The server stopped this stream.")])
+
+    def test_a_channel_refused_on_its_way_to_kodi_can_be_watched_here_instead(self):
+        played = []
+        self.player.play = played.append
+        xbmcgui.picks.append(0)
+        held = [{"channel_id": 2, "channel_name": "Sport 1080i", "watchers": [], "people": 1, "yours": True, "can_take_over": True}]
+        self.player.busy("The one connection is in use.", held, "/api/live/channels/1/stream.ts?client_id=kodi-1")
+        for _ in range(50):
+            if played:
+                break
+            time.sleep(0.02)
+        self.assertEqual(played, ["plugin://plugin.video.pley/?route=live_play&id=1&take_over=2"])
 
     def test_a_channel_refused_on_its_way_to_kodi_is_said_once(self):
         livetv.queue(BASE, CHANNELS, 0, NOW)
@@ -257,6 +270,7 @@ class RoutesTest(unittest.TestCase):
         clock_patch.start()
         self.addCleanup(clock_patch.stop)
         self.busy = False
+        self.held = []
         self.server = support.FakeServer(self.handle)
         self.addCleanup(self.server.close)
         kodi.set_property(kodi.PROXY, self.server.url + "/s3cret")
@@ -267,18 +281,22 @@ class RoutesTest(unittest.TestCase):
         kodi.xbmcaddon.settings["_profile"] = tempfile.mkdtemp()
         del xbmcplugin.calls[:]
         del xbmcgui.boxes[:]
+        del xbmcgui.lists[:]
+        del xbmcgui.picks[:]
         xbmc.PlayList.entries.clear()
 
     def handle(self, request):
         path, _, query = request.path[len("/s3cret") :].partition("?")
         if path == "/api/live/channels/1/watch":
-            if self.busy:
-                return support.answer(409, {"code": "conflict", "message": "The one connection of Test Provider is in use, watching Sport 1080i."})
+            if self.busy and request.json().get("take_over") != 2:
+                return support.answer(409, {"code": "conflict", "message": "The one connection of Test Provider is in use, watching Sport 1080i.", "connections": self.held})
             return support.answer(200, {"session_id": "w1", "url": "/api/live/sessions/w1/index.m3u8", "kind": "hls", "channel": NEWS})
         if path == "/api/live/channels/2/favorite":
             return 204, {}, b""
         if path == "/api/live/channels":
             raise AssertionError("every channel is never asked for")
+        if path == "/api/search":
+            return support.answer(200, {"items": [], "people": [], "channels": [NEWS]})
         return support.answer(200, lineup(path, dict(urllib.parse.parse_qsl(query)), CHANNELS))
 
     def run_route(self, query):
@@ -360,6 +378,46 @@ class RoutesTest(unittest.TestCase):
         self.assertEqual([c[:2] for c in xbmcplugin.calls if c[0] == "resolved"], [("resolved", False)])
         self.assertEqual(xbmcgui.boxes, [("All connections are in use", "The one connection of Test Provider is in use, watching Sport 1080i.")])
         self.assertEqual(xbmc.PlayList(xbmc.PLAYLIST_VIDEO).size(), 0, "Kodi would try each channel after it")
+        # What holds each connection, when nothing can be taken over.
+        del xbmcgui.boxes[:]
+        self.held = [{"channel_id": 2, "channel_name": "Sport 1080i", "watchers": [], "people": 3, "yours": False, "can_take_over": False}]
+        self.run_route("route=live_play&id=1")
+        self.assertTrue(xbmcgui.boxes[0][1].endswith("\n\nSport 1080i  ·  3 people"), xbmcgui.boxes)
+
+    def test_watching_here_instead_takes_a_connection_over(self):
+        self.busy = True
+        self.held = [
+            {"channel_id": 3, "channel_name": "Film Four", "watchers": ["ana"], "people": 1, "yours": False, "can_take_over": False},
+            {"channel_id": 2, "channel_name": "Sport 1080i", "watchers": [], "people": 1, "yours": True, "can_take_over": True},
+        ]
+        xbmcgui.picks.append(1)
+        self.run_route("route=live_play&id=1")
+        self.assertEqual(xbmcgui.lists, [("All connections are in use", [("Film Four", "ana"), ("Sport 1080i", "You, on another device  ·  Watch here instead")])])
+        resolved = [c for c in xbmcplugin.calls if c[0] == "resolved"]
+        self.assertEqual(len(resolved), 1)
+        _, ok, li = resolved[0]
+        self.assertTrue(ok)
+        self.assertIn("take_over=2", li.path, "the stream takes it too")
+        asked = [r.json().get("take_over") for r in self.server.requests if r.path.endswith("/watch")]
+        self.assertEqual(asked, [None, 2])
+        # Chosen elsewhere in the list (one that can't be taken), or let be: nothing plays.
+        del xbmcplugin.calls[:]
+        xbmcgui.picks.append(0)
+        self.run_route("route=live_play&id=1")
+        self.assertEqual([c[:2] for c in xbmcplugin.calls if c[0] == "resolved"], [("resolved", False)])
+
+    def test_who_holds_a_connection(self):
+        self.assertEqual(livetv.who({"yours": True, "people": 1}), "You, on another device")
+        self.assertEqual(livetv.who({"watchers": ["ana", "ben"], "people": 2}), "ana, ben")
+        self.assertEqual(livetv.who({"watchers": [], "people": 1}), "Someone else")
+        self.assertEqual(livetv.who({"watchers": [], "people": 4}), "4 people")
+
+    def test_search_finds_channels_too(self):
+        items = self.run_route("route=search&q=news")
+        labels = [c[2].label for c in items]
+        self.assertEqual(labels, ["101 Pley News HD"])
+        self.assertEqual(items[0][1], "plugin://plugin.video.pley/?route=live_play&id=1")
+        self.assertFalse(items[0][3])
 
     def test_a_favourite_from_the_menu(self):
         del xbmc.builtins[:]
@@ -575,6 +633,22 @@ class LiveScreenTest(unittest.TestCase):
         self.screen.click(L.LIVE_CATEGORIES)
         self.assertEqual([r.label for r in self.rows()], ["301 BBC NEWS"])
         self.assertEqual(self.win.made[L.LIVE_HEADING].label, "UK · News")
+
+    def test_the_apps_search_finds_channels(self):
+        screen = window.Search(self.win)
+        self.win.session.get = lambda path, **query: {"items": [], "people": [], "channels": [NEWS, SPORT]}
+        screen.search("news")
+        row = screen.rows.rows[-1]
+        self.assertEqual((row["title"], row["shape"]), ("Live TV", "channel"))
+        tiles = self.win.made[L.slot_list(L.SEARCH_ROWS, 0, "channel")].items
+        self.assertEqual([(t.label, t.label2) for t in tiles], [("101 Pley News HD", "Morning Briefing: Part 7"), ("102 Sport 1080i", "Match of the Day")])
+        self.assertEqual(tiles[0].art["tile"], self.win.session.base + "/api/live/channels/1/logo?w=320")
+        # Chosen, it plays, the others found queued.
+        list_id = L.slot_list(L.SEARCH_ROWS, 0, "channel")
+        self.win.made[list_id].selected = 1
+        screen.click(list_id)
+        self.assertEqual(xbmc.played[-1][2], 1)
+        self.assertEqual([u for u, _ in xbmc.PlayList.entries[xbmc.PLAYLIST_VIDEO]][1], "plugin://plugin.video.pley/?route=live_play&id=2")
 
     def test_without_channels_it_says_so(self):
         self.channels = []

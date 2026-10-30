@@ -65,9 +65,9 @@ def new_secret() -> str:
 class Proxy:
     """Serves on 127.0.0.1:`port` (another one when it is taken) until
     `stop`. `on_stopped(message)` hears of streams an administrator
-    stopped; `on_busy(message)` of a live channel refused because every
-    connection of its source is in use, `on_ended()` of one the server
-    ended. `meter` (autoquality.Meter) counts what streams bring, for
+    stopped; `on_busy(message, connections, path)` of a live channel
+    refused because every connection of its source is in use, `on_ended()`
+    of one the server ended. `meter` (autoquality.Meter) counts what streams bring, for
     Automatic."""
 
     def __init__(
@@ -413,10 +413,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if heard:
                 data = response.read()
                 try:
-                    message = json.loads(data.decode("utf-8")).get("message")
-                except (ValueError, AttributeError):
-                    message = None
-                heard(message)
+                    body = json.loads(data.decode("utf-8"))
+                    body = body if isinstance(body, dict) else {}
+                except ValueError:
+                    body = {}
+                if response.status == 409:
+                    # What holds each connection, and the channel asked for.
+                    heard(body.get("message"), body.get("connections") or [], path)
+                else:
+                    heard(body.get("message"))
                 self.send_response(response.status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))

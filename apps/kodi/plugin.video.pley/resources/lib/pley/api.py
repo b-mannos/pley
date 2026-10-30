@@ -17,11 +17,13 @@ class ApiError(Exception):
     """A refusal from the server ({code, message}, or OAuth's {error,
     error_description}), or no answer at all (status 0)."""
 
-    def __init__(self, status: int, code: str, message: str):
+    def __init__(self, status: int, code: str, message: str, details=None):
         super().__init__(message)
         self.status = status
         self.code = code
         self.message = message
+        # The rest of the refusal's body (a 409's `connections`).
+        self.details = details or {}
 
 
 class Response:
@@ -159,7 +161,7 @@ def error_of(response: Response) -> ApiError:
         body = {}
     code = body.get("code") or body.get("error") or "http_%d" % response.status
     message = body.get("message") or body.get("error_description") or "the server answered %d" % response.status
-    return ApiError(response.status, code, message)
+    return ApiError(response.status, code, message, body)
 
 
 class Client:

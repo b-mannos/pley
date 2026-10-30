@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import threading
 import time
 import urllib.parse
@@ -224,20 +225,25 @@ class Player(xbmc.Player):
         livetv.forget_queue()
         kodi.notify(kodi.text("stream_stopped"), error=True)
 
-    def busy(self, message) -> None:
+    def busy(self, message, connections=(), path: str = "") -> None:
         """A live channel Kodi asked for when every connection of its source
         was in use (the plugin asked first, and one was free then): said as
         the plugin says it, once in a few seconds, off the proxy's thread;
-        the queue of channels after it is let go."""
+        the queue of channels after it is let go. Watch here instead plays
+        the channel again, taking that connection over."""
         now = time.monotonic()
         if now - self.busy_at < 5:
             return
         self.busy_at = now
         from . import livetv
 
+        found = re.search(r"/api/live/channels/(\d+)/stream\.ts", path or "")
+
         def say():
             livetv.forget_queue()
-            livetv.busy(message)
+            take_over = livetv.busy(message, connections)
+            if take_over is not None and found:
+                self.play(livetv.play_url(int(found.group(1)), take_over=take_over))
 
         threading.Thread(target=say, name="pley-live-busy", daemon=True).start()
 

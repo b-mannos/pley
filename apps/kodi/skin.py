@@ -230,6 +230,7 @@ MASKS = {
     "grid": "mask-grid.png",
     "square": "mask-square.png",
     "person": "mask-circle.png",
+    "channel": "mask-episode.png",
 }
 
 # The tiles that can show an unwatched count (shows, seasons), and those a
@@ -357,12 +358,21 @@ def tile_parts(shape: L.Shape, list_id: int, focused: bool) -> list:
     mask = MASKS[shape.name]
     plain = "String.IsEmpty(ListItem.Property(seeall))"
     has_focus = "Control.HasFocus(%d)" % list_id
-    well = [
-        image(0, 0, w, h, "$INFO[ListItem.Property(ph)]", diffuse=mask, visible=plain),
-        # The title over the placeholder, on two lines (list labels keep to one).
-        control("textbox", left=16, top=h // 2 - 46, width=w - 32, height=92, visible=plain, font=L.FONT_TITLE, textcolor=L.FG, align="center", autoscroll="false", label="$INFO[ListItem.Label]"),
-        image(0, 0, w, h, "$INFO[ListItem.Art(tile)]", diffuse=mask, aspect="scale", fade=150, background="true", visible=plain),
-    ]
+    if shape.name == "channel":
+        # A logo, whole, on the dark well; the channel's name without one.
+        no_logo = "String.IsEmpty(ListItem.Art(tile))"
+        well = [
+            image(0, 0, w, h, "round8.png", color=L.SURFACE2, border=10),
+            control("textbox", left=16, top=h // 2 - 46, width=w - 32, height=92, visible=no_logo, font=L.FONT_TITLE, textcolor=L.FG, align="center", autoscroll="false", label="$INFO[ListItem.Label]"),
+            image(32, 24, w - 64, h - 48, "$INFO[ListItem.Art(tile)]", aspect="keep", fade=150, background="true"),
+        ]
+    else:
+        well = [
+            image(0, 0, w, h, "$INFO[ListItem.Property(ph)]", diffuse=mask, visible=plain),
+            # The title over the placeholder, on two lines (list labels keep to one).
+            control("textbox", left=16, top=h // 2 - 46, width=w - 32, height=92, visible=plain, font=L.FONT_TITLE, textcolor=L.FG, align="center", autoscroll="false", label="$INFO[ListItem.Label]"),
+            image(0, 0, w, h, "$INFO[ListItem.Art(tile)]", diffuse=mask, aspect="scale", fade=150, background="true", visible=plain),
+        ]
     if not shape.round:
         well += [
             image(0, 0, w, h, "hairline.png", border=10, visible=plain),
@@ -850,7 +860,7 @@ def search() -> ET.Element:
             label(L.GUTTER, 240, 1400, 48, L.FONT_TITLE, L.FG, id_=L.SEARCH_EMPTY_TITLE),
             label(L.GUTTER, 296, 1120, 100, L.FONT_BODY, L.MUTED, id_=L.SEARCH_EMPTY_BODY, wrap=True, aligny="top"),
         ]
-        + rows(L.SEARCH_ROWS, L.SEARCH_SLOTS, ("poster", "episode", "person", "square"), str(field)),
+        + rows(L.SEARCH_ROWS, L.SEARCH_SLOTS, ("poster", "episode", "person", "square", "channel"), str(field)),
         visible=is_("pley.screen", "search"),
     )
 

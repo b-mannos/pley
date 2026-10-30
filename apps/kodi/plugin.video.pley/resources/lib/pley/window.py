@@ -1037,6 +1037,9 @@ class Rows:
                 if shape == row["shape"]:
                     if shape == "person":
                         items = [tiles.person(base, credit) for credit in row["items"]]
+                    elif shape == "channel":
+                        now = time.time()
+                        items = [channel_tile(base, channel, now) for channel in row["items"]]
                     else:
                         items = [tiles.tile(base, item, shape) for item in row["items"]]
                     if row.get("see_all") is not None:
@@ -2286,7 +2289,7 @@ class Search(Screen):
         super().__init__(win)
         self.query = ""
         self.found = []
-        self.rows = Rows(win, L.SEARCH_ROWS, L.SEARCH_SLOTS, ("poster", "episode", "person", "square"))
+        self.rows = Rows(win, L.SEARCH_ROWS, L.SEARCH_SLOTS, ("poster", "episode", "person", "square", "channel"))
 
     def show(self, filled: bool) -> None:
         win = self.win
@@ -2328,6 +2331,11 @@ class Search(Screen):
             people = answer.get("people") or []
             if people:
                 self.found.insert(min(len(self.found), 3), {"key": "people", "title": T("people"), "shape": "person", "items": people})
+            # Live TV's channels, by name, number or what's on (a server
+            # with Live TV open to this profile).
+            channels = answer.get("channels") or []
+            if channels:
+                self.found.append({"key": "channels", "title": T("live_tv"), "shape": "channel", "items": channels})
         self.win.put(L.SEARCH_FIELD, self.query or color(T("search_hint"), L.MUTED))
         self.draw()
 
@@ -2345,6 +2353,10 @@ class Search(Screen):
                 self.rows.focus(0)
             return
         found = self.rows.selected(control_id)
+        if found is not None and found[1]["key"] == "channels":
+            # A channel plays, the others found queued: Next and Previous.
+            channels = found[1]["items"]
+            return play_channels(self.session.base, channels, next(i for i, c in enumerate(channels) if c is found[2]))
         if found is not None:
             item = dict(found[2])
             if found[1]["key"] == "people":
@@ -2368,7 +2380,7 @@ class Search(Screen):
 
     def menu(self, control_id: int) -> None:
         found = self.rows.selected(control_id)
-        if found is not None and found[1]["key"] != "people":
+        if found is not None and found[1]["key"] not in ("people", "channels"):
             self.win.tile_menu(found[2])
 
     def refresh(self) -> None:
@@ -3084,6 +3096,21 @@ def play_channels(base: str, channels: list, at: int, group=None) -> None:
     """Plays channel `at` of `channels`, those around it in Kodi's queue."""
     queue, start = livetv.queue(base, channels, at, time.time(), group)
     xbmc.Player().play(queue, startpos=start)
+
+
+def channel_tile(base: str, channel: dict, now: float) -> "xbmcgui.ListItem":
+    """A channel among search's rows: its logo, number and name, what's on
+    and how far into it."""
+    current = livetv.on_now(channel, now)
+    li = xbmcgui.ListItem(livetv.name(channel), livetv.headline(current) if current else livetv.nothing_on(channel), offscreen=True)
+    found = livetv.logo(base, channel)
+    if found:
+        li.setArt({"tile": found})
+    li.setProperty("id", str(channel["id"]))
+    li.setProperty("kind", "channel")
+    if current:
+        li.getVideoInfoTag().setResumePoint(max(1.0, now - current["start"]), float(current["stop"] - current["start"]))
+    return li
 
 
 def channel_row(base: str, channel: dict, now: float, li=None, group=None) -> "xbmcgui.ListItem":

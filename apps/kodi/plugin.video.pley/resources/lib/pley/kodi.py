@@ -225,6 +225,10 @@ TEXT = {
     "nothing_scheduled": 30272,
     "all_channels": 30273,
     "search_channels": 30274,
+    "you_elsewhere": 30275,
+    "someone_else": 30276,
+    "people_watching": 30277,
+    "watch_here": 30278,
 }
 
 

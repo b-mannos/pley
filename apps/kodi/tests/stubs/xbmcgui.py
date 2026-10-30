@@ -1,8 +1,11 @@
 NOTIFICATION_INFO, NOTIFICATION_WARNING, NOTIFICATION_ERROR = "info", "warning", "error"
 current_window = 10000
-# Notifications shown: (heading, message); boxes shown: (heading, message).
+# Notifications shown: (heading, message); boxes shown: (heading, message);
+# lists shown: (heading, [(label, label2)]), each answered by `picks`.
 notified = []
 boxes = []
+lists = []
+picks = []
 
 
 def getCurrentWindowId():
@@ -121,3 +124,7 @@ class Dialog:
     def ok(self, heading, message):
         boxes.append((heading, message))
         return True
+
+    def select(self, heading, entries, autoclose=0, preselect=-1, useDetails=False):
+        lists.append((heading, [(getattr(e, "label", e), getattr(e, "label2", "")) for e in entries]))
+        return picks.pop(0) if picks else -1
