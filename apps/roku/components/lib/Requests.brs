@@ -452,6 +452,12 @@ function reqSkeletonTiles() as object
     return tiles
 end function
 
+' Request more seasons, at the end of a library's show's seasons: it
+' opens the show's page on TMDB with its season picker.
+function reqAskMoreTile(tmdbKind as string, tmdbId as dynamic, title as string) as object
+    return { title: "Request more seasons", subtitle: "", image: "", wide: false, progress: 0.0, watched: false, itemId: 0, kind: "askMore", tmdbKind: tmdbKind, tmdbId: Int(httpNumber(tmdbId, 0)), showTitle: title, badge: "", badgeColor: "0x38BDF8FF", key: "askMore" }
+end function
+
 ' A row's one tile instead of titles, its words in its frame: kind
 ' "retry" loads the row again ("Couldn't load these…"), "note" only says
 ' so ("Nothing here right now.").

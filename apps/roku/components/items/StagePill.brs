@@ -6,10 +6,12 @@ sub init()
 end sub
 
 sub onLook()
+    ' Fields set in markup may come before init.
+    if m.label = invalid then return
     m.label.text = m.top.text
     m.label.width = 0
     textWidth = m.label.boundingRect().width
-    if textWidth > 900 then textWidth = 900
+    if textWidth > m.top.maxWidth - 36 then textWidth = m.top.maxWidth - 36
     m.label.width = textWidth
     m.back.width = textWidth + 36
     m.back.color = m.top.color
@@ -20,8 +22,10 @@ sub onLook()
     m.fill.visible = shown
     if shown
         if progress > 1 then progress = 1
-        m.track.translation = [textWidth + 60, 17]
-        m.fill.translation = [textWidth + 60, 17]
+        at = [textWidth + 60, 17]
+        if m.top.stacked then at = [0, 56]
+        m.track.translation = at
+        m.fill.translation = at
         m.fill.width = Int(m.track.width * progress)
     end if
 end sub

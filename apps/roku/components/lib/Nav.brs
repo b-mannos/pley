@@ -36,14 +36,15 @@ end function
 ' version doesn't open. A season opens its show on that season; a person
 ' and a collection, a grid of their titles, an artist of their albums; a
 ' playlist, its entries; a track, its album; an extra plays at once. A
-' TMDB title opens its page; See all, its list, or Discover's search for
-' its words.
+' TMDB title opens its page (Request more seasons, with its season
+' picker); See all, its list, or Discover's search for its words.
 function navForTile(tile as object) as dynamic
     kind = httpString(tile.kind)
-    if kind = "discover"
+    if kind = "discover" or kind = "askMore"
         tmdbId = httpNumber(tile.tmdbId, 0)
         tmdbKind = httpString(tile.tmdbKind)
         if tmdbId = 0 or (tmdbKind <> "movie" and tmdbKind <> "show") then return invalid
+        if kind = "askMore" then return { to: "requestTitle", params: { kind: tmdbKind, tmdbId: tmdbId, title: httpString(tile.showTitle), pick: true } }
         return { to: "requestTitle", params: { kind: tmdbKind, tmdbId: tmdbId, title: httpString(tile.title) } }
     end if
     if kind = "more"

@@ -516,6 +516,9 @@ sub test_requests_a_library_page_s_request()
     tkFalse(shown.askMore)
     data.askable = [3]
     tkFalse(reqItemRequest(data, reqTestSummary({ access: "off", own: 2 }), now, 0).askMore, "may not ask")
+    tile = reqAskMoreTile("show", 1396, "Breaking Bad")
+    tkEqual(tile.title, "Request more seasons")
+    tkEqual(navForTile(tile), { to: "requestTitle", params: { kind: "show", tmdbId: 1396, title: "Breaking Bad", pick: true } })
 end sub
 
 sub test_requests_hero()

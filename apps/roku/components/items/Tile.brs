@@ -27,8 +27,9 @@ sub onContent()
     if item.hasField("progress") then m.progress = item.progress
     m.watched.visible = item.hasField("watched") and item.watched = true
     m.title.text = item.title
-    ' See all, and a row's Try again or note: their words in the frame only.
-    if item.hasField("kind") and (item.kind = "more" or item.kind = "retry" or item.kind = "note") then m.title.text = ""
+    ' See all, a row's Try again or note, and Request more seasons: their
+    ' words in the frame only.
+    if item.hasField("kind") and (item.kind = "more" or item.kind = "retry" or item.kind = "note" or item.kind = "askMore") then m.title.text = ""
     m.subtitle.text = item.subtitle
     m.subtitle.color = "0xA1A9B6FF"
     if item.hasField("subtitleColor") then m.subtitle.color = item.subtitleColor
