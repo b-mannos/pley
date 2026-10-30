@@ -17,5 +17,11 @@
   "people": [
     { "id": 702, "name": "Denis Villeneuve", "photo_url": "/api/people/702/photo?v=c3d4e5f6a7" },
     { "id": 714, "name": "Dune Hartley" }
+  ],
+  "channels": [
+    {
+      "id": 9, "source_id": 1, "name": "Dune Classics", "number": "212", "group": "Films",
+      "logo": "/api/live/channels/9/logo", "favorite": false, "has_guide": false, "now": null, "next": null
+    }
   ]
 }

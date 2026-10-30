@@ -4,8 +4,11 @@ import app.pley.android.data.Loadable
 import app.pley.android.data.SearchRepository
 import app.pley.android.model.ItemKind
 import app.pley.android.model.ItemSummary
+import app.pley.android.model.LiveChannel
 import app.pley.android.model.PersonSummary
 import app.pley.android.model.SearchResults
+import app.pley.android.player.PlayRequest
+import app.pley.android.screens.PlayerLauncher
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.library.FakeTile
 import app.pley.android.screens.library.FakeTiles
@@ -75,9 +78,18 @@ class SearchViewModelTest {
         }
     }
 
+    private val watched = mutableListOf<Pair<Long, String>>()
+    private val launcher = object : PlayerLauncher {
+        override fun play(request: PlayRequest) = Unit
+
+        override fun watchLive(channelId: Long, category: String) {
+            watched += channelId to category
+        }
+    }
+
     private fun TestScope.viewModel(initial: String = ""): SearchViewModel<FakeTile> {
         val tiles = SearchTiles.of(FakeTiles) { person, origin -> FakeTile(person.id, person.name, TileLook.Poster, "person $origin") }
-        val vm = SearchViewModel(initial, SearchDeps(search, MutableStateFlow("http://pley"), dispatcher), tiles)
+        val vm = SearchViewModel(initial, SearchDeps(search, MutableStateFlow("http://pley"), dispatcher, launcher), tiles)
         backgroundScope.launch { vm.state.collect {} }
         return vm
     }
@@ -243,5 +255,22 @@ class SearchViewModelTest {
         advanceUntilIdle()
         assertEquals(listOf("north", "north"), search.asked)
         assertTrue(vm.results() is SearchResultsState.Ready)
+    }
+
+    @Test
+    fun channelsFoundComeWithTheResultsAndPlayAmongEveryChannel() = runTest(dispatcher) {
+        val vm = viewModel("sport")
+        val channel = LiveChannel(id = 7, name = "Sport 1", number = "101", logo = "/logo.png")
+        search.answer("sport").complete(SearchResults(channels = listOf(channel)))
+        advanceUntilIdle()
+        // Channels alone are results: not "No results".
+        val ready = vm.results() as SearchResultsState.Ready
+        assertEquals(emptyList<SearchGroup<FakeTile>>(), ready.groups)
+        assertEquals(listOf(channel), ready.channels)
+        assertEquals("http://pley", ready.origin)
+        vm.watch(channel)
+        advanceUntilIdle()
+        assertEquals(listOf(7L to "all"), watched)
+        assertEquals("sport", vm.state.value.recent.first())
     }
 }

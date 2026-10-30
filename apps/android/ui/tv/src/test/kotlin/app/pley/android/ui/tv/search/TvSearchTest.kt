@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import app.pley.android.common.Tier
 import app.pley.android.designsystem.tile.ArtworkTileModel
+import app.pley.android.model.LiveChannel
 import app.pley.android.screens.search.SearchGroup
 import app.pley.android.screens.search.SearchGroupKind
 import app.pley.android.screens.search.SearchResultsState
@@ -39,6 +40,7 @@ class TvSearchTest {
 
     private val opened = mutableListOf<Pair<SearchGroupKind, Long>>()
     private val chosen = mutableListOf<String>()
+    private val watched = mutableListOf<Long>()
 
     private fun show(state: SearchUiState<ArtworkTileModel>) {
         compose.setContent {
@@ -51,6 +53,7 @@ class TvSearchTest {
                     onClearRecent = {},
                     onOpen = { group, id -> opened += group to id },
                     onActions = {},
+                    onWatch = { watched += it.id },
                 )
             }
         }
@@ -77,6 +80,26 @@ class TvSearchTest {
         compose.press(Key.DirectionLeft)
         compose.press(Key.DirectionUp)
         compose.onNodeWithTag(TV_SEARCH_FIELD).assertIsFocused()
+    }
+
+    @Test
+    fun channelsFoundAreARowAfterPeopleThatPlays() {
+        val groups = listOf(
+            SearchGroup(SearchGroupKind.People, listOf(tile(70, "Lena North")), listOf(70)),
+            SearchGroup(SearchGroupKind.Movies, listOf(tile(1, "Northern Lights")), listOf(1)),
+        )
+        val channels = listOf(LiveChannel(id = 7, name = "North Sport", number = "101"), LiveChannel(id = 8, name = "North News"))
+        show(SearchUiState("north", emptyList(), SearchResultsState.Ready("north", groups, loading = false, channels = channels)))
+        compose.onNodeWithText("Live TV").assertExists()
+        compose.onNodeWithTag(TV_SEARCH_CHANNEL + 7).assertExists()
+        compose.press(Key.DirectionDown)
+        compose.focused().assert(hasContentDescription("Lena North"))
+        compose.press(Key.DirectionDown)
+        compose.press(Key.DirectionRight)
+        compose.press(Key.Enter)
+        assertEquals(listOf(8L), watched)
+        compose.press(Key.DirectionDown)
+        compose.focused().assert(hasContentDescription("Northern Lights"))
     }
 
     @Test

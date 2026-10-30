@@ -8,8 +8,10 @@ import app.pley.android.data.Loadable
 import app.pley.android.data.SearchRepository
 import app.pley.android.model.ItemKind
 import app.pley.android.model.ItemSummary
+import app.pley.android.model.LiveChannel
 import app.pley.android.model.PersonSummary
 import app.pley.android.model.SearchResults
+import app.pley.android.screens.PlayerLauncher
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.ScreensGraph
 import app.pley.android.screens.library.LibraryViewModel
@@ -38,14 +40,19 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** What search reads: the server's answers, recent searches, and the server's address for pictures. */
+/**
+ * What search reads: the server's answers, recent searches, and the
+ * server's address for pictures; [launcher] plays a Live TV channel found.
+ */
 class SearchDeps(
     val search: SearchRepository,
     val origin: Flow<String?>,
     val compute: CoroutineDispatcher = Dispatchers.Default,
+    val launcher: PlayerLauncher? = null,
 ) {
     companion object {
-        fun of(graph: ScreensGraph): SearchDeps = SearchDeps(graph.data.search, graph.data.servers.active)
+        fun of(graph: ScreensGraph): SearchDeps =
+            SearchDeps(graph.data.search, graph.data.servers.active, launcher = graph.playerLauncher)
     }
 }
 
@@ -102,10 +109,18 @@ sealed interface SearchResultsState<out T : Any> {
     data class Loading(val query: String) : SearchResultsState<Nothing>
 
     /**
-     * Results for [query], grouped. While [loading], a newer query's answer
-     * is on its way and these stay until it comes.
+     * Results for [query], grouped, with the Live TV [channels] found (shown
+     * after people, as on the web; their logos are on [origin]). While
+     * [loading], a newer query's answer is on its way and these stay until
+     * it comes.
      */
-    data class Ready<T : Any>(val query: String, val groups: List<SearchGroup<T>>, val loading: Boolean) : SearchResultsState<T>
+    data class Ready<T : Any>(
+        val query: String,
+        val groups: List<SearchGroup<T>>,
+        val loading: Boolean,
+        val channels: List<LiveChannel> = emptyList(),
+        val origin: String = "",
+    ) : SearchResultsState<T>
 
     /** `No results for "north"`. */
     data class Empty(val query: String) : SearchResultsState<Nothing>
@@ -128,8 +143,8 @@ data class SearchUiState<T : Any>(
  * What is typed is asked for once typing has paused 250 ms, and only the
  * latest query's answer counts: a newer one replaces a request still on
  * its way. The results already shown stay while the next ones load.
- * Results come in groups: People, Movies, Shows, Seasons, Episodes,
- * Artists, Albums, Tracks, each with its count. A query is kept among the
+ * Results come in groups: People, Live TV, Movies, Shows, Seasons,
+ * Episodes, Artists, Albums, Tracks, each with its count. A query is kept among the
  * profile's last 10 searches when it is submitted or one of its results
  * is opened.
  */
@@ -212,6 +227,17 @@ class SearchViewModel<T : Any>(
         return key
     }
 
+    /**
+     * Plays the Live TV [channel] found, changing channel among every
+     * channel (as a search in Live TV does); the query is kept among the
+     * recent searches.
+     */
+    fun watch(channel: LiveChannel) {
+        val q = shown.query
+        if (q.isNotEmpty()) viewModelScope.launch { deps.search.remember(q) }
+        deps.launcher?.watchLive(channel.id, "all")
+    }
+
     // The steps from what is typed to what shows.
 
     private sealed interface Step<out T : Any> {
@@ -219,16 +245,25 @@ class SearchViewModel<T : Any>(
 
         data class Asking(val query: String) : Step<Nothing>
 
-        data class Answer<T : Any>(val query: String, val groups: List<SearchGroup<T>>, val stillLoading: Boolean) : Step<T>
+        data class Answer<T : Any>(
+            val query: String,
+            val groups: List<SearchGroup<T>>,
+            val stillLoading: Boolean,
+            val channels: List<LiveChannel> = emptyList(),
+            val origin: String = "",
+        ) : Step<T>
 
         data class Failed(val query: String, val error: Throwable) : Step<Nothing>
     }
 
     private fun step(q: String, load: Loadable<SearchResults>, origin: String): Step<T> = when (load) {
         Loadable.Loading -> Step.Asking(q)
-        is Loadable.Ready -> Step.Answer(q, groups(q, load.value, origin), stillLoading = false)
-        is Loadable.Failed -> load.stale?.let { Step.Answer(q, groups(q, it, origin), stillLoading = false) } ?: Step.Failed(q, load.error)
+        is Loadable.Ready -> answer(q, load.value, origin)
+        is Loadable.Failed -> load.stale?.let { answer(q, it, origin) } ?: Step.Failed(q, load.error)
     }
+
+    private fun answer(q: String, results: SearchResults, origin: String): Step<T> =
+        Step.Answer(q, groups(q, results, origin), stillLoading = false, channels = results.channels, origin = origin)
 
     private fun next(before: SearchResultsState<T>, step: Step<T>): SearchResultsState<T> = when (step) {
         Step.Idle -> SearchResultsState.Idle
@@ -237,10 +272,10 @@ class SearchViewModel<T : Any>(
             is SearchResultsState.Ready -> before.copy(loading = true)
             else -> SearchResultsState.Loading(step.query)
         }
-        is Step.Answer -> if (step.groups.isEmpty()) {
+        is Step.Answer -> if (step.groups.isEmpty() && step.channels.isEmpty()) {
             SearchResultsState.Empty(step.query)
         } else {
-            SearchResultsState.Ready(step.query, step.groups, loading = step.stillLoading)
+            SearchResultsState.Ready(step.query, step.groups, loading = step.stillLoading, channels = step.channels, origin = step.origin)
         }
         is Step.Failed -> SearchResultsState.Failed(step.query, step.error)
     }

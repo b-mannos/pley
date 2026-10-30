@@ -6,7 +6,7 @@
     <string name="search_recent">Recent searches</string>
     <string name="search_recent_clear">Clear</string>
     <string name="search_empty_title">Search your libraries</string>
-    <string name="search_empty_body">Find movies, shows, episodes, people, artists, albums and tracks.</string>
+    <string name="search_empty_body">Find movies, shows, episodes, people, artists, albums, tracks and Live TV channels.</string>
     <string name="search_results_for">Results for “%1$s”</string>
     <string name="search_loading">Searching…</string>
     <string name="search_none_title">No results for “%1$s”</string>
@@ -15,6 +15,7 @@
 
     <!-- The groups results come in, in their order. -->
     <string name="search_group_people">People</string>
+    <string name="search_group_live">Live TV</string>
     <string name="search_group_movies">Movies</string>
     <string name="search_group_shows">Shows</string>
     <string name="search_group_seasons">Seasons</string>

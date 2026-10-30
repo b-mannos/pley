@@ -607,22 +607,28 @@ private fun ChannelTiles(
     }
 }
 
-/** A channel's tile: its logo with its number and how far what's on is, captioned with its name and what's on. */
+/**
+ * A channel's tile: its logo with its number and how far what's on is,
+ * captioned with its name and what's on (Live TV's cards, and search's).
+ * The long press opens [onDetails], where there are any.
+ */
 @Composable
-private fun ChannelTileCard(
+internal fun ChannelTileCard(
     channel: LiveChannel,
     name: String,
     origin: String,
     now: Long,
     focusModifier: Modifier,
     onWatch: (LiveChannel) -> Unit,
-    onDetails: (LiveChannel) -> Unit,
+    onDetails: ((LiveChannel) -> Unit)?,
+    modifier: Modifier = Modifier,
 ) {
     val on = channel.onAt(now)
     TvTileFrame(
         kind = TileKind.Episode,
         onClick = { onWatch(channel) },
-        onLongClick = { onDetails(channel) },
+        onLongClick = onDetails?.let { { it(channel) } },
+        modifier = modifier,
         focusModifier = focusModifier,
         caption = { focused ->
             TileCaption(

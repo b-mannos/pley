@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -54,6 +56,7 @@ import app.pley.android.designsystem.tile.TileStyle
 import app.pley.android.designsystem.tile.rememberSkeleton
 import app.pley.android.designsystem.tile.skeleton
 import app.pley.android.model.ItemSummary
+import app.pley.android.model.LiveChannel
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.library.TileFactory
 import app.pley.android.screens.library.TileLook
@@ -75,17 +78,22 @@ import app.pley.android.ui.tv.kit.initialFocus
 import app.pley.android.ui.tv.kit.railFade
 import app.pley.android.ui.tv.kit.railOnLeftStopOnRight
 import app.pley.android.ui.tv.kit.rememberFocusMemory
+import app.pley.android.ui.tv.kit.rememberedFocus
+import app.pley.android.ui.tv.kit.FocusMemory
+import app.pley.android.ui.tv.livetv.ChannelTileCard
 import app.pley.android.ui.tv.library.TvChip
 import app.pley.android.ui.tv.library.TvTiles
 import app.pley.android.ui.tv.shell.LocalTvNavigator
+import kotlinx.coroutines.delay
 
 /**
  * Search on TV (design spec §4.5, mockup tv-search): the field at the
  * top, 520 wide, with initial focus; Select opens the system keyboard,
  * which has voice input, and Back closes it. Before typing, the recent
  * searches as chips. While typing (250 ms after the last key), the
- * results as rows, grouped (People, Movies, Shows, Seasons, Episodes,
- * Artists, Albums, Tracks), the first header at y = 96. Down from the
+ * results as rows, grouped (People, Live TV, Movies, Shows, Seasons,
+ * Episodes, Artists, Albums, Tracks), the first header at y = 96; a
+ * channel found plays at once. Down from the
  * field goes into the rows, Up from the first row back to it; Left goes
  * to the rail.
  */
@@ -113,6 +121,7 @@ internal fun TvSearchScreen(key: PleyKey.Search) {
         onOpen = { group, id -> vm.open(group, id)?.let(navigator::open) },
         onActions = { id -> navigator.open(PleyKey.ItemActions(id)) },
         onRetry = vm::retry,
+        onWatch = vm::watch,
     )
 }
 
@@ -142,6 +151,7 @@ internal fun TvSearchContent(
     onOpen: (SearchGroupKind, Long) -> Unit,
     onActions: (Long) -> Unit,
     onRetry: () -> Unit = {},
+    onWatch: (LiveChannel) -> Unit = {},
 ) {
     val rail = LocalTvRailFocus.current
     val memory = rememberFocusMemory()
@@ -184,7 +194,11 @@ internal fun TvSearchContent(
                     contentPadding = PaddingValues(top = ResultsTop, bottom = ResultsBottomRoom),
                     headerY = ResultsTop,
                 ) {
-                    results.groups.forEach { group ->
+                    results.groups.forEachIndexed { index, group ->
+                        // Live TV's row comes after People, as on the web.
+                        if (index == results.groups.count { it.kind == SearchGroupKind.People } && results.channels.isNotEmpty()) {
+                            channelRow(results, memory, onWatch)
+                        }
                         val kind = group.kind.tvTileKind
                         item(key = group.kind.name, contentType = kind) {
                             TvRow(
@@ -197,6 +211,9 @@ internal fun TvSearchContent(
                                 memory = memory,
                             )
                         }
+                    }
+                    if (results.groups.all { it.kind == SearchGroupKind.People } && results.channels.isNotEmpty()) {
+                        channelRow(results, memory, onWatch)
                     }
                 }
             }
@@ -222,6 +239,63 @@ internal fun TvSearchContent(
             if (loading) {
                 Spacer(Modifier.width(20.dp))
                 BasicText(stringResource(R.string.tv_search_loading), style = PleyType.Tv.Caption.copy(color = PleyColors.Muted))
+            }
+        }
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.channelRow(
+    results: SearchResultsState.Ready<ArtworkTileModel>,
+    memory: FocusMemory,
+    onWatch: (LiveChannel) -> Unit,
+) {
+    item(key = CHANNELS_KEY, contentType = CHANNELS_KEY) {
+        ChannelRow(results.channels, results.origin, memory, onWatch)
+    }
+}
+
+/**
+ * The Live TV channels found (the web's ChannelResults), as Live TV's
+ * channel tiles: the logo with the number and how far what's on is,
+ * captioned with the name and what's on. Select plays the channel.
+ */
+@Composable
+private fun ChannelRow(channels: List<LiveChannel>, origin: String, memory: FocusMemory, onWatch: (LiveChannel) -> Unit) {
+    val rail = LocalTvRailFocus.current
+    val now by produceState(System.currentTimeMillis() / 1000) {
+        while (true) {
+            delay(NOW_TICK_MS)
+            value = System.currentTimeMillis() / 1000
+        }
+    }
+    Column(Modifier.fillMaxWidth().focusGroup()) {
+        BasicText(
+            stringResource(R.string.tv_search_group_live),
+            style = PleyType.Tv.Section.copy(color = PleyColors.Fg),
+            maxLines = 1,
+            modifier = Modifier.padding(start = PleyTv.Gutter, end = TvSafeArea.Horizontal).semantics { heading() },
+        )
+        Spacer(Modifier.height(PleyTv.HeaderToTiles - ChannelBleed))
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(TV_SEARCH_CHANNELS)
+                .railOnLeftStopOnRight(rail)
+                .focusRestorer(),
+            contentPadding = PaddingValues(start = PleyTv.Gutter, end = TvSafeArea.Horizontal + TileKind.Episode.tvWidth, top = ChannelBleed, bottom = ChannelBleed),
+            horizontalArrangement = Arrangement.spacedBy(TileKind.Episode.tvGap),
+        ) {
+            items(channels, key = { it.id }, contentType = { "channel" }) { channel ->
+                ChannelTileCard(
+                    channel = channel,
+                    name = channel.name,
+                    origin = origin,
+                    now = now,
+                    focusModifier = Modifier.rememberedFocus(memory, "$CHANNELS_KEY/${channel.id}"),
+                    onWatch = onWatch,
+                    onDetails = null,
+                    modifier = Modifier.testTag(TV_SEARCH_CHANNEL + channel.id),
+                )
             }
         }
     }
@@ -347,3 +421,14 @@ internal const val TV_SEARCH = "pley.tv.search"
 internal const val TV_SEARCH_FIELD = "pley.tv.search.field"
 internal const val TV_SEARCH_RESULTS = "pley.tv.search.results"
 internal const val TV_SEARCH_RECENT = "pley.tv.search.recent"
+internal const val TV_SEARCH_CHANNELS = "pley.tv.search.channels"
+internal const val TV_SEARCH_CHANNEL = "pley.tv.search.channel."
+
+/** The Live TV row's key among the results' rows. */
+private const val CHANNELS_KEY = "Channels"
+
+/** Room above and below the channel tiles for a focused tile's growth and glow. */
+private val ChannelBleed = 16.dp
+
+/** How often what's on a channel found is looked at again. */
+private const val NOW_TICK_MS = 30_000L

@@ -25,7 +25,7 @@ describes how they are made.
   going back, no picture in picture, as on the web), every connection in
   use listed with what holds it and Watch here instead where it may be
   taken over, the channel's logo for radio, and a spinner only once a
-  stall lasts.
+  stall lasts. Channels show in the app's search too.
   Leaving lets the provider's connection go. A channel the server sends
   as it is plays straight from its MPEG-TS, sooner than its HLS.
 - Live TV opens as it was left, after a restart too: the category, the

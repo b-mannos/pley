@@ -35,12 +35,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -78,6 +80,7 @@ import app.pley.android.designsystem.tile.SkeletonTile
 import app.pley.android.designsystem.tile.TileKind
 import app.pley.android.designsystem.tile.TileStyle
 import app.pley.android.designsystem.tile.rememberSkeleton
+import app.pley.android.model.LiveChannel
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.library.TileLook
 import app.pley.android.screens.screensGraph
@@ -99,15 +102,19 @@ import app.pley.android.ui.phone.kit.PleyTextButton
 import app.pley.android.ui.phone.kit.rememberHubRowState
 import app.pley.android.ui.phone.kit.rowCardWidth
 import app.pley.android.ui.phone.library.PhoneTiles
+import app.pley.android.ui.phone.livetv.ChannelTile
+import app.pley.android.ui.phone.livetv.ProgramProgress
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
+import kotlinx.coroutines.delay
 
 /**
  * Search on the phone (design spec §4.5; the web's SearchPage): a search
  * bar docked at the top with the keyboard up when the tab opens empty.
  * Before typing, the profile's recent searches with Clear; while typing,
- * the results as rows, grouped and counted (People, Movies, Shows…),
- * the ones shown staying while the next load.
+ * the results as rows, grouped and counted (People, Live TV, Movies,
+ * Shows…), the ones shown staying while the next load. A channel found
+ * plays at once.
  */
 @Composable
 internal fun PhoneSearchScreen(key: PleyKey.Search) {
@@ -131,6 +138,7 @@ internal fun PhoneSearchScreen(key: PleyKey.Search) {
         onClearRecent = vm::clearRecent,
         open = vm::open,
         onRetry = vm::retry,
+        onWatch = vm::watch,
     )
 }
 
@@ -148,6 +156,7 @@ internal fun SearchContent(
     onClearRecent: () -> Unit,
     open: (SearchGroupKind, Long) -> PleyKey?,
     onRetry: () -> Unit = {},
+    onWatch: (LiveChannel) -> Unit = {},
 ) {
     val navigator = LocalPhoneNavigator.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -188,6 +197,7 @@ internal fun SearchContent(
                     results,
                     onOpen = { group, id -> open(group, id)?.let(navigator::open) },
                     onActions = { id -> navigator.open(PleyKey.ItemActions(id)) },
+                    onWatch = onWatch,
                 )
             }
         }
@@ -287,12 +297,16 @@ private fun Recent(recent: List<String>, onRecent: (String) -> Unit, onClear: ()
     }
 }
 
-/** The results: a line saying what they are for (with a spinner while newer ones load), then a row per group. */
+/**
+ * The results: a line saying what they are for (with a spinner while newer
+ * ones load), then a row per group, Live TV's after People (the web's order).
+ */
 @Composable
 private fun Results(
     results: SearchResultsState.Ready<ArtworkTileModel>,
     onOpen: (SearchGroupKind, Long) -> Unit,
     onActions: (Long) -> Unit,
+    onWatch: (LiveChannel) -> Unit,
 ) {
     val metrics = LocalPhoneMetrics.current
     val list = rememberLazyListState()
@@ -318,8 +332,109 @@ private fun Results(
                 }
             }
         }
-        items(results.groups, key = { it.kind.name }, contentType = { it.kind.tileKind }) { group ->
-            ResultRow(group, onOpen = { onOpen(group.kind, it) }, onActions = if (group.kind == SearchGroupKind.People) null else onActions)
+        val people = results.groups.takeWhile { it.kind == SearchGroupKind.People }
+        val rest = results.groups.drop(people.size)
+        items(people, key = { it.kind.name }, contentType = { it.kind.tileKind }) { group ->
+            ResultRow(group, onOpen = { onOpen(group.kind, it) }, onActions = null)
+        }
+        if (results.channels.isNotEmpty()) {
+            item(key = "channels", contentType = "channels") {
+                ChannelRow(results.channels, results.origin, onWatch)
+            }
+        }
+        items(rest, key = { it.kind.name }, contentType = { it.kind.tileKind }) { group ->
+            ResultRow(group, onOpen = { onOpen(group.kind, it) }, onActions = onActions)
+        }
+    }
+}
+
+/** A group's name and count, read as one heading. */
+@Composable
+private fun RowHeader(name: String, count: Int) {
+    val metrics = LocalPhoneMetrics.current
+    val spoken = pluralStringResource(R.plurals.search_group_count, count, name, count.toString())
+    Row(
+        Modifier
+            .padding(start = metrics.marginStart, end = metrics.marginEnd)
+            .heightIn(min = 32.dp)
+            .clearAndSetSemantics {
+                contentDescription = spoken
+                heading()
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(name, style = MaterialTheme.typography.titleLarge, color = PleyColors.Fg)
+        Spacer(Modifier.width(8.dp))
+        Text(count.toString(), style = MaterialTheme.typography.bodyMedium, color = PleyColors.Subtle)
+    }
+}
+
+/**
+ * The Live TV channels found (the web's ChannelResults): cards with the
+ * logo, number and name, and what's on with how far it is (the group
+ * without a guide). A card plays its channel.
+ */
+@Composable
+private fun ChannelRow(channels: List<LiveChannel>, origin: String, onWatch: (LiveChannel) -> Unit) {
+    val metrics = LocalPhoneMetrics.current
+    val now by produceState(System.currentTimeMillis() / 1000) {
+        while (true) {
+            delay(NOW_TICK_MS)
+            value = System.currentTimeMillis() / 1000
+        }
+    }
+    Column(Modifier.fillMaxWidth()) {
+        RowHeader(stringResource(R.string.search_group_live), channels.size)
+        Spacer(Modifier.height(PleyPhone.HeaderToContent - PRESS_ROOM))
+        LazyRow(
+            state = rememberHubRowState(),
+            modifier = Modifier.fillMaxWidth().testTag(SEARCH_ROW + SEARCH_CHANNELS),
+            contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd, top = PRESS_ROOM, bottom = PRESS_ROOM),
+            horizontalArrangement = Arrangement.spacedBy(PleyPhone.TileGap),
+        ) {
+            items(channels, key = { it.id }, contentType = { "channel" }) { channel ->
+                ChannelCard(channel, origin, now, onClick = { onWatch(channel) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChannelCard(channel: LiveChannel, origin: String, now: Long, onClick: () -> Unit) {
+    val on = channel.onAt(now)
+    val title = listOfNotNull(channel.number, channel.name).joinToString(" ")
+    val watch = if (on != null) {
+        stringResource(R.string.livetv_watch_with_now, title, on.title)
+    } else {
+        stringResource(R.string.livetv_watch, title)
+    }
+    Row(
+        Modifier
+            .width(CHANNEL_CARD_WIDTH)
+            .clip(PleyShape.Card)
+            .background(PleyColors.Surface)
+            .clickable(role = Role.Button, onClickLabel = watch, onClick = onClick)
+            .padding(10.dp)
+            .testTag(SEARCH_CHANNEL + channel.id),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ChannelTile(channel, origin, Modifier.size(width = 72.dp, height = 44.dp), well = PleyColors.Surface3)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                channel.number?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = PleyColors.Subtle, maxLines = 1)
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(channel.name, style = MaterialTheme.typography.titleSmall, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (on != null) {
+                Text(on.title, style = MaterialTheme.typography.bodySmall, color = PleyColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(4.dp))
+                ProgramProgress(on, now, Modifier.fillMaxWidth())
+            } else if (channel.group.isNotEmpty()) {
+                Text(channel.group, style = MaterialTheme.typography.bodySmall, color = PleyColors.Subtle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
         }
     }
 }
@@ -330,23 +445,8 @@ private fun ResultRow(group: SearchGroup<ArtworkTileModel>, onOpen: (Long) -> Un
     val metrics = LocalPhoneMetrics.current
     val kind = group.kind.tileKind
     val width = rowCardWidth(kind, metrics.contentWidth - metrics.margin * 2)
-    val name = groupName(group.kind)
-    val spoken = pluralStringResource(R.plurals.search_group_count, group.count, name, group.count.toString())
     Column(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier
-                .padding(start = metrics.marginStart, end = metrics.marginEnd)
-                .heightIn(min = 32.dp)
-                .clearAndSetSemantics {
-                    contentDescription = spoken
-                    heading()
-                },
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(name, style = MaterialTheme.typography.titleLarge, color = PleyColors.Fg)
-            Spacer(Modifier.width(8.dp))
-            Text(group.count.toString(), style = MaterialTheme.typography.bodyMedium, color = PleyColors.Subtle)
-        }
+        RowHeader(groupName(group.kind), group.count)
         Spacer(Modifier.height(PleyPhone.HeaderToContent - PRESS_ROOM))
         LazyRow(
             state = rememberHubRowState(),
@@ -431,3 +531,11 @@ internal const val SEARCH_FIELD = "pley.search.field"
 internal const val SEARCH_RECENT = "pley.search.recent"
 internal const val SEARCH_RESULTS = "pley.search.results"
 internal const val SEARCH_ROW = "pley.search.row."
+internal const val SEARCH_CHANNELS = "Channels"
+internal const val SEARCH_CHANNEL = "pley.search.channel."
+
+/** How wide a channel found is drawn (the web's 16 rem). */
+private val CHANNEL_CARD_WIDTH = 256.dp
+
+/** How often what's on a channel found is looked at again. */
+private const val NOW_TICK_MS = 30_000L

@@ -176,7 +176,9 @@ rail. Its sources, lineup and connections are set up in the web app.
   HLS). Try again and Other channels as ever. The
   spinner shows only once a stall has lasted 0.7 s. There is no picture
   in picture. Leaving (onStop) lets the session go; coming back tunes
-  again at the live edge. The TV's display mode isn't matched for
+  again at the live edge. The app's search lists matching channels in a
+  Live TV row after People on phones and TVs; one plays at once, changing
+  channel among every channel. The TV's display mode isn't matched for
   live channels.
 
 ## Offline

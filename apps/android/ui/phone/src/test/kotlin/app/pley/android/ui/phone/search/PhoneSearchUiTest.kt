@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import app.pley.android.designsystem.tile.ArtworkTileModel
+import app.pley.android.model.LiveChannel
 import app.pley.android.screens.Navigator
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.search.SearchGroup
@@ -43,6 +44,7 @@ class PhoneSearchUiTest {
     }
 
     private val chosen = mutableListOf<String>()
+    private val watched = mutableListOf<LiveChannel>()
     private var cleared = 0
 
     private fun show(state: SearchUiState<ArtworkTileModel>, field: TextFieldState = TextFieldState(state.query)) {
@@ -56,6 +58,7 @@ class PhoneSearchUiTest {
                         onRecent = { chosen += it },
                         onClearRecent = { cleared++ },
                         open = { group, id -> if (group == SearchGroupKind.People) PleyKey.Person(id) else PleyKey.Item(id) },
+                        onWatch = { watched += it },
                     )
                 }
             }
@@ -95,6 +98,18 @@ class PhoneSearchUiTest {
         compose.onNodeWithText("Northern Lights", useUnmergedTree = true).performClick()
         compose.onNodeWithText("Lena Okafor", useUnmergedTree = true).performClick()
         assertEquals(listOf(PleyKey.Item(1), PleyKey.Person(70)), opened)
+    }
+
+    @Test
+    fun channelsFoundShowAsLiveTvAndPlay() {
+        val sport = LiveChannel(id = 7, name = "North Sport", number = "101", group = "Sport")
+        val groups = listOf(SearchGroup(SearchGroupKind.Movies, listOf(tile(1, "Northern Lights")), listOf(1)))
+        show(SearchUiState("north", emptyList(), SearchResultsState.Ready("north", groups, loading = false, channels = listOf(sport))))
+        compose.onNodeWithContentDescription("Live TV, 1 result").assertExists()
+        compose.onNodeWithText("Sport", useUnmergedTree = true).assertExists()
+        compose.onNodeWithTag(SEARCH_CHANNEL + 7).performClick()
+        assertEquals(listOf(sport), watched)
+        assertEquals(emptyList<PleyKey>(), opened)
     }
 
     @Test
