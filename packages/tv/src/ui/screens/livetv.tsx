@@ -368,7 +368,9 @@ const CARD_H = 92;
 const SECTION_HEADER = 24 + 14;
 /** Where the focused row's cards sit: under the chips, as the library's grid. */
 const CARDS_TOP = 172;
+/** Nothing shows above a titled row's header, nor 12 above an untitled row's cards (the row before's end 28 above). */
 const CARDS_CLIP = 124;
+const CARDS_CLIP_UNTITLED = CARDS_TOP - 12;
 /** Two cards a row, 400 wide, 16 apart (96 to 912). */
 const CARD_W = 400;
 const CARD_GAP = 16;
@@ -392,6 +394,8 @@ function ChannelCards(p: {
   const entry = p.entry;
   const [recentAt, setRecentAt] = useState(0);
   const [focusedKey, setFocusedKey] = useState<string | undefined>(entry.state.section as string | undefined);
+  /** The section focus is in: a row without a header is cut closer above. */
+  const [at, setAt] = useState<string | undefined>(focusedKey);
   const hours24 = useApp().platform.clock24();
   const rows: LiveChannel[][] = [];
   for (let i = 0; i < p.channels.length; i += 2) rows.push(p.channels.slice(i, i + 2));
@@ -404,6 +408,7 @@ function ChannelCards(p: {
     const key = `row/${Math.floor(at / 2)}`;
     entry.state.section = key;
     setFocusedKey(key);
+    setAt(key);
     setTimeout(() => {
       const el = document.querySelector<HTMLElement>(`.live-page [data-fid="card/${p.jump!.id}"]`);
       if (el) ui.focus.focus(el);
@@ -457,9 +462,12 @@ function ChannelCards(p: {
     <SectionPage
       sections={sections}
       top={CARDS_TOP - SECTION_HEADER}
-      clipAbove={CARDS_CLIP}
+      clipAbove={at && at !== "recent" && at !== "row/0" ? CARDS_CLIP_UNTITLED : CARDS_CLIP}
       focusedKey={focusedKey}
-      onFocusSection={(key) => (entry.state.section = key)}
+      onFocusSection={(key) => {
+        entry.state.section = key;
+        setAt(key);
+      }}
     />
   );
 }

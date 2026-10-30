@@ -500,7 +500,7 @@ function NowCard(p: { channel: LiveChannel; on: ReturnType<typeof nowAndNext>["o
             </div>
           </>
         ) : (
-          <div class="t-section c-fg one-line live-now-title">{c.has_guide ? "Nothing in the guide now" : "No guide for this channel"}</div>
+          <div class="t-title c-muted one-line live-now-title">{c.has_guide ? "Nothing in the guide now" : "No guide for this channel"}</div>
         )}
         {p.next && <div class="t-caption c-muted one-line" style="margin-top:6px">{`Next  ${formatTime(p.next.start, p.hours24)} · ${p.next.title}`}</div>}
       </div>

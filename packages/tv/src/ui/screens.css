@@ -1060,8 +1060,9 @@ html.avplay .engine-host { background: transparent; }
 .live-panel-facts .live-mark { margin-right: 0; }
 .live-panel-progress { display: flex; align-items: center; margin-top: 10px; }
 
-/* The live player: what's on above the timeshift's bar, at the left. */
-.live-info { position: absolute; left: 48px; right: 48px; top: 290px; opacity: 0; transition: opacity 200ms var(--focus-ease); z-index: 3; pointer-events: none; }
+/* The live player: what's on above the timeshift's bar, at the left, on a scrim darker below the middle than the title player's. */
+.live-player .player-scrim { background: linear-gradient(to bottom, rgba(0, 0, 0, 0.65) 0%, rgba(0, 0, 0, 0.2) 22%, rgba(0, 0, 0, 0.3) 42%, rgba(0, 0, 0, 0.78) 62%, rgba(0, 0, 0, 0.92) 100%); }
+.live-info { position: absolute; left: 48px; right: 48px; top: 290px; opacity: 0; transition: opacity 200ms var(--focus-ease); z-index: 3; pointer-events: none; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5); }
 .live-info.in { opacity: 1; }
 .reduced .live-info { transition: none; }
 .live-now { display: flex; align-items: flex-start; }
