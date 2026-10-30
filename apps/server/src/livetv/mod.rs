@@ -455,6 +455,15 @@ pub(crate) struct Lineup {
     names: Vec<String>,
     /// The groups of the channels shown, in the lineup's order.
     groups: Vec<Group>,
+    /// The guide's channels (by source) with programmes to come, as the
+    /// lineup was read: the guide is read again only with a change.
+    guided: HashSet<(i64, String)>,
+}
+
+impl Lineup {
+    fn has_guide(&self, c: &ChannelRow) -> bool {
+        c.guide_key().is_some_and(|k| self.guided.contains(&(c.source_id, k.to_owned())))
+    }
 }
 
 impl Lineup {
@@ -813,20 +822,10 @@ impl LiveTv {
 
     /// Channels with programmes now or ahead, by source.
     async fn guided_counts(&self) -> Result<HashMap<i64, i64>, AppError> {
-        let channels = self.channel_rows(None, true).await?;
-        let keys: HashSet<(i64, String)> =
-            sqlx::query_as::<_, (i64, String)>("SELECT DISTINCT source_id, guide_id FROM live_programs WHERE stop > ?")
-                .bind(now())
-                .fetch_all(&self.db.read)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?
-                .into_iter()
-                .collect();
+        let lineup = self.lineup().await?;
         let mut out = HashMap::new();
-        for c in channels {
-            if c.guide_key().is_some_and(|k| keys.contains(&(c.source_id, k.to_owned()))) {
-                *out.entry(c.source_id).or_insert(0) += 1;
-            }
+        for c in lineup.rows.iter().filter(|c| lineup.has_guide(c)) {
+            *out.entry(c.source_id).or_insert(0) += 1;
         }
         Ok(out)
     }
@@ -1370,7 +1369,15 @@ impl LiveTv {
             });
             groups[at].count += 1;
         }
-        let lineup = Arc::new(Lineup { rows, shown, names, groups });
+        let guided =
+            sqlx::query_as::<_, (i64, String)>("SELECT DISTINCT source_id, guide_id FROM live_programs WHERE stop > ?")
+                .bind(now())
+                .fetch_all(&self.db.read)
+                .await
+                .map_err(|e| AppError::Internal(e.into()))?
+                .into_iter()
+                .collect();
+        let lineup = Arc::new(Lineup { rows, shown, names, groups, guided });
         let mut kept = self.lineup.lock();
         // A change while it was read: this one is already out of date.
         if self.generation.load(Ordering::SeqCst) == generation {
@@ -1643,14 +1650,6 @@ impl LiveTv {
     pub async fn admin_channels(&self, source: Option<i64>) -> Result<Vec<AdminChannel>, AppError> {
         let lineup = self.lineup().await?;
         let rows = lineup.rows.iter().filter(|c| source.is_none_or(|s| c.source_id == s));
-        let keys: HashSet<(i64, String)> =
-            sqlx::query_as::<_, (i64, String)>("SELECT DISTINCT source_id, guide_id FROM live_programs WHERE stop > ?")
-                .bind(now())
-                .fetch_all(&self.db.read)
-                .await
-                .map_err(|e| AppError::Internal(e.into()))?
-                .into_iter()
-                .collect();
         Ok(rows
             .map(|c| AdminChannel {
                 id: c.id,
@@ -1660,7 +1659,7 @@ impl LiveTv {
                 group: c.group_name.clone(),
                 logo: (!c.logo_url.is_empty()).then(|| format!("/api/live/channels/{}/logo", c.id)),
                 guide_id: c.guide_key().unwrap_or_default().to_owned(),
-                has_guide: c.guide_key().is_some_and(|k| keys.contains(&(c.source_id, k.to_owned()))),
+                has_guide: lineup.has_guide(c),
                 hidden: c.hidden,
                 source_name: c.name.clone(),
                 source_number: c.number.clone(),
