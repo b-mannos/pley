@@ -311,7 +311,7 @@ fn pmt_pid(packet: &[u8]) -> Option<u16> {
     if table.first() != Some(&0) {
         return None;
     }
-    let length = usize::from(u16::from(table[1] & 0x0f) << 8 | u16::from(*table.get(2)?));
+    let length = usize::from(u16::from(*table.get(1)? & 0x0f) << 8 | u16::from(*table.get(2)?));
     let programs = table.get(8..(3 + length).saturating_sub(4))?;
     programs
         .as_chunks::<4>()
@@ -1356,6 +1356,15 @@ mod tests {
         f.push(&filler);
         assert!(f.keyframe.is_none());
         assert_eq!(f.start(), vec![filler]);
+    }
+
+    #[test]
+    fn a_pat_cut_short_is_no_pat() {
+        // A pointer field leaving one byte of table.
+        let mut p = packet(0, true, None, &[]);
+        p[4] = (TS_PACKET - 6) as u8;
+        p[TS_PACKET - 1] = 0;
+        assert_eq!(pmt_pid(&p), None);
     }
 
     #[test]
