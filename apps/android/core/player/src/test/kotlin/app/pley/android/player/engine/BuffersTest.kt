@@ -83,6 +83,13 @@ class BuffersTest {
         assertFalse(control.shouldStartPlayback(params(1_600, rebuffering = true)))
         assertTrue(control.shouldStartPlayback(params(2_100, rebuffering = true)))
         assertEquals(0L, control.getBackBufferDurationUs(player))
+
+        // Live starts on the small thresholds wherever the server is.
+        control.live = true
+        assertTrue(control.shouldStartPlayback(params(600, rebuffering = false)))
+        assertFalse(control.shouldStartPlayback(params(400, rebuffering = false)))
+        assertTrue(control.shouldStartPlayback(params(1_600, rebuffering = true)))
+        assertFalse(control.shouldStartPlayback(params(1_400, rebuffering = true)))
     }
 
     private fun loadError(error: IOException, count: Int) = LoadErrorHandlingPolicy.LoadErrorInfo(

@@ -251,6 +251,7 @@ class Media3Engine(
         matchJob?.cancel()
         wantPlay = playWhenReady
         loadControl.home = BufferPlan.isHome(source.url)
+        loadControl.live = source.live
         applyTrackParameters()
         player.setVideoChangeFrameRateStrategy(frameRateStrategy())
         struggle.reset()

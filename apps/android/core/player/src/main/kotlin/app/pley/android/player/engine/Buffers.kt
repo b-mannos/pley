@@ -95,12 +95,17 @@ data class BufferPlan(
  * Media3's DefaultLoadControl sized by [plan], deciding when to start from
  * where the server is ([home], set at each prepare): the home network's
  * thresholds are the delegate's, and away from home playback waits for a
- * little more.
+ * little more. A live channel ([live]) starts on the small thresholds
+ * wherever the server is (0.5 s, 1.5 s after a stall): it comes as it
+ * airs, and a bigger start buffer is only a later picture.
  */
 @OptIn(markerClass = [UnstableApi::class])
 class PleyLoadControl(private val plan: BufferPlan) : LoadControl {
     @Volatile
     var home: Boolean = true
+
+    @Volatile
+    var live: Boolean = false
 
     private val delegate: DefaultLoadControl = DefaultLoadControl.Builder()
         .setBufferDurationsMs(plan.minMs, plan.maxMs, plan.startHomeMs, plan.restartHomeMs)
@@ -138,7 +143,7 @@ class PleyLoadControl(private val plan: BufferPlan) : LoadControl {
 
     override fun shouldStartPlayback(parameters: LoadControl.Parameters): Boolean {
         if (!delegate.shouldStartPlayback(parameters)) return false
-        if (home) return true
+        if (home || live) return true
         val needUs = plan.startMs(home = false, rebuffering = parameters.rebuffering) * 1_000L
         val bufferedUs = Util.getPlayoutDurationForMediaDuration(parameters.bufferedDurationUs, parameters.playbackSpeed)
         return bufferedUs >= needUs
