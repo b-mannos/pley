@@ -18,7 +18,7 @@ sub onChips()
         label.font = "font:SmallSystemFont"
         label.text = chip.label
         width = chip.width
-        if width <= 0 then width = Int(label.boundingRect().width) + 64
+        if width <= 0 then width = Int(label.boundingRect().width) + m.top.pad
         back.translation = [x, 0]
         back.width = width
         back.height = 56

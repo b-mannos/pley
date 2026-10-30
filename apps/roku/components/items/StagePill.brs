@@ -9,10 +9,13 @@ sub onLook()
     ' Fields set in markup may come before init.
     if m.label = invalid then return
     m.label.text = m.top.text
+    ' As wide as its words, cut short only when they don't fit.
     m.label.width = 0
     textWidth = m.label.boundingRect().width
-    if textWidth > m.top.maxWidth - 36 then textWidth = m.top.maxWidth - 36
-    m.label.width = textWidth
+    if textWidth > m.top.maxWidth - 36
+        textWidth = m.top.maxWidth - 36
+        m.label.width = textWidth
+    end if
     m.back.width = textWidth + 36
     m.back.color = m.top.color
     m.fill.color = m.top.color

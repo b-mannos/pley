@@ -74,12 +74,16 @@ sub onLayout()
     m.track.visible = m.progress > 0
     m.fill.visible = m.progress > 0
     m.watched.translation = [w - 52, 12]
-    ' The badge at the poster's top left, as wide as its words.
+    ' The badge at the poster's top left, as wide as its words; cut short
+    ' only when they don't fit (a label as wide as it measures can lose
+    ' its last letters to rounding).
     if m.badge.visible
         m.badge.width = 0
         textWidth = m.badge.boundingRect().width
-        if textWidth > w - 48 then textWidth = w - 48
-        m.badge.width = textWidth
+        if textWidth > w - 48
+            textWidth = w - 48
+            m.badge.width = textWidth
+        end if
         m.badge.translation = [24, 12]
         m.badgeBack.translation = [12, 12]
         m.badgeBack.width = textWidth + 24

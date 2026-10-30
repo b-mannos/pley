@@ -32,9 +32,11 @@
         <!-- How many there are; for an administrator whose sign-in can't
              approve, how to make it. -->
         <Label id="count" translation="[1024, 60]" width="800" horizAlign="right" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
-        <ChipRow id="tabs" translation="[96, 132]" visible="false" />
+        <!-- Closer chips than a library's: a manager's eight tabs leave
+             room for the filters. -->
+        <ChipRow id="tabs" translation="[96, 132]" pad="44" visible="false" />
         <!-- A manager's filters, or Sign in again. -->
-        <ChipRow id="side" translation="[1600, 132]" visible="false" />
+        <ChipRow id="side" translation="[1600, 132]" pad="44" visible="false" />
         <MarkupList id="list" translation="[96, 212]" itemComponentName="RequestRow" itemSize="[1728, 184]" itemSpacing="[0, 16]" numRows="4" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
         <Label id="message" translation="[96, 480]" width="1728" wrap="true" horizAlign="center" color="0xA1A9B6FF" text="Loading…" font="font:MediumSystemFont" />
         <Label id="hint" translation="[96, 1016]" width="1728" color="0x8B95A5FF" text="Press * on a request for what can be done with it." visible="false" font="font:SmallestSystemFont" />

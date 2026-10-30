@@ -8,6 +8,36 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Requests: where the server has them on, people ask for movies and shows
+  found on TMDB, and managers approve them. Discover, in the menu, has a
+  hero for the first trending title and rows (Trending this week, Popular
+  movies, Popular shows, Coming to cinemas, Popular anime, Your requests)
+  of posters marked "In library", "Requested" or "Declined", each loading
+  as it comes into view, and its own search.
+- A TMDB title's page: its one main action (Request, Request more seasons,
+  Open, Tell me too) or why there is none, its request's stage, and its
+  seasons, each saying how it stands; Which seasons? picks those to ask
+  for.
+- Your requests: tabs by status and a card per request with its stage
+  (downloading with a bar and the time left), the reason or note; OK opens
+  the title, the Options key offers Withdraw, Stop following, Try again or
+  Request again.
+- Managers' Requests open on Needs attention and filter by movies or
+  shows, person and title; the Options key offers Approve, Decline,
+  Decline with a reason… (typed on the Roku's keyboard), Mark as added by
+  hand and Delete. The menu's number counts what waits, red while some
+  failed.
+- A requested title that arrives is told of ("… is ready to watch." with
+  Open), never over playing video.
+- Search shows titles "On TMDB" after the libraries' own, for those who
+  may ask. A library title that was asked for shows its request's stage
+  under the poster, and a show with seasons left to ask for ends its
+  seasons with Request more seasons.
+- Signing in asks for requests and approvals where the server offers them.
+  Settings carries TMDB's notice.
+
 ## [0.1.0] - 2026-10-30
 
 ### Added

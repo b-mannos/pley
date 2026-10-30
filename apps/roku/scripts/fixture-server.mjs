@@ -2,10 +2,11 @@
 // from docs/API.md, never a real server. It also checks what the app sends:
 // the User-Agent on every request, the token in the Authorization header
 // only (and not for a QR code), each refresh token used once and never two
-// refreshes at once.
+// refreshes at once. Requests and Discover are in fixture-requests.mjs.
 
 import { createServer } from "node:http";
 import { deflateSync } from "node:zlib";
+import { fakeRequests } from "./fixture-requests.mjs";
 
 const USER_AGENT = /^pleyRoku\/\d+\.\d+\.\d+ \(Roku OS [^;()]+; [^;()]+\)$/;
 const CLIENT_ID = "https://pley-media-server.github.io/pley/oauth/roku.json";
@@ -170,8 +171,12 @@ function detail(item, myList) {
 // The returned `down` makes the server stop answering, as when it's off;
 // `qr` false makes it answer 404 for QR codes, as an older one does;
 // `requestScopes` false makes it offer neither requests nor approvals,
-// and know nothing of requests, as an older one;
+// and know nothing of requests, as an older one; `requestsOn` false
+// turns requests off (the summary says so, the rest answers 503);
 // `playbackDelayMs` holds back the answers to POST /api/playback.
+// What the app asked for and did is kept: requestsAsked (POST
+// /api/requests bodies), requestsActed ({ id, action }), and
+// discoverPictures ({ kind, file, w }).
 export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
   const problems = [];
   const requests = [];
@@ -321,6 +326,20 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
 
     const path = url.pathname;
     let match;
+    // Requests and Discover, as the profile signed in sees them.
+    const answered = requestsApi.answer(req.method, path, url.searchParams, body, access.get(bearer));
+    if (answered) {
+      if (answered.picture) {
+        res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "private, max-age=604800, immutable" });
+        return res.end(answered.picture);
+      }
+      if (answered.status === 204) {
+        res.writeHead(204);
+        return res.end();
+      }
+      res.writeHead(answered.status, { "Content-Type": "application/json", "Cache-Control": "no-store", ...answered.headers });
+      return res.end(JSON.stringify(answered.body));
+    }
     const me = () => ({ id: 1, username: "anna", name: "Anna", ...fixture.trackDefaults });
     if (path === "/api/auth/me") return json(200, me());
     // The profile's track defaults (docs/API.md): all three at once.
@@ -638,9 +657,9 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     return json(404, { code: "not_found", message: `nothing at ${path}` });
   });
 
-  const fixture = { issuer: "", down: false, qr: true, requestScopes: true, scopesAsked: [], playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [],
+  const fixture = { issuer: "", down: false, qr: true, requestScopes: true, requestsOn: true, scopesAsked: [], playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [],
     household: [{ id: 1, name: "Anna", avatar_url: null, avatar_color: "#38bdf8", current: true, needs: "none" }, { id: 2, name: "Ben", avatar_url: null, avatar_color: "#f472b6", current: false, needs: "none" }],
-    switched: [], subtitlesAdded: [], probed: false, networkTold: [], speedTests: [], problems, requests, progress, closed, close: () => server.close(),
+    switched: [], subtitlesAdded: [], probed: false, networkTold: [], speedTests: [], requestsAsked: [], requestsActed: [], discoverPictures: [], problems, requests, progress, closed, close: () => server.close(),
     liveRecent: [2], liveBrowses: [], liveFavorites: [], liveFavoriteChanges: [], liveGuides: [], liveWatches: [], liveSessions: new Map(), livePlaylists: [], liveLeft: [] };
   // The channels, each with what's on now and next, by the half hour.
   function liveProgram(channelId, start) {
@@ -660,6 +679,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       now: c.id !== 3 ? liveProgram(c.id, slot) : null, next: c.id !== 3 ? liveProgram(c.id, slot + 1800) : null,
     }));
   }
+  const requestsApi = fakeRequests(fixture, png);
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       issuer = `http://127.0.0.1:${server.address().port}`;
