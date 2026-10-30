@@ -52,6 +52,7 @@ it ([below](#behind-a-reverse-proxy)).
 | `config/` | Pley's database, artwork and caches (default `PLEY_CONFIG_DIR`) |
 | `media/` | An example media folder (default `PLEY_MEDIA_DIR`) |
 | `Dockerfile` | The image: pley, pley-transcoder, FFmpeg 7.1, GPU drivers |
+| `pley.sh` | The image's `pley`: runs Pley as an ordinary user however it's started ([below](#without-compose-unraid-synology-truenas)) |
 
 Add-ons are turned on in `.env`, with `COMPOSE_FILE` (setup.sh does it for
 GPUs it finds):
@@ -248,6 +249,27 @@ docker compose stop && tar -czf pley-config-$(date +%F).tar.gz -C config . && do
 **Using a published image** instead of building: set
 `PLEY_IMAGE=ghcr.io/hhaidar/pley:<version>` and `PLEY_PULL_POLICY=missing`;
 update with `docker compose pull && docker compose up -d`.
+
+## Without Compose: Unraid, Synology, TrueNAS
+
+NAS systems start containers as root, with no `--user`. Pley still runs as
+an ordinary user there: PUID and PGID (1000 unless set), with every
+capability dropped. On its first start it gives the config folder, which
+Docker created as root's, to that user, and joins the groups of the GPUs
+passed in (`/dev/dri`, `/dev/nvidia*`), never root's. The image's `pley`
+([`pley.sh`](pley.sh)) does this, and says in the log what it changed.
+
+```sh
+docker run -d --name pley -p 7539:7539 \
+  -e PUID=1000 -e PGID=1000 \
+  -v /srv/pley:/config -v /srv/media:/media:ro \
+  --device /dev/dri \
+  ghcr.io/hhaidar/pley:latest
+```
+
+For NVIDIA, `--gpus all` (the NVIDIA Container Toolkit) instead of `--device
+/dev/dri`. On Unraid, use the template in [deploy/unraid](../unraid/README.md).
+Compose's `user:` above skips all this: started as a user, Pley runs as it is.
 
 ## Troubleshooting
 

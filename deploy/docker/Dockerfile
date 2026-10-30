@@ -8,7 +8,7 @@
 #   docker run -d -p 127.0.0.1:7539:7539 -v ./config:/config -v /srv/media:/media:ro pley
 #
 # deploy/docker/README.md sets it up with Docker Compose, hardened, and
-# covers hardware transcoding.
+# covers hardware transcoding; deploy/unraid has the Unraid template.
 
 # ---- web app ----------------------------------------------------------------
 FROM oven/bun:1.4.4-slim AS web
@@ -71,20 +71,27 @@ RUN apt-get update \
     && useradd --uid 1000 --user-group --no-create-home --home-dir /config --shell /usr/sbin/nologin pley \
     && mkdir -p /config /media && chown pley:pley /config && chmod 700 /config
 
-COPY --from=build /out/bin/ /usr/local/bin/
+# Pley and its transcoder side by side (it starts the one beside it), and
+# `pley` the script that runs Pley as an ordinary user however the container
+# is started (pley.sh).
+COPY --from=build /out/bin/ /usr/local/lib/pley/
+COPY --chmod=755 deploy/docker/pley.sh /usr/local/bin/pley
 COPY apps/server/LICENSE /usr/share/doc/pley/LICENSE.txt
 COPY LICENSING.md /usr/share/doc/pley/
 
 # HOME is /config for any user the container runs as (`--user`), so the GPU
 # drivers' shader caches and fontconfig's land in the one writable folder.
+# Started as root (no `--user`: Unraid, Synology, TrueNAS), Pley runs as
+# PUID:PGID (pley.sh); started as a user, as that user.
 ENV PLEY_DATA_DIR=/config \
     PLEY_BIND=0.0.0.0:7539 \
     HOME=/config \
+    PUID=1000 \
+    PGID=1000 \
     NVIDIA_DRIVER_CAPABILITIES=compute,video,utility,graphics
 VOLUME ["/config"]
 # The web app, its API and the Plex-compatible API.
 EXPOSE 7539
-USER pley
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --start-interval=2s \
     CMD ["pley", "health"]
 ENTRYPOINT ["tini", "--", "pley"]

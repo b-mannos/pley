@@ -24,6 +24,7 @@ on:
       - docs/TRANSCODER.md
       - .dockerignore
       - deploy/docker/**
+      - deploy/unraid/**
       - deploy/windows/**
       - deploy/systemd/**
       - deploy/launchd/**
@@ -54,6 +55,7 @@ on:
       - docs/TRANSCODER.md
       - .dockerignore
       - deploy/docker/**
+      - deploy/unraid/**
       - deploy/windows/**
       - deploy/systemd/**
       - deploy/launchd/**
@@ -259,6 +261,7 @@ jobs:
         env:
           PLEY_RENDER_GID: "44"
         run: |
+          python3 -c 'import xml.etree.ElementTree as e; e.parse("../unraid/pley.xml")'
           for addon in vaapi nvidia proxy plex; do
             docker compose -f compose.yaml -f "compose.$addon.yaml" config --quiet
           done
@@ -286,6 +289,33 @@ jobs:
           if in_pley touch /media/x 2>/dev/null; then fail "the media is writable"; fi
           in_pley touch /config/x /tmp/x || fail "/config or /tmp isn't writable"
           test "$(stat -c %a config)" = 700 || fail "the config folder isn't private"
+      # As Unraid (deploy/unraid) and other NAS systems start it: as root,
+      # PUID and PGID set, a config folder Docker made as root's.
+      - name: Check starting as root
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          appdata="$RUNNER_TEMP/appdata"
+          sudo install -d -o root -g root "$appdata"
+          docker run -d --name as-root -e PUID=99 -e PGID=100 -v "$appdata:/config" pley:local
+          for _ in $(seq 60); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' as-root)" = healthy ] && break
+            sleep 2
+          done
+          test "$(docker inspect -f '{{.State.Health.Status}}' as-root)" = healthy || fail "not healthy"
+          test "$(sudo stat -c %u:%g "$appdata")" = 99:100 || fail "the config folder wasn't given to PUID:PGID"
+          # Pley is tini's child.
+          pley=$(docker exec as-root cat /proc/1/task/1/children | tr -d ' ')
+          status=$(docker exec as-root cat "/proc/$pley/status")
+          grep -Eq '^Uid:[[:space:]]+99[[:space:]]+99[[:space:]]+99[[:space:]]+99$' <<<"$status" || fail "Pley doesn't run as PUID"
+          grep -Eq '^Gid:[[:space:]]+100[[:space:]]+100[[:space:]]+100[[:space:]]+100$' <<<"$status" || fail "Pley doesn't run as PGID"
+          grep -q '^CapBnd:[[:space:]]*0*$' <<<"$status" || fail "capabilities left"
+          grep -q '^NoNewPrivs:[[:space:]]*1$' <<<"$status" || fail "no-new-privileges is off"
+          docker exec as-root pley health || fail "pley health, run as root, failed"
+      - name: Its log
+        if: always()
+        run: |
+          docker logs as-root || true
+          docker rm -f as-root || true
       - name: Pley's log
         if: always()
         working-directory: deploy/docker

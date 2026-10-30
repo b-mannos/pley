@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<!--
+  Pley on Unraid: README.md beside this file says how to add it, and how to
+  give Pley an Intel, AMD or NVIDIA GPU for hardware transcoding.
+-->
+<Container version="2">
+  <Name>Pley</Name>
+  <Repository>ghcr.io/hhaidar/pley:latest</Repository>
+  <Registry>https://github.com/hhaidar/pley/pkgs/container/pley</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/hhaidar/pley/issues</Support>
+  <Project>https://github.com/hhaidar/pley</Project>
+  <Overview>Pley: your movies, shows, music and photos, and live TV, streamed to the web, phones, TVs, Kodi and Roku, transcoded on the GPU where there is one (Intel Quick Sync, AMD, NVIDIA NVENC), HDR tone mapping included.[br][br]Open the web UI once it has started: the first visit sets up the administrator. Hardware transcoding: give it /dev/dri (Intel, AMD) or the NVIDIA runtime, see the template's README.</Overview>
+  <Category>MediaServer:Video MediaServer:Music MediaServer:Photos</Category>
+  <WebUI>http://[IP]:[PORT:7539]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/hhaidar/pley/master/deploy/unraid/pley.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/hhaidar/pley/master/apps/web/public/icon-512.png</Icon>
+  <!-- Room for transcoding in memory (Settings, Transcoder), and for Pley to
+       finish what it's doing when stopped. -->
+  <ExtraParams>--shm-size=2g --stop-timeout=30 --security-opt=no-new-privileges</ExtraParams>
+  <PostArgs/>
+  <Requires>Hardware transcoding: Intel or AMD, the GPU's driver loaded (the Intel GPU TOP or Radeon TOP plugin loads it) and /dev/dri below; NVIDIA, the Nvidia Driver plugin, --runtime=nvidia in Extra Parameters and the GPU's UUID below.</Requires>
+  <Config Name="Web UI" Target="7539" Default="7539" Mode="tcp" Description="Pley's web app, the apps' API and the Plex-compatible API." Type="Port" Display="always" Required="true" Mask="false">7539</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/pley" Mode="rw" Description="Pley's database, artwork, caches and transcodes: the only folder it writes. On a cache pool for speed." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/pley</Config>
+  <Config Name="Media" Target="/media" Default="/mnt/user/media" Mode="ro" Description="Your media, read-only: libraries are folders under /media in Pley." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media</Config>
+  <Config Name="Intel or AMD GPU" Target="/dev/dri" Default="/dev/dri" Mode="" Description="Hardware transcoding on an Intel or AMD GPU: /dev/dri. Leave empty without one (the container doesn't start with a device that isn't there)." Type="Device" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="NVIDIA GPU" Target="NVIDIA_VISIBLE_DEVICES" Default="" Mode="" Description="Hardware transcoding on an NVIDIA GPU: its UUID from the Nvidia Driver plugin's page (or all), with --runtime=nvidia added to Extra Parameters." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="The user Pley runs as: Unraid's nobody (99) owns appdata and can read the shares." Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="The group Pley runs in: Unraid's users (100)." Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+  <Config Name="Discovery" Target="PLEY_NO_DISCOVERY" Default="true" Mode="" Description="true: the apps don't find Pley on the network by themselves (they can't reach a container on Docker's bridge network); enter its address in them. false with the host network." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Log level" Target="PLEY_LOG" Default="info" Mode="" Description="error, warn, info, debug or trace." Type="Variable" Display="advanced" Required="false" Mask="false">info</Config>
+</Container>
