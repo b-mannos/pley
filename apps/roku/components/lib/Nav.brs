@@ -48,8 +48,10 @@ function navForTile(tile as object) as dynamic
     end if
     if kind = "more"
         query = httpString(tile.query)
+        list = httpString(tile.list)
         if query <> "" then return { to: "search", params: { discover: true, query: query } }
-        return { to: "discoverList", params: { list: httpString(tile.list) } }
+        if list = "requests" then return { to: "requests", params: { view: "mine" } }
+        return { to: "discoverList", params: { list: list } }
     end if
     id = httpNumber(tile.itemId, 0)
     if id = 0 then return invalid

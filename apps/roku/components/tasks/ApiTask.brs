@@ -475,21 +475,17 @@ sub apiBuild(job as object, answer as object)
         answer.data = { size: episodes.Count() }
     else if job.build = "discoverTiles"
         ' A page of TMDB's titles (a list, search), those shown already
-        ' left out; keys says which it shows, to leave them out of the next
-        ' page, and first is the page's first title (Discover's hero).
+        ' left out (each tile's key names it, for the next page), and the
+        ' page's first title (Discover's hero).
         seen = httpObject(job.known)
         if seen = invalid then seen = {}
         results = httpArray(data.results)
         tiles = reqTitleTiles(results, server, seen)
         job.request.content = nodesContent(tiles)
-        keys = []
-        for each tile in tiles
-            keys.Push(tile.key)
-        end for
         first = invalid
         if results.Count() > 0 then first = httpObject(results[0])
         if first = invalid then first = {}
-        answer.data = { page: httpNumber(data.page, 1), totalPages: httpNumber(data.total_pages, 0), listed: results.Count(), shown: tiles.Count(), keys: keys, first: first }
+        answer.data = { page: httpNumber(data.page, 1), totalPages: httpNumber(data.total_pages, 0), listed: results.Count(), shown: tiles.Count(), first: first }
     else if job.build = "discoverDetail"
         ' A TMDB title's rows, its seasons and its cast; the details stay.
         rows = reqDetailRows(data, server, job.manage, apiNow(), fmtZoneSeconds())
@@ -523,11 +519,15 @@ sub apiBuild(job as object, answer as object)
         now = apiNow()
         zone = fmtZoneSeconds()
         tiles = []
+        busy = false
         for each request in requests
-            if GetInterface(request, "ifAssociativeArray") <> invalid then tiles.Push(reqRequestTile(request, server, job.manage, now, zone))
+            if GetInterface(request, "ifAssociativeArray") <> invalid
+                tiles.Push(reqRequestTile(request, server, job.manage, now, zone))
+                if reqBusy(httpString(request.stage)) then busy = true
+            end if
         end for
         job.request.content = nodesContent(tiles)
-        answer.data = { total: httpNumber(data.total, -1), shown: tiles.Count() }
+        answer.data = { total: httpNumber(data.total, -1), shown: tiles.Count(), busy: busy }
     end if
 end sub
 

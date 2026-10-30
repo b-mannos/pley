@@ -19,6 +19,7 @@ sub test_nav_tmdb_tiles_open_their_page_or_list()
     tkInvalid(navForTile({ kind: "discover", tmdbKind: "movie", tmdbId: 0 }))
     tkEqual(navForTile(reqMoreTile("See all", "upcoming", "")), { to: "discoverList", params: { list: "upcoming" } })
     tkEqual(navForTile(reqMoreTile("See all on Discover", "", "dune")), { to: "search", params: { discover: true, query: "dune" } })
+    tkEqual(navForTile(reqMoreTile("See all", "requests", "")), { to: "requests", params: { view: "mine" } }, "Discover's Your requests")
     tkInvalid(navForTile({ kind: "discoverSeason", number: 2 }), "a season picks itself on its page")
     tkInvalid(navForTile({ kind: "cast", title: "Ada Lovelace" }))
 end sub
