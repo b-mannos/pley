@@ -10,7 +10,8 @@ and tag (`<unit>-v<version>`, such as `kodi-v0.0.2`).
    commits with `bun scripts/release.mjs <unit> draft` and edit.
 2. Run `bun scripts/release.mjs <unit> patch --dry-run`, then the same with
    `--commit`, and push the commit to master.
-3. On GitHub: **Actions → Release → Run workflow**, and choose the unit.
+3. On GitHub: **Actions → Release → Run workflow**, and choose the unit, or
+   `gh workflow run release.yml -f unit=<unit>`.
 
 The Release workflow refuses to run off master, checks that the unit's
 manifests and CHANGELOG agree, and stops if the tag exists. It then runs the

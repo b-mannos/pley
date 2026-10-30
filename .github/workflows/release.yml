@@ -2,9 +2,10 @@ name: Release
 run-name: Release ${{ inputs.unit }}${{ inputs.draft && ' (draft)' || '' }}
 
 # Releases one unit, by hand (docs/RELEASING.md): Actions -> Release -> Run
-# workflow, on master, with the unit chosen. First `bun scripts/release.mjs
-# <unit> <patch|minor|major>` sets its version and dates its CHANGELOG, and
-# that commit is pushed. This run then checks the unit's manifests agree,
+# workflow, on master, with the unit chosen, or `gh workflow run release.yml
+# -f unit=<unit>`. First `bun scripts/release.mjs <unit> <patch|minor|major>`
+# sets its version and dates its CHANGELOG, and that commit is pushed. This
+# run then checks the unit's manifests agree,
 # refuses when the tag <unit>-v<version> exists, runs the unit's workflow
 # with its release builds, tags the commit, and publishes a GitHub release
 # whose notes are the version's CHANGELOG section, with checksums and build
