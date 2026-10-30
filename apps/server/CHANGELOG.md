@@ -79,6 +79,24 @@ describes how they are made.
   or Sonarr, downloading, importing, partly or wholly ready, or gone from
   the library since) and whether it has news its maker hasn't seen. Why a
   request failed, and where it was sent, are for administrators.
+- Asking for a title someone has asked for already follows their request
+  (*Tell me too*): its news comes to each follower, and following costs
+  nothing against the limits. When its maker withdraws a request others
+  follow, or their account is deleted, the earliest follower keeps it.
+  What was declined for an account may be asked for again after 30 days,
+  and the answer says from when.
+- Administrators' approvals answer at once while the request goes to
+  Radarr or Sonarr in the background. An approval may keep only some of
+  the seasons asked for and choose among Radarr's and Sonarr's quality
+  profiles and root folders (`GET /api/requests/options`); an approved
+  request not yet available may still be declined, and one may be marked
+  as added by hand, so it is never sent.
+- Requests are listed by several statuses at once, by what needs an
+  administrator, by kind, person, title or news, and oldest first. Each
+  request says what may be done to it, and request events say which
+  request changed and go only to whom it concerns: a new request to
+  administrators, a decision to its maker and followers, a request ready
+  to each account that can open it, a failure to administrators.
 - The web app draws picture subtitles (PGS, VobSub, DVB) over the video
   itself, so the file still plays as it is, or its stream keeps HDR,
   rather than having them burned in.

@@ -928,7 +928,8 @@ What apps see:
   and administers nothing: history, sessions and collections answer it as
   they would anyone else. The one exception: on an administrator's account,
   one of Pley's own apps allowed `approvals` manages requests (approves and
-  declines them, sees and deletes everyone's; see [Requests](#requests)).
+  declines them, marks them as added by hand, sees and deletes everyone's,
+  and hears the managers' request events; see [Requests](#requests)).
 - Libraries' `paths` are empty, and files' `path` is the file name only.
 - `/api/users/{id}/avatar` shows only the app's own profile, its
   household, and, to an app allowed `requests` while requests are on, the
@@ -941,7 +942,8 @@ What apps see:
   every request, HLS playlists and segments included (see
   [Keyed URLs](#keyed-urls) for players that can't).
 - The event stream ends when its token expires or the app is signed out;
-  the app connects again with a new token.
+  the app connects again with a new token. It carries request events only
+  with `requests` ([Request events](#request-events)).
 
 ### Signed-in apps
 
@@ -2244,22 +2246,25 @@ interface HistoryEntry {
 People ask for movies and shows the libraries don't have, found on TMDB
 (*Discover*). A manager approves or declines each request; administrators'
 own requests, and those of accounts whose `request_access` is `"auto"`, are
-approved as they're made. An approved request goes to Radarr (movies) or
-Sonarr (shows) where the [settings](#system-admin) connect them, which find
-and download it, and is *available* once a library has it: the movie, or
-every season asked for, whole.
+approved as they're made. Asking for what someone asked for already follows
+their request instead, so its news comes to the follower too. An approved
+request goes to Radarr (movies) or Sonarr (shows) where the
+[settings](#system-admin) connect them, which find and download it, and is
+*available* once a library has it: the movie, or every season asked for,
+whole.
 
-**Who.** A *manager* approves and declines, and sees and deletes
-everyone's requests: an administrator's own sign-in, or one of Pley's own
-apps on an administrator's account whose token has `approvals` (other
-publishers' apps can't be allowed it). Anyone else, an administrator's app
-without `approvals` included, sees only their own requests. Discover and
-asking need `request_access` `"ask"` or `"auto"`; an account whose
-`request_access` is `"off"` still lists, reads and withdraws its own
-requests. An administrator's account asks without limits, and its requests
-are approved as made from the web, the desktop app and Pley's own apps;
-from other publishers' apps they wait for a manager (its `access` there is
-`"ask"`, in the summary and in `/api/auth/me`).
+**Who.** A *manager* approves, declines and marks requests as added by
+hand, and sees and deletes everyone's: an administrator's own sign-in, or
+one of Pley's own apps on an administrator's account whose token has
+`approvals` (other publishers' apps can't be allowed it). Anyone else, an
+administrator's app without `approvals` included, sees only the requests it
+made or follows. Discover and asking need `request_access` `"ask"` or
+`"auto"`; an account whose `request_access` is `"off"` still lists, reads
+and withdraws its own requests, and stops following others'. An
+administrator's account asks without limits, and its requests are approved
+as made from the web, the desktop app and Pley's own apps; from other
+publishers' apps they wait for a manager (its `access` there is `"ask"`, in
+the summary and in `/api/auth/me`).
 
 Requests are off until `requests` is on in the settings, and need a TMDB
 key. Until then every endpoint here but the summary answers `503
@@ -2276,9 +2281,11 @@ An app's token without the route's scope is refused before all of it
 | `503` | `tmdb_key` (`setup: true`, `retry: false`) | TMDB refuses the server's key: an administrator fixes it in Settings → Server, trying again won't help |
 | `503` | `tmdb_down` (`setup: true`) | TMDB isn't answering: try again |
 | `403` | `no_access` | the account may not ask |
+| `403` | `forbidden` | a managers' route, for anyone else |
 | `403` | `restricted` | the title is above the account's age limit; `message` says why |
 | `409` | `in_library` | the libraries the account can open have all that was asked for |
-| `409` | `conflict` | asked for already, or the request isn't pending or failed (approving, declining), or no longer the maker's to withdraw |
+| `409` | `declined` (`retry_at`) | asking: what is left to ask for was declined for the account in the last 30 days; `retry_at` is when all of it may be asked for again |
+| `409` | `conflict` (`request`, `retry_at`) | what was asked can't be done to the request as it is now: `request` is the request as this session reads it, `retry_at` when it may be done (a declined request its maker may remove once its 30 days are over), else `null` |
 | `429` | `too_many_requests` (`retry_at`) | past the account's limits (below), with `Retry-After` when `retry_at` is set |
 | `502` | `tmdb_down` | a picture: TMDB's picture server isn't answering (`Cache-Control: no-store`) |
 
@@ -2291,13 +2298,16 @@ An app's token without the route's scope is refused before all of it
 | GET | `/api/discover/show/{tmdb_id}` | `requests` | `DiscoverDetail`, with `seasons` |
 | GET | `/api/discover/images/{kind}/{file}?w=` | `requests` | one of TMDB's pictures (below), whatever the account's `request_access` |
 | GET | `/api/items/{id}/request` | `requests` | `ItemRequest`: a library's movie or show as Discover sees it, whatever the account's `request_access` |
-| GET | `/api/requests?status=&mine=&offset=&limit=` | `requests` | `{ total, counts: Record<RequestStatus, number>, requests: MediaRequest[] }`, newest first |
-| POST | `/api/requests` | `requests` | `{ kind, tmdb_id, seasons? }` → `201` `MediaRequest` |
+| GET | `/api/requests?status=&attention=&kind=&user_id=&q=&order=&mine=&unseen=&changed_since=&offset=&limit=` | `requests` | `RequestList` (below) |
+| POST | `/api/requests` | `requests` | `{ kind, tmdb_id, seasons? }` → `201` with the new `MediaRequest`, or `200` with the one followed when nothing was left to ask for |
 | POST | `/api/requests/seen` | `requests` | `204`: what had news for this account is seen (`unseen` 0) |
 | GET | `/api/requests/{id}` | `requests` | `MediaRequest` |
-| POST | `/api/requests/{id}/approve` | `approvals` | managers: `{ quality_profile?, root_folder? }` → `MediaRequest` |
+| DELETE | `/api/requests/{id}` | `requests` | `204`: its maker withdraws it (below); managers delete it, for everyone |
+| DELETE | `/api/requests/{id}/watch` | `requests` | `204`: the account follows it no more |
+| POST | `/api/requests/{id}/approve` | `approvals` | managers: `{ quality_profile?, root_folder?, seasons? }` → `MediaRequest` |
 | POST | `/api/requests/{id}/decline` | `approvals` | managers: `{ reason? }` → `MediaRequest` |
-| DELETE | `/api/requests/{id}` | `requests` | `204`: withdraws your own while it's pending, declined or failed (others: `409`); managers delete any |
+| POST | `/api/requests/{id}/handled` | `approvals` | managers: → `MediaRequest`, approved as added by hand |
+| GET | `/api/requests/options` | `approvals` | managers: `RequestOptions`, what approving may choose in Radarr and Sonarr |
 
 - **The summary** answers every session and every app, so an app learns
   whether to show requests at all. `enabled` and `access` are always real.
@@ -2310,9 +2320,10 @@ An app's token without the route's scope is refused before all of it
 - **Limits** (`request_limit_movies`, `request_limit_seasons`, 0 = none)
   count an account's own requests made in the last 7 days (a show its
   seasons): pending, approved and available ones, and failed ones the
-  server will try again (`retry_at` set); declined ones and those failed
-  for a manager don't count. They never apply to administrators. Asking for
-  more than is left answers `429` with `retry_at`: when enough of what
+  server will try again (`retry_at` set); declined ones, those failed for a
+  manager and those it has as their earliest follower (below) don't count,
+  and following costs nothing. They never apply to administrators. Asking
+  for more than is left answers `429` with `retry_at`: when enough of what
   counts is older than 7 days for all that was asked; `null` when more was
   asked than the limit itself (pick fewer). `*_next_at` in the summary and
   `DiscoverDetail` is when one more may be asked for, once none is left.
@@ -2335,21 +2346,22 @@ An app's token without the route's scope is refused before all of it
   `restricted` (above the account's age limit, unrated titles included:
   only on a title page, with `restriction`); `requested` (active requests,
   pending, approved or failed, whoever made them, ask for all it lacks);
-  `declined` (the account's last request for it was declined in the last
-  30 days, or what a show lacks was); `partial` (shows: a library or active
-  requests have some of it, and aired seasons are left to ask for);
-  `none`. A movie matches by TMDB's or IMDb's id, a show by TMDB's,
-  TheTVDB's or IMDb's (lists look up a show's other ids where a library show
-  has no TMDB id). On lists, a show a library has or a request asks for is
-  looked at season by season from its details (8 at a time); without them
-  it is `library` where a library has it, else `requested`.
+  `declined` (the last request for it that the account made or follows was
+  declined in the last 30 days, or what a show lacks was); `partial`
+  (shows: a library or active requests have some of it, and aired seasons
+  are left to ask for); `none`. A movie matches by TMDB's or IMDb's id, a
+  show by TMDB's, TheTVDB's or IMDb's (lists look up a show's other ids
+  where a library show has no TMDB id). On lists, a show a library has or a
+  request asks for is looked at season by season from its details (8 at a
+  time); without them it is `library` where a library has it, else
+  `requested`.
 - **Seasons** (`DiscoverDetail.seasons`): `state` for the account, the
   first that holds: `library` (whole in a library it can open: as many
   episodes as have aired), `requested` (an active request asks for it),
   `unaired`, `partial` (some of its episodes are there), `missing`.
-  `declined`: a request of the account's for it was declined in the last 30
-  days. `request_id`: the active request asking for it, where the account
-  made or follows it (any, for managers).
+  `declined`: a request for it that the account made or follows was
+  declined in the last 30 days. `request_id`: the active request asking for
+  it, where the account made or follows it (any, for managers).
 - **Pictures** (`/api/discover/images/{kind}/{file}`): every picture field
   here is such a path, so no client contacts TMDB. `kind` is `poster`,
   `backdrop`, `profile` (cast) or `still`; `file` is TMDB's name, 1-64
@@ -2372,56 +2384,162 @@ An app's token without the route's scope is refused before all of it
   known only by those ids is (`tmdb_key` when it refuses the key).
 - **Asking** (`POST /api/requests`) checks, in this order: requests on
   (`503`), the account may ask (`403 no_access`), the body (`400`: seasons
-  for a movie, `seasons: []`), the title (`404` for one TMDB doesn't know),
-  its age limit (`403 restricted`), every season one TMDB lists (`400`),
-  the libraries it can open (`409 in_library` when they have the movie or
-  every season asked for whole). `seasons` (shows only) are TMDB's season
-  numbers, 0 for specials; left out, every season TMDB lists but specials.
-  Seasons a library it can open has whole, and those an active request asks
-  for already, are dropped: `409 conflict` when nothing is left, and for a
-  movie an active request asks for. Then the limits (`429`), and the
-  request is made.
-- **Approving** a pending or failed request (others: `409`): where Radarr
-  or Sonarr is connected for its kind, the title is added there, monitored,
-  with the settings' quality profile and root folder (anime's own where
-  set), or those given, and searched for unless `radarr_search` /
-  `sonarr_search` is off. A title already there is monitored again, the
-  seasons asked for too, and searched for. Should that fail, the request is
-  `failed` and `reason` says why; approving it again tries again. Without
-  Radarr or Sonarr for its kind, it is simply approved, for an
-  administrator to add by hand.
-- **Declining** a pending or failed request (others: `409`) keeps `reason`
-  (500 characters at most) for its maker to read.
+  for a movie, `seasons: []`), the title (`404` for one TMDB doesn't know,
+  and for an adult one but to managers), its age limit (`403 restricted`),
+  every season one TMDB lists (`400`), the libraries it can open (`409
+  in_library` when they have the movie, or every season asked for whole).
+  `seasons` (shows only) are TMDB's season numbers, 0 for specials. Left
+  out, they are the aired seasons but specials that the libraries it can
+  open lack whole, less those declined for the account in the last 30 days
+  (all of them, should each have been; every aired one, where none lacks);
+  before any has aired, every season TMDB lists but specials (`400` when it
+  lists none). Seasons a library it can open has whole are dropped. Then:
+  - the account follows each active request (pending, approved or failed),
+    whoever made it, that asks for the movie or for any of the seasons
+    asked for; its own change nothing;
+  - approved as it asks (`access` `"auto"`), it approves those of them
+    still pending, as if it had just asked for them (`decided_by`: the
+    account), and they are sent;
+  - what no active request asks for yet becomes a new request, answered
+    `201`: unless some of it was declined for the account in the last 30
+    days (a request it made or follows), `409 declined` with `retry_at`, or
+    it is past its limits, `429`;
+  - with nothing left to ask for, the answer is `200` with the request for
+    the movie, or for the lowest season asked for (the account's own first,
+    then the newest): `watching: true`, or `mine: true` for its own.
+
+  A refused ask changes nothing: nothing is followed or approved. Following
+  costs nothing against the limits, so a title page's *Tell me too* is this
+  call (for a show, with the seasons whose `state` is `requested`).
+- **Following**: an account follows requests by asking (above), and
+  `DELETE /api/requests/{id}/watch` stops it (`409` where it doesn't follow
+  the request, its own included; `404` for one it can't read). Followers
+  read a request as *Who sees what* says, and hear its news
+  ([events](#request-events)). When its maker withdraws a request others
+  follow, or the maker's account is deleted, the request stays: its
+  earliest follower becomes its maker (it doesn't count toward their
+  limits) and the others keep following.
+- **Withdrawing and deleting** (`DELETE /api/requests/{id}`): its maker
+  withdraws a pending or failed request, and removes a declined one once
+  its 30 days are over (before then `409 conflict` with `retry_at`, when it
+  may; an approved or available one, `409`). A follower gets `409`: it
+  stops following instead. A manager's delete, of its own requests too,
+  removes the request for everyone, its followers included, and deleting a
+  declined one lifts its 30 days. Nothing is removed from Radarr or Sonarr.
+- **Approving** (managers) a pending, failed or declined request, or an
+  approved one not sent (one added by hand too): it answers at once with
+  the request `approved`, its stage `approved` while it is being sent. In
+  the background, where Radarr or Sonarr is connected for its kind (its
+  address, key, quality profile and root folder are all set), the title is
+  added there, monitored, with the settings' quality profile and root
+  folder (anime's own where set) or those given, and searched for unless
+  `radarr_search` / `sonarr_search` is off. A title already there is
+  monitored again, the seasons asked for too, and searched for. Should that
+  fail, the request is `failed`, `reason` says why and managers hear it
+  (`request_failed`); approving it again (`retry`) tries again. Without
+  Radarr or Sonarr connected for its kind, it is simply approved, for an
+  administrator to add by hand. The body may choose `quality_profile` (a
+  profile's id, from the options below), `root_folder` (a path, 512
+  characters at most) and `seasons`, which keeps only those of the seasons
+  asked for: the others leave the request, stop counting toward its maker's
+  limits, and may be asked for again (`400` for an id below 1, an empty
+  path, a season it doesn't ask for, none, or seasons of a movie). A
+  request sent already, or being sent, is answered as it is (`200`: a
+  second approve, or a race); an available one answers `409`.
+- **Declining** (managers) a pending or failed request, or an approved one
+  not yet available (others: `409`), keeps `reason` (500 characters at
+  most) for its maker to read. The title is declined for its maker and its
+  followers for 30 days (`status` above), and they hear it
+  (`request_decided`), followers without the reason.
+- **Added by hand** (managers, `POST /api/requests/{id}/handled`): a
+  pending, failed or declined request, or an approved one not sent, is
+  approved as added to Radarr or Sonarr by hand. It is never sent
+  afterwards (`sent_to` `null`, `note` "Added by hand", stage `approved`),
+  and waits for the library like any other; approving it makes it one to
+  send after all (sent at once where Radarr or Sonarr is connected). One
+  added by hand already is answered as it is; one sent, being sent or
+  available answers `409`.
+- **Options** (managers, `GET /api/requests/options`): what approving may
+  choose in Radarr and in Sonarr, each `null` where it isn't connected:
+  their quality profiles and root folders, and the settings' choices, which
+  an approval preselects (anime's for anime). The lists are kept 5 minutes,
+  then asked for again (one question at a time) and waited for 3 seconds at
+  most: a service that hasn't answered by then has the lists it gave last
+  (none, if it never did), and `error` says why ("Radarr isn't answering",
+  or what went wrong).
+- **Actions** (`MediaRequest.actions`): what this session may do to the
+  request now, in the order clients list them. Clients offer exactly these
+  and work out none themselves; one refused anyway, after a race, answers
+  `409 conflict` with the request as it is now.
+  - `withdraw`: its maker, unless a manager (who deletes), while pending or
+    failed, or declined once its 30 days are over: `DELETE
+    /api/requests/{id}` (*Remove*, on a declined one);
+  - `unwatch`: a follower: `DELETE /api/requests/{id}/watch`;
+  - `approve`: managers, while pending or declined, or approved and not
+    sent where Radarr or Sonarr is connected for its kind;
+  - `retry`: managers, while failed: `POST /api/requests/{id}/approve`;
+  - `decline`: managers, while pending, failed or approved;
+  - `handled`: managers, while pending, failed or declined, or approved and
+    neither sent nor added by hand;
+  - `delete`: managers: `DELETE /api/requests/{id}`, for everyone;
+  - `ask_again`: an account that may ask, on a `gone` request it made or
+    follows, or its own declined one once its 30 days are over: `POST
+    /api/requests` with its `kind`, `tmdb_id` and `seasons`.
+
+  A request being sent offers neither `approve` nor `handled`.
 - **Available**: looked at after every library scan and every 5 minutes,
   for active requests: a library's title as in `status` above, with every
   season asked for whole (as many episodes as TMDB says have aired; with
   fewer, the last one there and Sonarr saying it has them all, as files of
   several episodes are counted once). `available_seasons` lists those whole
   so far. A pending request whose title arrives this way is available too.
-- **Unseen**: a request has news for its maker when it becomes available,
-  more of its seasons do, or it is declined; `unseen` counts those since
-  the account last called `POST /api/requests/seen`, which also sends
-  `requests_changed` to the account's streams so its other devices clear
-  their badges.
-- **Listing** (`GET /api/requests`): your own requests and those you
-  follow; managers' answer has everyone's, unless `mine=1`. `status` keeps one status; `counts`
-  counts each status of the same list without it. `offset` and `limit`
-  (default 50, at most 200).
-- **Events**: every change of a request sends `requests_changed` to its
-  maker's streams and to administrators'. A request becoming available also
-  sends `request_available` to its maker's. `requests_settings_changed`
-  says the summary may have changed (see [events](#activity--events)).
+- **Unseen**: a request has news for its maker and its followers when it
+  becomes available, more of its seasons do, or it is declined; `unseen`
+  counts those of the account's since it last called `POST
+  /api/requests/seen`. That sends `requests_changed` (`request_id` `null`)
+  to the account's other streams, not those of the session that called it,
+  so its other devices clear their badges.
+- **Listing** (`GET /api/requests`): the requests the account made or
+  follows; a manager's has everyone's, unless `mine=1`. Each filter given
+  narrows it:
+  - `status`: one status, or several separated by commas
+    (`pending,failed`);
+  - `attention=1`: pending requests, and failed ones the server won't try
+    again (`retry_at` `null`): what the summary's `pending` and `failed`
+    count for managers (*Needs attention* is `attention=1&order=oldest`);
+  - `kind`: `movie` or `show`;
+  - `user_id`: managers: the requests that account made (ignored for
+    others);
+  - `q`: titles containing it, at most 200 characters, whatever the case
+    of the letters A to Z;
+  - `unseen=1`: only those the account made or follows with news it
+    hasn't seen, for managers too, newest news first;
+  - `changed_since`: those whose `updated_at` is later than it;
+  - `order`: `newest` (the default) or `oldest`, by `created_at` (with
+    `unseen=1`, by when their news came);
+  - `offset` (default 0) and `limit` (default 50, at most 200).
+
+  `1`, `true` and `yes` turn a flag on; another `status`, `kind` or
+  `order`, or a number that isn't one, answers `400`. `total` counts what
+  the filters keep, `counts` each status of it with every filter but
+  `status`, and `people`, for managers, everyone who made a request that
+  every filter but `user_id` keeps, by name (the person filter, as apps
+  can't list users; `[]` for others).
+- **Events**: see [Request events](#request-events).
+  `requests_settings_changed` says the summary may have changed.
 - **`download`**: an approved request's download in Radarr or Sonarr while
   one is queued or running, looked up at most every 10 seconds.
 - **`stage`**: a pending, declined or failed request's is its `status`; an
   available one whose title no library has any more is `gone`. An approved
   one is `downloading` or `importing` while `download` says so, `partial`
   while some of the seasons asked for are ready, `searching` once sent to
-  Radarr or Sonarr, and `approved` while it isn't sent.
+  Radarr or Sonarr, and `approved` while it isn't sent: being sent, with no
+  Radarr or Sonarr connected for its kind, or added by hand.
 - **Who sees what**: a request's maker and the accounts following it read
   it; managers read everyone's. Followers don't see who asked or decided,
   nor why it was declined; what went wrong, `note`, `sent_to` and
-  `watchers` are for managers.
+  `watchers` are for managers. `item_id` is there only for an account that
+  can open the library's title, and `actions` are this session's.
 
 ```ts
 type TitleKind = "movie" | "show";
@@ -2441,8 +2559,8 @@ interface RequestSummary {
   manage: boolean;                  // this session is a manager
   pending: number;                  // managers: requests waiting for a decision (others: 0)
   failed: number;                   // managers: failed requests the server won't try again (others: 0)
-  unseen: number;                   // the account's requests with news since it last looked
-  own: number;                      // the account's requests, any status
+  unseen: number;                   // the requests it made or follows with news since it last looked
+  own: number;                      // the requests it made or follows, any status
   changed_at: Timestamp | null;     // the newest updated_at of the requests this session sees (managers:
                                     // everyone's): clients without events refetch when it moves
   sign_in_again: "requests" | "approvals" | null; // the scope signing in again would give this app
@@ -2483,8 +2601,9 @@ interface DiscoverDetail extends DiscoverTitle {
   cast: { name: string; character: string | null; photo_url: string | null }[]; // 12 at most;
                                     // photo_url: "/api/discover/images/profile/…"
   seasons: DiscoverSeason[] | null; // shows, in order (specials, 0, first)
-  declined: { reason: string | null; at: Timestamp; again_at: Timestamp } | null; // the account's newest
-                                    // request for it declined in the last 30 days (shows: for some seasons)
+  declined: { reason: string | null; at: Timestamp; again_at: Timestamp } | null; // the newest request for
+                                    // it that the account made or follows, declined in the last 30 days
+                                    // (shows: for some seasons); reason: null for a follower
   restriction: string | null;       // why the account can't ask: "Rated R: above this account's age limit"
   watching: boolean;                // the account follows an active request for it
   requests: MediaRequest[];         // for it: this account's and those it follows (everyone's for managers),
@@ -2505,7 +2624,8 @@ interface DiscoverSeason {
   in_library: number;               // episodes of it in the libraries this account can open
   requested: boolean;               // an active request asks for it
   state: "library" | "requested" | "unaired" | "partial" | "missing"; // draw a season from this
-  declined: boolean;                // a request of the account's for it was declined in the last 30 days
+  declined: boolean;                // a request for it that the account made or follows was declined in
+                                    // the last 30 days
   request_id: Id | null;            // the active request asking for it, where this account made or follows
                                     // it (any, for managers)
 }
@@ -2523,7 +2643,8 @@ interface ItemRequest {
 
 type RequestStage =
   | "pending" | "declined" | "failed"
-  | "approved"                      // approved, not sent: no Radarr or Sonarr for its kind, or added by hand
+  | "approved"                      // approved, not sent: being sent, no Radarr or Sonarr connected for its
+                                    // kind, or added by hand
   | "waiting"                       // sent; not out yet (`stage_at`, where known)
   | "searching"                     // sent and out; nothing downloading yet
   | "downloading"                   // see `download`
@@ -2548,12 +2669,13 @@ interface MediaRequest {
   stage_at: Timestamp | null;       // waiting: when it comes out, where known
   reason: string | null;            // declined: the administrator's (or null), for its maker and managers;
                                     // failed: what went wrong, for managers; null for others
-  note: string | null;              // managers: what to know of it
+  note: string | null;              // managers: what to know of it ("Added by hand")
   mine: boolean;                    // this account made it
   watching: boolean;                // this account follows it
   watchers: number;                 // managers: how many follow it; 0 for others
   unseen: boolean;                  // its maker's or a follower's: it became available, partly available or
                                     // declined since the account last looked
+  actions: RequestAction[];         // what this session may do to it now, in the order to list them
   requested_by: RequestUser | null; // its maker and managers; null for followers
   decided_by: RequestUser | null;   // who approved or declined it, for its maker and managers: the maker where
                                     // approved as made; null for an account deleted since, and for followers
@@ -2581,7 +2703,45 @@ interface RequestDownload {
   eta: Timestamp | null;            // the queue's estimate, where it has one
   episodes: number;                 // shows: episodes queued (movies: 1)
 }
+
+type RequestAction =                // see Actions above
+  | "withdraw"                      // its maker: DELETE /api/requests/{id} ("Remove" on a declined one)
+  | "unwatch"                       // a follower: DELETE /api/requests/{id}/watch
+  | "approve"                       // managers: POST /api/requests/{id}/approve
+  | "retry"                         // managers, a failed one: POST /api/requests/{id}/approve
+  | "decline"                       // managers: POST /api/requests/{id}/decline
+  | "handled"                       // managers: POST /api/requests/{id}/handled
+  | "delete"                        // managers: DELETE /api/requests/{id}, for everyone
+  | "ask_again";                    // POST /api/requests with its kind, tmdb_id and seasons
+
+interface RequestList {
+  total: number;                    // the requests the filters keep (requests: a page of them)
+  counts: Record<RequestStatus, number>; // of each status, with every filter but `status`
+  requests: MediaRequest[];
+  people: RequestUser[];            // managers: who made requests every filter but `user_id` keeps, by
+                                    // name; [] for others
+}
+
+interface RequestOptions {          // GET /api/requests/options
+  radarr: ApprovalOptions | null;   // null: not connected
+  sonarr: ApprovalOptions | null;
+}
+
+interface ApprovalOptions {
+  quality_profiles: { id: number; name: string }[]; // [] while it has never answered
+  root_folders: { path: string; free_bytes: number | null }[];
+  quality_profile: number | null;   // the settings' choices: what an approval preselects
+  root_folder: string | null;
+  anime_quality_profile: number | null; // for anime requests; null: as above
+  anime_root_folder: string | null;
+  error: string | null;             // it didn't answer: "Radarr isn't answering"; the lists are its last
+}
 ```
+
+A `409 conflict` about a request is `{ code: "conflict", message, request:
+MediaRequest, retry_at: Timestamp | null }`, and a `409 declined` is
+`{ code: "declined", message, retry_at: Timestamp }`. Clients show when from
+`retry_at`, never from the date in `message`.
 
 ## Activity & events
 
@@ -2657,6 +2817,45 @@ holding them. A play reaching 90 % also sends `library_changed`. Pley's apps
 gather both for 0.3 s and ask once, and leave alone what they fetched after
 the event came (their own change).
 
+### Request events
+
+A [request](#requests)'s events say whom they are for: the accounts they
+name (its maker, its followers) and whether managers get them. A stream gets
+one when its account is named, or when it is a manager's and the event is
+for managers. An app's stream gets none without `requests`, and those for
+managers only on an administrator's account whose token has `approvals`
+too. Whether a stream is a manager's is checked again as its session is
+(an account made an administrator, or no longer one).
+
+- `requests_changed`: a request was made, followed or no longer, approved,
+  declined, added by hand, sent, failed, partly or wholly available,
+  withdrawn or deleted: to its maker, its followers and managers (those it
+  had before, for one withdrawn, deleted or no longer followed).
+  `request_id`, `kind` and `tmdb_id` are all `null` when many changed: to
+  an account's other streams after `POST /api/requests/seen` (not those of
+  the session that called it), and to managers and those who inherited one
+  when an account with requests is deleted.
+- `request_available`: a request became available (`complete: true`), or
+  more of a show's seasons did (`complete: false`); `seasons` are a show's
+  newly ready ones (`null` for a movie). One event each to its maker and to
+  each follower who can open the library's title, with `item_id` where that
+  account may open it (`null` for a maker who can't); other followers get
+  only `requests_changed`.
+- `request_decided`: a pending or declined request was approved (by a
+  manager, marked as added by hand too, or by an account approved as it
+  asks that asked for it too), or a request was declined: to its maker
+  unless they decided it, with `reason` when declined; and when declined,
+  to its followers but the one who declined it, with `reason` `null`.
+- `request_created`: a new request, `pending` or approved as made: to
+  managers but its maker.
+- `request_failed`: a request couldn't be sent to Radarr or Sonarr and
+  waits for a manager (`retry_at` `null`): to managers.
+- `requests_settings_changed` has no audience: see the union below.
+
+Clients fetch the request summary again on each, and what shows that
+request (`GET /api/requests/{id}` when only it shows); nothing is replayed,
+so a stream that connects again fetches the summary too.
+
 ```ts
 interface AnalysisStatus {          // intro and credits detection of one season
   item_id: Id;                      // the season
@@ -2731,11 +2930,18 @@ type ServerEvent =
   | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean } // theirs only
   | { type: "live_channels_changed" }                // Live TV's sources, channels or guide changed: refetch
   | { type: "live_tuners_changed" }                  // a channel was tuned or let go, or its viewers changed
-  | { type: "requests_changed" }                     // a request was made, decided, withdrawn or became available,
-                                                     // or the account saw its news: to its maker's streams and
-                                                     // administrators'
-  | { type: "request_available"; request_id: Id; title: string; item_id: Id | null } // the maker's: a library has
-                                                     // it now (item_id: where they may open it)
+  | { type: "requests_changed"; request_id: Id | null; kind: TitleKind | null; tmdb_id: number | null }
+                                                     // a request changed; all three null: many did (Request events)
+  | { type: "request_available"; request_id: Id; title: string; kind: TitleKind; tmdb_id: number;
+      item_id: Id | null; poster_url: string | null; seasons: number[] | null; complete: boolean }
+                                                     // ready, or more of a show's seasons are (`seasons`: those);
+                                                     // item_id: where this account may open it
+  | { type: "request_decided"; request_id: Id; title: string; kind: TitleKind; tmdb_id: number;
+      status: "approved" | "declined"; reason: string | null } // reason: declined, to its maker only
+  | { type: "request_created"; request_id: Id; title: string; kind: TitleKind; tmdb_id: number;
+      seasons: number[] | null; requested_by: RequestUser; status: "pending" | "approved" } // to managers
+  | { type: "request_failed"; request_id: Id; title: string; kind: TitleKind; reason: string;
+      retry_at: Timestamp | null }                   // to managers: it waits for one (retry_at null)
   | { type: "requests_settings_changed" };           // fetch the request summary again: requests were turned on or
                                                      // off, their limits or the TMDB key changed (every stream, apps'
                                                      // included), or one account's request_access, role, age limit
@@ -2914,7 +3120,7 @@ interface LiveTuner {                  // a connection in use
 | GET | `/api/users` | `admin` | `User[]` |
 | POST | `/api/users` | `admin` | `{ username, password?, display_name?, is_admin?, managed?, home? (true), all_libraries? (true), library_ids?, max_age?, pin?, request_access? }` → `201` `User`; managed profiles need no password and can't be administrators (`400`) |
 | PATCH | `/api/users/{id}` | `admin` | `{ password?, display_name?, is_admin?, home?, disabled?, all_libraries?, library_ids?, max_age?, pin?, request_access? }` (`null` clears nullable fields) → `User` |
-| DELETE | `/api/users/{id}` | `admin` | `204` (not yourself); their apps end with them |
+| DELETE | `/api/users/{id}` | `admin` | `204` (not yourself); their apps end with them, and each of their [requests](#requests) someone follows goes to its earliest follower (the others go with them) |
 | GET | `/api/users/{id}/devices` | `admin` | `Device[]` |
 | DELETE | `/api/users/{id}/devices` | `admin` | `204`: signs the user out everywhere, apps included |
 | GET | `/api/users/{id}/apps` | `admin` | `AppGrant[]` ([Signed-in apps](#signed-in-apps)) |
