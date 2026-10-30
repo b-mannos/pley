@@ -97,8 +97,7 @@ fn build(ctx: &TrayContext) -> Result<TrayIcon, String> {
     let icon = Icon::from_rgba(pixels, width, height).map_err(|e| e.to_string())?;
     TrayIconBuilder::new()
         .with_id("pley")
-        .with_icon(icon)
-        .with_icon_as_template(true)
+        .with_icon_templated(icon)
         .with_tooltip(ctx.tooltip())
         .with_menu(Box::new(menu))
         .build()
