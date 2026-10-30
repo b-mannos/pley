@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A category in Live TV's rail (a MarkupList; Live.brs's liveRail): its
+     name and how many channels, a region with its groups under it (open
+     or not), a group of a region set in under it, the category shown in
+     the accent. -->
+<component name="LiveRailItem" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent" />
+        <field id="width" type="float" onChange="onLayout" />
+        <field id="height" type="float" onChange="onLayout" />
+        <field id="itemHasFocus" type="boolean" onChange="onFocus" />
+        <field id="listHasFocus" type="boolean" value="true" onChange="onFocus" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/items/LiveRailItem.brs" />
+    <children>
+        <Rectangle id="back" color="0x16191E00" />
+        <Label id="mark" width="32" horizAlign="center" vertAlign="center" color="0x8B95A5FF" font="font:SmallestBoldSystemFont" />
+        <Label id="title" vertAlign="center" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        <Label id="count" horizAlign="right" vertAlign="center" color="0x8B95A5FF" font="font:TinySystemFont" />
+    </children>
+</component>

@@ -1,10 +1,18 @@
-' Live TV (docs/API.md, "Live TV"): the channels and their guide as the
-' screens show them, what the player says, and where it goes on up and
-' down. Times are unix seconds, as the server sends them.
+' Live TV (docs/API.md, "Live TV"): the categories, the channels and their
+' guide as the screens show them, a page at a time (a provider's lineup
+' runs to tens of thousands of channels in hundreds of groups), what the
+' player says, and where it goes on up and down. Times are unix seconds,
+' as the server sends them.
 
 ' Logos are asked at about the size they're drawn.
 function liveLogoWidth() as integer
     return 240
+end function
+
+' Channels asked for at once (GET /api/live/browse): the guide's rows, a
+' page of cards, the player's list.
+function livePageSize() as integer
+    return 50
 end function
 
 ' The guide is fetched this many seconds at a time as it is scrolled to,
@@ -22,6 +30,188 @@ end function
 function liveGuideStart(now as integer) as integer
     return Int(now / 1800) * 1800 - 1800
 end function
+
+' --- Categories ---
+
+' A category: "all", "favorites", "recent" or "group:<name>", as the web
+' app writes them. The query GET /api/live/browse takes for it.
+function liveBrowseQuery(category as string, offset as integer, limit as integer) as object
+    query = { category: "all", offset: offset, limit: limit }
+    if category = "favorites" or category = "recent" then query.category = category
+    if Left(category, 6) = "group:"
+        query.category = "group"
+        query.group = Mid(category, 7)
+    end if
+    return query
+end function
+
+' A name's region and the rest, when it begins with one the way providers
+' write them ("UK| Sport", "[UK] Sport", "UK: Sport"), as the server
+' splits group names: [region, rest], or invalid.
+function liveSplitRegion(name as string) as dynamic
+    n = name.Trim()
+    while Left(n, 1) = "|"
+        n = Mid(n, 2).Trim()
+    end while
+    cache = liveCache()
+    found = invalid
+    for each re in [cache.bracket, cache.bar, cache.colon]
+        if found = invalid
+            match = re.Match(n)
+            if match.Count() = 3 then found = match
+        end if
+    end for
+    if found = invalid then return invalid
+    rest = cache.lead.Replace(found[2], "").Trim()
+    region = found[1].Trim()
+    if region = "" or rest = "" then return invalid
+    return [region, rest]
+end function
+
+function liveCache() as object
+    globals = GetGlobalAA()
+    if globals.liveCache = invalid
+        globals.liveCache = {
+            bracket: CreateObject("roRegex", "^\[([^\]]{1,16})\]\s*(.+)$", ""),
+            bar: CreateObject("roRegex", "^([^|]{1,16})\|\s*(.+)$", ""),
+            colon: CreateObject("roRegex", "^([A-Z]{1,4}):\s*(.+)$", ""),
+            lead: CreateObject("roRegex", "^[|:\-\s]+", "")
+        }
+    end if
+    return globals.liveCache
+end function
+
+' A channel's name as a list of category shows it: in a group, without
+' the region its group already says ("Sky Sports 1" in UK · Sport, not
+' "UK| Sky Sports 1").
+function liveShortName(name as string, group as string, category as string) as string
+    if Left(category, 6) <> "group:" then return name
+    ofName = liveSplitRegion(name)
+    ofGroup = liveSplitRegion(group)
+    if ofName = invalid or ofGroup = invalid then return name
+    if LCase(ofName[0]) <> LCase(ofGroup[0]) then return name
+    return ofName[1]
+end function
+
+' "57,176".
+function liveThousands(n as dynamic) as string
+    text = Int(httpNumber(n, 0)).ToStr()
+    out = ""
+    while Len(text) > 3
+        out = "," + Right(text, 3) + out
+        text = Left(text, Len(text) - 3)
+    end while
+    return text + out
+end function
+
+' The groups of GET /api/live/groups: [{ name, region, label, count }].
+function liveGroups(answer as dynamic) as object
+    out = []
+    data = httpObject(answer)
+    if data = invalid then return out
+    for each raw in httpArray(data.groups)
+        g = httpObject(raw)
+        if g <> invalid
+            name = httpSentence(g.name)
+            label = httpSentence(g.label)
+            if label = "" then label = name
+            if name <> "" then out.Push({ name: name, region: httpSentence(g.region), label: label, count: Int(httpNumber(g.count, 0)) })
+        end if
+    end for
+    return out
+end function
+
+' What a category is called: "Favourites", "UK · Sport".
+function liveCategoryName(category as string, groups as object) as string
+    if category = "favorites" then return "Favourites"
+    if category = "recent" then return "Recently watched"
+    if Left(category, 6) <> "group:" then return "All channels"
+    name = Mid(category, 7)
+    for each g in groups
+        if g.name = name
+            if g.region <> "" then return g.region + " · " + g.label
+            return g.label
+        end if
+    end for
+    return name
+end function
+
+' Whether a category still has channels: a group gone, or nothing marked
+' any more, shows every channel.
+function liveCategoryValid(category as string, summary as object, groups as object) as string
+    if category = "favorites" and summary.favorites > 0 then return category
+    if category = "recent" and summary.recent > 0 then return category
+    if Left(category, 6) = "group:"
+        name = Mid(category, 7)
+        for each g in groups
+            if g.name = name then return category
+        end for
+    end if
+    return "all"
+end function
+
+' The categories down the side, as TiviMate lists them: Favourites,
+' Recently watched, All channels, then the groups in the provider's
+' order, those of a region with more than one gathered under it ("UK · 12
+' groups"), its groups shown under it while open (open: { region: true }).
+' [{ kind ("category" or "region"), key (the category, or the region),
+' label, count, inner (a group shown under its region) }].
+function liveRail(summary as object, groups as object, open as object) as object
+    rail = [
+        { kind: "category", key: "favorites", label: "Favourites", count: summary.favorites, inner: false },
+        { kind: "category", key: "recent", label: "Recently watched", count: summary.recent, inner: false },
+        { kind: "category", key: "all", label: "All channels", count: summary.total, inner: false }
+    ]
+    if groups.Count() < 2 then return rail
+    byRegion = {}
+    for each g in groups
+        if g.region <> ""
+            key = "r" + g.region
+            if not byRegion.DoesExist(key) then byRegion[key] = []
+            byRegion[key].Push(g)
+        end if
+    end for
+    placed = {}
+    for each g in groups
+        region = invalid
+        if g.region <> "" then region = byRegion["r" + g.region]
+        if region = invalid or region.Count() < 2
+            rail.Push({ kind: "category", key: "group:" + g.name, label: g.name, count: g.count, inner: false })
+        else if not placed.DoesExist("r" + g.region)
+            placed["r" + g.region] = true
+            total = 0
+            for each member in region
+                total = total + member.count
+            end for
+            rail.Push({ kind: "region", key: g.region, label: g.region + "  ·  " + region.Count().ToStr() + " groups", count: total, inner: false })
+            if open.DoesExist(g.region)
+                for each member in region
+                    rail.Push({ kind: "category", key: "group:" + member.name, label: member.label, count: member.count, inner: true })
+                end for
+            end if
+        end if
+    end for
+    return rail
+end function
+
+' The region of a group category (its region open in the rail), or "".
+function liveRegionOf(category as string, groups as object) as string
+    if Left(category, 6) <> "group:" then return ""
+    name = Mid(category, 7)
+    for each g in groups
+        if g.name = name then return g.region
+    end for
+    return ""
+end function
+
+' { total, favorites, recent } of GET /api/live/groups.
+function liveSummary(answer as dynamic) as object
+    data = httpObject(answer)
+    if data = invalid then data = {}
+    return { total: Int(httpNumber(data.total, 0)), favorites: Int(httpNumber(data.favorites, 0)), recent: Int(httpNumber(data.recent, 0)) }
+end function
+
+' --- Channels ---
 
 ' A programme as the screens keep it: { start, ends, title, line,
 ' description, badges, live, isNew }, or invalid for none (or one that
@@ -58,19 +248,21 @@ end function
 
 ' A channel as the screens keep it: { id, name, number, group, logo,
 ' favorite, hasGuide, now, after }, its logo's address on server at
-' width (now and after left out for none); invalid without an id.
-function liveChannel(raw as dynamic, server as string, width = 240 as integer) as dynamic
+' width (now and after left out for none); invalid without an id. In a
+' group's category, its name leaves out the region the group says.
+function liveChannel(raw as dynamic, server as string, width = 240 as integer, category = "all" as string) as dynamic
     c = httpObject(raw)
     if c = invalid then return invalid
     id = Int(httpNumber(c.id, 0))
     if id <= 0 then return invalid
     name = httpSentence(c.name)
     if name = "" then name = "Channel " + id.ToStr()
+    group = httpSentence(c.group)
     channel = {
         id: id,
-        name: name,
+        name: liveShortName(name, group, category),
         number: httpSentence(c.number),
-        group: httpSentence(c.group),
+        group: group,
         logo: urlImage(server, c.logo, width),
         favorite: httpTrue(c.favorite),
         hasGuide: httpTrue(c.has_guide)
@@ -84,14 +276,21 @@ function liveChannel(raw as dynamic, server as string, width = 240 as integer) a
     return channel
 end function
 
-' The channels of GET /api/live/channels, in its order (by number).
-function liveChannels(list as dynamic, server as string) as object
+' The channels of a list, in its order.
+function liveChannels(list as dynamic, server as string, category = "all" as string) as object
     out = []
     for each raw in httpArray(list)
-        channel = liveChannel(raw, server)
+        channel = liveChannel(raw, server, liveLogoWidth(), category)
         if channel <> invalid then out.Push(channel)
     end for
     return out
+end function
+
+' A page of GET /api/live/browse: { total, offset, channels }.
+function livePage(answer as dynamic, server as string, category as string) as object
+    data = httpObject(answer)
+    if data = invalid then data = {}
+    return { total: Int(httpNumber(data.total, 0)), offset: Int(httpNumber(data.offset, 0)), channels: liveChannels(data.channels, server, category) }
 end function
 
 ' "101  Pley News HD", or the name alone without a number.
@@ -100,8 +299,8 @@ function liveTitle(channel as object) as string
     return channel.number + "  " + channel.name
 end function
 
-' What's on a channel at now: its now, or the one after once that has begun;
-' invalid when the guide has nothing on now.
+' What's on a channel at now: its now, or the one after once that has
+' begun; invalid when the guide has nothing on now.
 function liveOnNow(channel as object, now as integer) as dynamic
     for each p in [channel.now, channel.after]
         if p <> invalid and p.start <= now and p.ends > now then return p
@@ -162,111 +361,6 @@ function liveSpan(p as object, twelve as boolean) as string
     return liveClock(p.start, twelve) + " – " + liveClock(p.ends, twelve)
 end function
 
-' The groups channels are in, in their order: [{ name, count }].
-function liveGroups(channels as object) as object
-    counts = {}
-    order = []
-    for each channel in channels
-        if channel.group <> ""
-            key = "g" + channel.group
-            if not counts.DoesExist(key)
-                counts[key] = 0
-                order.Push(channel.group)
-            end if
-            counts[key] = counts[key] + 1
-        end if
-    end for
-    out = []
-    for each name in order
-        out.Push({ name: name, count: counts["g" + name] })
-    end for
-    return out
-end function
-
-' How many channels a lineup can have for a Roku to show them all at
-' once: past it, the guide and the player's list show a group (or the
-' favourites) at a time. IPTV lineups run to tens of thousands.
-function liveMany() as integer
-    return 1000
-end function
-
-' How old a kept lineup may be before it is fetched again: a minute
-' (what's on moves on), ten past liveMany channels, whose lineup is
-' megabytes.
-function liveRefreshMs(count as integer) as integer
-    if count > liveMany() then return 600000
-    return 55000
-end function
-
-' The most channels the guide, the player's list or a row of cards shows,
-' and the most cards the Channels tab makes in all.
-function liveShownMax() as integer
-    return 1000
-end function
-
-function liveRowMax() as integer
-    return 100
-end function
-
-function liveCardBudget() as integer
-    return 2000
-end function
-
-' The guide's filters: "all", "favorites" or "group:<name>", with labels
-' that count their channels: [{ value, label }]. All channels only for a
-' lineup of liveMany or fewer, favourites only when some are, groups only
-' when there are more than one.
-function liveFilterChoices(channels as object) as object
-    out = []
-    if channels.Count() <= liveMany() then out.Push({ value: "all", label: "All channels · " + channels.Count().ToStr() })
-    favorites = 0
-    for each channel in channels
-        if channel.favorite then favorites = favorites + 1
-    end for
-    if favorites > 0 then out.Push({ value: "favorites", label: "Favourites · " + favorites.ToStr() })
-    groups = liveGroups(channels)
-    if groups.Count() > 1 or out.Count() = 0
-        for each group in groups
-            out.Push({ value: "group:" + group.name, label: group.name + " · " + group.count.ToStr() })
-        end for
-    end if
-    if out.Count() = 0 then out.Push({ value: "all", label: "All channels · " + channels.Count().ToStr() })
-    return out
-end function
-
-' The filter as it can be: a group gone, or favourites none any more,
-' shows the first there is (every channel, where they aren't too many).
-function liveFilterValid(channels as object, filter as string) as string
-    choices = liveFilterChoices(channels)
-    for each choice in choices
-        if choice.value = filter then return filter
-    end for
-    return choices[0].value
-end function
-
-' The chip's label: "All channels", "Favourites", or the group's name.
-function liveFilterLabel(filter as string) as string
-    if filter = "favorites" then return "Favourites"
-    if Left(filter, 6) = "group:" then return Mid(filter, 7)
-    return "All channels"
-end function
-
-' The channels the filter shows, in order.
-function liveFiltered(channels as object, filter as string) as object
-    if filter = "all" then return channels
-    out = []
-    group = ""
-    if Left(filter, 6) = "group:" then group = Mid(filter, 7)
-    for each channel in channels
-        if filter = "favorites"
-            if channel.favorite then out.Push(channel)
-        else if channel.group = group
-            out.Push(channel)
-        end if
-    end for
-    return out
-end function
-
 ' Where a channel is in channels, or -1.
 function liveIndexOf(channels as object, id as dynamic) as integer
     for i = 0 to channels.Count() - 1
@@ -275,15 +369,31 @@ function liveIndexOf(channels as object, id as dynamic) as integer
     return -1
 end function
 
-' The channel by steps from the one with id (1: the next number), round
-' the ends; invalid without channels. A channel not in the list steps
-' from the first.
-function liveStep(channels as object, id as dynamic, by as integer) as dynamic
-    count = channels.Count()
+' Channel up and down (by 1 or -1) from the channel with id, in the page of
+' its category the player holds ({ total, offset, channels }): the
+' channel next to it, or at the page's ends the page to fetch and which of
+' its channels to take ({ offset, last }), round the ends of the list.
+' { channel } or { offset, last }; invalid without channels. A channel
+' not in the page steps from its first.
+function liveZap(page as object, id as dynamic, by as integer) as dynamic
+    count = page.channels.Count()
     if count = 0 then return invalid
-    at = liveIndexOf(channels, id)
-    if at < 0 then return channels[0]
-    return channels[((at + by) mod count + count) mod count]
+    at = liveIndexOf(page.channels, id)
+    if at < 0 then return { channel: page.channels[0] }
+    j = at + by
+    if j >= 0 and j < count then return { channel: page.channels[j] }
+    if page.total <= count then return { channel: page.channels[(j + count) mod count] }
+    size = livePageSize()
+    pages = Int((page.total + size - 1) / size)
+    pageNo = Int(page.offset / size)
+    if by < 0 then return { offset: ((pageNo - 1 + pages) mod pages) * size, last: true }
+    return { offset: ((pageNo + 1) mod pages) * size, last: false }
+end function
+
+' "Channels 51–100 of 2,345", or "" for a list on one page.
+function liveRange(offset as integer, shown as integer, total as integer) as string
+    if total <= shown or shown = 0 then return ""
+    return "Channels " + liveThousands(offset + 1) + "–" + liveThousands(offset + shown) + " of " + liveThousands(total)
 end function
 
 ' A channel's card (components/items/LiveCard): its logo and number, the
@@ -328,65 +438,6 @@ function liveListItem(channel as object, now as integer, twelve as boolean) as o
     return { channelId: channel.id, number: channel.number, title: channel.name, image: channel.logo, line: line, progress: progress, favorite: channel.favorite, current: false }
 end function
 
-' The Channels tab's rows: Recently watched (the last 12, newest first),
-' Favourites, then a row for each group (one row, "All channels", when
-' they are in one group or none): [{ key, title, cards }]. A row has
-' liveRowMax cards at most, and rows stop at liveCardBudget cards: the
-' guide's filter reaches the rest.
-function liveRows(channels as object, recent as dynamic, now as integer, twelve as boolean) as object
-    rows = []
-    byId = {}
-    favorites = []
-    byGroup = {}
-    groupOrder = []
-    others = []
-    for each channel in channels
-        byId["c" + channel.id.ToStr()] = channel
-        if channel.favorite and favorites.Count() < liveRowMax() then favorites.Push(channel)
-        if channel.group = ""
-            if others.Count() < liveRowMax() then others.Push(channel)
-        else
-            key = "g" + channel.group
-            if not byGroup.DoesExist(key)
-                byGroup[key] = []
-                groupOrder.Push(channel.group)
-            end if
-            if byGroup[key].Count() < liveRowMax() then byGroup[key].Push(channel)
-        end if
-    end for
-    picked = []
-    for each id in httpArray(recent)
-        key = "c" + urlValue(id)
-        if byId.DoesExist(key) and picked.Count() < 12 then picked.Push(byId[key])
-    end for
-    lists = []
-    if picked.Count() > 0 then lists.Push({ key: "recent", title: "Recently watched", channels: picked })
-    if favorites.Count() > 0 then lists.Push({ key: "favorites", title: "Favourites", channels: favorites })
-    if groupOrder.Count() > 1
-        for each name in groupOrder
-            lists.Push({ key: "group:" + name, title: name, channels: byGroup["g" + name] })
-        end for
-        if others.Count() > 0 then lists.Push({ key: "other", title: "Other channels", channels: others })
-    else if channels.Count() > 0
-        all = []
-        for each channel in channels
-            if all.Count() < liveRowMax() then all.Push(channel)
-        end for
-        lists.Push({ key: "all", title: "All channels", channels: all })
-    end if
-    made = 0
-    for each list in lists
-        if made >= liveCardBudget() then exit for
-        cards = []
-        for each channel in list.channels
-            cards.Push(liveCard(channel, now, twelve))
-        end for
-        made = made + cards.Count()
-        rows.Push({ key: list.key, title: list.title, cards: cards })
-    end for
-    return rows
-end function
-
 ' --- The guide ---
 
 ' Programmes of GET /api/live/guide added to kept ({ "<channel id>": {
@@ -396,15 +447,13 @@ sub liveGuideKeep(kept as object, programs as dynamic)
     if byChannel = invalid then return
     for each id in byChannel
         list = httpArray(byChannel[id])
-        if list.Count() > 0
-            key = "c" + id
-            if not kept.DoesExist(key) then kept[key] = {}
-            known = kept[key]
-            for each raw in list
-                p = liveProgram(raw)
-                if p <> invalid then known["s" + p.start.ToStr()] = p
-            end for
-        end if
+        key = "c" + id
+        if not kept.DoesExist(key) then kept[key] = {}
+        known = kept[key]
+        for each raw in list
+            p = liveProgram(raw)
+            if p <> invalid then known["s" + p.start.ToStr()] = p
+        end for
     end for
 end sub
 
@@ -441,15 +490,18 @@ end function
 ' logo doesn't show, the logo, its id) and programs its children's
 ' (TITLE, PLAYSTART, PLAYDURATION; the details as the screen above the
 ' grid shows them). Between from and upto (what is fetched), time the
-' guide says nothing of is a programme too, "No guide information" (id
-' "gap"): the TimeGrid would say it is still loading.
+' guide says nothing of is a programme too (id "gap"), else the TimeGrid
+' would say it is still loading: "No guide information", or across a
+' channel without a guide, its name.
 function liveGuideRows(channels as object, kept as object, from as integer, upto as integer) as object
     out = []
     for each channel in channels
+        gapTitle = "No guide information"
+        if not channel.hasGuide then gapTitle = channel.name
         programs = []
         at = from
         for each p in liveGuidePrograms(kept, channel.id)
-            if p.start - at >= 60 then programs.Push(liveGuideGap(at, p.start))
+            if p.start - at >= 60 then programs.Push(liveGuideGap(at, p.start, gapTitle))
             programs.Push({
                 title: p.title,
                 playStart: p.start,
@@ -460,34 +512,14 @@ function liveGuideRows(channels as object, kept as object, from as integer, upto
             })
             if p.ends > at then at = p.ends
         end for
-        if upto - at >= 60 then programs.Push(liveGuideGap(at, upto))
+        if upto - at >= 60 then programs.Push(liveGuideGap(at, upto, gapTitle))
         out.Push({ fields: { id: channel.id.ToStr(), title: liveTitle(channel), hdSmallIconUrl: channel.logo }, programs: programs })
     end for
     return out
 end function
 
-' The guide of a lineup past liveMany channels: what's on now and next of
-' each, from the lineup. GET /api/live/guide gives every channel's guide
-' at once, tens of megabytes for such a lineup. A channel without either
-' says so for six hours.
-function liveNowNextRows(channels as object, from as integer) as object
-    kept = {}
-    for each channel in channels
-        known = {}
-        for each p in [channel.now, channel.after]
-            if p <> invalid and p.ends > from then known["s" + p.start.ToStr()] = p
-        end for
-        kept["c" + channel.id.ToStr()] = known
-    end for
-    rows = liveGuideRows(channels, kept, from, from)
-    for each row in rows
-        if row.programs.Count() = 0 then row.programs.Push(liveGuideGap(from, from + liveGuideChunk()))
-    end for
-    return rows
-end function
-
-function liveGuideGap(from as integer, upto as integer) as object
-    return { id: "gap", title: "No guide information", playStart: from, playDuration: upto - from, description: "", shortDescriptionLine1: "", shortDescriptionLine2: "" }
+function liveGuideGap(from as integer, upto as integer, title as string) as object
+    return { id: "gap", title: title, playStart: from, playDuration: upto - from, description: "", shortDescriptionLine1: "", shortDescriptionLine2: "" }
 end function
 
 ' The part of the guide to fetch for the time shown (left edge and the
@@ -501,6 +533,15 @@ function liveGuideMissing(start as integer, loadedTo as integer, leftEdge as int
     upto = loadedTo + liveGuideChunk()
     if upto > last then upto = last
     return { from: loadedTo, to: upto }
+end function
+
+' "1,2,3": the ids of channels, for GET /api/live/guide?ids=.
+function liveIds(channels as object) as string
+    ids = []
+    for each channel in channels
+        ids.Push(channel.id.ToStr())
+    end for
+    return ids.Join(",")
 end function
 
 ' --- The player ---
@@ -534,7 +575,7 @@ function liveBehind(seconds as dynamic) as string
     return Int(s / 60).ToStr() + ":" + fmtTwo(s mod 60)
 end function
 
-' The Live badge: "LIVE" within liveWithin of the edge, else how far
+' The Live chip: "LIVE" within liveWithin of the edge, else how far
 ' behind ("−1:23"). duration and position are the Video node's for the
 ' stream's window; without a duration, live unless paused.
 function liveBadge(position as dynamic, duration as dynamic, paused as boolean) as object
@@ -547,24 +588,35 @@ function liveBadge(position as dynamic, duration as dynamic, paused as boolean) 
     return { live: false, text: "−" + liveBehind(behind), behind: behind }
 end function
 
-' The registry key of the Live TV screen's tab and filter for a server
+' Where a seek of by seconds from position lands in the window (0 to
+' duration, no nearer the edge than the Video node plays live).
+function liveSeekTarget(position as dynamic, duration as dynamic, by as integer) as float
+    length = httpNumber(duration, 0)
+    target = httpNumber(position, 0) + by
+    if target < 0 then target = 0
+    if length > 0 and target > length - 6 then target = length - 6
+    if target < 0 then target = 0
+    return target
+end function
+
+' The registry key of the Live TV screen's tab and category for a server
 ' and profile.
 function liveViewKey(server as string, profileId as dynamic) as string
     return server + "|" + urlValue(profileId)
 end function
 
-' { tab: "guide" | "channels", filter } kept for key, or the defaults.
+' { tab: "guide" | "channels", category } kept for key, or the defaults.
 function liveLoadView(section as object, key as string) as object
-    view = { tab: "guide", filter: "all" }
+    view = { tab: "guide", category: "all" }
     saved = httpObject(httpJson(section.Read(key)))
     if saved = invalid then return view
     if httpString(saved.tab) = "channels" then view.tab = "channels"
-    filter = httpString(saved.filter)
-    if filter = "favorites" or (Left(filter, 6) = "group:" and Len(filter) > 6) then view.filter = filter
+    category = httpString(saved.category)
+    if category = "favorites" or category = "recent" or (Left(category, 6) = "group:" and Len(category) > 6) then view.category = category
     return view
 end function
 
 sub liveSaveView(section as object, key as string, view as object)
-    section.Write(key, FormatJson({ tab: view.tab, filter: view.filter }))
+    section.Write(key, FormatJson({ tab: view.tab, category: view.category }))
     section.Flush()
 end sub

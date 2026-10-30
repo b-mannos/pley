@@ -190,36 +190,44 @@ the Up Next countdown, Back, play, fast forward and rewind cancel it.
 
 ## Live TV
 
-The web app's Live TV ([API.md](API.md#live-tv)), for watching; sources,
-the lineup and the settings stay in the web app. The code is
-`components/screens/LiveTvScreen`, `LivePlayerScreen`,
+The web app's Live TV ([API.md](API.md#live-tv)), for watching, laid out
+as TiviMate does; sources, the lineup and the settings stay in the web
+app. The code is `components/screens/LiveTvScreen`, `LivePlayerScreen`,
 `components/lib/Live.brs` and the API task's `live…` operations.
 
-- **Guide:** Roku's TimeGrid, channels down and two hours across, the
-  programme in focus described above it (On now, its times and time
-  left, episode, Live and New, what it is). Fetched six hours at a time
-  (`GET /api/live/guide`) as it is scrolled to, two days at most, from
-  half an hour before the current half hour. Rewind and fast forward page
-  through time, Replay goes back to now. OK on a programme on now (or on
-  time without a guide) watches the channel; on another, it says what it
-  is with Watch and the favourite.
-- **Filter** (the chip at the right): all channels, Favourites, or a
-  group, kept on the Roku per server and profile (registry section
-  `liveViews`), with the tab.
-- **Channels:** rows of cards: Recently watched (`recent` of `GET
-  /api/live`), Favourites, then each group (one row when there are no
-  groups). A card has the logo and number, a star for a favourite, what's
-  on with how far along, and what's next.
+A provider's lineup runs to tens of thousands of channels in hundreds of
+groups, so nothing asks for all of them: the categories come from `GET
+/api/live/groups`, channels 50 at a time from `GET /api/live/browse`, and
+programmes only for those 50 (`GET /api/live/guide?ids=`).
+
+- **Categories** down the left: Favourites, Recently watched, All
+  channels, then the provider's groups in its order, with their channel
+  counts. A region's groups ("UK| Sport", "UK| News") gather under it
+  ("UK · 12 groups"); OK opens or closes it. OK on a category shows its
+  channels and goes to them; Back or Left goes back to the categories.
+  The category and the tab are kept on the Roku per server and profile
+  (registry section `liveViews`); a group gone, or favourites none any
+  more, shows every channel.
+- **Guide** (the tab above the categories): Roku's TimeGrid, a page of
+  50 channels down and two hours across, the programme in focus
+  described above it (On now, its times and time left, episode, Live and
+  New, what it is). Past the page's last row (or before its first) comes
+  the next page (or the one before), round the ends of the category.
+  Programmes come six hours at a time as the guide is scrolled, two days
+  at most, from half an hour before the current half hour. Rewind and
+  fast forward page through time, Replay goes back to now. A channel
+  without a guide shows its name across it. OK on a programme on now (or
+  on time without a guide) watches the channel; on another, it says what
+  it is, with Watch and the favourite.
+- **Channels** (the other tab): the category's channels as cards (logo,
+  number, a star for a favourite, what's on with how far along, what's
+  next), 50 more as the focus nears the end.
+- **Channel names:** in a group, without the region the group already
+  says ("Sky Sports 1" in UK · Sport).
 - **The Options key** on a programme or a card: Watch, Add to or Remove
   from favourites (`PUT`/`DELETE …/favorite`).
-- **Big lineups:** IPTV lineups run to tens of thousands of channels.
-  The API task keeps the lineup and gives the screens what they show.
-  Past 1,000 channels: no "All channels" (the guide opens on the
-  favourites, else the first group), the guide shows each channel's now
-  and next from the lineup instead of `GET /api/live/guide` (megabytes
-  for such a lineup), a row has 100 cards at most and the tab 2,000, the
-  guide 1,000 channels; the lineup is fetched again every ten minutes
-  instead of every minute.
+- **Back from the player** lands on the channel watched: the page around
+  it (`browse?around=`), its row in focus.
 
 ### The live player
 
@@ -228,19 +236,28 @@ the lineup and the settings stay in the web app. The code is
   playlist once from the API task, which the server answers once the
   channel's first segments are made (50 s at most) or with why not; then
   the Video node, `Live = true`, the token in its agent. The channel's
-  logo, name and what's on show meanwhile.
-- **Up and down** change channel (Up: the next number), through the
-  list's channels; the channel shows at once and is tuned 0.7 s after the
-  last press. **Left** opens the channel list (number, logo, name, what's
-  on): every channel, or for a lineup past 1,000 the group of the channel
-  first watched, and Favourites; the Options key in it adds to or takes
-  out of the favourites. **Right** or **OK** show the banner: the
-  channel, what's on with its times, time left and progress, what's
-  next, and the Live badge (red at the edge, how far behind otherwise).
-  It shows for 5 s on tuning and stays while paused.
-- **Pause and rewind** are the Video node's own, within the server's
-  timeshift. Paused, the playlist is asked for every 20 s so the server
-  keeps the channel (its viewers leave after 45 s of nothing).
+  logo shows meanwhile, the spinner centred under it, then its name and
+  what's on.
+- **Up and down** change channel (Up: the next in the list) within the
+  category the player was opened from, the page around the channel
+  (`browse?around=`), the next or last page at its ends, round the ends
+  of the category; Recently watched keeps the order it had as the player
+  opened. The channel's banner shows at once and it is tuned 0.7 s after
+  the last press.
+- **Left** opens the category's channels (number, logo, name, what's
+  on), the page around the channel playing; up or down past its ends
+  brings the page before or after. The Options key in it adds to or
+  takes out of the favourites.
+- **Right** or **OK** show the banner: the channel, what's on with its
+  times, time left and progress, what's next, and the Live chip (red at
+  the edge, how far behind otherwise). It shows for 5 s on tuning and
+  stays while paused or behind live.
+- **No seek bar:** the Video node's own controls are off (`enableUI`
+  false). Play pauses and goes on; rewind, fast forward and Replay move
+  10 s within the server's timeshift, never nearer the edge than live
+  plays. Paused, the playlist is asked for every 20 s so the server keeps
+  the channel (its viewers leave after 45 s of nothing). A wait for data
+  shows a spinner.
 - **Troubles:** `409` (every connection in use) shows the server's
   message, which names what is watched, with Try again, Other channels
   and Back; so do a channel gone (`404`), Live TV closed (`403`), a

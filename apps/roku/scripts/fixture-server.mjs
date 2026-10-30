@@ -520,15 +520,45 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     // Live TV (docs/API.md, "Live TV"): three channels, one with no
     // guide; the source has one connection, which channel 3 never gets.
     if (path === "/api/live") return json(200, { available: true, allowed: true, channels: liveChannels().length, sources: 0, recent: fixture.liveRecent });
-    if (path === "/api/live/channels") return json(200, liveChannels());
+    if (path === "/api/live/channels") {
+      problems.push("every channel asked for: the app asks a page at a time");
+      return json(200, liveChannels());
+    }
+    if (path === "/api/live/groups") {
+      const channels = liveChannels();
+      const groups = [...new Set(channels.map((c) => c.group))].map((name) => {
+        const [region, label] = name.includes("| ") ? name.split("| ") : [null, name];
+        return { name, region, label, count: channels.filter((c) => c.group === name).length };
+      });
+      return json(200, { total: channels.length, favorites: fixture.liveFavorites.length, recent: fixture.liveRecent.length, groups });
+    }
+    if (path === "/api/live/browse") {
+      const category = url.searchParams.get("category") ?? "all";
+      const group = url.searchParams.get("group");
+      const limit = Math.min(500, Number(url.searchParams.get("limit") ?? 100));
+      const around = Number(url.searchParams.get("around") ?? 0);
+      fixture.liveBrowses.push({ category, group, offset: url.searchParams.get("offset"), limit, around });
+      let list = liveChannels();
+      if (category === "favorites") list = list.filter((c) => c.favorite);
+      if (category === "recent") list = fixture.liveRecent.map((id) => list.find((c) => c.id === id)).filter(Boolean);
+      if (category === "group") list = list.filter((c) => c.group === group);
+      let offset = Number(url.searchParams.get("offset") ?? 0);
+      if (around) {
+        const at = list.findIndex((c) => c.id === around);
+        offset = at < 0 ? 0 : Math.floor(at / limit) * limit;
+      }
+      return json(200, { total: list.length, offset, channels: list.slice(offset, offset + limit) });
+    }
     if (path === "/api/live/guide") {
       const from = Number(url.searchParams.get("from"));
       const to = Number(url.searchParams.get("to"));
       if (!(to > from)) problems.push(`a guide from ${from} to ${to}`);
-      fixture.liveGuides.push({ from, to });
+      const ids = (url.searchParams.get("ids") ?? "").split(",").filter(Boolean).map(Number);
+      if (ids.length === 0) problems.push("a guide of every channel: the app asks for the channels in view");
+      fixture.liveGuides.push({ from, to, ids });
       const programs = {};
       for (const channel of liveChannels()) {
-        if (!channel.has_guide) continue;
+        if (!channel.has_guide || !ids.includes(channel.id)) continue;
         programs[channel.id] = [];
         for (let start = Math.floor(from / 1800) * 1800; start < to; start += 1800) programs[channel.id].push(liveProgram(channel.id, start));
       }
@@ -590,7 +620,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
   const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [],
     household: [{ id: 1, name: "Anna", avatar_url: null, avatar_color: "#38bdf8", current: true, needs: "none" }, { id: 2, name: "Ben", avatar_url: null, avatar_color: "#f472b6", current: false, needs: "none" }],
     switched: [], subtitlesAdded: [], probed: false, networkTold: [], speedTests: [], problems, requests, progress, closed, close: () => server.close(),
-    liveRecent: [2], liveFavorites: [], liveFavoriteChanges: [], liveGuides: [], liveWatches: [], liveSessions: new Map(), livePlaylists: [], liveLeft: [] };
+    liveRecent: [2], liveBrowses: [], liveFavorites: [], liveFavoriteChanges: [], liveGuides: [], liveWatches: [], liveSessions: new Map(), livePlaylists: [], liveLeft: [] };
   // The channels, each with what's on now and next, by the half hour.
   function liveProgram(channelId, start) {
     const titles = { 1: ["Fixture Morning", "Fixture at One"], 2: ["Match Day", "Tennis Live"] }[channelId];
@@ -602,8 +632,8 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     const slot = Math.floor(now / 1800) * 1800;
     return [
       { id: 1, name: "Fixture News", number: "101", group: "News" },
-      { id: 2, name: "Fixture Sport", number: "102", group: "Sport" },
-      { id: 3, name: "Fixture Films", number: "103", group: "Films" },
+      { id: 2, name: "UK| Fixture Sport", number: "102", group: "UK| Sport" },
+      { id: 3, name: "Fixture Films", number: "103", group: "News" },
     ].map((c) => ({
       ...c, source_id: 1, logo: `/api/live/channels/${c.id}/logo`, favorite: fixture.liveFavorites.includes(c.id), has_guide: c.id !== 3,
       now: c.id !== 3 ? liveProgram(c.id, slot) : null, next: c.id !== 3 ? liveProgram(c.id, slot + 1800) : null,

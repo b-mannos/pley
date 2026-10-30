@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A Live TV channel in a RowList row (Live.brs's liveCard): its logo
+<!-- A Live TV channel in a grid of cards (Live.brs's liveCard): its logo
      (or its name) with its number and a star for a favourite, the name,
      what's on with how far along it is, and what's next. -->
 <component name="LiveCard" extends="Group">
@@ -10,6 +10,7 @@
         <field id="itemHasFocus" type="boolean" onChange="onFocus" />
         <field id="rowHasFocus" type="boolean" value="true" onChange="onFocus" />
         <field id="rowListHasFocus" type="boolean" value="true" onChange="onFocus" />
+        <field id="gridHasFocus" type="boolean" value="true" onChange="onFocus" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/items/LiveCard.brs" />
     <children>

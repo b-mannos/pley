@@ -24,6 +24,9 @@
         <field id="profileChosen" type="boolean" />
         <!-- The ids in My List as Home last saw them, for the Options key. -->
         <field id="myList" type="array" />
+        <!-- The Live TV channel watched last in this launch: Live TV opens back
+             at it. -->
+        <field id="liveChannel" type="integer" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />

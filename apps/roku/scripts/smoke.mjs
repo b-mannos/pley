@@ -334,13 +334,16 @@ async function walk() {
   shoot("home-options");
   await press("select");
   await waitFor(/^POST \/api\/items\/103\/watched$/, since, "a title marked watched");
-  // Live TV: its guide, OK on what's on now watches the channel, Up the
-  // next one (the server ends the first by the client_id), the channel
-  // list and a favourite, then a channel whose source has no connection
-  // left; Back leaves, then the Channels tab.
+  // Live TV: the categories and the guide of every channel (a page, its
+  // programmes for those channels), OK on what's on now watches the
+  // channel, Up the next one (the server ends the first by the
+  // client_id), the channel list and a favourite, then a channel whose
+  // source has no connection left; Back leaves to the guide at that
+  // channel, then the Channels tab.
   await openFromMenu(1, /^GET \/api\/live\/guide\?/, "Live TV's guide");
   await sleep(1500);
   shoot("live-guide");
+  await press("right"); // the guide
   since = mark();
   await press("select");
   await waitFor(/^POST \/api\/live\/channels\/1\/watch$/, since, "a channel watched");
@@ -365,16 +368,22 @@ async function walk() {
   live.busy = await drawnWithin(2500, noticeDrawn);
   shoot("live-busy");
   since = mark();
-  await press("back");
+  await press("back"); // leaves: the guide opens at the channel watched
+  await waitFor(/^GET \/api\/live\/browse\?.*around=3/, since, "the guide around the channel watched");
   await settle();
-  await press("back"); // the tabs
+  shoot("live-back");
+  await press("back"); // the categories, on All channels
+  await press("up", 3); // the tabs, above Favourites
   await press("right"); // Channels
   since = mark();
   await press("select");
-  await press("down");
-  await sleep(1000);
+  await waitFor(/^GET \/api\/live\/browse\?/, since, "the channels as cards");
+  await settle();
   shoot("live-channels");
-  await press("back"); // the tabs
+  await press("left"); // Guide again, which the walk's next start expects
+  await press("select");
+  await settle();
+  await press("down"); // the categories
   await press("back"); // Home
   await settle();
   await openFromMenu(2, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies");
@@ -692,7 +701,9 @@ const checks = [
   ["played an album's tracks with the music player", fixture.playbacks.some((p) => p.item === 5201) && fixture.progress.some((p) => p.item >= 5201 && p.item <= 5203)],
   ["played a playlist from its top, the next entry to come", fixture.playbacks.some((p) => p.item === 101)],
   ["searched", asked(/^GET \/api\/search\?/)],
-  ["showed Live TV's guide", fixture.liveGuides.length > 0],
+  ["showed Live TV's guide, its programmes for the channels in view", fixture.liveGuides.length > 0 && fixture.liveGuides.every((g) => g.ids.length > 0 && g.ids.length <= 50)],
+  ["listed channels a page at a time", fixture.liveBrowses.length > 0 && fixture.liveBrowses.every((b) => b.limit <= 50)],
+  ["opened Live TV back at the channel watched", fixture.liveBrowses.some((b) => b.around === 3)],
   ["watched channels with one client_id, so zapping holds one connection", fixture.liveWatches.length >= 2 && new Set(fixture.liveWatches.map((w) => w.client_id)).size === 1 && fixture.liveWatches[0].client_id !== null],
   ["asked for a channel's playlist before playing it", fixture.livePlaylists.length >= 2],
   ["put a channel in the favourites from the player's list", fixture.liveFavoriteChanges.some((c) => c.id === 2 && c.favorite)],

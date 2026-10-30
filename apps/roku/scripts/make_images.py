@@ -3,7 +3,8 @@ of buttons (images/button-focus.9.png, and where it was as a button group
 lost it, images/button-footprint.9.png): nine-patch pictures, a rounded
 box in the app's accent or its raised surface, as its lists have. The
 Live TV guide's programmes sit on images/guide-cell.9.png, and what has
-aired on images/guide-past.9.png. The
+aired on images/guide-past.9.png; images/spinner.png turns while a channel
+tunes. The
 icons and splash screens are pley's logo, rendered with the other apps'
 icons by scripts/render-icons.mjs at the repository's root. Standard
 library only.
@@ -28,6 +29,9 @@ RADIUS = 8
 
 # The watched mark, drawn at this size on tiles (components/items/Tile.brs).
 MARK_SIZE = 40
+
+# The spinner a BusySpinner turns (components/screens/LivePlayerScreen).
+SPINNER_SIZE = 64
 
 
 def segment_distance(px, py, ax, ay, bx, by):
@@ -96,6 +100,32 @@ def render_box(color, radius=RADIUS):
     return rows
 
 
+def render_spinner(size):
+    """RGBA rows of a ring in the accent, three quarters drawn, fading
+    from its head to its tail."""
+    samples = 4
+    outer = 0.5
+    inner = 0.38
+    rows = []
+    for row in range(size):
+        line = bytearray()
+        for col in range(size):
+            cover = 0.0
+            for sy in range(samples):
+                for sx in range(samples):
+                    x = (col + (sx + 0.5) / samples) / size - 0.5
+                    y = (row + (sy + 0.5) / samples) / size - 0.5
+                    r = math.hypot(x, y)
+                    if inner <= r <= outer:
+                        turn = (math.atan2(y, x) / (2 * math.pi)) % 1.0
+                        if turn <= 0.75:
+                            cover += 0.25 + 0.75 * turn / 0.75
+            line.extend(ACCENT)
+            line.append(round(255 * cover / (samples * samples)))
+        rows.append(bytes(line))
+    return rows
+
+
 def write_png(path, width, height, rows):
     def chunk(kind, data):
         body = kind + data
@@ -124,6 +154,8 @@ def main():
     for name, color, radius in boxes:
         write_png(os.path.join(folder, name), BOX + 2, BOX + 2, render_box(color, radius))
         print("images/" + name, BOX + 2, "x", BOX + 2)
+    write_png(os.path.join(folder, "spinner.png"), SPINNER_SIZE, SPINNER_SIZE, render_spinner(SPINNER_SIZE))
+    print("images/spinner.png", SPINNER_SIZE, "x", SPINNER_SIZE)
 
 
 if __name__ == "__main__":

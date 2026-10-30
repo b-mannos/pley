@@ -81,7 +81,7 @@ sub onLayout()
 end sub
 
 sub onFocus()
-    focused = m.top.itemHasFocus and m.top.rowHasFocus and m.top.rowListHasFocus
+    focused = m.top.itemHasFocus and m.top.rowHasFocus and m.top.rowListHasFocus and m.top.gridHasFocus
     if focused
         m.frame.color = "0x38BDF8FF"
         m.title.color = "0x7DD3FCFF"

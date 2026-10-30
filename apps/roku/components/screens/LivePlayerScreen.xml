@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The live player: a channel's live HLS stream in the Video node, with
-     the channel's logo while it tunes, a banner of what's on and next
-     with the Live badge, up and down to change channel, the channel list
-     at the left (Left), and what went wrong when it did (every connection
-     in use, the channel not playing). -->
+<!-- The live player: a channel's live HLS stream in the Video node (its
+     own controls and seek bar off: live has a Live chip instead), the
+     channel's logo with a spinner under it while it tunes, a banner of
+     what's on and next, up and down to change channel within the
+     category it was opened from, the category's channels at the left
+     (Left), and what went wrong when it did (every connection in use, the
+     channel not playing). -->
 <component name="LivePlayerScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -22,18 +24,22 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Live.brs" />
     <children>
         <Rectangle width="1920" height="1080" color="0x000000FF" />
-        <Video id="video" width="1920" height="1080" />
-        <!-- The channel while it tunes, and over a channel without
-             pictures (radio). -->
+        <Video id="video" width="1920" height="1080" enableUI="false" />
+        <!-- Waiting for data while it plays. -->
+        <BusySpinner id="waiting" translation="[928, 508]" visible="false" />
+        <!-- The channel while it tunes (the spinner under its logo), and
+             over a channel without pictures (radio). -->
         <Group id="card" visible="false">
-            <Rectangle id="cardBack" width="1920" height="1080" color="0x000000FF" />
-            <Rectangle translation="[780, 300]" width="360" height="180" color="0x262B35FF" />
-            <Label id="cardInitials" translation="[780, 300]" width="360" height="180" horizAlign="center" vertAlign="center" wrap="true" maxLines="2" color="0xA1A9B6FF" font="font:MediumBoldSystemFont" />
-            <Poster id="cardLogo" translation="[808, 320]" width="304" height="140" loadWidth="304" loadHeight="140" loadDisplayMode="scaleToFit" />
-            <Label id="cardTitle" translation="[160, 520]" width="1600" horizAlign="center" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="cardLine" translation="[160, 590]" width="1600" horizAlign="center" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+            <Rectangle width="1920" height="1080" color="0x000000FF" />
+            <Rectangle translation="[780, 280]" width="360" height="180" color="0x262B35FF" />
+            <Label id="cardInitials" translation="[780, 280]" width="360" height="180" horizAlign="center" vertAlign="center" wrap="true" maxLines="2" color="0xA1A9B6FF" font="font:MediumBoldSystemFont" />
+            <Poster id="cardLogo" translation="[808, 300]" width="304" height="140" loadWidth="304" loadHeight="140" loadDisplayMode="scaleToFit" />
+            <BusySpinner id="tuning" translation="[928, 492]" />
+            <Label id="cardTitle" translation="[160, 580]" width="1600" horizAlign="center" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Label id="cardLine" translation="[160, 646]" width="1600" horizAlign="center" color="0xA1A9B6FF" font="font:SmallSystemFont" />
         </Group>
-        <!-- What's on: as a channel starts, on Right or OK, and while paused. -->
+        <!-- What's on: as a channel starts, on Right or OK, and while paused
+             or behind live. -->
         <Group id="banner" visible="false">
             <Rectangle translation="[0, 720]" width="1920" height="360" color="0x16191EE6" />
             <Rectangle translation="[96, 792]" width="240" height="120" color="0x2E3440FF" />
@@ -45,7 +51,7 @@
             <Rectangle id="bannerTrack" translation="[384, 926]" width="1100" height="6" color="0x2E3440FF" />
             <Rectangle id="bannerFill" translation="[384, 926]" width="0" height="6" color="0x38BDF8FF" />
             <Label id="bannerNext" translation="[384, 948]" width="1100" color="0x8B95A5FF" font="font:SmallestSystemFont" />
-            <!-- The Live badge: red at the edge, how far behind it otherwise. -->
+            <!-- The Live chip: red at the edge, how far behind it otherwise. -->
             <Rectangle id="badge" translation="[1648, 790]" width="176" height="52" color="0xEB6B70FF" />
             <Label id="badgeText" translation="[1648, 790]" width="176" height="52" horizAlign="center" vertAlign="center" color="0xEBEBEBFF" font="font:SmallBoldSystemFont" />
             <Label id="star" translation="[1648, 856]" width="176" horizAlign="center" color="0x38BDF8FF" font="font:SmallestBoldSystemFont" />
@@ -58,13 +64,12 @@
             <Label id="noticeText" translation="[96, 430]" width="1500" wrap="true" maxLines="6" color="0xA1A9B6FF" font="font:SmallSystemFont" />
             <ButtonGroup id="noticeButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 700]" minWidth="400" />
         </Group>
-        <!-- The channel list, at the left over the video. -->
+        <!-- The category's channels, at the left over the video. -->
         <Group id="list" visible="false">
             <Rectangle width="800" height="1080" color="0x16191EF2" />
-            <Label translation="[64, 56]" width="400" text="Channels" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <ChipRow id="listChips" translation="[64, 128]" />
-            <MarkupList id="channelList" translation="[40, 212]" itemComponentName="LiveChannelRow" itemSize="[720, 100]" itemSpacing="[0, 4]" numRows="8" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
-            <Label id="listEmpty" translation="[64, 300]" width="672" wrap="true" horizAlign="center" color="0xA1A9B6FF" font="font:SmallSystemFont" visible="false" />
+            <Label id="listTitle" translation="[64, 56]" width="672" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Label id="listRange" translation="[64, 120]" width="672" color="0x8B95A5FF" font="font:SmallestSystemFont" />
+            <MarkupList id="channelList" translation="[40, 176]" itemComponentName="LiveChannelRow" itemSize="[720, 100]" itemSpacing="[0, 4]" numRows="8" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
             <Label id="listHint" translation="[64, 1032]" width="672" color="0x8B95A5FF" text="OK: watch   ·   Options (*): favourite   ·   Back: close" font="font:TinySystemFont" />
         </Group>
         <Group id="toast" visible="false">
@@ -73,13 +78,12 @@
         </Group>
         <!-- The banner goes after a while; up and down wait for more
              presses before tuning; a paused channel tells the server it
-             is still watched; what's on moves on; the list is asked for
-             again each minute; a channel without pictures is looked for. -->
+             is still watched; what's on moves on; a channel without
+             pictures is looked for. -->
         <Timer id="bannerTimer" duration="5" />
         <Timer id="zapTimer" duration="0.7" />
         <Timer id="keepAlive" duration="20" repeat="true" />
         <Timer id="clock" duration="15" repeat="true" />
-        <Timer id="listTimer" duration="60" repeat="true" />
         <Timer id="pictureTimer" duration="3" />
         <Timer id="toastTimer" duration="3" />
     </children>
