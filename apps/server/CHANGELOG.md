@@ -24,6 +24,9 @@ describes how they are made.
 - An account keeps at most 200 networks remembered for Automatic quality.
 - Subtitles from OpenSubtitles download over https only.
 - ctutils 0.4.7 (RUSTSEC-2026-0385).
+- quick-xml 0.41 for XMLTV guides (RUSTSEC-2026-0194, RUSTSEC-2026-0195).
+  A guide's title or description holding an HTML entity (`&nbsp;`) no
+  longer comes out empty.
 
 ### Added
 

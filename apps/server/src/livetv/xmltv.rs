@@ -15,8 +15,9 @@
 use std::collections::HashSet;
 use std::io::BufRead;
 
-use quick_xml::Reader;
+use quick_xml::escape::resolve_predefined_entity;
 use quick_xml::events::{BytesStart, Event};
+use quick_xml::{Reader, XmlVersion};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GuideChannel {
@@ -57,8 +58,9 @@ pub fn read<R: BufRead>(
     to: i64,
     wanted: impl FnOnce(&[GuideChannel]) -> HashSet<String>,
 ) -> Result<Guide, quick_xml::Error> {
+    // Text is trimmed once its element ends: `&amp;` and the like come as
+    // events of their own, so the spaces around them are part of it.
     let mut reader = Reader::from_reader(input);
-    reader.config_mut().trim_text(true);
     let mut guide = Guide::default();
     let mut wanted_fn = Some(wanted);
     let mut keep: HashSet<String> = HashSet::new();
@@ -140,7 +142,17 @@ pub fn read<R: BufRead>(
             }
             Event::Text(t) => {
                 if text_of.is_some() {
-                    text.push_str(&t.unescape().unwrap_or_default());
+                    text.push_str(&t.xml10_content().unwrap_or_default());
+                }
+            }
+            // `&amp;`, `&#233;`: XML's own; others (HTML's `&nbsp;`) are left out.
+            Event::GeneralRef(r) => {
+                if text_of.is_some() {
+                    if let Ok(Some(c)) = r.resolve_char_ref() {
+                        text.push(c);
+                    } else if let Some(s) = r.decode().ok().as_deref().and_then(resolve_predefined_entity) {
+                        text.push_str(s);
+                    }
                 }
             }
             Event::CData(t) => {
@@ -202,7 +214,7 @@ fn attribute(e: &BytesStart, name: &[u8]) -> Option<String> {
     e.attributes()
         .flatten()
         .find(|a| a.key.as_ref() == name)
-        .and_then(|a| a.unescape_value().ok().map(|v| v.trim().to_owned()))
+        .and_then(|a| a.normalized_value(XmlVersion::Implicit1_0).ok().map(|v| v.trim().to_owned()))
         .filter(|v| !v.is_empty())
 }
 
@@ -323,6 +335,26 @@ mod tests {
         );
         let news = &guide.programs[1];
         assert_eq!((news.is_live, news.season, news.episode, news.stop - news.start), (true, Some(2), Some(14), 3600));
+    }
+
+    #[test]
+    fn references_in_text_and_attributes_are_resolved() {
+        let guide = r#"<tv><channel id="a&amp;b"><display-name>Caf&#233; &lt;TV&gt;</display-name></channel>
+  <programme start="20261029200000" stop="20261029210000" channel="a&amp;b">
+    <title> Tom &amp; Jerry&nbsp;Show </title><desc>Line one
+line two</desc></programme></tv>"#;
+        let from = parse_time("20261029000000").unwrap();
+        let mut names = Vec::new();
+        let guide = read(guide.as_bytes(), from, from + 86_400, |channels| {
+            names = channels.iter().flat_map(|c| c.names.clone()).collect();
+            channels.iter().map(|c| c.id.clone()).collect()
+        })
+        .unwrap();
+        assert_eq!(names, ["Café <TV>"]);
+        assert_eq!(guide.programs[0].channel, "a&b");
+        // HTML's entities aren't XML's: left out, the rest kept.
+        assert_eq!(guide.programs[0].title, "Tom & JerryShow");
+        assert_eq!(guide.programs[0].description.as_deref(), Some("Line one\nline two"));
     }
 
     #[test]
