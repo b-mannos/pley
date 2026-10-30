@@ -78,7 +78,10 @@ export function Lineup() {
   useEffect(() => {
     setRange((r) => (r.from === firstRow && r.to === lastRow ? r : { from: firstRow, to: lastRow }));
   }, [firstRow, lastRow]);
-  useEffect(() => scrollRef.current?.scrollTo({ top: 0 }), [filter]);
+  // In braces: Chrome's scrollTo returns a promise, which React would take for the cleanup.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [filter]);
 
   const groupNames = useMemo(() => (groups.data ?? []).map((g) => g.name).filter(Boolean), [groups.data]);
 
