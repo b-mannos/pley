@@ -352,6 +352,10 @@ async fn channels_by_group_a_page_at_a_time() {
     assert_eq!(names(&app.get("/api/live/browse?q=1", &bob).await.body), ["One", "Ten"]);
     assert_eq!(names(&app.get("/api/live/browse?q=ten", &bob).await.body), ["Ten"]);
     assert_eq!(app.get("/api/live/browse?category=nope", &bob).await.status, StatusCode::BAD_REQUEST);
+    // The app's search finds channels too.
+    let found = app.get("/api/search?q=foot", &bob).await.body;
+    let found: Vec<&str> = found["channels"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap()).collect();
+    assert_eq!(found, ["Two HD"]);
 
     app.put(&format!("/api/live/channels/{ten}/favorite"), &bob, json!({})).await;
     assert_eq!(app.get("/api/live/groups", &bob).await.body["favorites"], 1);

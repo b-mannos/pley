@@ -306,6 +306,8 @@ export interface Backups {
 export interface SearchResults {
   items: ItemSummary[];
   people?: PersonSummary[];
+  /** Live TV channels by name, number or what's on, for those it's open to. */
+  channels?: import("./livetv").Channel[];
 }
 
 export type MarkerKind = "intro" | "credits";

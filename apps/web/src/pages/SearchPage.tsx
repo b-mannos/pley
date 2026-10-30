@@ -1,12 +1,14 @@
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { Search } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useSearch } from "@/api/hooks";
+import { programProgress, type Channel } from "@/api/livetv";
 import type { ItemKind, ItemSummary } from "@/api/types";
 import { aspectFor, CardSkeleton, MediaCard } from "@/components/cards";
 import { PersonCard } from "@/components/PersonCard";
 import { Button, EmptyState, SectionTitle, Spinner } from "@/components/ui";
 import { useDocumentTitle, useElementWidth } from "@/lib/hooks";
+import { ChannelLogo, liveUrl, useNow } from "@/pages/livetv/common";
 
 const GROUPS: { kind: ItemKind; title: string }[] = [
   { kind: "movie", title: "Movies" },
@@ -39,6 +41,49 @@ function ResultGroup({ title, items }: { title: string; items: ItemSummary[] }) 
   );
 }
 
+/** Live TV channels found: logo, number and name, what's on with how far it is. */
+function ChannelResults({ channels }: { channels: Channel[] }) {
+  const now = useNow();
+  return (
+    <section>
+      <SectionTitle>
+        Live TV <span className="ml-1 text-sm font-normal text-subtle">{channels.length}</span>
+      </SectionTitle>
+      <ul className="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-3">
+        {channels.map((c) => {
+          const on = c.now && c.now.start <= now && c.now.stop > now ? c.now : null;
+          return (
+            <li key={c.id}>
+              <Link
+                to={liveUrl(c)}
+                className="flex items-center gap-3 rounded-lg border border-border bg-surface p-2.5 transition-colors hover:border-border-strong hover:bg-surface-2"
+              >
+                <ChannelLogo channel={c} width={96} showName={false} className="h-11 w-[4.5rem] shrink-0 rounded-md bg-surface-3" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline gap-1.5">
+                    {c.number ? <span className="shrink-0 text-xs tabular-nums text-subtle">{c.number}</span> : null}
+                    <span className="truncate text-sm font-medium">{c.name}</span>
+                  </div>
+                  {on ? (
+                    <>
+                      <div className="truncate text-xs text-muted">{on.title}</div>
+                      <div className="mt-1 h-0.5 overflow-hidden rounded-full bg-white/10">
+                        <div className="h-full bg-accent" style={{ width: `${programProgress(on, now) * 100}%` }} />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="truncate text-xs text-subtle">{c.group}</div>
+                  )}
+                </div>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 export function SearchPage() {
   const [params] = useSearchParams();
   const q = params.get("q") ?? "";
@@ -51,7 +96,7 @@ export function SearchPage() {
         className="min-h-[60vh]"
         icon={<Search />}
         title="Search your libraries"
-        description="Find movies, shows, episodes, people, artists, albums and tracks. Press / anywhere to jump to the search box."
+        description="Find movies, shows, episodes, people, artists, albums, tracks and Live TV channels. Press / anywhere to jump to the search box."
       />
     );
   }
@@ -81,7 +126,8 @@ export function SearchPage() {
 
   const results = search.data?.items ?? [];
   const people = search.data?.people ?? [];
-  if (!results.length && !people.length) {
+  const channels = search.data?.channels ?? [];
+  if (!results.length && !people.length && !channels.length) {
     return (
       <EmptyState
         className="min-h-[60vh]"
@@ -112,6 +158,7 @@ export function SearchPage() {
           </div>
         </section>
       ) : null}
+      {channels.length ? <ChannelResults channels={channels} /> : null}
       {GROUPS.map(({ kind, title }) => {
         const items = results.filter((r) => r.kind === kind);
         return items.length ? <ResultGroup key={kind} title={title} items={items} /> : null;

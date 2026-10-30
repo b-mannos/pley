@@ -1266,7 +1266,7 @@ WebVTT file named `.srt` is taken as WebVTT). Its language is kept as ISO
 |---|---|---|---|
 | GET | `/api/hubs/home` | `library` | `{ hubs: Hub[] }` |
 | DELETE | `/api/continue-watching/{id}` | `play` | `204`: takes a title out of the user's Continue Watching |
-| GET | `/api/search?q=&limit=` | `library` | `{ items: ItemSummary[], people: PersonSummary[] }` (`limit` default 40) |
+| GET | `/api/search?q=&limit=` | `library` | `{ items: ItemSummary[], people: PersonSummary[], channels: LiveChannel[] }` (`limit` default 40; `channels`: up to 12 Live TV channels by name, number or what's on, for those Live TV is open to) |
 
 - **Home** hubs, empty ones left out: `continue_watching` (in progress and
   next up), then `my_list` ("My List", its 20 newest), then
