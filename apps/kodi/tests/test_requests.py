@@ -80,13 +80,15 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(requests.count(None), (0, False))
 
     def test_listings_that_show_requests(self):
-        self.assertTrue(requests.showing("plugin://plugin.video.pley/"))
-        self.assertTrue(requests.showing("plugin://plugin.video.pley/?route=requests&view=all"))
-        self.assertTrue(requests.showing("plugin://plugin.video.pley/?route=discover"))
-        self.assertTrue(requests.showing("plugin://plugin.video.pley/?route=seasons&tmdb=1396"))
-        self.assertFalse(requests.showing("plugin://plugin.video.pley/?route=discover_list&list=trending"))
-        self.assertFalse(requests.showing("plugin://plugin.video.pley/?route=library&id=1"))
-        self.assertFalse(requests.showing("plugin://plugin.video.other/"))
+        counted, listed = requests.COUNTED, requests.LISTED
+        self.assertTrue(requests.showing("plugin://plugin.video.pley/", counted))
+        self.assertTrue(requests.showing("plugin://plugin.video.pley/?route=discover", counted))
+        self.assertFalse(requests.showing("plugin://plugin.video.pley/?route=requests&view=all", counted))
+        self.assertTrue(requests.showing("plugin://plugin.video.pley/?route=requests&view=all", listed))
+        self.assertTrue(requests.showing("plugin://plugin.video.pley/?route=seasons&tmdb=1396", listed))
+        for path in ["plugin://plugin.video.pley/?route=discover_list&list=trending", "plugin://plugin.video.pley/?route=library&id=1",
+                     "plugin://plugin.video.other/"]:
+            self.assertFalse(requests.showing(path, counted + listed), path)
 
 
 class TitleTest(unittest.TestCase):

@@ -1,7 +1,7 @@
 """Requests (docs/API.md, Requests): what the summary lets this profile do,
 what a TMDB title or a request says of itself, and what can be done about
 it, in the words every pley app uses. No Kodi here: Kodi's lists
-(discover.py), the service's notices (news.py) and the tests use it, each
+(asking.py), the service's notices (news.py) and the tests use it, each
 with kodi.text (`text`)."""
 
 from __future__ import annotations
@@ -18,6 +18,10 @@ SUMMARY = "pley.requests"
 # Set by Your requests while something on it downloads or imports: its
 # address, refreshed by the service every 10 seconds while on screen.
 LIVE = "pley.requests.live"
+# What the plugin tells the service (NotifyAll) when it asked for something,
+# did something to a request, saw them or switched profile: the summary is
+# read again.
+ASKING = "pley.asking"
 
 # The stage pills' colours (pending amber; on its way blue; ready green;
 # refused red; gone gray), in pley's palette.
@@ -63,9 +67,11 @@ ACTIONS = {
     "delete": "delete",
     "ask_again": "request_again",
 }
-# Listings that show requests, or the number of them: refreshed when the
-# summary changes. Discover's rows never are.
-SHOWING = ("", "root", "discover", "requests", "seasons")
+# Listings that show the summary's number (refreshed when it changes), and
+# those that show requests (refreshed when one changes). Discover's rows
+# never are.
+COUNTED = ("", "root", "discover")
+LISTED = ("requests", "seasons")
 
 
 def summary(client) -> dict | None:
@@ -121,14 +127,14 @@ def colored(text: str, color) -> str:
     return "[COLOR %s]%s[/COLOR]" % (color, text) if text and color else text or ""
 
 
-def showing(path: str) -> bool:
-    """Whether the pley listing at `path` (Container.FolderPath) shows
-    requests or their number (SHOWING)."""
+def showing(path: str, routes) -> bool:
+    """Whether the pley listing at `path` (Container.FolderPath) is one of
+    `routes` (COUNTED, LISTED)."""
     prefix = "plugin://plugin.video.pley/"
     if not path.startswith(prefix):
         return False
     query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
-    return (query.get("route") or [""])[0] in SHOWING
+    return (query.get("route") or [""])[0] in routes
 
 
 # ------------------------------------------------------------------ titles
