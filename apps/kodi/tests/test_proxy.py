@@ -73,6 +73,8 @@ class ProxyTest(unittest.TestCase):
                 }
                 return 206, headers, part
             return 200, {"Content-Type": "video/x-matroska", "Accept-Ranges": "bytes"}, MOVIE
+        if request.path.startswith("/api/live/channels/3/stream.ts"):
+            return support.answer(409, {"code": "conflict", "message": "The one connection of Test Provider is in use, watching Sport."})
         if request.path == "/api/playback/s1/12.ts":
             return support.answer(410, {"code": "session_stopped", "message": "Maintenance tonight"})
         if request.path == "/api/collections/4/images/poster":
@@ -313,6 +315,52 @@ class ProxyTest(unittest.TestCase):
 
     def proxy_threads(self):
         return [t for t in threading.enumerate() if t.name.startswith("pley-proxy") and t.is_alive()]
+
+    def test_a_live_channel_comes_as_it_is_sent(self):
+        # A server that sends a little of a channel, then nothing for a
+        # while: a radio channel takes a quarter of a minute to fill the
+        # proxy's chunk, and Kodi mustn't wait for it.
+        from pley.autoquality import Meter
+
+        packets = b"\x47" + bytes(187)
+        sent = packets * 10
+        release = threading.Event()
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+
+        def serve():
+            conn, _ = listener.accept()
+            conn.recv(65536)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nTransfer-Encoding: chunked\r\n\r\n")
+            conn.sendall(b"%x\r\n%s\r\n" % (len(sent), sent))
+            release.wait(10)
+            conn.sendall(b"0\r\n\r\n")
+            conn.close()
+
+        threading.Thread(target=serve, daemon=True).start()
+        self.addCleanup(listener.close)
+        self.addCleanup(release.set)
+        self.store.save(dict(self.store.load(), server="http://127.0.0.1:%d" % listener.getsockname()[1]))
+        self.proxy.meter = Meter()
+        sock = socket.create_connection(("127.0.0.1", self.port), timeout=5)
+        self.addCleanup(sock.close)
+        sock.sendall(b"GET /%s/api/live/channels/1/stream.ts?client_id=kodi-1 HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n\r\n" % (SECRET.encode(), self.port))
+        got = b""
+        started = time.monotonic()
+        while sent not in got:
+            got += sock.recv(65536)
+        self.assertLess(time.monotonic() - started, 3, "the packets come while the server holds the rest")
+        self.assertIn(b"video/mp2t", got.split(b"\r\n\r\n", 1)[0].lower())
+        self.assertEqual((list(self.proxy.meter.answers), list(self.proxy.meter.chunks)), ([], []), "Automatic doesn't measure a channel")
+
+    def test_a_live_channel_without_a_connection_free_is_told(self):
+        busy = []
+        self.proxy.on_busy = busy.append
+        response, data = self.ask("GET", "/%s/api/live/channels/3/stream.ts?client_id=kodi-1" % SECRET)
+        self.assertEqual(response.status, 409)
+        self.assertEqual(busy, ["The one connection of Test Provider is in use, watching Sport."])
+        self.assertEqual(self.stopped, [])
 
     def test_subtitles_are_named_for_kodi(self):
         named = api.subtitle_name("/api/files/7/subtitles/3.vtt", "ENG", True)

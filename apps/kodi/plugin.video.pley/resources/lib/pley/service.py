@@ -148,6 +148,8 @@ class Player(xbmc.Player):
         # The playback last stopped by the server, and when.
         self.stopped_for = None
         self.stopped_at = float("-inf")
+        # When a live channel was last refused for want of a connection.
+        self.busy_at = float("-inf")
         # Automatic (docs/QUALITY.md): the playback's watch and what it
         # was given (playback.automatic), what the proxy counts, and the
         # title being played again at another quality: (item id, watch,
@@ -211,6 +213,23 @@ class Player(xbmc.Player):
         self.stopped_for, self.stopped_at = playing, now
         kodi.notify(message or kodi.text("stream_stopped"), error=True)
         self.stop()
+
+    def busy(self, message) -> None:
+        """A live channel Kodi asked for when every connection of its source
+        was in use (the plugin asked first, and one was free then): said as
+        the plugin says it, once in a few seconds, off the proxy's thread;
+        the queue of channels after it is let go."""
+        now = time.monotonic()
+        if now - self.busy_at < 5:
+            return
+        self.busy_at = now
+        from . import livetv
+
+        def say():
+            livetv.forget_queue()
+            livetv.busy(message)
+
+        threading.Thread(target=say, name="pley-live-busy", daemon=True).start()
 
     def heard(self, event: dict) -> None:
         """An event of the server's stream, from its thread."""
@@ -760,7 +779,9 @@ def run() -> None:
     worker = Worker()
     refresher = Refresher(kodi.refresh_listing, busy=lambda: player.isPlaying())
     player = Player(tokens, user_agent, worker, refresher)
-    proxy = Proxy(tokens, user_agent, config["secret"], config["port"], on_stopped=player.stopped_by_server, meter=player.meter)
+    proxy = Proxy(
+        tokens, user_agent, config["secret"], config["port"], on_stopped=player.stopped_by_server, meter=player.meter, on_busy=player.busy
+    )
     port = proxy.start()
     if port != config["port"]:
         save_proxy_config(profile, {"port": port, "secret": config["secret"]})

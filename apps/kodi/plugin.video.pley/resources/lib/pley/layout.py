@@ -108,17 +108,19 @@ SCRIM_HERO, SCRIM_ROWS, SCRIM_ITEM = 1003, 1004, 1005
 # The rail (TvRail, RailItems.kt): a group, its entries' groups and buttons.
 # The first three libraries take an entry each; with more, Libraries (a page
 # of them all) takes Collections' place, so the rail never holds more than
-# seven entries between the avatar and Settings.
+# seven entries between the avatar and Settings; eight with Live TV, after
+# Home as in the web's sidebar, where the server has channels.
 RAIL = 100
 RAIL_AVATAR = 110
 RAIL_SEARCH = 111
 RAIL_HOME = 112
+RAIL_LIVE = 117
 RAIL_LIBRARIES = (113, 114, 115)
 RAIL_ALL_LIBRARIES = 116
 RAIL_PLAYLISTS = 119
 RAIL_COLLECTIONS = 120
 RAIL_SETTINGS = 121
-RAIL_ENTRIES = (RAIL_AVATAR, RAIL_SEARCH, RAIL_HOME) + RAIL_LIBRARIES + (RAIL_ALL_LIBRARIES, RAIL_PLAYLISTS, RAIL_COLLECTIONS, RAIL_SETTINGS)
+RAIL_ENTRIES = (RAIL_AVATAR, RAIL_SEARCH, RAIL_HOME, RAIL_LIVE) + RAIL_LIBRARIES + (RAIL_ALL_LIBRARIES, RAIL_PLAYLISTS, RAIL_COLLECTIONS, RAIL_SETTINGS)
 RAIL_TOP = 194  # the first entry's middle, under the avatar's 86
 RAIL_PITCH = 112
 RAIL_SETTINGS_Y = 974
@@ -162,7 +164,17 @@ def rail_row(pitch: int) -> int:
 
 
 # Screens: each a group, shown alone.
-SCREENS = {"home": 2000, "item": 3000, "library": 4000, "search": 5000, "grid": 6000, "notice": 7000, "libraries": 8000, "profiles": 9000}
+SCREENS = {
+    "home": 2000,
+    "item": 3000,
+    "library": 4000,
+    "search": 5000,
+    "grid": 6000,
+    "notice": 7000,
+    "libraries": 8000,
+    "profiles": 9000,
+    "live": 10000,
+}
 
 # A metadata line (TvMetaLine): a group (which the window moves) around a row
 # of pieces, each a separator, a star, a text and a badge, of which the
@@ -262,6 +274,27 @@ def profiles_left(count: int) -> int:
         return SAFE_X
     span = count * PROFILE + max(count - 1, 0) * PROFILE_GAP
     return (WIDTH - span) // 2
+
+
+# Live TV (livetv.py; the web's LiveTvPage as a TV's channel list): the
+# title and its tabs (All, Favourites, Recently watched and Groups, each
+# twice: at rest and chosen, 100 on), the channels by number with what's on
+# now, and beside them the focused channel's programme now and next, which
+# the skin reads from the list's own item.
+LIVE_TITLE, LIVE_TABS = 10011, 10012
+LIVE_ALL, LIVE_FAVOURITES, LIVE_RECENT, LIVE_GROUP = 10013, 10014, 10015, 10016
+LIVE_TAB_IDS = (LIVE_ALL, LIVE_FAVOURITES, LIVE_RECENT, LIVE_GROUP)
+LIVE_LIST = 10020
+LIVE_EMPTY = 10040
+LIVE_PANEL = 10050
+LIVE_TOP = 176
+LIVE_ROW = 124
+LIVE_ROWS = 7
+LIVE_LIST_WIDTH = 1000
+LIVE_LOGO = (160, 90)
+LIVE_PANEL_X = 1264
+LIVE_PANEL_WIDTH = WIDTH - SAFE_X - LIVE_PANEL_X
+LIVE_PICTURE_HEIGHT = LIVE_PANEL_WIDTH * 9 // 16
 
 
 # Signing in (signin.py, TvLinkScreen): the code in two halves, the steps

@@ -512,6 +512,7 @@ def rail() -> list:
     entries = [
         (L.RAIL_SEARCH, "search", "icon-search.png", "$ADDON[plugin.video.pley 30003]"),
         (L.RAIL_HOME, "home", "icon-house.png", "$ADDON[plugin.video.pley 30100]"),
+        (L.RAIL_LIVE, "live", "icon-tv-minimal.png", "$ADDON[plugin.video.pley 30247]"),
     ]
     entries += [(e, "lib%d" % i, "icon-folder.png", "") for i, e in enumerate(L.RAIL_LIBRARIES)]
     entries += [
@@ -871,6 +872,164 @@ def grid_page() -> ET.Element:
     )
 
 
+def live_row(focused: bool) -> list:
+    """A channel in Live TV's list: its logo on a dark box (its number or
+    name without one), its number and name, what's on now, the time it
+    airs, what is left, and how far into it the channel is. Focused, on the
+    accent with on-accent text, as a library's card; while focus is
+    elsewhere on the page, on surface2."""
+    w, h = L.LIVE_LIST_WIDTH, L.LIVE_ROW
+    lw, lh = L.LIVE_LOGO
+    has_focus = "Control.HasFocus(%d)" % L.LIVE_LIST
+    no_logo = "String.IsEmpty(ListItem.Art(thumb))"
+    favourite = "String.IsEqual(ListItem.Property(favorite),1)"
+    out = []
+    fg, muted = L.FG, L.MUTED
+    if focused:
+        out += [
+            image(0, 4, w, h - 8, "round12.png", color=L.ACCENT, border=14, visible=has_focus),
+            image(0, 4, w, h - 8, "round12.png", color=L.SURFACE2, border=14, visible="!" + has_focus),
+        ]
+    top = (h - lh) // 2
+    out += [
+        image(16, top, lw, lh, "round8.png", color=L.BG if focused else L.SURFACE2, border=10),
+        image(28, top + 10, lw - 24, lh - 20, "$INFO[ListItem.Art(thumb)]", aspect="keep", fade=150, background="true"),
+        label(16, top, lw, lh, L.FONT_TITLE, L.FG, "$INFO[ListItem.Property(short)]", align="center", visible=no_logo),
+    ]
+    x = 16 + lw + 24
+    tw = w - x - 24
+    # Each line twice: as it is drawn on the accent, and elsewhere.
+    lines = [
+        (lambda c: label(x, 14, tw - 48, 34, L.FONT_LABEL, c, "$INFO[ListItem.Label]"), muted),
+        (lambda c: image(w - 24 - 28, 18, 28, 28, "icon-star.png", color=c, visible=favourite), L.ACCENT),
+        (lambda c: label(x, 46, tw, 42, L.FONT_TITLE, c, "$INFO[ListItem.Label2]"), fg),
+        (lambda c: label(x + 176, 84, tw - 176, 32, L.FONT_CAPTION, c, "$INFO[ListItem.Property(when)]", visible="ListItem.IsResumable"), muted),
+        (lambda c: label(x, 84, tw, 32, L.FONT_CAPTION, c, "$INFO[ListItem.Property(when)]", visible="!ListItem.IsResumable"), muted),
+    ]
+    for make, color in lines:
+        if focused:
+            on_accent = make(L.ON_ACCENT)
+            elsewhere = make(color)
+            for piece, shown in ((on_accent, has_focus), (elsewhere, "!" + has_focus)):
+                found = piece.find("visible")
+                if found is None:
+                    piece.append(el("visible", shown))
+                else:
+                    found.text = "%s + %s" % (found.text, shown)
+                out.append(piece)
+        else:
+            out.append(make(color))
+    bar = lambda bg, mid, shown: control(  # noqa: E731
+        "progress",
+        left=x,
+        top=97,
+        width=160,
+        height=6,
+        visible=shown,
+        texturebg=tex("pley-white.png", colordiffuse=bg),
+        midtexture=tex("pley-white.png", colordiffuse=mid),
+        info="ListItem.PercentPlayed",
+    )
+    if focused:
+        out += [bar("33000000", L.ON_ACCENT, "ListItem.IsResumable + " + has_focus), bar("33FFFFFF", L.ACCENT, "ListItem.IsResumable + !" + has_focus)]
+    else:
+        out.append(bar("33FFFFFF", L.ACCENT, "ListItem.IsResumable"))
+    return out
+
+
+def live_page() -> ET.Element:
+    """Live TV (livetv.py; the web's LiveTvPage, as a TV's channel list):
+    the title and tabs, the channels by number with what's on now, and
+    beside them what the focused channel shows now and next, which Kodi
+    reads from the list's item as focus moves."""
+    down = nav(ondown=str(L.LIVE_LIST), onleft=str(L.RAIL))
+    tabs = []
+    for id_, text in ((L.LIVE_ALL, 30184), (L.LIVE_FAVOURITES, 30249), (L.LIVE_RECENT, 30250), (L.LIVE_GROUP, 30251)):
+        # As a library's tabs: each twice, at rest and chosen (on surface3).
+        for chosen in (False, True):
+            tabs.append(
+                button(
+                    id_ + (100 if chosen else 0),
+                    None,
+                    0,
+                    None,
+                    80,
+                    "round12.png",
+                    "round12.png" if chosen else None,
+                    "$ADDON[plugin.video.pley %d]" % text,
+                    font=L.FONT_BODY_LARGE,
+                    color=L.FG if chosen else L.MUTED,
+                    offset=32,
+                    auto=(80, 600),
+                    animations=[anim("Focus", ZOOM_PILL)],
+                    navigation=down,
+                    nofocus_color=L.SURFACE3 if chosen else None,
+                )
+            )
+    width, height = L.LIVE_LIST_WIDTH, L.LIVE_ROW
+    channels = control(
+        "list",
+        L.LIVE_LIST,
+        L.GUTTER - 16,
+        L.LIVE_TOP,
+        width,
+        height * L.LIVE_ROWS,
+        orientation="vertical",
+        scrolltime={"text": "200", "attrs": {"tween": "cubic", "easing": "out"}},
+        itemlayout=el("itemlayout", None, live_row(False), width=width, height=height),
+        focusedlayout=el("focusedlayout", None, live_row(True), width=width, height=height),
+        **nav(onup=str(L.LIVE_TABS), onleft=str(L.RAIL)),
+    )
+    x, pw, ph = L.LIVE_PANEL_X, L.LIVE_PANEL_WIDTH, L.LIVE_PICTURE_HEIGHT
+    item = "Container(%d).ListItem" % L.LIVE_LIST
+    picture = "%s.Property(picture)" % item
+    y = L.LIVE_TOP
+    panel = group(
+        L.LIVE_PANEL,
+        0,
+        0,
+        L.WIDTH,
+        L.HEIGHT,
+        [
+            image(x, y, pw, ph, "round12.png", color=L.SURFACE2, border=14),
+            image(x + pw // 4, y + ph // 4, pw // 2, ph // 2, "$INFO[%s.Art(thumb)]" % item, aspect="keep", fade=150, background="true", visible="String.IsEmpty(%s)" % picture),
+            label(x + 32, y, pw - 64, ph, L.FONT_TITLE, L.FG, "$INFO[%s.Label]" % item, align="center", wrap=True, visible="String.IsEmpty(%s) + String.IsEmpty(%s.Art(thumb))" % (picture, item)),
+            image(x, y, pw, ph, "$INFO[%s]" % picture, diffuse="mask-landscape.png", aspect="scale", fade=150, background="true", visible="!String.IsEmpty(%s)" % picture),
+            label(x, y + ph + 24, pw, 88, L.FONT_TITLE, L.FG, "$INFO[%s.Property(title)]" % item, wrap=True, aligny="top"),
+            label(x, y + ph + 116, pw, 34, L.FONT_CAPTION, L.MUTED, "$INFO[%s.Property(airs)]" % item),
+            control(
+                "textbox",
+                left=x,
+                top=y + ph + 162,
+                width=pw,
+                height=210,
+                font=L.FONT_BODY,
+                textcolor=L.FG_85,
+                autoscroll="false",
+                label="$INFO[%s.Property(description)]" % item,
+            ),
+            label(x, y + ph + 390, pw, 34, L.FONT_CAPTION, L.SUBTLE, "$ADDON[plugin.video.pley 30257]", visible="!String.IsEmpty(%s.Property(next))" % item),
+            label(x, y + ph + 426, pw, 40, L.FONT_LABEL, L.FG, "$INFO[%s.Property(next)]" % item),
+        ],
+        visible="Integer.IsGreater(Container(%d).NumItems,0)" % L.LIVE_LIST,
+    )
+    return group(
+        L.SCREENS["live"],
+        0,
+        0,
+        L.WIDTH,
+        L.HEIGHT,
+        [
+            label(L.GUTTER, 64, 700, 68, L.FONT_PAGE, L.FG, "$ADDON[plugin.video.pley 30247]", id_=L.LIVE_TITLE),
+            grouplist(L.LIVE_TABS, 900, 58, L.WIDTH - L.SAFE_X - 900, 80, tabs, gap=16, align="right", navigation=down),
+            channels,
+            panel,
+            label(L.GUTTER, 240, 1400, 120, L.FONT_BODY_LARGE, L.MUTED, id_=L.LIVE_EMPTY, wrap=True, aligny="top"),
+        ],
+        visible=is_("pley.screen", "live"),
+    )
+
+
 def libraries_page() -> ET.Element:
     """Every library (TvLibrariesScreen): the title, Sort libraries at the
     row's other end, and a card for each library, three to a row. A card
@@ -1052,7 +1211,7 @@ def window() -> ET.Element:
     controls.append(image(0, 0, L.WIDTH, L.HEIGHT, "pley-white.png", color=L.BG))
     for c in backdrop():
         controls.append(c)
-    for screen in (home(), item(), library(), search(), grid_page(), libraries_page(), notice(), profiles_page()):
+    for screen in (home(), item(), library(), search(), grid_page(), live_page(), libraries_page(), notice(), profiles_page()):
         controls.append(screen)
     # Rows pass under the rail: bg to 112, clear from 144.
     railless = "!%s + !%s" % (is_("pley.screen", "notice"), is_("pley.screen", "profiles"))

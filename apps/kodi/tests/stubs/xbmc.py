@@ -11,6 +11,14 @@ def log(message, level=LOGINFO):
     logged.append((level, message))
 
 
+# Kodi's regional formats (getRegion).
+region = {"time": "%H:%M:%S"}
+
+
+def getRegion(name):
+    return region.get(name, "")
+
+
 def getInfoLabel(name):
     return info_labels.get(name, "")
 
@@ -68,6 +76,12 @@ class PlayList:
 
     def size(self):
         return len(PlayList.entries.get(self.kind, []))
+
+    def __getitem__(self, at):
+        import xbmcgui
+
+        url, _ = PlayList.entries.get(self.kind, [])[at]
+        return xbmcgui.ListItem(path=url)
 
 
 class Monitor:

@@ -41,6 +41,12 @@ function lucide() {
 }
 
 const ICONS = lucide();
+// Lucide's icons the Kodi screens draw that the Android app's set doesn't
+// have (yet): Live TV's `tv-minimal`, the web's.
+const KODI_ONLY = {
+  "tv-minimal": { filled: false, paths: ["M7 21h10", "M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-16a2 2 0 0 1 -2 -2v-10a2 2 0 0 1 2 -2z"] },
+};
+for (const [name, found] of Object.entries(KODI_ONLY)) ICONS[name] ??= found;
 
 /** Icon [name], [size] px, in [color], with its top left at (x, y), as SVG elements. */
 function icon(name, size, color, x = 0, y = 0) {
@@ -79,7 +85,7 @@ const add = (name, width, height, body) => pictures.push({ name, width, height, 
 for (const name of [
   "search", "house", "clapperboard", "tv", "music", "image", "folder", "list-music", "layers", "settings",
   "play", "refresh-cw", "arrow-up-narrow-wide", "arrow-down-wide-narrow", "sliders-horizontal", "chevron-down",
-  "check", "circle-check", "server", "log-out", "lock",
+  "check", "circle-check", "server", "log-out", "lock", "tv-minimal",
 ]) {
   add(`icon-${name}.png`, 40, 40, icon(name, 40, "#ffffff"));
 }

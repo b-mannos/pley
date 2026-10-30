@@ -798,3 +798,107 @@ msgstr ""
 msgctxt "#30246"
 msgid "%s isn't on your network and its connection isn't encrypted. Open it by its https address."
 msgstr ""
+
+msgctxt "#30247"
+msgid "Live TV"
+msgstr ""
+
+msgctxt "#30248"
+msgid "Channels"
+msgstr ""
+
+msgctxt "#30249"
+msgid "Favourites"
+msgstr ""
+
+msgctxt "#30250"
+msgid "Recently watched"
+msgstr ""
+
+msgctxt "#30251"
+msgid "Groups"
+msgstr ""
+
+msgctxt "#30252"
+msgid "Guide"
+msgstr ""
+
+msgctxt "#30253"
+msgid "Add to favourites"
+msgstr ""
+
+msgctxt "#30254"
+msgid "Remove from favourites"
+msgstr ""
+
+msgctxt "#30255"
+msgid "Schedule"
+msgstr ""
+
+msgctxt "#30256"
+msgid "Watch"
+msgstr ""
+
+msgctxt "#30257"
+msgid "Next"
+msgstr ""
+
+msgctxt "#30258"
+msgid "All connections are in use"
+msgstr ""
+
+msgctxt "#30259"
+msgid "No channels yet"
+msgstr ""
+
+msgctxt "#30260"
+msgid "Channels appear here once an administrator adds an IPTV provider."
+msgstr ""
+
+msgctxt "#30261"
+msgid "Add your IPTV provider's playlist or Xtream Codes account on the web, in Settings → Live TV."
+msgstr ""
+
+msgctxt "#30262"
+msgid "Today"
+msgstr ""
+
+msgctxt "#30263"
+msgid "Tomorrow"
+msgstr ""
+
+msgctxt "#30264"
+msgid "Yesterday"
+msgstr ""
+
+msgctxt "#30265"
+msgid "Nothing in the guide now"
+msgstr ""
+
+msgctxt "#30266"
+msgid "No guide"
+msgstr ""
+
+msgctxt "#30267"
+msgid "Later"
+msgstr ""
+
+msgctxt "#30268"
+msgid "Live"
+msgstr ""
+
+msgctxt "#30269"
+msgid "New"
+msgstr ""
+
+msgctxt "#30270"
+msgid "No channel %s"
+msgstr ""
+
+msgctxt "#30271"
+msgid "On now"
+msgstr ""
+
+msgctxt "#30272"
+msgid "The guide has nothing more for %s."
+msgstr ""

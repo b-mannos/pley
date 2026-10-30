@@ -19,8 +19,9 @@ READ_TIMEOUT = 45
 RETRY = (1, 2, 5, 10, 30)
 # A connection that held this long was a good one: tries count again.
 HELD = 60
-# Events that change what pley's listings show.
-CHANGES = ("user_state_changed", "watchlist_changed", "library_changed", "libraries_changed")
+# Events that change what pley's listings show (Live TV's: its channels
+# or guide changed, an administrator's lineup among them).
+CHANGES = ("user_state_changed", "watchlist_changed", "library_changed", "libraries_changed", "live_channels_changed")
 # Events come in bursts (a play reaching 90 % sends user_state_changed and
 # library_changed): the listing is asked for once, this long after the
 # first, and no more often than every MIN_GAP seconds (a scan).

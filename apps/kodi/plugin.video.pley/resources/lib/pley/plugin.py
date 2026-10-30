@@ -17,7 +17,7 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 
-from . import api, kodi, listing, playback
+from . import api, kodi, listing, livetv, playback
 
 PAGE = 300
 
@@ -145,12 +145,12 @@ class Plugin:
             else:
                 message = kodi.text("server_error") % e.message
             kodi.notify(message, error=True)
-            if route == "play":
+            if route in RESOLVING:
                 xbmcplugin.setResolvedUrl(self.handle, False, xbmcgui.ListItem())
             elif listing_route:
                 self.end(False)
         finally:
-            if route in ACTIONS and route != "play" and self.handle >= 0:
+            if route in ACTIONS and route not in RESOLVING and self.handle >= 0:
                 # An action opened as a folder (a skin's widget, JSON-RPC)
                 # lists nothing: Kodi keeps its Python between calls and
                 # waits for this, where it once waited for the script's end.
@@ -221,9 +221,14 @@ class Plugin:
             self.action(kodi.text("choose_server"), {"route": "choose_server"}, "DefaultNetwork.png")
             return self.end()
         client = self.client()
-        home, libraries = api.together(lambda: client.get("/api/hubs/home"), lambda: client.get("/api/libraries"))
+        home, libraries, live = api.together(
+            lambda: client.get("/api/hubs/home"), lambda: client.get("/api/libraries"), lambda: livetv.summary(client)
+        )
         for hub in home.get("hubs", []):
             self.folder(hub["title"], {"route": "hub", "key": hub["key"]}, "DefaultRecentlyAddedMovies.png")
+        if livetv.available(live):
+            # Where it has channels, after Home's rows as in the web's sidebar.
+            self.folder(kodi.text("live_tv"), {"route": "live"}, "DefaultPVRChannels.png")
         icons = {"movies": "DefaultMovies.png", "shows": "DefaultTVShows.png", "music": "DefaultMusicAlbums.png"}
         for library in libraries:
             params = {"route": "library", "id": library["id"], "kind": library["kind"]}
@@ -373,6 +378,163 @@ class Plugin:
             start_ms = int(listed or 0) if self.resume else 0
         li = playback.prepare(client, self.proxy_base, item_id, start_ms, detail)
         xbmcplugin.setResolvedUrl(self.handle, True, li)
+
+    # --------------------------------------------------------------- Live TV
+
+    def route_live(self) -> None:
+        """Live TV (livetv.py): its channels, the favourites, the channels
+        watched last, their groups and the guide."""
+        client = self.client()
+        summary, found = api.together(lambda: livetv.summary(client), lambda: livetv.channels(client))
+        if not found:
+            li = xbmcgui.ListItem(kodi.text("no_channels"), offscreen=True)
+            li.setArt({"icon": "DefaultIconInfo.png", "thumb": "DefaultIconInfo.png"})
+            li.getVideoInfoTag().setPlot(kodi.text("no_channels_body"))
+            xbmcplugin.addDirectoryItem(self.handle, self.url(route="retry"), li, isFolder=False)
+            return self.end()
+        self.folder(kodi.text("channels"), {"route": "live_channels"}, "DefaultPVRChannels.png")
+        if any(c.get("favorite") for c in found):
+            self.folder(kodi.text("favourites"), {"route": "live_channels", "tab": "favorites"}, "DefaultFavourites.png")
+        if livetv.recent_channels(found, summary.get("recent")):
+            self.folder(kodi.text("recently_watched"), {"route": "live_channels", "tab": "recent"}, "DefaultRecentlyAddedEpisodes.png")
+        if len(livetv.groups(found)) > 1:
+            self.folder(kodi.text("groups"), {"route": "live_groups"}, "DefaultGenre.png")
+        self.folder(kodi.text("guide"), {"route": "live_guide"}, "DefaultPVRGuide.png")
+        self.end()
+
+    def route_live_channels(self) -> None:
+        """A tab's channels, by number, each saying what's on now (its
+        label2) and next (its info). They play one at a time; in pley's
+        window, Next and Previous change channel."""
+        client = self.client()
+        tab = self.params.get("tab") or "all"
+        if tab == "recent":
+            summary, found = api.together(lambda: livetv.summary(client), lambda: livetv.channels(client))
+            recent = summary.get("recent") or []
+        else:
+            found, recent = livetv.channels(client), []
+        params = {"route": "live_channels", "tab": tab, "group": self.params.get("group")}
+        self.list_channels(livetv.shown(found, tab, recent, self.params.get("group")), params)
+
+    def list_channels(self, found: list, params: dict, guide: bool = False) -> None:
+        """A page of `found` channels (a lineup can have tens of thousands),
+        Next page after it. In the guide, each opens its schedule."""
+        offset = int(self.params.get("offset", 0))
+        now = time.time()
+        entries = []
+        for channel in found[offset : offset + PAGE]:
+            li = livetv.list_item(self.proxy_base, channel, now)
+            if guide:
+                li.setProperty("IsPlayable", "false")
+                li.addContextMenuItems(self.channel_menu(channel)[:1])
+                entries.append((self.url(route="live_schedule", id=channel["id"]), li, True))
+            else:
+                li.addContextMenuItems(self.channel_menu(channel))
+                entries.append((self.url(route=livetv.PLAY_ROUTE, id=channel["id"]), li, False))
+        xbmcplugin.addDirectoryItems(self.handle, entries, len(entries))
+        if offset + PAGE < len(found):
+            more = {k: v for k, v in dict(params, offset=offset + PAGE).items() if v is not None}
+            self.folder(kodi.text("next_page"), more, "DefaultFolder.png", last=True)
+        xbmcplugin.setContent(self.handle, "videos")
+        self.end()
+
+    def channel_menu(self, channel: dict) -> list:
+        """A channel's menu in Kodi's lists: its favourite, its schedule."""
+        favourite = bool(channel.get("favorite"))
+        toggle = self.url(route="live_favourite", id=channel["id"], value="0" if favourite else "1")
+        schedule = self.url(route="live_schedule", id=channel["id"])
+        return [
+            (kodi.text("remove_favourite" if favourite else "add_favourite"), "RunPlugin(%s)" % toggle),
+            (kodi.text("schedule"), "Container.Update(%s)" % schedule),
+        ]
+
+    def route_live_groups(self) -> None:
+        for group, count in livetv.groups(livetv.channels(self.client())):
+            self.folder("%s (%d)" % (group, count), {"route": "live_channels", "tab": "group", "group": group}, "DefaultGenre.png")
+        self.end()
+
+    def route_live_guide(self) -> None:
+        """The guide in Kodi's lists: each channel, now and next in its
+        info, opening its schedule. (Kodi's PVR grid is for PVR add-ons; a
+        plugin can only list.)"""
+        self.list_channels(livetv.channels(self.client()), {"route": "live_guide"}, guide=True)
+
+    def route_live_schedule(self) -> None:
+        """A channel's programmes, SCHEDULE_HOURS at a time from what's on
+        now: what's on plays the channel; the rest say what they are."""
+        client = self.client()
+        channel_id = int(self.params["id"])
+        now = time.time()
+        start = float(self.params.get("from") or now)
+        channel, programs = api.together(
+            lambda: client.get("%s/%d" % (livetv.CHANNELS, channel_id)), lambda: livetv.schedule(client, channel_id, start)
+        )
+        if start > now:
+            # A later page: what began on the page before isn't again.
+            programs = [p for p in programs if p["start"] >= start]
+        base = self.proxy_base
+        logo = livetv.logo(base, channel)
+        entries = []
+        for program in programs:
+            on = livetv.airing(program, now)
+            when = kodi.text("on_now") if on else "%s %s" % (livetv.day(program["start"], now), livetv.clock(program["start"]))
+            li = xbmcgui.ListItem("%s  %s" % (when, livetv.headline(program)), livetv.span(program), offscreen=True)
+            art = {"thumb": logo, "icon": logo} if logo else {}
+            picture = listing.image(base, program.get("image"), livetv.PICTURE_WIDTH)
+            if picture:
+                art.update(thumb=picture, fanart=picture)
+            if art:
+                li.setArt(art)
+            tag = li.getVideoInfoTag()
+            tag.setMediaType("video")
+            tag.setTitle(livetv.headline(program))
+            line = " · ".join(p for p in [livetv.span(program), livetv.episode(program)] + livetv.badges(program) if p)
+            tag.setPlot("[B]%s[/B]\n%s\n\n%s" % (livetv.name(channel), line, (program.get("description") or "").strip()))
+            if program.get("categories"):
+                tag.setGenres(list(program["categories"]))
+            if on:
+                li.setProperty("IsPlayable", "true")
+                entries.append((self.url(route=livetv.PLAY_ROUTE, id=channel_id), li, False))
+            else:
+                # Kodi shows its info: there is nothing to play yet.
+                entries.append((self.url(route="live_info"), li, False))
+        if not programs:
+            li = xbmcgui.ListItem(kodi.text("nothing_scheduled") % livetv.name(channel), offscreen=True)
+            li.setArt({"icon": "DefaultIconInfo.png", "thumb": "DefaultIconInfo.png"})
+            entries.append((self.url(route="live_info"), li, False))
+        xbmcplugin.addDirectoryItems(self.handle, entries, len(entries))
+        if programs:
+            later = max(p["stop"] for p in programs)
+            self.folder(kodi.text("later"), {"route": "live_schedule", "id": channel_id, "from": int(later)}, "DefaultFolder.png", last=True)
+        xbmcplugin.setContent(self.handle, "videos")
+        self.end()
+
+    def route_live_info(self) -> None:
+        """A programme still to come, chosen: its info."""
+        xbmc.executebuiltin("Action(Info)")
+
+    def route_live_play(self) -> None:
+        """Plays a channel: watched for this Kodi, then its stream. Every
+        connection in use (409) says so, the server's words naming the
+        channels watched; the queue of channels after it is let go."""
+        client = self.client()
+        install = playback.install_id()
+        try:
+            channel = livetv.watch(client, int(self.params["id"]), install)
+        except api.ApiError as e:
+            if e.status != 409:
+                raise
+            kodi.log("live channel %s: %s" % (self.params["id"], e.message), xbmc.LOGWARNING)
+            livetv.forget_queue()
+            xbmcplugin.setResolvedUrl(self.handle, False, xbmcgui.ListItem())
+            return livetv.busy(e.message)
+        li = livetv.play_item(self.proxy_base, channel, install, time.time())
+        kodi.log("watching live channel %d" % channel["id"])
+        xbmcplugin.setResolvedUrl(self.handle, True, li)
+
+    def route_live_favourite(self) -> None:
+        livetv.set_favorite(self.client(), int(self.params["id"]), self.params.get("value") == "1")
+        xbmc.executebuiltin("Container.Refresh")
 
     # ---------------------------------------------------------------- actions
 
@@ -664,9 +826,13 @@ class Plugin:
             xbmcgui.Dialog().ok("Pley", outcome)
 
 
-# Routes that run as actions, with no listing to end.
+# Routes that run as actions, with no listing to end; of them, those that
+# hand Kodi what to play.
 ACTIONS = (
     "play",
+    "live_play",
+    "live_favourite",
+    "live_info",
     "watched",
     "my_list",
     "settings",
@@ -680,6 +846,7 @@ ACTIONS = (
     "sign_out",
     "retry",
 )
+RESOLVING = ("play", "live_play")
 
 
 def choose(server: str, name: str, server_id: str) -> None:

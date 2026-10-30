@@ -58,6 +58,9 @@ class Control:
     def selectItem(self, at):
         self.selected = at
 
+    def getListItem(self, at):
+        return self.items[at]
+
     def setImage(self, path, use_cache=True):
         self.image = path
 

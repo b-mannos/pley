@@ -63,14 +63,16 @@ def new_secret() -> str:
 class Proxy:
     """Serves on 127.0.0.1:`port` (another one when it is taken) until
     `stop`. `on_stopped(message)` hears of streams an administrator
-    stopped. `meter` (autoquality.Meter) counts what streams bring, for
-    Automatic."""
+    stopped; `on_busy(message)` of a live channel refused because every
+    connection of its source is in use. `meter` (autoquality.Meter) counts
+    what streams bring, for Automatic."""
 
-    def __init__(self, tokens: Tokens, user_agent: str, secret: str, port: int = 0, on_stopped=None, meter=None):
+    def __init__(self, tokens: Tokens, user_agent: str, secret: str, port: int = 0, on_stopped=None, meter=None, on_busy=None):
         self.tokens = tokens
         self.user_agent = user_agent
         self.secret = secret
         self.on_stopped = on_stopped
+        self.on_busy = on_busy
         self.meter = meter
         self.server = None
         self.thread = None
@@ -397,14 +399,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def relay(self, response: http.client.HTTPResponse, path: str = "") -> None:
         try:
-            if response.status == 410 and self.proxy.on_stopped:
+            # A stream stopped by the server; a channel whose source has no
+            # connection free, between the plugin's asking and Kodi's.
+            heard = self.proxy.on_stopped if response.status == 410 else None
+            if response.status == 409 and is_live_stream(path):
+                heard = self.proxy.on_busy
+            if heard:
                 data = response.read()
                 try:
                     message = json.loads(data.decode("utf-8")).get("message")
-                except ValueError:
+                except (ValueError, AttributeError):
                     message = None
-                self.proxy.on_stopped(message)
-                self.send_response(410)
+                heard(message)
+                self.send_response(response.status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
@@ -426,13 +433,18 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             if self.command == "HEAD" or response.status in (204, 304):
                 return
+            # A live channel goes on as it comes: a read waits for no more
+            # than the server has sent (a radio channel takes a quarter of a
+            # minute to send a CHUNK), and Automatic doesn't measure it.
+            live = is_live_stream(path)
+            read = response.read1 if live else response.read
             # A stream's bytes are counted as they come, and its whole
             # answer over the time it took, Kodi's taking them included.
-            meter = self.proxy.meter if response.status in (200, 206) and is_media(response) else None
+            meter = self.proxy.meter if response.status in (200, 206) and is_media(response) and not live else None
             began = time.monotonic()
             size = 0
             while True:
-                chunk = response.read(CHUNK)
+                chunk = read(CHUNK)
                 if not chunk:
                     break
                 if meter is not None:
@@ -453,6 +465,12 @@ def is_object(data: bytes) -> bool:
         return isinstance(json.loads(data.decode("utf-8")), dict)
     except ValueError:
         return False
+
+
+def is_live_stream(path: str) -> bool:
+    """A live channel's stream (livetv.stream_path), which never ends."""
+    route = path.partition("?")[0]
+    return route.startswith("/api/live/channels/") and route.endswith("/stream.ts")
 
 
 def is_media(response: http.client.HTTPResponse) -> bool:
