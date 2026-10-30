@@ -16,7 +16,7 @@ use crate::auth::{
 };
 use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
-use crate::requests::RequestAccess;
+use crate::requests::{self, RequestAccess};
 use crate::state::AppState;
 use crate::streams::{self, SubtitleMode};
 use crate::util::now;
@@ -320,9 +320,16 @@ pub async fn delete_user(
     }
     let avatar: Option<Option<String>> =
         sqlx::query_scalar("SELECT avatar FROM users WHERE id = ?").bind(id).fetch_optional(&state.db.read).await?;
-    let result = sqlx::query("DELETE FROM users WHERE id = ?").bind(id).execute(&state.db.write).await?;
+    let mut tx = state.db.write.begin().await?;
+    // Requests others follow stay, with a new maker.
+    let told = requests::hand_down(&mut tx, id).await?;
+    let result = sqlx::query("DELETE FROM users WHERE id = ?").bind(id).execute(&mut *tx).await?;
     if result.rows_affected() == 0 {
         return Err(AppError::not_found("user not found"));
+    }
+    tx.commit().await?;
+    if let Some(to) = told {
+        state.requests.account_deleted(to);
     }
     if let Some(Some(file)) = avatar {
         let _ = tokio::fs::remove_file(accounts::avatars_dir(&state.config.data_dir).join(file)).await;

@@ -40,6 +40,14 @@ impl Service {
         }
     }
 
+    /// As requests store where they went.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Service::Radarr => "radarr",
+            Service::Sonarr => "sonarr",
+        }
+    }
+
     /// Its saved address and key, where both are.
     pub fn saved(self, settings: &Settings) -> Option<Connection> {
         let (url, key) = match self {
@@ -47,6 +55,28 @@ impl Service {
             Service::Sonarr => (&settings.sonarr_url, &settings.sonarr_api_key),
         };
         (!url.is_empty() && !key.is_empty()).then(|| Connection { url: url.clone(), key: key.clone() })
+    }
+
+    /// The same, where it is connected: its quality profile and root folder
+    /// are chosen too, so approved requests are sent there.
+    pub fn connected(self, settings: &Settings) -> Option<Connection> {
+        let (profile, folder) = self.chosen(settings).0;
+        self.saved(settings).filter(|_| profile > 0 && !folder.is_empty())
+    }
+
+    /// The quality profile and root folder chosen in the settings, then
+    /// anime's (0 and "" where none is).
+    pub fn chosen(self, settings: &Settings) -> ((i64, &str), (i64, &str)) {
+        match self {
+            Service::Radarr => (
+                (settings.radarr_quality_profile, settings.radarr_root_folder.as_str()),
+                (settings.radarr_anime_quality_profile, settings.radarr_anime_root_folder.as_str()),
+            ),
+            Service::Sonarr => (
+                (settings.sonarr_quality_profile, settings.sonarr_root_folder.as_str()),
+                (settings.sonarr_anime_quality_profile, settings.sonarr_anime_root_folder.as_str()),
+            ),
+        }
     }
 }
 
@@ -92,6 +122,33 @@ pub struct Profile {
 pub struct RootFolder {
     pub path: String,
     pub free_bytes: Option<i64>,
+}
+
+/// What an approval may choose from: the quality profiles and root folders.
+#[derive(Debug, Clone, Default)]
+pub struct Lists {
+    pub quality_profiles: Vec<Profile>,
+    pub root_folders: Vec<RootFolder>,
+}
+
+/// A title added (or there already): its id there, and the quality profile
+/// and root folder it has, where known.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Added {
+    pub id: i64,
+    pub quality_profile: Option<i64>,
+    pub root_folder: Option<String>,
+}
+
+impl Added {
+    /// One there already, as Radarr or Sonarr lists it.
+    fn listed(service: Service, title: &Value) -> Result<Added, ArrError> {
+        Ok(Added {
+            id: id_of(service, title)?,
+            quality_profile: title["qualityProfileId"].as_i64(),
+            root_folder: title["rootFolderPath"].as_str().filter(|f| !f.is_empty()).map(str::to_owned),
+        })
+    }
 }
 
 /// A title to add: what the request asks for, and what to add it with.
@@ -277,15 +334,8 @@ impl Arr {
         struct Status {
             version: String,
         }
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Folder {
-            path: String,
-            free_space: Option<i64>,
-        }
         let status: Status = self.get(service, to, "/system/status", &[]).await?;
-        let quality_profiles: Vec<Profile> = self.get(service, to, "/qualityprofile", &[]).await?;
-        let folders: Vec<Folder> = self.get(service, to, "/rootfolder", &[]).await?;
+        let lists = self.lists(service, to).await?;
         let language_profiles = if service == Service::Sonarr && status.version.starts_with("3.") {
             self.get(service, to, "/languageprofile", &[]).await?
         } else {
@@ -293,21 +343,39 @@ impl Arr {
         };
         Ok(Options {
             version: status.version,
+            quality_profiles: lists.quality_profiles,
+            root_folders: lists.root_folders,
+            language_profiles,
+        })
+    }
+
+    /// Its quality profiles and root folders, asked for at once.
+    pub async fn lists(&self, service: Service, to: &Connection) -> Result<Lists, ArrError> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Folder {
+            path: String,
+            free_space: Option<i64>,
+        }
+        let (quality_profiles, folders) = tokio::try_join!(
+            self.get::<Vec<Profile>>(service, to, "/qualityprofile", &[]),
+            self.get::<Vec<Folder>>(service, to, "/rootfolder", &[]),
+        )?;
+        Ok(Lists {
             quality_profiles,
             root_folders: folders.into_iter().map(|f| RootFolder { path: f.path, free_bytes: f.free_space }).collect(),
-            language_profiles,
         })
     }
 
     /// Adds a movie to Radarr, monitored, and searches for it; one there
     /// already is monitored again and searched for unless it has a file.
-    /// Its id in Radarr.
-    pub async fn add_movie(&self, to: &Connection, settings: &Settings, title: &Title<'_>) -> Result<i64, ArrError> {
+    pub async fn add_movie(&self, to: &Connection, settings: &Settings, title: &Title<'_>) -> Result<Added, ArrError> {
         let radarr = Service::Radarr;
         let tmdb = [("tmdbId", title.tmdb_id.to_string())];
         let found: Vec<Value> = self.get(radarr, to, "/movie", &tmdb).await?;
         if let Some(mut movie) = found.into_iter().next() {
-            let id = id_of(radarr, &movie)?;
+            let added = Added::listed(radarr, &movie)?;
+            let id = added.id;
             if movie["monitored"] != json!(true) {
                 movie["monitored"] = json!(true);
                 let _: Value = self.call(radarr, to, Method::PUT, &format!("/movie/{id}"), &[], Some(&movie)).await?;
@@ -316,7 +384,7 @@ impl Arr {
                 let command = json!({"name": "MoviesSearch", "movieIds": [id]});
                 let _: Value = self.call(radarr, to, Method::POST, "/command", &[], Some(&command)).await?;
             }
-            return Ok(id);
+            return Ok(added);
         }
         let (profile, folder) = choice(
             radarr,
@@ -341,13 +409,12 @@ impl Arr {
             movie["tags"] = json!([]);
         }
         let added: Value = self.call(radarr, to, Method::POST, "/movie", &[], Some(&movie)).await?;
-        id_of(radarr, &added)
+        Ok(Added { id: id_of(radarr, &added)?, quality_profile: Some(profile), root_folder: Some(folder.to_owned()) })
     }
 
     /// Adds a show to Sonarr with the seasons asked for monitored, and
     /// searches for them; one there already gets them monitored too.
-    /// Its id in Sonarr.
-    pub async fn add_series(&self, to: &Connection, settings: &Settings, title: &Title<'_>) -> Result<i64, ArrError> {
+    pub async fn add_series(&self, to: &Connection, settings: &Settings, title: &Title<'_>) -> Result<Added, ArrError> {
         let sonarr = Service::Sonarr;
         let tvdb = title.tvdb_id.ok_or_else(|| {
             ArrError::Needs(
@@ -357,7 +424,8 @@ impl Arr {
         let wanted = |season: &Value| season["seasonNumber"].as_i64().is_some_and(|n| title.seasons.contains(&n));
         let found: Vec<Value> = self.get(sonarr, to, "/series", &[("tvdbId", tvdb.to_string())]).await?;
         if let Some(mut series) = found.into_iter().next() {
-            let id = id_of(sonarr, &series)?;
+            let added = Added::listed(sonarr, &series)?;
+            let id = added.id;
             series["monitored"] = json!(true);
             for season in series["seasons"].as_array_mut().into_iter().flatten() {
                 if wanted(&*season) {
@@ -371,7 +439,7 @@ impl Arr {
                     let _: Value = self.call(sonarr, to, Method::POST, "/command", &[], Some(&command)).await?;
                 }
             }
-            return Ok(id);
+            return Ok(added);
         }
         let (profile, folder) = choice(
             sonarr,
@@ -413,7 +481,7 @@ impl Arr {
             series["tags"] = json!([]);
         }
         let added: Value = self.call(sonarr, to, Method::POST, "/series", &[], Some(&series)).await?;
-        id_of(sonarr, &added)
+        Ok(Added { id: id_of(sonarr, &added)?, quality_profile: Some(profile), root_folder: Some(folder.to_owned()) })
     }
 
     /// Whether Sonarr has a file for every episode of a season of a show

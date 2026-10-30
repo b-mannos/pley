@@ -16,12 +16,12 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use super::truthy;
-use crate::auth::AuthUser;
+use crate::auth::{AuthUser, CurrentToken};
 use crate::discover::{List, MAX_PAGE, TitleKind, pictures};
 use crate::error::{ApiResult, AppError};
 use crate::requests::{
     Approval, DiscoverDetail, DiscoverPage, ItemRequest, ListQuery, MediaRequest, NewRequest, RequestList,
-    RequestResult, RequestStatus, Summary,
+    RequestOptions, RequestResult, RequestStatus, Summary,
 };
 use crate::state::AppState;
 
@@ -151,33 +151,57 @@ pub async fn item_request(
     Ok(Json(state.requests.for_item(&caller, id).await?))
 }
 
-/// `GET /api/requests?status=&mine=&offset=&limit=`.
+/// `GET /api/requests?status=&attention=&kind=&user_id=&q=&order=&mine=&unseen=&changed_since=&offset=&limit=`.
 pub async fn list(State(state): State<AppState>, user: AuthUser, query: Params) -> RequestResult<Json<RequestList>> {
     let caller = state.requests.reader(&user).await?;
     let query = params(query)?;
-    let status = match query.get("status").map(String::as_str).filter(|s| !s.is_empty()) {
-        Some(status) => Some(
-            RequestStatus::parse(status)
-                .ok_or_else(|| AppError::bad_request("status is pending, approved, declined, failed or available"))?,
-        ),
+    let text = |name: &str| query.get(name).map(|v| v.trim()).filter(|v| !v.is_empty());
+    let mut statuses = Vec::new();
+    for status in text("status").into_iter().flat_map(|s| s.split(',')).map(str::trim).filter(|s| !s.is_empty()) {
+        let status = RequestStatus::parse(status).ok_or_else(|| {
+            AppError::bad_request("status is pending, approved, declined, failed or available, or several of them")
+        })?;
+        if !statuses.contains(&status) {
+            statuses.push(status);
+        }
+    }
+    let kind = match text("kind") {
+        Some(kind) => Some(TitleKind::parse(kind).ok_or_else(|| AppError::bad_request("kind is movie or show"))?),
         None => None,
     };
+    let oldest = match text("order") {
+        None | Some("newest") => false,
+        Some("oldest") => true,
+        Some(_) => return Err(AppError::bad_request("order is newest or oldest").into()),
+    };
+    let q = text("q");
+    if q.is_some_and(|q| q.chars().count() > QUERY_MAX) {
+        return Err(AppError::bad_request(format!("q is {QUERY_MAX} characters at most")).into());
+    }
     let number = |name: &str| -> ApiResult<Option<i64>> {
-        query
-            .get(name)
+        text(name)
             .map(|v| v.parse::<i64>().map_err(|_| AppError::bad_request(format!("{name} is a number"))))
             .transpose()
     };
+    let flag = |name: &str| query.get(name).is_some_and(|v| truthy(v));
     let list = ListQuery {
-        status,
-        mine: query.get("mine").is_some_and(|v| truthy(v)),
+        statuses,
+        attention: flag("attention"),
+        kind,
+        user_id: number("user_id")?,
+        q: q.map(str::to_owned),
+        oldest,
+        mine: flag("mine"),
+        unseen: flag("unseen"),
+        changed_since: number("changed_since")?,
         offset: number("offset")?.unwrap_or(0),
         limit: number("limit")?,
     };
     Ok(Json(state.requests.list(&caller, list).await?))
 }
 
-/// `POST /api/requests`: `{ kind, tmdb_id, seasons? }`.
+/// `POST /api/requests`: `{ kind, tmdb_id, seasons? }`. `201` with the new
+/// request; `200` with the one followed where nothing was left to ask for.
 pub async fn create(
     State(state): State<AppState>,
     user: AuthUser,
@@ -185,7 +209,8 @@ pub async fn create(
 ) -> RequestResult<(StatusCode, Json<MediaRequest>)> {
     let caller = state.requests.asker(&user).await?;
     let Json(new) = body.map_err(|err| AppError::bad_request(err.body_text()))?;
-    Ok((StatusCode::CREATED, Json(state.requests.create(&caller, new).await?)))
+    let (made, request) = state.requests.create(&caller, new).await?;
+    Ok((if made { StatusCode::CREATED } else { StatusCode::OK }, Json(request)))
 }
 
 /// `GET /api/requests/{id}`.
@@ -199,7 +224,8 @@ pub async fn get(
     Ok(Json(state.requests.get(&caller, id).await?))
 }
 
-/// `POST /api/requests/{id}/approve`: `{ quality_profile?, root_folder? }`.
+/// `POST /api/requests/{id}/approve`: `{ quality_profile?, root_folder?,
+/// seasons? }`.
 pub async fn approve(
     State(state): State<AppState>,
     user: AuthUser,
@@ -231,6 +257,25 @@ pub async fn decline(
     Ok(Json(state.requests.decline(&caller, id, decline.reason).await?))
 }
 
+/// `POST /api/requests/{id}/handled`: approved as added to Radarr or Sonarr
+/// by hand, so never sent.
+pub async fn handled(
+    State(state): State<AppState>,
+    user: AuthUser,
+    path: Result<Path<i64>, PathRejection>,
+) -> RequestResult<Json<MediaRequest>> {
+    let caller = state.requests.manager(&user).await?;
+    let id = id_of(path, "a request's")?;
+    Ok(Json(state.requests.handled(&caller, id).await?))
+}
+
+/// `GET /api/requests/options`: what approving may choose in Radarr and
+/// Sonarr.
+pub async fn options(State(state): State<AppState>, user: AuthUser) -> RequestResult<Json<RequestOptions>> {
+    state.requests.manager(&user).await?;
+    Ok(Json(state.requests.options().await))
+}
+
 /// `DELETE /api/requests/{id}`.
 pub async fn delete(
     State(state): State<AppState>,
@@ -243,9 +288,26 @@ pub async fn delete(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `POST /api/requests/seen`: what had news for this account is seen.
-pub async fn seen(State(state): State<AppState>, user: AuthUser) -> RequestResult<StatusCode> {
+/// `DELETE /api/requests/{id}/watch`: this account stops following it.
+pub async fn unwatch(
+    State(state): State<AppState>,
+    user: AuthUser,
+    path: Result<Path<i64>, PathRejection>,
+) -> RequestResult<StatusCode> {
     let caller = state.requests.reader(&user).await?;
-    state.requests.seen(&caller).await?;
+    let id = id_of(path, "a request's")?;
+    state.requests.unwatch(&caller, id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /api/requests/seen`: what had news for this account is seen, on
+/// its other devices too.
+pub async fn seen(
+    State(state): State<AppState>,
+    user: AuthUser,
+    CurrentToken(token): CurrentToken,
+) -> RequestResult<StatusCode> {
+    let caller = state.requests.reader(&user).await?;
+    state.requests.seen(&caller, token.as_deref()).await?;
     Ok(StatusCode::NO_CONTENT)
 }

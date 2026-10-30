@@ -211,6 +211,9 @@ impl Listener {
             | ServerEvent::LiveTunersChanged
             | ServerEvent::RequestsChanged { .. }
             | ServerEvent::RequestAvailable { .. }
+            | ServerEvent::RequestDecided { .. }
+            | ServerEvent::RequestCreated { .. }
+            | ServerEvent::RequestFailed { .. }
             | ServerEvent::RequestsSettingsChanged { .. } => Ok(Vec::new()),
         };
         result.unwrap_or_else(|err| {

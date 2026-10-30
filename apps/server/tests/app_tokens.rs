@@ -288,8 +288,11 @@ fn every_route_is_classified() {
     assert_eq!(app_route("GET", "/api/discover/images/{kind}/{file}"), requests);
     assert_eq!(app_route("GET", "/api/items/{id}/request"), requests);
     assert_eq!(app_route("POST", "/api/requests/seen"), requests);
+    assert_eq!(app_route("DELETE", "/api/requests/{id}/watch"), requests);
     let approvals = Some(Need::Scope(pley::auth::scopes::Scope::Approvals));
     assert_eq!(app_route("POST", "/api/requests/{id}/decline"), approvals);
+    assert_eq!(app_route("POST", "/api/requests/{id}/handled"), approvals);
+    assert_eq!(app_route("GET", "/api/requests/options"), approvals);
     // TVs: anyone starts with a code, which only pley's own page takes.
     assert!(PUBLIC.contains(&("POST", "/api/oauth/device")));
     assert!(PUBLIC.contains(&("GET", "/api/oauth/device/qr")));

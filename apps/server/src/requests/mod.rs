@@ -10,7 +10,7 @@ pub mod arr;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::Json;
 use axum::http::{HeaderValue, StatusCode, header};
@@ -19,22 +19,25 @@ use bytes::Bytes;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::SqliteConnection;
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::accounts::avatar_url;
-use crate::auth::AuthUser;
 use crate::auth::scopes::Scope;
+use crate::auth::{AuthUser, hash_token};
 use crate::catalog::{ME_CTE, VISIBLE};
 use crate::db::Db;
 use crate::discover::pictures::{self, Picture, Pictures, Unavailable};
 use crate::discover::{self, CastMember, Details, Discover, Found, List, TitleKind};
 use crate::error::AppError;
-use crate::events::{EventBus, ServerEvent};
+use crate::events::{Audience, EventBus, ServerEvent};
 use crate::metadata::{MetadataAgent, TmdbError};
 use crate::ratings::rating_age;
-use crate::settings::SettingsStore;
+use crate::settings::{Settings, SettingsStore};
+use crate::store::like_escape;
 use crate::util::{now, utc};
-use arr::{Arr, Download, DownloadState, Service};
+use arr::{Arr, ArrError, Connection, Download, DownloadState, Lists, Profile, RootFolder, Service};
 
 /// What the limits count: requests of the last 7 days.
 pub const LIMIT_WINDOW: i64 = 7 * 86_400;
@@ -60,6 +63,12 @@ const REASON_MAX: usize = 500;
 const FOLDER_MAX: usize = 512;
 /// Titles whose details (or other ids) are looked up at once.
 const LOOKUPS: usize = 8;
+/// How long what Radarr and Sonarr offer approvals is reused, and how long
+/// an answer waits for them after that.
+const OFFER_TTL: Duration = Duration::from_secs(300);
+const OFFER_WAIT: Duration = Duration::from_secs(3);
+/// What managers read of a request added by hand.
+const HAND_NOTE: &str = "Added by hand";
 
 /// Whether an account may ask for titles.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -197,9 +206,11 @@ pub enum RequestError {
     /// was asked, `None` when that is more than the limit itself.
     #[error("{message}")]
     Limit { message: String, retry_at: Option<i64> },
-    /// `409 conflict`, with the request as it is now (`request`).
+    /// `409 conflict`: what was asked can't be done to the request as it is
+    /// now (`request`); `retry_at`: when it may be (a declined request its
+    /// maker may remove once its 30 days are over).
     #[error("{message}")]
-    Conflict { message: String, request: Box<MediaRequest> },
+    Conflict { message: String, request: Box<MediaRequest>, retry_at: Option<i64> },
     /// `502`: TMDB's picture server didn't answer, or not with a picture.
     #[error("TMDB's pictures aren't answering: try again in a moment")]
     PictureDown,
@@ -257,9 +268,10 @@ impl IntoResponse for RequestError {
                 }
                 return response;
             }
-            RequestError::Conflict { request, .. } => {
-                (StatusCode::CONFLICT, json!({ "code": "conflict", "message": message, "request": request }))
-            }
+            RequestError::Conflict { request, retry_at, .. } => (
+                StatusCode::CONFLICT,
+                json!({ "code": "conflict", "message": message, "request": request, "retry_at": retry_at }),
+            ),
             RequestError::PictureDown => {
                 let body = json!({ "code": "tmdb_down", "message": message });
                 let headers = [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))];
@@ -476,6 +488,8 @@ pub struct MediaRequest {
     /// Its maker's or a follower's: it became available, partly available
     /// or declined since the account last looked.
     pub unseen: bool,
+    /// What this session may do to it now, in the order clients list them.
+    pub actions: Vec<RequestAction>,
     /// Its maker and managers: who asked.
     pub requested_by: Option<RequestUser>,
     /// Its maker and managers: who approved or declined it.
@@ -490,6 +504,27 @@ pub struct MediaRequest {
     pub sent_to: Option<SentTo>,
     pub item_id: Option<i64>,
     pub download: Option<Download>,
+}
+
+/// What a session may do to a request (docs/API.md, Requests: actions), in
+/// the order clients list them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RequestAction {
+    /// Its maker: `DELETE /api/requests/{id}` (Remove, on a declined one).
+    Withdraw,
+    /// A follower: `DELETE /api/requests/{id}/watch`.
+    Unwatch,
+    Approve,
+    /// A failed one: `POST /api/requests/{id}/approve`.
+    Retry,
+    Decline,
+    /// `POST /api/requests/{id}/handled`.
+    Handled,
+    /// Managers: `DELETE /api/requests/{id}`, for everyone.
+    Delete,
+    /// `POST /api/requests` with its kind, TMDB id and seasons.
+    AskAgain,
 }
 
 /// Where an approved request went, and with what: the quality profile's
@@ -512,8 +547,33 @@ pub struct RequestUser {
 #[derive(Debug, Clone, Serialize)]
 pub struct RequestList {
     pub total: i64,
+    /// Of every status, with the filters but `status`.
     pub counts: BTreeMap<RequestStatus, i64>,
     pub requests: Vec<MediaRequest>,
+    /// Managers: who made the requests the filters but `user_id` keep, by
+    /// name (none for others).
+    pub people: Vec<RequestUser>,
+}
+
+/// `GET /api/requests/options`: what approving may choose, for Radarr and
+/// Sonarr where each is connected.
+#[derive(Debug, Clone, Serialize)]
+pub struct RequestOptions {
+    pub radarr: Option<ArrOptions>,
+    pub sonarr: Option<ArrOptions>,
+}
+
+/// What one of them offers, and the settings' choices (anime's own too).
+#[derive(Debug, Clone, Serialize)]
+pub struct ArrOptions {
+    pub quality_profiles: Vec<Profile>,
+    pub root_folders: Vec<RootFolder>,
+    pub quality_profile: Option<i64>,
+    pub root_folder: Option<String>,
+    pub anime_quality_profile: Option<i64>,
+    pub anime_root_folder: Option<String>,
+    /// It didn't answer: the lists are the last it gave (none, if never).
+    pub error: Option<String>,
 }
 
 /// `POST /api/requests`.
@@ -525,21 +585,38 @@ pub struct NewRequest {
     pub seasons: Option<Vec<i64>>,
 }
 
-/// What an approval may choose instead of the settings.
+/// What an approval may choose instead of the settings, and the seasons it
+/// keeps of those asked for.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Approval {
     #[serde(default)]
     pub quality_profile: Option<i64>,
     #[serde(default)]
     pub root_folder: Option<String>,
+    #[serde(default)]
+    pub seasons: Option<Vec<i64>>,
 }
 
 /// Which requests `GET /api/requests` lists.
 #[derive(Debug, Clone, Default)]
 pub struct ListQuery {
-    pub status: Option<RequestStatus>,
+    /// Any of these (none: every status).
+    pub statuses: Vec<RequestStatus>,
+    /// Pending ones and those failed for a manager (the managers' badge).
+    pub attention: bool,
+    pub kind: Option<TitleKind>,
+    /// Managers: those this account made.
+    pub user_id: Option<i64>,
+    /// Titles containing it.
+    pub q: Option<String>,
+    /// Oldest first (newest by default).
+    pub oldest: bool,
     /// Managers: only their own and those they follow.
     pub mine: bool,
+    /// Only those with news unseen, newest news first.
+    pub unseen: bool,
+    /// Only those changed after it.
+    pub changed_since: Option<i64>,
     pub offset: i64,
     pub limit: Option<i64>,
 }
@@ -616,10 +693,33 @@ impl RequestRow {
 
     /// Sent to Radarr or Sonarr (not added by hand).
     fn sent(&self) -> Option<Service> {
-        match self.sent_to.as_deref() {
-            Some("radarr") => Some(Service::Radarr),
-            Some("sonarr") => Some(Service::Sonarr),
-            _ => None,
+        [Service::Radarr, Service::Sonarr].into_iter().find(|s| self.sent_to.as_deref() == Some(s.as_str()))
+    }
+
+    /// Added by hand: never sent.
+    fn hand(&self) -> bool {
+        self.sent_to.as_deref() == Some("hand")
+    }
+
+    /// Where its kind goes.
+    fn service(&self) -> Service {
+        match self.kind() {
+            TitleKind::Movie => Service::Radarr,
+            TitleKind::Show => Service::Sonarr,
+        }
+    }
+
+    /// Declined: when its maker may remove it, and ask again.
+    fn declined_until(&self) -> Option<i64> {
+        self.decided_at.filter(|_| self.status() == RequestStatus::Declined).map(|at| at + DECLINED_FOR)
+    }
+
+    fn maker(&self) -> RequestUser {
+        RequestUser {
+            id: self.user_id,
+            name: self.maker_name.clone(),
+            avatar_url: avatar_url(self.user_id, self.maker_avatar.as_deref()),
+            avatar_color: self.maker_color.clone(),
         }
     }
 
@@ -645,6 +745,45 @@ impl RequestRow {
                 },
             },
         }
+    }
+
+    /// What `viewer` may do to it now, in [`RequestAction`]'s order: its
+    /// maker withdraws it while pending or failed, or a declined one once
+    /// its 30 days are over (managers delete instead); a follower stops
+    /// following; managers approve one pending, declined, or approved and
+    /// not sent (where its service is connected), try a failed one again,
+    /// decline one not available yet, mark one as added by hand; an account
+    /// that may ask asks again for one gone from the library, or its own
+    /// declined one after the 30 days.
+    fn actions(&self, viewer: &Viewer, stage: RequestStage, mine: bool, watching: bool) -> Vec<RequestAction> {
+        use RequestStatus::{Approved, Declined, Failed, Pending};
+        let status = self.status();
+        let manager = viewer.manager;
+        let unsent = status == Approved && self.sent().is_none() && !viewer.sending.contains(&self.id);
+        let over = status == Declined && self.declined_until().is_none_or(|at| at <= viewer.now);
+        [
+            (RequestAction::Withdraw, mine && !manager && (matches!(status, Pending | Failed) || over)),
+            (RequestAction::Unwatch, watching),
+            (
+                RequestAction::Approve,
+                manager
+                    && (matches!(status, Pending | Declined) || (unsent && viewer.connected.contains(&self.service()))),
+            ),
+            (RequestAction::Retry, manager && status == Failed),
+            (RequestAction::Decline, manager && matches!(status, Pending | Failed | Approved)),
+            (
+                RequestAction::Handled,
+                manager && (matches!(status, Pending | Failed | Declined) || (unsent && !self.hand())),
+            ),
+            (RequestAction::Delete, manager),
+            (
+                RequestAction::AskAgain,
+                viewer.asks && ((stage == RequestStage::Gone && (mine || watching)) || (mine && over)),
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(action, may)| may.then_some(action))
+        .collect()
     }
 
     /// As `viewer` sees it: who asked and who decided for its maker and
@@ -677,17 +816,13 @@ impl RequestRow {
             stage,
             stage_at: self.stage_at.filter(|_| stage == RequestStage::Waiting),
             reason,
-            note: self.note.clone().filter(|_| viewer.manager),
+            note: self.note.clone().or_else(|| self.hand().then(|| HAND_NOTE.to_owned())).filter(|_| viewer.manager),
             mine,
             watching,
             watchers: if viewer.manager { viewer.followers.get(&self.id).copied().unwrap_or(0) } else { 0 },
             unseen: (mine || watching) && self.news_at.is_some_and(|at| at > viewer.seen_at),
-            requested_by: theirs.then(|| RequestUser {
-                id: self.user_id,
-                name: self.maker_name.clone(),
-                avatar_url: avatar_url(self.user_id, self.maker_avatar.as_deref()),
-                avatar_color: self.maker_color.clone(),
-            }),
+            actions: self.actions(viewer, stage, mine, watching),
+            requested_by: theirs.then(|| self.maker()),
             decided_by: self.decided_by.filter(|_| theirs).zip(self.decider_name.clone()).map(|(id, name)| {
                 RequestUser {
                     id,
@@ -712,11 +847,15 @@ impl RequestRow {
     }
 }
 
-/// Who reads requests, with what of the requests read is theirs to know.
+/// Who reads requests, with what of the requests read is theirs to know,
+/// and what they may do to them.
 #[derive(Debug)]
 struct Viewer {
     id: i64,
     manager: bool,
+    /// The account may ask for titles.
+    asks: bool,
+    now: i64,
     /// When the account last looked at its requests' news.
     seen_at: i64,
     /// The requests' library titles the account may open.
@@ -725,6 +864,10 @@ struct Viewer {
     followers: HashMap<i64, i64>,
     /// The requests the account follows.
     following: HashSet<i64>,
+    /// Radarr and Sonarr, where connected.
+    connected: Vec<Service>,
+    /// The requests being sent now.
+    sending: HashSet<i64>,
 }
 
 fn seasons_of(json: &str) -> Vec<i64> {
@@ -770,8 +913,12 @@ struct Active {
     seasons: Vec<i64>,
     /// The account made or follows it (or manages requests).
     theirs: bool,
+    /// The account made it.
+    mine: bool,
     /// The account follows it.
     follows: bool,
+    /// It waits for a manager.
+    pending: bool,
 }
 
 /// What the libraries and requests have of a title, for one account.
@@ -786,8 +933,9 @@ struct Mark {
     /// The account's last request for it (made or followed) was declined
     /// within [`DECLINED_FOR`].
     declined: bool,
-    /// Shows: the seasons of its requests declined within it.
-    declined_seasons: HashSet<i64>,
+    /// Shows: the seasons of its requests declined within it, with when
+    /// each may be asked for again.
+    declined_seasons: HashMap<i64, i64>,
     /// The newest of those declines.
     refusal: Option<Declined>,
 }
@@ -846,7 +994,7 @@ fn status_of(kind: TitleKind, mark: &Mark, lacking: Option<&[i64]>, restricted: 
         TitleStatus::Restricted
     } else if mark.requested() && unasked.is_empty() {
         TitleStatus::Requested
-    } else if mark.declined || (!unasked.is_empty() && unasked.iter().all(|n| mark.declined_seasons.contains(n))) {
+    } else if mark.declined || (!unasked.is_empty() && unasked.iter().all(|n| mark.declined_seasons.contains_key(n))) {
         // Its last request was declined, or what is left to ask for was.
         TitleStatus::Declined
     } else if (in_library || mark.requested()) && !unasked.is_empty() {
@@ -893,10 +1041,29 @@ fn askable(details: &Details, counts: &HashMap<i64, (i64, i64)>, mark: &Mark, re
     details
         .seasons
         .iter()
-        .filter(|s| s.number > 0 && !mark.declined_seasons.contains(&s.number))
+        .filter(|s| s.number > 0 && !mark.declined_seasons.contains_key(&s.number))
         .filter(|s| matches!(season_state(s, counts, &asked), SeasonState::Missing | SeasonState::Partial))
         .map(|s| s.number)
         .collect()
+}
+
+/// The seasons asked for when none are named: the aired ones but specials
+/// that no library with these `counts` has whole, less those `declined`
+/// for the account lately; when none has aired yet, every season but
+/// specials. Should every one lacking have been declined, or none lack,
+/// those (to be refused as declined, or as in a library).
+fn default_seasons(details: &Details, counts: &HashMap<i64, (i64, i64)>, declined: &HashMap<i64, i64>) -> Vec<i64> {
+    let aired: Vec<i64> = details.seasons.iter().filter(|s| s.number > 0 && s.aired > 0).map(|s| s.number).collect();
+    if aired.is_empty() {
+        return details.seasons.iter().map(|s| s.number).filter(|n| *n > 0).collect();
+    }
+    let lacking = lacking(details, counts);
+    let open: Vec<i64> = lacking.iter().copied().filter(|n| !declined.contains_key(n)).collect();
+    match (open.is_empty(), lacking.is_empty()) {
+        (false, _) => open,
+        (true, false) => lacking,
+        (true, true) => aired,
+    }
 }
 
 /// Whether a title rated `certification` is above `user`'s age limit:
@@ -1051,6 +1218,35 @@ pub struct Requests {
     making: tokio::sync::Mutex<()>,
     /// One look at the libraries at a time.
     syncing: tokio::sync::Mutex<()>,
+    /// The requests being sent to Radarr or Sonarr now ([`Self::send`]).
+    sending: watch::Sender<HashSet<i64>>,
+    /// What Radarr, then Sonarr, offers approvals ([`Self::offered`]).
+    offers: [parking_lot::Mutex<Offer>; 2],
+}
+
+/// What Radarr or Sonarr offered approvals, as last asked: where, when it
+/// answered and with what; why not, when it didn't; and the question out
+/// now, if one is (it says `true` once answered).
+#[derive(Default)]
+struct Offer {
+    to: Option<Connection>,
+    answered: Option<Instant>,
+    lists: Lists,
+    error: Option<String>,
+    asking: Option<watch::Receiver<bool>>,
+}
+
+/// A request being sent: it is no longer once this is dropped, however
+/// the sending ends.
+struct Sending(Arc<Requests>, i64);
+
+impl Drop for Sending {
+    fn drop(&mut self) {
+        let id = self.1;
+        self.0.sending.send_modify(|sending| {
+            sending.remove(&id);
+        });
+    }
 }
 
 impl Requests {
@@ -1070,6 +1266,8 @@ impl Requests {
             events,
             making: Default::default(),
             syncing: Default::default(),
+            sending: watch::channel(HashSet::new()).0,
+            offers: Default::default(),
         })
     }
 
@@ -1132,8 +1330,142 @@ impl Requests {
         Ok(caller)
     }
 
-    fn changed(&self, user_id: i64) {
-        self.events.send(ServerEvent::RequestsChanged { user_id });
+    // -------------------------------------------------------------- events
+
+    /// Whom news of request `id` is for: its maker, its followers, and
+    /// managers.
+    async fn audience(&self, id: i64) -> sqlx::Result<Audience> {
+        let users: Vec<i64> = sqlx::query_scalar(
+            "SELECT user_id FROM requests WHERE id = ? UNION SELECT user_id FROM request_watchers WHERE request_id = ?",
+        )
+        .bind(id)
+        .bind(id)
+        .fetch_all(&self.db.read)
+        .await?;
+        Ok(Audience::of(users))
+    }
+
+    /// Who follows request `id`, the earliest first.
+    async fn followers(&self, id: i64) -> sqlx::Result<Vec<i64>> {
+        sqlx::query_scalar("SELECT user_id FROM request_watchers WHERE request_id = ? ORDER BY created_at, user_id")
+            .bind(id)
+            .fetch_all(&self.db.read)
+            .await
+    }
+
+    /// Request `id` (of `kind` and `tmdb_id`) changed: `to` hears it.
+    fn changed_to(&self, to: Audience, id: i64, kind: TitleKind, tmdb_id: i64) {
+        self.events.send(ServerEvent::RequestsChanged {
+            to,
+            request_id: Some(id),
+            kind: Some(kind),
+            tmdb_id: Some(tmdb_id),
+        });
+    }
+
+    /// The same, to its maker, its followers and managers.
+    async fn changed(&self, id: i64, kind: TitleKind, tmdb_id: i64) {
+        match self.audience(id).await {
+            Ok(to) => self.changed_to(to, id, kind, tmdb_id),
+            Err(err) => tracing::warn!("request {id}: who to tell of it: {err}"),
+        }
+    }
+
+    /// Many requests changed: `to` hears it.
+    fn many_changed(&self, to: Audience) {
+        self.events.send(ServerEvent::RequestsChanged { to, request_id: None, kind: None, tmdb_id: None });
+    }
+
+    /// Someone asked (request `row`): managers but its maker hear it.
+    fn created(&self, row: &RequestRow) {
+        self.events.send(ServerEvent::RequestCreated {
+            to: Audience { except_user: Some(row.user_id), ..Audience::of(Vec::new()) },
+            request_id: row.id,
+            title: row.title.clone(),
+            kind: row.kind(),
+            tmdb_id: row.tmdb_id,
+            seasons: row.seasons(),
+            requested_by: row.maker(),
+            status: row.status(),
+        });
+    }
+
+    /// Request `row` was approved or declined by account `decider`: its
+    /// maker hears it, unless they decided it, and a declined one's
+    /// followers do too, without the reason.
+    async fn decided(&self, row: &RequestRow, decider: i64) -> sqlx::Result<()> {
+        let status = row.status();
+        let event = |to: Audience, reason: Option<String>| ServerEvent::RequestDecided {
+            to,
+            request_id: row.id,
+            title: row.title.clone(),
+            kind: row.kind(),
+            tmdb_id: row.tmdb_id,
+            status,
+            reason,
+        };
+        let declined = status == RequestStatus::Declined;
+        if row.user_id != decider {
+            self.events.send(event(Audience::only(vec![row.user_id]), row.reason.clone().filter(|_| declined)));
+        }
+        if declined {
+            let followers: Vec<i64> = self.followers(row.id).await?.into_iter().filter(|id| *id != decider).collect();
+            if !followers.is_empty() {
+                self.events.send(event(Audience::only(followers), None));
+            }
+        }
+        Ok(())
+    }
+
+    /// Request `row` is ready (`complete`), or some more of its seasons are
+    /// (`seasons`: those newly ready): its maker hears it, and each follower
+    /// who can open the title in a library, each with the library's title
+    /// where they may open it. The other followers hear only that it
+    /// changed.
+    async fn ready(&self, row: &RequestRow, seasons: Option<Vec<i64>>, complete: bool) -> sqlx::Result<()> {
+        let mut people = vec![row.user_id];
+        people.extend(self.followers(row.id).await?);
+        for user_id in people {
+            let library = self.in_library(user_id, row.kind(), &[row.known()]).await?;
+            let item_id = library.iter().find(|l| l.2).map(|l| l.1);
+            if item_id.is_none() && user_id != row.user_id {
+                continue;
+            }
+            self.events.send(ServerEvent::RequestAvailable {
+                to: Audience::only(vec![user_id]),
+                request_id: row.id,
+                title: row.title.clone(),
+                kind: row.kind(),
+                tmdb_id: row.tmdb_id,
+                item_id,
+                poster_url: pictures::url(Picture::Poster, row.poster_path.as_deref()),
+                seasons: seasons.clone(),
+                complete,
+            });
+        }
+        Ok(())
+    }
+
+    /// An account was deleted with requests it made or followed: `to`
+    /// (managers, and those who inherited some) hears that many changed.
+    pub fn account_deleted(&self, to: Audience) {
+        self.many_changed(to);
+    }
+
+    /// `409 conflict`: what was asked can't be done to request `id` as it
+    /// is now, saying why (`message`, from the request as `caller` sees it)
+    /// and when it may be (`retry_at`); `404` once it is gone.
+    async fn refused(
+        &self,
+        caller: &Caller<'_>,
+        id: i64,
+        retry_at: Option<i64>,
+        message: impl FnOnce(&MediaRequest) -> String,
+    ) -> RequestError {
+        match self.one(caller, id).await {
+            Ok(request) => RequestError::Conflict { message: message(&request), request: Box::new(request), retry_at },
+            Err(err) => err,
+        }
     }
 
     // -------------------------------------------------------------- reading
@@ -1369,12 +1701,14 @@ impl Requests {
             }
         }
         let ids: Vec<i64> = known.iter().map(|k| k.tmdb_id).collect();
-        for (tmdb_id, id, seasons, mine, follows) in self.active_requests(user_id, kind, &ids).await? {
+        for (tmdb_id, id, seasons, mine, follows, status) in self.active_requests(user_id, kind, &ids).await? {
             marks.entry(tmdb_id).or_default().active.push(Active {
                 id,
                 seasons: seasons.as_deref().map(seasons_of).unwrap_or_default(),
-                theirs: mine || caller.manager,
+                theirs: mine || follows || caller.manager,
+                mine,
                 follows,
+                pending: status == "pending",
             });
         }
         let since = now() - DECLINED_FOR;
@@ -1384,7 +1718,11 @@ impl Requests {
             let Some(at) = decided_at.filter(|at| status == "declined" && *at > since) else { continue };
             let mark = marks.entry(tmdb_id).or_default();
             mark.declined |= last;
-            mark.declined_seasons.extend(seasons.as_deref().map(seasons_of).unwrap_or_default());
+            // The latest decline of a season says when it may be asked for.
+            for n in seasons.as_deref().map(seasons_of).unwrap_or_default() {
+                let again_at = mark.declined_seasons.entry(n).or_default();
+                *again_at = (*again_at).max(at + DECLINED_FOR);
+            }
             mark.refusal.get_or_insert(Declined { reason, at, again_at: at + DECLINED_FOR });
         }
         Ok(marks)
@@ -1451,25 +1789,23 @@ impl Requests {
     }
 
     /// Active requests for any of these titles, newest first: TMDB's id,
-    /// the request's, its seasons, and whether `user_id` made or follows it
-    /// and follows it.
+    /// the request's, its seasons, whether `user_id` made it and whether it
+    /// follows it, and its status.
+    #[allow(clippy::type_complexity)]
     async fn active_requests(
         &self,
         user_id: i64,
         kind: TitleKind,
         tmdb_ids: &[i64],
-    ) -> sqlx::Result<Vec<(i64, i64, Option<String>, bool, bool)>> {
+    ) -> sqlx::Result<Vec<(i64, i64, Option<String>, bool, bool, String)>> {
         let sql = format!(
-            "SELECT r.tmdb_id, r.id, r.seasons, {MINE},
-                    EXISTS (SELECT 1 FROM request_watchers w WHERE w.request_id = r.id AND w.user_id = ?)
+            "SELECT r.tmdb_id, r.id, r.seasons, r.user_id = ?,
+                    EXISTS (SELECT 1 FROM request_watchers w WHERE w.request_id = r.id AND w.user_id = ?), r.status
              FROM requests r WHERE r.kind = ? AND r.tmdb_id IN ({}) AND r.status IN {ACTIVE} ORDER BY r.id DESC",
             vec!["?"; tmdb_ids.len()].join(",")
         );
-        let mut query = sqlx::query_as::<_, (i64, i64, Option<String>, bool, bool)>(sqlx::AssertSqlSafe(sql.as_str()))
-            .bind(user_id)
-            .bind(user_id)
-            .bind(user_id)
-            .bind(kind.as_str());
+        let mut query =
+            sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(user_id).bind(user_id).bind(kind.as_str());
         for id in tmdb_ids {
             query = query.bind(id);
         }
@@ -1548,7 +1884,7 @@ impl Requests {
                     in_library: counts.get(&s.number).map_or(0, |c| c.0),
                     requested: asked.contains(&s.number),
                     state: season_state(s, &counts, &asked),
-                    declined: mark.declined_seasons.contains(&s.number),
+                    declined: mark.declined_seasons.contains_key(&s.number),
                     request_id: mark.season_request(s.number),
                 })
                 .collect()
@@ -1715,8 +2051,18 @@ impl Requests {
         Ok(rows.iter().map(|r| r.to_dto(&viewer, downloads.get(&r.id).cloned())).collect())
     }
 
+    /// When account `user_id` last looked at its requests' news.
+    async fn seen_at(&self, user_id: i64) -> sqlx::Result<i64> {
+        let seen_at: Option<i64> = sqlx::query_scalar("SELECT COALESCE(requests_seen_at, 0) FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_optional(&self.db.read)
+            .await?;
+        Ok(seen_at.unwrap_or(0))
+    }
+
     /// What of these requests is `caller`'s to know: the library titles it
-    /// may open, who follows them, and when it last looked at its news.
+    /// may open, who follows them, and when it last looked at its news; and
+    /// what may be done to them now.
     async fn viewer(&self, caller: &Caller<'_>, rows: &[RequestRow]) -> sqlx::Result<Viewer> {
         let user = caller.user;
         let items: Vec<i64> = rows.iter().filter_map(|r| r.item_id).collect();
@@ -1739,17 +2085,21 @@ impl Requests {
                 }
             }
         }
-        let seen_at: Option<i64> = sqlx::query_scalar("SELECT COALESCE(requests_seen_at, 0) FROM users WHERE id = ?")
-            .bind(user.id)
-            .fetch_optional(&self.db.read)
-            .await?;
+        let settings = self.settings.get();
         Ok(Viewer {
             id: user.id,
             manager: caller.manager,
-            seen_at: seen_at.unwrap_or(0),
+            asks: caller.access != RequestAccess::Off,
+            now: now(),
+            seen_at: self.seen_at(user.id).await?,
             visible,
             followers,
             following,
+            connected: [Service::Radarr, Service::Sonarr]
+                .into_iter()
+                .filter(|s| s.connected(&settings).is_some())
+                .collect(),
+            sending: self.sending.borrow().clone(),
         })
     }
 
@@ -1775,43 +2125,127 @@ impl Requests {
         downloads
     }
 
-    /// `GET /api/requests`.
+    /// `GET /api/requests`: those `caller` made or follows (everyone's, for
+    /// managers but with `mine`) that every filter keeps; the counts of
+    /// each status with every filter but the statuses, and for managers who
+    /// made those every filter but the maker keeps.
     pub async fn list(&self, caller: &Caller<'_>, query: ListQuery) -> RequestResult<RequestList> {
         let user = caller.user;
         let everyone = caller.manager && !query.mine;
-        let counted: Vec<(String, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT r.status, COUNT(*) FROM requests r WHERE (? OR {MINE}) GROUP BY r.status"
-        )))
-        .bind(everyone)
-        .bind(user.id)
-        .bind(user.id)
-        .fetch_all(&self.db.read)
-        .await?;
+        // Only managers list by maker.
+        let maker = query.user_id.filter(|_| caller.manager);
+        let like = query.q.as_deref().map(|q| format!("%{}%", like_escape(q)));
+        let seen_at = if query.unseen { self.seen_at(user.id).await? } else { 0 };
+        let every: &[RequestStatus] = &[];
+        // With the statuses and the maker given (none: every one).
+        let conditions = |statuses: &[RequestStatus], maker: Option<i64>| {
+            let mut sql = format!("(? OR {MINE})");
+            if !statuses.is_empty() {
+                sql.push_str(&format!(" AND r.status IN ({})", vec!["?"; statuses.len()].join(",")));
+            }
+            if query.attention {
+                sql.push_str(" AND (r.status = 'pending' OR (r.status = 'failed' AND r.retry_at IS NULL))");
+            }
+            if query.kind.is_some() {
+                sql.push_str(" AND r.kind = ?");
+            }
+            if maker.is_some() {
+                sql.push_str(" AND r.user_id = ?");
+            }
+            if like.is_some() {
+                sql.push_str(" AND r.title LIKE ? ESCAPE '^'");
+            }
+            if query.changed_since.is_some() {
+                sql.push_str(" AND r.updated_at > ?");
+            }
+            if query.unseen {
+                sql.push_str(&format!(" AND {MINE} AND r.news_at > ?"));
+            }
+            sql
+        };
+        macro_rules! bind_filter {
+            ($query:expr, $statuses:expr, $maker:expr) => {{
+                let mut bound = $query.bind(everyone).bind(user.id).bind(user.id);
+                for status in $statuses {
+                    bound = bound.bind(status.as_str());
+                }
+                if let Some(kind) = query.kind {
+                    bound = bound.bind(kind.as_str());
+                }
+                if let Some(id) = $maker {
+                    bound = bound.bind(id);
+                }
+                if let Some(like) = &like {
+                    bound = bound.bind(like.as_str());
+                }
+                if let Some(at) = query.changed_since {
+                    bound = bound.bind(at);
+                }
+                if query.unseen {
+                    bound = bound.bind(user.id).bind(user.id).bind(seen_at);
+                }
+                bound
+            }};
+        }
+        let sql =
+            format!("SELECT r.status, COUNT(*) FROM requests r WHERE {} GROUP BY r.status", conditions(every, maker));
+        let counted = bind_filter!(sqlx::query_as::<_, (String, i64)>(sqlx::AssertSqlSafe(sql.as_str())), every, maker)
+            .fetch_all(&self.db.read)
+            .await?;
         let mut counts: BTreeMap<RequestStatus, i64> = RequestStatus::ALL.into_iter().map(|s| (s, 0)).collect();
         for (status, count) in counted {
             if let Some(status) = RequestStatus::parse(&status) {
                 counts.insert(status, count);
             }
         }
-        let total = match query.status {
-            Some(status) => counts[&status],
-            None => counts.values().sum(),
+        let total = match query.statuses.as_slice() {
+            [] => counts.values().sum(),
+            statuses => statuses.iter().map(|s| counts[s]).sum(),
+        };
+        // Unseen ones by their news.
+        let order = match (query.unseen, query.oldest) {
+            (false, false) => "r.created_at DESC, r.id DESC",
+            (false, true) => "r.created_at, r.id",
+            (true, false) => "r.news_at DESC, r.id DESC",
+            (true, true) => "r.news_at, r.id",
         };
         let limit = query.limit.unwrap_or(LIST_LIMIT).clamp(1, LIST_MAX);
-        let rows: Vec<RequestRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {COLUMNS} FROM {TABLES} WHERE (? OR {MINE}) AND (? IS NULL OR r.status = ?)
-             ORDER BY r.created_at DESC, r.id DESC LIMIT ? OFFSET ?"
-        )))
-        .bind(everyone)
-        .bind(user.id)
-        .bind(user.id)
-        .bind(query.status.map(RequestStatus::as_str))
-        .bind(query.status.map(RequestStatus::as_str))
-        .bind(limit)
-        .bind(query.offset.max(0))
-        .fetch_all(&self.db.read)
-        .await?;
-        Ok(RequestList { total, counts, requests: self.dtos(caller, rows).await? })
+        let sql = format!(
+            "SELECT {COLUMNS} FROM {TABLES} WHERE {} ORDER BY {order} LIMIT ? OFFSET ?",
+            conditions(&query.statuses, maker)
+        );
+        let rows =
+            bind_filter!(sqlx::query_as::<_, RequestRow>(sqlx::AssertSqlSafe(sql.as_str())), &query.statuses, maker)
+                .bind(limit)
+                .bind(query.offset.max(0))
+                .fetch_all(&self.db.read)
+                .await?;
+        let mut people = Vec::new();
+        if caller.manager {
+            let sql = format!(
+                "SELECT u.id, COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS name, u.avatar, u.avatar_color
+                 FROM users u WHERE u.id IN (SELECT r.user_id FROM requests r WHERE {})
+                 ORDER BY name COLLATE NOCASE, u.id",
+                conditions(&query.statuses, None)
+            );
+            let found = bind_filter!(
+                sqlx::query_as::<_, (i64, String, Option<String>, Option<String>)>(sqlx::AssertSqlSafe(sql.as_str())),
+                &query.statuses,
+                None::<i64>
+            )
+            .fetch_all(&self.db.read)
+            .await?;
+            people = found
+                .into_iter()
+                .map(|(id, name, avatar, avatar_color)| RequestUser {
+                    id,
+                    name,
+                    avatar_url: avatar_url(id, avatar.as_deref()),
+                    avatar_color,
+                })
+                .collect();
+        }
+        Ok(RequestList { total, counts, requests: self.dtos(caller, rows).await?, people })
     }
 
     /// `GET /api/requests/{id}`.
@@ -1821,8 +2255,20 @@ impl Requests {
 
     /// A request `caller` may see.
     async fn one(&self, caller: &Caller<'_>, id: i64) -> RequestResult<MediaRequest> {
+        self.answer(caller, id, false).await
+    }
+
+    /// The same, answering what `caller` did to it: `sending`, it is about
+    /// to be sent (so nothing that sends it is offered).
+    async fn answer(&self, caller: &Caller<'_>, id: i64, sending: bool) -> RequestResult<MediaRequest> {
         let row = self.row_for(caller, id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
-        Ok(self.dtos(caller, vec![row]).await?.remove(0))
+        let rows = [row];
+        let mut viewer = self.viewer(caller, &rows).await?;
+        if sending {
+            viewer.sending.insert(id);
+        }
+        let downloads = self.downloads(&rows).await;
+        Ok(rows[0].to_dto(&viewer, downloads.get(&id).cloned()))
     }
 
     /// Whether `user` may read a request naming account `id` (its maker,
@@ -1860,8 +2306,14 @@ impl Requests {
 
     // -------------------------------------------------------------- changing
 
-    /// `POST /api/requests`.
-    pub async fn create(&self, caller: &Caller<'_>, new: NewRequest) -> RequestResult<MediaRequest> {
+    /// `POST /api/requests`: `caller` asks for a title, or some of a show's
+    /// seasons (none named: [`default_seasons`]). It follows each active
+    /// request asking for some of that already (its own change nothing);
+    /// approved as it asks, it approves those of them still pending. What
+    /// is left is a new request: `true` with it, `false` with the request
+    /// asking for the lowest season asked for when nothing is left. All of
+    /// it or nothing: refused, nothing is followed or approved.
+    pub async fn create(self: &Arc<Self>, caller: &Caller<'_>, new: NewRequest) -> RequestResult<(bool, MediaRequest)> {
         let user = caller.user;
         match (new.kind, new.seasons.as_deref()) {
             (TitleKind::Movie, Some(_)) => return Err(AppError::bad_request("movies have no seasons").into()),
@@ -1877,18 +2329,18 @@ impl Requests {
         }
         let making = self.making.lock().await;
         let mark = self.marks(caller, new.kind, &[Known::of(&details)]).await?.remove(&new.tmdb_id).unwrap_or_default();
-        let seasons = match new.kind {
+        // The seasons asked for that no library it can open has whole (none
+        // for a movie), and the active requests asking for any of them.
+        let wanted = match new.kind {
             TitleKind::Movie if mark.item_id.is_some() => {
                 return Err(RequestError::InLibrary("a library this account can open has this movie already".into()));
             }
-            TitleKind::Movie if mark.requested() => {
-                return Err(AppError::conflict("this movie is asked for already").into());
-            }
-            TitleKind::Movie => None,
+            TitleKind::Movie => Vec::new(),
             TitleKind::Show => {
+                let counts = self.season_counts(&mark.shows).await?;
                 let mut wanted = match new.seasons {
                     Some(asked) => asked,
-                    None => details.seasons.iter().map(|s| s.number).filter(|n| *n > 0).collect(),
+                    None => default_seasons(&details, &counts, &mark.declined_seasons),
                 };
                 wanted.sort_unstable();
                 wanted.dedup();
@@ -1896,156 +2348,368 @@ impl Requests {
                     let message = format!("TMDB lists no seasons of {} yet", details.title);
                     return Err(AppError::bad_request(message).into());
                 }
-                let counts = self.season_counts(&mark.shows).await?;
-                let there = |n: i64| details.seasons.iter().any(|s| s.number == n && whole(&counts, s) == Whole::Yes);
-                if wanted.iter().all(|n| there(*n)) {
+                wanted.retain(|n| !details.seasons.iter().any(|s| s.number == *n && whole(&counts, s) == Whole::Yes));
+                if wanted.is_empty() {
                     let message = "the libraries this account can open have these seasons whole";
                     return Err(RequestError::InLibrary(message.into()));
                 }
-                let asked = mark.asked();
-                let left: Vec<i64> = wanted.into_iter().filter(|n| !asked.contains(n) && !there(*n)).collect();
-                if left.is_empty() {
-                    return Err(AppError::conflict("these seasons are asked for already, or there").into());
-                }
-                Some(left)
+                wanted
             }
         };
-        let quota = self.quota(caller).await?;
-        quota.allows(new.kind, seasons.as_ref().map_or(1, |s| s.len() as i64))?;
-        let at = now();
-        let id: i64 = sqlx::query_scalar(
-            "INSERT INTO requests (kind, tmdb_id, tvdb_id, imdb_id, title, year, poster_path, backdrop_path, seasons,
-                                   anime, user_id, status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?) RETURNING id",
-        )
-        .bind(new.kind.as_str())
-        .bind(new.tmdb_id)
-        .bind(details.tvdb_id)
-        .bind(details.imdb_id.as_deref())
-        .bind(&details.title)
-        .bind(details.year)
-        .bind(details.poster_path.as_deref())
-        .bind(details.backdrop_path.as_deref())
-        .bind(seasons.as_deref().map(seasons_json))
-        .bind(details.anime)
-        .bind(user.id)
-        .bind(at)
-        .bind(at)
-        .fetch_one(&self.db.write)
-        .await?;
-        drop(making);
-        tracing::info!("{} asked for {} (request {id})", user.username, details.title);
-        self.changed(user.id);
-        if caller.access == RequestAccess::Auto {
-            self.send(id, user.id, &Approval::default()).await?;
+        let covering: Vec<&Active> = mark
+            .active
+            .iter()
+            .filter(|a| new.kind == TitleKind::Movie || a.seasons.iter().any(|n| wanted.contains(n)))
+            .collect();
+        let asked = mark.asked();
+        let left: Vec<i64> = wanted.iter().copied().filter(|n| !asked.contains(n)).collect();
+        let make = match new.kind {
+            TitleKind::Movie => covering.is_empty(),
+            TitleKind::Show => !left.is_empty(),
+        };
+        if make {
+            // Declined for it lately: the movie, or some of the seasons left.
+            let declined: Vec<i64> = left.iter().copied().filter(|n| mark.declined_seasons.contains_key(n)).collect();
+            let again_at = match new.kind {
+                TitleKind::Movie => mark.refusal.as_ref().filter(|_| mark.declined).map(|r| r.again_at),
+                TitleKind::Show => declined.iter().filter_map(|n| mark.declined_seasons.get(n)).max().copied(),
+            };
+            if let Some(retry_at) = again_at {
+                let message = declined_message(new.kind, &declined, retry_at);
+                return Err(RequestError::Declined { message, retry_at });
+            }
+            let quota = self.quota(caller).await?;
+            quota.allows(new.kind, if new.kind == TitleKind::Movie { 1 } else { left.len() as i64 })?;
         }
-        self.one(caller, id).await
+        let auto = caller.access == RequestAccess::Auto;
+        let follow: Vec<i64> = covering.iter().filter(|a| !a.mine && !a.follows).map(|a| a.id).collect();
+        let pending: Vec<i64> = covering.iter().filter(|a| auto && !a.mine && a.pending).map(|a| a.id).collect();
+        let at = now();
+        let mut tx = self.db.write.begin().await?;
+        for id in &follow {
+            sqlx::query("INSERT OR IGNORE INTO request_watchers (request_id, user_id, created_at) VALUES (?, ?, ?)")
+                .bind(id)
+                .bind(user.id)
+                .bind(at)
+                .execute(&mut *tx)
+                .await?;
+            sqlx::query("UPDATE requests SET updated_at = ? WHERE id = ?").bind(at).bind(id).execute(&mut *tx).await?;
+        }
+        // Approved as if just asked for, by this account.
+        let mut approved = Vec::new();
+        for id in pending {
+            let done = sqlx::query(
+                "UPDATE requests SET status = 'approved', reason = NULL, decided_by = ?, decided_at = ?, updated_at = ?
+                 WHERE id = ? AND status = 'pending'",
+            )
+            .bind(user.id)
+            .bind(at)
+            .bind(at)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+            if done == 1 {
+                approved.push(id);
+            }
+        }
+        let made: Option<i64> = if make {
+            let seasons = (new.kind == TitleKind::Show).then(|| seasons_json(&left));
+            let id = sqlx::query_scalar(
+                "INSERT INTO requests (kind, tmdb_id, tvdb_id, imdb_id, title, year, poster_path, backdrop_path,
+                                       seasons, anime, user_id, status, decided_by, decided_at, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            )
+            .bind(new.kind.as_str())
+            .bind(new.tmdb_id)
+            .bind(details.tvdb_id)
+            .bind(details.imdb_id.as_deref())
+            .bind(&details.title)
+            .bind(details.year)
+            .bind(details.poster_path.as_deref())
+            .bind(details.backdrop_path.as_deref())
+            .bind(seasons)
+            .bind(details.anime)
+            .bind(user.id)
+            .bind(if auto { "approved" } else { "pending" })
+            .bind(auto.then_some(user.id))
+            .bind(auto.then_some(at))
+            .bind(at)
+            .bind(at)
+            .fetch_one(&mut *tx)
+            .await?;
+            Some(id)
+        } else {
+            None
+        };
+        tx.commit().await?;
+        drop(making);
+        for id in &follow {
+            tracing::info!("{} follows request {id} ({})", user.username, details.title);
+        }
+        let mut touched: Vec<i64> = follow.iter().chain(&approved).copied().collect();
+        touched.sort_unstable();
+        touched.dedup();
+        for id in touched {
+            if approved.contains(&id)
+                && let Some(row) = self.row(id).await?
+            {
+                self.decided(&row, user.id).await?;
+            }
+            self.changed(id, new.kind, new.tmdb_id).await;
+        }
+        if let Some(id) = made {
+            tracing::info!("{} asked for {} (request {id})", user.username, details.title);
+            if let Some(row) = self.row(id).await? {
+                self.created(&row);
+            }
+            self.changed(id, new.kind, new.tmdb_id).await;
+        }
+        // The new request, or the one asking for the lowest season asked
+        // for (its own first, then the newest).
+        let lowest = wanted.first().copied();
+        let answered = made.or_else(|| {
+            covering
+                .iter()
+                .filter(|a| lowest.is_none_or(|n| a.seasons.contains(&n)))
+                .max_by_key(|a| (a.mine, a.id))
+                .map(|a| a.id)
+        });
+        let Some(answered) = answered else {
+            return Err(AppError::conflict("this title is asked for already").into());
+        };
+        let service = match new.kind {
+            TitleKind::Movie => Service::Radarr,
+            TitleKind::Show => Service::Sonarr,
+        };
+        let sends = service.connected(&self.settings.get()).is_some();
+        let sent: Vec<i64> = approved.iter().copied().chain(made.filter(|_| auto)).collect();
+        let answer = self.answer(caller, answered, sends && sent.contains(&answered)).await?;
+        if sends {
+            for id in sent {
+                self.send(id, Approval::default());
+            }
+        }
+        Ok((made.is_some(), answer))
     }
 
-    /// `POST /api/requests/{id}/approve`.
-    pub async fn approve(&self, caller: &Caller<'_>, id: i64, approval: Approval) -> RequestResult<MediaRequest> {
-        let approval = Approval {
-            quality_profile: approval.quality_profile,
-            root_folder: approval.root_folder.map(|f| f.trim().to_owned()),
-        };
+    /// `POST /api/requests/{id}/approve`: a pending, failed, declined, or
+    /// approved and not sent request is approved, keeping `approval`'s
+    /// seasons of those asked for, and sent to Radarr or Sonarr in the
+    /// background with what it chose. One sent already, or being sent, is
+    /// answered as it is.
+    pub async fn approve(
+        self: &Arc<Self>,
+        caller: &Caller<'_>,
+        id: i64,
+        approval: Approval,
+    ) -> RequestResult<MediaRequest> {
+        let approval = Approval { root_folder: approval.root_folder.map(|f| f.trim().to_owned()), ..approval };
         if approval.quality_profile.is_some_and(|p| p <= 0) {
             return Err(AppError::bad_request("a quality profile is chosen by its id").into());
         }
         if approval.root_folder.as_deref().is_some_and(|f| f.is_empty() || f.chars().count() > FOLDER_MAX) {
             return Err(AppError::bad_request("a root folder is a folder's path").into());
         }
-        let row = self.row(id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
-        if !self.send(id, caller.user.id, &approval).await? {
-            let message = format!("this request is {}: only pending and failed ones are approved", row.status);
-            return Err(AppError::conflict(message).into());
+        if approval.seasons.as_ref().is_some_and(Vec::is_empty) {
+            return Err(AppError::bad_request("keep at least one season").into());
         }
-        self.one(caller, id).await
-    }
-
-    /// Approves a pending or failed request as `decider`, and adds it to
-    /// Radarr or Sonarr where connected (should that fail, the request is
-    /// `failed`, saying why). `false`: it was neither pending nor failed.
-    async fn send(&self, id: i64, decider: i64, approval: &Approval) -> sqlx::Result<bool> {
+        let row = self.row(id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
+        let status = row.status();
+        if self.sent(&row) {
+            return self.one(caller, id).await;
+        }
+        if status == RequestStatus::Available {
+            let message =
+                |_: &MediaRequest| "this request is available already: there is nothing to approve".to_owned();
+            return Err(self.refused(caller, id, None, message).await);
+        }
+        let seasons = match (row.kind(), approval.seasons.as_deref()) {
+            (_, None) => row.seasons(),
+            (TitleKind::Movie, Some(_)) => return Err(AppError::bad_request("movies have no seasons").into()),
+            (TitleKind::Show, Some(kept)) => {
+                let asked = row.seasons().unwrap_or_default();
+                if let Some(n) = kept.iter().find(|n| !asked.contains(n)) {
+                    return Err(AppError::bad_request(format!("season {n} isn't one this request asks for")).into());
+                }
+                let mut kept = kept.to_vec();
+                kept.sort_unstable();
+                kept.dedup();
+                Some(kept)
+            }
+        };
+        // Those left out aren't asked for any more.
+        let ready: Vec<i64> = seasons_of(&row.available_seasons)
+            .into_iter()
+            .filter(|n| seasons.as_ref().is_some_and(|s| s.contains(n)))
+            .collect();
         let at = now();
         let approved = sqlx::query(
-            "UPDATE requests SET status = 'approved', reason = NULL, decided_by = ?, decided_at = ?, updated_at = ?
-             WHERE id = ? AND status IN ('pending', 'failed')",
+            "UPDATE requests SET status = 'approved', reason = NULL,
+                    decided_by = CASE WHEN status = 'approved' THEN decided_by ELSE ? END,
+                    decided_at = CASE WHEN status = 'approved' THEN decided_at ELSE ? END,
+                    seasons = ?, available_seasons = ?, sent_to = NULL, sent_profile = NULL, sent_folder = NULL,
+                    attempts = 0, retry_at = NULL, stage = NULL, stage_at = NULL, note = NULL, updated_at = ?
+             WHERE id = ? AND status = ? AND sent_to IS ?",
         )
-        .bind(decider)
+        .bind(caller.user.id)
         .bind(at)
+        .bind(seasons.as_deref().map(seasons_json))
+        .bind(seasons_json(&ready))
         .bind(at)
         .bind(id)
+        .bind(&row.status)
+        .bind(row.sent_to.as_deref())
         .execute(&self.db.write)
         .await?
         .rows_affected()
             == 1;
         if !approved {
-            return Ok(false);
+            // Changed meanwhile: sent by now, or not to be approved.
+            if self.row(id).await?.is_some_and(|r| self.sent(&r)) {
+                return self.one(caller, id).await;
+            }
+            let message = |r: &MediaRequest| format!("this request changed meanwhile: it is {} now", r.status.as_str());
+            return Err(self.refused(caller, id, None, message).await);
         }
-        let Some(row) = self.row(id).await? else { return Ok(true) };
+        let row = self.row(id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
+        tracing::info!("{} approved request {id} ({})", caller.user.username, row.title);
+        if matches!(status, RequestStatus::Pending | RequestStatus::Declined) {
+            self.decided(&row, caller.user.id).await?;
+        }
+        self.changed(id, row.kind(), row.tmdb_id).await;
+        let sends = row.service().connected(&self.settings.get()).is_some();
+        let answer = self.answer(caller, id, sends).await?;
+        if sends {
+            self.send(id, approval);
+        }
+        Ok(answer)
+    }
+
+    /// Whether approved request `row` is sent, or being sent (approving it
+    /// again does nothing).
+    fn sent(&self, row: &RequestRow) -> bool {
+        row.status() == RequestStatus::Approved && (row.sent().is_some() || self.sending.borrow().contains(&row.id))
+    }
+
+    /// Sends approved request `id` to Radarr or Sonarr in the background,
+    /// with what `approval` chose instead of the settings: every send goes
+    /// through here. Till it is done the request is being sent (stage
+    /// `approved`), and nothing else sends it.
+    fn send(self: &Arc<Self>, id: i64, approval: Approval) {
+        if !self.sending.send_if_modified(|sending| sending.insert(id)) {
+            return;
+        }
+        let requests = self.clone();
+        tokio::spawn(async move {
+            let _done = Sending(requests.clone(), id);
+            if let Err(err) = requests.deliver(id, &approval).await {
+                tracing::warn!("request {id}: sending it failed: {err:#}");
+            }
+        });
+    }
+
+    /// Waits until nothing is being sent.
+    pub async fn settled(&self) {
+        let mut sending = self.sending.subscribe();
+        let _ = sending.wait_for(HashSet::is_empty).await;
+    }
+
+    /// Adds approved request `id` to Radarr or Sonarr, where its kind's is
+    /// connected, unless it is sent already (or added by hand); should that
+    /// fail, the request is `failed` for a manager, saying why.
+    async fn deliver(self: &Arc<Self>, id: i64, approval: &Approval) -> sqlx::Result<()> {
+        let Some(row) = self.row(id).await? else { return Ok(()) };
+        if row.status() != RequestStatus::Approved || row.sent_to.is_some() {
+            return Ok(());
+        }
         let settings = self.settings.get();
-        let (service, kind) = match row.kind() {
-            TitleKind::Movie => (Service::Radarr, TitleKind::Movie),
-            TitleKind::Show => (Service::Sonarr, TitleKind::Show),
+        let service = row.service();
+        let Some(to) = service.connected(&settings) else { return Ok(()) };
+        let seasons = row.seasons().unwrap_or_default();
+        let title = arr::Title {
+            tmdb_id: row.tmdb_id,
+            tvdb_id: row.tvdb_id,
+            anime: row.anime,
+            seasons: &seasons,
+            quality_profile: approval.quality_profile,
+            root_folder: approval.root_folder.as_deref(),
         };
-        if let Some(to) = service.saved(&settings) {
-            let seasons = row.seasons().unwrap_or_default();
-            let title = arr::Title {
-                tmdb_id: row.tmdb_id,
-                tvdb_id: row.tvdb_id,
-                anime: row.anime,
-                seasons: &seasons,
-                quality_profile: approval.quality_profile,
-                root_folder: approval.root_folder.as_deref(),
-            };
-            let added = match kind {
-                TitleKind::Movie => self.arr.add_movie(&to, &settings, &title).await,
-                TitleKind::Show => self.arr.add_series(&to, &settings, &title).await,
-            };
-            match added {
-                Ok(arr_id) => {
-                    tracing::info!("request {id}: {} added to {}", row.title, service.name());
-                    let sent_to = match kind {
-                        TitleKind::Movie => "radarr",
-                        TitleKind::Show => "sonarr",
-                    };
-                    sqlx::query("UPDATE requests SET arr_id = ?, sent_to = ? WHERE id = ?")
-                        .bind(arr_id)
-                        .bind(sent_to)
-                        .bind(id)
-                        .execute(&self.db.write)
-                        .await?;
-                }
-                Err(err) => {
-                    tracing::warn!("request {id}: {} wasn't added to {}: {err}", row.title, service.name());
-                    sqlx::query(
-                        "UPDATE requests SET status = 'failed', reason = ?, updated_at = ?
-                         WHERE id = ? AND status = 'approved'",
-                    )
-                    .bind(err.to_string())
-                    .bind(now())
-                    .bind(id)
-                    .execute(&self.db.write)
-                    .await?;
+        let added = match service {
+            Service::Radarr => self.arr.add_movie(&to, &settings, &title).await,
+            Service::Sonarr => self.arr.add_series(&to, &settings, &title).await,
+        };
+        match added {
+            Ok(added) => {
+                tracing::info!("request {id}: {} added to {}", row.title, service.name());
+                // Saved by its name: the profile's id may go.
+                let profile = match added.quality_profile {
+                    Some(profile) => {
+                        let (lists, _) = self.offered(service, &to).await;
+                        lists.quality_profiles.into_iter().find(|p| p.id == profile).map(|p| p.name)
+                    }
+                    None => None,
+                };
+                sqlx::query(
+                    "UPDATE requests SET arr_id = ?, sent_to = ?, sent_profile = ?, sent_folder = ?, attempts = 0,
+                                         retry_at = NULL, updated_at = ?
+                     WHERE id = ? AND status = 'approved' AND sent_to IS NULL",
+                )
+                .bind(added.id)
+                .bind(service.as_str())
+                .bind(profile)
+                .bind(added.root_folder)
+                .bind(now())
+                .bind(id)
+                .execute(&self.db.write)
+                .await?;
+            }
+            Err(err) => {
+                tracing::warn!("request {id}: {} wasn't added to {}: {err}", row.title, service.name());
+                let reason = err.to_string();
+                let failed = sqlx::query(
+                    "UPDATE requests SET status = 'failed', reason = ?, attempts = attempts + 1, retry_at = NULL,
+                                         updated_at = ?
+                     WHERE id = ? AND status = 'approved' AND sent_to IS NULL",
+                )
+                .bind(&reason)
+                .bind(now())
+                .bind(id)
+                .execute(&self.db.write)
+                .await?
+                .rows_affected();
+                // Left for a manager.
+                if failed == 1 {
+                    self.events.send(ServerEvent::RequestFailed {
+                        to: Audience::of(Vec::new()),
+                        request_id: id,
+                        title: row.title.clone(),
+                        kind: row.kind(),
+                        reason,
+                        retry_at: None,
+                    });
                 }
             }
         }
-        self.changed(row.user_id);
-        Ok(true)
+        self.changed(id, row.kind(), row.tmdb_id).await;
+        Ok(())
     }
 
-    /// `POST /api/requests/{id}/decline`.
+    /// `POST /api/requests/{id}/decline`: a pending, failed, or approved
+    /// one not available yet.
     pub async fn decline(&self, caller: &Caller<'_>, id: i64, reason: Option<String>) -> RequestResult<MediaRequest> {
         let reason = reason.map(|r| r.trim().to_owned()).filter(|r| !r.is_empty());
         if reason.as_ref().is_some_and(|r| r.chars().count() > REASON_MAX) {
             return Err(AppError::bad_request(format!("a reason is {REASON_MAX} characters at most")).into());
         }
-        let row = self.row(id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
+        if self.row(id).await?.is_none() {
+            return Err(AppError::not_found("no such request").into());
+        }
         let at = now();
         let declined = sqlx::query(
             "UPDATE requests SET status = 'declined', reason = ?, decided_by = ?, decided_at = ?, updated_at = ?,
-                                 news_at = ?
-             WHERE id = ? AND status IN ('pending', 'failed')",
+                                 news_at = ?, retry_at = NULL, stage = NULL, stage_at = NULL
+             WHERE id = ? AND status IN ('pending', 'failed', 'approved')",
         )
         .bind(reason)
         .bind(caller.user.id)
@@ -2057,43 +2721,246 @@ impl Requests {
         .await?
         .rows_affected();
         if declined == 0 {
-            let message = format!("this request is {}: only pending and failed ones are declined", row.status);
-            return Err(AppError::conflict(message).into());
+            let message = |r: &MediaRequest| {
+                format!("this request is {}: only pending, failed and approved ones are declined", r.status.as_str())
+            };
+            return Err(self.refused(caller, id, None, message).await);
         }
-        self.changed(row.user_id);
+        let row = self.row(id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
+        tracing::info!("{} declined request {id} ({})", caller.user.username, row.title);
+        self.decided(&row, caller.user.id).await?;
+        self.changed(id, row.kind(), row.tmdb_id).await;
         self.one(caller, id).await
     }
 
-    /// `DELETE /api/requests/{id}`: its maker withdraws it while it isn't
-    /// approved; managers delete any.
-    pub async fn delete(&self, caller: &Caller<'_>, id: i64) -> RequestResult<()> {
-        let row = self.row(id).await?.filter(|r| caller.manager || r.user_id == caller.user.id);
-        let row = row.ok_or_else(|| AppError::not_found("no such request"))?;
-        let deleted =
-            sqlx::query("DELETE FROM requests WHERE id = ? AND (? OR status IN ('pending', 'declined', 'failed'))")
-                .bind(id)
-                .bind(caller.manager)
-                .execute(&self.db.write)
-                .await?
-                .rows_affected();
-        if deleted == 0 {
-            let message = format!("this request is {}: an administrator can delete it", row.status);
-            return Err(AppError::conflict(message).into());
+    /// `POST /api/requests/{id}/handled`: approved as added to Radarr or
+    /// Sonarr by hand, so never sent: a pending, failed, declined, or
+    /// approved and not sent one. One added by hand already is answered as
+    /// it is.
+    pub async fn handled(&self, caller: &Caller<'_>, id: i64) -> RequestResult<MediaRequest> {
+        let row = self.row(id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
+        let status = row.status();
+        if status == RequestStatus::Approved && row.hand() {
+            return self.one(caller, id).await;
         }
-        self.changed(row.user_id);
+        let unsent = status == RequestStatus::Approved && row.sent_to.is_none() && !self.sent(&row);
+        if !(unsent || matches!(status, RequestStatus::Pending | RequestStatus::Failed | RequestStatus::Declined)) {
+            let message = |r: &MediaRequest| {
+                format!("this request is {}: only one not sent yet is marked as added by hand", r.status.as_str())
+            };
+            return Err(self.refused(caller, id, None, message).await);
+        }
+        let at = now();
+        let done = sqlx::query(
+            "UPDATE requests SET status = 'approved', reason = NULL, sent_to = 'hand', sent_profile = NULL,
+                    sent_folder = NULL, decided_by = CASE WHEN status = 'approved' THEN decided_by ELSE ? END,
+                    decided_at = CASE WHEN status = 'approved' THEN decided_at ELSE ? END, attempts = 0,
+                    retry_at = NULL, stage = NULL, stage_at = NULL, note = NULL, updated_at = ?
+             WHERE id = ? AND status = ? AND sent_to IS ?",
+        )
+        .bind(caller.user.id)
+        .bind(at)
+        .bind(at)
+        .bind(id)
+        .bind(&row.status)
+        .bind(row.sent_to.as_deref())
+        .execute(&self.db.write)
+        .await?
+        .rows_affected();
+        if done == 0 {
+            let message = |r: &MediaRequest| format!("this request changed meanwhile: it is {} now", r.status.as_str());
+            return Err(self.refused(caller, id, None, message).await);
+        }
+        let row = self.row(id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
+        tracing::info!("{} marked request {id} ({}) as added by hand", caller.user.username, row.title);
+        if matches!(status, RequestStatus::Pending | RequestStatus::Declined) {
+            self.decided(&row, caller.user.id).await?;
+        }
+        self.changed(id, row.kind(), row.tmdb_id).await;
+        self.one(caller, id).await
+    }
+
+    /// `DELETE /api/requests/{id}`: its maker withdraws it while pending or
+    /// failed, or a declined one once its 30 days are over, and its
+    /// earliest follower becomes its maker; managers delete any, for
+    /// everyone. Nothing is removed from Radarr or Sonarr.
+    pub async fn delete(&self, caller: &Caller<'_>, id: i64) -> RequestResult<()> {
+        let row = self.row_for(caller, id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
+        let to = self.audience(id).await?;
+        let (kind, tmdb_id) = (row.kind(), row.tmdb_id);
+        if caller.manager {
+            sqlx::query("DELETE FROM requests WHERE id = ?").bind(id).execute(&self.db.write).await?;
+            tracing::info!("{} deleted request {id} ({})", caller.user.username, row.title);
+            self.changed_to(to, id, kind, tmdb_id);
+            return Ok(());
+        }
+        if row.user_id != caller.user.id {
+            let message = |_: &MediaRequest| "only its maker withdraws a request: stop following it instead".to_owned();
+            return Err(self.refused(caller, id, None, message).await);
+        }
+        if let Some(until) = row.declined_until().filter(|at| *at > now()) {
+            let message = |_: &MediaRequest| {
+                format!("a declined request stays for 30 days: it may be removed from {}", day(until))
+            };
+            return Err(self.refused(caller, id, Some(until), message).await);
+        }
+        let status = row.status();
+        if !matches!(status, RequestStatus::Pending | RequestStatus::Failed | RequestStatus::Declined) {
+            let message =
+                |r: &MediaRequest| format!("this request is {}: an administrator can delete it", r.status.as_str());
+            return Err(self.refused(caller, id, None, message).await);
+        }
+        let at = now();
+        let mut tx = self.db.write.begin().await?;
+        let same: bool =
+            sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM requests WHERE id = ? AND user_id = ? AND status = ?)")
+                .bind(id)
+                .bind(caller.user.id)
+                .bind(&row.status)
+                .fetch_one(&mut *tx)
+                .await?;
+        if !same {
+            drop(tx);
+            let message = |r: &MediaRequest| format!("this request changed meanwhile: it is {} now", r.status.as_str());
+            return Err(self.refused(caller, id, None, message).await);
+        }
+        let heir = inherit(&mut tx, id, at).await?;
+        if heir.is_none() {
+            sqlx::query("DELETE FROM requests WHERE id = ?").bind(id).execute(&mut *tx).await?;
+        }
+        tx.commit().await?;
+        match heir {
+            Some(heir) => tracing::info!(
+                "{} withdrew request {id} ({}): account {heir} has it now",
+                caller.user.username,
+                row.title
+            ),
+            None => tracing::info!("{} withdrew request {id} ({})", caller.user.username, row.title),
+        }
+        self.changed_to(to, id, kind, tmdb_id);
         Ok(())
     }
 
-    /// `POST /api/requests/seen`: what had news for `caller` is seen, on
-    /// its other devices too.
-    pub async fn seen(&self, caller: &Caller<'_>) -> RequestResult<()> {
+    /// `DELETE /api/requests/{id}/watch`: `caller` follows it no more.
+    pub async fn unwatch(&self, caller: &Caller<'_>, id: i64) -> RequestResult<()> {
+        let row = self.row_for(caller, id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
+        let to = self.audience(id).await?;
+        let mut tx = self.db.write.begin().await?;
+        let stopped = sqlx::query("DELETE FROM request_watchers WHERE request_id = ? AND user_id = ?")
+            .bind(id)
+            .bind(caller.user.id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        if stopped == 0 {
+            drop(tx);
+            let message = |r: &MediaRequest| {
+                if r.mine {
+                    "this is this account's own request: withdraw it instead"
+                } else {
+                    "this account doesn't follow this request"
+                }
+                .to_owned()
+            };
+            return Err(self.refused(caller, id, None, message).await);
+        }
+        sqlx::query("UPDATE requests SET updated_at = ? WHERE id = ?").bind(now()).bind(id).execute(&mut *tx).await?;
+        tx.commit().await?;
+        self.changed_to(to, id, row.kind(), row.tmdb_id);
+        Ok(())
+    }
+
+    /// `POST /api/requests/seen`: what had news for `caller` is seen; the
+    /// account's other streams hear it (not those of `token`, the session
+    /// that saw it), so their badges clear too.
+    pub async fn seen(&self, caller: &Caller<'_>, token: Option<&str>) -> RequestResult<()> {
         sqlx::query("UPDATE users SET requests_seen_at = ? WHERE id = ?")
             .bind(now())
             .bind(caller.user.id)
             .execute(&self.db.write)
             .await?;
-        self.changed(caller.user.id);
+        self.many_changed(Audience { except_token: token.map(hash_token), ..Audience::only(vec![caller.user.id]) });
         Ok(())
+    }
+
+    // -------------------------------------------------------------- choices
+
+    /// `GET /api/requests/options`: what approving may choose in Radarr and
+    /// Sonarr, where each is connected.
+    pub async fn options(self: &Arc<Self>) -> RequestOptions {
+        let settings = self.settings.get();
+        let (radarr, sonarr) =
+            tokio::join!(self.offer(Service::Radarr, &settings), self.offer(Service::Sonarr, &settings));
+        RequestOptions { radarr, sonarr }
+    }
+
+    /// What `service` offers, where it is connected, and the settings'
+    /// choices.
+    async fn offer(self: &Arc<Self>, service: Service, settings: &Settings) -> Option<ArrOptions> {
+        let to = service.connected(settings)?;
+        let (lists, error) = self.offered(service, &to).await;
+        let ((profile, folder), (anime_profile, anime_folder)) = service.chosen(settings);
+        let profile_of = |id: i64| (id > 0).then_some(id);
+        let folder_of = |path: &str| (!path.is_empty()).then(|| path.to_owned());
+        Some(ArrOptions {
+            quality_profiles: lists.quality_profiles,
+            root_folders: lists.root_folders,
+            quality_profile: profile_of(profile),
+            root_folder: folder_of(folder),
+            anime_quality_profile: profile_of(anime_profile),
+            anime_root_folder: folder_of(anime_folder),
+            error,
+        })
+    }
+
+    /// The quality profiles and root folders `service` at `to` offers: as
+    /// it last answered, asked again once that is [`OFFER_TTL`] old (one
+    /// question at a time) and waited for [`OFFER_WAIT`] at most; with why
+    /// not while it doesn't answer.
+    async fn offered(self: &Arc<Self>, service: Service, to: &Connection) -> (Lists, Option<String>) {
+        let slot = &self.offers[service as usize];
+        let mut asking = {
+            let mut offer = slot.lock();
+            if offer.to.as_ref() != Some(to) {
+                *offer = Offer { to: Some(to.clone()), ..Offer::default() };
+            }
+            if offer.answered.is_some_and(|at| at.elapsed() < OFFER_TTL) {
+                return (offer.lists.clone(), offer.error.clone());
+            }
+            match &offer.asking {
+                Some(asking) => asking.clone(),
+                None => {
+                    let (answered, asking) = watch::channel(false);
+                    offer.asking = Some(asking.clone());
+                    let (requests, to) = (self.clone(), to.clone());
+                    tokio::spawn(async move {
+                        let lists = requests.arr.lists(service, &to).await;
+                        let mut offer = requests.offers[service as usize].lock();
+                        if offer.to.as_ref() == Some(&to) {
+                            offer.asking = None;
+                            match lists {
+                                Ok(lists) => {
+                                    offer.lists = lists;
+                                    offer.error = None;
+                                    offer.answered = Some(Instant::now());
+                                }
+                                Err(err) => {
+                                    tracing::debug!("{err}");
+                                    offer.error = Some(not_answering(service, &err));
+                                }
+                            }
+                        }
+                        drop(offer);
+                        let _ = answered.send(true);
+                    });
+                    asking
+                }
+            }
+        };
+        let answered = matches!(tokio::time::timeout(OFFER_WAIT, asking.wait_for(|done| *done)).await, Ok(Ok(_)));
+        let offer = slot.lock();
+        let error = if answered { offer.error.clone() } else { Some(format!("{} isn't answering", service.name())) };
+        (offer.lists.clone(), error)
     }
 
     // -------------------------------------------------------------- availability
@@ -2149,7 +3016,7 @@ impl Requests {
                 self.available(&row, item, &have).await?;
             } else if have != before || row.item_id != Some(item.0) {
                 // Seasons newly there are news to those waiting.
-                let news = have.iter().any(|n| !before.contains(n));
+                let newly: Vec<i64> = have.iter().copied().filter(|n| !before.contains(n)).collect();
                 let at = now();
                 sqlx::query(
                     "UPDATE requests SET available_seasons = ?, item_id = ?, updated_at = ?,
@@ -2159,12 +3026,15 @@ impl Requests {
                 .bind(seasons_json(&have))
                 .bind(item.0)
                 .bind(at)
-                .bind(news)
+                .bind(!newly.is_empty())
                 .bind(at)
                 .bind(row.id)
                 .execute(&self.db.write)
                 .await?;
-                self.changed(row.user_id);
+                if !newly.is_empty() {
+                    self.ready(&row, Some(newly), false).await?;
+                }
+                self.changed(row.id, row.kind(), row.tmdb_id).await;
             }
         }
         Ok(())
@@ -2190,13 +3060,12 @@ impl Requests {
         .rows_affected();
         if done == 1 {
             tracing::info!("request {}: {} is available", row.id, row.title);
-            self.events.send(ServerEvent::RequestAvailable {
-                user_id: row.user_id,
-                request_id: row.id,
-                title: row.title.clone(),
-                item_id: item.1.then_some(item.0),
-            });
-            self.changed(row.user_id);
+            // A show's: the seasons ready since it was last looked at.
+            let before = seasons_of(&row.available_seasons);
+            let newly = (row.kind() == TitleKind::Show)
+                .then(|| seasons.iter().copied().filter(|n| !before.contains(n)).collect());
+            self.ready(row, newly, true).await?;
+            self.changed(row.id, row.kind(), row.tmdb_id).await;
         }
         Ok(())
     }
@@ -2244,6 +3113,85 @@ async fn visible_items(db: &Db, user_id: i64, ids: &[i64]) -> sqlx::Result<HashS
     Ok(query.fetch_all(&db.read).await?.into_iter().collect())
 }
 
+/// Request `id`'s earliest follower becomes its maker (it doesn't count
+/// toward their limits) and follows it no more; the others keep following
+/// it. `None`: nobody follows it.
+async fn inherit(tx: &mut SqliteConnection, id: i64, at: i64) -> sqlx::Result<Option<i64>> {
+    let heir: Option<i64> = sqlx::query_scalar(
+        "SELECT user_id FROM request_watchers WHERE request_id = ? ORDER BY created_at, user_id LIMIT 1",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(heir) = heir else { return Ok(None) };
+    sqlx::query("DELETE FROM request_watchers WHERE request_id = ? AND user_id = ?")
+        .bind(id)
+        .bind(heir)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE requests SET user_id = ?, inherited_at = ?, updated_at = ? WHERE id = ?")
+        .bind(heir)
+        .bind(at)
+        .bind(at)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    Ok(Some(heir))
+}
+
+/// Before account `user_id` is deleted, in the same transaction: each of
+/// its requests someone follows goes to its earliest follower (the others
+/// go with the account). Who to tell once it is gone
+/// ([`Requests::account_deleted`]): managers, and those who inherited some;
+/// `None` when it made and followed none.
+pub async fn hand_down(tx: &mut SqliteConnection, user_id: i64) -> sqlx::Result<Option<Audience>> {
+    let made: Vec<i64> = sqlx::query_scalar("SELECT id FROM requests WHERE user_id = ? ORDER BY id")
+        .bind(user_id)
+        .fetch_all(&mut *tx)
+        .await?;
+    let follows: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM request_watchers WHERE user_id = ?)")
+        .bind(user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    if made.is_empty() && !follows {
+        return Ok(None);
+    }
+    let at = now();
+    let mut heirs = Vec::new();
+    for id in made {
+        if let Some(heir) = inherit(tx, id, at).await? {
+            tracing::info!("request {id}: its maker's account is being deleted: account {heir} has it now");
+            heirs.push(heir);
+        }
+    }
+    heirs.sort_unstable();
+    heirs.dedup();
+    Ok(Some(Audience::of(heirs)))
+}
+
+/// What approvals are told when Radarr or Sonarr didn't answer them.
+fn not_answering(service: Service, err: &ArrError) -> String {
+    match err {
+        ArrError::Unreachable(..) => format!("{} isn't answering", service.name()),
+        err => err.to_string(),
+    }
+}
+
+/// Why asking for a title again is refused for now: the movie, or these
+/// seasons, were declined for the account lately.
+fn declined_message(kind: TitleKind, seasons: &[i64], retry_at: i64) -> String {
+    let what = match (kind, seasons) {
+        (TitleKind::Movie, _) => "this movie was".to_owned(),
+        (TitleKind::Show, [n]) => format!("season {n} was"),
+        (TitleKind::Show, [first @ .., last]) => {
+            let first: Vec<String> = first.iter().map(i64::to_string).collect();
+            format!("seasons {} and {last} were", first.join(", "))
+        }
+        (TitleKind::Show, []) => "these seasons were".to_owned(),
+    };
+    format!("{what} declined for this account lately: it may ask again from {}", day(retry_at))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2276,7 +3224,7 @@ mod tests {
     }
 
     fn active(id: i64, seasons: &[i64], theirs: bool) -> Active {
-        Active { id, seasons: seasons.to_vec(), theirs, follows: false }
+        Active { id, seasons: seasons.to_vec(), theirs, mine: theirs, follows: false, pending: true }
     }
 
     #[test]
@@ -2300,7 +3248,7 @@ mod tests {
         assert_eq!(show(&mark, &[2, 3]), TitleStatus::Partial);
         mark.active.push(active(8, &[2], true));
         assert_eq!(show(&mark, &[2, 3]), TitleStatus::Partial);
-        mark.declined_seasons.insert(3);
+        mark.declined_seasons.insert(3, 1_000);
         assert_eq!(show(&mark, &[2, 3]), TitleStatus::Declined, "what is left was declined");
         mark.active.push(active(9, &[3], false));
         assert_eq!(show(&mark, &[2, 3]), TitleStatus::Requested, "everything it lacks is asked for");

@@ -255,10 +255,13 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     ("POST", "/api/requests/seen", Need::Scope(Requests)),
     ("GET", "/api/requests/{id}", Need::Scope(Requests)),
     ("DELETE", "/api/requests/{id}", Need::Scope(Requests)),
+    ("DELETE", "/api/requests/{id}/watch", Need::Scope(Requests)),
     // approvals: managing everyone's (an administrator's account only, see
     // AuthUser::manages_requests)
     ("POST", "/api/requests/{id}/approve", Need::Scope(Approvals)),
     ("POST", "/api/requests/{id}/decline", Need::Scope(Approvals)),
+    ("POST", "/api/requests/{id}/handled", Need::Scope(Approvals)),
+    ("GET", "/api/requests/options", Need::Scope(Approvals)),
 ];
 
 /// What an app's token needs for `method` on the routed `path`; `None`:
@@ -308,7 +311,7 @@ mod tests {
     fn every_app_route_is_on_a_real_path() {
         // Whether each names a route of api/mod.rs is checked by
         // tests/app_tokens.rs, which reads it.
-        assert_eq!(APP_ROUTES.len(), 96);
+        assert_eq!(APP_ROUTES.len(), 99);
         for (i, (method, path, _)) in APP_ROUTES.iter().enumerate() {
             assert!(["GET", "POST", "PUT", "PATCH", "DELETE"].contains(method), "{method} {path}");
             assert!(path.starts_with("/api/") && !path.ends_with('/'), "{path}");
@@ -325,6 +328,8 @@ mod tests {
         assert_eq!(required(&Method::GET, "/api/requests/summary"), Some(Need::AnyApp), "even apps that can't ask");
         assert_eq!(required(&Method::POST, "/api/requests"), Some(Need::Scope(Scope::Requests)));
         assert_eq!(required(&Method::POST, "/api/requests/{id}/approve"), Some(Need::Scope(Scope::Approvals)));
+        assert_eq!(required(&Method::DELETE, "/api/requests/{id}/watch"), Some(Need::Scope(Scope::Requests)));
+        assert_eq!(required(&Method::GET, "/api/requests/options"), Some(Need::Scope(Scope::Approvals)));
         assert_eq!(required(&Method::PUT, "/api/me/track-defaults"), Some(Need::Scope(Scope::Play)));
         assert_eq!(required(&Method::PATCH, "/api/me"), None, "name and picture stay in the web app");
         assert_eq!(required(&Method::POST, "/api/auth/switch"), None, "the web's switch makes sessions");

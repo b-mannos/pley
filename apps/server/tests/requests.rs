@@ -16,7 +16,9 @@ use axum::response::{IntoResponse, Response};
 use futures::StreamExt;
 use parking_lot::Mutex;
 use pley::events::ServerEvent;
+use pley::requests::RequestStatus;
 use serde_json::{Value, json};
+use tokio::sync::broadcast::Receiver;
 
 use common::TestApp;
 
@@ -395,6 +397,11 @@ fn status(reply: &common::Reply) -> (StatusCode, String) {
     (reply.status, reply.body["status"].as_str().unwrap_or_default().to_owned())
 }
 
+/// What the server said since `events` last looked.
+fn said(events: &mut Receiver<ServerEvent>) -> Vec<ServerEvent> {
+    std::iter::from_fn(|| events.try_recv().ok()).collect()
+}
+
 #[tokio::test]
 async fn requests_stay_off_until_turned_on() {
     let w = world().await;
@@ -414,10 +421,15 @@ async fn requests_stay_off_until_turned_on() {
         "/api/discover/movie/603",
         "/api/discover/images/poster/matrix.jpg",
         "/api/items/1/request",
+        "/api/requests/options",
     ] {
         let off = w.app.get(uri, &w.ann).await;
         assert_eq!(off.status, StatusCode::SERVICE_UNAVAILABLE, "{uri}");
         assert_eq!((&off.body["code"], &off.body["setup"]), (&json!("unavailable"), &json!(false)), "{uri}");
+    }
+    for (method, uri) in [(Method::DELETE, "/api/requests/1/watch"), (Method::POST, "/api/requests/1/handled")] {
+        let off = w.app.call(method, uri, Some(w.admin.as_str()), None, &[]).await;
+        assert_eq!((off.status, &off.body["code"]), (StatusCode::SERVICE_UNAVAILABLE, &json!("unavailable")), "{uri}");
     }
     // Before anything else is looked at.
     let off = w.app.post("/api/requests/seen", &w.ann, json!({})).await;
@@ -498,13 +510,18 @@ async fn a_movie_is_asked_for_approved_sent_to_radarr_and_found() {
     assert_eq!(asked.body["status"], json!("pending"));
     assert_eq!(asked.body["requested_by"]["name"], json!("ann"));
     assert_eq!((&asked.body["title"], &asked.body["year"]), (&json!("The Matrix"), &json!(1999)));
-    assert_eq!(asked.body["seasons"], Value::Null);
+    assert_eq!((&asked.body["seasons"], &asked.body["actions"]), (&Value::Null, &json!(["withdraw"])));
     let id = asked.body["id"].as_i64().unwrap();
     assert!(w.services.radarr_calls("POST", "/movie").is_empty(), "nothing goes to Radarr before it's approved");
 
-    // Asked for already, by anyone.
-    let again = w.ask(&w.admin, json!({"kind": "movie", "tmdb_id": 603})).await;
-    assert_eq!(again.status, StatusCode::CONFLICT, "{}", again.text());
+    // Asked for already: Bob follows hers, Tell me too.
+    let (bob, bob_id) = w.app.user(&w.admin, "bob", json!({})).await;
+    let again = w.ask(&bob, json!({"kind": "movie", "tmdb_id": 603})).await;
+    assert_eq!(again.status, StatusCode::OK, "{}", again.text());
+    assert_eq!(
+        (&again.body["id"], &again.body["mine"], &again.body["watching"], &again.body["actions"]),
+        (&json!(id), &json!(false), &json!(true), &json!(["unwatch"]))
+    );
     let unknown = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 999})).await;
     assert_eq!(unknown.status, StatusCode::NOT_FOUND);
     let seasons = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 604, "seasons": [1]})).await;
@@ -517,14 +534,20 @@ async fn a_movie_is_asked_for_approved_sent_to_radarr_and_found() {
     let summary = w.app.get("/api/requests/summary", &w.admin).await;
     assert_eq!(summary.body["pending"], json!(1));
     let heard: Vec<ServerEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
-    assert!(heard.iter().any(|e| matches!(e, ServerEvent::RequestsChanged { user_id } if *user_id == w.ann_id)));
+    assert!(heard.iter().any(|e| matches!(e,
+        ServerEvent::RequestsChanged { to, request_id, .. }
+            if to.users.contains(&w.ann_id) && to.users.contains(&bob_id) && *request_id == Some(id))));
 
-    // Only administrators decide.
+    // Only administrators decide; approving answers at once, and Radarr
+    // gets it in the background.
     let denied = w.app.post(&format!("/api/requests/{id}/approve"), &w.ann, json!({})).await;
     assert_eq!(denied.status, StatusCode::FORBIDDEN);
     let approved = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
     assert_eq!(status(&approved), (StatusCode::OK, "approved".to_owned()), "{}", approved.text());
+    assert_eq!((&approved.body["stage"], &approved.body["sent_to"]), (&json!("approved"), &Value::Null), "sending");
+    assert_eq!(approved.body["actions"], json!(["decline", "delete"]));
     assert_eq!(approved.body["decided_by"]["name"], json!("admin"));
+    w.app.state.requests.settled().await;
     let added = w.services.radarr_calls("POST", "/movie");
     assert_eq!(added.len(), 1);
     let movie = &added[0].body;
@@ -532,8 +555,15 @@ async fn a_movie_is_asked_for_approved_sent_to_radarr_and_found() {
     assert_eq!((&movie["rootFolderPath"], &movie["monitored"]), (&json!("/movies"), &json!(true)));
     assert_eq!(movie["minimumAvailability"], json!("released"));
     assert_eq!(movie["addOptions"], json!({"searchForMovie": true}));
+    // Approved already: as it is.
     let again = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
-    assert_eq!(again.status, StatusCode::CONFLICT, "approved already");
+    assert_eq!(status(&again), (StatusCode::OK, "approved".to_owned()), "{}", again.text());
+    assert_eq!(
+        again.body["sent_to"],
+        json!({"service": "radarr", "quality_profile": "HD-1080p", "root_folder": "/movies"})
+    );
+    w.app.state.requests.settled().await;
+    assert_eq!(w.services.radarr_calls("POST", "/movie").len(), 1, "sent once");
 
     // Radarr's queue says how far it is.
     let mine = w.app.get(&format!("/api/requests/{id}"), &w.ann).await;
@@ -541,8 +571,10 @@ async fn a_movie_is_asked_for_approved_sent_to_radarr_and_found() {
         mine.body["download"],
         json!({"progress": 0.6, "state": "downloading", "eta": 1_893_456_000, "episodes": 1})
     );
+    assert_eq!((&mine.body["stage"], &mine.body["actions"]), (&json!("downloading"), &json!([])));
     let withdrawn = w.app.delete(&format!("/api/requests/{id}"), &w.ann).await;
-    assert_eq!(withdrawn.status, StatusCode::CONFLICT, "approved: it stays");
+    assert_eq!((withdrawn.status, &withdrawn.body["code"]), (StatusCode::CONFLICT, &json!("conflict")), "it stays");
+    assert_eq!(withdrawn.body["request"]["id"], json!(id), "as it is now");
 
     // The movie arrives.
     w.add(w.movies, &["movies/The Matrix (1999).mkv"]).await;
@@ -554,9 +586,16 @@ async fn a_movie_is_asked_for_approved_sent_to_radarr_and_found() {
     assert_eq!((&mine.body["item_id"], &mine.body["download"]), (&json!(item), &Value::Null));
     assert!(mine.body["available_at"].is_i64());
     let heard: Vec<ServerEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
-    assert!(heard.iter().any(|e| matches!(e,
-        ServerEvent::RequestAvailable { user_id, request_id, item_id, .. }
-            if *user_id == w.ann_id && *request_id == id && *item_id == Some(item))));
+    for (who, user) in [("hers", w.ann_id), ("his, as he follows it", bob_id)] {
+        assert!(
+            heard.iter().any(|e| matches!(e,
+                ServerEvent::RequestAvailable { to, request_id, item_id, complete: true, .. }
+                    if to.users == [user] && !to.managers && *request_id == id && *item_id == Some(item))),
+            "{who}: {heard:?}"
+        );
+    }
+    let again = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    assert_eq!((again.status, &again.body["request"]["status"]), (StatusCode::CONFLICT, &json!("available")));
     let trending = w.app.get("/api/discover/trending", &w.ann).await;
     let matrix = &trending.body["results"][0];
     assert_eq!((&matrix["status"], &matrix["item_id"]), (&json!("library"), &json!(item)), "{matrix}");
@@ -640,8 +679,11 @@ async fn a_show_is_asked_for_the_seasons_a_library_lacks() {
     assert_eq!(asked.status, StatusCode::CREATED, "{}", asked.text());
     assert_eq!(asked.body["seasons"], json!([2]));
     let id = asked.body["id"].as_i64().unwrap();
-    let twice = w.ask(&w.admin, json!({"kind": "show", "tmdb_id": 1396, "seasons": [1, 2]})).await;
-    assert_eq!(twice.status, StatusCode::CONFLICT, "asked for already, or there");
+    // Season 1 is there, season 2 asked for: Bob follows hers.
+    let (bob, _) = w.app.user(&w.admin, "bob", json!({})).await;
+    let twice = w.ask(&bob, json!({"kind": "show", "tmdb_id": 1396, "seasons": [1, 2]})).await;
+    assert_eq!(twice.status, StatusCode::OK, "{}", twice.text());
+    assert_eq!((&twice.body["id"], &twice.body["watching"]), (&json!(id), &json!(true)));
     let detail = w.app.get("/api/discover/show/1396", &w.admin).await;
     let requested: Vec<bool> =
         detail.body["seasons"].as_array().unwrap().iter().map(|s| s["requested"].as_bool().unwrap()).collect();
@@ -656,6 +698,7 @@ async fn a_show_is_asked_for_the_seasons_a_library_lacks() {
 
     let approved = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
     assert_eq!(status(&approved), (StatusCode::OK, "approved".to_owned()), "{}", approved.text());
+    w.app.state.requests.settled().await;
     let added = w.services.sonarr_calls("POST", "/series");
     assert_eq!(added.len(), 1);
     let series = &added[0].body;
@@ -709,8 +752,16 @@ async fn anime_goes_to_its_own_folder_and_limits_count_seasons() {
     assert_eq!(status(&asked), (StatusCode::CREATED, "approved".to_owned()), "{}", asked.text());
     assert_eq!((&asked.body["seasons"], &asked.body["anime"]), (&json!([1, 2]), &json!(true)));
     assert_eq!(asked.body["decided_by"]["name"], json!("ann"));
+    w.app.state.requests.settled().await;
     let series = &w.services.sonarr_calls("POST", "/series")[0].body;
     assert_eq!((&series["rootFolderPath"], &series["seriesType"]), (&json!("/anime"), &json!("anime")));
+    let sent = w.app.get(&format!("/api/requests/{}", asked.body["id"]), &w.admin).await;
+    assert_eq!(
+        sent.body["sent_to"],
+        json!({"service": "sonarr", "quality_profile": "HD-720p", "root_folder": "/anime"}),
+        "{}",
+        sent.text()
+    );
 
     let made = asked.body["created_at"].as_i64().unwrap();
     let none_left = w.ask(&w.ann, json!({"kind": "show", "tmdb_id": 9001, "seasons": [3]})).await;
@@ -734,6 +785,7 @@ async fn anime_goes_to_its_own_folder_and_limits_count_seasons() {
     // seasons asked for monitored and searched for.
     let more = w.ask(&w.admin, json!({"kind": "show", "tmdb_id": 9001, "seasons": [3]})).await;
     assert_eq!(status(&more), (StatusCode::CREATED, "approved".to_owned()), "{}", more.text());
+    w.app.state.requests.settled().await;
     assert_eq!(w.services.sonarr_calls("POST", "/series").len(), 1);
     let put = w.services.sonarr_calls("PUT", "/series/21");
     let monitored: Vec<bool> =
@@ -750,9 +802,22 @@ async fn failures_say_why_and_approving_again_retries() {
     *w.services.refusals.lock() = 1;
     let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 604})).await;
     let id = asked.body["id"].as_i64().unwrap();
-    let failed = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    let mut events = w.app.state.events.subscribe();
+    let approved = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    assert_eq!(status(&approved), (StatusCode::OK, "approved".to_owned()));
+    w.app.state.requests.settled().await;
+    let failed = w.app.get(&format!("/api/requests/{id}"), &w.admin).await;
     assert_eq!(status(&failed), (StatusCode::OK, "failed".to_owned()));
     assert_eq!(failed.body["reason"], json!("Radarr refused: Root folder is not writable"));
+    assert_eq!(failed.body["actions"], json!(["retry", "decline", "handled", "delete"]));
+    let heard: Vec<ServerEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+    assert!(
+        heard.iter().any(|e| matches!(e,
+            ServerEvent::RequestFailed { to, request_id, reason, retry_at: None, .. }
+                if to.users.is_empty() && to.managers && *request_id == id
+                    && reason == "Radarr refused: Root folder is not writable")),
+        "managers hear it: {heard:?}"
+    );
     // Left for a manager: counted for them, not against her limits.
     let summary = w.app.get("/api/requests/summary", &w.admin).await;
     assert_eq!((&summary.body["pending"], &summary.body["failed"]), (&json!(0), &json!(1)));
@@ -768,22 +833,31 @@ async fn failures_say_why_and_approving_again_retries() {
         .await;
     assert_eq!(status(&approved), (StatusCode::OK, "approved".to_owned()), "{}", approved.text());
     assert_eq!(approved.body["reason"], Value::Null);
+    w.app.state.requests.settled().await;
     let movie = &w.services.radarr_calls("POST", "/movie")[1].body;
     assert_eq!((&movie["qualityProfileId"], &movie["rootFolderPath"]), (&json!(5), &json!("/4k")));
+    let sent = w.app.get(&format!("/api/requests/{id}"), &w.admin).await;
+    assert_eq!(
+        (&sent.body["stage"], &sent.body["sent_to"]),
+        (&json!("downloading"), &json!({"service": "radarr", "quality_profile": "Ultra-HD", "root_folder": "/4k"}))
+    );
 
     // A key Radarr refuses.
     let reply = w.app.put("/api/settings", &w.admin, json!({"radarr_api_key": "wrong"})).await;
     assert_eq!(reply.status, StatusCode::OK);
     let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 605})).await;
     let id = asked.body["id"].as_i64().unwrap();
-    let failed = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    w.app.state.requests.settled().await;
+    let failed = w.app.get(&format!("/api/requests/{id}"), &w.admin).await;
     assert_eq!(failed.body["reason"], json!("Radarr rejected the API key"));
     // Without Radarr, approving is all there is.
     let reply = w.app.put("/api/settings", &w.admin, json!({"radarr_url": ""})).await;
     assert_eq!(reply.status, StatusCode::OK);
     let approved = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
     assert_eq!(status(&approved), (StatusCode::OK, "approved".to_owned()));
-    assert_eq!(approved.body["download"], Value::Null);
+    assert_eq!((&approved.body["stage"], &approved.body["download"]), (&json!("approved"), &Value::Null));
+    assert_eq!(approved.body["actions"], json!(["decline", "handled", "delete"]), "nothing to send it to");
 }
 
 #[tokio::test]
@@ -810,8 +884,9 @@ async fn requests_are_declined_withdrawn_and_kept_to_their_makers() {
         w.app.post(&format!("/api/requests/{id}/decline"), &w.admin, json!({"reason": " Not this one "})).await;
     assert_eq!(status(&declined), (StatusCode::OK, "declined".to_owned()));
     assert_eq!(declined.body["reason"], json!("Not this one"));
-    let again = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
-    assert_eq!(again.status, StatusCode::CONFLICT, "declined");
+    assert_eq!(declined.body["actions"], json!(["approve", "handled", "delete"]));
+    let twice = w.app.post(&format!("/api/requests/{id}/decline"), &w.admin, json!({})).await;
+    assert_eq!((twice.status, &twice.body["request"]["status"]), (StatusCode::CONFLICT, &json!("declined")));
     // A declined request doesn't count.
     let summary = w.app.get("/api/requests/summary", &w.ann).await;
     assert_eq!(summary.body["movies_left"], json!(1));
@@ -827,7 +902,20 @@ async fn requests_are_declined_withdrawn_and_kept_to_their_makers() {
     assert_eq!(mine.body["total"], json!(0), "the administrator asked for nothing");
     assert_eq!(w.app.get("/api/requests?status=lost", &w.ann).await.status, StatusCode::BAD_REQUEST);
 
-    // Ann withdraws hers.
+    // Ann withdraws hers; a declined one stays for 30 days.
+    let decided = declined.body["decided_at"].as_i64().unwrap();
+    let hers = w.app.get(&format!("/api/requests/{id}"), &w.ann).await;
+    assert_eq!(hers.body["actions"], json!([]), "{}", hers.text());
+    let kept = w.app.delete(&format!("/api/requests/{id}"), &w.ann).await;
+    assert_eq!((kept.status, &kept.body["code"]), (StatusCode::CONFLICT, &json!("conflict")), "{}", kept.text());
+    assert_eq!((&kept.body["retry_at"], &kept.body["request"]["id"]), (&json!(decided + 30 * 86_400), &json!(id)));
+    sqlx::query("UPDATE requests SET decided_at = decided_at - 31 * 86400 WHERE id = ?")
+        .bind(id)
+        .execute(&w.app.state.db.write)
+        .await
+        .unwrap();
+    let hers = w.app.get(&format!("/api/requests/{id}"), &w.ann).await;
+    assert_eq!(hers.body["actions"], json!(["withdraw", "ask_again"]), "{}", hers.text());
     assert_eq!(w.app.delete(&format!("/api/requests/{id}"), &w.ann).await.status, StatusCode::NO_CONTENT);
     let other_id = other.body["id"].as_i64().unwrap();
     assert_eq!(w.app.delete(&format!("/api/requests/{other_id}"), &w.ann).await.status, StatusCode::NO_CONTENT);
@@ -1011,8 +1099,10 @@ async fn news_is_unseen_until_looked_at() {
     assert_eq!(seen.status, StatusCode::NO_CONTENT);
     let heard: Vec<ServerEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
     assert!(
-        heard.iter().any(|e| matches!(e, ServerEvent::RequestsChanged { user_id } if *user_id == w.ann_id)),
-        "her other devices clear their badges too"
+        heard.iter().any(|e| matches!(e,
+            ServerEvent::RequestsChanged { to, request_id: None, kind: None, tmdb_id: None }
+                if to.users == [w.ann_id] && !to.managers && to.except_token.is_some())),
+        "her other devices clear their badges too: {heard:?}"
     );
     assert_eq!(w.app.get("/api/requests/summary", &w.ann).await.body["unseen"], json!(0));
 
@@ -1031,7 +1121,7 @@ async fn news_is_unseen_until_looked_at() {
 async fn a_request_says_where_it_is_and_whose_it_is() {
     let w = world().await;
     w.turn_on(json!({})).await;
-    let (bob, bob_id) = w.app.user(&w.admin, "bob", json!({})).await;
+    let (bob, _) = w.app.user(&w.admin, "bob", json!({})).await;
     let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 604})).await;
     assert_eq!(asked.status, StatusCode::CREATED, "{}", asked.text());
     let id = asked.body["id"].as_i64().unwrap();
@@ -1043,16 +1133,13 @@ async fn a_request_says_where_it_is_and_whose_it_is() {
         assert_eq!(asked.body[field], Value::Null, "{field}");
     }
 
-    // Bob follows it: he sees where it is, not who asked.
-    sqlx::query("INSERT INTO request_watchers (request_id, user_id, created_at) VALUES (?, ?, ?)")
-        .bind(id)
-        .bind(bob_id)
-        .bind(asked.body["created_at"].as_i64())
-        .execute(&w.app.state.db.write)
-        .await
-        .unwrap();
+    // Bob asks for it too, and follows hers: he sees where it is, not who
+    // asked.
+    let followed = w.ask(&bob, json!({"kind": "movie", "tmdb_id": 604})).await;
+    assert_eq!(followed.status, StatusCode::OK, "{}", followed.text());
     let his = w.app.get(&format!("/api/requests/{id}"), &bob).await;
     assert_eq!(his.status, StatusCode::OK, "{}", his.text());
+    assert_eq!(his.body, followed.body);
     assert_eq!(
         (&his.body["mine"], &his.body["watching"], &his.body["watchers"], &his.body["requested_by"]),
         (&json!(false), &json!(true), &json!(0), &Value::Null)
@@ -1090,11 +1177,14 @@ async fn a_request_says_where_it_is_and_whose_it_is() {
     let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 603})).await;
     let matrix = asked.body["id"].as_i64().unwrap();
     let approved = w.app.post(&format!("/api/requests/{matrix}/approve"), &w.admin, json!({})).await;
+    assert_eq!((&approved.body["stage"], &approved.body["sent_to"]), (&json!("approved"), &Value::Null), "sending");
+    w.app.state.requests.settled().await;
+    let sent = w.app.get(&format!("/api/requests/{matrix}"), &w.admin).await;
     assert_eq!(
-        (&approved.body["stage"], &approved.body["sent_to"]["service"]),
+        (&sent.body["stage"], &sent.body["sent_to"]["service"]),
         (&json!("downloading"), &json!("radarr")),
         "{}",
-        approved.text()
+        sent.text()
     );
     let hers = w.app.get(&format!("/api/requests/{matrix}"), &w.ann).await;
     assert_eq!((&hers.body["stage"], &hers.body["sent_to"]), (&json!("downloading"), &Value::Null));
@@ -1103,7 +1193,9 @@ async fn a_request_says_where_it_is_and_whose_it_is() {
     *w.services.refusals.lock() = 1;
     let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 605})).await;
     let id = asked.body["id"].as_i64().unwrap();
-    let failed = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    w.app.state.requests.settled().await;
+    let failed = w.app.get(&format!("/api/requests/{id}"), &w.admin).await;
     assert_eq!(
         (&failed.body["stage"], &failed.body["reason"]),
         (&json!("failed"), &json!("Radarr refused: Root folder is not writable"))
@@ -1268,11 +1360,18 @@ async fn administrators_streams_hear_of_everyones_requests() {
     let mut bob = events(&w.app, &bob).await;
     let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 603})).await;
     assert_eq!(asked.status, StatusCode::CREATED);
+    let id = asked.body["id"].as_i64().unwrap();
     w.app.state.events.send(ServerEvent::LibrariesChanged);
     let admin = heard(&mut admin).await;
-    assert!(admin.contains(r#"{"type":"requests_changed"}"#), "{admin}");
+    let changed = format!(r#"{{"type":"requests_changed","request_id":{id},"kind":"movie","tmdb_id":603}}"#);
+    assert!(admin.contains(&changed), "{admin}");
+    let created = format!(
+        r#"{{"type":"request_created","request_id":{id},"title":"The Matrix","kind":"movie","tmdb_id":603,"seasons":null,"requested_by":{{"id":{},"name":"ann","avatar_url":null,"avatar_color":null}},"status":"pending"}}"#,
+        w.ann_id
+    );
+    assert!(admin.contains(&created), "{admin}");
     let bob = heard(&mut bob).await;
-    assert!(!bob.contains("requests_changed"), "{bob}");
+    assert!(!bob.contains("request"), "{bob}");
 }
 
 #[tokio::test]
@@ -1332,4 +1431,505 @@ async fn the_settings_ask_radarr_and_sonarr_what_they_offer() {
     assert!(w.services.radarr.lock().iter().all(|c| c.key.as_deref() != Some(SONARR_KEY)));
     assert!(w.services.sonarr.lock().iter().all(|c| c.key.as_deref() != Some(RADARR_KEY)));
     assert!(w.services.tmdb.lock().iter().all(|r| !r.contains(RADARR_KEY) && !r.contains(SONARR_KEY)));
+}
+
+#[tokio::test]
+async fn asking_again_follows_the_requests_asking_already() {
+    let w = world().await;
+    w.turn_on(json!({"request_limit_seasons": 2})).await;
+    let (bob, bob_id) = w.app.user(&w.admin, "bob", json!({})).await;
+    let hers = w.ask(&w.ann, json!({"kind": "show", "tmdb_id": 9001, "seasons": [1]})).await;
+    assert_eq!(hers.status, StatusCode::CREATED, "{}", hers.text());
+    let id = hers.body["id"].as_i64().unwrap();
+
+    // Tell me too: Bob follows hers, which costs him nothing.
+    let too = w.ask(&bob, json!({"kind": "show", "tmdb_id": 9001, "seasons": [1]})).await;
+    assert_eq!(too.status, StatusCode::OK, "{}", too.text());
+    assert_eq!(
+        (&too.body["id"], &too.body["mine"], &too.body["watching"], &too.body["requested_by"]),
+        (&json!(id), &json!(false), &json!(true), &Value::Null)
+    );
+    let summary = w.app.get("/api/requests/summary", &bob).await;
+    assert_eq!((&summary.body["seasons_left"], &summary.body["own"]), (&json!(2), &json!(1)));
+    let again = w.ask(&bob, json!({"kind": "show", "tmdb_id": 9001, "seasons": [1]})).await;
+    assert_eq!((again.status, &again.body["id"]), (StatusCode::OK, &json!(id)), "nothing changes");
+    let own = w.ask(&w.ann, json!({"kind": "show", "tmdb_id": 9001, "seasons": [1]})).await;
+    assert_eq!((own.status, &own.body["id"], &own.body["mine"]), (StatusCode::OK, &json!(id), &json!(true)));
+    let theirs = w.app.get(&format!("/api/requests/{id}"), &w.admin).await;
+    assert_eq!(theirs.body["watchers"], json!(1), "her own changes nothing");
+
+    // Every season he lacks: he follows hers for the first, and asks for
+    // the other two.
+    let more = w.ask(&bob, json!({"kind": "show", "tmdb_id": 9001})).await;
+    assert_eq!(more.status, StatusCode::CREATED, "{}", more.text());
+    assert_eq!((&more.body["seasons"], &more.body["mine"]), (&json!([2, 3]), &json!(true)));
+    let his = more.body["id"].as_i64().unwrap();
+    let detail = w.app.get("/api/discover/show/9001", &bob).await;
+    assert_eq!((&detail.body["status"], &detail.body["watching"]), (&json!("requested"), &json!(true)));
+    let requests: Vec<(i64, bool, bool)> = detail.body["requests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| (r["id"].as_i64().unwrap(), r["mine"].as_bool().unwrap(), r["watching"].as_bool().unwrap()))
+        .collect();
+    assert_eq!(requests, [(his, true, false), (id, false, true)]);
+
+    // He stops following hers.
+    let stopped = w.app.delete(&format!("/api/requests/{id}/watch"), &bob).await;
+    assert_eq!(stopped.status, StatusCode::NO_CONTENT, "{}", stopped.text());
+    assert_eq!(w.app.get(&format!("/api/requests/{id}"), &bob).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(w.app.delete(&format!("/api/requests/{id}/watch"), &bob).await.status, StatusCode::NOT_FOUND);
+    let own = w.app.delete(&format!("/api/requests/{id}/watch"), &w.ann).await;
+    assert_eq!((own.status, &own.body["request"]["mine"]), (StatusCode::CONFLICT, &json!(true)), "hers to withdraw");
+    assert_eq!(w.app.get(&format!("/api/requests/{id}"), &w.admin).await.body["watchers"], json!(0));
+
+    // Cid is approved as he asks: following her pending request approves
+    // it, as if he had asked for it, and Sonarr gets it.
+    let (cid, _) = w.app.user(&w.admin, "cid", json!({"request_access": "auto"})).await;
+    let mut events = w.app.state.events.subscribe();
+    let approved = w.ask(&cid, json!({"kind": "show", "tmdb_id": 9001, "seasons": [1]})).await;
+    assert_eq!(status(&approved), (StatusCode::OK, "approved".to_owned()), "{}", approved.text());
+    assert_eq!(
+        (&approved.body["id"], &approved.body["watching"], &approved.body["stage"]),
+        (&json!(id), &json!(true), &json!("approved"))
+    );
+    w.app.state.requests.settled().await;
+    assert_eq!(w.services.sonarr_calls("POST", "/series").len(), 1);
+    let hers = w.app.get(&format!("/api/requests/{id}"), &w.ann).await;
+    assert_eq!(hers.body["decided_by"]["name"], json!("cid"));
+    let heard = said(&mut events);
+    assert!(
+        heard.iter().any(|e| matches!(e,
+            ServerEvent::RequestDecided { to, request_id, status: RequestStatus::Approved, reason: None, .. }
+                if to.users == [w.ann_id] && *request_id == id)),
+        "{heard:?}"
+    );
+    assert!(!heard.iter().any(|e| matches!(e, ServerEvent::RequestCreated { .. })), "nothing new");
+
+    // Declined: for those who follow it too, without the reason, and none
+    // of them may ask for those seasons for 30 days.
+    let (dee, dee_id) = w.app.user(&w.admin, "dee", json!({})).await;
+    let follows = w.ask(&dee, json!({"kind": "show", "tmdb_id": 9001, "seasons": [2]})).await;
+    assert_eq!((follows.status, &follows.body["id"]), (StatusCode::OK, &json!(his)));
+    let mut events = w.app.state.events.subscribe();
+    let declined = w.app.post(&format!("/api/requests/{his}/decline"), &w.admin, json!({"reason": "Too long"})).await;
+    assert_eq!(status(&declined), (StatusCode::OK, "declined".to_owned()));
+    let decided: Vec<(Vec<i64>, Option<String>)> = said(&mut events)
+        .into_iter()
+        .filter_map(|e| match e {
+            ServerEvent::RequestDecided { to, reason, status: RequestStatus::Declined, .. } => Some((to.users, reason)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(decided, [(vec![bob_id], Some("Too long".to_owned())), (vec![dee_id], None)]);
+    let at = declined.body["decided_at"].as_i64().unwrap();
+    for token in [&bob, &dee] {
+        let refused = w.ask(token, json!({"kind": "show", "tmdb_id": 9001, "seasons": [2]})).await;
+        assert_eq!(
+            (refused.status, &refused.body["code"], &refused.body["retry_at"]),
+            (StatusCode::CONFLICT, &json!("declined"), &json!(at + 30 * 86_400)),
+            "{}",
+            refused.text()
+        );
+        assert!(refused.body["message"].as_str().unwrap().starts_with("season 2 was declined for this account"));
+    }
+    let detail = w.app.get("/api/discover/show/9001", &dee).await;
+    assert_eq!(detail.body["status"], json!("declined"), "what is left to ask for was");
+    let both = w.ask(&dee, json!({"kind": "show", "tmdb_id": 9001, "seasons": [2, 3]})).await;
+    assert!(both.body["message"].as_str().unwrap().starts_with("seasons 2 and 3 were declined"), "{}", both.text());
+    // Without seasons named: those not declined, season 1, which she
+    // follows then.
+    let rest = w.ask(&dee, json!({"kind": "show", "tmdb_id": 9001})).await;
+    assert_eq!((rest.status, &rest.body["id"], &rest.body["watching"]), (StatusCode::OK, &json!(id), &json!(true)));
+}
+
+#[tokio::test]
+async fn a_withdrawn_request_goes_to_its_earliest_follower() {
+    let w = world().await;
+    w.turn_on(json!({"request_limit_movies": 1})).await;
+    let (bob, bob_id) = w.app.user(&w.admin, "bob", json!({})).await;
+    let (cid, cid_id) = w.app.user(&w.admin, "cid", json!({})).await;
+    let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 604})).await;
+    let id = asked.body["id"].as_i64().unwrap();
+    for token in [&bob, &cid] {
+        let follows = w.ask(token, json!({"kind": "movie", "tmdb_id": 604})).await;
+        assert_eq!((follows.status, &follows.body["id"]), (StatusCode::OK, &json!(id)), "{}", follows.text());
+    }
+    // Cid followed it first.
+    sqlx::query("UPDATE request_watchers SET created_at = created_at - 60 WHERE user_id = ?")
+        .bind(cid_id)
+        .execute(&w.app.state.db.write)
+        .await
+        .unwrap();
+
+    // Ann withdraws hers: it is Cid's now, and Bob still follows it.
+    let mut events = w.app.state.events.subscribe();
+    assert_eq!(w.app.delete(&format!("/api/requests/{id}"), &w.ann).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(w.app.get(&format!("/api/requests/{id}"), &w.ann).await.status, StatusCode::NOT_FOUND);
+    let his = w.app.get(&format!("/api/requests/{id}"), &cid).await;
+    assert_eq!(
+        (&his.body["mine"], &his.body["watching"], &his.body["requested_by"]["name"], &his.body["actions"]),
+        (&json!(true), &json!(false), &json!("cid"), &json!(["withdraw"])),
+        "{}",
+        his.text()
+    );
+    let bobs = w.app.get(&format!("/api/requests/{id}"), &bob).await;
+    assert_eq!((&bobs.body["mine"], &bobs.body["watching"]), (&json!(false), &json!(true)));
+    let theirs = w.app.get(&format!("/api/requests/{id}"), &w.admin).await;
+    assert_eq!((&theirs.body["requested_by"]["name"], &theirs.body["watchers"]), (&json!("cid"), &json!(1)));
+    let summary = w.app.get("/api/requests/summary", &cid).await;
+    assert_eq!((&summary.body["movies_left"], &summary.body["own"]), (&json!(1), &json!(1)), "it costs him nothing");
+    let heard = said(&mut events);
+    assert!(
+        heard.iter().any(|e| matches!(e,
+            ServerEvent::RequestsChanged { to, request_id: Some(r), .. }
+                if *r == id && to.managers && [w.ann_id, bob_id, cid_id].iter().all(|u| to.users.contains(u)))),
+        "{heard:?}"
+    );
+
+    // Cid's account is deleted: Bob's now. Then Bob's: nobody follows it,
+    // so it goes with his account.
+    let mut events = w.app.state.events.subscribe();
+    let gone = w.app.delete(&format!("/api/users/{cid_id}"), &w.admin).await;
+    assert_eq!(gone.status, StatusCode::NO_CONTENT, "{}", gone.text());
+    let his = w.app.get(&format!("/api/requests/{id}"), &bob).await;
+    assert_eq!((&his.body["mine"], &his.body["watching"]), (&json!(true), &json!(false)), "{}", his.text());
+    let heard = said(&mut events);
+    assert!(
+        heard.iter().any(|e| matches!(e,
+            ServerEvent::RequestsChanged { to, request_id: None, .. } if to.users == [bob_id] && to.managers)),
+        "{heard:?}"
+    );
+    assert_eq!(w.app.delete(&format!("/api/users/{bob_id}"), &w.admin).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(w.app.get(&format!("/api/requests/{id}"), &w.admin).await.status, StatusCode::NOT_FOUND);
+
+    // Only its maker withdraws one; a manager's delete is for everyone.
+    let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 605})).await;
+    let id = asked.body["id"].as_i64().unwrap();
+    let (dee, dee_id) = w.app.user(&w.admin, "dee", json!({})).await;
+    w.ask(&dee, json!({"kind": "movie", "tmdb_id": 605})).await;
+    let refused = w.app.delete(&format!("/api/requests/{id}"), &dee).await;
+    assert_eq!((refused.status, &refused.body["request"]["watching"]), (StatusCode::CONFLICT, &json!(true)));
+    let mut events = w.app.state.events.subscribe();
+    assert_eq!(w.app.delete(&format!("/api/requests/{id}"), &w.admin).await.status, StatusCode::NO_CONTENT);
+    for token in [&w.ann, &dee] {
+        assert_eq!(w.app.get(&format!("/api/requests/{id}"), token).await.status, StatusCode::NOT_FOUND);
+    }
+    let heard = said(&mut events);
+    assert!(
+        heard.iter().any(|e| matches!(e,
+            ServerEvent::RequestsChanged { to, request_id: Some(r), .. } if *r == id && to.users.contains(&dee_id))),
+        "{heard:?}"
+    );
+}
+
+#[tokio::test]
+async fn approving_keeps_the_seasons_chosen_and_added_by_hand_sends_nothing() {
+    let w = world().await;
+    w.turn_on(json!({"request_limit_seasons": 3})).await;
+    let asked = w.ask(&w.ann, json!({"kind": "show", "tmdb_id": 9001})).await;
+    assert_eq!(asked.body["seasons"], json!([1, 2, 3]), "{}", asked.text());
+    let id = asked.body["id"].as_i64().unwrap();
+    for (body, why) in [
+        (json!({"seasons": []}), "none kept"),
+        (json!({"seasons": [4]}), "one not asked for"),
+        (json!({"seasons": "all"}), "not seasons"),
+        (json!({"quality_profile": 0}), "no profile"),
+        (json!({"root_folder": " "}), "no folder"),
+    ] {
+        let refused = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, body).await;
+        assert_eq!(
+            (refused.status, &refused.body["code"]),
+            (StatusCode::BAD_REQUEST, &json!("bad_request")),
+            "{why}: {}",
+            refused.text()
+        );
+    }
+    let approved = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({"seasons": [3, 1]})).await;
+    assert_eq!(status(&approved), (StatusCode::OK, "approved".to_owned()), "{}", approved.text());
+    assert_eq!((&approved.body["seasons"], &approved.body["stage"]), (&json!([1, 3]), &json!("approved")));
+    // Season 2 left: it no longer counts against her.
+    assert_eq!(w.app.get("/api/requests/summary", &w.ann).await.body["seasons_left"], json!(1));
+    w.app.state.requests.settled().await;
+    let series = &w.services.sonarr_calls("POST", "/series")[0].body;
+    let monitored: Vec<bool> =
+        series["seasons"].as_array().unwrap().iter().map(|s| s["monitored"].as_bool().unwrap()).collect();
+    assert_eq!(monitored, [false, true, false, true]);
+    let again = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({"seasons": [1]})).await;
+    assert_eq!((again.status, &again.body["seasons"]), (StatusCode::OK, &json!([1, 3])), "sent: as it is");
+
+    // Declined once sent, then approved again: sent again.
+    let declined = w.app.post(&format!("/api/requests/{id}/decline"), &w.admin, json!({"reason": "Later"})).await;
+    assert_eq!(status(&declined), (StatusCode::OK, "declined".to_owned()), "{}", declined.text());
+    assert_eq!(declined.body["sent_to"]["service"], json!("sonarr"), "it went there");
+    let approved = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    assert_eq!(status(&approved), (StatusCode::OK, "approved".to_owned()));
+    assert_eq!(approved.body["reason"], Value::Null);
+    w.app.state.requests.settled().await;
+    assert_eq!(w.services.sonarr_calls("PUT", "/series/21").len(), 1, "there already: monitored again");
+
+    // Added by hand: approved, never sent.
+    let movie = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 604})).await;
+    let movie_id = movie.body["id"].as_i64().unwrap();
+    assert_eq!(
+        w.app.post(&format!("/api/requests/{movie_id}/handled"), &w.ann, json!({})).await.status,
+        StatusCode::FORBIDDEN
+    );
+    let handled = w.app.post(&format!("/api/requests/{movie_id}/handled"), &w.admin, json!({})).await;
+    assert_eq!(status(&handled), (StatusCode::OK, "approved".to_owned()), "{}", handled.text());
+    assert_eq!(
+        (&handled.body["stage"], &handled.body["sent_to"], &handled.body["note"], &handled.body["actions"]),
+        (&json!("approved"), &Value::Null, &json!("Added by hand"), &json!(["approve", "decline", "delete"]))
+    );
+    let hers = w.app.get(&format!("/api/requests/{movie_id}"), &w.ann).await;
+    assert_eq!((&hers.body["note"], &hers.body["decided_by"]["name"]), (&Value::Null, &json!("admin")));
+    let again = w.app.post(&format!("/api/requests/{movie_id}/handled"), &w.admin, json!({})).await;
+    assert_eq!(status(&again), (StatusCode::OK, "approved".to_owned()));
+    w.app.state.requests.settled().await;
+    assert!(w.services.radarr_calls("POST", "/movie").is_empty(), "never sent");
+    let refused = w.app.post(&format!("/api/requests/{id}/handled"), &w.admin, json!({})).await;
+    assert_eq!((refused.status, &refused.body["request"]["id"]), (StatusCode::CONFLICT, &json!(id)), "sent");
+    // Approving it sends it after all.
+    let approved = w.app.post(&format!("/api/requests/{movie_id}/approve"), &w.admin, json!({})).await;
+    assert_eq!(status(&approved), (StatusCode::OK, "approved".to_owned()));
+    w.app.state.requests.settled().await;
+    assert_eq!(w.services.radarr_calls("POST", "/movie").len(), 1);
+    assert_eq!(w.app.post("/api/requests/999/handled", &w.admin, json!({})).await.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn the_options_say_what_approving_may_choose() {
+    let w = world().await;
+    w.turn_on(json!({"radarr_anime_quality_profile": 5})).await;
+    let options = w.app.get("/api/requests/options", &w.admin).await;
+    assert_eq!(options.status, StatusCode::OK, "{}", options.text());
+    assert_eq!(
+        options.body,
+        json!({
+            "radarr": {
+                "quality_profiles": [{"id": 4, "name": "HD-1080p"}, {"id": 5, "name": "Ultra-HD"}],
+                "root_folders": [{"path": "/movies", "free_bytes": 5_000_000_000_i64}],
+                "quality_profile": 4, "root_folder": "/movies",
+                "anime_quality_profile": 5, "anime_root_folder": null, "error": null
+            },
+            "sonarr": {
+                "quality_profiles": [{"id": 6, "name": "HD-720p"}],
+                "root_folders": [{"path": "/tv", "free_bytes": null}, {"path": "/anime", "free_bytes": null}],
+                "quality_profile": 6, "root_folder": "/tv",
+                "anime_quality_profile": null, "anime_root_folder": "/anime", "error": null
+            }
+        })
+    );
+    // Kept a while: Radarr isn't asked again.
+    assert_eq!(w.app.get("/api/requests/options", &w.admin).await.status, StatusCode::OK);
+    assert_eq!(w.services.radarr_calls("GET", "/qualityprofile").len(), 1);
+    // Managers only.
+    let refused = w.app.get("/api/requests/options", &w.ann).await;
+    assert_eq!((refused.status, &refused.body["code"]), (StatusCode::FORBIDDEN, &json!("forbidden")));
+    let (app, _) = w.app.app_token(1, "library requests").await;
+    let refused = w.app.get("/api/requests/options", &app).await;
+    assert_eq!((refused.status, &refused.body["code"]), (StatusCode::FORBIDDEN, &json!("insufficient_scope")));
+    let (manager, _) = w.app.app_token(1, "library requests approvals").await;
+    assert_eq!(w.app.get("/api/requests/options", &manager).await.status, StatusCode::OK);
+
+    // Sonarr moved where nothing answers: said so, with nothing to choose
+    // from; Radarr without a root folder isn't connected.
+    let moved = w
+        .app
+        .put(
+            "/api/settings",
+            &w.admin,
+            json!({"sonarr_url": "http://127.0.0.1:9", "sonarr_api_key": "k", "radarr_root_folder": ""}),
+        )
+        .await;
+    assert_eq!(moved.status, StatusCode::OK, "{}", moved.text());
+    let options = w.app.get("/api/requests/options", &w.admin).await;
+    assert_eq!(options.status, StatusCode::OK, "always");
+    assert_eq!(options.body["radarr"], Value::Null);
+    let sonarr = &options.body["sonarr"];
+    assert_eq!(
+        (&sonarr["error"], &sonarr["quality_profiles"], &sonarr["root_folders"], &sonarr["quality_profile"]),
+        (&json!("Sonarr isn't answering"), &json!([]), &json!([]), &json!(6))
+    );
+}
+
+#[tokio::test]
+async fn the_list_filters_counts_and_names_the_people() {
+    let w = world().await;
+    w.turn_on(json!({})).await;
+    let (bob, bob_id) = w.app.user(&w.admin, "bob", json!({"display_name": "Bob"})).await;
+    let mut ids = Vec::new();
+    for (token, kind, tmdb_id) in [
+        (&w.ann, "movie", 603),
+        (&w.ann, "movie", 604),
+        (&w.ann, "show", 1396),
+        (&bob, "movie", 605),
+        (&bob, "movie", 606),
+    ] {
+        let asked = w.ask(token, json!({"kind": kind, "tmdb_id": tmdb_id})).await;
+        assert_eq!(asked.status, StatusCode::CREATED, "{}", asked.text());
+        ids.push(asked.body["id"].as_i64().unwrap());
+    }
+    let [matrix, reloaded, breaking, revolutions, robots] = ids[..] else { panic!() };
+    w.app.post(&format!("/api/requests/{reloaded}/decline"), &w.admin, json!({})).await;
+    *w.services.refusals.lock() = 1;
+    w.app.post(&format!("/api/requests/{revolutions}/approve"), &w.admin, json!({})).await;
+    w.app.state.requests.settled().await;
+    let listed = |reply: &common::Reply| -> Vec<i64> {
+        reply.body["requests"].as_array().unwrap().iter().map(|r| r["id"].as_i64().unwrap()).collect()
+    };
+    let counts = |reply: &common::Reply| -> Vec<i64> {
+        ["pending", "approved", "declined", "failed", "available"]
+            .iter()
+            .map(|s| reply.body["counts"][s].as_i64().unwrap())
+            .collect()
+    };
+    let people = |reply: &common::Reply| -> Vec<String> {
+        reply.body["people"].as_array().unwrap().iter().map(|p| p["name"].as_str().unwrap().to_owned()).collect()
+    };
+
+    let some = w.app.get("/api/requests?status=pending,failed", &w.admin).await;
+    assert_eq!(some.status, StatusCode::OK, "{}", some.text());
+    assert_eq!((listed(&some), &some.body["total"]), (vec![robots, revolutions, breaking, matrix], &json!(4)));
+    assert_eq!(counts(&some), [3, 0, 1, 1, 0], "every status");
+    assert_eq!(people(&some), ["ann", "Bob"], "by name");
+    // Needs attention, oldest first.
+    let attention = w.app.get("/api/requests?attention=1&order=oldest", &w.admin).await;
+    assert_eq!(listed(&attention), [matrix, breaking, revolutions, robots]);
+    assert_eq!(counts(&attention), [3, 0, 0, 1, 0]);
+    let shows = w.app.get("/api/requests?kind=show", &w.admin).await;
+    assert_eq!((listed(&shows), counts(&shows)), (vec![breaking], vec![1, 0, 0, 0, 0]));
+    let his = w.app.get(&format!("/api/requests?user_id={bob_id}"), &w.admin).await;
+    assert_eq!((listed(&his), people(&his)), (vec![robots, revolutions], vec!["ann".to_owned(), "Bob".to_owned()]));
+    let found = w.app.get("/api/requests?q=MATRIX", &w.admin).await;
+    assert_eq!(
+        (listed(&found), people(&found)),
+        (vec![revolutions, reloaded, matrix], vec!["ann".to_owned(), "Bob".to_owned()])
+    );
+    let found = w.app.get("/api/requests?q=matrix%20r&user_id=1", &w.admin).await;
+    assert_eq!((listed(&found), people(&found)), (vec![], vec!["ann".to_owned(), "Bob".to_owned()]));
+    let none = w.app.get("/api/requests?q=100%25", &w.admin).await;
+    assert_eq!(listed(&none), Vec::<i64>::new(), "% is a character");
+    let page = w.app.get("/api/requests?limit=2&offset=1", &w.admin).await;
+    assert_eq!((listed(&page), &page.body["total"]), (vec![revolutions, breaking], &json!(5)));
+    let own = w.app.get("/api/requests?mine=1", &w.admin).await;
+    assert_eq!((listed(&own), people(&own)), (vec![], Vec::<String>::new()));
+    // Changed lately.
+    sqlx::query("UPDATE requests SET updated_at = CASE WHEN id = ? THEN 2000 ELSE 1000 END")
+        .bind(breaking)
+        .execute(&w.app.state.db.write)
+        .await
+        .unwrap();
+    assert_eq!(listed(&w.app.get("/api/requests?changed_since=1500", &w.admin).await), [breaking]);
+    // News: hers, newest news first.
+    let unseen = w.app.get("/api/requests?unseen=1", &w.ann).await;
+    assert_eq!((listed(&unseen), &unseen.body["total"]), (vec![reloaded], &json!(1)), "{}", unseen.text());
+    assert_eq!(listed(&w.app.get("/api/requests?unseen=1", &w.admin).await), Vec::<i64>::new(), "not his");
+    // Others have their own and those they follow, and no people.
+    let hers = w.app.get(&format!("/api/requests?user_id={bob_id}"), &w.ann).await;
+    assert_eq!((listed(&hers), people(&hers)), (vec![breaking, reloaded, matrix], Vec::<String>::new()));
+    for query in ["kind=film", "order=random", "status=pending,lost", "user_id=x", "changed_since=soon"] {
+        let bad = w.app.get(&format!("/api/requests?{query}"), &w.admin).await;
+        assert_eq!((bad.status, &bad.body["code"]), (StatusCode::BAD_REQUEST, &json!("bad_request")), "{query}");
+    }
+    let long = w.app.get(&format!("/api/requests?q={}", "x".repeat(201)), &w.admin).await;
+    assert_eq!(long.status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn request_events_go_to_whom_they_are_for() {
+    let w = world().await;
+    w.turn_on(json!({})).await;
+    // Bob opens the shows only; Cid every library.
+    let (bob, bob_id) = w.app.user(&w.admin, "bob", json!({"all_libraries": false, "library_ids": [w.shows]})).await;
+    let (cid, cid_id) = w.app.user(&w.admin, "cid", json!({})).await;
+    let mut bus = w.app.state.events.subscribe();
+    let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 603})).await;
+    let id = asked.body["id"].as_i64().unwrap();
+    for token in [&bob, &cid] {
+        assert_eq!(w.ask(token, json!({"kind": "movie", "tmdb_id": 603})).await.status, StatusCode::OK);
+    }
+    let news = said(&mut bus);
+    let created: Vec<&ServerEvent> = news.iter().filter(|e| matches!(e, ServerEvent::RequestCreated { .. })).collect();
+    assert_eq!(created.len(), 1, "made once, followed twice: {news:?}");
+    assert!(matches!(created[0],
+        ServerEvent::RequestCreated { to, request_id, status: RequestStatus::Pending, requested_by, seasons: None, .. }
+            if to.managers && to.users.is_empty() && to.except_user == Some(w.ann_id) && *request_id == id
+                && requested_by.name == "ann"));
+
+    // Declined: she hears why, they hear that it was.
+    w.app.post(&format!("/api/requests/{id}/decline"), &w.admin, json!({"reason": "No"})).await;
+    let decided: Vec<(Vec<i64>, RequestStatus, Option<String>)> = said(&mut bus)
+        .into_iter()
+        .filter_map(|e| match e {
+            ServerEvent::RequestDecided { to, status, reason, .. } => Some((to.users, status, reason)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        decided,
+        [
+            (vec![w.ann_id], RequestStatus::Declined, Some("No".to_owned())),
+            (vec![bob_id, cid_id], RequestStatus::Declined, None)
+        ]
+    );
+    // Approved after all: she hears it, and it is sent.
+    w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    w.app.state.requests.settled().await;
+    let decided: Vec<(Vec<i64>, RequestStatus)> = said(&mut bus)
+        .into_iter()
+        .filter_map(|e| match e {
+            ServerEvent::RequestDecided { to, status, .. } => Some((to.users, status)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(decided, [(vec![w.ann_id], RequestStatus::Approved)]);
+
+    // Ready: each who can open it hears so, with the title; Bob, who
+    // can't, hears only that it changed.
+    w.add(w.movies, &["movies/The Matrix (1999).mkv"]).await;
+    w.identify("The Matrix", "tmdb_id = 603").await;
+    w.app.state.requests.sync().await.unwrap();
+    let item = w.app.ids(w.movies, &w.admin).await["The Matrix"];
+    let news = said(&mut bus);
+    let ready: Vec<(Vec<i64>, Option<i64>)> = news
+        .iter()
+        .filter_map(|e| match e {
+            ServerEvent::RequestAvailable { to, item_id, .. } => Some((to.users.clone(), *item_id)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ready, [(vec![w.ann_id], Some(item)), (vec![cid_id], Some(item))]);
+    assert!(news.iter().any(|e| matches!(e,
+        ServerEvent::RequestsChanged { to, request_id: Some(r), .. } if *r == id && to.users.contains(&bob_id))));
+    let his = w.app.get(&format!("/api/requests/{id}"), &bob).await;
+    assert_eq!((&his.body["stage"], &his.body["item_id"]), (&json!("available"), &Value::Null), "not his to open");
+
+    // Streams: an app's hears requests' events with `requests` only, and
+    // managers' with `approvals` too; seeing the news is for the account's
+    // other streams.
+    let (library, _) = w.app.app_token(w.ann_id, "library").await;
+    let (asking, _) = w.app.app_token(w.ann_id, "library requests").await;
+    let (admins, _) = w.app.app_token(1, "library requests").await;
+    let (manager, _) = w.app.app_token(1, "library requests approvals").await;
+    let mut streams = Vec::new();
+    for token in [&library, &asking, &admins, &manager, &w.ann] {
+        streams.push(events(&w.app, token).await);
+    }
+    let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 604})).await;
+    let other = asked.body["id"].as_i64().unwrap();
+    assert_eq!(w.app.post("/api/requests/seen", &w.ann, json!({})).await.status, StatusCode::NO_CONTENT);
+    w.app.state.events.send(ServerEvent::LibrariesChanged);
+    let mut told = Vec::new();
+    for stream in &mut streams {
+        told.push(heard(stream).await);
+    }
+    let changed = format!(r#""type":"requests_changed","request_id":{other},"#);
+    let seen = r#"{"type":"requests_changed","request_id":null,"kind":null,"tmdb_id":null}"#;
+    assert!(!told[0].contains("request"), "without `requests`: {}", told[0]);
+    assert!(told[1].contains(&changed) && told[1].contains(seen), "hers: {}", told[1]);
+    assert!(!told[1].contains("request_created"), "not a manager's: {}", told[1]);
+    assert!(!told[2].contains("request"), "an administrator's app without `approvals`: {}", told[2]);
+    assert!(told[3].contains("request_created") && told[3].contains(&changed), "a manager's: {}", told[3]);
+    assert!(told[4].contains(&changed) && !told[4].contains(seen), "the session that saw it: {}", told[4]);
 }
