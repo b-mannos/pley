@@ -2,6 +2,7 @@ import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { makeItem } from "@/test/fixtures";
 import { apiError, mockApi, renderWithProviders } from "@/test/render";
+import { makeSummary, makeTitle } from "@/test/requests";
 import { SearchPage } from "./SearchPage";
 import { personUrl } from "@/lib/urls";
 
@@ -32,17 +33,67 @@ describe("SearchPage", () => {
     expect(within(movies).getByText("1995")).toBeInTheDocument();
     // The query is trimmed.
     expect(requests.find((r) => r.path.startsWith("/api/search"))?.path).toBe("/api/search?q=heat&limit=60");
-    // Without requests (here, a server without them), no way to Discover.
-    expect(screen.queryByRole("link", { name: /in Discover/ })).not.toBeInTheDocument();
+    // Without requests (here, a server without them), nothing from TMDB.
+    expect(screen.queryByRole("heading", { name: "On TMDB" })).not.toBeInTheDocument();
+    expect(requests.some((r) => r.path.startsWith("/api/discover"))).toBe(false);
   });
 
-  it("offers to look in Discover where this account may ask for titles", async () => {
-    mockApi({
-      "GET /api/search": () => ({ items: [] }),
-      "GET /api/requests/summary": () => ({ enabled: true, access: "ask", movies_left: null, seasons_left: null, movies_next_at: null, seasons_next_at: null, pending: 0 }),
+  it("adds what TMDB has that the libraries don't, where this account may ask", async () => {
+    const requests = mockApi({
+      "GET /api/search": () => ({ items: [makeItem({ id: 2, title: "Dune", year: 2021 })] }),
+      "GET /api/requests/summary": () => makeSummary(),
+      "GET /api/discover/search": () => ({
+        page: 1,
+        total_pages: 1,
+        results: [makeTitle({ tmdb_id: 841, title: "Dune", year: 1984 }), makeTitle({ tmdb_id: 693134, title: "Dune: Part Two", year: 2024 })],
+      }),
     });
     search("dune ");
-    expect(await screen.findByRole("link", { name: "Look for “dune” in Discover" })).toHaveAttribute("href", "/discover?q=dune");
+
+    expect(await screen.findByRole("link", { name: "See all on Discover" })).toHaveAttribute("href", "/discover?q=dune");
+    const heading = screen.getByRole("heading", { name: "On TMDB" });
+    expect(within(heading).getByRole("link")).toHaveAttribute("href", "/discover?q=dune");
+    expect(screen.getByRole("link", { name: "Dune: Part Two, 2024, Movie" })).toHaveAttribute("href", "/discover/movie/693134");
+    // After the libraries' results.
+    const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(headings).toEqual(["Movies 1", "On TMDB"]);
+    expect(requests.find((r) => r.path.startsWith("/api/discover/search"))?.path).toBe("/api/discover/search?q=dune&missing=1");
+  });
+
+  it("shows TMDB's titles under a line when the libraries have nothing", async () => {
+    mockApi({
+      "GET /api/search": () => ({ items: [] }),
+      "GET /api/requests/summary": () => makeSummary(),
+      "GET /api/discover/search": () => ({ page: 1, total_pages: 1, results: [makeTitle()] }),
+    });
+    search("matrix");
+    expect(await screen.findByText("Nothing in your libraries matches")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "The Matrix, 1999, Movie" })).toBeInTheDocument();
+    expect(screen.queryByText("No results for “matrix”")).not.toBeInTheDocument();
+  });
+
+  it("never holds the libraries' results back for TMDB", async () => {
+    mockApi({
+      "GET /api/search": () => ({ items: [makeItem({ id: 2, title: "Heat", year: 1995 })] }),
+      "GET /api/requests/summary": () => makeSummary(),
+      "GET /api/discover/search": () => new Promise(() => {}),
+    });
+    search("heat");
+    expect(await screen.findByRole("heading", { name: "Movies 1" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "On TMDB" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "On TMDB" }).closest("section")).toHaveAttribute("aria-busy", "true");
+  });
+
+  it("says what went wrong with TMDB without hiding the libraries' results", async () => {
+    mockApi({
+      "GET /api/search": () => ({ items: [makeItem({ id: 2, title: "Heat", year: 1995 })] }),
+      "GET /api/requests/summary": () => makeSummary(),
+      "GET /api/discover/search": () => apiError(503, "tmdb_down", "TMDB didn't answer"),
+    });
+    search("heat");
+    expect(await screen.findByRole("alert")).toHaveTextContent("TMDB isn't answering");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Movies 1" })).toBeInTheDocument();
   });
 
   it("invites a search without a query", () => {

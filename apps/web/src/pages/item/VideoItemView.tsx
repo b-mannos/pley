@@ -18,6 +18,7 @@ import { MediaInfo } from "./MediaInfo";
 import { MoreLikeThis } from "./MoreLikeThis";
 import { EditDialogs, type EditDialog } from "./EditMenu";
 import { MoreActions } from "./ItemActions";
+import { ItemRequestLine } from "./ItemRequest";
 import {
   ContentRating,
   Genres,
@@ -202,6 +203,7 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
             <WatchedButton item={item} />
             <MoreActions item={item} file={file} />
           </div>
+          {item.kind === "movie" ? <ItemRequestLine item={item} /> : null}
 
           {item.kind === "movie" && item.tmdb_id == null && !item.summary ? <MissingKeyNotice className="max-w-3xl" /> : null}
           <EditDialogs item={item} dialog={edit} onClose={() => setEdit(null)} />
