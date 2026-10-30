@@ -1,7 +1,7 @@
-// Takes the README's pictures of the web app (docs/images): five screenshots and a tour
-// as a GIF, through a headless Chrome, from a server holding the store library.
+// Takes the README's picture of the web app (docs/images/web-home.jpg) through a
+// headless Chrome, from a server holding the store library.
 // Usage: bun web.mjs <dir> <address>, with <dir> as setup.mjs left it (admin.json).
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -78,7 +78,7 @@ async function settle(ms) {
 }
 const shot = async (quality) => Buffer.from((await send("Page.captureScreenshot", { format: "jpeg", quality })).data, "base64");
 
-// The mouse, moved as a hand would, so hover states show in the tour.
+// The mouse, moved as a hand would.
 let mouse = { x: width / 2, y: height / 2 };
 async function moveTo(x, y, steps = 14) {
   const from = mouse;
@@ -113,13 +113,6 @@ async function click(selector, text) {
 const still = async (name) => writeFileSync(join(out, `${name}.jpg`), await shot(80));
 const library = "aside a[href^='/library/'], nav a[href^='/library/']";
 
-// Frames as fast as the browser gives them, each with when it was taken.
-const frames = [];
-let recording = false;
-async function record() {
-  while (recording) frames.push({ t: performance.now(), jpeg: await shot(92) });
-}
-
 try {
   mkdirSync(out, { recursive: true });
   const { username, password } = JSON.parse(readFileSync(join(dir, "admin.json"), "utf8"));
@@ -137,49 +130,7 @@ try {
   await goto("/");
   await settle(1500);
   await still("web-home");
-
-  recording = true;
-  const recorder = record();
-  await sleep(1600);
-  await click("a[href^='/item/']", "Paper Moons");
-  await settle(1800);
-  await still("web-movie");
-  await click("button", "Resume");
-  await sleep(2600);
-  await moveTo(700, 600, 8); // shows the player's controls
-  await sleep(600);
-  await still("web-player");
-  await evaluate("history.back()");
-  await settle(200);
-  await click(library, "Movies");
-  await settle(1600);
-  await still("web-library");
-  await click(library, "TV Shows");
-  await settle(900);
-  await click("a[href^='/item/']", "Harbor Town");
-  await settle(1000);
-  await evaluate("window.scrollBy({ top: 440, behavior: 'smooth' }); document.querySelector('main')?.scrollBy({ top: 440, behavior: 'smooth' })");
-  await sleep(1100);
-  await click("a[href^='/item/']", "Season 1");
-  await settle(2200);
-  await still("web-season");
-  recording = false;
-  await recorder;
-
-  // The frames, each shown until the next was taken, as a 960-pixel GIF at 12 frames a second.
-  const work = mkdtempSync(join(tmpdir(), "pley-tour-"));
-  const list = [];
-  frames.forEach((f, i) => {
-    writeFileSync(join(work, `${i}.jpg`), f.jpeg);
-    list.push(`file '${i}.jpg'`, `duration ${(((frames[i + 1]?.t ?? f.t + 1500) - f.t) / 1000).toFixed(3)}`);
-  });
-  list.push(`file '${frames.length - 1}.jpg'`);
-  writeFileSync(join(work, "list.txt"), list.join("\n") + "\n");
-  const graph = "fps=12,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=192:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle";
-  const ff = spawnSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", join(work, "list.txt"), "-vf", graph, "-loop", "0", join(out, "tour.gif")], { stdio: "inherit" });
-  rmSync(work, { recursive: true, force: true });
-  if (ff.status !== 0) throw new Error("ffmpeg couldn't make the GIF");
-  console.log(`${frames.length} frames; the pictures are in ${out}`);
+  console.log(`the picture is in ${out}`);
 } finally {
   socket.close();
   browser.kill();
