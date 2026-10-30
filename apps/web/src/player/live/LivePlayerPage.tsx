@@ -567,7 +567,7 @@ function LivePlayer({
     >
       <video
         ref={videoRef}
-        className="absolute inset-0 size-full object-contain"
+        className={cn("absolute inset-y-0 left-0 h-full w-full object-contain transition-[width] duration-300 ease-out", panel && "sm:w-[calc(100%-24rem)]")}
         playsInline
         onClick={() => (panel ? setPanel(false) : togglePlay())}
         onDoubleClick={toggleFullscreen}
