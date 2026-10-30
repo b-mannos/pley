@@ -34,7 +34,7 @@ use crate::metadata::{MetadataAgent, TmdbError};
 use crate::ratings::rating_age;
 use crate::settings::SettingsStore;
 use crate::util::{now, utc};
-use arr::{Arr, Download, Service};
+use arr::{Arr, Download, DownloadState, Service};
 
 /// What the limits count: requests of the last 7 days.
 pub const LIMIT_WINDOW: i64 = 7 * 86_400;
@@ -124,6 +124,45 @@ impl RequestStatus {
 
     pub fn parse(text: &str) -> Option<RequestStatus> {
         RequestStatus::ALL.into_iter().find(|s| s.as_str() == text)
+    }
+}
+
+/// Where a request is: its decision, then for an approved one how far
+/// Radarr or Sonarr is with it (docs/API.md, Requests).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RequestStage {
+    Pending,
+    Declined,
+    Failed,
+    /// Approved, not sent: no Radarr or Sonarr for its kind, sending, or
+    /// added by hand.
+    Approved,
+    /// Sent; not out yet (until `stage_at`, where known).
+    Waiting,
+    /// Sent and out; nothing downloading yet.
+    Searching,
+    Downloading,
+    Importing,
+    /// Shows: some of the seasons asked for are ready.
+    Partial,
+    Available,
+    /// Was available; no library has it any more.
+    Gone,
+}
+
+impl RequestStage {
+    /// An approved request's, as stored once Radarr or Sonarr said.
+    fn approved(text: &str) -> Option<RequestStage> {
+        match text {
+            "approved" => Some(RequestStage::Approved),
+            "waiting" => Some(RequestStage::Waiting),
+            "searching" => Some(RequestStage::Searching),
+            "downloading" => Some(RequestStage::Downloading),
+            "importing" => Some(RequestStage::Importing),
+            "partial" => Some(RequestStage::Partial),
+            _ => None,
+        }
     }
 }
 
@@ -420,15 +459,46 @@ pub struct MediaRequest {
     pub available_seasons: Vec<i64>,
     pub anime: bool,
     pub status: RequestStatus,
+    pub stage: RequestStage,
+    /// Waiting: when it comes out, where known.
+    pub stage_at: Option<i64>,
+    /// Declined: the administrator's, for its maker and managers. Failed:
+    /// what went wrong, for managers.
     pub reason: Option<String>,
-    pub requested_by: RequestUser,
+    /// Managers: what to know of it.
+    pub note: Option<String>,
+    /// The account made it.
+    pub mine: bool,
+    /// The account follows it.
+    pub watching: bool,
+    /// Managers: how many follow it.
+    pub watchers: i64,
+    /// Its maker's or a follower's: it became available, partly available
+    /// or declined since the account last looked.
+    pub unseen: bool,
+    /// Its maker and managers: who asked.
+    pub requested_by: Option<RequestUser>,
+    /// Its maker and managers: who approved or declined it.
     pub decided_by: Option<RequestUser>,
     pub decided_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
     pub available_at: Option<i64>,
+    /// Failed: when the server tries again by itself.
+    pub retry_at: Option<i64>,
+    /// Managers: where it was sent.
+    pub sent_to: Option<SentTo>,
     pub item_id: Option<i64>,
     pub download: Option<Download>,
+}
+
+/// Where an approved request went, and with what: the quality profile's
+/// name and the root folder.
+#[derive(Debug, Clone, Serialize)]
+pub struct SentTo {
+    pub service: Service,
+    pub quality_profile: Option<String>,
+    pub root_folder: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -478,7 +548,8 @@ pub struct ListQuery {
 
 const COLUMNS: &str = "r.id, r.kind, r.tmdb_id, r.tvdb_id, r.imdb_id, r.title, r.year, r.poster_path,
     r.backdrop_path, r.seasons, r.available_seasons, r.anime, r.user_id, r.status, r.reason, r.decided_by,
-    r.decided_at, r.item_id, r.arr_id, r.created_at, r.updated_at, r.available_at,
+    r.decided_at, r.item_id, r.arr_id, r.created_at, r.updated_at, r.available_at, r.sent_to, r.sent_profile,
+    r.sent_folder, r.retry_at, r.stage, r.stage_at, r.note, r.news_at,
     COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS maker_name, u.avatar AS maker_avatar,
     u.avatar_color AS maker_color, COALESCE(NULLIF(TRIM(d.display_name), ''), d.username) AS decider_name,
     d.avatar AS decider_avatar, d.avatar_color AS decider_color";
@@ -508,6 +579,16 @@ struct RequestRow {
     created_at: i64,
     updated_at: i64,
     available_at: Option<i64>,
+    /// 'radarr', 'sonarr', or 'hand' (added by hand: never sent).
+    sent_to: Option<String>,
+    sent_profile: Option<String>,
+    sent_folder: Option<String>,
+    retry_at: Option<i64>,
+    /// An approved request's, as Radarr or Sonarr last said.
+    stage: Option<String>,
+    stage_at: Option<i64>,
+    note: Option<String>,
+    news_at: Option<i64>,
     maker_name: String,
     maker_avatar: Option<String>,
     maker_color: Option<String>,
@@ -533,8 +614,54 @@ impl RequestRow {
         Known { tmdb_id: self.tmdb_id, tvdb_id: self.tvdb_id, imdb_id: self.imdb_id.clone() }
     }
 
-    /// As `viewer` sees it: the library's title where they may open it.
-    fn to_dto(&self, visible: &HashSet<i64>, download: Option<Download>) -> MediaRequest {
+    /// Sent to Radarr or Sonarr (not added by hand).
+    fn sent(&self) -> Option<Service> {
+        match self.sent_to.as_deref() {
+            Some("radarr") => Some(Service::Radarr),
+            Some("sonarr") => Some(Service::Sonarr),
+            _ => None,
+        }
+    }
+
+    /// Where it is: an approved one's from its download, else from what
+    /// Radarr or Sonarr said last.
+    fn stage(&self, download: Option<&Download>) -> RequestStage {
+        match self.status() {
+            RequestStatus::Pending => RequestStage::Pending,
+            RequestStatus::Declined => RequestStage::Declined,
+            RequestStatus::Failed => RequestStage::Failed,
+            // Its library title went (`item_id` goes with it).
+            RequestStatus::Available if self.item_id.is_none() => RequestStage::Gone,
+            RequestStatus::Available => RequestStage::Available,
+            RequestStatus::Approved => match download.map(|d| d.state) {
+                Some(DownloadState::Importing) => RequestStage::Importing,
+                Some(_) => RequestStage::Downloading,
+                None => match self.stage.as_deref().and_then(RequestStage::approved) {
+                    Some(stage) => stage,
+                    None if !seasons_of(&self.available_seasons).is_empty() => RequestStage::Partial,
+                    // Sent: Radarr or Sonarr looks for it.
+                    None if self.sent().is_some() => RequestStage::Searching,
+                    None => RequestStage::Approved,
+                },
+            },
+        }
+    }
+
+    /// As `viewer` sees it: who asked and who decided for its maker and
+    /// managers, why it was declined for its maker too; what went wrong,
+    /// where it went and what to know for managers; the library's title
+    /// where the viewer may open it.
+    fn to_dto(&self, viewer: &Viewer, download: Option<Download>) -> MediaRequest {
+        let status = self.status();
+        let stage = self.stage(download.as_ref());
+        let mine = self.user_id == viewer.id;
+        let watching = viewer.following.contains(&self.id);
+        let theirs = mine || viewer.manager;
+        let reason = match status {
+            RequestStatus::Declined if theirs => self.reason.clone(),
+            RequestStatus::Failed if viewer.manager => self.reason.clone(),
+            _ => None,
+        };
         MediaRequest {
             id: self.id,
             kind: self.kind(),
@@ -546,28 +673,58 @@ impl RequestRow {
             seasons: self.seasons(),
             available_seasons: seasons_of(&self.available_seasons),
             anime: self.anime,
-            status: self.status(),
-            reason: self.reason.clone(),
-            requested_by: RequestUser {
+            status,
+            stage,
+            stage_at: self.stage_at.filter(|_| stage == RequestStage::Waiting),
+            reason,
+            note: self.note.clone().filter(|_| viewer.manager),
+            mine,
+            watching,
+            watchers: if viewer.manager { viewer.followers.get(&self.id).copied().unwrap_or(0) } else { 0 },
+            unseen: (mine || watching) && self.news_at.is_some_and(|at| at > viewer.seen_at),
+            requested_by: theirs.then(|| RequestUser {
                 id: self.user_id,
                 name: self.maker_name.clone(),
                 avatar_url: avatar_url(self.user_id, self.maker_avatar.as_deref()),
                 avatar_color: self.maker_color.clone(),
-            },
-            decided_by: self.decided_by.zip(self.decider_name.clone()).map(|(id, name)| RequestUser {
-                id,
-                name,
-                avatar_url: avatar_url(id, self.decider_avatar.as_deref()),
-                avatar_color: self.decider_color.clone(),
+            }),
+            decided_by: self.decided_by.filter(|_| theirs).zip(self.decider_name.clone()).map(|(id, name)| {
+                RequestUser {
+                    id,
+                    name,
+                    avatar_url: avatar_url(id, self.decider_avatar.as_deref()),
+                    avatar_color: self.decider_color.clone(),
+                }
             }),
             decided_at: self.decided_at,
             created_at: self.created_at,
             updated_at: self.updated_at,
             available_at: self.available_at,
-            item_id: self.item_id.filter(|id| visible.contains(id)),
+            retry_at: self.retry_at.filter(|_| status == RequestStatus::Failed),
+            sent_to: self.sent().filter(|_| viewer.manager).map(|service| SentTo {
+                service,
+                quality_profile: self.sent_profile.clone(),
+                root_folder: self.sent_folder.clone(),
+            }),
+            item_id: self.item_id.filter(|id| viewer.visible.contains(id)),
             download,
         }
     }
+}
+
+/// Who reads requests, with what of the requests read is theirs to know.
+#[derive(Debug)]
+struct Viewer {
+    id: i64,
+    manager: bool,
+    /// When the account last looked at its requests' news.
+    seen_at: i64,
+    /// The requests' library titles the account may open.
+    visible: HashSet<i64>,
+    /// How many follow each request (those someone follows).
+    followers: HashMap<i64, i64>,
+    /// The requests the account follows.
+    following: HashSet<i64>,
 }
 
 fn seasons_of(json: &str) -> Vec<i64> {
@@ -1397,7 +1554,7 @@ impl Requests {
                 .collect()
         });
         let rows = self.title_rows(caller, kind, tmdb_id).await?;
-        let requests = self.dtos(user, rows).await?;
+        let requests = self.dtos(caller, rows).await?;
         let quota = self.quota(caller).await?;
         let found = Found {
             kind,
@@ -1510,7 +1667,7 @@ impl Requests {
             TitleKind::Show => details.as_ref().map(|d| askable(d, &counts, &mark, restricted)),
         };
         let request = match mark.request_id() {
-            Some(id) => self.dtos(user, self.row(id).await?.into_iter().collect()).await?.pop(),
+            Some(id) => self.dtos(caller, self.row(id).await?.into_iter().collect()).await?.pop(),
             None => None,
         };
         Ok(ItemRequest { kind, tmdb_id, status, request, askable })
@@ -1551,12 +1708,49 @@ impl Requests {
             .await
     }
 
-    /// Requests as `viewer` sees them, with their downloads.
-    async fn dtos(&self, viewer: &AuthUser, rows: Vec<RequestRow>) -> sqlx::Result<Vec<MediaRequest>> {
-        let items: Vec<i64> = rows.iter().filter_map(|r| r.item_id).collect();
-        let visible = visible_items(&self.db, viewer.id, &items).await?;
+    /// Requests as `caller` sees them, with their downloads.
+    async fn dtos(&self, caller: &Caller<'_>, rows: Vec<RequestRow>) -> sqlx::Result<Vec<MediaRequest>> {
+        let viewer = self.viewer(caller, &rows).await?;
         let downloads = self.downloads(&rows).await;
-        Ok(rows.iter().map(|r| r.to_dto(&visible, downloads.get(&r.id).cloned())).collect())
+        Ok(rows.iter().map(|r| r.to_dto(&viewer, downloads.get(&r.id).cloned())).collect())
+    }
+
+    /// What of these requests is `caller`'s to know: the library titles it
+    /// may open, who follows them, and when it last looked at its news.
+    async fn viewer(&self, caller: &Caller<'_>, rows: &[RequestRow]) -> sqlx::Result<Viewer> {
+        let user = caller.user;
+        let items: Vec<i64> = rows.iter().filter_map(|r| r.item_id).collect();
+        let visible = visible_items(&self.db, user.id, &items).await?;
+        let (mut followers, mut following) = (HashMap::new(), HashSet::new());
+        if !rows.is_empty() {
+            let sql = format!(
+                "SELECT request_id, COUNT(*), MAX(user_id = ?) FROM request_watchers
+                 WHERE request_id IN ({}) GROUP BY request_id",
+                vec!["?"; rows.len()].join(",")
+            );
+            let mut query = sqlx::query_as::<_, (i64, i64, bool)>(sqlx::AssertSqlSafe(sql.as_str())).bind(user.id);
+            for row in rows {
+                query = query.bind(row.id);
+            }
+            for (id, count, follows) in query.fetch_all(&self.db.read).await? {
+                followers.insert(id, count);
+                if follows {
+                    following.insert(id);
+                }
+            }
+        }
+        let seen_at: Option<i64> = sqlx::query_scalar("SELECT COALESCE(requests_seen_at, 0) FROM users WHERE id = ?")
+            .bind(user.id)
+            .fetch_optional(&self.db.read)
+            .await?;
+        Ok(Viewer {
+            id: user.id,
+            manager: caller.manager,
+            seen_at: seen_at.unwrap_or(0),
+            visible,
+            followers,
+            following,
+        })
     }
 
     /// The downloads of approved requests that Radarr or Sonarr is busy with.
@@ -1617,7 +1811,7 @@ impl Requests {
         .bind(query.offset.max(0))
         .fetch_all(&self.db.read)
         .await?;
-        Ok(RequestList { total, counts, requests: self.dtos(user, rows).await? })
+        Ok(RequestList { total, counts, requests: self.dtos(caller, rows).await? })
     }
 
     /// `GET /api/requests/{id}`.
@@ -1628,7 +1822,7 @@ impl Requests {
     /// A request `caller` may see.
     async fn one(&self, caller: &Caller<'_>, id: i64) -> RequestResult<MediaRequest> {
         let row = self.row_for(caller, id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
-        Ok(self.dtos(caller.user, vec![row]).await?.remove(0))
+        Ok(self.dtos(caller, vec![row]).await?.remove(0))
     }
 
     /// Whether `user` may read a request naming account `id` (its maker,

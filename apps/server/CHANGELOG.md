@@ -75,6 +75,10 @@ describes how they are made.
 - Accounts made from an invitation with an age limit, or given one later,
   don't ask for titles until an administrator lets them; accounts that may
   not ask still see and withdraw their own requests.
+- A request says where it is (waiting for an administrator, sent to Radarr
+  or Sonarr, downloading, importing, partly or wholly ready, or gone from
+  the library since) and whether it has news its maker hasn't seen. Why a
+  request failed, and where it was sent, are for administrators.
 - The web app draws picture subtitles (PGS, VobSub, DVB) over the video
   itself, so the file still plays as it is, or its stream keeps HDR,
   rather than having them burned in.

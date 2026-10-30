@@ -1028,6 +1028,110 @@ async fn news_is_unseen_until_looked_at() {
 }
 
 #[tokio::test]
+async fn a_request_says_where_it_is_and_whose_it_is() {
+    let w = world().await;
+    w.turn_on(json!({})).await;
+    let (bob, bob_id) = w.app.user(&w.admin, "bob", json!({})).await;
+    let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 604})).await;
+    assert_eq!(asked.status, StatusCode::CREATED, "{}", asked.text());
+    let id = asked.body["id"].as_i64().unwrap();
+    assert_eq!(
+        (&asked.body["stage"], &asked.body["mine"], &asked.body["watching"], &asked.body["unseen"]),
+        (&json!("pending"), &json!(true), &json!(false), &json!(false))
+    );
+    for field in ["stage_at", "note", "retry_at", "sent_to"] {
+        assert_eq!(asked.body[field], Value::Null, "{field}");
+    }
+
+    // Bob follows it: he sees where it is, not who asked.
+    sqlx::query("INSERT INTO request_watchers (request_id, user_id, created_at) VALUES (?, ?, ?)")
+        .bind(id)
+        .bind(bob_id)
+        .bind(asked.body["created_at"].as_i64())
+        .execute(&w.app.state.db.write)
+        .await
+        .unwrap();
+    let his = w.app.get(&format!("/api/requests/{id}"), &bob).await;
+    assert_eq!(his.status, StatusCode::OK, "{}", his.text());
+    assert_eq!(
+        (&his.body["mine"], &his.body["watching"], &his.body["watchers"], &his.body["requested_by"]),
+        (&json!(false), &json!(true), &json!(0), &Value::Null)
+    );
+    assert_eq!(w.app.get("/api/requests", &bob).await.body["total"], json!(1), "those he follows are listed");
+    let theirs = w.app.get(&format!("/api/requests/{id}"), &w.admin).await;
+    assert_eq!(
+        (&theirs.body["mine"], &theirs.body["watchers"], &theirs.body["requested_by"]["name"]),
+        (&json!(false), &json!(1), &json!("ann"))
+    );
+
+    // Declined: news to her and to him; why, and who said so, are hers.
+    let declined = w.app.post(&format!("/api/requests/{id}/decline"), &w.admin, json!({"reason": "Not now"})).await;
+    assert_eq!(
+        (&declined.body["stage"], &declined.body["reason"], &declined.body["unseen"]),
+        (&json!("declined"), &json!("Not now"), &json!(false)),
+        "{}",
+        declined.text()
+    );
+    let hers = w.app.get(&format!("/api/requests/{id}"), &w.ann).await;
+    assert_eq!(
+        (&hers.body["reason"], &hers.body["decided_by"]["name"], &hers.body["unseen"]),
+        (&json!("Not now"), &json!("admin"), &json!(true))
+    );
+    let his = w.app.get(&format!("/api/requests/{id}"), &bob).await;
+    assert_eq!(
+        (&his.body["stage"], &his.body["reason"], &his.body["decided_by"], &his.body["unseen"]),
+        (&json!("declined"), &Value::Null, &Value::Null, &json!(true))
+    );
+    assert_eq!(w.app.post("/api/requests/seen", &bob, json!({})).await.status, StatusCode::NO_CONTENT);
+    assert_eq!(w.app.get(&format!("/api/requests/{id}"), &bob).await.body["unseen"], json!(false));
+    assert_eq!(w.app.get(&format!("/api/requests/{id}"), &w.ann).await.body["unseen"], json!(true), "hers to see");
+
+    // Sent to Radarr, which downloads it: where it went is for managers.
+    let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 603})).await;
+    let matrix = asked.body["id"].as_i64().unwrap();
+    let approved = w.app.post(&format!("/api/requests/{matrix}/approve"), &w.admin, json!({})).await;
+    assert_eq!(
+        (&approved.body["stage"], &approved.body["sent_to"]["service"]),
+        (&json!("downloading"), &json!("radarr")),
+        "{}",
+        approved.text()
+    );
+    let hers = w.app.get(&format!("/api/requests/{matrix}"), &w.ann).await;
+    assert_eq!((&hers.body["stage"], &hers.body["sent_to"]), (&json!("downloading"), &Value::Null));
+
+    // Failed: what went wrong is for managers.
+    *w.services.refusals.lock() = 1;
+    let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 605})).await;
+    let id = asked.body["id"].as_i64().unwrap();
+    let failed = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    assert_eq!(
+        (&failed.body["stage"], &failed.body["reason"]),
+        (&json!("failed"), &json!("Radarr refused: Root folder is not writable"))
+    );
+    let hers = w.app.get(&format!("/api/requests/{id}"), &w.ann).await;
+    assert_eq!((&hers.body["stage"], &hers.body["reason"]), (&json!("failed"), &Value::Null));
+
+    // Without Radarr: approved, not sent.
+    let reply = w.app.put("/api/settings", &w.admin, json!({"radarr_url": ""})).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 606})).await;
+    let id = asked.body["id"].as_i64().unwrap();
+    let approved = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    assert_eq!((&approved.body["stage"], &approved.body["sent_to"]), (&json!("approved"), &Value::Null));
+
+    // There, then gone from the library.
+    w.add(w.movies, &["movies/The Matrix (1999).mkv"]).await;
+    w.identify("The Matrix", "tmdb_id = 603").await;
+    w.app.state.requests.sync().await.unwrap();
+    let hers = w.app.get(&format!("/api/requests/{matrix}"), &w.ann).await;
+    assert_eq!((&hers.body["stage"], &hers.body["unseen"]), (&json!("available"), &json!(true)), "{}", hers.text());
+    let item = hers.body["item_id"].as_i64().unwrap();
+    sqlx::query("DELETE FROM items WHERE id = ?").bind(item).execute(&w.app.state.db.write).await.unwrap();
+    let hers = w.app.get(&format!("/api/requests/{matrix}"), &w.ann).await;
+    assert_eq!((&hers.body["stage"], &hers.body["item_id"]), (&json!("gone"), &Value::Null));
+}
+
+#[tokio::test]
 async fn apps_ask_with_requests_and_manage_with_approvals() {
     let w = world().await;
     w.turn_on(json!({})).await;

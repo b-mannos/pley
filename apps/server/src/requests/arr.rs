@@ -25,7 +25,7 @@ const QUEUE_SIZE: u32 = 1000;
 /// What an error quotes of an answer at most.
 const QUOTE: usize = 300;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Service {
     Radarr,

@@ -2403,8 +2403,8 @@ An app's token without the route's scope is refused before all of it
   the account last called `POST /api/requests/seen`, which also sends
   `requests_changed` to the account's streams so its other devices clear
   their badges.
-- **Listing** (`GET /api/requests`): your own requests; managers' answer
-  has everyone's, unless `mine=1`. `status` keeps one status; `counts`
+- **Listing** (`GET /api/requests`): your own requests and those you
+  follow; managers' answer has everyone's, unless `mine=1`. `status` keeps one status; `counts`
   counts each status of the same list without it. `offset` and `limit`
   (default 50, at most 200).
 - **Events**: every change of a request sends `requests_changed` to its
@@ -2413,6 +2413,15 @@ An app's token without the route's scope is refused before all of it
   says the summary may have changed (see [events](#activity--events)).
 - **`download`**: an approved request's download in Radarr or Sonarr while
   one is queued or running, looked up at most every 10 seconds.
+- **`stage`**: a pending, declined or failed request's is its `status`; an
+  available one whose title no library has any more is `gone`. An approved
+  one is `downloading` or `importing` while `download` says so, `partial`
+  while some of the seasons asked for are ready, `searching` once sent to
+  Radarr or Sonarr, and `approved` while it isn't sent.
+- **Who sees what**: a request's maker and the accounts following it read
+  it; managers read everyone's. Followers don't see who asked or decided,
+  nor why it was declined; what went wrong, `note`, `sent_to` and
+  `watchers` are for managers.
 
 ```ts
 type TitleKind = "movie" | "show";
@@ -2478,7 +2487,8 @@ interface DiscoverDetail extends DiscoverTitle {
                                     // request for it declined in the last 30 days (shows: for some seasons)
   restriction: string | null;       // why the account can't ask: "Rated R: above this account's age limit"
   watching: boolean;                // the account follows an active request for it
-  requests: MediaRequest[];         // for it: this account's, everyone's for managers; newest first
+  requests: MediaRequest[];         // for it: this account's and those it follows (everyone's for managers),
+                                    // newest first
   movies_left: number | null;       // as in the summary, so the page needs no other call
   seasons_left: number | null;
   movies_next_at: Timestamp | null;
@@ -2511,6 +2521,17 @@ interface ItemRequest {
                                     // movies and titles above the age limit; null without TMDB's details yet
 }
 
+type RequestStage =
+  | "pending" | "declined" | "failed"
+  | "approved"                      // approved, not sent: no Radarr or Sonarr for its kind, or added by hand
+  | "waiting"                       // sent; not out yet (`stage_at`, where known)
+  | "searching"                     // sent and out; nothing downloading yet
+  | "downloading"                   // see `download`
+  | "importing"                     // downloaded; going into the library
+  | "partial"                       // shows: some of the seasons asked for are ready
+  | "available"
+  | "gone";                         // was available; no library has it any more
+
 interface MediaRequest {
   id: Id;
   kind: TitleKind;
@@ -2522,15 +2543,27 @@ interface MediaRequest {
   seasons: number[] | null;         // shows: the seasons asked for; null for movies
   available_seasons: number[];      // shows: those a library has whole
   anime: boolean;
-  status: RequestStatus;
-  reason: string | null;            // declined: the administrator's (or null); failed: what went wrong
-  requested_by: RequestUser;
-  decided_by: RequestUser | null;   // who approved or declined it: the maker where approved as made;
-                                    // null for an account deleted since
+  status: RequestStatus;            // the decision
+  stage: RequestStage;              // where it is: draw a request from this
+  stage_at: Timestamp | null;       // waiting: when it comes out, where known
+  reason: string | null;            // declined: the administrator's (or null), for its maker and managers;
+                                    // failed: what went wrong, for managers; null for others
+  note: string | null;              // managers: what to know of it
+  mine: boolean;                    // this account made it
+  watching: boolean;                // this account follows it
+  watchers: number;                 // managers: how many follow it; 0 for others
+  unseen: boolean;                  // its maker's or a follower's: it became available, partly available or
+                                    // declined since the account last looked
+  requested_by: RequestUser | null; // its maker and managers; null for followers
+  decided_by: RequestUser | null;   // who approved or declined it, for its maker and managers: the maker where
+                                    // approved as made; null for an account deleted since, and for followers
   decided_at: Timestamp | null;
   created_at: Timestamp;
   updated_at: Timestamp;
   available_at: Timestamp | null;
+  retry_at: Timestamp | null;       // failed: when the server tries again by itself; null: it won't
+  sent_to: { service: "radarr" | "sonarr"; quality_profile: string | null; root_folder: string | null } | null;
+                                    // managers: where it was sent (the profile's name), where known
   item_id: Id | null;               // a library's title once there, where this account may open it
   download: RequestDownload | null;
 }
