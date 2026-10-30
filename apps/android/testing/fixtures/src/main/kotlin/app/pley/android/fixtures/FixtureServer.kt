@@ -3,7 +3,9 @@ package app.pley.android.fixtures
 import app.pley.android.model.ServerEvent
 import java.io.Closeable
 import java.net.InetAddress
+import java.net.ServerSocket
 import java.util.concurrent.TimeUnit
+import javax.net.ServerSocketFactory
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
@@ -182,9 +184,30 @@ class FixtureServer(private val options: Options = Options()) : Closeable {
         next.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse = answer(request)
         }
+        next.serverSocketFactory = ReusingSockets
         next.start(InetAddress.getByName("127.0.0.1"), at)
         server = next
         port = next.port
+    }
+
+    /**
+     * Server sockets that always reuse their address. MockWebServer sets it
+     * only when given a port, so on Linux the connections left from a first
+     * start on a free port would keep a restart ([Mode.Down], [start] with
+     * the old port) from binding it again.
+     */
+    private object ReusingSockets : ServerSocketFactory() {
+        override fun createServerSocket(): ServerSocket = object : ServerSocket() {
+            override fun setReuseAddress(on: Boolean) = super.setReuseAddress(true)
+        }
+
+        override fun createServerSocket(port: Int): ServerSocket = unbound()
+
+        override fun createServerSocket(port: Int, backlog: Int): ServerSocket = unbound()
+
+        override fun createServerSocket(port: Int, backlog: Int, address: InetAddress?): ServerSocket = unbound()
+
+        private fun unbound(): Nothing = throw UnsupportedOperationException("MockWebServer binds the socket itself")
     }
 
     private fun stopListening() {
