@@ -334,7 +334,8 @@ class RoutesTest(unittest.TestCase):
         on, later, more = items
         self.assertEqual(on[2].label, "On now  Morning Briefing: Part 7")
         self.assertEqual((on[1], on[3]), ("plugin://plugin.video.pley/?route=live_play&id=1", False))
-        self.assertEqual(later[2].label, "Today %s  World at One" % clock(NOW + 2700))
+        # "Today", or "Tomorrow" run in the hour before midnight.
+        self.assertEqual(later[2].label, "%s %s  World at One" % (livetv.day(NOW + 2700, NOW), clock(NOW + 2700)))
         self.assertNotIn("IsPlayable", later[2].properties)
         self.assertEqual(more[2].label, "Later")
         self.assertIn("from=%d" % (NOW + 5400), more[1])
@@ -528,7 +529,8 @@ class LiveScreenTest(unittest.TestCase):
         with test_window.Dialogs(picks=[1, -1]) as asked:
             self.screen.info(L.LIVE_LIST)
         labels, preselect = asked.shown[0]
-        self.assertEqual(labels, ["On now  ·  Morning Briefing: Part 7", "Today %s  ·  World at One" % clock(NOW + 2700), "Later"])
+        upcoming = "%s %s  ·  World at One" % (livetv.day(NOW + 2700, NOW), clock(NOW + 2700))
+        self.assertEqual(labels, ["On now  ·  Morning Briefing: Part 7", upcoming, "Later"])
         self.assertEqual(asked.shown[1][1], 1)
         self.assertEqual(asked.asked[0][0], "World at One")
         self.assertIn("101 Pley News HD", asked.asked[0][1])
