@@ -238,6 +238,10 @@ Apps sign in on Pley's own page with OAuth 2.1.
   downloads in the system's player or file manager.
 - Server pages get none of its commands; only the pages bundled with the
   app do.
+- While the window isn't in front, it follows that server's event stream
+  with the window's own session, sent to that server's origin only, and
+  tells of requests in the system's notifications: titles, seasons and
+  names, never pictures or links.
 
 ### The Android app
 
