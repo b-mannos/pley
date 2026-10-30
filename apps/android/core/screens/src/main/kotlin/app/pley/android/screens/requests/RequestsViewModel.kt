@@ -282,12 +282,12 @@ class RequestsViewModel(
         }
     }
 
-    /** Pull to refresh, or Retry. */
+    /** Pull to refresh, or Retry: the summary and the list read again (once, however often it's pulled meanwhile). */
     fun refresh() {
+        if (refreshing.value) return
         requests.refresh()
         val f = filter.value ?: return
         if (list.value !is RequestListState.Ready) return restart(f)
-        if (refreshing.value) return
         refreshing.value = true
         viewModelScope.launch {
             try {

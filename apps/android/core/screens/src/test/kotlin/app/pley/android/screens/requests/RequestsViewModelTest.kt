@@ -189,6 +189,27 @@ class RequestsViewModelTest {
     }
 
     @Test
+    fun pullingToRefreshReadsAgainOnceAndShowsItUntilTheListComes() = runTest(dispatcher) {
+        val requests = FakeRequests(summary)
+        requests.api.answer("requests", RequestList(total = 1, requests = listOf(attention.requests.first())))
+        val vm = viewModel(requests)
+        settle()
+        val lists = requests.queries().size
+        val summaries = requests.refreshed
+        requests.api.hold()
+        vm.refresh()
+        // Pulled again while it reads: nothing more is asked.
+        vm.refresh()
+        settle()
+        assertTrue(vm.state.value.refreshing)
+        requests.api.release()
+        settle()
+        assertFalse(vm.state.value.refreshing)
+        assertEquals(lists + 1, requests.queries().size)
+        assertEquals(summaries + 1, requests.refreshed)
+    }
+
+    @Test
     fun theApproveDialogStartsOnTheSettingsChoices() = runTest(dispatcher) {
         val requests = FakeRequests(manager)
         val vm = viewModel(requests)

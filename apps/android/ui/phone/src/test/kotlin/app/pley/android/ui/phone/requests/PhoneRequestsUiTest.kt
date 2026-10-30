@@ -167,7 +167,7 @@ class PhoneRequestsUiTest {
         // The specials come last.
         page.performScrollToNode(hasTestTag(TITLE_SEASON + 0))
         page.performScrollToNode(hasTestTag(TITLE_CAST))
-        compose.onNodeWithText("Bryan Cranston", substring = true, useUnmergedTree = true).assertExists()
+        compose.onAllNodesWithText("Bryan Cranston", substring = true, useUnmergedTree = true).onFirst().assertExists()
     }
 
     @Test
