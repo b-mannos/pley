@@ -25,6 +25,9 @@ const RING_MS = 500;
 /** Left and Right move this far in the timeshift; held, three times as far. */
 const STEP_MS = 10_000;
 
+/** Where the picture goes beside the channel list (the side panel's 440 px), in canvas px. */
+const ASIDE = { left: 0, top: 0, width: 520, height: 540 };
+
 /** Keys the player takes whatever has focus. */
 const MEDIA_KEYS: Key[] = ["playPause", "play", "pause", "stop", "fastForward", "rewind", "next", "previous", "channelUp", "channelDown", "channelList", "guide", "info"];
 
@@ -116,7 +119,7 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
   const hours24 = app.platform.clock24();
   const [controls, setControls] = useState(false);
   const [list, setList] = useState(false);
-  const [banner, setBanner] = useState(true);
+  const [banner, setBanner] = useState(false);
   const [ring, setRing] = useState(false);
   const [toast, setToast] = useState<{ text: string; n: number; error: boolean } | null>(null);
   const [missing, setMissing] = useState<string | null>(null);
@@ -164,8 +167,8 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
     if (s.shown && s.tunes === 1) console.info(`pley: live picture ${Date.now() - p.pressedAt} ms after the press`);
   }, [s.shown]);
 
-  // What's on shows as each channel starts, for 5 s once it plays.
-  useEffect(() => setBanner(true), [s.tunes]);
+  // What's on shows when asked (Info), for 5 s once it plays; not as each channel starts, as on the web. A new channel puts it away.
+  useEffect(() => setBanner(false), [s.tunes]);
   useEffect(() => {
     if (!banner || s.phase !== "playing") return;
     const t = setTimeout(() => setBanner(false), BANNER_MS);
@@ -360,6 +363,11 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
   keysRef.current = keys;
   useEffect(() => ui.input.push((key, e) => keysRef.current(key, e)), []);
 
+  // The TV's own player draws on a plane of its own: it is told where the picture goes as the list opens and closes.
+  useEffect(() => {
+    c.engine?.setArea?.(list ? ASIDE : null);
+  }, [list, c.engine]);
+
   // The pointer (the Magic Remote) moving shows the controls and keeps them up, as a key does.
   useEffect(() => {
     const moved = () => {
@@ -392,49 +400,52 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
   const name = channelName(channel, category);
   return (
     <div class="player live-player">
-      <div
-        ref={(el) => {
-          host.current = el;
-        }}
-        class="engine-host"
-      />
-      <div class={`player-scrim${controls || infoShown ? " in" : ""}`} />
-      <F class="video-holder" fid="video" disabled={controls} label={`${name}, live`} />
-      {s.phase === "tuning" && !s.shown && <TuningCard channel={channel} name={name} on={on} />}
-      {s.shown && s.audioOnly && !trouble && <RadioCard channel={channel} name={name} on={on} hours24={hours24} />}
-      <div class={`live-info${infoShown ? " in" : ""}`} aria-hidden={!infoShown}>
-        <NowCard channel={channel} name={name} on={on} next={next} now={now} hours24={hours24} />
-      </div>
-      <div class={`player-controls${controls ? " in" : ""}`} aria-hidden={!controls}>
-        <div class="player-top">
-          <div style="flex:1" />
-          <div class="player-clock">
-            <TimeOfDay hours24={hours24} />
-          </div>
+      {/* The picture and its controls; beside the channel list while it is open, rather than under it. */}
+      <div class={`live-stage${list ? " aside" : ""}`}>
+        <div
+          ref={(el) => {
+            host.current = el;
+          }}
+          class="engine-host"
+        />
+        <div class={`player-scrim${controls || infoShown ? " in" : ""}`} />
+        <F class="video-holder" fid="video" disabled={controls} label={`${name}, live`} />
+        {s.phase === "tuning" && !s.shown && <TuningCard channel={channel} name={name} on={on} />}
+        {s.shown && s.audioOnly && !trouble && <RadioCard channel={channel} name={name} on={on} hours24={hours24} />}
+        <div class={`live-info${infoShown ? " in" : ""}`} aria-hidden={!infoShown}>
+          <NowCard channel={channel} name={name} on={on} next={next} now={now} hours24={hours24} />
         </div>
-        <G kind="row" class="player-row">
-          <div class="row-left">
-            <PlayerButton fid="channels" icon="list" label="Channels" onSelect={() => setList(true)} />
-            <PlayerButton fid="favorite" icon={channel.favorite ? "star" : "star-outline"} label={channel.favorite ? "Remove from favourites" : "Add to favourites"} onSelect={toggleFavorite} />
+        <div class={`player-controls${controls ? " in" : ""}`} aria-hidden={!controls}>
+          <div class="player-top">
+            <div style="flex:1" />
+            <div class="player-clock">
+              <TimeOfDay hours24={hours24} />
+            </div>
           </div>
-          <div class="row-centre">
-            {/* Without a window to seek in (the TV's player hasn't said one), only pause. */}
-            {clock.window && <PlayerButton fid="back10" icon="rotate-ccw" skipSeconds={STEP_MS / 1000} label="Back 10 seconds" onSelect={() => seek(-STEP_MS)} />}
-            <PlayerButton fid="playpause" icon={c.wantsToPlay ? "pause" : "play"} label={c.wantsToPlay ? "Pause" : "Play"} big onSelect={() => c.togglePause()} />
-            {clock.window && <PlayerButton fid="fwd10" icon="rotate-cw" skipSeconds={STEP_MS / 1000} label="Forward 10 seconds" onSelect={() => seek(STEP_MS)} />}
-          </div>
-          <div class="row-right">
-            <LiveChip atLive={atLive} behindMs={clock.behindMs} onGoLive={() => c.goLive()} />
-            <PlayerButton fid="chdown" icon="chevron-down" label="Previous channel" onSelect={() => zap(-1)} />
-            <PlayerButton fid="chup" icon="chevron-up" label="Next channel" onSelect={() => zap(1)} />
-          </div>
-        </G>
-      </div>
-      {ring && !trouble && (
-        <div class="player-ring" role="status" aria-label="Loading">
-          <div />
+          <G kind="row" class="player-row">
+            <div class="row-left">
+              <PlayerButton fid="channels" icon="list" label="Channels" onSelect={() => setList(true)} />
+              <PlayerButton fid="favorite" icon={channel.favorite ? "star" : "star-outline"} label={channel.favorite ? "Remove from favourites" : "Add to favourites"} onSelect={toggleFavorite} />
+            </div>
+            <div class="row-centre">
+              {/* Without a window to seek in (the TV's player hasn't said one), only pause. */}
+              {clock.window && !list && <PlayerButton fid="back10" icon="rotate-ccw" skipSeconds={STEP_MS / 1000} label="Back 10 seconds" onSelect={() => seek(-STEP_MS)} />}
+              <PlayerButton fid="playpause" icon={c.wantsToPlay ? "pause" : "play"} label={c.wantsToPlay ? "Pause" : "Play"} big onSelect={() => c.togglePause()} />
+              {clock.window && !list && <PlayerButton fid="fwd10" icon="rotate-cw" skipSeconds={STEP_MS / 1000} label="Forward 10 seconds" onSelect={() => seek(STEP_MS)} />}
+            </div>
+            <div class="row-right">
+              <LiveChip atLive={atLive} behindMs={clock.behindMs} onGoLive={() => c.goLive()} />
+              <PlayerButton fid="chdown" icon="chevron-down" label="Previous channel" onSelect={() => zap(-1)} />
+              <PlayerButton fid="chup" icon="chevron-up" label="Next channel" onSelect={() => zap(1)} />
+            </div>
+          </G>
         </div>
-      )}
+        {ring && !trouble && (
+          <div class="player-ring" role="status" aria-label="Loading">
+            <div />
+          </div>
+        )}
+      </div>
       {trouble && (
         <div class="player-error live-error">
           <ChannelLogo channel={channel} width={128} height={72} />
@@ -697,7 +708,8 @@ function ChannelList(p: { category: LiveCategory; current: number; now: number; 
   }
   return (
     <div ref={trap} class="panel-root" style="position:absolute;left:0;top:0;right:0;bottom:0;z-index:30" aria-label="Channels">
-      <div class={`scrim${inside ? " in" : ""}`} onClick={p.onClose} />
+      {/* The picture moves aside for the list: nothing dims it. */}
+      <div class="scrim beside" onClick={p.onClose} />
       <div class={`side-panel wide live-list${inside ? " in" : ""}`}>
         <div class="live-list-head">
           <div class="t-title c-fg one-line">{categoryName(category, groups?.groups)}</div>

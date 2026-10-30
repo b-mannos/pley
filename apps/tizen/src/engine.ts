@@ -133,7 +133,7 @@ export class AvplayEngine implements PlayerEngine {
         onsubtitlechange: () => undefined,
       });
       // AVPlay places its plane in a 1920×1080 space, whatever the page's size.
-      p.setDisplayRect(0, 0, 1920, 1080);
+      this.placePlane();
       p.setDisplayMethod("PLAYER_DISPLAY_MODE_LETTER_BOX");
       if (source.hls && this.uhd) {
         try {
@@ -264,6 +264,25 @@ export class AvplayEngine implements PlayerEngine {
   /** AVPlay doesn't say how far it has buffered: just the position. */
   bufferedMs(): number {
     return this.positionMs();
+  }
+
+  /** Where the picture goes, in the canvas's 960×540 px; `null`: the whole screen. */
+  private area: { left: number; top: number; width: number; height: number } | null = null;
+
+  /** The plane to the area, in AVPlay's 1920×1080 space (twice the canvas); letterboxed inside it. */
+  setArea(area: { left: number; top: number; width: number; height: number } | null): void {
+    this.area = area;
+    if (this.source) this.placePlane();
+  }
+
+  private placePlane(): void {
+    const a = this.area;
+    try {
+      if (a) this.player.setDisplayRect(Math.round(a.left * 2), Math.round(a.top * 2), Math.round(a.width * 2), Math.round(a.height * 2));
+      else this.player.setDisplayRect(0, 0, 1920, 1080);
+    } catch {
+      // Nothing open yet: placed as the next source opens.
+    }
   }
 
   /** A live stream's window, as AVPlay reads it from the playlist ("start|end", ms on its own clock). */

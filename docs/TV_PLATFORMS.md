@@ -350,11 +350,17 @@ the web, as the TVs' other administration does.
 
 - **The page:** a category of channels at a time, as TiviMate shows them,
   in the Guide or as Channels (both kept on the TV). Left from the
-  channels opens the categories: Favourites, Recently watched, All
-  channels, then the provider's groups, those of a region ("UK| Sport")
-  gathered under it (OK opens a region; a region of one group stays a
-  group). In a group, channel names leave out the region it says. The
-  channels come a page of 100 at a time (`GET /api/live/browse`) as they
+  channels opens the categories: Search at their head, then Favourites,
+  Recently watched and All channels, then Regions, in alphabetical order,
+  each opening to its groups ("UK| Sport", "UK| News"…), and More groups,
+  the rest in the provider's order (a region of one group is one of them;
+  with fewer than two regions, the groups are one plain list). Search
+  (Left goes to it from anywhere in the list; OK opens the TV's own
+  keyboard) looks among every channel by name, number or what's on,
+  whatever category was open (`browse?category=all&q=`), and the header
+  offers the groups whose names match to go to; Back leaves the results
+  for the category before. In a group, channel names leave out the region
+  it says. The channels come a page of 100 at a time (`GET /api/live/browse`) as they
   scroll into view, and the guide only for the rows drawn (`ids`), so a
   lineup of tens of thousands opens at once. The guide shows two and a
   half hours, four px a minute, with now marked; Up and Down keep the time
@@ -381,11 +387,14 @@ the web, as the TVs' other administration does.
   far behind it, channel down and up). A live channel has no position
   bar: Live sits with the buttons, and behind live it is the button that
   goes back. The menu key (and Samsung's CH LIST) opens the channel list,
-  a page at a time as it scrolls, open at the channel playing; Left in it
-  opens the categories, to list another (changing to one of its channels
-  makes CH+ and CH− follow it). Info shows what's on. A banner says what's
-  on for 5 s at each channel; tuning shows the channel's logo with the
-  spinner centred under it. Pause and rewind
+  a page at a time as it scrolls, open at the channel playing, beside the
+  picture: the picture and its controls move aside into the 520 px left of
+  it (AVPlay's plane is placed there too) rather than going under it. Left
+  in the list opens the categories, with the same search, to list another
+  (changing to one of its channels makes CH+ and CH− follow it). What's on
+  shows only when asked: Info, or OK with the controls; not as each
+  channel starts. Tuning shows the channel's logo with the spinner centred
+  under it. Pause and rewind
   stay within the server's timeshift window, as the engine reports it
   (`video.seekable` on LG, AVPlay's `GET_LIVE_DURATION`); without one, the
   10 s buttons hide. Paused, the playlist is asked for every 20 s, as the

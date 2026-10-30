@@ -1,10 +1,10 @@
 import { signal } from "@preact/signals";
 import type { LiveChannel, LiveChannelPage } from "../api/types";
-import { CHANNEL_PAGE, type LiveCategory } from "./data";
+import { browseQuery, CHANNEL_PAGE, type LiveCategory } from "./data";
 
 /** What the pages need of the server (the Api; tests give their own). */
 export interface LiveBrowser {
-  liveBrowse(query: { category: LiveCategory["kind"]; group?: string; q?: string; offset?: number; limit?: number; around?: number }): Promise<LiveChannelPage>;
+  liveBrowse(query: { category: "all" | "favorites" | "recent" | "group"; group?: string; q?: string; offset?: number; limit?: number; around?: number }): Promise<LiveChannelPage>;
 }
 
 /** A page asked for this long ago is asked for again as it shows: what's on moves on. */
@@ -138,8 +138,7 @@ export class ChannelPages {
   }
 
   private ask(extra: { offset?: number; around?: number }): Promise<LiveChannelPage> {
-    const c = this.category;
-    return this.api.liveBrowse({ category: c.kind, group: c.kind === "group" ? c.group : undefined, limit: CHANNEL_PAGE, ...extra });
+    return this.api.liveBrowse({ ...browseQuery(this.category), limit: CHANNEL_PAGE, ...extra });
   }
 
   private keep(answer: LiveChannelPage): void {

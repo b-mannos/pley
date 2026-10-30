@@ -9,7 +9,9 @@ import {
   channelName,
   chunkStarts,
   GUIDE_CHUNK,
-  groupTree,
+  browseQuery,
+  groupSections,
+  groupsMatching,
   guideCells,
   mergeGuide,
   nowAndNext,
@@ -63,14 +65,32 @@ describe("categories", () => {
   const group = (name: string, region: string | null, label: string, count: number) => ({ name, region, label, count });
   const groups = [group("UK| Sport", "UK", "Sport", 40), group("News", null, "News", 2), group("UK| News", "UK", "News", 10), group("FR| Films", "FR", "Films", 7)];
 
-  it("round-trip through their keys", () => {
-    for (const c of [{ kind: "all" }, { kind: "favorites" }, { kind: "recent" }, { kind: "group", group: "UK| Sport" }] as const) expect(parseCategory(categoryKey(c))).toEqual(c);
+  it("round-trip through their keys, a search's words included", () => {
+    for (const c of [{ kind: "all" }, { kind: "favorites" }, { kind: "recent" }, { kind: "group", group: "UK| Sport" }, { kind: "search", q: "bbc one" }] as const)
+      expect(parseCategory(categoryKey(c))).toEqual(c);
     expect(parseCategory(null)).toEqual({ kind: "all" });
+    expect(parseCategory("search:")).toEqual({ kind: "all" });
   });
 
-  it("gather a region's groups under it, a region of one staying a group, in the provider's order", () => {
-    const tree = groupTree(groups);
-    expect(tree.map((e) => (e.kind === "group" ? e.group.name : `${e.region} (${e.groups.length}, ${e.count})`))).toEqual(["UK (2, 50)", "News", "FR| Films"]);
+  it("are asked for as browse wants them: a search among every channel", () => {
+    expect(browseQuery({ kind: "search", q: "bbc" })).toEqual({ category: "all", q: "bbc" });
+    expect(browseQuery({ kind: "group", group: "News" })).toEqual({ category: "group", group: "News" });
+    expect(browseQuery({ kind: "recent" })).toEqual({ category: "recent" });
+  });
+
+  it("list the regions in alphabetical order, then the other groups in the provider's order", () => {
+    const more = groups.concat([group("FR| News", "FR", "News", 3), group("DE| Sport", "DE", "Sport", 4)]);
+    const { regions, others } = groupSections(more);
+    expect(regions.map((r) => `${r.region} (${r.groups.length}, ${r.count})`)).toEqual(["FR (2, 10)", "UK (2, 50)"]);
+    // A region of one group is one of the rest.
+    expect(others.map((g) => g.name)).toEqual(["News", "DE| Sport"]);
+    // Fewer than two regions: one plain list.
+    expect(groupSections(groups)).toEqual({ regions: [], others: groups });
+  });
+
+  it("are found by name for a search's links", () => {
+    expect(groupsMatching(groups, "news", 5).map((g) => g.name)).toEqual(["News", "UK| News"]);
+    expect(groupsMatching(groups, " ", 5)).toEqual([]);
   });
 
   it("are named as the web names them", () => {

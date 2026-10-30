@@ -88,48 +88,79 @@ export function channelTitle(c: Pick<LiveChannel, "number" | "name">): string {
 
 // ---- categories
 
-/** Which channels a list has: the marked ones, every one, or a group's (the web's LiveCategory). */
-export type LiveCategory = { kind: "all" } | { kind: "favorites" } | { kind: "recent" } | { kind: "group"; group: string };
+/**
+ * Which channels a list has: the marked ones, every one, a group's (the
+ * web's LiveCategory), or every channel whose name, number or what's on
+ * has `q` in it (the one search, whatever category was open).
+ */
+export type LiveCategory = { kind: "all" } | { kind: "favorites" } | { kind: "recent" } | { kind: "group"; group: string } | { kind: "search"; q: string };
 
 /** Channels asked for at once. */
 export const CHANNEL_PAGE = 100;
 
-/** "all", "favorites", "recent" or "group:<name>": kept on the TV and in a page's key. */
+/** "all", "favorites", "recent", "group:<name>" or "search:<words>": kept on the TV and in a page's key. */
 export function categoryKey(c: LiveCategory): string {
-  return c.kind === "group" ? `group:${c.group}` : c.kind;
+  return c.kind === "group" ? `group:${c.group}` : c.kind === "search" ? `search:${c.q}` : c.kind;
 }
 
 export function parseCategory(key: string | null | undefined): LiveCategory {
   if (key === "favorites" || key === "recent") return { kind: key };
   if (key && key.indexOf("group:") === 0) return { kind: "group", group: key.slice(6) };
+  if (key && key.indexOf("search:") === 0 && key.length > 7) return { kind: "search", q: key.slice(7) };
   return { kind: "all" };
 }
 
-/** A category's line in the list: a group, or a region's groups gathered under it. */
-export type CategoryEntry = { kind: "group"; group: LiveGroup } | { kind: "region"; region: string; groups: LiveGroup[]; count: number };
-
-/**
- * Groups in the provider's order, those of a region ("UK| Sport", "UK|
- * News"…) gathered under it, so hundreds of groups read as a few dozen.
- * A region with one group stays a group (the web's groupTree).
- */
-export function groupTree(groups: LiveGroup[]): CategoryEntry[] {
-  const byRegion: Record<string, LiveGroup[]> = {};
-  for (const g of groups) if (g.region) (byRegion[g.region] = byRegion[g.region] ?? []).push(g);
-  const out: CategoryEntry[] = [];
-  const placed: Record<string, true> = {};
-  for (const g of groups) {
-    const region = g.region ? byRegion[g.region]! : null;
-    if (!region || region.length < 2) out.push({ kind: "group", group: g });
-    else if (!placed[g.region!]) {
-      placed[g.region!] = true;
-      out.push({ kind: "region", region: g.region!, groups: region, count: region.reduce((n, x) => n + x.count, 0) });
-    }
-  }
-  return out;
+/** What `browse` is asked for a category's channels. */
+export function browseQuery(c: LiveCategory): { category: "all" | "favorites" | "recent" | "group"; group?: string; q?: string } {
+  if (c.kind === "search") return { category: "all", q: c.q };
+  if (c.kind === "group") return { category: "group", group: c.group };
+  return { category: c.kind };
 }
 
-/** What a category is called: "Favourites", "UK · Sport". */
+/** A region's groups, gathered. */
+export interface Region {
+  region: string;
+  groups: LiveGroup[];
+  count: number;
+}
+
+/**
+ * The groups as the categories list them (the web's groupSections): a
+ * provider naming hundreds of groups by region ("UK| Sport", "UK|
+ * News"…) has them gathered under each region, the regions in
+ * alphabetical order, and the rest after, in its own order; a region with
+ * one group is one of the rest. With fewer than two regions, the groups as
+ * the provider lists them.
+ */
+export function groupSections(groups: LiveGroup[]): { regions: Region[]; others: LiveGroup[] } {
+  const byRegion: Record<string, LiveGroup[]> = {};
+  const order: string[] = [];
+  for (const g of groups) {
+    if (!g.region) continue;
+    if (!byRegion[g.region]) {
+      byRegion[g.region] = [];
+      order.push(g.region);
+    }
+    byRegion[g.region]!.push(g);
+  }
+  const regions = order
+    .filter((r) => byRegion[r]!.length > 1)
+    .map((r) => ({ region: r, groups: byRegion[r]!, count: byRegion[r]!.reduce((n, g) => n + g.count, 0) }))
+    .sort((a, b) => a.region.localeCompare(b.region));
+  if (regions.length < 2) return { regions: [], others: groups };
+  const gathered: Record<string, true> = {};
+  for (const r of regions) gathered[r.region] = true;
+  return { regions, others: groups.filter((g) => !g.region || !gathered[g.region]) };
+}
+
+/** The groups whose names have `q` in them, for a search's quick links. */
+export function groupsMatching(groups: LiveGroup[], q: string, max: number): LiveGroup[] {
+  const s = q.trim().toLowerCase();
+  if (!s) return [];
+  return groups.filter((g) => g.name.toLowerCase().indexOf(s) >= 0).slice(0, max);
+}
+
+/** What a category is called: "Favourites", "UK · Sport", "Results for “bbc”". */
 export function categoryName(c: LiveCategory, groups: LiveGroup[] | null | undefined): string {
   switch (c.kind) {
     case "all":
@@ -138,6 +169,8 @@ export function categoryName(c: LiveCategory, groups: LiveGroup[] | null | undef
       return "Favourites";
     case "recent":
       return "Recently watched";
+    case "search":
+      return `Results for “${c.q}”`;
     default: {
       const g = (groups ?? []).filter((x) => x.name === c.group)[0];
       return g?.region ? `${g.region} · ${g.label}` : g?.label ?? c.group;

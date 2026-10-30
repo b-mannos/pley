@@ -17,12 +17,14 @@ describes how they are made.
 
 - Live TV, where the server has IPTV channels for the profile, by
   category as TiviMate shows it: Favourites, Recently watched, All
-  channels and the provider's groups gathered by region, a guide that
+  channels, the regions in alphabetical order, each opening to its
+  groups, and the other groups; one search, with the TV's keyboard, of
+  every channel by name, number or what's on and of the groups; a guide that
   moves through time and channel cards with what's on and next, a page at
   a time, so a lineup of tens of thousands opens at once. The player plays
   a channel through LG's media pipeline from its live edge, with what's
   on, Live (or how far behind it), pause and rewind in the server's
-  timeshift, the channel list, and CH+ and CH−, Up and Down within the
+  timeshift, the channel list beside the picture, and CH+ and CH−, Up and Down within the
   category, or a channel's number to change channels; Back lands on the
   channel watched. When every connection is in use, the server's words say
   which channels hold them. Needs a server that gives the TV's player

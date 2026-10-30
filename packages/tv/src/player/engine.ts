@@ -107,6 +107,12 @@ export interface PlayerEngine {
    * `null` while unknown.
    */
   liveWindow?(): { startMs: number; endMs: number } | null;
+  /**
+   * Where the picture goes, in the 960×540 canvas's px (the picture kept
+   * whole inside it), or the whole screen (`null`). An engine on a plane of
+   * its own (AVPlay) is told; one in the page follows its host's size.
+   */
+  setArea?(area: { left: number; top: number; width: number; height: number } | null): void;
   /** How fast the network brings the stream, kbps, when the engine measures it; `null` when it can't say. */
   bandwidthKbps?(): number | null;
   /**

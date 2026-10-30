@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/ho
 import type { LiveChannel, LiveProgram } from "../../api/types";
 import {
   airing,
+  browseQuery,
   categoryKey,
   categoryName,
   channelByNumber,
@@ -10,6 +11,7 @@ import {
   formatGuideDay,
   formatSpan,
   formatTime,
+  groupsMatching,
   nowAndNext,
   parseCategory,
   programProgress,
@@ -91,7 +93,8 @@ export function LiveTvScreen(p: { entry: Entry }) {
     setViewState(v);
   };
   const setCategory = (c: LiveCategory) => {
-    app.store.set(CATEGORY_KEY, categoryKey(c));
+    // A search shows until Back; the category kept is the one it was opened over.
+    if (c.kind !== "search") app.store.set(CATEGORY_KEY, categoryKey(c));
     p.entry.state.guideRow = undefined;
     p.entry.state.cardRow = undefined;
     setJump(null);
@@ -123,6 +126,16 @@ export function LiveTvScreen(p: { entry: Entry }) {
       live = false;
     };
   }, [pages]);
+
+  const searching = shown.kind === "search";
+  useEffect(() => {
+    if (!searching) return;
+    return ui.input.push((key, e) => {
+      if (key !== "back" || panel) return false;
+      if (e.type === "down" && !e.repeat) setCategory(parseCategory(app.store.get(CATEGORY_KEY)));
+      return true;
+    });
+  }, [searching, !!panel]);
 
   const watch = (c: LiveChannel) => {
     app.keepLiveChannel(c);
@@ -159,7 +172,7 @@ export function LiveTvScreen(p: { entry: Entry }) {
   // A number typed: that channel in this category, else among every channel.
   const digits = useNumberEntry((d) => {
     const find = (c: LiveCategory) =>
-      ui.api.liveBrowse({ category: c.kind, group: c.kind === "group" ? c.group : undefined, q: d, limit: 50 }).then((page) => channelByNumber(page.channels, d));
+      ui.api.liveBrowse({ ...browseQuery(c.kind === "search" ? { kind: "all" } : c), q: d, limit: 50 }).then((page) => channelByNumber(page.channels, d));
     find(shown)
       .then((found) => (found ? { found, here: true } : find({ kind: "all" }).then((f) => ({ found: f, here: false }))))
       .then(
@@ -220,6 +233,8 @@ export function LiveTvScreen(p: { entry: Entry }) {
   }
 
   const openCategories = () => setPanel({ kind: "categories" });
+  // A search's groups whose names match, to go to.
+  const found = shown.kind === "search" ? groupsMatching(groups.data?.groups ?? [], shown.q, 2) : [];
   const focusTabs = () => {
     const el = tabsRef.current?.querySelector<HTMLElement>(`[data-fid="tab/${view}"]`);
     return !!el && ui.focus.focus(el);
@@ -239,14 +254,25 @@ export function LiveTvScreen(p: { entry: Entry }) {
       </div>
       <G kind="row" class="library-chips">
         <Chip fid="chip/category" label={name} icon={categoryIcon(shown)} maxWidth={360} onSelect={openCategories} />
+        {found.map((g) => (
+          <Chip key={g.name} fid={`chip/group:${g.name}`} label={g.region ? `${g.region} · ${g.label}` : g.label} maxWidth={170} onSelect={() => setCategory({ kind: "group", group: g.name })} />
+        ))}
         <div class="t-caption c-muted chips-count">{total === null ? "" : total === 1 ? "1 channel" : `${count(total)} channels`}</div>
       </G>
       {total === 0 ? (
         <ColumnMessage
           top={146}
-          title={shown.kind === "favorites" ? "No favourites yet" : shown.kind === "recent" ? "Nothing watched yet" : "No channels here"}
-          body={shown.kind === "favorites" ? "Mark a channel with its menu key, or in the player, to find it here." : shown.kind === "recent" ? "The channels you watch show here." : "This group has no channels to show."}
-          action={{ label: "All channels", icon: "layers", onSelect: () => setCategory({ kind: "all" }) }}
+          title={shown.kind === "favorites" ? "No favourites yet" : shown.kind === "recent" ? "Nothing watched yet" : shown.kind === "search" ? "No channels match" : "No channels here"}
+          body={
+            shown.kind === "favorites"
+              ? "Mark a channel with its menu key, or in the player, to find it here."
+              : shown.kind === "recent"
+                ? "The channels you watch show here."
+                : shown.kind === "search"
+                  ? `No channel's name, number or programme on now has “${shown.q}” in it.`
+                  : "This group has no channels to show."
+          }
+          action={shown.kind === "search" ? { label: "Search again", icon: "search", onSelect: openCategories } : { label: "All channels", icon: "layers", onSelect: () => setCategory({ kind: "all" }) }}
         />
       ) : view === "guide" ? (
         <LiveGuide
@@ -303,7 +329,7 @@ export function LiveTvScreen(p: { entry: Entry }) {
 }
 
 function categoryIcon(c: LiveCategory) {
-  return c.kind === "favorites" ? "star" : c.kind === "recent" ? "history" : c.kind === "all" ? "layers" : "list";
+  return c.kind === "favorites" ? "star" : c.kind === "recent" ? "history" : c.kind === "all" ? "layers" : c.kind === "search" ? "search" : "list";
 }
 
 // ---- a programme's details
