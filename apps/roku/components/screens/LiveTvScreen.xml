@@ -27,7 +27,10 @@
         <Rectangle width="528" height="1080" color="0x1E222AFF" />
         <Label translation="[48, 40]" width="440" text="Live TV" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
         <ChipRow id="tabs" translation="[48, 132]" />
-        <MarkupList id="rail" translation="[24, 212]" itemComponentName="LiveRailItem" itemSize="[480, 56]" itemSpacing="[0, 4]" numRows="14" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
+        <!-- Search, pinned above the categories: it never scrolls away. -->
+        <MarkupList id="searchRow" translation="[24, 212]" itemComponentName="LiveRailItem" itemSize="[480, 56]" numRows="1" drawFocusFeedback="false" />
+        <Rectangle translation="[48, 274]" width="432" height="2" color="0x2E3440FF" />
+        <MarkupList id="rail" translation="[24, 284]" itemComponentName="LiveRailItem" itemSize="[480, 56]" itemSpacing="[0, 4]" numRows="13" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
         <!-- The category's channels. -->
         <Label id="category" translation="[576, 44]" width="1280" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
         <Label id="count" translation="[576, 104]" width="1280" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
@@ -40,7 +43,9 @@
             <Label id="infoMeta" translation="[0, 86]" width="1020" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
             <Label id="infoText" translation="[0, 120]" width="1280" wrap="true" maxLines="2" lineSpacing="2" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
         </Group>
-        <TimeGrid id="guide" translation="[576, 376]" width="1280" height="648" numRows="7" duration="7200" maxDays="2" channelInfoWidth="260" infoGridGap="8"
+        <!-- Rewind, fast forward and Replay are the screen's (Replay opens
+             Search): it pages the guide through time itself. -->
+        <TimeGrid id="guide" translation="[576, 376]" width="1280" height="648" numRows="7" duration="7200" maxDays="2" channelInfoWidth="260" infoGridGap="8" ignoreTrickPlayKeys="true"
             focusBitmapUri="pkg:/images/button-focus.9.png" programBackgroundBitmapUri="pkg:/images/guide-cell.9.png"
             channelInfoBackgroundBitmapUri="pkg:/images/guide-cell.9.png" channelInfoTextColor="0xEBEBEBFF" channelInfoFont="font:SmallestBoldSystemFont"
             programTitleColor="0xEBEBEBFF" programTitleFocusedColor="0x16191EFF" programTitleFont="font:SmallestSystemFont"

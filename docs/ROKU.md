@@ -200,8 +200,9 @@ groups, so nothing asks for all of them: the categories come from `GET
 /api/live/groups`, channels 50 at a time from `GET /api/live/browse`, and
 programmes only for those 50 (`GET /api/live/guide?ids=`).
 
-- **Categories** down the left, with their channel counts: Search,
-  Favourites, Recently watched, All channels, then "Regions" in
+- **Categories** down the left, with their channel counts, under Search
+  pinned above them (it never scrolls away): Favourites, Recently
+  watched, All channels, then "Regions" in
   alphabetical order (a region with more than one group, "UK · 12
   groups": OK opens it to its groups, closing the one open) and "More
   groups", the rest in the provider's order (a region of one group with
@@ -209,12 +210,15 @@ programmes only for those 50 (`GET /api/live/guide?ids=`).
   OK on a category shows its channels and goes to them; Back or Left
   goes back to the categories. The category and the tab are kept on the
   Roku per server and profile (registry section `liveViews`); a group
-  gone, or favourites none any more, shows every channel.
-- **Search** opens Roku's keyboard. It looks through every channel
-  (`browse?category=all&q=`: a name, a number's beginning, or the title
-  on now), shown as "Results for …" in the guide or the cards; the groups
-  whose names match follow it in the rail as links. Clear goes back to
-  every channel. A search isn't kept for the next visit.
+  gone, or favourites none any more, shows every channel. Rewind and fast
+  forward in the categories move a screen (13 rows) up or down.
+- **Search** (OK on it, or the **Replay** key from anywhere in Live TV:
+  Roku remotes have no search key for apps) opens Roku's keyboard. It
+  looks through every channel (`browse?category=all&q=`: a name, a
+  number's beginning, or the title on now), shown as "Results for …" in
+  the guide or the cards; the groups whose names match head the
+  categories as links. Clear goes back to every channel. A search isn't
+  kept for the next visit.
 - **Guide** (the tab above the categories): Roku's TimeGrid, a page of
   50 channels down and two hours across, the programme in focus
   described above it (On now, its times and time left, episode, Live and
@@ -222,7 +226,9 @@ programmes only for those 50 (`GET /api/live/guide?ids=`).
   the next page (or the one before), round the ends of the category.
   Programmes come six hours at a time as the guide is scrolled, two days
   at most, from half an hour before the current half hour. Rewind and
-  fast forward page through time, Replay goes back to now. A channel
+  fast forward move two hours earlier or later, Play goes back to now
+  (the TimeGrid's own trick-play keys are off, so Replay can open
+  Search). A channel
   without a guide shows its name across it. OK on a programme on now (or
   on time without a guide) watches the channel; on another, it says what
   it is, with Watch and the favourite.

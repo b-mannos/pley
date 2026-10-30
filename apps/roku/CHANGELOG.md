@@ -11,7 +11,8 @@ describes how they are made.
 ### Added
 
 - Live TV, where the server has channels, as TiviMate lays it out:
-  Search (every channel, and the groups whose names match), Favourites,
+  Search pinned at the top (every channel, and the groups whose names
+  match; Replay opens it from anywhere), Favourites,
   Recently watched, All channels, the regions in alphabetical order and
   then the other groups down the left, and the category's channels as a
   guide (Roku's TimeGrid, the programme in focus described above it) or

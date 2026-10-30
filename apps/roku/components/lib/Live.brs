@@ -224,18 +224,40 @@ function liveGroupsMatching(groups as object, query as string) as object
     return out
 end function
 
-' The categories down the side: Search (with the query searched for, and
-' the groups whose names match it as links under it), Favourites,
-' Recently watched, All channels, then "Regions" in alphabetical order,
-' the one open with its groups under it, and "More groups", the rest in
-' the provider's order (one plain list, "Groups", with fewer than two
-' regions). [{ kind ("search", "category", "region" or "heading"), key
-' (the category, or the region), label, count (-1 for none), inner (set
-' in under the entry above) }].
+' Where rewind (by -1) and fast forward (by 1) take the rail's focus from
+' at: a screen of rows (rows) on or back, past a heading the way it goes,
+' no further than the ends. kinds: the rail's entries' kinds.
+function liveRailPage(kinds as object, at as integer, rows as integer, by as integer) as integer
+    last = kinds.Count() - 1
+    if last < 0 then return 0
+    target = at + by * rows
+    if target > last then target = last
+    if target < 0 then target = 0
+    while target >= 0 and target <= last and kinds[target] = "heading"
+        target = target + by
+    end while
+    if target > last then target = last
+    if target < 0 then target = 0
+    return target
+end function
+
+' The Search entry pinned above the categories: "Search", or the words
+' searched for.
+function liveSearchLabel(query as string) as string
+    if query = "" then return "Search"
+    return "Search: “" + query + "”"
+end function
+
+' The categories down the side, under the Search entry pinned above them:
+' the groups whose names match the words searched for, as links,
+' Favourites, Recently watched, All channels, then "Regions" in
+' alphabetical order, the one open with its groups under it, and "More
+' groups", the rest in the provider's order (one plain list, "Groups",
+' with fewer than two regions). [{ kind ("category", "region" or
+' "heading"), key (the category, or the region), label, count (-1 for
+' none), inner (set in under the entry above) }].
 function liveRail(summary as object, groups as object, open as string, query as string) as object
-    searchLabel = "Search"
-    if query <> "" then searchLabel = "Search: “" + query + "”"
-    rail = [{ kind: "search", key: "search:" + query, label: searchLabel, count: -1, inner: false }]
+    rail = []
     for each g in liveGroupsMatching(groups, query)
         rail.Push({ kind: "category", key: "group:" + g.name, label: liveGroupLabel(g), count: g.count, inner: true })
     end for

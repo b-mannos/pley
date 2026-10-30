@@ -11,6 +11,7 @@
 sub init()
     m.tabs = m.top.findNode("tabs")
     m.rail = m.top.findNode("rail")
+    m.searchRow = m.top.findNode("searchRow")
     m.categoryLabel = m.top.findNode("category")
     m.count = m.top.findNode("count")
     m.info = m.top.findNode("info")
@@ -56,6 +57,7 @@ sub init()
     m.tabs.observeField("chosen", "onTabChosen")
     m.rail.observeField("itemSelected", "onRailSelected")
     m.rail.observeField("itemFocused", "onRailFocused")
+    m.searchRow.observeField("itemSelected", "askSearch")
     m.guide.observeField("programFocusedDetails", "onProgramFocused")
     m.guide.observeField("programSelected", "onProgramSelected")
     m.guide.observeField("leftEdgeTargetTime", "onLeftEdge")
@@ -68,6 +70,7 @@ sub onActive()
     if not m.top.active
         m.lastFocus = m.rail
         if m.tabs.isInFocusChain() then m.lastFocus = m.tabs
+        if m.searchRow.isInFocusChain() then m.lastFocus = m.searchRow
         if m.guide.isInFocusChain() then m.lastFocus = m.guide
         if m.cards.isInFocusChain() then m.lastFocus = m.cards
         return
@@ -166,6 +169,39 @@ sub buildRail()
     m.railFocused = at
     m.rail.content = nodesContent(items)
     m.rail.jumpToItem = at
+    searching = Left(m.view.category, 7) = "search:"
+    m.searchRow.content = nodesContent([{ title: liveSearchLabel(m.query), countText: "", mark: "", inner: false, heading: false, current: searching }])
+end sub
+
+' Rewind and fast forward in the rail: a screen of categories back or on.
+sub pageRail(by as integer)
+    kinds = []
+    for each entry in m.railEntries
+        kinds.Push(entry.kind)
+    end for
+    target = liveRailPage(kinds, m.rail.itemFocused, 13, by)
+    m.railFocused = target
+    m.rail.jumpToItem = target
+end sub
+
+' Rewind and fast forward in the guide: two hours earlier or later, within
+' what it spans; Play: back to now.
+sub pageGuide(key as string)
+    if m.guide.content = invalid then return
+    span = Int(m.guide.duration)
+    left = m.guide.leftEdgeTargetTime
+    if left <= 0 then left = m.guideStart
+    if key = "play"
+        left = Int(nowSeconds() / 1800) * 1800
+    else if key = "rewind"
+        left = left - span
+    else
+        left = left + span
+    end if
+    last = m.guideStart + liveGuideSpan() - span
+    if left > last then left = last
+    if left < m.guideStart then left = m.guideStart
+    m.guide.leftEdgeTargetTime = left
 end sub
 
 ' A heading ("Regions", "More groups") is passed over, the way the focus
@@ -401,7 +437,7 @@ sub onGuide(event as object)
     m.guide.visible = true
     m.info.visible = true
     showCount()
-    m.hint.text = "OK: watch   ·   Options (*): favourite   ·   Rewind and fast forward: earlier and later   ·   Replay: now"
+    m.hint.text = "OK: watch   ·   Options (*): favourite   ·   Rewind and fast forward: earlier and later   ·   Play: now   ·   Replay: search"
     showProgram()
 end sub
 
@@ -638,7 +674,7 @@ sub onCards(event as object)
     m.cards.visible = true
     m.guide.visible = false
     m.info.visible = false
-    m.hint.text = "OK: watch   ·   Options (*): favourite"
+    m.hint.text = "OK: watch   ·   Options (*): favourite   ·   Replay: search"
     showCount()
 end sub
 
@@ -739,12 +775,40 @@ function onKeyEvent(key as string, press as boolean) as boolean
             return true
         end if
     end if
+    ' Replay opens Search from anywhere in Live TV.
+    if key = "replay"
+        askSearch()
+        return true
+    end if
+    if (key = "rewind" or key = "fastforward") and m.rail.isInFocusChain()
+        by = 1
+        if key = "rewind" then by = -1
+        pageRail(by)
+        return true
+    end if
+    if (key = "rewind" or key = "fastforward" or key = "play") and m.guide.isInFocusChain()
+        pageGuide(key)
+        return true
+    end if
+    if key = "right" and m.searchRow.isInFocusChain() and (m.guide.visible or m.cards.visible)
+        focusContent()
+        return true
+    end if
+    ' The rail's top, Search pinned above it, the tabs above that.
     if key = "up" and m.rail.isInFocusChain()
+        m.searchRow.setFocus(true)
+        return true
+    end if
+    if key = "up" and m.searchRow.isInFocusChain()
         m.tabs.focusIndex = m.tabs.current
         m.tabs.setFocus(true)
         return true
     end if
     if key = "down" and m.tabs.isInFocusChain()
+        m.searchRow.setFocus(true)
+        return true
+    end if
+    if key = "down" and m.searchRow.isInFocusChain()
         m.rail.setFocus(true)
         return true
     end if
