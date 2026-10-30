@@ -27,6 +27,7 @@
     <string name="livetv_more_groups">More groups</string>
     <string name="livetv_no_group_name">No group</string>
     <string name="livetv_found_groups">Groups</string>
+    <string name="livetv_results_for">Results for “%1$s”</string>
     <string name="livetv_none_favorites_title">No favourites yet</string>
     <string name="livetv_none_favorites_body">Star a channel to find it here.</string>
     <string name="livetv_none_recent_title">Nothing watched yet</string>

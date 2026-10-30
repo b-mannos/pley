@@ -257,17 +257,18 @@ private fun Filters(page: LivePage, onQuery: (String) -> Unit, onPick: () -> Uni
                 .testTag(LIVE_TV_CATEGORY),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(categoryIcon(page.category), contentDescription = null, size = 20.dp, tint = PleyColors.AccentBright)
+            // While a search is typed, what shows is its results from every channel, not the category's (the web's).
+            Icon(if (page.searching) PleyIcons.Search else categoryIcon(page.category), contentDescription = null, size = 20.dp, tint = PleyColors.AccentBright)
             Spacer(Modifier.width(10.dp))
             Text(
-                categoryName(page.category, page),
+                if (page.searching) stringResource(R.string.livetv_results_for, page.query.trim()) else categoryName(page.category, page),
                 style = MaterialTheme.typography.titleMedium,
                 color = PleyColors.Fg,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            if (count != null) {
+            if (count != null && !page.searching) {
                 Text("  %,d".format(count), style = MaterialTheme.typography.bodyMedium, color = PleyColors.Subtle, maxLines = 1)
             }
             Spacer(Modifier.width(4.dp))

@@ -128,7 +128,8 @@ rail. Its sources, lineup and connections are set up in the web app.
   "UK| News"), then More groups: those without a region, or whose region
   has one group, in the provider's order. With fewer than two regions
   it is one list in the provider's order. A picker on phones; a column
-  beside the guide on TVs, where Left from the guide's start goes to it.
+  beside the guide on TVs, where Left from the guide's start or the
+  cards' first column goes to the category shown, scrolled into view.
   The category, the view (guide or cards) and the channel last watched
   are kept per server and profile (`LiveTvViews`), so Live TV opens as it
   was left after a restart too.

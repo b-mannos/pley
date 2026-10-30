@@ -45,8 +45,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import app.pley.android.screens.livetv.GroupSections
+import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
@@ -131,6 +141,20 @@ internal fun TvLiveTvScreen() {
     var notice by remember { mutableStateOf<String?>(null) }
     val categories = remember { FocusRequester() }
     val shownCategory = remember { FocusRequester() }
+    val categoryList = rememberLazyListState()
+    var shownIndex by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
+
+    /** Left from the channels: to the category shown, brought into view first; to the column when it can't be. */
+    fun toShownCategory() {
+        scope.launch {
+            if (categoryList.layoutInfo.visibleItemsInfo.none { it.index == shownIndex }) {
+                categoryList.scrollToItem((shownIndex - 2).coerceAtLeast(0))
+                withFrameNanos { }
+            }
+            if (runCatching { shownCategory.requestFocus() }.isFailure) runCatching { categories.requestFocus() }
+        }
+    }
     val content = remember { FocusRequester() }
     val search = rememberTextFieldState(page.query)
     /** Focus is in the categories (the search with them): channels shown meanwhile leave it there… */
@@ -192,6 +216,8 @@ internal fun TvLiveTvScreen() {
                         toChannels = true
                         runCatching { content.requestFocus() }
                     },
+                    state = categoryList,
+                    onShownIndex = { shownIndex = it },
                     modifier = Modifier
                         .padding(start = PleyTv.Gutter - CATEGORY_INSET)
                         .width(CATEGORIES_WIDTH)
@@ -227,14 +253,23 @@ internal fun TvLiveTvScreen() {
                                 onWatch = vm::watch,
                                 onDetails = { channel, program -> details = channel to program },
                                 // To the category shown; to the column when it is scrolled away.
-                                onLeave = { if (runCatching { shownCategory.requestFocus() }.isFailure) runCatching { categories.requestFocus() } },
+                                onLeave = ::toShownCategory,
                                 modifier = Modifier.fillMaxSize(),
                                 requester = content,
                             )
                         }
                         else -> key(page.listed) {
                             val takeFocus = remember { toChannels || !inCategories }
-                            ChannelTiles(vm, pages, page, now, Modifier.focusRequester(content), onDetails = { details = it to it.onAt(now) }, takeFocus = takeFocus)
+                            ChannelTiles(
+                                vm,
+                                pages,
+                                page,
+                                now,
+                                Modifier.focusRequester(content),
+                                onDetails = { details = it to it.onAt(now) },
+                                takeFocus = takeFocus,
+                                onLeave = ::toShownCategory,
+                            )
                         }
                     }
                 }
@@ -308,9 +343,13 @@ private fun Categories(
     onSelect: (LiveCategory) -> Unit,
     onSearched: () -> Unit,
     modifier: Modifier,
+    state: LazyListState,
+    onShownIndex: (Int) -> Unit,
 ) {
     val rail = LocalTvRailFocus.current
     CategoryColumn(
+        state = state,
+        onShownIndex = onShownIndex,
         groups = page.groups,
         selected = page.category,
         selectedRequester = selectedRequester,
@@ -345,13 +384,19 @@ internal fun CategoryColumn(
     modifier: Modifier = Modifier,
     found: List<LiveGroup> = emptyList(),
     search: (@Composable () -> Unit)? = null,
+    state: LazyListState = rememberLazyListState(),
+    /** Where [selected]'s row is in the column (its region's, the region closed), to bring it into view. */
+    onShownIndex: (Int) -> Unit = {},
 ) {
     val all = groups?.groups.orEmpty()
     val sections = remember(all) { LiveTv.groupSections(all) }
     val selectedRegion = (selected as? LiveCategory.Group)?.let { s -> sections.regions.firstOrNull { r -> r.groups.any { it.name == s.name } }?.region }
     var open by remember(selectedRegion) { mutableStateOf(selectedRegion) }
+    val shownIndex = shownIndexOf(selected, sections, open, hasSearch = search != null, found = found.size)
+    SideEffect { onShownIndex(shownIndex) }
     CompositionLocalProvider(LocalSelectedCategory provides selectedRequester) {
     LazyColumn(
+        state = state,
         modifier = modifier.focusRestorer(selectedRequester),
         contentPadding = PaddingValues(bottom = TvSafeArea.Vertical),
         verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -411,6 +456,35 @@ internal fun CategoryColumn(
         }
     }
 }
+}
+
+/**
+ * [selected]'s row in [CategoryColumn], counted as its items are laid out:
+ * the search, the groups found, the three marked categories, then the
+ * regions (with [open]'s groups) and the others, each under a heading.
+ */
+private fun shownIndexOf(selected: LiveCategory, sections: GroupSections, open: String?, hasSearch: Boolean, found: Int): Int {
+    var i = if (hasSearch) 1 else 0
+    if (found > 0) i += 1 + found
+    when (selected) {
+        LiveCategory.Favorites -> return i
+        LiveCategory.Recent -> return i + 1
+        LiveCategory.All -> return i + 2
+        is LiveCategory.Group -> Unit
+    }
+    i += 3
+    val name = (selected as LiveCategory.Group).name
+    if (sections.regions.isNotEmpty()) {
+        i += 1
+        for (r in sections.regions) {
+            val at = r.groups.indexOfFirst { it.name == name }
+            val expanded = open == r.region
+            if (at >= 0) return if (expanded) i + 1 + at else i
+            i += 1 + if (expanded) r.groups.size else 0
+        }
+    }
+    val at = sections.others.indexOfFirst { it.name == name }
+    return if (at >= 0) i + 1 + at else 0
 }
 
 /** A section's heading in the categories: "REGIONS", "MORE GROUPS". */
@@ -474,6 +548,8 @@ private fun ChannelTiles(
     modifier: Modifier,
     onDetails: (LiveChannel) -> Unit,
     takeFocus: Boolean = true,
+    /** Left from the first column: to the category shown, as from the guide. */
+    onLeave: () -> Unit = {},
 ) {
     val grid = rememberLazyGridState()
     val memory = rememberFocusMemory()
@@ -496,7 +572,18 @@ private fun ChannelTiles(
     LazyVerticalGrid(
         columns = GridCells.Fixed(COLUMNS),
         state = grid,
-        modifier = modifier.fillMaxSize().focusGroup().testTag(TV_LIVE_TILES),
+        modifier = modifier
+            .fillMaxSize()
+            .focusProperties {
+                onExit = {
+                    if (requestedFocusDirection == FocusDirection.Left) {
+                        cancelFocusChange()
+                        onLeave()
+                    }
+                }
+            }
+            .focusGroup()
+            .testTag(TV_LIVE_TILES),
         contentPadding = PaddingValues(end = TvSafeArea.Horizontal, top = 8.dp, bottom = 48.dp),
         horizontalArrangement = Arrangement.spacedBy(PleyTv.WideTileGap),
         verticalArrangement = Arrangement.spacedBy(20.dp),
