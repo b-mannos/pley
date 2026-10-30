@@ -1,8 +1,9 @@
 # cargo-deny configuration (https://github.com/EmbarkStudios/cargo-deny).
 #   cargo install cargo-deny && cargo deny check licenses
 # Third-party crates must be permissively licensed. Our own crates are
-# unpublished (`publish = false`) and skipped here; the server ↔ transcoder
-# boundary is enforced by scripts/check-licenses.ps1 (see LICENSING.md).
+# unpublished (`publish = false`) and skipped here; scripts/check-licenses.ps1
+# also keeps copyleft-only crates out of the server and the transcoder, and
+# the transcoder out of the server (see LICENSING.md).
 
 [graph]
 all-features = false

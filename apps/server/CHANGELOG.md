@@ -65,6 +65,8 @@ describes how they are made.
 
 ### Changed
 
+- Pley is Restricted, its licence terms to be determined (`LICENSE`), and
+  the dashboard no longer shows the transcoder's licence.
 - The web app's sidebar has no line above Settings.
 - Picture subtitles a player shows itself are burned in on any stream it
   asks for (Remux, Transcode), not only when the file can't play as it is.

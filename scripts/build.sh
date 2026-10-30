@@ -49,7 +49,7 @@ name="pley-server-$version-$os-$arch"
 out="$root/dist/$name"
 rm -rf "$out" && mkdir -p "$out"
 cp "$bin/pley" "$bin/pley-transcoder" "$out/"
-cp "$root/apps/server/LICENSE" "$out/LICENSE.txt"
+cp "$root/LICENSE" "$out/LICENSE.txt"
 cp "$root/LICENSING.md" "$root/README.md" "$root/pley.example.toml" "$out/"
 # Running it as a service (deploy/README.md).
 case "$os" in

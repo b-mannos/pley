@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-Restricted
 //
-// pley-transcoder — FFmpeg media engine for the pley media server.
+// pley-transcoder — FFmpeg media engine for the Pley media server.
 // Copyright (c) 2026 the Pley authors. All rights reserved. See LICENSE.
 
 //! Standalone transcoding service. It is the only pley component that runs

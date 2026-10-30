@@ -54,7 +54,7 @@ $out = "$root/dist/$name"
 if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 New-Item -ItemType Directory -Force $out | Out-Null
 Copy-Item "$bin/pley.exe", "$bin/pley-transcoder.exe" $out
-Copy-Item "$root/apps/server/LICENSE" "$out/LICENSE.txt"
+Copy-Item "$root/LICENSE" "$out/LICENSE.txt"
 Copy-Item "$root/LICENSING.md", "$root/README.md", "$root/pley.example.toml" $out
 
 

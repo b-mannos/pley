@@ -19,6 +19,7 @@ on:
       - package.json
       - bun.lock
       - bunfig.toml
+      - LICENSE
       - LICENSING.md
       - pley.example.toml
       - docs/TRANSCODER.md
@@ -50,6 +51,7 @@ on:
       - package.json
       - bun.lock
       - bunfig.toml
+      - LICENSE
       - LICENSING.md
       - pley.example.toml
       - docs/TRANSCODER.md
@@ -213,13 +215,14 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/master' }}
-      - name: Server never depends on the transcoder
+      - name: No copyleft-only crates, and the server never links the transcoder
         shell: pwsh
         run: ./scripts/check-licenses.ps1
       - name: Third-party licenses
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check licenses
+
   docker:
     name: Docker image
     # A release builds and publishes the image itself (image, below).

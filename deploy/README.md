@@ -35,6 +35,8 @@ The image is based on Debian 13 and its FFmpeg 7.1:
 - NVIDIA (NVENC, CUDA scaling), Intel (Quick Sync, VAAPI) and AMD (VAAPI)
   transcoding;
 - HDR tone mapping with libplacebo (Vulkan), OpenCL or zscale;
+- Pley's licence in `/usr/share/doc/pley`, and each Debian package's,
+  FFmpeg's among them, in `/usr/share/doc/<package>/copyright`.
 
 Releases publish it to GitHub Container Registry for amd64 and arm64:
 `ghcr.io/hhaidar/pley:latest`, or a server version such as `:0.0.1` or

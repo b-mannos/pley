@@ -1,4 +1,4 @@
-//! Client for the pley transcoder (a separate program; see LICENSING.md).
+//! Client for the pley transcoder (a separate program; see docs/TRANSCODER.md).
 //!
 //! The server never links or runs FFmpeg itself. In *managed* mode it spawns
 //! the `pley-transcoder` executable (found next to the server binary unless

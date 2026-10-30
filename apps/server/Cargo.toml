@@ -16,8 +16,8 @@ name = "pley"
 path = "src/main.rs"
 
 [dependencies]
-# Shared wire types. The server must NOT depend on the
-# transcoder crate itself; it talks to the transcoder process over HTTP.
+# Shared wire types. The server must NOT depend on the transcoder crate
+# itself; it talks to the transcoder process over HTTP.
 pley-transcoder-api = { path = "../../packages/transcoder-api" }
 
 anyhow = "1"

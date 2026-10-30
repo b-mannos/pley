@@ -9,10 +9,10 @@
 - makes thumbnails, seek previews and embedded cover art
 - indexes keyframes
 
-It is a separate program. The Pley server runs
-it as a child process, or connects to one elsewhere, and talks to it only
-through the HTTP API below. The request and response types live
-in the `pley-transcoder-api` crate (`packages/transcoder-api`).
+It is a separate program, and the only one in Pley that runs FFmpeg. The
+Pley server runs it as a child process, or connects to one elsewhere, and
+talks to it only through the HTTP API below. The request and response types
+live in the `pley-transcoder-api` crate (`packages/transcoder-api`).
 
 ## Running
 
@@ -161,8 +161,8 @@ Errors are `{"code": "...", "message": "..."}`:
 |---|---|
 | `name`, `version`, `api_version` | the program and its API version |
 | `commit` | the build's short hash, when known |
-| `license` | `LicenseRef-Restricted` |
-| `source` | where to get the source |
+| `license` | the program's licence, as SPDX: `LicenseRef-Restricted` |
+| `source` | where its source can be obtained, if it is offered (`null`) |
 | `started_at_ms` | start time |
 | `capabilities` | what this transcoder and its FFmpeg can do (below) |
 | `limits` | `max_jobs`, `max_hw_jobs` |
@@ -1251,5 +1251,5 @@ modify or distribute it is granted until then. It comes with ABSOLUTELY NO
 WARRANTY. See the LICENSE file.
 ```
 
-FFmpeg is run as a separate program and has its own license. The FFmpeg build
-used during development (`--enable-gpl --enable-version3`) is GPLv3.
+FFmpeg is run as a separate program, never linked, and has its own licence
+([LICENSING.md](../LICENSING.md#ffmpeg)).

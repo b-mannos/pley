@@ -7,8 +7,8 @@ description = "Pley transcoder: FFmpeg-based media engine (probing, HLS transcod
 license = "LicenseRef-Restricted"
 publish = false
 
-# This crate is intentionally self-contained (no workspace inheritance) so that
-# it builds on its own.
+# This crate is intentionally self-contained (no workspace inheritance): a
+# separate program, which the server only speaks to over HTTP.
 
 [[bin]]
 name = "pley-transcoder"

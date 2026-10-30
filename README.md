@@ -220,21 +220,21 @@ Archive belong to their owners.
 | [docs/ANDROID.md](docs/ANDROID.md), [docs/KODI.md](docs/KODI.md), [docs/ROKU.md](docs/ROKU.md), [docs/TV_PLATFORMS.md](docs/TV_PLATFORMS.md) | The Android, Kodi, Roku, Samsung and LG apps |
 | [docs/RELEASING.md](docs/RELEASING.md) | Versions, changelogs, releases and CI |
 | [SECURITY.md](SECURITY.md) | Security model and reporting |
-| [LICENSING.md](LICENSING.md) | The license boundary between server and transcoder |
+| [LICENSING.md](LICENSING.md) | Pley's licence, the Kodi add-on's, FFmpeg's and third-party notices |
 
 ## Development
 
 ### Architecture
 
 ```
- browser ── HTTP ──▶ pley (server)                               pley-transcoder
+ browser ── HTTP ──▶ pley (server)                              pley-transcoder
    React UI            libraries · scanner · metadata · auth      ffprobe/ffmpeg · HLS jobs · tone mapping
    hls.js              sessions · hubs · search · /api            thumbnails · subtitles · keyframes · /metrics
                        SQLite (WAL)          ── HTTP/JSON ──▶      spawned & supervised by the server
 ```
 
-The transcoder is a separate program, and the server talks to it only over
-HTTP, so the two can have different licenses ([LICENSING.md](LICENSING.md)).
+The transcoder is a separate program, the only one that runs FFmpeg, and
+the server talks to it only over HTTP ([docs/TRANSCODER.md](docs/TRANSCODER.md)).
 
 | Path | What |
 |---|---|
@@ -250,7 +250,7 @@ HTTP, so the two can have different licenses ([LICENSING.md](LICENSING.md)).
 | `packages/transcoder-api` | Protocol types shared by server and transcoder |
 | `deploy/` | Docker, systemd and launchd setups, the Windows installer, store listings |
 | `docs/` | Documentation ([above](#documentation)) |
-| `scripts/` | Versions and releases (`version.mjs`, `release.mjs`), release builds, the transcoder source package, the license check, the apps' icons and store pictures (`render-icons.mjs`) |
+| `scripts/` | Versions and releases (`version.mjs`, `release.mjs`), release builds, the license check, the apps' icons and store pictures (`render-icons.mjs`) |
 
 ### Requirements
 
@@ -275,7 +275,7 @@ HTTP, so the two can have different licenses ([LICENSING.md](LICENSING.md)).
 | `cargo test --workspace` | The Rust tests, including end-to-end tests of both APIs |
 | `cargo test -p pley-server --test providers -- --ignored` | Also checks the real TVmaze and MusicBrainz (and TheTVDB with `PLEY_TEST_TVDB_KEY` and, if needed, `PLEY_TEST_TVDB_PIN`) |
 | `cargo clippy --workspace --all-targets`, `cargo fmt --all` | Lint and format the Rust code |
-| `scripts/check-licenses.ps1` | Checks the license boundary |
+| `scripts/check-licenses.ps1` | Checks that no copyleft-only crate is in the server or the transcoder ([LICENSING.md](LICENSING.md)) |
 | `bun run check` | The web app's and desktop app's type check, ESLint and tests (Vitest) |
 | `bun run desktop` | Runs the desktop app (on Linux needs WebKitGTK: `libwebkit2gtk-4.1-dev`); `bun run --cwd apps/desktop build` makes its installers |
 | `bun run tv:check` | Type-checks and tests the Samsung and LG apps; `bun run tizen` and `bun run webos` package them ([docs/TV_PLATFORMS.md](docs/TV_PLATFORMS.md)) |
@@ -327,12 +327,17 @@ The project is early: each app's version starts at 0.0.1.
 
 ## License
 
-Pley is split along a license boundary ([LICENSING.md](LICENSING.md)):
+Pley is **Restricted**, its licence terms to be determined
+([LICENSE](LICENSE)): no right to copy, modify or distribute it is granted
+until they are published, except by a separate written agreement. If it was
+shared with you, you may view and run it for the purpose it was shared with
+you.
 
 | Part | License |
 |---|---|
-| Server and web app | All rights reserved |
-| Desktop, Android, Roku, Samsung and LG apps | All rights reserved |
-| Transcoder (`apps/transcoder`) | All rights reserved |
-| Kodi add-on (`apps/kodi`) | GPL-2.0-or-later ([LICENSE.txt](apps/kodi/plugin.video.pley/LICENSE.txt)) |
-| Protocol types (`packages/transcoder-api`) | All rights reserved |
+| Server, web app, transcoder and protocol types | Restricted ([LICENSE](LICENSE)) |
+| Desktop, Android, Roku, Samsung and LG apps | Restricted ([LICENSE](LICENSE)) |
+| Kodi add-on (`apps/kodi`) | GPL-2.0-or-later, as Kodi requires ([LICENSE.txt](apps/kodi/plugin.video.pley/LICENSE.txt)) |
+
+Third-party code, and FFmpeg where a build ships it, keep their own licences
+([LICENSING.md](LICENSING.md)).

@@ -108,7 +108,7 @@ pull requests that touch it, and by hand (Run workflow):
 
 | Workflow | Runs for changes in |
 |---|---|
-| Server | `apps/server`, `apps/transcoder`, `packages/transcoder-api`, `apps/web`, `deploy/` (except Markdown), `Cargo.*`, `rustfmt.toml`, `deny.toml`, the root `package.json`, `bun.lock`, `bunfig.toml`, the build, installer, license and source scripts |
+| Server | `apps/server`, `apps/transcoder`, `packages/transcoder-api`, `apps/web`, `deploy/` (except Markdown), `Cargo.*`, `rustfmt.toml`, `deny.toml`, the root `package.json`, `bun.lock`, `bunfig.toml`, `LICENSE`, `LICENSING.md`, the build and installer scripts and the license check |
 | Desktop | `apps/desktop`, the root `package.json`, `bun.lock`, `bunfig.toml`, `rustfmt.toml` |
 | Android | `apps/android`, `scripts/check-android.ps1` |
 | Samsung TV, LG TV | `apps/tizen` or `apps/webos`, `packages/tv`, the root `package.json`, `bun.lock`, `bunfig.toml`, `scripts/commit.mjs` |

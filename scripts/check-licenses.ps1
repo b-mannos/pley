@@ -1,7 +1,9 @@
-# Verifies the licensing boundary (see LICENSING.md):
-#  * the server (pley-server) must not depend on the transcoder
-#    crate or on any crate that is only available under a (L/A)GPL license;
-#  * everything the transcoder uses is permissive.
+# Verifies the licensing rules (see LICENSING.md):
+#  * the server (pley-server) and the transcoder (pley-transcoder), both
+#    under LICENSE (Restricted), must not depend on any crate that is only
+#    available under a copyleft license ((L/A)GPL and the like);
+#  * the server must not depend on the transcoder crate: it is a separate
+#    program, spoken to only over HTTP.
 # Walks the resolved dependency graph from `cargo metadata` (dev-dependencies excluded).
 # Exit code 1 on violations.
 
@@ -37,7 +39,7 @@ function Get-Closure([string]$name) {
     return $seen.Keys | ForEach-Object { $packages[$_] }
 }
 
-# A license expression is "copyleft-only" when every alternative is GPL-family.
+# A license expression is "copyleft-only" when every alternative is copyleft.
 function Test-CopyleftOnly([string]$expr) {
     if (-not $expr) { return $false }
     $alternatives = $expr -split '\s+OR\s+|/'
@@ -49,34 +51,26 @@ function Test-CopyleftOnly([string]$expr) {
 
 $failed = $false
 
-$server = Get-Closure "pley-server"
-Write-Host "pley-server: $($server.Count) crates in the runtime dependency graph"
-foreach ($p in $server) {
-    if ($p.name -eq "pley-transcoder") {
-        Write-Host "  ERROR: pley-server depends on pley-transcoder" -ForegroundColor Red
-        $failed = $true
+foreach ($program in "pley-server", "pley-transcoder") {
+    $closure = Get-Closure $program
+    Write-Host "${program}: $($closure.Count) crates in the runtime dependency graph"
+    foreach ($p in $closure) {
+        if ($program -eq "pley-server" -and $p.name -eq "pley-transcoder") {
+            Write-Host "  ERROR: pley-server depends on pley-transcoder (a separate program)" -ForegroundColor Red
+            $failed = $true
+        }
+        if (Test-CopyleftOnly $p.license) {
+            Write-Host "  ERROR: $($p.name) $($p.version) is $($p.license)" -ForegroundColor Red
+            $failed = $true
+        }
+        if (-not $p.license -and -not $p.license_file -and $p.source) {
+            Write-Host "  WARN: $($p.name) $($p.version) declares no license" -ForegroundColor Yellow
+        }
     }
-    if (Test-CopyleftOnly $p.license) {
-        Write-Host "  ERROR: $($p.name) $($p.version) is $($p.license)" -ForegroundColor Red
-        $failed = $true
-    }
-    if (-not $p.license -and -not $p.license_file -and $p.source) {
-        Write-Host "  WARN: $($p.name) $($p.version) declares no license" -ForegroundColor Yellow
-    }
+    $licenses = $closure | Group-Object { if ($_.license) { $_.license } else { "(file) $($_.license_file)" } } | Sort-Object Count -Descending
+    Write-Host "Licenses used by ${program}:"
+    foreach ($l in $licenses) { Write-Host ("  {0,4}  {1}" -f $l.Count, $l.Name) }
 }
-
-$transcoder = Get-Closure "pley-transcoder"
-Write-Host "pley-transcoder: $($transcoder.Count) crates in the runtime dependency graph"
-foreach ($p in $transcoder) {
-    if ($p.license -match 'SSPL|EUPL|GPL-2\.0-only|GPL-2\.0$') {
-        Write-Host "  ERROR: $($p.name) $($p.version) ($($p.license)) can't be used in the transcoder" -ForegroundColor Red
-        $failed = $true
-    }
-}
-
-$licenses = $server | Group-Object { if ($_.license) { $_.license } else { "(file) $($_.license_file)" } } | Sort-Object Count -Descending
-Write-Host "Licenses used by pley-server:"
-foreach ($l in $licenses) { Write-Host ("  {0,4}  {1}" -f $l.Count, $l.Name) }
 
 if ($failed) {
     Write-Host "License check FAILED" -ForegroundColor Red

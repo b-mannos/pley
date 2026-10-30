@@ -1,9 +1,8 @@
 //! Wire protocol between the pley media server and a pley transcoder node.
 //!
-//! The transcoder is a separate program that owns every
-//! interaction with FFmpeg. The server talks to it over plain HTTP + JSON using
-//! the types in this crate, so that both
-//! sides can use it. See `docs/TRANSCODER.md` for the endpoint list.
+//! The transcoder is a separate program that owns every interaction with
+//! FFmpeg. The server talks to it over plain HTTP + JSON using the types in
+//! this crate. See `docs/TRANSCODER.md` for the endpoint list.
 //!
 //! Conventions: all timestamps are unix **milliseconds** (`*_ms`), durations are
 //! milliseconds, stream indexes are FFmpeg input stream indexes.
@@ -634,9 +633,10 @@ pub struct TranscoderInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<String>,
     pub api_version: u32,
-    /// SPDX license of the transcoder program.
+    /// SPDX license of the transcoder program (Pley's: `LicenseRef-Restricted`).
     pub license: String,
-    /// Where the source code can be obtained.
+    /// Where its source code can be obtained, if it is offered (Pley's
+    /// transcoder offers none).
     pub source: Option<String>,
     pub started_at_ms: i64,
     pub capabilities: Capabilities,

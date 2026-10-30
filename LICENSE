@@ -1,0 +1,32 @@
+Pley: Restricted License (terms to be determined)
+SPDX-License-Identifier: LicenseRef-Restricted
+
+Copyright (c) 2026 the Pley authors. All rights reserved.
+
+Pley's licence terms have not been decided yet. Until they are published,
+this repository and everything built from it (the server, the transcoder,
+the web app, the desktop, Android, Roku, Samsung TV and LG TV apps, and the
+code they share) are restricted:
+
+- No licence is granted to use, copy, modify, merge, publish, distribute,
+  sublicense or sell any of it, in source or binary form, except under a
+  separate written agreement with the copyright holders.
+- If this repository or a build of it was shared with you, you may view and
+  run it for the purpose it was shared with you, and for nothing else. That
+  permission ends when the copyright holders withdraw it.
+
+Not covered by this licence, each under its own:
+
+- The Kodi add-on, apps/kodi/plugin.video.pley: GNU General Public License,
+  version 2 or (at your option) any later version (its LICENSE.txt).
+- Third-party code, fonts and icons that the apps and builds contain, and
+  third-party programs shipped beside them (such as FFmpeg): under their
+  own licences, as their notices say. LICENSING.md lists them.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

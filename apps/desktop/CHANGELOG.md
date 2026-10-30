@@ -8,6 +8,10 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- Pley Desktop is Restricted, its licence terms to be determined (`LICENSE`).
+
 ### Fixed
 
 - Searching the network finds servers on Windows computers that also have

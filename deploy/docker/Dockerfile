@@ -35,8 +35,6 @@ COPY Cargo.toml Cargo.lock rustfmt.toml ./
 COPY apps/server apps/server
 COPY apps/transcoder apps/transcoder
 COPY packages packages
-COPY docs docs
-COPY scripts scripts
 COPY --from=web /src/apps/web/dist apps/web/dist
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
@@ -76,7 +74,9 @@ RUN apt-get update \
 # is started (pley.sh).
 COPY --from=build /out/bin/ /usr/local/lib/pley/
 COPY --chmod=755 deploy/docker/pley.sh /usr/local/bin/pley
-COPY apps/server/LICENSE /usr/share/doc/pley/LICENSE.txt
+# Pley's licence; Debian's packages (FFmpeg among them) keep theirs in
+# /usr/share/doc/<package>/copyright (LICENSING.md).
+COPY LICENSE /usr/share/doc/pley/LICENSE.txt
 COPY LICENSING.md /usr/share/doc/pley/
 
 # HOME is /config for any user the container runs as (`--user`), so the GPU

@@ -10,8 +10,8 @@ standalone HTTP service that handles:
 - thumbnails and cover art
 - metrics in JSON and Prometheus formats
 
-It is a separate program. The Pley server talks to
-it only over HTTP; see `../../LICENSING.md`.
+It is Restricted, as all of Pley is (`../../LICENSE`), and the Pley server
+talks to it only over HTTP; see `../../LICENSING.md`.
 
 ```sh
 export PLEY_TRANSCODER_TOKEN=$(openssl rand -hex 16)

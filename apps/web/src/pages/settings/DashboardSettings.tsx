@@ -286,7 +286,6 @@ function TranscoderCard({ tc }: { tc: TranscoderInfo }) {
           aria-label={tc.available ? "Available" : "Unavailable"}
         />
         <h3 className="text-base font-semibold">Transcoder</h3>
-        {tc.license ? <Badge tone="info">{tc.license}</Badge> : null}
         <span className="text-xs text-muted">{tc.managed ? "Managed by Pley" : "External"}</span>
       </div>
       {tc.error ? <p className="mb-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">{tc.error}</p> : null}
