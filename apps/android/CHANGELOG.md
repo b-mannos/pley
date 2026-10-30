@@ -8,6 +8,8 @@ describes how they are made.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-30
+
 ### Added
 
 - Live TV, where the server has channels: from the Libraries tab on
@@ -77,5 +79,6 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/android-v0.0.1...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/android-v0.1.0...HEAD
+[0.1.0]: https://github.com/pley-media-server/pley/releases/tag/android-v0.1.0
 [0.0.1]: https://github.com/pley-media-server/pley/releases/tag/android-v0.0.1
