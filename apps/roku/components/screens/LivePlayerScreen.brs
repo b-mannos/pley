@@ -284,8 +284,8 @@ end sub
 
 ' --- Tuning ---
 
-' Up and down: the channel shows at once, and is tuned once the presses
-' stop.
+' Up and down: the channel's banner shows at once, over the one playing,
+' and it is tuned once the presses stop.
 sub zap(by as integer)
     from = m.zapTo
     if from = invalid then from = m.channel
@@ -293,7 +293,6 @@ sub zap(by as integer)
     target = liveStep(m.channels, from.id, by)
     if target = invalid then return
     m.zapTo = target
-    showCard(target, "")
     showBanner(true)
     m.bannerTimer.control = "stop"
     m.zapTimer.control = "stop"
@@ -304,8 +303,8 @@ sub onZapTimer()
     target = m.zapTo
     m.zapTo = invalid
     if target = invalid then return
-    if m.channel <> invalid and target.id = m.channel.id and m.sessionId <> "" and m.played
-        m.card.visible = false
+    if m.channel <> invalid and target.id = m.channel.id and m.sessionId <> ""
+        ' Back where it started.
         showBanner(true)
         return
     end if
