@@ -1,23 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { categoryKey, parseCategory, type LiveGroup } from "@/api/livetv";
-import { categoryName, groupTree } from "./CategoryRail";
+import { categoryName, groupSections } from "./CategoryRail";
 import { channelName, liveUrl, splitRegion } from "./common";
 
 const group = (name: string, region: string | null, label: string, count = 1): LiveGroup => ({ name, region, label, count });
 
-describe("groupTree", () => {
-  it("gathers a region's groups where its first one is, and leaves a region of one a group", () => {
-    const tree = groupTree([
+describe("groupSections", () => {
+  it("gathers regions in alphabetical order, the rest after in the provider's order", () => {
+    const { regions, others } = groupSections([
       group("UK| News", "UK", "News", 3),
       group("24/7 Films", null, "24/7 Films"),
-      group("UK| Sport", "UK", "Sport", 4),
       group("FR| Cinéma", "FR", "Cinéma"),
+      group("UK| Sport", "UK", "Sport", 4),
+      group("FR| Info", "FR", "Info"),
+      group("DE| Sport", "DE", "Sport"),
     ]);
-    expect(tree.map((e) => (e.kind === "region" ? `region ${e.region} ${e.count}` : e.group.name))).toEqual([
-      "region UK 7",
-      "24/7 Films",
-      "FR| Cinéma",
-    ]);
+    expect(regions.map((r) => `${r.region} ${r.count}`)).toEqual(["FR 2", "UK 7"]);
+    expect(others.map((g) => g.name)).toEqual(["24/7 Films", "DE| Sport"]);
+  });
+
+  it("leaves a lineup with fewer than two regions as it is", () => {
+    const groups = [group("News", null, "News"), group("UK| Sport", "UK", "Sport"), group("UK| News", "UK", "News")];
+    expect(groupSections(groups)).toEqual({ regions: [], others: groups });
   });
 });
 

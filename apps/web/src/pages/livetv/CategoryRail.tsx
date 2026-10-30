@@ -1,33 +1,34 @@
 import { useMemo, useState } from "react";
-import { ChevronRight, History, LayoutGrid, Search, Star, X } from "lucide-react";
+import { ChevronRight, History, LayoutGrid, Star } from "lucide-react";
 import { categoryKey, type LiveCategory, type LiveGroup, type LiveGroups } from "@/api/livetv";
 import { Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 
-type Entry = { kind: "group"; group: LiveGroup } | { kind: "region"; region: string; groups: LiveGroup[]; count: number };
+export interface Region {
+  region: string;
+  groups: LiveGroup[];
+  count: number;
+}
 
 /**
- * Groups in the provider's order, those of a region ("UK| Sport", "UK|
- * News"…) gathered under it, so hundreds of groups read as a few dozen.
- * A region with one group stays a group.
+ * The groups as the side shows them. A provider naming hundreds of groups
+ * by region ("UK| Sport", "UK| News"…) has them gathered under each region,
+ * the regions in alphabetical order, and the rest after, in its own order;
+ * a region with one group is one of the rest. Without regions, the groups
+ * as the provider lists them.
  */
-export function groupTree(groups: LiveGroup[]): Entry[] {
+export function groupSections(groups: LiveGroup[]): { regions: Region[]; others: LiveGroup[] } {
   const byRegion = new Map<string, LiveGroup[]>();
   for (const g of groups) {
     if (g.region) byRegion.set(g.region, [...(byRegion.get(g.region) ?? []), g]);
   }
-  const entries: Entry[] = [];
-  const placed = new Set<string>();
-  for (const g of groups) {
-    const region = g.region ? byRegion.get(g.region)! : null;
-    if (!region || region.length < 2) {
-      entries.push({ kind: "group", group: g });
-    } else if (!placed.has(g.region!)) {
-      placed.add(g.region!);
-      entries.push({ kind: "region", region: g.region!, groups: region, count: region.reduce((n, x) => n + x.count, 0) });
-    }
-  }
-  return entries;
+  const regions = [...byRegion]
+    .filter(([, gs]) => gs.length > 1)
+    .map(([region, gs]) => ({ region, groups: gs, count: gs.reduce((n, g) => n + g.count, 0) }))
+    .sort((a, b) => a.region.localeCompare(b.region));
+  if (regions.length < 2) return { regions: [], others: groups };
+  const gathered = new Set(regions.map((r) => r.region));
+  return { regions, others: groups.filter((g) => !g.region || !gathered.has(g.region)) };
 }
 
 /** What a category is called: "Favourites", "UK · Sport". */
@@ -48,7 +49,7 @@ export function categoryName(c: LiveCategory, groups: LiveGroup[] | undefined): 
 
 const count = (n: number) => n.toLocaleString();
 
-/** The categories down the side of Live TV: the marked ones, all, then every group. */
+/** The categories down the side of Live TV: the marked ones, all, then the regions and groups. */
 export function CategoryRail({
   groups,
   selected,
@@ -60,28 +61,15 @@ export function CategoryRail({
   onSelect: (c: LiveCategory) => void;
   className?: string;
 }) {
-  const [search, setSearch] = useState("");
-  const tree = useMemo(() => groupTree(groups?.groups ?? []), [groups]);
+  const { regions, others } = useMemo(() => groupSections(groups?.groups ?? []), [groups]);
   const selectedRegion =
-    selected.kind === "group" ? (groups?.groups.find((g) => g.name === selected.group)?.region ?? null) : null;
-  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set(selectedRegion ? [selectedRegion] : []));
-  const q = search.trim().toLowerCase();
-  const found = useMemo(
-    () => (q ? (groups?.groups ?? []).filter((g) => g.name.toLowerCase().includes(q)) : []),
-    [groups, q],
-  );
+    selected.kind === "group" ? (regions.find((r) => r.groups.some((g) => g.name === selected.group))?.region ?? null) : null;
+  const [open, setOpen] = useState<string | null>(selectedRegion);
   const key = categoryKey(selected);
-  const toggle = (region: string) =>
-    setOpen((o) => {
-      const next = new Set(o);
-      if (next.has(region)) next.delete(region);
-      else next.add(region);
-      return next;
-    });
 
   return (
     <nav aria-label="Channel groups" className={cn("flex min-h-0 flex-col", className)}>
-      <div className="space-y-0.5 p-2">
+      <div className="space-y-0.5 border-b border-border p-2">
         <Item active={key === "favorites"} onClick={() => onSelect({ kind: "favorites" })} icon={<Star className="size-4" />} count={groups?.favorites}>
           Favourites
         </Item>
@@ -98,111 +86,79 @@ export function CategoryRail({
             <Skeleton key={i} className="h-7 w-full rounded-md" />
           ))}
         </div>
-      ) : groups.groups.length > 1 ? (
-        <>
-          <div className="flex items-center justify-between border-t border-border px-4 pb-1 pt-3">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-subtle">Groups</span>
-            <span className="text-[11px] tabular-nums text-subtle">{count(groups.groups.length)}</span>
-          </div>
-          {groups.groups.length > 12 ? (
-            <div className="relative px-2 pb-2 pt-1">
-              <Search className="pointer-events-none absolute left-4.5 top-1/2 size-3.5 -translate-y-1/2 text-subtle" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Find a group"
-                aria-label="Find a group"
-                className="h-8 w-full rounded-md border border-border bg-surface-2 pl-8 pr-8 text-sm placeholder:text-subtle focus:border-accent focus:outline-none"
-              />
-              {search ? (
-                <button
-                  type="button"
-                  onClick={() => setSearch("")}
-                  aria-label="Clear"
-                  className="absolute right-3.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-subtle hover:text-fg"
-                >
-                  <X className="size-3" />
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-2 pb-3 [scrollbar-width:thin]">
-            {q ? (
-              found.length ? (
-                found.map((g) => (
-                  <Item key={g.name} active={key === `group:${g.name}`} onClick={() => onSelect({ kind: "group", group: g.name })} count={g.count}>
-                    {g.region ? <span className="mr-1.5 text-subtle">{g.region}</span> : null}
-                    {g.label}
-                  </Item>
-                ))
-              ) : (
-                <p className="px-3 py-4 text-sm text-subtle">No group called “{search.trim()}”.</p>
-              )
-            ) : (
-              tree.map((e) =>
-                e.kind === "group" ? (
-                  <Item
-                    key={e.group.name}
-                    active={key === `group:${e.group.name}`}
-                    onClick={() => onSelect({ kind: "group", group: e.group.name })}
-                    count={e.group.count}
-                  >
-                    {e.group.name}
-                  </Item>
-                ) : (
-                  <Region
-                    key={e.region}
-                    entry={e}
-                    open={open.has(e.region) || selectedRegion === e.region}
-                    onToggle={() => toggle(e.region)}
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3 [scrollbar-width:thin]">
+          {regions.length ? (
+            <>
+              <Heading>Regions</Heading>
+              <div className="space-y-0.5">
+                {regions.map((r) => (
+                  <RegionItem
+                    key={r.region}
+                    region={r}
+                    open={open === r.region}
+                    onToggle={() => setOpen((o) => (o === r.region ? null : r.region))}
                     selectedKey={key}
                     onSelect={onSelect}
                   />
-                ),
-              )
-            )}
-          </div>
-        </>
-      ) : null}
+                ))}
+              </div>
+            </>
+          ) : null}
+          {others.length > 1 || (others.length === 1 && regions.length) ? (
+            <>
+              <Heading>{regions.length ? "More groups" : "Groups"}</Heading>
+              <div className="space-y-0.5">
+                {others.map((g) => (
+                  <Item key={g.name} active={key === `group:${g.name}`} onClick={() => onSelect({ kind: "group", group: g.name })} count={g.count}>
+                    {g.name || "No group"}
+                  </Item>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
+      )}
     </nav>
   );
 }
 
-function Region({
-  entry,
+function Heading({ children }: { children: React.ReactNode }) {
+  return <div className="px-2.5 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-subtle">{children}</div>;
+}
+
+function RegionItem({
+  region: r,
   open,
   onToggle,
   selectedKey,
   onSelect,
 }: {
-  entry: Extract<Entry, { kind: "region" }>;
+  region: Region;
   open: boolean;
   onToggle: () => void;
   selectedKey: string;
   onSelect: (c: LiveCategory) => void;
 }) {
-  const holdsSelected = entry.groups.some((g) => selectedKey === `group:${g.name}`);
+  const holdsSelected = r.groups.some((g) => selectedKey === `group:${g.name}`);
   return (
-    <div>
+    <div className={cn("rounded-md", open && "bg-surface-2/60")}>
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
         className={cn(
-          "flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors hover:bg-surface-2",
-          holdsSelected && !open ? "text-accent" : "text-fg",
+          "flex min-h-8 w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-left text-sm transition-colors hover:bg-surface-2",
+          holdsSelected ? "text-accent" : "text-muted hover:text-fg",
         )}
       >
+        <span className={cn("min-w-0 flex-1 truncate font-medium", holdsSelected ? "text-accent" : "text-fg")}>{r.region}</span>
+        <span className="shrink-0 text-xs tabular-nums text-subtle">{count(r.count)}</span>
         <ChevronRight className={cn("size-3.5 shrink-0 text-subtle transition-transform duration-200", open && "rotate-90")} />
-        <span className="min-w-8 rounded bg-surface-3 px-1.5 py-0.5 text-center text-[11px] font-bold tracking-wide">{entry.region}</span>
-        <span className="flex-1 truncate text-xs text-subtle">
-          {entry.groups.length} groups
-        </span>
-        <span className="text-xs tabular-nums text-subtle">{count(entry.count)}</span>
       </button>
       {open ? (
-        <div className="mb-1 ml-[1.15rem] space-y-0.5 border-l border-border pl-2">
-          {entry.groups.map((g) => (
+        <div className="space-y-0.5 pb-1.5 pl-3">
+          {r.groups.map((g) => (
             <Item key={g.name} active={selectedKey === `group:${g.name}`} onClick={() => onSelect({ kind: "group", group: g.name })} count={g.count}>
               {g.label}
             </Item>

@@ -48,7 +48,7 @@ import { ChannelPanel } from "./ChannelPanel";
 
 /** Controls hide after this long without the pointer moving. */
 const HIDE_CONTROLS_AFTER = 3500;
-/** The banner saying what's on shows this long after tuning. */
+/** What's on, shown with I, goes after this long. */
 const BANNER_FOR = 5000;
 /** Seconds behind the live edge that still count as live. */
 const LIVE_WITHIN = 10;
@@ -230,7 +230,7 @@ function LivePlayer({
   const [fullscreen, setFullscreen] = useState(false);
   const [panel, setPanel] = useState(false);
   const [showControls, setShowControls] = useState(true);
-  const [banner, setBanner] = useState(true);
+  const [banner, setBanner] = useState(false);
   const [digits, setDigits] = useState("");
   const [notFound, setNotFound] = useState<string | null>(null);
   const [position, setPosition] = useState({ current: 0, start: 0, end: 0 });
@@ -252,7 +252,7 @@ function LivePlayer({
     let mediaRetries = 0;
     setStatus("tuning");
     setProblem(null);
-    setBanner(true);
+    setBanner(false);
     const fail = (t: Trouble) => {
       if (cancelled) return;
       setProblem(t);
@@ -566,193 +566,201 @@ function LivePlayer({
       onMouseMove={poke}
       onTouchStart={poke}
     >
-      <video
-        ref={videoRef}
-        className={cn("absolute inset-y-0 left-0 h-full w-full object-contain transition-[width] duration-300 ease-out", panel && "sm:w-[calc(100%-24rem)]")}
-        playsInline
-        onClick={() => (panel ? setPanel(false) : togglePlay())}
-        onDoubleClick={toggleFullscreen}
-      />
-
-      {/* Tuning: the channel's logo while it starts. */}
-      {status === "tuning" ? (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-black animate-fade-in">
-          <ChannelLogo channel={channel} width={240} className="h-28 w-48 rounded-2xl bg-white/[0.06]" />
-          <LoaderCircle className="size-7 animate-spin text-accent" aria-label="Tuning" />
-          <div className="text-center">
-            <div className="text-lg font-semibold">
-              {channel.number ? <span className="mr-2 tabular-nums text-white/60">{channel.number}</span> : null}
-              {channel.name}
-            </div>
-            <div className="mt-1 text-sm text-white/60">{on ? on.title : "Tuning…"}</div>
-          </div>
-        </div>
-      ) : null}
-
-      {status === "playing" && buffering ? (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <LoaderCircle className="size-12 animate-spin text-white/80 drop-shadow" />
-        </div>
-      ) : null}
-
-      {status === "error" && problem ? (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/85 p-4">
-          <TroubleCard
-            trouble={problem}
-            channel={channel}
-            onRetry={problem.kind === "stopped" || problem.kind === "missing" ? undefined : () => setAttempt((a) => a + 1)}
-            onBack={goBack}
-            onChannels={() => setPanel(true)}
-          />
-        </div>
-      ) : null}
-
-      {/* A channel number being typed. */}
-      {digits || notFound ? (
-        <div className="absolute right-6 top-6 z-30 rounded-xl bg-black/85 px-5 py-3 text-4xl font-bold tabular-nums tracking-widest shadow-2xl animate-pop-in">
-          {digits || <span className="text-xl tracking-normal text-white/70">No channel {notFound}</span>}
-        </div>
-      ) : null}
-
-      {/* Top bar */}
+      {/* The picture and its controls, beside the channel list when it is open. */}
       <div
         className={cn(
-          "absolute inset-x-0 top-0 z-10 flex items-start gap-3 bg-linear-to-b from-black/80 via-black/40 to-transparent px-3 pb-16 pt-3 transition-opacity duration-300 sm:px-6 sm:pt-5",
-          controlsVisible ? "opacity-100" : "pointer-events-none opacity-0",
+          "absolute inset-y-0 left-0 right-0 overflow-hidden transition-[right] duration-300 ease-out",
+          panel && "sm:right-[24rem]",
         )}
       >
-        <button type="button" aria-label="Back" onClick={goBack} className={cn(button, "shrink-0")}>
-          <ArrowLeft className="size-6" />
-        </button>
-        <ChannelLogo channel={channel} width={80} showName={false} className="mt-0.5 hidden h-10 w-16 shrink-0 rounded-md bg-white/10 sm:flex" />
-        <div className="min-w-0 flex-1 pt-0.5">
-          <div className="flex items-center gap-2 truncate text-lg font-semibold drop-shadow sm:text-xl">
-            {channel.number ? <span className="tabular-nums text-white/60">{channel.number}</span> : null}
-            <span className="truncate">{channel.name}</span>
-          </div>
-          {on ? <div className="truncate text-sm text-white/75">{on.title}</div> : null}
-        </div>
-        <button
-          type="button"
-          aria-label={channel.favorite ? "Remove from favourites" : "Add to favourites"}
-          aria-pressed={channel.favorite}
-          onClick={() => favorite.mutate({ id: channel.id, favorite: !channel.favorite })}
-          className={button}
-        >
-          <Star className={cn("size-5", channel.favorite && "fill-accent text-accent")} />
-        </button>
-        <button type="button" aria-label="Channels" title="Channels (G)" onClick={() => setPanel((p) => !p)} className={cn(button, panel && "bg-white/15")}>
-          <List className="size-5" />
-        </button>
-      </div>
+        <video
+          ref={videoRef}
+          className="absolute inset-0 size-full object-contain"
+          playsInline
+          onClick={() => (panel ? setPanel(false) : togglePlay())}
+          onDoubleClick={toggleFullscreen}
+        />
 
-      {/* What's on: shown on tuning, and with I. */}
-      <div
-        className={cn(
-          "pointer-events-none absolute bottom-20 left-3 right-3 z-10 transition-all duration-500 sm:bottom-24 sm:left-6 sm:right-auto sm:w-[30rem]",
-          banner && status === "playing" ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0",
-        )}
-        aria-hidden={!banner}
-      >
-        <div className="flex gap-4 rounded-xl border border-white/10 bg-black/85 p-4 shadow-2xl">
-          <ChannelLogo channel={channel} width={96} className="h-14 w-24 shrink-0 rounded-lg bg-white/[0.07]" />
-          <div className="min-w-0 flex-1">
-            {on ? (
-              <>
-                <div className="truncate font-semibold">{on.title}</div>
-                <div className="mt-0.5 text-xs tabular-nums text-white/60">
-                  {formatSpan(on)} · {timeLeft(on, now)}
-                </div>
-                <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/15">
-                  <div className="h-full rounded-full bg-accent" style={{ width: `${programProgress(on, now) * 100}%` }} />
-                </div>
-              </>
-            ) : (
-              <div className="pt-1 text-sm text-white/70">{channel.has_guide ? "Nothing in the guide now" : "No guide for this channel"}</div>
-            )}
-            {next ? (
-              <div className="mt-2 truncate text-xs text-white/55">
-                Next <span className="tabular-nums">{formatTime(next.start)}</span> · {next.title}
+        {/* Tuning: the channel's logo while it starts. */}
+        {status === "tuning" ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-black animate-fade-in">
+            <ChannelLogo channel={channel} width={240} className="h-28 w-48 rounded-2xl bg-white/[0.06]" />
+            <LoaderCircle className="size-7 animate-spin text-accent" aria-label="Tuning" />
+            <div className="text-center">
+              <div className="text-lg font-semibold">
+                {channel.number ? <span className="mr-2 tabular-nums text-white/60">{channel.number}</span> : null}
+                {channel.name}
               </div>
-            ) : null}
+              <div className="mt-1 text-sm text-white/60">{on ? on.title : "Tuning…"}</div>
+            </div>
           </div>
-        </div>
-      </div>
+        ) : null}
 
-      {/* Bottom bar */}
-      <div
-        className={cn(
-          "absolute inset-x-0 bottom-0 z-10 bg-linear-to-t from-black/90 via-black/55 to-transparent px-3 pb-3 pt-16 transition-opacity duration-300 sm:px-6 sm:pb-5",
-          controlsVisible ? "opacity-100" : "pointer-events-none opacity-0",
-        )}
-      >
-        <div className="flex items-center gap-0.5 sm:gap-1.5">
-          <button type="button" aria-label={playing ? "Pause" : "Play"} onClick={togglePlay} className={cn(button, "size-11")}>
-            {playing ? <Pause className="size-6 fill-current" /> : <Play className="ml-0.5 size-6 fill-current" />}
+        {status === "playing" && buffering ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <LoaderCircle className="size-12 animate-spin text-white/80 drop-shadow" />
+          </div>
+        ) : null}
+
+        {status === "error" && problem ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/85 p-4">
+            <TroubleCard
+              trouble={problem}
+              channel={channel}
+              onRetry={problem.kind === "stopped" || problem.kind === "missing" ? undefined : () => setAttempt((a) => a + 1)}
+              onBack={goBack}
+              onChannels={() => setPanel(true)}
+            />
+          </div>
+        ) : null}
+
+        {/* A channel number being typed. */}
+        {digits || notFound ? (
+          <div className="absolute right-6 top-6 z-30 rounded-xl bg-black/85 px-5 py-3 text-4xl font-bold tabular-nums tracking-widest shadow-2xl animate-pop-in">
+            {digits || <span className="text-xl tracking-normal text-white/70">No channel {notFound}</span>}
+          </div>
+        ) : null}
+
+        {/* Top bar */}
+        <div
+          className={cn(
+            "absolute inset-x-0 top-0 z-10 flex items-start gap-3 bg-linear-to-b from-black/80 via-black/40 to-transparent px-3 pb-16 pt-3 transition-opacity duration-300 sm:px-6 sm:pt-5",
+            controlsVisible ? "opacity-100" : "pointer-events-none opacity-0",
+          )}
+        >
+          <button type="button" aria-label="Back" onClick={goBack} className={cn(button, "shrink-0")}>
+            <ArrowLeft className="size-6" />
           </button>
-          <button type="button" aria-label="Back 10 seconds" title="Back 10 s (←)" onClick={() => seekBy(-10)} className={button}>
-            <RotateCcw className="size-5" />
-          </button>
+          <ChannelLogo channel={channel} width={80} showName={false} className="mt-0.5 hidden h-10 w-16 shrink-0 rounded-md bg-white/10 sm:flex" />
+          <div className="min-w-0 flex-1 pt-0.5">
+            <div className="flex items-center gap-2 truncate text-lg font-semibold drop-shadow sm:text-xl">
+              {channel.number ? <span className="tabular-nums text-white/60">{channel.number}</span> : null}
+              <span className="truncate">{channel.name}</span>
+            </div>
+            {on ? <div className="truncate text-sm text-white/75">{on.title}</div> : null}
+          </div>
           <button
             type="button"
-            aria-label="Forward 10 seconds"
-            title="Forward 10 s (→)"
-            onClick={() => seekBy(10)}
-            disabled={atLive}
+            aria-label={channel.favorite ? "Remove from favourites" : "Add to favourites"}
+            aria-pressed={channel.favorite}
+            onClick={() => favorite.mutate({ id: channel.id, favorite: !channel.favorite })}
             className={button}
           >
-            <RotateCw className="size-5" />
+            <Star className={cn("size-5", channel.favorite && "fill-accent text-accent")} />
           </button>
-          <div className="group/vol hidden items-center sm:flex">
-            <button type="button" aria-label={muted ? "Unmute" : "Mute"} onClick={() => setMuted((m) => !m)} className={button}>
-              <VolumeIcon className="size-5" />
-            </button>
-            <div className="hidden w-0 overflow-hidden transition-[width] duration-200 group-hover/vol:w-24 group-focus-within/vol:w-24 sm:block">
-              <Slider
-                label="Volume"
-                value={muted ? 0 : volume}
-                max={1}
-                onPreview={(v) => {
-                  setVolume(v);
-                  setMuted(v === 0);
-                }}
-                className="ml-1 w-20"
-              />
+          <button type="button" aria-label="Channels" title="Channels (G)" onClick={() => setPanel((p) => !p)} className={cn(button, panel && "bg-white/15")}>
+            <List className="size-5" />
+          </button>
+        </div>
+
+        {/* What's on: shown with I. */}
+        <div
+          className={cn(
+            "pointer-events-none absolute bottom-20 left-3 right-3 z-10 transition-all duration-500 sm:bottom-24 sm:left-6 sm:right-auto sm:w-[30rem]",
+            banner && status === "playing" ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0",
+          )}
+          aria-hidden={!banner}
+        >
+          <div className="flex gap-4 rounded-xl border border-white/10 bg-black/85 p-4 shadow-2xl">
+            <ChannelLogo channel={channel} width={96} className="h-14 w-24 shrink-0 rounded-lg bg-white/[0.07]" />
+            <div className="min-w-0 flex-1">
+              {on ? (
+                <>
+                  <div className="truncate font-semibold">{on.title}</div>
+                  <div className="mt-0.5 text-xs tabular-nums text-white/60">
+                    {formatSpan(on)} · {timeLeft(on, now)}
+                  </div>
+                  <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/15">
+                    <div className="h-full rounded-full bg-accent" style={{ width: `${programProgress(on, now) * 100}%` }} />
+                  </div>
+                </>
+              ) : (
+                <div className="pt-1 text-sm text-white/70">{channel.has_guide ? "Nothing in the guide now" : "No guide for this channel"}</div>
+              )}
+              {next ? (
+                <div className="mt-2 truncate text-xs text-white/55">
+                  Next <span className="tabular-nums">{formatTime(next.start)}</span> · {next.title}
+                </div>
+              ) : null}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={goLive}
-            disabled={atLive}
-            className={cn(
-              "ml-1 flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-bold uppercase tracking-wide transition sm:ml-2",
-              atLive ? "bg-danger/90 text-white" : "bg-white/15 text-white/85 hover:bg-white/25",
-            )}
-            title={atLive ? "Live" : "Go live"}
-          >
-            <span className={cn("size-1.5 rounded-full", atLive ? "bg-white animate-pulse" : "bg-white/60")} />
-            {atLive ? "Live" : `−${formatBehind(behind)}`}
-          </button>
-          {on ? (
-            <div className="ml-2 hidden min-w-0 truncate text-sm text-white/70 md:block">
-              <span className="tabular-nums">{formatSpan(on)}</span>
-            </div>
-          ) : null}
-          <div className="flex-1" />
-          <button type="button" aria-label="Channel up" title="Channel up (↑)" onClick={() => onStep(1)} className={button}>
-            <ChevronUp className="size-5" />
-          </button>
-          <button type="button" aria-label="Channel down" title="Channel down (↓)" onClick={() => onStep(-1)} className={button}>
-            <ChevronDown className="size-5" />
-          </button>
-          {"pictureInPictureEnabled" in document && document.pictureInPictureEnabled ? (
-            <button type="button" aria-label="Picture in picture" onClick={togglePip} className={cn(button, "hidden sm:flex")}>
-              <PictureInPicture2 className="size-5" />
+        </div>
+
+        {/* Bottom bar */}
+        <div
+          className={cn(
+            "absolute inset-x-0 bottom-0 z-10 bg-linear-to-t from-black/90 via-black/55 to-transparent px-3 pb-3 pt-16 transition-opacity duration-300 sm:px-6 sm:pb-5",
+            controlsVisible ? "opacity-100" : "pointer-events-none opacity-0",
+          )}
+        >
+          <div className="flex items-center gap-0.5 sm:gap-1.5">
+            <button type="button" aria-label={playing ? "Pause" : "Play"} onClick={togglePlay} className={cn(button, "size-11")}>
+              {playing ? <Pause className="size-6 fill-current" /> : <Play className="ml-0.5 size-6 fill-current" />}
             </button>
-          ) : null}
-          <button type="button" aria-label={fullscreen ? "Exit full screen" : "Full screen"} title="Full screen (F)" onClick={toggleFullscreen} className={button}>
-            {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
-          </button>
+            <button type="button" aria-label="Back 10 seconds" title="Back 10 s (←)" onClick={() => seekBy(-10)} className={button}>
+              <RotateCcw className="size-5" />
+            </button>
+            <button
+              type="button"
+              aria-label="Forward 10 seconds"
+              title="Forward 10 s (→)"
+              onClick={() => seekBy(10)}
+              disabled={atLive}
+              className={button}
+            >
+              <RotateCw className="size-5" />
+            </button>
+            <div className="group/vol hidden items-center sm:flex">
+              <button type="button" aria-label={muted ? "Unmute" : "Mute"} onClick={() => setMuted((m) => !m)} className={button}>
+                <VolumeIcon className="size-5" />
+              </button>
+              <div className="hidden w-0 overflow-hidden transition-[width] duration-200 group-hover/vol:w-24 group-focus-within/vol:w-24 sm:block">
+                <Slider
+                  label="Volume"
+                  value={muted ? 0 : volume}
+                  max={1}
+                  onPreview={(v) => {
+                    setVolume(v);
+                    setMuted(v === 0);
+                  }}
+                  className="ml-1 w-20"
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={goLive}
+              disabled={atLive}
+              className={cn(
+                "ml-1 flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-bold uppercase tracking-wide transition sm:ml-2",
+                atLive ? "bg-danger/90 text-white" : "bg-white/15 text-white/85 hover:bg-white/25",
+              )}
+              title={atLive ? "Live" : "Go live"}
+            >
+              <span className={cn("size-1.5 rounded-full", atLive ? "bg-white animate-pulse" : "bg-white/60")} />
+              {atLive ? "Live" : `−${formatBehind(behind)}`}
+            </button>
+            {on ? (
+              <div className="ml-2 hidden min-w-0 truncate text-sm text-white/70 md:block">
+                <span className="tabular-nums">{formatSpan(on)}</span>
+              </div>
+            ) : null}
+            <div className="flex-1" />
+            <button type="button" aria-label="Channel up" title="Channel up (↑)" onClick={() => onStep(1)} className={button}>
+              <ChevronUp className="size-5" />
+            </button>
+            <button type="button" aria-label="Channel down" title="Channel down (↓)" onClick={() => onStep(-1)} className={button}>
+              <ChevronDown className="size-5" />
+            </button>
+            {"pictureInPictureEnabled" in document && document.pictureInPictureEnabled ? (
+              <button type="button" aria-label="Picture in picture" onClick={togglePip} className={cn(button, "hidden sm:flex")}>
+                <PictureInPicture2 className="size-5" />
+              </button>
+            ) : null}
+            <button type="button" aria-label={fullscreen ? "Exit full screen" : "Full screen"} title="Full screen (F)" onClick={toggleFullscreen} className={button}>
+              {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
+            </button>
+          </div>
         </div>
       </div>
 

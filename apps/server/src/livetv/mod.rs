@@ -439,6 +439,8 @@ pub struct LiveTv {
     /// Every channel, in order, read once and kept until something changes:
     /// a lineup runs to tens of thousands, and every page of the apps asks.
     lineup: Mutex<Option<Arc<Lineup>>>,
+    /// One reading of the lineup at a time: those asking meanwhile wait for it.
+    reading_lineup: tokio::sync::Mutex<()>,
     /// Counts changes, so a lineup read while one happened isn't kept.
     generation: AtomicU64,
 }
@@ -556,6 +558,7 @@ impl LiveTv {
             tried: Mutex::default(),
             refresh_lock: tokio::sync::Mutex::new(()),
             lineup: Mutex::default(),
+            reading_lineup: tokio::sync::Mutex::new(()),
             generation: AtomicU64::new(0),
         });
         // Whether channels played, as the tuners find out (until Live TV goes).
@@ -635,6 +638,8 @@ impl LiveTv {
     }
 
     async fn refresh_due(&self) {
+        // A lineup changed meanwhile is read again now, not by the next app asking.
+        let _ = self.lineup().await;
         let every = i64::from(self.settings().refresh_hours) * 3600;
         let Ok(sources) = self.source_rows().await else { return };
         for source in sources.into_iter().filter(|s| s.enabled) {
@@ -1343,6 +1348,11 @@ impl LiveTv {
 
     /// The lineup, read again when something changed since it was last.
     pub(crate) async fn lineup(&self) -> Result<Arc<Lineup>, AppError> {
+        if let Some(lineup) = self.lineup.lock().clone() {
+            return Ok(lineup);
+        }
+        let _one = self.reading_lineup.lock().await;
+        // Read by whoever went first.
         if let Some(lineup) = self.lineup.lock().clone() {
             return Ok(lineup);
         }

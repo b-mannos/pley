@@ -52,7 +52,9 @@ export function ChannelPanel({
   }
 
   const [range, setRange] = useState({ from: 0, to: 20 });
-  const list = useChannelList(shown, search, range.from, range.to);
+  // Search looks among every channel, whatever group is listed.
+  const listed: LiveCategory = search.trim() ? { kind: "all" } : shown;
+  const list = useChannelList(listed, search, range.from, range.to);
   const around = useQuery({ ...liveQueries.around(shown, current), enabled: open && !search });
   // TanStack Virtual: the compiler leaves this component as it is.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -131,8 +133,8 @@ export function ChannelPanel({
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Find"
-                aria-label="Find a channel"
+                placeholder="Search channels"
+                aria-label="Search channels"
                 className="h-9 w-full rounded-md border border-white/10 bg-white/[0.06] pl-9 pr-3 text-sm text-white placeholder:text-white/40 focus:border-accent focus:outline-none"
               />
             </div>
@@ -164,7 +166,7 @@ export function ChannelPanel({
               return (
                 <div key={row.key} className="absolute inset-x-2" style={{ top: row.start, height: ROW }}>
                   {c ? (
-                    <PanelRow channel={c} name={channelName(c, shown)} active={c.id === current} now={now} onTune={() => onTune(c, shown)} />
+                    <PanelRow channel={c} name={channelName(c, listed)} active={c.id === current} now={now} onTune={() => onTune(c, listed)} />
                   ) : (
                     <div className="flex h-full items-center gap-3 p-2" aria-hidden>
                       <span className="w-8" />

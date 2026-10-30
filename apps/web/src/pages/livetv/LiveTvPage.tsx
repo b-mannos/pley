@@ -68,6 +68,9 @@ export function LiveTvPage() {
     initialDataUpdatedAt: 0,
   }).data;
   const name = categoryName(category, groups.data?.groups);
+  const query = search.trim().toLowerCase();
+  const searching = query.length > 0;
+  const foundGroups = searching ? (groups.data?.groups ?? []).filter((g) => g.name.toLowerCase().includes(query)).slice(0, 12) : [];
   const total =
     category.kind === "all"
       ? groups.data?.total
@@ -179,16 +182,25 @@ export function LiveTvPage() {
               <ChevronDown className="ml-auto size-4 shrink-0 text-subtle" />
             </button>
             <h2 className="hidden min-w-0 flex-1 items-baseline gap-2 lg:flex">
-              <span className="truncate text-lg font-semibold tracking-tight">{name}</span>
-              {total !== undefined ? <span className="text-sm tabular-nums text-subtle">{total.toLocaleString()} channels</span> : null}
+              {searching ? (
+                <span className="truncate text-lg font-semibold tracking-tight">Results for “{search.trim()}”</span>
+              ) : (
+                <>
+                  <span className="truncate text-lg font-semibold tracking-tight">{name}</span>
+                  {total !== undefined ? <span className="text-sm tabular-nums text-subtle">{total.toLocaleString()} channels</span> : null}
+                </>
+              )}
             </h2>
-            <div className="relative sm:ml-auto sm:w-72">
+            <div className="relative sm:ml-auto sm:w-80">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle" />
               <TextInput
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder={category.kind === "all" ? "Find a channel or what's on" : `Find in ${name}`}
-                aria-label="Find a channel"
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setSearch("");
+                }}
+                placeholder="Search channels, groups and what's on"
+                aria-label="Search Live TV"
                 className="h-9 pl-9 pr-9"
               />
               {search ? (
@@ -204,17 +216,25 @@ export function LiveTvPage() {
             </div>
           </div>
 
-          <Results
-            category={category}
-            search={search}
-            view={view}
-            now={now}
-            onDetails={onDetails}
-            searchAll={(q) => {
-              select({ kind: "all" });
-              setSearch(q);
-            }}
-          />
+          {searching && foundGroups.length ? (
+            <div className="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="Groups found">
+              <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-subtle">Groups</span>
+              {foundGroups.map((g) => (
+                <button
+                  key={g.name}
+                  type="button"
+                  onClick={() => select({ kind: "group", group: g.name })}
+                  className="flex h-7 items-center gap-1.5 rounded-full border border-border px-3 text-sm text-muted transition-colors hover:border-accent/50 hover:text-fg"
+                >
+                  {g.region ? <span className="text-xs font-semibold text-subtle">{g.region}</span> : null}
+                  {g.label}
+                  <span className="text-xs tabular-nums text-subtle">{g.count.toLocaleString()}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {/* Search looks among every channel, whatever group is open. */}
+          <Results category={searching ? { kind: "all" } : category} search={search} view={view} now={now} onDetails={onDetails} />
         </div>
       </div>
 
@@ -233,14 +253,12 @@ function Results({
   view,
   now,
   onDetails,
-  searchAll,
 }: {
   category: LiveCategory;
   search: string;
   view: View;
   now: number;
   onDetails: (channel: Channel, program: Program) => void;
-  searchAll: (q: string) => void;
 }) {
   const first = useQuery(liveQueries.page(category, search, 0));
   const height = "h-[calc(100dvh-13rem)] min-h-[22rem] sm:h-[calc(100dvh-12.5rem)]";
@@ -263,13 +281,8 @@ function Results({
     return (
       <EmptyState
         icon={<Search />}
-        title="No channels match"
-        description={search ? `Nothing called “${search.trim()}” here.` : "Nothing in this group now."}
-        action={
-          search && category.kind !== "all" ? (
-            <Button onClick={() => searchAll(search)}>Find it in every channel</Button>
-          ) : undefined
-        }
+        title={search ? "No channels match" : "No channels here"}
+        description={search ? `No channel's name, number or programme on now has “${search.trim()}” in it.` : "Nothing in this group now."}
       />
     );
   }
