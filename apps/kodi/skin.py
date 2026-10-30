@@ -937,48 +937,74 @@ def live_row(focused: bool) -> list:
     return out
 
 
+def live_category(focused: bool) -> list:
+    """A category in Live TV's first column: its name (a region's groups
+    set in under it) and how many channels it has; a region's chevron says
+    whether it is open. The one shown is on surface3; focused, the accent
+    with on-accent text, as a rail entry."""
+    w, h = L.LIVE_CATEGORY_WIDTH, L.LIVE_CATEGORY_ROW
+    has_focus = "Control.HasFocus(%d)" % L.LIVE_CATEGORIES
+    chosen = "String.IsEqual(ListItem.Property(chosen),1)"
+    inner = "String.IsEqual(ListItem.Property(inner),1)"
+    region = "!String.IsEmpty(ListItem.Property(region))"
+    lit = has_focus if focused else "false"
+    out = [
+        image(0, 4, w, h - 8, "round12.png", color=L.SURFACE3, border=14, visible="%s + !%s" % (chosen, lit) if focused else chosen),
+    ]
+    if focused:
+        out.append(image(0, 4, w, h - 8, "round12.png", color=L.ACCENT, border=14, visible=has_focus))
+    for on_accent in ((False, True) if focused else (False,)):
+        shown = (has_focus if on_accent else "!" + has_focus) if focused else None
+        fg = L.ON_ACCENT if on_accent else L.FG
+        muted = L.ON_ACCENT if on_accent else L.MUTED
+
+        def when(condition):
+            return " + ".join(c for c in (condition, shown) if c)
+
+        out += [
+            label(24, 0, w - 156, h, L.FONT_LABEL, fg, "$INFO[ListItem.Label]", visible=when("!" + inner)),
+            label(56, 0, w - 188, h, L.FONT_LABEL, fg, "$INFO[ListItem.Label]", visible=when(inner)),
+            label(w - 140, 0, 116, h, L.FONT_CAPTION, muted, "$INFO[ListItem.Label2]", align="right", visible=when("!" + region)),
+            label(w - 172, 0, 116, h, L.FONT_CAPTION, muted, "$INFO[ListItem.Label2]", align="right", visible=when(region)),
+            image(w - 48, (h - 28) // 2, 28, 28, "icon-chevron-right.png", color=muted, visible=when("String.IsEqual(ListItem.Property(region),closed)")),
+            image(w - 48, (h - 28) // 2, 28, 28, "icon-chevron-down.png", color=muted, visible=when("String.IsEqual(ListItem.Property(region),open)")),
+        ]
+    return out
+
+
 def live_page() -> ET.Element:
-    """Live TV (livetv.py; the web's LiveTvPage, as a TV's channel list):
-    the title and tabs, the channels by number with what's on now, and
-    beside them what the focused channel shows now and next, which Kodi
-    reads from the list's item as focus moves."""
-    down = nav(ondown=str(L.LIVE_LIST), onleft=str(L.RAIL))
-    tabs = []
-    for id_, text in ((L.LIVE_ALL, 30184), (L.LIVE_FAVOURITES, 30249), (L.LIVE_RECENT, 30250), (L.LIVE_GROUP, 30251)):
-        # As a library's tabs: each twice, at rest and chosen (on surface3).
-        for chosen in (False, True):
-            tabs.append(
-                button(
-                    id_ + (100 if chosen else 0),
-                    None,
-                    0,
-                    None,
-                    80,
-                    "round12.png",
-                    "round12.png" if chosen else None,
-                    "$ADDON[plugin.video.pley %d]" % text,
-                    font=L.FONT_BODY_LARGE,
-                    color=L.FG if chosen else L.MUTED,
-                    offset=32,
-                    auto=(80, 600),
-                    animations=[anim("Focus", ZOOM_PILL)],
-                    navigation=down,
-                    nofocus_color=L.SURFACE3 if chosen else None,
-                )
-            )
+    """Live TV (livetv.py), as TiviMate and the web's LiveTvPage lay it
+    out: the categories, the channels of the one shown by number with
+    what's on now, and beside them what the focused channel shows now and
+    next, which Kodi reads from the list's item as focus moves."""
+    scroll = {"text": "200", "attrs": {"tween": "cubic", "easing": "out"}}
+    cw, ch = L.LIVE_CATEGORY_WIDTH, L.LIVE_CATEGORY_ROW
+    categories = control(
+        "list",
+        L.LIVE_CATEGORIES,
+        L.LIVE_CATEGORY_X,
+        L.LIVE_TOP,
+        cw,
+        ch * L.LIVE_CATEGORY_ROWS,
+        orientation="vertical",
+        scrolltime=scroll,
+        itemlayout=el("itemlayout", None, live_category(False), width=cw, height=ch),
+        focusedlayout=el("focusedlayout", None, live_category(True), width=cw, height=ch),
+        **nav(onleft=str(L.RAIL), onright=str(L.LIVE_LIST)),
+    )
     width, height = L.LIVE_LIST_WIDTH, L.LIVE_ROW
     channels = control(
         "list",
         L.LIVE_LIST,
-        L.GUTTER - 16,
+        L.LIVE_LIST_X,
         L.LIVE_TOP,
         width,
         height * L.LIVE_ROWS,
         orientation="vertical",
-        scrolltime={"text": "200", "attrs": {"tween": "cubic", "easing": "out"}},
+        scrolltime=scroll,
         itemlayout=el("itemlayout", None, live_row(False), width=width, height=height),
         focusedlayout=el("focusedlayout", None, live_row(True), width=width, height=height),
-        **nav(onup=str(L.LIVE_TABS), onleft=str(L.RAIL)),
+        **nav(onleft=str(L.LIVE_CATEGORIES)),
     )
     x, pw, ph = L.LIVE_PANEL_X, L.LIVE_PANEL_WIDTH, L.LIVE_PICTURE_HEIGHT
     item = "Container(%d).ListItem" % L.LIVE_LIST
@@ -993,14 +1019,14 @@ def live_page() -> ET.Element:
         [
             image(x, y, pw, ph, "round12.png", color=L.SURFACE2, border=14),
             image(x + pw // 4, y + ph // 4, pw // 2, ph // 2, "$INFO[%s.Art(thumb)]" % item, aspect="keep", fade=150, background="true", visible="String.IsEmpty(%s)" % picture),
-            label(x + 32, y, pw - 64, ph, L.FONT_TITLE, L.FG, "$INFO[%s.Label]" % item, align="center", wrap=True, visible="String.IsEmpty(%s) + String.IsEmpty(%s.Art(thumb))" % (picture, item)),
+            label(x + 24, y, pw - 48, ph, L.FONT_TITLE, L.FG, "$INFO[%s.Label]" % item, align="center", wrap=True, visible="String.IsEmpty(%s) + String.IsEmpty(%s.Art(thumb))" % (picture, item)),
             image(x, y, pw, ph, "$INFO[%s]" % picture, diffuse="mask-landscape.png", aspect="scale", fade=150, background="true", visible="!String.IsEmpty(%s)" % picture),
-            label(x, y + ph + 24, pw, 88, L.FONT_TITLE, L.FG, "$INFO[%s.Property(title)]" % item, wrap=True, aligny="top"),
-            label(x, y + ph + 116, pw, 34, L.FONT_CAPTION, L.MUTED, "$INFO[%s.Property(airs)]" % item),
+            label(x, y + ph + 20, pw, 88, L.FONT_TITLE, L.FG, "$INFO[%s.Property(title)]" % item, wrap=True, aligny="top"),
+            label(x, y + ph + 112, pw, 68, L.FONT_CAPTION, L.MUTED, "$INFO[%s.Property(airs)]" % item, wrap=True, aligny="top"),
             control(
                 "textbox",
                 left=x,
-                top=y + ph + 162,
+                top=y + ph + 188,
                 width=pw,
                 height=210,
                 font=L.FONT_BODY,
@@ -1008,8 +1034,8 @@ def live_page() -> ET.Element:
                 autoscroll="false",
                 label="$INFO[%s.Property(description)]" % item,
             ),
-            label(x, y + ph + 390, pw, 34, L.FONT_CAPTION, L.SUBTLE, "$ADDON[plugin.video.pley 30257]", visible="!String.IsEmpty(%s.Property(next))" % item),
-            label(x, y + ph + 426, pw, 40, L.FONT_LABEL, L.FG, "$INFO[%s.Property(next)]" % item),
+            label(x, y + ph + 414, pw, 34, L.FONT_CAPTION, L.SUBTLE, "$ADDON[plugin.video.pley 30257]", visible="!String.IsEmpty(%s.Property(next))" % item),
+            label(x, y + ph + 450, pw, 40, L.FONT_LABEL, L.FG, "$INFO[%s.Property(next)]" % item),
         ],
         visible="Integer.IsGreater(Container(%d).NumItems,0)" % L.LIVE_LIST,
     )
@@ -1020,11 +1046,13 @@ def live_page() -> ET.Element:
         L.WIDTH,
         L.HEIGHT,
         [
-            label(L.GUTTER, 64, 700, 68, L.FONT_PAGE, L.FG, "$ADDON[plugin.video.pley 30247]", id_=L.LIVE_TITLE),
-            grouplist(L.LIVE_TABS, 900, 58, L.WIDTH - L.SAFE_X - 900, 80, tabs, gap=16, align="right", navigation=down),
+            label(L.GUTTER, 64, L.LIVE_LIST_X - L.GUTTER, 68, L.FONT_PAGE, L.FG, "$ADDON[plugin.video.pley 30247]", id_=L.LIVE_TITLE),
+            label(L.LIVE_LIST_X + 16, 72, width - 16, 56, L.FONT_SECTION, L.FG, id_=L.LIVE_HEADING),
+            label(L.LIVE_LIST_X + 16, 124, width - 16, 36, L.FONT_CAPTION, L.MUTED, id_=L.LIVE_COUNT),
+            categories,
             channels,
             panel,
-            label(L.GUTTER, 240, 1400, 120, L.FONT_BODY_LARGE, L.MUTED, id_=L.LIVE_EMPTY, wrap=True, aligny="top"),
+            label(L.LIVE_LIST_X + 16, 240, width - 16, 120, L.FONT_BODY_LARGE, L.MUTED, id_=L.LIVE_EMPTY, wrap=True, aligny="top"),
         ],
         visible=is_("pley.screen", "live"),
     )

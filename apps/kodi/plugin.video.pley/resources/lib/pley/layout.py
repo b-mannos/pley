@@ -276,23 +276,28 @@ def profiles_left(count: int) -> int:
     return (WIDTH - span) // 2
 
 
-# Live TV (livetv.py; the web's LiveTvPage as a TV's channel list): the
-# title and its tabs (All, Favourites, Recently watched and Groups, each
-# twice: at rest and chosen, 100 on), the channels by number with what's on
-# now, and beside them the focused channel's programme now and next, which
-# the skin reads from the list's own item.
-LIVE_TITLE, LIVE_TABS = 10011, 10012
-LIVE_ALL, LIVE_FAVOURITES, LIVE_RECENT, LIVE_GROUP = 10013, 10014, 10015, 10016
-LIVE_TAB_IDS = (LIVE_ALL, LIVE_FAVOURITES, LIVE_RECENT, LIVE_GROUP)
+# Live TV (livetv.py), as TiviMate and the web's LiveTvPage lay it out:
+# the categories (Search, Favourites, Recently watched, All channels and
+# the groups, a region's under it), the channels of the one shown by
+# number with what's on now under its name and count, and beside them the
+# focused channel's programme now and next, which the skin reads from the
+# list's own item.
+LIVE_TITLE, LIVE_HEADING, LIVE_COUNT = 10011, 10012, 10013
+LIVE_CATEGORIES = 10030
 LIVE_LIST = 10020
 LIVE_EMPTY = 10040
 LIVE_PANEL = 10050
 LIVE_TOP = 176
+LIVE_CATEGORY_X = GUTTER - 16
+LIVE_CATEGORY_WIDTH = 384
+LIVE_CATEGORY_ROW = 72
+LIVE_CATEGORY_ROWS = 12
+LIVE_LIST_X = LIVE_CATEGORY_X + LIVE_CATEGORY_WIDTH + 24
 LIVE_ROW = 124
 LIVE_ROWS = 7
-LIVE_LIST_WIDTH = 1000
+LIVE_LIST_WIDTH = 800
 LIVE_LOGO = (160, 90)
-LIVE_PANEL_X = 1264
+LIVE_PANEL_X = LIVE_LIST_X + LIVE_LIST_WIDTH + 32
 LIVE_PANEL_WIDTH = WIDTH - SAFE_X - LIVE_PANEL_X
 LIVE_PICTURE_HEIGHT = LIVE_PANEL_WIDTH * 9 // 16
 

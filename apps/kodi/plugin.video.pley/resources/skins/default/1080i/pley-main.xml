@@ -31850,7 +31850,7 @@
       <control type="label" id="10011">
         <left>192</left>
         <top>64</top>
-        <width>700</width>
+        <width>392</width>
         <height>68</height>
         <font>font52_title</font>
         <textcolor>FFE9EBEF</textcolor>
@@ -31859,170 +31859,280 @@
         <scroll>false</scroll>
         <label>$ADDON[plugin.video.pley 30247]</label>
       </control>
-      <control type="grouplist" id="10012">
-        <left>900</left>
-        <top>58</top>
-        <width>924</width>
-        <height>80</height>
-        <orientation>horizontal</orientation>
-        <itemgap>16</itemgap>
-        <align>right</align>
-        <usecontrolcoords>true</usecontrolcoords>
-        <ondown>10020</ondown>
-        <onleft>100</onleft>
-        <control type="button" id="10013">
-          <top>0</top>
-          <height>80</height>
-          <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
-          <texturefocus border="14" colordiffuse="FF38BDF8">round12.png</texturefocus>
-          <texturenofocus />
-          <font>font13</font>
-          <textcolor>FFA1A9B6</textcolor>
-          <focusedcolor>FF03131F</focusedcolor>
-          <disabledcolor>FFA1A9B6</disabledcolor>
-          <align>center</align>
-          <aligny>center</aligny>
-          <textoffsetx>32</textoffsetx>
-          <label>$ADDON[plugin.video.pley 30184]</label>
-          <ondown>10020</ondown>
-          <onleft>100</onleft>
-          <width min="80" max="600">auto</width>
-        </control>
-        <control type="button" id="10113">
-          <top>0</top>
-          <height>80</height>
-          <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
-          <texturefocus border="14" colordiffuse="FF38BDF8">round12.png</texturefocus>
-          <texturenofocus border="14" colordiffuse="FF222731">round12.png</texturenofocus>
-          <font>font13</font>
-          <textcolor>FFE9EBEF</textcolor>
-          <focusedcolor>FF03131F</focusedcolor>
-          <disabledcolor>FFE9EBEF</disabledcolor>
-          <align>center</align>
-          <aligny>center</aligny>
-          <textoffsetx>32</textoffsetx>
-          <label>$ADDON[plugin.video.pley 30184]</label>
-          <ondown>10020</ondown>
-          <onleft>100</onleft>
-          <width min="80" max="600">auto</width>
-        </control>
-        <control type="button" id="10014">
-          <top>0</top>
-          <height>80</height>
-          <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
-          <texturefocus border="14" colordiffuse="FF38BDF8">round12.png</texturefocus>
-          <texturenofocus />
-          <font>font13</font>
-          <textcolor>FFA1A9B6</textcolor>
-          <focusedcolor>FF03131F</focusedcolor>
-          <disabledcolor>FFA1A9B6</disabledcolor>
-          <align>center</align>
-          <aligny>center</aligny>
-          <textoffsetx>32</textoffsetx>
-          <label>$ADDON[plugin.video.pley 30249]</label>
-          <ondown>10020</ondown>
-          <onleft>100</onleft>
-          <width min="80" max="600">auto</width>
-        </control>
-        <control type="button" id="10114">
-          <top>0</top>
-          <height>80</height>
-          <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
-          <texturefocus border="14" colordiffuse="FF38BDF8">round12.png</texturefocus>
-          <texturenofocus border="14" colordiffuse="FF222731">round12.png</texturenofocus>
-          <font>font13</font>
-          <textcolor>FFE9EBEF</textcolor>
-          <focusedcolor>FF03131F</focusedcolor>
-          <disabledcolor>FFE9EBEF</disabledcolor>
-          <align>center</align>
-          <aligny>center</aligny>
-          <textoffsetx>32</textoffsetx>
-          <label>$ADDON[plugin.video.pley 30249]</label>
-          <ondown>10020</ondown>
-          <onleft>100</onleft>
-          <width min="80" max="600">auto</width>
-        </control>
-        <control type="button" id="10015">
-          <top>0</top>
-          <height>80</height>
-          <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
-          <texturefocus border="14" colordiffuse="FF38BDF8">round12.png</texturefocus>
-          <texturenofocus />
-          <font>font13</font>
-          <textcolor>FFA1A9B6</textcolor>
-          <focusedcolor>FF03131F</focusedcolor>
-          <disabledcolor>FFA1A9B6</disabledcolor>
-          <align>center</align>
-          <aligny>center</aligny>
-          <textoffsetx>32</textoffsetx>
-          <label>$ADDON[plugin.video.pley 30250]</label>
-          <ondown>10020</ondown>
-          <onleft>100</onleft>
-          <width min="80" max="600">auto</width>
-        </control>
-        <control type="button" id="10115">
-          <top>0</top>
-          <height>80</height>
-          <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
-          <texturefocus border="14" colordiffuse="FF38BDF8">round12.png</texturefocus>
-          <texturenofocus border="14" colordiffuse="FF222731">round12.png</texturenofocus>
-          <font>font13</font>
-          <textcolor>FFE9EBEF</textcolor>
-          <focusedcolor>FF03131F</focusedcolor>
-          <disabledcolor>FFE9EBEF</disabledcolor>
-          <align>center</align>
-          <aligny>center</aligny>
-          <textoffsetx>32</textoffsetx>
-          <label>$ADDON[plugin.video.pley 30250]</label>
-          <ondown>10020</ondown>
-          <onleft>100</onleft>
-          <width min="80" max="600">auto</width>
-        </control>
-        <control type="button" id="10016">
-          <top>0</top>
-          <height>80</height>
-          <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
-          <texturefocus border="14" colordiffuse="FF38BDF8">round12.png</texturefocus>
-          <texturenofocus />
-          <font>font13</font>
-          <textcolor>FFA1A9B6</textcolor>
-          <focusedcolor>FF03131F</focusedcolor>
-          <disabledcolor>FFA1A9B6</disabledcolor>
-          <align>center</align>
-          <aligny>center</aligny>
-          <textoffsetx>32</textoffsetx>
-          <label>$ADDON[plugin.video.pley 30251]</label>
-          <ondown>10020</ondown>
-          <onleft>100</onleft>
-          <width min="80" max="600">auto</width>
-        </control>
-        <control type="button" id="10116">
-          <top>0</top>
-          <height>80</height>
-          <animation effect="zoom" start="100" end="105" time="150" tween="cubic" easing="out" center="auto">Focus</animation>
-          <texturefocus border="14" colordiffuse="FF38BDF8">round12.png</texturefocus>
-          <texturenofocus border="14" colordiffuse="FF222731">round12.png</texturenofocus>
-          <font>font13</font>
-          <textcolor>FFE9EBEF</textcolor>
-          <focusedcolor>FF03131F</focusedcolor>
-          <disabledcolor>FFE9EBEF</disabledcolor>
-          <align>center</align>
-          <aligny>center</aligny>
-          <textoffsetx>32</textoffsetx>
-          <label>$ADDON[plugin.video.pley 30251]</label>
-          <ondown>10020</ondown>
-          <onleft>100</onleft>
-          <width min="80" max="600">auto</width>
-        </control>
+      <control type="label" id="10012">
+        <left>600</left>
+        <top>72</top>
+        <width>784</width>
+        <height>56</height>
+        <font>font36_title</font>
+        <textcolor>FFE9EBEF</textcolor>
+        <align>left</align>
+        <aligny>center</aligny>
+        <scroll>false</scroll>
+        <label />
       </control>
-      <control type="list" id="10020">
+      <control type="label" id="10013">
+        <left>600</left>
+        <top>124</top>
+        <width>784</width>
+        <height>36</height>
+        <font>font12</font>
+        <textcolor>FFA1A9B6</textcolor>
+        <align>left</align>
+        <aligny>center</aligny>
+        <scroll>false</scroll>
+        <label />
+      </control>
+      <control type="list" id="10030">
         <left>176</left>
         <top>176</top>
-        <width>1000</width>
+        <width>384</width>
+        <height>864</height>
+        <orientation>vertical</orientation>
+        <scrolltime tween="cubic" easing="out">200</scrolltime>
+        <itemlayout width="384" height="72">
+          <control type="image">
+            <left>0</left>
+            <top>4</top>
+            <width>384</width>
+            <height>64</height>
+            <visible>String.IsEqual(ListItem.Property(chosen),1)</visible>
+            <texture colordiffuse="FF222731" border="14">round12.png</texture>
+          </control>
+          <control type="label">
+            <left>24</left>
+            <top>0</top>
+            <width>228</width>
+            <height>72</height>
+            <visible>!String.IsEqual(ListItem.Property(inner),1)</visible>
+            <font>font27</font>
+            <textcolor>FFE9EBEF</textcolor>
+            <align>left</align>
+            <aligny>center</aligny>
+            <scroll>false</scroll>
+            <label>$INFO[ListItem.Label]</label>
+          </control>
+          <control type="label">
+            <left>56</left>
+            <top>0</top>
+            <width>196</width>
+            <height>72</height>
+            <visible>String.IsEqual(ListItem.Property(inner),1)</visible>
+            <font>font27</font>
+            <textcolor>FFE9EBEF</textcolor>
+            <align>left</align>
+            <aligny>center</aligny>
+            <scroll>false</scroll>
+            <label>$INFO[ListItem.Label]</label>
+          </control>
+          <control type="label">
+            <left>244</left>
+            <top>0</top>
+            <width>116</width>
+            <height>72</height>
+            <visible>!!String.IsEmpty(ListItem.Property(region))</visible>
+            <font>font12</font>
+            <textcolor>FFA1A9B6</textcolor>
+            <align>right</align>
+            <aligny>center</aligny>
+            <scroll>false</scroll>
+            <label>$INFO[ListItem.Label2]</label>
+          </control>
+          <control type="label">
+            <left>212</left>
+            <top>0</top>
+            <width>116</width>
+            <height>72</height>
+            <visible>!String.IsEmpty(ListItem.Property(region))</visible>
+            <font>font12</font>
+            <textcolor>FFA1A9B6</textcolor>
+            <align>right</align>
+            <aligny>center</aligny>
+            <scroll>false</scroll>
+            <label>$INFO[ListItem.Label2]</label>
+          </control>
+          <control type="image">
+            <left>336</left>
+            <top>22</top>
+            <width>28</width>
+            <height>28</height>
+            <visible>String.IsEqual(ListItem.Property(region),closed)</visible>
+            <texture colordiffuse="FFA1A9B6">icon-chevron-right.png</texture>
+          </control>
+          <control type="image">
+            <left>336</left>
+            <top>22</top>
+            <width>28</width>
+            <height>28</height>
+            <visible>String.IsEqual(ListItem.Property(region),open)</visible>
+            <texture colordiffuse="FFA1A9B6">icon-chevron-down.png</texture>
+          </control>
+        </itemlayout>
+        <focusedlayout width="384" height="72">
+          <control type="image">
+            <left>0</left>
+            <top>4</top>
+            <width>384</width>
+            <height>64</height>
+            <visible>String.IsEqual(ListItem.Property(chosen),1) + !Control.HasFocus(10030)</visible>
+            <texture colordiffuse="FF222731" border="14">round12.png</texture>
+          </control>
+          <control type="image">
+            <left>0</left>
+            <top>4</top>
+            <width>384</width>
+            <height>64</height>
+            <visible>Control.HasFocus(10030)</visible>
+            <texture colordiffuse="FF38BDF8" border="14">round12.png</texture>
+          </control>
+          <control type="label">
+            <left>24</left>
+            <top>0</top>
+            <width>228</width>
+            <height>72</height>
+            <visible>!String.IsEqual(ListItem.Property(inner),1) + !Control.HasFocus(10030)</visible>
+            <font>font27</font>
+            <textcolor>FFE9EBEF</textcolor>
+            <align>left</align>
+            <aligny>center</aligny>
+            <scroll>false</scroll>
+            <label>$INFO[ListItem.Label]</label>
+          </control>
+          <control type="label">
+            <left>56</left>
+            <top>0</top>
+            <width>196</width>
+            <height>72</height>
+            <visible>String.IsEqual(ListItem.Property(inner),1) + !Control.HasFocus(10030)</visible>
+            <font>font27</font>
+            <textcolor>FFE9EBEF</textcolor>
+            <align>left</align>
+            <aligny>center</aligny>
+            <scroll>false</scroll>
+            <label>$INFO[ListItem.Label]</label>
+          </control>
+          <control type="label">
+            <left>244</left>
+            <top>0</top>
+            <width>116</width>
+            <height>72</height>
+            <visible>!!String.IsEmpty(ListItem.Property(region)) + !Control.HasFocus(10030)</visible>
+            <font>font12</font>
+            <textcolor>FFA1A9B6</textcolor>
+            <align>right</align>
+            <aligny>center</aligny>
+            <scroll>false</scroll>
+            <label>$INFO[ListItem.Label2]</label>
+          </control>
+          <control type="label">
+            <left>212</left>
+            <top>0</top>
+            <width>116</width>
+            <height>72</height>
+            <visible>!String.IsEmpty(ListItem.Property(region)) + !Control.HasFocus(10030)</visible>
+            <font>font12</font>
+            <textcolor>FFA1A9B6</textcolor>
+            <align>right</align>
+            <aligny>center</aligny>
+            <scroll>false</scroll>
+            <label>$INFO[ListItem.Label2]</label>
+          </control>
+          <control type="image">
+            <left>336</left>
+            <top>22</top>
+            <width>28</width>
+            <height>28</height>
+            <visible>String.IsEqual(ListItem.Property(region),closed) + !Control.HasFocus(10030)</visible>
+            <texture colordiffuse="FFA1A9B6">icon-chevron-right.png</texture>
+          </control>
+          <control type="image">
+            <left>336</left>
+            <top>22</top>
+            <width>28</width>
+            <height>28</height>
+            <visible>String.IsEqual(ListItem.Property(region),open) + !Control.HasFocus(10030)</visible>
+            <texture colordiffuse="FFA1A9B6">icon-chevron-down.png</texture>
+          </control>
+          <control type="label">
+            <left>24</left>
+            <top>0</top>
+            <width>228</width>
+            <height>72</height>
+            <visible>!String.IsEqual(ListItem.Property(inner),1) + Control.HasFocus(10030)</visible>
+            <font>font27</font>
+            <textcolor>FF03131F</textcolor>
+            <align>left</align>
+            <aligny>center</aligny>
+            <scroll>false</scroll>
+            <label>$INFO[ListItem.Label]</label>
+          </control>
+          <control type="label">
+            <left>56</left>
+            <top>0</top>
+            <width>196</width>
+            <height>72</height>
+            <visible>String.IsEqual(ListItem.Property(inner),1) + Control.HasFocus(10030)</visible>
+            <font>font27</font>
+            <textcolor>FF03131F</textcolor>
+            <align>left</align>
+            <aligny>center</aligny>
+            <scroll>false</scroll>
+            <label>$INFO[ListItem.Label]</label>
+          </control>
+          <control type="label">
+            <left>244</left>
+            <top>0</top>
+            <width>116</width>
+            <height>72</height>
+            <visible>!!String.IsEmpty(ListItem.Property(region)) + Control.HasFocus(10030)</visible>
+            <font>font12</font>
+            <textcolor>FF03131F</textcolor>
+            <align>right</align>
+            <aligny>center</aligny>
+            <scroll>false</scroll>
+            <label>$INFO[ListItem.Label2]</label>
+          </control>
+          <control type="label">
+            <left>212</left>
+            <top>0</top>
+            <width>116</width>
+            <height>72</height>
+            <visible>!String.IsEmpty(ListItem.Property(region)) + Control.HasFocus(10030)</visible>
+            <font>font12</font>
+            <textcolor>FF03131F</textcolor>
+            <align>right</align>
+            <aligny>center</aligny>
+            <scroll>false</scroll>
+            <label>$INFO[ListItem.Label2]</label>
+          </control>
+          <control type="image">
+            <left>336</left>
+            <top>22</top>
+            <width>28</width>
+            <height>28</height>
+            <visible>String.IsEqual(ListItem.Property(region),closed) + Control.HasFocus(10030)</visible>
+            <texture colordiffuse="FF03131F">icon-chevron-right.png</texture>
+          </control>
+          <control type="image">
+            <left>336</left>
+            <top>22</top>
+            <width>28</width>
+            <height>28</height>
+            <visible>String.IsEqual(ListItem.Property(region),open) + Control.HasFocus(10030)</visible>
+            <texture colordiffuse="FF03131F">icon-chevron-down.png</texture>
+          </control>
+        </focusedlayout>
+        <onleft>100</onleft>
+        <onright>10020</onright>
+      </control>
+      <control type="list" id="10020">
+        <left>584</left>
+        <top>176</top>
+        <width>800</width>
         <height>868</height>
         <orientation>vertical</orientation>
         <scrolltime tween="cubic" easing="out">200</scrolltime>
-        <itemlayout width="1000" height="124">
+        <itemlayout width="800" height="124">
           <control type="image">
             <left>16</left>
             <top>17</top>
@@ -32055,7 +32165,7 @@
           <control type="label">
             <left>200</left>
             <top>14</top>
-            <width>728</width>
+            <width>528</width>
             <height>34</height>
             <font>font27</font>
             <textcolor>FFA1A9B6</textcolor>
@@ -32065,7 +32175,7 @@
             <label>$INFO[ListItem.Label]</label>
           </control>
           <control type="image">
-            <left>948</left>
+            <left>748</left>
             <top>18</top>
             <width>28</width>
             <height>28</height>
@@ -32075,7 +32185,7 @@
           <control type="label">
             <left>200</left>
             <top>46</top>
-            <width>776</width>
+            <width>576</width>
             <height>42</height>
             <font>font32_title</font>
             <textcolor>FFE9EBEF</textcolor>
@@ -32087,7 +32197,7 @@
           <control type="label">
             <left>376</left>
             <top>84</top>
-            <width>600</width>
+            <width>400</width>
             <height>32</height>
             <visible>ListItem.IsResumable</visible>
             <font>font12</font>
@@ -32100,7 +32210,7 @@
           <control type="label">
             <left>200</left>
             <top>84</top>
-            <width>776</width>
+            <width>576</width>
             <height>32</height>
             <visible>!ListItem.IsResumable</visible>
             <font>font12</font>
@@ -32121,11 +32231,11 @@
             <info>ListItem.PercentPlayed</info>
           </control>
         </itemlayout>
-        <focusedlayout width="1000" height="124">
+        <focusedlayout width="800" height="124">
           <control type="image">
             <left>0</left>
             <top>4</top>
-            <width>1000</width>
+            <width>800</width>
             <height>116</height>
             <visible>Control.HasFocus(10020)</visible>
             <texture colordiffuse="FF38BDF8" border="14">round12.png</texture>
@@ -32133,7 +32243,7 @@
           <control type="image">
             <left>0</left>
             <top>4</top>
-            <width>1000</width>
+            <width>800</width>
             <height>116</height>
             <visible>!Control.HasFocus(10020)</visible>
             <texture colordiffuse="FF191D24" border="14">round12.png</texture>
@@ -32170,7 +32280,7 @@
           <control type="label">
             <left>200</left>
             <top>14</top>
-            <width>728</width>
+            <width>528</width>
             <height>34</height>
             <font>font27</font>
             <textcolor>FF03131F</textcolor>
@@ -32183,7 +32293,7 @@
           <control type="label">
             <left>200</left>
             <top>14</top>
-            <width>728</width>
+            <width>528</width>
             <height>34</height>
             <font>font27</font>
             <textcolor>FFA1A9B6</textcolor>
@@ -32194,7 +32304,7 @@
             <visible>!Control.HasFocus(10020)</visible>
           </control>
           <control type="image">
-            <left>948</left>
+            <left>748</left>
             <top>18</top>
             <width>28</width>
             <height>28</height>
@@ -32202,7 +32312,7 @@
             <texture colordiffuse="FF03131F">icon-star.png</texture>
           </control>
           <control type="image">
-            <left>948</left>
+            <left>748</left>
             <top>18</top>
             <width>28</width>
             <height>28</height>
@@ -32212,7 +32322,7 @@
           <control type="label">
             <left>200</left>
             <top>46</top>
-            <width>776</width>
+            <width>576</width>
             <height>42</height>
             <font>font32_title</font>
             <textcolor>FF03131F</textcolor>
@@ -32225,7 +32335,7 @@
           <control type="label">
             <left>200</left>
             <top>46</top>
-            <width>776</width>
+            <width>576</width>
             <height>42</height>
             <font>font32_title</font>
             <textcolor>FFE9EBEF</textcolor>
@@ -32238,7 +32348,7 @@
           <control type="label">
             <left>376</left>
             <top>84</top>
-            <width>600</width>
+            <width>400</width>
             <height>32</height>
             <visible>ListItem.IsResumable + Control.HasFocus(10020)</visible>
             <font>font12</font>
@@ -32251,7 +32361,7 @@
           <control type="label">
             <left>376</left>
             <top>84</top>
-            <width>600</width>
+            <width>400</width>
             <height>32</height>
             <visible>ListItem.IsResumable + !Control.HasFocus(10020)</visible>
             <font>font12</font>
@@ -32264,7 +32374,7 @@
           <control type="label">
             <left>200</left>
             <top>84</top>
-            <width>776</width>
+            <width>576</width>
             <height>32</height>
             <visible>!ListItem.IsResumable + Control.HasFocus(10020)</visible>
             <font>font12</font>
@@ -32277,7 +32387,7 @@
           <control type="label">
             <left>200</left>
             <top>84</top>
-            <width>776</width>
+            <width>576</width>
             <height>32</height>
             <visible>!ListItem.IsResumable + !Control.HasFocus(10020)</visible>
             <font>font12</font>
@@ -32308,8 +32418,7 @@
             <info>ListItem.PercentPlayed</info>
           </control>
         </focusedlayout>
-        <onup>10012</onup>
-        <onleft>100</onleft>
+        <onleft>10030</onleft>
       </control>
       <control type="group" id="10050">
         <left>0</left>
@@ -32318,27 +32427,27 @@
         <height>1080</height>
         <visible>Integer.IsGreater(Container(10020).NumItems,0)</visible>
         <control type="image">
-          <left>1264</left>
+          <left>1416</left>
           <top>176</top>
-          <width>560</width>
-          <height>315</height>
+          <width>408</width>
+          <height>229</height>
           <texture colordiffuse="FF191D24" border="14">round12.png</texture>
         </control>
         <control type="image">
-          <left>1404</left>
-          <top>254</top>
-          <width>280</width>
-          <height>157</height>
+          <left>1518</left>
+          <top>233</top>
+          <width>204</width>
+          <height>114</height>
           <visible>String.IsEmpty(Container(10020).ListItem.Property(picture))</visible>
           <texture background="true">$INFO[Container(10020).ListItem.Art(thumb)]</texture>
           <aspectratio>keep</aspectratio>
           <fadetime>150</fadetime>
         </control>
         <control type="label">
-          <left>1296</left>
+          <left>1440</left>
           <top>176</top>
-          <width>496</width>
-          <height>315</height>
+          <width>360</width>
+          <height>229</height>
           <visible>String.IsEmpty(Container(10020).ListItem.Property(picture)) + String.IsEmpty(Container(10020).ListItem.Art(thumb))</visible>
           <font>font32_title</font>
           <textcolor>FFE9EBEF</textcolor>
@@ -32349,19 +32458,19 @@
           <label>$INFO[Container(10020).ListItem.Label]</label>
         </control>
         <control type="image">
-          <left>1264</left>
+          <left>1416</left>
           <top>176</top>
-          <width>560</width>
-          <height>315</height>
+          <width>408</width>
+          <height>229</height>
           <visible>!String.IsEmpty(Container(10020).ListItem.Property(picture))</visible>
           <texture diffuse="mask-landscape.png" background="true">$INFO[Container(10020).ListItem.Property(picture)]</texture>
           <aspectratio scalediffuse="false">scale</aspectratio>
           <fadetime>150</fadetime>
         </control>
         <control type="label">
-          <left>1264</left>
-          <top>515</top>
-          <width>560</width>
+          <left>1416</left>
+          <top>425</top>
+          <width>408</width>
           <height>88</height>
           <font>font32_title</font>
           <textcolor>FFE9EBEF</textcolor>
@@ -32372,21 +32481,22 @@
           <label>$INFO[Container(10020).ListItem.Property(title)]</label>
         </control>
         <control type="label">
-          <left>1264</left>
-          <top>607</top>
-          <width>560</width>
-          <height>34</height>
+          <left>1416</left>
+          <top>517</top>
+          <width>408</width>
+          <height>68</height>
           <font>font12</font>
           <textcolor>FFA1A9B6</textcolor>
           <align>left</align>
-          <aligny>center</aligny>
+          <aligny>top</aligny>
+          <wrapmultiline>true</wrapmultiline>
           <scroll>false</scroll>
           <label>$INFO[Container(10020).ListItem.Property(airs)]</label>
         </control>
         <control type="textbox">
-          <left>1264</left>
-          <top>653</top>
-          <width>560</width>
+          <left>1416</left>
+          <top>593</top>
+          <width>408</width>
           <height>210</height>
           <font>font27</font>
           <textcolor>D9E9EBEF</textcolor>
@@ -32394,9 +32504,9 @@
           <label>$INFO[Container(10020).ListItem.Property(description)]</label>
         </control>
         <control type="label">
-          <left>1264</left>
-          <top>881</top>
-          <width>560</width>
+          <left>1416</left>
+          <top>819</top>
+          <width>408</width>
           <height>34</height>
           <visible>!String.IsEmpty(Container(10020).ListItem.Property(next))</visible>
           <font>font12</font>
@@ -32407,9 +32517,9 @@
           <label>$ADDON[plugin.video.pley 30257]</label>
         </control>
         <control type="label">
-          <left>1264</left>
-          <top>917</top>
-          <width>560</width>
+          <left>1416</left>
+          <top>855</top>
+          <width>408</width>
           <height>40</height>
           <font>font27</font>
           <textcolor>FFE9EBEF</textcolor>
@@ -32420,9 +32530,9 @@
         </control>
       </control>
       <control type="label" id="10040">
-        <left>192</left>
+        <left>600</left>
         <top>240</top>
-        <width>1400</width>
+        <width>784</width>
         <height>120</height>
         <font>font13</font>
         <textcolor>FFA1A9B6</textcolor>

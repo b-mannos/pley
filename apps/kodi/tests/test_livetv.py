@@ -1,6 +1,7 @@
 import json
 import time
 import unittest
+import urllib.parse
 from unittest import mock
 
 import support
@@ -40,7 +41,53 @@ SPORT = {
 RADIO = {"id": 4, "source_id": 1, "name": "Radio Jazz", "number": "104", "group": "Radio", "logo": None, "favorite": False,
          "has_guide": False, "now": None, "next": None}
 WEATHER = dict(RADIO, id=5, name="Weather Now", number="105", group="News")
-CHANNELS = [NEWS, SPORT, RADIO, WEATHER]
+SKY = dict(RADIO, id=7, name="UK| SKY SPORTS 1", number="201", group="UK| Sport")
+SKY2 = dict(RADIO, id=8, name="UK| SKY SPORTS 2", number="202", group="UK| Sport")
+BBC = dict(RADIO, id=9, name="UK| BBC NEWS", number="301", group="UK| News")
+CHANNELS = [NEWS, SPORT, RADIO, WEATHER, SKY, SKY2, BBC]
+RECENT = [4, 1]
+GROUPS = [
+    {"name": "News", "region": None, "label": "News", "count": 2},
+    {"name": "UK| Sport", "region": "UK", "label": "Sport", "count": 2},
+    {"name": "Sport", "region": None, "label": "Sport", "count": 1},
+    {"name": "UK| News", "region": "UK", "label": "News", "count": 1},
+    {"name": "Radio", "region": None, "label": "Radio", "count": 1},
+    {"name": "US| Films", "region": "US", "label": "Films", "count": 0},
+]
+
+
+def lineup(path, query, channels):
+    """The Live TV API of a server with `channels`, as far as the add-on asks it."""
+    if path == "/api/live":
+        return {"available": True, "allowed": True, "channels": len(channels), "sources": 0, "recent": RECENT}
+    if path == "/api/live/groups":
+        return {"total": len(channels), "favorites": sum(1 for c in channels if c["favorite"]), "recent": len(RECENT), "groups": GROUPS}
+    if path == "/api/live/browse":
+        category = query.get("category", "all")
+        found = list(channels)
+        if category == "favorites":
+            found = [c for c in found if c["favorite"]]
+        elif category == "recent":
+            found = [c for c in channels if c["id"] in RECENT]
+            found.sort(key=lambda c: RECENT.index(c["id"]))
+        elif category == "group":
+            found = [c for c in found if c["group"] == query.get("group")]
+        q = (query.get("q") or "").lower()
+        if q:
+            found = [c for c in found if q in c["name"].lower() or (c["number"] or "").startswith(q)]
+        limit = int(query.get("limit", 100))
+        offset = int(query.get("offset", 0))
+        if "around" in query:
+            at = [c["id"] for c in found].index(int(query["around"]))
+            offset = at // limit * limit
+        return {"total": len(found), "offset": offset, "channels": found[offset : offset + limit]}
+    if path.startswith("/api/live/channels/") and path.count("/") == 4:
+        return next(c for c in channels if c["id"] == int(path.rsplit("/", 1)[1]))
+    if path == "/api/live/guide":
+        ids = query.get("ids")
+        assert ids, "the guide is asked for one channel, never every one"
+        return {"from": 0, "to": 0, "programs": {"1": [NEWS["now"], NEWS["next"]]} if ids == "1" else {}}
+    raise AssertionError(path)
 
 
 def clock(ts):
@@ -87,25 +134,36 @@ class WhatsOnTest(unittest.TestCase):
         self.assertEqual(livetv.plot(RADIO, NOW), "No guide")
         self.assertEqual(livetv.plot(dict(RADIO, has_guide=True), NOW), "Nothing in the guide now")
 
-    def test_tabs(self):
-        self.assertEqual(livetv.groups(CHANNELS), [("News", 2), ("Sport", 1), ("Radio", 1)])
-        self.assertEqual(livetv.shown(CHANNELS, "favorites"), [SPORT])
-        self.assertEqual(livetv.shown(CHANNELS, "recent", [4, 99, 1]), [RADIO, NEWS], "newest first, gone ones left out")
-        self.assertEqual(livetv.shown(CHANNELS, "group", group="News"), [NEWS, WEATHER])
-        self.assertEqual(livetv.shown(CHANNELS, "all"), CHANNELS)
+    def test_regions(self):
+        # As the server splits group names (and the web channel names).
+        self.assertEqual(livetv.split_region("UK| Sport"), ("UK", "Sport"))
+        self.assertEqual(livetv.split_region("[DE] Kino"), ("DE", "Kino"))
+        self.assertEqual(livetv.split_region("FR: Sport"), ("FR", "Sport"))
+        self.assertEqual(livetv.split_region("|UK| SKY SPORTS 1"), ("UK", "SKY SPORTS 1"))
+        self.assertIsNone(livetv.split_region("Pley News HD"))
+        self.assertIsNone(livetv.split_region("Movies: Action"), "a word, not a region")
+        # In a group, a name leaves out the region the group says; elsewhere it's whole.
+        self.assertEqual(livetv.name(SKY, "UK| Sport"), "201 SKY SPORTS 1")
+        self.assertEqual(livetv.name(SKY), "201 UK| SKY SPORTS 1")
+        self.assertEqual(livetv.short_name(SKY, "News"), "UK| SKY SPORTS 1")
+        self.assertEqual(livetv.short_name(dict(SKY, name="US| CNN"), "UK| Sport"), "US| CNN", "another region's stays")
+
+    def test_groups_gathered_under_their_region(self):
+        tree = livetv.group_tree(GROUPS)
+        self.assertEqual(
+            [(e["kind"], e.get("region") or e["group"]["name"]) for e in tree],
+            [("group", "News"), ("region", "UK"), ("group", "Sport"), ("group", "Radio"), ("group", "US| Films")],
+            "in the lineup's order; a region with one group stays a group",
+        )
+        self.assertEqual(tree[1]["count"], 3)
+        self.assertEqual([g["label"] for g in tree[1]["groups"]], ["Sport", "News"])
+        self.assertEqual(livetv.group_name(GROUPS[1]), "UK · Sport")
+        self.assertEqual(livetv.group_name(GROUPS[0]), "News")
+
+    def test_a_number(self):
         self.assertIs(livetv.by_number(CHANNELS, "104"), RADIO)
         self.assertIs(livetv.by_number(CHANNELS, "10"), NEWS, "the first whose number starts so")
         self.assertIsNone(livetv.by_number(CHANNELS, "7"))
-
-    def test_one_channels_programmes_out_of_the_whole_guide(self):
-        guide = {"from": NOW, "to": NOW + 6 * HOUR, "programs": {
-            "11": [program(11, NOW, NOW + HOUR, "Not this one", description='Says "1":[ in its text')],
-            "1": [NEWS["now"], NEWS["next"]],
-        }}
-        body = json.dumps(guide, separators=(",", ":")).encode("utf-8")
-        self.assertEqual(livetv.programs_of(body, 1), [NEWS["now"], NEWS["next"]])
-        self.assertEqual(livetv.programs_of(body, 11)[0]["title"], "Not this one")
-        self.assertEqual(livetv.programs_of(body, 7), [])
 
 
 class ItemsTest(unittest.TestCase):
@@ -124,6 +182,7 @@ class ItemsTest(unittest.TestCase):
         self.assertEqual((tag["setPlaycount"], tag["setResumePoint"]), (0, (0.0, 0.0)))
         self.assertNotIn("setDuration", tag)
         self.assertEqual(li.properties["IsPlayable"], "true")
+        self.assertEqual(livetv.list_item(BASE, SKY, NOW, "UK| Sport").label, "201 SKY SPORTS 1")
 
     def test_a_channel_plays_as_the_provider_sends_it(self):
         li = livetv.play_item(BASE, NEWS, "kodi-1", NOW)
@@ -138,6 +197,10 @@ class ItemsTest(unittest.TestCase):
         self.assertEqual(entries[at][0], "plugin://plugin.video.pley/?route=live_play&id=301")
         playlist, at = livetv.queue(BASE, many, 3, NOW)
         self.assertEqual((at, len(xbmc.PlayList.entries[xbmc.PLAYLIST_VIDEO])), (3, livetv.QUEUED + 4))
+        # Opened from a group: its names, and the player's, are the group's.
+        livetv.queue(BASE, [SKY, SKY2], 0, NOW, "UK| Sport")
+        url, li = xbmc.PlayList.entries[xbmc.PLAYLIST_VIDEO][1]
+        self.assertEqual((url, li.label), ("plugin://plugin.video.pley/?route=live_play&id=8&group=UK%7C+Sport", "202 SKY SPORTS 2"))
 
     def test_only_a_queue_of_channels_is_let_go(self):
         mine = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
@@ -200,53 +263,57 @@ class RoutesTest(unittest.TestCase):
         xbmc.PlayList.entries.clear()
 
     def handle(self, request):
-        path = request.path[len("/s3cret") :]
-        if path == "/api/live":
-            return support.answer(200, {"available": True, "allowed": True, "channels": 4, "sources": 0, "recent": [2]})
-        if path == "/api/live/channels":
-            return support.answer(200, CHANNELS)
-        if path == "/api/live/channels/1":
-            return support.answer(200, NEWS)
-        if path.startswith("/api/live/guide"):
-            return support.answer(200, {"from": 0, "to": 0, "programs": {"1": [NEWS["now"], NEWS["next"]]}})
+        path, _, query = request.path[len("/s3cret") :].partition("?")
         if path == "/api/live/channels/1/watch":
             if self.busy:
                 return support.answer(409, {"code": "conflict", "message": "The one connection of Test Provider is in use, watching Sport 1080i."})
             return support.answer(200, {"session_id": "w1", "url": "/api/live/sessions/w1/index.m3u8", "kind": "hls", "channel": NEWS})
         if path == "/api/live/channels/2/favorite":
             return 204, {}, b""
-        return support.answer(404, {"code": "not_found", "message": path})
+        if path == "/api/live/channels":
+            raise AssertionError("every channel is never asked for")
+        return support.answer(200, lineup(path, dict(urllib.parse.parse_qsl(query)), CHANNELS))
 
     def run_route(self, query):
         plugin.Plugin(["plugin://plugin.video.pley/", "1", "?" + query]).run()
         return [c for c in xbmcplugin.calls if c[0] == "item"]
 
-    def test_live_tv_lists_what_it_has(self):
+    def test_live_tv_lists_its_categories(self):
         items = self.run_route("route=live")
-        self.assertEqual([c[2].label for c in items], ["Channels", "Favourites", "Recently watched", "Groups", "Guide"])
+        labels = [c[2].label.split("  [COLOR")[0] for c in items]
+        self.assertEqual(labels, ["Favourites", "Recently watched", "All channels", "Search channels", "News", "UK", "Sport", "Radio", "US · Films"])
+        self.assertIn("(7)", items[2][2].label)
+        self.assertIn("category=favorites", items[0][1])
+        self.assertIn("route=live_region&region=UK", items[5][1])
         del xbmcplugin.calls[:]
-        items = self.run_route("route=live_groups")
-        self.assertEqual([c[2].label for c in items], ["News (2)", "Sport (1)", "Radio (1)"])
+        items = self.run_route("route=live_region&region=UK")
+        self.assertEqual([c[2].label.split("  [COLOR")[0] for c in items], ["Sport", "News"])
+        self.assertIn("group=UK%7C+Sport", items[0][1])
 
-    def test_a_tabs_channels_play_and_have_a_menu(self):
-        items = self.run_route("route=live_channels&tab=group&group=News")
-        self.assertEqual([c[2].label for c in items], ["101 Pley News HD", "105 Weather Now"])
+    def test_a_groups_channels_play_and_have_a_menu(self):
+        items = self.run_route("route=live_channels&category=group&group=UK%7C+Sport")
+        self.assertEqual([c[2].label for c in items], ["201 SKY SPORTS 1", "202 SKY SPORTS 2"])
         url, li, folder = items[0][1:]
-        self.assertEqual((url, folder), ("plugin://plugin.video.pley/?route=live_play&id=1", False))
+        self.assertEqual((url, folder), ("plugin://plugin.video.pley/?route=live_play&id=7&group=UK%7C+Sport", False))
         self.assertEqual([name for name, _ in li.menu], ["Add to favourites", "Schedule"])
         self.assertIn(("content", "videos"), xbmcplugin.calls)
+        asked = [r.path for r in self.server.requests]
+        self.assertEqual(asked, ["/s3cret/api/live/browse?category=group&offset=0&limit=300&group=UK%7C+Sport"])
         del xbmcplugin.calls[:]
-        self.assertEqual([c[2].label for c in self.run_route("route=live_channels&tab=recent")], ["102 Sport 1080i"])
+        self.assertEqual([c[2].label for c in self.run_route("route=live_channels&category=recent")], ["104 Radio Jazz", "101 Pley News HD"])
 
-    def test_a_lineup_comes_a_page_at_a_time(self):
+    def test_a_category_comes_a_page_at_a_time(self):
         with mock.patch.object(plugin, "PAGE", 3):
-            items = self.run_route("route=live_guide")
+            items = self.run_route("route=live_channels&category=all")
             self.assertEqual([c[2].label for c in items], ["101 Pley News HD", "102 Sport 1080i", "104 Radio Jazz", "Next page"])
-            self.assertTrue(items[0][3], "the guide's channels open their schedules")
             self.assertIn("offset=3", items[-1][1])
             del xbmcplugin.calls[:]
-            items = self.run_route("route=live_guide&offset=3")
-        self.assertEqual([c[2].label for c in items], ["105 Weather Now"])
+            items = self.run_route("route=live_channels&category=all&offset=6")
+        self.assertEqual([c[2].label for c in items], ["301 UK| BBC NEWS"])
+
+    def test_searching(self):
+        items = self.run_route("route=live_channels&category=all&q=sky")
+        self.assertEqual([c[2].label for c in items], ["201 UK| SKY SPORTS 1", "202 UK| SKY SPORTS 2"])
 
     def test_a_channels_schedule(self):
         items = self.run_route("route=live_schedule&id=1")
@@ -257,6 +324,8 @@ class RoutesTest(unittest.TestCase):
         self.assertNotIn("IsPlayable", later[2].properties)
         self.assertEqual(more[2].label, "Later")
         self.assertIn("from=%d" % (NOW + 5400), more[1])
+        guide = next(r.path for r in self.server.requests if "/guide" in r.path)
+        self.assertIn("ids=1", guide)
 
     def test_playing_a_channel(self):
         self.run_route("route=live_play&id=1")
@@ -304,28 +373,26 @@ class LiveScreenTest(unittest.TestCase):
         self.win = test_window.FakeWindow()
         self.win.me = {"id": 3, "is_admin": False}
         self.win.live = {"available": True}
+        # Work handed to other threads runs at once.
+        self.win.later = lambda work, then, failed=None: then(work())
+        self.win.post = lambda work: work()
+        self.win.rest = lambda then: then()
         self.channels = [dict(c) for c in CHANNELS]
         self.favourites = []
-        self.guides = []
+        self.asked = []
 
         class Server:
             def get(inner, path, **query):
-                if path == "/api/live":
-                    return {"available": True, "recent": [4]}
-                if path == "/api/live/channels":
-                    return self.channels
-                raise AssertionError(path)
-
-            def request(inner, method, path, query=None):
-                self.guides.append(query)
-                body = {"from": 0, "to": 0, "programs": {"1": [NEWS["now"], NEWS["next"]]}}
-                return livetv.api.Response(200, {}, json.dumps(body).encode("utf-8"))
+                self.asked.append((path, query))
+                return lineup(path, {k: str(v) for k, v in query.items()}, self.channels)
 
             def put(inner, path, body=None):
                 self.favourites.append(("PUT", path))
+                next(c for c in self.channels if path.endswith("/%d/favorite" % c["id"]))["favorite"] = True
 
             def delete(inner, path):
                 self.favourites.append(("DELETE", path))
+                next(c for c in self.channels if path.endswith("/%d/favorite" % c["id"]))["favorite"] = False
 
         self.win.session.client = Server()
         self.screen = window.Live(self.win)
@@ -336,10 +403,17 @@ class LiveScreenTest(unittest.TestCase):
     def rows(self):
         return self.win.made[L.LIVE_LIST].items
 
-    def test_the_channels_with_whats_on(self):
+    def categories(self):
+        return [(li.label, li.label2, li.properties["chosen"]) for li in self.win.made[L.LIVE_CATEGORIES].items]
+
+    def test_categories_and_the_channels_with_whats_on(self):
         self.screen.show(False)
+        self.assertEqual(self.categories(), [
+            ("Search channels", "", ""), ("Favourites", "1", ""), ("Recently watched", "2", ""), ("All channels", "7", "1"),
+            ("News", "2", ""), ("UK", "3", ""), ("Sport", "1", ""), ("Radio", "1", ""), ("US · Films", "0", ""),
+        ])
         rows = self.rows()
-        self.assertEqual([r.label for r in rows], ["101 Pley News HD", "102 Sport 1080i", "104 Radio Jazz", "105 Weather Now"])
+        self.assertEqual([r.label for r in rows][:3], ["101 Pley News HD", "102 Sport 1080i", "104 Radio Jazz"])
         news = rows[0]
         self.assertEqual(news.label2, "Morning Briefing: Part 7")
         self.assertEqual(news.properties["when"].split(" · ")[1], "45 min left")
@@ -350,35 +424,69 @@ class LiveScreenTest(unittest.TestCase):
         self.assertEqual(news.video.values["setResumePoint"][1], 3600.0)
         self.assertEqual((rows[1].properties["favorite"], rows[1].properties["short"]), ("1", "102"))
         self.assertEqual((rows[2].label2, rows[2].properties["when"]), ("No guide", ""))
+        self.assertEqual(self.win.made[L.LIVE_HEADING].label, "All channels")
+        self.assertEqual(self.win.made[L.LIVE_COUNT].label, "7 channels")
         self.assertEqual(self.win.focused, L.LIVE_LIST)
-        # Tabs: Favourites with a favourite, Recently watched with one watched, Groups with two.
-        self.assertTrue(self.win.made[L.LIVE_ALL + 100].visible)
-        for tab in (L.LIVE_FAVOURITES, L.LIVE_RECENT, L.LIVE_GROUP):
-            self.assertTrue(self.win.made[tab].visible, tab)
+        # Never every channel at once.
+        self.assertNotIn("/api/live/channels", [p for p, _ in self.asked])
 
-    def test_tabs_and_their_memory(self):
+    def test_a_region_opens_and_its_groups_drop_the_region(self):
         self.screen.show(False)
         stored = {}
         orig = (window.kodi.remember, window.kodi.setting)
         window.kodi.remember = lambda key, value: stored.update({key: value})
         window.kodi.setting = lambda name: "srv" if name == "server_id" else ""
         self.addCleanup(lambda: (setattr(window.kodi, "remember", orig[0]), setattr(window.kodi, "setting", orig[1])))
-        with test_window.Dialogs(picks=[0]) as asked:
-            self.screen.click(L.LIVE_GROUP)
-        self.assertEqual(asked.shown[0][0], ["News (2)", "Sport (1)", "Radio (1)"])
-        self.assertEqual([r.label for r in self.rows()], ["101 Pley News HD", "105 Weather Now"])
-        self.assertEqual(self.win.made[L.LIVE_GROUP + 100].label, "News")
-        self.assertEqual(stored, {"live_tab/srv/3": "group:News"})
-        self.screen.click(L.LIVE_RECENT)
-        self.assertEqual([r.label for r in self.rows()], ["104 Radio Jazz"])
-
-    def test_watching_queues_the_tabs_channels(self):
-        self.screen.show(False)
-        self.win.made[L.LIVE_LIST].selected = 1
+        found = self.win.made[L.LIVE_CATEGORIES]
+        found.selected = 5
+        self.screen.click(L.LIVE_CATEGORIES)
+        labels = [c[0] for c in self.categories()]
+        self.assertEqual(labels[5:8], ["UK", "Sport", "News"])
+        self.assertEqual(self.win.made[L.LIVE_CATEGORIES].items[5].properties["region"], "open")
+        self.assertEqual(self.win.made[L.LIVE_CATEGORIES].items[6].properties["inner"], "1")
+        # Focus resting on a category shows its channels (TiviMate's way).
+        found.selected = 6
+        self.win.focused = L.LIVE_CATEGORIES
+        self.screen.moved(L.LIVE_CATEGORIES, window.DOWN)
+        self.assertEqual([r.label for r in self.rows()], ["201 SKY SPORTS 1", "202 SKY SPORTS 2"])
+        self.assertEqual(self.win.made[L.LIVE_HEADING].label, "UK · Sport")
+        self.assertEqual(self.categories()[6][2], "1")
+        self.assertEqual(stored, {"live_tab/srv/3": "group:UK| Sport"})
+        # Played from it: Next and Previous stay in the group.
         self.screen.click(L.LIVE_LIST)
-        queue, listitem, start = xbmc.played[-1]
-        self.assertEqual(start, 1)
-        self.assertEqual([url for url, _ in xbmc.PlayList.entries[xbmc.PLAYLIST_VIDEO]][1], "plugin://plugin.video.pley/?route=live_play&id=2")
+        self.assertEqual([u for u, _ in xbmc.PlayList.entries[xbmc.PLAYLIST_VIDEO]], [
+            "plugin://plugin.video.pley/?route=live_play&id=7&group=UK%7C+Sport", "plugin://plugin.video.pley/?route=live_play&id=8&group=UK%7C+Sport",
+        ])
+        # Closed again.
+        found.selected = 5
+        self.screen.click(L.LIVE_CATEGORIES)
+        self.assertEqual([c[0] for c in self.categories()][5:7], ["UK", "Sport"])
+
+    def test_pages_come_as_the_list_is_scrolled(self):
+        self.channels = [dict(RADIO, id=i, number=str(1000 + i), name="Channel %d" % i, group="Radio") for i in range(1, 251)]
+        self.screen.load()
+        self.screen.show(False)
+        self.assertEqual((len(self.rows()), self.screen.total), (livetv.PAGE, 250))
+        self.win.made[L.LIVE_LIST].selected = livetv.PAGE - 10
+        self.screen.moved(L.LIVE_LIST, window.DOWN)
+        self.assertEqual(len(self.rows()), 2 * livetv.PAGE)
+        self.assertEqual(self.win.made[L.LIVE_LIST].selected, livetv.PAGE - 10, "focus stays where it was")
+        self.assertEqual(self.rows()[livetv.PAGE].label, "%d Channel %d" % (1000 + livetv.PAGE + 1, livetv.PAGE + 1))
+        browses = [q for p, q in self.asked if p == "/api/live/browse"]
+        self.assertEqual(browses[-1]["offset"], livetv.PAGE)
+
+    def test_a_list_opened_further_on_gets_the_page_before(self):
+        self.channels = [dict(RADIO, id=i, number=str(1000 + i), name="Channel %d" % i, group="Radio") for i in range(1, 251)]
+        self.screen.load()
+        self.screen.show(False)
+        for digit in "1220":
+            self.screen.number(int(digit))
+        self.screen.typed_timer.cancel()
+        self.screen.go_to_typed()
+        self.assertEqual((self.screen.offset, self.win.made[L.LIVE_LIST].selected), (200, 19))
+        self.win.made[L.LIVE_LIST].selected = 5
+        self.screen.moved(L.LIVE_LIST, window.UP)
+        self.assertEqual((self.screen.offset, len(self.rows()), self.win.made[L.LIVE_LIST].selected), (100, 150, 105))
 
     def test_a_favourite_from_the_menu(self):
         self.screen.show(False)
@@ -388,14 +496,15 @@ class LiveScreenTest(unittest.TestCase):
         self.assertEqual(asked.shown[0][0], ["Watch", "Add to favourites", "Schedule"])
         self.assertEqual(self.favourites, [("PUT", "/api/live/channels/1/favorite")])
         self.assertEqual(self.rows()[0].properties["favorite"], "1")
-        # The last favourite removed on Favourites: All again, and no Favourites tab.
-        self.screen.switch("favorites")
-        for at in (0, 0):
-            self.win.made[L.LIVE_LIST].selected = at
+        self.assertEqual(self.categories()[1][:2], ("Favourites", "2"))
+        # The last favourite removed on Favourites: All channels again, and no Favourites.
+        self.screen.choose(("favorites", None))
+        for _ in range(2):
+            self.win.made[L.LIVE_LIST].selected = 0
             with test_window.Dialogs(picks=[1]):
                 self.screen.menu(L.LIVE_LIST)
-        self.assertEqual(self.screen.tab, "all")
-        self.assertFalse(self.win.made[L.LIVE_FAVOURITES].visible)
+        self.assertEqual(self.screen.category, ("all", None))
+        self.assertNotIn("Favourites", [c[0] for c in self.categories()])
         self.assertEqual(self.win.focused, L.LIVE_LIST)
 
     def test_a_channels_schedule(self):
@@ -409,7 +518,8 @@ class LiveScreenTest(unittest.TestCase):
         self.assertEqual(asked.shown[1][1], 1)
         self.assertEqual(asked.asked[0][0], "World at One")
         self.assertIn("101 Pley News HD", asked.asked[0][1])
-        self.assertEqual(self.guides, [{"from": NOW, "to": NOW + 6 * HOUR}])
+        guides = [q for p, q in self.asked if p == "/api/live/guide"]
+        self.assertEqual(guides, [{"from": NOW, "to": NOW + 6 * HOUR, "ids": 1}])
         # What's on watches the channel.
         with test_window.Dialogs(picks=[0]):
             self.screen.info(L.LIVE_LIST)
@@ -417,20 +527,27 @@ class LiveScreenTest(unittest.TestCase):
 
     def test_number_keys_go_to_a_channel(self):
         self.screen.show(False)
-        self.win.post = lambda work: work()
-        self.screen.switch("favorites")
+        self.screen.choose(("favorites", None))
         for digit in (1, 0, 4):
             self.screen.number(digit)
         self.screen.typed_timer.cancel()
         self.assertEqual(self.win.toasts[-1], "104")
         self.screen.go_to_typed()
-        # Not among the favourites: on All.
-        self.assertEqual(self.screen.tab, "all")
+        # Not among the favourites: in All channels.
+        self.assertEqual(self.screen.category, ("all", None))
         self.assertEqual(self.win.made[L.LIVE_LIST].selected, 2)
         self.screen.number(9)
         self.screen.typed_timer.cancel()
         self.screen.go_to_typed()
         self.assertEqual(self.win.toasts[-1], "No channel 9")
+
+    def test_searching(self):
+        self.screen.show(False)
+        with test_window.Dialogs(typed=["sky"]):
+            self.screen.search()
+        self.assertEqual([r.label for r in self.rows()], ["201 UK| SKY SPORTS 1", "202 UK| SKY SPORTS 2"])
+        self.assertEqual(self.categories()[0], ("“sky”", "2", "1"))
+        self.assertEqual(self.win.made[L.LIVE_HEADING].label, "“sky”")
 
     def test_without_channels_it_says_so(self):
         self.channels = []

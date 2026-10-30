@@ -188,36 +188,48 @@ says `available`), the rail has Live TV after Home, as the web's sidebar
 does; on a server with Live TV alone (or a profile without libraries) it
 is Home. Setting it up (sources, lineup, settings) stays in the web app.
 
-- **The page** (`livetv.py`, `window.Live`): the channels by number, each
-  with its logo, what's on now, its times, what's left and a progress bar.
-  Beside them, the focused channel's programme: its picture (else the
-  logo), title, day and times, episode, Live and New, description, and
-  what comes next. Kodi reads the panel from the list's own item, so it
-  follows focus with no wait.
-- **Tabs**: All, Favourites (with a favourite), Recently watched (the
-  server's `recent`) and Groups (with two groups or more; it asks which).
-  The tab is kept per server and profile in `remembered.json`, as a
-  library's.
+- **The page** (`livetv.py`, `window.Live`), as TiviMate and the web lay
+  it out: the categories, then the channels of the one focus rests on, then
+  the focused channel's programme.
+  - **Categories**: Search channels, Favourites and Recently watched (when
+    they have channels), All channels, then the groups in the lineup's
+    order (`GET /api/live/groups`), with how many channels each has. A
+    region's groups ("UK| Sport", "UK| News") are gathered under it ("UK",
+    a chevron; Select opens it); a region with one group stays a group.
+    The category shown is kept per server and profile in
+    `remembered.json`, as a library's tab.
+  - **Channels** by number, each with its logo, what's on now, its times,
+    what's left and a progress bar. In a group, a name leaves out the
+    region the group already says ("SKY SPORTS 1" in UK · Sport). They
+    come a page at a time (`GET /api/live/browse`, 100 to a page): the next
+    page as focus nears the end of those in, the page before for a list
+    that began further on (a number typed).
+  - **Beside them**, the focused channel's programme: its picture (else
+    the logo), title, day and times, episode, Live and New, description,
+    and what comes next. Kodi reads it from the list's own item, so it
+    follows focus with no wait.
 - **A channel**: Select watches it. Menu has Watch, Add to (Remove from)
   favourites and Schedule; Info is Schedule. Number keys typed together
-  go to the channel of that number (on All when the tab hasn't it).
+  go to the channel of that number, in the category shown, else in All
+  channels (`q` finds it, `around` its page).
+- **Search channels** asks Kodi's keyboard; a name, a number's beginning
+  or the title of what's on finds channels (`q`).
 - **Schedule**: the channel's next six hours in Kodi's list (Later, the
-  six after): what's on watches the channel, a programme to come shows its
-  details. The guide is asked for every channel at once (the API has no
-  channel filter), so on a lineup of tens of thousands it takes a few
-  seconds under Kodi's busy circle.
+  six after), the guide of that channel alone (`ids`): what's on watches
+  the channel, a programme to come shows its details.
 - **What's on stays current**: every 30 s the rows near focus are redrawn;
   a channel whose programme ended is asked for again
-  (`GET /api/live/channels/{id}`). A lineup of 57,000 channels (tested)
-  draws in about 2 s on a PC; the rest is freshened as focus comes near.
+  (`GET /api/live/channels/{id}`). Nothing asks for every channel
+  (`GET /api/live/channels`) or the whole guide: on a lineup of 56,000
+  channels (tested) the page opens at once.
 - **Kodi's lists** (Settings → Screens → Kodi's lists, and skins'
-  widgets): Live TV after Home's rows, with Channels, Favourites, Recently
-  watched, Groups and Guide (each channel opening its schedule), 300 to a
-  page. A channel's menu has its favourite and its schedule.
+  widgets): Live TV after Home's rows, with the same categories (a region
+  a folder of its groups), each a page of 300 channels with Next page. A
+  channel's menu has its favourite and its schedule.
 
 **A full guide grid** isn't possible in a plugin: Kodi's EPG grid control
 draws its PVR add-ons' data only, and a list's items are all one width.
-The page's now-and-next, the schedule and the Guide folder stand in for it.
+The page's now-and-next and each channel's schedule stand in for it.
 
 ### Playing
 
@@ -248,8 +260,9 @@ So changing channel never holds two connections.
   go, or Kodi would try each one after it. A 409 to the stream itself
   (the connection taken between the two requests) is said the same way,
   by the service's proxy.
-- **Channel up and down**: the tab's channels around the one chosen (100
-  each side) are Kodi's video queue, so the player's Next and Previous
+- **Channel up and down**: the channels of the category the channel was
+  opened from, around it (those loaded, 100 each side), are Kodi's video
+  queue, so the player's Next and Previous
   (the remote's skip keys, `.` and `,` on a keyboard, the OSD's buttons)
   change channel, and its info shows the next one. Kodi's Up and Down in
   the player seek, as for any video: a plugin can't take them without a

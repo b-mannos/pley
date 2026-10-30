@@ -17,6 +17,7 @@ changing channel lets go of the one before.
 
 from __future__ import annotations
 
+import re
 import time
 from urllib.parse import urlencode
 
@@ -28,9 +29,12 @@ from .listing import image
 
 SUMMARY = "/api/live"
 CHANNELS = "/api/live/channels"
+GROUPS = "/api/live/groups"
+BROWSE = "/api/live/browse"
 GUIDE = "/api/live/guide"
-# A channel's schedule, asked for this many hours at a time: the guide
-# can only be asked for every channel at once.
+# Channels asked for at a time (the server's own page, 500 at most).
+PAGE = 100
+# A channel's schedule, asked for this many hours at a time.
 SCHEDULE_HOURS = 6
 LOGO_WIDTH = 320
 PICTURE_WIDTH = 640
@@ -70,9 +74,32 @@ def available(found: dict) -> bool:
     return bool((found or {}).get("available"))
 
 
-def channels(client) -> list:
-    """The shown channels by number, each with what's on now and next."""
-    return client.get(CHANNELS) or []
+def groups(client) -> dict:
+    """GET /api/live/groups: {total, favorites, recent, groups: [{name,
+    region, label, count}]}, the groups in the lineup's order."""
+    found = client.get(GROUPS) or {}
+    return found if isinstance(found, dict) else {}
+
+
+def browse(client, category: str, group=None, query=None, offset: int = 0, limit: int = PAGE, around=None) -> dict:
+    """A page of a category's channels ("all", "favorites", "recent" or
+    "group" of `group`), matching `query` (a name, a number's beginning, or
+    what's on): {total, offset, channels}; `around`, the page holding that
+    channel. A lineup can have tens of thousands: no list asks for more."""
+    asked = {"category": category, "offset": offset, "limit": limit}
+    if category == "group":
+        asked["group"] = group or ""
+    if query:
+        asked["q"] = query
+    if around is not None:
+        asked["around"] = around
+        asked.pop("offset")
+    found = client.get(BROWSE, **asked) or {}
+    return {"total": found.get("total") or 0, "offset": found.get("offset") or 0, "channels": found.get("channels") or []}
+
+
+def channel(client, channel_id: int) -> dict:
+    return client.get("%s/%d" % (CHANNELS, channel_id))
 
 
 def set_favorite(client, channel_id: int, favorite: bool) -> None:
@@ -98,31 +125,10 @@ def stream_path(channel_id: int, client_id: str) -> str:
 
 def schedule(client, channel_id: int, start: float, hours: int = SCHEDULE_HOURS) -> list:
     """The channel's programmes from `start` (the one on then included) over
-    `hours`."""
+    `hours`: the guide of that channel alone (`ids`)."""
     begin = int(start)
-    response = client.request("GET", GUIDE, query={"from": begin, "to": begin + hours * 3600})
-    if response.status >= 400:
-        raise api.error_of(response)
-    return programs_of(response.body, channel_id)
-
-
-def programs_of(body: bytes, channel_id: int) -> list:
-    """One channel's programmes out of the guide's answer, found in it
-    rather than the whole of it read: the guide is asked for every channel
-    at once, and a lineup of tens of thousands sends tens of megabytes for
-    a few hours. Its channels are its only keys made of digits."""
-    import json
-    import re
-
-    text = body.decode("utf-8", "replace")
-    key = re.search(r'"%d"\s*:\s*(?=\[)' % channel_id, text)
-    if key is None:
-        return []
-    try:
-        found, _ = json.JSONDecoder().raw_decode(text, key.end())
-    except ValueError:
-        return []
-    return found if isinstance(found, list) else []
+    guide = client.get(GUIDE, **{"from": begin, "to": begin + hours * 3600, "ids": channel_id}) or {}
+    return (guide.get("programs") or {}).get(str(channel_id)) or []
 
 
 # ------------------------------------------------------------ what's on
@@ -214,10 +220,12 @@ def badges(program: dict) -> list:
     return found
 
 
-def name(channel: dict) -> str:
-    """"101 Pley News HD", or the name alone."""
+def name(channel: dict, group=None) -> str:
+    """"101 Pley News HD", or the name alone; in `group`, without the
+    region the group says."""
     number = channel.get("number")
-    return "%s %s" % (number, channel.get("name") or "") if number else channel.get("name") or ""
+    called = short_name(channel, group)
+    return "%s %s" % (number, called) if number else called
 
 
 def nothing_on(channel: dict) -> str:
@@ -251,31 +259,57 @@ def plot(channel: dict, now: float) -> str:
     return "\n".join(parts)
 
 
-def groups(found: list) -> list:
-    """(group, how many channels) in the order the channels have them."""
-    counts = {}
-    for channel in found:
-        group = channel.get("group") or ""
-        if group:
-            counts[group] = counts.get(group, 0) + 1
-    return list(counts.items())
+def split_region(text: str):
+    """(region, the rest) of a name that begins with one the way providers
+    write them ("UK| Sport", "[UK] Sport", "UK: Sport"), as the server
+    splits group names; None for one that doesn't."""
+    text = re.sub(r"^\|+\s*", "", (text or "").strip())
+    found = (
+        re.match(r"^\[([^\]]{1,16})\]\s*(.+)$", text)
+        or re.match(r"^([^|]{1,16})\|\s*(.+)$", text)
+        or re.match(r"^([A-Z]{1,4}):\s*(.+)$", text)
+    )
+    if not found:
+        return None
+    region, rest = found.group(1).strip(), re.sub(r"^[|:\-\s]+", "", found.group(2)).strip()
+    return (region, rest) if region and rest else None
 
 
-def recent_channels(found: list, recent: list) -> list:
-    """The channels watched last, newest first, that are still shown."""
-    by_id = {c["id"]: c for c in found}
-    return [by_id[i] for i in recent or [] if i in by_id]
+def short_name(channel: dict, group=None) -> str:
+    """A channel's name in `group`, without the region the group already
+    says ("SKY SPORTS 1" in UK · Sport, not "UK| SKY SPORTS 1"); its whole
+    name elsewhere."""
+    whole = channel.get("name") or ""
+    if not group:
+        return whole
+    mine, its = split_region(whole), split_region(group)
+    return mine[1] if mine and its and mine[0].lower() == its[0].lower() else whole
 
 
-def shown(found: list, which: str, recent=(), group=None) -> list:
-    """The channels of a tab: "all", "favorites", "recent" or "group"."""
-    if which == "favorites":
-        return [c for c in found if c.get("favorite")]
-    if which == "recent":
-        return recent_channels(found, list(recent))
-    if which == "group":
-        return [c for c in found if (c.get("group") or "") == group]
-    return list(found)
+def group_tree(found: list) -> list:
+    """The groups in the lineup's order, those of a region ("UK| Sport",
+    "UK| News"…) gathered under it, so hundreds of groups read as a few
+    dozen; a region with one group stays a group (the web's groupTree).
+    Entries: {"kind": "group", "group"} and {"kind": "region", "region",
+    "groups", "count"}."""
+    by_region = {}
+    for group in found:
+        if group.get("region"):
+            by_region.setdefault(group["region"], []).append(group)
+    entries, placed = [], set()
+    for group in found:
+        region = by_region.get(group.get("region")) if group.get("region") else None
+        if not region or len(region) < 2:
+            entries.append({"kind": "group", "group": group})
+        elif group["region"] not in placed:
+            placed.add(group["region"])
+            entries.append({"kind": "region", "region": group["region"], "groups": region, "count": sum(g.get("count") or 0 for g in region)})
+    return entries
+
+
+def group_name(group: dict) -> str:
+    """"UK · Sport", or a group's name without a region."""
+    return "%s · %s" % (group["region"], group["label"]) if group.get("region") else group.get("label") or group.get("name") or ""
 
 
 def by_number(found: list, typed: str):
@@ -288,22 +322,28 @@ def by_number(found: list, typed: str):
 # ------------------------------------------------------------ Kodi's items
 
 
-def play_url(channel_id: int) -> str:
-    """The plugin's play route for a channel."""
-    return "plugin://%s/?%s" % (kodi.ADDON_ID, urlencode({"route": PLAY_ROUTE, "id": channel_id}))
+def play_url(channel_id: int, group=None) -> str:
+    """The plugin's play route for a channel (opened from `group`: its name
+    in the player is the group's)."""
+    asked = {"route": PLAY_ROUTE, "id": channel_id}
+    if group:
+        asked["group"] = group
+    return "plugin://%s/?%s" % (kodi.ADDON_ID, urlencode(asked))
 
 
 def logo(base: str, channel: dict, width: int = LOGO_WIDTH):
     return image(base, channel.get("logo"), width)
 
 
-def list_item(base: str, channel: dict, now: float) -> xbmcgui.ListItem:
+def list_item(base: str, channel: dict, now: float, group=None) -> xbmcgui.ListItem:
     """A channel in Kodi's lists, its queue of channels and its player:
-    its number and name, what's on now beside it, now and next in its info,
-    its logo, and the programme's picture as fanart. Kodi plays it as a
-    stream without an end: no duration, never watched, no resume point."""
+    its number and name (in `group`, without the group's region), what's on
+    now beside it, now and next in its info, its logo, and the programme's
+    picture as fanart. Kodi plays it as a stream without an end: no
+    duration, never watched, no resume point."""
     current = on_now(channel, now)
-    li = xbmcgui.ListItem(name(channel), headline(current) if current else "", offscreen=True)
+    called = name(channel, group)
+    li = xbmcgui.ListItem(called, headline(current) if current else "", offscreen=True)
     art = {}
     found = logo(base, channel)
     if found:
@@ -315,7 +355,7 @@ def list_item(base: str, channel: dict, now: float) -> xbmcgui.ListItem:
         li.setArt(art)
     tag = li.getVideoInfoTag()
     tag.setMediaType("video")
-    tag.setTitle(name(channel))
+    tag.setTitle(called)
     tag.setPlot(plot(channel, now))
     # Kodi counts a stream it stopped as played, and keeps it by address:
     # a channel is never watched, nor has a place to resume from.
@@ -329,26 +369,26 @@ def list_item(base: str, channel: dict, now: float) -> xbmcgui.ListItem:
     return li
 
 
-def play_item(base: str, channel: dict, client_id: str, now: float) -> xbmcgui.ListItem:
+def play_item(base: str, channel: dict, client_id: str, now: float, group=None) -> xbmcgui.ListItem:
     """Kodi's item for playing a channel: its stream, said to be MPEG-TS,
     so Kodi asks the server nothing before it plays."""
-    li = list_item(base, channel, now)
+    li = list_item(base, channel, now, group)
     li.setPath(api.path_in(base, stream_path(channel["id"], client_id)))
     li.setMimeType(MIME)
     li.setContentLookup(False)
     return li
 
 
-def queue(base: str, found: list, at: int, now: float) -> tuple:
-    """Kodi's video queue, holding the channels of `found` around the one at
-    `at` (QUEUED either side: a lineup can have tens of thousands), and
-    where that one is in it: Next and Previous in the player change
-    channel."""
+def queue(base: str, found: list, at: int, now: float, group=None) -> tuple:
+    """Kodi's video queue, holding the channels of `found` (those of the
+    category the channel was opened from) around the one at `at` (QUEUED
+    either side), and where that one is in it: Next and Previous in the
+    player change channel within the category."""
     first = max(0, at - QUEUED)
     playlist = xbmc.PlayList(xbmc.PLAYLIST_VIDEO)
     playlist.clear()
     for channel in found[first : at + QUEUED + 1]:
-        playlist.add(play_url(channel["id"]), list_item(base, channel, now))
+        playlist.add(play_url(channel["id"], group), list_item(base, channel, now, group))
     playlist.unshuffle()
     return playlist, at - first
 

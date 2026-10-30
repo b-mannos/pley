@@ -85,7 +85,7 @@ const add = (name, width, height, body) => pictures.push({ name, width, height, 
 for (const name of [
   "search", "house", "clapperboard", "tv", "music", "image", "folder", "list-music", "layers", "settings",
   "play", "refresh-cw", "arrow-up-narrow-wide", "arrow-down-wide-narrow", "sliders-horizontal", "chevron-down",
-  "check", "circle-check", "server", "log-out", "lock", "tv-minimal",
+  "check", "circle-check", "server", "log-out", "lock", "tv-minimal", "chevron-right",
 ]) {
   add(`icon-${name}.png`, 40, 40, icon(name, 40, "#ffffff"));
 }

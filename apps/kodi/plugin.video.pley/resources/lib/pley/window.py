@@ -1279,7 +1279,7 @@ class Home(Screen):
                 live.load()
             except api.ApiError as e:
                 kodi.log("Live TV as Home: %s" % e.message, xbmc.LOGWARNING)
-            if live.channels:
+            if live.lineup.get("total"):
                 return live
         if not win.libraries:
             return Notice(win, T("no_libraries"), T("no_libraries_body"), retry=self)
@@ -2591,93 +2591,101 @@ class Playlist(Grid):
 
 
 class Live(Screen):
-    """Live TV (livetv.py; the web's LiveTvPage, as a TV's channel list):
-    the channels of a tab (All, Favourites, Recently watched, a group) by
-    number with what's on now and how far into it; beside them, the focused
-    channel's programme now and next. A channel plays in Kodi's player with
-    the tab's channels in its queue: Next and Previous change channel. Menu
-    and Info: its favourite and schedule; number keys go to a channel."""
+    """Live TV (livetv.py), as TiviMate and the web lay it out: the
+    categories (Search, Favourites, Recently watched, All channels, then
+    the groups, those of a region gathered under it), the channels of the
+    one focus rests on by number with what's on now, and beside them the
+    focused channel's programme now and next. Channels come a page at a
+    time as the list is scrolled: a lineup can have tens of thousands. A
+    channel plays in Kodi's player with its category's channels in the
+    queue, so Next and Previous change channel within it. Menu and Info:
+    its favourite and schedule; number keys go to a channel."""
 
     name = "live"
     rail = "live"
-    # What's on is redrawn this often; the channels asked for again once a
-    # programme shown has ended.
+    # What's on is redrawn this often near focus; a channel whose
+    # programme ended is asked for again.
     TICK = 30
     # Number keys typed this close together make one number.
     TYPING = 1.5
     # Rows either side of focus kept up to date.
     AROUND = 20
+    # The next page is asked for this close to the end of those in.
+    AHEAD = 30
 
     def __init__(self, win: Window):
         super().__init__(win)
-        self.channels = []
-        self.recent = []
-        # "all", "favorites", "recent" or "group" (of self.group).
+        self.lineup = {}
+        # The category shown: ("all"|"favorites"|"recent"|"group"|"search", group or query).
         key = self.remembered_as()
         kept = kodi.remembered(key, "all") if key else "all"
-        self.tab, _, group = kept.partition(":")
-        self.group = group or None
+        kind, _, group = kept.partition(":")
+        self.category = (kind, group or None) if kind in ("all", "favorites", "recent", "group") else ("all", None)
+        self.entries = []
+        self.open_regions = set()
+        # The channels in the list: those from `offset` in the category, of `total`.
+        self.offset = 0
+        self.total = 0
         self.shown = []
+        self.asked = 0
+        self.loading = False
         self.timer = None
         self.typed = ""
         self.typed_timer = None
 
     def remembered_as(self):
-        """Where the tab is remembered: the server and the profile, as a
-        library's (the web keeps its filter in the browser)."""
+        """Where the category is remembered: the server and the profile, as
+        a library's tab (the web keeps its own in the browser)."""
         server = kodi.setting("server_id") or kodi.setting("server_url")
         profile = self.win.me.get("id")
         if not server or profile is None:
             return None
         return "live_tab/%s/%s" % (server, profile)
 
+    # ------------------------------------------------------------ the server
+
+    @property
+    def group(self):
+        """The group shown, when it is one: names in it leave out its region."""
+        return self.category[1] if self.category[0] == "group" else None
+
+    def page(self, offset: int = 0, around=None, category=None) -> dict:
+        kind, value = category or self.category
+        if kind == "search":
+            return livetv.browse(self.session.client, "all", query=value, offset=offset, around=around)
+        return livetv.browse(self.session.client, kind, value if kind == "group" else None, offset=offset, around=around)
+
     def load(self) -> None:
-        client = self.session.client
-        summary, found = api.together(lambda: livetv.summary(client), lambda: livetv.channels(client))
-        self.recent = summary.get("recent") or []
-        self.channels = found or []
+        self.lineup = livetv.groups(self.session.client)
+        self.settle()
+        self.take(self.page())
+
+    def take(self, found: dict) -> None:
+        self.offset, self.total, self.shown = found["offset"], found["total"], list(found["channels"])
+
+    def settle(self) -> None:
+        """All channels where the category went (the last favourite gone, a
+        group hidden)."""
+        kind, group = self.category
+        names = {g["name"] for g in self.lineup.get("groups") or []}
+        if (kind == "group" and group not in names) or (kind in ("favorites", "recent") and not self.lineup.get(kind)):
+            self.category = ("all", None)
 
     def instead(self):
-        if self.channels:
+        if self.lineup.get("total"):
             return None
         admin = bool(self.win.me.get("is_admin"))
         notice = Notice(self.win, T("no_channels"), T("no_channels_admin" if admin else "no_channels_body"), retry=self)
         notice.rail = "live"
         return notice
 
-    def tabs(self) -> list:
-        """The tabs there is something in: Favourites with a favourite,
-        Recently watched with a channel watched, Groups with two groups."""
-        offered = ["all"]
-        if any(c.get("favorite") for c in self.channels):
-            offered.append("favorites")
-        if livetv.recent_channels(self.channels, self.recent):
-            offered.append("recent")
-        if len(livetv.groups(self.channels)) > 1:
-            offered.append("group")
-        return offered
-
-    def settle(self) -> None:
-        """The tab back to All where its channels went (the last favourite
-        removed, a group gone)."""
-        if self.tab not in self.tabs() or (self.tab == "group" and self.group not in dict(livetv.groups(self.channels))):
-            self.tab, self.group = "all", None
-
-    def draw_tabs(self) -> None:
-        win = self.win
-        offered = self.tabs()
-        for tab, id_ in zip(("all", "favorites", "recent", "group"), L.LIVE_TAB_IDS):
-            win.visible(id_, tab in offered and tab != self.tab)
-            win.visible(id_ + 100, tab in offered and tab == self.tab)
-        # The group tab says the group chosen.
-        win.put(L.LIVE_GROUP + 100, self.group or T("groups"))
+    # --------------------------------------------------------------- drawing
 
     def show(self, filled: bool) -> None:
         win = self.win
         if not filled:
+            self.draw_categories(select=True)
             self.draw()
-        else:
-            self.draw_tabs()
         self.wait()
         if filled and self.last_focus:
             win.setFocusId(self.last_focus)
@@ -2685,58 +2693,80 @@ class Live(Screen):
             win.setFocusId(self.first())
 
     def first(self) -> int:
-        return L.LIVE_LIST if self.shown else L.LIVE_ALL + 100
+        return L.LIVE_LIST if self.shown else L.LIVE_CATEGORIES
+
+    def category_entries(self) -> list:
+        """The categories as the list shows them: a region's groups after
+        it while it is open (and while one of them is shown)."""
+        lineup = self.lineup
+        out = [{"key": ("search", None), "label": T("search_channels"), "count": None}]
+        if self.category[0] == "search":
+            # What was looked for, marked as the category shown.
+            out[0].update(key=self.category, label="“%s”" % self.category[1], count=self.total)
+        if lineup.get("favorites"):
+            out.append({"key": ("favorites", None), "label": T("favourites"), "count": lineup["favorites"]})
+        if lineup.get("recent"):
+            out.append({"key": ("recent", None), "label": T("recently_watched"), "count": lineup["recent"]})
+        out.append({"key": ("all", None), "label": T("all_channels"), "count": lineup.get("total") or 0})
+        for entry in livetv.group_tree(lineup.get("groups") or []):
+            if entry["kind"] == "group":
+                group = entry["group"]
+                out.append({"key": ("group", group["name"]), "label": livetv.group_name(group), "count": group.get("count")})
+                continue
+            region = entry["region"]
+            opened = region in self.open_regions
+            out.append({"key": ("region", region), "label": region, "count": entry["count"], "region": True, "open": opened})
+            if opened:
+                for group in entry["groups"]:
+                    out.append({"key": ("group", group["name"]), "label": group.get("label") or group["name"], "count": group.get("count"), "inner": True})
+        return out
+
+    def draw_categories(self, select: bool = False) -> None:
+        """The categories' list, the one shown marked; `select`: focus on it."""
+        win = self.win
+        found = win.c(L.LIVE_CATEGORIES)
+        at = found.getSelectedPosition()
+        if select and self.group:
+            # The region of the group shown opens with it.
+            region = next((g.get("region") for g in self.lineup.get("groups") or [] if g["name"] == self.group), None)
+            if region:
+                self.open_regions.add(region)
+        self.entries = self.category_entries()
+        items = []
+        for entry in self.entries:
+            li = xbmcgui.ListItem(entry["label"], "{:,}".format(entry["count"]) if entry["count"] is not None else "", offscreen=True)
+            li.setProperty("chosen", "1" if entry["key"] == self.category else "")
+            li.setProperty("region", ("open" if entry.get("open") else "closed") if entry.get("region") else "")
+            li.setProperty("inner", "1" if entry.get("inner") else "")
+            items.append(li)
+        found.reset()
+        found.addItems(items)
+        keys = [e["key"] for e in self.entries]
+        if select and self.category in keys:
+            found.selectItem(keys.index(self.category))
+        elif 0 <= at < len(items):
+            found.selectItem(at)
 
     def draw(self, keep=None) -> None:
-        """The tab's channels; `keep`: the channel to stay on."""
+        """The category's channels in; `keep`: the channel to stay on."""
         win = self.win
-        self.settle()
-        self.draw_tabs()
-        self.shown = livetv.shown(self.channels, self.tab, self.recent, self.group)
         began = time.perf_counter()
         now = time.time()
         found = win.c(L.LIVE_LIST)
         found.reset()
-        found.addItems([channel_row(self.session.base, channel, now) for channel in self.shown])
-        kodi.log("Live TV: %d channels drawn in %d ms" % (len(self.shown), (time.perf_counter() - began) * 1000))
+        found.addItems([channel_row(self.session.base, channel, now, None, self.group) for channel in self.shown])
         ids = [c["id"] for c in self.shown]
         if keep in ids:
             found.selectItem(ids.index(keep))
-        win.put(L.LIVE_EMPTY, "" if self.shown else T("no_channels"))
-
-    def redraw(self) -> None:
-        """The channels as loaded again: in place when they are the same
-        ones (focus and the list stay as they are)."""
-        shown = livetv.shown(self.channels, self.tab, self.recent, self.group)
-        if [c["id"] for c in shown] != [c["id"] for c in self.shown] or self.tab not in self.tabs():
-            return self.draw(keep=self.focused_channel_id())
-        self.shown = shown
-        self.draw_tabs()
-        self.freshen(fetch=False)
-
-    def around(self) -> range:
-        """The rows near focus: the ones seen, and those a few presses away."""
-        at = max(self.win.c(L.LIVE_LIST).getSelectedPosition(), 0)
-        return range(max(0, at - self.AROUND), min(len(self.shown), at + self.AROUND + 1))
-
-    def freshen(self, fetch: bool = True) -> None:
-        """What's on now in the rows near focus, as time passed; with
-        `fetch`, the channels among them whose programme ended asked for
-        again (what comes after it). A lineup can have tens of thousands of
-        channels: the rest are freshened as focus comes near them."""
-        rows = self.around()
-        now = time.time()
-        if fetch:
-            ended = [self.shown[i] for i in rows if (self.shown[i].get("now") or {}).get("stop", now + 1) <= now]
-            if ended:
-                client = self.session.client
-                path = livetv.CHANNELS + "/%d"
-                for channel, fresh in zip(ended, api.together(*[lambda c=c: client.get(path % c["id"]) for c in ended])):
-                    if isinstance(fresh, dict):
-                        channel.update(fresh)
-        found = self.win.c(L.LIVE_LIST)
-        for at in rows:
-            channel_row(self.session.base, self.shown[at], now, found.getListItem(at))
+        kind, value = self.category
+        if kind == "group":
+            heading = livetv.group_name(next((g for g in self.lineup.get("groups") or [] if g["name"] == value), {"label": value}))
+        else:
+            heading = {"all": T("all_channels"), "favorites": T("favourites"), "recent": T("recently_watched")}.get(kind) or "“%s”" % value
+        win.put(L.LIVE_HEADING, heading)
+        win.put(L.LIVE_COUNT, words.plural(self.total, "channel") if self.total else "")
+        win.put(L.LIVE_EMPTY, "" if self.shown else T("nothing_found") if kind == "search" else T("no_channels"))
+        kodi.log("Live TV: %d of %d channels drawn in %d ms" % (len(self.shown), self.total, (time.perf_counter() - began) * 1000), xbmc.LOGDEBUG)
 
     def focused_channel_id(self):
         channel = self.selected()
@@ -2747,8 +2777,27 @@ class Live(Screen):
         return self.shown[at] if 0 <= at < len(self.shown) else None
 
     def refresh(self) -> None:
-        self.load()
-        self.redraw()
+        """What changed on the server (back from playing, an event): the
+        categories' counts, and the channels in the list from where they
+        start, focus kept on its channel."""
+        keep = self.focused_channel_id()
+        self.lineup = livetv.groups(self.session.client)
+        before = self.category
+        self.settle()
+        count = max(len(self.shown), livetv.PAGE)
+        found = self.page(0 if before != self.category else self.offset)
+        if count > livetv.PAGE and before == self.category:
+            more = livetv.browse(self.session.client, *self.browse_args(), offset=self.offset + livetv.PAGE, limit=min(count - livetv.PAGE, 400))
+            found["channels"] = found["channels"] + more["channels"]
+        self.take(found)
+        self.draw_categories()
+        self.draw(keep=keep)
+
+    def browse_args(self) -> tuple:
+        kind, value = self.category
+        if kind == "search":
+            return ("all", None, value)
+        return (kind, value if kind == "group" else None, None)
 
     def leave(self) -> None:
         super().leave()
@@ -2757,6 +2806,28 @@ class Live(Screen):
             self.timer = None
 
     # --------------------------------------------------------- time passes
+
+    def around(self) -> range:
+        """The rows near focus: the ones seen, and those a few presses away."""
+        at = max(self.win.c(L.LIVE_LIST).getSelectedPosition(), 0)
+        return range(max(0, at - self.AROUND), min(len(self.shown), at + self.AROUND + 1))
+
+    def freshen(self, fetch: bool = True) -> None:
+        """What's on now in the rows near focus, as time passed; with
+        `fetch`, the channels among them whose programme ended asked for
+        again (what comes after it)."""
+        rows = self.around()
+        now = time.time()
+        if fetch:
+            ended = [self.shown[i] for i in rows if (self.shown[i].get("now") or {}).get("stop", now + 1) <= now]
+            if ended:
+                client = self.session.client
+                for channel, fresh in zip(ended, api.together(*[lambda c=c: livetv.channel(client, c["id"]) for c in ended])):
+                    if isinstance(fresh, dict):
+                        channel.update(fresh)
+        found = self.win.c(L.LIVE_LIST)
+        for at in rows:
+            channel_row(self.session.base, self.shown[at], now, found.getListItem(at), self.group)
 
     def wait(self) -> None:
         """What's on is redrawn in TICK seconds, while this page shows."""
@@ -2779,43 +2850,123 @@ class Live(Screen):
         finally:
             self.wait()
 
+    # -------------------------------------------------------------- moving
+
+    def focused(self, control_id: int) -> None:
+        if control_id == L.LIVE_CATEGORIES:
+            self.win.rest(self.rested_on_category)
+
+    def moved(self, control_id: int, action: int) -> None:
+        if control_id == L.LIVE_CATEGORIES:
+            # As TiviMate: the channels follow focus once it rests.
+            self.win.rest(self.rested_on_category)
+        elif control_id == L.LIVE_LIST:
+            self.win.rest(lambda: self.win.screen is self and self.rested_on_channel())
+
+    def rested_on_category(self) -> None:
+        if self.win.screen is not self or self.win.getFocusId() != L.LIVE_CATEGORIES:
+            return
+        at = self.win.c(L.LIVE_CATEGORIES).getSelectedPosition()
+        if 0 <= at < len(self.entries) and self.entries[at]["key"][0] in ("all", "favorites", "recent", "group"):
+            self.choose(self.entries[at]["key"])
+
+    def choose(self, category: tuple, then=None) -> None:
+        """Shows `category`'s first page, asked for away from the window's
+        thread (a newer choice wins); `then()` once it is in."""
+        if category == self.category and self.shown:
+            if then:
+                then()
+            return
+        self.asked += 1
+        asked = self.asked
+
+        def done(found):
+            if asked != self.asked or self.win.screen is not self:
+                return
+            self.category = category
+            key = self.remembered_as()
+            if key and category[0] != "search":
+                kodi.remember(key, category[0] + (":" + category[1] if category[1] else ""))
+            self.take(found)
+            self.draw_categories()
+            self.draw()
+            if then:
+                then()
+
+        self.win.later(lambda: self.page(category=category), done, lambda: self.win.toast(T("page_failed"), 5))
+
+    def rested_on_channel(self) -> None:
+        """Near the end of the channels in, the next page; near the start
+        of a list that began further on, the page before."""
+        at = self.win.c(L.LIVE_LIST).getSelectedPosition()
+        if self.loading or at < 0:
+            return
+        if at >= len(self.shown) - self.AHEAD and self.offset + len(self.shown) < self.total:
+            self.load_more(self.offset + len(self.shown), before=False)
+        elif at < self.AHEAD and self.offset > 0:
+            self.load_more(max(0, self.offset - livetv.PAGE), before=True)
+        self.freshen()
+
+    def load_more(self, offset: int, before: bool) -> None:
+        self.loading = True
+        category = self.category
+        limit = (self.offset - offset) if before else livetv.PAGE
+
+        def done(found):
+            self.loading = False
+            if category != self.category or self.win.screen is not self:
+                return
+            found_list = self.win.c(L.LIVE_LIST)
+            now = time.time()
+            if before:
+                at = found_list.getSelectedPosition()
+                self.shown = found["channels"] + self.shown
+                self.offset = found["offset"]
+                found_list.reset()
+                found_list.addItems([channel_row(self.session.base, c, now, None, self.group) for c in self.shown])
+                found_list.selectItem(at + len(found["channels"]))
+            else:
+                at = found_list.getSelectedPosition()
+                self.shown += found["channels"]
+                found_list.addItems([channel_row(self.session.base, c, now, None, self.group) for c in found["channels"]])
+                # Kodi's list goes back to its start as items are added.
+                found_list.selectItem(at)
+
+        def failed():
+            self.loading = False
+
+        kind, value, query = self.browse_args()
+        self.win.later(lambda: livetv.browse(self.session.client, kind, value, query, offset, limit), done, failed)
+
     # ------------------------------------------------------------ actions
 
-    def switch(self, tab: str, group=None) -> None:
-        if (tab, group) == (self.tab, self.group):
-            return
-        self.tab, self.group = tab, group
-        key = self.remembered_as()
-        if key:
-            kodi.remember(key, tab + (":" + group if group else ""))
-        self.draw()
-        self.win.setFocusId(self.first())
-
-    def pick_group(self) -> None:
-        found = livetv.groups(self.channels)
-        names = [group for group, _ in found]
-        at = names.index(self.group) if self.group in names else -1
-        chosen = xbmcgui.Dialog().select(T("groups"), ["%s (%d)" % (group, count) for group, count in found], preselect=at)
-        if chosen >= 0:
-            self.switch("group", names[chosen])
-        else:
-            self.win.setFocusId(L.LIVE_GROUP + (100 if self.tab == "group" else 0))
-
     def click(self, control_id: int) -> None:
-        tabs = dict(zip(L.LIVE_TAB_IDS, ("all", "favorites", "recent", "group")))
-        tab = tabs.get(control_id) or tabs.get(control_id - 100)
-        if tab == "group":
-            return self.pick_group()
-        if tab:
-            return self.switch(tab)
+        if control_id == L.LIVE_CATEGORIES:
+            at = self.win.c(L.LIVE_CATEGORIES).getSelectedPosition()
+            if not 0 <= at < len(self.entries):
+                return
+            kind, value = self.entries[at]["key"]
+            if kind == "region":
+                # Opened or closed where it is.
+                self.open_regions.symmetric_difference_update({value})
+                return self.draw_categories()
+            if kind == "search":
+                return self.search()
+            return self.choose((kind, value), then=lambda: self.shown and self.win.setFocusId(L.LIVE_LIST))
         if control_id == L.LIVE_LIST:
             at = self.win.c(L.LIVE_LIST).getSelectedPosition()
             if 0 <= at < len(self.shown):
                 self.watch(at)
 
+    def search(self) -> None:
+        query = (xbmcgui.Dialog().input(T("search_channels"), defaultt=self.category[1] if self.category[0] == "search" else "") or "").strip()
+        if query:
+            self.choose(("search", query), then=lambda: self.win.setFocusId(L.LIVE_LIST if self.shown else L.LIVE_CATEGORIES))
+
     def watch(self, at: int) -> None:
-        """Plays the channel at `at`, the tab's channels in Kodi's queue."""
-        play_channels(self.session.base, self.shown, at)
+        """Plays the channel at `at`, its category's channels around it in
+        Kodi's queue."""
+        play_channels(self.session.base, self.shown, at, self.group)
 
     def menu(self, control_id: int) -> None:
         if control_id != L.LIVE_LIST:
@@ -2838,23 +2989,21 @@ class Live(Screen):
         if channel is not None:
             self.schedule(channel)
 
-    def moved(self, control_id: int, action: int) -> None:
-        if control_id == L.LIVE_LIST:
-            # Rows far from where they were drawn say what's on now once
-            # focus rests.
-            self.win.rest(lambda: self.win.screen is self and self.freshen())
-
     def set_favourite(self, channel: dict, favourite: bool) -> None:
-        offered = self.tabs()
         livetv.set_favorite(self.session.client, channel["id"], favourite)
         channel["favorite"] = favourite
-        if self.tab == "favorites" or self.tabs() != offered:
-            # The channel leaves the tab shown, or Favourites comes or goes.
-            self.draw(keep=channel["id"])
+        self.lineup = livetv.groups(self.session.client)
+        if self.category[0] == "favorites":
+            # The channel leaves the list (or the list goes, the last one).
+            self.settle()
+            self.take(self.page())
+            self.draw_categories()
+            self.draw()
             return self.win.setFocusId(self.first())
+        self.draw_categories()
         at = next((i for i, c in enumerate(self.shown) if c is channel), -1)
         if at >= 0:
-            channel_row(self.session.base, channel, time.time(), self.win.c(L.LIVE_LIST).getListItem(at))
+            channel_row(self.session.base, channel, time.time(), self.win.c(L.LIVE_LIST).getListItem(at), self.group)
 
     def schedule(self, channel: dict, start=None) -> None:
         """The channel's programmes, SCHEDULE_HOURS at a time, in Kodi's
@@ -2863,25 +3012,21 @@ class Live(Screen):
         now = time.time()
         start = start or now
         logo = livetv.logo(self.session.base, channel)
+        called = livetv.name(channel, self.group)
         programs, at = None, 0
         while True:
             if programs is None:
-                # The guide is asked for every channel at once: a large
-                # lineup's takes a few seconds.
-                xbmc.executebuiltin("ActivateWindow(busydialognocancel)")
                 try:
                     programs = livetv.schedule(self.session.client, channel["id"], start)
                 except api.ApiError as e:
                     return self.win.toast(T("server_error") % e.message, 6)
-                finally:
-                    xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
                 if start > now:
                     programs = [p for p in programs if p["start"] >= start]
                 if not programs:
-                    return self.win.toast(T("nothing_scheduled") % livetv.name(channel), 5)
+                    return self.win.toast(T("nothing_scheduled") % called, 5)
                 at = 0
             entries = [schedule_entry(p, now, logo) for p in programs] + [xbmcgui.ListItem(T("later"), offscreen=True)]
-            chosen = xbmcgui.Dialog().select(livetv.name(channel), entries, preselect=at, useDetails=True)
+            chosen = xbmcgui.Dialog().select(called, entries, preselect=at, useDetails=True)
             if chosen < 0:
                 return
             if chosen == len(programs):
@@ -2894,7 +3039,7 @@ class Live(Screen):
                     return self.watch(ids.index(channel["id"]))
                 return play_channels(self.session.base, [channel], 0)
             # Its details; back from them, the schedule as it was.
-            xbmcgui.Dialog().textviewer(livetv.headline(program), program_text(channel, program, now))
+            xbmcgui.Dialog().textviewer(livetv.headline(program), program_text(channel, program, now, self.group))
 
     def number(self, digit: int) -> None:
         """Number keys typed together make a channel's number (the web
@@ -2908,40 +3053,49 @@ class Live(Screen):
         self.typed_timer.start()
 
     def go_to_typed(self) -> None:
+        """The channel of the number typed: in the category shown, else in
+        All channels; its page asked for, and focus on it."""
         typed, self.typed = self.typed, ""
         if not typed or self.win.screen is not self:
             return
-        channel = livetv.by_number(self.shown, typed)
-        if channel is None:
-            channel = livetv.by_number(self.channels, typed)
-            if channel is None:
+        try:
+            category = self.category if self.category[0] != "search" else ("all", None)
+            kind, value = category
+            found = livetv.by_number(livetv.browse(self.session.client, kind, value if kind == "group" else None, typed, limit=50)["channels"], typed)
+            if found is None and kind != "all":
+                category = ("all", None)
+                found = livetv.by_number(livetv.browse(self.session.client, "all", query=typed, limit=50)["channels"], typed)
+            if found is None:
                 return self.win.toast(T("no_channel_numbered") % typed)
-            # On another tab: on All, then.
-            self.tab, self.group = "all", None
-            self.draw()
-        self.win.c(L.LIVE_LIST).selectItem(next(i for i, c in enumerate(self.shown) if c is channel))
+            self.category = category
+            self.take(self.page(around=found["id"]))
+        except api.ApiError as e:
+            return self.win.toast(T("server_error") % e.message, 6)
+        self.draw_categories(select=True)
+        self.draw(keep=found["id"])
         self.win.setFocusId(L.LIVE_LIST)
         self.freshen(fetch=False)
 
 
-def play_channels(base: str, channels: list, at: int) -> None:
+def play_channels(base: str, channels: list, at: int, group=None) -> None:
     """Plays channel `at` of `channels`, those around it in Kodi's queue."""
-    queue, start = livetv.queue(base, channels, at, time.time())
+    queue, start = livetv.queue(base, channels, at, time.time(), group)
     xbmc.Player().play(queue, startpos=start)
 
 
-def channel_row(base: str, channel: dict, now: float, li=None) -> "xbmcgui.ListItem":
+def channel_row(base: str, channel: dict, now: float, li=None, group=None) -> "xbmcgui.ListItem":
     """A channel in Live TV's list (skin.live_row), and what the panel beside
     it says of it (skin.live_page), as `li`'s labels, picture and
-    properties; a new item without `li`."""
+    properties; a new item without `li`. In `group`, its name leaves out
+    the group's region."""
     li = li if li is not None else xbmcgui.ListItem(offscreen=True)
     current = livetv.on_now(channel, now)
     later = livetv.up_next(channel, now)
-    li.setLabel(livetv.name(channel))
+    li.setLabel(livetv.name(channel, group))
     li.setLabel2(livetv.headline(current) if current else livetv.nothing_on(channel))
     li.setArt({"thumb": livetv.logo(base, channel) or ""})
-    name = channel.get("name") or ""
-    li.setProperty("short", channel.get("number") or name[:3])
+    called = livetv.short_name(channel, group)
+    li.setProperty("short", channel.get("number") or called[:3])
     li.setProperty("id", str(channel["id"]))
     li.setProperty("favorite", "1" if channel.get("favorite") else "")
     tag = li.getVideoInfoTag()
@@ -2957,7 +3111,7 @@ def channel_row(base: str, channel: dict, now: float, li=None) -> "xbmcgui.ListI
     else:
         tag.setResumePoint(0.0, 0.0)
         li.setProperty("when", "")
-        li.setProperty("title", livetv.name(channel))
+        li.setProperty("title", livetv.name(channel, group))
         li.setProperty("airs", livetv.nothing_on(channel))
         li.setProperty("description", "")
         li.setProperty("picture", "")
@@ -2976,12 +3130,12 @@ def schedule_entry(program: dict, now: float, logo=None) -> "xbmcgui.ListItem":
     return li
 
 
-def program_text(channel: dict, program: dict, now: float) -> str:
+def program_text(channel: dict, program: dict, now: float, group=None) -> str:
     """A programme still to come, in Kodi's text viewer."""
     line = " · ".join(
         p for p in ["%s · %s" % (livetv.day(program["start"], now), livetv.span(program)), livetv.episode(program)] + livetv.badges(program) if p
     )
-    parts = ["[B]%s[/B]" % livetv.name(channel), line]
+    parts = ["[B]%s[/B]" % livetv.name(channel, group), line]
     if program.get("description"):
         parts += ["", program["description"].strip()]
     if program.get("categories"):

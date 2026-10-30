@@ -201,11 +201,8 @@ TEXT = {
     "subtitles_need_newer": 30245,
     "unencrypted": 30246,
     "live_tv": 30247,
-    "channels": 30248,
     "favourites": 30249,
     "recently_watched": 30250,
-    "groups": 30251,
-    "guide": 30252,
     "add_favourite": 30253,
     "remove_favourite": 30254,
     "schedule": 30255,
@@ -226,6 +223,8 @@ TEXT = {
     "no_channel_numbered": 30270,
     "on_now": 30271,
     "nothing_scheduled": 30272,
+    "all_channels": 30273,
+    "search_channels": 30274,
 }
 
 

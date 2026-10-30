@@ -382,59 +382,74 @@ class Plugin:
     # --------------------------------------------------------------- Live TV
 
     def route_live(self) -> None:
-        """Live TV (livetv.py): its channels, the favourites, the channels
-        watched last, their groups and the guide."""
-        client = self.client()
-        summary, found = api.together(lambda: livetv.summary(client), lambda: livetv.channels(client))
-        if not found:
+        """Live TV (livetv.py), as TiviMate lays it out: Favourites, Recently
+        watched and All channels, then the groups, those of a region
+        gathered under it. Nothing asks for more than a page of channels."""
+        found = livetv.groups(self.client())
+        if not found.get("total"):
             li = xbmcgui.ListItem(kodi.text("no_channels"), offscreen=True)
             li.setArt({"icon": "DefaultIconInfo.png", "thumb": "DefaultIconInfo.png"})
             li.getVideoInfoTag().setPlot(kodi.text("no_channels_body"))
             xbmcplugin.addDirectoryItem(self.handle, self.url(route="retry"), li, isFolder=False)
             return self.end()
-        self.folder(kodi.text("channels"), {"route": "live_channels"}, "DefaultPVRChannels.png")
-        if any(c.get("favorite") for c in found):
-            self.folder(kodi.text("favourites"), {"route": "live_channels", "tab": "favorites"}, "DefaultFavourites.png")
-        if livetv.recent_channels(found, summary.get("recent")):
-            self.folder(kodi.text("recently_watched"), {"route": "live_channels", "tab": "recent"}, "DefaultRecentlyAddedEpisodes.png")
-        if len(livetv.groups(found)) > 1:
-            self.folder(kodi.text("groups"), {"route": "live_groups"}, "DefaultGenre.png")
-        self.folder(kodi.text("guide"), {"route": "live_guide"}, "DefaultPVRGuide.png")
+        if found.get("favorites"):
+            self.category(kodi.text("favourites"), found["favorites"], {"category": "favorites"}, "DefaultFavourites.png")
+        if found.get("recent"):
+            self.category(kodi.text("recently_watched"), found["recent"], {"category": "recent"}, "DefaultRecentlyAddedEpisodes.png")
+        self.category(kodi.text("all_channels"), found["total"], {"category": "all"}, "DefaultPVRChannels.png")
+        self.category(kodi.text("search_channels"), None, {"route": "live_search"}, "DefaultAddonsSearch.png")
+        self.groups(livetv.group_tree(found.get("groups") or []))
         xbmcplugin.addSortMethod(self.handle, xbmcplugin.SORT_METHOD_UNSORTED)
         self.end()
 
-    def route_live_channels(self) -> None:
-        """A tab's channels, by number, each saying what's on now (its
-        label2) and next (its info). They play one at a time; in pley's
-        window, Next and Previous change channel."""
-        client = self.client()
-        tab = self.params.get("tab") or "all"
-        if tab == "recent":
-            summary, found = api.together(lambda: livetv.summary(client), lambda: livetv.channels(client))
-            recent = summary.get("recent") or []
-        else:
-            found, recent = livetv.channels(client), []
-        params = {"route": "live_channels", "tab": tab, "group": self.params.get("group")}
-        self.list_channels(livetv.shown(found, tab, recent, self.params.get("group")), params)
+    def route_live_region(self) -> None:
+        """A region's groups: "Sport", "News"… of "UK"."""
+        region = self.params.get("region")
+        found = livetv.groups(self.client()).get("groups") or []
+        self.groups([{"kind": "group", "group": g, "label": g.get("label")} for g in found if g.get("region") == region])
+        xbmcplugin.addSortMethod(self.handle, xbmcplugin.SORT_METHOD_UNSORTED)
+        self.end()
 
-    def list_channels(self, found: list, params: dict, guide: bool = False) -> None:
-        """A page of `found` channels (a lineup can have tens of thousands),
-        Next page after it. In the guide, each opens its schedule."""
+    def groups(self, entries: list) -> None:
+        for entry in entries:
+            if entry["kind"] == "region":
+                self.category(entry["region"], entry["count"], {"route": "live_region", "region": entry["region"]}, "DefaultCountry.png")
+            else:
+                group = entry["group"]
+                title = entry.get("label") or livetv.group_name(group)
+                self.category(title, group.get("count"), {"category": "group", "group": group["name"]}, "DefaultGenre.png")
+
+    def category(self, title: str, count, params: dict, icon: str) -> None:
+        """A folder of Live TV's: a category of channels, how many it has."""
+        params = dict({"route": "live_channels"}, **params)
+        label = "%s  [COLOR %s](%s)[/COLOR]" % (title, "FF8B95A5", "{:,}".format(count)) if count is not None else title
+        self.folder(label, params, icon)
+
+    def route_live_search(self) -> None:
+        """Finds channels by name, number or what's on: the results' own
+        address, so going back to them doesn't ask again."""
+        query = (xbmcgui.Dialog().input(kodi.text("search_channels")) or "").strip()
+        self.end(False)
+        if query:
+            xbmc.executebuiltin("Container.Update(%s)" % self.url(route="live_channels", category="all", q=query))
+
+    def route_live_channels(self) -> None:
+        """A page of a category's channels (PAGE, as the server sends them),
+        each saying what's on now (its label2) and next (its info), Next
+        page after them. In a group, names leave out the group's region."""
+        category = self.params.get("category") or "all"
+        group = self.params.get("group") if category == "group" else None
         offset = int(self.params.get("offset", 0))
+        page = livetv.browse(self.client(), category, group, self.params.get("q"), offset, PAGE)
         now = time.time()
         entries = []
-        for channel in found[offset : offset + PAGE]:
-            li = livetv.list_item(self.proxy_base, channel, now)
-            if guide:
-                li.setProperty("IsPlayable", "false")
-                li.addContextMenuItems(self.channel_menu(channel)[:1])
-                entries.append((self.url(route="live_schedule", id=channel["id"]), li, True))
-            else:
-                li.addContextMenuItems(self.channel_menu(channel))
-                entries.append((self.url(route=livetv.PLAY_ROUTE, id=channel["id"]), li, False))
+        for channel in page["channels"]:
+            li = livetv.list_item(self.proxy_base, channel, now, group)
+            li.addContextMenuItems(self.channel_menu(channel))
+            entries.append((livetv.play_url(channel["id"], group), li, False))
         xbmcplugin.addDirectoryItems(self.handle, entries, len(entries))
-        if offset + PAGE < len(found):
-            more = {k: v for k, v in dict(params, offset=offset + PAGE).items() if v is not None}
+        if offset + len(page["channels"]) < page["total"]:
+            more = {k: v for k, v in dict(self.params, offset=offset + PAGE).items() if v}
             self.folder(kodi.text("next_page"), more, "DefaultFolder.png", last=True)
         # By number, as the server lists them; by name if asked.
         xbmcplugin.addSortMethod(self.handle, xbmcplugin.SORT_METHOD_UNSORTED)
@@ -452,17 +467,6 @@ class Plugin:
             (kodi.text("schedule"), "Container.Update(%s)" % schedule),
         ]
 
-    def route_live_groups(self) -> None:
-        for group, count in livetv.groups(livetv.channels(self.client())):
-            self.folder("%s (%d)" % (group, count), {"route": "live_channels", "tab": "group", "group": group}, "DefaultGenre.png")
-        self.end()
-
-    def route_live_guide(self) -> None:
-        """The guide in Kodi's lists: each channel, now and next in its
-        info, opening its schedule. (Kodi's PVR grid is for PVR add-ons; a
-        plugin can only list.)"""
-        self.list_channels(livetv.channels(self.client()), {"route": "live_guide"}, guide=True)
-
     def route_live_schedule(self) -> None:
         """A channel's programmes, SCHEDULE_HOURS at a time from what's on
         now: what's on plays the channel; the rest say what they are."""
@@ -470,9 +474,7 @@ class Plugin:
         channel_id = int(self.params["id"])
         now = time.time()
         start = float(self.params.get("from") or now)
-        channel, programs = api.together(
-            lambda: client.get("%s/%d" % (livetv.CHANNELS, channel_id)), lambda: livetv.schedule(client, channel_id, start)
-        )
+        channel, programs = api.together(lambda: livetv.channel(client, channel_id), lambda: livetv.schedule(client, channel_id, start))
         if start > now:
             # A later page: what began on the page before isn't again.
             programs = [p for p in programs if p["start"] >= start]
@@ -534,7 +536,7 @@ class Plugin:
             livetv.forget_queue()
             xbmcplugin.setResolvedUrl(self.handle, False, xbmcgui.ListItem())
             return livetv.busy(e.message)
-        li = livetv.play_item(self.proxy_base, channel, install, time.time())
+        li = livetv.play_item(self.proxy_base, channel, install, time.time(), self.params.get("group"))
         kodi.log("watching live channel %d" % channel["id"])
         xbmcplugin.setResolvedUrl(self.handle, True, li)
 

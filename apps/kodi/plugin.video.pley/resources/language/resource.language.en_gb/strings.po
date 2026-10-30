@@ -803,9 +803,6 @@ msgctxt "#30247"
 msgid "Live TV"
 msgstr ""
 
-msgctxt "#30248"
-msgid "Channels"
-msgstr ""
 
 msgctxt "#30249"
 msgid "Favourites"
@@ -815,13 +812,7 @@ msgctxt "#30250"
 msgid "Recently watched"
 msgstr ""
 
-msgctxt "#30251"
-msgid "Groups"
-msgstr ""
 
-msgctxt "#30252"
-msgid "Guide"
-msgstr ""
 
 msgctxt "#30253"
 msgid "Add to favourites"
@@ -901,4 +892,12 @@ msgstr ""
 
 msgctxt "#30272"
 msgid "The guide has nothing more for %s."
+msgstr ""
+
+msgctxt "#30273"
+msgid "All channels"
+msgstr ""
+
+msgctxt "#30274"
+msgid "Search channels"
 msgstr ""
