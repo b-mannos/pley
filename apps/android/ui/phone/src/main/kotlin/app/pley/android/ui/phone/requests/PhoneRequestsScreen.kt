@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -310,9 +311,14 @@ private fun RequestList(
     val navigator = LocalPhoneNavigator.current
     val metrics = LocalPhoneMetrics.current
     val skeleton = rememberSkeleton(animated = true)
-    val sides = Modifier.padding(start = metrics.marginStart, end = metrics.marginEnd)
+    // Centred on tablets, as history's rows are.
+    val sides = Modifier.padding(start = metrics.marginStart, end = metrics.marginEnd).widthIn(max = REQUEST_CARD_MAX)
     when (val shown = state.list) {
-        RequestListState.Loading -> Column(Modifier.fillMaxSize().padding(top = 8.dp).testTag(REQUESTS_SKELETON), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        RequestListState.Loading -> Column(
+            Modifier.fillMaxSize().padding(top = 8.dp).testTag(REQUESTS_SKELETON),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             repeat(SKELETON_CARDS) { RequestCardSkeleton(skeleton, sides) }
         }
         is RequestListState.Failed -> Scrollable {
@@ -334,6 +340,7 @@ private fun RequestList(
                 modifier = Modifier.fillMaxSize().testTag(REQUESTS_LIST),
                 contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // Read again, and the server didn't answer: what shows is from before (out of reach, the banner says so).
                 shown.problem?.takeIf { it !is RequestProblem.Offline }?.let { problem ->

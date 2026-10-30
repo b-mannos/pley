@@ -481,6 +481,9 @@ private const val REASON_MAX = 500
 
 private val POSTER_WIDTH = 64.dp
 
+/** A card's widest, on tablets: its words and its buttons stay together. */
+internal val REQUEST_CARD_MAX = 720.dp
+
 internal const val REQUEST_CARD = "pley.requests.card."
 internal const val DECLINE_REASON = "pley.requests.declineReason"
 internal const val APPROVE_DIALOG = "pley.requests.approve"

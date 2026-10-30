@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,13 +37,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -88,6 +92,7 @@ import app.pley.android.ui.phone.kit.rememberItemGridState
 import app.pley.android.ui.phone.search.SearchField
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
+import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 
@@ -250,11 +255,12 @@ private fun Hero(hero: DiscoverHero, state: DiscoverUiState, texts: RequestTexts
             ?.copy(maxWidth = ArtworkImage.backdropCap(tier))
     }
     val badge = badgeOf(title)?.let(texts::badge)
+    val tallest = heroMaxHeight()
     Column(Modifier.fillMaxWidth().padding(start = metrics.marginStart, end = metrics.marginEnd).testTag(DISCOVER_HERO)) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .aspectRatio(HERO_RATIO)
+                .heroSize(tallest)
                 .clip(PleyShape.Card)
                 .clickable(role = Role.Button, onClickLabel = stringResource(R.string.requests_details), onClick = onDetails),
         ) {
@@ -343,8 +349,9 @@ private fun heroIcon(action: MainAction) = when (action) {
 @Composable
 private fun HeroSkeleton(skeleton: SkeletonState) {
     val metrics = LocalPhoneMetrics.current
+    val tallest = heroMaxHeight()
     Column(Modifier.fillMaxWidth().padding(start = metrics.marginStart, end = metrics.marginEnd)) {
-        Box(Modifier.fillMaxWidth().aspectRatio(HERO_RATIO).skeleton(skeleton, PleyShape.Card))
+        Box(Modifier.fillMaxWidth().heroSize(tallest).skeleton(skeleton, PleyShape.Card))
         Spacer(Modifier.height(12.dp))
         Box(Modifier.fillMaxWidth(0.4f).height(48.dp).skeleton(skeleton, PleyShape.Control))
     }
@@ -398,8 +405,26 @@ private fun SearchResults(
     }
 }
 
+/** The hero's tallest: half the window, so its buttons show on a tablet held sideways. */
+@Composable
+private fun heroMaxHeight(): Dp {
+    val window = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
+    return if (window > 0.dp) window * HERO_MAX_SHARE else Dp.Infinity
+}
+
+/** A backdrop's 16:9 across the page, lower where that would pass [tallest] (the picture cropped). */
+private fun Modifier.heroSize(tallest: Dp): Modifier = layout { measurable, constraints ->
+    val width = constraints.maxWidth
+    val natural = (width / HERO_RATIO).roundToInt()
+    val height = if (tallest == Dp.Infinity) natural else minOf(natural, tallest.roundToPx())
+    val placeable = measurable.measure(Constraints.fixed(width, height))
+    layout(width, height) { placeable.place(0, 0) }
+}
+
 /** The hero's picture: a backdrop's 16:9, so the first row shows under it. */
 private const val HERO_RATIO = 16f / 9f
+
+private const val HERO_MAX_SHARE = 0.5f
 
 private const val HERO_OVERVIEW_LINES = 2
 

@@ -181,7 +181,7 @@ private fun TitlePage(page: TitleUiState.Ready, texts: RequestTexts, vm: Discove
                         texts = texts,
                         onOpen = null,
                         onAction = { action -> act(request, action) },
-                        modifier = sides.padding(bottom = 8.dp),
+                        modifier = sides.padding(bottom = 8.dp).widthIn(max = REQUEST_CARD_MAX),
                         poster = false,
                     )
                 }
