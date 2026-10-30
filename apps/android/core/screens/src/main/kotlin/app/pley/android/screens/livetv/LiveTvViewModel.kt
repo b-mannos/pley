@@ -8,10 +8,12 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.pley.android.data.LiveTvRepository
+import app.pley.android.data.LiveTvViews
 import app.pley.android.data.Loadable
 import app.pley.android.data.valueOrNull
 import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
+import app.pley.android.model.LiveGroup
 import app.pley.android.model.LiveGroups
 import app.pley.android.model.LiveProgram
 import app.pley.android.screens.PlayerLauncher
@@ -30,6 +32,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -49,9 +52,12 @@ class LiveTvDeps(
     val compute: CoroutineDispatcher = Dispatchers.Default,
     /** Where changes run: they outlive the page that asked. */
     val work: CoroutineScope = LiveWork,
+    /** The category, the view and the channel Live TV was left at, for the profile. */
+    val views: LiveTvViews = LiveTvViews.None,
 ) {
     companion object {
-        fun of(graph: ScreensGraph): LiveTvDeps = LiveTvDeps(graph.data.liveTv, graph.playerLauncher, graph.data.servers.active)
+        fun of(graph: ScreensGraph): LiveTvDeps =
+            LiveTvDeps(graph.data.liveTv, graph.playerLauncher, graph.data.servers.active, views = graph.data.liveTvViews)
     }
 }
 
@@ -66,7 +72,14 @@ data class LivePage(
     val view: LiveView = LiveView.Guide,
     /** The server's origin: logos and programme pictures are on it. */
     val origin: String = "",
-)
+    /** The groups a search names, as quick links to them. */
+    val found: List<LiveGroup> = emptyList(),
+) {
+    val searching: Boolean get() = query.isNotBlank()
+
+    /** What the channels are: the category, or every channel while searching (search looks everywhere, as the web's). */
+    val listed: LiveCategory get() = if (searching) LiveCategory.All else category
+}
 
 /** Where a list opens: at [index] of [category] searched for [query] (the channel last watched). */
 data class Landing(val category: LiveCategory, val query: String, val index: Int?)
@@ -89,13 +102,18 @@ sealed interface LiveTvEvent {
  * opens the live player, which changes channel within the category. The
  * list opens back at the channel last watched.
  *
- * The category and the view are kept with the page (and its saved state).
+ * The category and the view are kept with the page's saved state and for
+ * the profile ([LiveTvViews], as the web keeps them in the browser), with
+ * the channel last watched: Live TV opens as it was left, after a restart
+ * too.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class LiveTvViewModel(private val deps: LiveTvDeps, private val saved: SavedStateHandle = SavedStateHandle()) : ViewModel() {
-    private val category = MutableStateFlow(LiveCategory.parse(saved[CATEGORY]))
+    /** `null` until what was kept for the profile is read: nothing is asked for before. */
+    private val chosen = MutableStateFlow(saved.get<String>(CATEGORY)?.let(LiveCategory::parse))
+    private val category: Flow<LiveCategory> = chosen.filterNotNull()
     private val query = MutableStateFlow("")
-    private val view = MutableStateFlow(saved.get<String>(VIEW)?.let { runCatching { LiveView.valueOf(it) }.getOrNull() } ?: LiveView.Guide)
+    private val view = MutableStateFlow(viewOf(saved[VIEW]) ?: LiveView.Guide)
     private val eventChannel = Channel<LiveTvEvent>(Channel.BUFFERED)
 
     /** A favourite refused, to tell. */
@@ -125,10 +143,14 @@ class LiveTvViewModel(private val deps: LiveTvDeps, private val saved: SavedStat
             query = q,
             view = v,
             origin = origin,
+            found = LiveTv.foundGroups(groups.valueOrNull?.groups.orEmpty(), q),
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_AFTER_MS), LivePage(category = category.value, view = view.value))
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_AFTER_MS), LivePage(category = chosen.value ?: LiveCategory.All, view = view.value))
 
-    private val paging = ChannelPaging(deps.live, category, query, viewModelScope)
+    /** The category listed: every channel while searching. */
+    private val listed: Flow<LiveCategory> = combine(category, query) { c, q -> if (q.isBlank()) c else LiveCategory.All }.distinctUntilChanged()
+
+    private val paging = ChannelPaging(deps.live, listed, query, viewModelScope)
 
     /** The chosen category's channels, as far as they are loaded. */
     val channels: StateFlow<ChannelPages> = paging.pages
@@ -176,6 +198,13 @@ class LiveTvViewModel(private val deps: LiveTvDeps, private val saved: SavedStat
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_AFTER_MS), GuidePrograms())
 
     init {
+        // As it was left for the profile, unless the saved state says (the page restored).
+        viewModelScope.launch {
+            val kept = deps.views.of()
+            if (LastWatched.channel.value == null) kept.channel?.let { LastWatched.channel.compareAndSet(null, it) }
+            if (saved.get<String>(VIEW) == null) viewOf(kept.view)?.let { view.value = it }
+            if (chosen.value == null) chosen.value = kept.category?.let(LiveCategory::parse) ?: LiveCategory.All
+        }
         // What's on moves on: a programme listed as now that ended asks for the pages again.
         viewModelScope.launch {
             var asked = 0L
@@ -192,11 +221,15 @@ class LiveTvViewModel(private val deps: LiveTvDeps, private val saved: SavedStat
     fun setView(value: LiveView) {
         view.value = value
         saved[VIEW] = value.name
+        deps.work.launch { deps.views.keep(view = value.name) }
     }
 
+    /** Shows [value]'s channels; a search ends, as the web's does. */
     fun setCategory(value: LiveCategory) {
-        category.value = value
+        query.value = ""
+        chosen.value = value
         saved[CATEGORY] = value.key
+        deps.work.launch { deps.views.keep(category = value.key) }
     }
 
     fun setQuery(value: String) {
@@ -216,8 +249,11 @@ class LiveTvViewModel(private val deps: LiveTvDeps, private val saved: SavedStat
         if (span != now) window.value = from to to
     }
 
-    /** Opens the live player on [channel], which changes channel within the category it was chosen in. */
-    fun watch(channel: LiveChannel) = deps.launcher.watchLive(channel.id, category.value.key)
+    /** Opens the live player on [channel], which changes channel within the category it was chosen in (every channel, from a search). */
+    fun watch(channel: LiveChannel) {
+        val from = if (query.value.isBlank()) chosen.value ?: LiveCategory.All else LiveCategory.All
+        deps.launcher.watchLive(channel.id, from.key)
+    }
 
     fun toggleFavorite(channel: LiveChannel) {
         deps.work.launch {
@@ -243,6 +279,8 @@ class LiveTvViewModel(private val deps: LiveTvDeps, private val saved: SavedStat
         private const val HALF_CHUNK = LiveTvRepository.GUIDE_CHUNK_S / 2
         private const val VIEW = "live.view"
         private const val CATEGORY = "live.category"
+
+        private fun viewOf(name: String?): LiveView? = name?.let { runCatching { LiveView.valueOf(it) }.getOrNull() }
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer { LiveTvViewModel(LiveTvDeps.of(screensGraph()), createSavedStateHandle()) }

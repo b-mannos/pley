@@ -16,7 +16,9 @@ import app.pley.android.player.PlayRequest
 import app.pley.android.player.live.LivePlayback
 import app.pley.android.screens.PlayerLauncher
 import app.pley.android.testing.MainDispatcherRule
+import app.pley.android.data.LiveTvView
 import app.pley.android.testing.data.FakeLiveTv
+import app.pley.android.testing.data.FakeLiveTvViews
 import app.pley.android.testing.player.engine.FakePlayerEngine
 import kotlin.reflect.KClass
 import kotlinx.coroutines.CoroutineScope
@@ -79,6 +81,7 @@ class LiveTvViewModelTest {
     private val live = FakeLiveTv().apply {
         lineup.value = lineup.value + (1..200).map { LiveChannel(1000L + it, name = "Filler $it", number = "${1000 + it}", group = "Filler") }
     }
+    private val views = FakeLiveTvViews()
     private val watched = mutableListOf<Pair<Long, String>>()
     private val launcher = object : PlayerLauncher {
         override fun play(request: PlayRequest) = Unit
@@ -92,7 +95,8 @@ class LiveTvViewModelTest {
     private var clock = 1_761_752_400_000L
 
     private fun TestScope.page(saved: SavedStateHandle = SavedStateHandle()): LiveTvViewModel {
-        val vm = held { LiveTvViewModel(LiveTvDeps(live, launcher, flowOf("http://nas:7539"), clock = { clock }, compute = main.dispatcher, work = backgroundScope), saved) }
+        val deps = LiveTvDeps(live, launcher, flowOf("http://nas:7539"), clock = { clock }, compute = main.dispatcher, work = backgroundScope, views = views)
+        val vm = held { LiveTvViewModel(deps, saved) }
         backgroundScope.launch(main.dispatcher) { vm.state.collect { } }
         backgroundScope.launch(main.dispatcher) { vm.channels.collect { } }
         backgroundScope.launch(main.dispatcher) { vm.guide.collect { } }
@@ -121,6 +125,26 @@ class LiveTvViewModelTest {
     }
 
     @Test
+    fun `a search looks among every channel, names the groups it matches, and ends with a category chosen`() = liveTest {
+        val vm = page()
+        vm.setCategory(LiveCategory.Group("News"))
+        vm.setQuery("sport")
+        runCurrent()
+        // Sport 1080i isn't in News: found all the same.
+        assertEquals(listOf(2L), vm.channels.value.loaded.map { it.id })
+        assertEquals(LiveCategory.All, vm.state.value.listed)
+        assertEquals(listOf("Sport", "UK| Sport"), vm.state.value.found.map { it.name })
+
+        vm.watch(vm.channels.value[0]!!)
+        assertEquals(listOf(2L to "all"), watched)
+
+        vm.setCategory(LiveCategory.Group("UK| Sport"))
+        runCurrent()
+        assertEquals("", vm.state.value.query)
+        assertEquals(emptyList<String>(), vm.state.value.found.map { it.name })
+    }
+
+    @Test
     fun `the view and the category are kept with the page`() = liveTest {
         val saved = SavedStateHandle()
         val vm = page(saved)
@@ -130,6 +154,32 @@ class LiveTvViewModelTest {
         val again = page(saved)
         assertEquals(LiveView.Channels, again.state.value.view)
         assertEquals(LiveCategory.Favorites, again.state.value.category)
+    }
+
+    @Test
+    fun `the category, the view and the channel last watched are kept for the next launch`() = liveTest {
+        val vm = page()
+        vm.setView(LiveView.Channels)
+        vm.setCategory(LiveCategory.Group("News"))
+        runCurrent()
+        assertEquals(LiveTvView("group:News", "Channels", null), views.kept)
+
+        // A cold start: no saved state, nothing watched in this process.
+        views.kept = views.kept.copy(channel = 5)
+        val again = page()
+        assertEquals(LiveView.Channels, again.state.value.view)
+        assertEquals(LiveCategory.Group("News"), again.state.value.category)
+        assertEquals(5L, LastWatched.channel.value)
+        assertEquals(Landing(LiveCategory.Group("News"), "", 1), again.landing.value)
+        assertEquals(listOf(1L, 5L), again.channels.value.loaded.map { it.id })
+    }
+
+    @Test
+    fun `the page's saved state wins over what was kept`() = liveTest {
+        views.kept = LiveTvView("favorites", "Channels", null)
+        val vm = page(SavedStateHandle(mapOf("live.category" to "recent", "live.view" to "Guide")))
+        assertEquals(LiveCategory.Recent, vm.state.value.category)
+        assertEquals(LiveView.Guide, vm.state.value.view)
     }
 
     @Test
@@ -187,6 +237,7 @@ class LiveTvViewModelTest {
             origin = flowOf("http://nas:7539"),
             clock = { clock },
             work = backgroundScope,
+            views = views,
         )
         val vm = held { LivePlayerViewModel(deps, saved, channelId, category.key) }
         settle()
@@ -275,8 +326,60 @@ class LiveTvViewModelTest {
         settle()
         val again = player(1, LiveCategory.All, saved)
         assertEquals("watch 5 android-1", lastWatch())
-        assertEquals(LiveCategory.Group("News"), again.category)
+        assertEquals(LiveCategory.Group("News"), again.category.value)
         assertNull(again.digits.value.notFound)
+    }
+
+    @Test
+    fun `the channel list shows another group, and a channel tuned from it changes what channel up goes through`() = liveTest {
+        val vm = player(2, LiveCategory.Group("Sport"))
+        backgroundScope.launch(main.dispatcher) { vm.list.collect { } }
+        backgroundScope.launch(main.dispatcher) { vm.listIndex.collect { } }
+        settle()
+        assertEquals(listOf(2L), vm.list.value.loaded.map(LiveChannel::id))
+
+        vm.showList(LiveCategory.Group("News"))
+        settle()
+        assertEquals(listOf(1L, 5L), vm.list.value.loaded.map(LiveChannel::id))
+        assertNull("the channel playing isn't in it", vm.listIndex.value)
+        // Only looking: channel up stays in Sport.
+        assertEquals(LiveCategory.Group("Sport"), vm.category.value)
+
+        vm.tune(1, vm.list.value[0], from = vm.listCategory.value)
+        settle()
+        assertEquals(LiveCategory.Group("News"), vm.category.value)
+        vm.step(1)
+        settle()
+        assertEquals("watch 5 android-1", lastWatch())
+
+        // Opened again, the list starts on the category zapped through.
+        vm.showList(LiveCategory.Favorites)
+        vm.openList()
+        assertEquals(LiveCategory.Group("News"), vm.listCategory.value)
+    }
+
+    @Test
+    fun `the channel list's search looks among every channel`() = liveTest {
+        val vm = player(1, LiveCategory.Group("News"))
+        backgroundScope.launch(main.dispatcher) { vm.list.collect { } }
+        vm.searchList("sport")
+        settle()
+        assertEquals(LiveCategory.All, vm.listed.value)
+        assertEquals(listOf(2L), vm.list.value.loaded.map(LiveChannel::id))
+        vm.tune(2, vm.list.value[0], from = vm.listed.value)
+        settle()
+        assertEquals(LiveCategory.All, vm.category.value)
+        // Opened again, unsearched.
+        vm.openList()
+        assertEquals("", vm.listQuery.value)
+    }
+
+    @Test
+    fun `the channel watched is kept for the guide after a restart`() = liveTest {
+        val vm = player(1)
+        vm.step(1)
+        settle()
+        assertEquals(2L, views.kept.channel)
     }
 
     @Test

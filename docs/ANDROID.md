@@ -123,10 +123,20 @@ Live TV ([API.md](API.md#live-tv)) shows where `GET /api/live` says
 `available`: first in the phone's Libraries tab, after Home in the TV's
 rail. Its sources, lineup and connections are set up in the web app.
 
-- **Categories**: Favourites, Recently watched, All channels, then the
-  provider's groups in its order, a region's ("UK| Sport", "UK| News")
-  gathered under it. A picker on phones; a column beside the guide on
-  TVs, where Left from the guide's start goes to it.
+- **Categories**: Favourites, Recently watched, All channels, then
+  Regions, alphabetically, each opening to its groups ("UK| Sport",
+  "UK| News"), then More groups: those without a region, or whose region
+  has one group, in the provider's order. With fewer than two regions
+  it is one list in the provider's order. A picker on phones; a column
+  beside the guide on TVs, where Left from the guide's start goes to it.
+  The category, the view (guide or cards) and the channel last watched
+  are kept per server and profile (`LiveTvViews`), so Live TV opens as it
+  was left after a restart too.
+- **Search**: one field (the top of the TV's column, with the system
+  keyboard) looks among every channel (`browse?category=all&q=`),
+  whatever category is open, and names the groups it matches as quick
+  links; choosing a category ends it. The player's channel list searches
+  every channel too.
 - **Pages**: a category's channels come 100 at a time (`browse`) as the
   guide or the cards scroll, and the guide asks for the programmes of
   the pages in view only (`ids`), six hours at a time; a provider of
@@ -142,8 +152,12 @@ rail. Its sources, lineup and connections are set up in the web app.
   with this device's client id, which ends what it watched before, so
   zapping holds one connection. Channel up and down stay in the category
   it was opened from, round its ends (Up and Channel up the next one on
-  TVs, a swipe or the chevrons on phones); a typed number tunes that
-  number among every channel. Paused, it tells the server every 20 s it
+  TVs, a swipe or the chevrons on phones); the channel list's heading
+  shows another group's channels, and a channel tuned from there makes
+  channel up and down follow that group. A typed number tunes that
+  number among every channel. What's on and next shows only when asked
+  for (Info on TVs, a tap that brings the controls on phones), not as a
+  channel tunes. Paused, it tells the server every 20 s it
   still watches; behind the live edge it says how far, and Live goes
   back. `409` shows the server's sentence (which channels hold the
   connections), with Try again and Other channels. Leaving (onStop, not

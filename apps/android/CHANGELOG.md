@@ -12,7 +12,7 @@ describes how they are made.
 
 - Live TV, where the server has channels: from the Libraries tab on
   phones and the rail on TVs. Favourites, Recently watched, All channels
-  and the provider's groups (a region's under it) are a picker on phones
+  and the provider's groups are a picker on phones
   and a column beside the guide on TVs. The guide scrolls through time
   with now marked, or the channels show as cards; both load a page of
   channels at a time, ask for the programmes of the rows in view only,
@@ -20,11 +20,20 @@ describes how they are made.
   the region the group says. A programme's details come with Watch and
   the favourite.
 - The live player: channel up and down within the group it was opened
-  from, a channel list, a typed number, what's on and next as it tunes,
-  pause and going back in what the server keeps (Live, or how far
+  from, a channel list, a typed number, what's on and next when asked
+  for (Info on a TV, a tap on a phone), pause and going back in what the server keeps (Live, or how far
   behind), the server's own sentence when every connection is in use,
   the channel's logo for radio, and picture in picture on phones.
   Leaving lets the provider's connection go.
+- Live TV opens as it was left, after a restart too: the category, the
+  guide or the cards, and the channel last watched, for each server and
+  profile. Its groups read as Regions (alphabetical, each opening to its
+  groups), then More groups in the provider's order.
+- One search across every channel, whatever category is open, naming
+  the groups it matches; on TVs it is at the top of the categories, with
+  the system keyboard. The live player's channel list searches every
+  channel too, and its heading lists another group: a channel tuned from
+  there makes channel up and down follow that group.
 
 ### Security
 

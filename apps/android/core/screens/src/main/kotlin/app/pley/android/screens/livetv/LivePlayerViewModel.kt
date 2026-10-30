@@ -9,10 +9,12 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.pley.android.data.LiveTvRepository
+import app.pley.android.data.LiveTvViews
 import app.pley.android.data.Loadable
 import app.pley.android.data.valueOrNull
 import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
+import app.pley.android.model.LiveGroups
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.live.LivePhase
 import app.pley.android.player.live.LivePlayback
@@ -47,6 +49,8 @@ class LivePlayerDeps(
     /** Unix ms. */
     val clock: () -> Long = System::currentTimeMillis,
     val work: CoroutineScope = LiveWork,
+    /** Where the channel watched is kept for the profile, for the guide to open at after a restart. */
+    val views: LiveTvViews = LiveTvViews.None,
 )
 
 /** A channel number being typed on a remote or keypad, or one that matched nothing. */
@@ -59,10 +63,12 @@ data class ChannelDigits(val typed: String = "", val notFound: String? = null)
  * channels either side of it in the server's pages, round the ends; in
  * Recently watched, the order it had as the player opened); a channel
  * number typed, found among every channel; the category's channels a page
- * at a time for the channel list; pause and going back in what the server
- * keeps; a favourite. The channel is kept with the screen's saved state,
- * and is the one the guide opens back at. The playback ends with the
- * ViewModel.
+ * at a time for the channel list, which can show another category's (a
+ * channel tuned from there makes channel up and down go through that one,
+ * as the web's does); pause and going back in what the server keeps; a
+ * favourite. The channel and its category are kept with the screen's saved
+ * state, and the channel for the profile too: the guide opens back at it.
+ * The playback ends with the ViewModel.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class LivePlayerViewModel(
@@ -83,8 +89,27 @@ class LivePlayerViewModel(
     /** Recently watched's order as the player opened: watching changes it, zapping through it shouldn't. */
     private var recentOrder: List<LiveChannel>? = null
 
+    private val zapCategory = MutableStateFlow(LiveCategory.parse(saved[CATEGORY] ?: categoryKey))
+    private val shown = MutableStateFlow(zapCategory.value)
+
     /** The category channel up and down go through. */
-    val category: LiveCategory = LiveCategory.parse(saved[CATEGORY] ?: categoryKey)
+    val category: StateFlow<LiveCategory> = zapCategory.asStateFlow()
+
+    /** The category the channel list shows: the player's, unless another was chosen in it. */
+    val listCategory: StateFlow<LiveCategory> = shown.asStateFlow()
+
+    private val mutableListQuery = MutableStateFlow("")
+
+    /** What the channel list is searched for: among every channel, whatever category it shows. */
+    val listQuery: StateFlow<String> = mutableListQuery.asStateFlow()
+
+    /** What the channel list's channels are: [listCategory], or every channel while searching. */
+    val listed: StateFlow<LiveCategory> = combine(shown, mutableListQuery) { c, q -> if (q.isBlank()) c else LiveCategory.All }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, shown.value)
+
+    /** The groups and the counts, for choosing another in the channel list; `null` while unknown. */
+    val groups: StateFlow<LiveGroups?> = deps.live.groups().map { it.valueOrNull }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(LiveTvViewModel.STOP_AFTER_MS), null)
 
     val state: StateFlow<LiveState> = playback.state
 
@@ -110,14 +135,15 @@ class LivePlayerViewModel(
     /** A channel number being typed. */
     val digits: StateFlow<ChannelDigits> = mutableDigits.asStateFlow()
 
-    private val panel = ChannelPaging(deps.live, flowOf(category), flowOf(""), viewModelScope)
+    private val panel = ChannelPaging(deps.live, listed, mutableListQuery, viewModelScope)
 
-    /** The category's channels for the channel list, as far as they are loaded. */
+    /** [listed]'s channels for the channel list (those its search finds), as far as they are loaded. */
     val list: StateFlow<ChannelPages> = panel.pages
 
     /** Where the channel playing is in the channel list; `null` while unknown, or when it isn't in it. */
-    val listIndex: StateFlow<Int?> = current.flatMapLatest { id ->
-        deps.live.around(category, id).map { load ->
+    val listIndex: StateFlow<Int?> = combine(current, shown, mutableListQuery.map { it.isNotBlank() }.distinctUntilChanged(), ::Triple).flatMapLatest { (id, c, searching) ->
+        if (searching) return@flatMapLatest flowOf(null)
+        deps.live.around(c, id).map { load ->
             load.valueOrNull?.let { page -> page.channels.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.plus(page.offset) }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(LiveTvViewModel.STOP_AFTER_MS), null)
@@ -132,18 +158,28 @@ class LivePlayerViewModel(
         }
     }
 
-    /** Watches [channelId] in place of what plays; [seen] is what a list knew of it. */
-    fun tune(channelId: Long, seen: LiveChannel? = null) {
+    /**
+     * Watches [channelId] in place of what plays; [seen] is what a list knew
+     * of it. Chosen in another category's list ([from]), channel up and down
+     * go through that one from then on.
+     */
+    fun tune(channelId: Long, seen: LiveChannel? = null, from: LiveCategory? = null) {
         seen?.let { known[it.id] = it }
+        if (from != null && from != zapCategory.value) {
+            zapCategory.value = from
+            recentOrder = null
+            saved[CATEGORY] = from.key
+        }
         if (channelId == state.value.channelId && state.value.phase !is LivePhase.Failed) return
         tuneNow(channelId)
     }
 
     private fun tuneNow(channelId: Long) {
         saved[CHANNEL] = channelId
-        saved[CATEGORY] = category.key
+        saved[CATEGORY] = zapCategory.value.key
         current.value = channelId
         LastWatched.channel.value = channelId
+        deps.work.launch { deps.views.keep(channel = channelId) }
         playback.tune(channelId)
     }
 
@@ -157,6 +193,7 @@ class LivePlayerViewModel(
 
     /** The channel [by] places from [id] in the category, round its ends; `null` when it has no other. */
     private suspend fun neighbour(id: Long, by: Int): LiveChannel? {
+        val category = zapCategory.value
         if (category == LiveCategory.Recent) {
             val list = recentOrder ?: ready(deps.live.page(category, "", 0))?.channels?.also { recentOrder = it } ?: return null
             if (list.size < 2) return null
@@ -182,6 +219,23 @@ class LivePlayerViewModel(
 
     /** Rows [first] to [last] of the channel list show: their pages are loaded. */
     fun showingListRows(first: Int, last: Int) = panel.showing(first, last)
+
+    /** The channel list opens: on the category channel up and down go through, unsearched. */
+    fun openList() {
+        shown.value = zapCategory.value
+        mutableListQuery.value = ""
+    }
+
+    /** The channel list shows [category]'s channels; channel up and down keep theirs until one is tuned. */
+    fun showList(category: LiveCategory) {
+        shown.value = category
+        mutableListQuery.value = ""
+    }
+
+    /** Searches the channel list (every channel); "" lists [listCategory]'s again. */
+    fun searchList(query: String) {
+        mutableListQuery.value = query
+    }
 
     /**
      * A digit of a channel number: the channel numbered so among every
@@ -268,6 +322,7 @@ class LivePlayerViewModel(
                     live = graph.data.liveTv,
                     playback = { scope -> LivePlayback.create(app, graph.data.liveTv, graph.player.engines, graph.device, scope) },
                     origin = graph.data.servers.active,
+                    views = graph.data.liveTvViews,
                 )
                 LivePlayerViewModel(deps, createSavedStateHandle(), channelId, category)
             }

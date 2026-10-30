@@ -26,16 +26,17 @@ import kotlinx.coroutines.flow.stateIn
 /** How a Live TV page shows the channels: the guide (channels by time) or cards. */
 enum class LiveView { Guide, Channels }
 
-/**
- * An entry of the categories' list (the web's CategoryRail): a group, or
- * a region ("UK") gathering its groups ("UK| Sport", "UK| News"…), so
- * hundreds of groups read as a few dozen.
- */
-sealed interface GroupEntry {
-    data class Single(val group: LiveGroup) : GroupEntry
+/** A region ("UK") gathering its groups ("UK| Sport", "UK| News"…), with their channels' [count]. */
+data class GroupRegion(val region: String, val groups: List<LiveGroup>, val count: Int)
 
-    data class Region(val region: String, val groups: List<LiveGroup>, val count: Int) : GroupEntry
-}
+/**
+ * The groups as the categories list them (the web's CategoryRail
+ * `groupSections`): [regions] in alphabetical order, each opening to its
+ * groups, then [others] (no region, or a region of one group) in the
+ * provider's order. With fewer than two regions, every group is in
+ * [others], in the provider's order.
+ */
+data class GroupSections(val regions: List<GroupRegion>, val others: List<LiveGroup>)
 
 /**
  * A category's channels as far as they are loaded: [total] in the list
@@ -62,21 +63,26 @@ object LiveTv {
     /** How far ahead the guide goes from where it starts. */
     const val GUIDE_SPAN_S = 48 * 3600L
 
-    /** Groups in the lineup's order, those of a region with two or more gathered under it. */
-    fun groupTree(groups: List<LiveGroup>): List<GroupEntry> {
-        val byRegion = groups.filter { it.region != null }.groupBy { it.region!! }
-        val placed = HashSet<String>()
-        return buildList {
-            for (g in groups) {
-                val name = g.region
-                val region = name?.let(byRegion::get)
-                when {
-                    name == null || region == null || region.size < 2 -> add(GroupEntry.Single(g))
-                    placed.add(name) -> add(GroupEntry.Region(name, region, region.sumOf { it.count }))
-                }
-            }
-        }
+    /** The regions of two or more groups, alphabetically, then the rest in the provider's order; one list with fewer than two regions. */
+    fun groupSections(groups: List<LiveGroup>): GroupSections {
+        val regions = groups.filter { it.region != null }.groupBy { it.region!! }
+            .filterValues { it.size > 1 }
+            .map { (region, gs) -> GroupRegion(region, gs, gs.sumOf { it.count }) }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.region })
+        if (regions.size < 2) return GroupSections(emptyList(), groups)
+        val gathered = regions.mapTo(HashSet()) { it.region }
+        return GroupSections(regions, groups.filter { it.region == null || it.region !in gathered })
     }
+
+    /** The groups a search names, as quick links beside its channels (the web's, a dozen at most). */
+    fun foundGroups(groups: List<LiveGroup>, query: String): List<LiveGroup> {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) return emptyList()
+        return groups.filter { it.name.lowercase().contains(q) }.take(FOUND_GROUPS)
+    }
+
+    /** At most this many groups show for a search. */
+    const val FOUND_GROUPS = 12
 
     /**
      * A name's region and the rest, when it begins with one the way
@@ -154,7 +160,8 @@ object LiveTv {
 
 /**
  * The channel last watched: a list opens back at it, coming back from the
- * player. For as long as the app runs, as the web keeps it for the tab.
+ * player. Kept for the profile too ([app.pley.android.data.LiveTvViews]),
+ * which sets it again after a restart.
  */
 object LastWatched {
     val channel = MutableStateFlow<Long?>(null)

@@ -15,6 +15,13 @@
     <string name="tv_livetv_category_favorites">Favourites</string>
     <string name="tv_livetv_category_recent">Recently watched</string>
     <string name="tv_livetv_groups">Groups</string>
+    <string name="tv_livetv_regions">Regions</string>
+    <string name="tv_livetv_more_groups">More groups</string>
+    <string name="tv_livetv_no_group_name">No group</string>
+    <string name="tv_livetv_found_groups">Groups found</string>
+    <string name="tv_livetv_search">Search</string>
+    <string name="tv_livetv_no_match_title">No channels match</string>
+    <string name="tv_livetv_no_match_search">No channel\'s name, number or programme on now has “%1$s” in it.</string>
     <string name="tv_livetv_none_favorites_title">No favourites yet</string>
     <string name="tv_livetv_none_favorites_body">Hold OK on a channel and add it to your favourites to find it here.</string>
     <string name="tv_livetv_none_recent_title">Nothing watched yet</string>
@@ -53,6 +60,9 @@
     <string name="tv_live_player_forward_10">Forward 10 seconds</string>
     <string name="tv_live_player_go_live">Go live</string>
     <string name="tv_live_player_channels">Channels</string>
+    <string name="tv_live_player_groups">Channel groups</string>
+    <string name="tv_live_player_change_group">Change group</string>
+    <string name="tv_live_player_search">Search channels</string>
     <string name="tv_live_player_live">Live</string>
     <string name="tv_live_player_behind">−%1$s</string>
     <string name="tv_live_player_radio">Sound only</string>

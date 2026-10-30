@@ -8,7 +8,7 @@
     </plurals>
     <string name="livetv_show_guide">Show the guide</string>
     <string name="livetv_show_channels">Show the channels</string>
-    <string name="livetv_search">Find a channel or what\'s on</string>
+    <string name="livetv_search">Search channels, groups and what\'s on</string>
     <string name="livetv_search_clear">Clear</string>
     <string name="livetv_failed">Live TV didn\'t load</string>
     <string name="livetv_not_allowed_title">Live TV isn\'t open to this profile</string>
@@ -16,15 +16,17 @@
     <string name="livetv_none_title">No channels yet</string>
     <string name="livetv_none_body">Channels appear here once an administrator adds an IPTV provider in Pley\'s web app.</string>
     <string name="livetv_no_match_title">No channels match</string>
-    <string name="livetv_no_match_search">Nothing called “%1$s” here.</string>
+    <string name="livetv_no_match_search">No channel\'s name, number or programme on now has “%1$s” in it.</string>
     <string name="livetv_no_match_group">No channels in this group.</string>
     <string name="livetv_categories">Channel groups</string>
     <string name="livetv_category_all">All channels</string>
     <string name="livetv_category_favorites">Favourites</string>
     <string name="livetv_category_recent">Recently watched</string>
     <string name="livetv_groups">Groups</string>
-    <string name="livetv_find_group">Find a group</string>
-    <string name="livetv_no_group">No group called “%1$s”.</string>
+    <string name="livetv_regions">Regions</string>
+    <string name="livetv_more_groups">More groups</string>
+    <string name="livetv_no_group_name">No group</string>
+    <string name="livetv_found_groups">Groups</string>
     <string name="livetv_none_favorites_title">No favourites yet</string>
     <string name="livetv_none_favorites_body">Star a channel to find it here.</string>
     <string name="livetv_none_recent_title">Nothing watched yet</string>
@@ -63,6 +65,8 @@
     <string name="live_player_back">Back</string>
     <string name="live_player_tuning">Tuning…</string>
     <string name="live_player_channels">Channels</string>
+    <string name="live_player_change_group">Change group</string>
+    <string name="live_player_search">Search channels</string>
     <string name="live_player_channel_up">Channel up</string>
     <string name="live_player_channel_down">Channel down</string>
     <string name="live_player_play">Play</string>

@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import app.pley.android.model.LiveCategory
 import app.pley.android.screens.livetv.LiveTv
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
@@ -26,6 +27,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -39,14 +41,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import app.pley.android.ui.tv.search.TvSearchField
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -105,8 +113,9 @@ private enum class Overlay { None, Controls, Channels }
  *   the channel list, the favourite) over what's on; Menu or Guide shows
  *   the channel list; Back hides what shows, then leaves.
  *
- * What's on and next shows for 5 s on tuning and after a seek, the
- * window and Live (or how far behind) with it. A channel that doesn't
+ * What's on and next shows for 5 s when asked for (Info) and after a
+ * seek, never on its own as a channel tunes, the window and Live (or how
+ * far behind) with it. A channel that doesn't
  * start says why (the server's sentence), with Try again and Other
  * channels.
  */
@@ -119,21 +128,22 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
     val now by vm.now.collectAsStateWithLifecycle()
     val digits by vm.digits.collectAsStateWithLifecycle()
     var overlay by remember { mutableStateOf(Overlay.None) }
-    var peek by remember { mutableIntStateOf(1) }
+    // What's on shows when asked for (Info, a seek), never on its own as a channel tunes.
+    var peek by remember { mutableIntStateOf(0) }
     var poked by remember { mutableIntStateOf(0) }
-    var showInfo by remember { mutableStateOf(true) }
+    var showInfo by remember { mutableStateOf(false) }
     val root = remember { FocusRequester() }
     val playing = state.phase == LivePhase.Playing
     val failed = state.phase is LivePhase.Failed
 
-    // What's on shows for a while on tuning and after a seek.
-    LaunchedEffect(state.channelId) { peek++ }
-    LaunchedEffect(peek, playing) {
+    // Asked for, what's on shows for a while; another channel puts it away.
+    LaunchedEffect(state.channelId) { showInfo = false }
+    LaunchedEffect(peek) {
+        if (peek == 0) return@LaunchedEffect
         showInfo = true
-        if (playing) {
-            delay(INFO_MS)
-            showInfo = false
-        }
+        snapshotFlow { state.phase == LivePhase.Playing }.first { it }
+        delay(INFO_MS)
+        showInfo = false
     }
     // The controls hide when left alone while it plays.
     LaunchedEffect(overlay, poked, state.playWhenReady) {
@@ -147,6 +157,8 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
         if (overlay == Overlay.None && !failed) runCatching { root.requestFocus() }
     }
     BackHandler(enabled = overlay != Overlay.None) { overlay = Overlay.None }
+    // The channel list opens on the category zapped through.
+    LaunchedEffect(overlay == Overlay.Channels) { if (overlay == Overlay.Channels) vm.openList() }
 
     Box(
         Modifier
@@ -249,9 +261,9 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
                 current = state.channelId,
                 origin = origin,
                 now = now,
-                onTune = {
+                onTune = { channel, from ->
                     overlay = Overlay.None
-                    vm.tune(it.id, it)
+                    vm.tune(channel.id, channel, from)
                 },
             )
         }
@@ -261,12 +273,13 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
 /** The channel's logo, name and what's on while it is tuned. */
 @Composable
 private fun Tuning(vm: LivePlayerViewModel, channel: LiveChannel, origin: String, now: Long) {
+    val category by vm.category.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxSize().background(Color.Black), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
         ChannelTile(channel, origin, Modifier.size(width = 200.dp, height = 112.dp), name = true, style = PleyType.Tv.Title, well = Color.White.copy(alpha = 0.06f), shape = PleyShape.Dialog)
         Spacer(Modifier.height(22.dp))
         Spinner()
         Spacer(Modifier.height(18.dp))
-        BasicText(listOfNotNull(channel.number, LiveTv.channelName(channel, vm.category)).joinToString("  "), style = PleyType.Tv.Section.copy(color = PleyColors.Fg))
+        BasicText(listOfNotNull(channel.number, LiveTv.channelName(channel, category)).joinToString("  "), style = PleyType.Tv.Section.copy(color = PleyColors.Fg))
         BasicText(
             channel.onAt(now)?.title ?: stringResource(R.string.tv_live_player_tuning),
             style = PleyType.Tv.Body.copy(color = PleyColors.Muted),
@@ -306,6 +319,7 @@ private fun InfoBar(
     onChannels: () -> Unit,
 ) {
     val clock = rememberClock()
+    val category by vm.category.collectAsStateWithLifecycle()
     val on = channel.onAt(now)
     val next = channel.nextAt(now)
     Column(
@@ -321,7 +335,7 @@ private fun InfoBar(
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     channel.number?.let { BasicText(it, style = PleyType.Tv.Label.copy(color = PleyColors.Muted), modifier = Modifier.padding(end = 8.dp)) }
-                    BasicText(LiveTv.channelName(channel, vm.category), style = PleyType.Tv.Label.copy(color = PleyColors.Muted), maxLines = 1)
+                    BasicText(LiveTv.channelName(channel, category), style = PleyType.Tv.Label.copy(color = PleyColors.Muted), maxLines = 1)
                     if (channel.favorite) Icon(PleyIcons.Star, contentDescription = null, size = 14.dp, tint = PleyColors.Accent, modifier = Modifier.padding(start = 6.dp))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
@@ -496,22 +510,134 @@ private fun Spinner(modifier: Modifier = Modifier) {
 }
 
 /**
- * The category's channels in the side panel, a page at a time as they
- * scroll: what's on each, the channel watched first in focus.
+ * A category's channels in the side panel (the web's ChannelPanel), a page
+ * at a time as they scroll: what's on each, the channel watched first in
+ * focus. It opens on the category zapped through; its heading, Up from
+ * the first channel, opens the categories to list another's ([onTune] says
+ * which it was chosen in).
  */
 @Composable
-private fun ChannelList(vm: LivePlayerViewModel, current: Long?, origin: String, now: Long, onTune: (LiveChannel) -> Unit) {
+private fun ColumnScope.ChannelList(vm: LivePlayerViewModel, current: Long?, origin: String, now: Long, onTune: (LiveChannel, LiveCategory) -> Unit) {
+    val shown by vm.listCategory.collectAsStateWithLifecycle()
+    val listed by vm.listed.collectAsStateWithLifecycle()
+    val groups by vm.groups.collectAsStateWithLifecycle()
+    val search = rememberTextFieldState()
+    LaunchedEffect(search) { snapshotFlow { search.text.toString() }.collect(vm::searchList) }
+    var picking by remember { mutableStateOf(false) }
+    // Back from the groups, the row that had focus is gone: the channels take it.
+    var picked by remember { mutableStateOf(false) }
+    val selected = remember { FocusRequester() }
+    BackHandler(enabled = picking) { picking = false }
+    Surface(
+        onClick = {
+            picked = true
+            picking = !picking
+        },
+        modifier = Modifier.fillMaxWidth().testTag(TV_LIVE_PLAYER_GROUP),
+        shape = ClickableSurfaceDefaults.shape(PleyShape.Control),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Color.Transparent,
+            contentColor = PleyColors.Fg,
+            focusedContainerColor = PleyColors.Accent,
+            focusedContentColor = PleyColors.OnAccent,
+            pressedContainerColor = PleyColors.AccentBright,
+            pressedContentColor = PleyColors.OnAccent,
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f, pressedScale = 1f),
+        glow = ClickableSurfaceDefaults.glow(Glow.None, Glow.None, Glow.None),
+    ) {
+        val content = androidx.tv.material3.LocalContentColor.current
+        Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (picking) {
+                Icon(PleyIcons.ArrowLeft, contentDescription = null, size = 20.dp, tint = content)
+                Spacer(Modifier.width(10.dp))
+            } else if (shown == LiveCategory.Favorites) {
+                Icon(PleyIcons.Star, contentDescription = null, size = 18.dp, tint = content)
+                Spacer(Modifier.width(8.dp))
+            }
+            BasicText(
+                if (picking) stringResource(R.string.tv_live_player_groups) else categoryLabel(shown),
+                style = PleyType.Tv.Title.copy(color = content),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (!picking) {
+                Spacer(Modifier.width(8.dp))
+                Icon(PleyIcons.ChevronDown, contentDescription = stringResource(R.string.tv_live_player_change_group), size = 18.dp, tint = content)
+            }
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    if (picking) {
+        CategoryColumn(
+            groups = groups,
+            selected = shown,
+            selectedRequester = selected,
+            onSelect = {
+                search.clearText()
+                vm.showList(it)
+                picking = false
+            },
+            modifier = Modifier.fillMaxWidth().weight(1f),
+        )
+        LaunchedEffect(Unit) { runCatching { selected.requestFocus() } }
+    } else {
+        TvSearchField(
+            state = search,
+            placeholder = stringResource(R.string.tv_live_player_search),
+            onSearch = {},
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            focusModifier = Modifier.testTag(TV_LIVE_PLAYER_SEARCH),
+        )
+        // Focus starts on the channel playing as the list opens, not each time a search lists others.
+        val first = remember { mutableStateOf(true) }
+        key(listed) {
+            val initial = remember { first.value }
+            SideEffect { first.value = false }
+            CategoryChannels(vm, listed, current, origin, now, initial = initial, takeFocus = picked, onTookFocus = { picked = false }, onTune = onTune)
+        }
+    }
+}
+
+/**
+ * [category]'s channels in the side panel, from the channel playing when
+ * it is among them; with [takeFocus], that row (or the first) takes focus
+ * once it is in.
+ */
+@Composable
+private fun CategoryChannels(
+    vm: LivePlayerViewModel,
+    category: LiveCategory,
+    current: Long?,
+    origin: String,
+    now: Long,
+    initial: Boolean,
+    takeFocus: Boolean,
+    onTookFocus: () -> Unit,
+    onTune: (LiveChannel, LiveCategory) -> Unit,
+) {
     val pages by vm.list.collectAsStateWithLifecycle()
     val start by vm.listIndex.collectAsStateWithLifecycle()
     val list = rememberLazyListState()
     val index = start ?: 0
+    val target = remember { FocusRequester() }
     LaunchedEffect(start != null) { list.scrollToItem((index - 2).coerceAtLeast(0)) }
+    LaunchedEffect(takeFocus, index, pages[index] != null) {
+        if (takeFocus && pages[index] != null) {
+            list.scrollToItem((index - 2).coerceAtLeast(0))
+            withFrameNanos { }
+            if (runCatching { target.requestFocus() }.isSuccess) onTookFocus()
+        }
+    }
     LaunchedEffect(list) {
         snapshotFlow { list.layoutInfo.visibleItemsInfo.let { (it.firstOrNull()?.index ?: 0) to (it.lastOrNull()?.index ?: 0) } }
             .distinctUntilChanged()
             .collect { (first, last) -> vm.showingListRows(first, last) }
     }
-    BasicText(categoryLabel(vm.category), style = PleyType.Tv.Title.copy(color = PleyColors.Fg), maxLines = 1, modifier = Modifier.padding(start = 8.dp, bottom = 12.dp))
+    if (pages.total == 0) {
+        BasicText(stringResource(R.string.tv_livetv_no_match), style = PleyType.Tv.Label.copy(color = PleyColors.Subtle), modifier = Modifier.padding(8.dp))
+    }
     LazyColumn(state = list, contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.testTag(TV_LIVE_PLAYER_CHANNELS)) {
         items(count = pages.total ?: 0, key = { i -> pages[i]?.id ?: -i - 1L }) { i ->
             val channel = pages[i]
@@ -522,8 +648,8 @@ private fun ChannelList(vm: LivePlayerViewModel, current: Long?, origin: String,
             val on = channel.onAt(now)
             val isCurrent = channel.id == current
             Surface(
-                onClick = { onTune(channel) },
-                modifier = Modifier.fillMaxWidth().then(if (i == index) Modifier.initialFocus() else Modifier),
+                onClick = { onTune(channel, category) },
+                modifier = Modifier.fillMaxWidth().then(if (i == index) Modifier.initialFocus(enabled = initial).focusRequester(target) else Modifier),
                 shape = ClickableSurfaceDefaults.shape(PleyShape.Control),
                 colors = ClickableSurfaceDefaults.colors(
                     containerColor = if (isCurrent) PleyColors.Surface3 else Color.Transparent,
@@ -542,7 +668,7 @@ private fun ChannelList(vm: LivePlayerViewModel, current: Long?, origin: String,
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         BasicText(
-                            listOfNotNull(channel.number, LiveTv.channelName(channel, vm.category)).joinToString("  "),
+                            listOfNotNull(channel.number, LiveTv.channelName(channel, category)).joinToString("  "),
                             style = PleyType.Tv.Label.copy(color = content),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -558,7 +684,7 @@ private fun ChannelList(vm: LivePlayerViewModel, current: Long?, origin: String,
     }
 }
 
-/** The channel list's heading: the category channel up and down go through. */
+/** The channel list's heading: the category it shows. */
 @Composable
 private fun categoryLabel(category: LiveCategory): String = when (category) {
     LiveCategory.All -> stringResource(R.string.tv_livetv_category_all)
@@ -583,3 +709,5 @@ internal const val TV_LIVE_PLAYER_LIVE = "pley.tv.live.player.live"
 internal const val TV_LIVE_PLAYER_DIGITS = "pley.tv.live.player.digits"
 internal const val TV_LIVE_PLAYER_TROUBLE = "pley.tv.live.player.trouble"
 internal const val TV_LIVE_PLAYER_CHANNELS = "pley.tv.live.player.channels"
+internal const val TV_LIVE_PLAYER_GROUP = "pley.tv.live.player.group"
+internal const val TV_LIVE_PLAYER_SEARCH = "pley.tv.live.player.search"

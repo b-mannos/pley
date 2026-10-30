@@ -18,8 +18,10 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -35,7 +37,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -56,6 +60,7 @@ import app.pley.android.designsystem.tile.rememberSkeleton
 import app.pley.android.designsystem.tile.skeleton
 import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
+import app.pley.android.model.LiveGroup
 import app.pley.android.model.LiveProgram
 import app.pley.android.screens.livetv.ChannelPages
 import app.pley.android.screens.livetv.LivePage
@@ -66,6 +71,7 @@ import app.pley.android.screens.livetv.LiveView
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.EmptyState
 import app.pley.android.ui.phone.kit.ErrorState
+import app.pley.android.ui.phone.kit.PleyChip
 import app.pley.android.ui.phone.kit.PleyIconButton
 import app.pley.android.ui.phone.kit.PleyTopAppBar
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
@@ -95,6 +101,14 @@ internal fun PhoneLiveTvScreen() {
     val resources = LocalResources.current
     var details by remember { mutableStateOf<Pair<LiveChannel, LiveProgram>?>(null) }
     var picking by remember { mutableStateOf(false) }
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    // Search let go first: back from the player, the field would take focus again and open the keyboard.
+    val watch: (LiveChannel) -> Unit = { channel ->
+        keyboard?.hide()
+        focus.clearFocus(force = true)
+        vm.watch(channel)
+    }
     LaunchedEffect(vm) {
         vm.events.collect { event ->
             when (event) {
@@ -129,7 +143,16 @@ internal fun PhoneLiveTvScreen() {
             Message(stringResource(R.string.livetv_not_allowed_title), stringResource(R.string.livetv_not_allowed_body))
             return@Column
         }
-        Filters(page, onQuery = vm::setQuery, onPick = { picking = true })
+        Filters(
+            page,
+            onQuery = vm::setQuery,
+            onPick = { picking = true },
+            onGroup = {
+                keyboard?.hide()
+                focus.clearFocus(force = true)
+                vm.setCategory(LiveCategory.Group(it.name))
+            },
+        )
         Box(Modifier.weight(1f).fillMaxWidth()) {
             val total = channels.total
             when {
@@ -141,13 +164,13 @@ internal fun PhoneLiveTvScreen() {
                 page.view == LiveView.Guide -> PhoneGuide(
                     vm = vm,
                     channels = channels,
-                    category = page.category,
+                    category = page.listed,
                     origin = page.origin,
                     now = now,
-                    onWatch = vm::watch,
+                    onWatch = watch,
                     onDetails = { channel, program -> details = channel to program },
                 )
-                else -> ChannelCards(vm, channels, page, now, grid, onDetails = { channel, program -> details = channel to program })
+                else -> ChannelCards(vm, channels, page, now, grid, onWatch = watch, onDetails = { channel, program -> details = channel to program })
             }
         }
     }
@@ -170,7 +193,7 @@ internal fun PhoneLiveTvScreen() {
             now = now,
             onWatch = {
                 details = null
-                vm.watch(channel)
+                watch(channel)
             },
             onFavorite = {
                 vm.toggleFavorite(channel)
@@ -209,10 +232,15 @@ internal fun categoryName(category: LiveCategory, page: LivePage): String = when
     is LiveCategory.Group -> LiveTv.groupName(page.groups?.groups?.firstOrNull { it.name == category.name }, category.name)
 }
 
-/** The category's button (its icon, name and count, a chevron: it opens the picker), then the search. */
+/**
+ * The category's button (its icon, name and count, a chevron: it opens the
+ * picker), then the search, which looks among every channel and names the
+ * groups it matches (a tap opens one).
+ */
 @Composable
-private fun Filters(page: LivePage, onQuery: (String) -> Unit, onPick: () -> Unit) {
+private fun Filters(page: LivePage, onQuery: (String) -> Unit, onPick: () -> Unit, onGroup: (LiveGroup) -> Unit) {
     val metrics = LocalPhoneMetrics.current
+    val focus = LocalFocusManager.current
     val count = when (val c = page.category) {
         LiveCategory.All -> page.groups?.total
         LiveCategory.Favorites -> page.groups?.favorites
@@ -269,6 +297,7 @@ private fun Filters(page: LivePage, onQuery: (String) -> Unit, onPick: () -> Uni
                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = PleyColors.Fg),
                     cursorBrush = SolidColor(PleyColors.AccentBright),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
                     modifier = Modifier.fillMaxWidth().semantics { contentDescription = label }.testTag(LIVE_TV_SEARCH),
                 )
             }
@@ -276,6 +305,18 @@ private fun Filters(page: LivePage, onQuery: (String) -> Unit, onPick: () -> Uni
                 PleyIconButton(PleyIcons.X, stringResource(R.string.livetv_search_clear), onClick = { onQuery("") }, tint = PleyColors.Muted)
             } else {
                 Spacer(Modifier.width(10.dp))
+            }
+        }
+        if (page.found.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()).testTag(LIVE_TV_FOUND_GROUPS),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(stringResource(R.string.livetv_found_groups).uppercase(), style = MaterialTheme.typography.labelSmall, color = PleyColors.Subtle)
+                for (g in page.found) {
+                    PleyChip("${LiveTv.groupName(g, g.name)}  ${"%,d".format(g.count)}", selected = false, onClick = { onGroup(g) })
+                }
             }
         }
     }
@@ -301,6 +342,7 @@ private fun ChannelCards(
     page: LivePage,
     now: Long,
     grid: LazyGridState,
+    onWatch: (LiveChannel) -> Unit,
     onDetails: (LiveChannel, LiveProgram) -> Unit,
 ) {
     val metrics = LocalPhoneMetrics.current
@@ -327,10 +369,10 @@ private fun ChannelCards(
             } else {
                 ChannelCard(
                     channel,
-                    LiveTv.channelName(channel, page.category),
+                    LiveTv.channelName(channel, page.listed),
                     page.origin,
                     now,
-                    onWatch = { vm.watch(channel) },
+                    onWatch = { onWatch(channel) },
                     onFavorite = { vm.toggleFavorite(channel) },
                     onDetails = { onDetails(channel, it) },
                 )
@@ -453,5 +495,6 @@ internal const val LIVE_TV_PAGE = "pley.live"
 internal const val LIVE_TV_VIEW = "pley.live.view"
 internal const val LIVE_TV_CATEGORY = "pley.live.category"
 internal const val LIVE_TV_SEARCH = "pley.live.search"
+internal const val LIVE_TV_FOUND_GROUPS = "pley.live.found.groups"
 internal const val LIVE_TV_CHANNELS = "pley.live.channels"
 internal const val LIVE_TV_CHANNEL = "pley.live.channel."

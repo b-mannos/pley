@@ -33,11 +33,19 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import app.pley.android.designsystem.tile.rememberSkeleton
@@ -99,7 +107,8 @@ import kotlinx.coroutines.delay
  * controls: Back, the channel and what's on, the favourite, the channel
  * list; play and pause with 10 s back and on; the window the server keeps
  * with Live (or how far behind it is); channel down and up. A swipe up or
- * down changes channel. What's on and next shows for 5 s on tuning.
+ * down changes channel. What's on and next shows for 5 s when a tap brings
+ * the controls, not on its own as a channel tunes.
  */
 @Composable
 internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: () -> Unit) {
@@ -109,10 +118,13 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: (
     val origin by vm.origin.collectAsStateWithLifecycle()
     val now by vm.now.collectAsStateWithLifecycle()
     val digits by vm.digits.collectAsStateWithLifecycle()
+    val category by vm.category.collectAsStateWithLifecycle()
     var controls by remember { mutableStateOf(true) }
     var poked by remember { mutableIntStateOf(0) }
     var panel by rememberSaveable { mutableStateOf(false) }
-    var banner by remember(state.channelId) { mutableStateOf(true) }
+    // What's on and next shows when asked for (a tap that brings the controls), never on its own as a channel tunes.
+    var banner by remember(state.channelId) { mutableStateOf(false) }
+    val keyboard = LocalSoftwareKeyboardController.current
     val playing = state.phase == LivePhase.Playing
     val poke: () -> Unit = {
         controls = true
@@ -120,20 +132,22 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: (
     }
 
     BackHandler(enabled = panel) { panel = false }
+    // Each opening starts on the category zapped through.
+    LaunchedEffect(panel) { if (panel) vm.openList() }
     LaunchedEffect(poked, controls, state.playWhenReady, playing, panel) {
         if (controls && state.playWhenReady && playing && !panel) {
             delay(HIDE_CONTROLS_MS)
             controls = false
         }
     }
-    LaunchedEffect(state.channelId, playing) {
-        if (playing) {
+    LaunchedEffect(banner, playing) {
+        if (banner && playing) {
             delay(BANNER_MS)
             banner = false
         }
     }
 
-    CompositionLocalProvider(LocalCategory provides vm.category) {
+    CompositionLocalProvider(LocalCategory provides category) {
     Box(Modifier.fillMaxSize().background(Color.Black).testTag(LIVE_PLAYER)) {
         VideoSurface(engine?.player, Modifier.fillMaxSize().testTag(TestTags.PLAYER_SURFACE))
         val density = LocalDensity.current
@@ -142,7 +156,16 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: (
                 .fillMaxSize()
                 .pointerInput(panel) {
                     detectTapGestures(
-                        onTap = { if (panel) panel = false else if (controls) controls = false else poke() },
+                        onTap = {
+                            when {
+                                panel -> panel = false
+                                controls -> controls = false
+                                else -> {
+                                    poke()
+                                    banner = true
+                                }
+                            }
+                        },
                         onDoubleTap = { at -> if (state.canRewind) vm.seekBy(if (at.x < size.width / 2) -SEEK_MS else SEEK_MS) },
                     )
                 }
@@ -187,7 +210,8 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: (
                     exit = fadeOut() + slideOutVertically { it / 4 },
                     modifier = Modifier.align(Alignment.BottomStart),
                 ) {
-                    Banner(shown, origin, now, Modifier.padding(start = 16.dp, end = 16.dp, bottom = if (controls) 132.dp else 24.dp))
+                    // Between the bottom row and the round buttons when the controls show.
+                    Banner(shown, origin, now, Modifier.padding(start = 16.dp, end = 16.dp, bottom = if (controls) 56.dp else 24.dp))
                 }
             }
             Digits(digits, Modifier.align(Alignment.TopEnd))
@@ -202,9 +226,10 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: (
                     current = state.channelId,
                     origin = origin,
                     now = now,
-                    onTune = {
+                    onTune = { channel, from ->
+                        keyboard?.hide()
                         panel = false
-                        vm.tune(it.id, it)
+                        vm.tune(channel.id, channel, from)
                     },
                 )
             }
@@ -424,7 +449,7 @@ private fun Banner(channel: LiveChannel, origin: String, now: Long, modifier: Mo
             .clip(PleyShape.Dialog)
             .background(Color.Black.copy(alpha = 0.82f))
             .border(1.dp, Color.White.copy(alpha = 0.1f), PleyShape.Dialog)
-            .padding(14.dp)
+            .padding(12.dp)
             .testTag(LIVE_PLAYER_BANNER),
     ) {
         ChannelTile(channel, origin, Modifier.size(width = 88.dp, height = 52.dp), name = true, well = Color.White.copy(alpha = 0.07f))
@@ -530,9 +555,10 @@ private fun TroubleCard(
 }
 
 /**
- * The channels beside the picture (the web's ChannelPanel): the category's
- * channels a page at a time, what's on each, to change to one; it opens
- * on the channel playing.
+ * The channels beside the picture (the web's ChannelPanel): a category's
+ * channels a page at a time, what's on each, to change to one. It opens on
+ * the category zapped through, at the channel playing; its heading opens
+ * the categories to list another's ([onTune] says which it was chosen in).
  */
 @Composable
 private fun ChannelPanel(
@@ -540,7 +566,116 @@ private fun ChannelPanel(
     current: Long?,
     origin: String,
     now: Long,
-    onTune: (LiveChannel) -> Unit,
+    onTune: (LiveChannel, LiveCategory) -> Unit,
+) {
+    val shown by vm.listCategory.collectAsStateWithLifecycle()
+    val listed by vm.listed.collectAsStateWithLifecycle()
+    val query by vm.listQuery.collectAsStateWithLifecycle()
+    val groups by vm.groups.collectAsStateWithLifecycle()
+    var picking by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = picking) { picking = false }
+    Column(
+        Modifier
+            .fillMaxHeight()
+            .width(340.dp)
+            .background(PleyColors.Surface)
+            .drawBehind { drawLine(PleyColors.Surface4, Offset(0f, 0f), Offset(0f, size.height), 1.dp.toPx()) }
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .testTag(LIVE_PLAYER_PANEL),
+    ) {
+        Row(
+            Modifier
+                .padding(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 4.dp)
+                .fillMaxWidth()
+                .clip(PleyShape.Field)
+                .clickable(role = Role.Button) { picking = !picking }
+                .padding(horizontal = 8.dp, vertical = 10.dp)
+                .testTag(LIVE_PLAYER_GROUP),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (picking) {
+                Icon(PleyIcons.ArrowLeft, contentDescription = null, size = 18.dp, tint = PleyColors.Fg)
+                Spacer(Modifier.width(10.dp))
+            } else if (shown == LiveCategory.Favorites) {
+                Icon(PleyIcons.Star, contentDescription = null, size = 16.dp, tint = PleyColors.Accent)
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(
+                if (picking) stringResource(R.string.livetv_categories) else categoryLabel(shown),
+                style = MaterialTheme.typography.titleMedium,
+                color = PleyColors.Fg,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (!picking) {
+                Spacer(Modifier.width(6.dp))
+                Icon(PleyIcons.ChevronDown, contentDescription = stringResource(R.string.live_player_change_group), size = 16.dp, tint = PleyColors.Muted)
+            }
+        }
+        if (picking) {
+            CategoryList(
+                groups = groups,
+                selected = shown,
+                onSelect = {
+                    vm.showList(it)
+                    picking = false
+                },
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                surface = PleyColors.Surface,
+            )
+        } else {
+            PanelSearch(query, vm::searchList)
+            key(listed) { PanelChannels(vm, listed, current, origin, now, onTune) }
+        }
+    }
+}
+
+/** Searches the channel list, among every channel. */
+@Composable
+private fun PanelSearch(value: String, onValue: (String) -> Unit) {
+    val label = stringResource(R.string.live_player_search)
+    val focus = LocalFocusManager.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .height(40.dp)
+            .clip(PleyShape.Pill)
+            .background(PleyColors.Surface3)
+            .padding(start = 12.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(PleyIcons.Search, contentDescription = null, size = 16.dp, tint = PleyColors.Muted)
+        Spacer(Modifier.width(8.dp))
+        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+            if (value.isEmpty()) Text(label, style = MaterialTheme.typography.bodyMedium, color = PleyColors.Muted)
+            BasicTextField(
+                value = value,
+                onValueChange = onValue,
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = PleyColors.Fg),
+                cursorBrush = SolidColor(PleyColors.AccentBright),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
+                modifier = Modifier.fillMaxWidth().semantics { contentDescription = label }.testTag(LIVE_PLAYER_SEARCH),
+            )
+        }
+        if (value.isNotEmpty()) {
+            PleyIconButton(PleyIcons.X, stringResource(R.string.livetv_search_clear), onClick = { onValue("") }, tint = PleyColors.Muted)
+        }
+    }
+}
+
+/** [category]'s channels in the panel, from the channel playing when it is among them. */
+@Composable
+private fun PanelChannels(
+    vm: LivePlayerViewModel,
+    category: LiveCategory,
+    current: Long?,
+    origin: String,
+    now: Long,
+    onTune: (LiveChannel, LiveCategory) -> Unit,
 ) {
     val pages by vm.list.collectAsStateWithLifecycle()
     val start by vm.listIndex.collectAsStateWithLifecycle()
@@ -552,23 +687,15 @@ private fun ChannelPanel(
             .distinctUntilChanged()
             .collect { (first, last) -> vm.showingListRows(first, last) }
     }
-    Column(
-        Modifier
-            .fillMaxHeight()
-            .width(340.dp)
-            .background(PleyColors.Surface)
-            .drawBehind { drawLine(PleyColors.Surface4, Offset(0f, 0f), Offset(0f, size.height), 1.dp.toPx()) }
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .testTag(LIVE_PLAYER_PANEL),
-    ) {
-        Text(
-            categoryLabel(vm.category),
-            style = MaterialTheme.typography.titleMedium,
-            color = PleyColors.Fg,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
-        )
+    Column {
+        if (pages.total == 0) {
+            Text(
+                stringResource(R.string.livetv_no_match_group),
+                style = MaterialTheme.typography.bodyMedium,
+                color = PleyColors.Subtle,
+                modifier = Modifier.padding(16.dp),
+            )
+        }
         LazyColumn(state = list, contentPadding = PaddingValues(bottom = 16.dp)) {
             items(count = pages.total ?: 0, key = { index -> pages[index]?.id ?: -index - 1L }) { index ->
                 val channel = pages[index]
@@ -582,7 +709,7 @@ private fun ChannelPanel(
                     Modifier
                         .fillMaxWidth()
                         .background(if (isCurrent) PleyColors.Accent.copy(alpha = 0.15f) else Color.Transparent)
-                        .clickable(role = Role.Button) { onTune(channel) }
+                        .clickable(role = Role.Button) { onTune(channel, category) }
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -592,7 +719,7 @@ private fun ChannelPanel(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             channel.number?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = PleyColors.Subtle, modifier = Modifier.padding(end = 6.dp)) }
                             Text(
-                                LiveTv.channelName(channel, vm.category),
+                                LiveTv.channelName(channel, category),
                                 style = MaterialTheme.typography.titleSmall,
                                 color = if (isCurrent) PleyColors.AccentBright else PleyColors.Fg,
                                 maxLines = 1,
@@ -612,7 +739,7 @@ private fun ChannelPanel(
     }
 }
 
-/** The channel list's heading: the category channel up and down go through. */
+/** The channel list's heading: the category it shows. */
 @Composable
 private fun categoryLabel(category: LiveCategory): String = when (category) {
     LiveCategory.All -> stringResource(R.string.livetv_category_all)
@@ -639,5 +766,7 @@ internal const val LIVE_PLAYER_UP = "pley.live.player.up"
 internal const val LIVE_PLAYER_LIVE = "pley.live.player.live"
 internal const val LIVE_PLAYER_CHANNELS = "pley.live.player.channels"
 internal const val LIVE_PLAYER_PANEL = "pley.live.player.panel"
+internal const val LIVE_PLAYER_GROUP = "pley.live.player.group"
+internal const val LIVE_PLAYER_SEARCH = "pley.live.player.search"
 internal const val LIVE_PLAYER_BANNER = "pley.live.player.banner"
 internal const val LIVE_PLAYER_TROUBLE = "pley.live.player.trouble"

@@ -113,6 +113,8 @@ internal fun TvGuide(
     onLeave: () -> Unit,
     modifier: Modifier = Modifier,
     requester: FocusRequester = remember { FocusRequester() },
+    /** Takes focus as it shows (not while a search is typed beside it). */
+    takeFocus: Boolean = true,
 ) {
     val guide by vm.guide.collectAsStateWithLifecycle()
     val start = vm.guideStart
@@ -210,7 +212,7 @@ internal fun TvGuide(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .initialFocus()
+                .initialFocus(enabled = takeFocus)
                 .focusRequester(requester)
                 .onFocusChanged { focused = it.isFocused }
                 .onPreviewKeyEvent { event ->
@@ -225,7 +227,7 @@ internal fun TvGuide(
                             if (target < start || channel == null || programs[channel.id].isNullOrEmpty()) {
                                 onLeave()
                             } else {
-                                val before = channel?.let { at(programs[it.id], target) }
+                                val before = at(programs[channel.id], target)
                                 moveTo(before?.start?.coerceAtLeast(slot(target)) ?: slot(target))
                             }
                             true

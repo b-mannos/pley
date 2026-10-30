@@ -25,6 +25,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -43,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
@@ -79,9 +83,11 @@ import app.pley.android.designsystem.tile.skeleton
 import app.pley.android.designsystem.tile.tvTileSize
 import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
+import app.pley.android.model.LiveGroup
+import app.pley.android.model.LiveGroups
 import app.pley.android.model.LiveProgram
 import app.pley.android.screens.livetv.ChannelPages
-import app.pley.android.screens.livetv.GroupEntry
+import app.pley.android.ui.tv.search.TvSearchField
 import app.pley.android.screens.livetv.Landing
 import app.pley.android.screens.livetv.LivePage
 import app.pley.android.screens.livetv.LiveTv
@@ -126,6 +132,13 @@ internal fun TvLiveTvScreen() {
     val categories = remember { FocusRequester() }
     val shownCategory = remember { FocusRequester() }
     val content = remember { FocusRequester() }
+    val search = rememberTextFieldState(page.query)
+    /** Focus is in the categories (the search with them): channels shown meanwhile leave it there… */
+    var inCategories by remember { mutableStateOf(false) }
+
+    /** …unless it was sent to them (a category chosen, a search made, the page opened) and they don't have it yet. */
+    var toChannels by remember { mutableStateOf(true) }
+    LaunchedEffect(search) { snapshotFlow { search.text.toString() }.collect(vm::setQuery) }
     LaunchedEffect(vm) {
         vm.events.collect { event ->
             when (event) {
@@ -166,16 +179,29 @@ internal fun TvLiveTvScreen() {
             Row(Modifier.fillMaxSize().padding(top = 16.dp)) {
                 Categories(
                     page = page,
+                    search = search,
                     selectedRequester = shownCategory,
                     onSelect = {
+                        // Choosing a category ends a search, as the web's.
+                        search.clearText()
+                        toChannels = true
                         vm.setCategory(it)
                         runCatching { content.requestFocus() }
                     },
-                    modifier = Modifier.padding(start = PleyTv.Gutter - CATEGORY_INSET).width(CATEGORIES_WIDTH).fillMaxHeight().focusRequester(categories),
+                    onSearched = {
+                        toChannels = true
+                        runCatching { content.requestFocus() }
+                    },
+                    modifier = Modifier
+                        .padding(start = PleyTv.Gutter - CATEGORY_INSET)
+                        .width(CATEGORIES_WIDTH)
+                        .fillMaxHeight()
+                        .focusRequester(categories)
+                        .onFocusChanged { inCategories = it.hasFocus },
                 )
                 Spacer(Modifier.width(16.dp))
                 val total = pages.total
-                Box(Modifier.weight(1f).fillMaxHeight()) {
+                Box(Modifier.weight(1f).fillMaxHeight().onFocusChanged { if (it.hasFocus) toChannels = false }) {
                     when {
                         total == null && pages.error != null -> Box(Modifier.focusRequester(content).focusGroup()) {
                             TvMessage(
@@ -188,11 +214,14 @@ internal fun TvLiveTvScreen() {
                         }
                         total == null -> Unit
                         total == 0 -> Empty(page)
-                        page.view == LiveView.Guide -> key(page.category) {
+                        page.view == LiveView.Guide -> key(page.listed) {
+                            // Shown as a search is typed, it leaves focus in the search.
+                            val takeFocus = remember { toChannels || !inCategories }
                             TvGuide(
+                                takeFocus = takeFocus,
                                 vm = vm,
                                 pages = pages,
-                                category = page.category,
+                                category = page.listed,
                                 origin = page.origin,
                                 now = now,
                                 onWatch = vm::watch,
@@ -203,8 +232,9 @@ internal fun TvLiveTvScreen() {
                                 requester = content,
                             )
                         }
-                        else -> key(page.category) {
-                            ChannelTiles(vm, pages, page, now, Modifier.focusRequester(content), onDetails = { details = it to it.onAt(now) })
+                        else -> key(page.listed) {
+                            val takeFocus = remember { toChannels || !inCategories }
+                            ChannelTiles(vm, pages, page, now, Modifier.focusRequester(content), onDetails = { details = it to it.onAt(now) }, takeFocus = takeFocus)
                         }
                     }
                 }
@@ -251,6 +281,10 @@ internal fun TvLiveTvScreen() {
 /** A category or search without channels: why, in its own words. */
 @Composable
 private fun Empty(page: LivePage) {
+    if (page.searching) {
+        TvMessage(stringResource(R.string.tv_livetv_no_match_title), stringResource(R.string.tv_livetv_no_match_search, page.query.trim()), top = 24.dp, takeFocus = false)
+        return
+    }
     when (page.category) {
         LiveCategory.Favorites -> TvMessage(stringResource(R.string.tv_livetv_none_favorites_title), stringResource(R.string.tv_livetv_none_favorites_body), top = 24.dp, takeFocus = false)
         LiveCategory.Recent -> TvMessage(stringResource(R.string.tv_livetv_none_recent_title), stringResource(R.string.tv_livetv_none_recent_body), top = 24.dp, takeFocus = false)
@@ -260,74 +294,133 @@ private fun Empty(page: LivePage) {
 }
 
 /**
- * The categories down the left (the web's CategoryRail): the marked ones
- * and All channels with their counts, then every group, those of a region
- * gathered under it, opened and closed with OK. OK on a category shows it
- * and moves focus to its channels; Left goes to the rail. Focus comes
- * back to the category shown.
+ * The categories down the left (the web's CategoryRail), under the search
+ * (every channel, and the groups it names): the marked ones and All
+ * channels with their counts, then the regions, opened and closed with OK,
+ * then the other groups. OK on a category shows it and moves focus to its
+ * channels; Left goes to the rail. Focus comes back to the category shown.
+ */
+@Composable
+private fun Categories(
+    page: LivePage,
+    search: TextFieldState,
+    selectedRequester: FocusRequester,
+    onSelect: (LiveCategory) -> Unit,
+    onSearched: () -> Unit,
+    modifier: Modifier,
+) {
+    val rail = LocalTvRailFocus.current
+    CategoryColumn(
+        groups = page.groups,
+        selected = page.category,
+        selectedRequester = selectedRequester,
+        onSelect = onSelect,
+        modifier = modifier.railOnLeftStopOnRight(rail, stopRight = false).testTag(TV_LIVE_CATEGORIES),
+        found = page.found,
+        search = {
+            TvSearchField(
+                state = search,
+                placeholder = stringResource(R.string.tv_livetv_search),
+                onSearch = onSearched,
+                modifier = Modifier.fillMaxWidth().padding(start = CATEGORY_INSET - 10.dp, bottom = 8.dp),
+                focusModifier = Modifier.testTag(TV_LIVE_SEARCH),
+            )
+        },
+    )
+}
+
+/**
+ * The categories as a column: beside the guide, and in the live player's
+ * channel list when another group is chosen. Focus comes back to
+ * [selected]'s row, which takes [selectedRequester]. Under [search], when
+ * there is one, the groups a search names ([found]).
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun Categories(page: LivePage, selectedRequester: FocusRequester, onSelect: (LiveCategory) -> Unit, modifier: Modifier) {
-    val rail = LocalTvRailFocus.current
-    val groups = page.groups?.groups.orEmpty()
-    val tree = remember(groups) { LiveTv.groupTree(groups) }
-    val selectedRegion = (page.category as? LiveCategory.Group)?.let { s -> groups.firstOrNull { it.name == s.name }?.region }
-    var open by remember { mutableStateOf(setOfNotNull(selectedRegion)) }
+internal fun CategoryColumn(
+    groups: LiveGroups?,
+    selected: LiveCategory,
+    selectedRequester: FocusRequester,
+    onSelect: (LiveCategory) -> Unit,
+    modifier: Modifier = Modifier,
+    found: List<LiveGroup> = emptyList(),
+    search: (@Composable () -> Unit)? = null,
+) {
+    val all = groups?.groups.orEmpty()
+    val sections = remember(all) { LiveTv.groupSections(all) }
+    val selectedRegion = (selected as? LiveCategory.Group)?.let { s -> sections.regions.firstOrNull { r -> r.groups.any { it.name == s.name } }?.region }
+    var open by remember(selectedRegion) { mutableStateOf(selectedRegion) }
     CompositionLocalProvider(LocalSelectedCategory provides selectedRequester) {
     LazyColumn(
-        modifier = modifier.railOnLeftStopOnRight(rail, stopRight = false).focusRestorer(selectedRequester).testTag(TV_LIVE_CATEGORIES),
+        modifier = modifier.focusRestorer(selectedRequester),
         contentPadding = PaddingValues(bottom = TvSafeArea.Vertical),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
+        if (search != null) {
+            item(key = "search") { search() }
+        }
+        if (found.isNotEmpty()) {
+            item(key = "found") { SectionHeading(stringResource(R.string.tv_livetv_found_groups)) }
+            items(found, key = { "found:${it.name}" }) { g ->
+                CategoryRow(null, LiveTv.groupName(g, g.name), g.count, selected = false, indent = GROUP_INSET) { onSelect(LiveCategory.Group(g.name)) }
+            }
+        }
         item(key = "favorites") {
-            CategoryRow(PleyIcons.Star, stringResource(R.string.tv_livetv_category_favorites), page.groups?.favorites, page.category == LiveCategory.Favorites) {
+            CategoryRow(PleyIcons.Star, stringResource(R.string.tv_livetv_category_favorites), groups?.favorites, selected == LiveCategory.Favorites) {
                 onSelect(LiveCategory.Favorites)
             }
         }
         item(key = "recent") {
-            CategoryRow(PleyIcons.History, stringResource(R.string.tv_livetv_category_recent), page.groups?.recent, page.category == LiveCategory.Recent) {
+            CategoryRow(PleyIcons.History, stringResource(R.string.tv_livetv_category_recent), groups?.recent, selected == LiveCategory.Recent) {
                 onSelect(LiveCategory.Recent)
             }
         }
         item(key = "all") {
-            CategoryRow(PleyIcons.LayoutGrid, stringResource(R.string.tv_livetv_category_all), page.groups?.total, page.category == LiveCategory.All) {
+            CategoryRow(PleyIcons.LayoutGrid, stringResource(R.string.tv_livetv_category_all), groups?.total, selected == LiveCategory.All) {
                 onSelect(LiveCategory.All)
             }
         }
-        if (groups.size > 1) {
-            item(key = "groups") {
-                BasicText(
-                    stringResource(R.string.tv_livetv_groups).uppercase(),
-                    style = PleyType.Tv.Badge.copy(color = PleyColors.Subtle),
-                    modifier = Modifier.padding(start = CATEGORY_INSET, top = 14.dp, bottom = 6.dp),
-                )
-            }
-            for (entry in tree) {
-                when (entry) {
-                    is GroupEntry.Single -> item(key = "group:${entry.group.name}") {
-                        val category = LiveCategory.Group(entry.group.name)
-                        CategoryRow(null, entry.group.name, entry.group.count, page.category == category, indent = GROUP_INSET) { onSelect(category) }
+        val regions = sections.regions
+        if (regions.isNotEmpty()) {
+            item(key = "regions") { SectionHeading(stringResource(R.string.tv_livetv_regions)) }
+            for (r in regions) {
+                // One open at a time, as the web's.
+                val expanded = open == r.region
+                item(key = "region:${r.region}") {
+                    CategoryRow(if (expanded) PleyIcons.ChevronDown else PleyIcons.ChevronRight, r.region, r.count, selected = false) {
+                        open = if (expanded) null else r.region
                     }
-                    is GroupEntry.Region -> {
-                        val expanded = entry.region in open
-                        item(key = "region:${entry.region}") {
-                            CategoryRow(if (expanded) PleyIcons.ChevronDown else PleyIcons.ChevronRight, entry.region, entry.count, selected = false) {
-                                open = if (expanded) open - entry.region else open + entry.region
-                            }
-                        }
-                        if (expanded) {
-                            items(entry.groups, key = { "group:${it.name}" }) { g ->
-                                val category = LiveCategory.Group(g.name)
-                                CategoryRow(null, g.label, g.count, page.category == category, indent = GROUP_INSET + 16.dp) { onSelect(category) }
-                            }
-                        }
+                }
+                if (expanded) {
+                    items(r.groups, key = { "group:${it.name}" }) { g ->
+                        val category = LiveCategory.Group(g.name)
+                        CategoryRow(null, g.label, g.count, selected == category, indent = GROUP_INSET + 16.dp) { onSelect(category) }
                     }
                 }
             }
         }
+        val others = sections.others
+        if (others.size > 1 || (others.size == 1 && regions.isNotEmpty())) {
+            item(key = "others") {
+                SectionHeading(stringResource(if (regions.isEmpty()) R.string.tv_livetv_groups else R.string.tv_livetv_more_groups))
+            }
+            items(others, key = { "group:${it.name}" }) { g ->
+                val category = LiveCategory.Group(g.name)
+                CategoryRow(null, g.name.ifEmpty { stringResource(R.string.tv_livetv_no_group_name) }, g.count, selected == category, indent = GROUP_INSET) { onSelect(category) }
+            }
+        }
     }
 }
+}
+
+/** A section's heading in the categories: "REGIONS", "MORE GROUPS". */
+@Composable
+private fun SectionHeading(text: String) {
+    BasicText(
+        text.uppercase(),
+        style = PleyType.Tv.Badge.copy(color = PleyColors.Subtle),
+        modifier = Modifier.padding(start = CATEGORY_INSET, top = 14.dp, bottom = 6.dp),
+    )
 }
 
 /** The category shown's row takes this, so focus comes back to it. */
@@ -380,6 +473,7 @@ private fun ChannelTiles(
     now: Long,
     modifier: Modifier,
     onDetails: (LiveChannel) -> Unit,
+    takeFocus: Boolean = true,
 ) {
     val grid = rememberLazyGridState()
     val memory = rememberFocusMemory()
@@ -414,10 +508,10 @@ private fun ChannelTiles(
             } else {
                 ChannelTileCard(
                     channel,
-                    LiveTv.channelName(channel, page.category),
+                    LiveTv.channelName(channel, page.listed),
                     page.origin,
                     now,
-                    Modifier.rememberedFocus(memory, "channel/${channel.id}", initial = index == initial),
+                    Modifier.rememberedFocus(memory, "channel/${channel.id}", initial = takeFocus && index == initial),
                     onWatch = vm::watch,
                     onDetails = onDetails,
                 )
@@ -565,5 +659,6 @@ private const val NOTICE_MS = 4_000L
 
 internal const val TV_LIVE_TV = "pley.tv.live"
 internal const val TV_LIVE_CATEGORIES = "pley.tv.live.categories"
+internal const val TV_LIVE_SEARCH = "pley.tv.live.search"
 internal const val TV_LIVE_TILES = "pley.tv.live.tiles"
 internal const val TV_LIVE_PROGRAM = "pley.tv.live.program"

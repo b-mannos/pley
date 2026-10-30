@@ -24,18 +24,30 @@ class LiveTvTest {
     }
 
     @Test
-    fun `a region's groups are gathered under it, a region of one stays a group`() {
-        val groups = Fixtures.decode<LiveGroups>("live/groups.json").groups
-        val tree = LiveTv.groupTree(groups)
-        assertEquals(
-            listOf(
-                GroupEntry.Single(groups[0]),
-                GroupEntry.Single(groups[1]),
-                GroupEntry.Region("UK", listOf(groups[2], groups[3]), 101),
-                GroupEntry.Single(groups[4]),
-            ),
-            tree,
+    fun `regions come first, alphabetically, then the other groups in the provider's order`() {
+        val groups = listOf(
+            LiveGroup("UK| Sport", "UK", "Sport", 80),
+            LiveGroup("Movies", null, "Movies", 9),
+            LiveGroup("AR| Kids", "AR", "Kids", 12),
+            LiveGroup("UK| News", "UK", "News", 21),
+            LiveGroup("FR| Info", "FR", "Info", 3),
+            LiveGroup("AR| News", "AR", "News", 7),
         )
+        assertEquals(
+            GroupSections(
+                regions = listOf(GroupRegion("AR", listOf(groups[2], groups[5]), 19), GroupRegion("UK", listOf(groups[0], groups[3]), 101)),
+                // FR has one group: it stays with the rest.
+                others = listOf(groups[1], groups[4]),
+            ),
+            LiveTv.groupSections(groups),
+        )
+    }
+
+    @Test
+    fun `with fewer than two regions the groups are one list, in the provider's order`() {
+        val groups = Fixtures.decode<LiveGroups>("live/groups.json").groups
+        // UK only gathers two: one region is no sections.
+        assertEquals(GroupSections(emptyList(), groups), LiveTv.groupSections(groups))
         assertEquals("UK · Sport", LiveTv.groupName(groups[2], groups[2].name))
         assertEquals("News", LiveTv.groupName(groups[0], "News"))
         assertEquals("Gone", LiveTv.groupName(null, "Gone"))
@@ -90,6 +102,14 @@ class LiveTvTest {
         assertEquals(listOf("A", "B", "C"), merged.getValue(1).map { it.title })
         assertEquals(listOf("B"), LiveTv.between(merged[1], 210, 290).map { it.title })
         assertEquals(1 to 5, LiveTv.left(LiveProgram(1, 0, 3900, "long"), 0))
+    }
+
+    @Test
+    fun `a search names the groups it matches, a dozen at most`() {
+        val groups = (1..20).map { LiveGroup("UK| Sport $it", "UK", "Sport $it", it) } + LiveGroup("News", null, "News", 2)
+        assertEquals(LiveTv.FOUND_GROUPS, LiveTv.foundGroups(groups, " sport ").size)
+        assertEquals(listOf("News"), LiveTv.foundGroups(groups, "NEWS").map { it.name })
+        assertEquals(emptyList<LiveGroup>(), LiveTv.foundGroups(groups, "  "))
     }
 
     @Test
