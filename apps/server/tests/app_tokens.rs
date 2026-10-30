@@ -37,6 +37,7 @@ const PUBLIC: &[(&str, &str)] = &[
     // A session's media for players that can't send the token: the
     // session's own key stands in for it (tests/tv_apps.rs).
     ("GET", "/api/media/{key}/{file}"),
+    ("GET", "/api/live/media/{key}/{file}"),
 ];
 
 /// Routes for pley's own sign-in only: how an account signs in, its
