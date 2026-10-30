@@ -17,6 +17,10 @@ pub enum AppError {
     NotFound(String),
     #[error("{0}")]
     Conflict(String),
+    /// A conflict with what the client needs to resolve it: `409` with
+    /// `{ code: "conflict", message, ...details }`.
+    #[error("{0}")]
+    ConflictWith(String, serde_json::Value),
     #[error("{0}")]
     Unavailable(String),
     /// Something this server can't do at all (its transcoder is too old for
@@ -77,6 +81,7 @@ impl AppError {
             Self::Forbidden(m) => Self::Forbidden(m.clone()),
             Self::NotFound(m) => Self::NotFound(m.clone()),
             Self::Conflict(m) => Self::Conflict(m.clone()),
+            Self::ConflictWith(m, d) => Self::ConflictWith(m.clone(), d.clone()),
             Self::Unavailable(m) => Self::Unavailable(m.clone()),
             Self::NotImplemented(m) => Self::NotImplemented(m.clone()),
             Self::TooManyRequests(m) => Self::TooManyRequests(m.clone()),
@@ -95,7 +100,7 @@ impl AppError {
             Self::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             Self::Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden"),
             Self::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
-            Self::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
+            Self::Conflict(_) | Self::ConflictWith(..) => (StatusCode::CONFLICT, "conflict"),
             Self::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
             Self::NotImplemented(_) => (StatusCode::NOT_IMPLEMENTED, "not_implemented"),
             Self::TooManyRequests(_) => (StatusCode::TOO_MANY_REQUESTS, "too_many_requests"),
@@ -153,6 +158,13 @@ impl IntoResponse for AppError {
         if let Self::SessionStopped(message) = &self {
             // The players' contract names it `error`; `code` as every error.
             return (status, Json(json!({ "code": code, "error": code, "message": message }))).into_response();
+        }
+        if let Self::ConflictWith(message, details) = &self {
+            let mut body = json!({ "code": code, "message": message });
+            if let (Some(body), Some(details)) = (body.as_object_mut(), details.as_object()) {
+                body.extend(details.clone());
+            }
+            return (status, Json(body)).into_response();
         }
         let challenge = self.challenge();
         let message = match &self {

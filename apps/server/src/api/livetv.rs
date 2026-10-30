@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::auth::{AdminUser, AuthUser};
 use crate::error::{ApiResult, AppError};
-use crate::livetv::tuner::{Tune, TunerStatus, ViewerKind, Watching};
+use crate::livetv::tuner::{Tune, TunerStatus, ViewerKind, WatchAs, Watching};
 use crate::livetv::{
     AdminChannel, AdminGroup, AdminPage, Category, Channel, ChannelPage, ChannelPatch, Groups, Guide, LineupFilter,
     LiveSettings, Source, SourceInput, SourceTest,
@@ -202,6 +202,10 @@ pub struct WatchRequest {
     /// the playlist's address carries a key instead.
     #[serde(default)]
     keyed_urls: bool,
+    /// Every connection being in use, the channel whose connection to take
+    /// (one the `409` said may be).
+    #[serde(default)]
+    take_over: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -218,15 +222,22 @@ async fn start_watching(
     client_id: Option<String>,
     kind: ViewerKind,
     keyed: bool,
+    take_over: Option<i64>,
 ) -> ApiResult<(Watching, Channel)> {
     state.live.check_access(user)?;
+    // An app acts as a viewer, but whose connections it may take over goes by the account.
+    let admin = user.is_admin || state.live.account_is_admin(user.id).await;
     let channel = state.live.channel(user, id).await?;
     let row = state.live.channel_row(id).await?;
     let (source_name, max_connections, user_agent) = state.live.source_of(&row).await?;
     let watching = state
         .live
         .tuners
-        .watch(user, Tune { channel: &row, source_name, max_connections, user_agent }, client_id, kind, keyed)
+        .watch(
+            user,
+            Tune { channel: &row, source_name, max_connections, user_agent },
+            WatchAs { client_id, kind, keyed, admin, take_over },
+        )
         .await?;
     state.live.watched(user.id, id).await;
     Ok((watching, channel))
@@ -241,7 +252,7 @@ pub async fn watch(
 ) -> ApiResult<Json<WatchInfo>> {
     let body = body.map(|Json(b)| b).unwrap_or_default();
     let (watching, channel) =
-        start_watching(&state, &user, id, body.client_id, ViewerKind::Hls, body.keyed_urls).await?;
+        start_watching(&state, &user, id, body.client_id, ViewerKind::Hls, body.keyed_urls, body.take_over).await?;
     Ok(Json(WatchInfo { watching, channel }))
 }
 
@@ -254,7 +265,8 @@ pub async fn stream(
     Query(query): Query<HashMap<String, String>>,
 ) -> ApiResult<Response> {
     let client_id = query.get("client_id").cloned();
-    let (watching, _) = start_watching(&state, &user, id, client_id, ViewerKind::Stream, false).await?;
+    let take_over = query.get("take_over").and_then(|t| t.parse().ok());
+    let (watching, _) = start_watching(&state, &user, id, client_id, ViewerKind::Stream, false, take_over).await?;
     let body = state.live.tuners.stream(&watching.session_id, &user)?;
     Response::builder()
         .header(header::CONTENT_TYPE, "video/mp2t")

@@ -442,7 +442,7 @@ impl From<AppError> for PlexError {
             }
             AppError::Forbidden(_) | AppError::InsufficientScope(_) => PlexError::Forbidden,
             AppError::NotFound(_) | AppError::SessionStopped(_) => PlexError::NotFound,
-            AppError::BadRequest(m) | AppError::Conflict(m) => PlexError::BadRequest(m),
+            AppError::BadRequest(m) | AppError::Conflict(m) | AppError::ConflictWith(m, _) => PlexError::BadRequest(m),
             AppError::Unavailable(m) | AppError::TooManyRequests(m) | AppError::NotImplemented(m) => {
                 PlexError::Unavailable(m)
             }

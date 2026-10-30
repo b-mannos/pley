@@ -834,6 +834,17 @@ impl LiveTv {
 
     // ------------------------------------------------------------ sources
 
+    /// Whether the account is an administrator's, whatever signed it in.
+    pub async fn account_is_admin(&self, user_id: i64) -> bool {
+        sqlx::query_scalar::<_, bool>("SELECT is_admin FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_optional(&self.db.read)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(false)
+    }
+
     /// How many sources are set up.
     pub async fn source_count(&self) -> Result<usize, AppError> {
         Ok(self.source_rows().await.map_err(|e| AppError::Internal(e.into()))?.len())

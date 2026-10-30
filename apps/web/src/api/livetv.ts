@@ -492,9 +492,28 @@ export function useStopTuner() {
   });
 }
 
-/** Starts watching a channel on this device. */
-export function watchChannel(id: Id, clientId: string): Promise<Watching> {
-  return api.post<Watching>(`/api/live/channels/${id}/watch`, { client_id: clientId });
+/** A connection of a source whose connections are all in use (a `409`'s `connections`). */
+export interface BusyConnection {
+  channel_id: Id;
+  channel_name: string;
+  /** Who watches it: named to administrators only. */
+  watchers: string[];
+  people: number;
+  /** Only you watch it (on another device). */
+  yours: boolean;
+  /** You may take it over: it's yours, or you're an administrator and nobody watching it is. */
+  can_take_over: boolean;
+}
+
+/** The connections a `409` from watching says are in use. */
+export function busyConnections(err: unknown): BusyConnection[] {
+  const body = (err as { body?: { connections?: BusyConnection[] } } | null)?.body;
+  return Array.isArray(body?.connections) ? body.connections : [];
+}
+
+/** Starts watching a channel on this device; `takeOver`: the channel whose connection to take. */
+export function watchChannel(id: Id, clientId: string, takeOver?: Id): Promise<Watching> {
+  return api.post<Watching>(`/api/live/channels/${id}/watch`, { client_id: clientId, take_over: takeOver });
 }
 
 /**

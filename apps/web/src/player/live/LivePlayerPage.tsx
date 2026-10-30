@@ -10,7 +10,6 @@ import {
   LoaderCircle,
   Maximize,
   Minimize,
-  PictureInPicture2,
   RefreshCw,
   Star,
   TriangleAlert,
@@ -21,6 +20,7 @@ import {
 } from "lucide-react";
 import { ApiError, errorMessage, isApiError } from "@/api/client";
 import {
+  busyConnections,
   CHANNEL_PAGE,
   leaveChannel,
   liveKeys,
@@ -32,6 +32,7 @@ import {
   streamUrl,
   useSetFavorite,
   watchChannel,
+  type BusyConnection,
   type Channel,
   type LiveCategory,
 } from "@/api/livetv";
@@ -48,15 +49,25 @@ import { ChannelPanel } from "./ChannelPanel";
 
 /** Controls hide after this long without the pointer moving. */
 const HIDE_CONTROLS_AFTER = 3500;
+/** A stall shows the spinner once it has lasted this long. */
+const SPINNER_AFTER = 700;
 /** What's on, shown with I, goes after this long. */
 const BANNER_FOR = 5000;
 /** Digits typed for a channel number wait this long for more. */
 const NUMBER_WAIT = 1400;
 
-type Trouble = { kind: "busy" | "unavailable" | "stopped" | "missing" | "other"; title: string; message: string };
+type Trouble = {
+  kind: "busy" | "unavailable" | "stopped" | "missing" | "other";
+  title: string;
+  message: string;
+  /** All connections in use: what holds them. */
+  connections?: BusyConnection[];
+};
 
 function trouble(err: unknown, channel: string): Trouble {
-  if (isApiError(err, 409)) return { kind: "busy", title: "All connections are in use", message: errorMessage(err) };
+  if (isApiError(err, 409)) {
+    return { kind: "busy", title: "All connections are in use", message: errorMessage(err), connections: busyConnections(err) };
+  }
   if (isApiError(err, 410)) return { kind: "stopped", title: "Watching stopped", message: errorMessage(err) };
   if (isApiError(err, 404)) return { kind: "missing", title: "This channel isn't here any more", message: errorMessage(err) };
   if (isApiError(err, 403)) return { kind: "other", title: "Live TV isn't open to this account", message: errorMessage(err) };
@@ -227,6 +238,8 @@ function LivePlayer({
   const now = useNow(5000);
 
   const [attempt, setAttempt] = useState(0);
+  // The channel whose connection the next try takes over.
+  const takeOver = useRef<number | undefined>(undefined);
   const [status, setStatus] = useState<"tuning" | "playing" | "error">("tuning");
   const [problem, setProblem] = useState<Trouble | null>(null);
   const [buffering, setBuffering] = useState(false);
@@ -277,7 +290,9 @@ function LivePlayer({
     };
     const watch = async () => {
       try {
-        const watching = await watchChannel(channel.id, clientId());
+        const taking = takeOver.current;
+        takeOver.current = undefined;
+        const watching = await watchChannel(channel.id, clientId(), taking);
         if (cancelled) {
           void leaveChannel(watching.session_id);
           return null;
@@ -424,15 +439,26 @@ function LivePlayer({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+    // A stall shows the spinner only once it lasts: channels whose stream
+    // stutters for a moment don't flicker it.
+    let stalled: number | undefined;
+    const waiting = () => {
+      window.clearTimeout(stalled);
+      stalled = window.setTimeout(() => setBuffering(true), SPINNER_AFTER);
+    };
+    const going = () => {
+      window.clearTimeout(stalled);
+      stalled = undefined;
+      setBuffering(false);
+    };
     const onPlaying = () => {
       setStatus("playing");
-      setBuffering(false);
+      going();
       setPlaying(true);
       // The last channel's picture, kept while this one tuned, is done with.
       video.removeAttribute("poster");
     };
-    // Live TV doesn't pause: whatever paused it (a media key, picture in
-    // picture closed), it plays on.
+    // Live TV doesn't pause: whatever paused it (a media key, say), it plays on.
     const onPause = () => {
       setPlaying(false);
       if (video.src || video.srcObject) window.setTimeout(() => void video.play().catch(() => undefined), 100);
@@ -441,11 +467,13 @@ function LivePlayer({
       ["playing", onPlaying],
       ["pause", onPause],
       ["play", () => setPlaying(true)],
-      ["waiting", () => setBuffering(true)],
-      ["canplay", () => setBuffering(false)],
+      ["waiting", waiting],
+      ["canplay", going],
+      ["timeupdate", () => stalled !== undefined && video.readyState >= 3 && going()],
     ];
     for (const [name, fn] of handlers) video.addEventListener(name, fn);
     return () => {
+      window.clearTimeout(stalled);
       for (const [name, fn] of handlers) video.removeEventListener(name, fn);
     };
   }, []);
@@ -478,12 +506,6 @@ function LivePlayer({
   const toggleFullscreen = useCallback(() => {
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
     else void containerRef.current?.requestFullscreen?.().catch(() => undefined);
-  }, []);
-  const togglePip = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (document.pictureInPictureElement) void document.exitPictureInPicture().catch(() => undefined);
-    else void video.requestPictureInPicture?.().catch(() => undefined);
   }, []);
   const goBack = useCallback(() => {
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
@@ -593,6 +615,7 @@ function LivePlayer({
           ref={videoRef}
           className="absolute inset-0 size-full object-contain"
           playsInline
+          disablePictureInPicture
           onClick={() => (panel ? setPanel(false) : poke())}
           onDoubleClick={toggleFullscreen}
         />
@@ -624,6 +647,10 @@ function LivePlayer({
               trouble={problem}
               channel={channel}
               onRetry={problem.kind === "stopped" || problem.kind === "missing" ? undefined : () => setAttempt((a) => a + 1)}
+            onTakeOver={(channelId) => {
+              takeOver.current = channelId;
+              setAttempt((a) => a + 1);
+            }}
               onBack={goBack}
               onChannels={() => setPanel(true)}
             />
@@ -743,11 +770,6 @@ function LivePlayer({
             <button type="button" aria-label="Channel down" title="Channel down (↓)" onClick={() => onStep(-1)} className={button}>
               <ChevronDown className="size-5" />
             </button>
-            {"pictureInPictureEnabled" in document && document.pictureInPictureEnabled ? (
-              <button type="button" aria-label="Picture in picture" onClick={togglePip} className={cn(button, "hidden sm:flex")}>
-                <PictureInPicture2 className="size-5" />
-              </button>
-            ) : null}
             <button type="button" aria-label={fullscreen ? "Exit full screen" : "Full screen"} title="Full screen (F)" onClick={toggleFullscreen} className={button}>
               {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
             </button>
@@ -794,20 +816,31 @@ function keepPicture(video: HTMLVideoElement) {
   }
 }
 
+/** Who holds a connection: "You, on another device", their names, or how many. */
+function holders(c: BusyConnection): string {
+  if (c.yours) return "You, on another device";
+  if (c.watchers.length) return c.watchers.join(", ");
+  return c.people === 1 ? "Someone else" : `${c.people} people`;
+}
+
 function TroubleCard({
   trouble,
   channel,
   onRetry,
+  onTakeOver,
   onBack,
   onChannels,
 }: {
   trouble: Trouble;
   channel?: Channel;
   onRetry?: () => void;
+  onTakeOver?: (channelId: number) => void;
   onBack: () => void;
   onChannels?: () => void;
 }) {
   const Icon = trouble.kind === "busy" ? Tv2 : TriangleAlert;
+  const connections = trouble.connections ?? [];
+  const anyToTake = connections.some((c) => c.can_take_over);
   return (
     <div className="w-full max-w-md rounded-2xl border border-white/10 bg-surface/95 p-6 text-center shadow-2xl animate-pop-in" role="alert">
       {channel ? (
@@ -816,7 +849,39 @@ function TroubleCard({
         <Icon className={cn("mx-auto mb-4 size-10", trouble.kind === "busy" ? "text-accent" : "text-danger")} />
       )}
       <h2 className="text-lg font-semibold">{trouble.title}</h2>
-      {trouble.message ? <p className="mt-2 text-sm text-muted [text-wrap:pretty]">{trouble.message}</p> : null}
+      {connections.length ? (
+        <>
+          <p className="mt-2 text-sm text-muted [text-wrap:pretty]">
+            {connections.length === 1 ? "Its one connection is watching:" : `Its ${connections.length} connections are watching:`}
+          </p>
+          <ul className="mt-4 space-y-2 text-left">
+            {connections.map((c) => (
+              <li key={c.channel_id} className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{c.channel_name}</div>
+                  <div className="truncate text-xs text-muted">{holders(c)}</div>
+                </div>
+                {c.can_take_over && onTakeOver ? (
+                  <button
+                    type="button"
+                    onClick={() => onTakeOver(c.channel_id)}
+                    className="h-8 shrink-0 rounded-md bg-accent px-3 text-xs font-semibold text-accent-fg hover:bg-accent-hover"
+                  >
+                    Watch here instead
+                  </button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          {!anyToTake ? (
+            <p className="mt-3 text-xs text-subtle [text-wrap:pretty]">
+              A channel already being watched can be joined, or try again once one is stopped.
+            </p>
+          ) : null}
+        </>
+      ) : trouble.message ? (
+        <p className="mt-2 text-sm text-muted [text-wrap:pretty]">{trouble.message}</p>
+      ) : null}
       <div className="mt-6 flex flex-wrap justify-center gap-2">
         {onRetry ? (
           <button type="button" onClick={onRetry} className="flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-accent-fg hover:bg-accent-hover">

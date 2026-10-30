@@ -88,7 +88,44 @@ struct Viewer {
     media_key: Option<String>,
     /// The app sign-in it was started with: the key ends with it.
     app_grant: Option<i64>,
+    /// The account is an administrator's (whatever signed it in): whose
+    /// connections it may take over.
+    admin: bool,
 }
+
+/// How a channel is watched.
+pub struct WatchAs {
+    /// The device watching: what it watched before ends.
+    pub client_id: Option<String>,
+    pub kind: ViewerKind,
+    /// Its playlist's address carries a key (a player that can't send the
+    /// Authorization header).
+    pub keyed: bool,
+    /// The account is an administrator's (whatever signed it in).
+    pub admin: bool,
+    /// Every connection being in use, the channel whose connection to take.
+    pub take_over: Option<i64>,
+}
+
+/// A connection of a source whose connections are all in use, as someone
+/// refused one is told of it.
+#[derive(Debug, Clone, Serialize)]
+pub struct BusyConnection {
+    pub channel_id: i64,
+    pub channel_name: String,
+    /// Who watches it: named to administrators only.
+    pub watchers: Vec<String>,
+    /// How many people watch it.
+    pub people: usize,
+    /// Only the one asking watches it (on another device).
+    pub yours: bool,
+    /// The one asking may take it over (`take_over`): it's theirs, or they
+    /// are an administrator and nobody watching it is.
+    pub can_take_over: bool,
+}
+
+/// What a watching session ended by someone taking its connection over says.
+const ENDED_KEPT: usize = 500;
 
 /// Someone watching, as administrators see it.
 #[derive(Debug, Clone, Serialize)]
@@ -258,6 +295,8 @@ pub struct Tuners {
     viewers: Mutex<HashMap<String, Viewer>>,
     /// Decisions to start a tuner, one at a time (they count connections).
     starting: tokio::sync::Mutex<()>,
+    /// Why sessions ended that were taken over: their players are told.
+    ended: Mutex<HashMap<String, String>>,
     played: mpsc::UnboundedSender<Played>,
 }
 
@@ -283,6 +322,7 @@ impl Tuners {
             tuners: Mutex::default(),
             viewers: Mutex::default(),
             starting: tokio::sync::Mutex::new(()),
+            ended: Mutex::default(),
             played,
         })
     }
@@ -407,14 +447,8 @@ impl Tuners {
     /// pulling it, or a new one when its source has a connection free.
     /// `keyed`: the HLS playlist's address carries a key of its own instead
     /// of needing the token (docs/API.md, "Keyed URLs").
-    pub async fn watch(
-        self: &Arc<Self>,
-        user: &AuthUser,
-        tune: Tune<'_>,
-        client_id: Option<String>,
-        kind: ViewerKind,
-        keyed: bool,
-    ) -> Result<Watching, AppError> {
+    pub async fn watch(self: &Arc<Self>, user: &AuthUser, tune: Tune<'_>, how: WatchAs) -> Result<Watching, AppError> {
+        let WatchAs { client_id, kind, keyed, admin, take_over } = how;
         let channel_id = tune.channel.id;
         // What this device watched before ends: its connection is free.
         if let Some(client) = client_id.as_deref().filter(|c| !c.is_empty()) {
@@ -426,7 +460,7 @@ impl Tuners {
             let pulling = self.tuners.lock().get(&channel_id).filter(|t| t.is_live()).cloned();
             match pulling {
                 Some(t) => t,
-                None => self.start_tuner(user, &tune)?,
+                None => self.start_tuner(user, admin, &tune, take_over)?,
             }
         };
         let session_id = uuid::Uuid::new_v4().simple().to_string();
@@ -448,6 +482,7 @@ impl Tuners {
                 kind,
                 media_key,
                 app_grant: user.app.as_ref().map(|app| app.grant_id),
+                admin,
             },
         );
         tuner.state.lock().idle_since = None;
@@ -465,7 +500,13 @@ impl Tuners {
             .map(|v| (v.id.clone(), v.user_id, v.app_grant))
     }
 
-    fn start_tuner(self: &Arc<Self>, user: &AuthUser, tune: &Tune<'_>) -> Result<Arc<Tuner>, AppError> {
+    fn start_tuner(
+        self: &Arc<Self>,
+        user: &AuthUser,
+        admin: bool,
+        tune: &Tune<'_>,
+        take_over: Option<i64>,
+    ) -> Result<Arc<Tuner>, AppError> {
         let watched: HashMap<i64, usize> = self.viewers.lock().values().fold(HashMap::new(), |mut m, v| {
             *m.entry(v.channel_id).or_insert(0) += 1;
             m
@@ -481,7 +522,17 @@ impl Tuners {
             // A channel nobody watches gives its connection up.
             match on_source.iter().find(|t| !watched.contains_key(&t.channel_id)) {
                 Some(idle) => self.remove_tuner(idle),
-                None => return Err(self.all_in_use(user, tune, &on_source)),
+                None => match take_over.and_then(|id| on_source.iter().find(|t| t.channel_id == id)) {
+                    Some(held) if self.may_take_over(user.id, admin, held.channel_id) => {
+                        self.take_over(user, held, tune.channel.display_name());
+                    }
+                    Some(_) => {
+                        return Err(AppError::forbidden(
+                            "someone else watches that channel: only an administrator takes it over, from those who aren't",
+                        ));
+                    }
+                    None => return Err(self.all_in_use(user, admin, tune, &on_source)),
+                },
             }
         }
         let tuner = Arc::new(Tuner {
@@ -509,39 +560,82 @@ impl Tuners {
         Ok(tuner)
     }
 
-    fn all_in_use(&self, user: &AuthUser, tune: &Tune<'_>, on_source: &[Arc<Tuner>]) -> AppError {
-        let viewers = self.viewers.lock();
-        let names: Vec<String> = on_source
-            .iter()
-            .map(|t| {
-                let mut who: Vec<&str> =
-                    viewers.values().filter(|v| v.channel_id == t.channel_id).map(|v| v.username.as_str()).collect();
-                // One person on two devices is named once.
-                who.sort_unstable();
-                who.dedup();
-                if user.is_admin && !who.is_empty() {
-                    format!("{} ({})", t.channel_name, who.join(", "))
+    /// Whether a user may take channel `channel_id`'s connection over: all
+    /// who watch it are them, or they are an administrator and none of
+    /// those watching it is.
+    fn may_take_over(&self, user_id: i64, admin: bool, channel_id: i64) -> bool {
+        self.viewers
+            .lock()
+            .values()
+            .filter(|v| v.channel_id == channel_id)
+            .all(|v| v.user_id == user_id || (admin && !v.admin))
+    }
+
+    /// Ends everyone watching `held`, telling them why, and lets its
+    /// connection go for `user` to watch `channel_name` with.
+    fn take_over(&self, user: &AuthUser, held: &Arc<Tuner>, channel_name: &str) {
+        {
+            let mut viewers = self.viewers.lock();
+            let mut ended = self.ended.lock();
+            if ended.len() > ENDED_KEPT {
+                ended.clear();
+            }
+            for v in viewers.values().filter(|v| v.channel_id == held.channel_id) {
+                let why = if v.user_id == user.id {
+                    format!("Watching moved to {channel_name} on another device.")
                 } else {
-                    t.channel_name.clone()
-                }
-            })
-            .collect();
+                    format!("{} started watching {channel_name} on this connection.", user.username)
+                };
+                ended.insert(v.id.clone(), why);
+            }
+            viewers.retain(|_, v| v.channel_id != held.channel_id);
+        }
+        tracing::info!(channel = held.channel_id, by = %user.username, "live channel's connection taken over");
+        self.remove_tuner(held);
+        self.events.send(ServerEvent::LiveTunersChanged);
+    }
+
+    fn all_in_use(&self, user: &AuthUser, admin: bool, tune: &Tune<'_>, on_source: &[Arc<Tuner>]) -> AppError {
+        let connections: Vec<BusyConnection> = {
+            let viewers = self.viewers.lock();
+            on_source
+                .iter()
+                .map(|t| {
+                    let watching: Vec<&Viewer> = viewers.values().filter(|v| v.channel_id == t.channel_id).collect();
+                    let mut who: Vec<String> = watching.iter().map(|v| v.username.clone()).collect();
+                    // One person on two devices is named once.
+                    who.sort_unstable();
+                    who.dedup();
+                    BusyConnection {
+                        channel_id: t.channel_id,
+                        channel_name: t.channel_name.clone(),
+                        people: who.len(),
+                        watchers: if admin { who } else { Vec::new() },
+                        yours: !watching.is_empty() && watching.iter().all(|v| v.user_id == user.id),
+                        can_take_over: watching.iter().all(|v| v.user_id == user.id || (admin && !v.admin)),
+                    }
+                })
+                .collect()
+        };
         let n = tune.max_connections;
-        AppError::Conflict(format!(
-            "{} of {} {} in use, watching {}. A channel already being watched can be joined, or one of these stopped.",
-            if n == 1 { "The one connection".to_owned() } else { format!("All {n} connections") },
+        let message = format!(
+            "{} allows {} at once, and {} in use: watching {}.",
             tune.source_name,
-            if n == 1 { "is" } else { "are" },
-            names.join(", ")
-        ))
+            if n == 1 { "one connection".to_owned() } else { format!("{n} connections") },
+            if n == 1 { "it is" } else { "all are" },
+            connections.iter().map(|c| c.channel_name.as_str()).collect::<Vec<_>>().join(", ")
+        );
+        AppError::ConflictWith(message, serde_json::json!({ "connections": connections }))
     }
 
     fn viewer(&self, session_id: &str, user: &AuthUser) -> Result<Viewer, AppError> {
         let mut viewers = self.viewers.lock();
-        let v = viewers
-            .get_mut(session_id)
-            .filter(|v| v.user_id == user.id)
-            .ok_or_else(|| AppError::SessionStopped(Some("this channel isn't being watched any more".into())))?;
+        let Some(v) = viewers.get_mut(session_id).filter(|v| v.user_id == user.id) else {
+            let why = self.ended.lock().get(session_id).cloned();
+            return Err(AppError::SessionStopped(Some(
+                why.unwrap_or_else(|| "this channel isn't being watched any more".into()),
+            )));
+        };
         v.last_seen = Instant::now();
         Ok(v.clone())
     }
