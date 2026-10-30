@@ -333,6 +333,20 @@ describe("UsersSettings: requests", () => {
     expect(requests.find((r) => r.method === "PATCH")?.body).toEqual({ request_access: "auto" });
   });
 
+  it("stops an account asking when it gets an age limit, unless asking is picked too", async () => {
+    const user = userEvent.setup();
+    const requests = serveRequests();
+    await user.click(await screen.findByRole("button", { name: /Ann/ }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Ann" });
+    const select = within(dialog).getByLabelText("Requests");
+    await user.selectOptions(within(dialog).getByLabelText("Age limit"), "Kids (TV-Y7)");
+    expect(select).toHaveValue("off");
+    await user.selectOptions(select, "ask");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Saved Ann")).toBeInTheDocument();
+    expect(requests.find((r) => r.method === "PATCH")?.body).toEqual({ max_age: 7, request_access: "ask" });
+  });
+
   it("shows administrators' requests as approved as made, and keeps what one demoted gets", async () => {
     const user = userEvent.setup();
     const requests = serveRequests();
@@ -356,7 +370,7 @@ describe("UsersSettings: requests", () => {
     expect(select).toHaveValue("ask");
     await user.selectOptions(within(dialog).getByLabelText("Age limit"), "Kids (TV-Y7)");
     expect(select).toHaveValue("off");
-    expect(within(dialog).getByText(/whatever their age rating/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/leaves out titles above the age limit/)).toBeInTheDocument();
     await user.selectOptions(within(dialog).getByLabelText("Age limit"), "No limit");
     await user.click(within(dialog).getByRole("button", { name: /Managed profile/ }));
     expect(select).toHaveValue("off");

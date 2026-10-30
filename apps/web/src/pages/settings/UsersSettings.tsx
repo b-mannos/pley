@@ -264,6 +264,8 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
   const [clearPin, setClearPin] = useState(false);
   // What the Requests select was set to; `null` until then (a new account, or an administrator).
   const [requestChoice, setRequestChoice] = useState<RequestAccess | null>(null);
+  // Whether it was set in this dialog, not kept from the account.
+  const [requestPicked, setRequestPicked] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Reset the form whenever the dialog opens (for someone else); background
@@ -273,6 +275,7 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
     setKind(user?.managed ? "managed" : "regular");
     // Administrators report "auto" whatever is kept for them: no choice to keep.
     setRequestChoice(user && !user.is_admin ? (user.request_access ?? null) : null);
+    setRequestPicked(false);
     setUsername(user?.username ?? "");
     setDisplayName(user?.display_name ?? "");
     setPassword("");
@@ -297,10 +300,14 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
   const requestsKnown = (users.data ?? []).some((u) => u.request_access !== undefined);
   // Administrators' requests are always approved as they make them.
   const asAdmin = isAdmin && !managed;
-  // As the server has it for an account made without one: no asking for
-  // managed profiles and those with an age limit (Discover shows TMDB's
-  // titles whatever their rating).
-  const requestAccess: RequestAccess = requestChoice ?? (managed || access.max_age !== null ? "off" : "ask");
+  // As the server has it: an account made without one doesn't ask if it's
+  // a managed profile or has an age limit, and adding an age limit to one
+  // that asks for approval stops it asking, unless picked here too.
+  const ageAdded = !!user && user.max_age === null && access.max_age !== null;
+  const requestAccess: RequestAccess =
+    ageAdded && !requestPicked && requestChoice === "ask"
+      ? "off"
+      : (requestChoice ?? (managed || access.max_age !== null ? "off" : "ask"));
 
   const validate = (): string | null => {
     if (isNew && !username.trim()) return "Enter a username.";
@@ -360,7 +367,8 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
     if (pin) patch.pin = pin;
     else if (clearPin) patch.pin = null;
     // One no longer an administrator keeps what the dialog shows, not what was kept from before.
-    if (requestsKnown && !asAdmin && (user.is_admin || requestAccess !== user.request_access)) patch.request_access = requestAccess;
+    // An age limit added says along with it whether the account still asks.
+    if (requestsKnown && !asAdmin && (user.is_admin || ageAdded || requestAccess !== user.request_access)) patch.request_access = requestAccess;
     if (Object.keys(patch).length === 0) return onClose();
     update.mutate(
       { id: user.id, ...patch },
@@ -515,7 +523,7 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
               asAdmin
                 ? "Administrators' requests are approved as they make them."
                 : access.max_age !== null
-                  ? "Asking for movies and shows in Discover, which shows TMDB's titles whatever their age rating."
+                  ? "Asking for movies and shows in Discover, which leaves out titles above the age limit."
                   : "Asking for movies and shows the libraries don't have, in Discover."
             }
           >
@@ -524,7 +532,10 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
               className="h-10 w-full"
               value={asAdmin ? "auto" : requestAccess}
               disabled={asAdmin}
-              onChange={(e) => setRequestChoice(e.target.value as RequestAccess)}
+              onChange={(e) => {
+                setRequestChoice(e.target.value as RequestAccess);
+                setRequestPicked(true);
+              }}
             >
               <option value="ask">May ask, for an administrator to approve</option>
               <option value="auto">May ask, approved as asked</option>

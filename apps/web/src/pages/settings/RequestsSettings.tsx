@@ -385,10 +385,10 @@ export function RequestsSettings() {
                   </Note>
                 ) : null}
               </Row>
-              <Row label="Movies a week" htmlFor="request-limit-movies" hint="How many each account may ask for in 7 days. Administrators have no limit.">
+              <Row label="Movies per 7 days" htmlFor="request-limit-movies" hint="How many each account may ask for in any 7 days. Administrators have no limit.">
                 <LimitInput id="request-limit-movies" value={form.request_limit_movies ?? 0} onChange={(v) => draft.set("request_limit_movies", v)} unit="movies" />
               </Row>
-              <Row label="Seasons a week" htmlFor="request-limit-seasons" hint="A show counts its seasons.">
+              <Row label="Seasons per 7 days" htmlFor="request-limit-seasons" hint="A show counts its seasons.">
                 <LimitInput id="request-limit-seasons" value={form.request_limit_seasons ?? 0} onChange={(v) => draft.set("request_limit_seasons", v)} unit="seasons" />
               </Row>
               <p className="text-xs text-subtle">
