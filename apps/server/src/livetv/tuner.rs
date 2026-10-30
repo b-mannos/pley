@@ -6,9 +6,11 @@
 //!   [`LINGER`], or at once when another channel needs its connection.
 //! - Players watch through a *viewer*: an HLS one gets the channel from the
 //!   transcoder (one live job per tuner, which every HLS viewer of it reads),
-//!   a stream one the provider's MPEG-TS as it comes. Starting to watch on a
-//!   device (`client_id`) ends what that device watched before, so changing
-//!   channels on a one-connection account just works.
+//!   a stream one the provider's MPEG-TS as it comes, from its last video
+//!   keyframe. Starting to watch on a device (`client_id`, and the
+//!   `<client_id>-stream` its stream reader goes by) ends what that device
+//!   watched before, so changing channels on a one-connection account just
+//!   works.
 //! - Channels served as HLS by the provider are read segment by segment and
 //!   handed on as one MPEG-TS stream.
 //! - A connection that breaks is made again, a few times, while the channel
@@ -41,8 +43,12 @@ const LINGER: Duration = Duration::from_secs(20);
 /// An HLS viewer that asked for nothing this long left (players ask for the
 /// playlist every few seconds while they play; a paused one too).
 const VIEWER_GONE: Duration = Duration::from_secs(45);
-/// What the provider last sent, given to whoever joins first: a quick start.
+/// What the provider last sent, given to whoever joins (from its last video
+/// keyframe): a quick start.
 const BACKLOG_BYTES: usize = 2 << 20;
+/// An MPEG-TS packet's size, and the byte it starts with.
+const TS_PACKET: usize = 188;
+const TS_SYNC: u8 = 0x47;
 /// Chunks a slow reader may fall behind before it skips some.
 const CHANNEL_CHUNKS: usize = 2048;
 /// The provider sending nothing this long breaks the connection.
@@ -170,7 +176,163 @@ pub struct Watching {
 struct Feed {
     backlog: VecDeque<Bytes>,
     backlog_bytes: usize,
+    /// Chunks dropped from the backlog's front: the number of its first.
+    dropped: u64,
+    /// Where the last video keyframe starts: its chunk's number and the
+    /// offset in it.
+    keyframe: Option<(u64, usize)>,
+    ts: TsScan,
     tx: Option<broadcast::Sender<Bytes>>,
+}
+
+impl Feed {
+    fn new() -> Self {
+        Self {
+            backlog: VecDeque::new(),
+            backlog_bytes: 0,
+            dropped: 0,
+            keyframe: None,
+            ts: TsScan::default(),
+            tx: Some(broadcast::channel(CHANNEL_CHUNKS).0),
+        }
+    }
+
+    fn push(&mut self, chunk: &Bytes) {
+        if let Some(offset) = self.ts.scan(chunk) {
+            self.keyframe = Some((self.dropped + self.backlog.len() as u64, offset));
+        }
+        self.backlog_bytes += chunk.len();
+        self.backlog.push_back(chunk.clone());
+        while self.backlog_bytes > BACKLOG_BYTES {
+            let Some(old) = self.backlog.pop_front() else { break };
+            self.backlog_bytes -= old.len();
+            self.dropped += 1;
+        }
+        if self.keyframe.is_some_and(|(n, _)| n < self.dropped) {
+            self.keyframe = None;
+        }
+    }
+
+    /// What a new reader is given first: the tables and what came from the
+    /// last video keyframe, so the picture starts whole and at once instead
+    /// of seconds behind (players skip ahead to catch up: the picture jumps).
+    /// A stream without marked keyframes is given all of the backlog.
+    fn start(&self) -> Vec<Bytes> {
+        let (Some((n, offset)), Some(pat), Some(pmt)) = (self.keyframe, &self.ts.pat, &self.ts.pmt) else {
+            return self.backlog.iter().cloned().collect();
+        };
+        let from = (n - self.dropped) as usize;
+        let mut out = vec![pat.clone(), pmt.clone()];
+        for (i, chunk) in self.backlog.iter().skip(from).enumerate() {
+            out.push(if i == 0 { chunk.slice(offset..) } else { chunk.clone() });
+        }
+        out
+    }
+}
+
+/// Reads the MPEG-TS packets in what a provider sends, chunk by chunk
+/// (packets run across chunks): the tables a demuxer needs before anything
+/// else (PAT and PMT) and where video keyframes start.
+#[derive(Default)]
+struct TsScan {
+    /// Where the next packet starts in the next chunk; `None` until the
+    /// packets are found.
+    next: Option<usize>,
+    pat: Option<Bytes>,
+    pmt_pid: Option<u16>,
+    pmt: Option<Bytes>,
+}
+
+impl TsScan {
+    /// Where the last video keyframe's first packet starts in `chunk`.
+    fn scan(&mut self, chunk: &Bytes) -> Option<usize> {
+        let data = &chunk[..];
+        let mut at = match self.next {
+            Some(n) if n >= data.len() => {
+                self.next = Some(n - data.len());
+                return None;
+            }
+            Some(n) if data[n] == TS_SYNC => n,
+            _ => ts_sync(data)?,
+        };
+        let mut keyframe = None;
+        while at + TS_PACKET <= data.len() {
+            if data[at] != TS_SYNC {
+                // Lost: found again further on, or in the next chunk.
+                match ts_sync(&data[at..]) {
+                    Some(skip) => at += skip,
+                    None => {
+                        self.next = None;
+                        return keyframe;
+                    }
+                }
+                continue;
+            }
+            let packet = &data[at..at + TS_PACKET];
+            let pid = u16::from(packet[1] & 0x1f) << 8 | u16::from(packet[2]);
+            if packet[1] & 0x40 != 0 {
+                if pid == 0 {
+                    self.pat = Some(Bytes::copy_from_slice(packet));
+                    self.pmt_pid = pmt_pid(packet).or(self.pmt_pid);
+                } else if Some(pid) == self.pmt_pid {
+                    self.pmt = Some(Bytes::copy_from_slice(packet));
+                } else if is_video_keyframe(packet) {
+                    keyframe = Some(at);
+                }
+            }
+            at += TS_PACKET;
+        }
+        self.next = Some(if at < data.len() { TS_PACKET - (data.len() - at) } else { 0 });
+        keyframe
+    }
+}
+
+/// Where packets start in `data`: a sync byte with another a packet on, when
+/// there's that much.
+fn ts_sync(data: &[u8]) -> Option<usize> {
+    (0..data.len()).find(|&i| data[i] == TS_SYNC && data.get(i + TS_PACKET).is_none_or(|&b| b == TS_SYNC))
+}
+
+/// A packet's payload, after its adaptation field.
+fn ts_payload(packet: &[u8]) -> Option<&[u8]> {
+    let control = (packet[3] >> 4) & 3;
+    if control & 1 == 0 {
+        return None;
+    }
+    let start = if control & 2 != 0 { 5 + usize::from(packet[4]) } else { 4 };
+    packet.get(start..)
+}
+
+/// The PMT's PID, from a PAT packet: its first program's.
+fn pmt_pid(packet: &[u8]) -> Option<u16> {
+    let payload = ts_payload(packet)?;
+    let table = payload.get(1 + usize::from(*payload.first()?)..)?;
+    // table_id 0, then the section's length and five bytes of header.
+    if table.first() != Some(&0) {
+        return None;
+    }
+    let length = usize::from(u16::from(table[1] & 0x0f) << 8 | u16::from(*table.get(2)?));
+    let programs = table.get(8..(3 + length).saturating_sub(4))?;
+    programs
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .find(|p| p[0] != 0 || p[1] != 0)
+        .map(|p| u16::from(p[2] & 0x1f) << 8 | u16::from(p[3]))
+}
+
+/// The device a client id is: players read a channel's stream as
+/// `<client_id>-stream`, beside the session asked for as `<client_id>`.
+fn device_of(client: &str) -> &str {
+    client.strip_suffix("-stream").unwrap_or(client)
+}
+
+/// A packet that starts a video PES at a random access point: a keyframe.
+fn is_video_keyframe(packet: &[u8]) -> bool {
+    let control = (packet[3] >> 4) & 3;
+    let random_access = control & 2 != 0 && packet[4] > 0 && packet[5] & 0x40 != 0;
+    random_access
+        && ts_payload(packet).is_some_and(|p| p.len() >= 4 && p[..3] == [0, 0, 1] && (0xe0..=0xef).contains(&p[3]))
 }
 
 struct TunerState {
@@ -234,12 +396,7 @@ impl Tuner {
             state.error = None;
         }
         let mut feed = self.feed.lock();
-        feed.backlog_bytes += chunk.len();
-        feed.backlog.push_back(chunk.clone());
-        while feed.backlog_bytes > BACKLOG_BYTES {
-            let Some(old) = feed.backlog.pop_front() else { break };
-            feed.backlog_bytes -= old.len();
-        }
+        feed.push(&chunk);
         if let Some(tx) = &feed.tx {
             let _ = tx.send(chunk);
         }
@@ -250,7 +407,7 @@ impl Tuner {
     fn subscribe(&self) -> Option<impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static + use<>> {
         let feed = self.feed.lock();
         let rx = feed.tx.as_ref()?.subscribe();
-        let backlog: Vec<Bytes> = feed.backlog.iter().cloned().collect();
+        let backlog = feed.start();
         drop(feed);
         let live = futures::stream::unfold(rx, |mut rx| async move {
             loop {
@@ -450,9 +607,15 @@ impl Tuners {
     pub async fn watch(self: &Arc<Self>, user: &AuthUser, tune: Tune<'_>, how: WatchAs) -> Result<Watching, AppError> {
         let WatchAs { client_id, kind, keyed, admin, take_over } = how;
         let channel_id = tune.channel.id;
-        // What this device watched before ends: its connection is free.
+        // What this device watched before ends: its connection is free. Its
+        // stream reader of another channel too, though that response may not
+        // have closed yet (channels changed quickly would find them all in use).
         if let Some(client) = client_id.as_deref().filter(|c| !c.is_empty()) {
-            self.viewers.lock().retain(|_, v| !(v.user_id == user.id && v.client_id.as_deref() == Some(client)));
+            self.viewers.lock().retain(|_, v| {
+                let Some(theirs) = v.client_id.as_deref() else { return true };
+                let same = theirs == client || (device_of(theirs) == device_of(client) && v.channel_id != channel_id);
+                !(v.user_id == user.id && same)
+            });
         }
         let tuner = {
             let _one = self.starting.lock().await;
@@ -543,11 +706,7 @@ impl Tuners {
             url: tune.channel.stream_url.clone(),
             user_agent: tune.user_agent.clone(),
             started_at: now(),
-            feed: Mutex::new(Feed {
-                backlog: VecDeque::new(),
-                backlog_bytes: 0,
-                tx: Some(broadcast::channel(CHANNEL_CHUNKS).0),
-            }),
+            feed: Mutex::new(Feed::new()),
             state: Mutex::new(TunerState::default()),
             stop: CancellationToken::new(),
             hls: tokio::sync::Mutex::new(None),
@@ -1136,6 +1295,69 @@ mod tests {
         assert_eq!((p.target_duration, p.ended, p.last_sequence()), (4.0, false, 101));
         assert!(media_playlist("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"k\"\n#EXTINF:4,\na.ts\n").is_err());
         assert!(media_playlist("#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n").is_err());
+    }
+
+    fn packet(pid: u16, start: bool, flags: Option<u8>, payload: &[u8]) -> Vec<u8> {
+        let mut p = vec![TS_SYNC, if start { 0x40 } else { 0 } | (pid >> 8) as u8, pid as u8, 0x10];
+        if let Some(flags) = flags {
+            p[3] = 0x30;
+            p.extend([1, flags]);
+        }
+        p.extend_from_slice(payload);
+        p.resize(TS_PACKET, 0xff);
+        p
+    }
+
+    fn pat(pmt: u16) -> Vec<u8> {
+        packet(0, true, None, &[0, 0, 0xb0, 13, 0, 1, 0xc1, 0, 0, 0, 1, 0xe0 | (pmt >> 8) as u8, pmt as u8, 0, 0, 0, 0])
+    }
+
+    fn feed(stream: &[u8], cuts: &[usize]) -> Feed {
+        let mut feed = Feed::new();
+        let mut from = 0;
+        for &to in cuts.iter().chain([stream.len()].iter()) {
+            feed.push(&Bytes::copy_from_slice(&stream[from..to]));
+            from = to;
+        }
+        feed
+    }
+
+    #[test]
+    fn new_readers_start_at_the_last_keyframe_with_the_tables() {
+        let (pat, pmt) = (pat(0x100), packet(0x100, true, None, &[0, 2]));
+        let key = |n: u8| packet(0x101, true, Some(0x40), &[0, 0, 1, 0xe0, n]);
+        let frame = packet(0x101, true, Some(0), &[0, 0, 1, 0xe0]);
+        // Audio is marked at every frame: not where the picture starts.
+        let audio = packet(0x102, true, Some(0x40), &[0, 0, 1, 0xc0]);
+        let stream = [pat.clone(), pmt.clone(), key(1), frame.clone(), audio, key(2), frame.clone()].concat();
+        // Cut across packets: the scan carries on in the next chunk.
+        let start = feed(&stream, &[400, 900]).start().concat();
+        assert_eq!(start, [pat, pmt, key(2), frame].concat());
+    }
+
+    #[test]
+    fn a_stream_without_marked_keyframes_is_given_whole() {
+        let audio = packet(0x102, true, Some(0x40), &[0, 0, 1, 0xc0]);
+        let stream = [pat(0x100), packet(0x100, true, None, &[0, 2]), audio.clone(), audio].concat();
+        assert_eq!(feed(&stream, &[300]).start().concat(), stream);
+        // Not MPEG-TS at all: as it came.
+        assert_eq!(feed(b"not a transport stream", &[5]).start().concat(), b"not a transport stream");
+    }
+
+    #[test]
+    fn a_keyframe_dropped_from_the_backlog_is_forgotten() {
+        let mut f = feed(&[pat(0x100), packet(0x100, true, None, &[0, 2]), packet(0x101, true, Some(0x40), &[0, 0, 1, 0xe0])].concat(), &[]);
+        assert!(f.keyframe.is_some());
+        let filler = Bytes::from(packet(0x101, false, None, &[]).repeat(BACKLOG_BYTES / TS_PACKET));
+        f.push(&filler);
+        assert!(f.keyframe.is_none());
+        assert_eq!(f.start(), vec![filler]);
+    }
+
+    #[test]
+    fn a_stream_reader_is_its_device() {
+        assert_eq!(device_of("android-1-stream"), "android-1");
+        assert_eq!(device_of("android-1"), "android-1");
     }
 
     #[test]

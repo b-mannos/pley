@@ -311,6 +311,35 @@ async fn channels_guide_favourites_and_connections() {
 }
 
 #[tokio::test]
+async fn changing_channels_frees_the_connection_the_old_stream_still_holds() {
+    let (base, provider) = provider().await;
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let source = json!({"name": "Provider", "kind": "m3u", "url": format!("{base}/list.m3u"), "max_connections": 1});
+    assert_eq!(app.post("/api/live/sources", &admin, source).await.status, StatusCode::CREATED);
+    wait_until_read(&app, &admin).await;
+    let channels = app.get("/api/live/channels", &admin).await.body;
+    let (one, two) = (channels[0]["id"].as_i64().unwrap(), channels[1]["id"].as_i64().unwrap());
+
+    // As the apps watch: the session asked for as the device, its stream read as `<device>-stream`.
+    let asked = app.post(&format!("/api/live/channels/{one}/watch"), &admin, json!({"client_id": "tv"})).await;
+    assert!(asked.status.is_success(), "{:?}", asked.body);
+    let (status, body) = open_stream(&app, &admin, one, "tv-stream").await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, one_reader) = first_bytes(body).await;
+
+    // Two is asked for before One's stream closed: One's connection is Two's all the same.
+    let asked = app.post(&format!("/api/live/channels/{two}/watch"), &admin, json!({"client_id": "tv"})).await;
+    assert!(asked.status.is_success(), "{:?}", asked.body);
+    let (status, body) = open_stream(&app, &admin, two, "tv-stream").await;
+    assert_eq!(status, StatusCode::OK);
+    let (first, _two_reader) = first_bytes(body).await;
+    assert_eq!(first[4], 2, "Two's packets");
+    drop(one_reader);
+    assert_eq!(provider.most.load(Ordering::SeqCst), 1, "never more than the one connection at once");
+}
+
+#[tokio::test]
 async fn channels_by_group_a_page_at_a_time() {
     let (base, _) = provider().await;
     let app = TestApp::new().await;
