@@ -61,6 +61,9 @@ interface TvShellSource {
     /** Music has a queue, playing or paused: the rail leads to Now Playing. */
     val music: Flow<Boolean> get() = flowOf(false)
 
+    /** Live TV is open to this profile and has channels: the rail leads to it. */
+    val liveTv: Flow<Boolean> get() = flowOf(false)
+
     /** Each time the server's events connect: it answers again (the offline mark goes). */
     val serverAnswered: Flow<Unit> get() = emptyFlow()
 
@@ -153,6 +156,8 @@ private class GraphShellSource(
     override val reduceMotion: Flow<Boolean> = offMain { graph.data.settings.settings }.map { it.reduceMotion }.distinctUntilChanged()
 
     override val music: Flow<Boolean> = offMain { graph.player.music.nowPlaying }.map { it != null }.distinctUntilChanged()
+
+    override val liveTv: Flow<Boolean> = offMain { graph.data.liveTv.summary() }.map { it.valueOrNull?.available == true }.distinctUntilChanged()
 
     override val serverAnswered: Flow<Unit> = offMain { graph.data.liveUpdates.answered }
 

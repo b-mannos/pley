@@ -58,8 +58,11 @@ data class LiveTrouble(val kind: Kind, val message: String) {
         Other,
     }
 
-    /** Whether trying again may help: not for a channel stopped or gone (as on the web). */
-    val canRetry: Boolean get() = kind != Kind.Missing && kind != Kind.Stopped
+    /**
+     * Whether trying again may help: not for a channel that is gone. A
+     * stopped one (an administrator, a server restarting) tunes again.
+     */
+    val canRetry: Boolean get() = kind != Kind.Missing
 
     companion object {
         /** The trouble [error] is: a refusal of the server's, a network failure, or else. */

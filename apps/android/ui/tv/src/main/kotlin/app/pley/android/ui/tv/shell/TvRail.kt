@@ -259,6 +259,7 @@ private fun NavigationDrawerScope.RailEntry(item: RailItem, rail: RailState, onS
 private fun label(item: RailItem): String = when (item.slot) {
     RailSlot.Search -> stringResource(R.string.tv_shell_rail_search)
     RailSlot.Home -> stringResource(R.string.tv_shell_rail_home)
+    RailSlot.LiveTv -> stringResource(R.string.tv_shell_rail_live_tv)
     RailSlot.Library -> item.name.orEmpty()
     RailSlot.Libraries -> stringResource(R.string.tv_shell_rail_libraries)
     RailSlot.Playlists -> stringResource(R.string.tv_shell_rail_playlists)

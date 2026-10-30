@@ -97,8 +97,13 @@ class LivePlayerViewModel(
         playback.tune(saved[CHANNEL] ?: channelId)
         // What's on moves on while watching: the lineup is asked again when the programme playing ends.
         viewModelScope.launch {
+            var asked = 0L
             combine(now, channel) { t, c -> c?.now?.let { it.stop <= t } == true }.distinctUntilChanged().collect { ended ->
-                if (ended) deps.live.refresh()
+                val floor = if (channels.value.size > LiveTvViewModel.BIG_LINEUP) LiveTvViewModel.BIG_REFRESH_FLOOR_MS else LiveTvViewModel.REFRESH_FLOOR_MS
+                if (ended && deps.clock() - asked > floor) {
+                    asked = deps.clock()
+                    deps.live.refresh()
+                }
             }
         }
     }

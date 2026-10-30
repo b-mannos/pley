@@ -3,12 +3,19 @@ package app.pley.android.data
 import app.pley.android.common.NotBuiltYet
 import app.pley.android.model.LiveChannel
 import app.pley.android.model.LiveGuide
+import app.pley.android.model.LiveProgram
 import app.pley.android.model.LiveSummary
 import app.pley.android.model.LiveWatching
 import app.pley.android.model.WatchRequest
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.builtins.ListSerializer
 
@@ -50,8 +57,11 @@ interface LiveTvRepository {
     fun leave(sessionId: String)
 
     companion object {
-        /** The guide is fetched in chunks of six hours. */
-        const val GUIDE_CHUNK_S = 6 * 3600L
+        /**
+         * The guide is fetched in chunks of two hours: a provider of 50,000
+         * channels has some 30,000 programmes in two hours, 11 MB of JSON.
+         */
+        const val GUIDE_CHUNK_S = 2 * 3600L
 
         /** No Live TV: tests' graphs, which have none. */
         val None: LiveTvRepository = object : LiveTvRepository {
@@ -77,24 +87,42 @@ interface LiveTvRepository {
 
 /**
  * Live TV through the cache: the summary and the channels are kept as
- * snapshots, so the entry to it and the channels show at once; the guide
- * is held in memory only, by chunk, the least recently used going first.
+ * snapshots (the channels without what the guide says of their
+ * programmes, which a big lineup makes megabytes of), so the entry to it
+ * and the channels show at once. The guide is held in memory only, by
+ * chunk: the [HELD_CHUNKS] used last keep their programmes, the others let
+ * them go and ask again when shown, so scrolling through two days of a
+ * big lineup's guide never holds it all.
  */
 internal class CachedLiveTv(private val cache: ResourceCache) : LiveTvRepository {
     private val summary = Resource(SnapshotKeys.LIVE, LiveSummary.serializer()) { api, _ -> api.liveSummary() }
 
-    private val channels = Resource(SnapshotKeys.LIVE_CHANNELS, ListSerializer(LiveChannel.serializer())) { api, _ -> api.liveChannels() }
+    private val channels = Resource(
+        SnapshotKeys.LIVE_CHANNELS,
+        ListSerializer(LiveChannel.serializer()),
+        trim = { list -> list.map { c -> c.copy(now = c.now?.let(::brief), next = c.next?.let(::brief)) } },
+    ) { api, _ -> api.liveChannels() }
 
-    private fun guideOf(from: Long) =
-        Resource<LiveGuide>(SnapshotKeys.liveGuide(from), serializer = null, detail = true) { api, _ ->
-            api.liveGuide(from, from + LiveTvRepository.GUIDE_CHUNK_S)
-        }
+    /** The chunks holding programmes, the one used last at the end. */
+    private val held = ArrayDeque<GuideChunk>()
 
     override fun summary(): Flow<Loadable<LiveSummary>> = cache.observe(summary)
 
     override fun channels(): Flow<Loadable<List<LiveChannel>>> = cache.observe(channels)
 
-    override fun guide(from: Long): Flow<Loadable<LiveGuide>> = cache.observe(guideOf(from))
+    override fun guide(from: Long): Flow<Loadable<LiveGuide>> = cache.whileReady { profile ->
+        flow {
+            val key = SnapshotKeys.liveGuide(from)
+            val chunk = cache.node(profile, key, detail = false) { GuideChunk(key, from, profile) }
+            chunk.users.incrementAndGet()
+            try {
+                if (chunk.stale()) chunk.load()
+                emitAll(chunk.state)
+            } finally {
+                chunk.users.decrementAndGet()
+            }
+        }
+    }
 
     override fun refresh() = cache.revalidate { key, _ -> key == SnapshotKeys.LIVE || key == SnapshotKeys.LIVE_CHANNELS }
 
@@ -131,5 +159,81 @@ internal class CachedLiveTv(private val cache: ResourceCache) : LiveTvRepository
                 // Out of reach: the server lets the session go by itself after 45 s.
             }
         }
+    }
+
+    /** [chunk] has programmes now: the eldest chunks nobody shows let theirs go. */
+    private fun keep(chunk: GuideChunk) = synchronized(held) {
+        held.remove(chunk)
+        held.addLast(chunk)
+        var over = held.size - HELD_CHUNKS
+        for (old in held.filter { !it.active }) {
+            if (over <= 0) break
+            held.remove(old)
+            old.drop()
+            over--
+        }
+    }
+
+    /**
+     * One chunk of the guide, as the cache holds it (asked again on Live
+     * TV's events, forgotten with the profile), its programmes let go by
+     * [keep] when others were used since.
+     */
+    private inner class GuideChunk(override val key: String, private val from: Long, private val profile: ProfileScope) : CacheNode {
+        val state = MutableStateFlow<Loadable<LiveGuide>>(Loadable.Loading)
+        val users = AtomicInteger()
+        private var job: Job? = null
+
+        @Volatile
+        override var fetchedAt: Long = ResourceCache.NEVER
+            private set
+
+        override val active: Boolean get() = users.get() > 0
+        override val current: Any? get() = state.value.valueOrNull
+
+        fun stale(): Boolean = fetchedAt == ResourceCache.NEVER || cache.clock() - fetchedAt >= GUIDE_STALE_MS
+
+        fun load() = synchronized(this) {
+            if (job?.isActive == true) return@synchronized
+            job = cache.app.launch {
+                try {
+                    val guide = cache.api(profile).liveGuide(from, from + LiveTvRepository.GUIDE_CHUNK_S)
+                    fetchedAt = cache.clock()
+                    state.value = Loadable.Ready(guide, fresh = true)
+                    keep(this@GuideChunk)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    state.update { Loadable.Failed(e, it.valueOrNull) }
+                }
+            }
+        }
+
+        /** Lets the programmes go: asked for again when shown. */
+        fun drop() {
+            fetchedAt = ResourceCache.NEVER
+            state.value = Loadable.Loading
+        }
+
+        override fun patch(transform: (Any) -> Any?): (() -> Unit)? = null
+
+        override fun refresh() {
+            load()
+        }
+
+        override fun markStale() {
+            fetchedAt = ResourceCache.NEVER
+        }
+    }
+
+    private companion object {
+        /** Chunks that keep their programmes: what a guide shows and either side of it, and a little more. */
+        const val HELD_CHUNKS = 5
+
+        /** A chunk shown again is asked for again when older than this: a source read again says so by an event. */
+        const val GUIDE_STALE_MS = 10 * 60_000L
+
+        /** A programme as the channels' snapshot keeps it: what the cards show. */
+        fun brief(p: LiveProgram) = p.copy(description = null, categories = emptyList(), image = null)
     }
 }

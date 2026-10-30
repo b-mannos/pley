@@ -8,7 +8,7 @@ import app.pley.android.model.LibraryKind
 import app.pley.android.screens.PleyKey
 
 /** The kinds of place the rail goes to. */
-enum class RailSlot { Search, Home, Library, Libraries, Playlists, Collections, NowPlaying, Settings }
+enum class RailSlot { Search, Home, LiveTv, Library, Libraries, Playlists, Collections, NowPlaying, Settings }
 
 /** One rail entry: where it goes, and for a library its name and kind. */
 @Immutable
@@ -25,6 +25,7 @@ data class RailItem(
         get() = when (slot) {
             RailSlot.Search -> PleyIcons.Search
             RailSlot.Home -> PleyIcons.House
+            RailSlot.LiveTv -> PleyIcons.TvMinimal
             RailSlot.Library -> when (libraryKind) {
                 LibraryKind.Movies -> PleyIcons.Clapperboard
                 LibraryKind.Shows -> PleyIcons.Tv
@@ -45,19 +46,32 @@ data class RailItem(
  * Collections. Between the avatar and Settings there is room for seven
  * entries, so with more libraries a "Libraries" entry, which lists them
  * all, takes Collections' place (collections stay on each library's
- * Collections tab). While music has a queue ([nowPlaying]), Now Playing
- * comes last: in Collections' place when the rail is full, else in the
- * last library's (which "Libraries" lists).
+ * Collections tab). Live TV, where it has channels ([liveTv], as the
+ * web's sidebar shows it), comes after Home; while music has a queue
+ * ([nowPlaying]), Now Playing comes last. Each takes room as it is added
+ * ([roomIn]).
  */
-fun railItems(libraries: List<Library>, nowPlaying: Boolean = false): List<RailItem> {
-    val items = mainItems(libraries)
-    if (!nowPlaying) return items
-    val room = when {
-        items.size < MAX_ITEMS -> items
-        items.any { it.slot == RailSlot.Collections } -> items.filter { it.slot != RailSlot.Collections }
-        else -> items - items.last { it.slot == RailSlot.Library }
-    }
-    return room + NowPlayingItem
+fun railItems(libraries: List<Library>, nowPlaying: Boolean = false, liveTv: Boolean = false): List<RailItem> {
+    var items = mainItems(libraries)
+    if (liveTv) items = roomIn(items).let { listOf(it[0], it[1], LiveTvItem) + it.drop(2) }
+    if (nowPlaying) items = roomIn(items) + NowPlayingItem
+    return items
+}
+
+/**
+ * [items] with room for one more: as they are when there is room, else
+ * without Collections, else without the last library ("Libraries" lists
+ * it); with no "Libraries" yet, the last two libraries make way for it.
+ */
+private fun roomIn(items: List<RailItem>): List<RailItem> {
+    if (items.size < MAX_ITEMS) return items
+    if (items.any { it.slot == RailSlot.Collections }) return items.filter { it.slot != RailSlot.Collections }
+    val libraries = items.filter { it.slot == RailSlot.Library }
+    if (items.any { it.slot == RailSlot.Libraries }) return items - libraries.last()
+    val leaving = libraries.takeLast(2)
+    val at = items.indexOf(leaving.first())
+    val kept = items - leaving.toSet()
+    return kept.take(at) + RailItem("libraries", RailSlot.Libraries, PleyKey.Libraries) + kept.drop(at)
 }
 
 private fun mainItems(libraries: List<Library>): List<RailItem> = buildList {
@@ -74,6 +88,9 @@ private fun mainItems(libraries: List<Library>): List<RailItem> = buildList {
         if (first != null) add(RailItem("collections", RailSlot.Collections, PleyKey.Collections(first.id)))
     }
 }
+
+/** Live TV, where it has channels. */
+val LiveTvItem = RailItem("live-tv", RailSlot.LiveTv, PleyKey.LiveTv)
 
 /** Music's Now Playing, while there is music. */
 val NowPlayingItem = RailItem("now-playing", RailSlot.NowPlaying, PleyKey.NowPlaying)

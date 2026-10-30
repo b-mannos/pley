@@ -3,6 +3,7 @@
     <!-- The rail (design spec §2.1). -->
     <string name="tv_shell_rail_search">Search</string>
     <string name="tv_shell_rail_home">Home</string>
+    <string name="tv_shell_rail_live_tv">Live TV</string>
     <string name="tv_shell_rail_libraries">Libraries</string>
     <string name="tv_shell_rail_playlists">Playlists</string>
     <string name="tv_shell_rail_collections">Collections</string>

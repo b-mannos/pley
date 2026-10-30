@@ -46,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -67,11 +68,13 @@ import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.tile.rememberSkeleton
 import app.pley.android.designsystem.tile.skeleton
 import app.pley.android.model.LibraryKind
+import app.pley.android.screens.PleyGraphOwner
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.home.LibrariesEvent
 import app.pley.android.screens.home.LibrariesState
 import app.pley.android.screens.home.LibrariesViewModel
 import app.pley.android.screens.home.LibraryEntry
+import app.pley.android.screens.livetv.LiveTvEntryViewModel
 import app.pley.android.screens.playlists.Playlists
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.EmptyState
@@ -99,6 +102,7 @@ import kotlinx.coroutines.delay
 @Composable
 internal fun PhoneLibrariesScreen(vm: LibrariesViewModel = viewModel(factory = LibrariesViewModel.Factory)) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val live = liveChannels()
     val navigator = LocalPhoneNavigator.current
     val shell = LocalPhoneShell.current
     val resources = LocalResources.current
@@ -150,7 +154,7 @@ internal fun PhoneLibrariesScreen(vm: LibrariesViewModel = viewModel(factory = L
                     ErrorState(stringResource(R.string.home_libraries_failed), s.error, onRetry = vm::refresh)
                 }
                 is LibrariesState.Ready -> when {
-                    s.libraries.isEmpty() -> Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    s.libraries.isEmpty() && live == null -> Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                         EmptyState(
                             stringResource(R.string.home_no_libraries),
                             stringResource(R.string.home_no_libraries_body),
@@ -159,6 +163,9 @@ internal fun PhoneLibrariesScreen(vm: LibrariesViewModel = viewModel(factory = L
                     }
                     inSort -> SortList(s.libraries, list, vm)
                     else -> LazyColumn(state = list, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
+                        if (live != null) {
+                            item(key = "live", contentType = "library") { LiveTvRow(live, onClick = { navigator.open(PleyKey.LiveTv) }) }
+                        }
                         items(s.libraries, key = { it.library.id }, contentType = { "library" }) { entry ->
                             LibraryRow(entry, onClick = { navigator.open(PleyKey.Library(entry.library.id)) })
                         }
@@ -194,6 +201,50 @@ private fun LibraryRow(entry: LibraryEntry, onClick: () -> Unit) {
         } else {
             Icon(PleyIcons.ChevronRight, contentDescription = null, size = 20.dp, tint = PleyColors.Muted)
         }
+    }
+}
+
+/**
+ * How many channels Live TV has, when it shows (the web's sidebar entry:
+ * open to this profile and with channels); `null` otherwise, or while
+ * unknown. Graphs without Live TV (the shell's tests) have none.
+ */
+@Composable
+private fun liveChannels(): Int? {
+    if (LocalContext.current.applicationContext !is PleyGraphOwner) return null
+    val vm: LiveTvEntryViewModel = viewModel(factory = LiveTvEntryViewModel.Factory)
+    val channels by vm.channels.collectAsStateWithLifecycle()
+    return channels?.takeIf { it > 0 }
+}
+
+/** Live TV, first in the list: the TV icon's tile, then "Live TV" over how many channels it has. */
+@Composable
+private fun LiveTvRow(channels: Int, onClick: () -> Unit) {
+    val metrics = LocalPhoneMetrics.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(start = metrics.marginStart, end = metrics.marginEnd, top = 12.dp, bottom = 12.dp)
+            .testTag(LIBRARIES_LIVE_TV),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(40.dp).background(PleyColors.Surface3, IconShape), contentAlignment = Alignment.Center) {
+            Icon(PleyIcons.TvMinimal, contentDescription = null, size = 22.dp, tint = PleyColors.Fg)
+        }
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text(stringResource(R.string.livetv_title), style = MaterialTheme.typography.titleMedium, color = PleyColors.Fg, maxLines = 1)
+            Text(
+                if (channels == 1) stringResource(R.string.livetv_entry_one_channel) else stringResource(R.string.livetv_entry_channels, channels),
+                style = MaterialTheme.typography.bodyMedium,
+                color = PleyColors.Muted,
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Icon(PleyIcons.ChevronRight, contentDescription = null, size = 20.dp, tint = PleyColors.Muted)
     }
 }
 
@@ -356,6 +407,7 @@ internal fun kindIcon(kind: LibraryKind): PleyIcon = when (kind) {
 
 /** The sorted list, and a library's row and handle in it (+ its id). */
 internal const val LIBRARIES_SORT = "libraries_sort"
+internal const val LIBRARIES_LIVE_TV = "libraries_live_tv"
 internal const val LIBRARY_SORT_ROW = "library_sort_row_"
 internal const val LIBRARY_HANDLE = "library_handle_"
 

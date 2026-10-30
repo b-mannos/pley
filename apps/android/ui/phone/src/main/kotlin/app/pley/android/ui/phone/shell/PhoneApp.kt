@@ -91,6 +91,7 @@ import app.pley.android.ui.phone.kit.ToastHost
 import app.pley.android.ui.phone.library.libraryEntries
 import app.pley.android.ui.phone.music.musicEntries
 import app.pley.android.ui.phone.onboarding.onboardingEntries
+import app.pley.android.ui.phone.livetv.liveTvEntries
 import app.pley.android.ui.phone.playlists.playlistsEntries
 import app.pley.android.ui.phone.search.searchEntries
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
@@ -226,6 +227,7 @@ private fun shellEntries(): (NavKey) -> NavEntry<NavKey> {
         itemEntries()
         searchEntries()
         playlistsEntries()
+        liveTvEntries()
         accountEntries()
         musicEntries()
     }

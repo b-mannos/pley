@@ -33,5 +33,17 @@
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
             android:theme="@style/Theme.PleyPhone.Player" />
+
+        <!--
+          The live player (Live TV), as the player: through rotation and the
+          rest, landscape on phones in code, into picture in picture.
+        -->
+        <activity
+            android:name=".livetv.LivePlayerActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:exported="false"
+            android:resizeableActivity="true"
+            android:supportsPictureInPicture="true"
+            android:theme="@style/Theme.PleyPhone.Player" />
     </application>
 </manifest>

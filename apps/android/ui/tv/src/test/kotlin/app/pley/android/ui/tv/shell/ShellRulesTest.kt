@@ -6,6 +6,7 @@ import app.pley.android.model.LibraryKind
 import app.pley.android.screens.PleyKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** The start gate (tv-addendum §3.3) and what the rail lists (design spec §2.1). */
@@ -69,6 +70,34 @@ class ShellRulesTest {
         )
         val items = railItems(libraries(3), nowPlaying = true)
         assertEquals("now-playing", railCurrent(PleyKey.NowPlaying, items))
+    }
+
+    @Test
+    fun liveTvComesAfterHomeAndMakesRoomAsNowPlayingDoes() {
+        assertEquals(
+            "in Collections' place",
+            listOf("search", "home", "live-tv", "library:1", "library:2", "library:3", "playlists"),
+            railItems(libraries(3), liveTv = true).map { it.id },
+        )
+        assertEquals(
+            "in the last library's, which Libraries lists",
+            listOf("search", "home", "live-tv", "library:1", "library:2", "libraries", "playlists"),
+            railItems(libraries(5), liveTv = true).map { it.id },
+        )
+        assertEquals(
+            "with Now Playing too, two libraries make way for Libraries",
+            listOf("search", "home", "live-tv", "library:1", "libraries", "playlists", "now-playing"),
+            railItems(libraries(3), nowPlaying = true, liveTv = true).map { it.id },
+        )
+        assertEquals(
+            "without libraries",
+            listOf("search", "home", "live-tv", "playlists"),
+            railItems(emptyList(), liveTv = true).map { it.id },
+        )
+        for (n in 0..6) {
+            for (music in listOf(false, true)) assertTrue(railItems(libraries(n), music, liveTv = true).size <= MAX_ITEMS)
+        }
+        assertEquals("live-tv", railCurrent(PleyKey.LiveTv, railItems(libraries(2), liveTv = true)))
     }
 
     @Test

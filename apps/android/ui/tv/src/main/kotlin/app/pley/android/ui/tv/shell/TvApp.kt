@@ -74,6 +74,7 @@ import app.pley.android.ui.tv.kit.railOnLeftStopOnRight
 import app.pley.android.ui.tv.library.libraryEntries
 import app.pley.android.ui.tv.music.musicEntries
 import app.pley.android.ui.tv.onboarding.onboardingEntries
+import app.pley.android.ui.tv.livetv.liveTvEntries
 import app.pley.android.ui.tv.playlists.playlistsEntries
 import app.pley.android.ui.tv.search.searchEntries
 import app.pley.android.ui.tv.theme.TvTheme
@@ -141,7 +142,12 @@ private fun TvShell(
         withFrameNanos { }
         source.music.collect { value = it }
     }
-    val items = remember(libraries, music) { railItems(libraries, nowPlaying = music) }
+    // Live TV too: its summary is a snapshot, read in a moment.
+    val liveTv by produceState(false, source) {
+        withFrameNanos { }
+        source.liveTv.collect { value = it }
+    }
+    val items = remember(libraries, music, liveTv) { railItems(libraries, nowPlaying = music, liveTv = liveTv) }
     val content = remember { FocusRequester() }
     val rail = remember { RailState(content) }
     val offline = remember { TvOfflineState() }
@@ -235,6 +241,7 @@ private fun TvShell(
                         itemEntries()
                         searchEntries()
                         playlistsEntries()
+                        liveTvEntries()
                         accountEntries()
                         musicEntries()
                     },

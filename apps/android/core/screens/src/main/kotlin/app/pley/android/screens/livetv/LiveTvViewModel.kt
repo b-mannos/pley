@@ -153,7 +153,9 @@ class LiveTvViewModel(private val deps: LiveTvDeps, private val saved: SavedStat
             var asked = 0L
             combine(now, channels) { t, load -> t to load.valueOrNull.orEmpty() }.collect { (t, list) ->
                 val ended = list.any { c -> c.now?.let { it.stop <= t } == true }
-                if (ended && deps.clock() - asked > REFRESH_FLOOR_MS) {
+                // A big lineup is megabytes to read again: what's on falls back on what was next meanwhile.
+                val floor = if (list.size > BIG_LINEUP) BIG_REFRESH_FLOOR_MS else REFRESH_FLOOR_MS
+                if (ended && deps.clock() - asked > floor) {
                     asked = deps.clock()
                     deps.live.refresh()
                 }
@@ -241,6 +243,10 @@ class LiveTvViewModel(private val deps: LiveTvDeps, private val saved: SavedStat
 
         /** What's on is asked for again at most this often. */
         const val REFRESH_FLOOR_MS = 60_000L
+
+        /** At most this often for a lineup bigger than [BIG_LINEUP]. */
+        const val BIG_REFRESH_FLOOR_MS = 10 * 60_000L
+        const val BIG_LINEUP = 2_000
 
         private const val CHUNK = LiveTvRepository.GUIDE_CHUNK_S / 2
         private const val VIEW = "live.view"

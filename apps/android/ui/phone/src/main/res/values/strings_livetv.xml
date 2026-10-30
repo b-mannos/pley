@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Live TV's page (apps/web/src/pages/livetv/LiveTvPage.tsx). -->
+    <string name="livetv_title">Live TV</string>
+    <string name="livetv_entry_channels">%1$d channels</string>
+    <string name="livetv_entry_one_channel">1 channel</string>
+    <string name="livetv_show_guide">Show the guide</string>
+    <string name="livetv_show_channels">Show the channels</string>
+    <string name="livetv_search">Find a channel or what\'s on</string>
+    <string name="livetv_search_clear">Clear</string>
+    <string name="livetv_all">All</string>
+    <string name="livetv_favorites">Favourites</string>
+    <string name="livetv_recent">Recently watched</string>
+    <string name="livetv_failed">Live TV didn\'t load</string>
+    <string name="livetv_not_allowed_title">Live TV isn\'t open to this profile</string>
+    <string name="livetv_not_allowed_body">An administrator can open it in Pley\'s web app, under Settings → Live TV.</string>
+    <string name="livetv_none_title">No channels yet</string>
+    <string name="livetv_none_body">Channels appear here once an administrator adds an IPTV provider in Pley\'s web app.</string>
+    <string name="livetv_no_match_title">No channels match</string>
+    <string name="livetv_no_match_search">Nothing called “%1$s” here.</string>
+    <string name="livetv_no_match_group">No channels in this group.</string>
+    <string name="livetv_show_every_channel">Show every channel</string>
+    <string name="livetv_favorite_failed">The favourite wasn\'t saved: %1$s</string>
+
+    <!-- What's on. -->
+    <string name="livetv_nothing_now">Nothing in the guide now</string>
+    <string name="livetv_no_guide">No guide for this channel</string>
+    <string name="livetv_no_info">No information for this time</string>
+    <string name="livetv_next">Next %1$s · %2$s</string>
+    <string name="livetv_span">%1$s – %2$s</string>
+    <string name="livetv_minutes_left">%1$d min left</string>
+    <string name="livetv_hours_left">%1$d h left</string>
+    <string name="livetv_hours_minutes_left">%1$d h %2$d min left</string>
+    <string name="livetv_today">Today</string>
+    <string name="livetv_tomorrow">Tomorrow</string>
+    <string name="livetv_yesterday">Yesterday</string>
+    <string name="livetv_now">Now</string>
+    <string name="livetv_badge_live">Live</string>
+    <string name="livetv_badge_new">New</string>
+    <string name="livetv_on_now">On now</string>
+    <string name="livetv_watch">Watch %1$s</string>
+    <string name="livetv_watch_with_now">Watch %1$s, now: %2$s</string>
+    <string name="livetv_guide">TV guide</string>
+
+    <!-- A programme's details (ProgramModal.tsx). -->
+    <string name="livetv_watch_now">Watch now</string>
+    <string name="livetv_watch_channel">Watch channel</string>
+    <string name="livetv_favorite_add">Add to favourites</string>
+    <string name="livetv_favorite_remove">Remove from favourites</string>
+    <string name="livetv_favorite_on">Favourite</string>
+    <string name="livetv_no_description">The guide says nothing more of it.</string>
+    <string name="livetv_ended">It has ended.</string>
+
+    <!-- The live player (apps/web/src/player/live/LivePlayerPage.tsx). -->
+    <string name="live_player_back">Back</string>
+    <string name="live_player_tuning">Tuning…</string>
+    <string name="live_player_channels">Channels</string>
+    <string name="live_player_channel_up">Channel up</string>
+    <string name="live_player_channel_down">Channel down</string>
+    <string name="live_player_play">Play</string>
+    <string name="live_player_pause">Pause</string>
+    <string name="live_player_back_10">Back 10 seconds</string>
+    <string name="live_player_forward_10">Forward 10 seconds</string>
+    <string name="live_player_live">Live</string>
+    <string name="live_player_go_live">Go live</string>
+    <string name="live_player_behind">−%1$s</string>
+    <string name="live_player_window">−%1$d min</string>
+    <string name="live_player_position">Position</string>
+    <string name="live_player_radio">Sound only</string>
+    <string name="live_player_no_channel">No channel %1$s</string>
+    <string name="live_player_all_channels">All channels</string>
+    <string name="live_player_favorites_only">Favourites</string>
+    <string name="live_player_find_channel">Find a channel</string>
+    <string name="live_player_retry">Try again</string>
+    <string name="live_player_other_channels">Other channels</string>
+    <string name="live_player_back_to_guide">Back to the guide</string>
+    <string name="live_player_busy">All connections are in use</string>
+    <string name="live_player_stopped">Watching stopped</string>
+    <string name="live_player_missing">This channel isn\'t here any more</string>
+    <string name="live_player_not_allowed">Live TV isn\'t open to this profile</string>
+    <string name="live_player_unavailable">%1$s isn\'t playing</string>
+    <string name="live_player_offline">Can\'t reach your server</string>
+    <string name="live_player_failed">%1$s didn\'t start</string>
+</resources>

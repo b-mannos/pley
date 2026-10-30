@@ -14,5 +14,13 @@
             android:supportsPictureInPicture="false"
             android:exported="false"
             android:theme="@style/Theme.PleyTv.Player" />
+
+        <!-- The live player (Live TV), as the player: never rebuilt mid-channel, never in picture in picture. -->
+        <activity
+            android:name=".livetv.TvLivePlayerActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode"
+            android:supportsPictureInPicture="false"
+            android:exported="false"
+            android:theme="@style/Theme.PleyTv.Player" />
     </application>
 </manifest>

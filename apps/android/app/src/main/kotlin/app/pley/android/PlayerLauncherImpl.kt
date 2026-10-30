@@ -6,13 +6,16 @@ import app.pley.android.common.DeviceProfile
 import app.pley.android.player.PlayRequest
 import app.pley.android.player.PlayerGraph
 import app.pley.android.screens.PlayerLauncher
+import app.pley.android.ui.phone.livetv.LivePlayerActivity
 import app.pley.android.ui.phone.player.PhonePlayerActivity
+import app.pley.android.ui.tv.livetv.TvLivePlayerActivity
 import app.pley.android.ui.tv.player.TvPlayerActivity
 
 /**
  * Starts playback: the request goes out first, so the server answers
  * while the player screen opens; music pauses; then the phone's or the
- * TV's player.
+ * TV's player. Live TV opens the phone's or the TV's live player, which
+ * tunes the channel itself.
  */
 class PlayerLauncherImpl(
     private val context: Context,
@@ -24,6 +27,12 @@ class PlayerLauncherImpl(
         val key = graph.services.prepare(request)
         graph.music.pauseForVideo()
         val screen = if (device.isTv) TvPlayerActivity.intent(context, key) else PhonePlayerActivity.intent(context, key)
+        context.startActivity(screen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    override fun watchLive(channelId: Long) {
+        player().music.pauseForVideo()
+        val screen = if (device.isTv) TvLivePlayerActivity.intent(context, channelId) else LivePlayerActivity.intent(context, channelId)
         context.startActivity(screen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }
