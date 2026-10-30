@@ -46,7 +46,9 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -60,8 +62,11 @@ sealed interface RequestsState {
     /** Not known yet: starting, or the server never answered. */
     data object Unknown : RequestsState
 
-    /** None of it shows: requests are off, the server is older, or the account may do nothing with them. */
+    /** None of it shows: requests are off, or the server is older. */
     data object Hidden : RequestsState
+
+    /** None of it shows either: requests are on, but this account may not ask, and has no requests. */
+    data object NoAccess : RequestsState
 
     /** Discover shows only "Sign in again to ask for movies and shows": this sign-in came before requests. */
     data class SignInAgain(val summary: RequestSummary) : RequestsState
@@ -76,7 +81,7 @@ sealed interface RequestsState {
             !summary.enabled -> Hidden
             summary.signInAgain == RequestScope.Requests && summary.discover -> SignInAgain(summary)
             summary.discover || summary.requestsEntry -> Open(summary)
-            else -> Hidden
+            else -> NoAccess
         }
     }
 }
@@ -86,7 +91,7 @@ val RequestsState.summary: RequestSummary?
     get() = when (this) {
         is RequestsState.Open -> summary
         is RequestsState.SignInAgain -> summary
-        RequestsState.Hidden, RequestsState.Unknown -> null
+        RequestsState.Hidden, RequestsState.NoAccess, RequestsState.Unknown -> null
     }
 
 /** Asking works from here now: Discover's rows, search's "On TMDB", title pages' Request. */
@@ -194,11 +199,11 @@ interface RequestsRepository {
     /** Asks for [request] (or follows the requests that ask for it already). */
     suspend fun ask(request: NewRequest): Asked
 
-    /** Withdraws this account's request; managers delete anyone's. */
-    suspend fun delete(id: Long)
+    /** Withdraws this account's [request] (Remove, on a declined one); managers delete anyone's. */
+    suspend fun delete(request: MediaRequest)
 
-    /** Stops following someone else's request. */
-    suspend fun unwatch(id: Long)
+    /** Stops following someone else's [request]. */
+    suspend fun unwatch(request: MediaRequest)
 
     suspend fun approve(id: Long, approval: Approval = Approval()): MediaRequest
 
@@ -222,6 +227,36 @@ interface RequestsRepository {
     companion object {
         /** Notices kept while they can't show. */
         const val KEPT = 3
+
+        /** Requests that never show: graphs made without them (tests of other screens, previews). */
+        val None: RequestsRepository = object : RequestsRepository {
+            override val state: StateFlow<RequestsState> = MutableStateFlow(RequestsState.Hidden).asStateFlow()
+            override val changes: Flow<RequestChange> = emptyFlow()
+            override val notices: StateFlow<List<RequestNotice>> = MutableStateFlow(emptyList<RequestNotice>()).asStateFlow()
+
+            override fun start() = Unit
+            override fun refresh() = Unit
+            override fun row(list: DiscoverList): Flow<Loadable<DiscoverPage>> = flowOf(Loadable.Failed(off()))
+            override suspend fun page(list: DiscoverList, page: Int): DiscoverPage = throw off()
+            override suspend fun search(query: String, page: Int, missing: Boolean): DiscoverPage = throw off()
+            override fun title(kind: TitleKind, tmdbId: Long): Flow<Loadable<DiscoverDetail>> = flowOf(Loadable.Failed(off()))
+            override fun refreshTitle(kind: TitleKind, tmdbId: Long) = Unit
+            override suspend fun itemRequest(itemId: Long): ItemRequest? = null
+            override suspend fun list(query: RequestQuery): RequestList = throw off()
+            override suspend fun request(id: Long): MediaRequest? = null
+            override suspend fun ask(request: NewRequest): Asked = throw off()
+            override suspend fun delete(request: MediaRequest) = throw off()
+            override suspend fun unwatch(request: MediaRequest) = throw off()
+            override suspend fun approve(id: Long, approval: Approval): MediaRequest = throw off()
+            override suspend fun decline(id: Long, reason: String?): MediaRequest = throw off()
+            override suspend fun handled(id: Long): MediaRequest = throw off()
+            override suspend fun options(): RequestOptions = RequestOptions()
+            override suspend fun seen() = Unit
+            override fun dismiss(notice: RequestNotice) = Unit
+
+            /** What a server with requests off answers. */
+            private fun off() = ApiException(503, "unavailable", "Requests are off")
+        }
     }
 }
 
@@ -500,27 +535,26 @@ internal class ServerRequests(
             if (e.status == 409) refreshTitle(request.kind, request.tmdbId)
             throw e
         }
-        acted(request.kind, request.tmdbId)
+        acted(asked.request)
         return asked
     }
 
-    override suspend fun delete(id: Long) {
-        api().deleteRequest(id)
-        acted(null, null)
+    override suspend fun delete(request: MediaRequest) {
+        api().deleteRequest(request.id)
+        acted(request)
     }
 
-    override suspend fun unwatch(id: Long) {
-        api().unwatchRequest(id)
-        acted(null, null)
+    override suspend fun unwatch(request: MediaRequest) {
+        api().unwatchRequest(request.id)
+        acted(request)
     }
 
-    override suspend fun approve(id: Long, approval: Approval): MediaRequest =
-        api().approveRequest(id, approval).also { acted(it.kind, it.tmdbId) }
+    override suspend fun approve(id: Long, approval: Approval): MediaRequest = api().approveRequest(id, approval).also(::acted)
 
     override suspend fun decline(id: Long, reason: String?): MediaRequest =
-        api().declineRequest(id, Decline(reason?.trim()?.takeIf { it.isNotEmpty() })).also { acted(it.kind, it.tmdbId) }
+        api().declineRequest(id, Decline(reason?.trim()?.takeIf { it.isNotEmpty() })).also(::acted)
 
-    override suspend fun handled(id: Long): MediaRequest = api().requestHandled(id).also { acted(it.kind, it.tmdbId) }
+    override suspend fun handled(id: Long): MediaRequest = api().requestHandled(id).also(::acted)
 
     override suspend fun options(): RequestOptions = api().requestOptions()
 
@@ -536,10 +570,15 @@ internal class ServerRequests(
         }
     }
 
-    /** Something changed here: the summary now (counts, what's left), and the title's page. */
-    private fun acted(kind: TitleKind?, tmdbId: Long?) {
+    /**
+     * [request] changed here: the summary is read now (counts, what's
+     * left), the title's page too, and the screens hear of it at once,
+     * before the server's event comes.
+     */
+    private fun acted(request: MediaRequest) {
         refresh()
-        if (kind != null && tmdbId != null) refreshTitle(kind, tmdbId)
+        refreshTitle(request.kind, request.tmdbId)
+        _changes.tryEmit(RequestChange(request.id, request.kind, request.tmdbId))
     }
 
     private suspend fun api(): PleyApi = cache.api(cache.profile())

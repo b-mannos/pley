@@ -51,8 +51,8 @@ interface DataGraph {
     val liveUpdates: LiveUpdates
     val settings: AppSettings
 
-    /** Requests and Discover: movies and shows found on TMDB, asked for and followed. */
-    val requests: RequestsRepository
+    /** Requests and Discover: movies and shows found on TMDB, asked for and followed (none unless the graph has them). */
+    val requests: RequestsRepository get() = RequestsRepository.None
 
     /** How each library was left on this device (nothing kept unless the graph keeps it). */
     val libraryViews: LibraryViews get() = LibraryViews.None

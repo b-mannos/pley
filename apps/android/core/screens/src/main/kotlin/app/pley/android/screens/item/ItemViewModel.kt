@@ -12,27 +12,35 @@ import app.pley.android.data.DataGraph
 import app.pley.android.data.Loadable
 import app.pley.android.data.PlayTarget
 import app.pley.android.data.map
+import app.pley.android.data.mayAsk
+import app.pley.android.data.summary
 import app.pley.android.data.valueOrNull
 import app.pley.android.model.ItemDetail
 import app.pley.android.model.ItemKind
+import app.pley.android.model.ItemRequest
 import app.pley.android.model.ItemSummary
 import app.pley.android.network.ApiException
 import app.pley.android.player.PlayRequest
 import app.pley.android.screens.PlayerLauncher
 import app.pley.android.screens.PleyKey
+import app.pley.android.screens.requests.ItemRequestState
 import app.pley.android.screens.screensGraph
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -67,7 +75,7 @@ sealed interface ItemEvent {
  * Watched marks, ratings and My List show at once and are undone if the server
  * refuses.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 class ItemViewModel(
     private val data: DataGraph,
     private val launcher: PlayerLauncher,
@@ -185,12 +193,62 @@ class ItemViewModel(
         }
     }
 
-    /** The page first drew its content: the end of [TraceNames.NAV_ITEM]. */
+    /**
+     * The page first drew its content: the end of [TraceNames.NAV_ITEM],
+     * and what requests say of it may be asked now.
+     */
     fun onShown() {
+        endTrace()
+        drawn.value = true
+    }
+
+    private fun endTrace() {
         if (traced) {
             traced = false
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Trace.endAsyncSection(TraceNames.NAV_ITEM, itemId.toInt())
         }
+    }
+
+    /** The page has drawn ([onShown]): until then nothing is asked of requests. */
+    private val drawn = MutableStateFlow(false)
+
+    /**
+     * What requests say of this movie or show (requests-v2 §6): asked for
+     * once the page has drawn, never before, and only when the person may
+     * ask or has requests; read again when one of its requests changes.
+     * `null`: nothing to show (not a movie or show, no TMDB match, or
+     * requests don't apply).
+     */
+    val request: StateFlow<ItemRequestState?> = combine(
+        drawn,
+        data.requests.state,
+        data.items.detail(itemId).map { it.valueOrNull?.kind }.distinctUntilChanged(),
+    ) { shown, gate, kind ->
+        val wanted = gate.mayAsk || gate.summary?.let { it.own > 0 && it.yourRequests } == true
+        if (shown && wanted && (kind == ItemKind.Movie || kind == ItemKind.Show)) RequestGate(gate.mayAsk, gate.summary?.manage == true) else null
+    }
+        .distinctUntilChanged()
+        .flatMapLatest { gate -> if (gate == null) flowOf(null) else itemRequests(gate) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_MS), null)
+
+    private data class RequestGate(val mayAsk: Boolean, val manage: Boolean)
+
+    private fun itemRequests(gate: RequestGate): Flow<ItemRequestState?> = flow {
+        val first = readItemRequest() ?: return@flow emit(null)
+        emit(ItemRequestState.of(first, gate.mayAsk, gate.manage))
+        data.requests.changes
+            .filter { it.about(first.kind, first.tmdbId) || (it.requestId != null && it.requestId == first.request?.id) }
+            .debounce(REQUEST_CHANGES_MS)
+            .collect { readItemRequest()?.let { emit(ItemRequestState.of(it, gate.mayAsk, gate.manage)) } }
+    }
+
+    private suspend fun readItemRequest(): ItemRequest? = try {
+        data.requests.itemRequest(itemId)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        // An extra: the page shows without it.
+        null
     }
 
     /** Loads the page again after it failed. */
@@ -310,7 +368,7 @@ class ItemViewModel(
     }
 
     override fun onCleared() {
-        onShown()
+        endTrace()
     }
 
     private data class Shape(val kind: ItemKind, val parentId: Long?)
@@ -327,6 +385,9 @@ class ItemViewModel(
     companion object {
         /** Keeps loading this long after the page stops showing (rotation, a quick look elsewhere). */
         const val STOP_MS = 5_000L
+
+        /** Request events gathered before the item's request is read again. */
+        const val REQUEST_CHANGES_MS = 500L
 
         /** The page of [itemId], made with the app's graph. */
         fun factory(itemId: Long): ViewModelProvider.Factory = viewModelFactory {

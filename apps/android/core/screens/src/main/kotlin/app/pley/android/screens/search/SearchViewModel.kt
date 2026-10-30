@@ -5,7 +5,10 @@ package app.pley.android.screens.search
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.pley.android.data.Loadable
+import app.pley.android.data.RequestsRepository
 import app.pley.android.data.SearchRepository
+import app.pley.android.data.mayAsk
+import app.pley.android.model.DiscoverTitle
 import app.pley.android.model.ItemKind
 import app.pley.android.model.ItemSummary
 import app.pley.android.model.LiveChannel
@@ -17,7 +20,9 @@ import app.pley.android.screens.ScreensGraph
 import app.pley.android.screens.library.LibraryViewModel
 import app.pley.android.screens.library.TileFactory
 import app.pley.android.screens.library.TileLook
+import app.pley.android.screens.requests.patchFor
 import java.util.IdentityHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -31,6 +36,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -41,19 +47,33 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * What search reads: the server's answers, recent searches, and the
- * server's address for pictures; [launcher] plays a Live TV channel found.
+ * What search reads: the server's answers, recent searches, the server's
+ * address for pictures, and [requests] for what TMDB has beside them;
+ * [launcher] plays a Live TV channel found.
  */
 class SearchDeps(
     val search: SearchRepository,
     val origin: Flow<String?>,
     val compute: CoroutineDispatcher = Dispatchers.Default,
     val launcher: PlayerLauncher? = null,
+    val requests: RequestsRepository = RequestsRepository.None,
 ) {
     companion object {
         fun of(graph: ScreensGraph): SearchDeps =
-            SearchDeps(graph.data.search, graph.data.servers.active, launcher = graph.playerLauncher)
+            SearchDeps(graph.data.search, graph.data.servers.active, launcher = graph.playerLauncher, requests = graph.data.requests)
     }
+}
+
+/**
+ * "On TMDB" (requests-v2 §6): the first of TMDB's titles for the query
+ * that no library has, after the libraries' results, while asking works.
+ */
+sealed interface TmdbSection {
+    data object Hidden : TmdbSection
+
+    data class Loading(val query: String) : TmdbSection
+
+    data class Ready(val query: String, val titles: List<DiscoverTitle>) : TmdbSection
 }
 
 /**
@@ -188,6 +208,41 @@ class SearchViewModel<T : Any>(
         SearchUiState(q, recent, results)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_AFTER_MS), SearchUiState(initialQuery, emptyList(), SearchResultsState.Idle))
 
+    /**
+     * "On TMDB", asked for beside the libraries' search, never before it
+     * nor holding it up: TMDB's first titles that no library has
+     * (`missing=1`), their badges following requests_changed. Hidden
+     * when asking doesn't work, TMDB has none, or it didn't answer.
+     */
+    val tmdb: StateFlow<TmdbSection> = combine(
+        typed.map { it.trim() }.distinctUntilChanged().debounce { if (it.isEmpty()) 0L else DEBOUNCE_MS },
+        deps.requests.state.map { it.mayAsk }.distinctUntilChanged(),
+    ) { q, asking -> if (asking) q else "" }
+        .distinctUntilChanged()
+        .flatMapLatest { q -> if (q.isEmpty()) flowOf(TmdbSection.Hidden) else onTmdb(q) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_AFTER_MS), TmdbSection.Hidden)
+
+    private fun onTmdb(q: String): Flow<TmdbSection> = flow {
+        emit(TmdbSection.Loading(q))
+        var titles = try {
+            deps.requests.search(q, 1, missing = true).results.distinctBy { "${it.kind.wire}:${it.tmdbId}" }.take(TMDB_SHOWN)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            emptyList()
+        }
+        if (titles.isEmpty()) {
+            emit(TmdbSection.Hidden)
+            return@flow
+        }
+        emit(TmdbSection.Ready(q, titles))
+        deps.requests.changes.collect { change ->
+            val patch = deps.requests.patchFor(change, titles.asSequence()) ?: return@collect
+            titles = titles.map(patch)
+            emit(TmdbSection.Ready(q, titles))
+        }
+    }
+
     /** The field changed. */
     fun onQueryChange(text: String) {
         typed.value = text
@@ -316,6 +371,9 @@ class SearchViewModel<T : Any>(
 
         /** How long the results keep being followed after the page stops showing. */
         const val STOP_AFTER_MS = 5_000L
+
+        /** How many of TMDB's titles "On TMDB" shows; See all on Discover has the rest. */
+        const val TMDB_SHOWN = 12
 
         /**
          * [results] in their groups and the groups' order (people, movies,

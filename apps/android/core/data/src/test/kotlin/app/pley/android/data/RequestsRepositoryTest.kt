@@ -64,7 +64,7 @@ class RequestsRepositoryTest {
         data.api.answer("requestSummary", off.copy(own = 0))
         requests.refresh()
         testScheduler.runCurrent()
-        assertEquals(RequestsState.Hidden, requests.state.value)
+        assertEquals(RequestsState.NoAccess, requests.state.value)
     }
 
     @Test
@@ -256,6 +256,7 @@ class RequestsRepositoryTest {
         val data = signedIn(folder.newFolder())
         val requests = data.graph.requests
         val title = collect(requests.title(TitleKind.Movie, 1184918))
+        val changes = collect(requests.changes)
         testScheduler.runCurrent()
         val reads = data.api.calls("discoverTitle").size
         val summaries = data.api.calls("requestSummary").size
@@ -265,6 +266,21 @@ class RequestsRepositoryTest {
         assertEquals(reads + 1, data.api.calls("discoverTitle").size)
         assertEquals(summaries + 1, data.api.calls("requestSummary").size)
         assertEquals("The Wild Robot", title.last().valueOrNull?.title)
+        // The screens hear of it at once, before the server's event.
+        assertEquals(listOf(RequestChange(asked.request.id, TitleKind.Movie, 1184918)), changes)
+    }
+
+    @Test
+    fun `withdrawing tells the screens which title changed`() = runTest {
+        val data = signedIn(folder.newFolder())
+        val requests = data.graph.requests
+        val changes = collect(requests.changes)
+        testScheduler.runCurrent()
+        val pending = requests.list(RequestQuery()).requests.first { it.id == 44L }
+        requests.delete(pending)
+        testScheduler.runCurrent()
+        assertEquals(listOf(44L), data.api.calls("deleteRequest").map { it.args.single() })
+        assertEquals(listOf(RequestChange(44, pending.kind, pending.tmdbId)), changes)
     }
 
     @Test
