@@ -35,6 +35,11 @@ function fixture() {
     mkdirSync(dirname(join(dir, f)), { recursive: true });
     cpSync(join(ROOT, f), join(dir, f));
   }
+  // Each changelog as just after a release, whatever the repository's own say now.
+  for (const u of Object.values(UNITS)) {
+    const path = join(dir, u.changelog);
+    writeFileSync(path, readFileSync(path, "utf8").replace(/## \[Unreleased\]\n[\s\S]*?(?=\n## \[)/, "## [Unreleased]\n"));
+  }
   const git = (...args) =>
     execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", ...args], {
       cwd: dir,
