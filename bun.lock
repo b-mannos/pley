@@ -71,7 +71,7 @@
     },
     "apps/webos": {
       "name": "pley-webos",
-      "version": "0.0.1",
+      "version": "0.1.0",
       "dependencies": {
         "pley-tv": "*",
       },
