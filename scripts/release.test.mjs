@@ -35,10 +35,11 @@ function fixture() {
     mkdirSync(dirname(join(dir, f)), { recursive: true });
     cpSync(join(ROOT, f), join(dir, f));
   }
-  // Each changelog as just after a release, whatever the repository's own say now.
-  for (const u of Object.values(UNITS)) {
+  // Every unit as just after its 0.0.1, whatever the repository's own versions and changelogs say now.
+  for (const [name, u] of Object.entries(UNITS)) {
+    write(planSet(name, "0.0.1", dir), dir);
     const path = join(dir, u.changelog);
-    writeFileSync(path, readFileSync(path, "utf8").replace(/## \[Unreleased\]\n[\s\S]*?(?=\n## \[)/, "## [Unreleased]\n"));
+    writeFileSync(path, readFileSync(path, "utf8").replace(/## \[Unreleased\]\n[\s\S]*?(?=\n## \[0\.0\.1\])/, "## [Unreleased]\n"));
   }
   const git = (...args) =>
     execFileSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false", ...args], {
@@ -273,7 +274,9 @@ describe("release", () => {
     for (const unit of UNIT_NAMES) {
       const out = spawnSync("bun", [join(ROOT, "scripts/release.mjs"), unit, "notes"], { encoding: "utf8" });
       expect(out.status).toBe(0);
-      expect(out.stdout).toStartWith("### Added\n\n- First release with a version of its own");
+      const changelog = readFileSync(join(ROOT, UNITS[unit].changelog), "utf8");
+      expect(out.stdout.trimEnd()).toBe(notes(changelog, versionOf(unit)));
+      expect(out.stdout).toStartWith("### ");
     }
     const missing = spawnSync("bun", [join(ROOT, "scripts/release.mjs"), "kodi", "notes", "9.9.9"], { encoding: "utf8" });
     expect(missing.status).toBe(2);
