@@ -320,9 +320,14 @@ function LivePlayer({
           enableWorker: true,
           enableStashBuffer: false,
           lazyLoad: false,
-          liveBufferLatencyChasing: true,
-          liveBufferLatencyMaxLatency: 3,
-          liveBufferLatencyMinRemain: 0.8,
+          // Never skipped ahead (the picture jumped as a channel started, its
+          // first seconds all coming at once): a few seconds behind live is
+          // fine. Only far behind (stalls adding up) is it caught up, by
+          // playing a little faster.
+          liveSync: true,
+          liveSyncMaxLatency: 30,
+          liveSyncTargetLatency: 10,
+          liveSyncPlaybackRate: 1.1,
         },
       );
       let failed = false;
@@ -356,7 +361,8 @@ function LivePlayer({
       if (Hls?.isSupported()) {
         const hls = new Hls({
           liveSyncDurationCount: 3,
-          liveMaxLatencyDurationCount: 10,
+          // Behind live is caught up a little faster, never by skipping ahead.
+          maxLiveSyncPlaybackRate: 1.1,
           maxBufferLength: 20,
           backBufferLength: 30,
           // The server waits for the channel's first segments before it answers.
