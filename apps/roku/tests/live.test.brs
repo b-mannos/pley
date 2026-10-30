@@ -269,20 +269,6 @@ sub test_live_troubles()
     tkFalse(liveTrouble({ status: 410, message: "the channel was stopped" }, "x").retry, "stopped by an administrator")
 end sub
 
-sub test_live_badge_and_seeking()
-    tkEqual(liveBadge(100, 108, false).text, "LIVE")
-    tkTrue(liveBadge(100, 108, false).live)
-    tkEqual(liveBadge(100, 183, false).text, "−1:23")
-    tkEqual(liveBadge(100, 108, true).text, "−0:08", "paused at the edge")
-    tkEqual(liveBadge(0, 0, false).text, "LIVE", "no window known")
-    tkEqual(liveBadge(0, 0, true).text, "PAUSED")
-    tkEqual(liveBehind(725), "12 min")
-    tkEqual(liveBehind(59.6), "1:00")
-    tkEqual(liveSeekTarget(100, 600, -10), 90)
-    tkEqual(liveSeekTarget(5, 600, -10), 0, "not before the window")
-    tkEqual(liveSeekTarget(590, 600, 10), 594, "not past what plays live")
-end sub
-
 sub test_live_view_kept()
     section = tkRegistrySection()
     key = liveViewKey("http://tv:7539", 2)

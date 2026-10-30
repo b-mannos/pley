@@ -4,9 +4,8 @@
 ' connection; then its live HLS playlist, asked once by the API task
 ' (the server answers it once the channel's first segments are made, and
 ' says plainly why when it can't), then given to the Video node as live
-' content. The Video node's own controls are off (no seek bar on live):
-' play pauses, rewind and fast forward move 10 s within the server's
-' timeshift, and the Live chip says how far behind it is. Up and down
+' content, from its live edge. Live is live: the Video node's own controls
+' are off, and nothing pauses, rewinds or skips. Up and down
 ' change channel within the category the player was opened from, a page
 ' of it at a time (GET /api/live/browse?around=), round its ends. Leaving
 ' sends DELETE /api/live/sessions/{session}, so the connection goes at
@@ -31,8 +30,6 @@ sub init()
     m.bannerFill = m.top.findNode("bannerFill")
     m.bannerNext = m.top.findNode("bannerNext")
     m.bannerHint = m.top.findNode("bannerHint")
-    m.badge = m.top.findNode("badge")
-    m.badgeText = m.top.findNode("badgeText")
     m.star = m.top.findNode("star")
     m.list = m.top.findNode("list")
     m.listTitle = m.top.findNode("listTitle")
@@ -46,7 +43,6 @@ sub init()
     m.toastText = m.top.findNode("toastText")
     m.bannerTimer = m.top.findNode("bannerTimer")
     m.zapTimer = m.top.findNode("zapTimer")
-    m.keepAlive = m.top.findNode("keepAlive")
     m.clock = m.top.findNode("clock")
     m.pictureTimer = m.top.findNode("pictureTimer")
     m.toastTimer = m.top.findNode("toastTimer")
@@ -75,19 +71,16 @@ sub init()
     m.sessionId = ""
     m.playlist = ""
     m.played = false
-    m.paused = false
     ' When the stream was tuned again after breaking (playerMayRestart).
     m.restarts = []
     m.span = CreateObject("roTimespan")
     m.trouble = invalid
     m.video.notificationInterval = 1
     m.video.observeField("state", "onState")
-    m.video.observeField("position", "onPosition")
     m.noticeButtons.observeField("buttonSelected", "onNoticeButton")
     m.channelList.observeField("itemSelected", "onListSelected")
     m.bannerTimer.observeField("fire", "onBannerTimer")
     m.zapTimer.observeField("fire", "onZapTimer")
-    m.keepAlive.observeField("fire", "onKeepAlive")
     m.clock.observeField("fire", "onClock")
     m.pictureTimer.observeField("fire", "onPictureTimer")
     m.toastTimer.observeField("fire", "onToastTimer")
@@ -307,9 +300,7 @@ sub tune(channel as object)
     m.zapTimer.control = "stop"
     m.channel = channel
     m.played = false
-    m.paused = false
     m.trouble = invalid
-    m.keepAlive.control = "stop"
     m.pictureTimer.control = "stop"
     m.video.control = "stop"
     m.notice.visible = false
@@ -331,7 +322,6 @@ end sub
 
 ' DELETE /api/live/sessions/{session}: the connection goes at once.
 sub leave()
-    m.keepAlive.control = "stop"
     if m.sessionId = "" then return
     uiRequest({ method: "DELETE", path: "/api/live/sessions/" + urlEncode(m.sessionId) }, "")
     m.sessionId = ""
@@ -399,29 +389,16 @@ sub onState(event as object)
     state = event.getData()
     showWaiting(state = "buffering" and m.played)
     if state = "playing"
-        m.keepAlive.control = "stop"
-        if not m.played
+            if not m.played
             m.played = true
             m.card.visible = false
             m.tuning.control = "stop"
             ' A channel without pictures (radio) keeps its card.
             m.pictureTimer.control = "start"
-        else if m.paused
-            showBanner(true)
         end if
-        m.paused = false
-        updateBadge()
         return
     end if
-    if state = "paused"
-        m.paused = true
-        ' Paused, the Video node asks for nothing: the server is told the
-        ' channel is still watched.
-        m.keepAlive.control = "start"
-        showBanner(false)
-        m.bannerTimer.control = "stop"
-        updateBadge()
-    else if state = "error" or state = "finished"
+    if state = "error" or state = "finished"
         broken()
     end if
 end sub
@@ -436,42 +413,11 @@ sub showWaiting(shown as boolean)
     end if
 end sub
 
-' Paused for 20 s: the playlist again, so the server keeps the channel.
-sub onKeepAlive()
-    if m.playlist = "" or not m.paused
-        m.keepAlive.control = "stop"
-        return
-    end if
-    uiRequest({ method: "GET", path: m.playlist, timeoutMs: 10000 }, "")
-end sub
-
 sub onPictureTimer()
     if not m.played or m.channel = invalid then return
     video = httpString(m.video.videoFormat)
     audio = httpString(m.video.audioFormat)
     if video = "" and audio <> "" then showCard(m.channel, "radio")
-end sub
-
-sub onPosition()
-    if m.banner.visible then updateBadge()
-end sub
-
-' Play pauses or goes on; rewind and fast forward (and Replay) move 10 s
-' within the timeshift, never nearer the edge than live plays.
-sub playKey(key as string)
-    if not m.played then return
-    if key = "play"
-        if m.paused
-            m.video.control = "resume"
-        else
-            m.video.control = "pause"
-        end if
-        return
-    end if
-    by = 10
-    if key = "rewind" or key = "replay" then by = -10
-    m.video.seek = liveSeekTarget(m.video.position, m.video.duration, by)
-    showBanner(true)
 end sub
 
 ' The stream broke: what the server says of its playlist says what to do.
@@ -545,7 +491,7 @@ end sub
 
 ' The banner: the channel, what's on with when and how long it has left,
 ' how far along, what's next, and the Live chip. With hides, it goes
-' after 5 s (not while paused or behind live).
+' after 5 s.
 sub showBanner(hides as boolean)
     channel = m.zapTo
     if channel = invalid then channel = m.channel
@@ -578,12 +524,11 @@ sub showBanner(hides as boolean)
     if coming <> invalid then m.bannerNext.text = "Next   " + liveClock(coming.start, m.twelve) + "   " + coming.title
     m.star.text = ""
     if channel.favorite then m.star.text = "★ Favourite"
-    m.bannerHint.text = "Up and down: channels   ·   Left: " + m.categoryName + "   ·   Play: pause   ·   Rewind and fast forward: 10 s"
-    updateBadge()
+    m.bannerHint.text = "Up and down: channels   ·   Left: " + m.categoryName + "   ·   OK: close"
     if m.list.visible or m.notice.visible then return
     m.banner.visible = true
     m.bannerTimer.control = "stop"
-    if hides and not m.paused then m.bannerTimer.control = "start"
+    if hides then m.bannerTimer.control = "start"
 end sub
 
 sub hideBanner()
@@ -592,21 +537,7 @@ sub hideBanner()
 end sub
 
 sub onBannerTimer()
-    if m.paused or m.zapTo <> invalid then return
-    if not liveBadge(m.video.position, m.video.duration, false).live then return
-    hideBanner()
-end sub
-
-' LIVE in red at the edge, how far behind in grey otherwise.
-sub updateBadge()
-    badge = liveBadge(m.video.position, m.video.duration, m.paused)
-    if not m.played then badge = { live: true, text: "LIVE" }
-    m.badgeText.text = badge.text
-    if badge.live
-        m.badge.color = "0xEB6B70FF"
-    else
-        m.badge.color = "0x2E3440FF"
-    end if
+    if m.zapTo = invalid then hideBanner()
 end sub
 
 ' Each 15 s: what's on moves on.
@@ -664,7 +595,7 @@ sub finish()
     abandonWatch()
     leave()
     m.video.control = "stop"
-    for each timer in [m.bannerTimer, m.zapTimer, m.keepAlive, m.clock, m.pictureTimer, m.toastTimer]
+    for each timer in [m.bannerTimer, m.zapTimer, m.clock, m.pictureTimer, m.toastTimer]
         timer.control = "stop"
     end for
     if m.channel <> invalid then m.top.getScene().liveChannel = m.channel.id
@@ -674,7 +605,7 @@ end sub
 ' Up and down change channel (Up: the next number); Left opens the
 ' category's channels, Right, OK and the Options key (*) show what's on
 ' (it never shows by itself as a channel starts); play, rewind, fast
-' forward and Replay pause and move within the timeshift. In the list:
+' forward and Replay do nothing. In the list:
 ' the Options key adds to or takes out of the favourites, up and down past
 ' its ends go to the page before or after, Back and Right close it. Back
 ' with the banner showing hides it; otherwise it leaves (the scene).
@@ -712,19 +643,17 @@ function onKeyEvent(key as string, press as boolean) as boolean
         openList()
         return true
     end if
-    if key = "play" or key = "rewind" or key = "fastforward" or key = "replay"
-        playKey(key)
-        return true
-    end if
+    ' Live is live: no pause, rewind or skip.
+    if key = "play" or key = "rewind" or key = "fastforward" or key = "replay" then return true
     if key = "right" or key = "OK" or key = "options"
-        if m.banner.visible and not m.paused
+        if m.banner.visible
             hideBanner()
         else
             showBanner(true)
         end if
         return true
     end if
-    if key = "back" and m.banner.visible and not m.paused and m.zapTo = invalid
+    if key = "back" and m.banner.visible and m.zapTo = invalid
         hideBanner()
         return true
     end if

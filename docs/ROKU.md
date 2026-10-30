@@ -263,16 +263,12 @@ programmes only for those 50 (`GET /api/live/guide?ids=`).
   takes out of the favourites.
 - **Right**, **OK** or the **Options key** (\*) show the banner: the
   channel, what's on with its times, time left and progress, what's
-  next, and the Live chip (red at the edge, how far behind otherwise).
-  It never shows by itself as a channel starts or changes (the tuning
-  card says which channel it is); asked for, it goes after 5 s, and stays
-  while paused or behind live.
-- **No seek bar:** the Video node's own controls are off (`enableUI`
-  false). Play pauses and goes on; rewind, fast forward and Replay move
-  10 s within the server's timeshift, never nearer the edge than live
-  plays. Paused, the playlist is asked for every 20 s so the server keeps
-  the channel (its viewers leave after 45 s of nothing). A wait for data
-  shows a spinner.
+  next, and the Live chip (a plain badge). It never shows by itself as a
+  channel starts or changes (the tuning card says which channel it is);
+  asked for, it goes after 5 s.
+- **Live is live:** no pause, rewind or skip. The Video node's own
+  controls are off (`enableUI` false), and Play, Rewind, Fast forward and
+  Replay do nothing in the player. A wait for data shows a spinner.
 - **Troubles:** `409` (every connection in use) shows the server's
   message, which names what is watched, with Try again, Other channels
   and Back; so do a channel gone (`404`), Live TV closed (`403`), a

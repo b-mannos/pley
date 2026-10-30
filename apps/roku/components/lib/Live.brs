@@ -660,44 +660,6 @@ function liveTrouble(answer as object, channelName as string) as object
     return { kind: "other", title: channelName + " didn't start", message: message, retry: true }
 end function
 
-' Seconds behind the live edge still counted as live: the Video node
-' plays a few segments back from it.
-function liveWithin() as integer
-    return 15
-end function
-
-' "1:23" behind live, "12 min" from ten minutes.
-function liveBehind(seconds as dynamic) as string
-    s = Int(httpNumber(seconds, 0) + 0.5)
-    if s < 0 then s = 0
-    if s >= 600 then return Int((s + 30) / 60).ToStr() + " min"
-    return Int(s / 60).ToStr() + ":" + fmtTwo(s mod 60)
-end function
-
-' The Live chip: "LIVE" within liveWithin of the edge, else how far
-' behind ("−1:23"). duration and position are the Video node's for the
-' stream's window; without a duration, live unless paused.
-function liveBadge(position as dynamic, duration as dynamic, paused as boolean) as object
-    behind = 0
-    length = httpNumber(duration, 0)
-    if length > 0 then behind = length - httpNumber(position, 0)
-    if behind < 0 then behind = 0
-    if not paused and behind < liveWithin() then return { live: true, text: "LIVE", behind: behind }
-    if length <= 0 then return { live: false, text: "PAUSED", behind: 0 }
-    return { live: false, text: "−" + liveBehind(behind), behind: behind }
-end function
-
-' Where a seek of by seconds from position lands in the window (0 to
-' duration, no nearer the edge than the Video node plays live).
-function liveSeekTarget(position as dynamic, duration as dynamic, by as integer) as float
-    length = httpNumber(duration, 0)
-    target = httpNumber(position, 0) + by
-    if target < 0 then target = 0
-    if length > 0 and target > length - 6 then target = length - 6
-    if target < 0 then target = 0
-    return target
-end function
-
 ' The registry key of the Live TV screen's tab and category for a server
 ' and profile.
 function liveViewKey(server as string, profileId as dynamic) as string

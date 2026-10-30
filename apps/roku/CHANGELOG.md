@@ -19,9 +19,9 @@ describes how they are made.
   as cards, 50 at a time, so lineups of tens of thousands of channels
   open at once. The live player changes channel with up and down within
   the category, lists it at the left, shows what's on with a Live chip
-  instead of a seek bar when asked (OK, Right or the Options key), pauses and moves 10 s within the server's
-  timeshift, and gives the server's own words when every connection is
-  in use. The Options key adds a channel to the favourites or takes it
+  when asked (OK, Right or the Options key), plays live only (no pause,
+  rewind or skip), and gives the server's own words when every
+  connection is in use. The Options key adds a channel to the favourites or takes it
   out; back from the player, the guide is at the channel watched.
 
 ### Changed
