@@ -501,17 +501,18 @@ function LivePlayer({
           e.preventDefault();
           togglePlay();
           break;
+        // Up is channel up, the next channel, as on a TV's remote.
         case "ArrowUp":
         case "PageUp":
         case "ChannelUp":
           e.preventDefault();
-          onStep(-1);
+          onStep(1);
           break;
         case "ArrowDown":
         case "PageDown":
         case "ChannelDown":
           e.preventDefault();
-          onStep(1);
+          onStep(-1);
           break;
         case "ArrowLeft":
         case "j":
@@ -738,10 +739,10 @@ function LivePlayer({
             </div>
           ) : null}
           <div className="flex-1" />
-          <button type="button" aria-label="Previous channel" title="Previous channel (↑)" onClick={() => onStep(-1)} className={button}>
+          <button type="button" aria-label="Channel up" title="Channel up (↑)" onClick={() => onStep(1)} className={button}>
             <ChevronUp className="size-5" />
           </button>
-          <button type="button" aria-label="Next channel" title="Next channel (↓)" onClick={() => onStep(1)} className={button}>
+          <button type="button" aria-label="Channel down" title="Channel down (↓)" onClick={() => onStep(-1)} className={button}>
             <ChevronDown className="size-5" />
           </button>
           {"pictureInPictureEnabled" in document && document.pictureInPictureEnabled ? (
