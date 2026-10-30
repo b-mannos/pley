@@ -10,6 +10,8 @@ export interface Variant {
   uri: string;
   width: number;
   height: number;
+  /** bits per second */
+  bandwidth: number;
 }
 
 /** The sizes a multivariant playlist lists, in its order; none for a media playlist. */
@@ -21,7 +23,8 @@ export function variantsOf(master: string, base: string): Variant[] {
     const uri = lines.slice(i + 1).find((l) => l && !l.startsWith("#"));
     if (!uri) return;
     const [width, height] = (/RESOLUTION=(\d+)x(\d+)/.exec(line) ?? []).slice(1).map(Number);
-    found.push({ uri: new URL(uri, base).href, width: width || 0, height: height || 0 });
+    const bandwidth = Number(/[:,]BANDWIDTH=(\d+)/.exec(line)?.[1] ?? 0);
+    found.push({ uri: new URL(uri, base).href, width: width || 0, height: height || 0, bandwidth });
   });
   return found;
 }
@@ -54,7 +57,8 @@ async function text(url: string, signal: AbortSignal): Promise<string> {
 /**
  * Asks for the stream at `url` as a player starting at `startSec` would:
  * its playlist, the size `pick` chooses of a stream in several sizes
- * (given smallest first), and the segment that size starts with. Resolves
+ * (given smallest first, as hls.js orders them: a size listed twice at its
+ * lower bitrate first), and the segment that size starts with. Resolves
  * once that segment has come, which is when the transcoder has made it.
  */
 export async function warmStream(
@@ -67,7 +71,7 @@ export async function warmStream(
   let playlist = await text(playlistUrl, signal);
   const sizes = variantsOf(playlist, playlistUrl);
   if (sizes.length) {
-    const sorted = [...sizes].sort((a, b) => a.width * a.height - b.width * b.height);
+    const sorted = [...sizes].sort((a, b) => a.width * a.height - b.width * b.height || a.bandwidth - b.bandwidth);
     const chosen = sorted[pick(sorted, sorted.indexOf(sizes[0]!))] ?? sizes[0]!;
     playlistUrl = chosen.uri;
     playlist = await text(playlistUrl, signal);

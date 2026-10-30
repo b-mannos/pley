@@ -118,6 +118,19 @@ describes how they are made.
   A title that starts lower for what was remembered of the network goes
   back up after 20 s calm, as high as the network carries, the original
   included.
+- A transcode is made at the bitrate of the quality picked: 20 and 12 Mbps
+  1080p came out at 8 Mbps, 30 Mbps 4K at 20 and 2 Mbps 480p at 1.2. The
+  original converted for a player that can't play it gets its quality's
+  bitrate too (30 Mbps for a 4K remux). A quality never gets more than half
+  again the file's own bitrate, nor more than the highest quality of its
+  lines, whatever a player asks (an app of the compatibility API asking
+  for its most). A stream in several sizes also comes at its own size's
+  usual bitrate below such a quality (8 Mbps for 1080p), for a network
+  that can't carry it.
+- The web app's menus, tooltips and buttons over the video no longer
+  change its colours as they show: their blurred backgrounds made Chrome
+  and Edge take the video off the graphics card's overlay, where the
+  driver's colour settings for video apply. They are plain dark now.
 
 ## [0.0.1] - 2026-10-29
 

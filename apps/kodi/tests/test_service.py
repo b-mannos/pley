@@ -222,9 +222,11 @@ class AutomaticTest(unittest.TestCase):
         player.starts(automatic("s1"))
         first = player.watch
         self.assertEqual(first.quality, "original")
-        # 1.5 MB a second through the proxy: 12 Mbps.
-        for _ in range(30):
+        # 1.5 MB a second through the proxy: 12 Mbps, its answers too, under 1.5 times the file's 20.
+        for n in range(30):
             player.second(arriving=1_500_000)
+            if n % 10 == 0:
+                player.meter.answered(player.auto["prefix"] + "%d.ts" % n, 1_500_000, 1.0)
         player.second(0.0, caching=True)
         player.second(0.0, caching=True)
         self.assertEqual(player.restarts, [(7, 30_000, "8m")])

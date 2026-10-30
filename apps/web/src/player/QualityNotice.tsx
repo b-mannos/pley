@@ -41,7 +41,7 @@ export function QualityNotice({ notice }: { notice: QualityNoticeText | null }) 
         <div
           key={shown.n}
           className={cn(
-            "flex animate-pop-in items-center gap-2.5 rounded-full border border-white/20 bg-black/70 py-2 pl-3.5 pr-4 text-sm text-white shadow-2xl backdrop-blur-md transition-opacity duration-300",
+            "flex animate-pop-in items-center gap-2.5 rounded-full border border-white/20 bg-black/80 py-2 pl-3.5 pr-4 text-sm text-white shadow-2xl transition-opacity duration-300",
             shown.leaving && "opacity-0",
           )}
         >

@@ -86,7 +86,7 @@ export function ChaptersMenu({
       {open ? (
         <div
           className={cn(
-            "absolute bottom-full right-0 mb-2 max-h-[min(60vh,28rem)] animate-pop-in overflow-y-auto rounded-lg border border-white/10 bg-black/90 p-1.5 shadow-2xl backdrop-blur",
+            "absolute bottom-full right-0 mb-2 max-h-[min(60vh,28rem)] animate-pop-in overflow-y-auto rounded-lg border border-white/10 bg-black/90 p-1.5 shadow-2xl",
             pictures ? "w-[min(24rem,calc(100vw-2rem))]" : "w-72",
           )}
         >

@@ -390,12 +390,16 @@ class Player(xbmc.Player):
         prefix = auto.get("prefix") or ""
         arriving = self.meter.arriving_kbps(prefix)
         carried = None
+        shown = None
         if watch.quality != autoquality.ORIGINAL or watch.converted:
             # Since the last issue, change or raise of where the next title starts.
             carried = self.meter.carried_kbps(prefix, max(watch.issue_at, watch.changed_at, watch.raised_at or 0))
+        else:
+            # Over the last 2 minutes: a wait of the file as it is counts only on a network too slow for it.
+            shown = self.meter.carried_kbps(prefix, self.clock() - autoquality.ORIGINAL_NETWORK_WINDOW)
         with self.lock:
             # Under the lock the server's answers to a bitrate step take.
-            step = watch.tick(self.clock(), position / 1000.0, paused, seeking, caching, ahead, arriving, carried)
+            step = watch.tick(self.clock(), position / 1000.0, paused, seeking, caching, ahead, arriving, carried, shown)
             reports = self.reports
             if step is None or reports is None or self.watch is not watch:
                 return

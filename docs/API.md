@@ -1897,11 +1897,12 @@ sizes from `master.m3u8` (`PlaybackInfo.adaptive`). See
 [QUALITY.md](QUALITY.md#several-sizes-adaptive-bitrate) for what players do.
 
 - Sizes: the one asked for (or the original's closest quality,
-  `auto_quality`), then 1080p, 720p, 540p and 360p below it, each at 8, 4,
-  2 or 0.7 Mbps and never more than the one above. A film wider than 16:9
-  goes by its width (1920×800 is 1080p).
-- A size with more than two thirds of the bits of the one above is left
-  out. A remux, a direct play and a download come in one size.
+  `auto_quality`); the same size at its usual bitrate when that is lower
+  (8 Mbps under 20 Mbps 1080p, 20 under 30 Mbps 4K); then 1080p, 720p, 540p
+  and 360p below it, each at 8, 4, 2 or 0.7 Mbps and never more than the one
+  above. A film wider than 16:9 goes by its width (1920×800 is 1080p).
+- A smaller size with more than two thirds of the bits of the one above is
+  left out. A remux, a direct play and a download come in one size.
 - A smaller size's playlist is `v{k}.m3u8`, its segments `v{k}-{n}.ts`.
   Segment `n` of every size starts at the same time with a keyframe, so the
   player can move at any segment.

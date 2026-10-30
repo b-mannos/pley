@@ -98,6 +98,7 @@ class Kodi:
         self.ahead = None
         self.arriving = None
         self.carried = None
+        self.shown = None
         # What the watch said: (when, the quality restarted at, or the
         # bitrate a stream goes on at, or "next <quality>"), and its steps.
         self.said = []
@@ -108,7 +109,7 @@ class Kodi:
         self.position += moves
         if ahead is not None:
             self.ahead = ahead
-        step = self.watch.tick(self.now, self.position, paused, seeking, caching, self.ahead, self.arriving, self.carried)
+        step = self.watch.tick(self.now, self.position, paused, seeking, caching, self.ahead, self.arriving, self.carried, self.shown)
         if step:
             self.steps.append(step)
             if step.kind == aq.BITRATE:
@@ -147,6 +148,8 @@ def live(quality="8m", playing=8_000, file=20_000, file_lines=1080, lines=1080, 
 class WatchTest(unittest.TestCase):
     def test_a_long_wait_moves_the_original_to_a_conversion(self):
         kodi = Kodi(watch())
+        # The proxy measured 16 Mbps over the last 2 minutes: under 1.5 times the file's 20.
+        kodi.shown = 16_000
         kodi.play(30)
         kodi.wait(1)
         self.assertEqual(kodi.said, [])
@@ -155,6 +158,52 @@ class WatchTest(unittest.TestCase):
         self.assertEqual(kodi.steps[0], aq.Step(aq.RESTART, "4m", None, True, 7_500))
         kodi.wait(5)
         self.assertEqual(len(kodi.said), 1, "one wait, one step")
+
+    def test_the_original_plays_on_through_waits_on_a_network_that_carries_it(self):
+        # 30 Mbps, 1.5 times the file's 20: the server is why it waits.
+        w = watch()
+        kodi = Kodi(w)
+        kodi.shown = 30_000
+        kodi.play(30)
+        kodi.wait(2)
+        kodi.play(20)
+        kodi.wait(8)
+        kodi.play(30)
+        self.assertEqual(kodi.said, [])
+        self.assertEqual(w.issue_at, 0, "neither wait an issue, nor the two of them short waits")
+
+    def test_a_slow_answer_as_a_wait_ends_shows_the_network_to_blame(self):
+        kodi = Kodi(watch())
+        kodi.play(30)
+        kodi.wait(3)
+        self.assertEqual(kodi.said, [], "nothing measured yet")
+        kodi.shown = 12_000
+        kodi.play(1)
+        self.assertEqual(kodi.said, [(34, "4m")])
+
+    def test_a_direct_play_moves_at_the_second_wait_within_5_minutes(self):
+        # Nothing measures the network: the proxy passes the file on in one answer.
+        kodi = Kodi(watch())
+        kodi.play(30)
+        kodi.wait(4)
+        kodi.play(60)
+        self.assertEqual(kodi.said, [])
+        kodi.wait(2)
+        self.assertEqual(kodi.said, [(96, "4m")])
+        apart = Kodi(watch())
+        apart.play(30)
+        apart.wait(3)
+        apart.play(300)
+        apart.wait(3)
+        self.assertEqual(apart.said, [], "5 minutes apart")
+
+    def test_the_original_converted_moves_on_any_long_wait(self):
+        # Converted at the server's own quality: a lower one is less for it to make.
+        kodi = Kodi(Watch(0.0, "original", 15_000, 40_000, 2160, "15m", converted=True))
+        kodi.shown = 80_000
+        kodi.play(30)
+        kodi.wait(2)
+        self.assertEqual(kodi.said, [(32, "4m")])
 
     def test_two_short_waits_dont_move_the_original(self):
         # The picture plays on: another stream would blank the screen.
@@ -210,6 +259,7 @@ class WatchTest(unittest.TestCase):
         kodi = Kodi(w)
         # 12 Mbps arriving through the proxy: 9 with the margin.
         kodi.arriving = 12_000
+        kodi.shown = 12_000
         kodi.play(30)
         kodi.wait(2)
         self.assertEqual(kodi.said[-1][1], "8m")

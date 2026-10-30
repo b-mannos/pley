@@ -286,7 +286,8 @@ end function
 '
 ' Roku's Video node replaces its content to play another stream, and the
 ' screen goes black meanwhile. Automatic moves to another stream only once
-' the picture has stopped anyway (a wait of 2 s or more); a conversion whose
+' the picture has stopped anyway (a wait of 2 s or more; at the original as
+' the file is, one the network is to blame for, aqLongWait); a conversion whose
 ' bitrate changes as it is sent (PlaybackInfo.live_bitrate) steps its
 ' bitrate instead (PUT /api/playback/{id}/bitrate), keeping its size, and
 ' plays on.
@@ -379,6 +380,12 @@ function aqWatch(now as integer, quality as string, playingKbps as float, fileKb
         playingSince: -1,
         waitSince: -1,
         waitCounted: false,
+        ' The wait under way lasted 2 s (aqLongWait): what's left of it is no
+        ' short wait. It came on a network nothing measured, and is among
+        ' originalWaits: when the original's long waits came on one.
+        waitLong: false,
+        waitUnmeasured: false,
+        originalWaits: [],
         shortWaits: [],
         segments: [],
         lastPosition: -1,
@@ -449,6 +456,8 @@ sub aqPosition(watch as object, now as integer, positionMs as integer)
             ' A wait in progress was the seek's; one now needs 2 s of playing first.
             watch.waitSince = -1
             watch.waitCounted = false
+            watch.waitLong = false
+            watch.waitUnmeasured = false
             if watch.playingSince >= 0 then watch.playingSince = now
         end if
     end if
@@ -461,26 +470,37 @@ sub aqSeeked(watch as object)
     watch.playingSince = -1
     watch.waitSince = -1
     watch.waitCounted = false
+    watch.waitLong = false
+    watch.waitUnmeasured = false
 end sub
 
 ' The Video node's state changed. underrun is bufferingStatus.isUnderrun
 ' (invalid when the Roku doesn't say). Answers a step (aqStep), or invalid.
 function aqState(watch as object, now as integer, state as string, underrun as dynamic) as dynamic
     issue = false
+    waited = false
     if state = "playing"
         if watch.waitSince >= 0 and not watch.waitCounted
-            ' A short wait: two within a minute are a play issue.
-            kept = [now]
-            for each at in watch.shortWaits
-                if now - at <= 60000 then kept.Push(at)
-            end for
-            watch.shortWaits = kept
-            if kept.Count() >= 2
-                watch.shortWaits = []
+            if now - watch.waitSince >= 2000 and aqLongWait(watch, now)
+                ' At the original, what arrived as it ended may show the network to blame after all.
                 issue = true
+                waited = true
+            else if not watch.waitLong
+                ' A short wait: two within a minute are a play issue.
+                kept = [now]
+                for each at in watch.shortWaits
+                    if now - at <= 60000 then kept.Push(at)
+                end for
+                watch.shortWaits = kept
+                if kept.Count() >= 2
+                    watch.shortWaits = []
+                    issue = true
+                end if
             end if
         end if
         watch.waitSince = -1
+        watch.waitLong = false
+        watch.waitUnmeasured = false
         if watch.playingSince < 0 then watch.playingSince = now
     else if state = "buffering"
         ' Only after 2 s of playing (not a start or a seek), and not when
@@ -490,12 +510,14 @@ function aqState(watch as object, now as integer, state as string, underrun as d
         if flowing and not notUnderrun and watch.waitSince < 0
             watch.waitSince = now
             watch.waitCounted = false
+            watch.waitLong = false
+            watch.waitUnmeasured = false
         end if
         watch.playingSince = -1
     else
         aqSeeked(watch)
     end if
-    if issue then return aqIssue(watch, now, false)
+    if issue then return aqIssue(watch, now, waited)
     return invalid
 end function
 
@@ -532,11 +554,36 @@ end function
 ' starts, back up. Answers a step (aqStep), or invalid.
 function aqTick(watch as object, now as integer) as dynamic
     if watch.waitSince >= 0 and not watch.waitCounted and now - watch.waitSince >= 2000
-        watch.waitCounted = true
-        return aqIssue(watch, now, true)
+        if aqLongWait(watch, now)
+            watch.waitCounted = true
+            return aqIssue(watch, now, true)
+        end if
     end if
     if watch.playingSince < 0 then return invalid
     return aqUp(watch, now)
+end function
+
+' Whether the wait under way, 2 s long by now, is a play issue. At the
+' original as the file is, only on a network the segments of the last 2
+' minutes show carrying less than 1.5 times the file's bitrate: on one that
+' carries more, the server is why it waits (its disk, a remux catching up),
+' and a conversion reads the same file and does more. Where no segments
+' came (a direct play), the second such wait within 5 minutes. Asked again
+' as the wait goes on and as it ends, with the segments since.
+function aqLongWait(watch as object, now as integer) as boolean
+    watch.waitLong = true
+    if watch.quality <> "original" or watch.converted then return true
+    network = aqCarried(watch, now - 120000, 2)
+    if network > 0 and watch.fileKbps > 0 then return network < 1.5 * watch.fileKbps
+    if not watch.waitUnmeasured
+        watch.waitUnmeasured = true
+        kept = [now]
+        for each at in watch.originalWaits
+            if now - at < 300000 then kept.Push(at)
+        end for
+        watch.originalWaits = kept
+    end if
+    return watch.originalWaits.Count() >= 2
 end function
 
 ' A play issue: a step down, as the stream is sent when it can be; else

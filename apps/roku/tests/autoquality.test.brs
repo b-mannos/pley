@@ -226,12 +226,62 @@ sub test_aq_a_seek_in_the_rokus_own_controls_isnt_a_wait()
     aqPosition(watch, 32000, 600000)
     tkInvalid(aqTick(watch, 34000), "the wait was the seek's")
     aqState(watch, 34000, "playing", invalid)
-    ' Playing on, a real wait counts again.
+    ' Playing on, a real wait counts again: on a network the segments show at 8 Mbps.
     for second = 35 to 40
         aqPosition(watch, second * 1000, 600000 + (second - 34) * 1000)
+        if second MOD 2 = 0 then aqSegment(watch, second * 1000, 1000000, 1000)
     end for
     aqState(watch, 40500, "buffering", invalid)
     tkEqual(aqSaid(aqTick(watch, 42600)), "4m")
+end sub
+
+sub test_aq_the_original_plays_on_through_a_wait_on_a_network_that_carries_it()
+    ' Segments at 32 Mbps, over 1.5 times the file's 20: the server is why it waits.
+    watch = aqWatch(0, "original", 20000, 20000, 1080, "", false)
+    aqState(watch, 1000, "playing", invalid)
+    played = aqPlay(watch, 1000, 30, 32000)
+    tkEqual(aqWait(watch, played.now, 2), "")
+    played = aqPlay(watch, played.now + 2000, 20, 32000)
+    tkEqual(aqWait(watch, played.now, 8), "")
+    tkEqual(watch.issueAt, 0, "neither wait an issue, nor the two of them short waits")
+    tkEqual(watch.quality, "original")
+end sub
+
+sub test_aq_a_slow_segment_as_a_wait_ends_shows_the_network_to_blame()
+    watch = aqWatch(0, "original", 20000, 20000, 1080, "", false)
+    aqState(watch, 1000, "playing", invalid)
+    aqSegment(watch, 2000, 1000000, 200)
+    played = aqPlay(watch, 2000, 25, 0)
+    aqState(watch, played.now, "buffering", true)
+    tkInvalid(aqTick(watch, played.now + 2000), "one segment at 40 Mbps: nothing measured yet")
+    ' Two more, at 8 Mbps, arrive as it waits.
+    aqSegment(watch, played.now + 2500, 1000000, 1000)
+    aqSegment(watch, played.now + 2900, 1000000, 1000)
+    tkEqual(aqSaid(aqState(watch, played.now + 3000, "playing", invalid)), "4m", "8 Mbps arriving, 6 with the margin")
+end sub
+
+sub test_aq_a_direct_play_moves_at_the_second_wait_within_5_minutes()
+    ' No segments: nothing measures the network.
+    watch = aqWatch(0, "original", 20000, 20000, 1080, "", false)
+    aqState(watch, 1000, "playing", invalid)
+    played = aqPlay(watch, 1000, 30, 0)
+    tkEqual(aqWait(watch, played.now, 4), "")
+    played = aqPlay(watch, played.now + 4000, 60, 0)
+    tkEqual(aqWait(watch, played.now, 3), "4m", "half the file with the margin: 7.5")
+    apart = aqWatch(0, "original", 20000, 20000, 1080, "", false)
+    aqState(apart, 1000, "playing", invalid)
+    played = aqPlay(apart, 1000, 30, 0)
+    tkEqual(aqWait(apart, played.now, 3), "")
+    played = aqPlay(apart, played.now + 3000, 300, 0)
+    tkEqual(aqWait(apart, played.now, 3), "", "5 minutes apart")
+end sub
+
+sub test_aq_the_original_converted_moves_on_any_long_wait()
+    ' Converted at the server's own quality: a lower one is less for it to make.
+    watch = aqWatch(0, "original", 15000, 40000, 2160, "15m", false, false, 2160, true)
+    aqState(watch, 1000, "playing", invalid)
+    played = aqPlay(watch, 1000, 30, 0)
+    tkEqual(aqWait(watch, played.now, 2), "4m", "half its 15 Mbps with the margin: 5.6")
 end sub
 
 ' --- A conversion whose bitrate changes as it is sent ---

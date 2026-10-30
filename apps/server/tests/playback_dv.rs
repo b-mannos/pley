@@ -705,12 +705,19 @@ async fn players_that_adapt_get_transcodes_in_several_sizes() {
     let session = started.body["session_id"].as_str().unwrap().to_owned();
     assert_eq!(started.body["adaptive"], json!(true));
     assert_eq!(started.body["url"], json!(format!("/api/playback/{session}/master.m3u8")));
-    // The 1080p film's own size, then 720p, 540p and 360p.
+    // The 1080p film's own size at its quality (20 Mbps), again at 1080p's
+    // own 8, then 720p, 540p and 360p.
     let job = fake.created.lock().last().cloned().unwrap();
+    assert_eq!(job.video.as_ref().unwrap().max_bitrate_kbps, Some(19_808));
     let rungs: Vec<_> = job.variants.iter().map(|v| (v.max_width, v.max_height, v.max_bitrate_kbps)).collect();
     assert_eq!(
         rungs,
-        [(Some(1280), Some(720), Some(4_000)), (Some(960), Some(540), Some(2_000)), (Some(640), Some(360), Some(700))]
+        [
+            (None, Some(1080), Some(8_000)),
+            (Some(1280), Some(720), Some(4_000)),
+            (Some(960), Some(540), Some(2_000)),
+            (Some(640), Some(360), Some(700)),
+        ]
     );
 
     // A lower rendition's playlist and segments come through the session,

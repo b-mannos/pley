@@ -303,7 +303,7 @@ variants}`. See [How HLS jobs work](#how-hls-jobs-work).
 | `mode` | `transcode` (default) or `copy` (remux; falls back to transcode when it can't be done, and the plan says so) |
 | `codec` | `h264` (default) or `hevc` |
 | `max_width?`, `max_height?` | size limit |
-| `max_bitrate_kbps?` | bitrate cap (default: by the output size, see [Bitrates](#bitrates)) |
+| `max_bitrate_kbps?` | the bitrate (default: by the output size, see [Bitrates](#bitrates)) |
 | `dynamic_range` | transcodes of HDR: `sdr` (default), `hdr10` or `hlg` (see [HDR kept](#hdr-kept)) |
 | `dolby_vision` | remuxes: `copy` (default), `signal` or `to81` (see [Dolby Vision in remuxes](#dolby-vision-in-remuxes)) |
 | `strip_hdr10plus` | remuxes: leave out HDR10+ metadata |
@@ -543,7 +543,8 @@ smaller renditions:
 
 ### Bitrates
 
-A transcode's bitrate, unless asked for less, follows its size. Lines are
+A transcode's bitrate is the one asked for (`max_bitrate_kbps`, at least
+300 kbps), whatever its size. Without one, it follows its size. Lines are
 counted as for a 16:9 picture of the same width (a 1920×800 film gets 1080p's
 8 Mbps).
 

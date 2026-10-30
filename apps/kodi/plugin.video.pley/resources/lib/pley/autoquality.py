@@ -55,6 +55,14 @@ BLIND = "8m"
 # Rebuffering: one wait this long, or two shorter ones this close.
 LONG_WAIT = 2.0
 SHORT_WAITS_WITHIN = 60.0
+# The original as the file is moves for such a wait only where the network
+# carried less than this many times the file's bitrate over the last 2
+# minutes: on one that carries more, the server is why it waits (its disk,
+# a remux catching up), and a conversion reads the same file and does more.
+# Where nothing measured it, the second such wait this close moves it.
+ORIGINAL_NETWORK = 1.5
+ORIGINAL_NETWORK_WINDOW = 120.0
+ORIGINAL_WAITS_WITHIN = 300.0
 # Delivery: seconds of video arriving per second, over this long; under
 # SLOW for SLOW_FOR seconds with under LOW_AHEAD seconds read ahead, and
 # falling, it is a play issue before a wait.
@@ -345,6 +353,8 @@ class Watch:
         self.raised_at = None
         self.fell_back = False
         self.dropped_told = False
+        # When the original's long waits came on a network nothing measured.
+        self.original_waits = collections.deque()
         self.stream(quality, playing_kbps, live, lines, converted)
         self.reset(now)
 
@@ -379,6 +389,11 @@ class Watch:
         self.flowing = 0
         self.stall_since = None
         self.stall_counted = False
+        # The wait under way lasted 2 s (`long_wait`): what's left of it is
+        # no short wait. It came on a network nothing measured, and is among
+        # `original_waits`.
+        self.stall_long = False
+        self.stall_unmeasured = False
         self.short_waits = collections.deque()
         self.history = collections.deque()
         self.slow_since = None
@@ -387,6 +402,8 @@ class Watch:
         """Kodi was told to seek: the wait that follows isn't the network's."""
         self.flowing = 0
         self.stall_since = None
+        self.stall_long = False
+        self.stall_unmeasured = False
         self.history.clear()
         self.slow_since = None
 
@@ -425,11 +442,13 @@ class Watch:
         ahead: Optional[float] = None,
         arriving_kbps: Optional[float] = None,
         carried_kbps: Optional[float] = None,
+        shown_kbps: Optional[float] = None,
     ) -> Optional[Step]:
         """What Kodi says this second: `position` and `ahead` in seconds,
         `arriving_kbps` what the proxy passed on over the last 20 s,
         `carried_kbps` what it measured the network carrying since the
-        last issue (None when it can't tell)."""
+        last issue, `shown_kbps` over the last 2 minutes (None when it
+        can't tell)."""
         last, self.last = self.last, (now, position)
         if paused or seeking:
             # Waits while paused or seeking aren't the network's.
@@ -451,18 +470,28 @@ class Watch:
                     # Stopped somewhere since the last look: counted from it.
                     self.stall_since = last[0]
                     self.stall_counted = False
+                    self.stall_long = False
+                    self.stall_unmeasured = False
                 if self.stall_since is not None and not self.stall_counted and now - self.stall_since >= LONG_WAIT:
-                    self.stall_counted = True
-                    issue = stopped = True
+                    if self.long_wait(now, shown_kbps):
+                        self.stall_counted = True
+                        issue = stopped = True
             else:
                 if self.stall_since is not None and not self.stall_counted:
-                    self.short_waits.append(now)
-                    while self.short_waits and now - self.short_waits[0] > SHORT_WAITS_WITHIN:
-                        self.short_waits.popleft()
-                    if len(self.short_waits) >= 2:
-                        self.short_waits.clear()
-                        issue = True
+                    if self.stall_long:
+                        if self.long_wait(now, shown_kbps):
+                            # At the original, what arrived as it ended shows the network to blame after all.
+                            issue = stopped = True
+                    else:
+                        self.short_waits.append(now)
+                        while self.short_waits and now - self.short_waits[0] > SHORT_WAITS_WITHIN:
+                            self.short_waits.popleft()
+                        if len(self.short_waits) >= 2:
+                            self.short_waits.clear()
+                            issue = True
                 self.stall_since = None
+                self.stall_long = False
+                self.stall_unmeasured = False
                 self.flowing += 1
         if self.flowing >= 2 or self.stall_since is not None:
             self.history.append((now, position, ahead))
@@ -482,6 +511,25 @@ class Watch:
         if issue:
             return self.on_issue(now, stopped, delivery, arriving_kbps)
         return self.maybe_up(now, carried_kbps)
+
+    def long_wait(self, now: float, shown_kbps: Optional[float]) -> bool:
+        """Whether the wait under way, 2 s long by `now`, is a play issue.
+        At the original as the file is, only on a network not shown
+        (`shown_kbps`) carrying ORIGINAL_NETWORK times the file's bitrate;
+        where nothing measured it (a direct play, whose answer the proxy
+        passes on whole), the second such wait within 5 minutes. Asked
+        again as the wait goes on and as it ends."""
+        self.stall_long = True
+        if self.quality != ORIGINAL or self.converted:
+            return True
+        if shown_kbps and self.file_kbps:
+            return shown_kbps < ORIGINAL_NETWORK * self.file_kbps
+        if not self.stall_unmeasured:
+            self.stall_unmeasured = True
+            while self.original_waits and now - self.original_waits[0] >= ORIGINAL_WAITS_WITHIN:
+                self.original_waits.popleft()
+            self.original_waits.append(now)
+        return len(self.original_waits) >= 2
 
     def falling(self) -> bool:
         """Less read ahead now than at the start of the window."""

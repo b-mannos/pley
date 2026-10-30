@@ -122,10 +122,11 @@ function hlsStartPosition(startSec: number): number {
 }
 
 /**
- * Of a stream's sizes (hls.js's levels, smallest first), the one to start
- * at for a player shown `video`'s size: the smallest that fills it (as
- * hls.js's `capLevelToPlayerSize` measures it), no bigger than `first`, the
- * largest the server lists.
+ * Of a stream's sizes (hls.js's levels, smallest first, a size listed twice
+ * at its lower bitrate first), the one to start at for a player shown
+ * `video`'s size: the smallest that fills it (as hls.js's
+ * `capLevelToPlayerSize` measures it) at its higher bitrate, no bigger
+ * than `first`, the largest the server lists.
  */
 export function startSize(
   levels: readonly { width: number; height: number }[],
@@ -136,8 +137,12 @@ export function startSize(
   const [w, h] = [video.clientWidth * scale, video.clientHeight * scale];
   // Not laid out yet: no size to go by.
   if (!w || !h) return first;
-  const fills = levels.findIndex((l) => l.width >= w || l.height >= h);
-  return fills < 0 ? first : Math.min(fills, first);
+  let fills = levels.findIndex((l) => l.width >= w || l.height >= h);
+  if (fills < 0) return first;
+  const same = (a: { width: number; height: number }, b: { width: number; height: number }) =>
+    a.width === b.width && a.height === b.height;
+  while (fills + 1 < levels.length && same(levels[fills + 1]!, levels[fills]!)) fills += 1;
+  return Math.min(fills, first);
 }
 
 export interface VideoPlayerProps {
@@ -2014,7 +2019,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
               {methodHover && !settingsOpen ? (
                 <div
                   role="tooltip"
-                  className="absolute bottom-full right-0 mb-3 w-80 animate-pop-in rounded-xl border border-white/10 bg-black/90 py-2 text-white shadow-2xl backdrop-blur-md"
+                  className="absolute bottom-full right-0 mb-3 w-80 animate-pop-in rounded-xl border border-white/10 bg-black/90 py-2 text-white shadow-2xl"
                 >
                   <PlaybackDetails
                     info={info}
