@@ -570,6 +570,40 @@ impl Tuners {
 
     /// The live playlist of an HLS viewer's channel, the transcoder's job
     /// made when it is the first.
+    /// What the transcoder makes of the channel a session watches, once it
+    /// has looked at its first moment (starting its live job when there is
+    /// none yet); `None` when that takes longer than `wait`. Players that
+    /// read MPEG-TS themselves play a channel sent as it is (H.264 and AAC)
+    /// straight from `stream.ts`, sooner than its first segments.
+    pub async fn plan(
+        &self,
+        session_id: &str,
+        user: &AuthUser,
+        settings: &LiveSettings,
+        hwaccel: HwAccel,
+        wait: Duration,
+    ) -> Result<Option<LivePlan>, AppError> {
+        let viewer = self.viewer(session_id, user)?;
+        let tuner = self.tuner_of(&viewer)?;
+        let job = self.hls_job(&tuner, settings, hwaccel).await?;
+        let deadline = Instant::now() + wait;
+        loop {
+            if let Some(plan) = tuner.state.lock().plan.clone() {
+                return Ok(Some(plan));
+            }
+            if let Ok(status) = self.transcoder.live_status(&job).await
+                && let Some(plan) = status.plan
+            {
+                tuner.state.lock().plan = Some(plan.clone());
+                return Ok(Some(plan));
+            }
+            if Instant::now() >= deadline || !tuner.is_live() {
+                return Ok(None);
+            }
+            tokio::time::sleep(Duration::from_millis(150)).await;
+        }
+    }
+
     pub async fn playlist(
         &self,
         session_id: &str,

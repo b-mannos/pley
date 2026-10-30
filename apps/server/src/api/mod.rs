@@ -149,6 +149,7 @@ pub fn router(state: AppState) -> Router {
         .route("/live/channels/{id}/stream.ts", get(livetv::stream))
         .route("/live/guide", get(livetv::guide))
         .route("/live/sessions/{session}", delete(livetv::leave))
+        .route("/live/sessions/{session}/plan", get(livetv::session_plan))
         .route("/live/sessions/{session}/{file}", get(livetv::session_file))
         .route("/live/media/{key}/{file}", get(livetv::keyed_file))
         .route("/live/settings", get(livetv::get_settings).put(livetv::put_settings))

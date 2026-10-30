@@ -174,6 +174,7 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     // watching Live TV, and the profile's favourite channels
     ("POST", "/api/live/channels/{id}/watch", Need::Scope(Play)),
     ("GET", "/api/live/channels/{id}/stream.ts", Need::Scope(Play)),
+    ("GET", "/api/live/sessions/{session}/plan", Need::Scope(Play)),
     ("GET", "/api/live/sessions/{session}/{file}", Need::Scope(Play)),
     ("DELETE", "/api/live/sessions/{session}", Need::Scope(Play)),
     ("PUT", "/api/live/channels/{id}/favorite", Need::Scope(Play)),

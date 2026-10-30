@@ -369,7 +369,8 @@ async fn channels_by_group_a_page_at_a_time() {
     let page = app.get("/api/live/lineup/page?state=no-guide&q=ten", &admin).await.body;
     assert_eq!(page["total"], 1, "{page}");
     assert_eq!(app.get("/api/live/lineup/page", &bob).await.status, StatusCode::FORBIDDEN);
-    let hidden = app.patch("/api/live/lineup", &admin, json!({"filter": {"group": "Sport", "q": "two"}, "hidden": true})).await;
+    let hidden =
+        app.patch("/api/live/lineup", &admin, json!({"filter": {"group": "Sport", "q": "two"}, "hidden": true})).await;
     assert_eq!(hidden.status, StatusCode::NO_CONTENT);
     assert_eq!(app.get("/api/live/lineup/page?state=hidden", &admin).await.body["total"], 1);
     app.patch("/api/live/lineup", &admin, json!({"filter": {"state": "hidden"}, "hidden": false})).await;

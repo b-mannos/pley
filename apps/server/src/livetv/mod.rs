@@ -63,6 +63,11 @@ const RECHECK_AFTER: i64 = 6 * 3600;
 const RECHECKS: i64 = 10;
 /// Bytes a channel tried again must send to count as playing.
 const PLAYS_BYTES: usize = 188 * 64;
+/// Logos fetched from providers each minute ahead of anyone looking, and
+/// how many at once: a lineup's logos are on this server within the hour,
+/// and a page of channels shows its logos at once.
+const LOGOS_AHEAD: usize = 600;
+const LOGOS_AT_ONCE: usize = 8;
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -443,6 +448,8 @@ pub struct LiveTv {
     reading_lineup: tokio::sync::Mutex<()>,
     /// Counts changes, so a lineup read while one happened isn't kept.
     generation: AtomicU64,
+    /// Logo addresses fetched ahead (or that failed): not asked for again.
+    logos_ahead: Mutex<HashSet<String>>,
 }
 
 /// The channels of the enabled sources as they are now, hidden ones too.
@@ -605,6 +612,7 @@ impl LiveTv {
             lineup: Mutex::default(),
             reading_lineup: tokio::sync::Mutex::new(()),
             generation: AtomicU64::new(0),
+            logos_ahead: Mutex::default(),
         });
         // Whether channels played, as the tuners find out (until Live TV goes).
         let weak = Arc::downgrade(&live);
@@ -701,6 +709,30 @@ impl LiveTv {
             .execute(&self.db.write)
             .await;
         self.recheck_offline().await;
+        self.fetch_logos_ahead().await;
+    }
+
+    /// Fetches the logos of channels shown that nobody has looked at yet,
+    /// in the lineup's order, each address once.
+    async fn fetch_logos_ahead(&self) {
+        let Ok(lineup) = self.lineup().await else { return };
+        let urls: Vec<String> = {
+            let done = self.logos_ahead.lock();
+            let mut seen = HashSet::new();
+            lineup
+                .shown()
+                .map(|c| c.logo_url.as_str())
+                .filter(|u| !u.is_empty() && !done.contains(*u) && seen.insert(*u))
+                .take(LOGOS_AHEAD)
+                .map(str::to_owned)
+                .collect()
+        };
+        futures::StreamExt::for_each_concurrent(futures::stream::iter(urls), LOGOS_AT_ONCE, |url| async move {
+            // Kept, or failed and not tried again for a while: either way done.
+            let _ = self.picture(&url).await;
+            self.logos_ahead.lock().insert(url);
+        })
+        .await;
     }
 
     /// A channel played, or gave nothing: offline until it plays again.

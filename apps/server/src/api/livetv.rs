@@ -2,12 +2,14 @@
 //! Live TV is open to; sources, channels and connections for administrators.
 
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use pley_transcoder_api::LivePlan;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::{AdminUser, AuthUser};
@@ -310,6 +312,20 @@ async fn session_media(state: &AppState, user: &AuthUser, session: &str, file: &
         response = response.header(header::CONTENT_LENGTH, len);
     }
     response.body(Body::from_stream(upstream.bytes_stream())).map_err(|e| AppError::Internal(e.into()))
+}
+
+/// What the channel a session watches is made into (`null` when not known
+/// within a few seconds): a player that reads MPEG-TS plays a copied channel
+/// from `stream.ts` instead of waiting for its first segments.
+pub async fn session_plan(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(session): Path<String>,
+) -> ApiResult<Json<Option<LivePlan>>> {
+    let settings = state.live.settings();
+    let hwaccel = state.settings.get().hwaccel;
+    let plan = state.live.tuners.plan(&session, &user, &settings, hwaccel, Duration::from_secs(3)).await?;
+    Ok(Json(plan))
 }
 
 /// Stops watching: the connection is let go once nobody else watches.
