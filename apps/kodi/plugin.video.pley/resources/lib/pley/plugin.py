@@ -556,7 +556,7 @@ class Plugin:
                 kodi.log("live channel %s: %s" % (self.params["id"], e.message), xbmc.LOGWARNING)
                 # What holds each connection; Watch here instead, where this
                 # account may take one over.
-                take_over = livetv.busy(e.message, e.details.get("connections"))
+                take_over = livetv.busy(e.message, e.body.get("connections"))
                 if take_over is None:
                     livetv.forget_queue()
                     return xbmcplugin.setResolvedUrl(self.handle, False, xbmcgui.ListItem())

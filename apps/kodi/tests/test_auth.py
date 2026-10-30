@@ -180,6 +180,7 @@ class DeviceSignInTest(unittest.TestCase):
     def setUp(self):
         self.answers = []
         self.meta = None
+        self.asked = []
         self.server = support.FakeServer(self.handle)
 
     def tearDown(self):
@@ -189,7 +190,7 @@ class DeviceSignInTest(unittest.TestCase):
         if request.path == "/.well-known/oauth-authorization-server":
             return support.answer(200, self.meta or support.metadata(self.server.url))
         if request.path == "/api/oauth/device":
-            self.assertEqual(request.form(), {"client_id": auth.CLIENT_ID, "scope": auth.SCOPE})
+            self.asked.append(request.form())
             self.assertTrue(request.headers["user-agent"].startswith("pleyKodi/"))
             return support.answer(
                 200,
@@ -207,6 +208,7 @@ class DeviceSignInTest(unittest.TestCase):
     def test_the_code_is_polled_until_someone_answers(self):
         flow = auth.DeviceSignIn(self.server.url, "pleyKodi/0.1.0 (Kodi 21.3; Windows)")
         self.assertEqual(flow.start()["user_code"], "BCDF-GHJK")
+        self.assertEqual(self.asked, [{"client_id": auth.CLIENT_ID, "scope": "library play playlists profiles"}])
         tokens = {"access_token": "at", "refresh_token": "rt", "expires_in": 3600, "scope": "library play"}
         self.answers = [
             support.answer(400, {"error": "authorization_pending"}),
@@ -225,6 +227,24 @@ class DeviceSignInTest(unittest.TestCase):
         self.assertEqual(record["expires_at"], 3700)
         self.assertEqual(record["token_endpoint"], self.server.url + "/api/oauth/token")
         self.assertEqual(record["server"], self.server.url)
+
+    def test_requests_are_asked_for_where_the_server_offers_them(self):
+        # A server that lists them, one that lists only `requests`, and one
+        # from before them (asking for a scope it doesn't know would fail
+        # the whole sign-in).
+        offered = ["library", "play", "playlists", "profiles", "requests", "approvals", "admin"]
+        for supported, scope in (
+            (offered, "library play playlists profiles requests approvals"),
+            (offered[:5], "library play playlists profiles requests"),
+            (offered[:4], "library play playlists profiles"),
+        ):
+            self.meta = dict(support.metadata(self.server.url), scopes_supported=supported)
+            flow = auth.DeviceSignIn(self.server.url, "pleyKodi/test")
+            flow.start()
+            self.assertEqual(self.asked.pop()["scope"], scope)
+            # A token answer without its scope keeps what was asked.
+            record = flow.record({"access_token": "at", "refresh_token": "rt"}, "Living room", "abc")
+            self.assertEqual(record["scope"], scope)
 
     def test_a_server_that_isnt_the_one_asked_is_refused(self):
         self.meta = support.metadata("http://elsewhere.example:7539")

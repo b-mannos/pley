@@ -24,6 +24,11 @@ SWITCH_GRANT = "urn:pley:params:oauth:grant-type:switch-profile"
 # to playlist, a library's Save as…), and switch to the household's other
 # profiles ("Who's watching?").
 SCOPE = "library play playlists profiles"
+# And where the server offers them: ask for movies and shows the libraries
+# don't have and follow the profile's requests, and approve and decline what
+# people ask for (an administrator's account). A server refuses a sign-in
+# that asks for a scope it doesn't know, so these go only where listed.
+OFFERED = ("requests", "approvals")
 # Access tokens are refreshed this long before they expire.
 REFRESH_MARGIN = 300
 
@@ -50,6 +55,13 @@ def path_of(server: str, endpoint: str) -> str:
     return endpoint[len(server) :]
 
 
+def scope_for(meta: dict) -> str:
+    """What to ask `meta`'s server for: SCOPE, and those of OFFERED that its
+    metadata lists (scopes_supported)."""
+    supported = meta.get("scopes_supported") or []
+    return " ".join([SCOPE] + [name for name in OFFERED if name in supported])
+
+
 class DeviceSignIn:
     """One sign-in with a code: `start`, then `poll` every `interval`."""
 
@@ -57,12 +69,13 @@ class DeviceSignIn:
         self.server = server
         self.user_agent = user_agent
         self.meta = metadata(server, user_agent)
+        self.scope = scope_for(self.meta)
         self.client = Client(server, user_agent)
         self.interval = 5
 
     def start(self) -> dict:
         path = path_of(self.server, self.meta["device_authorization_endpoint"])
-        started = self.client.json("POST", path, form={"client_id": CLIENT_ID, "scope": SCOPE})
+        started = self.client.json("POST", path, form={"client_id": CLIENT_ID, "scope": self.scope})
         self.interval = max(int(started.get("interval") or 5), 1)
         return started
 
@@ -98,7 +111,7 @@ class DeviceSignIn:
             "access_token": tokens["access_token"],
             "expires_at": (now if now is not None else time.time()) + int(tokens.get("expires_in") or 3600),
             "refresh_token": tokens["refresh_token"],
-            "scope": tokens.get("scope", SCOPE),
+            "scope": tokens.get("scope", self.scope),
         }
 
 
