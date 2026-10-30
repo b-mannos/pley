@@ -328,7 +328,12 @@ sub notify(notice as object)
 end sub
 
 sub showNotice()
-    if m.notices.Count() = 0 or m.top.dialog <> invalid or m.stack.Count() = 0 then return
+    if m.notices.Count() = 0 or m.stack.Count() = 0 then return
+    if dialogShowing()
+        ' Shown once that one closes.
+        if m.top.dialog.hasField("wasClosed") then m.top.dialog.observeField("wasClosed", "onDialog")
+        return
+    end if
     route = m.stack.Peek().route
     if route = "player" or route = "link" or route = "servers" or route = "profiles" or route = "unreachable" then return
     m.shownNotice = m.notices.Shift()
@@ -345,18 +350,31 @@ sub onNoticeButton(event as object)
     notice = m.shownNotice
     m.shownNotice = invalid
     if m.top.dialog <> invalid then m.top.dialog.close = true
-    if event.getData() <> 0 or notice = invalid then return
-    if notice.itemId > 0
-        show({ to: "details", params: { itemId: notice.itemId } })
-    else
-        show({ to: "requests", params: { view: "mine" } })
+    if event.getData() = 0 and notice <> invalid
+        if notice.itemId > 0
+            show({ to: "details", params: { itemId: notice.itemId } })
+        else
+            show({ to: "requests", params: { view: "mine" } })
+        end if
     end if
+    ' The next one waiting, if any.
+    showNotice()
 end sub
 
 ' A dialog closed: a notice waiting may show.
 sub onDialog()
-    if m.top.dialog = invalid then showNotice()
+    showNotice()
 end sub
+
+' Whether a dialog is up: one the scene holds that hasn't been closed (a
+' closed dialog may stay in the scene's field until another replaces it).
+function dialogShowing() as boolean
+    dialog = m.top.dialog
+    if dialog = invalid then return false
+    if dialog.hasField("close") and httpTrue(dialog.close) then return false
+    if dialog.hasField("wasClosed") and httpTrue(dialog.wasClosed) then return false
+    return true
+end function
 
 ' Pictures load through the scene's HTTP agent (nodes without their own
 ' use their nearest parent's): a new token makes a new agent.

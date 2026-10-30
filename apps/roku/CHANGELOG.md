@@ -11,8 +11,8 @@ describes how they are made.
 ### Added
 
 - Requests: where the server has them on, people ask for movies and shows
-  found on TMDB, and managers approve them. Discover, in the menu, has a
-  hero for the first trending title and rows (Trending this week, Popular
+  found on TMDB, and administrators approve them. Discover, in the menu,
+  has a hero for the first trending title and rows (Trending this week, Popular
   movies, Popular shows, Coming to cinemas, Popular anime, Your requests)
   of posters marked "In library", "Requested" or "Declined", each loading
   as it comes into view, and its own search.
@@ -22,13 +22,13 @@ describes how they are made.
   for.
 - Your requests: tabs by status and a card per request with its stage
   (downloading with a bar and the time left), the reason or note; OK opens
-  the title, the Options key offers Withdraw, Stop following, Try again or
-  Request again.
-- Managers' Requests open on Needs attention and filter by movies or
-  shows, person and title; the Options key offers Approve, Decline,
-  Decline with a reason… (typed on the Roku's keyboard), Mark as added by
-  hand and Delete. The menu's number counts what waits, red while some
-  failed.
+  the title, the Options key offers Watch, Withdraw, Remove, Stop following
+  or Request again.
+- Administrators' Requests open on Needs attention and filter by movies or
+  shows, person and title; the Options key offers Approve, Try again,
+  Decline, Decline with a reason… (typed on the Roku's keyboard), Mark as
+  added by hand and Delete. The menu's number counts what waits, red while
+  some failed.
 - A requested title that arrives is told of ("… is ready to watch." with
   Open), never over playing video.
 - Search shows titles "On TMDB" after the libraries' own, for those who

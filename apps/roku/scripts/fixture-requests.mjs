@@ -700,5 +700,15 @@ export function fakeRequests(fixture, png) {
     if (path.startsWith("/api/requests/") || path.startsWith("/api/discover/")) return fail(404, "not_found", `nothing at ${path}`);
     return null;
   };
-  return { answer };
+
+  // Time passing, for the walk: a movie request's download comes into a
+  // library as item itemId, which its maker hasn't seen yet. No event
+  // tells of it (the fake server has no stream).
+  const arrive = (id, itemId) => {
+    const r = find(id);
+    const at = now();
+    titleOf(r).library = { itemId };
+    Object.assign(r, { status: "available", stage: "available", download: null, availableAt: at, updatedAt: at, newsAt: at });
+  };
+  return { answer, arrive };
 }

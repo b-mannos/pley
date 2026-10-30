@@ -176,7 +176,8 @@ function detail(item, myList) {
 // `playbackDelayMs` holds back the answers to POST /api/playback.
 // What the app asked for and did is kept: requestsAsked (POST
 // /api/requests bodies), requestsActed ({ id, action }), and
-// discoverPictures ({ kind, file, w }).
+// discoverPictures ({ kind, file, w }); requestArrives(id, itemId) brings
+// a movie request's title into a library, as time would.
 export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
   const problems = [];
   const requests = [];
@@ -680,6 +681,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     }));
   }
   const requestsApi = fakeRequests(fixture, png);
+  fixture.requestArrives = requestsApi.arrive;
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       issuer = `http://127.0.0.1:${server.address().port}`;

@@ -5,11 +5,11 @@
 // next page, a show's page, its episodes and a person's page, Live TV (its
 // guide, a channel watched, the next one, the channel list, a favourite,
 // every connection in use, the Channels tab), Search, Discover (a movie
-// asked for, a show's seasons picked), the managers' Requests (Approve,
-// then Yours), Settings, the server gone and Try again, then signing out
-// and in again on a server too old for QR codes or requests. Then it
-// starts the app again,
-// signed in, and times how soon Home is asked for. Fails on a BrightScript
+// asked for, a show's seasons picked), the managers' Requests (Approve, a
+// ready-to-watch notice, then Yours), Settings, the server gone and Try
+// again, then signing out and in again on a server too old for QR codes or
+// requests. Then it starts the app again, signed in, and times how soon
+// Home is asked for. Fails on a BrightScript
 // error or on anything the fake server found wrong; saves what the screen
 // showed at each step in out/smoke/. brs-node is a simulator: layouts and
 // the player differ from a Roku, and so does its speed.
@@ -260,6 +260,8 @@ const sync = { label: false };
 const home = { kept: false };
 // From when the server knew nothing of requests (an older one).
 const older = { since: -1 };
+// The ready-to-watch notice's Open led to the title.
+const notice = { opened: false };
 
 async function walk() {
   // A cold start of brs-node can take a while.
@@ -558,16 +560,28 @@ async function walk() {
     await settle();
   }
   // The managers' Requests, on Needs attention: the Options key on the
-  // oldest, Approve. Then Yours, the last tab, which marks Anna's news
-  // seen.
+  // oldest, Approve. Meanwhile Anna's download came into a library, which
+  // no event told of: the summary asked after Approve has news, and its
+  // notice opens the title. Then Yours, the last tab, which marks Anna's
+  // news seen.
   await openFromMenu(8, /^GET \/api\/requests\?.*attention=1/, "Requests");
   shoot("requests");
   since = mark();
   await press("options");
   await sleep(500);
   shoot("requests-options");
+  fixture.requestArrives(3, 1011);
   await press("select"); // Approve
   await waitFor(/^POST \/api\/requests\/1\/approve$/, since, "a request approved");
+  await waitFor(/^GET \/api\/requests\?.*unseen=1/, since, "the requests with news");
+  await sleep(800);
+  shoot("ready-to-watch");
+  since = mark();
+  await press("select"); // Open
+  await waitFor(/^GET \/api\/items\/1011$/, since, "the title the notice opens");
+  notice.opened = true;
+  await press("back"); // the requests
+  await settle();
   shoot("requests-approved");
   for (let attempt = 0; attempt < 3 && !seen(/^GET \/api\/requests\?.*mine=1/, since); attempt++) {
     await press("up"); // the tabs
@@ -793,6 +807,7 @@ const checks = [
   ["asked for a show's missing seasons, ticked to start with", fixture.requestsAsked.some((a) => a.kind === "show" && a.tmdb_id === 8004 && JSON.stringify(a.seasons) === "[1,2,3]")],
   ["approved a request from the Options key", fixture.requestsActed.some((a) => a.id === 1 && a.action === "approve")],
   ["marked the profile's news seen once its requests showed", fixture.requestsActed.some((a) => a.action === "seen")],
+  ["told of a title ready to watch, which Open opened", notice.opened],
   ["asked a show's page what of it may still be asked for", asked(/^GET \/api\/items\/99\/request$/)],
   [
     "asked a server without requests for nothing of them but the summary",

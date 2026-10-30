@@ -123,9 +123,11 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
 ### Requests and Discover
 
 Where an administrator has turned requests on, people ask for movies and
-shows found on TMDB, managers approve them, and Radarr and Sonarr fetch
-them ([API.md](API.md#requests)). The menu shows what the profile may
-do; its number counts what waits: a manager's pending and failed requests
+shows found on TMDB, administrators approve them, and Radarr and Sonarr
+fetch them ([API.md](API.md#requests)). An administrator's Roku manages
+them (a manager, below) once its sign-in allows `approvals`; one signed in
+before is offered Sign in again. The menu shows what the profile may do;
+its number counts what waits: a manager's pending and failed requests
 (red while some failed) and their own news, anyone else's news.
 
 - **Discover**, for those who may ask: a hero for the first trending title
@@ -150,10 +152,11 @@ do; its number counts what waits: a manager's pending and failed requests
   waiting for approval; blue approved, searching, or downloading with a
   bar and the time left; green in library; red declined or failed; gray
   gone), who asked and when, the reason or note. OK opens the title; the
-  Options key (\*) offers Watch, Withdraw, Stop following, Try again or
-  Request again, and to managers Approve, Decline, Decline with a reason…
-  (the keyboard), Mark as added by hand and Delete; Withdraw and Delete ask
-  first. Opening the account's own requests marks their news seen.
+  Options key (\*) offers Watch, Withdraw, Remove, Stop following or
+  Request again, and to managers Approve, Try again, Decline, Decline with
+  a reason… (the keyboard), Mark as added by hand and Delete; Withdraw,
+  Remove and Delete ask first. Opening the account's own requests marks
+  their news seen.
 - **Search** shows titles **On TMDB** after the libraries' own, for those
   who may ask. A library title that was asked for shows its request's
   stage under the poster, and a show with seasons left to ask for ends its
@@ -256,8 +259,9 @@ bun run images    # the nine-patch focus and watched-mark images
   and walks every screen, saving each in `out/smoke/`. It fails on a
   BrightScript error, a request without the User-Agent, a token in an
   address, or a refresh token used twice. On the way it asks for a movie
-  and three seasons from Discover, approves a request, and checks that a
-  server without requests is asked nothing but the summary.
+  and three seasons from Discover, approves a request, opens a title from
+  its ready-to-watch notice, and checks that a server without requests is
+  asked nothing but the summary.
 - **brs-node limits:** its own fonts, no video (Skip intro and Up Next have
   only unit tests), one fetch at a time, the odd dropped key, and no
   measure of a Roku's speed.
