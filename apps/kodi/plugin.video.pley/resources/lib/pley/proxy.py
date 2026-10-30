@@ -44,6 +44,8 @@ RESPONSE_HEADERS = (
     "cache-control",
     "x-pley-complete",
 )
+# A live channel's: nothing of a length or of ranges.
+LIVE_HEADERS = ("content-type", "cache-control")
 MAX_BODY = 1 << 20
 CHUNK = 256 * 1024
 # Segments of a conversion can take a while to be made.
@@ -422,8 +424,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(data)
                 return
             self.send_response(response.status)
-            length = response.getheader("Content-Length")
-            for name in RESPONSE_HEADERS:
+            live = is_live_stream(path)
+            # A live channel has no length and no ranges: Kodi's player
+            # then neither pauses nor seeks it (Live TV has neither).
+            length = None if live else response.getheader("Content-Length")
+            for name in LIVE_HEADERS if live else RESPONSE_HEADERS:
                 value = response.getheader(name)
                 if value is not None:
                     self.send_header(name, value)
@@ -440,7 +445,6 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             # A live channel goes on as it comes: a read waits for no more
             # than the server has sent (a radio channel takes a quarter of a
             # minute to send a CHUNK), and Automatic doesn't measure it.
-            live = is_live_stream(path)
             read = response.read1 if live else response.read
             # A stream's bytes are counted as they come, and its whole
             # answer over the time it took, Kodi's taking them included.

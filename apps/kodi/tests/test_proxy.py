@@ -332,7 +332,8 @@ class ProxyTest(unittest.TestCase):
         def serve():
             conn, _ = listener.accept()
             conn.recv(65536)
-            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nTransfer-Encoding: chunked\r\n\r\n")
+            # A server that says it takes ranges.
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nAccept-Ranges: bytes\r\nTransfer-Encoding: chunked\r\n\r\n")
             conn.sendall(b"%x\r\n%s\r\n" % (len(sent), sent))
             release.wait(10)
             conn.sendall(b"0\r\n\r\n")
@@ -351,7 +352,12 @@ class ProxyTest(unittest.TestCase):
         while sent not in got:
             got += sock.recv(65536)
         self.assertLess(time.monotonic() - started, 3, "the packets come while the server holds the rest")
-        self.assertIn(b"video/mp2t", got.split(b"\r\n\r\n", 1)[0].lower())
+        head = got.split(b"\r\n\r\n", 1)[0].lower()
+        self.assertIn(b"video/mp2t", head)
+        # No length, no ranges: Kodi's player can neither pause nor seek it,
+        # as Live TV has neither.
+        self.assertNotIn(b"accept-ranges", head)
+        self.assertNotIn(b"content-length", head)
         self.assertEqual((list(self.proxy.meter.answers), list(self.proxy.meter.chunks)), ([], []), "Automatic doesn't measure a channel")
         # The server ends the channel: said before Kodi reads the end.
         ended = []

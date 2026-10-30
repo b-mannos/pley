@@ -250,8 +250,13 @@ HLS (`POST …/watch`):
 - The server converts nothing, and a channel watched elsewhere is joined
   on the same connection.
 - It starts at once: the server sends what it holds of the channel first.
-- What it costs: no rewinding further than Kodi's own cache holds (pause
-  keeps a little), where the server's HLS keeps its timeshift.
+- **No pause, back or forward**, as in every Pley app's Live TV. The
+  stream has no length and the proxy passes on no `Accept-Ranges`, so
+  Kodi's player takes it as a stream it can neither pause nor seek
+  (`Player.CanPause` and `Player.CanSeek` are false): its OSD has only
+  Previous, Stop and Next (with a queue of channels), and Pause, Rewind,
+  Fast forward and the step keys do nothing. Pley's window has no
+  controls of its own in the player.
 
 The plugin asks `POST …/watch` first with this Kodi's `client_id`
 (`install_id`, the one its playback sessions use): that tunes the
@@ -270,8 +275,9 @@ So changing channel never holds two connections.
   queue, so the player's Next and Previous
   (the remote's skip keys, `.` and `,` on a keyboard, the OSD's buttons)
   change channel, and its info shows the next one. Kodi's Up and Down in
-  the player seek, as for any video: a plugin can't take them without a
-  keymap of its own, which the add-on doesn't install. From Kodi's lists
+  the player (a video's big steps) do nothing on a channel: a plugin can't
+  make them change channel without a keymap of its own, which the add-on
+  doesn't install. From Kodi's lists
   a channel plays alone (unless Kodi's Settings → Player → Videos → Play
   next video automatically is on).
 - **A channel the server ends** (an administrator stopped it, the
@@ -289,8 +295,7 @@ So changing channel never holds two connections.
 **Kodi's PVR IPTV Simple client** could be given the server's lineup as
 an M3U and its guide as XMLTV, from the service's proxy (Pley takes no
 token in an address). It would bring Kodi's own guide grid, channel
-up and down in its Live TV player and timeshift through
-`inputstream.ffmpegdirect`. It isn't offered: it means setting up another
+up and down in its Live TV player. It isn't offered: it means setting up another
 add-on (the add-on changes none of Kodi's settings), a second set of
 favourites and recents the server doesn't know, and XMLTV made of every
 channel's guide (tens of megabytes on large lineups).
@@ -393,7 +398,6 @@ for screenshots put this in `portable_data/userdata/advancedsettings.xml`:
   as they are show every kind.
 - Not yet seen on a running Kodi: Automatic stepping back up, a bitrate
   lowered as it is sent, and Kodi's player giving up on the original.
-- Live TV: a guide grid (Kodi draws one only for PVR add-ons), rewinding
-  a channel (the server's HLS timeshift isn't used), Kodi's Up and Down
-  changing channel in the player, recording (none in Pley), and Live TV's
+- Live TV: a guide grid (Kodi draws one only for PVR add-ons), Kodi's
+  Up and Down changing channel in the player, recording (none in Pley), and Live TV's
   administration (the web app's).
