@@ -11,13 +11,14 @@ describes how they are made.
 ### Added
 
 - Live TV, where the server has channels, as TiviMate lays it out:
-  Favourites, Recently watched, All channels and the provider's groups
-  (gathered by region) down the left, and the category's channels as a
+  Search (every channel, and the groups whose names match), Favourites,
+  Recently watched, All channels, the regions in alphabetical order and
+  then the other groups down the left, and the category's channels as a
   guide (Roku's TimeGrid, the programme in focus described above it) or
   as cards, 50 at a time, so lineups of tens of thousands of channels
   open at once. The live player changes channel with up and down within
   the category, lists it at the left, shows what's on with a Live chip
-  instead of a seek bar, pauses and moves 10 s within the server's
+  instead of a seek bar when asked (OK, Right or the Options key), pauses and moves 10 s within the server's
   timeshift, and gives the server's own words when every connection is
   in use. The Options key adds a channel to the favourites or takes it
   out; back from the player, the guide is at the channel watched.

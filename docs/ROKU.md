@@ -200,14 +200,21 @@ groups, so nothing asks for all of them: the categories come from `GET
 /api/live/groups`, channels 50 at a time from `GET /api/live/browse`, and
 programmes only for those 50 (`GET /api/live/guide?ids=`).
 
-- **Categories** down the left: Favourites, Recently watched, All
-  channels, then the provider's groups in its order, with their channel
-  counts. A region's groups ("UK| Sport", "UK| News") gather under it
-  ("UK · 12 groups"); OK opens or closes it. OK on a category shows its
-  channels and goes to them; Back or Left goes back to the categories.
-  The category and the tab are kept on the Roku per server and profile
-  (registry section `liveViews`); a group gone, or favourites none any
-  more, shows every channel.
+- **Categories** down the left, with their channel counts: Search,
+  Favourites, Recently watched, All channels, then "Regions" in
+  alphabetical order (a region with more than one group, "UK · 12
+  groups": OK opens it to its groups, closing the one open) and "More
+  groups", the rest in the provider's order (a region of one group with
+  them). With fewer than two regions, the groups are one plain list.
+  OK on a category shows its channels and goes to them; Back or Left
+  goes back to the categories. The category and the tab are kept on the
+  Roku per server and profile (registry section `liveViews`); a group
+  gone, or favourites none any more, shows every channel.
+- **Search** opens Roku's keyboard. It looks through every channel
+  (`browse?category=all&q=`: a name, a number's beginning, or the title
+  on now), shown as "Results for …" in the guide or the cards; the groups
+  whose names match follow it in the rail as links. Clear goes back to
+  every channel. A search isn't kept for the next visit.
 - **Guide** (the tab above the categories): Roku's TimeGrid, a page of
   50 channels down and two hours across, the programme in focus
   described above it (On now, its times and time left, episode, Live and
@@ -242,16 +249,18 @@ programmes only for those 50 (`GET /api/live/guide?ids=`).
   category the player was opened from, the page around the channel
   (`browse?around=`), the next or last page at its ends, round the ends
   of the category; Recently watched keeps the order it had as the player
-  opened. The channel's banner shows at once and it is tuned 0.7 s after
-  the last press.
+  opened. The channel's logo and name show at once and it is tuned 0.7 s
+  after the last press.
 - **Left** opens the category's channels (number, logo, name, what's
   on), the page around the channel playing; up or down past its ends
   brings the page before or after. The Options key in it adds to or
   takes out of the favourites.
-- **Right** or **OK** show the banner: the channel, what's on with its
-  times, time left and progress, what's next, and the Live chip (red at
-  the edge, how far behind otherwise). It shows for 5 s on tuning and
-  stays while paused or behind live.
+- **Right**, **OK** or the **Options key** (\*) show the banner: the
+  channel, what's on with its times, time left and progress, what's
+  next, and the Live chip (red at the edge, how far behind otherwise).
+  It never shows by itself as a channel starts or changes (the tuning
+  card says which channel it is); asked for, it goes after 5 s, and stays
+  while paused or behind live.
 - **No seek bar:** the Video node's own controls are off (`enableUI`
   false). Play pauses and goes on; rewind, fast forward and Replay move
   10 s within the server's timeshift, never nearer the edge than live

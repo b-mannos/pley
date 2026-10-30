@@ -542,6 +542,8 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       if (category === "favorites") list = list.filter((c) => c.favorite);
       if (category === "recent") list = fixture.liveRecent.map((id) => list.find((c) => c.id === id)).filter(Boolean);
       if (category === "group") list = list.filter((c) => c.group === group);
+      const q = (url.searchParams.get("q") ?? "").toLowerCase();
+      if (q) list = list.filter((c) => c.name.toLowerCase().includes(q) || (c.number ?? "").startsWith(q) || (c.now?.title ?? "").toLowerCase().includes(q));
       let offset = Number(url.searchParams.get("offset") ?? 0);
       if (around) {
         const at = list.findIndex((c) => c.id === around);

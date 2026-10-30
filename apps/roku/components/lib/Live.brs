@@ -34,9 +34,12 @@ end function
 ' --- Categories ---
 
 ' A category: "all", "favorites", "recent" or "group:<name>", as the web
-' app writes them. The query GET /api/live/browse takes for it.
+' app writes them, or "search:<query>", every channel whose name, number
+' or programme on now has the query in it. The query GET /api/live/browse
+' takes for it.
 function liveBrowseQuery(category as string, offset as integer, limit as integer) as object
     query = { category: "all", offset: offset, limit: limit }
+    if Left(category, 7) = "search:" then query.q = Mid(category, 8)
     if category = "favorites" or category = "recent" then query.category = category
     if Left(category, 6) = "group:"
         query.category = "group"
@@ -123,6 +126,7 @@ end function
 
 ' What a category is called: "Favourites", "UK · Sport".
 function liveCategoryName(category as string, groups as object) as string
+    if Left(category, 7) = "search:" then return "Results for “" + Mid(category, 8) + "”"
     if category = "favorites" then return "Favourites"
     if category = "recent" then return "Recently watched"
     if Left(category, 6) <> "group:" then return "All channels"
@@ -139,6 +143,7 @@ end function
 ' Whether a category still has channels: a group gone, or nothing marked
 ' any more, shows every channel.
 function liveCategoryValid(category as string, summary as object, groups as object) as string
+    if Left(category, 7) = "search:" and Len(category) > 7 then return category
     if category = "favorites" and summary.favorites > 0 then return category
     if category = "recent" and summary.recent > 0 then return category
     if Left(category, 6) = "group:"
@@ -150,56 +155,128 @@ function liveCategoryValid(category as string, summary as object, groups as obje
     return "all"
 end function
 
-' The categories down the side, as TiviMate lists them: Favourites,
-' Recently watched, All channels, then the groups in the provider's
-' order, those of a region with more than one gathered under it ("UK · 12
-' groups"), its groups shown under it while open (open: { region: true }).
-' [{ kind ("category" or "region"), key (the category, or the region),
-' label, count, inner (a group shown under its region) }].
-function liveRail(summary as object, groups as object, open as object) as object
-    rail = [
-        { kind: "category", key: "favorites", label: "Favourites", count: summary.favorites, inner: false },
-        { kind: "category", key: "recent", label: "Recently watched", count: summary.recent, inner: false },
-        { kind: "category", key: "all", label: "All channels", count: summary.total, inner: false }
-    ]
-    if groups.Count() < 2 then return rail
+' The groups as the rail sorts them: the regions with more than one
+' group ("UK" of "UK| Sport", "UK| News"…), by name, and the other groups
+' in the provider's order; with fewer than two regions, every group in
+' its order. { regions: [{ region, groups, count }], others }.
+function liveGroupSections(groups as object) as object
     byRegion = {}
+    order = []
     for each g in groups
         if g.region <> ""
             key = "r" + g.region
-            if not byRegion.DoesExist(key) then byRegion[key] = []
+            if not byRegion.DoesExist(key)
+                byRegion[key] = []
+                order.Push(g.region)
+            end if
             byRegion[key].Push(g)
         end if
     end for
-    placed = {}
-    for each g in groups
-        region = invalid
-        if g.region <> "" then region = byRegion["r" + g.region]
-        if region = invalid or region.Count() < 2
-            rail.Push({ kind: "category", key: "group:" + g.name, label: g.name, count: g.count, inner: false })
-        else if not placed.DoesExist("r" + g.region)
-            placed["r" + g.region] = true
+    regions = []
+    for each region in order
+        members = byRegion["r" + region]
+        if members.Count() > 1
             total = 0
-            for each member in region
+            for each member in members
                 total = total + member.count
             end for
-            rail.Push({ kind: "region", key: g.region, label: g.region + "  ·  " + region.Count().ToStr() + " groups", count: total, inner: false })
-            if open.DoesExist(g.region)
-                for each member in region
-                    rail.Push({ kind: "category", key: "group:" + member.name, label: member.label, count: member.count, inner: true })
-                end for
-            end if
+            ' In alphabetical order as they come.
+            entry = { region: region, groups: members, count: total }
+            at = regions.Count()
+            while at > 0 and LCase(regions[at - 1].region) > LCase(region)
+                at = at - 1
+            end while
+            sorted = []
+            for i = 0 to regions.Count() - 1
+                if i = at then sorted.Push(entry)
+                sorted.Push(regions[i])
+            end for
+            if at = regions.Count() then sorted.Push(entry)
+            regions = sorted
         end if
     end for
+    if regions.Count() < 2 then return { regions: [], others: groups }
+    gathered = {}
+    for each r in regions
+        gathered["r" + r.region] = true
+    end for
+    others = []
+    for each g in groups
+        if g.region = "" or not gathered.DoesExist("r" + g.region) then others.Push(g)
+    end for
+    return { regions: regions, others: others }
+end function
+
+' A group as a link to it reads: "UK · Sport", or its name.
+function liveGroupLabel(g as object) as string
+    if g.region <> "" then return g.region + " · " + g.label
+    return g.name
+end function
+
+' The groups whose names have query in them, 12 at most.
+function liveGroupsMatching(groups as object, query as string) as object
+    out = []
+    wanted = LCase(query.Trim())
+    if wanted = "" then return out
+    for each g in groups
+        if out.Count() < 12 and Instr(1, LCase(g.name), wanted) > 0 then out.Push(g)
+    end for
+    return out
+end function
+
+' The categories down the side: Search (with the query searched for, and
+' the groups whose names match it as links under it), Favourites,
+' Recently watched, All channels, then "Regions" in alphabetical order,
+' the one open with its groups under it, and "More groups", the rest in
+' the provider's order (one plain list, "Groups", with fewer than two
+' regions). [{ kind ("search", "category", "region" or "heading"), key
+' (the category, or the region), label, count (-1 for none), inner (set
+' in under the entry above) }].
+function liveRail(summary as object, groups as object, open as string, query as string) as object
+    searchLabel = "Search"
+    if query <> "" then searchLabel = "Search: “" + query + "”"
+    rail = [{ kind: "search", key: "search:" + query, label: searchLabel, count: -1, inner: false }]
+    for each g in liveGroupsMatching(groups, query)
+        rail.Push({ kind: "category", key: "group:" + g.name, label: liveGroupLabel(g), count: g.count, inner: true })
+    end for
+    rail.Push({ kind: "category", key: "favorites", label: "Favourites", count: summary.favorites, inner: false })
+    rail.Push({ kind: "category", key: "recent", label: "Recently watched", count: summary.recent, inner: false })
+    rail.Push({ kind: "category", key: "all", label: "All channels", count: summary.total, inner: false })
+    sections = liveGroupSections(groups)
+    if sections.regions.Count() > 0
+        rail.Push({ kind: "heading", key: "", label: "Regions", count: -1, inner: false })
+        for each r in sections.regions
+            rail.Push({ kind: "region", key: r.region, label: r.region + "  ·  " + r.groups.Count().ToStr() + " groups", count: r.count, inner: false })
+            if r.region = open
+                for each g in r.groups
+                    rail.Push({ kind: "category", key: "group:" + g.name, label: g.label, count: g.count, inner: true })
+                end for
+            end if
+        end for
+    end if
+    others = sections.others
+    if others.Count() > 1 or (others.Count() = 1 and sections.regions.Count() > 0)
+        heading = "Groups"
+        if sections.regions.Count() > 0 then heading = "More groups"
+        rail.Push({ kind: "heading", key: "", label: heading, count: -1, inner: false })
+        for each g in others
+            label = g.name
+            if label = "" then label = "No group"
+            rail.Push({ kind: "category", key: "group:" + g.name, label: label, count: g.count, inner: false })
+        end for
+    end if
     return rail
 end function
 
-' The region of a group category (its region open in the rail), or "".
+' The region a group category is gathered under in the rail (open there),
+' or "".
 function liveRegionOf(category as string, groups as object) as string
     if Left(category, 6) <> "group:" then return ""
     name = Mid(category, 7)
-    for each g in groups
-        if g.name = name then return g.region
+    for each r in liveGroupSections(groups).regions
+        for each g in r.groups
+            if g.name = name then return r.region
+        end for
     end for
     return ""
 end function

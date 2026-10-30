@@ -220,10 +220,7 @@ sub onListSelected(event as object)
     if at < 0 or at >= m.page.channels.Count() then return
     channel = m.page.channels[at]
     closeList()
-    if m.channel <> invalid and channel.id = m.channel.id and not m.notice.visible
-        showBanner(true)
-        return
-    end if
+    if m.channel <> invalid and channel.id = m.channel.id and not m.notice.visible then return
     tune(channel)
 end sub
 
@@ -277,11 +274,12 @@ sub zap(by as integer)
     askPage(move.offset, 0, which)
 end sub
 
-' The channel's banner shows at once, over the one playing, and it is
-' tuned once the presses stop.
+' The channel's logo and name show at once, and it is tuned once the
+' presses stop. What's on shows only when asked for.
 sub zapTo(channel as object)
     m.zapTo = channel
-    showBanner(true)
+    hideBanner()
+    showCard(channel, "")
     m.bannerTimer.control = "stop"
     m.zapTimer.control = "stop"
     m.zapTimer.control = "start"
@@ -293,7 +291,7 @@ sub onZapTimer()
     if target = invalid then return
     if m.channel <> invalid and target.id = m.channel.id and m.sessionId <> ""
         ' Back where it started.
-        showBanner(true)
+        if m.played then m.card.visible = false
         return
     end if
     tune(target)
@@ -317,7 +315,7 @@ sub tune(channel as object)
     m.notice.visible = false
     showWaiting(false)
     showCard(channel, "")
-    showBanner(true)
+    hideBanner()
     markCurrent()
     if not m.list.visible then m.top.setFocus(true)
     m.watchRequest = uiRequest({ op: "liveWatch", channelId: channel.id, attempt: m.attempt }, "onWatch")
@@ -362,7 +360,7 @@ sub onWatch(event as object)
     fresh = liveChannel(answer.data.channel, m.global.session.server, liveLogoWidth(), m.category)
     if fresh <> invalid and fresh.id = m.channel.id then m.channel = fresh
     showCard(m.channel, "")
-    showBanner(true)
+    if m.banner.visible then showBanner(false)
     ' The playlist once, waited for: the server answers it once the
     ' channel's first segments are made, or says why not.
     uiRequest({ method: "GET", path: m.playlist, timeoutMs: 50000, attempt: m.attempt }, "onPlaylist")
@@ -406,7 +404,6 @@ sub onState(event as object)
             m.played = true
             m.card.visible = false
             m.tuning.control = "stop"
-            showBanner(true)
             ' A channel without pictures (radio) keeps its card.
             m.pictureTimer.control = "start"
         else if m.paused
@@ -675,7 +672,8 @@ sub finish()
 end sub
 
 ' Up and down change channel (Up: the next number); Left opens the
-' category's channels, Right and OK show what's on; play, rewind, fast
+' category's channels, Right, OK and the Options key (*) show what's on
+' (it never shows by itself as a channel starts); play, rewind, fast
 ' forward and Replay pause and move within the timeshift. In the list:
 ' the Options key adds to or takes out of the favourites, up and down past
 ' its ends go to the page before or after, Back and Right close it. Back
@@ -718,7 +716,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
         playKey(key)
         return true
     end if
-    if key = "right" or key = "OK"
+    if key = "right" or key = "OK" or key = "options"
         if m.banner.visible and not m.paused
             hideBanner()
         else

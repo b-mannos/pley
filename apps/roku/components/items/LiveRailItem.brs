@@ -5,6 +5,7 @@ sub init()
     m.count = m.top.findNode("count")
     m.inner = false
     m.current = false
+    m.heading = false
 end sub
 
 sub onContent()
@@ -12,7 +13,17 @@ sub onContent()
     if item = invalid then return
     m.inner = item.inner = true
     m.current = item.current = true
-    m.title.text = item.title
+    m.heading = item.heading = true
+    if m.heading
+        ' "REGIONS", "MORE GROUPS": a section's title, set at the bottom.
+        m.title.text = UCase(item.title)
+        m.title.font = "font:SmallestBoldSystemFont"
+        m.title.vertAlign = "bottom"
+    else
+        m.title.text = item.title
+        m.title.font = "font:SmallestSystemFont"
+        m.title.vertAlign = "center"
+    end if
     m.count.text = item.countText
     m.mark.text = item.mark
     onLayout()
@@ -33,13 +44,19 @@ sub onLayout()
     if m.mark.text = "" then textX = x
     m.title.translation = [textX, 0]
     m.title.width = w - textX - 120
-    m.title.height = h
+    m.title.height = h - 8
+    if not m.heading then m.title.height = h
     m.count.translation = [w - 112, 0]
     m.count.width = 96
     m.count.height = h
 end sub
 
 sub onFocus()
+    if m.heading
+        m.back.color = "0x16191E00"
+        m.title.color = "0x8B95A5FF"
+        return
+    end if
     focused = m.top.itemHasFocus and m.top.listHasFocus
     if focused
         m.back.color = "0x38BDF8FF"

@@ -26,6 +26,8 @@ function liveSampleGroups() as object
             { name: "UK| News", region: "UK", label: "News", count: 40 },
             { name: "News", region: invalid, label: "News", count: 2 },
             { name: "FR| Cinema", region: "FR", label: "Cinema", count: 30 },
+            { name: "AR| Kids", region: "AR", label: "Kids", count: 5 },
+            { name: "AR| Movies", region: "AR", label: "Movies", count: 7 },
             { label: "No name", count: 3 }
         ]
     }
@@ -78,7 +80,7 @@ sub test_live_categories()
     tkEqual(liveBrowseQuery("favorites", 50, 50), { category: "favorites", offset: 50, limit: 50 })
     tkEqual(liveBrowseQuery("group:UK| Sport", 0, 50), { category: "group", group: "UK| Sport", offset: 0, limit: 50 })
     groups = liveGroups(liveSampleGroups())
-    tkEqual(groups.Count(), 4, "one without a name is left out")
+    tkEqual(groups.Count(), 6, "one without a name is left out")
     tkEqual(groups[2].region, "")
     tkEqual(liveCategoryName("group:UK| Sport", groups), "UK · Sport")
     tkEqual(liveCategoryName("group:News", groups), "News")
@@ -96,20 +98,40 @@ end sub
 sub test_live_rail_gathers_regions()
     groups = liveGroups(liveSampleGroups())
     summary = liveSummary(liveSampleGroups())
-    rail = liveRail(summary, groups, {})
+    rail = liveRail(summary, groups, "", "")
     keys = []
     for each entry in rail
-        keys.Push(entry.key)
+        keys.Push(entry.kind + ":" + entry.key)
     end for
-    tkEqual(keys, ["favorites", "recent", "all", "UK", "group:News", "group:FR| Cinema"], "a region of one group stays a group")
-    tkEqual(rail[3].kind, "region")
-    tkEqual(rail[3].label, "UK  ·  2 groups")
-    tkEqual(rail[3].count, 160)
-    tkEqual(rail[2].count, 56171)
-    opened = liveRail(summary, groups, { UK: true })
-    tkEqual(opened.Count(), 8)
-    tkEqual(opened[4], { kind: "category", key: "group:UK| Sport", label: "Sport", count: 120, inner: true })
-    tkEqual(liveRail(summary, [groups[2]], {}).Count(), 3, "one group: no groups listed")
+    tkEqual(keys, ["search:search:", "category:favorites", "category:recent", "category:all", "heading:", "region:AR", "region:UK", "heading:", "category:group:News", "category:group:FR| Cinema"], "regions by name, then the rest in the provider's order, a region of one group with them")
+    tkEqual(rail[4].label, "Regions")
+    tkEqual(rail[7].label, "More groups")
+    tkEqual(rail[6].label, "UK  ·  2 groups")
+    tkEqual(rail[6].count, 160)
+    tkEqual(rail[3].count, 56171)
+    opened = liveRail(summary, groups, "UK", "")
+    tkEqual(opened.Count(), 12)
+    tkEqual(opened[7], { kind: "category", key: "group:UK| Sport", label: "Sport", count: 120, inner: true })
+    plain = liveRail(summary, [groups[0], groups[1], groups[2]], "", "")
+    tkEqual(plain.Count(), 8, "one region: one plain list")
+    tkEqual(plain[4].label, "Groups")
+    tkEqual(plain[5].label, "UK| Sport")
+    tkEqual(liveRail(summary, [groups[2]], "", "").Count(), 4, "one group: no groups listed")
+end sub
+
+sub test_live_search()
+    groups = liveGroups(liveSampleGroups())
+    summary = liveSummary(liveSampleGroups())
+    rail = liveRail(summary, groups, "", "news")
+    tkEqual(rail[0].label, "Search: “news”")
+    tkEqual(rail[0].key, "search:news")
+    tkEqual(rail[1], { kind: "category", key: "group:UK| News", label: "UK · News", count: 40, inner: true }, "the groups whose names match, as links")
+    tkEqual(rail[2].key, "group:News")
+    tkEqual(rail[3].key, "favorites")
+    tkEqual(liveBrowseQuery("search:bbc one", 0, 50), { category: "all", q: "bbc one", offset: 0, limit: 50 })
+    tkEqual(liveCategoryName("search:bbc", groups), "Results for “bbc”")
+    tkEqual(liveCategoryValid("search:bbc", summary, groups), "search:bbc")
+    tkEqual(liveGroupsMatching(groups, "  "), [])
 end sub
 
 sub test_live_now_and_next()

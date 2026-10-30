@@ -373,7 +373,7 @@ async function walk() {
   await settle();
   shoot("live-back");
   await press("back"); // the categories, on All channels
-  await press("up", 3); // the tabs, above Favourites
+  await press("up", 4); // the tabs, above Search and Favourites
   await press("right"); // Channels
   since = mark();
   await press("select");

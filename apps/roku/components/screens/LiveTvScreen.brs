@@ -28,11 +28,14 @@ sub init()
     m.view = { tab: "guide", category: "all" }
     m.viewKey = ""
     ' The groups ({ total, favorites, recent } and [{ name, region, label,
-    ' count }]), the rail's entries, and the regions open in it.
+    ' count }]), the rail's entries and the one in focus, the region open in
+    ' it, and the words searched for.
     m.summary = invalid
     m.groups = []
     m.railEntries = []
-    m.open = {}
+    m.railFocused = 0
+    m.open = ""
+    m.query = ""
     ' The guide: where it starts, how far it is fetched, the page shown
     ' ({ total, offset, channels }), the focus as it was last seen (to tell
     ' a page's end gone round), and which asking an answer must be for.
@@ -52,6 +55,7 @@ sub init()
     m.tabs.chips = [{ label: "Guide", width: 208 }, { label: "Channels", width: 208 }]
     m.tabs.observeField("chosen", "onTabChosen")
     m.rail.observeField("itemSelected", "onRailSelected")
+    m.rail.observeField("itemFocused", "onRailFocused")
     m.guide.observeField("programFocusedDetails", "onProgramFocused")
     m.guide.observeField("programSelected", "onProgramSelected")
     m.guide.observeField("leftEdgeTargetTime", "onLeftEdge")
@@ -129,7 +133,7 @@ sub onGroups(event as object)
     end if
     category = liveCategoryValid(m.view.category, m.summary, m.groups)
     region = liveRegionOf(category, m.groups)
-    if region <> "" then m.open[region] = true
+    if region <> "" then m.open = region
     changed = category <> m.view.category
     m.view.category = category
     buildRail()
@@ -140,7 +144,7 @@ end sub
 sub buildRail()
     focusedKey = invalid
     if m.rail.content <> invalid and m.rail.itemFocused >= 0 and m.rail.itemFocused < m.railEntries.Count() then focusedKey = m.railEntries[m.rail.itemFocused].key
-    m.railEntries = liveRail(m.summary, m.groups, m.open)
+    m.railEntries = liveRail(m.summary, m.groups, m.open, m.query)
     items = []
     at = 0
     for i = 0 to m.railEntries.Count() - 1
@@ -148,37 +152,115 @@ sub buildRail()
         mark = ""
         if entry.kind = "region"
             mark = "+"
-            if m.open.DoesExist(entry.key) then mark = "−"
+            if entry.key = m.open then mark = "−"
         end if
-        items.Push({ title: entry.label, countText: liveThousands(entry.count), mark: mark, inner: entry.inner, current: entry.kind = "category" and entry.key = m.view.category })
-        if focusedKey = invalid and entry.key = m.view.category then at = i
-        if focusedKey <> invalid and entry.key = focusedKey then at = i
+        countText = ""
+        if entry.count >= 0 then countText = liveThousands(entry.count)
+        current = (entry.kind = "category" or entry.kind = "search") and entry.key = m.view.category
+        items.Push({ title: entry.label, countText: countText, mark: mark, inner: entry.inner, heading: entry.kind = "heading", current: current })
+        if entry.kind <> "heading"
+            if focusedKey = invalid and entry.key = m.view.category then at = i
+            if focusedKey <> invalid and entry.key = focusedKey then at = i
+        end if
     end for
+    m.railFocused = at
     m.rail.content = nodesContent(items)
     m.rail.jumpToItem = at
 end sub
 
-' OK on a category shows it and goes to its channels; on a region, its
-' groups open or close.
+' A heading ("Regions", "More groups") is passed over, the way the focus
+' was going.
+sub onRailFocused(event as object)
+    at = event.getData()
+    was = m.railFocused
+    m.railFocused = at
+    if at < 0 or at >= m.railEntries.Count() or m.railEntries[at].kind <> "heading" then return
+    target = at + 1
+    if was > at then target = at - 1
+    if target < 0 or target >= m.railEntries.Count() then target = at + 1
+    if target >= m.railEntries.Count() then return
+    m.railFocused = target
+    m.rail.jumpToItem = target
+end sub
+
+' OK on Search asks what to find; on a category, it shows and the focus
+' goes to its channels; on a region, its groups open (and another's
+' close) or close.
 sub onRailSelected(event as object)
     at = event.getData()
     if at < 0 or at >= m.railEntries.Count() then return
     entry = m.railEntries[at]
+    if entry.kind = "heading" then return
+    if entry.kind = "search"
+        askSearch()
+        return
+    end if
     if entry.kind = "region"
-        if m.open.DoesExist(entry.key)
-            m.open.Delete(entry.key)
+        if m.open = entry.key
+            m.open = ""
         else
-            m.open[entry.key] = true
+            m.open = entry.key
         end if
         buildRail()
         return
     end if
-    if entry.key <> m.view.category
-        m.view.category = entry.key
-        liveSaveView(viewSection(), m.viewKey, m.view)
-        buildRail()
-        showCategory(0)
+    choose(entry.key)
+    focusContent()
+end sub
+
+' Shows a category, kept on the Roku (a search isn't).
+sub choose(category as string)
+    if category = m.view.category then return
+    m.view.category = category
+    if Left(category, 7) <> "search:" then liveSaveView(viewSection(), m.viewKey, m.view)
+    buildRail()
+    showCategory(0)
+end sub
+
+' --- Search ---
+
+' Roku's keyboard: every channel whose name, number or programme on now
+' has the words in it, and the groups whose names do.
+sub askSearch()
+    dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
+    dialog.title = "Search Live TV"
+    dialog.message = ["Channels, groups and what's on"]
+    dialog.text = m.query
+    buttons = ["Search"]
+    if m.query <> "" then buttons.Push("Clear")
+    buttons.Push("Cancel")
+    dialog.buttons = buttons
+    dialog.observeField("buttonSelected", "onSearchAnswered")
+    m.top.getScene().dialog = dialog
+end sub
+
+sub onSearchAnswered(event as object)
+    dialog = m.top.getScene().dialog
+    text = ""
+    labels = []
+    if dialog <> invalid
+        text = dialog.text.Trim()
+        labels = dialog.buttons
     end if
+    uiCloseDialog()
+    chosen = event.getData()
+    if chosen < 0 or chosen >= labels.Count() then return
+    label = labels[chosen]
+    if label = "Cancel" then return
+    if label = "Clear" or text = ""
+        ' Back to every channel.
+        m.query = ""
+        if Left(m.view.category, 7) = "search:"
+            m.view.category = ""
+            choose("all")
+        else
+            buildRail()
+        end if
+        return
+    end if
+    m.query = httpSentence(text)
+    m.view.category = ""
+    choose("search:" + m.query)
     focusContent()
 end sub
 
@@ -324,6 +406,7 @@ sub onGuide(event as object)
 end sub
 
 function emptyText() as string
+    if Left(m.view.category, 7) = "search:" then return "No channel's name, number or programme on now has “" + m.query + "” in it."
     if m.view.category = "favorites" then return "No favourites yet: the Options key (*) on a channel adds it."
     if m.view.category = "recent" then return "Nothing watched yet."
     return "No channels here."
