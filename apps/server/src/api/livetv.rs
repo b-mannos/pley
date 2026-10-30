@@ -37,7 +37,7 @@ pub struct Summary {
 pub async fn summary(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Summary>> {
     let allowed = state.live.may_watch(&user);
     let channels = if allowed { state.live.channel_count().await? } else { 0 };
-    let sources = if user.is_admin { state.live.sources().await?.len() } else { 0 };
+    let sources = if user.is_admin { state.live.source_count().await? } else { 0 };
     let recent = if allowed { state.live.recent(&user, 12).await? } else { Vec::new() };
     Ok(Json(Summary { available: allowed && channels > 0, allowed, channels, sources, recent }))
 }

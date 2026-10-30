@@ -745,6 +745,11 @@ impl LiveTv {
 
     // ------------------------------------------------------------ sources
 
+    /// How many sources are set up.
+    pub async fn source_count(&self) -> Result<usize, AppError> {
+        Ok(self.source_rows().await.map_err(|e| AppError::Internal(e.into()))?.len())
+    }
+
     async fn source_rows(&self) -> sqlx::Result<Vec<SourceRow>> {
         sqlx::query_as("SELECT * FROM live_sources ORDER BY id").fetch_all(&self.db.read).await
     }
