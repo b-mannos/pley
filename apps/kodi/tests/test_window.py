@@ -133,7 +133,7 @@ class Dialogs:
         outer = self
 
         class Dialog:
-            def select(self, heading, entries, preselect=-1):
+            def select(self, heading, entries, preselect=-1, useDetails=False):
                 outer.shown.append(([getattr(e, "label", e) for e in entries], preselect))
                 return outer.picks.pop(0)
 
@@ -143,6 +143,9 @@ class Dialogs:
             def numeric(self, kind, heading, defaultt="", hidden=False):
                 outer.asked.append((heading, hidden))
                 return outer.typed.pop(0)
+
+            def textviewer(self, heading, text):
+                outer.asked.append((heading, text))
 
             def contextmenu(self, entries):
                 outer.shown.append((list(entries), -1))

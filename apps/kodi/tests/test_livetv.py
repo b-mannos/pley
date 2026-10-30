@@ -119,8 +119,10 @@ class ItemsTest(unittest.TestCase):
         self.assertEqual(li.art["fanart"], BASE + "/api/live/channels/1/programs/1/image?w=640")
         tag = li.video.values
         self.assertEqual((tag["setMediaType"], tag["setTitle"], tag["setTagLine"], tag["setGenres"]), ("video", "101 Pley News HD", "Morning Briefing: Part 7", ["News"]))
-        # A stream without an end: Kodi keeps no resume point or watched mark for it.
-        self.assertNotIn("setResumePoint", tag)
+        # A stream without an end: Kodi counts one it stopped as played, and
+        # keeps that by its address; a channel is never watched, nor resumed.
+        self.assertEqual((tag["setPlaycount"], tag["setResumePoint"]), (0, (0.0, 0.0)))
+        self.assertNotIn("setDuration", tag)
         self.assertEqual(li.properties["IsPlayable"], "true")
 
     def test_a_channel_plays_as_the_provider_sends_it(self):
@@ -145,6 +147,36 @@ class ItemsTest(unittest.TestCase):
         livetv.queue(BASE, CHANNELS, 0, NOW)
         livetv.forget_queue()
         self.assertEqual(mine.size(), 0)
+
+
+class ServiceTest(unittest.TestCase):
+    """What the service's proxy hears of a channel Kodi plays."""
+
+    def setUp(self):
+        from pley import service
+
+        xbmc.PlayList.entries.clear()
+        del xbmcgui.notified[:]
+        del xbmcgui.boxes[:]
+        self.player = service.Player(None, "pleyKodi/test", None)
+
+    def test_a_channel_the_server_ended_doesnt_tune_the_next(self):
+        livetv.queue(BASE, CHANNELS, 0, NOW)
+        self.player.live_ended()
+        self.assertEqual(xbmc.PlayList(xbmc.PLAYLIST_VIDEO).size(), 0)
+        self.assertEqual(xbmcgui.notified, [("Pley", "The server stopped this stream.")])
+
+    def test_a_channel_refused_on_its_way_to_kodi_is_said_once(self):
+        livetv.queue(BASE, CHANNELS, 0, NOW)
+        self.player.busy("The one connection is in use.")
+        self.player.busy("The one connection is in use.")
+        for _ in range(50):
+            if xbmcgui.boxes:
+                break
+            time.sleep(0.02)
+        time.sleep(0.1)
+        self.assertEqual(xbmcgui.boxes, [("All connections are in use", "The one connection is in use.")])
+        self.assertEqual(xbmc.PlayList(xbmc.PLAYLIST_VIDEO).size(), 0)
 
 
 class RoutesTest(unittest.TestCase):
@@ -274,6 +306,7 @@ class LiveScreenTest(unittest.TestCase):
         self.win.live = {"available": True}
         self.channels = [dict(c) for c in CHANNELS]
         self.favourites = []
+        self.guides = []
 
         class Server:
             def get(inner, path, **query):
@@ -282,6 +315,11 @@ class LiveScreenTest(unittest.TestCase):
                 if path == "/api/live/channels":
                     return self.channels
                 raise AssertionError(path)
+
+            def request(inner, method, path, query=None):
+                self.guides.append(query)
+                body = {"from": 0, "to": 0, "programs": {"1": [NEWS["now"], NEWS["next"]]}}
+                return livetv.api.Response(200, {}, json.dumps(body).encode("utf-8"))
 
             def put(inner, path, body=None):
                 self.favourites.append(("PUT", path))
@@ -359,6 +397,23 @@ class LiveScreenTest(unittest.TestCase):
         self.assertEqual(self.screen.tab, "all")
         self.assertFalse(self.win.made[L.LIVE_FAVOURITES].visible)
         self.assertEqual(self.win.focused, L.LIVE_LIST)
+
+    def test_a_channels_schedule(self):
+        self.screen.show(False)
+        # Info: the schedule; a programme still to come says what it is,
+        # and back from it the schedule is as it was, not asked for again.
+        with test_window.Dialogs(picks=[1, -1]) as asked:
+            self.screen.info(L.LIVE_LIST)
+        labels, preselect = asked.shown[0]
+        self.assertEqual(labels, ["On now  ·  Morning Briefing: Part 7", "Today %s  ·  World at One" % clock(NOW + 2700), "Later"])
+        self.assertEqual(asked.shown[1][1], 1)
+        self.assertEqual(asked.asked[0][0], "World at One")
+        self.assertIn("101 Pley News HD", asked.asked[0][1])
+        self.assertEqual(self.guides, [{"from": NOW, "to": NOW + 6 * HOUR}])
+        # What's on watches the channel.
+        with test_window.Dialogs(picks=[0]):
+            self.screen.info(L.LIVE_LIST)
+        self.assertEqual(xbmc.PlayList.entries[xbmc.PLAYLIST_VIDEO][xbmc.played[-1][2]][0], "plugin://plugin.video.pley/?route=live_play&id=1")
 
     def test_number_keys_go_to_a_channel(self):
         self.screen.show(False)

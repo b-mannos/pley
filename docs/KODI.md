@@ -62,9 +62,10 @@ is signed in to again with a code. Back leaves Pley. The profile's menu
 Opened from Kodi's add-ons (or a favourite), Pley shows its own screens
 over Kodi, after the Android TV app's.
 
-- **The rail**: the profile, Search, Home, the first three libraries,
-  Playlists, Collections and Settings. With more than three libraries,
-  Libraries takes Collections' place. Left opens it with names.
+- **The rail**: the profile, Search, Home, Live TV (where the server has
+  channels), the first three libraries, Playlists, Collections and
+  Settings. With more than three libraries, Libraries takes Collections'
+  place. Left opens it with names.
 - **The profile's menu**: Switch profile, Choose a server, Audio and
   subtitles, Sort libraries and Sign out.
 - **Library order** is the profile's, saved for all its devices
@@ -180,6 +181,102 @@ part (`autoquality.py`):
   nothing measures a way up. A stream that can't go higher raises where
   the next title starts instead.
 
+## Live TV
+
+Where the server has channels ([API.md](API.md#live-tv), `GET /api/live`
+says `available`), the rail has Live TV after Home, as the web's sidebar
+does; on a server with Live TV alone (or a profile without libraries) it
+is Home. Setting it up (sources, lineup, settings) stays in the web app.
+
+- **The page** (`livetv.py`, `window.Live`): the channels by number, each
+  with its logo, what's on now, its times, what's left and a progress bar.
+  Beside them, the focused channel's programme: its picture (else the
+  logo), title, day and times, episode, Live and New, description, and
+  what comes next. Kodi reads the panel from the list's own item, so it
+  follows focus with no wait.
+- **Tabs**: All, Favourites (with a favourite), Recently watched (the
+  server's `recent`) and Groups (with two groups or more; it asks which).
+  The tab is kept per server and profile in `remembered.json`, as a
+  library's.
+- **A channel**: Select watches it. Menu has Watch, Add to (Remove from)
+  favourites and Schedule; Info is Schedule. Number keys typed together
+  go to the channel of that number (on All when the tab hasn't it).
+- **Schedule**: the channel's next six hours in Kodi's list (Later, the
+  six after): what's on watches the channel, a programme to come shows its
+  details. The guide is asked for every channel at once (the API has no
+  channel filter), so on a lineup of tens of thousands it takes a few
+  seconds under Kodi's busy circle.
+- **What's on stays current**: every 30 s the rows near focus are redrawn;
+  a channel whose programme ended is asked for again
+  (`GET /api/live/channels/{id}`). A lineup of 57,000 channels (tested)
+  draws in about 2 s on a PC; the rest is freshened as focus comes near.
+- **Kodi's lists** (Settings → Screens → Kodi's lists, and skins'
+  widgets): Live TV after Home's rows, with Channels, Favourites, Recently
+  watched, Groups and Guide (each channel opening its schedule), 300 to a
+  page. A channel's menu has its favourite and its schedule.
+
+**A full guide grid** isn't possible in a plugin: Kodi's EPG grid control
+draws its PVR add-ons' data only, and a list's items are all one width.
+The page's now-and-next, the schedule and the Guide folder stand in for it.
+
+### Playing
+
+A channel plays from `GET /api/live/channels/{id}/stream.ts?client_id=…`,
+the provider's MPEG-TS passed through the server, not the server's live
+HLS (`POST …/watch`):
+
+- Kodi reads MPEG-TS itself and deinterlaces with its own deinterlacer
+  (in hardware where it decodes there): interlaced MPEG-2 with MP2 plays
+  as the provider sends it, and surround sound reaches a receiver. The
+  HLS is converted to H.264 and AAC stereo by the server, and starts a few
+  segments behind.
+- The server converts nothing, and a channel watched elsewhere is joined
+  on the same connection.
+- It starts at once: the server sends what it holds of the channel first.
+- What it costs: no rewinding further than Kodi's own cache holds (pause
+  keeps a little), where the server's HLS keeps its timeshift.
+
+The plugin asks `POST …/watch` first with this Kodi's `client_id`
+(`install_id`, the one its playback sessions use): that tunes the
+channel, says when every connection of its source is in use, and gives
+what's on for the player's info. Then Kodi reads the stream under the
+same `client_id`, which ends the watch; closing it lets the channel go.
+So changing channel never holds two connections.
+
+- **409** (every connection in use): a box with the server's own words,
+  which name the channels being watched. Kodi's queue of channels is let
+  go, or Kodi would try each one after it. A 409 to the stream itself
+  (the connection taken between the two requests) is said the same way,
+  by the service's proxy.
+- **Channel up and down**: the tab's channels around the one chosen (100
+  each side) are Kodi's video queue, so the player's Next and Previous
+  (the remote's skip keys, `.` and `,` on a keyboard, the OSD's buttons)
+  change channel, and its info shows the next one. Kodi's Up and Down in
+  the player seek, as for any video: a plugin can't take them without a
+  keymap of its own, which the add-on doesn't install. From Kodi's lists
+  a channel plays alone (unless Kodi's Settings → Player → Videos → Play
+  next video automatically is on).
+- **A channel the server ends** (an administrator stopped it, the
+  provider gave up): the proxy sees the stream end before Kodi does, lets
+  Kodi's queue go so it doesn't tune the next channel, and says "The
+  server stopped this stream."
+- **Marked live**: Kodi 21 has no live flag for a plugin's item (only its
+  PVR channels). A channel is a video with no duration, never watched and
+  with no resume point (Kodi otherwise counts a stopped stream as played),
+  `video/mp2t` without Kodi asking first. The player shows the channel's
+  name, what's on as its tagline, and now and next in its info.
+- The proxy relays a channel as it comes (a radio channel sends a few
+  kilobytes a second), and Automatic doesn't measure it.
+
+**Kodi's PVR IPTV Simple client** could be given the server's lineup as
+an M3U and its guide as XMLTV, from the service's proxy (Pley takes no
+token in an address). It would bring Kodi's own guide grid, channel
+up and down in its Live TV player and timeshift through
+`inputstream.ffmpegdirect`. It isn't offered: it means setting up another
+add-on (the add-on changes none of Kodi's settings), a second set of
+favourites and recents the server doesn't know, and XMLTV made of every
+channel's guide (tens of megabytes on large lineups).
+
 ## Kodi's player
 
 The add-on adds no controls to Kodi's player and changes none of Kodi's
@@ -278,3 +375,7 @@ for screenshots put this in `portable_data/userdata/advancedsettings.xml`:
   as they are show every kind.
 - Not yet seen on a running Kodi: Automatic stepping back up, a bitrate
   lowered as it is sent, and Kodi's player giving up on the original.
+- Live TV: a guide grid (Kodi draws one only for PVR add-ons), rewinding
+  a channel (the server's HLS timeshift isn't used), Kodi's Up and Down
+  changing channel in the player, recording (none in Pley), and Live TV's
+  administration (the web app's).

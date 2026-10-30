@@ -64,15 +64,19 @@ class Proxy:
     """Serves on 127.0.0.1:`port` (another one when it is taken) until
     `stop`. `on_stopped(message)` hears of streams an administrator
     stopped; `on_busy(message)` of a live channel refused because every
-    connection of its source is in use. `meter` (autoquality.Meter) counts
-    what streams bring, for Automatic."""
+    connection of its source is in use, `on_ended()` of one the server
+    ended. `meter` (autoquality.Meter) counts what streams bring, for
+    Automatic."""
 
-    def __init__(self, tokens: Tokens, user_agent: str, secret: str, port: int = 0, on_stopped=None, meter=None, on_busy=None):
+    def __init__(
+        self, tokens: Tokens, user_agent: str, secret: str, port: int = 0, on_stopped=None, meter=None, on_busy=None, on_ended=None
+    ):
         self.tokens = tokens
         self.user_agent = user_agent
         self.secret = secret
         self.on_stopped = on_stopped
         self.on_busy = on_busy
+        self.on_ended = on_ended
         self.meter = meter
         self.server = None
         self.thread = None
@@ -453,6 +457,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
             if meter is not None:
                 meter.answered(path, size, time.monotonic() - began)
+            if live and response.status == 200 and self.proxy.on_ended:
+                # The server ended the channel (an administrator stopped
+                # it, the provider gave up): said before Kodi reads the
+                # end, which would play the next channel of its queue.
+                self.proxy.on_ended()
         except (OSError, http.client.HTTPException):
             # Kodi let go (a seek, a stop), the server did, or the proxy is
             # stopping: the connection ends, and Kodi asks again from where

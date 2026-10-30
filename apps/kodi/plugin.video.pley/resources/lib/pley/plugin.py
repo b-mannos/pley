@@ -400,6 +400,7 @@ class Plugin:
         if len(livetv.groups(found)) > 1:
             self.folder(kodi.text("groups"), {"route": "live_groups"}, "DefaultGenre.png")
         self.folder(kodi.text("guide"), {"route": "live_guide"}, "DefaultPVRGuide.png")
+        xbmcplugin.addSortMethod(self.handle, xbmcplugin.SORT_METHOD_UNSORTED)
         self.end()
 
     def route_live_channels(self) -> None:
@@ -435,6 +436,9 @@ class Plugin:
         if offset + PAGE < len(found):
             more = {k: v for k, v in dict(params, offset=offset + PAGE).items() if v is not None}
             self.folder(kodi.text("next_page"), more, "DefaultFolder.png", last=True)
+        # By number, as the server lists them; by name if asked.
+        xbmcplugin.addSortMethod(self.handle, xbmcplugin.SORT_METHOD_UNSORTED)
+        xbmcplugin.addSortMethod(self.handle, xbmcplugin.SORT_METHOD_LABEL)
         xbmcplugin.setContent(self.handle, "videos")
         self.end()
 
@@ -506,6 +510,8 @@ class Plugin:
         if programs:
             later = max(p["stop"] for p in programs)
             self.folder(kodi.text("later"), {"route": "live_schedule", "id": channel_id, "from": int(later)}, "DefaultFolder.png", last=True)
+        # In the order they air.
+        xbmcplugin.addSortMethod(self.handle, xbmcplugin.SORT_METHOD_UNSORTED)
         xbmcplugin.setContent(self.handle, "videos")
         self.end()
 

@@ -214,6 +214,16 @@ class Player(xbmc.Player):
         kodi.notify(message or kodi.text("stream_stopped"), error=True)
         self.stop()
 
+    def live_ended(self) -> None:
+        """A live channel the server ended (an administrator stopped it, or
+        its provider gave up), from the proxy before Kodi reads the end:
+        Kodi's queue of channels is let go, or Kodi would tune the next
+        one, taking the connection again; and it is said."""
+        from . import livetv
+
+        livetv.forget_queue()
+        kodi.notify(kodi.text("stream_stopped"), error=True)
+
     def busy(self, message) -> None:
         """A live channel Kodi asked for when every connection of its source
         was in use (the plugin asked first, and one was free then): said as
@@ -780,7 +790,14 @@ def run() -> None:
     refresher = Refresher(kodi.refresh_listing, busy=lambda: player.isPlaying())
     player = Player(tokens, user_agent, worker, refresher)
     proxy = Proxy(
-        tokens, user_agent, config["secret"], config["port"], on_stopped=player.stopped_by_server, meter=player.meter, on_busy=player.busy
+        tokens,
+        user_agent,
+        config["secret"],
+        config["port"],
+        on_stopped=player.stopped_by_server,
+        meter=player.meter,
+        on_busy=player.busy,
+        on_ended=player.live_ended,
     )
     port = proxy.start()
     if port != config["port"]:

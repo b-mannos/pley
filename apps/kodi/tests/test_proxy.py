@@ -353,6 +353,45 @@ class ProxyTest(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 3, "the packets come while the server holds the rest")
         self.assertIn(b"video/mp2t", got.split(b"\r\n\r\n", 1)[0].lower())
         self.assertEqual((list(self.proxy.meter.answers), list(self.proxy.meter.chunks)), ([], []), "Automatic doesn't measure a channel")
+        # The server ends the channel: said before Kodi reads the end.
+        ended = []
+        self.proxy.on_ended = lambda: ended.append(len(got))
+        release.set()
+        while True:
+            piece = sock.recv(65536)
+            if not piece:
+                break
+        self.assertEqual(len(ended), 1)
+
+    def test_a_live_channel_kodi_lets_go_of_hasnt_ended(self):
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+
+        def serve():
+            conn, _ = listener.accept()
+            conn.recv(65536)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: video/mp2t\r\nTransfer-Encoding: chunked\r\n\r\n")
+            try:
+                while True:
+                    conn.sendall(b"%x\r\n%s\r\n" % (188 * 100, bytes(188 * 100)))
+                    time.sleep(0.02)
+            except OSError:
+                pass
+            conn.close()
+
+        threading.Thread(target=serve, daemon=True).start()
+        self.addCleanup(listener.close)
+        self.store.save(dict(self.store.load(), server="http://127.0.0.1:%d" % listener.getsockname()[1]))
+        ended = []
+        self.proxy.on_ended = lambda: ended.append(1)
+        sock = socket.create_connection(("127.0.0.1", self.port), timeout=5)
+        sock.sendall(b"GET /%s/api/live/channels/1/stream.ts HTTP/1.1\r\nHost: 127.0.0.1:%d\r\n\r\n" % (SECRET.encode(), self.port))
+        sock.recv(65536)
+        # Kodi stops: the channel goes on for others, nothing is said.
+        sock.close()
+        time.sleep(1)
+        self.assertEqual(ended, [])
 
     def test_a_live_channel_without_a_connection_free_is_told(self):
         busy = []

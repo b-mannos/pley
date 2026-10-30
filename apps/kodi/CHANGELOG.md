@@ -8,6 +8,18 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Live TV, where the server has channels: in the rail after Home, the
+  channels by number with what's on now and how far into it, the focused
+  one's programme and what comes next beside them; tabs for Favourites,
+  Recently watched and a group; a channel's schedule; number keys to go to
+  a channel. Kodi's lists have Channels, Favourites, Recently watched,
+  Groups and a Guide. A channel plays in Kodi's own player as the provider
+  sends it (Kodi deinterlaces; surround sound passes through), Next and
+  Previous change channel, and every connection in use says so in the
+  server's words. Needs a server with Live TV.
+
 ### Security
 
 - Plain http goes only to addresses on the home network, checked on the

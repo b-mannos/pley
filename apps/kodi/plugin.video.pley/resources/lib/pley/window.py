@@ -2862,28 +2862,38 @@ class Live(Screen):
         Later shows the hours after."""
         now = time.time()
         start = start or now
+        logo = livetv.logo(self.session.base, channel)
+        programs, at = None, 0
         while True:
-            try:
-                programs = livetv.schedule(self.session.client, channel["id"], start)
-            except api.ApiError as e:
-                return self.win.toast(T("server_error") % e.message, 6)
-            if start > now:
-                programs = [p for p in programs if p["start"] >= start]
-            if not programs:
-                return self.win.toast(T("nothing_scheduled") % livetv.name(channel), 5)
-            entries = [schedule_entry(p, now) for p in programs] + [xbmcgui.ListItem(T("later"), offscreen=True)]
-            chosen = xbmcgui.Dialog().select(livetv.name(channel), entries, useDetails=True)
+            if programs is None:
+                # The guide is asked for every channel at once: a large
+                # lineup's takes a few seconds.
+                xbmc.executebuiltin("ActivateWindow(busydialognocancel)")
+                try:
+                    programs = livetv.schedule(self.session.client, channel["id"], start)
+                except api.ApiError as e:
+                    return self.win.toast(T("server_error") % e.message, 6)
+                finally:
+                    xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
+                if start > now:
+                    programs = [p for p in programs if p["start"] >= start]
+                if not programs:
+                    return self.win.toast(T("nothing_scheduled") % livetv.name(channel), 5)
+                at = 0
+            entries = [schedule_entry(p, now, logo) for p in programs] + [xbmcgui.ListItem(T("later"), offscreen=True)]
+            chosen = xbmcgui.Dialog().select(livetv.name(channel), entries, preselect=at, useDetails=True)
             if chosen < 0:
                 return
             if chosen == len(programs):
-                start = max(p["stop"] for p in programs)
+                start, programs = max(p["stop"] for p in programs), None
                 continue
-            program = programs[chosen]
+            program, at = programs[chosen], chosen
             if livetv.airing(program, time.time()):
                 ids = [c["id"] for c in self.shown]
                 if channel["id"] in ids:
                     return self.watch(ids.index(channel["id"]))
                 return play_channels(self.session.base, [channel], 0)
+            # Its details; back from them, the schedule as it was.
             xbmcgui.Dialog().textviewer(livetv.headline(program), program_text(channel, program, now))
 
     def number(self, digit: int) -> None:
@@ -2955,12 +2965,15 @@ def channel_row(base: str, channel: dict, now: float, li=None) -> "xbmcgui.ListI
     return li
 
 
-def schedule_entry(program: dict, now: float) -> "xbmcgui.ListItem":
+def schedule_entry(program: dict, now: float, logo=None) -> "xbmcgui.ListItem":
     """A programme in a channel's schedule: when, its title, and its time
-    and episode under it."""
+    and episode under it, beside the channel's logo."""
     when = T("on_now") if livetv.airing(program, now) else "%s %s" % (livetv.day(program["start"], now), livetv.clock(program["start"]))
     under = " · ".join(p for p in [livetv.span(program), livetv.episode(program)] + livetv.badges(program) if p)
-    return xbmcgui.ListItem("%s  ·  %s" % (when, livetv.headline(program)), under, offscreen=True)
+    li = xbmcgui.ListItem("%s  ·  %s" % (when, livetv.headline(program)), under, offscreen=True)
+    if logo:
+        li.setArt({"icon": logo, "thumb": logo})
+    return li
 
 
 def program_text(channel: dict, program: dict, now: float) -> str:

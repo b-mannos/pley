@@ -301,8 +301,7 @@ def list_item(base: str, channel: dict, now: float) -> xbmcgui.ListItem:
     """A channel in Kodi's lists, its queue of channels and its player:
     its number and name, what's on now beside it, now and next in its info,
     its logo, and the programme's picture as fanart. Kodi plays it as a
-    stream without an end: no duration and no resume point, so nothing of
-    it is kept in Kodi's library."""
+    stream without an end: no duration, never watched, no resume point."""
     current = on_now(channel, now)
     li = xbmcgui.ListItem(name(channel), headline(current) if current else "", offscreen=True)
     art = {}
@@ -318,6 +317,10 @@ def list_item(base: str, channel: dict, now: float) -> xbmcgui.ListItem:
     tag.setMediaType("video")
     tag.setTitle(name(channel))
     tag.setPlot(plot(channel, now))
+    # Kodi counts a stream it stopped as played, and keeps it by address:
+    # a channel is never watched, nor has a place to resume from.
+    tag.setPlaycount(0)
+    tag.setResumePoint(0.0, 0.0)
     if current:
         tag.setTagLine(headline(current))
         if current.get("categories"):
