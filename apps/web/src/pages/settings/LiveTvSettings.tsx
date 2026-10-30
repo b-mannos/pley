@@ -137,15 +137,6 @@ function OptionsForm({ saved }: { saved: LiveSettings }) {
           </Select>
           <Note>H.264 channels are sent as they are, whatever their size.</Note>
         </Row>
-        <Row label="Pause and rewind" hint="How far back a channel can be paused and gone back over." htmlFor="live-timeshift">
-          <Select id="live-timeshift" value={form.timeshift_minutes} onChange={(e) => set("timeshift_minutes", Number(e.target.value))} className="w-full">
-            {[1, 2, 5, 10, 15, 30, 60].map((m) => (
-              <option key={m} value={m}>
-                {m === 60 ? "1 hour" : `${m} minutes`}
-              </option>
-            ))}
-          </Select>
-        </Row>
       </Group>
 
       <Group title="Channels and guide">

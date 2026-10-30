@@ -10,12 +10,8 @@ import {
   LoaderCircle,
   Maximize,
   Minimize,
-  Pause,
   PictureInPicture2,
-  Play,
   RefreshCw,
-  RotateCcw,
-  RotateCw,
   Star,
   TriangleAlert,
   Tv2,
@@ -28,9 +24,12 @@ import {
   CHANNEL_PAGE,
   leaveChannel,
   liveKeys,
+  livePlan,
   liveQueries,
   parseCategory,
+  playsAsSent,
   programProgress,
+  streamUrl,
   useSetFavorite,
   watchChannel,
   type Channel,
@@ -41,6 +40,7 @@ import { Slider } from "@/components/Slider";
 import { cn } from "@/lib/cn";
 import { canPlayNativeHls } from "@/lib/caps";
 import { loadHls } from "@/lib/hls";
+import { loadMpegts } from "@/lib/mpegts";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
 import { clientId } from "@/lib/progress";
 import { ChannelLogo, formatSpan, formatTime, liveUrl, setLastWatched, timeLeft, useNow } from "@/pages/livetv/common";
@@ -50,8 +50,6 @@ import { ChannelPanel } from "./ChannelPanel";
 const HIDE_CONTROLS_AFTER = 3500;
 /** What's on, shown with I, goes after this long. */
 const BANNER_FOR = 5000;
-/** Seconds behind the live edge that still count as live. */
-const LIVE_WITHIN = 10;
 /** Digits typed for a channel number wait this long for more. */
 const NUMBER_WAIT = 1400;
 
@@ -215,6 +213,8 @@ function LivePlayer({
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<HlsType | null>(null);
+  // A channel sent as it is plays straight from its stream (mpegts.js).
+  const directRef = useRef<{ destroy: () => void } | null>(null);
   const sessionRef = useRef<{ id: string; url: string } | null>(null);
   const audioPlayer = useOptionalAudioPlayer();
   const favorite = useSetFavorite();
@@ -233,7 +233,6 @@ function LivePlayer({
   const [banner, setBanner] = useState(false);
   const [digits, setDigits] = useState("");
   const [notFound, setNotFound] = useState<string | null>(null);
-  const [position, setPosition] = useState({ current: 0, start: 0, end: 0 });
   const hideTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => setLastWatched(channel.id), [channel.id]);
@@ -259,28 +258,78 @@ function LivePlayer({
       setStatus("error");
       hlsRef.current?.destroy();
       hlsRef.current = null;
+      directRef.current?.destroy();
+      directRef.current = null;
     };
-    void (async () => {
-      let watching;
+    const start = () => {
+      video.play().catch(() => {
+        // Autoplay with sound refused: muted, then.
+        video.muted = true;
+        setMuted(true);
+        void video.play().catch(() => undefined);
+      });
+    };
+    const watch = async () => {
       try {
-        watching = await watchChannel(channel.id, clientId());
+        const watching = await watchChannel(channel.id, clientId());
+        if (cancelled) {
+          void leaveChannel(watching.session_id);
+          return null;
+        }
+        sessionRef.current = { id: watching.session_id, url: watching.url };
+        return watching;
       } catch (err) {
         fail(trouble(err, channel.name));
-        return;
+        return null;
       }
-      if (cancelled) {
-        void leaveChannel(watching.session_id);
-        return;
+    };
+    // A channel sent as it is (H.264 and AAC) plays from its stream as soon
+    // as a keyframe comes; any other, or where that can't be, from the
+    // transcoder's segments. The stream is read while the server says what
+    // the channel is, and plays once it says it's sent as it is.
+    const playDirect = async (sessionId: string): Promise<boolean> => {
+      const plan = livePlan(sessionId).catch(() => null);
+      const mpegts = "MediaSource" in window ? await loadMpegts().catch(() => null) : null;
+      if (cancelled || !mpegts?.isSupported()) return false;
+      // A device id of its own: reading the stream doesn't end the session asked about.
+      const url = new URL(streamUrl(channel.id, `${clientId()}-stream`), window.location.href).href;
+      const player = mpegts.createPlayer(
+        { type: "mpegts", isLive: true, url },
+        {
+          enableWorker: true,
+          enableStashBuffer: false,
+          lazyLoad: false,
+          liveBufferLatencyChasing: true,
+          liveBufferLatencyMaxLatency: 3,
+          liveBufferLatencyMinRemain: 0.8,
+        },
+      );
+      let failed = false;
+      let played = false;
+      video.addEventListener("playing", () => (played = true), { once: true });
+      player.on(mpegts.Events.ERROR, () => {
+        failed = true;
+        player.destroy();
+        if (directRef.current === player) directRef.current = null;
+        if (cancelled || !played) return;
+        // It broke off while playing: the transcoder's segments from now.
+        void watch().then((w) => w && playHls(w.url));
+      });
+      directRef.current = player;
+      player.attachMediaElement(video);
+      player.load();
+      const known = await plan;
+      if (cancelled) return true;
+      // What the server says goes; not known in time, what the stream turned out to be.
+      if (failed || (known ? !playsAsSent(known) : !hasPlayableTracks(player))) {
+        player.destroy();
+        if (directRef.current === player) directRef.current = null;
+        return false;
       }
-      sessionRef.current = { id: watching.session_id, url: watching.url };
-      const start = () => {
-        video.play().catch(() => {
-          // Autoplay with sound refused: muted, then.
-          video.muted = true;
-          setMuted(true);
-          void video.play().catch(() => undefined);
-        });
-      };
+      start();
+      return true;
+    };
+    const playHls = async (url: string) => {
       const Hls = await loadHls().catch(() => null);
       if (cancelled) return;
       if (Hls?.isSupported()) {
@@ -288,7 +337,7 @@ function LivePlayer({
           liveSyncDurationCount: 3,
           liveMaxLatencyDurationCount: 10,
           maxBufferLength: 20,
-          backBufferLength: 600,
+          backBufferLength: 30,
           // The server waits for the channel's first segments before it answers.
           manifestLoadPolicy: {
             default: {
@@ -317,19 +366,28 @@ function LivePlayer({
             fail(answered ?? { kind: "other", title: `${channel.name} stopped`, message: data.details });
           }
         });
-        hls.loadSource(watching.url);
+        hls.loadSource(url);
         hls.attachMedia(video);
       } else if (canPlayNativeHls(video)) {
-        video.src = watching.url;
+        video.src = url;
         start();
       } else {
         fail({ kind: "other", title: "This browser can't play live TV", message: "It plays neither HLS nor Media Source Extensions." });
       }
+    };
+    void (async () => {
+      const watching = await watch();
+      if (!watching) return;
+      if (!(await playDirect(watching.session_id)) && !cancelled) await playHls(watching.url);
     })();
     return () => {
       cancelled = true;
+      // The last picture stays while the next channel tunes.
+      keepPicture(video);
       hlsRef.current?.destroy();
       hlsRef.current = null;
+      directRef.current?.destroy();
+      directRef.current = null;
       video.removeAttribute("src");
       video.load();
       if (sessionRef.current) void leaveChannel(sessionRef.current.id);
@@ -346,16 +404,6 @@ function LivePlayer({
     return () => window.removeEventListener("pagehide", leave);
   }, []);
 
-  // Paused, the player asks for nothing: the server is told it's still watched.
-  useEffect(() => {
-    if (playing || status !== "playing") return;
-    const id = window.setInterval(() => {
-      const session = sessionRef.current;
-      if (session) void fetch(session.url, { credentials: "same-origin" }).catch(() => undefined);
-    }, 20_000);
-    return () => window.clearInterval(id);
-  }, [playing, status]);
-
   // The video element's state.
   useEffect(() => {
     const video = videoRef.current;
@@ -370,25 +418,25 @@ function LivePlayer({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    const update = () => {
-      const r = video.seekable;
-      const start = r.length ? r.start(0) : 0;
-      const end = hlsRef.current?.liveSyncPosition ?? (r.length ? r.end(r.length - 1) : video.currentTime);
-      setPosition({ current: video.currentTime, start, end: Math.max(end, video.currentTime) });
-    };
     const onPlaying = () => {
       setStatus("playing");
       setBuffering(false);
       setPlaying(true);
+      // The last channel's picture, kept while this one tuned, is done with.
+      video.removeAttribute("poster");
+    };
+    // Live TV doesn't pause: whatever paused it (a media key, picture in
+    // picture closed), it plays on.
+    const onPause = () => {
+      setPlaying(false);
+      if (video.src || video.srcObject) window.setTimeout(() => void video.play().catch(() => undefined), 100);
     };
     const handlers: [string, () => void][] = [
       ["playing", onPlaying],
-      ["pause", () => setPlaying(false)],
+      ["pause", onPause],
       ["play", () => setPlaying(true)],
       ["waiting", () => setBuffering(true)],
       ["canplay", () => setBuffering(false)],
-      ["timeupdate", update],
-      ["progress", update],
     ];
     for (const [name, fn] of handlers) video.addEventListener(name, fn);
     return () => {
@@ -421,29 +469,6 @@ function LivePlayer({
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
 
-  const behind = position.end - position.current;
-  const atLive = behind < LIVE_WITHIN;
-
-  const togglePlay = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) void video.play().catch(() => undefined);
-    else video.pause();
-  }, []);
-  const seekBy = useCallback((by: number) => {
-    const video = videoRef.current;
-    if (!video || !video.seekable.length) return;
-    const start = video.seekable.start(0);
-    const end = hlsRef.current?.liveSyncPosition ?? video.seekable.end(video.seekable.length - 1);
-    video.currentTime = Math.min(end, Math.max(start, video.currentTime + by));
-  }, []);
-  const goLive = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    const end = hlsRef.current?.liveSyncPosition ?? (video.seekable.length ? video.seekable.end(video.seekable.length - 1) : null);
-    if (end != null) video.currentTime = end;
-    if (video.paused) void video.play().catch(() => undefined);
-  }, []);
   const toggleFullscreen = useCallback(() => {
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
     else void containerRef.current?.requestFullscreen?.().catch(() => undefined);
@@ -496,11 +521,6 @@ function LivePlayer({
         return;
       }
       switch (e.key) {
-        case " ":
-        case "k":
-          e.preventDefault();
-          togglePlay();
-          break;
         // Up is channel up, the next channel, as on a TV's remote.
         case "ArrowUp":
         case "PageUp":
@@ -513,16 +533,6 @@ function LivePlayer({
         case "ChannelDown":
           e.preventDefault();
           onStep(-1);
-          break;
-        case "ArrowLeft":
-        case "j":
-          e.preventDefault();
-          seekBy(-10);
-          break;
-        case "ArrowRight":
-        case "l":
-          e.preventDefault();
-          seekBy(10);
           break;
         case "m":
           setMuted((m) => !m);
@@ -552,7 +562,7 @@ function LivePlayer({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [poke, togglePlay, onStep, seekBy, toggleFullscreen, panel, goBack]);
+  }, [poke, onStep, toggleFullscreen, panel, goBack]);
 
   const on = channel.now && channel.now.stop > now && channel.now.start <= now ? channel.now : null;
   const next = on ? channel.next : (channel.next ?? channel.now);
@@ -577,13 +587,13 @@ function LivePlayer({
           ref={videoRef}
           className="absolute inset-0 size-full object-contain"
           playsInline
-          onClick={() => (panel ? setPanel(false) : togglePlay())}
+          onClick={() => (panel ? setPanel(false) : poke())}
           onDoubleClick={toggleFullscreen}
         />
 
         {/* Tuning: the channel's logo while it starts. */}
         {status === "tuning" ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-black animate-fade-in">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-black/70 backdrop-blur-sm animate-fade-in">
             <ChannelLogo channel={channel} width={240} className="h-28 w-48 rounded-2xl bg-white/[0.06]" />
             <LoaderCircle className="size-7 animate-spin text-accent" aria-label="Tuning" />
             <div className="text-center">
@@ -694,22 +704,6 @@ function LivePlayer({
           )}
         >
           <div className="flex items-center gap-0.5 sm:gap-1.5">
-            <button type="button" aria-label={playing ? "Pause" : "Play"} onClick={togglePlay} className={cn(button, "size-11")}>
-              {playing ? <Pause className="size-6 fill-current" /> : <Play className="ml-0.5 size-6 fill-current" />}
-            </button>
-            <button type="button" aria-label="Back 10 seconds" title="Back 10 s (←)" onClick={() => seekBy(-10)} className={button}>
-              <RotateCcw className="size-5" />
-            </button>
-            <button
-              type="button"
-              aria-label="Forward 10 seconds"
-              title="Forward 10 s (→)"
-              onClick={() => seekBy(10)}
-              disabled={atLive}
-              className={button}
-            >
-              <RotateCw className="size-5" />
-            </button>
             <div className="group/vol hidden items-center sm:flex">
               <button type="button" aria-label={muted ? "Unmute" : "Mute"} onClick={() => setMuted((m) => !m)} className={button}>
                 <VolumeIcon className="size-5" />
@@ -727,19 +721,10 @@ function LivePlayer({
                 />
               </div>
             </div>
-            <button
-              type="button"
-              onClick={goLive}
-              disabled={atLive}
-              className={cn(
-                "ml-1 flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-bold uppercase tracking-wide transition sm:ml-2",
-                atLive ? "bg-danger/90 text-white" : "bg-white/15 text-white/85 hover:bg-white/25",
-              )}
-              title={atLive ? "Live" : "Go live"}
-            >
-              <span className={cn("size-1.5 rounded-full", atLive ? "bg-white animate-pulse" : "bg-white/60")} />
-              {atLive ? "Live" : `−${formatBehind(behind)}`}
-            </button>
+            <span className="ml-1 flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-danger/90 px-2.5 text-xs font-bold uppercase tracking-wide text-white sm:ml-2">
+              <span className="size-1.5 animate-pulse rounded-full bg-white" />
+              Live
+            </span>
             {on ? (
               <div className="ml-2 hidden min-w-0 truncate text-sm text-white/70 md:block">
                 <span className="tabular-nums">{formatSpan(on)}</span>
@@ -779,11 +764,28 @@ function LivePlayer({
   );
 }
 
-/** "1:23" behind live, or "12 min". */
-function formatBehind(seconds: number): string {
-  const s = Math.max(0, Math.round(seconds));
-  if (s >= 600) return `${Math.round(s / 60)} min`;
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+/** What mpegts.js found in the stream is H.264 and AAC (or either alone), which the browser plays. */
+function hasPlayableTracks(player: { mediaInfo?: unknown }): boolean {
+  const info = player.mediaInfo as { videoCodec?: string; audioCodec?: string; hasVideo?: boolean; hasAudio?: boolean } | undefined;
+  if (!info) return false;
+  const video = !info.hasVideo || (info.videoCodec ?? "").startsWith("avc");
+  const audio = !info.hasAudio || (info.audioCodec ?? "").startsWith("mp4a");
+  return video && audio && (info.hasVideo || info.hasAudio) === true;
+}
+
+/** Keeps what the video shows as its poster: the picture stays while the next channel tunes. */
+function keepPicture(video: HTMLVideoElement) {
+  if (!video.videoWidth || video.readyState < 2) return;
+  try {
+    const canvas = document.createElement("canvas");
+    const scale = Math.min(1, 960 / video.videoWidth);
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
+    video.poster = canvas.toDataURL("image/jpeg", 0.75);
+  } catch {
+    // No picture to keep: black while it tunes.
+  }
 }
 
 function TroubleCard({

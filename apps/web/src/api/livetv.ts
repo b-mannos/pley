@@ -493,6 +493,26 @@ export function watchChannel(id: Id, clientId: string): Promise<Watching> {
   return api.post<Watching>(`/api/live/channels/${id}/watch`, { client_id: clientId });
 }
 
+/**
+ * What the channel a session watches is made into, once the transcoder has
+ * looked at it (null when that takes too long).
+ */
+export function livePlan(sessionId: string): Promise<LivePlan | null> {
+  return api.get<LivePlan | null>(`/api/live/sessions/${encodeURIComponent(sessionId)}/plan`);
+}
+
+/** A channel sent as it is (H.264, AAC, or either alone): a player that reads MPEG-TS plays it from `stream.ts`. */
+export function playsAsSent(plan: LivePlan): boolean {
+  const video = plan.video === "copy" || plan.video === "none";
+  const audio = plan.audio === "copy" || plan.audio === "none";
+  return video && audio && !(plan.video === "none" && plan.audio === "none");
+}
+
+/** The channel's MPEG-TS as the provider sends it, for this device. */
+export function streamUrl(channelId: Id, clientId: string): string {
+  return `/api/live/channels/${channelId}/stream.ts${qs({ client_id: clientId })}`;
+}
+
 /** Stops watching (keepalive: also as the page goes away). */
 export function leaveChannel(sessionId: string, keepalive = false): Promise<void> {
   return api.del<void>(`/api/live/sessions/${encodeURIComponent(sessionId)}`, { keepalive }).catch(() => undefined);

@@ -2341,6 +2341,7 @@ when another channel needs the connection).
 | DELETE | `/api/live/channels/{id}/favorite` | `play` | `204` |
 | POST | `/api/live/channels/{id}/watch` | `play` | optional `{ client_id?, keyed_urls? }` → `{ session_id, url, kind: "hls", channel: LiveChannel }`: `url` is the channel's live HLS playlist; with `keyed_urls`, an address carrying a key of its own ([Keyed URLs](#keyed-urls)) |
 | GET | `/api/live/channels/{id}/stream.ts` | `play` | `?client_id=`: the channel's MPEG-TS as the provider sends it, for as long as it is read (VLC, Kodi, TVs that read MPEG-TS) |
+| GET | `/api/live/sessions/{session}/plan` | `play` | the transcoder's `LivePlan` for the channel (`video`: `"copy"` or the encoder, `audio`: `"copy"`, `"aac"` or `"none"`, codecs, size, interlaced), waited for a few seconds; `null` when not known in time. A player that reads MPEG-TS plays a channel whose video and audio are copied from `stream.ts` (with a client id of its own), sooner than its first segments |
 | GET | `/api/live/sessions/{session}/{file}` | `play` | `index.m3u8` or a segment of a watching session |
 | GET | `/api/live/media/{key}/{file}` | `public` (the key) | the same, for a session watched with `keyed_urls` |
 | DELETE | `/api/live/sessions/{session}` | `play` | `204`: stops watching; `404` when not yours or already gone |
