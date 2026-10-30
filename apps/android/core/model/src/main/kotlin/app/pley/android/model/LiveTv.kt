@@ -164,11 +164,14 @@ data class LiveGuide(
 /**
  * The body of POST /api/live/channels/{id}/watch: [clientId] ends what
  * this device watched before, so changing channels never holds two of the
- * provider's connections.
+ * provider's connections. [takeOver], every connection being in use: the
+ * channel whose connection to take (one the `409` said may be,
+ * [BusyConnection.canTakeOver]); those watching it are told who took it.
  */
 @Serializable
 data class WatchRequest(
     val clientId: String? = null,
+    val takeOver: Long? = null,
 )
 
 /**

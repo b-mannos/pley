@@ -68,6 +68,7 @@ import androidx.compose.ui.input.key.nativeKeyCode
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -84,6 +85,7 @@ import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.model.BusyConnection
 import app.pley.android.model.LiveChannel
 import app.pley.android.player.engine.VideoSurface
 import app.pley.android.player.live.LivePhase
@@ -222,6 +224,7 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
                 channel = shown,
                 origin = origin,
                 onRetry = if (phase.trouble.canRetry) vm::retry else null,
+                onTakeOver = vm::takeOver,
                 onChannels = { overlay = Overlay.Channels },
                 onBack = onExit,
             )
@@ -415,16 +418,24 @@ private fun Digits(digits: ChannelDigits, modifier: Modifier = Modifier) {
     )
 }
 
-/** Why the channel doesn't play, with Try again, Other channels and Back to the guide. */
+/**
+ * Why the channel doesn't play, with Try again, Other channels and Back to
+ * the guide. Every connection in use, what holds each (the web's
+ * TroubleCard), with Watch here instead where it may be taken over
+ * ([onTakeOver]), focused first.
+ */
 @Composable
 private fun Trouble(
     trouble: LiveTrouble,
     channel: LiveChannel?,
     origin: String,
     onRetry: (() -> Unit)?,
+    onTakeOver: (Long) -> Unit,
     onChannels: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val connections = trouble.connections
+    val firstToTake = connections.firstOrNull { it.canTakeOver }
     val name = channel?.name.orEmpty()
     val title = when (trouble.kind) {
         LiveTrouble.Kind.Busy -> stringResource(R.string.tv_live_player_busy)
@@ -453,7 +464,21 @@ private fun Trouble(
             }
             Spacer(Modifier.height(18.dp))
             BasicText(title, style = PleyType.Tv.Section.copy(color = PleyColors.Fg, textAlign = TextAlign.Center))
-            if (trouble.message.isNotBlank()) {
+            if (connections.isNotEmpty()) {
+                BasicText(
+                    pluralStringResource(R.plurals.tv_live_player_connections_watching, connections.size, connections.size),
+                    style = PleyType.Tv.Body.copy(color = PleyColors.Muted, textAlign = TextAlign.Center),
+                    modifier = Modifier.padding(top = 10.dp, bottom = 14.dp),
+                )
+                for (c in connections) BusyRow(c, onTakeOver, focusFirst = c == firstToTake)
+                if (firstToTake == null) {
+                    BasicText(
+                        stringResource(R.string.tv_live_player_none_to_take),
+                        style = PleyType.Tv.Caption.copy(color = PleyColors.Subtle, textAlign = TextAlign.Center),
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            } else if (trouble.message.isNotBlank()) {
                 BasicText(
                     trouble.message,
                     style = PleyType.Tv.Body.copy(color = PleyColors.Muted, textAlign = TextAlign.Center),
@@ -462,17 +487,60 @@ private fun Trouble(
             }
             Spacer(Modifier.height(24.dp))
             Row(Modifier.focusGroup(), horizontalArrangement = Arrangement.spacedBy(PleyTv.ButtonGap)) {
-                if (onRetry != null) TvPillButton(stringResource(R.string.tv_live_player_retry), onClick = onRetry, icon = PleyIcons.RefreshCw, modifier = Modifier.initialFocus())
+                if (onRetry != null) {
+                    TvPillButton(
+                        stringResource(R.string.tv_live_player_retry),
+                        onClick = onRetry,
+                        icon = PleyIcons.RefreshCw,
+                        modifier = if (firstToTake == null) Modifier.initialFocus() else Modifier,
+                    )
+                }
                 TvPillButton(
                     stringResource(R.string.tv_live_player_other_channels),
                     onClick = onChannels,
                     icon = PleyIcons.List,
-                    modifier = if (onRetry == null) Modifier.initialFocus() else Modifier,
+                    modifier = if (onRetry == null && firstToTake == null) Modifier.initialFocus() else Modifier,
                 )
                 TvPillButton(stringResource(R.string.tv_live_player_back_to_guide), onClick = onBack)
             }
         }
     }
+}
+
+/** A connection in use: its channel, who holds it, and Watch here instead where it may be taken. */
+@Composable
+private fun BusyRow(connection: BusyConnection, onTakeOver: (Long) -> Unit, focusFirst: Boolean) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .clip(PleyShape.Control)
+            .background(Color.White.copy(alpha = 0.04f))
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .testTag(TV_LIVE_PLAYER_BUSY),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            BasicText(connection.channelName, style = PleyType.Tv.Label.copy(color = PleyColors.Fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            BasicText(holders(connection), style = PleyType.Tv.Caption.copy(color = PleyColors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (connection.canTakeOver) {
+            Spacer(Modifier.width(12.dp))
+            TvPillButton(
+                stringResource(R.string.tv_live_player_take_over),
+                onClick = { onTakeOver(connection.channelId) },
+                modifier = if (focusFirst) Modifier.initialFocus() else Modifier,
+            )
+        }
+    }
+}
+
+/** Who holds a connection: "You, on another device", their names (to administrators), or how many. */
+@Composable
+private fun holders(c: BusyConnection): String = when {
+    c.yours -> stringResource(R.string.tv_live_player_held_by_you)
+    c.watchers.isNotEmpty() -> c.watchers.joinToString(", ")
+    else -> pluralStringResource(R.plurals.tv_live_player_held_by_people, c.people.coerceAtLeast(1), c.people.coerceAtLeast(1))
 }
 
 /** A spinning ring in the accent, while a channel tunes or waits for data. */
@@ -695,6 +763,7 @@ internal const val TV_LIVE_PLAYER_CHANNEL_LIST = "pley.tv.live.player.channel.li
 internal const val TV_LIVE_PLAYER_LIVE = "pley.tv.live.player.live"
 internal const val TV_LIVE_PLAYER_DIGITS = "pley.tv.live.player.digits"
 internal const val TV_LIVE_PLAYER_TROUBLE = "pley.tv.live.player.trouble"
+internal const val TV_LIVE_PLAYER_BUSY = "pley.tv.live.player.busy"
 internal const val TV_LIVE_PLAYER_CHANNELS = "pley.tv.live.player.channels"
 internal const val TV_LIVE_PLAYER_GROUP = "pley.tv.live.player.group"
 internal const val TV_LIVE_PLAYER_SEARCH = "pley.tv.live.player.search"

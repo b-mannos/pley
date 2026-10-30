@@ -269,6 +269,9 @@ class LivePlayerViewModel(
 
     fun retry() = playback.retry()
 
+    /** Every connection being in use: watches the channel playing on [channelId]'s connection instead (one the server said may be taken). */
+    fun takeOver(channelId: Long) = playback.retry(takeOver = channelId)
+
     /** The screen went to the background: the connection and the decoders are let go. */
     fun stop() = playback.stop()
 

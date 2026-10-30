@@ -167,10 +167,17 @@ rail. Its sources, lineup and connections are set up in the web app.
   going back, and Live is a plain badge; play, pause, rewind and fast
   forward (media keys, the media session, Left and Right on TVs) do
   nothing, and a pause from elsewhere (headphones pulled out) plays on.
-  `409` shows the server's sentence (which channels hold the
-  connections), with Try again and Other channels. Leaving (onStop, not
-  in picture in picture) lets the session go; coming back tunes again at
-  the live edge. The TV's display mode isn't matched for live channels.
+  A `409` lists its `connections`: each channel, then "You, on another
+  device", the names (to administrators), or "Someone else"/"N people",
+  with Watch here instead where `can_take_over` (watching again with
+  `take_over`); a player whose connection is taken shows the server's
+  `410` sentence as it is (a `stream.ts` that stops while playing asks
+  the session's plan, whose `410` says why; without one it plays the
+  HLS). Try again and Other channels as ever. The
+  spinner shows only once a stall has lasted 0.7 s. There is no picture
+  in picture. Leaving (onStop) lets the session go; coming back tunes
+  again at the live edge. The TV's display mode isn't matched for
+  live channels.
 
 ## Offline
 

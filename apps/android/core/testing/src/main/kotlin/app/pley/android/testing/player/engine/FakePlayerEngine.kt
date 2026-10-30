@@ -123,6 +123,9 @@ class FakeVideoPlayer(looper: Looper) : SimpleBasePlayer(looper) {
     /** The item played to its end. */
     fun end() = setPlaybackState(STATE_ENDED)
 
+    /** The buffer ran dry while playing: waiting for data. */
+    fun stall() = setPlaybackState(STATE_BUFFERING)
+
     /** Playing failed with [error]: the player stops, as Media3's does. */
     fun fail(error: PlaybackException) {
         current = current.buildUpon().setPlayerError(error).setPlaybackState(STATE_IDLE).build()

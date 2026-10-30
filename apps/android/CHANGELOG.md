@@ -22,9 +22,10 @@ describes how they are made.
 - The live player: channel up and down within the group it was opened
   from, a channel list, a typed number, what's on and next when asked
   for (Info on a TV, a tap on a phone), Live as it airs (no pause, no
-  going back, as on the web), the server's own sentence when every
-  connection is in use,
-  the channel's logo for radio, and picture in picture on phones.
+  going back, no picture in picture, as on the web), every connection in
+  use listed with what holds it and Watch here instead where it may be
+  taken over, the channel's logo for radio, and a spinner only once a
+  stall lasts.
   Leaving lets the provider's connection go. A channel the server sends
   as it is plays straight from its MPEG-TS, sooner than its HLS.
 - Live TV opens as it was left, after a restart too: the category, the

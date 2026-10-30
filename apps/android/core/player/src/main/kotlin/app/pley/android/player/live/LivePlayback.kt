@@ -14,6 +14,7 @@ import app.pley.android.common.asSentence
 import app.pley.android.common.sentenceOf
 import app.pley.android.data.LiveTvRepository
 import app.pley.android.model.ApiErrorBody
+import app.pley.android.model.BusyConnection
 import app.pley.android.model.PleyJson
 import app.pley.android.network.ApiException
 import app.pley.android.network.OfflineException
@@ -23,6 +24,7 @@ import app.pley.android.player.session.clientIdOf
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,9 +34,11 @@ import kotlinx.coroutines.launch
 /**
  * Why a channel doesn't play, by what the server answered (docs/API.md,
  * "Watching"), with its own sentence: a `409` names the channels holding
- * every connection of the source.
+ * every connection of the source, and lists them ([connections]: who
+ * watches each, and which may be taken over). A connection taken over
+ * from this device is a `410` saying who took it, for what.
  */
-data class LiveTrouble(val kind: Kind, val message: String) {
+data class LiveTrouble(val kind: Kind, val message: String, val connections: List<BusyConnection> = emptyList()) {
     enum class Kind {
         /** `409`: every connection of the channel's source is in use. */
         Busy,
@@ -65,7 +69,7 @@ data class LiveTrouble(val kind: Kind, val message: String) {
     companion object {
         /** The trouble [error] is: a refusal of the server's, a network failure, or else. */
         fun of(error: Throwable): LiveTrouble = when (error) {
-            is ApiException -> LiveTrouble(kindOf(error.status), sentenceOf(error))
+            is ApiException -> LiveTrouble(kindOf(error.status), sentenceOf(error), error.connections)
             is OfflineException -> LiveTrouble(Kind.Offline, sentenceOf(error))
             else -> LiveTrouble(Kind.Other, sentenceOf(error))
         }
@@ -76,9 +80,13 @@ data class LiveTrouble(val kind: Kind, val message: String) {
             var cause: Throwable? = error
             while (cause != null) {
                 if (cause is HttpDataSource.InvalidResponseCodeException) {
-                    val said = runCatching { PleyJson.decodeFromString(ApiErrorBody.serializer(), cause.responseBody.decodeToString()).message }
-                        .getOrNull()?.takeIf { it.isNotBlank() }
-                    return LiveTrouble(kindOf(cause.responseCode), said?.let(::sentence) ?: "The server answered ${cause.responseCode}.")
+                    val body = runCatching { PleyJson.decodeFromString(ApiErrorBody.serializer(), cause.responseBody.decodeToString()) }.getOrNull()
+                    val said = body?.message?.takeIf { it.isNotBlank() }
+                    return LiveTrouble(
+                        kindOf(cause.responseCode),
+                        said?.let(::sentence) ?: "The server answered ${cause.responseCode}.",
+                        body?.connections.orEmpty(),
+                    )
                 }
                 if (cause is HttpDataSource.HttpDataSourceException) return LiveTrouble(Kind.Offline, sentenceOf(OfflineException(cause)))
                 cause = cause.cause
@@ -167,12 +175,16 @@ class LivePlayback(
     /** `stream.ts` is read, not yet played: the plan hasn't said the channel is sent as it is. */
     private var holding = false
 
+    /** A stall under way, said once it has lasted [STALL_SHOWN_MS]. */
+    private var stall: Job? = null
+
     /** Starts watching [channelId] in place of what played. */
     fun tune(channelId: Long) = tune(channelId, allowDirect = true)
 
-    private fun tune(channelId: Long, allowDirect: Boolean) {
+    private fun tune(channelId: Long, allowDirect: Boolean, takeOver: Long? = null) {
         if (closed) return
         tuning?.cancel()
+        stall?.cancel()
         direct = false
         holding = false
         letSessionGo()
@@ -183,7 +195,7 @@ class LivePlayback(
         mutableState.value = LiveState(channelId = channelId, phase = LivePhase.Tuning)
         tuning = scope.launch {
             val watching = try {
-                live.watch(channelId, clientId())
+                live.watch(channelId, clientId(), takeOver)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -220,7 +232,45 @@ class LivePlayback(
         }
     }
 
-    private fun playing() = mutableState.update { if (it.phase is LivePhase.Tuning) it.copy(phase = LivePhase.Playing, buffering = false) else it.copy(buffering = false) }
+    /**
+     * stream.ts stopped while it played. The server ended watching (its
+     * connection taken over, the channel stopped): its `410` says why, as
+     * the HLS would. Otherwise it broke off: watched again, as HLS (the
+     * web's).
+     */
+    private fun brokeOff(channelId: Long) {
+        direct = false
+        holding = false
+        stall?.cancel()
+        val asked = session
+        tuning?.cancel()
+        tuning = scope.launch {
+            val ended = asked?.let { s ->
+                try {
+                    live.plan(s)
+                    null
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: ApiException) {
+                    e.takeIf { it.status == 410 }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            if (ended != null) {
+                // Already gone at the server: nothing to let go.
+                if (session == asked) session = null
+                fail(LiveTrouble.of(ended))
+            } else {
+                tune(channelId, allowDirect = false)
+            }
+        }
+    }
+
+    private fun playing() {
+        stall?.cancel()
+        mutableState.update { if (it.phase is LivePhase.Tuning) it.copy(phase = LivePhase.Playing, buffering = false) else it.copy(buffering = false) }
+    }
 
     /** [block]'s answer, or `null` when it fails: a plan not had is HLS played, as before there were plans. */
     private suspend fun <T> quietly(block: suspend () -> T): T? = try {
@@ -231,9 +281,13 @@ class LivePlayback(
         null
     }
 
-    /** Tunes the channel again: after a failure, or back from the background. */
-    fun retry() {
-        state.value.channelId?.let(::tune)
+    /**
+     * Tunes the channel again: after a failure, or back from the background.
+     * [takeOver]: every connection being in use, the channel whose
+     * connection to take (one [LiveTrouble.connections] said may be).
+     */
+    fun retry(takeOver: Long? = null) {
+        state.value.channelId?.let { tune(it, allowDirect = true, takeOver = takeOver) }
     }
 
     /** Back in front: the channel left in [stop] plays again, from the live edge. */
@@ -248,6 +302,7 @@ class LivePlayback(
      */
     fun stop() {
         tuning?.cancel()
+        stall?.cancel()
         direct = false
         holding = false
         letSessionGo()
@@ -271,6 +326,7 @@ class LivePlayback(
     }
 
     private fun fail(trouble: LiveTrouble) {
+        stall?.cancel()
         letSessionGo()
         mutableEngine.value?.player?.stop()
         mutableState.update { it.copy(phase = LivePhase.Failed(trouble), buffering = false) }
@@ -281,7 +337,15 @@ class LivePlayback(
             when (playbackState) {
                 // Held for the plan, it isn't playing yet.
                 Player.STATE_READY -> if (!holding) playing()
-                Player.STATE_BUFFERING -> mutableState.update { if (it.phase is LivePhase.Playing) it.copy(buffering = true) else it }
+                // Said once it lasts: a channel that stutters for a moment doesn't flicker the spinner (the web's).
+                Player.STATE_BUFFERING -> if (state.value.phase is LivePhase.Playing && stall?.isActive != true) {
+                    stall = scope.launch {
+                        delay(STALL_SHOWN_MS)
+                        mutableState.update { if (it.phase is LivePhase.Playing) it.copy(buffering = true) else it }
+                    }
+                }
+                // stream.ts ended: the server let it go (taken over, stopped), or it broke off.
+                Player.STATE_ENDED -> state.value.channelId?.let { if (direct && !holding) brokeOff(it) }
                 else -> Unit
             }
         }
@@ -300,10 +364,14 @@ class LivePlayback(
             val player = mutableEngine.value?.player ?: return
             val channelId = state.value.channelId
             if (direct && channelId != null) {
-                // stream.ts didn't play (its codecs, the connection): watched again, as HLS.
-                direct = false
-                holding = false
-                tune(channelId, allowDirect = false)
+                if (state.value.phase is LivePhase.Playing) {
+                    brokeOff(channelId)
+                } else {
+                    // stream.ts didn't play (its codecs, the connection): watched again, as HLS.
+                    direct = false
+                    holding = false
+                    tune(channelId, allowDirect = false)
+                }
                 return
             }
             if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
@@ -317,6 +385,9 @@ class LivePlayback(
     }
 
     companion object {
+        /** A stall shows the spinner once it has lasted this long (the web's 0.7 s). */
+        const val STALL_SHOWN_MS = 700L
+
         /** `stream.ts` is read under the device's id with this after it (the web's): the HLS session stays. */
         const val STREAM_CLIENT = "-stream"
 

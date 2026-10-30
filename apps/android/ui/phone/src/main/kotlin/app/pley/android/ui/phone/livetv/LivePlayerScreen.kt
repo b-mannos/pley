@@ -33,6 +33,9 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -83,6 +86,7 @@ import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.model.BusyConnection
 import app.pley.android.model.LiveChannel
 import app.pley.android.player.engine.VideoSurface
 import app.pley.android.player.live.LivePhase
@@ -111,7 +115,7 @@ import kotlinx.coroutines.delay
  * the controls, not on its own as a channel tunes.
  */
 @Composable
-internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: () -> Unit) {
+internal fun LivePlayerScreen(vm: LivePlayerViewModel, onBack: () -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     val engine by vm.engine.collectAsStateWithLifecycle()
     val channel by vm.channel.collectAsStateWithLifecycle()
@@ -191,6 +195,7 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: (
                 channel = shown,
                 origin = origin,
                 onRetry = if (phase.trouble.canRetry) vm::retry else null,
+                onTakeOver = vm::takeOver,
                 onChannels = { panel = true },
                 onBack = onBack,
             )
@@ -198,40 +203,38 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: (
                 CircularProgressIndicator(Modifier.align(Alignment.Center).size(48.dp), color = PleyColors.Fg, trackColor = Color.Transparent, strokeWidth = 3.dp)
             }
         }
-        if (!inPip) {
-            AnimatedVisibility(controls && state.phase !is LivePhase.Failed, enter = fadeIn(), exit = fadeOut()) {
-                Controls(state, shown, origin, now, vm, onBack = onBack, onChannels = { panel = true }, onPoke = poke)
-            }
-            if (shown != null) {
-                AnimatedVisibility(
-                    banner && playing && !panel,
-                    enter = fadeIn() + slideInVertically { it / 4 },
-                    exit = fadeOut() + slideOutVertically { it / 4 },
-                    modifier = Modifier.align(Alignment.BottomStart),
-                ) {
-                    // Above the bottom row when the controls show.
-                    Banner(shown, origin, now, Modifier.padding(start = 16.dp, end = 16.dp, bottom = if (controls) 56.dp else 24.dp))
-                }
-            }
-            Digits(digits, Modifier.align(Alignment.TopEnd))
+        AnimatedVisibility(controls && state.phase !is LivePhase.Failed, enter = fadeIn(), exit = fadeOut()) {
+            Controls(state, shown, origin, now, vm, onBack = onBack, onChannels = { panel = true }, onPoke = poke)
+        }
+        if (shown != null) {
             AnimatedVisibility(
-                panel,
-                enter = slideInHorizontally { it },
-                exit = slideOutHorizontally { it },
-                modifier = Modifier.align(Alignment.CenterEnd),
+                banner && playing && !panel,
+                enter = fadeIn() + slideInVertically { it / 4 },
+                exit = fadeOut() + slideOutVertically { it / 4 },
+                modifier = Modifier.align(Alignment.BottomStart),
             ) {
-                ChannelPanel(
-                    vm = vm,
-                    current = state.channelId,
-                    origin = origin,
-                    now = now,
-                    onTune = { channel, from ->
-                        keyboard?.hide()
-                        panel = false
-                        vm.tune(channel.id, channel, from)
-                    },
-                )
+                // Above the bottom row when the controls show.
+                Banner(shown, origin, now, Modifier.padding(start = 16.dp, end = 16.dp, bottom = if (controls) 56.dp else 24.dp))
             }
+        }
+        Digits(digits, Modifier.align(Alignment.TopEnd))
+        AnimatedVisibility(
+            panel,
+            enter = slideInHorizontally { it },
+            exit = slideOutHorizontally { it },
+            modifier = Modifier.align(Alignment.CenterEnd),
+        ) {
+            ChannelPanel(
+                vm = vm,
+                current = state.channelId,
+                origin = origin,
+                now = now,
+                onTune = { channel, from ->
+                    keyboard?.hide()
+                    panel = false
+                    vm.tune(channel.id, channel, from)
+                },
+            )
         }
     }
     }
@@ -436,13 +439,19 @@ private fun Digits(digits: ChannelDigits, modifier: Modifier = Modifier) {
     )
 }
 
-/** Why the channel doesn't play, with what can be done: try again, another channel, back to the guide. */
+/**
+ * Why the channel doesn't play, with what can be done: try again, another
+ * channel, back to the guide. Every connection in use, what holds each
+ * (the web's TroubleCard), with "Watch here instead" where it may be taken
+ * over ([onTakeOver]).
+ */
 @Composable
 private fun TroubleCard(
     trouble: LiveTrouble,
     channel: LiveChannel?,
     origin: String,
     onRetry: (() -> Unit)?,
+    onTakeOver: (Long) -> Unit,
     onChannels: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -463,6 +472,7 @@ private fun TroubleCard(
                 .widthIn(max = 440.dp)
                 .clip(PleyShape.Dialog)
                 .background(PleyColors.Surface2)
+                .verticalScroll(rememberScrollState())
                 .padding(24.dp)
                 .testTag(LIVE_PLAYER_TROUBLE),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -474,7 +484,27 @@ private fun TroubleCard(
             }
             Spacer(Modifier.height(16.dp))
             Text(title, style = MaterialTheme.typography.titleLarge, color = PleyColors.Fg, textAlign = TextAlign.Center)
-            if (trouble.message.isNotBlank()) {
+            val connections = trouble.connections
+            if (connections.isNotEmpty()) {
+                Text(
+                    pluralStringResource(R.plurals.live_player_connections_watching, connections.size, connections.size),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = PleyColors.Muted,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+                Spacer(Modifier.height(12.dp))
+                for (c in connections) BusyRow(c, onTakeOver)
+                if (connections.none { it.canTakeOver }) {
+                    Text(
+                        stringResource(R.string.live_player_none_to_take),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = PleyColors.Subtle,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            } else if (trouble.message.isNotBlank()) {
                 Text(
                     trouble.message,
                     style = MaterialTheme.typography.bodyMedium,
@@ -491,6 +521,38 @@ private fun TroubleCard(
             PleyTextButton(stringResource(R.string.live_player_back_to_guide), onClick = onBack)
         }
     }
+}
+
+/** A connection in use: its channel, who holds it, and "Watch here instead" where it may be taken. */
+@Composable
+private fun BusyRow(connection: BusyConnection, onTakeOver: (Long) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .clip(PleyShape.Field)
+            .background(Color.White.copy(alpha = 0.04f))
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .testTag(LIVE_PLAYER_BUSY),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(connection.channelName, style = MaterialTheme.typography.titleSmall, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(holders(connection), style = MaterialTheme.typography.bodySmall, color = PleyColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (connection.canTakeOver) {
+            Spacer(Modifier.width(8.dp))
+            TonalButton(stringResource(R.string.live_player_take_over), onClick = { onTakeOver(connection.channelId) })
+        }
+    }
+}
+
+/** Who holds a connection: "You, on another device", their names (to administrators), or how many. */
+@Composable
+private fun holders(c: BusyConnection): String = when {
+    c.yours -> stringResource(R.string.live_player_held_by_you)
+    c.watchers.isNotEmpty() -> c.watchers.joinToString(", ")
+    else -> pluralStringResource(R.plurals.live_player_held_by_people, c.people.coerceAtLeast(1), c.people.coerceAtLeast(1))
 }
 
 /**
@@ -705,3 +767,4 @@ internal const val LIVE_PLAYER_GROUP = "pley.live.player.group"
 internal const val LIVE_PLAYER_SEARCH = "pley.live.player.search"
 internal const val LIVE_PLAYER_BANNER = "pley.live.player.banner"
 internal const val LIVE_PLAYER_TROUBLE = "pley.live.player.trouble"
+internal const val LIVE_PLAYER_BUSY = "pley.live.player.busy"

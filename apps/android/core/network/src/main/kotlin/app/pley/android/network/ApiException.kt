@@ -4,6 +4,7 @@ import app.pley.android.common.LocalNetwork
 import app.pley.android.common.UserFacing
 import app.pley.android.common.describe
 import app.pley.android.model.ApiErrorBody
+import app.pley.android.model.BusyConnection
 import app.pley.android.model.PleyJson
 import java.io.IOException
 import kotlinx.serialization.SerializationException
@@ -26,6 +27,8 @@ class ApiException(
     message: String,
     val bearerError: String? = null,
     val scope: String? = null,
+    /** A `409` from watching a live channel: the connections in use, and which may be taken over. */
+    val connections: List<BusyConnection> = emptyList(),
 ) : java.io.IOException(message), UserFacing {
     /** The token doesn't work any more: expired, signed out, or its account disabled. */
     val signedOut: Boolean get() = status == 401 && (bearerError == "invalid_token" || code == "unauthorized")
@@ -74,6 +77,7 @@ class ApiException(
                 message = message,
                 bearerError = challenge?.error,
                 scope = challenge?.scope,
+                connections = json?.connections.orEmpty(),
             )
         }
 

@@ -73,6 +73,11 @@ class HttpPleyApiErrorsTest {
         assertEquals(409, e.status)
         assertEquals("conflict", e.code)
         assertTrue(e.message!!.contains("Sport 1080i"))
+        // What holds each connection, and which may be taken over.
+        val held = e.connections.single()
+        assertEquals(2L, held.channelId)
+        assertEquals("Sport 1080i", held.channelName)
+        assertTrue(held.yours && held.canTakeOver)
     }
 
     @Test

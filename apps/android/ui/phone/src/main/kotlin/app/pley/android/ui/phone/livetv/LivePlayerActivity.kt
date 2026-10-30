@@ -1,22 +1,15 @@
 package app.pley.android.ui.phone.livetv
 
-import android.app.AppOpsManager
-import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import android.content.pm.PackageManager
-import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
-import android.os.Process
-import android.util.Rational
 import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
-import androidx.compose.runtime.mutableStateOf
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -35,21 +28,18 @@ import kotlinx.coroutines.launch
 /**
  * The phone and tablet live player, in a window of its own, as the
  * phone's player: immersive and black, landscape on phones, the screen
- * kept on while it plays, and picture in picture when leaving while it
- * plays (by itself from Android 12; Home before). Live has no pause: the
- * media session offers none either ([LiveSessionPlayer]).
- * Leaving otherwise lets the channel's connection and the decoders go;
- * back to it, the channel is tuned again at the live edge.
+ * kept on while it plays. Live has no pause: the media session offers
+ * none either ([LiveSessionPlayer]), and no picture in picture (the
+ * web's). Leaving lets the channel's connection and the decoders go; back
+ * to it, the channel is tuned again at the live edge.
  */
 class LivePlayerActivity : ComponentActivity() {
     private val vm: LivePlayerViewModel by viewModels {
         LivePlayerViewModel.factory(intent.getLongExtra(EXTRA_CHANNEL, 0), intent.getStringExtra(EXTRA_CATEGORY) ?: "all")
     }
-    private val inPip = mutableStateOf(false)
     private var attached: PlayerEngine? = null
     private var mediaSession: VideoMediaSession? = null
     private var screenOn = false
-    private var pipPlaying: Boolean? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,7 +49,7 @@ class LivePlayerActivity : ComponentActivity() {
         }
         setContent {
             PhoneTheme {
-                LivePlayerScreen(vm = vm, inPip = inPip.value, onBack = ::finish)
+                LivePlayerScreen(vm = vm, onBack = ::finish)
             }
         }
         lifecycleScope.launch {
@@ -67,7 +57,6 @@ class LivePlayerActivity : ComponentActivity() {
                 combine(vm.engine, vm.state) { engine, state -> engine to state }.collect { (engine, state) ->
                     attach(engine)
                     keepScreenOn(state.phase == LivePhase.Playing || state.phase == LivePhase.Tuning)
-                    updatePip(state.phase == LivePhase.Playing)
                 }
             }
         }
@@ -101,8 +90,8 @@ class LivePlayerActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         detach()
-        // In picture in picture the screen turned off: it is still watched. Otherwise the connection goes.
-        if (!isChangingConfigurations && !isInPictureInPictureMode) vm.stop()
+        // Out of sight, the connection goes.
+        if (!isChangingConfigurations) vm.stop()
     }
 
     override fun onDestroy() {
@@ -155,57 +144,6 @@ class LivePlayerActivity : ComponentActivity() {
         if (on == screenOn) return
         screenOn = on
         if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-    }
-
-    // ---------------------------------------------------------------- picture in picture
-
-    private val pipSupported: Boolean by lazy {
-        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return@lazy false
-        val ops = getSystemService(AppOpsManager::class.java) ?: return@lazy true
-        @Suppress("DEPRECATION")
-        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ops.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_PICTURE_IN_PICTURE, Process.myUid(), packageName)
-        } else {
-            ops.checkOpNoThrow(AppOpsManager.OPSTR_PICTURE_IN_PICTURE, Process.myUid(), packageName)
-        }
-        mode == AppOpsManager.MODE_ALLOWED
-    }
-
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
-        // Android 12 and later enter by themselves (setAutoEnterEnabled).
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && pipPlaying == true && pipSupported) {
-            runCatching { enterPictureInPictureMode(pipParams(true)) }
-        }
-    }
-
-    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
-        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
-        inPip.value = isInPictureInPictureMode
-        // Left picture in picture while stopped: its window was closed, and watching ends.
-        if (!isInPictureInPictureMode && lifecycle.currentState == Lifecycle.State.CREATED) {
-            vm.stop()
-            finish()
-        }
-    }
-
-    /** Picture in picture's settings, set again only when playing changes. */
-    private fun updatePip(playing: Boolean) {
-        if (!pipSupported || pipPlaying == playing) return
-        pipPlaying = playing
-        runCatching { setPictureInPictureParams(pipParams(playing)) }
-    }
-
-    private fun pipParams(playing: Boolean): PictureInPictureParams {
-        val builder = PictureInPictureParams.Builder()
-            .setAspectRatio(Rational(16, 9))
-            .setActions(emptyList())
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Only while playing: a channel tuning or that failed doesn't shrink into a corner.
-            builder.setAutoEnterEnabled(playing)
-            builder.setSeamlessResizeEnabled(false)
-        }
-        return builder.build()
     }
 
     companion object {

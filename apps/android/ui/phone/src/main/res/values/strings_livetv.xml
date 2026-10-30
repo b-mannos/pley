@@ -77,6 +77,17 @@
     <string name="live_player_other_channels">Other channels</string>
     <string name="live_player_back_to_guide">Back to the guide</string>
     <string name="live_player_busy">All connections are in use</string>
+    <plurals name="live_player_connections_watching">
+        <item quantity="one">Its one connection is watching:</item>
+        <item quantity="other">Its %1$d connections are watching:</item>
+    </plurals>
+    <string name="live_player_held_by_you">You, on another device</string>
+    <plurals name="live_player_held_by_people">
+        <item quantity="one">Someone else</item>
+        <item quantity="other">%1$d people</item>
+    </plurals>
+    <string name="live_player_take_over">Watch here instead</string>
+    <string name="live_player_none_to_take">A channel already being watched can be joined, or try again once one is stopped.</string>
     <string name="live_player_stopped">Watching stopped</string>
     <string name="live_player_missing">This channel isn\'t here any more</string>
     <string name="live_player_not_allowed">Live TV isn\'t open to this profile</string>

@@ -3,6 +3,7 @@ package app.pley.android.player.live
 import android.os.Looper
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
+import app.pley.android.model.BusyConnection
 import app.pley.android.model.LivePlan
 import app.pley.android.network.ApiException
 import app.pley.android.testing.Fixtures
@@ -83,9 +84,9 @@ class LivePlaybackTest {
 
         engine().player.fail(PlaybackException("no", null, PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED))
         settle()
-        // Watched again, its HLS played without asking for a plan.
+        // The session still on at the server, it broke off: watched again, its HLS played.
         assertEquals(listOf("watch 1 android-1", "leave live-1", "watch 1 android-1"), live.sent)
-        assertEquals(listOf("live-1"), live.plansAsked)
+        assertEquals(listOf("live-1", "live-1"), live.plansAsked)
         val hls = engine().prepared.last().source
         assertTrue(hls.hls && hls.url.endsWith("/api/live/sessions/live-1/index.m3u8"))
         assertEquals(LivePhase.Tuning, playback.state.value.phase)
@@ -136,6 +137,69 @@ class LivePlaybackTest {
         settle()
         assertEquals(listOf("watch 1 android-1", "watch 1 android-1"), live.sent)
         assertEquals(1, engine().prepared.count { it.source.hls })
+    }
+
+    @Test
+    fun `a connection the server says may be taken is taken over by watching again with it`() {
+        val held = BusyConnection(channelId = 2, channelName = "Sport 1080i", people = 1, yours = true, canTakeOver = true)
+        live.watchFails = ApiException(409, "conflict", "In use.", connections = listOf(held))
+        playback.tune(1)
+        settle()
+        val failed = playback.state.value.phase as LivePhase.Failed
+        assertEquals(listOf(held), failed.trouble.connections)
+
+        live.watchFails = null
+        playback.retry(takeOver = 2)
+        settle()
+        assertEquals("watch 1 android-1 taking 2", live.sent.last())
+        // Taken over from here later, the server's sentence says who took it, as it is.
+        assertEquals("Bob started watching Film Four on this connection.", LiveTrouble.of(ApiException(410, "gone", "Bob started watching Film Four on this connection.")).message)
+    }
+
+    @Test
+    fun `a stream ts that ends because its connection was taken says who took it`() {
+        live.plan = Fixtures.decode<LivePlan>("live/plan.json")
+        playback.tune(1)
+        settle()
+        engine().player.ready()
+        settle()
+        val why = "Bob started watching Film Four on this connection."
+        live.planFails = ApiException(410, "session_stopped", why)
+        engine().player.end()
+        settle()
+        val failed = playback.state.value.phase as LivePhase.Failed
+        assertEquals(LiveTrouble.Kind.Stopped, failed.trouble.kind)
+        assertEquals(why, failed.trouble.message)
+        // Gone at the server already: not left, not watched again.
+        assertEquals(listOf("watch 1 android-1"), live.sent)
+    }
+
+    @Test
+    fun `a stall shows only once it has lasted`() {
+        playback.tune(1)
+        settle()
+        engine().player.ready()
+        settle()
+        engine().player.stall()
+        settle()
+        scheduler.advanceTimeBy(LivePlayback.STALL_SHOWN_MS / 2)
+        settle()
+        assertFalse(playback.state.value.buffering)
+        // Over before it showed: never shown.
+        engine().player.ready()
+        settle()
+        scheduler.advanceTimeBy(LivePlayback.STALL_SHOWN_MS)
+        settle()
+        assertFalse(playback.state.value.buffering)
+
+        engine().player.stall()
+        settle()
+        scheduler.advanceTimeBy(LivePlayback.STALL_SHOWN_MS + 1)
+        settle()
+        assertTrue(playback.state.value.buffering)
+        engine().player.ready()
+        settle()
+        assertFalse(playback.state.value.buffering)
     }
 
     @Test

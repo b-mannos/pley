@@ -45,6 +45,9 @@ class FakeLiveTv : LiveTvRepository {
     /** What every session's channel is made into: `null` (not known in time, the HLS is played) unless the test sets one. */
     var plan: LivePlan? = null
 
+    /** Makes asking for a plan refuse: a `410` for a session the server ended. */
+    var planFails: Exception? = null
+
     /** The sessions whose plan was asked for, in order. */
     val plansAsked = mutableListOf<String>()
 
@@ -96,14 +99,15 @@ class FakeLiveTv : LiveTvRepository {
         lineup.value = lineup.value.map { if (it.id == channelId) it.copy(favorite = favorite) else it }
     }
 
-    override suspend fun watch(channelId: Long, clientId: String): LiveWatching {
-        sent += "watch $channelId $clientId"
+    override suspend fun watch(channelId: Long, clientId: String, takeOver: Long?): LiveWatching {
+        sent += "watch $channelId $clientId" + (takeOver?.let { " taking $it" } ?: "")
         watchFails?.let { throw it }
         return LiveWatching("live-$channelId", "http://127.0.0.1:7539/api/live/sessions/live-$channelId/index.m3u8")
     }
 
     override suspend fun plan(sessionId: String): LivePlan? {
         plansAsked += sessionId
+        planFails?.let { throw it }
         return plan
     }
 
