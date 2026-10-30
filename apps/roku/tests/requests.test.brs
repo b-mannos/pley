@@ -383,6 +383,15 @@ sub test_requests_title_page_leaves_out_what_can_t_be_pressed()
     tkEqual(again.note, "Sign in again to ask for movies and shows." + Chr(10) + "This app signed in before it could ask. Signing in again lets it.")
 end sub
 
+' A movie is asked for after a question: what asking does, what may still
+' be asked for.
+sub test_requests_asking_for_a_movie_asks_first()
+    now = reqTestNow()
+    allowance = { moviesLeft: 2, seasonsLeft: -1, moviesNextAt: 0, seasonsNextAt: 0, moviesLimit: 3, seasonsLimit: -1 }
+    tkEqual(reqAskConfirm("Dune", "ask", allowance, now), { title: "Ask for “Dune”?", lines: ["An administrator decides on it. You'll hear when it's ready to watch.", "You can ask for 2 more movies.", "Limit: 3 movies per 7 days."] })
+    tkEqual(reqAskConfirm("Dune", "auto", reqNoSummary(false), now).lines, ["Approved as you ask, and sent on to download."], "no limit")
+end sub
+
 sub test_requests_title_page_of_a_request()
     now = reqTestNow()
     summary = reqTestSummary({})
@@ -392,6 +401,9 @@ sub test_requests_title_page_of_a_request()
     tkEqual(requested.stage.text, "Searching")
     tkEqual(requested.requestId, 42)
     tkEqual(requested.buttons, ["Withdraw"])
+    tkFalse(requested.busy)
+    mine.stage = "downloading"
+    tkTrue(reqTitlePage(reqTestDetail({ status: "requested", request_id: 42, requests: [mine] }), summary, "", now, 0).busy, "asked again every 10 s")
     followed = reqTestRequest({ kind: "movie", mine: false, watching: true, status: "approved", stage: "approved", actions: ["unwatch"] })
     following = reqTitlePage(reqTestDetail({ status: "requested", request_id: 42, watching: true, requests: [followed] }), summary, "", now, 0)
     tkEqual(following.note, "Following")

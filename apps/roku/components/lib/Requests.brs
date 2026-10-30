@@ -193,6 +193,16 @@ function reqAskWords(access as string) as string
     return "An administrator decides on it. You'll hear when it's ready to watch."
 end function
 
+' The question before a movie is asked for (a TV's OK is pressed often):
+' { title, lines }, what asking does and what may still be asked for.
+function reqAskConfirm(title as string, access as string, allowance as object, now as integer) as object
+    lines = [reqAskWords(access)]
+    words = reqAllowance(allowance, now)
+    if words.text <> "" then lines.Push(words.text)
+    if words.limits <> "" then lines.Push(words.limits)
+    return { title: "Ask for " + reqQuoted(title) + "?", lines: lines }
+end function
+
 ' "Season 2", "Seasons 1–3, 5", "Seasons 1–2 and specials", "Specials";
 ' "" for none (movies).
 function reqSeasonsLabel(seasons as dynamic) as string
@@ -840,10 +850,20 @@ function reqTitlePage(detail as object, summary as object, server as string, now
         stage: stage,
         requestId: requestId,
         requestStatus: reqShownStatus(shown),
+        busy: reqDetailBusy(detail),
         allowance: allowance,
         remaining: remaining,
         access: summary.access
     }
+end function
+
+' Whether one of a title's requests downloads or goes into a library now:
+' its page is asked again every 10 s meanwhile.
+function reqDetailBusy(detail as object) as boolean
+    for each request in httpArray(detail.requests)
+        if GetInterface(request, "ifAssociativeArray") <> invalid and reqBusy(httpString(request.stage)) then return true
+    end for
+    return false
 end function
 
 function reqShownStatus(request as dynamic) as string

@@ -35,6 +35,14 @@
              uiNoteRequest): the screens showing its tile give it its
              badge. -->
         <field id="requestNote" type="assocarray" alwaysNotify="true" />
+        <!-- A screen did something to a request ({ requestId (0 for
+             none), kind, tmdbId }): the summary is asked at once, and
+             without the event stream the request's title gets its badge
+             where it shows. -->
+        <field id="requestTouched" type="assocarray" alwaysNotify="true" />
+        <!-- The server's event stream is up: what changes elsewhere is
+             told, so pages showing requests need not ask on their own. -->
+        <field id="eventsLive" type="boolean" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />

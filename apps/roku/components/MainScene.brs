@@ -56,6 +56,7 @@ sub init()
     session.observeField("profileId", "onProfile")
     m.events.observeField("live", "onStreamLive")
     m.top.observeField("requestNote", "onRequestNote")
+    m.top.observeField("requestTouched", "onRequestTouched")
     m.top.observeField("dialog", "onDialog")
 
     m.events.control = "run"
@@ -153,7 +154,8 @@ function requestsSection() as object
     return CreateObject("roRegistrySection", "requests")
 end function
 
-' why: "start", "events", "poll" or "live".
+' why: "start", "events", "poll", "live" or "asked" (a screen did
+' something, and shows what came of it).
 sub askRequestSummary(why as string)
     if m.global.session.profileId <= 0 then return
     uiRequest({ method: "GET", path: "/api/requests/summary", asked: m.requestsAsked, why: why }, "onRequestSummary")
@@ -169,8 +171,8 @@ sub onRequestSummary(event as object)
     setRequestSummary(summary)
     pollRequests()
     ' Changes no event told of (none came, or the stream was down): the
-    ' screen on top asks again.
-    if before.known and summary.changedAt <> before.changedAt and spec.why <> "events" then pokeRequests({ requestId: 0, kind: "", tmdbId: 0 })
+    ' screen on top asks again, unless it made them.
+    if before.known and summary.changedAt <> before.changedAt and spec.why <> "events" and spec.why <> "asked" then pokeRequests({ requestId: 0, kind: "", tmdbId: 0 })
     ' News no event told of: the requests that have it.
     unseenBefore = 0
     if before.known then unseenBefore = before.unseen
@@ -204,8 +206,21 @@ end sub
 ' The stream is up (again): nothing it missed is told, so the summary is
 ' asked again, an older server's too (it may have been updated).
 sub onStreamLive()
+    m.top.eventsLive = m.events.live
     if m.events.live then askRequestSummary("live")
     pollRequests()
+end sub
+
+' A screen did something to a request: what the profile may do now (its
+' allowance, the managers' count). The stream tells of the request's
+' title; without it, its badge is asked for here.
+sub onRequestTouched()
+    touched = m.top.requestTouched
+    askRequestSummary("asked")
+    requestId = httpNumber(touched.requestId, 0)
+    tmdbId = httpNumber(touched.tmdbId, 0)
+    if m.events.live or requestId = 0 or tmdbId = 0 or not showsTiles() then return
+    uiRequest({ method: "GET", path: "/api/requests/" + urlValue(requestId), key: reqKey(httpString(touched.kind), tmdbId), asked: m.requestsAsked }, "onRequestStatus")
 end sub
 
 ' A request event: the summary is asked a second on, once for those that
