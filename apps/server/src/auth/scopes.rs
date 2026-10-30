@@ -163,6 +163,8 @@ pub const APP_ROUTES: &[(&str, &str, Need)] = &[
     // Live TV's channels and guide
     ("GET", "/api/live", Need::Scope(Library)),
     ("GET", "/api/live/channels", Need::Scope(Library)),
+    ("GET", "/api/live/groups", Need::Scope(Library)),
+    ("GET", "/api/live/browse", Need::Scope(Library)),
     ("GET", "/api/live/channels/{id}", Need::Scope(Library)),
     ("GET", "/api/live/channels/{id}/logo", Need::Scope(Library)),
     ("GET", "/api/live/channels/{id}/programs/{start}/image", Need::Scope(Library)),

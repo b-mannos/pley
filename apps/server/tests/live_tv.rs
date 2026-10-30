@@ -311,6 +311,146 @@ async fn channels_guide_favourites_and_connections() {
 }
 
 #[tokio::test]
+async fn channels_by_group_a_page_at_a_time() {
+    let (base, _) = provider().await;
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (bob, _) = app.user(&admin, "bob", json!({})).await;
+    let url = format!("{base}/list.m3u");
+    app.post("/api/live/sources", &admin, json!({"name": "Provider", "kind": "m3u", "url": url})).await;
+    wait_until_read(&app, &admin).await;
+    let names = |page: &Value| -> Vec<String> {
+        page["channels"].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap().to_owned()).collect()
+    };
+
+    let groups = app.get("/api/live/groups", &bob).await.body;
+    assert_eq!((groups["total"].as_i64(), groups["favorites"].as_i64()), (Some(3), Some(0)));
+    assert_eq!(
+        groups["groups"],
+        json!([
+            {"name": "News", "region": null, "label": "News", "count": 1},
+            {"name": "Sport", "region": null, "label": "Sport", "count": 2},
+        ])
+    );
+
+    let sport = app.get("/api/live/browse?category=group&group=Sport", &bob).await.body;
+    assert_eq!((sport["total"].as_i64(), sport["offset"].as_i64()), (Some(2), Some(0)));
+    assert_eq!(names(&sport), ["Two HD", "Ten"]);
+    assert_eq!(sport["channels"][0]["now"]["title"], "Football", "what's on comes with the page");
+    let page = app.get("/api/live/browse?offset=1&limit=1", &bob).await.body;
+    assert_eq!((page["total"].as_i64(), names(&page)), (Some(3), vec!["Two HD".to_owned()]));
+    let ten = sport["channels"][1]["id"].as_i64().unwrap();
+    let around = app.get(&format!("/api/live/browse?limit=2&around={ten}"), &bob).await.body;
+    assert_eq!((around["offset"].as_i64(), names(&around)), (Some(2), vec!["Ten".to_owned()]));
+
+    // Found by name, by number, or by what's on.
+    assert_eq!(names(&app.get("/api/live/browse?q=foot", &bob).await.body), ["Two HD"]);
+    assert_eq!(names(&app.get("/api/live/browse?q=1", &bob).await.body), ["One", "Ten"]);
+    assert_eq!(names(&app.get("/api/live/browse?q=ten", &bob).await.body), ["Ten"]);
+    assert_eq!(app.get("/api/live/browse?category=nope", &bob).await.status, StatusCode::BAD_REQUEST);
+
+    app.put(&format!("/api/live/channels/{ten}/favorite"), &bob, json!({})).await;
+    assert_eq!(app.get("/api/live/groups", &bob).await.body["favorites"], 1);
+    assert_eq!(names(&app.get("/api/live/browse?category=favorites", &bob).await.body), ["Ten"]);
+
+    // The guide of a page of channels only.
+    let all = app.get("/api/live/browse", &bob).await.body;
+    assert_eq!(names(&all)[0], "One");
+    let one_id = all["channels"][0]["id"].as_i64().unwrap();
+    let guide = app.get(&format!("/api/live/guide?ids={one_id}"), &bob).await.body;
+    let keys: Vec<&String> = guide["programs"].as_object().unwrap().keys().collect();
+    assert_eq!(keys, [&one_id.to_string()]);
+    assert_eq!(app.get("/api/live/guide?ids=x", &bob).await.status, StatusCode::BAD_REQUEST);
+
+    // A whole group hidden, and shown again.
+    let hidden = app.patch("/api/live/lineup", &admin, json!({"groups": ["Sport"], "hidden": true})).await;
+    assert_eq!(hidden.status, StatusCode::NO_CONTENT);
+    let groups = app.get("/api/live/groups", &bob).await.body;
+    assert_eq!((groups["total"].as_i64(), groups["groups"].as_array().unwrap().len()), (Some(1), 1));
+    assert_eq!(app.get("/api/live", &bob).await.body["channels"], 1, "the count follows at once");
+    let admin_groups = app.get("/api/live/lineup/groups", &admin).await.body;
+    assert_eq!(
+        admin_groups[1],
+        json!({"name": "Sport", "region": null, "label": "Sport", "count": 2, "hidden": 2, "offline": 0})
+    );
+    assert_eq!(app.get("/api/live/lineup/groups", &bob).await.status, StatusCode::FORBIDDEN);
+    app.patch("/api/live/lineup", &admin, json!({"groups": ["Sport"], "hidden": false})).await;
+    assert_eq!(app.get("/api/live/browse?category=group&group=Sport", &bob).await.body["total"], 2);
+}
+
+#[tokio::test]
+async fn channels_that_dont_play_and_divider_rows_are_left_out() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let playlist = format!(
+        "#EXTM3U\n#EXTINF:-1 tvg-chno=\"1\" group-title=\"UK| News\",##### UK NEWS #####\n{base}/live/0.ts\n\
+         #EXTINF:-1 tvg-chno=\"2\" group-title=\"UK| News\",Plays\n{base}/live/2.ts\n\
+         #EXTINF:-1 tvg-chno=\"3\" group-title=\"UK| News\",Gone\n{base}/gone.ts\n"
+    );
+    let provider = Router::new().route("/list.m3u", get(move || async move { playlist })).route(
+        "/live/{n}",
+        get(|| async {
+            let packets =
+                futures::stream::repeat_with(|| Ok::<_, std::io::Error>(bytes::Bytes::from(vec![0x47u8; 188 * 10])));
+            ([(header::CONTENT_TYPE, "video/mp2t")], Body::from_stream(packets.take(1000)))
+        }),
+    );
+    tokio::spawn(async move { axum::serve(listener, provider).await.unwrap() });
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let url = format!("{base}/list.m3u");
+    app.post("/api/live/sources", &admin, json!({"name": "P", "kind": "m3u", "url": url, "max_connections": 0})).await;
+    for _ in 0..100 {
+        let source = &app.get("/api/live/sources", &admin).await.body[0];
+        if source["channels_at"].is_i64() && source["refreshing"] == false {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let names = |list: &Value| -> Vec<String> {
+        list.as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap().to_owned()).collect()
+    };
+
+    assert_eq!(
+        names(&app.get("/api/live/channels", &admin).await.body),
+        ["Plays", "Gone"],
+        "the divider row isn't a channel"
+    );
+    let gone = app.get("/api/live/channels", &admin).await.body[1]["id"].as_i64().unwrap();
+    let watched = app.post(&format!("/api/live/channels/{gone}/watch"), &admin, json!({"client_id": "tv"})).await;
+    assert_eq!(watched.status, StatusCode::OK, "{:?}", watched.body);
+    // The provider answers 404 however often it is asked: the channel goes.
+    let mut left = Vec::new();
+    for _ in 0..60 {
+        left = names(&app.get("/api/live/channels", &admin).await.body);
+        if left.len() == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert_eq!(left, ["Plays"]);
+    assert_eq!(app.get("/api/live", &admin).await.body["channels"], 1);
+    let lineup = app.get("/api/live/lineup", &admin).await.body;
+    let offline: Vec<(String, bool)> = lineup
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| (c["name"].as_str().unwrap().to_owned(), c["offline"] == true))
+        .collect();
+    assert!(
+        offline.contains(&("Gone".to_owned(), true)) && offline.contains(&("Plays".to_owned(), false)),
+        "{offline:?}"
+    );
+    assert_eq!(app.get("/api/live/lineup/groups", &admin).await.body[0]["offline"], 2);
+
+    // Shown again when the administrators want to see them all.
+    let mut settings = app.get("/api/live/settings", &admin).await.body;
+    settings["hide_offline"] = json!(false);
+    app.put("/api/live/settings", &admin, settings).await;
+    assert_eq!(app.get("/api/live/channels", &admin).await.body.as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
 async fn sources_are_tested_and_their_errors_said() {
     let (base, _) = provider().await;
     let app = TestApp::new().await;

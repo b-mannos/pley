@@ -17,6 +17,7 @@ pub mod xtream;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
@@ -32,6 +33,7 @@ use crate::events::{EventBus, ServerEvent};
 use crate::transcoder::Transcoder;
 use crate::util::now;
 
+use tuner::Played;
 pub use tuner::Tuners;
 
 /// The settings table's key for [`LiveSettings`].
@@ -51,6 +53,16 @@ const RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
 const PICTURE_RETRY: Duration = Duration::from_secs(3600);
 /// Rows inserted per write transaction (the database has one writer).
 const BATCH: usize = 2000;
+/// The most channels a page of them has.
+const MAX_PAGE: usize = 500;
+/// How many channels "Recently watched" keeps.
+const RECENT: i64 = 24;
+/// An offline channel is tried again this long after it last was.
+const RECHECK_AFTER: i64 = 6 * 3600;
+/// Offline channels tried per source each minute, while it has nothing to pull.
+const RECHECKS: i64 = 10;
+/// Bytes a channel tried again must send to count as playing.
+const PLAYS_BYTES: usize = 188 * 64;
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -81,6 +93,9 @@ pub struct LiveSettings {
     pub refresh_hours: u32,
     /// Days of guide kept ahead.
     pub guide_days: u32,
+    /// Channels that didn't play, and a provider's divider rows ("##### UK
+    /// #####"), are left out of the lists.
+    pub hide_offline: bool,
 }
 
 impl Default for LiveSettings {
@@ -93,6 +108,7 @@ impl Default for LiveSettings {
             timeshift_minutes: 5,
             refresh_hours: 12,
             guide_days: 7,
+            hide_offline: true,
         }
     }
 }
@@ -289,6 +305,9 @@ pub struct AdminChannel {
     pub custom_number: Option<String>,
     pub custom_guide_id: Option<String>,
     pub has_guide: bool,
+    /// It didn't play when last tried (since then), or it is a divider row.
+    pub offline: bool,
+    pub offline_since: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -330,11 +349,17 @@ pub struct ChannelRow {
     custom_name: Option<String>,
     custom_number: Option<String>,
     custom_guide_id: Option<String>,
+    offline_since: Option<i64>,
 }
 
 impl ChannelRow {
     pub fn display_name(&self) -> &str {
         self.custom_name.as_deref().filter(|n| !n.is_empty()).unwrap_or(&self.name)
+    }
+
+    /// It didn't play when last tried, or it is a provider's divider row.
+    fn offline(&self) -> bool {
+        self.offline_since.is_some() || is_divider(self.display_name())
     }
 
     fn display_number(&self) -> Option<String> {
@@ -352,7 +377,7 @@ impl ChannelRow {
 
 const CHANNEL_COLUMNS: &str = "c.id, c.source_id, c.name, c.number, c.group_name, c.logo_url, c.guide_id, \
      c.matched_guide_id, c.stream_url, c.user_agent, c.position, c.hidden, c.custom_name, c.custom_number, \
-     c.custom_guide_id";
+     c.custom_guide_id, c.offline_since";
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct ProgramRow {
@@ -411,6 +436,89 @@ pub struct LiveTv {
     refreshing: Mutex<HashSet<i64>>,
     tried: Mutex<HashMap<i64, Instant>>,
     refresh_lock: tokio::sync::Mutex<()>,
+    /// Every channel, in order, read once and kept until something changes:
+    /// a lineup runs to tens of thousands, and every page of the apps asks.
+    lineup: Mutex<Option<Arc<Lineup>>>,
+    /// Counts changes, so a lineup read while one happened isn't kept.
+    generation: AtomicU64,
+}
+
+/// The channels of the enabled sources as they are now, hidden ones too.
+pub(crate) struct Lineup {
+    rows: Vec<ChannelRow>,
+    /// Whether each row is shown: not hidden, and not offline while offline
+    /// channels are left out.
+    shown: Vec<bool>,
+    /// Each channel's name and number in lower case, for finding it.
+    names: Vec<String>,
+    /// The groups of the channels shown, in the lineup's order.
+    groups: Vec<Group>,
+}
+
+impl Lineup {
+    fn shown(&self) -> impl Iterator<Item = &ChannelRow> {
+        self.rows.iter().zip(&self.shown).filter(|(_, shown)| **shown).map(|(c, _)| c)
+    }
+}
+
+/// A group as administrators see it: hidden channels counted too.
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminGroup {
+    #[serde(flatten)]
+    pub group: Group,
+    pub hidden: usize,
+    /// Its channels that don't play (or are divider rows).
+    pub offline: usize,
+}
+
+/// A group of channels, as the provider names it.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Group {
+    pub name: String,
+    /// The region its name begins with ("UK" of "UK| Sport"), which
+    /// providers with hundreds of groups name them by.
+    pub region: Option<String>,
+    /// The name without its region ("Sport").
+    pub label: String,
+    pub count: usize,
+}
+
+impl Group {
+    fn new(name: &str) -> Self {
+        let (region, label) = match split_region(name) {
+            Some((region, label)) => (Some(region.to_owned()), label.to_owned()),
+            None => (None, name.trim().to_owned()),
+        };
+        Self { name: name.to_owned(), region, label, count: 0 }
+    }
+}
+
+/// Which channels to list.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Category {
+    All,
+    Favorites,
+    /// The ones watched last, newest first.
+    Recent,
+    Group(String),
+}
+
+/// A page of a list of channels.
+#[derive(Debug, Serialize)]
+pub struct ChannelPage {
+    /// How many channels the whole list has.
+    pub total: usize,
+    pub offset: usize,
+    pub channels: Vec<Channel>,
+}
+
+/// The groups `user` sees, with how many channels in all and marked.
+#[derive(Debug, Serialize)]
+pub struct Groups {
+    pub total: usize,
+    pub favorites: usize,
+    pub recent: usize,
+    pub groups: Vec<Group>,
 }
 
 impl LiveTv {
@@ -430,11 +538,12 @@ impl LiveTv {
             .connect_timeout(Duration::from_secs(10))
             .build()?;
         let settings = RwLock::new(Arc::new(settings));
-        let tuners = Tuners::new(transcoder, events.clone(), http.clone());
+        let (played_tx, played) = tokio::sync::mpsc::unbounded_channel();
+        let tuners = Tuners::new(transcoder, events.clone(), http.clone(), played_tx);
         let pictures = cache_dir.join("live").join("pictures");
         let downloads = cache_dir.join("live").join("downloads");
         let _ = std::fs::remove_dir_all(&downloads);
-        Ok(Arc::new(Self {
+        let live = Arc::new(Self {
             db,
             events,
             settings,
@@ -446,7 +555,27 @@ impl LiveTv {
             refreshing: Mutex::default(),
             tried: Mutex::default(),
             refresh_lock: tokio::sync::Mutex::new(()),
-        }))
+            lineup: Mutex::default(),
+            generation: AtomicU64::new(0),
+        });
+        // Whether channels played, as the tuners find out (until Live TV goes).
+        let weak = Arc::downgrade(&live);
+        let mut played = played;
+        tokio::spawn(async move {
+            while let Some(p) = played.recv().await {
+                let Some(live) = weak.upgrade() else { break };
+                live.mark_played(p).await;
+            }
+        });
+        Ok(live)
+    }
+
+    /// Something about the channels changed: they are read again when next
+    /// asked for, and the apps are told.
+    fn changed(&self) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        *self.lineup.lock() = None;
+        self.events.send(ServerEvent::LiveChannelsChanged);
     }
 
     pub fn settings(&self) -> Arc<LiveSettings> {
@@ -466,7 +595,7 @@ impl LiveTv {
         .map_err(|e| AppError::Internal(e.into()))?;
         let settings = Arc::new(settings);
         *self.settings.write() = settings.clone();
-        self.events.send(ServerEvent::LiveChannelsChanged);
+        self.changed();
         Ok(settings)
     }
 
@@ -521,6 +650,97 @@ impl LiveTv {
             .bind(now() - GUIDE_BEHIND)
             .execute(&self.db.write)
             .await;
+        self.recheck_offline().await;
+    }
+
+    /// A channel played, or gave nothing: offline until it plays again.
+    async fn mark_played(&self, p: Played) {
+        let at = now();
+        let query = if p.played {
+            sqlx::query(
+                "UPDATE live_channels SET offline_since = NULL, offline_checked = NULL \
+                 WHERE id = ?1 AND offline_since IS NOT NULL",
+            )
+        } else {
+            sqlx::query(
+                "UPDATE live_channels SET offline_since = ?2, offline_checked = ?2 \
+                 WHERE id = ?1 AND offline_since IS NULL",
+            )
+        };
+        match query.bind(p.channel_id).bind(at).execute(&self.db.write).await {
+            Ok(done) if done.rows_affected() > 0 => {
+                tracing::info!(
+                    channel = p.channel_id,
+                    "live channel {}",
+                    if p.played { "plays again" } else { "offline" }
+                );
+                self.changed();
+            }
+            Ok(_) => {}
+            Err(err) => tracing::warn!(channel = p.channel_id, "a live channel's state wasn't saved: {err}"),
+        }
+    }
+
+    /// Tries channels that didn't play again, one at a time, on sources
+    /// nobody is watching (a try takes one of their connections).
+    async fn recheck_offline(&self) {
+        let Ok(sources) = self.source_rows().await else { return };
+        for source in sources.into_iter().filter(|s| s.enabled) {
+            let sql = format!(
+                "SELECT {CHANNEL_COLUMNS} FROM live_channels c WHERE c.source_id = ? AND c.offline_since IS NOT NULL \
+                 AND c.missing_since IS NULL AND c.hidden = 0 AND (c.offline_checked IS NULL OR c.offline_checked < ?) \
+                 ORDER BY c.offline_checked LIMIT ?"
+            );
+            let Ok(due) = sqlx::query_as::<_, ChannelRow>(sqlx::AssertSqlSafe(sql.as_str()))
+                .bind(source.id)
+                .bind(now() - RECHECK_AFTER)
+                .bind(RECHECKS)
+                .fetch_all(&self.db.read)
+                .await
+            else {
+                continue;
+            };
+            for channel in due {
+                if self.tuners.source_busy(source.id) {
+                    break;
+                }
+                let agent =
+                    channel.user_agent.clone().filter(|a| !a.is_empty()).unwrap_or_else(|| source.user_agent.clone());
+                if self.plays(&channel.stream_url, &agent).await {
+                    self.mark_played(Played { channel_id: channel.id, played: true }).await;
+                } else {
+                    let _ = sqlx::query("UPDATE live_channels SET offline_checked = ? WHERE id = ?")
+                        .bind(now())
+                        .bind(channel.id)
+                        .execute(&self.db.write)
+                        .await;
+                }
+            }
+        }
+    }
+
+    /// Whether a channel's stream sends something within a few seconds.
+    async fn plays(&self, url: &str, agent: &str) -> bool {
+        let tried = async {
+            let mut req = self.http.get(url);
+            if !agent.is_empty() {
+                req = req.header(reqwest::header::USER_AGENT, agent);
+            }
+            let mut resp = req.send().await.ok()?;
+            if !resp.status().is_success() {
+                return Some(false);
+            }
+            let mut got = 0;
+            while let Some(chunk) = resp.chunk().await.ok()? {
+                got += chunk.len();
+                if got >= PLAYS_BYTES {
+                    return Some(true);
+                }
+            }
+            // A provider's HLS playlist: short, and it answered.
+            Some(got > 0)
+        };
+        matches!(tokio::time::timeout(Duration::from_secs(15), tried).await, Ok(Some(true)))
     }
 
     // ------------------------------------------------------------ sources
@@ -687,7 +907,7 @@ impl LiveTv {
         if reread {
             self.refresh_soon(id);
         }
-        self.events.send(ServerEvent::LiveChannelsChanged);
+        self.changed();
         self.source(id).await
     }
 
@@ -701,7 +921,7 @@ impl LiveTv {
         if done.rows_affected() == 0 {
             return Err(AppError::not_found(format!("live TV source {id} not found")));
         }
-        self.events.send(ServerEvent::LiveChannelsChanged);
+        self.changed();
         Ok(())
     }
 
@@ -763,7 +983,7 @@ impl LiveTv {
             return;
         }
         self.tried.lock().insert(id, Instant::now());
-        self.events.send(ServerEvent::LiveChannelsChanged);
+        self.changed();
         // One source at a time: guides are large.
         let _one = self.refresh_lock.lock().await;
         if channels {
@@ -776,7 +996,7 @@ impl LiveTv {
                 .bind(id)
                 .execute(&self.db.write)
                 .await;
-            self.events.send(ServerEvent::LiveChannelsChanged);
+            self.changed();
         }
         if guide {
             let result = self.refresh_guide(id).await;
@@ -794,7 +1014,7 @@ impl LiveTv {
             }
         }
         self.refreshing.lock().remove(&id);
-        self.events.send(ServerEvent::LiveChannelsChanged);
+        self.changed();
     }
 
     async fn list_channels(&self, source: &SourceRow) -> anyhow::Result<Listed> {
@@ -868,6 +1088,7 @@ impl LiveTv {
                  user_agent, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
                  ON CONFLICT(source_id, key) DO UPDATE SET name = excluded.name, number = excluded.number, \
                  group_name = excluded.group_name, logo_url = excluded.logo_url, guide_id = excluded.guide_id, \
+                 offline_since = CASE WHEN stream_url = excluded.stream_url THEN offline_since END, \
                  stream_url = excluded.stream_url, user_agent = excluded.user_agent, position = excluded.position, \
                  missing_since = NULL",
             )
@@ -1067,7 +1288,8 @@ impl LiveTv {
     // ----------------------------------------------------------- channels
 
     /// Channels of `source` (every source's when `None`) its list has now;
-    /// hidden ones too when `hidden`. Enabled sources' only.
+    /// hidden ones too when `hidden`. Enabled sources' only. From the
+    /// database: [`Self::lineup`] keeps them.
     pub(crate) async fn channel_rows(&self, source: Option<i64>, hidden: bool) -> Result<Vec<ChannelRow>, AppError> {
         let sql = format!(
             "SELECT {CHANNEL_COLUMNS} FROM live_channels c JOIN live_sources s ON s.id = c.source_id \
@@ -1114,20 +1336,82 @@ impl LiveTv {
             .collect())
     }
 
+    /// The lineup, read again when something changed since it was last.
+    pub(crate) async fn lineup(&self) -> Result<Arc<Lineup>, AppError> {
+        if let Some(lineup) = self.lineup.lock().clone() {
+            return Ok(lineup);
+        }
+        let generation = self.generation.load(Ordering::SeqCst);
+        let rows = self.channel_rows(None, true).await?;
+        let names = rows.iter().map(|c| c.display_name().to_lowercase()).collect();
+        let hide_offline = self.settings().hide_offline;
+        let shown: Vec<bool> = rows.iter().map(|c| !c.hidden && !(hide_offline && c.offline())).collect();
+        let mut groups: Vec<Group> = Vec::new();
+        let mut index: HashMap<&str, usize> = HashMap::new();
+        for c in rows.iter().zip(&shown).filter(|(c, shown)| **shown && !c.group_name.is_empty()).map(|(c, _)| c) {
+            let at = *index.entry(&c.group_name).or_insert_with(|| {
+                groups.push(Group::new(&c.group_name));
+                groups.len() - 1
+            });
+            groups[at].count += 1;
+        }
+        let lineup = Arc::new(Lineup { rows, shown, names, groups });
+        let mut kept = self.lineup.lock();
+        // A change while it was read: this one is already out of date.
+        if self.generation.load(Ordering::SeqCst) == generation {
+            *kept = Some(lineup.clone());
+        }
+        Ok(lineup)
+    }
+
     /// Programmes between `from` and `to` of `channels`, by channel.
     async fn programs_of(
         &self,
-        channels: &[ChannelRow],
+        channels: &[&ChannelRow],
         from: i64,
         to: i64,
     ) -> Result<HashMap<i64, Vec<Program>>, AppError> {
-        let rows: Vec<ProgramRow> =
+        let mut wanted: HashMap<i64, HashSet<&str>> = HashMap::new();
+        for c in channels {
+            if let Some(key) = c.guide_key() {
+                wanted.entry(c.source_id).or_default().insert(key);
+            }
+        }
+        let rows: Vec<ProgramRow> = if wanted.values().map(HashSet::len).sum::<usize>() > 2000 {
+            // Most of a lineup: one pass over the time asked for.
             sqlx::query_as("SELECT * FROM live_programs WHERE stop > ? AND start < ? ORDER BY start")
                 .bind(from)
                 .bind(to)
                 .fetch_all(&self.db.read)
                 .await
-                .map_err(|e| AppError::Internal(e.into()))?;
+                .map_err(|e| AppError::Internal(e.into()))?
+        } else {
+            // A page of channels: theirs only, by the table's key.
+            let mut rows = Vec::new();
+            for (source, keys) in &wanted {
+                let keys: Vec<&str> = keys.iter().copied().collect();
+                for batch in keys.chunks(500) {
+                    let sql = format!(
+                        "SELECT * FROM live_programs WHERE source_id = ? AND guide_id IN ({}) AND stop > ? AND start < ? \
+                         ORDER BY start",
+                        vec!["?"; batch.len()].join(", ")
+                    );
+                    let mut query = sqlx::query_as::<_, ProgramRow>(sqlx::AssertSqlSafe(sql.as_str())).bind(source);
+                    for key in batch {
+                        query = query.bind(*key);
+                    }
+                    rows.extend(
+                        query
+                            .bind(from)
+                            .bind(to)
+                            .fetch_all(&self.db.read)
+                            .await
+                            .map_err(|e| AppError::Internal(e.into()))?,
+                    );
+                }
+            }
+            rows
+        };
         let mut by_key: HashMap<(i64, &str), Vec<&ProgramRow>> = HashMap::new();
         for r in &rows {
             by_key.entry((r.source_id, r.guide_id.as_str())).or_default().push(r);
@@ -1164,12 +1448,23 @@ impl LiveTv {
         }
     }
 
+    /// Channels as apps get them, with what's on now and next.
+    async fn channels_out(&self, user: &AuthUser, rows: &[&ChannelRow]) -> Result<Vec<Channel>, AppError> {
+        let favorites = self.favorites(user.id).await?;
+        let programs = self.programs_of(rows, now(), now() + 12 * 3600).await?;
+        Ok(rows.iter().map(|c| Self::channel_out(c, &favorites, programs.get(&c.id))).collect())
+    }
+
+    /// How many channels are shown.
+    pub async fn channel_count(&self) -> Result<usize, AppError> {
+        Ok(self.lineup().await?.shown().count())
+    }
+
     /// Every channel `user` sees, with what's on now and next.
     pub async fn channels(&self, user: &AuthUser) -> Result<Vec<Channel>, AppError> {
-        let rows = self.channel_rows(None, false).await?;
-        let favorites = self.favorites(user.id).await?;
-        let programs = self.programs_of(&rows, now(), now() + 12 * 3600).await?;
-        Ok(rows.iter().map(|c| Self::channel_out(c, &favorites, programs.get(&c.id))).collect())
+        let lineup = self.lineup().await?;
+        let rows: Vec<&ChannelRow> = lineup.shown().collect();
+        self.channels_out(user, &rows).await
     }
 
     pub async fn channel(&self, user: &AuthUser, id: i64) -> Result<Channel, AppError> {
@@ -1177,9 +1472,100 @@ impl LiveTv {
         if row.hidden {
             return Err(AppError::not_found(format!("channel {id} not found")));
         }
+        self.channels_out(user, &[&row])
+            .await?
+            .pop()
+            .ok_or_else(|| AppError::not_found(format!("channel {id} not found")))
+    }
+
+    /// The groups `user` sees, and how many channels in all, marked and watched lately.
+    pub async fn groups(&self, user: &AuthUser) -> Result<Groups, AppError> {
+        let lineup = self.lineup().await?;
         let favorites = self.favorites(user.id).await?;
-        let programs = self.programs_of(std::slice::from_ref(&row), now(), now() + 12 * 3600).await?;
-        Ok(Self::channel_out(&row, &favorites, programs.get(&row.id)))
+        let shown: HashSet<i64> = lineup.shown().map(|c| c.id).collect();
+        Ok(Groups {
+            total: shown.len(),
+            favorites: favorites.iter().filter(|id| shown.contains(id)).count(),
+            recent: self.recent(user, RECENT).await?.len(),
+            groups: lineup.groups.clone(),
+        })
+    }
+
+    /// A page of the channels of `category` that match `search` (a name, a
+    /// number's beginning, or the title of what's on): `limit` from
+    /// `offset`, or the page with channel `around` in it.
+    pub async fn browse(
+        &self,
+        user: &AuthUser,
+        category: &Category,
+        search: &str,
+        offset: usize,
+        limit: usize,
+        around: Option<i64>,
+    ) -> Result<ChannelPage, AppError> {
+        let lineup = self.lineup().await?;
+        let search = search.trim().to_lowercase();
+        let airing = if search.is_empty() { HashSet::new() } else { self.airing_titled(&search).await? };
+        let matches = |i: usize, c: &ChannelRow| {
+            search.is_empty()
+                || lineup.names[i].contains(&search)
+                || c.display_number().is_some_and(|n| n.starts_with(&search))
+                || c.guide_key().is_some_and(|k| airing.contains(&(c.source_id, k.to_owned())))
+        };
+        let listed: Vec<&ChannelRow> = match category {
+            Category::Recent => {
+                let by_id: HashMap<i64, usize> = lineup.rows.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
+                self.recent(user, RECENT)
+                    .await?
+                    .into_iter()
+                    .filter_map(|id| by_id.get(&id).copied())
+                    .filter(|&i| lineup.shown[i] && matches(i, &lineup.rows[i]))
+                    .map(|i| &lineup.rows[i])
+                    .collect()
+            }
+            _ => {
+                let favorites =
+                    if *category == Category::Favorites { self.favorites(user.id).await? } else { HashSet::new() };
+                lineup
+                    .rows
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, _)| lineup.shown[i])
+                    .filter(|(_, c)| match category {
+                        Category::Favorites => favorites.contains(&c.id),
+                        Category::Group(name) => c.group_name == *name,
+                        _ => true,
+                    })
+                    .filter(|&(i, c)| matches(i, c))
+                    .map(|(_, c)| c)
+                    .collect()
+            }
+        };
+        let limit = limit.clamp(1, MAX_PAGE);
+        let offset = match around.and_then(|id| listed.iter().position(|c| c.id == id)) {
+            Some(at) => at / limit * limit,
+            None => offset.min(listed.len()),
+        };
+        let page = &listed[offset..(offset + limit).min(listed.len())];
+        Ok(ChannelPage { total: listed.len(), offset, channels: self.channels_out(user, page).await? })
+    }
+
+    /// The guide channels (by source) airing a programme whose title has `search` in it.
+    async fn airing_titled(&self, search: &str) -> Result<HashSet<(i64, String)>, AppError> {
+        let pattern = format!("%{}%", search.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        let at = now();
+        Ok(sqlx::query_as::<_, (i64, String)>(
+            "SELECT DISTINCT source_id, guide_id FROM live_programs WHERE start <= ? AND stop > ? \
+             AND title LIKE ? ESCAPE '\\'",
+        )
+        .bind(at)
+        .bind(at)
+        .bind(pattern)
+        .fetch_all(&self.db.read)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?
+        .into_iter()
+        .collect())
     }
 
     /// The channels `user` watched last, newest first.
@@ -1221,18 +1607,27 @@ impl LiveTv {
         Ok(())
     }
 
-    /// The guide from `from` to `to` (at most two days) for every channel `user` sees.
-    pub async fn guide(&self, _user: &AuthUser, from: i64, to: i64) -> Result<Guide, AppError> {
+    /// The guide from `from` to `to` (at most two days) for channels `ids`
+    /// (every channel `user` sees when `None`).
+    pub async fn guide(
+        &self,
+        _user: &AuthUser,
+        from: i64,
+        to: i64,
+        ids: Option<&HashSet<i64>>,
+    ) -> Result<Guide, AppError> {
         if to <= from || to - from > 2 * 86_400 {
             return Err(AppError::bad_request("the guide is asked for two days at most, `to` after `from`"));
         }
-        let rows = self.channel_rows(None, false).await?;
+        let lineup = self.lineup().await?;
+        let rows: Vec<&ChannelRow> = lineup.shown().filter(|c| ids.is_none_or(|ids| ids.contains(&c.id))).collect();
         let programs = self.programs_of(&rows, from, to).await?;
         Ok(Guide { from, to, programs })
     }
 
     pub async fn admin_channels(&self, source: Option<i64>) -> Result<Vec<AdminChannel>, AppError> {
-        let rows = self.channel_rows(source, true).await?;
+        let lineup = self.lineup().await?;
+        let rows = lineup.rows.iter().filter(|c| source.is_none_or(|s| c.source_id == s));
         let keys: HashSet<(i64, String)> =
             sqlx::query_as::<_, (i64, String)>("SELECT DISTINCT source_id, guide_id FROM live_programs WHERE stop > ?")
                 .bind(now())
@@ -1242,7 +1637,6 @@ impl LiveTv {
                 .into_iter()
                 .collect();
         Ok(rows
-            .into_iter()
             .map(|c| AdminChannel {
                 id: c.id,
                 source_id: c.source_id,
@@ -1260,8 +1654,33 @@ impl LiveTv {
                 custom_name: c.custom_name.clone(),
                 custom_number: c.custom_number.clone(),
                 custom_guide_id: c.custom_guide_id.clone(),
+                offline: c.offline(),
+                offline_since: c.offline_since,
             })
             .collect())
+    }
+
+    /// Every group, hidden channels' too, with how many of each are hidden.
+    pub async fn admin_groups(&self) -> Result<Vec<AdminGroup>, AppError> {
+        let lineup = self.lineup().await?;
+        let mut groups: Vec<AdminGroup> = Vec::new();
+        let mut index: HashMap<&str, usize> = HashMap::new();
+        for c in &lineup.rows {
+            let at = *index.entry(&c.group_name).or_insert_with(|| {
+                groups.push(AdminGroup { group: Group::new(&c.group_name), hidden: 0, offline: 0 });
+                groups.len() - 1
+            });
+            groups[at].group.count += 1;
+            groups[at].hidden += usize::from(c.hidden);
+            groups[at].offline += usize::from(c.offline());
+        }
+        Ok(groups)
+    }
+
+    /// The channels in groups `names`, hidden ones too.
+    pub async fn group_channels(&self, names: &[String]) -> Result<Vec<i64>, AppError> {
+        let names: HashSet<&str> = names.iter().map(String::as_str).collect();
+        Ok(self.lineup().await?.rows.iter().filter(|c| names.contains(c.group_name.as_str())).map(|c| c.id).collect())
     }
 
     /// Changes channels `ids` as `patch` says.
@@ -1271,25 +1690,30 @@ impl LiveTv {
         }
         let clean = |v: &Option<String>| v.as_ref().map(|s| s.trim().to_owned()).map(|s| (!s.is_empty()).then_some(s));
         let (name, number, guide) = (clean(&patch.name), clean(&patch.number), clean(&patch.guide_id));
+        let mut sets = Vec::new();
+        if patch.hidden.is_some() {
+            sets.push("hidden = ?");
+        }
+        if name.is_some() {
+            sets.push("custom_name = ?");
+        }
+        if number.is_some() {
+            sets.push("custom_number = ?");
+        }
+        if guide.is_some() {
+            sets.push("custom_guide_id = ?");
+        }
+        if sets.is_empty() {
+            return Ok(());
+        }
         let mut tx = self.db.write.begin().await.map_err(|e| AppError::Internal(e.into()))?;
-        for id in ids {
-            let mut sets = Vec::new();
-            if patch.hidden.is_some() {
-                sets.push("hidden = ?");
-            }
-            if name.is_some() {
-                sets.push("custom_name = ?");
-            }
-            if number.is_some() {
-                sets.push("custom_number = ?");
-            }
-            if guide.is_some() {
-                sets.push("custom_guide_id = ?");
-            }
-            if sets.is_empty() {
-                break;
-            }
-            let sql = format!("UPDATE live_channels SET {} WHERE id = ?", sets.join(", "));
+        // Whole groups run to thousands of channels: hundreds per statement.
+        for batch in ids.chunks(500) {
+            let sql = format!(
+                "UPDATE live_channels SET {} WHERE id IN ({})",
+                sets.join(", "),
+                vec!["?"; batch.len()].join(", ")
+            );
             let mut q = sqlx::query(sqlx::AssertSqlSafe(sql.as_str()));
             if let Some(hidden) = patch.hidden {
                 q = q.bind(hidden);
@@ -1297,7 +1721,10 @@ impl LiveTv {
             for value in [&name, &number, &guide].into_iter().flatten() {
                 q = q.bind(value.clone());
             }
-            q.bind(id).execute(&mut *tx).await.map_err(|e| AppError::Internal(e.into()))?;
+            for id in batch {
+                q = q.bind(id);
+            }
+            q.execute(&mut *tx).await.map_err(|e| AppError::Internal(e.into()))?;
         }
         tx.commit().await.map_err(|e| AppError::Internal(e.into()))?;
         if patch.hidden == Some(true) {
@@ -1305,7 +1732,7 @@ impl LiveTv {
                 self.tuners.stop_channel(*id).await;
             }
         }
-        self.events.send(ServerEvent::LiveChannelsChanged);
+        self.changed();
         Ok(())
     }
 
@@ -1394,6 +1821,29 @@ fn sort_channels(rows: &mut [ChannelRow]) {
     rows.sort_by(|a, b| key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal));
 }
 
+/// A group name's region and the rest, when it begins with one the way
+/// providers write them: "UK| Sport", "|UK| Sport", "UK: Sport", "[UK] Sport".
+fn split_region(name: &str) -> Option<(&str, &str)> {
+    let name = name.trim().trim_start_matches('|').trim_start();
+    let (region, rest) = if let Some(inner) = name.strip_prefix('[') {
+        inner.split_once(']')?
+    } else if let Some(split) = name.split_once('|') {
+        split
+    } else {
+        // A colon only after a short code ("UK:", not "Live: Sport").
+        name.split_once(':').filter(|(r, _)| r.len() <= 4 && r.chars().all(|c| c.is_ascii_uppercase()))?
+    };
+    let (region, rest) = (region.trim(), rest.trim().trim_start_matches(['|', ':', '-']).trim());
+    (!region.is_empty() && region.chars().count() <= 16 && !rest.is_empty()).then_some((region, rest))
+}
+
+/// A provider's divider row rather than a channel: a name between runs of
+/// marks ("##### UK SPORTS #####", "---- NEWS ----", "★★★ VIP ★★★").
+fn is_divider(name: &str) -> bool {
+    let name = name.trim();
+    name.chars().take_while(|c| "#=*-~_+•●★☆✦━─|".contains(*c)).count() >= 3 || !name.chars().any(char::is_alphanumeric)
+}
+
 /// A channel name as compared with the guide's: lower case, letters and
 /// digits only, and a trailing quality said or not (`HD`, `FHD`, `4K`).
 fn normalize(name: &str) -> String {
@@ -1438,6 +1888,20 @@ mod tests {
         assert_eq!(normalize("Sky Sports F1 FHD"), "skysportsf1");
         assert_eq!(normalize("HD"), "hd");
         assert_eq!(redact("http://x/live/me/secret/1.ts", "secret"), "http://x/live/me/••••/1.ts");
+    }
+
+    #[test]
+    fn groups_are_told_by_their_region() {
+        assert_eq!(split_region("UK| SPORTS"), Some(("UK", "SPORTS")));
+        assert_eq!(split_region("|AR| MBC"), Some(("AR", "MBC")));
+        assert_eq!(split_region("GR| ΓΕΝΙΚΆ/GENERAL"), Some(("GR", "ΓΕΝΙΚΆ/GENERAL")));
+        assert_eq!(split_region("[DE] Sport"), Some(("DE", "Sport")));
+        assert_eq!(split_region("FR: Cinéma"), Some(("FR", "Cinéma")));
+        assert_eq!(split_region("Live: Sport"), None);
+        assert_eq!(split_region("24/7 SHOWS VIP"), None);
+        assert_eq!(split_region("UK|"), None);
+        assert_eq!(Group::new("US| ESPN+ PPV").label, "ESPN+ PPV");
+        assert_eq!(Group::new("News").region, None);
     }
 
     #[test]

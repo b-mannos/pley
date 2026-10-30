@@ -121,6 +121,7 @@ const ADMIN: &[(&str, &str)] = &[
     ("POST", "/api/live/sources/{id}/refresh"),
     ("GET", "/api/live/lineup"),
     ("PATCH", "/api/live/lineup"),
+    ("GET", "/api/live/lineup/groups"),
     ("GET", "/api/live/tuners"),
     ("DELETE", "/api/live/tuners/{channel}"),
 ];

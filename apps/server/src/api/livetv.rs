@@ -1,7 +1,7 @@
 //! Live TV (`/api/live`): channels, the guide and watching for everyone
 //! Live TV is open to; sources, channels and connections for administrators.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use axum::Json;
 use axum::body::Body;
@@ -13,7 +13,10 @@ use serde::{Deserialize, Serialize};
 use crate::auth::{AdminUser, AuthUser};
 use crate::error::{ApiResult, AppError};
 use crate::livetv::tuner::{Tune, TunerStatus, ViewerKind, Watching};
-use crate::livetv::{AdminChannel, Channel, ChannelPatch, Guide, LiveSettings, Source, SourceInput, SourceTest};
+use crate::livetv::{
+    AdminChannel, AdminGroup, Category, Channel, ChannelPage, ChannelPatch, Groups, Guide, LiveSettings, Source,
+    SourceInput, SourceTest,
+};
 use crate::state::AppState;
 use crate::util::now;
 
@@ -33,7 +36,7 @@ pub struct Summary {
 
 pub async fn summary(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Summary>> {
     let allowed = state.live.may_watch(&user);
-    let channels = if allowed { state.live.channels(&user).await?.len() } else { 0 };
+    let channels = if allowed { state.live.channel_count().await? } else { 0 };
     let sources = if user.is_admin { state.live.sources().await?.len() } else { 0 };
     let recent = if allowed { state.live.recent(&user, 12).await? } else { Vec::new() };
     Ok(Json(Summary { available: allowed && channels > 0, allowed, channels, sources, recent }))
@@ -42,6 +45,58 @@ pub async fn summary(State(state): State<AppState>, user: AuthUser) -> ApiResult
 pub async fn channels(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Vec<Channel>>> {
     state.live.check_access(&user)?;
     Ok(Json(state.live.channels(&user).await?))
+}
+
+pub async fn groups(State(state): State<AppState>, user: AuthUser) -> ApiResult<Json<Groups>> {
+    state.live.check_access(&user)?;
+    Ok(Json(state.live.groups(&user).await?))
+}
+
+#[derive(Deserialize)]
+pub struct BrowseQuery {
+    /// `all` (the default), `favorites`, `recent` or `group`.
+    #[serde(default)]
+    category: Option<String>,
+    /// The group, for `category=group`.
+    #[serde(default)]
+    group: Option<String>,
+    #[serde(default)]
+    q: Option<String>,
+    #[serde(default)]
+    offset: Option<usize>,
+    #[serde(default)]
+    limit: Option<usize>,
+    /// A channel whose page is wanted (the offset is then its page's).
+    #[serde(default)]
+    around: Option<i64>,
+}
+
+/// A page of a category's channels, with what's on now and next.
+pub async fn browse(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Query(query): Query<BrowseQuery>,
+) -> ApiResult<Json<ChannelPage>> {
+    state.live.check_access(&user)?;
+    let category = match query.category.as_deref().unwrap_or("all") {
+        "all" => Category::All,
+        "favorites" => Category::Favorites,
+        "recent" => Category::Recent,
+        "group" => Category::Group(query.group.ok_or_else(|| AppError::bad_request("`group` names the group"))?),
+        other => return Err(AppError::bad_request(format!("no category `{other}`"))),
+    };
+    let page = state
+        .live
+        .browse(
+            &user,
+            &category,
+            query.q.as_deref().unwrap_or(""),
+            query.offset.unwrap_or(0),
+            query.limit.unwrap_or(100),
+            query.around,
+        )
+        .await?;
+    Ok(Json(page))
 }
 
 pub async fn channel(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Json<Channel>> {
@@ -65,6 +120,9 @@ pub async fn unfavorite(State(state): State<AppState>, user: AuthUser, Path(id):
 pub struct GuideQuery {
     from: Option<i64>,
     to: Option<i64>,
+    /// The channels wanted, by id with commas between (all when not given).
+    #[serde(default)]
+    ids: Option<String>,
 }
 
 /// The guide from `from` (default: half an hour ago) to `to` (default: six
@@ -77,7 +135,16 @@ pub async fn guide(
     state.live.check_access(&user)?;
     let from = query.from.unwrap_or_else(|| now() - 1800);
     let to = query.to.unwrap_or(from + 6 * 3600);
-    Ok(Json(state.live.guide(&user, from, to).await?))
+    let ids = query
+        .ids
+        .map(|ids| {
+            ids.split(',')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim().parse::<i64>().map_err(|_| AppError::bad_request("`ids` are channel ids")))
+                .collect::<Result<HashSet<i64>, _>>()
+        })
+        .transpose()?;
+    Ok(Json(state.live.guide(&user, from, to, ids.as_ref()).await?))
 }
 
 async fn picture(
@@ -305,24 +372,36 @@ pub async fn admin_channels(
     Ok(Json(state.live.admin_channels(query.source_id).await?))
 }
 
+pub async fn admin_groups(State(state): State<AppState>, _admin: AdminUser) -> ApiResult<Json<Vec<AdminGroup>>> {
+    Ok(Json(state.live.admin_groups().await?))
+}
+
 #[derive(Deserialize)]
 pub struct ChannelsPatch {
+    #[serde(default)]
     ids: Vec<i64>,
+    /// Every channel of these groups, as well as `ids`.
+    #[serde(default)]
+    groups: Vec<String>,
     #[serde(flatten)]
     patch: ChannelPatch,
 }
 
-/// Hides, shows, renames or renumbers channels (`ids`), or gives them a
-/// guide channel of their own.
+/// Hides, shows, renames or renumbers channels (`ids`, and those of
+/// `groups`), or gives them a guide channel of their own.
 pub async fn patch_channels(
     State(state): State<AppState>,
     _admin: AdminUser,
     Json(req): Json<ChannelsPatch>,
 ) -> ApiResult<StatusCode> {
-    if req.ids.len() > 20_000 {
+    if req.ids.len() > 20_000 || req.groups.len() > 5_000 {
         return Err(AppError::bad_request("too many channels at once"));
     }
-    state.live.patch_channels(&req.ids, &req.patch).await?;
+    let mut ids = req.ids;
+    if !req.groups.is_empty() {
+        ids.extend(state.live.group_channels(&req.groups).await?);
+    }
+    state.live.patch_channels(&ids, &req.patch).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

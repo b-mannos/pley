@@ -13,6 +13,8 @@
 //!   handed on as one MPEG-TS stream.
 //! - A connection that breaks is made again, a few times, while the channel
 //!   is watched.
+//! - Whether a channel played is told ([`Played`]): one the provider gives
+//!   nothing for is offline until it plays again.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -23,7 +25,7 @@ use futures::{Stream, StreamExt};
 use parking_lot::Mutex;
 use pley_transcoder_api::{HwAccel, LivePlan, LiveRequest};
 use serde::Serialize;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use super::{ChannelRow, LiveSettings};
@@ -50,6 +52,17 @@ const ATTEMPTS: u32 = 5;
 /// Bytes after which a connection counts as having worked (its failures
 /// start again from 0).
 const WORKED_BYTES: u64 = 4 << 20;
+
+/// Whether a channel played: it sent something, or the provider gave
+/// nothing for it however often it was asked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Played {
+    pub channel_id: i64,
+    pub played: bool,
+}
+
+/// How a provider refusing the account (not the channel) begins.
+const REFUSED: &str = "the provider refused it";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -160,6 +173,7 @@ struct Tuner {
     stop: CancellationToken,
     /// The transcoder's live job, once an HLS viewer came.
     hls: tokio::sync::Mutex<Option<String>>,
+    played: mpsc::UnboundedSender<Played>,
 }
 
 impl Tuner {
@@ -170,6 +184,9 @@ impl Tuner {
     fn push(&self, chunk: Bytes) {
         {
             let mut state = self.state.lock();
+            if state.bytes_in == 0 {
+                let _ = self.played.send(Played { channel_id: self.channel_id, played: true });
+            }
             state.bytes_in += chunk.len() as u64;
             state.connected = true;
             state.error = None;
@@ -236,6 +253,7 @@ pub struct Tuners {
     viewers: Mutex<HashMap<String, Viewer>>,
     /// Decisions to start a tuner, one at a time (they count connections).
     starting: tokio::sync::Mutex<()>,
+    played: mpsc::UnboundedSender<Played>,
 }
 
 /// What a tuner needs to know of its channel.
@@ -247,7 +265,12 @@ pub struct Tune<'a> {
 }
 
 impl Tuners {
-    pub fn new(transcoder: Arc<Transcoder>, events: EventBus, http: reqwest::Client) -> Arc<Self> {
+    pub fn new(
+        transcoder: Arc<Transcoder>,
+        events: EventBus,
+        http: reqwest::Client,
+        played: mpsc::UnboundedSender<Played>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             transcoder,
             events,
@@ -255,7 +278,13 @@ impl Tuners {
             tuners: Mutex::default(),
             viewers: Mutex::default(),
             starting: tokio::sync::Mutex::new(()),
+            played,
         })
+    }
+
+    /// Whether any channel of `source_id` is being pulled.
+    pub fn source_busy(&self, source_id: i64) -> bool {
+        self.tuners.lock().values().any(|t| t.source_id == source_id && t.is_live())
     }
 
     /// Lets go of channels nobody watches, every few seconds.
@@ -446,6 +475,7 @@ impl Tuners {
             state: Mutex::new(TunerState::default()),
             stop: CancellationToken::new(),
             hls: tokio::sync::Mutex::new(None),
+            played: self.played.clone(),
         });
         tracing::info!(channel = tuner.channel_id, name = %tuner.channel_name, source = %tuner.source_name, "live channel tuned");
         self.tuners.lock().insert(tuner.channel_id, tuner.clone());
@@ -718,6 +748,7 @@ fn is_segment_name(name: &str) -> bool {
 /// Pulls the channel while the tuner lives, connecting again when it breaks.
 async fn pull(tuner: Arc<Tuner>, http: reqwest::Client) {
     let mut failures = 0u32;
+    let mut refused = false;
     while !tuner.stop.is_cancelled() {
         let before = tuner.state.lock().bytes_in;
         let result = tokio::select! {
@@ -733,6 +764,7 @@ async fn pull(tuner: Arc<Tuner>, http: reqwest::Client) {
             Ok(()) => "the provider ended the stream".to_owned(),
             Err(why) => why,
         };
+        refused = why.starts_with(REFUSED);
         tracing::info!(channel = tuner.channel_id, attempt = failures, "live channel's connection broke: {why}");
         {
             let mut state = tuner.state.lock();
@@ -747,6 +779,11 @@ async fn pull(tuner: Arc<Tuner>, http: reqwest::Client) {
             () = tokio::time::sleep(wait) => {}
             () = tuner.stop.cancelled() => break,
         }
+    }
+    let gave_nothing = tuner.state.lock().bytes_in == 0;
+    // Nothing ever came for it, and not for want of a connection: offline.
+    if gave_nothing && !refused && !tuner.stop.is_cancelled() {
+        let _ = tuner.played.send(Played { channel_id: tuner.channel_id, played: false });
     }
     tuner.state.lock().ended = true;
     tuner.feed.lock().tx = None;
@@ -765,9 +802,9 @@ async fn pull_once(tuner: &Tuner, http: &reqwest::Client) -> Result<(), String> 
     let status = resp.status();
     if !status.is_success() {
         return Err(match status.as_u16() {
-            401 | 403 | 458 | 509 => format!(
-                "the provider refused it ({status}): the account's connections may be in use elsewhere, or it expired"
-            ),
+            401 | 403 | 458 | 509 => {
+                format!("{REFUSED} ({status}): the account's connections may be in use elsewhere, or it expired")
+            }
             404 => "the provider doesn't have this channel now (404)".into(),
             _ => format!("the provider answered {status}"),
         });

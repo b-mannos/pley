@@ -34,8 +34,13 @@ describes how they are made.
   connections: a channel watched on several devices takes one, and when
   all are in use the apps say which channels hold them. Interlaced and
   non-H.264 channels are converted, on the graphics card where there is
-  one. Settings → Live TV has the sources, the lineup (hide, rename,
-  renumber, pick a guide channel) and who is watching what.
+  one. Settings → Live TV has the sources, the groups (a whole group or
+  region hidden at once), the lineup (hide, rename, renumber, pick a
+  guide channel) and who is watching what. Channels are browsed by group,
+  as TiviMate does: groups named by region ("UK| Sport") fold under it,
+  and channel up and down stay in the group. Lineups of tens of
+  thousands of channels open at once: the apps fetch a page of channels
+  and the guide of those in view.
 - The web app draws picture subtitles (PGS, VobSub, DVB) over the video
   itself, so the file still plays as it is, or its stream keeps HDR,
   rather than having them burned in.

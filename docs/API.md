@@ -2324,10 +2324,12 @@ when another channel needs the connection).
 |---|---|---|---|
 | GET | `/api/live` | `library` | `{ available, allowed, channels, sources, recent: Id[] }`: whether to show Live TV (`allowed`: open to this account; `available`: and it has channels), the channel count, the sources set up (administrators; else 0) and the channels watched last, newest first |
 | GET | `/api/live/channels` | `library` | `LiveChannel[]`, the shown channels by number, each with what's on now and next |
+| GET | `/api/live/groups` | `library` | `{ total, favorites, recent, groups: LiveGroup[] }`: the groups in the lineup's order, and how many channels in all, marked and watched lately |
+| GET | `/api/live/browse` | `library` | `?category=all\|favorites\|recent\|group&group=&q=&offset=&limit=&around=` → `{ total, offset, channels: LiveChannel[] }`: a page (100 by default, 500 at most) of a category's channels matching `q` (a name, a number's beginning, or the title of what's on); `around` gives the page with that channel in it |
 | GET | `/api/live/channels/{id}` | `library` | `LiveChannel` |
 | GET | `/api/live/channels/{id}/logo` | `library` | the logo, fetched once and kept; `?w=` resizes it |
 | GET | `/api/live/channels/{id}/programs/{start}/image` | `library` | a programme's picture; `?w=` resizes it |
-| GET | `/api/live/guide` | `library` | `?from=&to=` (unix seconds; default half an hour ago to six hours on, two days at most) → `{ from, to, programs: { [channel_id]: LiveProgram[] } }` |
+| GET | `/api/live/guide` | `library` | `?from=&to=&ids=` (unix seconds; default half an hour ago to six hours on, two days at most; `ids`: the channels wanted, with commas between, else every one) → `{ from, to, programs: { [channel_id]: LiveProgram[] } }` |
 | PUT | `/api/live/channels/{id}/favorite` | `play` | `204` |
 | DELETE | `/api/live/channels/{id}/favorite` | `play` | `204` |
 | POST | `/api/live/channels/{id}/watch` | `play` | optional `{ client_id? }` → `{ session_id, url, kind: "hls", channel: LiveChannel }`: `url` is the channel's live HLS playlist |
@@ -2343,7 +2345,8 @@ when another channel needs the connection).
 | DELETE | `/api/live/sources/{id}` | `admin` | `204`, with its channels |
 | POST | `/api/live/sources/{id}/refresh` | `admin` | `202`: reads its channels and guide again now |
 | GET | `/api/live/lineup` | `admin` | `?source_id=` → `LiveLineupChannel[]`, hidden ones too |
-| PATCH | `/api/live/lineup` | `admin` | `{ ids: Id[], hidden?, name?, number?, guide_id? }` → `204`; `""` gives back the source's own value; 20,000 ids at most |
+| PATCH | `/api/live/lineup` | `admin` | `{ ids: Id[], groups?: string[], hidden?, name?, number?, guide_id? }` → `204`: those channels and every one of `groups`; `""` gives back the source's own value; 20,000 ids at most |
+| GET | `/api/live/lineup/groups` | `admin` | `(LiveGroup & { hidden, offline })[]`: every group, hidden and offline channels counted |
 | GET | `/api/live/tuners` | `admin` | `LiveTuner[]`: the channels being pulled and who watches them |
 | DELETE | `/api/live/tuners/{channel}` | `admin` | `204`: stops pulling the channel, for everyone watching it |
 
@@ -2353,6 +2356,12 @@ interface LiveChannel {
   logo: string | null;                 // the logo's address on this server
   favorite: boolean; has_guide: boolean;
   now: LiveProgram | null; next: LiveProgram | null;
+}
+interface LiveGroup {
+  name: string;
+  region: string | null;               // "UK" of "UK| Sport", "[UK] Sport", "UK: Sport"
+  label: string;                       // the name without its region: "Sport"
+  count: number;
 }
 interface LiveProgram {
   channel_id: Id; start: number; stop: number; title: string;
@@ -2384,6 +2393,7 @@ interface LiveSettings {
   timeshift_minutes: number;           // how far back a channel can be paused and rewound
   refresh_hours: number;               // channels and guide read again this often
   guide_days: number;                  // days of guide kept ahead
+  hide_offline: boolean;               // /* true */ channels that don't play, and divider rows, left out
 }
 ```
 
@@ -2398,6 +2408,20 @@ interface LiveSettings {
   same HLS stream, made once.
 - **Leaving.** An HLS viewer that asked for nothing for 45 s has left;
   `DELETE /api/live/sessions/{session}` says so at once.
+- **Large lineups.** Providers list tens of thousands of channels in
+  hundreds of groups. Apps list them by group (`groups`), a page at a
+  time (`browse`), and ask the guide for the channels in view (`ids`);
+  `GET /api/live/channels` and a guide without `ids` give every channel,
+  which is fine for a few hundred. The server keeps the lineup in memory
+  until it changes.
+- **Offline channels.** A channel the provider gives nothing for, however
+  often it is asked (no answer, a 404, no data; not a refusal of the
+  account), is offline until it plays again; so is a provider's divider
+  row ("##### UK #####"). While `hide_offline` is on they are left out of
+  every list, the guide and the counts, but can still be watched by id.
+  Offline channels are tried again in the background every six hours,
+  one at a time, while nothing of their source is being watched. The
+  lineup says `offline` and `offline_since` for each channel.
 - **Hidden channels** are nobody's to watch, administrators' included,
   until shown again. Names, numbers and guide channels set in the lineup
   stay when the source is read again.
