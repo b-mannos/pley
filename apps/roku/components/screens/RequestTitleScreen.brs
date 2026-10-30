@@ -6,7 +6,9 @@
 ' requestsChanged), each 10 s while something on it downloads, and each
 ' 30 s while it shows a request and the event stream is down. params:
 ' { kind, tmdbId, title, ask (Discover's Request: the main action at
-' once), pick (a library's Request more seasons: the picker at once) }.
+' once), pick (a library's Request more seasons: the picker at once),
+' requestId (the request a list opened it for: its stage and actions show,
+' where the title has it) }.
 
 sub init()
     m.backdrop = m.top.findNode("backdrop")
@@ -98,6 +100,8 @@ sub onDetail(event as object)
         return
     end if
     m.detail = answer.data
+    wanted = httpNumber(m.top.params.requestId, 0)
+    if wanted > 0 and reqRequestsById(m.detail.requests).DoesExist(urlValue(wanted)) then m.detail.request_id = wanted
     m.problem.visible = false
     m.problemShown = invalid
     showRows(request.content)

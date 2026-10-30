@@ -543,6 +543,22 @@ sub test_requests_list_queries_and_empty_lists()
     tkEqual(reqEmptyText("pending", false, true), "Nothing matches.")
 end sub
 
+sub test_requests_open_on_a_tab_the_person_has()
+    tkEqual(reqListView("mine", true), "mine")
+    tkEqual(reqListView("mine", false), "all")
+    tkEqual(reqListView("", true), "attention")
+    tkEqual(reqListView("", false), "all")
+    tkEqual(reqListView("declined", false), "declined")
+    tkEqual(reqListView("attention", false), "all")
+end sub
+
+sub test_requests_filters_say_what_they_keep()
+    tkEqual(reqFilterLabel("", "", ""), "Filter")
+    tkEqual(reqFilterLabel("movie", "", ""), "Movies")
+    tkEqual(reqFilterLabel("show", "Ann", "star"), "Shows · Ann · “star”")
+    tkEqual(reqFilterLabel("", "", "dune"), "“dune”")
+end sub
+
 sub test_requests_ready_notices()
     tkEqual(reqReadyText("Dune", "movie", invalid), "“Dune” is ready to watch.")
     tkEqual(reqReadyText("Severance", "show", [2]), "Season 2 of “Severance” is ready to watch.")

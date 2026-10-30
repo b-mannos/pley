@@ -7,7 +7,8 @@
 
 ' What can be done with a request, in a dialog titled with it: target is
 ' { requestId, title, status, stage, kind, tmdbId, seasons, libraryId,
-' actions } (a row's fields, reqRow's). Nothing to do: false.
+' actions } (a row's fields, reqRow's, its tmdbKind as kind). Nothing to
+' do: false.
 function uiRequestOptions(target as object) as boolean
     options = reqActions(target, target.libraryId)
     if options.Count() = 0 then return false

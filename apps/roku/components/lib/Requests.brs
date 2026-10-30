@@ -1278,6 +1278,29 @@ function reqListQuery(view as string, kind as string, userId as integer, q as st
     return query
 end function
 
+' The tab the requests open on: the one asked for (a notice's Open, See
+' all: "mine") where the person has it, else the first, Needs attention
+' for a manager.
+function reqListView(view as string, manage as boolean) as string
+    for each entry in reqTabs(manage)
+        if entry.key = view then return view
+    end for
+    if manage then return "attention"
+    return "all"
+end function
+
+' The managers' filters, as their chip says them: "Filter" for none, else
+' "Movies · Ann · “star”".
+function reqFilterLabel(kind as string, person as string, q as string) as string
+    parts = []
+    if kind = "movie" then parts.Push("Movies")
+    if kind = "show" then parts.Push("Shows")
+    if person <> "" then parts.Push(person)
+    if q <> "" then parts.Push(reqQuoted(q))
+    if parts.Count() = 0 then return "Filter"
+    return parts.Join(" · ")
+end function
+
 ' --- Notices ---
 
 ' "“X” is ready to watch.", "Season 2 of “X” is ready to watch.",
