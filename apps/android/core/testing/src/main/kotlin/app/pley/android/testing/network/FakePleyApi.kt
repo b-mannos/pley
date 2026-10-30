@@ -17,6 +17,10 @@ import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
+import app.pley.android.model.LiveChannel
+import app.pley.android.model.LiveGuide
+import app.pley.android.model.LiveSummary
+import app.pley.android.model.LiveWatching
 import app.pley.android.model.ConversionInfo
 import app.pley.android.model.ConversionState
 import app.pley.android.model.AddSubtitle
@@ -43,6 +47,7 @@ import app.pley.android.model.SessionStatus
 import app.pley.android.model.SortOrder
 import app.pley.android.model.StreamChoice
 import app.pley.android.model.TrickplayInfo
+import app.pley.android.model.WatchRequest
 import app.pley.android.network.HttpPleyApi
 import app.pley.android.network.PleyApi
 import app.pley.android.network.SubtitleText
@@ -297,6 +302,27 @@ class FakePleyApi(val issuer: String = "http://127.0.0.1:7539") : PleyApi {
     override suspend fun addToWatchlist(itemId: Long) = respond("addToWatchlist", itemId) { }
 
     override suspend fun removeFromWatchlist(itemId: Long) = respond("removeFromWatchlist", itemId) { }
+
+    // ---------------------------------------------------------------- live TV
+
+    override suspend fun liveSummary(): LiveSummary = respond("liveSummary") { fixture("live/summary.json") }
+
+    override suspend fun liveChannels(): List<LiveChannel> = respond("liveChannels") { fixture("live/channels.json") }
+
+    override suspend fun liveGuide(from: Long, to: Long): LiveGuide = respond("liveGuide", from, to) {
+        fixture<LiveGuide>("live/guide.json").copy(from = from, to = to)
+    }
+
+    override suspend fun setFavoriteChannel(channelId: Long, favorite: Boolean) = respond("setFavoriteChannel", channelId, favorite) { }
+
+    override suspend fun watchChannel(channelId: Long, request: WatchRequest): LiveWatching = respond("watchChannel", channelId, request) {
+        val watching = fixture<LiveWatching>("live/watching.json")
+        watching.copy(sessionId = "live-$channelId", url = "/api/live/sessions/live-$channelId/index.m3u8")
+    }
+
+    override suspend fun keepWatching(sessionId: String) = respond("keepWatching", sessionId) { }
+
+    override suspend fun leaveChannel(sessionId: String) = respond("leaveChannel", sessionId) { }
 
     // ---------------------------------------------------------------- playlists (changing)
 

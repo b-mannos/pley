@@ -1,0 +1,115 @@
+package app.pley.android.model
+
+import kotlinx.serialization.Serializable
+
+/**
+ * GET /api/live: whether to show Live TV. [allowed]: it is open to this
+ * profile; [available]: and it has channels. [sources] is for
+ * administrators (0 for the others); [recent] the channels watched last,
+ * newest first.
+ */
+@Serializable
+data class LiveSummary(
+    val available: Boolean = false,
+    val allowed: Boolean = false,
+    val channels: Int = 0,
+    val sources: Int = 0,
+    val recent: List<Long> = emptyList(),
+)
+
+/**
+ * A programme of the guide (docs/API.md, `LiveProgram`). Times are unix
+ * seconds; [image] is an address on the server, when the guide has a
+ * picture.
+ */
+@Serializable
+data class LiveProgram(
+    val channelId: Long,
+    val start: Long,
+    val stop: Long,
+    val title: String = "",
+    val subtitle: String? = null,
+    val description: String? = null,
+    val categories: List<String> = emptyList(),
+    val image: String? = null,
+    val season: Int? = null,
+    val episode: Int? = null,
+    val isNew: Boolean = false,
+    /** Shown as it happens (a match, the news). */
+    val isLive: Boolean = false,
+    val rating: String? = null,
+) {
+    /** On at [now] (unix seconds). */
+    fun airingAt(now: Long): Boolean = start <= now && stop > now
+
+    /** How far it is at [now], from 0 to 1. */
+    fun progressAt(now: Long): Float =
+        ((now - start).toFloat() / (stop - start).coerceAtLeast(1)).coerceIn(0f, 1f)
+
+    /** "S2 E14", or "E14", when the guide numbers the episode. */
+    val episodeLabel: String?
+        get() = when {
+            season != null && episode != null -> "S$season E$episode"
+            episode != null -> "E$episode"
+            else -> null
+        }
+}
+
+/**
+ * A channel of the lineup, with what's on [now] and [next]
+ * (docs/API.md, `LiveChannel`). [logo] is its logo's address on the server.
+ */
+@Serializable
+data class LiveChannel(
+    val id: Long,
+    val sourceId: Long = 0,
+    val name: String,
+    val number: String? = null,
+    val group: String = "",
+    val logo: String? = null,
+    val favorite: Boolean = false,
+    /** The guide has programmes for it. */
+    val hasGuide: Boolean = false,
+    val now: LiveProgram? = null,
+    val next: LiveProgram? = null,
+) {
+    /** What is on at [now] (unix seconds); `null` once [LiveChannel.now] ended, before the list is asked again. */
+    fun onAt(now: Long): LiveProgram? = this.now?.takeIf { it.airingAt(now) } ?: next?.takeIf { it.airingAt(now) }
+
+    /** What comes after [onAt]: [next], or what was listed as now when it hasn't begun. */
+    fun nextAt(now: Long): LiveProgram? {
+        val on = onAt(now) ?: return listOfNotNull(this.now, next).firstOrNull { it.start > now }
+        return listOfNotNull(this.now, next).firstOrNull { it.start >= on.stop }
+    }
+}
+
+/** GET /api/live/guide: the programmes between [from] and [to] (unix seconds), by channel. */
+@Serializable
+data class LiveGuide(
+    val from: Long,
+    val to: Long,
+    val programs: Map<Long, List<LiveProgram>> = emptyMap(),
+)
+
+/**
+ * The body of POST /api/live/channels/{id}/watch: [clientId] ends what
+ * this device watched before, so changing channels never holds two of the
+ * provider's connections.
+ */
+@Serializable
+data class WatchRequest(
+    val clientId: String? = null,
+)
+
+/**
+ * POST /api/live/channels/{id}/watch's answer: [url] is the channel's
+ * live HLS playlist, read as [sessionId] until DELETE
+ * /api/live/sessions/{session} (or 45 s without a request).
+ */
+@Serializable
+data class LiveWatching(
+    val sessionId: String,
+    val url: String,
+    val kind: String = "hls",
+    val channel: LiveChannel? = null,
+)

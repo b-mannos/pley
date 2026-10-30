@@ -24,6 +24,11 @@ data class EngineSource(
     val video: MediaStream? = null,
     /** How long the item is; display modes only change for 10 minutes or more. */
     val durationMs: Long? = null,
+    /**
+     * A live channel: it starts at the live edge, whatever the start
+     * position, and goes back in the window the server keeps.
+     */
+    val live: Boolean = false,
 )
 
 /**

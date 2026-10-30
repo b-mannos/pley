@@ -19,6 +19,10 @@ import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
+import app.pley.android.model.LiveChannel
+import app.pley.android.model.LiveGuide
+import app.pley.android.model.LiveSummary
+import app.pley.android.model.LiveWatching
 import app.pley.android.model.ConversionInfo
 import app.pley.android.model.AddSubtitle
 import app.pley.android.model.MaybeItem
@@ -44,6 +48,7 @@ import app.pley.android.model.SessionStatus
 import app.pley.android.model.SortOrder
 import app.pley.android.model.StreamChoice
 import app.pley.android.model.TrickplayInfo
+import app.pley.android.model.WatchRequest
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineDispatcher
@@ -334,6 +339,39 @@ class HttpPleyApi(
     override suspend fun addToWatchlist(itemId: Long) = call("PUT", EMPTY, "api", "watchlist", itemId)
 
     override suspend fun removeFromWatchlist(itemId: Long) = call("DELETE", null, "api", "watchlist", itemId)
+
+    // ---------------------------------------------------------------- live TV
+
+    override suspend fun liveSummary(): LiveSummary = get(LiveSummary.serializer(), "api", "live")
+
+    override suspend fun liveChannels(): List<LiveChannel> = get(ListSerializer(LiveChannel.serializer()), "api", "live", "channels")
+
+    override suspend fun liveGuide(from: Long, to: Long): LiveGuide = get(
+        LiveGuide.serializer(),
+        "api", "live", "guide",
+        query = listOf("from" to from.toString(), "to" to to.toString()),
+    )
+
+    override suspend fun setFavoriteChannel(channelId: Long, favorite: Boolean) =
+        if (favorite) {
+            call("PUT", EMPTY, "api", "live", "channels", channelId, "favorite")
+        } else {
+            call("DELETE", null, "api", "live", "channels", channelId, "favorite")
+        }
+
+    override suspend fun watchChannel(channelId: Long, request: WatchRequest): LiveWatching =
+        send("POST", LiveWatching.serializer(), json(WatchRequest.serializer(), request), "api", "live", "channels", channelId, "watch")
+
+    override suspend fun keepWatching(sessionId: String) {
+        val request = Request.Builder().url(address(listOf("api", "live", "sessions", sessionId, "index.m3u8"))).get().build()
+        http().fetch(request) { it.expectSuccess() }
+    }
+
+    override suspend fun leaveChannel(sessionId: String) {
+        val request = jsonRequest(address(listOf("api", "live", "sessions", sessionId))).delete().build()
+        // Gone already (left by itself, or stopped by an administrator): left all the same.
+        http().fetch(request) { if (it.code != 404) it.expectSuccess() }
+    }
 
     // ---------------------------------------------------------------- playlists (changing)
 

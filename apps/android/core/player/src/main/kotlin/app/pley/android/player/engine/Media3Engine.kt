@@ -264,7 +264,8 @@ class Media3Engine(
         Log.i(TAG, "prepare at $startMs ms: play $playWhenReady, display match ${if (asked != null) "asked" else "none"}, window ${window != null}")
         snapToKeyFrame = startMs > 0 && !music && !source.hls
         player.setSeekParameters(SeekParameters.EXACT)
-        player.setMediaSource(loading.mediaSource(source), startMs.coerceAtLeast(0))
+        // A live channel starts at its default position: the live edge, less the playlist's offset.
+        if (source.live) player.setMediaSource(loading.mediaSource(source)) else player.setMediaSource(loading.mediaSource(source), startMs.coerceAtLeast(0))
         setPlayWhenReady(playWhenReady && !matchPending)
         player.prepare()
         if (matchPending && window != null) startMatch()

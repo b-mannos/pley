@@ -25,6 +25,7 @@ class PleyKeyTest {
         PleyKey.Search("blade runner"),
         PleyKey.Playlists,
         PleyKey.Playlist(5),
+        PleyKey.LiveTv,
         PleyKey.Me,
         PleyKey.History,
         PleyKey.Downloads,

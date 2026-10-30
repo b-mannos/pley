@@ -42,6 +42,9 @@ const icons = [
   ["HardDrive", "hard-drive"], ["Cpu", "cpu"], ["AppWindow", "app-window"], ["LayoutDashboard", "layout-dashboard"],
   ["Folder", "folder"], ["FolderOpen", "folder-open"], ["FolderPlus", "folder-plus"], ["FolderSearch", "folder-search"],
   ["ImageUp", "image-up"], ["ScanSearch", "scan-search"], ["DatabaseBackup", "database-backup"],
+  // Live TV
+  ["TvMinimal", "tv-minimal"], ["CalendarDays", "calendar-days"], ["LayoutGrid", "layout-grid"], ["Radio", "radio"],
+  ["Clock", "clock"], ["StarOutline", "star"],
 ];
 
 const n = (v) => Number(v);

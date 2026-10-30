@@ -31,6 +31,8 @@ class ServerEventTest {
             ServerEvent.parse("""{"type":"user_state_changed","item_ids":[203,202,201],"children":false}"""),
         )
         assertEquals(ServerEvent.UserStateChanged(listOf(201), children = true), ServerEvent.parse("""{"type":"user_state_changed","item_ids":[201],"children":true}"""))
+        assertEquals(ServerEvent.LiveChannelsChanged, ServerEvent.parse("""{"type":"live_channels_changed"}"""))
+        assertEquals(ServerEvent.LiveTunersChanged, ServerEvent.parse("""{"type":"live_tuners_changed"}"""))
     }
 
     @Test
@@ -69,6 +71,8 @@ class ServerEventTest {
             ServerEvent.SessionsChanged,
             ServerEvent.WatchlistChanged,
             ServerEvent.UserStateChanged(listOf(201), children = true),
+            ServerEvent.LiveChannelsChanged,
+            ServerEvent.LiveTunersChanged,
             ServerEvent.Unknown("later"),
         )
         for (event in events) {

@@ -27,6 +27,18 @@ object SnapshotKeys {
     /** This profile's recent searches. */
     const val SEARCHES = "searches"
 
+    /** GET /api/live. */
+    const val LIVE = "live"
+
+    /** GET /api/live/channels. */
+    const val LIVE_CHANNELS = "live:channels"
+
+    /** A chunk of GET /api/live/guide, from [from]. */
+    fun liveGuide(from: Long) = "live:guide:$from"
+
+    /** Whether [key] is Live TV's: what the server's Live TV events ask for again. */
+    fun isLive(key: String): Boolean = key == LIVE || key.startsWith("live:")
+
     fun libraryHubs(libraryId: Long) = "libhubs:$libraryId"
 
     /** The first items of a library's listing, for the first frame. */

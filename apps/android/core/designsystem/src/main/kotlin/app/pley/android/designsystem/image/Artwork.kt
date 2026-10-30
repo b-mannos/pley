@@ -78,12 +78,17 @@ class ArtworkLoad {
     var settled: Boolean by mutableStateOf(false)
         private set
 
+    /** Whether none of its addresses loaded: there is no picture to wait for. */
+    var failed: Boolean by mutableStateOf(false)
+        private set
+
     private var fade: Job? = null
 
     internal fun onState(state: AsyncImagePainter.State, scope: CoroutineScope) {
         fade?.cancel()
         fade = null
         settled = state is AsyncImagePainter.State.Success || state is AsyncImagePainter.State.Error
+        failed = state is AsyncImagePainter.State.Error
         val result = (state as? AsyncImagePainter.State.Success)?.result
         val millis = result?.fadeMillis() ?: 0
         if (millis == 0) {

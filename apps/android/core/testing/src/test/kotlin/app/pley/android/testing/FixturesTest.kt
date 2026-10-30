@@ -24,6 +24,10 @@ import app.pley.android.model.JobState
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibraryKind
+import app.pley.android.model.LiveChannel
+import app.pley.android.model.LiveGuide
+import app.pley.android.model.LiveSummary
+import app.pley.android.model.LiveWatching
 import app.pley.android.model.MarkerKind
 import app.pley.android.model.MarkerSource
 import app.pley.android.model.MaybeItem
@@ -52,6 +56,7 @@ import app.pley.android.model.SubtitleMode
 import app.pley.android.model.TrackDefaults
 import app.pley.android.model.TrickplayInfo
 import app.pley.android.model.UserState
+import app.pley.android.model.WatchRequest
 import app.pley.android.model.caps.ClientCaps
 import app.pley.android.model.caps.DeviceForm
 import kotlinx.serialization.DeserializationStrategy
@@ -132,6 +137,12 @@ class FixturesTest {
         "events/libraries_changed.json" to ServerEvent.Serializer,
         "events/sessions_changed.json" to ServerEvent.Serializer,
         "events/unknown_type.json" to ServerEvent.Serializer,
+        "live/summary.json" to LiveSummary.serializer(),
+        "live/channels.json" to ListSerializer(LiveChannel.serializer()),
+        "live/guide.json" to LiveGuide.serializer(),
+        "live/watching.json" to LiveWatching.serializer(),
+        "live/watch_request.json" to WatchRequest.serializer(),
+        "live/busy.json" to ApiErrorBody.serializer(),
     )
 
     @Test
@@ -148,7 +159,7 @@ class FixturesTest {
         assertTrue("no fixtures found on the classpath", files.isNotEmpty())
         assertEquals("fixtures missing from the table", emptyList<String>(), files - table.keys)
         assertEquals("table entries without a file", emptyList<String>(), (table.keys - files.toSet()).toList())
-        assertEquals(65, files.size)
+        assertEquals(71, files.size)
     }
 
     @Test
@@ -335,5 +346,25 @@ class FixturesTest {
         check("playlists/add_items_request.json", ItemIds.serializer())
         check("playlists/order_request.json", EntryIds.serializer())
         check("me/track_defaults.json", TrackDefaults.serializer())
+        check("live/watch_request.json", WatchRequest.serializer())
+    }
+
+    @Test
+    fun liveTvAnswers() {
+        val channels = Fixtures.decode<List<LiveChannel>>("live/channels.json")
+        assertEquals(listOf("101", "102", "105"), channels.map { it.number })
+        val news = channels[0]
+        assertEquals("S1 E7", news.now?.episodeLabel)
+        // Halfway through the briefing, then into the next programme before the list is asked again.
+        assertEquals("Morning Briefing", news.onAt(1761751800)?.title)
+        assertEquals(0.5f, news.now!!.progressAt(1761751800), 0.001f)
+        assertEquals("World at One", news.nextAt(1761751800)?.title)
+        assertEquals("World at One", news.onAt(1761754000)?.title)
+        assertNull(news.nextAt(1761754000))
+        assertNull(channels[2].onAt(1761751800))
+        val guide = Fixtures.decode<LiveGuide>("live/guide.json")
+        assertEquals(setOf(1L, 2L), guide.programs.keys)
+        assertTrue(guide.programs.getValue(2).single().isLive)
+        assertEquals(listOf(2L, 1L), Fixtures.decode<LiveSummary>("live/summary.json").recent)
     }
 }

@@ -47,6 +47,8 @@ import kotlinx.coroutines.launch
  *   kid's Home fills once their age limit is lifted;
  * - `watchlist_changed` (My List changed on another device) asks again
  *   for My List, Home and the pages of movies and shows;
+ * - `live_channels_changed` (Live TV's sources, channels or guide) asks
+ *   again for Live TV's summary, channels and guide;
  * - `user_state_changed` (something watched, started or taken out of
  *   Continue Watching, here or on another device), gathered for
  *   [STATE_MS], asks again for Home, the libraries' rows and what shows
@@ -175,7 +177,8 @@ internal class ServerLiveUpdates(
                     }
                 }
             }
-            ServerEvent.SessionsChanged, is ServerEvent.SessionStopped, is ServerEvent.Unknown -> Unit
+            ServerEvent.LiveChannelsChanged -> cache.revalidate { key, _ -> SnapshotKeys.isLive(key) }
+            ServerEvent.SessionsChanged, is ServerEvent.SessionStopped, ServerEvent.LiveTunersChanged, is ServerEvent.Unknown -> Unit
         }
     }
 

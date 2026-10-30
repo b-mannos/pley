@@ -76,6 +76,10 @@ sealed interface PleyKey : NavKey {
     @Serializable
     data class Playlist(val playlistId: Long) : PleyKey
 
+    /** Live TV: the guide and the channels (the player is a window of its own: PlayerLauncher.watchLive). */
+    @Serializable
+    data object LiveTv : PleyKey
+
     // Yours.
 
     /** The profile's own page: switching profiles, track defaults, history, settings. */

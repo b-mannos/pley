@@ -17,6 +17,10 @@ import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
+import app.pley.android.model.LiveChannel
+import app.pley.android.model.LiveGuide
+import app.pley.android.model.LiveSummary
+import app.pley.android.model.LiveWatching
 import app.pley.android.model.ConversionInfo
 import app.pley.android.model.AddSubtitle
 import app.pley.android.model.MaybeItem
@@ -41,6 +45,7 @@ import app.pley.android.model.SessionStatus
 import app.pley.android.model.SortOrder
 import app.pley.android.model.StreamChoice
 import app.pley.android.model.TrickplayInfo
+import app.pley.android.model.WatchRequest
 
 /**
  * A subtitle track as WebVTT (GET /api/files/{id}/subtitles/{index}.vtt).
@@ -328,6 +333,45 @@ interface PleyApi {
 
     /** DELETE /api/watchlist/{id}: takes it off My List. */
     suspend fun removeFromWatchlist(itemId: Long)
+
+    // ---------------------------------------------------------------- live TV (docs/API.md, "Live TV")
+
+    /**
+     * GET /api/live (scope library): whether Live TV is open to this
+     * profile and has channels, and the channels watched last.
+     */
+    suspend fun liveSummary(): LiveSummary
+
+    /** GET /api/live/channels (scope library): the channels shown, by number, each with what's on now and next. */
+    suspend fun liveChannels(): List<LiveChannel>
+
+    /**
+     * GET /api/live/guide (scope library): the programmes between [from]
+     * and [to] (unix seconds, two days at most), by channel.
+     */
+    suspend fun liveGuide(from: Long, to: Long): LiveGuide
+
+    /** PUT (or, not [favorite], DELETE) /api/live/channels/{id}/favorite (scope play). */
+    suspend fun setFavoriteChannel(channelId: Long, favorite: Boolean)
+
+    /**
+     * POST /api/live/channels/{id}/watch (scope play): tunes the channel
+     * (unless someone watches it already) and answers its live HLS
+     * playlist. A `409` says which channels hold every connection of its
+     * source; [WatchRequest.clientId] ends what this device watched
+     * before, first.
+     */
+    suspend fun watchChannel(channelId: Long, request: WatchRequest): LiveWatching
+
+    /**
+     * GET /api/live/sessions/{session}/index.m3u8 (scope play), the body
+     * left unread: a paused player asks for nothing, and the server takes
+     * 45 s without a request for a viewer that left.
+     */
+    suspend fun keepWatching(sessionId: String)
+
+    /** DELETE /api/live/sessions/{session} (scope play): stops watching now; a session already gone is fine. */
+    suspend fun leaveChannel(sessionId: String)
 
     // ---------------------------------------------------------------- playlists (scope playlists)
 

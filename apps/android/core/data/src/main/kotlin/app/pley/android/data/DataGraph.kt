@@ -54,6 +54,9 @@ interface DataGraph {
     /** How each library was left on this device (nothing kept unless the graph keeps it). */
     val libraryViews: LibraryViews get() = LibraryViews.None
 
+    /** Live TV's channels, guide and watching (none unless the graph has it). */
+    val liveTv: LiveTvRepository get() = LiveTvRepository.None
+
     companion object {
         /**
          * The data side of the app over [network] and [auth]. Making it
@@ -182,6 +185,7 @@ class AppDataGraph(private val env: DataEnvironment) : DataGraph {
     override val watchlist: WatchlistRepository by lazy { CachedWatchlist(cache) }
     override val trackDefaults: TrackDefaultsRepository by lazy { SessionTrackDefaults(sessionImpl, env.trackDefaults, cache) }
     override val playItem: PlayItem by lazy { CachedPlayItem(cache, itemsImpl) }
+    override val liveTv: LiveTvRepository by lazy { CachedLiveTv(cache) }
 
     override val settings: AppSettings by lazy {
         DataStoreSettings(

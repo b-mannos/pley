@@ -25,4 +25,11 @@ interface Navigator {
  */
 interface PlayerLauncher {
     fun play(request: PlayRequest)
+
+    /**
+     * Opens the live player on [channelId] (Live TV), music paused; the
+     * player tunes it as it opens. Launchers without Live TV (tests') do
+     * nothing.
+     */
+    fun watchLive(channelId: Long) = Unit
 }

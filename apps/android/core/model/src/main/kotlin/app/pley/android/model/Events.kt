@@ -153,6 +153,18 @@ sealed interface ServerEvent {
         }
     }
 
+    /** Live TV's sources, channels or guide changed: the channels and the guide are asked for again. */
+    data object LiveChannelsChanged : ServerEvent {
+        const val TYPE = "live_channels_changed"
+        override val type: String get() = TYPE
+    }
+
+    /** A live channel was tuned or let go, or its viewers changed: the connections in use changed. */
+    data object LiveTunersChanged : ServerEvent {
+        const val TYPE = "live_tuners_changed"
+        override val type: String get() = TYPE
+    }
+
     /** An event this app doesn't know: skipped, but not an error. */
     data class Unknown(override val type: String) : ServerEvent
 
@@ -181,6 +193,8 @@ sealed interface ServerEvent {
                 SessionStopped.TYPE -> json.decodeFromJsonElement(SessionStopped.serializer(), fields)
                 WatchlistChanged.TYPE -> WatchlistChanged
                 UserStateChanged.TYPE -> json.decodeFromJsonElement(UserStateChanged.serializer(), fields)
+                LiveChannelsChanged.TYPE -> LiveChannelsChanged
+                LiveTunersChanged.TYPE -> LiveTunersChanged
                 else -> Unknown(type)
             }
         }
@@ -195,7 +209,7 @@ sealed interface ServerEvent {
                 is LibraryChanged -> json.encodeToJsonElement(LibraryChanged.serializer(), value).jsonObject
                 is SessionStopped -> json.encodeToJsonElement(SessionStopped.serializer(), value).jsonObject
                 is UserStateChanged -> json.encodeToJsonElement(UserStateChanged.serializer(), value).jsonObject
-                LibrariesChanged, SessionsChanged, WatchlistChanged, is Unknown -> emptyMap()
+                LibrariesChanged, SessionsChanged, WatchlistChanged, LiveChannelsChanged, LiveTunersChanged, is Unknown -> emptyMap()
             }
             output.encodeJsonElement(JsonObject(mapOf<String, JsonElement>("type" to JsonPrimitive(value.type)) + fields))
         }

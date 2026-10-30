@@ -67,6 +67,15 @@ class HttpPleyApiErrorsTest {
     }
 
     @Test
+    fun everyConnectionInUseSaysWhichChannelsHoldThem() = runTest {
+        server.enqueue(MockPley.fixture("live/busy.json", code = 409))
+        val e = failing<ApiException> { api.watchChannel(1, app.pley.android.model.WatchRequest("android-1")) }
+        assertEquals(409, e.status)
+        assertEquals("conflict", e.code)
+        assertTrue(e.message!!.contains("Sport 1080i"))
+    }
+
+    @Test
     fun insufficientScopeKeepsTheScope() = runTest {
         server.enqueue(MockPley.insufficientScope("play"))
         val e = failing<ApiException> { api.startPlayback(app.pley.android.model.PlaybackRequest(itemId = 101)) }
