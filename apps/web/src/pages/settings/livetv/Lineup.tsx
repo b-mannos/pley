@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
 import { pluralize } from "@/lib/format";
 import { ChannelLogo } from "@/pages/livetv/common";
 
-type Shown = "all" | "shown" | "hidden" | "no-guide";
+type Shown = "all" | "shown" | "hidden" | "no-guide" | "offline";
 
 const ROW = 56;
 
@@ -35,7 +35,8 @@ export function Lineup() {
       (c) =>
         (source === "all" || String(c.source_id) === source) &&
         (group === "all" || c.group === group) &&
-        (shown === "all" || (shown === "hidden" ? c.hidden : shown === "shown" ? !c.hidden : !c.has_guide)) &&
+        (shown === "all" ||
+          (shown === "hidden" ? c.hidden : shown === "shown" ? !c.hidden : shown === "offline" ? c.offline : !c.has_guide)) &&
         (!q || c.name.toLowerCase().includes(q) || c.source_name.toLowerCase().includes(q) || (c.number ?? "").startsWith(q)),
     );
   }, [all, search, source, group, shown]);
@@ -105,6 +106,7 @@ export function Lineup() {
           <option value="shown">Shown</option>
           <option value="hidden">Hidden</option>
           <option value="no-guide">Without a guide</option>
+          <option value="offline">Offline</option>
         </Select>
       </div>
 
@@ -166,6 +168,11 @@ export function Lineup() {
                         {[c.group, c.custom_name ? `“${c.source_name}” at the source` : null].filter(Boolean).join(" · ")}
                       </div>
                     </div>
+                    {c.offline ? (
+                      <span className="hidden rounded bg-danger/15 px-1.5 py-0.5 text-[11px] font-medium text-danger sm:inline" title="It didn't play when last tried">
+                        Offline
+                      </span>
+                    ) : null}
                     <span
                       className={cn("hidden items-center gap-1 text-xs sm:flex", c.has_guide ? "text-success" : "text-subtle")}
                       title={c.has_guide ? `Guide: ${c.guide_id}` : "No guide"}

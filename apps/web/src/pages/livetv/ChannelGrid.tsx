@@ -1,78 +1,136 @@
-import { memo, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Info, Play, Star } from "lucide-react";
-import { programProgress, useSetFavorite, type Channel, type Program } from "@/api/livetv";
+import { categoryKey, programProgress, useSetFavorite, type Channel, type LiveCategory, type Program } from "@/api/livetv";
 import { cn } from "@/lib/cn";
-import { ChannelLogo, formatTime, liveUrl } from "./common";
+import { useChannelList } from "./channelList";
+import { ChannelLogo, channelName, formatTime, lastWatched, liveUrl, useIndexOf } from "./common";
 
-/** Channels as cards: the logo, what's on with how far it is, what's next. */
+/** The card's text under its logo: name, what's on, how far, what's next. */
+const CARD_TEXT = 116;
+const CARD_WIDTH = 236;
+
+/**
+ * Channels as cards: the logo, what's on with how far it is, what's next.
+ * Rows are virtualized and channels fetched a page at a time as they come
+ * into view.
+ */
 export function ChannelGrid({
-  channels,
+  category,
+  search,
   now,
   onDetails,
 }: {
-  channels: Channel[];
+  category: LiveCategory;
+  search: string;
   now: number;
   onDetails: (channel: Channel, program: Program) => void;
 }) {
-  return (
-    <ul className="grid grid-cols-[repeat(auto-fill,minmax(15.5rem,1fr))] gap-3 sm:gap-4">
-      {channels.map((c) => (
-        <li key={c.id}>
-          <ChannelCard channel={c} now={now} onDetails={onDetails} />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-/** One line of cards as wide as the grid's, as many as fit; on phones a row
- *  scrolled sideways. */
-export function ChannelRow({
-  channels,
-  now,
-  onDetails,
-}: {
-  channels: Channel[];
-  now: number;
-  onDetails: (channel: Channel, program: Program) => void;
-}) {
-  const ref = useRef<HTMLUListElement>(null);
-  const [columns, setColumns] = useState(channels.length);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
   useLayoutEffect(() => {
-    const ul = ref.current;
-    if (!ul) return;
-    const measure = () => {
-      const style = getComputedStyle(ul);
-      // Below sm the row is a flex row, and every card shows.
-      setColumns(style.display === "grid" ? style.gridTemplateColumns.split(" ").length : Infinity);
-    };
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = () => setWidth(el.clientWidth);
     measure();
     const observer = new ResizeObserver(measure);
-    observer.observe(ul);
+    observer.observe(el);
     return () => observer.disconnect();
   }, []);
+  const padding = width < 640 ? 12 : 16;
+  const gap = width < 640 ? 12 : 16;
+  const inner = Math.max(0, width - padding * 2);
+  const cols = inner > 0 ? Math.max(1, Math.floor((inner + gap) / (CARD_WIDTH + gap))) : 1;
+  const colWidth = (inner - gap * (cols - 1)) / cols;
+  const rowHeight = Math.round(colWidth / 2 + CARD_TEXT + gap);
+  const [range, setRange] = useState({ from: 0, to: 40 });
+  const list = useChannelList(category, search, range.from, range.to);
+  const total = list.total ?? 0;
+
+  // TanStack Virtual: the compiler leaves this component as it is.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const rows = useVirtualizer({
+    count: width > 0 ? Math.ceil(total / cols) : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => rowHeight,
+    overscan: 3,
+    paddingStart: padding,
+    paddingEnd: padding,
+  });
+  useEffect(() => rows.measure(), [rows, rowHeight, cols]);
+  const items = rows.getVirtualItems();
+  const firstIndex = (items[0]?.index ?? 0) * cols;
+  const lastIndex = ((items[items.length - 1]?.index ?? 0) + 1) * cols - 1;
+  useEffect(() => {
+    setRange((r) => (r.from === firstIndex && r.to === lastIndex ? r : { from: firstIndex, to: lastIndex }));
+  }, [firstIndex, lastIndex]);
+  const [returnTo] = useState(lastWatched);
+  const returnIndex = useIndexOf(category, search ? null : returnTo);
+  const placed = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const key = `${categoryKey(category)}|${search}`;
+    if (placed.current === key || returnIndex === undefined || list.total === undefined || width === 0) return;
+    const first = placed.current === null;
+    placed.current = key;
+    if (first && returnIndex != null) rows.scrollToIndex(Math.floor(returnIndex / cols), { align: "center" });
+    else scrollRef.current?.scrollTo({ top: 0 });
+  }, [category, search, returnIndex, list.total, width, cols, rows]);
+
   return (
-    <ul
-      ref={ref}
-      className="scrollbar-none -mx-4 flex gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-[repeat(auto-fill,minmax(15.5rem,1fr))] sm:gap-4 sm:px-0"
+    <div
+      ref={scrollRef}
+      className="relative h-full overflow-y-auto overscroll-contain [scrollbar-width:thin]"
+      aria-label="Channels"
+      role="list"
     >
-      {channels.slice(0, columns).map((c) => (
-        <li key={c.id} className="w-60 shrink-0 sm:w-auto">
-          <ChannelCard channel={c} now={now} onDetails={onDetails} />
-        </li>
-      ))}
-    </ul>
+      <div className="relative w-full" style={{ height: rows.getTotalSize() }}>
+        {items.map((row) => (
+          <div
+            key={row.key}
+            className="absolute grid"
+            style={{
+              top: row.start,
+              left: padding,
+              right: padding,
+              height: rowHeight - gap,
+              gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+              columnGap: gap,
+            }}
+          >
+            {Array.from({ length: Math.min(cols, total - row.index * cols) }, (_, i) => {
+              const channel = list.at(row.index * cols + i);
+              return channel ? (
+                <div key={channel.id} role="listitem">
+                  <ChannelCard channel={channel} category={category} now={now} onDetails={onDetails} />
+                </div>
+              ) : (
+                <div key={`p${i}`} aria-hidden className="flex flex-col overflow-hidden rounded-lg border border-border bg-surface">
+                  <div className="skeleton aspect-[16/8] w-full rounded-none" />
+                  <div className="space-y-2 p-3">
+                    <div className="skeleton h-4 w-2/3" />
+                    <div className="skeleton h-3.5 w-full" />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
 export const ChannelCard = memo(function ChannelCard({
   channel,
+  category,
   now,
   onDetails,
   className,
 }: {
   channel: Channel;
+  /** Where it was chosen: channel up and down stay there. */
+  category?: LiveCategory;
   now: number;
   onDetails: (channel: Channel, program: Program) => void;
   className?: string;
@@ -88,7 +146,7 @@ export const ChannelCard = memo(function ChannelCard({
       )}
     >
       <Link
-        to={liveUrl(channel.id)}
+        to={liveUrl(channel.id, category)}
         className="relative block outline-none"
         aria-label={`Watch ${channel.number ? `${channel.number} ` : ""}${channel.name}${on ? `, now: ${on.title}` : ""}`}
       >
@@ -122,7 +180,7 @@ export const ChannelCard = memo(function ChannelCard({
       </button>
       <div className="flex min-h-0 flex-1 flex-col gap-1.5 p-3">
         <div className="truncate text-sm font-semibold" title={channel.name}>
-          {channel.name}
+          {channelName(channel, category)}
         </div>
         {on ? (
           <button

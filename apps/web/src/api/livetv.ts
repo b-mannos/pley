@@ -55,6 +55,56 @@ export interface Guide {
   programs: Record<string, Program[]>;
 }
 
+/** A group of channels as the provider names it. */
+export interface LiveGroup {
+  name: string;
+  /** The region its name begins with ("UK" of "UK| Sport"). */
+  region: string | null;
+  /** The name without its region ("Sport"). */
+  label: string;
+  count: number;
+}
+
+export interface LiveGroups {
+  /** Channels shown in all. */
+  total: number;
+  favorites: number;
+  recent: number;
+  groups: LiveGroup[];
+}
+
+/** Which channels a list has. */
+export type LiveCategory = { kind: "all" } | { kind: "favorites" } | { kind: "recent" } | { kind: "group"; group: string };
+
+export interface ChannelPage {
+  /** Channels in the whole list. */
+  total: number;
+  offset: number;
+  channels: Channel[];
+}
+
+/** Channels asked for at once. */
+export const CHANNEL_PAGE = 100;
+
+/** "all", "favorites", "recent" or "group:<name>": in URLs and storage. */
+export function categoryKey(c: LiveCategory): string {
+  return c.kind === "group" ? `group:${c.group}` : c.kind;
+}
+
+export function parseCategory(key: string | null | undefined): LiveCategory {
+  if (key === "favorites" || key === "recent") return { kind: key };
+  if (key?.startsWith("group:")) return { kind: "group", group: key.slice(6) };
+  return { kind: "all" };
+}
+
+function browseParams(category: LiveCategory, search: string) {
+  return {
+    category: category.kind,
+    group: category.kind === "group" ? category.group : undefined,
+    q: search.trim() || undefined,
+  };
+}
+
 export interface Watching {
   session_id: string;
   /** The live HLS playlist. */
@@ -77,6 +127,8 @@ export interface LiveSettings {
   timeshift_minutes: number;
   refresh_hours: number;
   guide_days: number;
+  /** Channels that didn't play, and a provider's divider rows, are left out. */
+  hide_offline: boolean;
 }
 
 export type SourceKind = "m3u" | "xtream";
@@ -151,10 +203,22 @@ export interface LineupChannel {
   custom_number: string | null;
   custom_guide_id: string | null;
   has_guide: boolean;
+  /** It didn't play when last tried, or it is a provider's divider row. */
+  offline: boolean;
+  offline_since: Timestamp | null;
+}
+
+export interface LineupGroup extends LiveGroup {
+  /** Its channels hidden. */
+  hidden: number;
+  /** Its channels that don't play (or are divider rows). */
+  offline: number;
 }
 
 export interface LineupPatch {
   ids: Id[];
+  /** Every channel of these groups too. */
+  groups?: string[];
   hidden?: boolean;
   /** "" goes back to the source's. */
   name?: string;
@@ -197,11 +261,17 @@ export const liveKeys = {
   summary: ["live", "summary"] as const,
   channels: ["live", "channels"] as const,
   channel: (id: Id) => ["live", "channels", id] as const,
-  guide: (from: Timestamp, to: Timestamp) => ["live", "guide", from, to] as const,
+  groups: ["live", "groups"] as const,
+  browse: ["live", "browse"] as const,
+  page: (category: LiveCategory, search: string, page: number) =>
+    ["live", "browse", categoryKey(category), search.trim(), page] as const,
+  around: (category: LiveCategory, id: Id) => ["live", "browse", categoryKey(category), "", "around", id] as const,
+  guide: (from: Timestamp, to: Timestamp, ids?: string) => ["live", "guide", from, to, ids ?? "all"] as const,
   // Administrators'.
   settings: ["live", "admin", "settings"] as const,
   sources: ["live", "admin", "sources"] as const,
   lineup: ["live", "admin", "lineup"] as const,
+  lineupGroups: ["live", "admin", "lineup", "groups"] as const,
   tuners: ["live", "admin", "tuners"] as const,
 };
 
@@ -220,15 +290,50 @@ export const liveQueries = {
       queryKey: liveKeys.channel(id),
       queryFn: ({ signal }) => api.get<Channel>(`/api/live/channels/${id}`, { signal }),
     }),
-  guide: (from: Timestamp, to: Timestamp) =>
+  groups: () =>
     queryOptions({
-      queryKey: liveKeys.guide(from, to),
-      queryFn: ({ signal }) => api.get<Guide>(`/api/live/guide${qs({ from, to })}`, { signal }),
+      queryKey: liveKeys.groups,
+      queryFn: ({ signal }) => api.get<LiveGroups>("/api/live/groups", { signal }),
+      staleTime: 60_000,
+    }),
+  /** Page `page` (CHANNEL_PAGE channels) of a category's channels matching `search`. */
+  page: (category: LiveCategory, search: string, page: number) =>
+    queryOptions({
+      queryKey: liveKeys.page(category, search, page),
+      queryFn: ({ signal }) =>
+        api.get<ChannelPage>(
+          `/api/live/browse${qs({ ...browseParams(category, search), offset: page * CHANNEL_PAGE, limit: CHANNEL_PAGE })}`,
+          { signal },
+        ),
+      staleTime: 30_000,
+      // What's on now changes as time passes.
+      refetchInterval: 60_000,
+      refetchIntervalInBackground: false,
+    }),
+  /** The page of a category with channel `id` in it. */
+  around: (category: LiveCategory, id: Id) =>
+    queryOptions({
+      queryKey: liveKeys.around(category, id),
+      queryFn: ({ signal }) =>
+        api.get<ChannelPage>(`/api/live/browse${qs({ ...browseParams(category, ""), around: id, limit: CHANNEL_PAGE })}`, {
+          signal,
+        }),
+      staleTime: 30_000,
+      refetchInterval: 60_000,
+      refetchIntervalInBackground: false,
+    }),
+  /** The guide of channels `ids` (comma-separated; every channel without). */
+  guide: (from: Timestamp, to: Timestamp, ids?: string) =>
+    queryOptions({
+      queryKey: liveKeys.guide(from, to, ids),
+      queryFn: ({ signal }) => api.get<Guide>(`/api/live/guide${qs({ from, to, ids })}`, { signal }),
       staleTime: 5 * 60_000,
     }),
   settings: () => queryOptions({ queryKey: liveKeys.settings, queryFn: () => api.get<LiveSettings>("/api/live/settings") }),
   sources: () => queryOptions({ queryKey: liveKeys.sources, queryFn: () => api.get<LiveSource[]>("/api/live/sources") }),
   lineup: () => queryOptions({ queryKey: liveKeys.lineup, queryFn: () => api.get<LineupChannel[]>("/api/live/lineup") }),
+  lineupGroups: () =>
+    queryOptions({ queryKey: liveKeys.lineupGroups, queryFn: () => api.get<LineupGroup[]>("/api/live/lineup/groups") }),
   tuners: () => queryOptions({ queryKey: liveKeys.tuners, queryFn: () => api.get<TunerStatus[]>("/api/live/tuners") }),
 };
 
@@ -244,6 +349,10 @@ export function useGuide(from: Timestamp, to: Timestamp) {
   return useQuery(liveQueries.guide(from, to));
 }
 
+export function useLiveGroups(enabled = true) {
+  return useQuery({ ...liveQueries.groups(), enabled });
+}
+
 export function useSetFavorite() {
   const qc = useQueryClient();
   return useMutation({
@@ -251,9 +360,19 @@ export function useSetFavorite() {
       favorite ? api.put<void>(`/api/live/channels/${id}/favorite`) : api.del<void>(`/api/live/channels/${id}/favorite`),
     onMutate: async ({ id, favorite }) => {
       await qc.cancelQueries({ queryKey: liveKeys.channels });
-      qc.setQueryData<Channel[]>(liveKeys.channels, (list) => list?.map((c) => (c.id === id ? { ...c, favorite } : c)));
+      await qc.cancelQueries({ queryKey: liveKeys.browse });
+      const mark = (c: Channel) => (c.id === id ? { ...c, favorite } : c);
+      qc.setQueryData<Channel[]>(liveKeys.channels, (list) => list?.map(mark));
+      qc.setQueriesData<ChannelPage>({ queryKey: liveKeys.browse }, (page) => page && { ...page, channels: page.channels.map(mark) });
+      qc.setQueryData<Channel>(liveKeys.channel(id), (c) => c && { ...c, favorite });
+      qc.setQueryData<LiveGroups>(liveKeys.groups, (g) => g && { ...g, favorites: Math.max(0, g.favorites + (favorite ? 1 : -1)) });
     },
-    onSettled: () => qc.invalidateQueries({ queryKey: liveKeys.channels }),
+    onSettled: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: liveKeys.channels }),
+        qc.invalidateQueries({ queryKey: liveKeys.browse }),
+        qc.invalidateQueries({ queryKey: liveKeys.groups }),
+      ]),
   });
 }
 
@@ -321,6 +440,10 @@ export function useTestSource() {
 
 export function useLineup(enabled = true) {
   return useQuery({ ...liveQueries.lineup(), enabled });
+}
+
+export function useLineupGroups(enabled = true) {
+  return useQuery({ ...liveQueries.lineupGroups(), enabled });
 }
 
 export function usePatchLineup() {

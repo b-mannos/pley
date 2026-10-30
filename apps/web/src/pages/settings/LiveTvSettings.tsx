@@ -1,20 +1,22 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import { ListVideo, Save, SlidersHorizontal, Tv2, Waypoints } from "lucide-react";
+import { FolderTree, ListVideo, Save, SlidersHorizontal, Tv2, Waypoints } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useLiveSettings, useLiveSources, useSaveLiveSettings, type LiveSettings } from "@/api/livetv";
 import { useToast } from "@/components/Toast";
 import { Button, buttonClass, EmptyState, PageSpinner, Select, Toggle } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
+import { Groups } from "./livetv/Groups";
 import { Lineup } from "./livetv/Lineup";
 import { Sources } from "./livetv/Sources";
 import { Group, Note, Row } from "./SettingsForm";
 
-type Tab = "sources" | "channels" | "options";
+type Tab = "sources" | "groups" | "channels" | "options";
 
 const TABS: { key: Tab; label: string; icon: typeof Tv2 }[] = [
   { key: "sources", label: "Sources", icon: Waypoints },
+  { key: "groups", label: "Groups", icon: FolderTree },
   { key: "channels", label: "Channels", icon: ListVideo },
   { key: "options", label: "Options", icon: SlidersHorizontal },
 ];
@@ -38,7 +40,7 @@ export function LiveTvSettings() {
           </Link>
         ) : null}
       </div>
-      <div role="tablist" aria-label="Live TV settings" className="flex gap-1 border-b border-border">
+      <div role="tablist" aria-label="Live TV settings" className="scrollbar-none flex gap-1 overflow-x-auto border-b border-border">
         {TABS.map(({ key, label, icon: Icon }) => (
           <button
             key={key}
@@ -57,7 +59,15 @@ export function LiveTvSettings() {
         ))}
       </div>
       <div role="tabpanel">
-        {tab === "sources" || (tab === "channels" && !hasSources) ? <Sources /> : tab === "channels" ? <Lineup /> : <Options />}
+        {tab === "sources" || (tab !== "options" && !hasSources) ? (
+          <Sources />
+        ) : tab === "groups" ? (
+          <Groups />
+        ) : tab === "channels" ? (
+          <Lineup />
+        ) : (
+          <Options />
+        )}
       </div>
     </div>
   );
@@ -147,6 +157,12 @@ function OptionsForm({ saved }: { saved: LiveSettings }) {
               </option>
             ))}
           </Select>
+        </Row>
+        <Row
+          label="Leave out channels that don't play"
+          hint="A channel the provider sends nothing for, and divider rows like “##### UK #####”. Offline channels are tried again now and then, while nobody watches."
+        >
+          <Toggle checked={form.hide_offline} onChange={(v) => set("hide_offline", v)} label="Leave out channels that don't play" />
         </Row>
         <Row label="Guide kept ahead" htmlFor="live-days">
           <Select id="live-days" value={form.guide_days} onChange={(e) => set("guide_days", Number(e.target.value))} className="w-full">

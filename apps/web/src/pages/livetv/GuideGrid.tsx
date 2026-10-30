@@ -3,10 +3,12 @@ import { useNavigate } from "react-router";
 import { useQueries } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Clock, Play, Star } from "lucide-react";
-import { liveQueries, type Channel, type Program } from "@/api/livetv";
+import { CHANNEL_PAGE, categoryKey, liveQueries, type Channel, type LiveCategory, type Program } from "@/api/livetv";
+import { Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useMediaQuery } from "@/lib/hooks";
-import { ChannelLogo, formatGuideDay, formatTime, liveUrl } from "./common";
+import { useChannelList } from "./channelList";
+import { ChannelLogo, channelName, formatGuideDay, formatTime, lastWatched, liveUrl, useIndexOf } from "./common";
 
 /** The guide fetched in chunks of this many seconds, as it is scrolled to. */
 const CHUNK = 6 * 3600;
@@ -26,15 +28,18 @@ const NARROW: Layout = { pxPerMin: 4, rowHeight: 60, channelWidth: 84, headerHei
 
 /**
  * The programme guide: channels down, time across, now marked. Rows are
- * virtualized and programmes fetched in six-hour chunks as they come into
- * view, so a lineup of thousands scrolls as easily as ten.
+ * virtualized, channels fetched a page at a time and their programmes in
+ * six-hour chunks as they come into view, so a lineup of tens of thousands
+ * scrolls as easily as ten.
  */
 export function GuideGrid({
-  channels,
+  category,
+  search,
   now,
   onDetails,
 }: {
-  channels: Channel[];
+  category: LiveCategory;
+  search: string;
   now: number;
   onDetails: (channel: Channel, program: Program) => void;
 }) {
@@ -46,16 +51,37 @@ export function GuideGrid({
   const width = SPAN * pxPerSec;
   const scrollRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState({ left: 0, width: 1200 });
+  const [range, setRange] = useState({ from: 0, to: 20 });
+  const list = useChannelList(category, search, range.from, range.to);
 
   // TanStack Virtual: the compiler leaves this component as it is.
   // eslint-disable-next-line react-hooks/incompatible-library
   const rows = useVirtualizer({
-    count: channels.length,
+    count: list.total ?? 0,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => layout.rowHeight,
     overscan: 8,
     paddingStart: layout.headerHeight,
   });
+  const items = rows.getVirtualItems();
+  const firstRow = items[0]?.index ?? 0;
+  const lastRow = items[items.length - 1]?.index ?? 20;
+  useEffect(() => {
+    setRange((r) => (r.from === firstRow && r.to === lastRow ? r : { from: firstRow, to: lastRow }));
+  }, [firstRow, lastRow]);
+  // Another list starts at its top; coming back from the player, at the
+  // channel watched.
+  const [returnTo] = useState(lastWatched);
+  const returnIndex = useIndexOf(category, search ? null : returnTo);
+  const placed = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const key = `${categoryKey(category)}|${search}`;
+    if (placed.current === key || returnIndex === undefined || list.total === undefined) return;
+    const first = placed.current === null;
+    placed.current = key;
+    if (first && returnIndex != null) rows.scrollToIndex(returnIndex, { align: "center" });
+    else scrollRef.current?.scrollTo({ top: 0, left: scrollRef.current.scrollLeft });
+  }, [category, search, returnIndex, list.total, rows]);
 
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -91,11 +117,18 @@ export function GuideGrid({
   const viewTo = viewFrom + (view.width - layout.channelWidth) / pxPerSec;
   const firstChunk = Math.max(0, Math.floor((viewFrom - start) / CHUNK) - 1);
   const lastChunk = Math.min(SPAN / CHUNK - 1, Math.floor((viewTo - start) / CHUNK) + 1);
+  // Each page of channels in view, for each chunk of time in view.
+  const pageIds = [...list.pages.entries()]
+    .filter(([page]) => page >= Math.floor(firstRow / CHANNEL_PAGE) && page <= Math.floor(lastRow / CHANNEL_PAGE))
+    .map(([, channels]) => channels.map((c) => c.id).join(","))
+    .filter(Boolean);
   const chunks = useQueries({
-    queries: Array.from({ length: lastChunk - firstChunk + 1 }, (_, i) => {
-      const from = start + (firstChunk + i) * CHUNK;
-      return liveQueries.guide(from, from + CHUNK);
-    }),
+    queries: pageIds.flatMap((ids) =>
+      Array.from({ length: lastChunk - firstChunk + 1 }, (_, i) => {
+        const from = start + (firstChunk + i) * CHUNK;
+        return liveQueries.guide(from, from + CHUNK, ids);
+      }),
+    ),
   });
   const chunkData = chunks.map((c) => c.data);
   const programs = useMemo(() => {
@@ -126,14 +159,14 @@ export function GuideGrid({
   }, [start, viewFrom, viewTo]);
 
   return (
-    <div className="relative">
+    <div className="relative h-full">
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="relative h-[calc(100dvh-13.5rem)] min-h-[22rem] overflow-auto overscroll-contain rounded-lg border border-border bg-surface [scrollbar-width:thin]"
+        className="relative h-full overflow-auto overscroll-contain rounded-lg border border-border bg-surface [scrollbar-width:thin]"
         role="grid"
         aria-label="TV guide"
-        aria-rowcount={channels.length}
+        aria-rowcount={list.total}
       >
         <div className="relative" style={{ width: layout.channelWidth + width, height: rows.getTotalSize() }}>
           {/* Times across the top. */}
@@ -181,12 +214,16 @@ export function GuideGrid({
             />
           ) : null}
 
-          {rows.getVirtualItems().map((row) => {
-            const channel = channels[row.index]!;
+          {items.map((row) => {
+            const channel = list.at(row.index);
+            if (!channel) {
+              return <LoadingRow key={`row${row.index}`} top={row.start} layout={layout} width={width} viewFrom={viewFrom} start={start} />;
+            }
             return (
               <GuideRow
                 key={channel.id}
                 channel={channel}
+                category={category}
                 programs={programs.get(channel.id)}
                 loaded={loaded}
                 top={row.start}
@@ -216,8 +253,37 @@ export function GuideGrid({
   );
 }
 
+/** A row whose channel is still on its way. */
+function LoadingRow({
+  top,
+  layout,
+  width,
+  viewFrom,
+  start,
+}: {
+  top: number;
+  layout: Layout;
+  width: number;
+  viewFrom: number;
+  start: number;
+}) {
+  const left = Math.max(0, (viewFrom - start) * (layout.pxPerMin / 60));
+  return (
+    <div aria-hidden className="absolute left-0 flex border-b border-border/70" style={{ top, height: layout.rowHeight, width: layout.channelWidth + width }}>
+      <div className="sticky left-0 z-10 flex shrink-0 items-center gap-2.5 border-r border-border bg-surface px-2.5" style={{ width: layout.channelWidth }}>
+        <Skeleton className={cn("rounded-md", layout === WIDE ? "h-10 w-16" : "h-9 w-14")} />
+        {layout === WIDE ? <Skeleton className="h-3.5 flex-1 rounded" /> : null}
+      </div>
+      <div className="relative flex-1">
+        <div className="skeleton absolute inset-y-1 rounded-md" style={{ left: left + 2, width: 420 }} />
+      </div>
+    </div>
+  );
+}
+
 const GuideRow = memo(function GuideRow({
   channel,
+  category,
   programs,
   loaded,
   top,
@@ -231,6 +297,7 @@ const GuideRow = memo(function GuideRow({
   onDetails,
 }: {
   channel: Channel;
+  category: LiveCategory;
   programs: Program[] | undefined;
   loaded: boolean;
   top: number;
@@ -259,7 +326,7 @@ const GuideRow = memo(function GuideRow({
       <button
         type="button"
         role="rowheader"
-        onClick={() => void navigate(liveUrl(channel.id))}
+        onClick={() => void navigate(liveUrl(channel.id, category))}
         className="group/ch sticky left-0 z-10 flex shrink-0 items-center gap-2.5 border-r border-border bg-surface px-2.5 text-left transition-colors hover:bg-surface-2"
         style={{ width: layout.channelWidth }}
         title={`Watch ${channel.name}`}
@@ -281,7 +348,9 @@ const GuideRow = memo(function GuideRow({
               {channel.number ?? ""}
               {channel.favorite ? <Star className="size-3 fill-accent text-accent" /> : null}
             </div>
-            <div className="truncate text-sm font-medium">{channel.name}</div>
+            <div className="truncate text-sm font-medium" title={channel.name}>
+              {channelName(channel, category)}
+            </div>
           </div>
         ) : null}
       </button>
@@ -291,7 +360,7 @@ const GuideRow = memo(function GuideRow({
             className="absolute inset-y-1 flex items-center rounded-md bg-white/[0.02] px-3 text-xs text-subtle"
             style={{ left: Math.max(0, (viewFrom - start) * pxPerSec) + 2, width: Math.max(0, (viewTo - viewFrom) * pxPerSec) - 4 }}
           >
-            {channel.has_guide ? "No information for this time" : "No guide for this channel"}
+            {channel.has_guide ? "No information for this time" : <span className="truncate text-muted">{channelName(channel, category)}</span>}
           </div>
         ) : null}
         {visible.map((p) => (

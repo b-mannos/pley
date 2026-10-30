@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import type HlsType from "hls.js";
 import {
   ArrowLeft,
@@ -23,7 +24,18 @@ import {
   VolumeX,
 } from "lucide-react";
 import { ApiError, errorMessage, isApiError } from "@/api/client";
-import { leaveChannel, programProgress, useChannels, useSetFavorite, watchChannel, type Channel } from "@/api/livetv";
+import {
+  CHANNEL_PAGE,
+  leaveChannel,
+  liveKeys,
+  liveQueries,
+  parseCategory,
+  programProgress,
+  useSetFavorite,
+  watchChannel,
+  type Channel,
+  type LiveCategory,
+} from "@/api/livetv";
 import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { Slider } from "@/components/Slider";
 import { cn } from "@/lib/cn";
@@ -31,7 +43,7 @@ import { canPlayNativeHls } from "@/lib/caps";
 import { loadHls } from "@/lib/hls";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
 import { clientId } from "@/lib/progress";
-import { ChannelLogo, formatSpan, formatTime, liveUrl, timeLeft, useNow } from "@/pages/livetv/common";
+import { ChannelLogo, formatSpan, formatTime, liveUrl, setLastWatched, timeLeft, useNow } from "@/pages/livetv/common";
 import { ChannelPanel } from "./ChannelPanel";
 
 /** Controls hide after this long without the pointer moving. */
@@ -69,51 +81,117 @@ function hlsTrouble(response: { code?: number; text?: string } | undefined, chan
 export function LivePlayerPage() {
   const { channelId } = useParams();
   const id = Number(channelId);
+  const [params] = useSearchParams();
+  const category = useMemo(() => parseCategory(params.get("in")), [params]);
   const navigate = useNavigate();
-  const channels = useChannels();
-  const list = useMemo(() => channels.data ?? [], [channels.data]);
-  const index = list.findIndex((c) => c.id === id);
-  const channel = index >= 0 ? list[index]! : null;
+  const qc = useQueryClient();
+  const current = useQuery(liveQueries.channel(id));
+  const channel = current.data ?? null;
+  const zap = useZap(category, id);
   useDocumentTitle(channel ? `${channel.name} · Live TV` : "Live TV");
 
-  const tune = useCallback((c: Channel) => void navigate(liveUrl(c.id), { replace: true }), [navigate]);
-  const step = useCallback(
-    (by: number) => {
-      if (list.length === 0 || index < 0) return;
-      tune(list[(index + by + list.length) % list.length]!);
+  const tune = useCallback(
+    (c: Channel, inCategory: LiveCategory = category) => {
+      // What the list knows of it shows at once.
+      qc.setQueryData(liveKeys.channel(c.id), c);
+      void navigate(liveUrl(c.id, inCategory), { replace: true });
     },
-    [list, index, tune],
+    [navigate, qc, category],
   );
+  const step = useCallback(
+    (by: 1 | -1) => {
+      const next = zap(by);
+      if (next) tune(next);
+    },
+    [zap, tune],
+  );
+  // A channel number: every channel's, as a remote's would.
+  const byNumber = useCallback(async (digits: string) => {
+    const page = await qc.fetchQuery(liveQueries.page({ kind: "all" }, digits, 0));
+    return page.channels.find((c) => c.number === digits) ?? null;
+  }, [qc]);
 
-  if (channels.isError) {
+  if (current.isError) {
+    const missing = isApiError(current.error, 404);
     return (
       <Blackout>
         <TroubleCard
-          trouble={{ kind: "other", title: "Live TV didn't load", message: errorMessage(channels.error) }}
-          onRetry={() => void channels.refetch()}
+          trouble={
+            missing
+              ? { kind: "missing", title: "This channel isn't here", message: "It may have been hidden, or its source removed." }
+              : { kind: "other", title: "Live TV didn't load", message: errorMessage(current.error) }
+          }
+          onRetry={missing ? undefined : () => void current.refetch()}
           onBack={() => void navigate("/live")}
         />
-      </Blackout>
-    );
-  }
-  if (!channels.data) {
-    return (
-      <Blackout>
-        <LoaderCircle className="size-12 animate-spin text-white/70" />
       </Blackout>
     );
   }
   if (!channel) {
     return (
       <Blackout>
-        <TroubleCard
-          trouble={{ kind: "missing", title: "This channel isn't here", message: "It may have been hidden, or its source removed." }}
-          onBack={() => void navigate("/live")}
-        />
+        <LoaderCircle className="size-12 animate-spin text-white/70" />
       </Blackout>
     );
   }
-  return <LivePlayer channel={channel} channels={list} onTune={tune} onStep={step} />;
+  return (
+    <LivePlayer
+      channel={channel}
+      category={category}
+      onTune={tune}
+      onStep={step}
+      byNumber={byNumber}
+    />
+  );
+}
+
+/**
+ * Channel up and down through `category`: the page around the channel
+ * watched, and the next or last page at its ends (round to the other end
+ * of the list). "Recently watched" keeps the order it had as the player
+ * opened: it changes with every channel watched.
+ */
+function useZap(category: LiveCategory, id: number): (by: 1 | -1) => Channel | null {
+  const recent = category.kind === "recent";
+  const around = useQuery({ ...liveQueries.around(category, id), enabled: !recent, placeholderData: keepPreviousData });
+  const recentPage = useQuery({ ...liveQueries.page(category, "", 0), enabled: recent });
+  const [recentOrder, setRecentOrder] = useState<Channel[] | null>(null);
+  if (recent && !recentOrder && recentPage.data) setRecentOrder(recentPage.data.channels);
+
+  const page = around.data;
+  const at = page ? page.channels.findIndex((c) => c.id === id) : -1;
+  const pages = page ? Math.ceil(page.total / CHANNEL_PAGE) : 0;
+  const pageNo = page ? Math.floor(page.offset / CHANNEL_PAGE) : 0;
+  const edge = page != null && pages > 1;
+  const before = useQuery({
+    ...liveQueries.page(category, "", (pageNo - 1 + pages) % Math.max(1, pages)),
+    enabled: edge && at === 0,
+  });
+  const after = useQuery({
+    ...liveQueries.page(category, "", (pageNo + 1) % Math.max(1, pages)),
+    enabled: edge && at === (page?.channels.length ?? 0) - 1,
+  });
+
+  return useCallback(
+    (by: 1 | -1) => {
+      if (recent) {
+        const list = recentOrder ?? [];
+        if (list.length < 2) return null;
+        const i = list.findIndex((c) => c.id === id);
+        return list[(Math.max(0, i) + by + list.length) % list.length]!;
+      }
+      if (!page || page.channels.length === 0) return null;
+      // Not in this category (tuned by number, say): its first channel.
+      if (at < 0) return page.channels[0]!;
+      const j = at + by;
+      if (j >= 0 && j < page.channels.length) return page.channels[j]!;
+      if (pages <= 1) return page.channels[(j + page.channels.length) % page.channels.length]!;
+      const other = by < 0 ? before.data : after.data;
+      if (!other?.channels.length) return null;
+      return by < 0 ? other.channels[other.channels.length - 1]! : other.channels[0]!;
+    },
+    [recent, recentOrder, id, page, at, pages, before.data, after.data],
+  );
 }
 
 function Blackout({ children }: { children: React.ReactNode }) {
@@ -122,14 +200,16 @@ function Blackout({ children }: { children: React.ReactNode }) {
 
 function LivePlayer({
   channel,
-  channels,
+  category,
   onTune,
   onStep,
+  byNumber,
 }: {
   channel: Channel;
-  channels: Channel[];
-  onTune: (c: Channel) => void;
-  onStep: (by: number) => void;
+  category: LiveCategory;
+  onTune: (c: Channel, category?: LiveCategory) => void;
+  onStep: (by: 1 | -1) => void;
+  byNumber: (digits: string) => Promise<Channel | null>;
 }) {
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -155,6 +235,8 @@ function LivePlayer({
   const [notFound, setNotFound] = useState<string | null>(null);
   const [position, setPosition] = useState({ current: 0, start: 0, end: 0 });
   const hideTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => setLastWatched(channel.id), [channel.id]);
 
   useEffect(() => {
     audioPlayer?.pause();
@@ -341,7 +423,6 @@ function LivePlayer({
 
   const behind = position.end - position.current;
   const atLive = behind < LIVE_WITHIN;
-  const windowLength = Math.max(0, position.end - position.start);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
@@ -382,14 +463,22 @@ function LivePlayer({
   // A channel number typed: tuned once the digits stop.
   useEffect(() => {
     if (!digits) return;
+    let cancelled = false;
     const id = window.setTimeout(() => {
-      const match = channels.find((c) => c.number === digits);
-      if (match) onTune(match);
-      else setNotFound(digits);
       setDigits("");
+      void byNumber(digits)
+        .catch(() => null)
+        .then((match) => {
+          if (cancelled) return;
+          if (match) onTune(match, { kind: "all" });
+          else setNotFound(digits);
+        });
     }, NUMBER_WAIT);
-    return () => window.clearTimeout(id);
-  }, [digits, channels, onTune]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(id);
+    };
+  }, [digits, byNumber, onTune]);
   useEffect(() => {
     if (!notFound) return;
     const id = window.setTimeout(() => setNotFound(null), 2000);
@@ -451,6 +540,13 @@ function LivePlayer({
           if (panel) setPanel(false);
           else if (!document.fullscreenElement) goBack();
           break;
+        case "Backspace":
+        case "BrowserBack":
+        case "GoBack":
+          e.preventDefault();
+          if (panel) setPanel(false);
+          else goBack();
+          break;
       }
     };
     window.addEventListener("keydown", onKey);
@@ -480,10 +576,8 @@ function LivePlayer({
       {/* Tuning: the channel's logo while it starts. */}
       {status === "tuning" ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-black animate-fade-in">
-          <div className="relative">
-            <ChannelLogo channel={channel} width={240} className="h-28 w-48 rounded-2xl bg-white/[0.06]" />
-            <LoaderCircle className="absolute -bottom-3 -right-3 size-8 animate-spin text-accent" />
-          </div>
+          <ChannelLogo channel={channel} width={240} className="h-28 w-48 rounded-2xl bg-white/[0.06]" />
+          <LoaderCircle className="size-7 animate-spin text-accent" aria-label="Tuning" />
           <div className="text-center">
             <div className="text-lg font-semibold">
               {channel.number ? <span className="mr-2 tabular-nums text-white/60">{channel.number}</span> : null}
@@ -554,7 +648,7 @@ function LivePlayer({
       {/* What's on: shown on tuning, and with I. */}
       <div
         className={cn(
-          "pointer-events-none absolute bottom-28 left-3 right-3 z-10 transition-all duration-500 sm:bottom-32 sm:left-6 sm:right-auto sm:w-[30rem]",
+          "pointer-events-none absolute bottom-20 left-3 right-3 z-10 transition-all duration-500 sm:bottom-24 sm:left-6 sm:right-auto sm:w-[30rem]",
           banner && status === "playing" ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0",
         )}
         aria-hidden={!banner}
@@ -587,39 +681,11 @@ function LivePlayer({
       {/* Bottom bar */}
       <div
         className={cn(
-          "absolute inset-x-0 bottom-0 z-10 bg-linear-to-t from-black/90 via-black/55 to-transparent px-3 pb-3 pt-20 transition-opacity duration-300 sm:px-6 sm:pb-5",
+          "absolute inset-x-0 bottom-0 z-10 bg-linear-to-t from-black/90 via-black/55 to-transparent px-3 pb-3 pt-16 transition-opacity duration-300 sm:px-6 sm:pb-5",
           controlsVisible ? "opacity-100" : "pointer-events-none opacity-0",
         )}
       >
-        <div className="flex items-center gap-3">
-          <span className="w-12 shrink-0 text-right text-xs tabular-nums text-white/60">
-            {windowLength > 30 ? `−${Math.round(windowLength / 60)} min` : ""}
-          </span>
-          <Slider
-            label="Position"
-            value={Math.max(0, position.current - position.start)}
-            max={Math.max(1, windowLength)}
-            onCommit={(v) => {
-              const video = videoRef.current;
-              if (video) video.currentTime = position.start + v;
-            }}
-            className="flex-1"
-          />
-          <button
-            type="button"
-            onClick={goLive}
-            disabled={atLive}
-            className={cn(
-              "flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-bold uppercase tracking-wide transition",
-              atLive ? "bg-danger/90 text-white" : "bg-white/15 text-white/85 hover:bg-white/25",
-            )}
-            title={atLive ? "Live" : "Go live"}
-          >
-            <span className={cn("size-1.5 rounded-full", atLive ? "bg-white animate-pulse" : "bg-white/60")} />
-            {atLive ? "Live" : `−${formatBehind(behind)}`}
-          </button>
-        </div>
-        <div className="mt-1.5 flex items-center gap-0.5 sm:gap-1.5">
+        <div className="flex items-center gap-0.5 sm:gap-1.5">
           <button type="button" aria-label={playing ? "Pause" : "Play"} onClick={togglePlay} className={cn(button, "size-11")}>
             {playing ? <Pause className="size-6 fill-current" /> : <Play className="ml-0.5 size-6 fill-current" />}
           </button>
@@ -653,6 +719,19 @@ function LivePlayer({
               />
             </div>
           </div>
+          <button
+            type="button"
+            onClick={goLive}
+            disabled={atLive}
+            className={cn(
+              "ml-1 flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-bold uppercase tracking-wide transition sm:ml-2",
+              atLive ? "bg-danger/90 text-white" : "bg-white/15 text-white/85 hover:bg-white/25",
+            )}
+            title={atLive ? "Live" : "Go live"}
+          >
+            <span className={cn("size-1.5 rounded-full", atLive ? "bg-white animate-pulse" : "bg-white/60")} />
+            {atLive ? "Live" : `−${formatBehind(behind)}`}
+          </button>
           {on ? (
             <div className="ml-2 hidden min-w-0 truncate text-sm text-white/70 md:block">
               <span className="tabular-nums">{formatSpan(on)}</span>
@@ -678,12 +757,12 @@ function LivePlayer({
 
       <ChannelPanel
         open={panel}
-        channels={channels}
+        category={category}
         current={channel.id}
         now={now}
         onClose={() => setPanel(false)}
-        onTune={(c) => {
-          onTune(c);
+        onTune={(c, inCategory) => {
+          onTune(c, inCategory);
           setPanel(false);
         }}
       />

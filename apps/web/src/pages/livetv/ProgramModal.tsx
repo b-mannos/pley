@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router";
 import { Play, Radio, Star } from "lucide-react";
-import { episodeLabel, programProgress, useSetFavorite, type Channel, type Program } from "@/api/livetv";
+import { episodeLabel, programProgress, useSetFavorite, type Channel, type LiveCategory, type Program } from "@/api/livetv";
 import { Modal } from "@/components/Modal";
 import { Badge, Button, ProgressBar } from "@/components/ui";
 import { sizedImage } from "@/lib/images";
@@ -10,10 +10,13 @@ import { ChannelLogo, formatGuideDay, formatSpan, liveUrl, timeLeft, useNow } fr
 export function ProgramModal({
   channel,
   program,
+  category,
   onClose,
 }: {
   channel: Channel | null;
   program: Program | null;
+  /** Where the channel was chosen: channel up and down stay there. */
+  category?: LiveCategory;
   onClose: () => void;
 }) {
   const navigate = useNavigate();
@@ -47,7 +50,7 @@ export function ProgramModal({
           >
             {channel.favorite ? "Favourite" : "Add to favourites"}
           </Button>
-          <Button variant="primary" icon={<Play className="size-4 fill-current" />} onClick={() => void navigate(liveUrl(channel.id))}>
+          <Button variant="primary" icon={<Play className="size-4 fill-current" />} onClick={() => void navigate(liveUrl(channel.id, category))}>
             {airing ? "Watch now" : "Watch channel"}
           </Button>
         </>

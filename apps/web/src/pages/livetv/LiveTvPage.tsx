@@ -1,44 +1,81 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router";
-import { CalendarDays, LayoutGrid, RefreshCw, Search, Settings2, Star, Tv2, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { CalendarDays, ChevronDown, LayoutGrid, RefreshCw, Search, Settings2, Tv2, X } from "lucide-react";
 import { errorMessage } from "@/api/client";
-import { useChannels, useLiveSummary, type Channel, type Program } from "@/api/livetv";
+import {
+  categoryKey,
+  liveQueries,
+  parseCategory,
+  useLiveGroups,
+  useLiveSummary,
+  type Channel,
+  type LiveCategory,
+  type LiveGroups,
+  type Program,
+} from "@/api/livetv";
 import { useAuth } from "@/auth";
+import { Modal } from "@/components/Modal";
 import { Button, buttonClass, EmptyState, Skeleton, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useDocumentTitle, useLocalStorage } from "@/lib/hooks";
-import { ChannelGrid, ChannelRow } from "./ChannelGrid";
-import { filterKey, parseFilter, useFilteredChannels, useGroups, useNow, type ChannelFilter } from "./common";
+import { CategoryRail, categoryName } from "./CategoryRail";
+import { ChannelGrid } from "./ChannelGrid";
+import { useNow } from "./common";
 import { GuideGrid } from "./GuideGrid";
 import { ProgramModal } from "./ProgramModal";
 
 type View = "guide" | "channels";
 
+/** Whether `category` still has channels to show. */
+function stillThere(c: LiveCategory, groups: LiveGroups): boolean {
+  switch (c.kind) {
+    case "all":
+      return true;
+    case "favorites":
+      return groups.favorites > 0;
+    case "recent":
+      return groups.recent > 0;
+    case "group":
+      return groups.groups.some((g) => g.name === c.group);
+  }
+}
+
 export function LiveTvPage() {
   useDocumentTitle("Live TV");
   const user = useAuth();
   const summary = useLiveSummary();
-  const channels = useChannels();
+  const groups = useLiveGroups(summary.data?.available ?? false);
   const now = useNow();
   const [view, setView] = useLocalStorage<View>("pley.live.view", "guide");
-  const [filterValue, setFilterValue] = useLocalStorage("pley.live.filter", "all");
-  const filter = parseFilter(filterValue);
+  const [stored, setStored] = useLocalStorage("pley.live.category", "all");
   const [search, setSearch] = useState("");
+  const [picking, setPicking] = useState(false);
   const [details, setDetails] = useState<{ channel: Channel; program: Program } | null>(null);
-  const groups = useGroups(channels.data);
-  const favorites = channels.data?.filter((c) => c.favorite).length ?? 0;
-  // A filter whose group went away shows everything.
-  const effective: ChannelFilter =
-    (filter.kind === "group" && !groups.some((g) => g.name === filter.group)) || (filter.kind === "favorites" && favorites === 0)
-      ? { kind: "all" }
-      : filter;
-  const shown = useFilteredChannels(channels.data, effective, search);
-  const recent = useMemo(() => {
-    const byId = new Map((channels.data ?? []).map((c) => [c.id, c]));
-    return (summary.data?.recent ?? []).map((id) => byId.get(id)).filter((c): c is Channel => !!c).slice(0, 6);
-  }, [channels.data, summary.data?.recent]);
-  // Details follow the channel as it refreshes (a favourite set, say).
-  const detailChannel = details ? (channels.data?.find((c) => c.id === details.channel.id) ?? details.channel) : null;
+  const chosen = parseCategory(stored);
+  // A group gone, or nothing marked any more: every channel.
+  const category: LiveCategory = groups.data && !stillThere(chosen, groups.data) ? { kind: "all" } : chosen;
+  const select = (c: LiveCategory) => {
+    setStored(categoryKey(c));
+    setSearch("");
+    setPicking(false);
+  };
+  // Details follow the channel as it changes (a favourite set, say).
+  const detailChannel = useQuery({
+    ...liveQueries.channel(details?.channel.id ?? 0),
+    enabled: details != null,
+    initialData: details?.channel,
+    initialDataUpdatedAt: 0,
+  }).data;
+  const name = categoryName(category, groups.data?.groups);
+  const total =
+    category.kind === "all"
+      ? groups.data?.total
+      : category.kind === "favorites"
+        ? groups.data?.favorites
+        : category.kind === "recent"
+          ? groups.data?.recent
+          : groups.data?.groups.find((g) => g.name === category.group)?.count;
 
   if (summary.data && !summary.data.allowed) {
     return (
@@ -47,15 +84,16 @@ export function LiveTvPage() {
       </Page>
     );
   }
-  if (channels.isError) {
+  if (summary.isError || groups.isError) {
+    const failed = summary.isError ? summary : groups;
     return (
       <Page>
         <EmptyState
           icon={<Tv2 />}
           title="Live TV didn't load"
-          description={errorMessage(channels.error)}
+          description={errorMessage(failed.error)}
           action={
-            <Button icon={<RefreshCw className="size-4" />} onClick={() => void channels.refetch()}>
+            <Button icon={<RefreshCw className="size-4" />} onClick={() => void failed.refetch()}>
               Try again
             </Button>
           }
@@ -63,7 +101,7 @@ export function LiveTvPage() {
       </Page>
     );
   }
-  if (channels.data && channels.data.length === 0) {
+  if (summary.data && !summary.data.available) {
     return (
       <Page>
         <EmptyState
@@ -85,6 +123,9 @@ export function LiveTvPage() {
       </Page>
     );
   }
+
+  const rail = <CategoryRail groups={groups.data} selected={category} onSelect={select} className="h-full" />;
+  const onDetails = (channel: Channel, program: Program) => setDetails({ channel, program });
 
   return (
     <Page
@@ -120,89 +161,132 @@ export function LiveTvPage() {
         </div>
       }
     >
-      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
-        <div className="relative lg:w-72">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle" />
-          <TextInput
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Find a channel or what's on"
-            aria-label="Find a channel"
-            className="pl-9 pr-9"
-          />
-          {search ? (
+      <div className="flex gap-4 lg:gap-5">
+        <aside className="hidden h-[calc(100dvh-9.75rem)] min-h-[22rem] w-64 shrink-0 overflow-hidden rounded-lg border border-border bg-surface lg:block xl:w-72">
+          {rail}
+        </aside>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            {/* The category, and on narrow screens the way to change it. */}
             <button
               type="button"
-              onClick={() => setSearch("")}
-              aria-label="Clear"
-              className="absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-full text-subtle hover:bg-white/10 hover:text-fg"
+              onClick={() => setPicking(true)}
+              className="flex h-9 min-w-0 items-center gap-2 rounded-md border border-border bg-surface px-3 text-left text-sm font-medium transition-colors hover:border-border-strong lg:hidden"
             >
-              <X className="size-3.5" />
+              <span className="truncate">{name}</span>
+              {total !== undefined ? <span className="text-xs tabular-nums text-subtle">{total.toLocaleString()}</span> : null}
+              <ChevronDown className="ml-auto size-4 shrink-0 text-subtle" />
             </button>
-          ) : null}
-        </div>
-        <div className="scrollbar-none -mx-4 flex min-w-0 flex-1 gap-1.5 overflow-x-auto px-4 lg:mx-0 lg:px-0" role="group" aria-label="Show">
-          <Chip active={effective.kind === "all"} onClick={() => setFilterValue("all")}>
-            All <Count n={channels.data?.length} />
-          </Chip>
-          {favorites > 0 ? (
-            <Chip active={effective.kind === "favorites"} onClick={() => setFilterValue("favorites")}>
-              <Star className="size-3.5" /> Favourites <Count n={favorites} />
-            </Chip>
-          ) : null}
-          {groups.length > 1
-            ? groups.map((g) => (
-                <Chip
-                  key={g.name}
-                  active={effective.kind === "group" && effective.group === g.name}
-                  onClick={() => setFilterValue(filterKey({ kind: "group", group: g.name }))}
+            <h2 className="hidden min-w-0 flex-1 items-baseline gap-2 lg:flex">
+              <span className="truncate text-lg font-semibold tracking-tight">{name}</span>
+              {total !== undefined ? <span className="text-sm tabular-nums text-subtle">{total.toLocaleString()} channels</span> : null}
+            </h2>
+            <div className="relative sm:ml-auto sm:w-72">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle" />
+              <TextInput
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={category.kind === "all" ? "Find a channel or what's on" : `Find in ${name}`}
+                aria-label="Find a channel"
+                className="h-9 pl-9 pr-9"
+              />
+              {search ? (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  aria-label="Clear"
+                  className="absolute right-2 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-full text-subtle hover:bg-white/10 hover:text-fg"
                 >
-                  {g.name} <Count n={g.count} />
-                </Chip>
-              ))
-            : null}
+                  <X className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          <Results
+            category={category}
+            search={search}
+            view={view}
+            now={now}
+            onDetails={onDetails}
+            searchAll={(q) => {
+              select({ kind: "all" });
+              setSearch(q);
+            }}
+          />
         </div>
       </div>
 
-      {!channels.data ? (
-        <Skeleton className="h-[calc(100dvh-13.5rem)] min-h-[22rem] w-full rounded-lg" />
-      ) : shown.length === 0 ? (
-        <EmptyState
-          icon={<Search />}
-          title="No channels match"
-          description={search ? `Nothing called “${search}” here.` : "No channels in this group."}
-          action={
-            <Button
-              onClick={() => {
-                setSearch("");
-                setFilterValue("all");
-              }}
-            >
-              Show every channel
-            </Button>
-          }
-        />
-      ) : view === "guide" ? (
-        <GuideGrid channels={shown} now={now} onDetails={(channel, program) => setDetails({ channel, program })} />
-      ) : (
-        <>
-          {recent.length > 0 && !search && effective.kind === "all" ? (
-            <section className="mb-8">
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-subtle">Recently watched</h2>
-              <ChannelRow channels={recent} now={now} onDetails={(channel, program) => setDetails({ channel, program })} />
-            </section>
-          ) : null}
-          <ChannelGrid channels={shown} now={now} onDetails={(channel, program) => setDetails({ channel, program })} />
-        </>
-      )}
-      <ProgramModal channel={detailChannel} program={details?.program ?? null} onClose={() => setDetails(null)} />
+      <Modal open={picking} onClose={() => setPicking(false)} title="Channel groups" size="md">
+        <div className="-mx-6 -my-2 h-[min(70dvh,36rem)]">{rail}</div>
+      </Modal>
+      <ProgramModal channel={details ? (detailChannel ?? details.channel) : null} program={details?.program ?? null} category={category} onClose={() => setDetails(null)} />
     </Page>
+  );
+}
+
+/** The channels of the category: the guide or the cards, or why there are none. */
+function Results({
+  category,
+  search,
+  view,
+  now,
+  onDetails,
+  searchAll,
+}: {
+  category: LiveCategory;
+  search: string;
+  view: View;
+  now: number;
+  onDetails: (channel: Channel, program: Program) => void;
+  searchAll: (q: string) => void;
+}) {
+  const first = useQuery(liveQueries.page(category, search, 0));
+  const height = "h-[calc(100dvh-13rem)] min-h-[22rem] sm:h-[calc(100dvh-12.5rem)]";
+  if (first.isError) {
+    return (
+      <EmptyState
+        icon={<Tv2 />}
+        title="The channels didn't load"
+        description={errorMessage(first.error)}
+        action={
+          <Button icon={<RefreshCw className="size-4" />} onClick={() => void first.refetch()}>
+            Try again
+          </Button>
+        }
+      />
+    );
+  }
+  if (!first.data) return <Skeleton className={cn(height, "w-full rounded-lg")} />;
+  if (first.data.total === 0) {
+    return (
+      <EmptyState
+        icon={<Search />}
+        title="No channels match"
+        description={search ? `Nothing called “${search.trim()}” here.` : "Nothing in this group now."}
+        action={
+          search && category.kind !== "all" ? (
+            <Button onClick={() => searchAll(search)}>Find it in every channel</Button>
+          ) : undefined
+        }
+      />
+    );
+  }
+  return view === "guide" ? (
+    <div className={height}>
+      <GuideGrid category={category} search={search} now={now} onDetails={onDetails} />
+    </div>
+  ) : (
+    <div className={cn(height, "overflow-hidden rounded-lg border border-border bg-surface/40")}>
+      <ChannelGrid category={category} search={search} now={now} onDetails={onDetails} />
+    </div>
   );
 }
 
 function Page({ children, actions }: { children: React.ReactNode; actions?: React.ReactNode }) {
   return (
-    <div className="px-4 pb-12 pt-6 sm:px-8">
+    <div className="px-4 pb-6 pt-6 sm:px-8">
       <div className="mb-5 flex items-center gap-3">
         <div className="flex size-10 items-center justify-center rounded-lg bg-surface-2 text-accent">
           <Tv2 className="size-5" />
@@ -213,24 +297,4 @@ function Page({ children, actions }: { children: React.ReactNode; actions?: Reac
       {children}
     </div>
   );
-}
-
-function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors",
-        active ? "border-accent/50 bg-accent/15 text-accent" : "border-border text-muted hover:border-border-strong hover:text-fg",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Count({ n }: { n: number | undefined }) {
-  return n === undefined ? null : <span className="text-xs tabular-nums opacity-70">{n}</span>;
 }

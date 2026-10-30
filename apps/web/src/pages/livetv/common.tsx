@@ -1,5 +1,6 @@
-import { memo, useEffect, useMemo, useState } from "react";
-import type { Channel, Program } from "@/api/livetv";
+import { memo, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { categoryKey, liveQueries, type Channel, type LiveCategory, type Program } from "@/api/livetv";
 import { cn } from "@/lib/cn";
 import { placeholderGradient, sizedImage } from "@/lib/images";
 
@@ -85,48 +86,65 @@ export const ChannelLogo = memo(function ChannelLogo({
   );
 });
 
-export type ChannelFilter = { kind: "all" } | { kind: "favorites" } | { kind: "group"; group: string };
-
-export function filterKey(f: ChannelFilter): string {
-  return f.kind === "group" ? `group:${f.group}` : f.kind;
+/**
+ * A name's region and the rest, when it begins with one the way providers
+ * write them ("UK| Sport", "[UK] Sport", "UK: Sport"), as the server splits
+ * group names.
+ */
+export function splitRegion(name: string): [string, string] | null {
+  const n = name.trim().replace(/^\|+\s*/, "");
+  const m = /^\[([^\]]{1,16})\]\s*(.+)$/.exec(n) ?? /^([^|]{1,16})\|\s*(.+)$/.exec(n) ?? /^([A-Z]{1,4}):\s*(.+)$/.exec(n);
+  if (!m) return null;
+  const rest = m[2]!.replace(/^[|:\-\s]+/, "").trim();
+  const region = m[1]!.trim();
+  return region && rest ? [region, rest] : null;
 }
 
-export function parseFilter(key: string): ChannelFilter {
-  if (key === "favorites") return { kind: "favorites" };
-  if (key.startsWith("group:")) return { kind: "group", group: key.slice(6) };
-  return { kind: "all" };
+/**
+ * A channel's name as a list shows it: in a group, without the region its
+ * group already says ("Sky Sports 1" in UK · Sport, not "UK| Sky Sports 1").
+ */
+export function channelName(c: Pick<Channel, "name" | "group">, category?: LiveCategory): string {
+  if (category?.kind !== "group") return c.name;
+  const name = splitRegion(c.name);
+  const group = splitRegion(c.group);
+  return name && group && name[0].toLowerCase() === group[0].toLowerCase() ? name[1] : c.name;
 }
 
-/** Channels that pass `filter` and match `search` (name, number, or what's on). */
-export function useFilteredChannels(channels: Channel[] | undefined, filter: ChannelFilter, search: string): Channel[] {
-  return useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return (channels ?? []).filter((c) => {
-      if (filter.kind === "favorites" && !c.favorite) return false;
-      if (filter.kind === "group" && c.group !== filter.group) return false;
-      if (!q) return true;
-      return (
-        c.name.toLowerCase().includes(q) ||
-        c.number === q ||
-        (c.number?.startsWith(q) ?? false) ||
-        (c.now?.title.toLowerCase().includes(q) ?? false)
-      );
-    });
-  }, [channels, filter, search]);
+const LAST_WATCHED = "pley.live.lastWatched";
+
+/** The channel last watched in this tab: the guide opens back at it. */
+export function lastWatched(): number | null {
+  try {
+    const id = Number(sessionStorage.getItem(LAST_WATCHED));
+    return Number.isFinite(id) && id > 0 ? id : null;
+  } catch {
+    return null;
+  }
 }
 
-/** The groups channels are in, in their order, with how many each has. */
-export function useGroups(channels: Channel[] | undefined): { name: string; count: number }[] {
-  return useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const c of channels ?? []) {
-      if (c.group) counts.set(c.group, (counts.get(c.group) ?? 0) + 1);
-    }
-    return [...counts].map(([name, count]) => ({ name, count }));
-  }, [channels]);
+export function setLastWatched(id: number) {
+  try {
+    sessionStorage.setItem(LAST_WATCHED, String(id));
+  } catch {
+    // Storage refused: the guide opens at its top.
+  }
 }
 
-/** `/live/:id`. */
-export function liveUrl(channelId: number): string {
-  return `/live/${channelId}`;
+/**
+ * Index of channel `id` in `category`, once known (null: not in it, or no
+ * channel asked): where a list opens when coming back from the player.
+ */
+export function useIndexOf(category: LiveCategory, id: number | null): number | null | undefined {
+  const around = useQuery({ ...liveQueries.around(category, id ?? 0), enabled: id != null });
+  if (id == null) return null;
+  if (!around.data) return around.isError ? null : undefined;
+  const at = around.data.channels.findIndex((c) => c.id === id);
+  return at < 0 ? null : around.data.offset + at;
+}
+
+/** `/live/:id`, with the category it was chosen in (channel up and down stay in it). */
+export function liveUrl(channelId: number, category?: LiveCategory): string {
+  const key = category ? categoryKey(category) : "all";
+  return key === "all" ? `/live/${channelId}` : `/live/${channelId}?in=${encodeURIComponent(key)}`;
 }
