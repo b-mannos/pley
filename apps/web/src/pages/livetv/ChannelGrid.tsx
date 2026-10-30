@@ -11,10 +11,13 @@ import { ChannelLogo, channelName, formatTime, lastWatched, liveUrl, useIndexOf 
 const CARD_TEXT = 116;
 const CARD_WIDTH = 236;
 
+/** On a phone's width, channels are a list of rows this tall rather than cards. */
+const LIST_ROW = 76;
+
 /**
- * Channels as cards: the logo, what's on with how far it is, what's next.
- * Rows are virtualized and channels fetched a page at a time as they come
- * into view.
+ * Channels as cards: the logo, what's on with how far it is, what's next;
+ * on a phone's width, as a list. Rows are virtualized and channels fetched
+ * a page at a time as they come into view.
  */
 export function ChannelGrid({
   category,
@@ -38,12 +41,13 @@ export function ChannelGrid({
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-  const padding = width < 640 ? 12 : 16;
-  const gap = width < 640 ? 12 : 16;
+  const narrow = width > 0 && width < 560;
+  const padding = narrow ? 0 : 16;
+  const gap = narrow ? 0 : 16;
   const inner = Math.max(0, width - padding * 2);
-  const cols = inner > 0 ? Math.max(1, Math.floor((inner + gap) / (CARD_WIDTH + gap))) : 1;
+  const cols = narrow ? 1 : inner > 0 ? Math.max(1, Math.floor((inner + gap) / (CARD_WIDTH + gap))) : 1;
   const colWidth = (inner - gap * (cols - 1)) / cols;
-  const rowHeight = Math.round(colWidth / 2 + CARD_TEXT + gap);
+  const rowHeight = narrow ? LIST_ROW : Math.round(colWidth / 2 + CARD_TEXT + gap);
   const [range, setRange] = useState({ from: 0, to: 40 });
   const list = useChannelList(category, search, range.from, range.to);
   const total = list.total ?? 0;
@@ -102,7 +106,19 @@ export function ChannelGrid({
               const channel = list.at(row.index * cols + i);
               return channel ? (
                 <div key={channel.id} role="listitem">
-                  <ChannelCard channel={channel} category={category} now={now} onDetails={onDetails} />
+                  {narrow ? (
+                    <ChannelListRow channel={channel} category={category} now={now} />
+                  ) : (
+                    <ChannelCard channel={channel} category={category} now={now} onDetails={onDetails} />
+                  )}
+                </div>
+              ) : narrow ? (
+                <div key={`p${i}`} aria-hidden className="flex h-full items-center gap-3 border-b border-border/60 px-3">
+                  <div className="skeleton h-10 w-16 rounded-md" />
+                  <div className="flex-1 space-y-2">
+                    <div className="skeleton h-3.5 w-1/2" />
+                    <div className="skeleton h-3 w-3/4" />
+                  </div>
                 </div>
               ) : (
                 <div key={`p${i}`} aria-hidden className="flex flex-col overflow-hidden rounded-lg border border-border bg-surface">
@@ -120,6 +136,45 @@ export function ChannelGrid({
     </div>
   );
 }
+
+/** A channel as a row of a phone's list: logo, number and name, what's on and how far. */
+const ChannelListRow = memo(function ChannelListRow({
+  channel,
+  category,
+  now,
+}: {
+  channel: Channel;
+  category: LiveCategory;
+  now: number;
+}) {
+  const on = channel.now && channel.now.start <= now && channel.now.stop > now ? channel.now : null;
+  return (
+    <Link
+      to={liveUrl(channel.id, category)}
+      className="flex h-full items-center gap-3 border-b border-border/60 px-3 transition-colors hover:bg-surface-2 active:bg-surface-2"
+      aria-label={`Watch ${channel.number ? `${channel.number} ` : ""}${channel.name}${on ? `, now: ${on.title}` : ""}`}
+    >
+      <ChannelLogo channel={channel} width={80} showName={false} className="h-10 w-16 shrink-0 rounded-md bg-surface-3" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          {channel.number ? <span className="shrink-0 text-xs tabular-nums text-subtle">{channel.number}</span> : null}
+          <span className="truncate text-sm font-medium">{channelName(channel, category)}</span>
+          {channel.favorite ? <Star className="size-3 shrink-0 self-center fill-accent text-accent" /> : null}
+        </div>
+        {on ? (
+          <>
+            <div className="truncate text-xs text-muted">{on.title}</div>
+            <div className="mt-1 h-0.5 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full bg-accent" style={{ width: `${programProgress(on, now) * 100}%` }} />
+            </div>
+          </>
+        ) : (
+          <div className="truncate text-xs text-subtle">{channel.has_guide ? "Nothing in the guide now" : "No guide"}</div>
+        )}
+      </div>
+    </Link>
+  );
+});
 
 export const ChannelCard = memo(function ChannelCard({
   channel,

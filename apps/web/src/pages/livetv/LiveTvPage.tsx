@@ -145,6 +145,7 @@ export function LiveTvPage() {
                 key={key}
                 role="tab"
                 aria-selected={view === key}
+                aria-label={label}
                 onClick={() => setView(key)}
                 className={cn(
                   "flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors",
