@@ -124,10 +124,11 @@ class Asking:
         return "Container.Update(%s)" % self.url(route="item", id=item_id)
 
     def changed(self) -> None:
-        """What was just done shows: the listing again, and global search's
-        TMDB titles asked for again."""
+        """What was just done shows: the listing again (pley's window, when
+        it was done from there), and global search's TMDB titles asked for
+        again."""
         kodi.clear_property(FOUND)
-        xbmc.executebuiltin("Container.Refresh")
+        kodi.refresh_listing()
 
     def cant(self, error: api.ApiError) -> None:
         """A listing that can't be shown: what is wrong in its place, and
@@ -160,12 +161,7 @@ class Asking:
 
     def requests_entry(self, s, last: bool = False) -> None:
         """Your requests (Requests, for managers), with its number."""
-        T = kodi.text
-        number, danger = requests.count(s)
-        label = T("requests_page") if requests.manages(s) else T("your_requests")
-        if number:
-            label += " " + requests.colored("({:,})".format(number), requests.RED if danger else None)
-        self.entry(label, {"route": "requests"}, "DefaultInProgressShows.png", last=last)
+        self.entry(requests.entry_label(s, kodi.text), {"route": "requests"}, "DefaultInProgressShows.png", last=last)
 
     def asking_entries(self, s) -> None:
         """The root's entries: Discover, and the requests."""

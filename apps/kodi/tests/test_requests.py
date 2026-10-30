@@ -78,6 +78,10 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(requests.count(manager), (6, True))
         self.assertEqual(requests.count(dict(manager, failed=0)), (5, False))
         self.assertEqual(requests.count(None), (0, False))
+        # Kodi's lists and pley's window name the entry alike.
+        self.assertEqual(requests.entry_label(ON, T), "Your requests")
+        self.assertEqual(requests.entry_label(dict(ON, unseen=1200), T), "Your requests (1,200)")
+        self.assertEqual(requests.entry_label(manager, T), "Requests [COLOR %s](6)[/COLOR]" % requests.RED)
 
     def test_listings_that_show_requests(self):
         counted, listed = requests.COUNTED, requests.LISTED

@@ -1313,3 +1313,11 @@ msgstr ""
 msgctxt "#30545"
 msgid "There's nothing more of “%s” to ask for."
 msgstr ""
+
+msgctxt "#30546"
+msgid "Movie"
+msgstr ""
+
+msgctxt "#30547"
+msgid "Show"
+msgstr ""

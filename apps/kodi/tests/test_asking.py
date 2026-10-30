@@ -110,6 +110,8 @@ class Case(unittest.TestCase):
             kodi.clear_property(name)
         del xbmcplugin.calls[:], xbmcplugin.sorts[:], xbmc.builtins[:], xbmcgui.notified[:]
         self.addCleanup(xbmc.info_labels.clear)
+        # One of pley's listings on screen: what was done there shows it again.
+        xbmc.info_labels["Container.FolderPath"] = BASE + "?route=discover"
 
     def handle(self, request):
         path, _, query = request.path[len("/s3cret"):].partition("?")
@@ -474,6 +476,16 @@ class ActTest(Case):
         self.assertEqual(self.sent("POST"), [], "no longer offered")
         self.assertEqual(self.act("choose", found=request(actions=[])), [
             ("ok", "Heat", "[COLOR %s]Waiting for approval[/COLOR][CR]Asked for 3 days ago" % requests.AMBER)])
+
+    def test_done_from_pleys_window(self):
+        # Asked over pley's window (window.run_plugin): the window shows it, not
+        # the list of add-ons under it.
+        xbmc.info_labels["Container.FolderPath"] = "addons://sources/video/"
+        kodi.set_property(kodi.WINDOW_OPEN, "1")
+        self.addCleanup(kodi.clear_property, kodi.WINDOW_OPEN)
+        self.answers["POST /api/requests/42/approve"] = (200, {})
+        self.act("approve")
+        self.assertEqual(xbmc.builtins[-2:], ["NotifyAll(plugin.video.pley,pley.asking)", "NotifyAll(plugin.video.pley,changed)"])
 
 
 class SearchTest(Case):

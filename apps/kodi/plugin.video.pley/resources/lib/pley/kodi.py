@@ -329,6 +329,8 @@ TEXT = {
     "seasons": 30543,
     "episodes_in_library": 30544,
     "nothing_more": 30545,
+    "movie": 30546,
+    "show": 30547,
 }
 
 

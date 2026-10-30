@@ -123,6 +123,17 @@ def count(s) -> tuple:
     return s.get("unseen") or 0, False
 
 
+def entry_label(s, text) -> str:
+    """The name of the entry that opens the requests, with its number: "Your
+    requests (2)", "Requests (3)" for managers (its number red while one
+    couldn't be sent)."""
+    number, danger = count(s)
+    label = text("requests_page") if manages(s) else text("your_requests")
+    if number:
+        label += " " + colored("({:,})".format(number), RED if danger else None)
+    return label
+
+
 def colored(text: str, color) -> str:
     return "[COLOR %s]%s[/COLOR]" % (color, text) if text and color else text or ""
 
