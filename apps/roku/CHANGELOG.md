@@ -8,6 +8,8 @@ describes how they are made.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-30
+
 ### Added
 
 - Live TV, where the server has channels, as TiviMate lays it out:
@@ -49,5 +51,6 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/roku-v0.0.1...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/roku-v0.1.0...HEAD
+[0.1.0]: https://github.com/pley-media-server/pley/releases/tag/roku-v0.1.0
 [0.0.1]: https://github.com/pley-media-server/pley/releases/tag/roku-v0.0.1
