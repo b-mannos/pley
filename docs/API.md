@@ -2353,7 +2353,8 @@ when another channel needs the connection).
 | DELETE | `/api/live/sources/{id}` | `admin` | `204`, with its channels |
 | POST | `/api/live/sources/{id}/refresh` | `admin` | `202`: reads its channels and guide again now |
 | GET | `/api/live/lineup` | `admin` | `?source_id=` → `LiveLineupChannel[]`, hidden ones too |
-| PATCH | `/api/live/lineup` | `admin` | `{ ids: Id[], groups?: string[], hidden?, name?, number?, guide_id? }` → `204`: those channels and every one of `groups`; `""` gives back the source's own value; 20,000 ids at most |
+| PATCH | `/api/live/lineup` | `admin` | `{ ids: Id[], groups?: string[], filter?: { source_id?, group?, state?, q? }, hidden?, name?, number?, guide_id? }` → `204`: those channels, every one of `groups` and every one `filter` keeps; `""` gives back the source's own value; 20,000 ids at most |
+| GET | `/api/live/lineup/page` | `admin` | `?source_id=&group=&state=all\|shown\|hidden\|no-guide\|offline&q=&offset=&limit=` → `{ total, hidden, offset, channels: LiveLineupChannel[] }`: a page of the lineup, filtered |
 | GET | `/api/live/lineup/groups` | `admin` | `(LiveGroup & { hidden, offline })[]`: every group, hidden and offline channels counted |
 | GET | `/api/live/tuners` | `admin` | `LiveTuner[]`: the channels being pulled and who watches them |
 | DELETE | `/api/live/tuners/{channel}` | `admin` | `204`: stops pulling the channel, for everyone watching it |
