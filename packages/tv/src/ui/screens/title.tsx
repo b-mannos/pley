@@ -15,6 +15,7 @@ import {
   requestsProblem,
   requestsTitle,
   seasonLine,
+  seasonStage,
   titleKey,
   TMDB_CREDIT,
   type Tone,
@@ -32,11 +33,13 @@ import { ArtTile, TileCaption, TILES } from "../kit/tile";
 import type { Entry } from "../shell/navigator";
 import { Message, problem, useApp, useAfterFrame, useLoad } from "./common";
 import { TitleMeta } from "./discover";
-import { askFor, keepTitle, RequestsMessage, stageOf, TitleActions, useMarks, usePoll, useTitleChanges } from "./request-kit";
+import { askFor, hours24, keepLastWords, keepTitle, RequestsMessage, TitleActions, useMarks, usePoll, useTitleChanges } from "./request-kit";
 
 /** The hero's section: 52 above it, the focused button's label and 8 below (as the item page). */
 const HERO_PAD = 52 + 23 + 8;
 const HERO_H = 380;
+/** A short hero still puts the first row's header at 400, so the row's captions start under the screen rather than cut at its foot. */
+const HERO_MIN = 372;
 const ROWS_LINE = 172;
 
 /** Whether a show's seasons may be picked to ask for now. */
@@ -167,7 +170,7 @@ function TitlePage(p: { entry: Entry; detail: DiscoverDetail; pick: boolean }) {
   };
   sections.push({
     key: "hero",
-    height: heroH,
+    height: Math.max(heroH, HERO_MIN),
     anchor: null,
     render: (onFocus) => [
       section !== "hero" && <div key="zone" class="hero-zone" onMouseMove={pointedAtHero} />,
@@ -196,7 +199,7 @@ function TitlePage(p: { entry: Entry; detail: DiscoverDetail; pick: boolean }) {
     const requests = d.requests ?? [];
     sections.push({
       key: "seasons",
-      height: rowHeight("poster"),
+      height: rowHeight("poster") + SEASON_STAGE_LINE,
       anchor: ROWS_LINE,
       render: (onFocus) => (
         <Row
@@ -213,12 +216,14 @@ function TitlePage(p: { entry: Entry; detail: DiscoverDetail; pick: boolean }) {
           tile={(x, _i, place) => {
             const r = x.request_id !== null ? requests.filter((q) => q.id === x.request_id)[0] ?? null : null;
             const badge = seasonBadge(x);
-            const caption = seasonCaption(x, r ? stageOf(app, r) : null);
+            const stage = r ? seasonStage(r, x.number, { manage: !!s?.manage, hours24: hours24(app) }) : null;
+            const caption = seasonCaption(x, stage);
             return (
               <SeasonTile
                 name={x.name || (x.number === 0 ? "Specials" : `Season ${x.number}`)}
                 line={caption.text}
                 lineTone={caption.tone}
+                progress={stage ? stage.progress : null}
                 badge={badge ? badge.text : null}
                 badgeTone={badge ? badge.tone : "gray"}
                 art={[x.poster_url, d.poster_url].filter((u): u is string => !!u)}
@@ -352,20 +357,25 @@ function TitleHero(p: {
   );
 }
 
-/** Under a season's name: a request's stage in its colour, else what it holds or when it airs. */
+/** Under a season's name: its own stage from its request in the stage's colour, else what it holds or when it airs. */
 function seasonCaption(s: DiscoverSeason, stage: { text: string; tone: Tone } | null): { text: string; tone: Tone | null } {
   if (stage) return { text: stage.text, tone: stage.tone };
   if (s.state === "unaired") return { text: seasonLine(s), tone: null };
   return { text: s.episodes ? pluralize(s.episodes, "episode") : seasonLine(s), tone: null };
 }
 
-/** A season as a poster: its state's badge on it, its name, and its stage or episodes under it. */
+/** A season's stage may take a second line under its name ("Waiting for / approval"). */
+const SEASON_STAGE_LINE = 17;
+
+/** A season as a poster: its state's badge and a download's progress on it, its name, and its stage (whole) or episodes under it. */
 const SeasonTile = memo(SeasonTileView, ["priority"]);
 
 function SeasonTileView(p: {
   name: string;
   line: string;
   lineTone: Tone | null;
+  /** The download's bar on the poster, 0–1, while the season downloads. */
+  progress: number | null;
   badge: string | null;
   badgeTone: Tone;
   art: string[];
@@ -375,20 +385,37 @@ function SeasonTileView(p: {
   onSelect: () => void;
 }) {
   const spec = TILES.poster;
+  const [first, ...rest] = p.line.split(" · ");
   return (
     <F class="tile" style={`width:${spec.w}px`} fid={p.fid} label={[p.name, p.badge, p.line].filter(Boolean).join(", ")} onSelect={p.onSelect} onFocus={p.onFocus}>
       <div class="tile-well" style={`width:${spec.w}px;height:${spec.h}px`}>
         <div class="tile-clip">
           <Art candidates={p.art} width={spec.w} title={p.name} showTitle class="tile-clip" priority={p.priority} />
           <div class="tile-hairline" />
+          {p.progress !== null && (
+            <div class="tile-progress">
+              <div style={`width:${(Math.max(0, Math.min(1, p.progress)) * 100).toFixed(1)}%`} />
+            </div>
+          )}
           {p.badge && <div class={`title-badge t-badge tone-${p.badgeTone}`}>{p.badge}</div>}
         </div>
         <div class="tile-ring" />
       </div>
       {p.lineTone ? (
-        <div class="tile-caption" aria-hidden="true">
+        <div class="tile-caption season-caption" aria-hidden="true">
           <div class="title t-caption one-line">{p.name}</div>
-          <div class={`sub t-caption one-line tone-text-${p.lineTone}`}>{p.line}</div>
+          <div class={`sub t-caption lines-2 tone-text-${p.lineTone}`}>
+            {/* A download's time comes on the second line ("Downloading 70%" / "in 2 hours"), not after a dot that wrapped. */}
+            {rest.length ? (
+              <>
+                {first}
+                <br />
+                {rest.join(" · ")}
+              </>
+            ) : (
+              p.line
+            )}
+          </div>
         </div>
       ) : (
         <TileCaption title={p.name} subtitle={p.line} />
@@ -439,6 +466,7 @@ export function SeasonPicker(p: { detail: DiscoverDetail; start: number | null; 
         seasons_next_at: d.seasons_next_at,
         movies_limit: s?.movies_limit ?? null,
         seasons_limit: s?.seasons_limit ?? null,
+        kind: "show",
       })
     : null;
   return (
@@ -463,9 +491,17 @@ export function SeasonPicker(p: { detail: DiscoverDetail; start: number | null; 
       })}
       {lines && (
         <div class="picker-note t-caption c-muted">
-          {lines.map((l) => (
-            <div key={l}>{l}</div>
-          ))}
+          {lines.map((l, i) =>
+            // More ticked than may be asked for: the line saying how many may, by the button it turned off, stands out.
+            over && i === 0 ? (
+              <div key={l} class="picker-over">
+                <Icon name="circle-alert" size={14} />
+                <span>{keepLastWords(l)}</span>
+              </div>
+            ) : (
+              <div key={l}>{keepLastWords(l)}</div>
+            ),
+          )}
         </div>
       )}
       <G kind="row" class="picker-foot">

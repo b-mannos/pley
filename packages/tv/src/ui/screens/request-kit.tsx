@@ -75,6 +75,17 @@ export function DownloadBar(p: { progress: number; width?: number }) {
   );
 }
 
+/** A stage with a download's bar under it, as wide as its pill: beside a title's button, at a card's end. */
+export function StageBlock(p: { words: StageWords }) {
+  const bar = p.words.progress !== null;
+  return (
+    <div class={`stage-block${bar ? " with-bar" : ""}`}>
+      <StagePill words={p.words} />
+      {bar && <DownloadBar progress={p.words.progress!} />}
+    </div>
+  );
+}
+
 /** A request's stage under a library title's facts: the pill, and a download's bar beside it. */
 export function ItemRequestLine(p: { request: MediaRequest }) {
   const app = useApp();
@@ -280,11 +291,12 @@ export function useTitleChanges(key: string): number {
 }
 
 /**
- * A title's one main action (§9a) as buttons, then what it says under
- * them: the stage pill beside [Requested] or [Following], the download's
- * bar, the allowance when nothing is left to ask for, why it can't be
- * asked for. Focus that was on a button that went (the title was just
- * asked for) goes to the row's first.
+ * A title's one main action (§9a) as buttons, with the stage and a
+ * download's bar beside [Requested] or [Following], then what it says
+ * under them: the stage's line, the allowance (for the title's kind) when
+ * nothing is left to ask for, why it can't be asked for. Focus that was
+ * on a button that went (the title was just asked for) goes to the row's
+ * first.
  */
 export function TitleActions(p: {
   /** The details; `null` while they load (the list's title stands in, never with Tell me too). */
@@ -297,6 +309,8 @@ export function TitleActions(p: {
   onFocus?: () => void;
   /** Buttons after the main action's; `initial`: none of the main action's takes focus first, so one of these does. */
   extra?: (initial: boolean) => ComponentChildren;
+  /** Discover's hero, which has room for little: the first of what it says, above the buttons. */
+  compact?: boolean;
   class?: string;
 }) {
   const app = useApp();
@@ -350,6 +364,7 @@ export function TitleActions(p: {
       seasons_next_at: left?.seasons_next_at ?? null,
       movies_limit: s?.movies_limit ?? null,
       seasons_limit: s?.seasons_limit ?? null,
+      kind: t.kind,
     });
     for (const line of lines ?? []) notes.push({ text: line });
   };
@@ -426,25 +441,42 @@ export function TitleActions(p: {
       break;
   }
 
+  // The stage's own line comes first: it says more of the pill beside the button.
+  if (stage && stage.note) notes.unshift({ text: stage.note });
+  const said = p.compact ? notes.slice(0, 1) : notes;
+  // With no button of the main action's, what it says stands in its place, over the other buttons.
+  const above = p.compact || !buttons.length;
+  const words = said.length ? (
+    <div class={`title-notes t-body${above ? " above" : ""}`}>
+      {said.map((n, i) => (
+        <div key={i} class={`title-note${n.tone === "danger" ? " danger" : ""}`}>
+          {n.icon && <Icon name={n.icon} size={16} />}
+          <span class="lines-2">{keepLastWords(n.text)}</span>
+        </div>
+      ))}
+    </div>
+  ) : null;
   return (
     <>
+      {above && words}
       <G kind="row" restore class={`buttons ${p.class ?? ""}`} elRef={(el) => (group.current = el)}>
         {buttons}
-        {stage && <StagePill key="stage" words={stage} />}
+        {stage && <StageBlock key="stage" words={stage} />}
         {after}
         {p.extra?.(!!p.initial && !claimed)}
       </G>
-      {stage && stage.progress !== null && <DownloadBar progress={stage.progress} width={240} />}
-      {stage && stage.note && <div class="title-note t-caption c-muted lines-2">{stage.note}</div>}
-      {notes.map((n, i) => (
-        <div key={i} class={`title-note t-body${n.tone === "danger" ? " c-danger" : " c-muted"}`}>
-          {n.icon && <Icon name={n.icon} size={16} />}
-          <span class="lines-2">{n.text}</span>
-        </div>
-      ))}
+      {!above && words}
       {signIn && <SignInAgainDialog onClose={() => setSignIn(false)} />}
     </>
   );
+}
+
+const NO_BREAK_SPACE = String.fromCharCode(0xa0);
+
+/** A line's last two words kept together, so a wrapped line never ends with one word alone ("… in 3" / "days."). */
+export function keepLastWords(text: string): string {
+  const at = text.lastIndexOf(" ");
+  return at > 0 ? text.slice(0, at) + NO_BREAK_SPACE + text.slice(at + 1) : text;
 }
 
 /** Signing in again, so the TV may ask (or decide): signed out here, and a new code to link it. */

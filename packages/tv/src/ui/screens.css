@@ -805,10 +805,14 @@
 .stage-pill.small { height: 22px; padding: 0 10px 0 8px; border-radius: 11px; }
 .stage-dot { flex: none; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: currentColor; }
 .stage-pill.small .stage-dot { width: 6px; height: 6px; margin-right: 6px; }
-.buttons > .stage-pill { margin-top: 7px; }
 /* How much of a download is in: blue, as its stage. */
 .download-bar { height: 4px; margin-top: 8px; border-radius: 2px; background: rgba(233, 235, 239, 0.16); overflow: hidden; }
 .download-bar > div { height: 100%; border-radius: 2px; background: var(--info); }
+/* A stage with a download's bar 4 under it, as wide as the pill; beside a 40 px button, the two centred on it. */
+.stage-block { display: flex; flex-direction: column; align-items: flex-start; flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.stage-block > .download-bar { align-self: stretch; margin-top: 4px; }
+.buttons > .stage-block { margin-top: 7px; }
+.buttons > .stage-block.with-bar { margin-top: 3px; }
 /* A title's badge on its poster ("In library", "Requested"…), at the upper left. */
 .title-badge {
   position: absolute;
@@ -816,21 +820,30 @@
   top: 6px;
   max-width: calc(100% - 12px);
   height: 18px;
-  padding: 0 6px;
+  padding: 0 5px;
   box-sizing: border-box;
   border-radius: 2px;
   line-height: 18px;
+  /* "Partly in library" whole on a poster at every scale. */
+  letter-spacing: 0.2px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 /* News since Your requests was last looked at: an accent dot. */
 .tile-news { position: absolute; top: 8px; right: 8px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--on-art); }
-/* What a title's main action says under it: the allowance, why it can't be asked for, a stage's second line. */
-.title-note { display: flex; align-items: flex-start; max-width: 464px; margin-top: 10px; }
-.title-note > .icon { margin: 2px 8px 0 0; }
-.hero-buttons > .download-bar,
-.item-buttons > .download-bar { margin-top: 4px; }
+/*
+ * What a title's main action says under it, muted and close together: a
+ * stage's line, the allowance, why it can't be asked for (its icon in the
+ * danger colour once declined). Over the buttons where no button of the
+ * main action's shows, and on Discover's hero (the first of it only).
+ */
+.title-notes { max-width: 464px; margin-top: 12px; color: var(--muted); }
+.title-notes.above { margin: 0 0 14px; }
+.title-note { display: flex; align-items: flex-start; }
+.title-note + .title-note { margin-top: 4px; }
+.title-note > .icon { flex: none; margin: 2px 8px 0 0; }
+.title-note.danger > .icon { color: var(--danger-text); }
 /* A library title's request under its facts: the stage, a download's bar beside it. */
 .item-request { display: flex; align-items: center; margin-top: 10px; }
 .item-request > .download-bar { flex: none; margin: 0 0 0 12px; }
@@ -877,9 +890,13 @@
 
 /* No backdrop on TMDB: the poster stands at the right of the hero. */
 .title-poster { position: absolute; left: 664px; top: 52px; width: 200px; height: 300px; border-radius: 6px; overflow: hidden; background: var(--surface2); }
+/* A season's name, and its stage whole on up to two lines under it. */
+.tile-caption.season-caption { height: 51px; }
 .picker-for { padding: 0 0 8px 16px; }
 .picker-note { padding: 8px 16px 0; }
 .picker-note > * + * { margin-top: 4px; }
+.picker-over { display: flex; align-items: flex-start; color: var(--fg); }
+.picker-over > .icon { flex: none; margin: 1px 6px 0 0; color: var(--warning); }
 .picker-foot { padding: 16px 16px 8px; }
 /* A season's tick box at its row's end. */
 .tick {
@@ -903,6 +920,8 @@
 .requests-page { position: absolute; left: 0; top: 0; width: 960px; height: 540px; overflow: hidden; }
 .requests-tabs { position: absolute; left: 96px; right: 48px; top: 76px; display: flex; }
 .requests-tabs > * + * { margin-left: 8px; }
+/* Seven of them, counts and all, inside the page's edge. */
+.requests-tabs .tab { padding: 0 12px; }
 .tab-count {
   min-width: 20px;
   height: 20px;
@@ -920,12 +939,28 @@
 .tab[data-focused] .tab-count { background: rgba(3, 19, 31, 0.16); color: var(--on-accent); }
 .requests-filters { position: absolute; left: 96px; right: 48px; top: 124px; height: 44px; display: flex; align-items: center; }
 .requests-filters > * + * { margin-left: 10px; }
+/* The title field as high as the chips beside it. */
+.requests-filters .field { height: 40px; }
 .requests-signin { flex: 0 1 auto; min-width: 0; }
 /* The list scrolls under the tabs (and filters), the full width so a focused card's ring is never cut. */
 .requests-viewport { position: absolute; left: 0; right: 0; bottom: 0; overflow: hidden; }
 .requests-viewport .scroll-y { padding-bottom: 27px; }
 .requests-list { padding: 8px 48px 0 96px; }
 .requests-more { padding: 4px 48px 0 96px; }
+/* More below: the list fades out over its last 40 px, rather than a card ending in a hard cut at the screen's foot. */
+.requests-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 40px;
+  background: linear-gradient(rgba(11, 13, 16, 0), var(--bg));
+  opacity: 0;
+  transition: opacity 150ms linear;
+  pointer-events: none;
+}
+.requests-fade.shown { opacity: 1; }
+.reduced .requests-fade { transition: none; }
 .requests-note { position: absolute; left: 96px; right: 48px; }
 /* A request: its poster, its words, its stage at the right; focus lifts it with the tiles' ring. */
 .request-card {
@@ -967,7 +1002,8 @@
 .request-text .sub { margin-top: 3px; color: var(--muted); }
 .request-text .note { margin-top: 2px; color: var(--subtle); }
 .request-year { color: var(--muted); font-weight: 500; }
-.request-stage { flex: none; width: 220px; display: flex; flex-direction: column; align-items: flex-end; }
+.request-stage { flex: none; width: 260px; display: flex; flex-direction: column; align-items: flex-end; }
+.request-stage > .stage-block { align-items: flex-end; }
 .panel-request { padding: 4px 16px 12px; }
 .panel-request .download-bar { margin-top: 10px; }
 .panel-request > .t-caption + .t-caption { margin-top: 2px; }

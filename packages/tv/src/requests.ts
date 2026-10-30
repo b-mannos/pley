@@ -395,6 +395,8 @@ export interface Allowance {
   seasons_next_at: number | null;
   movies_limit?: number | null;
   seasons_limit?: number | null;
+  /** What is being asked for: its lines alone (a movie's page says nothing of seasons). */
+  kind?: TitleKind;
 }
 
 /**
@@ -402,7 +404,8 @@ export interface Allowance {
  * ("per 7 days": they're a rolling week, never "this week"); `null`
  * without limits.
  */
-export function allowanceLines(a: Allowance, now = Date.now()): string[] | null {
+export function allowanceLines(given: Allowance, now = Date.now()): string[] | null {
+  const a = given.kind ? allowanceFor(given, given.kind) : given;
   const m = a.movies_left;
   const s = a.seasons_left;
   if (m === null && s === null) return null;
@@ -429,6 +432,13 @@ export function allowanceLines(a: Allowance, now = Date.now()): string[] | null 
   return lines;
 }
 
+/** The allowance of one kind: the other's counts and limit left out. */
+function allowanceFor(a: Allowance, kind: TitleKind): Allowance {
+  return kind === "movie"
+    ? { ...a, seasons_left: null, seasons_next_at: null, seasons_limit: null }
+    : { ...a, movies_left: null, movies_next_at: null, movies_limit: null };
+}
+
 // ---- a request's stage
 
 /** The stage pill's colour: waiting for a decision, on its way, ready, refused or failed, gone. */
@@ -439,7 +449,7 @@ export interface StageWords {
   tone: Tone;
   /** The download bar, 0–1, while something downloads. */
   progress: number | null;
-  /** A second line ("Trying again in 5 min."). */
+  /** A line under it: why it couldn't be sent (managers), "Trying again in 5 min.". */
   note: string | null;
 }
 
@@ -453,7 +463,8 @@ export function stageWords(r: MediaRequest, opts: { manage: boolean; hours24: bo
       return words("Declined", "red", null, r.reason ? `“${r.reason.trim()}”` : null);
     case "failed": {
       const retry = r.retry_at !== null ? `Trying again ${timeUntil(r.retry_at, now)}.` : null;
-      if (opts.manage) return words(r.reason ? `Couldn't send: ${r.reason.trim()}` : "Couldn't send", "red", null, retry);
+      // "Couldn't send: {reason}" in two parts, so a long reason is read whole under a short pill.
+      if (opts.manage) return words("Couldn't send", "red", null, [r.reason ? tidy(r.reason) : "", retry ?? ""].filter(Boolean).join(" ") || null);
       return words("Not sent yet", "red", null, retry ?? "It couldn't be sent to download yet: an administrator will look at it.");
     }
     case "approved":
@@ -510,6 +521,18 @@ function downloadWords(r: MediaRequest, now: number): StageWords {
   }
 }
 
+/**
+ * A season's own stage from the request asking for it: of a show's
+ * request partly ready, a season is ready, or downloads while the request
+ * does; `null` for one still to come with nothing downloading (its own
+ * state says the rest). Other stages are the request's.
+ */
+export function seasonStage(r: MediaRequest, season: number, opts: { manage: boolean; hours24: boolean }, now = Date.now()): StageWords | null {
+  if (r.stage !== "partial") return stageWords(r, opts, now);
+  if ((r.available_seasons ?? []).indexOf(season) >= 0) return { text: "Ready to watch", tone: "green", progress: null, note: null };
+  return r.download ? downloadWords(r, now) : null;
+}
+
 /** Something on the list downloads or goes into the library: the list is asked for again every 10 s. */
 export function moving(list: MediaRequest[]): boolean {
   return list.some((r) => r.stage === "downloading" || r.stage === "importing" || (r.stage === "partial" && !!r.download));
@@ -522,6 +545,11 @@ export function askedLine(r: MediaRequest, manage: boolean, now = Date.now()): s
   if (r.watching && !r.mine) parts.unshift("You follow it");
   if (manage && r.watchers > 0) parts.push(`${r.watchers} following`);
   return parts.join(" · ");
+}
+
+/** What the server tells managers of a request ("In Movies 4K, which Ann can't open."), a sentence as the stage's line is. */
+export function requestNote(r: MediaRequest): string | null {
+  return r.note && r.note.trim() ? tidy(r.note) : null;
 }
 
 // ---- a request's actions

@@ -31,6 +31,8 @@ import type { Entry, PageKey } from "../../src/ui/shell/navigator";
 const NOW = new Date(2026, 9, 30, 12, 0, 0).getTime();
 const AT = Math.floor(NOW / 1000);
 const DAY = 86_400;
+/** What keeps a line's last two words together. */
+const NBSP = String.fromCharCode(0xa0);
 
 function memoryStore(): KeyValue {
   const kept = new Map<string, string>();
@@ -313,12 +315,28 @@ describe("a title's page", () => {
     expect(t.fid()).toBe("more");
   });
 
-  it("says why a declined title can't be asked for, with no button, and gives focus to the requests", async () => {
+  it("turns the picker's button off when more seasons are ticked than may be asked for, and says how many may", async () => {
+    const d = show([season(1, "missing"), season(2, "missing"), season(3, "missing")], { seasons_left: 2 });
+    const t = mount((entry) => <TitleScreen entry={entry} kind="show" tmdbId={20} />, { discoverTitle: () => Promise.resolve(d) }, summary({ seasons_left: 2, seasons_limit: 10 }));
+    await t.settle();
+    t.press("ok");
+    // As many ticked as may be asked for: nothing to say yet.
+    expect(t.el("pick/ask")!.textContent).toBe("Request 2 seasons");
+    expect(document.querySelector(".picker-note")).toBeNull();
+    t.select("pick/3");
+    expect(t.el("pick/ask")!.hasAttribute("data-fdisabled")).toBe(true);
+    expect(t.text(".picker-over")).toEqual([`You can ask for 2 more${NBSP}seasons.`]);
+    expect(t.text(".picker-note > div")).toEqual([`You can ask for 2 more${NBSP}seasons.`, `Limits: 10 seasons per 7${NBSP}days.`]);
+  });
+
+  it("says why a declined title can't be asked for, with no button, over the other buttons, and gives focus to the requests", async () => {
     const d = detail({ status: "declined", declined: { reason: "Not this one.", at: AT - DAY, again_at: AT + 12 * DAY } });
     const t = mount((entry) => <TitleScreen entry={entry} kind="movie" tmdbId={10} />, { discoverTitle: () => Promise.resolve(d) }, summary({ own: 1 }));
     await t.settle();
     expect(t.el("main")).toBeNull();
-    expect(t.text(".title-page .title-note")).toEqual(["Declined: “Not this one”. You can ask again in 12 days."]);
+    // Its last two words kept together, so the line never ends with one alone.
+    expect(t.text(".title-page .title-note")).toEqual([`Declined: “Not this one”. You can ask again in 12${NBSP}days.`]);
+    expect(document.querySelector(".title-page .title-notes")!.nextElementSibling!.classList.contains("buttons")).toBe(true);
     expect(t.fid()).toBe("requests");
   });
 
@@ -327,7 +345,9 @@ describe("a title's page", () => {
     const t = mount((entry) => <TitleScreen entry={entry} kind="movie" tmdbId={10} />, { discoverTitle: () => Promise.resolve(d) }, summary({ movies_left: 0, movies_limit: 3, movies_next_at: AT + 3 * DAY }));
     await t.settle();
     expect(t.el("main")!.hasAttribute("data-fdisabled")).toBe(true);
-    expect(t.text(".title-page .title-note")).toEqual(["You've asked for all the movies you can for now: you can ask for more in 3 days.", "Limits: 3 movies per 7 days."]);
+    expect(t.text(".title-page .title-note")).toEqual([`You've asked for all the movies you can for now: you can ask for more in 3${NBSP}days.`, `Limits: 3 movies per 7${NBSP}days.`]);
+    // Under the disabled button, as what it says of it.
+    expect(document.querySelector(".title-page .title-notes")!.previousElementSibling!.classList.contains("buttons")).toBe(true);
     // The remote isn't dead: the requests take focus.
     expect(t.fid()).toBe("requests");
   });
@@ -385,6 +405,15 @@ describe("a title's page", () => {
     t.advance(60_000);
     await t.settle();
     expect(asked).toBe(calls);
+  });
+
+  it("puts a season's download time on its own line under its name, without the dot", async () => {
+    const r = request({ id: 5, kind: "show", tmdb_id: 20, title: "Severance", seasons: [2], status: "approved", stage: "downloading", download: { progress: 0.7, state: "downloading", eta: AT + 2 * 3600, episodes: 10 } });
+    const d = show([season(1, "library"), season(2, "requested", { request_id: 5 })], { status: "partial", item_id: 7, requests: [r] });
+    const t = mount((entry) => <TitleScreen entry={entry} kind="show" tmdbId={20} />, { discoverTitle: () => Promise.resolve(d) }, summary());
+    await t.settle();
+    expect(document.querySelector('[data-fid="season/2"] .season-caption .sub')!.innerHTML).toBe("Downloading 70%<br>in 2 hours");
+    expect(t.el("season/2")!.getAttribute("aria-label")).toBe("Season 2, Requested, Downloading 70% · in 2 hours");
   });
 });
 
@@ -531,7 +560,7 @@ describe("the requests", () => {
     expect(t.text(".requests-note .t-section")).toEqual(["No requests need attention."]);
   });
 
-  it("withdraws one's own request once asked in the panel; Back from the question goes back to the actions", async () => {
+  it("withdraws one's own request once asked in the panel; Cancel, first, and Back go back to the actions", async () => {
     let all = [request({ id: 1, actions: ["withdraw"] }), request({ id: 2, tmdb_id: 11, title: "Dune", actions: ["withdraw"] })];
     const deleted: number[] = [];
     const t = mount(
@@ -554,15 +583,39 @@ describe("the requests", () => {
     t.press("ok");
     t.select("action/withdraw");
     expect(t.text(".side-panel .panel-title")).toEqual(["Withdraw your request for “Arrival”?"]);
-    expect(t.fid()).toBe("confirm");
+    // OK pressed twice withdraws nothing.
+    expect(t.fid()).toBe("cancel");
+    t.press("ok");
+    expect(t.fid()).toBe("action/withdraw");
+    expect(deleted).toEqual([]);
+    t.press("ok");
     t.press("back");
     expect(t.fid()).toBe("action/withdraw");
     t.press("ok");
+    t.press("down");
+    expect(t.fid()).toBe("confirm");
     t.press("ok");
     await t.settle();
     expect(deleted).toEqual([1]);
     expect(t.toasts).toEqual(["Withdrew your request for “Arrival”."]);
     expect(t.fid()).toBe("req/2");
+  });
+
+  it("fades out at the screen's foot while cards are below it, and not once the last is in view", async () => {
+    const all = [1, 2, 3, 4, 5, 6].map((id) => request({ id, tmdb_id: 10 + id, title: `Title ${id}` }));
+    const t = mount(
+      (entry) => <RequestsScreen entry={entry} />,
+      { requests: () => Promise.resolve(list(all)), markRequestsSeen: () => Promise.resolve() },
+      summary({ own: 6 }),
+      { name: "requests" },
+    );
+    await t.settle();
+    const fading = () => document.querySelector(".requests-fade")!.classList.contains("shown");
+    expect(t.fid()).toBe("req/1");
+    expect(fading()).toBe(true);
+    for (let i = 0; i < 5; i++) t.press("down");
+    expect(t.fid()).toBe("req/6");
+    expect(fading()).toBe(false);
   });
 });
 

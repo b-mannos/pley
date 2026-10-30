@@ -137,7 +137,8 @@ function NoticeCard(p: { notice: RequestNotice; onDone: (open: boolean) => void;
           </div>
         )}
         <div class="request-notice-text">
-          <Icon name="circle-check" size={20} color="var(--success)" />
+          {/* The poster says which title it is; without one, a tick says it's good news. */}
+          {!p.notice.poster && <Icon name="circle-check" size={20} color="var(--success)" />}
           <div class="t-label lines-3 c-fg">{p.notice.text}</div>
         </div>
       </div>

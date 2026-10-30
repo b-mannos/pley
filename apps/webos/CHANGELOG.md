@@ -68,6 +68,8 @@ describes how they are made.
   only on a network the TV measured below 1.5 times the file's bitrate in
   the last 2 minutes, or, where it measured nothing, the second such wait
   within 5 minutes.
+- The search field no longer shows a small cross at its end while you
+  type, one the remote's arrows can't reach.
 
 ## [0.0.1] - 2026-10-29
 

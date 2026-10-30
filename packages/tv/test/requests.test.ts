@@ -18,10 +18,12 @@ import {
   preselected,
   problemWords,
   readyText,
+  requestNote,
   requestsCount,
   requestsProblem,
   seasonLine,
   seasonsLabel,
+  seasonStage,
   stageWords,
   statusFromRequest,
   titleBadge,
@@ -330,7 +332,9 @@ describe("a request's stage", () => {
 
   it("tells managers why sending failed, and everyone else that an administrator will look", () => {
     const failed = request({ status: "failed", stage: "failed", reason: "Radarr isn't answering" });
-    expect(stageWords(failed, { manage: true, hours24: true }, NOW)).toMatchObject({ text: "Couldn't send: Radarr isn't answering", tone: "red" });
+    // "Couldn't send: {reason}" in two parts: the pill, and the reason whole under it.
+    expect(stageWords(failed, { manage: true, hours24: true }, NOW)).toMatchObject({ text: "Couldn't send", tone: "red", note: "Radarr isn't answering." });
+    expect(stageWords({ ...failed, retry_at: AT + 5 * MIN }, { manage: true, hours24: true }, NOW).note).toBe("Radarr isn't answering. Trying again in 5 min.");
     expect(stageWords({ ...failed, reason: null }, opts, NOW)).toMatchObject({
       text: "Not sent yet",
       note: "It couldn't be sent to download yet: an administrator will look at it.",
@@ -338,10 +342,26 @@ describe("a request's stage", () => {
     expect(stageWords({ ...failed, reason: null, retry_at: AT + 5 * MIN }, opts, NOW).note).toBe("Trying again in 5 min.");
   });
 
+  it("gives managers the server's note as a sentence, as the stage's line beside it is", () => {
+    expect(requestNote(request({ note: "In Movies 4K, which Ann can't open" }))).toBe("In Movies 4K, which Ann can't open.");
+    expect(requestNote(request({ note: "Radarr has the file, but no library has it: is its folder in one?" }))).toBe("Radarr has the file, but no library has it: is its folder in one?");
+    expect(requestNote(request({ note: " " }))).toBeNull();
+    expect(requestNote(request())).toBeNull();
+  });
+
   it("says where a follower can't open what is ready", () => {
     expect(stageWords(request({ status: "available", stage: "available", item_id: null, mine: false, watching: true }), opts, NOW).note).toBe(
       "Ready, in a library you can't open: ask an administrator",
     );
+  });
+
+  it("is each season's own while a show's request is partly ready", () => {
+    const download = { progress: 0.7, state: "downloading" as const, eta: AT + 2 * HOUR, episodes: 8 };
+    const partial = request({ kind: "show", status: "approved", stage: "partial", seasons: [3, 4], available_seasons: [3], download });
+    expect(seasonStage(partial, 3, opts, NOW)).toEqual({ text: "Ready to watch", tone: "green", progress: null, note: null });
+    expect(seasonStage(partial, 4, opts, NOW)).toEqual({ text: "Downloading 70% · in 2 hours", tone: "blue", progress: 0.7, note: null });
+    expect(seasonStage({ ...partial, download: null }, 4, opts, NOW)).toBeNull();
+    expect(seasonStage(request({ kind: "show", stage: "pending", seasons: [3, 4] }), 4, opts, NOW)).toMatchObject({ text: "Waiting for approval", tone: "amber" });
   });
 });
 
@@ -381,6 +401,19 @@ describe("what may still be asked for", () => {
   it("says when for each once both are", () => {
     const a = { movies_left: 0, seasons_left: 0, movies_next_at: AT + 3 * DAY, seasons_next_at: AT + 5 * DAY };
     expect(allowanceLines(a, NOW)).toEqual(["You've asked for all you can for now: more movies in 3 days, more seasons in 5 days."]);
+  });
+
+  it("says only what a title's kind is asked within", () => {
+    const a = { movies_left: 0, seasons_left: 0, movies_next_at: AT + 3 * DAY, seasons_next_at: AT + 5 * DAY, movies_limit: 3, seasons_limit: 10 };
+    expect(allowanceLines({ ...a, kind: "movie" }, NOW)).toEqual([
+      "You've asked for all the movies you can for now: you can ask for more in 3 days.",
+      "Limits: 3 movies per 7 days.",
+    ]);
+    expect(allowanceLines({ ...a, kind: "show" }, NOW)).toEqual([
+      "You've asked for all the seasons you can for now: you can ask for more in 5 days.",
+      "Limits: 10 seasons per 7 days.",
+    ]);
+    expect(allowanceLines({ ...a, movies_left: null, movies_next_at: null, kind: "movie" }, NOW)).toBeNull();
   });
 
   it("is nothing without limits", () => {

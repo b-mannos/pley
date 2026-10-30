@@ -10,6 +10,7 @@ import {
   mayAsk,
   moving,
   problemWords,
+  requestNote,
   requestsEmpty,
   requestsProblem,
   requestsQuery,
@@ -35,7 +36,7 @@ import { memo } from "../kit/memo";
 import { PanelTitle, SidePanel, useScrollToFocus } from "../kit/panel";
 import type { Entry } from "../shell/navigator";
 import { failedTitle, PageTitle, problem, useApp, useLoad } from "./common";
-import { askFor, DownloadBar, hours24, RequestsMessage, SignInAgainDialog, StagePill, summaryProblem, usePoll } from "./request-kit";
+import { askFor, DownloadBar, hours24, RequestsMessage, SignInAgainDialog, StageBlock, StagePill, summaryProblem, usePoll } from "./request-kit";
 
 /** Requests come 30 at a time, 30 more as focus nears the end, up to the 200 the server gives at once. */
 export const REQUESTS_PAGE = 30;
@@ -45,6 +46,10 @@ const FILTER_DEBOUNCE_MS = 400;
 /** The list starts under the tabs, or under the filters (or the line asking to sign in again). */
 const LIST_TOP = 128;
 const LIST_TOP_LOW = 178;
+/** A card and the gap under it: the list scrolls by whole cards. */
+const CARD_PITCH = 98;
+/** The line after the newest 200, under the last card. */
+const MORE_LINE = 4 + 17;
 /** Answers kept for the tabs and filters seen, so going back to one draws it at once. */
 const LISTS_KEPT = 8;
 
@@ -99,6 +104,8 @@ function RequestsPage(p: { entry: Entry }) {
   const [limit, setLimit] = useState<number>((entry.state.limit as number | undefined) ?? REQUESTS_PAGE);
   const [panel, setPanel] = useState<Panel>(null);
   const [signIn, setSignIn] = useState(false);
+  /** The card focus is on (or was last), which the list scrolls to. */
+  const [focusAt, setFocusAt] = useState<number>((entry.state.index as number | undefined) ?? 0);
   const f: RequestFilters = manage ? filters : { kind: null, userId: null, q: "" };
 
   const setTab = (t: RequestsTab) => {
@@ -107,6 +114,7 @@ function RequestsPage(p: { entry: Entry }) {
     entry.state.limit = REQUESTS_PAGE;
     entry.state.index = 0;
     setLimit(REQUESTS_PAGE);
+    setFocusAt(0);
     redraw((n) => n + 1);
   };
   const setFilters = (change: (f: RequestFilters) => RequestFilters) => {
@@ -118,6 +126,7 @@ function RequestsPage(p: { entry: Entry }) {
     entry.state.limit = REQUESTS_PAGE;
     entry.state.index = 0;
     setLimit(REQUESTS_PAGE);
+    setFocusAt(0);
   };
   // The title filter asks once typing pauses.
   useEffect(() => {
@@ -188,7 +197,15 @@ function RequestsPage(p: { entry: Entry }) {
   const hadFocus = useRef(false);
   const lowTop = manage || s?.sign_in_again === "approvals";
   const listTop = lowTop ? LIST_TOP_LOW : LIST_TOP;
-  const shift = useScrollToFocus(listBox, 540 - listTop);
+  const scrolled = useScrollToFocus(listBox, 540 - listTop);
+  const moreLine = !!list && list.total > list.requests.length && limit >= REQUESTS_MAX;
+  // By whole cards, the one above the focused in view, so none shows cut under the tabs; no further than the last needs.
+  // The pointer's nudges stay as they are.
+  const lastFits = Math.ceil((CARD_PITCH * (shown.length + (moreLine ? 1 : 0)) + 6 - (540 - listTop)) / CARD_PITCH);
+  const shift = ui.focus.byPointer ? scrolled : CARD_PITCH * Math.max(0, Math.min(focusAt - 1, lastFits));
+  // A card (or the line after the last) cut at the screen's foot: the list fades out there, as it goes on.
+  const listEnd = 8 + CARD_PITCH * shown.length - 10 + (moreLine ? MORE_LINE : 0);
+  const goesOn = listEnd - shift > 540 - listTop;
 
   const focusIn = (box: HTMLElement | null, selector = "[data-f]:not([data-fdisabled])") => {
     const el = box?.querySelector<HTMLElement>(selector) ?? null;
@@ -226,6 +243,7 @@ function RequestsPage(p: { entry: Entry }) {
     if (i < 0) return;
     index.current = i;
     entry.state.index = i;
+    setFocusAt(i);
     // Five from the end: 30 more, while the server has more.
     if (!list || i < shown.length - 5 || list.total <= list.requests.length || limit > list.requests.length || limit >= REQUESTS_MAX) return;
     const next = Math.min(REQUESTS_MAX, list.requests.length + REQUESTS_PAGE);
@@ -282,7 +300,8 @@ function RequestsPage(p: { entry: Entry }) {
   if (why && problemWords(why, manage)) return <RequestsMessage problem={why} title="Couldn't load the requests" onRetry={load.reload} />;
 
   const h24 = hours24(app);
-  const findSome = mayAsk(s) && tab === "all" && !manage && !f.kind && f.userId === null && !f.q;
+  const filtered = !!(f.kind || f.userId !== null || f.q);
+  const findSome = mayAsk(s) && tab === "all" && !manage && !filtered;
   let body;
   if (!list) {
     body = load.error ? (
@@ -291,7 +310,6 @@ function RequestsPage(p: { entry: Entry }) {
       <CardSkeletons top={listTop} />
     );
   } else if (!shown.length) {
-    const filtered = !!(f.kind || f.userId !== null || f.q);
     body = (
       <ListNote
         top={listTop}
@@ -326,13 +344,16 @@ function RequestsPage(p: { entry: Entry }) {
               />
             ))}
           </G>
-          {list.total > list.requests.length && limit >= REQUESTS_MAX && <div class="requests-more t-caption c-muted">The newest 200 show here: filter to find the others.</div>}
+          {moreLine && <div class="requests-more t-caption c-muted">The newest 200 show here: filter to find the others.</div>}
         </div>
+        <div class={`requests-fade${goesOn ? " shown" : ""}`} />
       </div>
     );
   }
 
   const counts = list?.counts ?? null;
+  // Filtered, Needs attention counts what its list holds (the summary's number is everyone's): known while it shows.
+  const count = (t: RequestsTab) => (t === "attention" && filtered ? (tab === "attention" && list ? list.total : null) : tabCount(t, counts, s));
   return (
     <div ref={page} class="requests-page">
       <PageTitle>{requestsTitle(s)}</PageTitle>
@@ -351,7 +372,7 @@ function RequestsPage(p: { entry: Entry }) {
             key={t.tab}
             fid={`tab/${t.tab}`}
             label={t.label}
-            count={tabCount(t.tab, counts, s)}
+            count={count(t.tab)}
             shown={t.tab === tab}
             initial={t.tab === tab && !!list && !shown.length && !findSome}
             onSelect={() => setTab(t.tab)}
@@ -476,13 +497,13 @@ function RequestCardView(p: {
   const stage = stageWords(r, { manage: p.manage, hours24: p.hours24 });
   const what = requestWhat(r);
   const asked = askedLine(r, p.manage);
-  const note = [stage.note, p.manage ? r.note : null].filter(Boolean).join(" · ");
+  const note = [stage.note, p.manage ? requestNote(r) : null].filter(Boolean).join(" ");
   return (
     <F
       class="request-card"
       fid={p.fid}
       initial={p.initial}
-      label={[r.title, r.year ? String(r.year) : "", what, stage.text, asked, p.news ? "New" : ""].filter(Boolean).join(", ")}
+      label={[r.title, r.year ? String(r.year) : "", what, stage.text, note, asked, p.news ? "New" : ""].filter(Boolean).join(", ")}
       onFocus={p.onFocus}
       onSelect={p.onSelect}
     >
@@ -499,8 +520,7 @@ function RequestCardView(p: {
         {note && <div class="t-caption one-line note">{note}</div>}
       </div>
       <div class="request-stage">
-        <StagePill words={stage} />
-        {stage.progress !== null && <DownloadBar progress={stage.progress} width={180} />}
+        <StageBlock words={stage} />
       </div>
       <div class="card-ring" />
     </F>
@@ -580,12 +600,13 @@ export function RequestPanel(p: { request: MediaRequest; manage: boolean; onClos
   let content;
   if (step.kind === "confirm") {
     const c = step.row.confirm!;
+    // Cancel first, as the app's other questions: OK pressed twice undoes nothing.
     content = (
       <>
         <PanelTitle>{c.title}</PanelTitle>
         {c.body && <div class="panel-text t-body c-muted">{c.body}</div>}
-        <PanelRow fid="confirm" label={c.button} icon={ACTION_ICONS[step.row.id]} danger={step.row.danger} initial onSelect={() => p.onAction(r, step.row.id)} />
-        <PanelRow fid="cancel" label="Cancel" onSelect={back} />
+        <PanelRow fid="cancel" label="Cancel" icon="arrow-left" initial onSelect={back} />
+        <PanelRow fid="confirm" label={c.button} icon={ACTION_ICONS[step.row.id]} danger onSelect={() => p.onAction(r, step.row.id)} />
       </>
     );
   } else if (step.kind === "reason") {
@@ -610,13 +631,12 @@ export function RequestPanel(p: { request: MediaRequest; manage: boolean; onClos
           />
         </div>
         <PanelRow fid="decline" label="Decline" icon="ban" onSelect={() => p.onAction(r, "decline_reason", reason)} />
-        <PanelRow fid="cancel" label="Cancel" onSelect={back} />
+        <PanelRow fid="cancel" label="Cancel" icon="arrow-left" onSelect={back} />
       </>
     );
   } else {
     const stage = stageWords(r, { manage: p.manage, hours24: hours24(app) });
     const facts = [requestWhat(r), askedLine(r, p.manage)].join(" · ");
-    const note = [stage.note, p.manage ? r.note : null].filter(Boolean).join(" · ");
     const first = r.item_id !== null ? "open" : rows.length ? rows[0]!.id : "details";
     const initial = (id: string) => (last.current ? last.current === id : first === id);
     content = (
@@ -628,7 +648,8 @@ export function RequestPanel(p: { request: MediaRequest; manage: boolean; onClos
           <div class="t-caption c-muted lines-2" style="margin-top:8px">
             {facts}
           </div>
-          {note && <div class="t-caption c-muted lines-2">{note}</div>}
+          {stage.note && <div class="t-caption c-muted lines-3">{stage.note}</div>}
+          {p.manage && requestNote(r) && <div class="t-caption c-muted lines-2">{requestNote(r)}</div>}
         </div>
         {r.item_id !== null && (
           <PanelRow

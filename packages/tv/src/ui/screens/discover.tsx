@@ -43,9 +43,9 @@ const HERO_H = 356;
 const ROWS_ANCHOR = 172;
 /** TMDB is asked once typing pauses this long. */
 const SEARCH_DEBOUNCE_MS = 400;
-/** Discover's search results under its search field; See all's under the page's title. */
+/** Discover's search results under its search field, two rows whole on the screen; See all's under the page's title. */
 const RESULTS_CLIP = 84;
-const RESULTS_TOP = 108;
+const RESULTS_TOP = 96;
 const LIST_CLIP = 72;
 const LIST_TOP = 96;
 
@@ -125,11 +125,11 @@ export function usePages(
 type Focused = { title: DiscoverTitle } | { request: MediaRequest };
 
 /**
- * Discover (§9b): a hero for the first trending title with its main
- * action, then TMDB's rows of posters with their badges, then this
- * profile's requests; TMDB's search at the top, which shows its results
- * as a grid in place of the rows while it has words. Each row loads as it
- * comes near.
+ * Discover (§9b): a hero for the first trending title with a line of its
+ * overview and its main action, then TMDB's rows of posters with their
+ * badges, then this profile's requests; TMDB's search at the top, which
+ * shows its results as a grid in place of the rows while it has words.
+ * Each row loads as it comes near.
  */
 export function DiscoverScreen(p: { entry: Entry; query?: string }) {
   const app = useApp();
@@ -352,7 +352,8 @@ function DiscoverRows(p: { entry: Entry; inRows: boolean; setInRows: (v: boolean
     return <DiscoverSkeleton />;
   }
 
-  const inRow = (key: string, onFocus: () => void, f: Focused) => {
+  /** Focus in a row: on a title or request (`null`: on See all, which shows no info block, as on Home). */
+  const inRow = (key: string, onFocus: () => void, f: Focused | null) => {
     onFocus();
     setSection(key);
     entry.state.section = key;
@@ -400,7 +401,7 @@ function DiscoverRows(p: { entry: Entry; inRows: boolean; setInRows: (v: boolean
             onFocusIndex={(i) => {
               rowIndex[r.list] = i;
               const t = r.titles[i];
-              inRow(r.list, onFocus, t ? { title: t } : { title: r.titles[0]! });
+              inRow(r.list, onFocus, t ? { title: t } : null);
             }}
             tile={(t, _i, place) => (
               <TitleTile
@@ -437,7 +438,8 @@ function DiscoverRows(p: { entry: Entry; inRows: boolean; setInRows: (v: boolean
           onLeftEdge={ui.toRail}
           onFocusIndex={(i) => {
             rowIndex.mine = i;
-            inRow("mine", onFocus, { request: mineList[i] ?? mineList[0]! });
+            const r = mineList[i];
+            inRow("mine", onFocus, r ? { request: r } : null);
           }}
           tile={(r, _i, place) => {
             const w = stageOf(app, r);
@@ -479,6 +481,7 @@ function DiscoverFocus(p: { hero: DiscoverTitle; inRows: boolean; focused: Signa
   const shown = p.inRows ? rested : null;
   const t = shown && "title" in shown ? shown.title : null;
   const r = shown && "request" in shown ? shown.request : null;
+  const stage = r ? stageOf(app, r) : null;
   const picture = t ? t.backdrop_url : r ? r.backdrop_url : p.hero.backdrop_url;
   const name = t ? t.title : r ? r.title : p.hero.title;
   return (
@@ -500,15 +503,20 @@ function DiscoverFocus(p: { hero: DiscoverTitle; inRows: boolean; focused: Signa
             )}
           </>
         )}
-        {r && (
+        {r && stage && (
           <>
             <div class="meta-line" style="margin-top:10px;max-width:464px;height:auto">
-              <StagePill words={stageOf(app, r)} small />
+              <StagePill words={stage} small />
               {r.seasons && r.seasons.length > 0 && <span class="t-label c-muted one-line">{seasonsLabel(r.seasons)}</span>}
             </div>
             <div class="t-caption c-muted one-line" style="margin-top:8px">
               {askedLine(r, !!app.requests.value?.manage)}
             </div>
+            {stage.note && (
+              <div class="t-caption c-muted one-line" style="margin-top:2px">
+                {stage.note}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -561,13 +569,14 @@ function DiscoverHero(p: { title: DiscoverTitle; detail: DiscoverDetail | null; 
         <div style="margin-top:8px">
           <TitleMeta title={p.title} detail={p.detail} />
         </div>
-        {t.overview && <div class="t-body-large lines-2 hero-summary">{t.overview}</div>}
+        {t.overview && <div class="t-body-large one-line hero-summary">{t.overview}</div>}
         <div class="hero-buttons">
           <TitleActions
             detail={p.detail}
             title={p.title}
             fid={(n) => `hero/${n}`}
             initial
+            compact
             onFocus={p.onFocus}
             onPick={() => open(true)}
             extra={(initial) => <Round key="details" label="Details" icon="info" fid="hero/details" initial={initial} onFocus={p.onFocus} onSelect={() => open(false)} />}
