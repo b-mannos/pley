@@ -23,6 +23,7 @@ import app.pley.android.model.LiveChannelPage
 import app.pley.android.model.LiveGroups
 import app.pley.android.model.LiveGuide
 import app.pley.android.model.LiveSummary
+import app.pley.android.model.LivePlan
 import app.pley.android.model.LiveWatching
 import app.pley.android.model.ConversionInfo
 import app.pley.android.model.ConversionState
@@ -346,6 +347,8 @@ class FakePleyApi(val issuer: String = "http://127.0.0.1:7539") : PleyApi {
         val watching = fixture<LiveWatching>("live/watching.json")
         watching.copy(sessionId = "live-$channelId", url = "/api/live/sessions/live-$channelId/index.m3u8")
     }
+
+    override suspend fun livePlan(sessionId: String): LivePlan? = respond("livePlan", sessionId) { fixture<LivePlan>("live/plan.json") }
 
     override suspend fun leaveChannel(sessionId: String) = respond("leaveChannel", sessionId) { }
 

@@ -1,7 +1,11 @@
 package app.pley.android.player.live
 
 import android.os.Looper
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
+import app.pley.android.model.LivePlan
 import app.pley.android.network.ApiException
+import app.pley.android.testing.Fixtures
 import app.pley.android.network.OfflineException
 import app.pley.android.testing.data.FakeLiveTv
 import app.pley.android.testing.player.engine.FakePlayerEngine
@@ -51,7 +55,8 @@ class LivePlaybackTest {
         assertEquals(LivePhase.Tuning, playback.state.value.phase)
         settle()
         assertEquals(listOf("watch 1 android-1"), live.sent)
-        val prepared = engine().prepared.single()
+        // No plan in time: the stream.ts read meanwhile gives way to the HLS.
+        val prepared = engine().prepared.last()
         assertEquals("http://127.0.0.1:7539/api/live/sessions/live-1/index.m3u8", prepared.source.url)
         assertTrue(prepared.source.hls && prepared.source.live && prepared.playWhenReady)
 
@@ -59,6 +64,45 @@ class LivePlaybackTest {
         settle()
         assertEquals(LivePhase.Playing, playback.state.value.phase)
         assertEquals(1L, playback.state.value.channelId)
+    }
+
+    @Test
+    fun `a channel sent as it is plays its stream ts, and falls back to its HLS when that fails`() {
+        live.plan = Fixtures.decode<LivePlan>("live/plan.json")
+        playback.tune(1)
+        settle()
+        assertEquals(listOf("live-1"), live.plansAsked)
+        // Read at once, under an id of its own, held for the plan, then played.
+        val read = engine().prepared.single()
+        assertEquals("http://127.0.0.1:7539/api/live/channels/1/stream.ts?client_id=android-1-stream", read.source.url)
+        assertTrue(!read.source.hls && read.source.live && read.source.mimeType == MimeTypes.VIDEO_MP2T && !read.playWhenReady)
+        assertTrue(engine().player.playWhenReady)
+        engine().player.ready()
+        settle()
+        assertEquals(LivePhase.Playing, playback.state.value.phase)
+
+        engine().player.fail(PlaybackException("no", null, PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED))
+        settle()
+        // Watched again, its HLS played without asking for a plan.
+        assertEquals(listOf("watch 1 android-1", "leave live-1", "watch 1 android-1"), live.sent)
+        assertEquals(listOf("live-1"), live.plansAsked)
+        val hls = engine().prepared.last().source
+        assertTrue(hls.hls && hls.url.endsWith("/api/live/sessions/live-1/index.m3u8"))
+        assertEquals(LivePhase.Tuning, playback.state.value.phase)
+    }
+
+    @Test
+    fun `a channel made into something else, or no plan in time, plays its HLS`() {
+        live.plan = Fixtures.decode<LivePlan>("live/plan.json").copy(video = "h264_nvenc", audio = "aac")
+        playback.tune(1)
+        settle()
+        assertEquals(listOf(false, true), engine().prepared.map { it.source.hls })
+        assertTrue(engine().prepared.last().playWhenReady)
+
+        live.plan = null
+        playback.tune(2)
+        settle()
+        assertTrue(engine().prepared.last().source.hls)
     }
 
     @Test
@@ -71,7 +115,7 @@ class LivePlaybackTest {
         settle()
         assertEquals(listOf("watch 1 android-1", "leave live-1", "watch 2 android-1"), live.sent)
         assertEquals(1, engines.size)
-        assertEquals(2, engine().prepared.size)
+        assertEquals(2, engine().prepared.count { it.source.hls })
         assertEquals(LivePhase.Tuning, playback.state.value.phase)
     }
 
@@ -91,7 +135,7 @@ class LivePlaybackTest {
         playback.retry()
         settle()
         assertEquals(listOf("watch 1 android-1", "watch 1 android-1"), live.sent)
-        assertEquals(1, engine().prepared.size)
+        assertEquals(1, engine().prepared.count { it.source.hls })
     }
 
     @Test

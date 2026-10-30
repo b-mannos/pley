@@ -23,6 +23,7 @@ import app.pley.android.model.LiveChannelPage
 import app.pley.android.model.LiveGroups
 import app.pley.android.model.LiveGuide
 import app.pley.android.model.LiveSummary
+import app.pley.android.model.LivePlan
 import app.pley.android.model.LiveWatching
 import app.pley.android.model.ConversionInfo
 import app.pley.android.model.AddSubtitle
@@ -384,6 +385,13 @@ interface PleyApi {
      * before, first.
      */
     suspend fun watchChannel(channelId: Long, request: WatchRequest): LiveWatching
+
+    /**
+     * GET /api/live/sessions/{session}/plan (scope play): what the
+     * session's channel is made into, waiting a few seconds for it; `null`
+     * when it isn't known by then.
+     */
+    suspend fun livePlan(sessionId: String): LivePlan?
 
     /** DELETE /api/live/sessions/{session} (scope play): stops watching now; a session already gone is fine. */
     suspend fun leaveChannel(sessionId: String)

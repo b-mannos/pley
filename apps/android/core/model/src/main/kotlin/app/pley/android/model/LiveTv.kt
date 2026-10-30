@@ -176,6 +176,32 @@ data class WatchRequest(
  * live HLS playlist, read as [sessionId] until DELETE
  * /api/live/sessions/{session} (or 45 s without a request).
  */
+/**
+ * GET /api/live/sessions/{session}/plan: what the channel a session watches
+ * carries and what the transcoder makes of it ([video]: `copy` or the
+ * encoder; [audio]: `copy`, `aac` or `none`). Sent as it is, a player
+ * that reads MPEG-TS plays it from `stream.ts`, sooner than its first HLS
+ * segments ([direct]).
+ */
+@Serializable
+data class LivePlan(
+    val videoCodec: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val frameRate: Double? = null,
+    val interlaced: Boolean = false,
+    val audioCodec: String? = null,
+    val audioChannels: Int? = null,
+    val video: String = "",
+    val audio: String = "",
+) {
+    /** The channel is sent as it is (or without picture or sound): `stream.ts` plays it straight away, as the web's player does. */
+    val direct: Boolean get() = video in SENT_AS_IS && audio in SENT_AS_IS
+}
+
+/** A [LivePlan]'s video or audio as the provider sends it, or none of it. */
+private val SENT_AS_IS = setOf("copy", "none")
+
 @Serializable
 data class LiveWatching(
     val sessionId: String,

@@ -90,6 +90,14 @@ class LiveTvTest {
     }
 
     @Test
+    fun `a session's plan is asked for, and the channel's stream ts carries this device's id`() = runTest {
+        val data = signedIn(folder.newFolder())
+        assertEquals(true, data.graph.liveTv.plan("live-5")?.direct)
+        assertEquals(listOf<Any?>("live-5"), data.api.calls("livePlan").single().args)
+        assertEquals("${data.issuer}/api/live/channels/5/stream.ts?client_id=android+1%2F2", data.graph.liveTv.streamUrl(5, "android 1/2"))
+    }
+
+    @Test
     fun `leaving outlives whoever asked, and a failure to is no one's`() = runTest {
         val data = signedIn(folder.newFolder())
         data.graph.liveTv.leave("s1")

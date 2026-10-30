@@ -5,6 +5,7 @@ import android.os.Looper
 import android.view.Window
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.SimpleBasePlayer
 import androidx.media3.common.util.UnstableApi
@@ -110,6 +111,7 @@ class FakeVideoPlayer(looper: Looper) : SimpleBasePlayer(looper) {
             .setPlaylist(listOf(item))
             .setContentPositionMs(startMs)
             .setPlayWhenReady(playWhenReady, PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+            .setPlayerError(null)
             .setPlaybackState(STATE_BUFFERING)
             .build()
         invalidateState()
@@ -120,6 +122,12 @@ class FakeVideoPlayer(looper: Looper) : SimpleBasePlayer(looper) {
 
     /** The item played to its end. */
     fun end() = setPlaybackState(STATE_ENDED)
+
+    /** Playing failed with [error]: the player stops, as Media3's does. */
+    fun fail(error: PlaybackException) {
+        current = current.buildUpon().setPlayerError(error).setPlaybackState(STATE_IDLE).build()
+        invalidateState()
+    }
 
     /** The position moved to [positionMs] (time passed while playing). */
     fun advanceTo(positionMs: Long) {

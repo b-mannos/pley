@@ -6,9 +6,11 @@ import app.pley.android.model.LiveChannel
 import app.pley.android.model.LiveChannelPage
 import app.pley.android.model.LiveGroups
 import app.pley.android.model.LiveGuide
+import app.pley.android.model.LivePlan
 import app.pley.android.model.LiveSummary
 import app.pley.android.model.LiveWatching
 import app.pley.android.model.WatchRequest
+import java.net.URLEncoder
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -55,6 +57,16 @@ interface LiveTvRepository {
      */
     suspend fun watch(channelId: Long, clientId: String): LiveWatching
 
+    /** What [sessionId]'s channel is made into, waiting a few seconds for it; `null` when not known by then. */
+    suspend fun plan(sessionId: String): LivePlan?
+
+    /**
+     * The address of [channelId]'s MPEG-TS as the provider sends it
+     * (`stream.ts`), absolute, for [clientId]: reading it ends that
+     * device's HLS viewer, as watching another channel does.
+     */
+    suspend fun streamUrl(channelId: Long, clientId: String): String
+
     /** Stops watching [sessionId], in the background: it outlives the screen that asks. */
     fun leave(sessionId: String)
 
@@ -89,6 +101,10 @@ interface LiveTvRepository {
             override suspend fun setFavorite(channelId: Long, favorite: Boolean) = throw NotBuiltYet("Live TV")
 
             override suspend fun watch(channelId: Long, clientId: String): LiveWatching = throw NotBuiltYet("Live TV")
+
+            override suspend fun plan(sessionId: String): LivePlan? = null
+
+            override suspend fun streamUrl(channelId: Long, clientId: String): String = throw NotBuiltYet("Live TV")
 
             override fun leave(sessionId: String) = Unit
         }
@@ -172,6 +188,11 @@ internal class CachedLiveTv(private val cache: ResourceCache) : LiveTvRepository
         }
         return watching.copy(url = api.url(watching.url))
     }
+
+    override suspend fun plan(sessionId: String): LivePlan? = cache.api(cache.profile()).livePlan(sessionId)
+
+    override suspend fun streamUrl(channelId: Long, clientId: String): String =
+        cache.api(cache.profile()).url("/api/live/channels/$channelId/stream.ts?client_id=${URLEncoder.encode(clientId, Charsets.UTF_8.name())}")
 
     override fun leave(sessionId: String) {
         cache.app.launch {

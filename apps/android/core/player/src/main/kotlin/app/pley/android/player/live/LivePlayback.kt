@@ -3,6 +3,7 @@ package app.pley.android.player.live
 import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
@@ -129,7 +130,11 @@ data class LiveState(
  * - [tune] asks the server for the channel with this device's
  *   [clientId], which ends what it watched before (zapping never holds
  *   two of the provider's connections), lets the previous session go, and
- *   plays the answer's HLS from the live edge on the app's Media3 engine;
+ *   reads the channel's `stream.ts` (MPEG-TS as the provider sends it)
+ *   while it asks what the channel is made into: sent as it is
+ *   ([app.pley.android.model.LivePlan.direct]), that plays from its first keyframe rather than
+ *   after the first HLS segments (as the web's); otherwise, or when it
+ *   fails, the answer's HLS from the live edge, on the app's Media3 engine;
  * - it is watched as it airs, as the web's: no pausing, no going back;
  * - [stop] lets the session and the engine go (the screen went to the
  *   background), [resume] tunes the channel again, [close] ends it all.
@@ -156,10 +161,20 @@ class LivePlayback(
     private var closed = false
     private val listener = Listener()
 
+    /** What plays is the channel's `stream.ts`: failing, it is watched again as HLS. */
+    private var direct = false
+
+    /** `stream.ts` is read, not yet played: the plan hasn't said the channel is sent as it is. */
+    private var holding = false
+
     /** Starts watching [channelId] in place of what played. */
-    fun tune(channelId: Long) {
+    fun tune(channelId: Long) = tune(channelId, allowDirect = true)
+
+    private fun tune(channelId: Long, allowDirect: Boolean) {
         if (closed) return
         tuning?.cancel()
+        direct = false
+        holding = false
         letSessionGo()
         mutableEngine.value?.player?.let {
             it.stop()
@@ -180,8 +195,40 @@ class LivePlayback(
                 it.player.addListener(listener)
                 mutableEngine.value = it
             }
-            engine.prepare(EngineSource(url = watching.url, hls = true, live = true), startMs = 0, playWhenReady = true)
+            val hls = EngineSource(url = watching.url, hls = true, live = true)
+            // As the web's: stream.ts is read at once, under an id of its own (so it doesn't end the HLS
+            // session the plan is asked of), and played once the plan says the channel is sent as it is.
+            val stream = if (allowDirect) quietly { live.streamUrl(channelId, clientId() + STREAM_CLIENT) } else null
+            if (stream == null) {
+                direct = false
+                engine.prepare(hls, startMs = 0, playWhenReady = true)
+                return@launch
+            }
+            direct = true
+            holding = true
+            engine.prepare(EngineSource(url = stream, hls = false, mimeType = MimeTypes.VIDEO_MP2T, live = true), startMs = 0, playWhenReady = false)
+            val plan = quietly { live.plan(watching.sessionId) }
+            holding = false
+            if (plan?.direct == true) {
+                engine.player.play()
+                if (engine.player.playbackState == Player.STATE_READY) playing()
+            } else {
+                // Made into something else, or not known in time: its HLS.
+                direct = false
+                engine.prepare(hls, startMs = 0, playWhenReady = true)
+            }
         }
+    }
+
+    private fun playing() = mutableState.update { if (it.phase is LivePhase.Tuning) it.copy(phase = LivePhase.Playing, buffering = false) else it.copy(buffering = false) }
+
+    /** [block]'s answer, or `null` when it fails: a plan not had is HLS played, as before there were plans. */
+    private suspend fun <T> quietly(block: suspend () -> T): T? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
     }
 
     /** Tunes the channel again: after a failure, or back from the background. */
@@ -201,6 +248,8 @@ class LivePlayback(
      */
     fun stop() {
         tuning?.cancel()
+        direct = false
+        holding = false
         letSessionGo()
         mutableEngine.value?.let {
             it.player.removeListener(listener)
@@ -230,9 +279,8 @@ class LivePlayback(
     private inner class Listener : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             when (playbackState) {
-                Player.STATE_READY -> mutableState.update {
-                    if (it.phase is LivePhase.Tuning) it.copy(phase = LivePhase.Playing, buffering = false) else it.copy(buffering = false)
-                }
+                // Held for the plan, it isn't playing yet.
+                Player.STATE_READY -> if (!holding) playing()
                 Player.STATE_BUFFERING -> mutableState.update { if (it.phase is LivePhase.Playing) it.copy(buffering = true) else it }
                 else -> Unit
             }
@@ -240,7 +288,7 @@ class LivePlayback(
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
             // Live has no pause (headphones pulled out, a stray media key): it plays on, as a browser's does.
-            if (!playWhenReady) mutableEngine.value?.player?.play()
+            if (!playWhenReady && !holding) mutableEngine.value?.player?.play()
         }
 
         override fun onTracksChanged(tracks: Tracks) {
@@ -250,6 +298,14 @@ class LivePlayback(
 
         override fun onPlayerError(error: PlaybackException) {
             val player = mutableEngine.value?.player ?: return
+            val channelId = state.value.channelId
+            if (direct && channelId != null) {
+                // stream.ts didn't play (its codecs, the connection): watched again, as HLS.
+                direct = false
+                holding = false
+                tune(channelId, allowDirect = false)
+                return
+            }
             if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
                 // Fell behind what the server keeps (a long stall): on from the live edge.
                 player.seekToDefaultPosition()
@@ -261,6 +317,9 @@ class LivePlayback(
     }
 
     companion object {
+        /** `stream.ts` is read under the device's id with this after it (the web's): the HLS session stays. */
+        const val STREAM_CLIENT = "-stream"
+
         /**
          * Watching on this device: [live]'s server, engines of [engines],
          * the device's own client id (the one its playbacks send).

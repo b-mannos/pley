@@ -7,6 +7,7 @@ import app.pley.android.model.LiveChannel
 import app.pley.android.model.LiveChannelPage
 import app.pley.android.model.LiveGroups
 import app.pley.android.model.LiveGuide
+import app.pley.android.model.LivePlan
 import app.pley.android.model.LiveSummary
 import app.pley.android.model.LiveWatching
 import app.pley.android.testing.Fixtures
@@ -40,6 +41,12 @@ class FakeLiveTv : LiveTvRepository {
 
     /** Setting a favourite fails with this until set back to `null`. */
     var favoriteFails: Exception? = null
+
+    /** What every session's channel is made into: `null` (not known in time, the HLS is played) unless the test sets one. */
+    var plan: LivePlan? = null
+
+    /** The sessions whose plan was asked for, in order. */
+    val plansAsked = mutableListOf<String>()
 
     fun guideChunk(from: Long): MutableStateFlow<Loadable<LiveGuide>> = guides.getOrPut(from) { MutableStateFlow(Loadable.Loading) }
 
@@ -94,6 +101,14 @@ class FakeLiveTv : LiveTvRepository {
         watchFails?.let { throw it }
         return LiveWatching("live-$channelId", "http://127.0.0.1:7539/api/live/sessions/live-$channelId/index.m3u8")
     }
+
+    override suspend fun plan(sessionId: String): LivePlan? {
+        plansAsked += sessionId
+        return plan
+    }
+
+    override suspend fun streamUrl(channelId: Long, clientId: String): String =
+        "http://127.0.0.1:7539/api/live/channels/$channelId/stream.ts?client_id=$clientId"
 
     override fun leave(sessionId: String) {
         sent += "leave $sessionId"

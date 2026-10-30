@@ -25,7 +25,8 @@ describes how they are made.
   going back, as on the web), the server's own sentence when every
   connection is in use,
   the channel's logo for radio, and picture in picture on phones.
-  Leaving lets the provider's connection go.
+  Leaving lets the provider's connection go. A channel the server sends
+  as it is plays straight from its MPEG-TS, sooner than its HLS.
 - Live TV opens as it was left, after a restart too: the category, the
   guide or the cards, and the channel last watched, for each server and
   profile. Its groups read as Regions (alphabetical, each opening to its

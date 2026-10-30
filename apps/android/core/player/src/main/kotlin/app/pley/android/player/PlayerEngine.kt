@@ -25,8 +25,8 @@ data class EngineSource(
     /** How long the item is; display modes only change for 10 minutes or more. */
     val durationMs: Long? = null,
     /**
-     * A live channel: it starts at the live edge, whatever the start
-     * position, and goes back in the window the server keeps.
+     * A live channel (its HLS, or its MPEG-TS as the provider sends it):
+     * it starts at the live edge, whatever the start position.
      */
     val live: Boolean = false,
 )

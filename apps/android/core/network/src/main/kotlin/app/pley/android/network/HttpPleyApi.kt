@@ -25,6 +25,7 @@ import app.pley.android.model.LiveChannelPage
 import app.pley.android.model.LiveGroups
 import app.pley.android.model.LiveGuide
 import app.pley.android.model.LiveSummary
+import app.pley.android.model.LivePlan
 import app.pley.android.model.LiveWatching
 import app.pley.android.model.ConversionInfo
 import app.pley.android.model.AddSubtitle
@@ -65,6 +66,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.nullable
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -381,6 +383,8 @@ class HttpPleyApi(
 
     override suspend fun watchChannel(channelId: Long, request: WatchRequest): LiveWatching =
         send("POST", LiveWatching.serializer(), json(WatchRequest.serializer(), request), "api", "live", "channels", channelId, "watch")
+
+    override suspend fun livePlan(sessionId: String): LivePlan? = get(LivePlan.serializer().nullable, "api", "live", "sessions", sessionId, "plan")
 
     override suspend fun leaveChannel(sessionId: String) {
         val request = jsonRequest(address(listOf("api", "live", "sessions", sessionId))).delete().build()

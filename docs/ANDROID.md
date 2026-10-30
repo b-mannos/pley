@@ -151,7 +151,12 @@ rail. Its sources, lineup and connections are set up in the web app.
   the player, it opens on the channel last watched.
 - **The player** (`LivePlayerActivity`, `TvLivePlayerActivity`) tunes
   with this device's client id, which ends what it watched before, so
-  zapping holds one connection. Channel up and down stay in the category
+  zapping holds one connection. Right after `watch` it starts reading the
+  channel's `stream.ts` (under `<client_id>-stream`, so the HLS session
+  stays) while it asks for the session's `plan`: a channel sent as it is
+  (`video` and `audio` `copy` or `none`) then plays that MPEG-TS from its
+  first keyframe, as the web's does; one made into something else, a
+  plan not known in time, or a `stream.ts` that fails plays the HLS. Channel up and down stay in the category
   it was opened from, round its ends (Up and Channel up the next one on
   TVs, a swipe or the chevrons on phones); the channel list's heading
   shows another group's channels, and a channel tuned from there makes

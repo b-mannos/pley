@@ -258,6 +258,8 @@ class HttpPleyApiTest {
                 "POST /api/live/channels/1/watch",
                 body = """{"client_id":"android-1"}""",
             ) { watchChannel(1, WatchRequest("android-1")) },
+            Golden("livePlan", json("live/plan.json"), "GET /api/live/sessions/5d0f7f2a/plan") { livePlan("5d0f7f2a") },
+            Golden("livePlan (not known in time)", jsonAnswer("null"), "GET /api/live/sessions/5d0f7f2a/plan") { livePlan("5d0f7f2a") },
             Golden("leaveChannel", MockPley.noContent(), "DELETE /api/live/sessions/5d0f7f2a") { leaveChannel("5d0f7f2a") },
             Golden(
                 "leaveChannel (gone already)",
