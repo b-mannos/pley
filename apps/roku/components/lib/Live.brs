@@ -646,18 +646,98 @@ end function
 ' --- The player ---
 
 ' A watching that didn't start, as the player says it: { kind, title,
-' message, retry }. kind "busy" (every connection of the source in use,
-' 409, the server's message naming what is watched), "missing" (404),
-' "closed" (403), "stopped" (410), "unavailable" (503) or "other".
+' message, retry, connections, lines }. kind "busy" (every connection of
+' the source in use, 409: the server's message, and what holds each
+' connection as liveBusyConnections reads them, lines the notice's), "missing"
+' (404), "closed" (403), "stopped" (410: its connection taken over, or
+' stopped by an administrator, the server's message saying which),
+' "unavailable" (503) or "other".
 function liveTrouble(answer as object, channelName as string) as object
     status = answer.status
     message = httpSentence(answer.message)
-    if status = 409 then return { kind: "busy", title: "All connections are in use", message: message, retry: true }
-    if status = 404 then return { kind: "missing", title: "This channel isn't here any more", message: "It may have been hidden, or its source removed.", retry: false }
-    if status = 403 then return { kind: "closed", title: "Live TV isn't open to this account", message: "An administrator can open it in Settings → Live TV, on the web.", retry: false }
-    if status = 410 then return { kind: "stopped", title: "Watching stopped", message: message, retry: false }
-    if status = 503 then return { kind: "unavailable", title: channelName + " isn't playing", message: message, retry: true }
-    return { kind: "other", title: channelName + " didn't start", message: message, retry: true }
+    if status = 409
+        connections = liveBusyConnections(answer.data)
+        return { kind: "busy", title: "All connections are in use", message: message, retry: true, connections: connections, lines: liveBusyLines(message, connections) }
+    end if
+    problem = { kind: "other", title: channelName + " didn't start", message: message, retry: true, connections: [] }
+    if status = 404 then problem = { kind: "missing", title: "This channel isn't here any more", message: "It may have been hidden, or its source removed.", retry: false, connections: [] }
+    if status = 403 then problem = { kind: "closed", title: "Live TV isn't open to this account", message: "An administrator can open it in Settings → Live TV, on the web.", retry: false, connections: [] }
+    if status = 410 then problem = { kind: "stopped", title: "Watching stopped", message: message, retry: false, connections: [] }
+    if status = 503 then problem = { kind: "unavailable", title: channelName + " isn't playing", message: message, retry: true, connections: [] }
+    problem.lines = problem.message
+    return problem
+end function
+
+' The connections of a 409 ({ connections: [{ channel_id, channel_name,
+' watchers, people, yours, can_take_over }] }): [{ channelId, channelName,
+' holders, canTakeOver }].
+function liveBusyConnections(data as dynamic) as object
+    out = []
+    body = httpObject(data)
+    if body = invalid then return out
+    for each raw in httpArray(body.connections)
+        c = httpObject(raw)
+        if c <> invalid
+            id = Int(httpNumber(c.channel_id, 0))
+            if id > 0 then out.Push({ channelId: id, channelName: httpSentence(c.channel_name), holders: liveHolders(c), canTakeOver: httpTrue(c.can_take_over) })
+        end if
+    end for
+    return out
+end function
+
+' Who holds a connection: "You, on another device", their names (to
+' administrators), or "Someone else" / "3 people".
+function liveHolders(c as object) as string
+    if httpTrue(c.yours) then return "You, on another device"
+    names = []
+    for each name in httpArray(c.watchers)
+        text = httpSentence(name)
+        if text <> "" then names.Push(text)
+    end for
+    if names.Count() > 0 then return names.Join(", ")
+    people = Int(httpNumber(c.people, 0))
+    if people <= 1 then return "Someone else"
+    return people.ToStr() + " people"
+end function
+
+' The busy notice's text: the server's message, then what each connection
+' watches and who.
+function liveBusyLines(message as string, connections as object) as string
+    lines = []
+    if message <> "" then lines.Push(message)
+    if connections.Count() > 0
+        if lines.Count() > 0 then lines.Push("")
+        if connections.Count() = 1
+            lines.Push("Its one connection is watching:")
+        else
+            lines.Push("Its " + connections.Count().ToStr() + " connections are watching:")
+        end if
+        for each c in connections
+            lines.Push("•  " + c.channelName + "  —  " + c.holders)
+        end for
+    end if
+    return lines.Join(Chr(10))
+end function
+
+' The buttons of a trouble's notice, and what each does ([{ label, action,
+' channelId }]): "Watch here instead" for each connection that may be taken
+' over (naming its channel when there are several), Try again, Other
+' channels, Back.
+function liveTroubleButtons(problem as object) as object
+    out = []
+    takeable = []
+    for each c in problem.connections
+        if c.canTakeOver then takeable.Push(c)
+    end for
+    for each c in takeable
+        label = "Watch here instead"
+        if takeable.Count() > 1 then label = "Watch here instead of " + c.channelName
+        out.Push({ label: label, action: "takeOver", channelId: c.channelId })
+    end for
+    if problem.retry then out.Push({ label: "Try again", action: "retry", channelId: 0 })
+    out.Push({ label: "Other channels", action: "list", channelId: 0 })
+    out.Push({ label: "Back", action: "back", channelId: 0 })
+    return out
 end function
 
 ' The registry key of the Live TV screen's tab and category for a server

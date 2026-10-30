@@ -192,7 +192,7 @@ sub pageGuide(key as string)
     left = m.guide.leftEdgeTargetTime
     if left <= 0 then left = m.guideStart
     if key = "play"
-        left = Int(nowSeconds() / 1800) * 1800
+        left = nowSeconds()
     else if key = "rewind"
         left = left - span
     else
@@ -404,7 +404,9 @@ sub onGuide(event as object)
     if content = invalid then return
     data = answer.data
     if data.upto > m.loadedTo then m.loadedTo = data.upto
-    left = m.guideStart + 1800
+    ' From now at the left edge: the focus is on what's on now (at the
+    ' half hour, the programme then could have ended).
+    left = nowSeconds()
     keepRow = -1
     if m.guide.content <> invalid
         if m.guide.leftEdgeTargetTime > 0 then left = m.guide.leftEdgeTargetTime

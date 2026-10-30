@@ -113,10 +113,11 @@ function syncDrawn() {
 }
 
 // The live player's notice: its dark panel over the whole screen, its
-// title in the app's text colour at the left (from 96, 340).
+// title in the app's text colour at the left (from 96, 120 when it lists what
+// holds each connection).
 function noticeDrawn() {
   if (!frame) return false;
-  for (let y = 350; y < 400; y += 2) {
+  for (let y = 130; y < 180; y += 2) {
     for (let x = 100; x < 600; x += 2) {
       const at = (Math.round(y * (frame.height / 1080)) * frame.width + Math.round(x * (frame.width / 1920))) * 4;
       if (frame.data[at] > 200 && frame.data[at + 1] > 200 && frame.data[at + 2] > 200) return true;
@@ -367,6 +368,11 @@ async function walk() {
   await sleep(1500);
   live.busy = await drawnWithin(2500, noticeDrawn);
   shoot("live-busy");
+  // Watch here instead: the same channel, taking over the connection.
+  since = mark();
+  await press("select");
+  await waitFor(/^POST \/api\/live\/channels\/3\/watch$/, since, "a channel watched taking over the connection");
+  await waitFor(/^GET \/api\/live\/sessions\/live\d+\/index\.m3u8$/, since, "the playlist of the channel taken over");
   since = mark();
   await press("back"); // leaves: the guide opens at the channel watched
   await waitFor(/^GET \/api\/live\/browse\?.*around=3/, since, "the guide around the channel watched");
@@ -708,6 +714,7 @@ const checks = [
   ["asked for a channel's playlist before playing it", fixture.livePlaylists.length >= 2],
   ["put a channel in the favourites from the player's list", fixture.liveFavoriteChanges.some((c) => c.id === 2 && c.favorite)],
   ["said every connection is in use", live.busy],
+  ["took over the connection with Watch here instead", fixture.liveWatches.some((w) => w.id === 3 && w.take_over === 1)],
   ["left the channels it watched", fixture.liveLeft.length > 0 && fixture.liveSessions.size === 0],
   ["asked again with a new token after a 401", new Set(fixture.requests.filter((r) => r.path === "/api/items/103").map((r) => r.auth)).size > 1],
   ["sent the token in the header only", fixture.requests.every((r) => !/[?&]token=/.test(r.path))],

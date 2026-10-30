@@ -83,5 +83,7 @@
         <Timer id="clock" duration="15" repeat="true" />
         <Timer id="pictureTimer" duration="3" />
         <Timer id="toastTimer" duration="3" />
+        <!-- A stall this long shows the spinner. -->
+        <Timer id="stallTimer" duration="0.7" />
     </children>
 </component>

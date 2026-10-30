@@ -46,6 +46,10 @@ sub init()
     m.clock = m.top.findNode("clock")
     m.pictureTimer = m.top.findNode("pictureTimer")
     m.toastTimer = m.top.findNode("toastTimer")
+    m.stallTimer = m.top.findNode("stallTimer")
+    m.stallTimer.observeField("fire", "onStall")
+    ' Waiting for data since the timer started (the spinner shows after it).
+    m.stalling = false
     for each spinner in [m.waiting, m.tuning]
         spinner.poster.uri = "pkg:/images/spinner.png"
         spinner.poster.width = 64
@@ -292,7 +296,7 @@ end sub
 
 ' Watches channel: the session before it ends (the server ends it too,
 ' by the client_id), its logo shows while it starts.
-sub tune(channel as object)
+sub tune(channel as object, takeOver = 0 as integer)
     m.attempt = m.attempt + 1
     abandonWatch()
     leave()
@@ -309,7 +313,7 @@ sub tune(channel as object)
     hideBanner()
     markCurrent()
     if not m.list.visible then m.top.setFocus(true)
-    m.watchRequest = uiRequest({ op: "liveWatch", channelId: channel.id, attempt: m.attempt }, "onWatch")
+    m.watchRequest = uiRequest({ op: "liveWatch", channelId: channel.id, takeOver: takeOver, attempt: m.attempt }, "onWatch")
 end sub
 
 ' The watch asked for isn't wanted any more: the API task ends it if it
@@ -387,7 +391,18 @@ end sub
 
 sub onState(event as object)
     state = event.getData()
-    showWaiting(state = "buffering" and m.played)
+    ' A stall shows the spinner only once it has lasted a moment: the
+    ' briefest flicker of one doesn't.
+    if state = "buffering" and m.played
+        if not m.stalling
+            m.stalling = true
+            m.stallTimer.control = "start"
+        end if
+    else
+        m.stalling = false
+        m.stallTimer.control = "stop"
+        showWaiting(false)
+    end if
     if state = "playing"
             if not m.played
             m.played = true
@@ -401,6 +416,10 @@ sub onState(event as object)
     if state = "error" or state = "finished"
         broken()
     end if
+end sub
+
+sub onStall()
+    if m.stalling then showWaiting(true)
 end sub
 
 sub showWaiting(shown as boolean)
@@ -446,7 +465,8 @@ sub onChecked(event as object)
     nowMs = m.span.TotalMilliseconds()
     if not playerMayRestart(m.restarts, nowMs)
         leave()
-        trouble({ kind: "other", title: m.channel.name + " stopped", message: "It stopped and couldn't get going again.", retry: true })
+        message = "It stopped and couldn't get going again."
+        trouble({ kind: "other", title: m.channel.name + " stopped", message: message, lines: message, retry: true, connections: [] })
         return
     end if
     m.restarts.Push(nowMs)
@@ -566,22 +586,47 @@ sub trouble(problem as object)
     showWaiting(false)
     hideBanner()
     m.noticeTitle.text = problem.title
-    m.noticeText.text = problem.message
-    buttons = []
-    if problem.retry then buttons.Push("Try again")
-    buttons.Push("Other channels")
-    buttons.Push("Back")
-    m.noticeButtons.buttons = buttons
+    m.noticeText.text = problem.lines
+    ' What holds each connection takes room: the text on the left, the
+    ' buttons beside it, all from the top.
+    if problem.connections.Count() > 0
+        m.noticeTitle.translation = [96, 120]
+        m.noticeText.translation = [96, 210]
+        m.noticeText.width = 920
+        m.noticeText.maxLines = 16
+        m.noticeButtons.translation = [1104, 210]
+        m.noticeButtons.minWidth = 720
+    else
+        m.noticeTitle.translation = [96, 340]
+        m.noticeText.translation = [96, 430]
+        m.noticeText.width = 1500
+        m.noticeText.maxLines = 6
+        m.noticeButtons.translation = [96, 700]
+        m.noticeButtons.minWidth = 400
+    end if
+    ' Every connection in use: what holds each, and Watch here instead
+    ' where this account may take one over.
+    m.noticeActions = liveTroubleButtons(problem)
+    labels = []
+    for each button in m.noticeActions
+        labels.Push(button.label)
+    end for
+    m.noticeButtons.buttons = labels
     m.notice.visible = true
     if not m.list.visible then m.noticeButtons.setFocus(true)
 end sub
 
 sub onNoticeButton(event as object)
-    label = m.noticeButtons.buttons[event.getData()]
-    if label = "Try again"
+    at = event.getData()
+    if m.noticeActions = invalid or at < 0 or at >= m.noticeActions.Count() then return
+    button = m.noticeActions[at]
+    if button.action = "takeOver"
+        m.restarts = []
+        tune(m.channel, button.channelId)
+    else if button.action = "retry"
         m.restarts = []
         tune(m.channel)
-    else if label = "Other channels"
+    else if button.action = "list"
         openList()
     else
         uiNavigate({ back: true })
@@ -595,7 +640,7 @@ sub finish()
     abandonWatch()
     leave()
     m.video.control = "stop"
-    for each timer in [m.bannerTimer, m.zapTimer, m.clock, m.pictureTimer, m.toastTimer]
+    for each timer in [m.bannerTimer, m.zapTimer, m.clock, m.pictureTimer, m.toastTimer, m.stallTimer]
         timer.control = "stop"
     end for
     if m.channel <> invalid then m.top.getScene().liveChannel = m.channel.id

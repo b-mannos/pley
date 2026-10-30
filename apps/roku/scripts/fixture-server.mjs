@@ -581,12 +581,18 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     if ((match = path.match(/^\/api\/live\/channels\/(\d+)\/watch$/)) && req.method === "POST") {
       const id = Number(match[1]);
       const ask = body ? JSON.parse(body) : {};
-      fixture.liveWatches.push({ id, client_id: ask.client_id ?? null });
+      fixture.liveWatches.push({ id, client_id: ask.client_id ?? null, take_over: ask.take_over ?? null });
       if (!ask.client_id) problems.push("a watch without a client_id");
       const channel = liveChannels().find((c) => c.id === id);
       if (!channel) return json(404, { code: "not_found", message: "no such channel" });
-      if (id === 3) {
-        return json(409, { code: "conflict", message: "The one connection of Fixture IPTV is in use, watching Fixture News (Ben)." });
+      // Channel 3's source has one connection, Ben's other device on
+      // Fixture News holds it: taken over, it is this one's.
+      if (id === 3 && ask.take_over !== 1) {
+        return json(409, {
+          code: "conflict",
+          message: "Fixture IPTV allows one connection at once, and it is in use: watching Fixture News.",
+          connections: [{ channel_id: 1, channel_name: "Fixture News", watchers: [], people: 1, yours: true, can_take_over: true }],
+        });
       }
       // The same client's earlier session ends with this one.
       for (const [session, watching] of fixture.liveSessions) if (watching.client === ask.client_id) fixture.liveSessions.delete(session);
@@ -610,7 +616,8 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     }
     if (path === "/api/search") {
       const q = (url.searchParams.get("q") ?? "").toLowerCase();
-      return json(200, { items: [...movies, show].filter((item) => item.title.toLowerCase().includes(q)).slice(0, 40), people: [] });
+      const channels = liveChannels().filter((c) => c.name.toLowerCase().includes(q) || c.number.startsWith(q)).slice(0, 12);
+      return json(200, { items: [...movies, show].filter((item) => item.title.toLowerCase().includes(q)).slice(0, 40), people: [], channels });
     }
     if (path.startsWith("/api/files/")) {
       res.writeHead(200, { "Content-Type": "application/octet-stream" });
@@ -635,7 +642,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     return [
       { id: 1, name: "Fixture News", number: "101", group: "News" },
       { id: 2, name: "UK| Fixture Sport", number: "102", group: "UK| Sport" },
-      { id: 3, name: "Fixture Films", number: "103", group: "News" },
+      { id: 3, name: "Fixture Movies", number: "103", group: "News" },
     ].map((c) => ({
       ...c, source_id: 1, logo: `/api/live/channels/${c.id}/logo`, favorite: fixture.liveFavorites.includes(c.id), has_guide: c.id !== 3,
       now: c.id !== 3 ? liveProgram(c.id, slot) : null, next: c.id !== 3 ? liveProgram(c.id, slot + 1800) : null,

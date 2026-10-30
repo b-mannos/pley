@@ -20,8 +20,9 @@ describes how they are made.
   open at once. The live player changes channel with up and down within
   the category, lists it at the left, shows what's on with a Live chip
   when asked (OK, Right or the Options key), plays live only (no pause,
-  rewind or skip), and gives the server's own words when every
-  connection is in use. The Options key adds a channel to the favourites or takes it
+  rewind or skip), and when every connection is in use says what holds
+  each, with Watch here instead where one may be taken over. Search
+  finds Live TV channels too, in a row of their own. The Options key adds a channel to the favourites or takes it
   out; back from the player, the guide is at the channel watched.
 
 ### Changed

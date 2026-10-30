@@ -267,6 +267,31 @@ sub test_live_troubles()
     tkEqual(liveTrouble({ status: 503, message: "the channel didn't start" }, "Film Four").title, "Film Four isn't playing")
     tkEqual(liveTrouble({ status: 500, message: "boom" }, "Film Four").title, "Film Four didn't start")
     tkFalse(liveTrouble({ status: 410, message: "the channel was stopped" }, "x").retry, "stopped by an administrator")
+    tkEqual(liveTroubleButtons(busy), [{ label: "Try again", action: "retry", channelId: 0 }, { label: "Other channels", action: "list", channelId: 0 }, { label: "Back", action: "back", channelId: 0 }], "without what holds the connections")
+end sub
+
+sub test_live_busy_connections()
+    data = { code: "conflict", message: "Test Provider allows 2 connections at once, and all are in use: watching Pley News HD, Sport 1080i.", connections: [
+        { channel_id: 1, channel_name: "Pley News HD", watchers: [], people: 1, yours: true, can_take_over: true },
+        { channel_id: 2, channel_name: "Sport 1080i", watchers: ["anna", "ben"], people: 2, yours: false, can_take_over: true },
+        { channel_id: 3, channel_name: "Film Four", watchers: [], people: 3, yours: false, can_take_over: false },
+        { channel_id: 0, channel_name: "no id" }
+    ] }
+    busy = liveTrouble({ status: 409, message: data.message, data: data }, "Radio Jazz")
+    tkEqual(busy.connections.Count(), 3)
+    tkEqual(busy.connections[0].holders, "You, on another device")
+    tkEqual(busy.connections[1].holders, "anna, ben", "named to administrators")
+    tkEqual(busy.connections[2].holders, "3 people")
+    tkEqual(liveHolders({ people: 1, watchers: [] }), "Someone else")
+    tkEqual(busy.lines, data.message + Chr(10) + Chr(10) + "Its 3 connections are watching:" + Chr(10) + "•  Pley News HD  —  You, on another device" + Chr(10) + "•  Sport 1080i  —  anna, ben" + Chr(10) + "•  Film Four  —  3 people")
+    buttons = liveTroubleButtons(busy)
+    tkEqual(buttons.Count(), 5)
+    tkEqual(buttons[0], { label: "Watch here instead of Pley News HD", action: "takeOver", channelId: 1 })
+    tkEqual(buttons[1].channelId, 2)
+    tkEqual(buttons[2].action, "retry")
+    one = liveTrouble({ status: 409, message: "", data: { connections: [{ channel_id: 7, channel_name: "Sport 1080i", watchers: [], people: 1, yours: true, can_take_over: true }] } }, "x")
+    tkEqual(liveTroubleButtons(one)[0].label, "Watch here instead", "one to take: its channel goes without saying")
+    tkEqual(one.lines, "Its one connection is watching:" + Chr(10) + "•  Sport 1080i  —  You, on another device")
 end sub
 
 sub test_live_view_kept()

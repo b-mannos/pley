@@ -55,9 +55,10 @@ sub onLayout()
     m.logo.height = logoHeight
     m.logo.loadWidth = logoWidth
     m.logo.loadHeight = logoHeight
-    m.fallback.translation = [20, 12]
+    ' Under the number badge, which would cover it.
+    m.fallback.translation = [20, 52]
     m.fallback.width = w - 40
-    m.fallback.height = plateHeight - 24
+    m.fallback.height = plateHeight - 60
     numberWidth = 24 + 14 * Len(m.number.text)
     m.numberBack.translation = [12, 12]
     m.numberBack.width = numberWidth

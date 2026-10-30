@@ -402,7 +402,9 @@ sub apiBuild(job as object, answer as object)
         end for
         job.request.content = nodesContent(tiles)
         ' listed: the page's items (the next page's offset), shown or not.
-        answer.data = { total: httpNumber(data.total, -1), listed: items.Count(), shown: tiles.Count() }
+        ' Search: the Live TV channels found too (12 at most), for a row of
+        ' their own.
+        answer.data = { total: httpNumber(data.total, -1), listed: items.Count(), shown: tiles.Count(), channels: liveChannels(data.channels, server) }
     else if job.build = "detail"
         ' The rows that come with a title's details; the details stay.
         rows = pageDetailRows(data, server)
@@ -1047,7 +1049,12 @@ sub apiLiveWatch(request as object, spec as object)
     job.build = ""
     job.auth = true
     job.liveWatch = true
-    job.body = FormatJson({ client_id: m.playerId })
+    body = { client_id: m.playerId }
+    ' Every connection in use: the one to take over (the server says
+    ' whose it may be).
+    takeOver = Int(httpNumber(spec.takeOver, 0))
+    if takeOver > 0 then body.take_over = takeOver
+    job.body = FormatJson(body)
     job.contentType = "application/json"
     job.timeoutMs = 60000
     apiSend(job)

@@ -49,7 +49,8 @@ more than one profile.
 - **Live TV**, in Home's menu after Home while the server has channels
   this profile may watch ([below](#live-tv)).
 - **Playlists:** Play, Shuffle, Rename, Delete, remove an entry.
-- **Search** (titles and people).
+- **Search** (titles and people, and the Live TV channels found as a row
+  above them: OK watches one, up and down going through what was found).
 - **Settings:** audio and subtitle defaults, Quality, Play the next episode
   by itself, Watch history, Switch profile, Sort libraries (OK lifts a
   library, up and down move it, OK drops it, Back cancels; "Use the
@@ -268,12 +269,18 @@ programmes only for those 50 (`GET /api/live/guide?ids=`).
   asked for, it goes after 5 s.
 - **Live is live:** no pause, rewind or skip. The Video node's own
   controls are off (`enableUI` false), and Play, Rewind, Fast forward and
-  Replay do nothing in the player. A wait for data shows a spinner.
-- **Troubles:** `409` (every connection in use) shows the server's
-  message, which names what is watched, with Try again, Other channels
-  and Back; so do a channel gone (`404`), Live TV closed (`403`), a
-  channel stopped by an administrator (`410`) and one not playing
-  (`503`). A stream that breaks is checked with its playlist and tuned
+  Replay do nothing in the player. A wait for data shows a spinner once
+  it has lasted 0.7 s.
+- **All connections in use** (`409`): the server's message, then each
+  connection's channel and who holds it ("You, on another device", the
+  names to administrators, or "Someone else" / "3 people"). Where the
+  server says it may be taken over (`can_take_over`), **Watch here
+  instead** (naming the channel when there are several) asks again with
+  `take_over`; then Try again, Other channels and Back.
+- **Troubles:** a channel gone (`404`), Live TV closed (`403`), a
+  connection taken over by someone else or a channel stopped by an
+  administrator (`410`, the server's message saying which) and one not
+  playing (`503`) say so, with what can be done. A stream that breaks is checked with its playlist and tuned
   again, three times a minute at most.
 - **Leaving** sends `DELETE /api/live/sessions/{session}`, as does
   changing channel.
