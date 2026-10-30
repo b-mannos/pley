@@ -5,7 +5,6 @@ import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.Timeline
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
@@ -23,12 +22,10 @@ import app.pley.android.player.session.clientIdOf
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -115,38 +112,15 @@ sealed interface LivePhase {
     data class Failed(val trouble: LiveTrouble) : LivePhase
 }
 
-/**
- * What a live player shows. Positions are in the window the server keeps
- * of the channel (its timeshift): [positionMs] from its start, [windowMs]
- * long, [behindMs] behind the live edge.
- */
+/** What a live player shows. Live TV is watched as it airs: no pausing, no going back. */
 data class LiveState(
     val channelId: Long? = null,
     val phase: LivePhase = LivePhase.Idle,
-    /** Playing, or about to: not paused. */
-    val playWhenReady: Boolean = true,
     /** Waiting for data while playing. */
     val buffering: Boolean = false,
-    val positionMs: Long = 0,
-    val windowMs: Long = 0,
-    val behindMs: Long = 0,
     /** The channel has sound only (radio): no picture comes. */
     val audioOnly: Boolean = false,
-) {
-    /** Close enough to the live edge to say Live. */
-    val atLive: Boolean get() = behindMs < LIVE_WITHIN_MS
-
-    /** The window is long enough to pause and go back in. */
-    val canRewind: Boolean get() = windowMs >= MIN_WINDOW_MS
-
-    companion object {
-        /** Behind the live edge by less than this is live (the web's 10 s). */
-        const val LIVE_WITHIN_MS = 10_000L
-
-        /** A window shorter than this is no timeshift: a channel just tuned keeps a few segments. */
-        const val MIN_WINDOW_MS = 30_000L
-    }
-}
+)
 
 /**
  * Watching Live TV on this device (docs/API.md, "Live TV"), shared by the
@@ -156,10 +130,7 @@ data class LiveState(
  *   [clientId], which ends what it watched before (zapping never holds
  *   two of the provider's connections), lets the previous session go, and
  *   plays the answer's HLS from the live edge on the app's Media3 engine;
- * - paused, the server is told every [KEEP_ALIVE_MS] that it is still
- *   watched (a paused player asks for nothing, and 45 s of silence is
- *   leaving); played again, it goes on from where it paused while the
- *   window holds it, else from the live edge;
+ * - it is watched as it airs, as the web's: no pausing, no going back;
  * - [stop] lets the session and the engine go (the screen went to the
  *   background), [resume] tunes the channel again, [close] ends it all.
  *
@@ -182,17 +153,13 @@ class LivePlayback(
 
     private var session: String? = null
     private var tuning: Job? = null
-    private var keepAlive: Job? = null
-    private var ticker: Job? = null
     private var closed = false
     private val listener = Listener()
-    private val window = Timeline.Window()
 
     /** Starts watching [channelId] in place of what played. */
     fun tune(channelId: Long) {
         if (closed) return
         tuning?.cancel()
-        keepAlive?.cancel()
         letSessionGo()
         mutableEngine.value?.player?.let {
             it.stop()
@@ -214,7 +181,6 @@ class LivePlayback(
                 mutableEngine.value = it
             }
             engine.prepare(EngineSource(url = watching.url, hls = true, live = true), startMs = 0, playWhenReady = true)
-            startTicker()
         }
     }
 
@@ -228,39 +194,6 @@ class LivePlayback(
         if (state.value.phase == LivePhase.Idle) retry()
     }
 
-    fun play() {
-        mutableEngine.value?.player?.play()
-    }
-
-    fun pause() {
-        mutableEngine.value?.player?.pause()
-    }
-
-    fun togglePlay() = if (state.value.playWhenReady) pause() else play()
-
-    /** Moves [deltaMs] (back when negative) in the window, never past the live edge. */
-    fun seekBy(deltaMs: Long) {
-        val s = state.value
-        if (!s.canRewind) return
-        seekTo(s.positionMs + deltaMs)
-    }
-
-    /** Moves to [positionMs] of the window, never past the live edge. */
-    fun seekTo(positionMs: Long) {
-        val player = mutableEngine.value?.player ?: return
-        val edge = liveEdgeMs(player) ?: return
-        player.seekTo(positionMs.coerceIn(0, edge))
-        sample()
-    }
-
-    /** Back to the live edge, playing. */
-    fun goLive() {
-        val player = mutableEngine.value?.player ?: return
-        player.seekToDefaultPosition()
-        player.play()
-        sample()
-    }
-
     /**
      * Lets the session and the engine go, keeping which channel it was:
      * the screen is in the background. Nothing plays and no connection is
@@ -268,8 +201,6 @@ class LivePlayback(
      */
     fun stop() {
         tuning?.cancel()
-        keepAlive?.cancel()
-        ticker?.cancel()
         letSessionGo()
         mutableEngine.value?.let {
             it.player.removeListener(listener)
@@ -291,56 +222,9 @@ class LivePlayback(
     }
 
     private fun fail(trouble: LiveTrouble) {
-        keepAlive?.cancel()
         letSessionGo()
         mutableEngine.value?.player?.stop()
         mutableState.update { it.copy(phase = LivePhase.Failed(trouble), buffering = false) }
-    }
-
-    private fun startTicker() {
-        if (ticker?.isActive == true) return
-        ticker = scope.launch {
-            while (isActive) {
-                sample()
-                delay(TICK_MS)
-            }
-        }
-    }
-
-    /** Where the player is in the window, now. */
-    private fun sample() {
-        val player = mutableEngine.value?.player ?: return
-        val edge = liveEdgeMs(player) ?: return
-        val position = player.currentPosition.coerceAtLeast(0)
-        val length = window.durationMs.takeIf { it != C.TIME_UNSET } ?: edge
-        mutableState.update {
-            it.copy(positionMs = position, windowMs = length.coerceAtLeast(edge), behindMs = (edge - position).coerceAtLeast(0))
-        }
-    }
-
-    /** The live edge, as a position in the window (the player's default position); `null` before the playlist is read. */
-    private fun liveEdgeMs(player: Player): Long? {
-        val timeline = player.currentTimeline
-        if (timeline.isEmpty) return null
-        timeline.getWindow(player.currentMediaItemIndex, window)
-        return window.defaultPositionMs
-    }
-
-    private fun keepTelling() {
-        keepAlive?.cancel()
-        val id = session ?: return
-        keepAlive = scope.launch {
-            while (isActive) {
-                delay(KEEP_ALIVE_MS)
-                try {
-                    live.keepWatching(id)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Exception) {
-                    // Out of reach for now: playing again asks for the stream itself.
-                }
-            }
-        }
     }
 
     private inner class Listener : Player.Listener {
@@ -352,12 +236,11 @@ class LivePlayback(
                 Player.STATE_BUFFERING -> mutableState.update { if (it.phase is LivePhase.Playing) it.copy(buffering = true) else it }
                 else -> Unit
             }
-            sample()
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-            mutableState.update { it.copy(playWhenReady = playWhenReady) }
-            if (playWhenReady) keepAlive?.cancel() else keepTelling()
+            // Live has no pause (headphones pulled out, a stray media key): it plays on, as a browser's does.
+            if (!playWhenReady) mutableEngine.value?.player?.play()
         }
 
         override fun onTracksChanged(tracks: Tracks) {
@@ -368,7 +251,7 @@ class LivePlayback(
         override fun onPlayerError(error: PlaybackException) {
             val player = mutableEngine.value?.player ?: return
             if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
-                // Paused past what the server keeps: on from the live edge.
+                // Fell behind what the server keeps (a long stall): on from the live edge.
                 player.seekToDefaultPosition()
                 player.prepare()
                 return
@@ -378,12 +261,6 @@ class LivePlayback(
     }
 
     companion object {
-        /** A paused player tells the server it still watches this often (it lets a silent viewer go after 45 s). */
-        const val KEEP_ALIVE_MS = 20_000L
-
-        /** How often the position in the window is read while it plays. */
-        const val TICK_MS = 500L
-
         /**
          * Watching on this device: [live]'s server, engines of [engines],
          * the device's own client id (the one its playbacks send).

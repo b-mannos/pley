@@ -21,7 +21,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 
-/** Watching a channel: tuning with this device's id, zapping, the server's refusals, pausing, the background. */
+/** Watching a channel: tuning with this device's id, zapping, the server's refusals, no pausing, the background. */
 @RunWith(RobolectricTestRunner::class)
 class LivePlaybackTest {
     private val scheduler = TestCoroutineScheduler()
@@ -41,11 +41,6 @@ class LivePlaybackTest {
         scheduler.runCurrent()
         shadowOf(Looper.getMainLooper()).idle()
         scheduler.runCurrent()
-    }
-
-    private fun advance(ms: Long) {
-        scheduler.advanceTimeBy(ms)
-        settle()
     }
 
     private fun engine() = engines.single()
@@ -110,21 +105,15 @@ class LivePlaybackTest {
     }
 
     @Test
-    fun `paused, the server hears every 20 s that the channel is still watched`() {
+    fun `live has no pause, so a channel paused by something else plays on`() {
         playback.tune(1)
         settle()
         engine().player.ready()
         settle()
-        playback.pause()
+        // Headphones pulled out, a stray media key.
+        engine().player.pause()
         settle()
-        assertFalse(playback.state.value.playWhenReady)
-        advance(LivePlayback.KEEP_ALIVE_MS * 2)
-        assertEquals(2, live.sent.count { it == "keep live-1" })
-
-        playback.play()
-        settle()
-        advance(LivePlayback.KEEP_ALIVE_MS * 2)
-        assertEquals(2, live.sent.count { it == "keep live-1" })
+        assertTrue(engine().player.playWhenReady)
     }
 
     @Test

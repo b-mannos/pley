@@ -1,17 +1,12 @@
 package app.pley.android.ui.phone.livetv
 
 import android.app.AppOpsManager
-import android.app.PendingIntent
 import android.app.PictureInPictureParams
-import android.app.RemoteAction
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
-import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
 import android.os.Process
@@ -22,7 +17,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.runtime.mutableStateOf
-import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -32,8 +26,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.engine.VideoMediaSession
 import app.pley.android.player.live.LivePhase
+import app.pley.android.player.live.LiveSessionPlayer
 import app.pley.android.screens.livetv.LivePlayerViewModel
-import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.theme.PhoneTheme
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -42,7 +36,8 @@ import kotlinx.coroutines.launch
  * The phone and tablet live player, in a window of its own, as the
  * phone's player: immersive and black, landscape on phones, the screen
  * kept on while it plays, and picture in picture when leaving while it
- * plays (by itself from Android 12; Home before), with play and pause.
+ * plays (by itself from Android 12; Home before). Live has no pause: the
+ * media session offers none either ([LiveSessionPlayer]).
  * Leaving otherwise lets the channel's connection and the decoders go;
  * back to it, the channel is tuned again at the live edge.
  */
@@ -56,19 +51,12 @@ class LivePlayerActivity : ComponentActivity() {
     private var screenOn = false
     private var pipPlaying: Boolean? = null
 
-    private val pipReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == ACTION_PLAY_PAUSE) vm.togglePlay()
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         immersive()
         if (resources.configuration.smallestScreenWidthDp < TABLET_DP) {
             requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         }
-        ContextCompat.registerReceiver(this, pipReceiver, IntentFilter(ACTION_PLAY_PAUSE), ContextCompat.RECEIVER_NOT_EXPORTED)
         setContent {
             PhoneTheme {
                 LivePlayerScreen(vm = vm, inPip = inPip.value, onBack = ::finish)
@@ -78,9 +66,8 @@ class LivePlayerActivity : ComponentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 combine(vm.engine, vm.state) { engine, state -> engine to state }.collect { (engine, state) ->
                     attach(engine)
-                    val playing = state.playWhenReady && state.phase !is LivePhase.Failed
-                    keepScreenOn(playing && state.phase != LivePhase.Idle)
-                    updatePip(playing && state.phase == LivePhase.Playing)
+                    keepScreenOn(state.phase == LivePhase.Playing || state.phase == LivePhase.Tuning)
+                    updatePip(state.phase == LivePhase.Playing)
                 }
             }
         }
@@ -119,7 +106,6 @@ class LivePlayerActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        runCatching { unregisterReceiver(pipReceiver) }
         detach()
         super.onDestroy()
     }
@@ -135,10 +121,10 @@ class LivePlayerActivity : ComponentActivity() {
                 vm.step(-1)
                 return true
             }
-            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_SPACE -> {
-                vm.togglePlay()
-                return true
-            }
+            // Live has no pause, no going back: these do nothing here.
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_SPACE,
+            KeyEvent.KEYCODE_MEDIA_REWIND, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+            -> return true
         }
         val digit = event.unicodeChar.toChar()
         if (digit.isDigit()) {
@@ -155,7 +141,7 @@ class LivePlayerActivity : ComponentActivity() {
         if (engine == null || !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return
         attached = engine
         engine.attachWindow(window)
-        mediaSession = VideoMediaSession(this, engine.player).also { it.start() }
+        mediaSession = VideoMediaSession(this, LiveSessionPlayer(engine.player)).also { it.start() }
     }
 
     private fun detach() {
@@ -213,22 +199,13 @@ class LivePlayerActivity : ComponentActivity() {
     private fun pipParams(playing: Boolean): PictureInPictureParams {
         val builder = PictureInPictureParams.Builder()
             .setAspectRatio(Rational(16, 9))
-            .setActions(listOf(playPause(playing)))
+            .setActions(emptyList())
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Only while playing: a paused channel doesn't shrink into a corner.
+            // Only while playing: a channel tuning or that failed doesn't shrink into a corner.
             builder.setAutoEnterEnabled(playing)
             builder.setSeamlessResizeEnabled(false)
         }
         return builder.build()
-    }
-
-    /** Pause while [playing], Play otherwise; this screen's receiver does it. */
-    private fun playPause(playing: Boolean): RemoteAction {
-        val title = getString(if (playing) R.string.live_player_pause else R.string.live_player_play)
-        val icon = Icon.createWithResource(this, if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play)
-        val intent = Intent(ACTION_PLAY_PAUSE).setPackage(packageName)
-        val pending = PendingIntent.getBroadcast(this, REQUEST_PLAY_PAUSE, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        return RemoteAction(icon, title, title, pending)
     }
 
     companion object {
@@ -239,8 +216,6 @@ class LivePlayerActivity : ComponentActivity() {
         const val EXTRA_CATEGORY = "category"
 
         private const val TABLET_DP = 600
-        private const val REQUEST_PLAY_PAUSE = 2
-        internal const val ACTION_PLAY_PAUSE = "app.pley.android.live.PLAY_PAUSE"
 
         fun intent(context: Context, channelId: Long, category: String): Intent =
             Intent(context, LivePlayerActivity::class.java).putExtra(EXTRA_CHANNEL, channelId).putExtra(EXTRA_CATEGORY, category)

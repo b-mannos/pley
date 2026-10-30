@@ -70,13 +70,7 @@
     <string name="live_player_search">Search channels</string>
     <string name="live_player_channel_up">Channel up</string>
     <string name="live_player_channel_down">Channel down</string>
-    <string name="live_player_play">Play</string>
-    <string name="live_player_pause">Pause</string>
-    <string name="live_player_back_10">Back 10 seconds</string>
-    <string name="live_player_forward_10">Forward 10 seconds</string>
     <string name="live_player_live">Live</string>
-    <string name="live_player_go_live">Go live</string>
-    <string name="live_player_behind">−%1$s</string>
     <string name="live_player_radio">Sound only</string>
     <string name="live_player_no_channel">No channel %1$s</string>
     <string name="live_player_retry">Try again</string>

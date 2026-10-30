@@ -385,13 +385,6 @@ interface PleyApi {
      */
     suspend fun watchChannel(channelId: Long, request: WatchRequest): LiveWatching
 
-    /**
-     * GET /api/live/sessions/{session}/index.m3u8 (scope play), the body
-     * left unread: a paused player asks for nothing, and the server takes
-     * 45 s without a request for a viewer that left.
-     */
-    suspend fun keepWatching(sessionId: String)
-
     /** DELETE /api/live/sessions/{session} (scope play): stops watching now; a session already gone is fine. */
     suspend fun leaveChannel(sessionId: String)
 

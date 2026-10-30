@@ -65,7 +65,7 @@ data class ChannelDigits(val typed: String = "", val notFound: String? = null)
  * number typed, found among every channel; the category's channels a page
  * at a time for the channel list, which can show another category's (a
  * channel tuned from there makes channel up and down go through that one,
- * as the web's does); pause and going back in what the server keeps; a
+ * as the web's does); watched as it airs, without pausing or going back; a
  * favourite. The channel and its category are kept with the screen's saved
  * state, and the channel for the profile too: the guide opens back at it.
  * The playback ends with the ViewModel.
@@ -266,16 +266,6 @@ class LivePlayerViewModel(
             }
         }
     }
-
-    fun play() = playback.play()
-
-    fun pause() = playback.pause()
-
-    fun togglePlay() = playback.togglePlay()
-
-    fun seekBy(deltaMs: Long) = playback.seekBy(deltaMs)
-
-    fun goLive() = playback.goLive()
 
     fun retry() = playback.retry()
 

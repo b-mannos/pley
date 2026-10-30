@@ -21,8 +21,9 @@ describes how they are made.
   the favourite.
 - The live player: channel up and down within the group it was opened
   from, a channel list, a typed number, what's on and next when asked
-  for (Info on a TV, a tap on a phone), pause and going back in what the server keeps (Live, or how far
-  behind), the server's own sentence when every connection is in use,
+  for (Info on a TV, a tap on a phone), Live as it airs (no pause, no
+  going back, as on the web), the server's own sentence when every
+  connection is in use,
   the channel's logo for radio, and picture in picture on phones.
   Leaving lets the provider's connection go.
 - Live TV opens as it was left, after a restart too: the category, the

@@ -55,9 +55,6 @@ interface LiveTvRepository {
      */
     suspend fun watch(channelId: Long, clientId: String): LiveWatching
 
-    /** Tells the server a paused player still watches [sessionId]. */
-    suspend fun keepWatching(sessionId: String)
-
     /** Stops watching [sessionId], in the background: it outlives the screen that asks. */
     fun leave(sessionId: String)
 
@@ -92,8 +89,6 @@ interface LiveTvRepository {
             override suspend fun setFavorite(channelId: Long, favorite: Boolean) = throw NotBuiltYet("Live TV")
 
             override suspend fun watch(channelId: Long, clientId: String): LiveWatching = throw NotBuiltYet("Live TV")
-
-            override suspend fun keepWatching(sessionId: String) = Unit
 
             override fun leave(sessionId: String) = Unit
         }
@@ -177,8 +172,6 @@ internal class CachedLiveTv(private val cache: ResourceCache) : LiveTvRepository
         }
         return watching.copy(url = api.url(watching.url))
     }
-
-    override suspend fun keepWatching(sessionId: String) = cache.api(cache.profile()).keepWatching(sessionId)
 
     override fun leave(sessionId: String) {
         cache.app.launch {

@@ -158,9 +158,11 @@ rail. Its sources, lineup and connections are set up in the web app.
   channel up and down follow that group. A typed number tunes that
   number among every channel. What's on and next shows only when asked
   for (Info on TVs, a tap that brings the controls on phones), not as a
-  channel tunes. Paused, it tells the server every 20 s it
-  still watches; behind the live edge it says how far, and Live goes
-  back. `409` shows the server's sentence (which channels hold the
+  channel tunes. It is watched as it airs, as the web's: no pause, no
+  going back, and Live is a plain badge; play, pause, rewind and fast
+  forward (media keys, the media session, Left and Right on TVs) do
+  nothing, and a pause from elsewhere (headphones pulled out) plays on.
+  `409` shows the server's sentence (which channels hold the
   connections), with Try again and Other channels. Leaving (onStop, not
   in picture in picture) lets the session go; coming back tunes again at
   the live edge. The TV's display mode isn't matched for live channels.

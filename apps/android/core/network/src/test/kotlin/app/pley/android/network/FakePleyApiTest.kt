@@ -94,7 +94,6 @@ class FakePleyApiTest {
         api.setFavoriteChannel(1, true)
         val watching = api.watchChannel(1, app.pley.android.model.WatchRequest("android-test"))
         assertEquals("/api/live/sessions/live-1/index.m3u8", watching.url)
-        api.keepWatching(watching.sessionId)
         api.leaveChannel(watching.sessionId)
         assertEquals("New", api.createPlaylist(NewPlaylist(title = "New", itemIds = listOf(101))).title)
         assertEquals("Renamed", api.updatePlaylist(901, PlaylistPatch(title = "Renamed")).title)

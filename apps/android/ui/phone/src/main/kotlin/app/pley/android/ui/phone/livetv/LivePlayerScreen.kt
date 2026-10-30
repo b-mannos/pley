@@ -105,8 +105,8 @@ import kotlinx.coroutines.delay
  * it doesn't play (the server's own sentence: which channels hold every
  * connection) with Try again and Other channels. A tap shows the
  * controls: Back, the channel and what's on, the favourite, the channel
- * list; play and pause with 10 s back and on; the window the server keeps
- * with Live (or how far behind it is); channel down and up. A swipe up or
+ * list; Live; channel down and up. Live TV is watched as it airs: no
+ * pause, no going back (as the web's). A swipe up or
  * down changes channel. What's on and next shows for 5 s when a tap brings
  * the controls, not on its own as a channel tunes.
  */
@@ -134,8 +134,8 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: (
     BackHandler(enabled = panel) { panel = false }
     // Each opening starts on the category zapped through.
     LaunchedEffect(panel) { if (panel) vm.openList() }
-    LaunchedEffect(poked, controls, state.playWhenReady, playing, panel) {
-        if (controls && state.playWhenReady && playing && !panel) {
+    LaunchedEffect(poked, controls, playing, panel) {
+        if (controls && playing && !panel) {
             delay(HIDE_CONTROLS_MS)
             controls = false
         }
@@ -166,7 +166,6 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: (
                                 }
                             }
                         },
-                        onDoubleTap = { at -> if (state.canRewind) vm.seekBy(if (at.x < size.width / 2) -SEEK_MS else SEEK_MS) },
                     )
                 }
                 .pointerInput(Unit) {
@@ -210,7 +209,7 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: (
                     exit = fadeOut() + slideOutVertically { it / 4 },
                     modifier = Modifier.align(Alignment.BottomStart),
                 ) {
-                    // Between the bottom row and the round buttons when the controls show.
+                    // Above the bottom row when the controls show.
                     Banner(shown, origin, now, Modifier.padding(start = 16.dp, end = 16.dp, bottom = if (controls) 56.dp else 24.dp))
                 }
             }
@@ -278,7 +277,7 @@ private fun SoundOnly(channel: LiveChannel, origin: String, now: Long) {
     }
 }
 
-/** The controls over the picture: a top bar, play and pause in the middle, the window and channel up and down below. */
+/** The controls over the picture: a top bar, then Live, what's on's times and channel up and down below. */
 @Composable
 private fun Controls(
     state: LiveState,
@@ -328,31 +327,6 @@ private fun Controls(
             }
             PleyIconButton(PleyIcons.List, stringResource(R.string.live_player_channels), onClick = onChannels, modifier = Modifier.testTag(LIVE_PLAYER_CHANNELS))
         }
-        if (state.phase == LivePhase.Playing) {
-            Row(Modifier.align(Alignment.Center), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-                if (state.canRewind) {
-                    RoundButton(PleyIcons.RotateCcw, stringResource(R.string.live_player_back_10), 52.dp) {
-                        onPoke()
-                        vm.seekBy(-SEEK_MS)
-                    }
-                }
-                RoundButton(
-                    if (state.playWhenReady) PleyIcons.Pause else PleyIcons.Play,
-                    stringResource(if (state.playWhenReady) R.string.live_player_pause else R.string.live_player_play),
-                    68.dp,
-                    Modifier.testTag(LIVE_PLAYER_PLAY),
-                ) {
-                    onPoke()
-                    vm.togglePlay()
-                }
-                if (state.canRewind) {
-                    RoundButton(PleyIcons.RotateCw, stringResource(R.string.live_player_forward_10), 52.dp, enabled = !state.atLive) {
-                        onPoke()
-                        vm.seekBy(SEEK_MS)
-                    }
-                }
-            }
-        }
         Column(
             Modifier
                 .align(Alignment.BottomCenter)
@@ -363,10 +337,7 @@ private fun Controls(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (state.phase == LivePhase.Playing) {
-                    LiveBadge(state) {
-                        onPoke()
-                        vm.goLive()
-                    }
+                    LiveBadge()
                     Spacer(Modifier.width(12.dp))
                 }
                 Text(
@@ -388,52 +359,20 @@ private fun Controls(
     }
 }
 
-/** Live (red, with a dot) at the live edge; behind it, how far ("−1:23"), which goes back to it. */
+/** Live, red with a dot: a badge, nothing to press. */
 @Composable
-private fun LiveBadge(state: LiveState, onGoLive: () -> Unit) {
-    val atLive = state.atLive
-    val label = if (atLive) stringResource(R.string.live_player_live) else stringResource(R.string.live_player_behind, behind(state.behindMs))
-    val goLive = stringResource(R.string.live_player_go_live)
+private fun LiveBadge() {
     Row(
         Modifier
             .clip(PleyShape.Circle)
-            .background(if (atLive) PleyColors.Danger else Color.White.copy(alpha = 0.18f))
-            .then(if (atLive) Modifier else Modifier.clickable(role = Role.Button, onClickLabel = goLive, onClick = onGoLive))
+            .background(PleyColors.Danger)
             .padding(horizontal = 10.dp, vertical = 5.dp)
             .testTag(LIVE_PLAYER_LIVE),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(6.dp).background(if (atLive) Color.White else Color.White.copy(alpha = 0.6f), PleyShape.Circle))
+        Box(Modifier.size(6.dp).background(Color.White, PleyShape.Circle))
         Spacer(Modifier.width(6.dp))
-        Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = Color.White)
-    }
-}
-
-/** "1:23" behind live, or "12 min" from 10 minutes. */
-internal fun behind(ms: Long): String {
-    val s = (ms / 1000).coerceAtLeast(0)
-    return if (s >= 600) "${s / 60} min" else "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
-}
-
-@Composable
-private fun RoundButton(
-    icon: app.pley.android.designsystem.icon.PleyIcon,
-    label: String,
-    size: androidx.compose.ui.unit.Dp,
-    modifier: Modifier = Modifier,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier
-            .size(size)
-            .clip(PleyShape.Circle)
-            .background(Color.Black.copy(alpha = 0.35f))
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = label },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = null, size = size * 0.45f, tint = if (enabled) PleyColors.Fg else PleyColors.Disabled)
+        Text(stringResource(R.string.live_player_live).uppercase(), style = MaterialTheme.typography.labelSmall, color = Color.White)
     }
 }
 
@@ -754,14 +693,10 @@ private const val HIDE_CONTROLS_MS = 3_500L
 /** The banner saying what's on shows this long after tuning. */
 private const val BANNER_MS = 5_000L
 
-/** A double tap's or a button's step back or on. */
-private const val SEEK_MS = 10_000L
-
 /** A swipe this long changes channel. */
 private val SWIPE = 72.dp
 
 internal const val LIVE_PLAYER = "pley.live.player"
-internal const val LIVE_PLAYER_PLAY = "pley.live.player.play"
 internal const val LIVE_PLAYER_UP = "pley.live.player.up"
 internal const val LIVE_PLAYER_LIVE = "pley.live.player.live"
 internal const val LIVE_PLAYER_CHANNELS = "pley.live.player.channels"

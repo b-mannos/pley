@@ -347,8 +347,6 @@ class FakePleyApi(val issuer: String = "http://127.0.0.1:7539") : PleyApi {
         watching.copy(sessionId = "live-$channelId", url = "/api/live/sessions/live-$channelId/index.m3u8")
     }
 
-    override suspend fun keepWatching(sessionId: String) = respond("keepWatching", sessionId) { }
-
     override suspend fun leaveChannel(sessionId: String) = respond("leaveChannel", sessionId) { }
 
     // ---------------------------------------------------------------- playlists (changing)

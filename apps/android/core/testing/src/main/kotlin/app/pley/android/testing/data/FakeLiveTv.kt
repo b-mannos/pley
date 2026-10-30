@@ -95,10 +95,6 @@ class FakeLiveTv : LiveTvRepository {
         return LiveWatching("live-$channelId", "http://127.0.0.1:7539/api/live/sessions/live-$channelId/index.m3u8")
     }
 
-    override suspend fun keepWatching(sessionId: String) {
-        sent += "keep $sessionId"
-    }
-
     override fun leave(sessionId: String) {
         sent += "leave $sessionId"
     }

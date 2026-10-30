@@ -258,11 +258,6 @@ class HttpPleyApiTest {
                 "POST /api/live/channels/1/watch",
                 body = """{"client_id":"android-1"}""",
             ) { watchChannel(1, WatchRequest("android-1")) },
-            Golden(
-                "keepWatching",
-                MockResponse.Builder().setHeader("Content-Type", "application/vnd.apple.mpegurl").body("#EXTM3U\n").build(),
-                "GET /api/live/sessions/5d0f7f2a/index.m3u8",
-            ) { keepWatching("5d0f7f2a") },
             Golden("leaveChannel", MockPley.noContent(), "DELETE /api/live/sessions/5d0f7f2a") { leaveChannel("5d0f7f2a") },
             Golden(
                 "leaveChannel (gone already)",

@@ -382,11 +382,6 @@ class HttpPleyApi(
     override suspend fun watchChannel(channelId: Long, request: WatchRequest): LiveWatching =
         send("POST", LiveWatching.serializer(), json(WatchRequest.serializer(), request), "api", "live", "channels", channelId, "watch")
 
-    override suspend fun keepWatching(sessionId: String) {
-        val request = Request.Builder().url(address(listOf("api", "live", "sessions", sessionId, "index.m3u8"))).get().build()
-        http().fetch(request) { it.expectSuccess() }
-    }
-
     override suspend fun leaveChannel(sessionId: String) {
         val request = jsonRequest(address(listOf("api", "live", "sessions", sessionId))).delete().build()
         // Gone already (left by itself, or stopped by an administrator): left all the same.

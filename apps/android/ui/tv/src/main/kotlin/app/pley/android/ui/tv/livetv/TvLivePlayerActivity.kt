@@ -13,6 +13,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import app.pley.android.player.PlayerEngine
 import app.pley.android.player.engine.VideoMediaSession
 import app.pley.android.player.live.LivePhase
+import app.pley.android.player.live.LiveSessionPlayer
 import app.pley.android.screens.PleyGraphOwner
 import app.pley.android.screens.livetv.LivePlayerViewModel
 import app.pley.android.ui.tv.theme.TvTheme
@@ -47,7 +48,7 @@ class TvLivePlayerActivity : ComponentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 combine(vm.engine, vm.state) { engine, state -> engine to state }.collect { (engine, state) ->
                     attach(engine)
-                    keepScreenOn(state.playWhenReady && (state.phase == LivePhase.Playing || state.phase == LivePhase.Tuning))
+                    keepScreenOn(state.phase == LivePhase.Playing || state.phase == LivePhase.Tuning)
                 }
             }
         }
@@ -74,7 +75,8 @@ class TvLivePlayerActivity : ComponentActivity() {
         if (engine == null || !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) return
         attached = engine
         engine.attachWindow(window)
-        session = VideoMediaSession(this, engine.player).also { it.start() }
+        // Live has no pause and no going back: the session offers none to remotes and assistants.
+        session = VideoMediaSession(this, LiveSessionPlayer(engine.player)).also { it.start() }
     }
 
     private fun detach() {

@@ -85,7 +85,6 @@ import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.model.LiveChannel
-import app.pley.android.player.engine.MediaKeys
 import app.pley.android.player.engine.VideoSurface
 import app.pley.android.player.live.LivePhase
 import app.pley.android.player.live.LiveState
@@ -107,17 +106,16 @@ private enum class Overlay { None, Controls, Channels }
  * channel full screen. With nothing over it:
  *
  * - Up and Down, and Channel up and down, change channel (Up the next
- *   number), digits tune a number, play and pause work;
- * - Left and Right go 10 s back and on in what the server keeps;
- * - OK shows the controls (play and pause, 10 s back and on, Go live,
- *   the channel list, the favourite) over what's on; Menu or Guide shows
- *   the channel list; Back hides what shows, then leaves.
+ *   number), digits tune a number;
+ * - OK shows the controls (the channel list, the favourite) over what's
+ *   on; Menu or Guide shows the channel list; Back hides what shows, then
+ *   leaves.
  *
- * What's on and next shows for 5 s when asked for (Info) and after a
- * seek, never on its own as a channel tunes, the window and Live (or how
- * far behind) with it. A channel that doesn't
- * start says why (the server's sentence), with Try again and Other
- * channels.
+ * Live TV is watched as it airs, as the web's: no pause, no going back,
+ * so play, pause, rewind and fast forward, Left and Right do nothing.
+ * What's on and next shows for 5 s when asked for (Info), never on its
+ * own as a channel tunes, with Live. A channel that doesn't start says why
+ * (the server's sentence), with Try again and Other channels.
  */
 @Composable
 internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
@@ -128,7 +126,7 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
     val now by vm.now.collectAsStateWithLifecycle()
     val digits by vm.digits.collectAsStateWithLifecycle()
     var overlay by remember { mutableStateOf(Overlay.None) }
-    // What's on shows when asked for (Info, a seek), never on its own as a channel tunes.
+    // What's on shows when asked for (Info), never on its own as a channel tunes.
     var peek by remember { mutableIntStateOf(0) }
     var poked by remember { mutableIntStateOf(0) }
     var showInfo by remember { mutableStateOf(false) }
@@ -146,8 +144,8 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
         showInfo = false
     }
     // The controls hide when left alone while it plays.
-    LaunchedEffect(overlay, poked, state.playWhenReady) {
-        if (overlay == Overlay.Controls && state.playWhenReady && playing) {
+    LaunchedEffect(overlay, poked, playing) {
+        if (overlay == Overlay.Controls && playing) {
             delay(CONTROLS_MS)
             overlay = Overlay.None
         }
@@ -190,7 +188,8 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
                         if (!down) peek++
                         true
                     }
-                    engine != null && MediaKeys.handle(engine!!.player, event.nativeKeyEvent) -> true
+                    // No pause, no going back on live.
+                    code in NOT_LIVE_KEYS -> true
                     overlay != Overlay.None || failed -> false
                     else -> when (code) {
                         KeyEvent.KEYCODE_DPAD_UP -> {
@@ -201,13 +200,7 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
                             if (down) vm.step(-1)
                             true
                         }
-                        KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            if (down && state.canRewind) {
-                                vm.seekBy(if (code == KeyEvent.KEYCODE_DPAD_LEFT) -SEEK_MS else SEEK_MS)
-                                peek++
-                            }
-                            true
-                        }
+                        KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> true
                         KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                             if (!down) overlay = Overlay.Controls
                             true
@@ -305,8 +298,8 @@ private fun SoundOnly(channel: LiveChannel, origin: String, now: Long) {
 
 /**
  * The bar at the foot: the channel's logo, number and name, what's on with
- * its times, how far it is and what's next; the window the server keeps
- * with Live; and with [controls], the buttons, play and pause first.
+ * its times, how far it is and what's next; Live; and with [controls],
+ * the buttons, the channel list first.
  */
 @Composable
 private fun InfoBar(
@@ -364,7 +357,7 @@ private fun InfoBar(
                     )
                 }
             }
-            if (state.phase == LivePhase.Playing) LiveBadge(state)
+            if (state.phase == LivePhase.Playing) LiveBadge()
         }
         if (controls) {
             Row(
@@ -372,17 +365,11 @@ private fun InfoBar(
                 horizontalArrangement = Arrangement.spacedBy(PleyTv.ButtonGap),
             ) {
                 TvRoundButton(
-                    stringResource(if (state.playWhenReady) R.string.tv_live_player_pause else R.string.tv_live_player_play),
-                    if (state.playWhenReady) PleyIcons.Pause else PleyIcons.Play,
-                    onClick = vm::togglePlay,
-                    modifier = Modifier.initialFocus().testTag(TV_LIVE_PLAYER_PLAY),
+                    stringResource(R.string.tv_live_player_channels),
+                    PleyIcons.List,
+                    onClick = onChannels,
+                    modifier = Modifier.initialFocus().testTag(TV_LIVE_PLAYER_CHANNEL_LIST),
                 )
-                if (state.canRewind) {
-                    TvRoundButton(stringResource(R.string.tv_live_player_back_10), PleyIcons.RotateCcw, onClick = { vm.seekBy(-SEEK_MS) })
-                    TvRoundButton(stringResource(R.string.tv_live_player_forward_10), PleyIcons.RotateCw, onClick = { vm.seekBy(SEEK_MS) }, enabled = !state.atLive)
-                    TvRoundButton(stringResource(R.string.tv_live_player_go_live), PleyIcons.ChevronsRight, onClick = vm::goLive, enabled = !state.atLive)
-                }
-                TvRoundButton(stringResource(R.string.tv_live_player_channels), PleyIcons.List, onClick = onChannels)
                 TvRoundButton(
                     stringResource(if (channel.favorite) R.string.tv_livetv_favorite_remove else R.string.tv_livetv_favorite_add),
                     if (channel.favorite) PleyIcons.Star else PleyIcons.StarOutline,
@@ -395,31 +382,21 @@ private fun InfoBar(
     }
 }
 
-/** Live (red, with a dot) at the live edge; behind it, how far ("−1:23"). */
+/** Live, red with a dot: a badge. */
 @Composable
-private fun LiveBadge(state: LiveState) {
-    val atLive = state.atLive
+private fun LiveBadge() {
     Row(
         Modifier
             .clip(PleyShape.Circle)
-            .background(if (atLive) PleyColors.Danger else Color.White.copy(alpha = 0.18f))
+            .background(PleyColors.Danger)
             .padding(horizontal = 12.dp, vertical = 6.dp)
             .testTag(TV_LIVE_PLAYER_LIVE),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(7.dp).background(if (atLive) Color.White else Color.White.copy(alpha = 0.6f), PleyShape.Circle))
+        Box(Modifier.size(7.dp).background(Color.White, PleyShape.Circle))
         Spacer(Modifier.width(7.dp))
-        BasicText(
-            (if (atLive) stringResource(R.string.tv_live_player_live) else stringResource(R.string.tv_live_player_behind, behind(state.behindMs))).uppercase(),
-            style = PleyType.Tv.Badge.copy(color = Color.White),
-        )
+        BasicText(stringResource(R.string.tv_live_player_live).uppercase(), style = PleyType.Tv.Badge.copy(color = Color.White))
     }
-}
-
-/** "1:23" behind live, or "12 min" from 10 minutes. */
-private fun behind(ms: Long): String {
-    val s = (ms / 1000).coerceAtLeast(0)
-    return if (s >= 600) "${s / 60} min" else "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
 }
 
 /** A channel number being typed on the remote, or the one that matched nothing. */
@@ -699,12 +676,22 @@ private const val INFO_MS = 5_000L
 /** The controls hide after this long untouched while playing. */
 private const val CONTROLS_MS = 6_000L
 
-/** Left, Right and the buttons go this far back or on. */
-private const val SEEK_MS = 10_000L
+/** Media keys that would pause, seek or skip: Live TV has none of that. */
+private val NOT_LIVE_KEYS = setOf(
+    KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+    KeyEvent.KEYCODE_MEDIA_PLAY,
+    KeyEvent.KEYCODE_MEDIA_PAUSE,
+    KeyEvent.KEYCODE_MEDIA_REWIND,
+    KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+    KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD,
+    KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD,
+    KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD,
+    KeyEvent.KEYCODE_MEDIA_STEP_FORWARD,
+)
 
 internal const val TV_LIVE_PLAYER = "pley.tv.live.player"
 internal const val TV_LIVE_PLAYER_INFO = "pley.tv.live.player.info"
-internal const val TV_LIVE_PLAYER_PLAY = "pley.tv.live.player.play"
+internal const val TV_LIVE_PLAYER_CHANNEL_LIST = "pley.tv.live.player.channel.list"
 internal const val TV_LIVE_PLAYER_LIVE = "pley.tv.live.player.live"
 internal const val TV_LIVE_PLAYER_DIGITS = "pley.tv.live.player.digits"
 internal const val TV_LIVE_PLAYER_TROUBLE = "pley.tv.live.player.trouble"
