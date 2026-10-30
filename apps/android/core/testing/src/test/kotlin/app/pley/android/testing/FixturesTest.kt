@@ -25,6 +25,8 @@ import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibraryKind
 import app.pley.android.model.LiveChannel
+import app.pley.android.model.LiveChannelPage
+import app.pley.android.model.LiveGroups
 import app.pley.android.model.LiveGuide
 import app.pley.android.model.LiveSummary
 import app.pley.android.model.LiveWatching
@@ -143,6 +145,8 @@ class FixturesTest {
         "live/watching.json" to LiveWatching.serializer(),
         "live/watch_request.json" to WatchRequest.serializer(),
         "live/busy.json" to ApiErrorBody.serializer(),
+        "live/groups.json" to LiveGroups.serializer(),
+        "live/browse.json" to LiveChannelPage.serializer(),
     )
 
     @Test
@@ -159,7 +163,7 @@ class FixturesTest {
         assertTrue("no fixtures found on the classpath", files.isNotEmpty())
         assertEquals("fixtures missing from the table", emptyList<String>(), files - table.keys)
         assertEquals("table entries without a file", emptyList<String>(), (table.keys - files.toSet()).toList())
-        assertEquals(71, files.size)
+        assertEquals(73, files.size)
     }
 
     @Test

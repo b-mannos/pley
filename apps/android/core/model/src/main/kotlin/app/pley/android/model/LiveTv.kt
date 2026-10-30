@@ -83,6 +83,76 @@ data class LiveChannel(
     }
 }
 
+/**
+ * A group of channels as the provider names it (docs/API.md,
+ * `LiveGroup`): [region] is the "UK" of "UK| Sport", [label] the rest.
+ */
+@Serializable
+data class LiveGroup(
+    val name: String,
+    val region: String? = null,
+    val label: String = name,
+    val count: Int = 0,
+)
+
+/** GET /api/live/groups: the groups in the lineup's order, and how many channels in all, marked and watched lately. */
+@Serializable
+data class LiveGroups(
+    val total: Int = 0,
+    val favorites: Int = 0,
+    val recent: Int = 0,
+    val groups: List<LiveGroup> = emptyList(),
+)
+
+/** GET /api/live/browse: [channels] from [offset] of a list of [total]. */
+@Serializable
+data class LiveChannelPage(
+    val total: Int = 0,
+    val offset: Int = 0,
+    val channels: List<LiveChannel> = emptyList(),
+)
+
+/**
+ * Which channels a list has (`category` of GET /api/live/browse): every
+ * one, the favourites, those watched lately, or one group's.
+ */
+sealed interface LiveCategory {
+    /** How it is kept and passed on: "all", "favorites", "recent" or "group:UK| Sport". */
+    val key: String
+
+    /** `category` on the wire. */
+    val wire: String
+
+    data object All : LiveCategory {
+        override val key: String get() = "all"
+        override val wire: String get() = "all"
+    }
+
+    data object Favorites : LiveCategory {
+        override val key: String get() = "favorites"
+        override val wire: String get() = "favorites"
+    }
+
+    data object Recent : LiveCategory {
+        override val key: String get() = "recent"
+        override val wire: String get() = "recent"
+    }
+
+    data class Group(val name: String) : LiveCategory {
+        override val key: String get() = "group:$name"
+        override val wire: String get() = "group"
+    }
+
+    companion object {
+        fun parse(key: String?): LiveCategory = when {
+            key == "favorites" -> Favorites
+            key == "recent" -> Recent
+            key != null && key.startsWith("group:") -> Group(key.removePrefix("group:"))
+            else -> All
+        }
+    }
+}
+
 /** GET /api/live/guide: the programmes between [from] and [to] (unix seconds), by channel. */
 @Serializable
 data class LiveGuide(

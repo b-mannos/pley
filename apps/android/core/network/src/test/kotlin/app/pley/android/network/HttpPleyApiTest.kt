@@ -10,6 +10,7 @@ import app.pley.android.model.ImageKind
 import app.pley.android.model.ItemIds
 import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
+import app.pley.android.model.LiveCategory
 import app.pley.android.model.NewPlaylist
 import app.pley.android.model.PlaybackRequest
 import app.pley.android.model.PlaylistPatch
@@ -235,6 +236,20 @@ class HttpPleyApiTest {
             Golden("liveGuide", json("live/guide.json"), "GET /api/live/guide?from=1761742800&to=1761764400") {
                 liveGuide(1761742800, 1761764400)
             },
+            Golden("liveGuide (the channels in view)", json("live/guide.json"), "GET /api/live/guide?from=1761742800&to=1761764400&ids=1%2C2") {
+                liveGuide(1761742800, 1761764400, listOf(1, 2))
+            },
+            Golden("liveGroups", json("live/groups.json"), "GET /api/live/groups") { liveGroups() },
+            Golden("liveBrowse (defaults)", json("live/browse.json"), "GET /api/live/browse?category=all&offset=0&limit=100") { liveBrowse(LiveCategory.All) },
+            Golden(
+                "liveBrowse (a group, searched)",
+                json("live/browse.json"),
+                "GET /api/live/browse?category=group&group=UK%7C%20Sport&q=sky&offset=200&limit=100",
+            ) { liveBrowse(LiveCategory.Group("UK| Sport"), " sky ", offset = 200) },
+            Golden("liveBrowse (around a channel)", json("live/browse.json"), "GET /api/live/browse?category=recent&limit=100&around=102") {
+                liveBrowse(LiveCategory.Recent, around = 102)
+            },
+            Golden("liveChannel", jsonAnswer("""{"id":1,"name":"Pley News HD","number":"101"}"""), "GET /api/live/channels/1") { liveChannel(1) },
             Golden("setFavoriteChannel", MockPley.noContent(), "PUT /api/live/channels/2/favorite", body = "") { setFavoriteChannel(2, true) },
             Golden("setFavoriteChannel (off)", MockPley.noContent(), "DELETE /api/live/channels/2/favorite") { setFavoriteChannel(2, false) },
             Golden(

@@ -19,7 +19,10 @@ import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
+import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
+import app.pley.android.model.LiveChannelPage
+import app.pley.android.model.LiveGroups
 import app.pley.android.model.LiveGuide
 import app.pley.android.model.LiveSummary
 import app.pley.android.model.LiveWatching
@@ -346,10 +349,27 @@ class HttpPleyApi(
 
     override suspend fun liveChannels(): List<LiveChannel> = get(ListSerializer(LiveChannel.serializer()), "api", "live", "channels")
 
-    override suspend fun liveGuide(from: Long, to: Long): LiveGuide = get(
+    override suspend fun liveGroups(): LiveGroups = get(LiveGroups.serializer(), "api", "live", "groups")
+
+    override suspend fun liveBrowse(category: LiveCategory, query: String?, offset: Int, limit: Int, around: Long?): LiveChannelPage = get(
+        LiveChannelPage.serializer(),
+        "api", "live", "browse",
+        query = listOf(
+            "category" to category.wire,
+            "group" to (category as? LiveCategory.Group)?.name,
+            "q" to query?.trim()?.ifEmpty { null },
+            "offset" to offset.takeIf { around == null }?.toString(),
+            "limit" to limit.toString(),
+            "around" to around?.toString(),
+        ),
+    )
+
+    override suspend fun liveChannel(id: Long): LiveChannel = get(LiveChannel.serializer(), "api", "live", "channels", id)
+
+    override suspend fun liveGuide(from: Long, to: Long, ids: List<Long>?): LiveGuide = get(
         LiveGuide.serializer(),
         "api", "live", "guide",
-        query = listOf("from" to from.toString(), "to" to to.toString()),
+        query = listOf("from" to from.toString(), "to" to to.toString(), "ids" to ids?.joinToString(",")),
     )
 
     override suspend fun setFavoriteChannel(channelId: Long, favorite: Boolean) =

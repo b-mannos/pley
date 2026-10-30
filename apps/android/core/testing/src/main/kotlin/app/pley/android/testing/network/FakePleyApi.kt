@@ -17,7 +17,10 @@ import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
+import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
+import app.pley.android.model.LiveChannelPage
+import app.pley.android.model.LiveGroups
 import app.pley.android.model.LiveGuide
 import app.pley.android.model.LiveSummary
 import app.pley.android.model.LiveWatching
@@ -48,6 +51,7 @@ import app.pley.android.model.SortOrder
 import app.pley.android.model.StreamChoice
 import app.pley.android.model.TrickplayInfo
 import app.pley.android.model.WatchRequest
+import app.pley.android.network.ApiException
 import app.pley.android.network.HttpPleyApi
 import app.pley.android.network.PleyApi
 import app.pley.android.network.SubtitleText
@@ -309,8 +313,31 @@ class FakePleyApi(val issuer: String = "http://127.0.0.1:7539") : PleyApi {
 
     override suspend fun liveChannels(): List<LiveChannel> = respond("liveChannels") { fixture("live/channels.json") }
 
-    override suspend fun liveGuide(from: Long, to: Long): LiveGuide = respond("liveGuide", from, to) {
-        fixture<LiveGuide>("live/guide.json").copy(from = from, to = to)
+    override suspend fun liveGroups(): LiveGroups = respond("liveGroups") { fixture("live/groups.json") }
+
+    override suspend fun liveBrowse(category: LiveCategory, query: String?, offset: Int, limit: Int, around: Long?): LiveChannelPage =
+        respond("liveBrowse", category, query, offset, limit, around) {
+            val recent = fixture<LiveSummary>("live/summary.json").recent
+            val all = fixture<List<LiveChannel>>("live/channels.json").filter { c ->
+                val inCategory = when (category) {
+                    LiveCategory.All -> true
+                    LiveCategory.Favorites -> c.favorite
+                    LiveCategory.Recent -> c.id in recent
+                    is LiveCategory.Group -> c.group == category.name
+                }
+                inCategory && (query.isNullOrBlank() || c.name.contains(query, ignoreCase = true) || c.number?.startsWith(query) == true)
+            }
+            val start = around?.let { id -> all.indexOfFirst { it.id == id }.coerceAtLeast(0) / limit * limit } ?: offset
+            LiveChannelPage(all.size, start, all.drop(start).take(limit))
+        }
+
+    override suspend fun liveChannel(id: Long): LiveChannel = respond("liveChannel", id) {
+        fixture<List<LiveChannel>>("live/channels.json").firstOrNull { it.id == id } ?: throw ApiException(404, "not_found", "no such channel")
+    }
+
+    override suspend fun liveGuide(from: Long, to: Long, ids: List<Long>?): LiveGuide = respond("liveGuide", from, to, ids) {
+        val guide = fixture<LiveGuide>("live/guide.json")
+        guide.copy(from = from, to = to, programs = if (ids == null) guide.programs else guide.programs.filterKeys { it in ids })
     }
 
     override suspend fun setFavoriteChannel(channelId: Long, favorite: Boolean) = respond("setFavoriteChannel", channelId, favorite) { }

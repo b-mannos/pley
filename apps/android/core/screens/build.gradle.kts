@@ -22,4 +22,8 @@ dependencies {
 
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
+    // Live TV's fakes and fixtures, and the live player's engine on a Looper.
+    testImplementation(project(":core:testing"))
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }

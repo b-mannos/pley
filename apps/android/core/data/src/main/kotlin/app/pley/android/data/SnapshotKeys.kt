@@ -30,11 +30,20 @@ object SnapshotKeys {
     /** GET /api/live. */
     const val LIVE = "live"
 
-    /** GET /api/live/channels. */
-    const val LIVE_CHANNELS = "live:channels"
+    /** GET /api/live/groups. */
+    const val LIVE_GROUPS = "live:groups"
 
-    /** A chunk of GET /api/live/guide, from [from]. */
-    fun liveGuide(from: Long) = "live:guide:$from"
+    /** Page [page] of a category's channels matching [query] (GET /api/live/browse). */
+    fun livePage(category: String, query: String, page: Int) = "live:page:$category:$page:$query"
+
+    /** The page of a category holding [channelId]. */
+    fun liveAround(category: String, channelId: Long) = "live:around:$category:$channelId"
+
+    /** GET /api/live/channels/{id}. */
+    fun liveChannel(channelId: Long) = "live:channel:$channelId"
+
+    /** A chunk of GET /api/live/guide from [from], for the channels [ids]. */
+    fun liveGuide(from: Long, ids: List<Long>) = "live:guide:$from:${ids.joinToString(",")}"
 
     /** Whether [key] is Live TV's: what the server's Live TV events ask for again. */
     fun isLive(key: String): Boolean = key == LIVE || key.startsWith("live:")

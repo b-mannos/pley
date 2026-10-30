@@ -30,9 +30,9 @@ class PlayerLauncherImpl(
         context.startActivity(screen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
-    override fun watchLive(channelId: Long) {
+    override fun watchLive(channelId: Long, category: String) {
         player().music.pauseForVideo()
-        val screen = if (device.isTv) TvLivePlayerActivity.intent(context, channelId) else LivePlayerActivity.intent(context, channelId)
+        val screen = if (device.isTv) TvLivePlayerActivity.intent(context, channelId, category) else LivePlayerActivity.intent(context, channelId, category)
         context.startActivity(screen.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }

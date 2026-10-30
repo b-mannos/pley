@@ -17,7 +17,10 @@ import app.pley.android.model.Library
 import app.pley.android.model.LibraryFilters
 import app.pley.android.model.LibraryIds
 import app.pley.android.model.LibrarySort
+import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
+import app.pley.android.model.LiveChannelPage
+import app.pley.android.model.LiveGroups
 import app.pley.android.model.LiveGuide
 import app.pley.android.model.LiveSummary
 import app.pley.android.model.LiveWatching
@@ -342,14 +345,33 @@ interface PleyApi {
      */
     suspend fun liveSummary(): LiveSummary
 
-    /** GET /api/live/channels (scope library): the channels shown, by number, each with what's on now and next. */
+    /**
+     * GET /api/live/channels (scope library): every channel shown, by
+     * number, each with what's on now and next. Fine for a few hundred; a
+     * provider's tens of thousands are browsed by group ([liveBrowse]).
+     */
     suspend fun liveChannels(): List<LiveChannel>
+
+    /** GET /api/live/groups (scope library): the groups in the lineup's order, and how many channels in all, marked and watched lately. */
+    suspend fun liveGroups(): LiveGroups
+
+    /**
+     * GET /api/live/browse (scope library): a page of [category]'s
+     * channels matching [query] (a name, a number's beginning, what's on),
+     * [limit] (500 at most) from [offset]; with [around], the page holding
+     * that channel instead.
+     */
+    suspend fun liveBrowse(category: LiveCategory, query: String? = null, offset: Int = 0, limit: Int = 100, around: Long? = null): LiveChannelPage
+
+    /** GET /api/live/channels/{id} (scope library): one channel, with what's on now and next. */
+    suspend fun liveChannel(id: Long): LiveChannel
 
     /**
      * GET /api/live/guide (scope library): the programmes between [from]
-     * and [to] (unix seconds, two days at most), by channel.
+     * and [to] (unix seconds, two days at most) of the channels [ids]
+     * (every one when `null`), by channel.
      */
-    suspend fun liveGuide(from: Long, to: Long): LiveGuide
+    suspend fun liveGuide(from: Long, to: Long, ids: List<Long>? = null): LiveGuide
 
     /** PUT (or, not [favorite], DELETE) /api/live/channels/{id}/favorite (scope play). */
     suspend fun setFavoriteChannel(channelId: Long, favorite: Boolean)

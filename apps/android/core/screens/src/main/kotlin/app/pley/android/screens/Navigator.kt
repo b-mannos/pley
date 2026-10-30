@@ -28,8 +28,9 @@ interface PlayerLauncher {
 
     /**
      * Opens the live player on [channelId] (Live TV), music paused; the
-     * player tunes it as it opens. Launchers without Live TV (tests') do
-     * nothing.
+     * player tunes it as it opens, and changes channel within [category]
+     * (a LiveCategory's key: "all", "favorites", "recent", "group:…").
+     * Launchers without Live TV (tests') do nothing.
      */
-    fun watchLive(channelId: Long) = Unit
+    fun watchLive(channelId: Long, category: String = "all") = Unit
 }

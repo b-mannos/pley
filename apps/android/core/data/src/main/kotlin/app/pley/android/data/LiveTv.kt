@@ -1,43 +1,48 @@
 package app.pley.android.data
 
 import app.pley.android.common.NotBuiltYet
+import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
+import app.pley.android.model.LiveChannelPage
+import app.pley.android.model.LiveGroups
 import app.pley.android.model.LiveGuide
-import app.pley.android.model.LiveProgram
 import app.pley.android.model.LiveSummary
 import app.pley.android.model.LiveWatching
 import app.pley.android.model.WatchRequest
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.cancellation.CancellationException
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.serialization.builtins.ListSerializer
 
 /**
- * Live TV (docs/API.md, "Live TV"): whether to show it, the channels with
- * what's on, the guide, favourites, and watching a channel.
+ * Live TV (docs/API.md, "Live TV"): whether to show it, its groups, the
+ * channels of a category a page at a time, the guide of the channels in
+ * view, favourites, and watching a channel. A provider lists tens of
+ * thousands of channels: nothing here asks for them all.
  */
 interface LiveTvRepository {
-    /** Whether Live TV is open to this profile and has channels, and what was watched last. */
+    /** Whether Live TV is open to this profile and has channels. */
     fun summary(): Flow<Loadable<LiveSummary>>
 
-    /** The channels shown, by number, each with what's on now and next. */
-    fun channels(): Flow<Loadable<List<LiveChannel>>>
+    /** The groups in the lineup's order, and how many channels are in all, marked and watched lately. */
+    fun groups(): Flow<Loadable<LiveGroups>>
 
-    /**
-     * The guide from [from] for [GUIDE_CHUNK_S] (unix seconds; [from] a
-     * multiple of it, so the same chunk is asked for however it is
-     * scrolled to).
-     */
-    fun guide(from: Long): Flow<Loadable<LiveGuide>>
+    /** Page [page] ([PAGE] channels) of [category]'s channels matching [query]. */
+    fun page(category: LiveCategory, query: String, page: Int): Flow<Loadable<LiveChannelPage>>
 
-    /** Asks for the channels and the summary again now: a programme ended, or the page came back. */
+    /** The page of [category] that holds [channelId]: where a list opens again, and the channels either side of it. */
+    fun around(category: LiveCategory, channelId: Long): Flow<Loadable<LiveChannelPage>>
+
+    /** One channel, with what's on now and next. */
+    fun channel(channelId: Long): Flow<Loadable<LiveChannel>>
+
+    /** The guide of the channels [ids] from [from] for [GUIDE_CHUNK_S] (a multiple of it, unix seconds). */
+    fun guide(from: Long, ids: List<Long>): Flow<Loadable<LiveGuide>>
+
+    /** The channel numbered [number] exactly, of every channel; `null` when none is. */
+    suspend fun numbered(number: String): LiveChannel?
+
+    /** Asks again for what's on and the groups' counts: a programme ended, or the page came back. */
     fun refresh()
 
     /** A favourite channel or not: at once on screen, put back if the server refuses. */
@@ -57,20 +62,30 @@ interface LiveTvRepository {
     fun leave(sessionId: String)
 
     companion object {
-        /**
-         * The guide is fetched in chunks of two hours: a provider of 50,000
-         * channels has some 30,000 programmes in two hours, 11 MB of JSON.
-         */
-        const val GUIDE_CHUNK_S = 2 * 3600L
+        /** Channels asked for at once, as the web asks. */
+        const val PAGE = 100
+
+        /** The guide is fetched in chunks of six hours, a page of channels at a time. */
+        const val GUIDE_CHUNK_S = 6 * 3600L
 
         /** No Live TV: tests' graphs, which have none. */
         val None: LiveTvRepository = object : LiveTvRepository {
             override fun summary(): Flow<Loadable<LiveSummary>> = flowOf(Loadable.Ready(LiveSummary(), fresh = true))
 
-            override fun channels(): Flow<Loadable<List<LiveChannel>>> = flowOf(Loadable.Ready(emptyList(), fresh = true))
+            override fun groups(): Flow<Loadable<LiveGroups>> = flowOf(Loadable.Ready(LiveGroups(), fresh = true))
 
-            override fun guide(from: Long): Flow<Loadable<LiveGuide>> =
+            override fun page(category: LiveCategory, query: String, page: Int): Flow<Loadable<LiveChannelPage>> =
+                flowOf(Loadable.Ready(LiveChannelPage(), fresh = true))
+
+            override fun around(category: LiveCategory, channelId: Long): Flow<Loadable<LiveChannelPage>> =
+                flowOf(Loadable.Ready(LiveChannelPage(), fresh = true))
+
+            override fun channel(channelId: Long): Flow<Loadable<LiveChannel>> = flowOf(Loadable.Failed(NotBuiltYet("Live TV")))
+
+            override fun guide(from: Long, ids: List<Long>): Flow<Loadable<LiveGuide>> =
                 flowOf(Loadable.Ready(LiveGuide(from, from + GUIDE_CHUNK_S), fresh = true))
+
+            override suspend fun numbered(number: String): LiveChannel? = null
 
             override fun refresh() = Unit
 
@@ -86,64 +101,80 @@ interface LiveTvRepository {
 }
 
 /**
- * Live TV through the cache: the summary and the channels are kept as
- * snapshots (the channels without what the guide says of their
- * programmes, which a big lineup makes megabytes of), so the entry to it
- * and the channels show at once. The guide is held in memory only, by
- * chunk: the [HELD_CHUNKS] used last keep their programmes, the others let
- * them go and ask again when shown, so scrolling through two days of a
- * big lineup's guide never holds it all.
+ * Live TV through the cache. The summary, the groups and each category's
+ * first page are kept as snapshots, so Live TV opens at once; other pages,
+ * channels and the guide are held in memory with item pages (the least
+ * recently used going first). A favourite changes every page, channel and
+ * count that shows it.
  */
 internal class CachedLiveTv(private val cache: ResourceCache) : LiveTvRepository {
     private val summary = Resource(SnapshotKeys.LIVE, LiveSummary.serializer()) { api, _ -> api.liveSummary() }
 
-    private val channels = Resource(
-        SnapshotKeys.LIVE_CHANNELS,
-        ListSerializer(LiveChannel.serializer()),
-        trim = { list -> list.map { c -> c.copy(now = c.now?.let(::brief), next = c.next?.let(::brief)) } },
-    ) { api, _ -> api.liveChannels() }
-
-    /** The chunks holding programmes, the one used last at the end. */
-    private val held = ArrayDeque<GuideChunk>()
+    private val groups = Resource(SnapshotKeys.LIVE_GROUPS, LiveGroups.serializer()) { api, _ -> api.liveGroups() }
 
     override fun summary(): Flow<Loadable<LiveSummary>> = cache.observe(summary)
 
-    override fun channels(): Flow<Loadable<List<LiveChannel>>> = cache.observe(channels)
+    override fun groups(): Flow<Loadable<LiveGroups>> = cache.observe(groups)
 
-    override fun guide(from: Long): Flow<Loadable<LiveGuide>> = cache.whileReady { profile ->
-        flow {
-            val key = SnapshotKeys.liveGuide(from)
-            val chunk = cache.node(profile, key, detail = false) { GuideChunk(key, from, profile) }
-            chunk.users.incrementAndGet()
-            try {
-                if (chunk.stale()) chunk.load()
-                emitAll(chunk.state)
-            } finally {
-                chunk.users.decrementAndGet()
-            }
-        }
+    override fun page(category: LiveCategory, query: String, page: Int): Flow<Loadable<LiveChannelPage>> {
+        val q = query.trim()
+        // A category's first page, unsearched, is what opens: it is kept on disk.
+        val kept = page == 0 && q.isEmpty()
+        return cache.observe(
+            Resource(
+                SnapshotKeys.livePage(category.key, q, page),
+                if (kept) LiveChannelPage.serializer() else null,
+                detail = !kept,
+            ) { api, _ -> api.liveBrowse(category, q, offset = page * LiveTvRepository.PAGE, limit = LiveTvRepository.PAGE) },
+        )
     }
 
-    override fun refresh() = cache.revalidate { key, _ -> key == SnapshotKeys.LIVE || key == SnapshotKeys.LIVE_CHANNELS }
+    override fun around(category: LiveCategory, channelId: Long): Flow<Loadable<LiveChannelPage>> = cache.observe(
+        Resource<LiveChannelPage>(SnapshotKeys.liveAround(category.key, channelId), serializer = null, detail = true) { api, _ ->
+            api.liveBrowse(category, limit = LiveTvRepository.PAGE, around = channelId)
+        },
+    )
+
+    override fun channel(channelId: Long): Flow<Loadable<LiveChannel>> = cache.observe(
+        Resource<LiveChannel>(SnapshotKeys.liveChannel(channelId), serializer = null, detail = true) { api, _ -> api.liveChannel(channelId) },
+    )
+
+    override fun guide(from: Long, ids: List<Long>): Flow<Loadable<LiveGuide>> = cache.observe(
+        Resource<LiveGuide>(SnapshotKeys.liveGuide(from, ids), serializer = null, detail = true) { api, _ ->
+            api.liveGuide(from, from + LiveTvRepository.GUIDE_CHUNK_S, ids)
+        },
+    )
+
+    override suspend fun numbered(number: String): LiveChannel? =
+        cache.api(cache.profile()).liveBrowse(LiveCategory.All, number, limit = LiveTvRepository.PAGE).channels.firstOrNull { it.number == number }
+
+    override fun refresh() = cache.revalidate { key, _ ->
+        key == SnapshotKeys.LIVE || key == SnapshotKeys.LIVE_GROUPS || key.startsWith("live:page:") ||
+            key.startsWith("live:around:") || key.startsWith("live:channel:")
+    }
 
     override suspend fun setFavorite(channelId: Long, favorite: Boolean) {
-        val patched = cache.patchKey(SnapshotKeys.LIVE_CHANNELS) { value ->
-            @Suppress("UNCHECKED_CAST")
-            val list = value as List<LiveChannel>
-            if (list.none { it.id == channelId && it.favorite != favorite }) null else list.map { if (it.id == channelId) it.copy(favorite = favorite) else it }
+        fun mark(c: LiveChannel) = if (c.id == channelId && c.favorite != favorite) c.copy(favorite = favorite) else c
+        val patched = cache.patchAll { value ->
+            when (value) {
+                is LiveChannelPage -> value.channels.map(::mark).takeIf { it != value.channels }?.let { value.copy(channels = it) }
+                is LiveChannel -> mark(value).takeIf { it !== value }
+                is LiveGroups -> value.copy(favorites = (value.favorites + if (favorite) 1 else -1).coerceAtLeast(0))
+                else -> null
+            }
         }
         undoing(patched) { cache.api(cache.profile()).setFavoriteChannel(channelId, favorite) }
+        // Favourites' own pages and counts come from the server.
+        cache.revalidate { key, _ -> key == SnapshotKeys.LIVE_GROUPS || key.startsWith("live:page:favorites:") || key.startsWith("live:around:favorites:") }
     }
 
     override suspend fun watch(channelId: Long, clientId: String): LiveWatching {
         val api = cache.api(cache.profile())
         val watching = api.watchChannel(channelId, WatchRequest(clientId))
-        // Recently watched leads with it now; the server says so too, next time it is asked.
-        cache.patchKey(SnapshotKeys.LIVE) { value ->
-            val live = value as LiveSummary
-            if (live.recent.firstOrNull() == channelId) null else live.copy(recent = listOf(channelId) + live.recent.filter { it != channelId })
+        // Recently watched has it first now: asked again when next shown.
+        cache.markStale { key, _ ->
+            key == SnapshotKeys.LIVE || key == SnapshotKeys.LIVE_GROUPS || key.startsWith("live:page:recent:") || key.startsWith("live:around:recent:")
         }
-        cache.markStale { key, _ -> key == SnapshotKeys.LIVE }
         return watching.copy(url = api.url(watching.url))
     }
 
@@ -159,81 +190,5 @@ internal class CachedLiveTv(private val cache: ResourceCache) : LiveTvRepository
                 // Out of reach: the server lets the session go by itself after 45 s.
             }
         }
-    }
-
-    /** [chunk] has programmes now: the eldest chunks nobody shows let theirs go. */
-    private fun keep(chunk: GuideChunk) = synchronized(held) {
-        held.remove(chunk)
-        held.addLast(chunk)
-        var over = held.size - HELD_CHUNKS
-        for (old in held.filter { !it.active }) {
-            if (over <= 0) break
-            held.remove(old)
-            old.drop()
-            over--
-        }
-    }
-
-    /**
-     * One chunk of the guide, as the cache holds it (asked again on Live
-     * TV's events, forgotten with the profile), its programmes let go by
-     * [keep] when others were used since.
-     */
-    private inner class GuideChunk(override val key: String, private val from: Long, private val profile: ProfileScope) : CacheNode {
-        val state = MutableStateFlow<Loadable<LiveGuide>>(Loadable.Loading)
-        val users = AtomicInteger()
-        private var job: Job? = null
-
-        @Volatile
-        override var fetchedAt: Long = ResourceCache.NEVER
-            private set
-
-        override val active: Boolean get() = users.get() > 0
-        override val current: Any? get() = state.value.valueOrNull
-
-        fun stale(): Boolean = fetchedAt == ResourceCache.NEVER || cache.clock() - fetchedAt >= GUIDE_STALE_MS
-
-        fun load() = synchronized(this) {
-            if (job?.isActive == true) return@synchronized
-            job = cache.app.launch {
-                try {
-                    val guide = cache.api(profile).liveGuide(from, from + LiveTvRepository.GUIDE_CHUNK_S)
-                    fetchedAt = cache.clock()
-                    state.value = Loadable.Ready(guide, fresh = true)
-                    keep(this@GuideChunk)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    state.update { Loadable.Failed(e, it.valueOrNull) }
-                }
-            }
-        }
-
-        /** Lets the programmes go: asked for again when shown. */
-        fun drop() {
-            fetchedAt = ResourceCache.NEVER
-            state.value = Loadable.Loading
-        }
-
-        override fun patch(transform: (Any) -> Any?): (() -> Unit)? = null
-
-        override fun refresh() {
-            load()
-        }
-
-        override fun markStale() {
-            fetchedAt = ResourceCache.NEVER
-        }
-    }
-
-    private companion object {
-        /** Chunks that keep their programmes: what a guide shows and either side of it, and a little more. */
-        const val HELD_CHUNKS = 5
-
-        /** A chunk shown again is asked for again when older than this: a source read again says so by an event. */
-        const val GUIDE_STALE_MS = 10 * 60_000L
-
-        /** A programme as the channels' snapshot keeps it: what the cards show. */
-        fun brief(p: LiveProgram) = p.copy(description = null, categories = emptyList(), image = null)
     }
 }
