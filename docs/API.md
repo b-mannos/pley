@@ -2335,7 +2335,7 @@ when another channel needs the connection).
 | GET | `/api/live/groups` | `library` | `{ total, favorites, recent, groups: LiveGroup[] }`: the groups in the lineup's order, and how many channels in all, marked and watched lately |
 | GET | `/api/live/browse` | `library` | `?category=all\|favorites\|recent\|group&group=&q=&offset=&limit=&around=` → `{ total, offset, channels: LiveChannel[] }`: a page (100 by default, 500 at most) of a category's channels matching `q` (a name, a number's beginning, or the title of what's on); `around` gives the page with that channel in it |
 | GET | `/api/live/channels/{id}` | `library` | `LiveChannel` |
-| GET | `/api/live/channels/{id}/logo` | `library` | the logo, fetched once and kept; `?w=` resizes it |
+| GET | `/api/live/channels/{id}/logo` | `library` | the logo, kept a week at a time (no larger than 1 MB and 400 px; one drawn dark on a see-through background is made light, for dark screens); `?w=` resizes it, a see-through one staying see-through |
 | GET | `/api/live/channels/{id}/programs/{start}/image` | `library` | a programme's picture; `?w=` resizes it |
 | GET | `/api/live/guide` | `library` | `?from=&to=&ids=` (unix seconds; default half an hour ago to six hours on, two days at most; `ids`: the channels wanted, with commas between, else every one) → `{ from, to, programs: { [channel_id]: LiveProgram[] } }` |
 | PUT | `/api/live/channels/{id}/favorite` | `play` | `204` |

@@ -43,6 +43,18 @@ const MAX_PLAYLIST_BYTES: usize = 200 << 20;
 /// A guide larger than this isn't read (gzipped ones are counted as they come).
 const MAX_GUIDE_BYTES: u64 = 3 << 30;
 const MAX_PICTURE_BYTES: usize = 4 << 20;
+/// A logo larger than this isn't taken (most are a few KB; a few are photos).
+const MAX_LOGO_BYTES: usize = 1 << 20;
+/// Logos are kept no larger than this either way: the apps show them small.
+const LOGO_SIDE: u32 = 400;
+/// A picture is downloaded again once it's this old, when next asked for (a
+/// provider changes its logos); one nobody asked for in [`PICTURE_DROP`] is
+/// deleted, and the oldest go first once all of them take [`PICTURES_MAX_BYTES`].
+const PICTURE_FRESH: Duration = Duration::from_secs(7 * 86_400);
+const PICTURE_DROP: Duration = Duration::from_secs(30 * 86_400);
+const PICTURES_MAX_BYTES: u64 = 256 << 20;
+/// How often the pictures kept are looked over.
+const PICTURES_PRUNED_EVERY: Duration = Duration::from_secs(3600);
 /// A channel its source stopped listing is forgotten after this long.
 const MISSING_KEPT: i64 = 14 * 86_400;
 /// Programmes kept behind now (the guide shows the past few hours).
@@ -444,10 +456,12 @@ pub struct LiveTv {
     settings: RwLock<Arc<LiveSettings>>,
     http: reqwest::Client,
     pub tuners: Arc<Tuners>,
-    /// Logos and programme pictures, downloaded once.
+    /// Logos and programme pictures, kept a while ([`PICTURE_FRESH`]).
     pictures: PathBuf,
     /// Pictures whose download failed lately (by URL).
     failed_pictures: Mutex<HashMap<String, Instant>>,
+    /// When the pictures kept were last looked over.
+    pictures_pruned: Mutex<Option<Instant>>,
     /// Guides are downloaded here before they are read.
     downloads: PathBuf,
     /// Sources being read now, and when each was last tried.
@@ -620,6 +634,7 @@ impl LiveTv {
             tuners,
             pictures,
             failed_pictures: Mutex::default(),
+            pictures_pruned: Mutex::default(),
             downloads,
             refreshing: Mutex::default(),
             tried: Mutex::default(),
@@ -749,7 +764,27 @@ impl LiveTv {
             .execute(&self.db.write)
             .await;
         self.recheck_offline().await;
+        self.prune_pictures().await;
         self.fetch_logos_ahead().await;
+    }
+
+    /// Deletes the pictures nobody asked for lately, then the oldest while
+    /// they take more than they may; hourly.
+    async fn prune_pictures(&self) {
+        {
+            let mut last = self.pictures_pruned.lock();
+            if last.is_some_and(|t| t.elapsed() < PICTURES_PRUNED_EVERY) {
+                return;
+            }
+            *last = Some(Instant::now());
+        }
+        let dir = self.pictures.clone();
+        let pruned = crate::util::blocking(move || prune(&dir, PICTURE_DROP, PICTURES_MAX_BYTES)).await;
+        match pruned {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("{n} live TV pictures let go"),
+            Err(err) => tracing::warn!("looking over the live TV pictures failed: {err:#}"),
+        }
     }
 
     /// Fetches the logos of channels shown that nobody has looked at yet,
@@ -769,7 +804,7 @@ impl LiveTv {
         };
         futures::StreamExt::for_each_concurrent(futures::stream::iter(urls), LOGOS_AT_ONCE, |url| async move {
             // Kept, or failed and not tried again for a while: either way done.
-            let _ = self.picture(&url).await;
+            let _ = self.picture(&url, true).await;
             self.logos_ahead.lock().insert(url);
         })
         .await;
@@ -1941,16 +1976,16 @@ impl LiveTv {
 
     // ----------------------------------------------------------- pictures
 
-    /// A channel's logo, downloaded the first time.
+    /// A channel's logo, downloaded the first time (and again once a week).
     pub async fn logo(&self, id: i64) -> Result<PathBuf, AppError> {
         let row = self.channel_row(id).await?;
         if row.logo_url.is_empty() {
             return Err(AppError::not_found("the channel has no logo"));
         }
-        self.picture(&row.logo_url).await
+        self.picture(&row.logo_url, true).await
     }
 
-    /// A programme's picture, downloaded the first time.
+    /// A programme's picture, downloaded the first time (and again once a week).
     pub async fn program_image(&self, channel: i64, start: i64) -> Result<PathBuf, AppError> {
         let row = self.channel_row(channel).await?;
         let key = row.guide_key().ok_or_else(|| AppError::not_found("the channel has no guide"))?;
@@ -1963,49 +1998,169 @@ impl LiveTv {
                 .await
                 .map_err(|e| AppError::Internal(e.into()))?
                 .flatten();
-        self.picture(&url.ok_or_else(|| AppError::not_found("the programme has no picture"))?).await
+        self.picture(&url.ok_or_else(|| AppError::not_found("the programme has no picture"))?, false).await
     }
 
-    async fn picture(&self, url: &str) -> Result<PathBuf, AppError> {
-        let hash = hex::encode(&Sha256::digest(url.as_bytes())[..16]);
+    /// The picture at `url`, kept on this server: downloaded the first time
+    /// and once [`PICTURE_FRESH`] old (the one kept still served when that
+    /// fails). A `logo` is made small enough ([`LOGO_SIDE`]), and light
+    /// where it was drawn dark on nothing ([`lightened`]).
+    async fn picture(&self, url: &str, logo: bool) -> Result<PathBuf, AppError> {
+        // Logos are kept apart from those kept before they were made fit.
+        let key = if logo { format!("logo\n{url}") } else { url.to_owned() };
+        let hash = hex::encode(&Sha256::digest(key.as_bytes())[..16]);
         let dir = self.pictures.join(&hash[..2]);
-        for ext in ["png", "jpg", "webp", "gif"] {
-            let path = dir.join(format!("{hash}.{ext}"));
-            if path.is_file() {
-                return Ok(path);
-            }
+        let kept = PICTURE_EXTS.iter().map(|ext| dir.join(format!("{hash}.{ext}"))).find(|p| p.is_file());
+        let fresh = |p: &PathBuf| {
+            std::fs::metadata(p)
+                .and_then(|m| m.modified())
+                .is_ok_and(|t| t.elapsed().is_ok_and(|age| age < PICTURE_FRESH))
+        };
+        if let Some(path) = &kept
+            && fresh(path)
+        {
+            return Ok(path.clone());
         }
         if self.failed_pictures.lock().get(url).is_some_and(|t| t.elapsed() < PICTURE_RETRY) {
-            return Err(AppError::not_found("the picture can't be downloaded"));
+            return kept.ok_or_else(|| AppError::not_found("the picture can't be downloaded"));
         }
         let fetched = async {
             if !(url.starts_with("http://") || url.starts_with("https://")) {
                 bail!("not a web address");
             }
-            let bytes = self.download(url, "", MAX_PICTURE_BYTES).await?;
+            let bytes = self.download(url, "", if logo { MAX_LOGO_BYTES } else { MAX_PICTURE_BYTES }).await?;
             // SVG isn't served: a picture opened from this server's address
             // must not run scripts there.
-            let ext = crate::store::picture_ext(&bytes).context("not a picture")?;
+            let mut ext = crate::store::picture_ext(&bytes).context("not a picture")?;
+            let mut bytes = bytes;
+            if logo {
+                // One that can't be read here is kept as it came: the apps may.
+                let given = bytes.clone();
+                if let Ok(Some(png)) = crate::util::blocking(move || made_fit(&given)).await {
+                    (bytes, ext) = (png, "png");
+                }
+            }
             tokio::fs::create_dir_all(&dir).await?;
             let path = dir.join(format!("{hash}.{ext}"));
             let tmp = dir.join(format!(".{hash}.tmp"));
             tokio::fs::write(&tmp, &bytes).await?;
             tokio::fs::rename(&tmp, &path).await?;
+            // One kept before in another format goes.
+            if let Some(old) = kept.as_ref().filter(|old| **old != path) {
+                let _ = tokio::fs::remove_file(old).await;
+            }
             Ok::<_, anyhow::Error>(path)
         };
-        match tokio::time::timeout(Duration::from_secs(20), fetched).await {
-            Ok(Ok(path)) => Ok(path),
+        let failed = match tokio::time::timeout(Duration::from_secs(20), fetched).await {
+            Ok(Ok(path)) => return Ok(path),
             Ok(Err(err)) => {
                 tracing::debug!(url, "live TV picture not downloaded: {err:#}");
-                self.failed_pictures.lock().insert(url.to_owned(), Instant::now());
-                Err(AppError::not_found("the picture can't be downloaded"))
+                "the picture can't be downloaded"
             }
-            Err(_) => {
-                self.failed_pictures.lock().insert(url.to_owned(), Instant::now());
-                Err(AppError::not_found("the picture took too long to download"))
+            Err(_) => "the picture took too long to download",
+        };
+        self.failed_pictures.lock().insert(url.to_owned(), Instant::now());
+        kept.ok_or_else(|| AppError::not_found(failed))
+    }
+}
+
+/// The formats a picture is kept in.
+const PICTURE_EXTS: [&str; 4] = ["png", "jpg", "webp", "gif"];
+
+/// A logo as it's kept, when it isn't as it came: no larger than
+/// [`LOGO_SIDE`] either way, and [`lightened`] where it was drawn dark.
+fn made_fit(bytes: &[u8]) -> anyhow::Result<Option<Vec<u8>>> {
+    let img = crate::images::decode(bytes)?;
+    let big = img.width() > LOGO_SIDE || img.height() > LOGO_SIDE;
+    let img = if big { img.resize(LOGO_SIDE, LOGO_SIDE, image::imageops::FilterType::Triangle) } else { img };
+    let img = match lightened(&img) {
+        Some(light) => image::DynamicImage::ImageRgba8(light),
+        None if big => img,
+        None => return Ok(None),
+    };
+    let mut png = Vec::new();
+    if img.color().has_alpha() {
+        img.to_rgba8().write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
+    } else {
+        img.to_rgb8().write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
+    }
+    Ok(Some(png))
+}
+
+/// A logo drawn dark on nothing (black lettering, a navy badge) is lost on
+/// the apps' dark screens: its lightness is turned around, black becoming
+/// white and navy light blue, colours keeping their hue. `None` for any
+/// other logo: one on a background of its own already shows.
+fn lightened(img: &image::DynamicImage) -> Option<image::RgbaImage> {
+    if !img.color().has_alpha() {
+        return None;
+    }
+    let mut rgba = img.to_rgba8();
+    // Judged on a small copy: as cheap whatever the logo's size.
+    let sample = image::imageops::thumbnail(&rgba, 64, 64);
+    let (mut clear, mut solid, mut dark) = (0usize, 0usize, 0usize);
+    for p in sample.pixels() {
+        match p[3] {
+            0..32 => clear += 1,
+            32..160 => {}
+            _ => {
+                solid += 1;
+                // Dim and with no bright channel: a strong red isn't dark on black.
+                let luma = 0.2126 * f32::from(p[0]) + 0.7152 * f32::from(p[1]) + 0.0722 * f32::from(p[2]);
+                if luma < 0.3 * 255.0 && p[0].max(p[1]).max(p[2]) < 140 {
+                    dark += 1;
+                }
             }
         }
     }
+    let total = sample.pixels().len();
+    // A tenth of it see-through, and most of what shows dark.
+    if clear * 10 < total || solid == 0 || dark * 10 < solid * 7 {
+        return None;
+    }
+    for p in rgba.pixels_mut() {
+        // Lightness turned around with hue and saturation kept: each channel
+        // moves by 255 − max − min (HSL keeps its chroma).
+        let (max, min) = (p[0].max(p[1]).max(p[2]), p[0].min(p[1]).min(p[2]));
+        let shift = 255 - i16::from(max) - i16::from(min);
+        for c in &mut p.0[..3] {
+            *c = (i16::from(*c) + shift).clamp(0, 255) as u8;
+        }
+    }
+    Some(rgba)
+}
+
+/// Deletes the files under `dir` older than `drop_after`, then the oldest
+/// while they take more than `max_bytes` (down to nine tenths of it): how
+/// many went.
+fn prune(dir: &std::path::Path, drop_after: Duration, max_bytes: u64) -> anyhow::Result<usize> {
+    let mut files = Vec::new();
+    let Ok(subdirs) = std::fs::read_dir(dir) else { return Ok(0) };
+    for sub in subdirs.flatten() {
+        let Ok(entries) = std::fs::read_dir(sub.path()) else { continue };
+        for entry in entries.flatten() {
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_file() {
+                let age = meta.modified().ok().and_then(|t| t.elapsed().ok()).unwrap_or_default();
+                files.push((entry.path(), age, meta.len()));
+            }
+        }
+    }
+    let mut gone = 0;
+    let mut total: u64 = files.iter().map(|f| f.2).sum();
+    let keep = if total > max_bytes { max_bytes / 10 * 9 } else { u64::MAX };
+    // Oldest first: the stale ones, then as many more as are too many.
+    files.sort_by_key(|f| std::cmp::Reverse(f.1));
+    for (path, age, len) in files {
+        if age <= drop_after && total <= keep {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            gone += 1;
+            total -= len;
+        }
+    }
+    Ok(gone)
 }
 
 struct Listed {
@@ -2090,6 +2245,73 @@ fn describe(e: &reqwest::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 100×100 logo: `ink` drawn in its middle, on nothing or on `ground`.
+    fn logo(ink: [u8; 3], ground: Option<[u8; 3]>) -> image::DynamicImage {
+        let mut img = image::RgbaImage::from_pixel(100, 100, image::Rgba([0, 0, 0, 0]));
+        for (x, y, p) in img.enumerate_pixels_mut() {
+            if (25..75).contains(&x) && (25..75).contains(&y) {
+                *p = image::Rgba([ink[0], ink[1], ink[2], 255]);
+            } else if let Some(g) = ground {
+                *p = image::Rgba([g[0], g[1], g[2], 255]);
+            }
+        }
+        image::DynamicImage::ImageRgba8(img)
+    }
+
+    #[test]
+    fn dark_logos_on_nothing_are_made_light() {
+        let light = lightened(&logo([0, 0, 0], None)).unwrap();
+        assert_eq!(light[(50, 50)].0, [255, 255, 255, 255], "black is white");
+        assert_eq!(light[(5, 5)][3], 0, "still see-through around it");
+        let navy = lightened(&logo([0, 0, 128], None)).unwrap();
+        assert_eq!(navy[(50, 50)].0, [127, 127, 255, 255], "navy is light blue: its hue kept");
+
+        assert!(lightened(&logo([230, 230, 230], None)).is_none(), "light already");
+        assert!(lightened(&logo([200, 30, 30], None)).is_none(), "colourful");
+        assert!(lightened(&logo([0, 0, 0], Some([255, 255, 255]))).is_none(), "on its own background");
+        let opaque = image::DynamicImage::ImageRgb8(image::RgbImage::new(10, 10));
+        assert!(lightened(&opaque).is_none(), "nothing see-through: a background of its own");
+    }
+
+    #[test]
+    fn logos_are_kept_small_and_as_they_came_when_they_show() {
+        let encode = |img: &image::DynamicImage| {
+            let mut out = Vec::new();
+            img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).unwrap();
+            out
+        };
+        assert!(made_fit(&encode(&logo([200, 30, 30], None))).unwrap().is_none(), "kept as it came");
+        let dark = image::load_from_memory(&made_fit(&encode(&logo([0, 0, 0], None))).unwrap().unwrap()).unwrap();
+        assert_eq!(dark.to_rgba8()[(50, 50)].0, [255, 255, 255, 255]);
+        let huge =
+            image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(2000, 1000, image::Rgba([200, 30, 30, 255])));
+        let small = image::load_from_memory(&made_fit(&encode(&huge)).unwrap().unwrap()).unwrap();
+        assert_eq!((small.width(), small.height()), (LOGO_SIDE, LOGO_SIDE / 2));
+        assert!(made_fit(b"<svg/>").is_err(), "not a picture");
+    }
+
+    #[test]
+    fn pictures_go_when_stale_or_too_many() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("ab");
+        std::fs::create_dir_all(&sub).unwrap();
+        let file = |name: &str, len: usize, days_old: u64| {
+            let path = sub.join(name);
+            std::fs::write(&path, vec![0u8; len]).unwrap();
+            let at = std::time::SystemTime::now() - Duration::from_secs(days_old * 86_400);
+            std::fs::File::options().write(true).open(&path).unwrap().set_modified(at).unwrap();
+            path
+        };
+        let stale = file("stale.png", 10, 40);
+        let (old, newer, newest) = (file("old.png", 100, 3), file("newer.png", 100, 2), file("newest.png", 100, 1));
+        assert_eq!(prune(dir.path(), Duration::from_secs(30 * 86_400), 1000).unwrap(), 1, "only the stale one");
+        assert!(!stale.exists() && old.exists());
+        // Too many: the oldest go, down to nine tenths of what they may take.
+        assert_eq!(prune(dir.path(), Duration::from_secs(30 * 86_400), 150).unwrap(), 2);
+        assert!(!old.exists() && !newer.exists() && newest.exists());
+        assert_eq!(prune(&dir.path().join("none"), Duration::ZERO, 0).unwrap(), 0, "nothing kept yet");
+    }
 
     #[test]
     fn names_match_the_guide_whatever_their_quality() {

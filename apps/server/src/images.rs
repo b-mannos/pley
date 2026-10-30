@@ -111,17 +111,20 @@ impl Images {
             return Ok(ImageBytes { content_type: content_type_of(source, &bytes), bytes: bytes.into(), etag });
         };
 
-        let cached = self.cache_dir.join(&key[..2]).join(format!("{key}.jpg"));
-        if let Ok(bytes) = tokio::fs::read(&cached).await {
-            return Ok(ImageBytes { bytes: bytes.into(), content_type: "image/jpeg", etag });
+        // A see-through picture (a channel's logo) stays see-through: PNG.
+        let dir = self.cache_dir.join(&key[..2]);
+        for (ext, content_type) in [("jpg", "image/jpeg"), ("png", "image/png")] {
+            if let Ok(bytes) = tokio::fs::read(dir.join(format!("{key}.{ext}"))).await {
+                return Ok(ImageBytes { bytes: bytes.into(), content_type, etag });
+            }
         }
 
         let _permit = self.limiter.acquire().await.map_err(|e| AppError::Internal(e.into()))?;
         let src = source.to_path_buf();
-        let out = cached.clone();
+        let out = dir.join(&key);
         let result = crate::util::blocking(move || resize_to_file(&src, bucket, &out)).await;
         match result {
-            Ok(Some(bytes)) => Ok(ImageBytes { bytes: bytes.into(), content_type: "image/jpeg", etag }),
+            Ok(Some((bytes, content_type))) => Ok(ImageBytes { bytes: bytes.into(), content_type, etag }),
             // Already small enough (or not decodable): serve the original.
             Ok(None) | Err(_) => {
                 let bytes = tokio::fs::read(source).await?;
@@ -131,9 +134,10 @@ impl Images {
     }
 }
 
-/// Resize to `width` (keeping aspect ratio) and write a JPEG. Returns `None`
-/// when the source is not wider than the target.
-fn resize_to_file(source: &Path, width: u32, out: &Path) -> anyhow::Result<Option<Vec<u8>>> {
+/// Resize to `width` (keeping aspect ratio) and write it beside `out` (its
+/// extension added): a JPEG, or a PNG when the picture is see-through.
+/// Returns `None` when the source is not wider than the target.
+fn resize_to_file(source: &Path, width: u32, out: &Path) -> anyhow::Result<Option<(Vec<u8>, &'static str)>> {
     let reader = ImageReader::open(source)?.with_guessed_format()?;
     let (w, h) = reader.into_dimensions()?;
     if w <= width {
@@ -141,16 +145,28 @@ fn resize_to_file(source: &Path, width: u32, out: &Path) -> anyhow::Result<Optio
     }
     let img = limited(ImageReader::open(source)?.with_guessed_format()?, MAX_DIMENSION, MAX_DECODE_BYTES)?;
     let height = ((h as f64) * (width as f64) / (w as f64)).round().max(1.0) as u32;
-    let resized = img.resize_exact(width, height, image::imageops::FilterType::Triangle).to_rgb8();
+    let resized = img.resize_exact(width, height, image::imageops::FilterType::Triangle);
     let mut buf = Vec::with_capacity((width * height / 4) as usize);
-    JpegEncoder::new_with_quality(&mut buf, JPEG_QUALITY).encode_image(&resized)?;
+    let (ext, content_type) = if see_through(&resized) {
+        resized.to_rgba8().write_to(&mut Cursor::new(&mut buf), image::ImageFormat::Png)?;
+        ("png", "image/png")
+    } else {
+        JpegEncoder::new_with_quality(&mut buf, JPEG_QUALITY).encode_image(&resized.to_rgb8())?;
+        ("jpg", "image/jpeg")
+    };
     if let Some(dir) = out.parent() {
         std::fs::create_dir_all(dir)?;
     }
+    let path = out.with_extension(ext);
     let tmp = out.with_extension("tmp");
     std::fs::write(&tmp, &buf)?;
-    std::fs::rename(&tmp, out)?;
-    Ok(Some(buf))
+    std::fs::rename(&tmp, path)?;
+    Ok(Some((buf, content_type)))
+}
+
+/// Whether any of a picture is see-through.
+pub fn see_through(img: &DynamicImage) -> bool {
+    img.color().has_alpha() && img.to_rgba8().pixels().any(|p| p[3] < 255)
 }
 
 pub fn content_type_of(path: &Path, bytes: &[u8]) -> &'static str {
@@ -195,5 +211,23 @@ mod tests {
         // Wider than the source: original bytes.
         let original = images.load(&src, Some(1920)).await.unwrap();
         assert_eq!(original.content_type, "image/png");
+    }
+
+    #[tokio::test]
+    async fn see_through_pictures_stay_see_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("logo.png");
+        let mut logo = image::RgbaImage::from_pixel(800, 400, image::Rgba([0, 0, 0, 0]));
+        for x in 200..600 {
+            logo.put_pixel(x, 200, image::Rgba([10, 10, 10, 255]));
+        }
+        logo.save(&src).unwrap();
+        let images = Images::new(dir.path().join("cache"));
+        for _ in 0..2 {
+            let small = images.load(&src, Some(240)).await.unwrap();
+            assert_eq!(small.content_type, "image/png");
+            let decoded = image::load_from_memory(&small.bytes).unwrap().to_rgba8();
+            assert_eq!((decoded.width(), decoded[(0, 0)][3]), (240, 0), "no black box behind it");
+        }
     }
 }

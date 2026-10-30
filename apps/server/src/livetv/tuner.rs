@@ -1346,7 +1346,11 @@ mod tests {
 
     #[test]
     fn a_keyframe_dropped_from_the_backlog_is_forgotten() {
-        let mut f = feed(&[pat(0x100), packet(0x100, true, None, &[0, 2]), packet(0x101, true, Some(0x40), &[0, 0, 1, 0xe0])].concat(), &[]);
+        let mut f = feed(
+            &[pat(0x100), packet(0x100, true, None, &[0, 2]), packet(0x101, true, Some(0x40), &[0, 0, 1, 0xe0])]
+                .concat(),
+            &[],
+        );
         assert!(f.keyframe.is_some());
         let filler = Bytes::from(packet(0x101, false, None, &[]).repeat(BACKLOG_BYTES / TS_PACKET));
         f.push(&filler);
