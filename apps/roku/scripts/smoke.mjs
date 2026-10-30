@@ -593,11 +593,13 @@ async function walk() {
   await press("select"); // Try again
   await waitFor(/^GET \/api\/libraries\/1\/items\?.*offset=0/, since, "the library after Try again");
   shoot("retried");
-  // Signed out, and in again with a server that has no QR codes yet: the
-  // code shows on its own.
+  // Signed out, and in again with a server that has no QR codes yet, nor
+  // requests: the code shows on its own, and the sign-in asks for no
+  // scope the server doesn't know.
   await press("back");
   await openFromMenu(7, /^GET \/api\/auth\/me$/, "Settings");
   fixture.qr = false;
+  fixture.requestScopes = false;
   since = mark();
   await signOut();
   await waitFor(/^POST \/api\/oauth\/device$/, since, "a new TV code", { settles: false });
@@ -720,6 +722,10 @@ const checks = [
   ["sent the token in the header only", fixture.requests.every((r) => !/[?&]token=/.test(r.path))],
   ["signed out", asked(/^POST \/api\/oauth\/revoke$/)],
   ["left out a QR code the server doesn't draw", qr.hidden],
+  [
+    "asked for requests and approvals only where the server offers them",
+    fixture.scopesAsked[0] === "library play playlists profiles requests approvals" && fixture.scopesAsked.at(-1) === "library play playlists profiles",
+  ],
   ["started again signed in", started !== null],
 ];
 for (const [what, ok] of checks) if (!ok) failures.push(`never ${what}`);

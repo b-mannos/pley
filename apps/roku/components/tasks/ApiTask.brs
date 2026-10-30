@@ -771,7 +771,7 @@ sub apiSignInStart(request as object)
         return
     end if
     m.signIns = m.signIns + 1
-    m.signIn = { id: m.signIns, request: request, server: m.server, meta: invalid, code: invalid, intervalMs: 5000, failures: 0, nextAt: 0, polling: false, troubled: false }
+    m.signIn = { id: m.signIns, request: request, server: m.server, meta: invalid, scope: httpScope(), code: invalid, intervalMs: 5000, failures: 0, nextAt: 0, polling: false, troubled: false }
     job = apiJob("metadata", "GET", m.server + "/.well-known/oauth-authorization-server")
     job.signIn = m.signIn.id
     apiSend(job)
@@ -814,7 +814,9 @@ sub apiMetadataAnswered(job as object, status as integer, body as string)
         return
     end if
     signIn.meta = meta
-    device = apiForm(apiJob("device", "POST", meta.deviceEndpoint), { client_id: httpClientId(), scope: httpScope() })
+    ' Requests and approvals where this server has them.
+    signIn.scope = authScopeFor(meta.scopes)
+    device = apiForm(apiJob("device", "POST", meta.deviceEndpoint), { client_id: httpClientId(), scope: signIn.scope })
     device.signIn = signIn.id
     apiSend(device)
 end sub
@@ -900,14 +902,14 @@ end sub
 ' Keeps the tokens of an approved code; the sign-in they replace on that
 ' server is ended.
 sub apiSignedIn(signIn as object, body as string)
-    answer = authParseTokens(body, httpScope(), apiNow())
+    answer = authParseTokens(body, signIn.scope, apiNow())
     if not answer.ok
         apiSignInUpdate(signIn, { status: "failed", message: answer.message })
         return
     end if
     meta = signIn.meta
     fresh = tokensFrom(answer, meta.issuer, meta.tokenEndpoint, meta.revocationEndpoint)
-    if authExtraScopes(fresh.scope, httpScope()).Count() > 0
+    if authExtraScopes(fresh.scope, signIn.scope).Count() > 0
         apiRevoke(fresh)
         apiSignInUpdate(signIn, { status: "failed", message: "The server allowed more than Pley for Roku asks for, so it was signed out again." })
         return
