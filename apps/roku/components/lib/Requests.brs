@@ -1076,7 +1076,8 @@ function reqSeasonNumbers(seasons as dynamic) as object
 end function
 
 ' A request as a tile (Discover's Your requests): its poster, its title
-' and its stage, the download's progress. It opens the title's page.
+' and its stage in the stage's colour, the download's progress. It opens
+' the title's page.
 function reqRequestTile(request as object, server as string, manage as boolean, now as integer, zone as integer) as object
     kind = httpString(request.kind)
     tmdbId = httpNumber(request.tmdb_id, 0)
@@ -1086,6 +1087,7 @@ function reqRequestTile(request as object, server as string, manage as boolean, 
     return {
         title: httpSentence(request.title),
         subtitle: stage.text,
+        subtitleColor: reqToneColor(stage.tone),
         image: urlImage(server, request.poster_url, contentPosterWidth()),
         wide: false,
         progress: progress,
@@ -1100,6 +1102,20 @@ function reqRequestTile(request as object, server as string, manage as boolean, 
         badgeColor: reqToneColor(stage.tone),
         key: "request:" + urlValue(httpNumber(request.id, 0))
     }
+end function
+
+' The people the managers' list can be narrowed to (the answer's people):
+' [{ id, name }], sorted as the server sends them.
+function reqPeople(people as dynamic) as object
+    out = []
+    for each person in httpArray(people)
+        if GetInterface(person, "ifAssociativeArray") <> invalid
+            id = httpNumber(person.id, 0)
+            name = httpSentence(person.name)
+            if id > 0 and name <> "" then out.Push({ id: id, name: name })
+        end if
+    end for
+    return out
 end function
 
 ' What can be done with a request, as the server lists it (its order),

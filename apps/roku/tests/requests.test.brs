@@ -275,6 +275,19 @@ sub test_requests_rows()
     tkFalse(reqBusy("waiting"))
 end sub
 
+' Discover's Your requests: the stage under the poster, in its colour;
+' and the managers' person filter.
+sub test_requests_request_tiles_and_people()
+    tile = reqRequestTile(reqTestRequest({ status: "approved", stage: "downloading", download: { progress: 0.42, state: "downloading", eta: invalid, episodes: 3 } }), "http://nas:7539", false, reqTestNow(), 0)
+    tkEqual(tile.subtitle, "Downloading 42%")
+    tkEqual(tile.subtitleColor, "0x38BDF8FF")
+    tkEqual(tile.progress, 0.42)
+    tkEqual(tile.badge, "")
+    tkEqual(tile.key, "request:42")
+    tkEqual(navForTile(tile), { to: "requestTitle", params: { kind: "show", tmdbId: 1396, title: "Breaking Bad" } })
+    tkEqual(reqPeople([{ id: 2, name: "Ben", avatar_url: invalid }, { id: 0, name: "Nobody" }, { id: 3, name: "" }, "x"]), [{ id: 2, name: "Ben" }])
+end sub
+
 sub test_requests_actions_in_the_server_s_order()
     actions = reqActions(reqTestRequest({ status: "pending", actions: ["approve", "decline", "handled", "delete"] }), 0)
     labels = []

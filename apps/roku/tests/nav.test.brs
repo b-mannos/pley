@@ -3,7 +3,24 @@ sub test_nav_names_screens()
     tkEqual(navScreen("player"), "PlayerScreen")
     tkEqual(navScreen("unreachable"), "UnreachableScreen")
     tkEqual(navScreen("sortLibraries"), "SortLibrariesScreen")
+    tkEqual(navScreen("discover"), "DiscoverScreen")
+    tkEqual(navScreen("discoverList"), "DiscoverListScreen")
+    tkEqual(navScreen("requestTitle"), "RequestTitleScreen")
+    tkEqual(navScreen("requestSeasons"), "RequestSeasonsScreen")
+    tkEqual(navScreen("requests"), "RequestsScreen")
     tkEqual(navScreen("nowhere"), "")
+end sub
+
+' TMDB's titles aren't the libraries': they have no itemId.
+sub test_nav_tmdb_tiles_open_their_page_or_list()
+    tkEqual(navForTile({ kind: "discover", tmdbKind: "movie", tmdbId: 603, title: "The Matrix", itemId: 0 }), { to: "requestTitle", params: { kind: "movie", tmdbId: 603, title: "The Matrix" } })
+    tkEqual(navForTile({ kind: "discover", tmdbKind: "show", tmdbId: 1396, title: "Breaking Bad", libraryId: 99 }), { to: "requestTitle", params: { kind: "show", tmdbId: 1396, title: "Breaking Bad" } }, "in a library: its TMDB page still")
+    tkInvalid(navForTile({ kind: "discover", tmdbKind: "person", tmdbId: 7 }))
+    tkInvalid(navForTile({ kind: "discover", tmdbKind: "movie", tmdbId: 0 }))
+    tkEqual(navForTile(reqMoreTile("See all", "upcoming", "")), { to: "discoverList", params: { list: "upcoming" } })
+    tkEqual(navForTile(reqMoreTile("See all on Discover", "", "dune")), { to: "search", params: { discover: true, query: "dune" } })
+    tkInvalid(navForTile({ kind: "discoverSeason", number: 2 }), "a season picks itself on its page")
+    tkInvalid(navForTile({ kind: "cast", title: "Ada Lovelace" }))
 end sub
 
 sub test_nav_tiles_open_details_or_their_show()
