@@ -10,6 +10,7 @@ import {
   listAction,
   mainAction,
   mayAsk,
+  moving,
   NO_ACCESS,
   problemWords,
   requestsProblem,
@@ -260,6 +261,8 @@ export function useItemRequest(itemId: number, kind: ItemKind): ItemRequest | nu
   const loaded = useLoad((c) => (wanted && drawn ? ui.api.itemRequest(itemId, c) : Promise.resolve(null)), [itemId, wanted, drawn, changes]);
   const r = wanted ? loaded.data : null;
   if (r) key.current = titleKey(r);
+  // Its download moves without events: asked again every 10 s while it does.
+  usePoll(loaded.reload, r && r.request && moving([r.request]) ? 10_000 : null);
   return r;
 }
 

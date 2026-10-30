@@ -313,6 +313,8 @@ function DiscoverRows(p: { entry: Entry; inRows: boolean; setInRows: (v: boolean
     entry.state.hero = detail;
     keepTitle(app, detail);
   }, [detail]);
+  // The hero's download, if it has one, moves without events.
+  usePoll(heroLoad.reload, detail && moving(detail.requests ?? []) ? 10_000 : null);
 
   // Back from the rows: the hero again (its main action), then the rail, as on Home.
   const [toHero, setToHero] = useState(0);

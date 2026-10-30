@@ -8,6 +8,7 @@ import {
   askable,
   hasRequests,
   mainAction,
+  moving,
   pickerButton,
   pickerSeasons,
   preselected,
@@ -31,7 +32,7 @@ import { ArtTile, TileCaption, TILES } from "../kit/tile";
 import type { Entry } from "../shell/navigator";
 import { Message, problem, useApp, useAfterFrame, useLoad } from "./common";
 import { TitleMeta } from "./discover";
-import { askFor, keepTitle, RequestsMessage, stageOf, TitleActions, useMarks, useTitleChanges } from "./request-kit";
+import { askFor, keepTitle, RequestsMessage, stageOf, TitleActions, useMarks, usePoll, useTitleChanges } from "./request-kit";
 
 /** The hero's section: 52 above it, the focused button's label and 8 below (as the item page). */
 const HERO_PAD = 52 + 23 + 8;
@@ -77,6 +78,8 @@ export function TitleScreen(p: { entry: Entry; kind: TitleKind; tmdbId: number; 
   useEffect(() => {
     if (d && loaded.error && !unreachable(loaded.error)) ui.toast(problem(loaded.error), true);
   }, [loaded.error]);
+  // Downloads move without events: asked again every 10 s while one for the title does (not after a failure, which said so once).
+  usePoll(loaded.reload, d && !loaded.error && moving(d.requests ?? []) ? 10_000 : null);
   if (!d) {
     if (loaded.error) {
       const why = requestsProblem(loaded.error);

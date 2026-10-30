@@ -348,6 +348,44 @@ describe("a title's page", () => {
     await gone.settle();
     expect(gone.text(".message-page .t-page")).toEqual(["Not on TMDB"]);
   });
+
+  it("follows its download every 10 s while one moves, and stops asking once it is in", async () => {
+    let asked = 0;
+    let stage: MediaRequest["stage"] = "downloading";
+    let progress = 0.25;
+    const now = () => {
+      if (stage === "available") return detail({ status: "library", item_id: 3 });
+      const r = request({ id: 5, status: "approved", stage, download: { progress, state: "downloading", eta: null, episodes: 1 } });
+      return detail({ status: "requested", request_id: 5, requests: [r] });
+    };
+    const t = mount(
+      (entry) => <TitleScreen entry={entry} kind="movie" tmdbId={10} />,
+      {
+        discoverTitle: () => {
+          asked++;
+          return Promise.resolve(now());
+        },
+      },
+      summary(),
+    );
+    await t.settle();
+    expect(t.text(".title-page .stage-pill")).toEqual(["Downloading 25%"]);
+    expect(document.querySelector(".title-page .download-bar")!.getAttribute("aria-valuenow")).toBe("25");
+    progress = 0.5;
+    t.advance(10_000);
+    await t.settle();
+    expect(t.text(".title-page .stage-pill")).toEqual(["Downloading 50%"]);
+    expect(t.fid()).toBe("main");
+    stage = "available";
+    t.advance(10_000);
+    await t.settle();
+    expect(t.el("main")!.textContent).toBe("Open");
+    expect(t.fid()).toBe("main");
+    const calls = asked;
+    t.advance(60_000);
+    await t.settle();
+    expect(asked).toBe(calls);
+  });
 });
 
 describe("Discover", () => {
@@ -608,6 +646,31 @@ describe("a library title's request", () => {
     u.advance(16);
     await u.settle();
     expect(calls).toEqual([]);
+  });
+
+  it("follows a download's progress every 10 s while it moves", async () => {
+    let progress = 0.1;
+    const answer = (): ItemRequest => ({
+      ...ANSWER,
+      request: request({ id: 4, kind: "show", tmdb_id: 20, status: "approved", stage: progress < 1 ? "downloading" : "available", download: progress < 1 ? { progress, state: "downloading", eta: null, episodes: 2 } : null }),
+    });
+    let calls = 0;
+    const t = mount(() => <Probe id={7} kind="show" />, { itemRequest: () => (calls++, Promise.resolve(answer())) }, summary());
+    t.advance(16);
+    await t.settle();
+    expect(t.text(".item-request")).toEqual(["Downloading 10%"]);
+    progress = 0.6;
+    t.advance(10_000);
+    await t.settle();
+    expect(t.text(".item-request")).toEqual(["Downloading 60%"]);
+    progress = 1;
+    t.advance(10_000);
+    await t.settle();
+    expect(t.text(".item-request")).toEqual(["Ready to watch"]);
+    const asked = calls;
+    t.advance(60_000);
+    await t.settle();
+    expect(calls).toBe(asked);
   });
 });
 
