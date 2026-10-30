@@ -437,10 +437,19 @@ class Plugin:
         """A page of a category's channels (PAGE, as the server sends them),
         each saying what's on now (its label2) and next (its info), Next
         page after them. In a group, names leave out the group's region."""
-        category = self.params.get("category") or "all"
+        query = self.params.get("q")
+        # A search looks across every channel, and lists the groups whose
+        # names match first, to open.
+        category = "all" if query else self.params.get("category") or "all"
         group = self.params.get("group") if category == "group" else None
         offset = int(self.params.get("offset", 0))
-        page = livetv.browse(self.client(), category, group, self.params.get("q"), offset, PAGE)
+        client = self.client()
+        if query and not offset:
+            page, found = api.together(lambda: livetv.browse(client, "all", None, query, 0, PAGE), lambda: livetv.groups(client))
+            for match in livetv.matching_groups(found.get("groups") or [], query):
+                self.category(livetv.group_name(match), match.get("count"), {"category": "group", "group": match["name"]}, "DefaultGenre.png")
+        else:
+            page = livetv.browse(client, category, group, query, offset, PAGE)
         now = time.time()
         entries = []
         for channel in page["channels"]:

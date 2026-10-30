@@ -287,24 +287,31 @@ def short_name(channel: dict, group=None) -> str:
 
 
 def group_tree(found: list) -> list:
-    """The groups in the lineup's order, those of a region ("UK| Sport",
-    "UK| News"…) gathered under it, so hundreds of groups read as a few
-    dozen; a region with one group stays a group (the web's groupTree).
-    Entries: {"kind": "group", "group"} and {"kind": "region", "region",
-    "groups", "count"}."""
+    """The groups as the web's side lists them (groupSections): the regions
+    ("UK" of "UK| Sport", "UK| News"…) in alphabetical order, each opening
+    to its groups, then the other groups in the lineup's order, a region of
+    one group among them. With fewer than two regions, the groups alone, in
+    their order. Entries: {"kind": "region", "region", "groups", "count"}
+    and {"kind": "group", "group"}."""
     by_region = {}
     for group in found:
         if group.get("region"):
             by_region.setdefault(group["region"], []).append(group)
-    entries, placed = [], set()
-    for group in found:
-        region = by_region.get(group.get("region")) if group.get("region") else None
-        if not region or len(region) < 2:
-            entries.append({"kind": "group", "group": group})
-        elif group["region"] not in placed:
-            placed.add(group["region"])
-            entries.append({"kind": "region", "region": group["region"], "groups": region, "count": sum(g.get("count") or 0 for g in region)})
-    return entries
+    regions = sorted((r for r, groups in by_region.items() if len(groups) > 1), key=lambda r: r.lower())
+    if len(regions) < 2:
+        return [{"kind": "group", "group": group} for group in found]
+    entries = [
+        {"kind": "region", "region": r, "groups": by_region[r], "count": sum(g.get("count") or 0 for g in by_region[r])} for r in regions
+    ]
+    gathered = set(regions)
+    return entries + [{"kind": "group", "group": g} for g in found if g.get("region") not in gathered]
+
+
+def matching_groups(found: list, query: str, most: int = 12) -> list:
+    """The groups whose names hold what was searched for (the web's), to
+    go to from the results."""
+    query = (query or "").strip().lower()
+    return [g for g in found if query and query in (g.get("name") or "").lower()][:most]
 
 
 def group_name(group: dict) -> str:

@@ -53,6 +53,8 @@ GROUPS = [
     {"name": "UK| News", "region": "UK", "label": "News", "count": 1},
     {"name": "Radio", "region": None, "label": "Radio", "count": 1},
     {"name": "US| Films", "region": "US", "label": "Films", "count": 0},
+    {"name": "DE| Sport", "region": "DE", "label": "Sport", "count": 0},
+    {"name": "DE| Kino", "region": "DE", "label": "Kino", "count": 0},
 ]
 
 
@@ -148,15 +150,20 @@ class WhatsOnTest(unittest.TestCase):
         self.assertEqual(livetv.short_name(SKY, "News"), "UK| SKY SPORTS 1")
         self.assertEqual(livetv.short_name(dict(SKY, name="US| CNN"), "UK| Sport"), "US| CNN", "another region's stays")
 
-    def test_groups_gathered_under_their_region(self):
+    def test_regions_first_then_the_other_groups(self):
         tree = livetv.group_tree(GROUPS)
         self.assertEqual(
             [(e["kind"], e.get("region") or e["group"]["name"]) for e in tree],
-            [("group", "News"), ("region", "UK"), ("group", "Sport"), ("group", "Radio"), ("group", "US| Films")],
-            "in the lineup's order; a region with one group stays a group",
+            [("region", "DE"), ("region", "UK"), ("group", "News"), ("group", "Sport"), ("group", "Radio"), ("group", "US| Films")],
+            "regions in alphabetical order, then the rest in the lineup's; a region with one group is among the rest",
         )
         self.assertEqual(tree[1]["count"], 3)
         self.assertEqual([g["label"] for g in tree[1]["groups"]], ["Sport", "News"])
+        # Fewer than two regions: one list, in the lineup's order.
+        one = [g for g in GROUPS if g.get("region") != "DE"]
+        self.assertEqual([e["kind"] for e in livetv.group_tree(one)], ["group"] * len(one))
+        self.assertEqual([g["name"] for g in livetv.matching_groups(GROUPS, "SPORT")], ["UK| Sport", "Sport", "DE| Sport"])
+        self.assertEqual(livetv.matching_groups(GROUPS, " "), [])
         self.assertEqual(livetv.group_name(GROUPS[1]), "UK · Sport")
         self.assertEqual(livetv.group_name(GROUPS[0]), "News")
 
@@ -281,7 +288,7 @@ class RoutesTest(unittest.TestCase):
     def test_live_tv_lists_its_categories(self):
         items = self.run_route("route=live")
         labels = [c[2].label.split("  [COLOR")[0] for c in items]
-        self.assertEqual(labels, ["Favourites", "Recently watched", "All channels", "Search channels", "News", "UK", "Sport", "Radio", "US · Films"])
+        self.assertEqual(labels, ["Favourites", "Recently watched", "All channels", "Search channels", "DE", "UK", "News", "Sport", "Radio", "US · Films"])
         self.assertIn("(7)", items[2][2].label)
         self.assertIn("category=favorites", items[0][1])
         self.assertIn("route=live_region&region=UK", items[5][1])
@@ -311,9 +318,16 @@ class RoutesTest(unittest.TestCase):
             items = self.run_route("route=live_channels&category=all&offset=6")
         self.assertEqual([c[2].label for c in items], ["301 UK| BBC NEWS"])
 
-    def test_searching(self):
+    def test_searching_every_channel_and_the_groups(self):
         items = self.run_route("route=live_channels&category=all&q=sky")
         self.assertEqual([c[2].label for c in items], ["201 UK| SKY SPORTS 1", "202 UK| SKY SPORTS 2"])
+        del xbmcplugin.calls[:]
+        # Whatever group it was asked from, a search looks at every channel,
+        # the groups whose names match first.
+        items = self.run_route("route=live_channels&category=group&group=Radio&q=news")
+        self.assertEqual([c[2].label.split("  [COLOR")[0] for c in items], ["News", "UK · News", "101 Pley News HD", "301 UK| BBC NEWS"])
+        self.assertTrue(items[0][3], "a group opens")
+        self.assertIn("group=UK%7C+News", items[1][1])
 
     def test_a_channels_schedule(self):
         items = self.run_route("route=live_schedule&id=1")
@@ -410,7 +424,7 @@ class LiveScreenTest(unittest.TestCase):
         self.screen.show(False)
         self.assertEqual(self.categories(), [
             ("Search channels", "", ""), ("Favourites", "1", ""), ("Recently watched", "2", ""), ("All channels", "7", "1"),
-            ("News", "2", ""), ("UK", "3", ""), ("Sport", "1", ""), ("Radio", "1", ""), ("US · Films", "0", ""),
+            ("DE", "0", ""), ("UK", "3", ""), ("News", "2", ""), ("Sport", "1", ""), ("Radio", "1", ""), ("US · Films", "0", ""),
         ])
         rows = self.rows()
         self.assertEqual([r.label for r in rows][:3], ["101 Pley News HD", "102 Sport 1080i", "104 Radio Jazz"])
@@ -460,7 +474,7 @@ class LiveScreenTest(unittest.TestCase):
         # Closed again.
         found.selected = 5
         self.screen.click(L.LIVE_CATEGORIES)
-        self.assertEqual([c[0] for c in self.categories()][5:7], ["UK", "Sport"])
+        self.assertEqual([c[0] for c in self.categories()][5:7], ["UK", "News"])
 
     def test_pages_come_as_the_list_is_scrolled(self):
         self.channels = [dict(RADIO, id=i, number=str(1000 + i), name="Channel %d" % i, group="Radio") for i in range(1, 251)]
@@ -548,6 +562,17 @@ class LiveScreenTest(unittest.TestCase):
         self.assertEqual([r.label for r in self.rows()], ["201 UK| SKY SPORTS 1", "202 UK| SKY SPORTS 2"])
         self.assertEqual(self.categories()[0], ("“sky”", "2", "1"))
         self.assertEqual(self.win.made[L.LIVE_HEADING].label, "“sky”")
+        # From a group too, every channel; the groups that match follow it.
+        self.screen.choose(("group", "Radio"))
+        with test_window.Dialogs(typed=["news"]):
+            self.screen.search()
+        self.assertEqual([r.label for r in self.rows()], ["101 Pley News HD", "301 UK| BBC NEWS"])
+        self.assertEqual([c[0] for c in self.categories()][:3], ["“news”", "News", "UK · News"])
+        found = self.win.made[L.LIVE_CATEGORIES]
+        found.selected = 2
+        self.screen.click(L.LIVE_CATEGORIES)
+        self.assertEqual([r.label for r in self.rows()], ["301 BBC NEWS"])
+        self.assertEqual(self.win.made[L.LIVE_HEADING].label, "UK · News")
 
     def test_without_channels_it_says_so(self):
         self.channels = []

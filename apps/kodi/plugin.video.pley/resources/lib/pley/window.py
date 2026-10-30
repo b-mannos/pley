@@ -2703,6 +2703,9 @@ class Live(Screen):
         if self.category[0] == "search":
             # What was looked for, marked as the category shown.
             out[0].update(key=self.category, label="“%s”" % self.category[1], count=self.total)
+            # The groups whose names match, to go to (the web's).
+            for group in livetv.matching_groups(lineup.get("groups") or [], self.category[1]):
+                out.append({"key": ("group", group["name"]), "label": livetv.group_name(group), "count": group.get("count"), "inner": True})
         if lineup.get("favorites"):
             out.append({"key": ("favorites", None), "label": T("favourites"), "count": lineup["favorites"]})
         if lineup.get("recent"):

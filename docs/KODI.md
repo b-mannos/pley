@@ -192,10 +192,12 @@ is Home. Setting it up (sources, lineup, settings) stays in the web app.
   it out: the categories, then the channels of the one focus rests on, then
   the focused channel's programme.
   - **Categories**: Search channels, Favourites and Recently watched (when
-    they have channels), All channels, then the groups in the lineup's
-    order (`GET /api/live/groups`), with how many channels each has. A
-    region's groups ("UK| Sport", "UK| News") are gathered under it ("UK",
-    a chevron; Select opens it); a region with one group stays a group.
+    they have channels), All channels, then the groups
+    (`GET /api/live/groups`) with how many channels each has, as the web
+    lists them: the regions in alphabetical order ("UK", a chevron; Select
+    opens it to "UK| Sport", "UK| News"…), then the other groups in the
+    lineup's order, a region of one group among them. With fewer than two
+    regions, the groups are one list in the lineup's order.
     The category shown is kept per server and profile in
     `remembered.json`, as a library's tab.
   - **Channels** by number, each with its logo, what's on now, its times,
@@ -212,8 +214,11 @@ is Home. Setting it up (sources, lineup, settings) stays in the web app.
   favourites and Schedule; Info is Schedule. Number keys typed together
   go to the channel of that number, in the category shown, else in All
   channels (`q` finds it, `around` its page).
-- **Search channels** asks Kodi's keyboard; a name, a number's beginning
-  or the title of what's on finds channels (`q`).
+- **Search channels** asks Kodi's keyboard and looks across every
+  channel, whatever category is open (`category=all&q=`): a name, a
+  number's beginning or the title of what's on. The groups whose names
+  match are listed under it, to open. Nothing shows a channel's programme
+  as it starts; Kodi's Info shows it when asked.
 - **Schedule**: the channel's next six hours in Kodi's list (Later, the
   six after), the guide of that channel alone (`ids`): what's on watches
   the channel, a programme to come shows its details.
