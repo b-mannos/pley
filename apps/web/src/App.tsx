@@ -165,11 +165,18 @@ const router = createBrowserRouter([
               (m) => m.TitlePage,
               (prefetch, { kind, tmdbId }) =>
                 (kind === "movie" || kind === "show") && Number.isInteger(Number(tmdbId)) && Number(tmdbId) > 0
-                  ? [prefetch(requestQueries.title(kind, Number(tmdbId)))]
+                  ? [prefetch(requestQueries.summary()), prefetch(requestQueries.title(kind, Number(tmdbId)))]
                   : [],
             ),
           },
-          { path: "requests", ...onDemand(() => import("@/pages/requests/RequestsPage"), (m) => m.RequestsPage) },
+          {
+            path: "requests",
+            ...onDemand(
+              () => import("@/pages/requests/RequestsPage"),
+              (m) => m.RequestsPage,
+              (prefetch) => [prefetch(requestQueries.summary())],
+            ),
+          },
           { path: "account", element: <AccountPage /> },
           {
             path: "settings",

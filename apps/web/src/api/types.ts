@@ -676,10 +676,48 @@ export type ServerEvent =
   | { type: "live_channels_changed" }
   /** A live channel started or stopped being watched: the connections in use changed. */
   | { type: "live_tuners_changed" }
-  /** A request was made, decided, withdrawn or became available (to its maker and administrators). */
-  | { type: "requests_changed" }
-  /** Something the user asked for is in a library now (`item_id`: where they may open it). */
-  | { type: "request_available"; request_id: Id; title: string; item_id: Id | null };
+  /**
+   * A request changed (made, decided, followed, its stage, withdrawn,
+   * deleted), to its maker, its followers and managers; all three `null`
+   * when many did (or this account's other streams marked them seen).
+   */
+  | { type: "requests_changed"; request_id: Id | null; kind: TitleKindName | null; tmdb_id: number | null }
+  /**
+   * Something this account asked for or follows is ready (`item_id`: where
+   * it may open it), or some of a show's seasons are (`complete: false`,
+   * `seasons`: those newly ready).
+   */
+  | {
+      type: "request_available";
+      request_id: Id;
+      title: string;
+      kind: TitleKindName;
+      tmdb_id: number;
+      item_id: Id | null;
+      poster_url: string | null;
+      seasons: number[] | null;
+      complete: boolean;
+    }
+  /** A request this account made was approved or declined (declined: its followers too, without the reason). */
+  | { type: "request_decided"; request_id: Id; title: string; kind: TitleKindName; tmdb_id: number; status: "approved" | "declined"; reason: string | null }
+  /** Managers: someone asked for something (they're told of `pending` ones). */
+  | {
+      type: "request_created";
+      request_id: Id;
+      title: string;
+      kind: TitleKindName;
+      tmdb_id: number;
+      seasons: number[] | null;
+      requested_by: { id: Id; name: string; avatar_url: string | null; avatar_color: string | null };
+      status: "pending" | "approved";
+    }
+  /** Managers: a request couldn't be sent to Radarr or Sonarr, and waits for one of them. */
+  | { type: "request_failed"; request_id: Id; title: string; kind: TitleKindName; reason: string | null; retry_at: Timestamp | null }
+  /** Requests were turned on or off, their limits or the TMDB key changed, or this account's access did. */
+  | { type: "requests_settings_changed" };
+
+/** A request's kind of title. */
+type TitleKindName = "movie" | "show";
 
 /** `vulkan` (h264_vulkan) isn't offered: it can only be set through the API. */
 export type HwAccel = "auto" | "none" | "nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox" | "vulkan";

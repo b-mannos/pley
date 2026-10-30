@@ -8,7 +8,6 @@ import { cn } from "@/lib/cn";
 import { APP_RESUMED } from "@/lib/shell";
 import { ConnectionBanner } from "./ConnectionBanner";
 import { ListMenuProvider } from "./lists/ListMenu";
-import { useRequestAlerts } from "./RequestAlerts";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { PageSpinner } from "./ui";
@@ -18,7 +17,6 @@ export function AppLayout() {
   const closeDrawer = useCallback(() => setDrawer(false), []);
   const audio = useAudioPlayer();
   const qc = useQueryClient();
-  useRequestAlerts();
 
   // The Android app says so when its own player closes: progress and watched marks changed.
   useEffect(() => {

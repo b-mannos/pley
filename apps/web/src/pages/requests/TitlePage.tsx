@@ -1,33 +1,38 @@
 import { useCallback, useLayoutEffect, useState } from "react";
-import { Link, useParams } from "react-router";
-import { Clock, Play, Plus } from "lucide-react";
+import { Link, useParams, useSearchParams } from "react-router";
+import { Ban, Bell, Check, Clock, LogIn, Play, Plus, UserMinus } from "lucide-react";
 import { isApiError } from "@/api/client";
 import {
-  mayRequest,
-  requestsUnavailable,
+  useAskRequest,
   useDiscoverTitle,
   useRequestSummary,
+  useUnwatchRequest,
   type DiscoverDetail,
   type DiscoverSeason,
+  type MediaRequest,
+  type RequestSummary,
   type TitleKind,
 } from "@/api/requests";
+import { useAuth } from "@/auth";
 import { Artwork } from "@/components/Artwork";
 import { ArrowButton, useFittedRow } from "@/components/HubRow";
 import { PersonPhoto } from "@/components/PersonCard";
+import { useToast } from "@/components/Toast";
 import { Badge, Button, buttonClass, SectionTitle, Skeleton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { formatDate, formatDuration, pluralize } from "@/lib/format";
 import { smoothScroll, useDocumentTitle } from "@/lib/hooks";
+import { allowanceText, askedText, kindLabel, mainAction, seasonStateText, spent } from "@/lib/requests";
 import { itemUrl } from "@/lib/urls";
 import { NotFoundPage } from "../NotFoundPage";
 import { ContentRating, Genres, MetaLine, RatingBadge, Summary } from "../item/shared";
-import { RequestItem } from "./RequestItem";
-import { askableSeasons, RequestModal, seasonName, seasonState, wholeInLibrary } from "./RequestModal";
-import { allowanceText, kindLabel, LoadError, RequestsUnavailable } from "./shared";
+import { failure, RequestCard } from "./RequestCard";
+import { SeasonPicker } from "./SeasonPicker";
+import { ProblemState, StagePill, TmdbCredit } from "./shared";
 
 function TitleSkeleton() {
   return (
-    <div className="px-4 pb-16 pt-6 sm:px-8 sm:pt-[10vh] lg:pt-[14vh]">
+    <div className="px-4 pb-16 pt-6 sm:px-8 sm:pt-[10vh] lg:pt-[14vh]" aria-busy>
       <div className="flex flex-col gap-8 sm:flex-row sm:gap-10">
         <Skeleton className="hidden aspect-[2/3] w-60 shrink-0 rounded-lg sm:block" />
         <div className="flex-1 space-y-4">
@@ -61,15 +66,198 @@ function Backdrop({ title }: { title: DiscoverDetail }) {
   );
 }
 
-/** "Nov 4, 2026" for a release still to come, else its year. */
+/** "Coming Nov 4, 2026" for a release still to come, else its year. */
 function released(title: DiscoverDetail): string | null {
   const date = title.release_date;
   if (date && new Date(`${date}T00:00:00`).getTime() > Date.now()) return `Coming ${formatDate(date)}`;
   return title.year ? String(title.year) : null;
 }
 
-function SeasonRow({ season }: { season: DiscoverSeason }) {
-  const whole = wholeInLibrary(season);
+/**
+ * The one thing a title's page offers (the first that applies), with
+ * its request's stage where there is one, and what's left to ask for
+ * once nothing is. `onPick` opens the season picker.
+ */
+export function MainActions({
+  title,
+  summary,
+  onPick,
+  size = "lg",
+}: {
+  title: DiscoverDetail;
+  summary: RequestSummary | undefined;
+  onPick: () => void;
+  size?: "md" | "lg";
+}) {
+  const toast = useToast();
+  const ask = useAskRequest();
+  const unwatch = useUnwatchRequest();
+  const action = mainAction(title, summary ?? { sign_in_again: null });
+  const manage = summary?.manage ?? false;
+  const off = summary?.access === "off";
+  const used = spent(title, title.kind);
+  const allowance = used ? allowanceText({ ...title, movies_limit: summary?.movies_limit, seasons_limit: summary?.seasons_limit }, title.kind) : null;
+  const icon = size === "lg" ? "size-5" : "size-4";
+  const fail = (e: unknown) => toast.error(failure(e, summary ?? { manage: false }, title.kind));
+
+  const request = () => {
+    if (title.kind === "show") return onPick();
+    ask.mutate({ kind: title.kind, tmdb_id: title.tmdb_id }, { onSuccess: (asked) => toast.success(askedText(asked)), onError: fail });
+  };
+  const tellMeToo = (seasons: number[] | null) =>
+    ask.mutate(
+      { kind: title.kind, tmdb_id: title.tmdb_id, ...(seasons?.length ? { seasons } : {}) },
+      { onSuccess: (asked) => toast.success(askedText(asked)), onError: fail },
+    );
+
+  const open = (itemId: number | null, primary = true) =>
+    itemId !== null ? (
+      <Link to={itemUrl(itemId)} className={buttonClass(primary ? "primary" : "secondary", size)}>
+        <Play className={cn(icon, "fill-current")} />
+        Open
+      </Link>
+    ) : null;
+  const moreSeasons = (
+    <Button variant="secondary" size={size} icon={<Plus className={icon} />} disabled={used} onClick={onPick}>
+      Request more seasons
+    </Button>
+  );
+  const notOpen = <p className="text-sm text-muted">Requests aren't open to this account.</p>;
+  const stage = (r: MediaRequest | null) => (r ? <StagePill request={r} manage={manage} className="basis-full" /> : null);
+
+  let body;
+  switch (action.kind) {
+    case "sign_in":
+      body = (
+        <div className="space-y-2">
+          <p className="font-medium">Sign in again to ask for movies and shows</p>
+          <p className="text-sm text-muted">This app signed in before it could ask. Signing in again lets it.</p>
+          <Link to="/login" className={buttonClass("primary", size)}>
+            <LogIn className={icon} />
+            Sign in again
+          </Link>
+        </div>
+      );
+      break;
+    case "restricted":
+      body = (
+        <p className="flex items-center gap-2 text-sm text-muted">
+          <Ban className="size-4 shrink-0 text-danger" />
+          {action.text}
+        </p>
+      );
+      break;
+    case "open":
+      body = open(action.itemId) ?? <Badge tone="success">In library</Badge>;
+      break;
+    case "declined":
+      body = (
+        <>
+          <p className="flex basis-full items-start gap-2 text-sm text-muted">
+            <Ban className="mt-0.5 size-4 shrink-0 text-danger" />
+            {action.text}
+          </p>
+          {action.more ? (off ? notOpen : moreSeasons) : null}
+        </>
+      );
+      break;
+    case "requested":
+      body = (
+        <>
+          <span className={buttonClass("secondary", size, "pointer-events-none text-muted")} aria-disabled>
+            <Check className={icon} />
+            Requested
+          </span>
+          {stage(action.request)}
+        </>
+      );
+      break;
+    case "following":
+      body = (
+        <>
+          <span className={buttonClass("secondary", size, "pointer-events-none text-muted")} aria-disabled>
+            <Bell className={icon} />
+            Following
+          </span>
+          {action.request ? (
+            <Button
+              variant="ghost"
+              size={size}
+              icon={<UserMinus className={icon} />}
+              loading={unwatch.isPending}
+              onClick={() => {
+                const followed = action.request;
+                if (followed) unwatch.mutate(followed, { onError: fail });
+              }}
+            >
+              Stop following
+            </Button>
+          ) : null}
+          {stage(action.request)}
+        </>
+      );
+      break;
+    case "tell_me_too":
+      body = off ? (
+        notOpen
+      ) : (
+        <>
+          <Button variant="primary" size={size} icon={<Bell className={icon} />} loading={ask.isPending} onClick={() => tellMeToo(action.seasons)}>
+            Tell me too
+          </Button>
+          <p className="text-sm text-muted">Someone asked for it already.</p>
+        </>
+      );
+      break;
+    case "partial":
+      body = (
+        <>
+          {open(action.itemId)}
+          {action.more ? (off ? notOpen : moreSeasons) : null}
+        </>
+      );
+      break;
+    case "request":
+      body = off ? (
+        notOpen
+      ) : (
+        <Button variant="primary" size={size} icon={<Plus className={icon} />} loading={ask.isPending} disabled={used} onClick={request}>
+          Request
+        </Button>
+      );
+      break;
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2.5">{body}</div>
+      {allowance && !off && action.kind !== "open" && action.kind !== "restricted" ? (
+        <p className="text-xs text-danger">{allowance.text}</p>
+      ) : null}
+    </div>
+  );
+}
+
+/** A season's state, from the server's word for it: its request's stage where this account sees the request. */
+function SeasonState({ season, title, manage }: { season: DiscoverSeason; title: DiscoverDetail; manage: boolean }) {
+  const request = season.request_id !== null ? title.requests.find((r) => r.id === season.request_id) : undefined;
+  if (season.state === "requested" && request) return <StagePill request={request} manage={manage} line={false} className="shrink-0" />;
+  const text = seasonStateText(season);
+  if (!text) return null;
+  if (season.state === "library") return <Badge tone="success">{text}</Badge>;
+  if (text === "Declined") return <Badge tone="danger">{text}</Badge>;
+  if (season.state === "requested") {
+    return (
+      <Badge tone="info">
+        <Clock className="size-3" /> {text}
+      </Badge>
+    );
+  }
+  if (season.state === "partial") return <Badge>{text}</Badge>;
+  return <span className="shrink-0 text-xs text-subtle">{text}</span>;
+}
+
+function SeasonRow({ season, title, manage }: { season: DiscoverSeason; title: DiscoverDetail; manage: boolean }) {
   return (
     <li className="flex items-center gap-3 rounded-lg border border-border bg-surface/80 px-3 py-2.5">
       <Artwork
@@ -81,20 +269,12 @@ function SeasonRow({ season }: { season: DiscoverSeason }) {
         className="aspect-[2/3] w-10 shrink-0 rounded ring-1 ring-white/5"
       />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{seasonName(season)}</div>
+        <div className="truncate text-sm font-medium">{season.name || (season.number === 0 ? "Specials" : `Season ${season.number}`)}</div>
         <div className="truncate text-xs text-subtle">
           {[pluralize(season.episodes, "episode"), season.air_date ? season.air_date.slice(0, 4) : null].filter(Boolean).join(" · ")}
         </div>
       </div>
-      {whole ? (
-        <Badge tone="success">In library</Badge>
-      ) : season.requested ? (
-        <Badge>
-          <Clock className="size-3" /> Requested
-        </Badge>
-      ) : (
-        <span className="shrink-0 text-xs text-subtle">{seasonState(season)}</span>
-      )}
+      <SeasonState season={season} title={title} manage={manage} />
     </li>
   );
 }
@@ -157,18 +337,11 @@ function CastRow({ cast }: { cast: DiscoverDetail["cast"] }) {
   );
 }
 
-function TitleView({ title }: { title: DiscoverDetail }) {
+function TitleView({ title, picking, setPicking }: { title: DiscoverDetail; picking: boolean; setPicking: (open: boolean) => void }) {
   const summary = useRequestSummary();
-  const [asking, setAsking] = useState(false);
   const show = title.kind === "show";
-  const askable = askableSeasons(title.seasons);
   const numbered = (title.seasons ?? []).filter((s) => s.number > 0);
-  const open = mayRequest(summary.data);
-  // A movie no library has and nothing asks for; a show with a season still to ask for.
-  const canAsk = open && (show ? askable.length > 0 : title.status === "none");
-  const left = show ? summary.data?.seasons_left : summary.data?.movies_left;
-  const usedUp = left === 0;
-  const allowance = summary.data && canAsk ? allowanceText(summary.data) : null;
+  const manage = summary.data?.manage ?? false;
 
   return (
     <div className="relative min-h-[calc(100vh-4rem)] animate-fade-in">
@@ -203,39 +376,15 @@ function TitleView({ title }: { title: DiscoverDetail }) {
               ]}
             />
             <Genres genres={title.genres} />
-            <div className="flex flex-wrap items-center gap-2.5 pt-1">
-              {title.item_id !== null ? (
-                <Link to={itemUrl(title.item_id)} className={buttonClass("primary", "lg")}>
-                  <Play className="size-5 fill-current" />
-                  Open in library
-                </Link>
-              ) : null}
-              {canAsk ? (
-                <Button
-                  variant={title.item_id !== null ? "secondary" : "primary"}
-                  size="lg"
-                  icon={<Plus className="size-5" />}
-                  disabled={usedUp}
-                  onClick={() => setAsking(true)}
-                >
-                  {title.status === "none" ? "Request" : "Request more"}
-                </Button>
-              ) : title.status === "requested" ? (
-                <span className={buttonClass("secondary", "lg", "pointer-events-none text-muted")}>
-                  <Clock className="size-5" />
-                  Requested
-                </span>
-              ) : title.status === "library" && title.item_id === null ? (
-                <Badge tone="success">In a library</Badge>
-              ) : null}
+            <div className="pt-1">
+              <MainActions title={title} summary={summary.data} onPick={() => setPicking(true)} />
             </div>
-            {allowance ? <p className={cn("text-xs", usedUp ? "text-danger" : "text-subtle")}>{allowance}</p> : null}
             {title.tagline ? <p className="text-base italic text-fg/75">{title.tagline}</p> : null}
             <Summary text={title.overview} />
           </div>
         </div>
 
-        {title.requests.length ? (
+        {title.requests.length && summary.data ? (
           <section className="mt-12">
             <SectionTitle>
               {title.requests.length === 1 ? "Request" : "Requests"}{" "}
@@ -243,7 +392,7 @@ function TitleView({ title }: { title: DiscoverDetail }) {
             </SectionTitle>
             <ul className="divide-y divide-white/[0.05] overflow-hidden rounded-lg border border-border bg-surface/80">
               {title.requests.map((r) => (
-                <RequestItem key={r.id} request={r} showTitle={false} />
+                <RequestCard key={r.id} request={r} summary={summary.data} showTitle={false} />
               ))}
             </ul>
           </section>
@@ -254,7 +403,7 @@ function TitleView({ title }: { title: DiscoverDetail }) {
             <SectionTitle>Seasons</SectionTitle>
             <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {[...numbered, ...title.seasons.filter((s) => s.number === 0)].map((s) => (
-                <SeasonRow key={s.number} season={s} />
+                <SeasonRow key={s.number} season={s} title={title} manage={manage} />
               ))}
             </ul>
           </section>
@@ -262,39 +411,53 @@ function TitleView({ title }: { title: DiscoverDetail }) {
 
         {title.cast.length ? <CastRow cast={title.cast} /> : null}
 
-        <p className="mt-12 text-xs text-subtle">Details and pictures from TMDB.</p>
+        <TmdbCredit className="mt-12" />
       </div>
-      {canAsk ? <RequestModal title={title} summary={summary.data} open={asking} onClose={() => setAsking(false)} /> : null}
+      {show ? <SeasonPicker title={title} summary={summary.data} open={picking} onClose={() => setPicking(false)} /> : null}
     </div>
   );
 }
 
-/** A movie or show on TMDB (`/discover/movie/603`): what it is, whether a library has it, and asking for it. */
+/**
+ * A movie or show on TMDB (`/discover/movie/603`): what it is, how it
+ * stands for this account, and the one thing to do about it. `?pick=1`
+ * opens a show's season picker (Request more seasons, from a library).
+ */
 export function TitlePage() {
+  const me = useAuth();
   const params = useParams();
+  const [search, setSearch] = useSearchParams();
   const kind: TitleKind | null = params.kind === "movie" || params.kind === "show" ? params.kind : null;
   const tmdbId = Number(params.tmdbId);
   const valid = kind !== null && Number.isInteger(tmdbId) && tmdbId > 0;
-  const title = useDiscoverTitle(kind ?? "movie", valid ? tmdbId : 0);
+  const summary = useRequestSummary();
+  const title = useDiscoverTitle(kind ?? "movie", valid ? tmdbId : 0, summary.data?.sign_in_again !== "requests");
   useDocumentTitle(title.data?.title);
+  const picking = search.get("pick") === "1";
+  const setPicking = (open: boolean) => {
+    const next = new URLSearchParams(search);
+    if (open) next.set("pick", "1");
+    else next.delete("pick");
+    setSearch(next, { replace: true });
+  };
 
   if (!valid) return <NotFoundPage />;
+  // This sign-in can't ask: it says so, and nothing more.
+  if (summary.data?.sign_in_again === "requests") return <ProblemState problem={{ kind: "sign_in" }} manage={false} />;
   if (title.isPending) return <TitleSkeleton />;
   // Failed before anything came (a refresh that fails keeps what's shown).
   if (!title.data) {
-    const why = requestsUnavailable(title.error);
-    if (why) return <RequestsUnavailable reason={why} />;
-    if (isApiError(title.error, 404)) return <NotFoundPage />;
+    if (isApiError(title.error, 404) && !isApiError(summary.error, 404)) return <NotFoundPage />;
     return (
-      <LoadError
-        className="min-h-[60vh]"
-        title="Couldn't load this title"
+      <ProblemState
         error={title.error}
+        manage={summary.data?.manage ?? me.is_admin}
+        title="Couldn't load this title"
         retrying={title.isFetching}
         onRetry={() => void title.refetch()}
       />
     );
   }
-  // Keyed, so what was being asked for doesn't carry over to another title.
-  return <TitleView key={`${title.data.kind}-${title.data.tmdb_id}`} title={title.data} />;
+  // Keyed, so what was being picked doesn't carry over to another title.
+  return <TitleView key={`${title.data.kind}-${title.data.tmdb_id}`} title={title.data} picking={picking} setPicking={setPicking} />;
 }

@@ -1,9 +1,10 @@
 import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { connectionLost, serverAnswers, setConnectionLost } from "@/lib/connection";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { connectionLost, eventsLive, serverAnswers, setConnectionLost, setEventsLive } from "@/lib/connection";
+import { isApiError } from "./client";
 import { keys } from "./hooks";
 import { liveKeys } from "./livetv";
-import { requestKeys } from "./requests";
+import { patchBadges, patchTitles, requestKeys, requestQueries, titleShown, type TitleKind } from "./requests";
 import type { Activity, Id, Library, ServerEvent } from "./types";
 
 /** How long the stream may be down before the pages say the server is out of reach: a restart takes a moment. */
@@ -55,6 +56,61 @@ function showsWatchState(key: readonly unknown[], change: WatchStateChange, libr
   }
 }
 
+/** TMDB's lists and searches, under `requestKeys.all`. */
+const isTmdbList = (key: readonly unknown[]) => key[1] === "discover" || key[1] === "search";
+
+/** A request that changed, heard and not acted on yet (`id` `null`: many did). */
+interface RequestChange {
+  id: Id | null;
+  kind: TitleKind | null;
+  tmdbId: number | null;
+  /** When it was heard (ms). */
+  heardAt: number;
+}
+
+/**
+ * What shows requests, after some changed: the lists and the titles'
+ * pages on screen are asked again (those fetched before the change was
+ * heard: what this page changed itself is fresh), and the badges of rows
+ * already shown follow the request as it is now. Discover's rows and
+ * search results are never fetched again for it.
+ */
+function refreshRequests(qc: QueryClient, changes: RequestChange[]) {
+  const heardAt = Math.max(...changes.map((c) => c.heardAt));
+  const before = (q: { state: { dataUpdatedAt: number } }) => q.state.dataUpdatedAt <= heardAt;
+  void qc.invalidateQueries({ queryKey: requestKeys.lists, predicate: before });
+  if (changes.some((c) => c.id === null)) {
+    void qc.invalidateQueries({ queryKey: requestKeys.titles, predicate: before });
+    void qc.invalidateQueries({ queryKey: requestKeys.items, predicate: before });
+    void qc.invalidateQueries({ queryKey: requestKeys.ones, predicate: before });
+    // Which badges changed isn't known: rows say so when next shown.
+    void qc.invalidateQueries({ queryKey: requestKeys.discovers, refetchType: "none" });
+    void qc.invalidateQueries({ queryKey: requestKeys.searches, refetchType: "none" });
+    return;
+  }
+  for (const { id, kind, tmdbId } of changes) {
+    if (id === null) continue;
+    void qc.invalidateQueries({ queryKey: requestKeys.one(id), predicate: before });
+    if (kind === null || tmdbId === null) continue;
+    void qc.invalidateQueries({ queryKey: requestKeys.title(kind, tmdbId), predicate: before });
+    void qc.invalidateQueries({
+      queryKey: requestKeys.items,
+      predicate: (q) => {
+        const data = q.state.data as { kind?: unknown; tmdb_id?: unknown } | undefined;
+        return before(q) && data?.kind === kind && data.tmdb_id === tmdbId;
+      },
+    });
+    if (!titleShown(qc, kind, tmdbId)) continue;
+    // What the rows' badges follow: the request as this account sees it now; none (404) leaves none.
+    void qc.fetchQuery({ ...requestQueries.one(id), staleTime: 0 }).then(
+      (request) => patchBadges(qc, kind, tmdbId, id, request),
+      (err: unknown) => {
+        if (isApiError(err, 404)) patchBadges(qc, kind, tmdbId, id, null);
+      },
+    );
+  }
+}
+
 /**
  * Keeps one `EventSource('/api/events')` open while logged in and turns server
  * events into React Query cache updates/invalidations.
@@ -75,6 +131,9 @@ export function useServerEvents(enabled: boolean) {
     let lostTimer: number | undefined;
     const pendingLibraries = new Set<Id>();
     let pendingWatchState: WatchStateChange | null = null;
+    let summaryTimer: number | undefined;
+    let requestsTimer: number | undefined;
+    let pendingRequests: RequestChange[] = [];
 
     // Down a while, and the server doesn't answer at all: the pages say so
     // (a stream refused, a sign-in that ended, is something else).
@@ -106,7 +165,48 @@ export function useServerEvents(enabled: boolean) {
       void qc.invalidateQueries({ queryKey: ["history"] });
       void qc.invalidateQueries({ queryKey: keys.watchlist });
       void qc.invalidateQueries({ queryKey: liveKeys.all });
-      void qc.invalidateQueries({ queryKey: requestKeys.all });
+      // Requests: all but TMDB's rows, whose badges say so when next shown.
+      void qc.invalidateQueries({ queryKey: requestKeys.all, predicate: (q) => !isTmdbList(q.queryKey) });
+      void qc.invalidateQueries({ queryKey: requestKeys.all, predicate: (q) => isTmdbList(q.queryKey), refetchType: "none" });
+    };
+
+    // The summary once a burst of request events is over (the number on
+    // Requests, what's left to ask for); what shows the requests that
+    // changed a moment after.
+    const refreshSummary = () => {
+      if (summaryTimer !== undefined) return;
+      summaryTimer = window.setTimeout(() => {
+        summaryTimer = undefined;
+        void qc.invalidateQueries({ queryKey: requestKeys.summary });
+      }, 1000);
+    };
+    const requestChanged = (id: Id | null, kind: TitleKind | null, tmdbId: number | null) => {
+      refreshSummary();
+      pendingRequests.push({ id, kind, tmdbId, heardAt: Date.now() });
+      if (requestsTimer !== undefined) return;
+      requestsTimer = window.setTimeout(() => {
+        requestsTimer = undefined;
+        const changes = pendingRequests;
+        pendingRequests = [];
+        refreshRequests(qc, changes);
+      }, 300);
+    };
+    // Turned on or off, other limits, another age limit or role: what
+    // each page offers may have changed.
+    const requestsSettingsChanged = () => {
+      refreshSummary();
+      for (const queryKey of [requestKeys.titles, requestKeys.items, requestKeys.lists, requestKeys.options]) {
+        void qc.invalidateQueries({ queryKey });
+      }
+      void qc.invalidateQueries({ queryKey: requestKeys.discovers, refetchType: "none" });
+      void qc.invalidateQueries({ queryKey: requestKeys.searches, refetchType: "none" });
+    };
+    // Without the stream, what shows requests asks again now and then (and
+    // the summary every minute): it learns so at its next answer.
+    const live = (value: boolean) => {
+      if (eventsLive() === value) return;
+      setEventsLive(value);
+      if (!value) void qc.invalidateQueries({ queryKey: requestKeys.summary });
     };
 
     // Metadata refreshes can emit many `library_changed` events in a burst;
@@ -234,11 +334,29 @@ export function useServerEvents(enabled: boolean) {
           void qc.invalidateQueries({ queryKey: liveKeys.tuners });
           void qc.invalidateQueries({ queryKey: liveKeys.sources });
           break;
-        // Statuses on Discover and the titles' pages, the lists of requests,
-        // the Requests count waiting for a decision.
+        // Statuses on the titles' pages and the badges in rows already
+        // shown, the lists of requests, the number on Requests.
         case "requests_changed":
-        case "request_available":
-          void qc.invalidateQueries({ queryKey: requestKeys.all });
+          requestChanged(ev.request_id, ev.kind, ev.tmdb_id);
+          break;
+        case "request_available": {
+          const itemId = ev.item_id;
+          // In a library this account can open: the badge says so at once.
+          if (itemId !== null && ev.complete) {
+            patchTitles(qc, ev.kind, ev.tmdb_id, (t) => ({ ...t, status: "library", item_id: itemId, request_id: null }));
+          }
+          requestChanged(ev.request_id, ev.kind, ev.tmdb_id);
+          break;
+        }
+        case "request_decided":
+        case "request_created":
+          requestChanged(ev.request_id, ev.kind, ev.tmdb_id);
+          break;
+        case "request_failed":
+          requestChanged(ev.request_id, ev.kind, null);
+          break;
+        case "requests_settings_changed":
+          requestsSettingsChanged();
           break;
       }
       for (const listener of listeners) listener(ev);
@@ -250,6 +368,7 @@ export function useServerEvents(enabled: boolean) {
       es.onopen = () => {
         failures = 0;
         back();
+        live(true);
         // Also fires when the browser reconnects on its own.
         if (connectedBefore) resync();
         connectedBefore = true;
@@ -263,6 +382,7 @@ export function useServerEvents(enabled: boolean) {
       };
       es.onerror = () => {
         dropped();
+        live(false);
         // While CONNECTING the browser retries on its own; once CLOSED
         // (e.g. a non-200 response) we have to reconnect manually.
         if (es && es.readyState === EventSource.CLOSED) {
@@ -282,7 +402,10 @@ export function useServerEvents(enabled: boolean) {
       window.clearTimeout(retryTimer);
       window.clearTimeout(flushTimer);
       window.clearTimeout(lostTimer);
+      window.clearTimeout(summaryTimer);
+      window.clearTimeout(requestsTimer);
       setConnectionLost(false);
+      setEventsLive(false);
     };
   }, [enabled, qc]);
 }

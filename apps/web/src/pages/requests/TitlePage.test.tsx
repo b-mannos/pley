@@ -2,134 +2,201 @@ import { Route, Routes } from "react-router";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import type { MediaRequest } from "@/api/requests";
+import type { ArrChoices, MediaRequest } from "@/api/requests";
 import type { User } from "@/api/types";
 import { itemUrl } from "@/lib/urls";
-import { mockApi, renderWithProviders, testUser } from "@/test/render";
-import { makeDetail, makeRequest, makeSeason, makeSummary } from "@/test/requests";
+import { apiError, LocationDisplay, mockApi, renderWithProviders, testUser } from "@/test/render";
+import { makeDetail, makeRequest, makeSeason, makeShowDetail, makeSummary } from "@/test/requests";
 import { TitlePage } from "./TitlePage";
 
 const ann: User = { ...testUser, id: 2, username: "ann", name: "Ann", is_admin: false };
+const now = () => Math.floor(Date.now() / 1000);
+const DAY = 86_400;
 
 function open(route: string, user: User = ann) {
   return renderWithProviders(
-    <Routes>
-      <Route path="/discover/:kind/:tmdbId" element={<TitlePage />} />
-    </Routes>,
+    <>
+      <Routes>
+        <Route path="/discover/:kind/:tmdbId" element={<TitlePage />} />
+      </Routes>
+      <LocationDisplay />
+    </>,
     { route, user },
   );
 }
 
-const show = makeDetail({
-  kind: "show",
-  tmdb_id: 1399,
-  title: "Seasons Show",
-  status: "library",
+/** A new request, as the server answers one (201; 200 means following one there already). */
+function created(request: MediaRequest): Response {
+  return new Response(JSON.stringify(request), { status: 201, headers: { "content-type": "application/json" } });
+}
+
+/** A show partly in a library: Season 1 whole, Season 2 in part, Season 3 asked for, Season 4 missing, Season 5 not aired. */
+const dark = makeShowDetail({
+  status: "partial",
   item_id: 40,
-  runtime_minutes: null,
-  show_status: "Returning Series",
   seasons: [
     makeSeason(0, { episodes: 3, aired: 3 }),
-    makeSeason(1, { in_library: 10 }),
-    makeSeason(2, { in_library: 3 }),
-    makeSeason(3, { requested: true }),
+    makeSeason(1, { in_library: 10, state: "library" }),
+    makeSeason(2, { in_library: 3, state: "partial" }),
+    makeSeason(3, { requested: true, state: "requested" }),
     makeSeason(4),
-    makeSeason(5, { aired: 0, air_date: null }),
+    makeSeason(5, { aired: 0, air_date: null, state: "unaired" }),
   ],
 });
 
+function choices(overrides: Partial<ArrChoices> = {}): ArrChoices {
+  return {
+    quality_profiles: [
+      { id: 1, name: "HD-1080p" },
+      { id: 4, name: "Ultra-HD" },
+    ],
+    root_folders: [{ path: "/movies", free_bytes: null }],
+    quality_profile: 1,
+    root_folder: "/movies",
+    anime_quality_profile: null,
+    anime_root_folder: null,
+    error: null,
+    ...overrides,
+  };
+}
+
 describe("TitlePage", () => {
-  it("asks for a movie, saying an administrator decides", async () => {
+  it("shows what a movie is, and asks for it at once, saying an administrator decides", async () => {
     const user = userEvent.setup();
+    let asked = false;
     const requests = mockApi({
-      "GET /api/discover/movie/603": () => makeDetail({ cast: [{ name: "Keanu Reeves", character: "Neo", photo_url: null }] }),
+      "GET /api/discover/movie/603": () =>
+        asked
+          ? makeDetail({ status: "requested", requests: [makeRequest({ id: 5, mine: true, actions: ["withdraw"] })] })
+          : makeDetail({ cast: [{ name: "Keanu Reeves", character: "Neo", photo_url: null }] }),
       "GET /api/requests/summary": () => makeSummary(),
-      "POST /api/requests": () => makeRequest(),
+      "POST /api/requests": () => {
+        asked = true;
+        return created(makeRequest({ id: 5, mine: true }));
+      },
     });
     open("/discover/movie/603");
 
     expect(await screen.findByRole("heading", { name: "The Matrix", level: 1 })).toBeInTheDocument();
     expect(screen.getByText("2h 16m")).toBeInTheDocument();
     expect(screen.getByText("Neo")).toBeInTheDocument();
-    await user.click(await screen.findByRole("button", { name: "Request" }));
-    const dialog = screen.getByRole("dialog", { name: "Request movie" });
-    expect(within(dialog).getByText("An administrator decides on it. You'll hear when it's ready to watch.")).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Request" }));
+    expect(screen.getByText("Details and pictures from TMDB.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Request" }));
 
-    expect(await screen.findByText("Requested “The Matrix”")).toBeInTheDocument();
+    expect(await screen.findByText("Asked for “The Matrix”: an administrator decides.")).toBeInTheDocument();
     expect(requests.find((r) => r.method === "POST")?.body).toEqual({ kind: "movie", tmdb_id: 603 });
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    // Asked, it says so, with where the request is.
+    expect(await screen.findByText("Requested")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request" })).not.toBeInTheDocument();
+    expect(screen.getAllByText("Waiting for approval").length).toBeGreaterThan(0);
   });
 
-  it("says why a request couldn't be made, in the dialog", async () => {
+  it("says when the account may ask again, past its limit", async () => {
     const user = userEvent.setup();
     mockApi({
       "GET /api/discover/movie/603": () => makeDetail(),
       "GET /api/requests/summary": () => makeSummary(),
       "POST /api/requests": () =>
-        new Response(JSON.stringify({ code: "too_many_requests", message: "you can ask again on Nov 2" }), {
+        new Response(JSON.stringify({ code: "too_many_requests", message: "past the limit", retry_at: now() + 3 * DAY }), {
           status: 429,
           headers: { "content-type": "application/json" },
         }),
     });
     open("/discover/movie/603");
     await user.click(await screen.findByRole("button", { name: "Request" }));
-    const dialog = screen.getByRole("dialog", { name: "Request movie" });
-    await user.click(within(dialog).getByRole("button", { name: "Request" }));
-    expect(await within(dialog).findByText("You can ask again on Nov 2")).toBeInTheDocument();
+    expect(await screen.findByText("You can ask for more in 3 days.")).toBeInTheDocument();
   });
 
-  it("asks for the seasons a library lacks, all of them picked at first", async () => {
+  it("holds Request once the allowance is spent, saying when more may be asked for", async () => {
+    mockApi({
+      "GET /api/discover/movie/603": () => makeDetail({ movies_left: 0, movies_next_at: now() + 3 * DAY }),
+      "GET /api/requests/summary": () => makeSummary({ movies_left: 0, movies_limit: 3 }),
+    });
+    open("/discover/movie/603");
+    expect(await screen.findByRole("button", { name: "Request" })).toBeDisabled();
+    expect(screen.getByText("You've asked for all the movies you can for now: you can ask for more in 3 days.")).toBeInTheDocument();
+  });
+
+  it("asks for the seasons a library lacks, those missing picked at first", async () => {
     const user = userEvent.setup();
     const requests = mockApi({
-      "GET /api/discover/show/1399": () => show,
+      "GET /api/discover/show/1399": () => dark,
       "GET /api/requests/summary": () => makeSummary({ access: "auto" }),
-      "POST /api/requests": (req) => makeRequest({ kind: "show", title: "Seasons Show", seasons: (req.body as { seasons: number[] }).seasons, status: "approved" }),
+      "POST /api/requests": (req) =>
+        created(makeRequest({ kind: "show", tmdb_id: 1399, title: "Dark", seasons: (req.body as { seasons: number[] }).seasons, status: "approved", mine: true })),
     });
     open("/discover/show/1399");
 
-    expect(await screen.findByRole("link", { name: "Open in library" })).toHaveAttribute("href", itemUrl(40));
-    await user.click(await screen.findByRole("button", { name: "Request more" }));
-    const dialog = screen.getByRole("dialog", { name: "Request seasons" });
+    expect(await screen.findByRole("link", { name: "Open" })).toHaveAttribute("href", itemUrl(40));
+    await user.click(screen.getByRole("button", { name: "Request more seasons" }));
+    const dialog = screen.getByRole("dialog", { name: "Which seasons?" });
     expect(within(dialog).getByText("Approved as you ask, and sent on to download.")).toBeInTheDocument();
+    expect(screen.getByTestId("location")).toHaveTextContent("/discover/show/1399?pick=1");
 
-    // Whole in a library, or asked for already: in, and not to be picked.
+    // Whole in a library, or asked for already: not to be picked.
     expect(within(dialog).getByRole("checkbox", { name: /Season 1/ })).toBeDisabled();
     expect(within(dialog).getByRole("checkbox", { name: /Season 3/ })).toBeDisabled();
     expect(within(dialog).getByRole("checkbox", { name: /Season 2/ })).toBeChecked();
-    expect(within(dialog).getByText("3 of 10 episodes in library")).toBeInTheDocument();
     expect(within(dialog).getByRole("checkbox", { name: /Season 4/ })).toBeChecked();
-    // Not begun, and specials: offered, not picked.
+    // Not aired yet, and specials: offered, not picked; specials come last.
     expect(within(dialog).getByRole("checkbox", { name: /Season 5/ })).not.toBeChecked();
     expect(within(dialog).getByRole("checkbox", { name: /Specials/ })).not.toBeChecked();
-    expect(within(dialog).getByRole("checkbox", { name: /All missing seasons/ })).toBeChecked();
+    expect(within(dialog).getAllByRole("checkbox").at(-1)).toHaveAccessibleName(/Specials/);
 
     await user.click(within(dialog).getByRole("checkbox", { name: /Specials/ }));
-    expect(within(dialog).getByRole("checkbox", { name: /All missing seasons/ })).not.toBeChecked();
     await user.click(within(dialog).getByRole("button", { name: "Request 3 seasons" }));
 
-    expect(await screen.findByText("“Seasons Show” is approved and on its way")).toBeInTheDocument();
+    expect(await screen.findByText("“Dark” is approved and on its way.")).toBeInTheDocument();
     expect(requests.find((r) => r.method === "POST")?.body).toEqual({ kind: "show", tmdb_id: 1399, seasons: [0, 2, 4] });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\/discover\/show\/1399$/);
+  });
+
+  it("asks for at least a season", async () => {
+    const user = userEvent.setup();
+    mockApi({ "GET /api/discover/show/1399": () => dark, "GET /api/requests/summary": () => makeSummary() });
+    open("/discover/show/1399?pick=1");
+    const dialog = await screen.findByRole("dialog", { name: "Which seasons?" });
+    await user.click(within(dialog).getByRole("checkbox", { name: /Season 2/ }));
+    await user.click(within(dialog).getByRole("checkbox", { name: /Season 4/ }));
+    expect(within(dialog).getByText("Pick a season.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Request" })).toBeDisabled();
   });
 
   it("won't ask for more seasons than the account has left", async () => {
     const user = userEvent.setup();
-    mockApi({ "GET /api/discover/show/1399": () => show, "GET /api/requests/summary": () => makeSummary({ seasons_left: 1 }) });
-    open("/discover/show/1399");
-    await user.click(await screen.findByRole("button", { name: "Request more" }));
-    const dialog = screen.getByRole("dialog", { name: "Request seasons" });
-    expect(within(dialog).getByText("You can ask for 1 more season this week.")).toHaveClass("text-danger");
-    expect(within(dialog).getByRole("button", { name: "Request 2 seasons" })).toBeDisabled();
-    await user.click(within(dialog).getByRole("checkbox", { name: /Season 4/ }));
+    mockApi({
+      "GET /api/discover/show/1399": () => ({ ...dark, seasons_left: 1 }),
+      "GET /api/requests/summary": () => makeSummary({ seasons_left: 1, seasons_limit: 5 }),
+    });
+    // From a library's page: the picker opens with the page.
+    open("/discover/show/1399?pick=1");
+    const dialog = await screen.findByRole("dialog", { name: "Which seasons?" });
+    // As many as are left are picked to begin with.
     expect(within(dialog).getByRole("button", { name: "Request 1 season" })).toBeEnabled();
+    await user.click(within(dialog).getByRole("checkbox", { name: /Season 4/ }));
+    expect(within(dialog).getByRole("button", { name: "Request 2 seasons" })).toBeDisabled();
+    expect(within(dialog).getByText("You can ask for 1 more season. Limits: 5 seasons per 7 days.")).toHaveClass("text-danger");
   });
 
-  it("shows a movie the account asked for, and lets it withdraw the request", async () => {
+  it("shows each season's state", async () => {
+    mockApi({ "GET /api/discover/show/1399": () => dark, "GET /api/requests/summary": () => makeSummary() });
+    open("/discover/show/1399");
+    const seasons = (await screen.findByRole("heading", { name: "Seasons" })).closest("section") as HTMLElement;
+    const row = (name: string) => within(seasons).getByText(name).closest("li") as HTMLElement;
+    expect(within(row("Season 1")).getByText("In library")).toBeInTheDocument();
+    expect(within(row("Season 2")).getByText("Partly in library")).toBeInTheDocument();
+    expect(within(row("Season 3")).getByText("Requested")).toBeInTheDocument();
+    expect(within(row("Season 5")).getByText("Not aired yet")).toBeInTheDocument();
+    // Specials last.
+    expect(within(seasons).getAllByRole("listitem").at(-1)).toHaveTextContent(/^Specials/);
+  });
+
+  it("lets the account withdraw what it asked for", async () => {
     const user = userEvent.setup();
-    const pending = makeRequest({ id: 5 });
-    let mine: MediaRequest[] = [pending];
+    let mine: MediaRequest[] = [makeRequest({ id: 5, mine: true, actions: ["withdraw"] })];
     const requests = mockApi({
-      "GET /api/discover/movie/603": () => makeDetail({ status: mine.length ? "requested" : "none", request_id: mine.length ? 5 : null, requests: mine }),
+      "GET /api/discover/movie/603": () => makeDetail({ status: mine.length ? "requested" : "none", requests: mine }),
       "GET /api/requests/summary": () => makeSummary(),
       "DELETE /api/requests/5": () => {
         mine = [];
@@ -138,68 +205,181 @@ describe("TitlePage", () => {
     });
     open("/discover/movie/603");
 
-    expect(await screen.findByText("Requested")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Request" })).not.toBeInTheDocument();
-    const list = screen.getByRole("list");
-    expect(within(list).getByText("Pending")).toBeInTheDocument();
-    expect(within(list).getByText("You")).toBeInTheDocument();
+    const list = await screen.findByRole("list");
+    expect(within(list).getByText(/You asked/)).toBeInTheDocument();
     expect(within(list).queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
-
     await user.click(within(list).getByRole("button", { name: "Withdraw" }));
-    await user.click(within(screen.getByRole("dialog", { name: "Withdraw your request?" })).getByRole("button", { name: "Withdraw" }));
-    expect(await screen.findByText("Withdrew “The Matrix”")).toBeInTheDocument();
-    expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/requests/5");
+    const confirm = screen.getByRole("dialog", { name: "Withdraw your request for “The Matrix”?" });
+    await user.click(within(confirm).getByRole("button", { name: "Withdraw" }));
     expect(await screen.findByRole("button", { name: "Request" })).toBeInTheDocument();
+    expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/requests/5");
   });
 
-  it("lets an administrator approve a request, or decline it with a reason", async () => {
+  it("offers Tell me too where someone else asked, and says it follows", async () => {
     const user = userEvent.setup();
-    const pending = makeRequest({ id: 5 });
+    const theirs = makeRequest({ id: 8 });
     const requests = mockApi({
-      "GET /api/discover/movie/603": () => makeDetail({ status: "requested", request_id: 5, requests: [pending] }),
-      "GET /api/requests/summary": () => makeSummary({ access: "auto", pending: 1 }),
-      "POST /api/requests/5/approve": () => ({ ...pending, status: "failed", reason: "no quality profile is chosen" }),
-      "POST /api/requests/5/decline": () => ({ ...pending, status: "declined" }),
+      "GET /api/discover/movie/603": () => makeDetail({ status: "requested" }),
+      "GET /api/requests/summary": () => makeSummary(),
+      "POST /api/requests": () => ({ ...theirs, watching: true }),
+    });
+    open("/discover/movie/603");
+    expect(await screen.findByText("Someone asked for it already.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Tell me too" }));
+    expect(await screen.findByText("You'll hear when “The Matrix” is ready.")).toBeInTheDocument();
+    expect(requests.find((r) => r.method === "POST")?.body).toEqual({ kind: "movie", tmdb_id: 603 });
+  });
+
+  it("stops following", async () => {
+    const user = userEvent.setup();
+    const followed = makeRequest({ id: 6, watching: true, actions: ["unwatch"], status: "approved", stage: "searching" });
+    const requests = mockApi({
+      "GET /api/discover/movie/603": () => makeDetail({ status: "requested", watching: true, requests: [followed] }),
+      "GET /api/requests/summary": () => makeSummary(),
+      "DELETE /api/requests/6/watch": () => undefined,
+    });
+    open("/discover/movie/603");
+    expect(await screen.findByText("Following")).toBeInTheDocument();
+    expect(screen.getAllByText("Searching").length).toBeGreaterThan(0);
+    await user.click(screen.getAllByRole("button", { name: "Stop following" })[0] as HTMLElement);
+    await waitFor(() => expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/requests/6/watch")).toBe(true));
+  });
+
+  it("says when a declined title may be asked for again, with no button", async () => {
+    mockApi({
+      "GET /api/discover/movie/603": () =>
+        makeDetail({ status: "declined", declined: { reason: "We have it on disc", at: now() - 18 * DAY, again_at: now() + 12 * DAY } }),
+      "GET /api/requests/summary": () => makeSummary(),
+    });
+    open("/discover/movie/603");
+    expect(await screen.findByText("Declined: “We have it on disc”. You can ask again in 12 days.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request" })).not.toBeInTheDocument();
+  });
+
+  it("says why a title above the account's age limit can't be asked for", async () => {
+    mockApi({
+      "GET /api/discover/movie/603": () => makeDetail({ status: "restricted", restriction: "Rated R: above this account's age limit" }),
+      "GET /api/requests/summary": () => makeSummary(),
+    });
+    open("/discover/movie/603");
+    expect(await screen.findByText("Rated R: above this account's age limit")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request" })).not.toBeInTheDocument();
+  });
+
+  it("says requests aren't open to an account that may not ask", async () => {
+    mockApi({
+      "GET /api/discover/movie/603": () => makeDetail(),
+      "GET /api/requests/summary": () => makeSummary({ access: "off" }),
+    });
+    open("/discover/movie/603");
+    expect(await screen.findByText("Requests aren't open to this account.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request" })).not.toBeInTheDocument();
+  });
+
+  it("lets a manager approve a request with the settings' choices", async () => {
+    const user = userEvent.setup();
+    let request = makeRequest({ id: 5, actions: ["approve", "decline", "handled", "delete"] });
+    const requests = mockApi({
+      "GET /api/discover/movie/603": () => makeDetail({ status: "requested", requests: [request] }),
+      "GET /api/requests/summary": () => makeSummary({ access: "auto", manage: true, pending: 1 }),
+      "POST /api/requests/5/approve": () => {
+        request = { ...request, status: "approved", stage: "searching", actions: [] };
+        return request;
+      },
     });
     open("/discover/movie/603", testUser);
 
     const list = await screen.findByRole("list");
     expect(within(list).getByText("Ann")).toBeInTheDocument();
+    // Seldom wanted, the rest wait in a menu.
+    expect(within(list).getByRole("button", { name: "More for The Matrix" })).toBeInTheDocument();
     await user.click(within(list).getByRole("button", { name: "Approve" }));
-    // Approved, but Radarr turned it down.
-    expect(await screen.findByText("“The Matrix” couldn't go to Radarr: no quality profile is chosen")).toBeInTheDocument();
+    expect(await screen.findByText("“The Matrix” was approved.")).toBeInTheDocument();
     expect(requests.find((r) => r.path === "/api/requests/5/approve")?.body).toEqual({});
+    expect(await within(list).findByText("Searching")).toBeInTheDocument();
+  });
 
+  it("lets a manager decline a request with a reason", async () => {
+    const user = userEvent.setup();
+    const pending = makeRequest({ id: 5, actions: ["approve", "decline"] });
+    const requests = mockApi({
+      "GET /api/discover/movie/603": () => makeDetail({ status: "requested", requests: [pending] }),
+      "GET /api/requests/summary": () => makeSummary({ access: "auto", manage: true, pending: 1 }),
+      "POST /api/requests/5/decline": () => ({ ...pending, status: "declined", stage: "declined", actions: [] }),
+    });
+    open("/discover/movie/603", testUser);
+
+    const list = await screen.findByRole("list");
     await user.click(within(list).getByRole("button", { name: "Decline" }));
     const dialog = screen.getByRole("dialog", { name: "Decline “The Matrix”?" });
     await user.type(within(dialog).getByLabelText("Reason"), "We have it on disc");
     await user.click(within(dialog).getByRole("button", { name: "Decline" }));
-    expect(await screen.findByText("Declined “The Matrix”")).toBeInTheDocument();
+    expect(await screen.findByText("“The Matrix” was declined.")).toBeInTheDocument();
     expect(requests.find((r) => r.path === "/api/requests/5/decline")?.body).toEqual({ reason: "We have it on disc" });
   });
 
-  it("shows an approved request's download", async () => {
+  it("approves with a profile of the manager's choosing", async () => {
+    const user = userEvent.setup();
+    const pending = makeRequest({ id: 5, actions: ["approve", "decline"] });
+    const requests = mockApi({
+      "GET /api/discover/movie/603": () => makeDetail({ status: "requested", requests: [pending] }),
+      "GET /api/requests/summary": () => makeSummary({ access: "auto", manage: true, pending: 1 }),
+      "GET /api/requests/options": () => ({ radarr: choices(), sonarr: null }),
+      "POST /api/requests/5/approve": () => ({ ...pending, status: "approved", stage: "searching", actions: [] }),
+    });
+    open("/discover/movie/603", testUser);
+
+    await user.click(await screen.findByRole("button", { name: "Approve…" }));
+    const dialog = screen.getByRole("dialog", { name: "Approve “The Matrix”" });
+    // The settings' choices to begin with.
+    expect(await within(dialog).findByLabelText("Quality profile")).toHaveValue("1");
+    await user.selectOptions(within(dialog).getByLabelText("Quality profile"), "Ultra-HD");
+    await user.click(within(dialog).getByRole("button", { name: "Approve" }));
+    expect(await screen.findByText("“The Matrix” was approved.")).toBeInTheDocument();
+    expect(requests.find((r) => r.path === "/api/requests/5/approve")?.body).toEqual({ quality_profile: 4 });
+  });
+
+  it("approves with the settings' choices when Radarr didn't answer", async () => {
+    const user = userEvent.setup();
+    const pending = makeRequest({ id: 5, actions: ["approve", "decline"] });
+    const requests = mockApi({
+      "GET /api/discover/movie/603": () => makeDetail({ status: "requested", requests: [pending] }),
+      "GET /api/requests/summary": () => makeSummary({ access: "auto", manage: true, pending: 1 }),
+      "GET /api/requests/options": () => ({
+        radarr: choices({ quality_profiles: [], root_folders: [], error: "Radarr isn't answering" }),
+        sonarr: null,
+      }),
+      "POST /api/requests/5/approve": () => ({ ...pending, status: "approved", stage: "approved", actions: [] }),
+    });
+    open("/discover/movie/603", testUser);
+
+    await user.click(await screen.findByRole("button", { name: "Approve…" }));
+    const dialog = screen.getByRole("dialog", { name: "Approve “The Matrix”" });
+    expect(await within(dialog).findByText("Radarr isn't answering")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Approve with the settings' choices" }));
+    expect(await screen.findByText("“The Matrix” was approved.")).toBeInTheDocument();
+    expect(requests.find((r) => r.path === "/api/requests/5/approve")?.body).toEqual({});
+  });
+
+  it("shows a download's progress", async () => {
     mockApi({
       "GET /api/discover/movie/603": () =>
         makeDetail({
           status: "requested",
-          request_id: 5,
-          requests: [makeRequest({ id: 5, status: "approved", download: { progress: 0.5, state: "downloading", eta: null, episodes: 1 } })],
+          requests: [
+            makeRequest({ id: 5, mine: true, status: "approved", stage: "downloading", download: { progress: 0.5, state: "downloading", eta: null, episodes: 1 } }),
+          ],
         }),
       "GET /api/requests/summary": () => makeSummary(),
     });
     open("/discover/movie/603");
-    expect(await screen.findByText("Downloading")).toBeInTheDocument();
-    expect(screen.getByText("50%")).toBeInTheDocument();
+    const bars = await screen.findAllByRole("progressbar", { name: "The Matrix: Downloading 50%" });
+    expect(bars[0]).toHaveAttribute("aria-valuenow", "50");
   });
 
   it("says requests are off when the server says so", async () => {
     mockApi({
-      "GET /api/discover/movie/603": () =>
-        new Response(JSON.stringify({ code: "unavailable", message: "requests are off", setup: false }), {
-          status: 503,
-          headers: { "content-type": "application/json" },
-        }),
+      "GET /api/discover/movie/603": () => apiError(503, "unavailable", "requests are off"),
       "GET /api/requests/summary": () => makeSummary({ enabled: false }),
     });
     open("/discover/movie/603");
@@ -210,26 +390,24 @@ describe("TitlePage", () => {
     const user = userEvent.setup();
     let down = true;
     mockApi({
-      "GET /api/discover/movie/603": () =>
-        down
-          ? new Response(JSON.stringify({ code: "unavailable", message: "TMDB couldn't be reached: try again in a moment", setup: true }), {
-              status: 503,
-              headers: { "content-type": "application/json" },
-            })
-          : makeDetail(),
+      "GET /api/discover/movie/603": () => (down ? apiError(503, "tmdb_down", "TMDB didn't answer") : makeDetail()),
       "GET /api/requests/summary": () => makeSummary(),
     });
     open("/discover/movie/603");
     expect(await screen.findByRole("heading", { name: "TMDB isn't answering" })).toBeInTheDocument();
-    expect(screen.getByText("TMDB couldn't be reached: try again in a moment")).toBeInTheDocument();
     down = false;
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByRole("heading", { name: "The Matrix", level: 1 })).toBeInTheDocument();
   });
 
-  it("knows nothing of other kinds of titles", async () => {
-    mockApi({});
-    open("/discover/person/5");
+  it("knows nothing of other kinds of titles, nor of titles TMDB doesn't have", async () => {
+    mockApi({ "GET /api/requests/summary": () => makeSummary() });
+    const { unmount } = open("/discover/person/5");
+    expect(await screen.findByRole("heading", { name: "Page not found" })).toBeInTheDocument();
+    unmount();
+
+    mockApi({ "GET /api/requests/summary": () => makeSummary(), "GET /api/discover/movie/9": () => apiError(404, "not_found", "no such title") });
+    open("/discover/movie/9");
     expect(await screen.findByRole("heading", { name: "Page not found" })).toBeInTheDocument();
   });
 });

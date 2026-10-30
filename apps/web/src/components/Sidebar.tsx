@@ -4,10 +4,11 @@ import { ArrowUpDown, Compass, Film, House, Inbox, List, ListMusic, ListVideo, L
 import { useLibraries } from "@/api/hooks";
 import { useLiveSummary } from "@/api/livetv";
 import { usePlaylists } from "@/api/lists";
-import { mayRequest, useRequestSummary } from "@/api/requests";
+import { hasRequests, mayRequest, useRequestSummary } from "@/api/requests";
 import type { LibraryKind } from "@/api/types";
 import { useAuth } from "@/auth";
 import { cn } from "@/lib/cn";
+import { requestsBadge } from "@/lib/requests";
 import { Logo } from "./Logo";
 import { keepTabInside } from "./Modal";
 import { SortLibrariesModal } from "./SortLibrariesModal";
@@ -134,32 +135,44 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
   );
 }
 
-/** Discover and Requests, where this account may ask for titles; administrators see how many wait for them. */
+/**
+ * Discover, where this account may ask for titles, and its requests where
+ * it has any (everyone's, for managers), with how many wait to be looked
+ * at: in the danger colour while some failed.
+ */
 function RequestsNav() {
   const summary = useRequestSummary();
-  if (!mayRequest(summary.data)) return null;
-  const waiting = summary.data.pending;
+  const data = summary.data;
+  if (!hasRequests(data) && !data?.manage) return null;
+  const { count, danger } = requestsBadge(data);
   return (
     <>
-      <NavItem to={discoverUrl()} icon={<Compass className="size-[18px]" />}>
-        Discover
-      </NavItem>
+      {mayRequest(data) ? (
+        <NavItem to={discoverUrl()} icon={<Compass className="size-[18px]" />}>
+          Discover
+        </NavItem>
+      ) : null}
       <NavItem
         to={requestsUrl}
         icon={<Inbox className="size-[18px]" />}
         trailing={
           // The spaces outside the spans, as names are made of their trimmed text: "Requests 3 waiting".
-          waiting > 0 ? (
+          count > 0 ? (
             <>
               {" "}
-              <span className="min-w-5 rounded-full bg-accent px-1.5 text-center text-[11px] font-bold leading-5 text-accent-fg">
-                {waiting > 99 ? "99+" : waiting} <span className="sr-only">waiting</span>
+              <span
+                className={cn(
+                  "min-w-5 rounded-full px-1.5 text-center text-[11px] font-bold leading-5",
+                  danger ? "bg-danger text-white" : "bg-accent text-accent-fg",
+                )}
+              >
+                {count > 99 ? "99+" : count} <span className="sr-only">waiting</span>
               </span>
             </>
           ) : null
         }
       >
-        Requests
+        {data?.manage ? "Requests" : "Your requests"}
       </NavItem>
     </>
   );

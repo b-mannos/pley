@@ -2,27 +2,32 @@ import type { ReactElement } from "react";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
+import type { MediaRequest } from "@/api/requests";
 import type { User } from "@/api/types";
-import { LocationDisplay, mockApi, renderWithProviders, testUser } from "@/test/render";
+import { itemUrl } from "@/lib/urls";
+import { apiError, LocationDisplay, mockApi, renderWithProviders, testUser } from "@/test/render";
 import { makeRequest, makeRequestList, makeSummary } from "@/test/requests";
 import { RequestsPage } from "./RequestsPage";
 
 const ann: User = { ...testUser, id: 2, username: "ann", name: "Ann", is_admin: false };
+const manager = makeSummary({ access: "auto", manage: true, pending: 2, failed: 1 });
+const people = [
+  { id: 2, name: "Ann", avatar_url: null, avatar_color: null },
+  { id: 3, name: "Bo", avatar_url: null, avatar_color: null },
+];
 
-const pending = makeRequest({ id: 1, title: "The Matrix" });
-const approved = makeRequest({
-  id: 2,
+const matrix = makeRequest({ id: 1, title: "The Matrix", actions: ["approve", "decline", "handled", "delete"] });
+const heat = makeRequest({ id: 2, tmdb_id: 949, title: "Heat", year: 1995, actions: ["approve", "decline", "handled", "delete"] });
+const failed = makeRequest({
+  id: 3,
   kind: "show",
   tmdb_id: 1399,
-  title: "Seasons Show",
+  title: "Dark",
   seasons: [1, 2, 3],
-  available_seasons: [1],
-  status: "approved",
-  decided_by: { id: 1, name: "Admin", avatar_url: null, avatar_color: null },
-  decided_at: 1_700_000_100,
-  download: { progress: 0.25, state: "downloading", eta: null, episodes: 8 },
+  status: "failed",
+  reason: "no root folder is chosen",
+  actions: ["retry", "decline", "handled", "delete"],
 });
-const declined = makeRequest({ id: 3, title: "Old Film", status: "declined", reason: "We have it on disc" });
 
 function show(ui: ReactElement, route = "/requests", user: User = testUser) {
   return renderWithProviders(
@@ -34,112 +39,250 @@ function show(ui: ReactElement, route = "/requests", user: User = testUser) {
   );
 }
 
-describe("RequestsPage", () => {
-  it("lists everyone's requests for administrators, with counts by status", async () => {
+const paths = (requests: { path: string }[]) => requests.map((r) => r.path);
+const rows = async () => within(await screen.findByRole("list")).getAllByRole("listitem");
+
+describe("RequestsPage for managers", () => {
+  it("opens on what needs them, oldest first, saying why a request failed", async () => {
     const requests = mockApi({
-      "GET /api/requests/summary": () => makeSummary({ access: "auto", pending: 1 }),
-      "GET /api/requests": (req) =>
-        req.path.includes("status=pending") ? { ...makeRequestList([pending]), counts: makeRequestList([pending, approved, declined]).counts } : makeRequestList([pending, approved, declined]),
+      "GET /api/requests/summary": () => manager,
+      "GET /api/requests": () => makeRequestList([matrix, heat, failed], 3, people),
     });
-    const user = userEvent.setup();
     show(<RequestsPage />);
 
-    const list = await screen.findByRole("list");
-    const rows = within(list).getAllByRole("listitem");
-    expect(rows).toHaveLength(3);
-    expect(rows[1]).toHaveTextContent("Seasons 1–3");
-    expect(rows[1]).toHaveTextContent("Approved");
-    expect(rows[1]).toHaveTextContent("Season 1 ready to watch");
-    expect(rows[1]).toHaveTextContent("25%");
-    expect(rows[2]).toHaveTextContent("Declined: “We have it on disc”");
-    expect(within(rows[0] as HTMLElement).getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Requests" })).toBeInTheDocument();
+    const tabs = screen.getByRole("tablist", { name: "Requests" });
+    expect(within(tabs).getByRole("tab", { name: "Needs attention 3" })).toHaveAttribute("aria-selected", "true");
+    const [first, , third] = await rows();
+    expect(within(first as HTMLElement).getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(within(first as HTMLElement).getByRole("button", { name: "Approve…" })).toBeInTheDocument();
+    expect(third).toHaveTextContent("Seasons 1–3");
+    expect(within(third as HTMLElement).getByText("Couldn't send: no root folder is chosen")).toBeInTheDocument();
+    expect(within(third as HTMLElement).getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(paths(requests)).toContain("/api/requests?attention=1&order=oldest&limit=50");
+  });
 
-    const tabs = screen.getByRole("tablist", { name: "Status" });
-    expect(within(tabs).getByRole("tab", { name: "All 3" })).toHaveAttribute("aria-selected", "true");
-    await user.click(within(tabs).getByRole("tab", { name: "Pending 1" }));
-    expect(screen.getByTestId("location")).toHaveTextContent("/requests?status=pending");
+  it("shows everyone's requests, filtered by status as pressed buttons", async () => {
+    const user = userEvent.setup();
+    const requests = mockApi({
+      "GET /api/requests/summary": () => manager,
+      "GET /api/requests": (req) =>
+        req.path.includes("status=pending")
+          ? { ...makeRequestList([matrix], 1, people), counts: makeRequestList([matrix, heat, failed]).counts }
+          : makeRequestList([matrix, heat, failed], 3, people),
+    });
+    show(<RequestsPage />);
+
+    await user.click(await screen.findByRole("tab", { name: "All requests" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/requests?view=all");
+    const status = await screen.findByRole("group", { name: "Status" });
+    expect(within(status).getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(await within(status).findByRole("button", { name: "Pending 2" }));
+    expect(within(status).getByRole("button", { name: /^Pending/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("location")).toHaveTextContent("/requests?view=all&status=pending");
     await waitFor(() => expect(within(screen.getByRole("list")).getAllByRole("listitem")).toHaveLength(1));
-    expect(requests.map((r) => r.path)).toContain("/api/requests?status=pending&limit=50");
+    expect(paths(requests)).toContain("/api/requests?status=pending&limit=50");
   });
 
-  it("keeps an administrator to their own requests when asked", async () => {
+  it("filters by kind, by who asked and by title", async () => {
     const user = userEvent.setup();
     const requests = mockApi({
-      "GET /api/requests/summary": () => makeSummary({ access: "auto" }),
-      "GET /api/requests": (req) => (req.path.includes("mine=1") ? makeRequestList([]) : makeRequestList([pending])),
+      "GET /api/requests/summary": () => manager,
+      "GET /api/requests": () => makeRequestList([matrix, heat], 2, people),
+    });
+    show(<RequestsPage />, "/requests?view=all");
+
+    await user.click(within(await screen.findByRole("group", { name: "Kind" })).getByRole("button", { name: "Movies" }));
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Who asked" }), "Bo");
+    await user.type(screen.getByRole("searchbox", { name: "Requests for titles containing" }), "heat");
+    await waitFor(() => expect(paths(requests)).toContain("/api/requests?kind=movie&user_id=3&q=heat&limit=50"));
+    expect(screen.getByTestId("location")).toHaveTextContent("/requests?view=all&kind=movie&user=3&q=heat");
+  });
+
+  it("approves several at once, saying how it went", async () => {
+    const user = userEvent.setup();
+    const requests = mockApi({
+      "GET /api/requests/summary": () => manager,
+      "GET /api/requests": () => makeRequestList([matrix, heat, failed], 3, people),
+      "POST /api/requests/1/approve": () => ({ ...matrix, status: "approved", stage: "searching", actions: [] }),
+      "POST /api/requests/2/approve": () => apiError(409, "conflict", "it was declined meanwhile"),
     });
     show(<RequestsPage />);
-    await screen.findByRole("list");
-    await user.click(screen.getByRole("switch", { name: "Only mine" }));
-    expect(await screen.findByText("You haven't asked for anything yet.")).toBeInTheDocument();
-    expect(requests.map((r) => r.path)).toContain("/api/requests?mine=1&limit=50");
+
+    await user.click(await screen.findByRole("checkbox", { name: "Select The Matrix" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Heat" }));
+    const bar = screen.getByRole("region", { name: "Requests picked" });
+    expect(bar).toHaveTextContent("2 requests picked");
+    await user.click(within(bar).getByRole("button", { name: "Approve" }));
+    expect(await screen.findByText("Approved 1 of 2. “Heat”: It was declined meanwhile")).toBeInTheDocument();
+    expect(paths(requests.filter((r) => r.method === "POST"))).toEqual(["/api/requests/1/approve", "/api/requests/2/approve"]);
+    expect(screen.queryByRole("region", { name: "Requests picked" })).not.toBeInTheDocument();
   });
 
-  it("shows 50 at a time", async () => {
+  it("declines several at once, with one reason", async () => {
     const user = userEvent.setup();
-    const many = Array.from({ length: 50 }, (_, i) => makeRequest({ id: 100 + i, title: `Title ${i}` }));
     const requests = mockApi({
-      "GET /api/requests/summary": () => makeSummary(),
-      "GET /api/requests": (req) =>
-        req.path.includes("offset=50") ? makeRequestList([makeRequest({ id: 999, title: "The Last One" })], 51) : makeRequestList(many, 51),
+      "GET /api/requests/summary": () => manager,
+      "GET /api/requests": () => makeRequestList([matrix, heat], 2, people),
+      "POST /api/requests/1/decline": () => ({ ...matrix, status: "declined", stage: "declined", actions: [] }),
+      "POST /api/requests/2/decline": () => ({ ...heat, status: "declined", stage: "declined", actions: [] }),
     });
     show(<RequestsPage />);
-    await user.click(await screen.findByRole("button", { name: "Show more" }));
-    expect(await screen.findByText("The Last One")).toBeInTheDocument();
-    expect(requests.map((r) => r.path)).toContain("/api/requests?offset=50&limit=50");
-    expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+
+    await user.click(await screen.findByRole("checkbox", { name: "Select The Matrix" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Heat" }));
+    await user.click(within(screen.getByRole("region", { name: "Requests picked" })).getByRole("button", { name: "Decline" }));
+    const dialog = screen.getByRole("dialog", { name: "Decline 2 requests?" });
+    await user.type(within(dialog).getByLabelText("Reason"), "Not this month");
+    await user.click(within(dialog).getByRole("button", { name: "Decline" }));
+    expect(await screen.findByText("Declined 2 requests.")).toBeInTheDocument();
+    expect(requests.filter((r) => r.method === "POST").map((r) => r.body)).toEqual([{ reason: "Not this month" }, { reason: "Not this month" }]);
   });
 
-  it("deletes a request after asking, saying what Radarr keeps", async () => {
+  it("marks a request as added by hand, from its menu", async () => {
     const user = userEvent.setup();
-    let list = [makeRequest({ id: 7, status: "available", item_id: 70, available_at: 1_700_000_500 })];
     const requests = mockApi({
-      "GET /api/requests/summary": () => makeSummary(),
+      "GET /api/requests/summary": () => manager,
+      "GET /api/requests": () => makeRequestList([matrix], 1, people),
+      "POST /api/requests/1/handled": () => ({ ...matrix, status: "approved", stage: "searching", actions: [] }),
+    });
+    show(<RequestsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "More for The Matrix" }));
+    await user.click(screen.getByRole("menuitem", { name: "Mark as added by hand" }));
+    expect(await screen.findByText("“The Matrix” is marked as added by hand.")).toBeInTheDocument();
+    expect(requests.some((r) => r.method === "POST" && r.path === "/api/requests/1/handled")).toBe(true);
+  });
+
+  it("deletes a request after asking, saying Radarr and Sonarr keep what they have", async () => {
+    const user = userEvent.setup();
+    let list: MediaRequest[] = [makeRequest({ id: 7, status: "available", item_id: 70, actions: ["delete"] })];
+    const requests = mockApi({
+      "GET /api/requests/summary": () => manager,
       "GET /api/requests": () => makeRequestList(list),
       "DELETE /api/requests/7": () => {
         list = [];
         return undefined;
       },
     });
-    show(<RequestsPage />);
-    const row = (await screen.findAllByRole("listitem"))[0] as HTMLElement;
-    expect(within(row).getByRole("link", { name: "Watch" })).toBeInTheDocument();
-    await user.click(within(row).getByRole("button", { name: "Delete request" }));
-    const dialog = screen.getByRole("dialog", { name: "Delete this request?" });
-    expect(dialog).toHaveTextContent("What Radarr has of it stays there.");
+    show(<RequestsPage />, "/requests?view=all");
+
+    const [row] = await rows();
+    expect(within(row as HTMLElement).getByRole("link", { name: "Watch" })).toHaveAttribute("href", itemUrl(70));
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "More for The Matrix" }));
+    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete this request? Radarr and Sonarr keep what they have." });
     await user.click(within(dialog).getByRole("button", { name: "Delete" }));
-    expect(await screen.findByText("Deleted the request for “The Matrix”")).toBeInTheDocument();
-    expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/requests/7");
     expect(await screen.findByText("No one has asked for anything yet.")).toBeInTheDocument();
+    expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/requests/7");
   });
 
-  it("lists someone's own requests, which they may withdraw while they wait", async () => {
+  it("says when nothing waits for them", async () => {
+    mockApi({ "GET /api/requests/summary": () => makeSummary({ access: "auto", manage: true }), "GET /api/requests": () => makeRequestList([]) });
+    show(<RequestsPage />);
+    expect(await screen.findByText("Nothing waits for you.")).toBeInTheDocument();
+  });
+
+  it("asks an app that may not approve to sign in again", async () => {
     mockApi({
-      "GET /api/requests/summary": () => makeSummary(),
-      "GET /api/requests": () => makeRequestList([pending, declined]),
+      "GET /api/requests/summary": () => makeSummary({ access: "auto", sign_in_again: "approvals" }),
+      "GET /api/requests": () => makeRequestList([]),
+    });
+    show(<RequestsPage />);
+    expect(await screen.findByText("Sign in again to approve and decline here.")).toBeInTheDocument();
+  });
+});
+
+describe("RequestsPage for everyone else", () => {
+  it("lists their own requests and those they follow, with what they may do, and marks the news seen", async () => {
+    const user = userEvent.setup();
+    const mine = makeRequest({ id: 1, mine: true, actions: ["withdraw"] });
+    const declined = makeRequest({ id: 2, title: "Old Film", mine: true, status: "declined", reason: "We have it on disc", unseen: true, actions: ["withdraw"] });
+    const followed = makeRequest({ id: 3, title: "Heat", watching: true, status: "approved", stage: "searching", actions: ["unwatch"] });
+    const requests = mockApi({
+      "GET /api/requests/summary": () => makeSummary({ unseen: 1, own: 2, movies_left: 2, movies_limit: 3 }),
+      "GET /api/requests": () => makeRequestList([mine, declined, followed]),
+      "POST /api/requests/seen": () => undefined,
+      "DELETE /api/requests/3/watch": () => undefined,
     });
     show(<RequestsPage />, "/requests", ann);
+
     expect(await screen.findByRole("heading", { name: "Your requests" })).toBeInTheDocument();
-    const rows = await screen.findAllByRole("listitem");
-    expect(within(rows[0] as HTMLElement).getByRole("button", { name: "Withdraw" })).toBeInTheDocument();
-    expect(within(rows[0] as HTMLElement).queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
-    expect(within(rows[1] as HTMLElement).queryByRole("button", { name: "Withdraw" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    const [first, second, third] = await rows();
+    expect(within(first as HTMLElement).getByRole("button", { name: "Withdraw" })).toBeInTheDocument();
+    expect(within(first as HTMLElement).queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     // Declined, it may be cleared away.
-    expect(within(rows[1] as HTMLElement).getByRole("button", { name: "Delete request" })).toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: "Only mine" })).not.toBeInTheDocument();
+    expect(second).toHaveTextContent("Declined: “We have it on disc”");
+    expect(within(second as HTMLElement).getByRole("button", { name: "Remove" })).toBeInTheDocument();
+    expect(third).toHaveTextContent("You follow it");
+    expect(screen.getByText("You can ask for 2 more movies. Limits: 3 movies per 7 days.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Discover" })).toHaveAttribute("href", "/discover");
+    await waitFor(() => expect(requests.some((r) => r.method === "POST" && r.path === "/api/requests/seen")).toBe(true));
+
+    await user.click(within(third as HTMLElement).getByRole("button", { name: "Stop following" }));
+    expect(await screen.findByText("You won't hear about “Heat” any more.")).toBeInTheDocument();
+  });
+
+  it("asks before withdrawing", async () => {
+    const user = userEvent.setup();
+    let list: MediaRequest[] = [makeRequest({ id: 1, mine: true, actions: ["withdraw"] })];
+    const requests = mockApi({
+      "GET /api/requests/summary": () => makeSummary({ own: 1 }),
+      "GET /api/requests": () => makeRequestList(list),
+      "DELETE /api/requests/1": () => {
+        list = [];
+        return undefined;
+      },
+    });
+    show(<RequestsPage />, "/requests", ann);
+    await user.click(await screen.findByRole("button", { name: "Withdraw" }));
+    const dialog = screen.getByRole("dialog", { name: "Withdraw your request for “The Matrix”?" });
+    await user.click(within(dialog).getByRole("button", { name: "Withdraw" }));
+    expect(await screen.findByText("You haven't asked for anything yet.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Find something to ask for" })).toHaveAttribute("href", "/discover");
+    expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/requests/1");
+  });
+
+  it("asks again for what was declined a while ago", async () => {
+    const user = userEvent.setup();
+    const old = makeRequest({ id: 4, mine: true, status: "declined", actions: ["ask_again", "withdraw"] });
+    const requests = mockApi({
+      "GET /api/requests/summary": () => makeSummary({ own: 1 }),
+      "GET /api/requests": () => makeRequestList([old]),
+      "POST /api/requests": () =>
+        new Response(JSON.stringify(makeRequest({ id: 9, mine: true })), { status: 201, headers: { "content-type": "application/json" } }),
+    });
+    show(<RequestsPage />, "/requests", ann);
+    await user.click(await screen.findByRole("button", { name: "Request again" }));
+    expect(await screen.findByText("Asked for “The Matrix”: an administrator decides.")).toBeInTheDocument();
+    expect(requests.find((r) => r.method === "POST")?.body).toEqual({ kind: "movie", tmdb_id: 603 });
+  });
+
+  it("shows 50 at a time", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 50 }, (_, i) => makeRequest({ id: 100 + i, title: `Title ${i}`, mine: true }));
+    const requests = mockApi({
+      "GET /api/requests/summary": () => makeSummary({ own: 51 }),
+      "GET /api/requests": (req) =>
+        req.path.includes("offset=50") ? makeRequestList([makeRequest({ id: 999, title: "The Last One", mine: true })], 51) : makeRequestList(many, 51),
+    });
+    show(<RequestsPage />, "/requests", ann);
+    await user.click(await screen.findByRole("button", { name: "Show more" }));
+    expect(await screen.findByText("The Last One")).toBeInTheDocument();
+    expect(paths(requests)).toContain("/api/requests?offset=50&limit=50");
+    expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
   });
 
   it("says requests are off when the server says so", async () => {
-    mockApi({
-      "GET /api/requests/summary": () => makeSummary({ enabled: false }),
-      "GET /api/requests": () =>
-        new Response(JSON.stringify({ code: "unavailable", message: "requests are off", setup: false }), {
-          status: 503,
-          headers: { "content-type": "application/json" },
-        }),
-    });
+    mockApi({ "GET /api/requests/summary": () => makeSummary({ enabled: false }) });
     show(<RequestsPage />, "/requests", ann);
     expect(await screen.findByRole("heading", { name: "Requests are off" })).toBeInTheDocument();
+  });
+
+  it("says requests aren't open to an account that may not ask and never did", async () => {
+    mockApi({ "GET /api/requests/summary": () => makeSummary({ access: "off" }) });
+    show(<RequestsPage />, "/requests", ann);
+    expect(await screen.findByRole("heading", { name: "Requests aren't open to this account" })).toBeInTheDocument();
   });
 });

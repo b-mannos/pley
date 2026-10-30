@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import { QueryClientProvider, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { connectionLost } from "@/lib/connection";
-import { testQueryClient } from "@/test/render";
+import { connectionLost, eventsLive } from "@/lib/connection";
+import { apiError, mockApi, testQueryClient } from "@/test/render";
+import { makeDetail, makeRequest, makeRequestList, makeSummary, makeTitle } from "@/test/requests";
 import { LOST_AFTER_MS, onServerEvent, useServerEvents } from "./events";
 import { keys } from "./hooks";
-import { requestKeys } from "./requests";
+import { EVERY_REQUEST, requestKeys, type DiscoverPage, type DiscoverTitle } from "./requests";
 import type { Activity, Library, ServerEvent } from "./types";
 
 /** Stands in for the browser's EventSource; tests drive it. */
@@ -291,26 +292,133 @@ describe("useServerEvents", () => {
     expect(invalidated(client, keys.homeHubs)).toBe(false);
   });
 
-  it("refreshes requests, Discover and the count waiting when a request changes", () => {
-    const { client, source } = setup();
-    client.setQueryData(requestKeys.summary, { pending: 0 });
-    client.setQueryData(requestKeys.title("movie", 603), { tmdb_id: 603 });
-    client.setQueryData(requestKeys.list({ status: null, mine: false }), { pages: [], pageParams: [] });
-    client.setQueryData(keys.item(5), { id: 5 });
+  describe("requests", () => {
+    const list = requestKeys.list(EVERY_REQUEST, 50);
+    const row = (titles: DiscoverTitle[]): InfiniteData<DiscoverPage> => ({
+      pages: [{ page: 1, total_pages: 1, results: titles }],
+      pageParams: [1],
+    });
+    const rowTitle = (client: QueryClient, tmdbId: number) =>
+      client.getQueryData<InfiniteData<DiscoverPage>>(requestKeys.discover("trending"))?.pages[0]?.results.find((t) => t.tmdb_id === tmdbId);
 
-    act(() => source().send({ type: "requests_changed" }));
-    expect(invalidated(client, requestKeys.summary)).toBe(true);
-    expect(invalidated(client, requestKeys.title("movie", 603))).toBe(true);
-    expect(invalidated(client, requestKeys.list({ status: null, mine: false }))).toBe(true);
-    expect(invalidated(client, keys.item(5))).toBe(false);
-  });
+    it("refreshes the count once a burst is over, and what shows the request a moment after", () => {
+      mockApi({});
+      const { client, source } = setup();
+      client.setQueryData(requestKeys.summary, makeSummary());
+      client.setQueryData(requestKeys.title("movie", 603), makeDetail());
+      client.setQueryData(requestKeys.title("movie", 604), makeDetail({ tmdb_id: 604 }));
+      client.setQueryData(list, { pages: [makeRequestList([])], pageParams: [0] });
+      client.setQueryData(requestKeys.discover("trending"), row([makeTitle({ tmdb_id: 604 })]));
 
-  it("refreshes requests after a reconnect", () => {
-    const { client, source } = setup();
-    act(() => source().open());
-    client.setQueryData(requestKeys.summary, { pending: 0 });
-    act(() => source().open());
-    expect(invalidated(client, requestKeys.summary)).toBe(true);
+      act(() => {
+        for (let i = 0; i < 5; i++) source().send({ type: "requests_changed", request_id: 7, kind: "movie", tmdb_id: 603 });
+      });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(invalidated(client, requestKeys.title("movie", 603))).toBe(true);
+      expect(invalidated(client, list)).toBe(true);
+      expect(invalidated(client, requestKeys.title("movie", 604))).toBe(false);
+      // TMDB's rows are never fetched again for it.
+      expect(invalidated(client, requestKeys.discover("trending"))).toBe(false);
+      expect(invalidated(client, requestKeys.summary)).toBe(false);
+
+      act(() => {
+        vi.advanceTimersByTime(700);
+      });
+      expect(invalidated(client, requestKeys.summary)).toBe(true);
+    });
+
+    it("changes the badge of a title shown in a row from its request as it is now", async () => {
+      const requests = mockApi({
+        "GET /api/requests/7": () => makeRequest({ id: 7, status: "declined", mine: true }),
+        "GET /api/requests/8": () => apiError(404, "not_found", "no such request"),
+      });
+      const { client, source } = setup();
+      client.setQueryData(
+        requestKeys.discover("trending"),
+        row([makeTitle({ tmdb_id: 603, status: "requested", request_id: 7 }), makeTitle({ tmdb_id: 604, status: "requested", request_id: 8 })]),
+      );
+
+      act(() => {
+        source().send({ type: "requests_changed", request_id: 7, kind: "movie", tmdb_id: 603 });
+        source().send({ type: "requests_changed", request_id: 8, kind: "movie", tmdb_id: 604 });
+        // Not shown: nothing to ask about.
+        source().send({ type: "requests_changed", request_id: 9, kind: "movie", tmdb_id: 605 });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      await vi.waitFor(() => expect(rowTitle(client, 603)?.status).toBe("declined"));
+      await vi.waitFor(() => expect(rowTitle(client, 604)).toMatchObject({ status: "none", request_id: null }));
+      expect(requests.map((r) => r.path)).toEqual(["/api/requests/7", "/api/requests/8"]);
+    });
+
+    it("puts a title that became available in the library at once", () => {
+      mockApi({});
+      const { client, source } = setup();
+      client.setQueryData(requestKeys.discover("trending"), row([makeTitle({ tmdb_id: 603, status: "requested", request_id: 7 })]));
+      act(() =>
+        source().send({
+          type: "request_available",
+          request_id: 7,
+          title: "The Matrix",
+          kind: "movie",
+          tmdb_id: 603,
+          item_id: 12,
+          poster_url: null,
+          seasons: null,
+          complete: true,
+        }),
+      );
+      expect(rowTitle(client, 603)).toMatchObject({ status: "library", item_id: 12 });
+    });
+
+    it("refreshes every list and page when many changed, and Discover's rows only when next shown", () => {
+      const { client, source } = setup();
+      client.setQueryData(requestKeys.title("movie", 603), makeDetail());
+      client.setQueryData(requestKeys.discover("trending"), row([makeTitle()]));
+      act(() => source().send({ type: "requests_changed", request_id: null, kind: null, tmdb_id: null }));
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      expect(invalidated(client, requestKeys.title("movie", 603))).toBe(true);
+      expect(invalidated(client, requestKeys.discover("trending"))).toBe(true);
+    });
+
+    it("refreshes what each page offers when the settings changed", () => {
+      const { client, source } = setup();
+      client.setQueryData(requestKeys.summary, makeSummary());
+      client.setQueryData(requestKeys.title("movie", 603), makeDetail());
+      client.setQueryData(requestKeys.options, { radarr: null, sonarr: null });
+      act(() => source().send({ type: "requests_settings_changed" }));
+      expect(invalidated(client, requestKeys.title("movie", 603))).toBe(true);
+      expect(invalidated(client, requestKeys.options)).toBe(true);
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(invalidated(client, requestKeys.summary)).toBe(true);
+    });
+
+    it("refreshes requests after a reconnect, leaving Discover's rows for when they're next shown", () => {
+      const { client, source } = setup();
+      act(() => source().open());
+      client.setQueryData(requestKeys.summary, makeSummary());
+      client.setQueryData(requestKeys.discover("trending"), row([makeTitle()]));
+      act(() => source().open());
+      expect(invalidated(client, requestKeys.summary)).toBe(true);
+      expect(invalidated(client, requestKeys.discover("trending"))).toBe(true);
+    });
+
+    it("says whether the stream is open, so what shows requests knows to ask again by itself", () => {
+      const { client, source } = setup();
+      client.setQueryData(requestKeys.summary, makeSummary());
+      act(() => source().open());
+      expect(eventsLive()).toBe(true);
+      act(() => source().fail());
+      expect(eventsLive()).toBe(false);
+      expect(invalidated(client, requestKeys.summary)).toBe(true);
+    });
   });
 
   it("passes events on to whoever listens", () => {

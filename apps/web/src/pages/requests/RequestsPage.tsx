@@ -1,25 +1,124 @@
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { Compass, Inbox } from "lucide-react";
+import { Ban, Check, Compass, Inbox, LogIn, Search, X } from "lucide-react";
 import { isApiError } from "@/api/client";
-import { mayRequest, requestsUnavailable, useRequests, useRequestSummary, type RequestStatus } from "@/api/requests";
+import {
+  hasRequests,
+  mayRequest,
+  requestFilter,
+  useDecideMany,
+  useMarkSeen,
+  useRequests,
+  useRequestSummary,
+  type MediaRequest,
+  type RequestFilter,
+  type RequestStatus,
+  type RequestSummary,
+  type TitleKind,
+} from "@/api/requests";
 import { useAuth } from "@/auth";
-import { Button, buttonClass, EmptyState, Skeleton, Toggle } from "@/components/ui";
+import { Modal } from "@/components/Modal";
+import { useToast } from "@/components/Toast";
+import { Button, buttonClass, EmptyState, Field, Select, Skeleton, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { useDocumentTitle } from "@/lib/hooks";
+import { pluralize } from "@/lib/format";
+import { useDebouncedValue, useDocumentTitle, useOnChange } from "@/lib/hooks";
+import { allowanceText } from "@/lib/requests";
 import { discoverUrl } from "@/lib/urls";
-import { RequestItem } from "./RequestItem";
-import { LoadError, RequestsUnavailable, STATUS_LABELS } from "./shared";
+import { failure, RequestCard } from "./RequestCard";
+import { ProblemState, RequestsUnavailable } from "./shared";
 
-const TABS: (RequestStatus | null)[] = [null, "pending", "approved", "available", "declined", "failed"];
+const STATUSES: { status: RequestStatus; label: string }[] = [
+  { status: "pending", label: "Pending" },
+  { status: "approved", label: "Approved" },
+  { status: "available", label: "Available" },
+  { status: "declined", label: "Declined" },
+  { status: "failed", label: "Failed" },
+];
 
-function statusOf(value: string | null): RequestStatus | null {
-  return TABS.find((t) => t === value) ?? null;
+/** Managers' views: what waits for them (the default), everyone's, or their own. */
+type View = "attention" | "all" | "mine";
+
+function viewOf(value: string | null, manage: boolean): View {
+  if (!manage) return "mine";
+  return value === "all" || value === "mine" ? value : "attention";
 }
 
-/** What a tab with nothing in it says. */
-function emptyText(status: RequestStatus | null, everyone: boolean): string {
-  const whose = everyone ? "" : " of yours";
-  switch (status) {
+function statusOf(value: string | null): RequestStatus | null {
+  return STATUSES.find((s) => s.status === value)?.status ?? null;
+}
+
+/** A filter that is on or off, as a pressed button. */
+function FilterButton({ pressed, onClick, children, count }: { pressed: boolean; onClick: () => void; children: string; count?: number | null }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors",
+        pressed ? "border-accent/60 bg-accent/15 text-fg" : "border-border text-muted hover:border-border-strong hover:text-fg",
+      )}
+    >
+      {children}
+      {/* The space outside the span, as the name is made of the text: "Pending 3". */}
+      {count ? (
+        <>
+          {" "}
+          <span className="text-xs tabular-nums text-subtle">{count}</span>
+        </>
+      ) : null}
+    </button>
+  );
+}
+
+/** Titles containing what's typed, kept in the address (`?q=`). */
+function TitleSearch({ q, onChange }: { q: string; onChange: (q: string) => void }) {
+  const [value, setValue] = useState(q);
+  const debounced = useDebouncedValue(value, 300);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useOnChange(q, (next) => {
+    if (next !== debounced.trim()) setValue(next);
+  });
+  useEffect(() => {
+    if (debounced.trim() !== q) onChange(debounced.trim());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debounced]);
+  return (
+    <div className="relative w-full sm:w-64">
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle" />
+      <TextInput
+        ref={inputRef}
+        type="search"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="Title"
+        aria-label="Requests for titles containing"
+        className="h-9 rounded-full pl-9 pr-8 [&::-webkit-search-cancel-button]:hidden"
+      />
+      {value ? (
+        <button
+          type="button"
+          aria-label="Clear"
+          onClick={() => {
+            setValue("");
+            inputRef.current?.focus();
+          }}
+          className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-full p-1 text-subtle hover:text-fg"
+        >
+          <X className="size-3.5" />
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** What a list with nothing in it says. */
+function emptyText(view: View, filter: RequestFilter, manage: boolean): string {
+  if (view === "attention") return "Nothing waits for you.";
+  if (filter.q || filter.kind || filter.userId) return "No requests match.";
+  const whose = manage && view === "all" ? "" : " of yours";
+  switch (filter.status[0]) {
     case "pending":
       return `No requests${whose} wait for a decision.`;
     case "approved":
@@ -31,117 +130,278 @@ function emptyText(status: RequestStatus | null, everyone: boolean): string {
     case "failed":
       return `No requests${whose} failed.`;
     default:
-      return everyone ? "No one has asked for anything yet." : "You haven't asked for anything yet.";
+      return manage && view === "all" ? "No one has asked for anything yet." : "You haven't asked for anything yet.";
   }
 }
 
-/**
- * Requests (`/requests`): your own, or everyone's for administrators (who
- * may keep to theirs), by status, newest first, with what may be done
- * with each.
- */
-export function RequestsPage() {
-  useDocumentTitle("Requests");
-  const me = useAuth();
+/** Declining several at once, with one reason for all, if any. */
+function DeclineManyDialog({ count, open, onClose, onDecline, busy }: { count: number; open: boolean; onClose: () => void; onDecline: (reason?: string) => void; busy: boolean }) {
+  const [reason, setReason] = useState("");
+  useOnChange(open, (o) => {
+    if (o) setReason("");
+  });
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      locked={busy}
+      size="sm"
+      title={`Decline ${pluralize(count, "request")}?`}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="danger" loading={busy} onClick={() => onDecline(reason.trim() || undefined)}>
+            Decline
+          </Button>
+        </>
+      }
+    >
+      <Field label="Reason" htmlFor="decline-many" hint="Optional. Those who asked see it.">
+        <TextInput id="decline-many" maxLength={500} autoComplete="off" value={reason} onChange={(e) => setReason(e.target.value)} data-autofocus />
+      </Field>
+    </Modal>
+  );
+}
+
+/** Approving or declining the requests picked, one after another, saying how it went. */
+function BulkBar({ picked, clear, summary }: { picked: MediaRequest[]; clear: () => void; summary: RequestSummary }) {
+  const decide = useDecideMany();
+  const toast = useToast();
+  const [declining, setDeclining] = useState(false);
+  const approvable = picked.filter((r) => r.actions.includes("approve") || r.actions.includes("retry"));
+  const declinable = picked.filter((r) => r.actions.includes("decline"));
+
+  const run = (decision: "approve" | "decline", requests: MediaRequest[], reason?: string) =>
+    decide.mutate(
+      { requests, decision, reason },
+      {
+        onSuccess: (done) => {
+          const failed = done.filter((d) => d.error);
+          const verb = decision === "approve" ? "Approved" : "Declined";
+          if (!failed.length) toast.success(`${verb} ${pluralize(done.length, "request")}.`);
+          else {
+            const [first] = failed;
+            const title = requests.find((r) => r.id === first?.request.id)?.title ?? "";
+            toast.error(`${verb} ${done.length - failed.length} of ${done.length}. “${title}”: ${failure(first?.error, summary, first?.request.kind ?? "movie")}`);
+          }
+          setDeclining(false);
+          clear();
+        },
+      },
+    );
+
+  return (
+    <div
+      role="region"
+      aria-label="Requests picked"
+      className="sticky bottom-4 z-20 flex flex-wrap items-center gap-3 rounded-lg border border-border-strong bg-surface-2 px-4 py-3 shadow-xl shadow-black/50"
+    >
+      <span className="text-sm font-medium">{pluralize(picked.length, "request")} picked</span>
+      <div className="flex flex-1 flex-wrap justify-end gap-2">
+        <Button variant="ghost" size="sm" onClick={clear} disabled={decide.isPending}>
+          Clear
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          icon={<Ban className="size-3.5" />}
+          disabled={!declinable.length || decide.isPending}
+          onClick={() => setDeclining(true)}
+        >
+          Decline {declinable.length !== picked.length ? declinable.length : ""}
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          icon={<Check className="size-4" />}
+          disabled={!approvable.length}
+          loading={decide.isPending && !declining}
+          onClick={() => run("approve", approvable)}
+        >
+          Approve {approvable.length !== picked.length ? approvable.length : ""}
+        </Button>
+      </div>
+      <DeclineManyDialog
+        count={declinable.length}
+        open={declining}
+        busy={decide.isPending}
+        onClose={() => setDeclining(false)}
+        onDecline={(reason) => run("decline", declinable, reason)}
+      />
+    </div>
+  );
+}
+
+function ListSkeleton() {
+  return (
+    <div className="space-y-2" aria-busy>
+      {Array.from({ length: 4 }, (_, i) => (
+        <Skeleton key={i} className="h-24" />
+      ))}
+    </div>
+  );
+}
+
+function RequestsView({ summary }: { summary: RequestSummary }) {
+  const manage = summary.manage;
   const [params, setParams] = useSearchParams();
+  const view = viewOf(params.get("view"), manage);
   const status = statusOf(params.get("status"));
-  const mine = me.is_admin && params.get("mine") === "1";
-  const everyone = me.is_admin && !mine;
-  const summary = useRequestSummary();
-  const requests = useRequests({ status, mine });
-  const first = requests.data?.pages[0];
+  const kind: TitleKind | null = params.get("kind") === "movie" || params.get("kind") === "show" ? (params.get("kind") as TitleKind) : null;
+  const userId = manage && Number(params.get("user")) > 0 ? Number(params.get("user")) : null;
+  const q = params.get("q") ?? "";
+  const filter = requestFilter(
+    view === "attention"
+      ? { attention: true, order: "oldest", kind, userId, q }
+      : { status: status ? [status] : [], kind, userId: view === "all" ? userId : null, q, mine: view === "mine" && manage },
+  );
+  const requests = useRequests(filter);
   const shown = requests.data?.pages.flatMap((p) => p.requests) ?? [];
-  const counts = first?.counts;
-  const total = counts ? Object.values(counts).reduce((n, c) => n + c, 0) : null;
+  const first = requests.data?.pages[0];
+  const people = first?.people ?? [];
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const seen = useMarkSeen();
+  const allowance = !manage ? allowanceText(summary) : null;
+
+  // Shown its first page, this account has seen its requests' news (managers: where it's among them).
+  const firstShown = !!first;
+  const news = shown.some((r) => r.unseen) || (!manage && summary.unseen > 0);
+  const { mutate: markSeen } = seen;
+  const marked = useRef(false);
+  useEffect(() => {
+    if (!firstShown || !news || marked.current) return;
+    marked.current = true;
+    markSeen();
+  }, [firstShown, news, markSeen]);
+
+  // What was picked goes as the list changes to another.
+  useOnChange(JSON.stringify(filter), () => setPicked(new Set()));
 
   const setParam = (key: string, value: string | null) => {
     const p = new URLSearchParams(params);
-    if (value === null) p.delete(key);
+    if (value === null || value === "") p.delete(key);
     else p.set(key, value);
     setParams(p, { replace: true });
   };
+  const decidable = (r: MediaRequest) => r.actions.includes("approve") || r.actions.includes("retry") || r.actions.includes("decline");
+  const pickedRequests = shown.filter((r) => picked.has(r.id));
 
   if (requests.isError && !requests.data) {
-    const why = requestsUnavailable(requests.error);
-    if (why) return <RequestsUnavailable reason={why} />;
-    // A server without requests.
-    if (isApiError(requests.error, 404)) return <RequestsUnavailable reason="setup" />;
+    return (
+      <ProblemState
+        className="py-16"
+        error={requests.error}
+        manage={manage}
+        title="Couldn't load the requests"
+        retrying={requests.isFetching}
+        onRetry={() => void requests.refetch()}
+      />
+    );
   }
 
+  const attention = summary.pending + summary.failed;
   return (
-    <div className="space-y-5 px-4 pb-16 pt-6 sm:px-8 sm:pt-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight">{me.is_admin ? "Requests" : "Your requests"}</h1>
-          <p className="mt-1 text-sm text-muted">
-            {me.is_admin
-              ? "What people asked for. Approving sends a title to Radarr or Sonarr where they're connected."
-              : "What you asked for, and how it's going."}
-          </p>
-        </div>
-        {mayRequest(summary.data) ? (
-          <Link to={discoverUrl()} className={buttonClass("outline", "sm")}>
-            <Compass className="size-4" />
-            Discover
-          </Link>
-        ) : null}
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="space-y-5">
+      {manage ? (
         <div className="scrollbar-none -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-          <div className="flex w-max rounded-lg bg-surface-2 p-1" role="tablist" aria-label="Status">
-            {TABS.map((t) => {
-              const count = t === null ? total : (counts?.[t] ?? null);
-              return (
-                <button
-                  key={t ?? "all"}
-                  type="button"
-                  role="tab"
-                  aria-selected={status === t}
-                  onClick={() => setParam("status", t)}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                    status === t ? "bg-surface-3 text-fg shadow" : "text-muted hover:text-fg",
-                  )}
-                >
-                  <span>{t === null ? "All" : STATUS_LABELS[t]}</span>{" "}
-                  {count ? (
+          <div className="flex w-max rounded-lg bg-surface-2 p-1" role="tablist" aria-label="Requests">
+            {(
+              [
+                ["attention", "Needs attention", attention],
+                ["all", "All requests", null],
+                ["mine", "Yours", summary.unseen || null],
+              ] as const
+            ).map(([v, label, count]) => (
+              <button
+                key={v}
+                type="button"
+                role="tab"
+                aria-selected={view === v}
+                onClick={() => {
+                  const p = new URLSearchParams(params);
+                  if (v === "attention") p.delete("view");
+                  else p.set("view", v);
+                  p.delete("status");
+                  setParams(p, { replace: true });
+                }}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                  view === v ? "bg-surface-3 text-fg shadow" : "text-muted hover:text-fg",
+                )}
+              >
+                {label}
+                {count ? (
+                  <>
+                    {" "}
                     <span
                       className={cn(
                         "min-w-5 rounded-full px-1.5 text-center text-[11px] font-semibold tabular-nums",
-                        t === "pending" && everyone ? "bg-accent text-accent-fg" : "bg-white/10 text-fg/80",
+                        v === "attention" && summary.failed > 0 ? "bg-danger text-white" : v === "attention" ? "bg-warning text-black" : "bg-white/10 text-fg/80",
                       )}
                     >
                       {count}
                     </span>
-                  ) : null}
-                </button>
-              );
-            })}
+                  </>
+                ) : null}
+              </button>
+            ))}
           </div>
         </div>
-        {me.is_admin ? (
-          <label className="flex items-center gap-2.5 text-sm text-muted">
-            <Toggle checked={mine} onChange={(v) => setParam("mine", v ? "1" : null)} label="Only mine" />
-            Only mine
-          </label>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        {view !== "attention" ? (
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Status">
+            <FilterButton pressed={status === null} onClick={() => setParam("status", null)}>
+              All
+            </FilterButton>
+            {STATUSES.map((s) => (
+              <FilterButton key={s.status} pressed={status === s.status} count={first?.counts[s.status]} onClick={() => setParam("status", status === s.status ? null : s.status)}>
+                {s.label}
+              </FilterButton>
+            ))}
+          </div>
         ) : null}
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Kind">
+          <FilterButton pressed={kind === "movie"} onClick={() => setParam("kind", kind === "movie" ? null : "movie")}>
+            Movies
+          </FilterButton>
+          <FilterButton pressed={kind === "show"} onClick={() => setParam("kind", kind === "show" ? null : "show")}>
+            Shows
+          </FilterButton>
+        </div>
+        <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+          {manage && view !== "mine" && (people.length > 1 || userId !== null) ? (
+            <Select aria-label="Who asked" value={userId ?? ""} onChange={(e) => setParam("user", e.target.value || null)}>
+              <option value="">Everyone</option>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </Select>
+          ) : null}
+          <TitleSearch q={q} onChange={(next) => setParam("q", next || null)} />
+        </div>
       </div>
 
+      {allowance ? (
+        <p className="text-xs text-subtle">
+          {allowance.text}
+          {allowance.limits ? ` ${allowance.limits}` : ""}
+        </p>
+      ) : null}
+
       {requests.isPending ? (
-        <div className="space-y-2">
-          {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-20" />
-          ))}
-        </div>
-      ) : requests.isError && !requests.data ? (
-        <LoadError title="Couldn't load the requests" error={requests.error} retrying={requests.isFetching} onRetry={() => void requests.refetch()} />
+        <ListSkeleton />
       ) : shown.length === 0 ? (
         <EmptyState
           icon={<Inbox />}
-          title={emptyText(status, everyone)}
+          title={emptyText(view, filter, manage)}
           action={
-            mayRequest(summary.data) && status === null && !everyone ? (
+            mayRequest(summary) && view === "mine" && status === null && !q && !kind ? (
               <Link to={discoverUrl()} className={buttonClass("primary")}>
                 Find something to ask for
               </Link>
@@ -149,19 +409,96 @@ export function RequestsPage() {
           }
         />
       ) : (
-        <div>
-          <ul className="divide-y divide-white/[0.05] overflow-hidden rounded-lg border border-border bg-surface">
+        <div className="space-y-3">
+          <ul className="divide-y divide-white/[0.05] overflow-hidden rounded-lg border border-border bg-surface" aria-busy={requests.isFetching}>
             {shown.map((r) => (
-              <RequestItem key={r.id} request={r} />
+              <RequestCard
+                key={r.id}
+                request={r}
+                summary={summary}
+                selected={picked.has(r.id)}
+                onSelect={
+                  manage && decidable(r)
+                    ? (on) =>
+                        setPicked((p) => {
+                          const next = new Set(p);
+                          if (on) next.add(r.id);
+                          else next.delete(r.id);
+                          return next;
+                        })
+                    : undefined
+                }
+              />
             ))}
           </ul>
           {requests.hasNextPage ? (
-            <Button variant="ghost" size="sm" className="mt-3" loading={requests.isFetchingNextPage} onClick={() => void requests.fetchNextPage()}>
+            <Button variant="ghost" size="sm" loading={requests.isFetchingNextPage} onClick={() => void requests.fetchNextPage()}>
               Show more
             </Button>
           ) : null}
+          {pickedRequests.length ? <BulkBar picked={pickedRequests} clear={() => setPicked(new Set())} summary={summary} /> : null}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Requests (`/requests`): for managers, what needs them first (pending
+ * requests, and failed ones the server won't try again), then everyone's
+ * and their own; for others, what they asked for or follow. Filters by
+ * status, kind, person and title, with what may be done to each.
+ */
+export function RequestsPage() {
+  const me = useAuth();
+  const summary = useRequestSummary();
+  const data = summary.data;
+  useDocumentTitle(data?.manage ? "Requests" : "Your requests");
+
+  let body;
+  if (summary.isPending) body = <ListSkeleton />;
+  else if (!data) {
+    // A server without requests answers 404 (an early one 403): as good as off.
+    body =
+      isApiError(summary.error, 404) || isApiError(summary.error, 403) ? (
+        <RequestsUnavailable reason="off" admin={me.is_admin} />
+      ) : (
+        <ProblemState error={summary.error} manage={me.is_admin} title="Couldn't load the requests" onRetry={() => void summary.refetch()} />
+      );
+  } else if (!data.enabled) body = <RequestsUnavailable reason="off" admin={me.is_admin} />;
+  else if (data.sign_in_again === "requests") body = <ProblemState problem={{ kind: "sign_in" }} manage={false} />;
+  else if (!hasRequests(data) && !data.manage) body = <RequestsUnavailable reason="no_access" admin={me.is_admin} />;
+  else body = <RequestsView summary={data} />;
+
+  const manage = data?.manage ?? false;
+  return (
+    <div className="space-y-5 px-4 pb-16 pt-6 sm:px-8 sm:pt-8">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight">{manage ? "Requests" : "Your requests"}</h1>
+          <p className="mt-1 text-sm text-muted">
+            {manage
+              ? "What people asked for. Approving sends a title to Radarr or Sonarr where they're connected."
+              : "What you asked for and follow, and how it's going."}
+          </p>
+        </div>
+        {mayRequest(data) ? (
+          <Link to={discoverUrl()} className={buttonClass("outline", "sm")}>
+            <Compass className="size-4" />
+            Discover
+          </Link>
+        ) : null}
+      </div>
+      {data?.sign_in_again === "approvals" ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
+          <span className="flex-1">Sign in again to approve and decline here.</span>
+          <Link to="/login" className={buttonClass("primary", "sm")}>
+            <LogIn className="size-4" />
+            Sign in again
+          </Link>
+        </div>
+      ) : null}
+      {body}
     </div>
   );
 }

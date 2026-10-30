@@ -6,6 +6,7 @@ import { useServerEvents } from "@/api/events";
 import type { User } from "@/api/types";
 import { AudioPlayerProvider } from "@/audio/AudioPlayer";
 import { Logo } from "@/components/Logo";
+import { RequestNotices } from "@/components/RequestNotices";
 import { Button, EmptyState, Spinner } from "@/components/ui";
 import { TriangleAlert } from "lucide-react";
 
@@ -84,6 +85,8 @@ export function RequireAuth() {
     <AuthContext.Provider value={me.data}>
       <AudioPlayerProvider>
         <Outlet />
+        {/* Out of the pages, so news heard during a video waits for it to stop. */}
+        <RequestNotices />
       </AudioPlayerProvider>
     </AuthContext.Provider>
   );

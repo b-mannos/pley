@@ -46,26 +46,45 @@ describe("Sidebar drawer", () => {
 });
 
 describe("Sidebar requests", () => {
-  it("shows Discover and Requests to accounts that may ask, with how many wait for an administrator", async () => {
+  const serve = (summary: ReturnType<typeof makeSummary>) =>
     mockApi({
       "GET /api/libraries": () => [],
       "GET /api/playlists": () => ({ playlists: [] }),
-      "GET /api/requests/summary": () => makeSummary({ access: "auto", pending: 3 }),
+      "GET /api/requests/summary": () => summary,
     });
+
+  it("shows managers Discover and Requests, with what waits for them and their own news", async () => {
+    serve(makeSummary({ access: "auto", manage: true, pending: 3, unseen: 1 }));
     renderWithProviders(<Sidebar open={false} onClose={() => {}} />);
     expect(await screen.findByRole("link", { name: "Discover" })).toHaveAttribute("href", "/discover");
-    expect(screen.getByRole("link", { name: "Requests 3 waiting" })).toHaveAttribute("href", "/requests");
+    const requests = screen.getByRole("link", { name: "Requests 4 waiting" });
+    expect(requests).toHaveAttribute("href", "/requests");
+    expect(within(requests).getByText("4")).toHaveClass("bg-accent");
   });
 
-  it("leaves them out for an account that may not ask", async () => {
-    mockApi({
-      "GET /api/libraries": () => [],
-      "GET /api/playlists": () => ({ playlists: [] }),
-      "GET /api/requests/summary": () => makeSummary({ access: "off" }),
-    });
-    const { client } = renderWithProviders(<Sidebar open={false} onClose={() => {}} />);
+  it("says so in the danger colour while some failed", async () => {
+    serve(makeSummary({ access: "auto", manage: true, pending: 1, failed: 1 }));
+    renderWithProviders(<Sidebar open={false} onClose={() => {}} />);
+    expect(within(await screen.findByRole("link", { name: "Requests 2 waiting" })).getByText("2")).toHaveClass("bg-danger");
+  });
+
+  it("counts others' news only", async () => {
+    serve(makeSummary({ unseen: 2, pending: 0 }));
+    renderWithProviders(<Sidebar open={false} onClose={() => {}} />);
+    expect(await screen.findByRole("link", { name: "Your requests 2 waiting" })).toHaveAttribute("href", "/requests");
+  });
+
+  it("leaves them out for an account that may not ask, unless it asked before", async () => {
+    serve(makeSummary({ access: "off" }));
+    const { client, unmount } = renderWithProviders(<Sidebar open={false} onClose={() => {}} />);
     await waitFor(() => expect(client.getQueryState(["requests", "summary"])?.status).toBe("success"));
     expect(screen.queryByRole("link", { name: "Discover" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Requests/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /requests/i })).not.toBeInTheDocument();
+    unmount();
+
+    serve(makeSummary({ access: "off", own: 2 }));
+    renderWithProviders(<Sidebar open={false} onClose={() => {}} />);
+    expect(await screen.findByRole("link", { name: "Your requests" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Discover" })).not.toBeInTheDocument();
   });
 });
