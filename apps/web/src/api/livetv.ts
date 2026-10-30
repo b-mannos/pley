@@ -277,14 +277,6 @@ export const liveKeys = {
 
 export const liveQueries = {
   summary: () => queryOptions({ queryKey: liveKeys.summary, queryFn: () => api.get<LiveSummary>("/api/live") }),
-  channels: () =>
-    queryOptions({
-      queryKey: liveKeys.channels,
-      queryFn: ({ signal }) => api.get<Channel[]>("/api/live/channels", { signal }),
-      // What's on now changes as time passes.
-      refetchInterval: 60_000,
-      refetchIntervalInBackground: false,
-    }),
   channel: (id: Id) =>
     queryOptions({
       queryKey: liveKeys.channel(id),
@@ -341,10 +333,6 @@ export function useLiveSummary(enabled = true) {
   return useQuery({ ...liveQueries.summary(), enabled });
 }
 
-export function useChannels() {
-  return useQuery(liveQueries.channels());
-}
-
 export function useGuide(from: Timestamp, to: Timestamp) {
   return useQuery(liveQueries.guide(from, to));
 }
@@ -362,7 +350,6 @@ export function useSetFavorite() {
       await qc.cancelQueries({ queryKey: liveKeys.channels });
       await qc.cancelQueries({ queryKey: liveKeys.browse });
       const mark = (c: Channel) => (c.id === id ? { ...c, favorite } : c);
-      qc.setQueryData<Channel[]>(liveKeys.channels, (list) => list?.map(mark));
       qc.setQueriesData<ChannelPage>({ queryKey: liveKeys.browse }, (page) => page && { ...page, channels: page.channels.map(mark) });
       qc.setQueryData<Channel>(liveKeys.channel(id), (c) => c && { ...c, favorite });
       qc.setQueryData<LiveGroups>(liveKeys.groups, (g) => g && { ...g, favorites: Math.max(0, g.favorites + (favorite ? 1 : -1)) });

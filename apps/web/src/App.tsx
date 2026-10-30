@@ -122,7 +122,7 @@ const router = createBrowserRouter([
         ...onDemand(
           () => import("@/player/live/LivePlayerPage"),
           (m) => m.LivePlayerPage,
-          (prefetch) => [prefetch(liveQueries.channels())],
+          (prefetch, params) => [prefetch(liveQueries.channel(Number(params.channelId)))],
           <PlayerFallback />,
         ),
       },
@@ -141,7 +141,7 @@ const router = createBrowserRouter([
             ...onDemand(
               () => import("@/pages/livetv/LiveTvPage"),
               (m) => m.LiveTvPage,
-              (prefetch) => [prefetch(liveQueries.channels()), prefetch(liveQueries.summary())],
+              (prefetch) => [prefetch(liveQueries.summary()), prefetch(liveQueries.groups())],
             ),
           },
           { path: "search", element: <SearchPage /> },
