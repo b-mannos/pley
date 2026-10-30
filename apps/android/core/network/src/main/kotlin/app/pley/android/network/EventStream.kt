@@ -80,7 +80,8 @@ internal class OkHttpSseConnection(private val client: () -> OkHttpClient, priva
  *   when their access token expires, apps/server/src/api/activity.rs) is
  *   opened again at once: the new request carries the refreshed token.
  * - Any other end waits [firstRetryMs], doubling after each failure to
- *   [maxRetryMs]; a connection that opened starts the count again.
+ *   [maxRetryMs]; a connection that opened starts the count again, and
+ *   says it was lost ([LiveEvent.Dropped]) before the wait.
  * - The flow ends with the [ApiException] of a 401 or 403 (signed out,
  *   or not allowed) and the sign-in module's errors: trying again can't
  *   help.
@@ -113,6 +114,7 @@ internal class EventStream(
             val error = ended
             if (error is AuthException || (error is ApiException && (error.status == 401 || error.status == 403))) throw error
             if (error == null && openedAt >= 0 && now() - openedAt >= stableMs) continue
+            if (openedAt >= 0) emit(LiveEvent.Dropped)
             failures++
             delay(retryDelay(failures))
         }
