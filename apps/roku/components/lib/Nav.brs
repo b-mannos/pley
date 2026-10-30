@@ -7,6 +7,8 @@ function navScreen(name as string) as string
         link: "LinkScreen",
         profiles: "ProfilesScreen",
         home: "HomeScreen",
+        live: "LiveTvScreen",
+        livePlayer: "LivePlayerScreen",
         library: "LibraryScreen",
         show: "ShowScreen",
         details: "DetailsScreen",

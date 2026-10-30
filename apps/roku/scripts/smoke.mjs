@@ -2,7 +2,9 @@
 // a fake pley server on 127.0.0.1 (scripts/fixture-server.mjs), and walks
 // it with the remote: sign in with the TV code and its QR code, Home, a
 // title's details, the player, the Options key, a library's grid and its
-// next page, a show's page, its episodes and a person's page, Search,
+// next page, a show's page, its episodes and a person's page, Live TV (its
+// guide, a channel watched, the next one, the channel list, a favourite,
+// every connection in use, the Channels tab), Search,
 // Settings, the server gone and Try again, then signing out and in
 // again on a server too old for QR codes. Then it starts the app again,
 // signed in, and times how soon Home is asked for. Fails on a BrightScript
@@ -110,6 +112,19 @@ function syncDrawn() {
   return false;
 }
 
+// The live player's notice: its dark panel over the whole screen, its
+// title in the app's text colour at the left (from 96, 340).
+function noticeDrawn() {
+  if (!frame) return false;
+  for (let y = 350; y < 400; y += 2) {
+    for (let x = 100; x < 600; x += 2) {
+      const at = (Math.round(y * (frame.height / 1080)) * frame.width + Math.round(x * (frame.width / 1920))) * 4;
+      if (frame.data[at] > 200 && frame.data[at + 1] > 200 && frame.data[at + 2] > 200) return true;
+    }
+  }
+  return false;
+}
+
 async function drawnWithin(ms, test) {
   const until = Date.now() + ms;
   while (Date.now() < until) {
@@ -200,7 +215,7 @@ async function waitFor(pattern, since, what, { ms = 30000, settles = true } = {}
 async function openFromMenu(index, pattern, what, then = async () => {}) {
   for (let attempt = 0; attempt < 3; attempt++) {
     await press("left", 3);
-    await press("up", 6);
+    await press("up", 9);
     await press("down", index);
     const since = mark();
     await press("select");
@@ -234,6 +249,8 @@ async function signOut() {
 }
 
 const qr = { shown: false, hidden: false };
+// The player's notice when every connection is in use.
+const live = { busy: false };
 const sync = { label: false };
 // Home asks again only after playing, or when its rows are a minute old.
 const home = { kept: false };
@@ -317,7 +334,50 @@ async function walk() {
   shoot("home-options");
   await press("select");
   await waitFor(/^POST \/api\/items\/103\/watched$/, since, "a title marked watched");
-  await openFromMenu(1, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies");
+  // Live TV: its guide, OK on what's on now watches the channel, Up the
+  // next one (the server ends the first by the client_id), the channel
+  // list and a favourite, then a channel whose source has no connection
+  // left; Back leaves, then the Channels tab.
+  await openFromMenu(1, /^GET \/api\/live\/guide\?/, "Live TV's guide");
+  await sleep(1500);
+  shoot("live-guide");
+  since = mark();
+  await press("select");
+  await waitFor(/^POST \/api\/live\/channels\/1\/watch$/, since, "a channel watched");
+  await waitFor(/^GET \/api\/live\/sessions\/live\d+\/index\.m3u8$/, since, "its playlist");
+  await sleep(1000);
+  shoot("live-player");
+  since = mark();
+  await press("up");
+  await waitFor(/^POST \/api\/live\/channels\/2\/watch$/, since, "the next channel watched");
+  await waitFor(/^GET \/api\/live\/sessions\/live\d+\/index\.m3u8$/, since, "the next channel's playlist");
+  await press("left");
+  await sleep(800);
+  shoot("live-list");
+  since = mark();
+  await press("options");
+  await waitFor(/^PUT \/api\/live\/channels\/2\/favorite$/, since, "a channel put in the favourites");
+  await press("back");
+  since = mark();
+  await press("up");
+  await waitFor(/^POST \/api\/live\/channels\/3\/watch$/, since, "a channel with no connection left");
+  await sleep(1500);
+  live.busy = await drawnWithin(2500, noticeDrawn);
+  shoot("live-busy");
+  since = mark();
+  await press("back");
+  await settle();
+  await press("back"); // the tabs
+  await press("right"); // Channels
+  since = mark();
+  await press("select");
+  await press("down");
+  await sleep(1000);
+  shoot("live-channels");
+  await press("back"); // the tabs
+  await press("back"); // Home
+  await settle();
+  await openFromMenu(2, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies");
   shoot("library");
   // Down until the next page is asked for: two rows before the first one ends.
   since = mark();
@@ -325,7 +385,7 @@ async function walk() {
   await waitFor(/^GET \/api\/libraries\/1\/items\?.*offset=70/, since, "the next page");
   shoot("library-scrolled");
   await press("back");
-  await openFromMenu(2, /^GET \/api\/libraries\/2\/items/, "TV Shows");
+  await openFromMenu(3, /^GET \/api\/libraries\/2\/items/, "TV Shows");
   // Its tabs: Recommended, Collections, then Library again, sorted by year.
   since = mark();
   await press("up"); // the tabs, on Library
@@ -377,7 +437,7 @@ async function walk() {
   }
   // Music: the artist, their album, and its tracks played; Now Playing
   // stopped, then Back to Home.
-  await openFromMenu(3, /^GET \/api\/libraries\/3\/items\?.*offset=0/, "Music");
+  await openFromMenu(4, /^GET \/api\/libraries\/3\/items\?.*offset=0/, "Music");
   shoot("music");
   since = mark();
   await press("select"); // the artist
@@ -399,7 +459,7 @@ async function walk() {
     await press("back"); // the artist, the library, Home
     await settle();
   }
-  await openFromMenu(5, /^GET \/api\/search\?.*q=mo/, "Search", async () => {
+  await openFromMenu(6, /^GET \/api\/search\?.*q=mo/, "Search", async () => {
     await sleep(800);
     await press("lit_m");
     await press("lit_o");
@@ -417,7 +477,7 @@ async function walk() {
   home.kept = age < 55000 ? !asked : age > 65000 ? asked : true;
   // Playlists: one opened, its first entry taken out with the Options key,
   // then played from the top; Back to Home.
-  await openFromMenu(4, /^GET \/api\/playlists$/, "Playlists");
+  await openFromMenu(5, /^GET \/api\/playlists$/, "Playlists");
   shoot("playlists");
   since = mark();
   await press("select"); // the first playlist
@@ -440,7 +500,7 @@ async function walk() {
     await press("back"); // the playlists, Home
     await settle();
   }
-  await openFromMenu(6, /^GET \/api\/auth\/me$/, "Settings");
+  await openFromMenu(7, /^GET \/api\/auth\/me$/, "Settings");
   shoot("settings");
   // Quality, after Audio language and Subtitles: Automatic checked, then
   // 8 Mbps 1080p chosen, kept on the Roku.
@@ -479,7 +539,7 @@ async function walk() {
   await press("back"); // Home, which asks for its libraries again
   await waitFor(/^GET \/api\/libraries$/, since, "Home's libraries after sorting");
   await press("right"); // the rows, where the next steps start
-  await openFromMenu(6, /^GET \/api\/auth\/me$/, "Settings");
+  await openFromMenu(7, /^GET \/api\/auth\/me$/, "Settings");
   // Subtitles: from "Only for foreign dialogue" to "Always", saved at once
   // with the languages left as they were; Subtitle language shows then.
   await settle();
@@ -508,8 +568,8 @@ async function walk() {
   await sleep(1500);
   fixture.down = true;
   await press("left", 3);
-  await press("up", 6);
-  await press("down");
+  await press("up", 9);
+  await press("down", 2);
   await press("select");
   await sleep(3000);
   shoot("unreachable");
@@ -521,7 +581,7 @@ async function walk() {
   // Signed out, and in again with a server that has no QR codes yet: the
   // code shows on its own.
   await press("back");
-  await openFromMenu(6, /^GET \/api\/auth\/me$/, "Settings");
+  await openFromMenu(7, /^GET \/api\/auth\/me$/, "Settings");
   fixture.qr = false;
   since = mark();
   await signOut();
@@ -632,6 +692,12 @@ const checks = [
   ["played an album's tracks with the music player", fixture.playbacks.some((p) => p.item === 5201) && fixture.progress.some((p) => p.item >= 5201 && p.item <= 5203)],
   ["played a playlist from its top, the next entry to come", fixture.playbacks.some((p) => p.item === 101)],
   ["searched", asked(/^GET \/api\/search\?/)],
+  ["showed Live TV's guide", fixture.liveGuides.length > 0],
+  ["watched channels with one client_id, so zapping holds one connection", fixture.liveWatches.length >= 2 && new Set(fixture.liveWatches.map((w) => w.client_id)).size === 1 && fixture.liveWatches[0].client_id !== null],
+  ["asked for a channel's playlist before playing it", fixture.livePlaylists.length >= 2],
+  ["put a channel in the favourites from the player's list", fixture.liveFavoriteChanges.some((c) => c.id === 2 && c.favorite)],
+  ["said every connection is in use", live.busy],
+  ["left the channels it watched", fixture.liveLeft.length > 0 && fixture.liveSessions.size === 0],
   ["asked again with a new token after a 401", new Set(fixture.requests.filter((r) => r.path === "/api/items/103").map((r) => r.auth)).size > 1],
   ["sent the token in the header only", fixture.requests.every((r) => !/[?&]token=/.test(r.path))],
   ["signed out", asked(/^POST \/api\/oauth\/revoke$/)],

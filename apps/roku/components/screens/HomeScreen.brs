@@ -4,6 +4,8 @@ sub init()
     m.message = m.top.findNode("message")
     m.started = false
     m.libraries = []
+    ' Whether the server has Live TV for this profile (GET /api/live).
+    m.live = false
     ' What the menu was built from, to build it again only when it changes.
     m.librariesShown = ""
     ' The rows shown: their hub keys in order, and { key: signature } (the
@@ -81,6 +83,7 @@ sub load()
     m.loadedAgo.Mark()
     if m.rowKeys.Count() = 0 then showMessage("Loading…")
     uiGet("/api/libraries", "onLibraries")
+    uiGet("/api/live", "onLive")
     if not m.householdAsked and authAllows(m.global.session.scope, "profiles")
         m.householdAsked = true
         uiGet("/api/oauth/profiles", "onHousehold")
@@ -92,6 +95,18 @@ end sub
 sub onHousehold(event as object)
     answer = event.getData()
     if answer.ok and GetInterface(answer.data, "ifArray") <> invalid then uiKeepHousehold(answer.data.Count())
+end sub
+
+' Live TV in the menu while the server has channels this profile may
+' watch; an older server (404) has none.
+sub onLive(event as object)
+    answer = event.getData()
+    live = false
+    if answer.ok and httpObject(answer.data) <> invalid then live = httpTrue(answer.data.available)
+    if not answer.ok and answer.status <> 404 and answer.status <> 403 then return
+    if live = m.live then return
+    m.live = live
+    buildMenu()
 end sub
 
 sub onLibraries(event as object)
@@ -130,14 +145,22 @@ sub onRows(event as object)
     end if
 end sub
 
-' The menu: Home, the libraries, Playlists, Search, Settings, and Now
-' Playing while music plays.
+' The menu: Home, Live TV where the server has it, the libraries,
+' Playlists, Search, Settings, and Now Playing while music plays.
 sub buildMenu()
     items = [{ title: "Home" }]
     m.menuActions = ["home"]
+    ' The library of each entry (invalid for the others).
+    m.menuLibraries = [invalid]
+    if m.live
+        items.Push({ title: "Live TV" })
+        m.menuActions.Push("live")
+        m.menuLibraries.Push(invalid)
+    end if
     for each library in m.libraries
         items.Push({ title: library.name })
         m.menuActions.Push("library")
+        m.menuLibraries.Push(library)
     end for
     for each entry in [["Playlists", "playlists"], ["Search", "search"], ["Settings", "settings"]]
         items.Push({ title: entry[0] })
@@ -276,8 +299,10 @@ sub onMenu(event as object)
     if action = "home"
         load()
         if m.rows.visible then m.rows.setFocus(true)
+    else if action = "live"
+        uiNavigate({ to: "live" })
     else if action = "library"
-        uiNavigate({ to: "library", params: { library: m.libraries[index - 1] } })
+        uiNavigate({ to: "library", params: { library: m.menuLibraries[index] } })
     else if action = "playlists"
         uiNavigate({ to: "grid", params: { kind: "playlists", id: 0, title: "Playlists" } })
     else if action = "search"

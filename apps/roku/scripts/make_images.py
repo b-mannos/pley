@@ -2,6 +2,8 @@
 of buttons (images/button-focus.9.png, and where it was as a button group
 lost it, images/button-footprint.9.png): nine-patch pictures, a rounded
 box in the app's accent or its raised surface, as its lists have. The
+Live TV guide's programmes sit on images/guide-cell.9.png, and what has
+aired on images/guide-past.9.png. The
 icons and splash screens are pley's logo, rendered with the other apps'
 icons by scripts/render-icons.mjs at the repository's root. Standard
 library only.
@@ -17,6 +19,8 @@ import zlib
 DARK = (0x16, 0x19, 0x1E)  # the app's background (components/shared/Ui.brs)
 ACCENT = (0x38, 0xBD, 0xF8)  # the app's accent
 SURFACE3 = (0x2E, 0x34, 0x40)  # its raised surface
+SURFACE2 = (0x26, 0x2B, 0x35)  # a guide's programme
+PAST = (0x1E, 0x22, 0x2A, 0x99)  # the guide's time gone, over the screen
 
 # A button's box: its size inside the nine-patch's border, and its corners.
 BOX = 32
@@ -60,10 +64,12 @@ def render_mark(size):
     return rows
 
 
-def render_box(color):
-    """RGBA rows of a nine-patch (Roku's .9.png): a rounded box of color,
-    in a border of one pixel whose black marks say what stretches (top
-    and left)."""
+def render_box(color, radius=RADIUS):
+    """RGBA rows of a nine-patch (Roku's .9.png): a rounded box of color
+    (with its alpha, if it has one), in a border of one pixel whose black
+    marks say what stretches (top and left)."""
+    alpha = color[3] if len(color) > 3 else 255
+    color = color[:3]
     size = BOX + 2
     samples = 4
     rows = []
@@ -71,7 +77,8 @@ def render_box(color):
         line = bytearray()
         for col in range(size):
             if row in (0, size - 1) or col in (0, size - 1):
-                marked = (row == 0 and RADIUS < col < size - 1 - RADIUS) or (col == 0 and RADIUS < row < size - 1 - RADIUS)
+                edge = max(radius, 1)
+                marked = (row == 0 and edge < col < size - 1 - edge) or (col == 0 and edge < row < size - 1 - edge)
                 line.extend((0, 0, 0, 255) if marked else (0, 0, 0, 0))
                 continue
             inside = 0
@@ -79,12 +86,12 @@ def render_box(color):
                 for sx in range(samples):
                     x = col - 1 + (sx + 0.5) / samples
                     y = row - 1 + (sy + 0.5) / samples
-                    dx = max(RADIUS - x, 0, x - (BOX - RADIUS))
-                    dy = max(RADIUS - y, 0, y - (BOX - RADIUS))
-                    if math.hypot(dx, dy) <= RADIUS:
+                    dx = max(radius - x, 0, x - (BOX - radius))
+                    dy = max(radius - y, 0, y - (BOX - radius))
+                    if math.hypot(dx, dy) <= radius:
                         inside += 1
             line.extend(color)
-            line.append(round(255 * inside / (samples * samples)))
+            line.append(round(alpha * inside / (samples * samples)))
         rows.append(bytes(line))
     return rows
 
@@ -108,8 +115,14 @@ def main():
     os.makedirs(folder, exist_ok=True)
     write_png(os.path.join(folder, "watched.png"), MARK_SIZE, MARK_SIZE, render_mark(MARK_SIZE))
     print("images/watched.png", MARK_SIZE, "x", MARK_SIZE)
-    for name, color in (("button-focus.9.png", ACCENT), ("button-footprint.9.png", SURFACE3)):
-        write_png(os.path.join(folder, name), BOX + 2, BOX + 2, render_box(color))
+    boxes = (
+        ("button-focus.9.png", ACCENT, RADIUS),
+        ("button-footprint.9.png", SURFACE3, RADIUS),
+        ("guide-cell.9.png", SURFACE2, 6),
+        ("guide-past.9.png", PAST, 0),
+    )
+    for name, color, radius in boxes:
+        write_png(os.path.join(folder, name), BOX + 2, BOX + 2, render_box(color, radius))
         print("images/" + name, BOX + 2, "x", BOX + 2)
 
 

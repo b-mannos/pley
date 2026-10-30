@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Live TV: the Guide (Roku's TimeGrid: channels down, time across, the
+     programme in focus described above it) and Channels (rows of cards:
+     Recently watched, Favourites, then each group), the guide's filter
+     (all channels, favourites or a group) chosen in a panel at the right.
+     OK on a programme on now, or a card, watches the channel; the Options
+     key adds it to favourites or takes it out. -->
+<component name="LiveTvScreen" extends="Group">
+    <interface>
+        <field id="route" type="string" />
+        <field id="params" type="assocarray" />
+        <field id="navigate" type="assocarray" alwaysNotify="true" />
+        <field id="active" type="boolean" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/screens/LiveTvScreen.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Nodes.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Format.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Live.brs" />
+    <children>
+        <Label id="title" translation="[96, 40]" width="1000" text="Live TV" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="count" translation="[1424, 60]" width="400" horizAlign="right" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
+        <ChipRow id="tabs" translation="[96, 132]" />
+        <ChipRow id="filterChip" translation="[1424, 132]" visible="false" />
+        <!-- The programme in focus, above the guide. -->
+        <Group id="info" translation="[96, 216]" visible="false">
+            <Poster id="infoLogo" translation="[1488, 4]" width="240" height="120" loadWidth="240" loadHeight="120" loadDisplayMode="scaleToFit" />
+            <Label id="infoChannel" width="1400" color="0x8B95A5FF" font="font:SmallestBoldSystemFont" />
+            <Label id="infoTitle" translation="[0, 30]" width="1400" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Label id="infoMeta" translation="[0, 86]" width="1400" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+            <Label id="infoText" translation="[0, 120]" width="1400" wrap="true" maxLines="2" lineSpacing="2" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        </Group>
+        <TimeGrid id="guide" translation="[96, 396]" width="1728" height="660" numRows="7" duration="7200" maxDays="2" channelInfoWidth="300" infoGridGap="8"
+            focusBitmapUri="pkg:/images/button-focus.9.png" programBackgroundBitmapUri="pkg:/images/guide-cell.9.png"
+            channelInfoBackgroundBitmapUri="pkg:/images/guide-cell.9.png" channelInfoTextColor="0xEBEBEBFF" channelInfoFont="font:SmallestBoldSystemFont"
+            programTitleColor="0xEBEBEBFF" programTitleFocusedColor="0x16191EFF" programTitleFont="font:SmallestSystemFont"
+            timeLabelColor="0xA1A9B6FF" timeLabelFont="font:SmallestSystemFont" timeBarHeight="48"
+            nowBarBlendColor="0x38BDF8FF" pastTimeScreenBitmapUri="pkg:/images/guide-past.9.png"
+            loadingDataText="Loading the guide…" channelNoDataText="No guide information" visible="false" />
+        <RowList id="rows" translation="[96, 216]" itemComponentName="LiveCard" itemSize="[1728, 380]" numRows="3" itemSpacing="[0, 20]" rowItemSize="[[340, 300]]" rowItemSpacing="[[28, 0]]" showRowLabel="[true]" rowLabelOffset="[[0, 12]]" rowLabelColor="0xEBEBEBFF" drawFocusFeedback="false" rowFocusAnimationStyle="floatingFocus" vertFocusAnimationStyle="floatingFocus" rowLabelFont="font:MediumBoldSystemFont" visible="false" />
+        <Label id="message" translation="[96, 440]" width="1728" wrap="true" horizAlign="center" color="0xA1A9B6FF" text="Loading…" font="font:MediumSystemFont" />
+        <Label id="hint" translation="[96, 1030]" width="1728" horizAlign="right" color="0x8B95A5FF" font="font:TinySystemFont" />
+        <!-- The guide's filter, over the right half. -->
+        <Group id="panel" visible="false">
+            <Rectangle translation="[1000, 0]" width="920" height="1080" color="0x1E222AFF" />
+            <Label translation="[1056, 56]" width="808" text="Show" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <RadioButtonList id="choices" translation="[1056, 150]" itemSize="[808, 64]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus" font="font:MediumSystemFont" focusedFont="font:MediumBoldSystemFont" />
+        </Group>
+        <!-- What the guide shows, a minute on and after each change. -->
+        <Timer id="tick" duration="60" repeat="true" />
+    </children>
+</component>

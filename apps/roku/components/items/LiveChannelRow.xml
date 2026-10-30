@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A channel in the player's channel list (a MarkupList): its number,
+     logo, name, what's on with how far along, and a star for a favourite;
+     the channel playing in the accent. -->
+<component name="LiveChannelRow" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent" />
+        <field id="width" type="float" onChange="onLayout" />
+        <field id="height" type="float" onChange="onLayout" />
+        <field id="itemHasFocus" type="boolean" onChange="onFocus" />
+        <field id="listHasFocus" type="boolean" value="true" onChange="onFocus" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/items/LiveChannelRow.brs" />
+    <children>
+        <Rectangle id="back" color="0x16191E00" />
+        <Rectangle id="mark" color="0x38BDF8FF" width="6" visible="false" />
+        <Label id="number" width="72" horizAlign="right" vertAlign="center" color="0x8B95A5FF" font="font:SmallestBoldSystemFont" />
+        <Rectangle id="plate" color="0x2E3440FF" width="112" height="64" />
+        <Label id="initials" width="112" height="64" horizAlign="center" vertAlign="center" color="0xA1A9B6FF" font="font:SmallestBoldSystemFont" />
+        <Poster id="logo" loadDisplayMode="scaleToFit" width="96" height="52" loadWidth="96" loadHeight="52" />
+        <Label id="title" color="0xEBEBEBFF" font="font:SmallestBoldSystemFont" />
+        <Label id="line" color="0xA1A9B6FF" font="font:TinySystemFont" />
+        <Rectangle id="track" color="0x2E3440FF" height="4" />
+        <Rectangle id="fill" color="0x38BDF8FF" height="4" />
+        <Label id="star" text="★" width="40" horizAlign="center" vertAlign="center" color="0x38BDF8FF" font="font:SmallestBoldSystemFont" visible="false" />
+    </children>
+</component>

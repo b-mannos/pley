@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A Live TV channel in a RowList row (Live.brs's liveCard): its logo
+     (or its name) with its number and a star for a favourite, the name,
+     what's on with how far along it is, and what's next. -->
+<component name="LiveCard" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent" />
+        <field id="width" type="float" onChange="onLayout" />
+        <field id="height" type="float" onChange="onLayout" />
+        <field id="itemHasFocus" type="boolean" onChange="onFocus" />
+        <field id="rowHasFocus" type="boolean" value="true" onChange="onFocus" />
+        <field id="rowListHasFocus" type="boolean" value="true" onChange="onFocus" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/items/LiveCard.brs" />
+    <children>
+        <Rectangle id="frame" color="0x262B35FF" />
+        <Rectangle id="plate" color="0x2E3440FF" />
+        <Label id="fallback" color="0xA1A9B6FF" horizAlign="center" vertAlign="center" wrap="true" maxLines="2" font="font:SmallBoldSystemFont" />
+        <Poster id="logo" loadDisplayMode="scaleToFit" />
+        <Rectangle id="numberBack" color="0x16191ECC" height="40" visible="false" />
+        <Label id="number" height="40" horizAlign="center" vertAlign="center" color="0xEBEBEBFF" font="font:SmallestBoldSystemFont" />
+        <Label id="star" text="★" width="40" height="40" horizAlign="center" vertAlign="center" color="0x38BDF8FF" font="font:SmallBoldSystemFont" visible="false" />
+        <Label id="title" color="0xEBEBEBFF" font="font:SmallestBoldSystemFont" />
+        <Label id="line" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        <Rectangle id="track" color="0x2E3440FF" height="6" />
+        <Rectangle id="fill" color="0x38BDF8FF" height="6" />
+        <Label id="nextLine" color="0x8B95A5FF" font="font:TinySystemFont" />
+    </children>
+</component>

@@ -8,6 +8,18 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Live TV, where the server has channels: a guide (Roku's TimeGrid, the
+  programme in focus described above it, filtered by group or
+  favourites), Channels (Recently watched, Favourites and each group as
+  rows of cards with what's on now and next), and a live player with
+  up and down to change channel, the channel list at the left, what's on
+  with the Live badge, pause and rewind within the server's timeshift,
+  and the server's own words when every connection is in use. The
+  Options key adds a channel to the favourites or takes it out. Past a
+  thousand channels the guide and the list show a group at a time.
+
 ### Changed
 
 - "Can't reach" offers Try again, as the other apps do, and the skip

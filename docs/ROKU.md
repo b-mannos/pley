@@ -46,6 +46,8 @@ more than one profile.
   while the app is used. Now Playing has Previous, Pause, Next and Stop
   (the remote's play, fast forward and rewind too); Home's menu shows Now
   playing while music plays.
+- **Live TV**, in Home's menu after Home while the server has channels
+  this profile may watch ([below](#live-tv)).
 - **Playlists:** Play, Shuffle, Rename, Delete, remove an entry.
 - **Search** (titles and people).
 - **Settings:** audio and subtitle defaults, Quality, Play the next episode
@@ -185,6 +187,70 @@ down only while Settings → Play the next episode by itself is on
 (otherwise it waits for Play now). While the button shows: OK skips, play
 pauses, fast forward and rewind move 10 s, Back leaves the player. During
 the Up Next countdown, Back, play, fast forward and rewind cancel it.
+
+## Live TV
+
+The web app's Live TV ([API.md](API.md#live-tv)), for watching; sources,
+the lineup and the settings stay in the web app. The code is
+`components/screens/LiveTvScreen`, `LivePlayerScreen`,
+`components/lib/Live.brs` and the API task's `live…` operations.
+
+- **Guide:** Roku's TimeGrid, channels down and two hours across, the
+  programme in focus described above it (On now, its times and time
+  left, episode, Live and New, what it is). Fetched six hours at a time
+  (`GET /api/live/guide`) as it is scrolled to, two days at most, from
+  half an hour before the current half hour. Rewind and fast forward page
+  through time, Replay goes back to now. OK on a programme on now (or on
+  time without a guide) watches the channel; on another, it says what it
+  is with Watch and the favourite.
+- **Filter** (the chip at the right): all channels, Favourites, or a
+  group, kept on the Roku per server and profile (registry section
+  `liveViews`), with the tab.
+- **Channels:** rows of cards: Recently watched (`recent` of `GET
+  /api/live`), Favourites, then each group (one row when there are no
+  groups). A card has the logo and number, a star for a favourite, what's
+  on with how far along, and what's next.
+- **The Options key** on a programme or a card: Watch, Add to or Remove
+  from favourites (`PUT`/`DELETE …/favorite`).
+- **Big lineups:** IPTV lineups run to tens of thousands of channels.
+  The API task keeps the lineup and gives the screens what they show.
+  Past 1,000 channels: no "All channels" (the guide opens on the
+  favourites, else the first group), the guide shows each channel's now
+  and next from the lineup instead of `GET /api/live/guide` (megabytes
+  for such a lineup), a row has 100 cards at most and the tab 2,000, the
+  guide 1,000 channels; the lineup is fetched again every ten minutes
+  instead of every minute.
+
+### The live player
+
+- **Tuning:** `POST …/watch` with the player's `client_id` (the one
+  playback uses), so the server ends the channel watched before; then the
+  playlist once from the API task, which the server answers once the
+  channel's first segments are made (50 s at most) or with why not; then
+  the Video node, `Live = true`, the token in its agent. The channel's
+  logo, name and what's on show meanwhile.
+- **Up and down** change channel (Up: the next number), through the
+  list's channels; the channel shows at once and is tuned 0.7 s after the
+  last press. **Left** opens the channel list (number, logo, name, what's
+  on): every channel, or for a lineup past 1,000 the group of the channel
+  first watched, and Favourites; the Options key in it adds to or takes
+  out of the favourites. **Right** or **OK** show the banner: the
+  channel, what's on with its times, time left and progress, what's
+  next, and the Live badge (red at the edge, how far behind otherwise).
+  It shows for 5 s on tuning and stays while paused.
+- **Pause and rewind** are the Video node's own, within the server's
+  timeshift. Paused, the playlist is asked for every 20 s so the server
+  keeps the channel (its viewers leave after 45 s of nothing).
+- **Troubles:** `409` (every connection in use) shows the server's
+  message, which names what is watched, with Try again, Other channels
+  and Back; so do a channel gone (`404`), Live TV closed (`403`), a
+  channel stopped by an administrator (`410`) and one not playing
+  (`503`). A stream that breaks is checked with its playlist and tuned
+  again, three times a minute at most.
+- **Leaving** sends `DELETE /api/live/sessions/{session}`, as does
+  changing channel.
+- **Radio:** a channel with sound and no picture (the Video node's
+  `videoFormat` empty 3 s into playing) keeps its card with what's on.
 
 ## How the app works
 

@@ -36,6 +36,14 @@ sub apiRun()
     ' What the server said of this Roku's network, for each server
     ' (aqNetworkKept): forgotten with each sign-in and profile.
     m.networkKept = {}
+    ' The Live TV guide fetched so far, for the server and the guide's
+    ' start it was fetched for: { key, programs, from, upto } (Live.brs's
+    ' liveGuideKeep), from and upto the time it covers.
+    m.liveGuide = { key: "", programs: {}, from: 0, upto: 0 }
+    ' The Live TV lineup of a server (Live.brs's liveChannel), kept here:
+    ' a lineup can run to tens of thousands of channels, more than the
+    ' screens can hold, so they get the part they show.
+    m.live = { server: "", channels: [], at: 0 }
     apiDeviceFacts()
     m.top.ready = true
     while true
@@ -129,6 +137,12 @@ sub apiAccept(request as dynamic)
         apiSpeedTest(request, spec)
     else if op = "switchProfile"
         apiSwitchProfile(request, spec)
+    else if op = "liveWatch"
+        apiLiveWatch(request, spec)
+    else if op = "liveChannels" or op = "liveList" or op = "liveGuide"
+        apiLive(request, spec)
+    else if op = "liveFavorite"
+        apiLiveFavorite(request, spec)
     else
         apiCall(request, spec)
     end if
@@ -331,6 +345,15 @@ sub apiCallAnswered(job as object, status as integer, body as string, headers as
         apiCloseSession(answer.data)
         return
     end if
+    if answer.ok and httpTrue(job.liveWatch) and apiAbandoned(job.request)
+        ' Zapped on or left before the channel came: its connection goes.
+        apiLeaveChannel(answer.data)
+        return
+    end if
+    if job.build = "liveKeep" or job.build = "liveGuide"
+        apiLiveAnswered(job, answer)
+        return
+    end if
     if answer.ok and job.build <> "" then apiBuild(job, answer)
     apiAnswer(job.request, answer)
 end sub
@@ -450,6 +473,11 @@ sub apiBuild(job as object, answer as object)
         answer.data = { size: episodes.Count() }
     end if
 end sub
+
+' Whether this Roku shows times on a 12-hour clock.
+function apiTwelveHour() as boolean
+    return CreateObject("roDeviceInfo").GetClockFormat() <> "24h"
+end function
 
 ' --- Tokens ---
 
@@ -630,6 +658,8 @@ end sub
 ' server is chosen signed in, and after each sign-in.
 sub apiAskProfile()
     m.networkKept = {}
+    ' Favourites are the profile's: the lineup is fetched again.
+    m.live = { server: "", channels: [], at: 0 }
     m.session.profileId = 0
     m.session.profileName = ""
     if m.tokens = invalid then return
@@ -1006,6 +1036,189 @@ sub apiPlay(request as object, spec as object)
     if httpNumber(spec.maxHeight, 0) > 0 then body.max_height = Int(spec.maxHeight)
     ' Starting a transcode takes the server a few seconds.
     apiCall(request, { method: "POST", path: "/api/playback", json: body, timeoutMs: 60000, play: true })
+end sub
+
+' --- Live TV (Live.brs) ---
+
+' POST /api/live/channels/{id}/watch with this Roku's client_id, which
+' ends what it watched before (zapping holds one connection). Tuning a
+' channel nobody watches takes the server a few seconds.
+sub apiLiveWatch(request as object, spec as object)
+    if m.server = ""
+        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        return
+    end if
+    job = apiJob("call", "POST", m.server + "/api/live/channels/" + urlValue(spec.channelId) + "/watch")
+    job.request = request
+    job.build = ""
+    job.auth = true
+    job.liveWatch = true
+    job.body = FormatJson({ client_id: m.playerId })
+    job.contentType = "application/json"
+    job.timeoutMs = 60000
+    apiSend(job)
+end sub
+
+' DELETE /api/live/sessions/{session} of a watch's answer; nothing waits.
+sub apiLeaveChannel(watching as dynamic)
+    data = httpObject(watching)
+    if data = invalid then return
+    sessionId = httpString(data.session_id)
+    if sessionId = "" then return
+    job = apiJob("leave", "DELETE", m.server + "/api/live/sessions/" + urlEncode(sessionId))
+    job.auth = true
+    apiSend(job)
+end sub
+
+' The lineup's parts the screens show: spec.op "liveChannels" (the
+' Channels tab's rows), "liveList" (the player's list) or "liveGuide"
+' (the guide). The lineup is fetched first (GET /api/live/channels) when
+' none is kept for this server, or with spec.refresh once what is kept is
+' older than liveRefreshMs.
+sub apiLive(request as object, spec as object)
+    if m.server = ""
+        apiAnswer(request, apiFail("no_server", "Choose a server first."))
+        return
+    end if
+    age = m.clock.TotalMilliseconds() - m.live.at
+    if m.live.server <> m.server or (httpTrue(spec.refresh) and age >= liveRefreshMs(m.live.channels.Count()))
+        job = apiJob("call", "GET", m.server + "/api/live/channels")
+        job.request = request
+        job.build = "liveKeep"
+        job.auth = true
+        job.timeoutMs = 120000
+        apiSend(job)
+        return
+    end if
+    apiLiveBuild(request, spec)
+end sub
+
+' The lineup fetched, or a part of the guide: kept, then the part asked
+' for built.
+sub apiLiveAnswered(job as object, answer as object)
+    request = job.request
+    if not answer.ok
+        apiAnswer(request, answer)
+        return
+    end if
+    if job.build = "liveKeep"
+        m.live = { server: job.server, channels: liveChannels(answer.data, job.server), at: m.clock.TotalMilliseconds() }
+        answer.data = invalid
+        apiLiveBuild(request, request.spec)
+        return
+    end if
+    data = httpObject(answer.data)
+    if data <> invalid then liveGuideKeep(m.liveGuide.programs, data.programs)
+    if job.upto > m.liveGuide.upto then m.liveGuide.upto = job.upto
+    apiLiveGuideBuilt(request)
+end sub
+
+sub apiLiveBuild(request as object, spec as object)
+    channels = m.live.channels
+    op = httpString(spec.op)
+    if op = "liveGuide"
+        apiLiveGuide(request, spec)
+        return
+    end if
+    if op = "liveList"
+        ' Every channel where the lineup is small; else the group of the
+        ' channel playing, or the filter chosen.
+        filter = httpString(spec.filter)
+        if filter = ""
+            filter = "all"
+            if channels.Count() > liveMany()
+                around = liveStep(channels, spec.around, 0)
+                filter = "favorites"
+                if around <> invalid and around.group <> "" then filter = "group:" + around.group
+            end if
+        end if
+        filter = liveFilterValid(channels, filter)
+        shown = apiLiveCapped(liveFiltered(channels, filter))
+        now = apiNow()
+        twelve = apiTwelveHour()
+        items = []
+        for each channel in shown
+            items.Push(liveListItem(channel, now, twelve))
+        end for
+        request.content = nodesContent(items)
+        apiAnswer(request, apiOk({ channels: shown, filter: filter, total: channels.Count(), choices: liveFilterChoices(channels) }))
+        return
+    end if
+    rows = liveRows(channels, spec.recent, apiNow(), apiTwelveHour())
+    built = []
+    keys = []
+    for each row in rows
+        built.Push({ title: row.title, tiles: row.cards })
+        keys.Push(row.key)
+    end for
+    request.content = nodesRows(built)
+    ' The guide's channels for the filter, for the screen to tell whether
+    ' they changed.
+    filter = liveFilterValid(channels, httpString(spec.filter))
+    ids = []
+    for each channel in apiLiveCapped(liveFiltered(channels, filter))
+        ids.Push(channel.id.ToStr() + " " + channel.name + " " + channel.logo)
+    end for
+    apiAnswer(request, apiOk({ count: channels.Count(), rowKeys: keys, choices: liveFilterChoices(channels), filter: filter, guideSignature: ids.Join(Chr(10)) }))
+end sub
+
+' A channel put in or out of the favourites on the server: so it is in
+' the lineup kept, without fetching it all again.
+sub apiLiveFavorite(request as object, spec as object)
+    for each channel in m.live.channels
+        if channel.id = spec.channelId then channel.favorite = httpTrue(spec.favorite)
+    end for
+    apiAnswer(request, apiOk(invalid))
+end sub
+
+' The first liveShownMax of channels.
+function apiLiveCapped(channels as object) as object
+    if channels.Count() <= liveShownMax() then return channels
+    out = []
+    for i = 0 to liveShownMax() - 1
+        out.Push(channels[i])
+    end for
+    return out
+end function
+
+' The guide as the TimeGrid's content, for the channels spec.filter
+' shows (liveShownMax at most): the part from spec.from to spec.to
+' fetched first (GET /api/live/guide) and kept with what was fetched
+' before for the same server and spec.start; none to fetch, built at once.
+sub apiLiveGuide(request as object, spec as object)
+    start = Int(httpNumber(spec.start, 0))
+    key = m.server + "|" + urlValue(start)
+    if m.liveGuide.key <> key then m.liveGuide = { key: key, programs: {}, from: start, upto: start }
+    from = Int(httpNumber(spec.from, 0))
+    upto = Int(httpNumber(spec.to, 0))
+    ' A lineup this big has its now and next only (liveNowNextRows).
+    if upto <= from or m.live.channels.Count() > liveMany()
+        apiLiveGuideBuilt(request)
+        return
+    end if
+    job = apiJob("call", "GET", m.server + urlWithQuery("/api/live/guide", { from: from, to: upto }))
+    job.request = request
+    job.build = "liveGuide"
+    job.auth = true
+    job.upto = upto
+    job.timeoutMs = 120000
+    apiSend(job)
+end sub
+
+' The guide's content from what is kept, and the channels of its rows.
+sub apiLiveGuideBuilt(request as object)
+    channels = m.live.channels
+    filter = liveFilterValid(channels, httpString(request.spec.filter))
+    matching = liveFiltered(channels, filter)
+    shown = apiLiveCapped(matching)
+    guide = m.liveGuide
+    if channels.Count() > liveMany()
+        request.content = nodesGuide(liveNowNextRows(shown, guide.from))
+        apiAnswer(request, apiOk({ channels: shown, filter: filter, total: matching.Count(), upto: guide.from + liveGuideSpan(), nowNext: true }))
+        return
+    end if
+    request.content = nodesGuide(liveGuideRows(shown, guide.programs, guide.from, guide.upto))
+    apiAnswer(request, apiOk({ channels: shown, filter: filter, total: matching.Count(), upto: guide.upto, nowNext: false }))
 end sub
 
 ' --- Where Automatic starts (AutoQuality.brs) ---

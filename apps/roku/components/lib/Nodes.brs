@@ -64,3 +64,15 @@ function nodesRows(rows as object) as object
     end for
     return root
 end function
+
+' The Live TV guide's TimeGrid content: a child per channel (its fields),
+' with a child per programme.
+function nodesGuide(rows as object) as object
+    root = CreateObject("roSGNode", "ContentNode")
+    for each row in rows
+        node = root.createChild("ContentNode")
+        nodesFill(node, row.fields)
+        nodesAppend(node, row.programs)
+    end for
+    return root
+end function

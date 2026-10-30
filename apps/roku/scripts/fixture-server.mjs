@@ -517,6 +517,65 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
         transcode: converted ? { job_id: "j1", state: "running", video: "transcode", audio: "copy", video_in: "H.264 1920×1080", video_out: "H.264 1920×1080", audio_in: "AAC 2.0", audio_out: null, encoder: "libx264", preset: "veryfast", decoder: "cpu", pipeline: "cpu", tonemap: null, dolby_vision: null, hdr10plus_stripped: false, subtitle_burn: true, speed: 2.5, fps: 60, transcoded_ms: 960000, segments_ready: 10, segments_total: 500, bitrate_out: 8000000, last_error: null } : null,
       });
     }
+    // Live TV (docs/API.md, "Live TV"): three channels, one with no
+    // guide; the source has one connection, which channel 3 never gets.
+    if (path === "/api/live") return json(200, { available: true, allowed: true, channels: liveChannels().length, sources: 0, recent: fixture.liveRecent });
+    if (path === "/api/live/channels") return json(200, liveChannels());
+    if (path === "/api/live/guide") {
+      const from = Number(url.searchParams.get("from"));
+      const to = Number(url.searchParams.get("to"));
+      if (!(to > from)) problems.push(`a guide from ${from} to ${to}`);
+      fixture.liveGuides.push({ from, to });
+      const programs = {};
+      for (const channel of liveChannels()) {
+        if (!channel.has_guide) continue;
+        programs[channel.id] = [];
+        for (let start = Math.floor(from / 1800) * 1800; start < to; start += 1800) programs[channel.id].push(liveProgram(channel.id, start));
+      }
+      return json(200, { from, to, programs });
+    }
+    if ((match = path.match(/^\/api\/live\/channels\/(\d+)\/favorite$/)) && (req.method === "PUT" || req.method === "DELETE")) {
+      const id = Number(match[1]);
+      fixture.liveFavorites = fixture.liveFavorites.filter((f) => f !== id);
+      if (req.method === "PUT") fixture.liveFavorites.push(id);
+      fixture.liveFavoriteChanges.push({ id, favorite: req.method === "PUT" });
+      res.writeHead(204);
+      return res.end();
+    }
+    if ((match = path.match(/^\/api\/live\/channels\/(\d+)\/logo$/))) {
+      res.writeHead(200, { "Content-Type": "image/png" });
+      return res.end(STILL);
+    }
+    if ((match = path.match(/^\/api\/live\/channels\/(\d+)\/watch$/)) && req.method === "POST") {
+      const id = Number(match[1]);
+      const ask = body ? JSON.parse(body) : {};
+      fixture.liveWatches.push({ id, client_id: ask.client_id ?? null });
+      if (!ask.client_id) problems.push("a watch without a client_id");
+      const channel = liveChannels().find((c) => c.id === id);
+      if (!channel) return json(404, { code: "not_found", message: "no such channel" });
+      if (id === 3) {
+        return json(409, { code: "conflict", message: "The one connection of Fixture IPTV is in use, watching Fixture News (Ben)." });
+      }
+      // The same client's earlier session ends with this one.
+      for (const [session, watching] of fixture.liveSessions) if (watching.client === ask.client_id) fixture.liveSessions.delete(session);
+      const session = `live${fixture.liveWatches.length}`;
+      fixture.liveSessions.set(session, { client: ask.client_id, channel: id });
+      fixture.liveRecent = [id, ...fixture.liveRecent.filter((r) => r !== id)];
+      return json(200, { session_id: session, url: `/api/live/sessions/${session}/index.m3u8`, kind: "hls", channel });
+    }
+    if ((match = path.match(/^\/api\/live\/sessions\/(\w+)\/index\.m3u8$/)) && req.method === "GET") {
+      if (!fixture.liveSessions.has(match[1])) return json(410, { code: "session_stopped", message: "this channel isn't being watched any more" });
+      fixture.livePlaylists.push(match[1]);
+      res.writeHead(200, { "Content-Type": "application/vnd.apple.mpegurl" });
+      return res.end("#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:2.000000,\ns0.ts\n");
+    }
+    if ((match = path.match(/^\/api\/live\/sessions\/(\w+)$/)) && req.method === "DELETE") {
+      fixture.liveLeft.push(match[1]);
+      const known = fixture.liveSessions.delete(match[1]);
+      if (!known) return json(404, { code: "not_found", message: "not watching" });
+      res.writeHead(204);
+      return res.end();
+    }
     if (path === "/api/search") {
       const q = (url.searchParams.get("q") ?? "").toLowerCase();
       return json(200, { items: [...movies, show].filter((item) => item.title.toLowerCase().includes(q)).slice(0, 40), people: [] });
@@ -530,7 +589,26 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
 
   const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [],
     household: [{ id: 1, name: "Anna", avatar_url: null, avatar_color: "#38bdf8", current: true, needs: "none" }, { id: 2, name: "Ben", avatar_url: null, avatar_color: "#f472b6", current: false, needs: "none" }],
-    switched: [], subtitlesAdded: [], probed: false, networkTold: [], speedTests: [], problems, requests, progress, closed, close: () => server.close() };
+    switched: [], subtitlesAdded: [], probed: false, networkTold: [], speedTests: [], problems, requests, progress, closed, close: () => server.close(),
+    liveRecent: [2], liveFavorites: [], liveFavoriteChanges: [], liveGuides: [], liveWatches: [], liveSessions: new Map(), livePlaylists: [], liveLeft: [] };
+  // The channels, each with what's on now and next, by the half hour.
+  function liveProgram(channelId, start) {
+    const titles = { 1: ["Fixture Morning", "Fixture at One"], 2: ["Match Day", "Tennis Live"] }[channelId];
+    const n = Math.floor(start / 1800);
+    return { channel_id: channelId, start, stop: start + 1800, title: `${titles[n % 2]} ${n % 7}`, subtitle: null, description: "What the fixture shows.", categories: [], image: null, season: 1, episode: n % 7, is_new: n % 2 === 0, is_live: channelId === 2, rating: null };
+  }
+  function liveChannels() {
+    const now = Math.floor(Date.now() / 1000);
+    const slot = Math.floor(now / 1800) * 1800;
+    return [
+      { id: 1, name: "Fixture News", number: "101", group: "News" },
+      { id: 2, name: "Fixture Sport", number: "102", group: "Sport" },
+      { id: 3, name: "Fixture Films", number: "103", group: "Films" },
+    ].map((c) => ({
+      ...c, source_id: 1, logo: `/api/live/channels/${c.id}/logo`, favorite: fixture.liveFavorites.includes(c.id), has_guide: c.id !== 3,
+      now: c.id !== 3 ? liveProgram(c.id, slot) : null, next: c.id !== 3 ? liveProgram(c.id, slot + 1800) : null,
+    }));
+  }
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => {
       issuer = `http://127.0.0.1:${server.address().port}`;
