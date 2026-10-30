@@ -26,6 +26,7 @@ import type {
   NetworkSettings,
   PersonDetail,
   RecoveryCodes,
+  RequestAccess,
   Resources,
   ProfilePatch,
   SearchResults,
@@ -929,6 +930,7 @@ export interface NewUserInput {
   library_ids?: Id[];
   max_age?: number | null;
   pin?: string;
+  request_access?: RequestAccess;
 }
 
 export function useCreateUser() {
@@ -953,6 +955,7 @@ export interface UserPatch {
   library_ids?: Id[];
   max_age?: number | null;
   pin?: string | null;
+  request_access?: RequestAccess;
 }
 
 export function useUpdateUser() {

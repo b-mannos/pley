@@ -203,6 +203,9 @@ interface User {
   subtitle_mode: "off" | "forced" | "foreign" | "always";
   has_password: boolean;            // false: a managed profile, or an account without a password
   two_step: boolean;                // two-step sign-in is on
+  request_access: "off" | "ask" | "auto"; // Requests: may not ask, asks an administrator, or approved as
+                                    // made. Administrators: always "auto". Left out when made: "off" for
+                                    // managed profiles and accounts with an age limit, else "ask"
 }
 
 type LibraryKind = "movies" | "shows" | "music";
@@ -2225,6 +2228,188 @@ interface HistoryEntry {
 }
 ```
 
+## Requests
+
+People ask for movies and shows the libraries don't have, found on TMDB
+(*Discover*). An administrator approves or declines each request;
+administrators' own requests, and those of accounts whose `request_access`
+is `"auto"`, are approved as they're made. An approved request goes to
+Radarr (movies) or Sonarr (shows) where the [settings](#system-admin)
+connect them, which find and download it, and is *available* once a
+library has it: the movie, or every season asked for, whole.
+
+Requests are off until `requests` is on in the settings, and need a TMDB
+key. Until then every endpoint here but the summary answers `503` with
+`{ code: "unavailable", message, setup: false }`. An account whose
+`request_access` is `"off"` (by default managed profiles' and those of
+accounts with an age limit: Discover shows TMDB's titles whatever their
+rating) gets `403`. Should TMDB refuse the key or not answer, `503` with
+`setup: true`.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | `/api/requests/summary` | `user` | `RequestSummary`: whether this account may ask, and how much more |
+| GET | `/api/discover/{list}?page=` | `user` | `DiscoverPage`. `list`: `trending`, `movies`, `shows`, `upcoming` or `anime` |
+| GET | `/api/discover/search?q=&page=` | `user` | `DiscoverPage`: movies and shows matching `q` |
+| GET | `/api/discover/movie/{tmdb_id}` | `user` | `DiscoverDetail` |
+| GET | `/api/discover/show/{tmdb_id}` | `user` | `DiscoverDetail`, with `seasons` |
+| GET | `/api/requests?status=&mine=&offset=&limit=` | `user` | `{ total, counts: Record<RequestStatus, number>, requests: MediaRequest[] }`, newest first |
+| POST | `/api/requests` | `user` | `{ kind, tmdb_id, seasons? }` → `201` `MediaRequest` |
+| GET | `/api/requests/{id}` | `user` | `MediaRequest` |
+| POST | `/api/requests/{id}/approve` | `admin` | `{ quality_profile?, root_folder? }` → `MediaRequest` |
+| POST | `/api/requests/{id}/decline` | `admin` | `{ reason? }` → `MediaRequest` |
+| DELETE | `/api/requests/{id}` | `user` | `204`: withdraws your own while it's pending, declined or failed (others: `409`); administrators delete any |
+
+- **Lists** (`/api/discover/…`): 20 titles a page in TMDB's order, `page`
+  from 1 (default) to 500. `trending`: this week's movies and shows;
+  `movies` and `shows`: the most popular; `upcoming`: movies coming to
+  cinemas in the server's region (`metadata_language`'s country);
+  `anime`: the most popular anime shows. Adult titles are left out. TMDB's
+  answers are reused for an hour, details for six.
+- **A title's `status`** for the account asking: `library` when a library
+  has it (a movie with the same TMDB or IMDb id, a show with the same TMDB,
+  TVDB or IMDb id), `requested` when an active (pending, approved or
+  failed) request asks for it, else `none`. Lists match by TMDB's id (and
+  shows by their other ids where a library show has no TMDB id). A show in
+  a library may still be asked for the seasons it lacks:
+  `DiscoverDetail.seasons` says which.
+- **Asking** (`POST /api/requests`): `seasons` (shows only) are TMDB's
+  season numbers, 0 for specials; left out, every season but specials.
+  Seasons a library has whole, and those an active request asks for
+  already, are dropped. `409` when nothing is left, and for a movie a
+  library has or an active request asks for; `400` for a season TMDB
+  doesn't list; `404` for a title TMDB doesn't know. Past the account's
+  limit (`request_limit_movies`, `request_limit_seasons`: a show counts its
+  seasons, over the last 7 days, declined requests left out), `429` with
+  when it may ask again in `message`. Administrators have no limit.
+- **Approving** a pending or failed request (others: `409`): where Radarr
+  or Sonarr is connected for its kind, the title is added there, monitored,
+  with the settings' quality profile and root folder (anime's own where
+  set), or those given, and searched for unless `radarr_search` /
+  `sonarr_search` is off. A title already there is monitored again, the
+  seasons asked for too, and searched for. Should that fail, the request is
+  `failed` and `reason` says why; approving it again tries again. Without
+  Radarr or Sonarr for its kind, it is simply approved, for an
+  administrator to add by hand.
+- **Declining** a pending or failed request (others: `409`) keeps `reason`
+  (500 characters at most) for its maker to read.
+- **Available**: looked at after every library scan and every 5 minutes,
+  for active requests: a library's title as in `status` above, with every
+  season asked for whole (as many episodes as TMDB says have aired; with
+  fewer, the last one there and Sonarr saying it has them all, as files of
+  several episodes are counted once). `available_seasons` lists those whole
+  so far. A pending request whose title arrives this way is available too.
+- **Listing** (`GET /api/requests`): your own requests; administrators'
+  answer has everyone's, unless `mine=1`. `status` keeps one status;
+  `counts` counts each status of the same list without it. `offset` and
+  `limit` (default 50, at most 200).
+- **Events**: every change of a request sends `requests_changed` to its
+  maker's streams and to administrators'. A request becoming available also
+  sends `request_available` to its maker's.
+- **`download`**: an approved request's download in Radarr or Sonarr while
+  one is queued or running, looked up at most every 10 seconds.
+
+```ts
+type TitleKind = "movie" | "show";
+type RequestStatus = "pending" | "approved" | "declined" | "failed" | "available";
+type RequestAccess = "off" | "ask" | "auto"; // may not ask; asks an administrator; approved as made
+
+interface RequestSummary {
+  enabled: boolean;                 // requests are on (and TMDB has a key)
+  access: RequestAccess;            // this account's; always "auto" for administrators
+  movies_left: number | null;       // requests it may still make in the 7 days; null = no limit
+  seasons_left: number | null;
+  movies_next_at: Timestamp | null; // with no movies left: when one more may be asked for
+  seasons_next_at: Timestamp | null; // with no seasons left: likewise
+  pending: number;                  // administrators: requests waiting for a decision (others: 0)
+}
+
+interface DiscoverTitle {
+  kind: TitleKind;
+  tmdb_id: number;
+  title: string;
+  year: number | null;
+  overview: string;
+  poster_url: string | null;        // TMDB's, 342 pixels wide (500 in DiscoverDetail)
+  backdrop_url: string | null;      // TMDB's, 1280 pixels wide
+  rating: number | null;            // TMDB's users', 0-10; null with too few votes
+  status: "library" | "requested" | "none";
+  item_id: Id | null;               // in a library: the title, where this account may open it
+  request_id: Id | null;            // requested: the active request, where it's this account's
+                                    // (any for administrators)
+}
+
+interface DiscoverPage {
+  page: number;
+  total_pages: number;
+  results: DiscoverTitle[];
+}
+
+interface DiscoverDetail extends DiscoverTitle {
+  original_title: string | null;    // where it differs from `title`
+  tagline: string | null;
+  genres: string[];
+  release_date: string | null;      // "2024-05-01": a movie's release, a show's first air date
+  runtime_minutes: number | null;   // movies
+  certification: string | null;     // "PG-13", "TV-MA": the server's region's
+  network: string | null;           // a show's first network, a movie's first studio
+  show_status: string | null;       // shows: TMDB's ("Returning Series", "Ended")
+  anime: boolean;                   // TMDB's "anime" keyword, or Japanese animation: anime's folder and profile
+  cast: { name: string; character: string | null; photo_url: string | null }[]; // 12 at most
+  seasons: DiscoverSeason[] | null; // shows, in order (specials, 0, first)
+  requests: MediaRequest[];         // for it: this account's, everyone's for administrators; newest first
+}
+
+interface DiscoverSeason {
+  number: number;                   // 0: specials
+  name: string;
+  episodes: number;                 // TMDB lists
+  aired: number;                    // of those, aired by now
+  air_date: string | null;          // its first episode's
+  poster_url: string | null;
+  in_library: number;               // episodes of it a library has
+  requested: boolean;               // an active request asks for it
+}
+
+interface MediaRequest {
+  id: Id;
+  kind: TitleKind;
+  tmdb_id: number;
+  title: string;                    // as TMDB had it when asked
+  year: number | null;
+  poster_url: string | null;
+  backdrop_url: string | null;
+  seasons: number[] | null;         // shows: the seasons asked for; null for movies
+  available_seasons: number[];      // shows: those a library has whole
+  anime: boolean;
+  status: RequestStatus;
+  reason: string | null;            // declined: the administrator's (or null); failed: what went wrong
+  requested_by: RequestUser;
+  decided_by: RequestUser | null;   // who approved or declined it: the maker where approved as made;
+                                    // null for an account deleted since
+  decided_at: Timestamp | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+  available_at: Timestamp | null;
+  item_id: Id | null;               // a library's title once there, where this account may open it
+  download: RequestDownload | null;
+}
+
+interface RequestUser {
+  id: Id;
+  name: string;
+  avatar_url: string | null;
+  avatar_color: string | null;
+}
+
+interface RequestDownload {
+  progress: number;                 // 0-1, of everything of it queued
+  state: "queued" | "downloading" | "paused" | "importing" | "warning";
+  eta: Timestamp | null;            // the queue's estimate, where it has one
+  episodes: number;                 // shows: episodes queued (movies: 1)
+}
+```
+
 ## Activity & events
 
 | Method | Path | Who | What |
@@ -2372,7 +2557,11 @@ type ServerEvent =
   | { type: "user_state_changed"; item_ids: Id[]; children: boolean } // their watch state (their streams only)
   | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean } // theirs only
   | { type: "live_channels_changed" }                // Live TV's sources, channels or guide changed: refetch
-  | { type: "live_tuners_changed" };                 // a channel was tuned or let go, or its viewers changed
+  | { type: "live_tuners_changed" }                  // a channel was tuned or let go, or its viewers changed
+  | { type: "requests_changed" }                     // a request was made, decided, withdrawn or became available:
+                                                     // to its maker's streams and administrators'
+  | { type: "request_available"; request_id: Id; title: string; item_id: Id | null }; // the maker's: a library has
+                                                     // it now (item_id: where they may open it)
 ```
 
 ## Live TV
@@ -2545,8 +2734,8 @@ interface LiveTuner {                  // a connection in use
 | Method | Path | Who | What |
 |---|---|---|---|
 | GET | `/api/users` | `admin` | `User[]` |
-| POST | `/api/users` | `admin` | `{ username, password?, display_name?, is_admin?, managed?, home? (true), all_libraries? (true), library_ids?, max_age?, pin? }` → `201` `User`; managed profiles need no password and can't be administrators (`400`) |
-| PATCH | `/api/users/{id}` | `admin` | `{ password?, display_name?, is_admin?, home?, disabled?, all_libraries?, library_ids?, max_age?, pin? }` (`null` clears nullable fields) → `User` |
+| POST | `/api/users` | `admin` | `{ username, password?, display_name?, is_admin?, managed?, home? (true), all_libraries? (true), library_ids?, max_age?, pin?, request_access? }` → `201` `User`; managed profiles need no password and can't be administrators (`400`) |
+| PATCH | `/api/users/{id}` | `admin` | `{ password?, display_name?, is_admin?, home?, disabled?, all_libraries?, library_ids?, max_age?, pin?, request_access? }` (`null` clears nullable fields) → `User` |
 | DELETE | `/api/users/{id}` | `admin` | `204` (not yourself); their apps end with them |
 | GET | `/api/users/{id}/devices` | `admin` | `Device[]` |
 | DELETE | `/api/users/{id}/devices` | `admin` | `204`: signs the user out everywhere, apps included |
@@ -2586,9 +2775,10 @@ interface LiveTuner {                  // a connection in use
 | GET | `/api/system/backups` | `admin` | `{ health: { ok, problem?, checked_at }, backups: { name, path, bytes, created_at }[] }`, newest first (`ok` and `checked_at` `null` until checked) |
 | POST | `/api/system/backups` | `admin` | the new backup: a checked `VACUUM INTO` copy; the last 3 are kept |
 | GET | `/api/transcoder` | `admin` | `TranscoderStatus`: the transcoder's live metrics (all jobs, counters) |
-| GET | `/api/settings` | `admin` | `Settings` (never with `opensubtitles_password`) |
+| GET | `/api/settings` | `admin` | `Settings` (never with `opensubtitles_password`, `radarr_api_key` or `sonarr_api_key`) |
 | PUT | `/api/settings` | `admin` | partial `Settings` → `Settings` |
 | POST | `/api/settings/test` | `admin` | `{ service, api_key?, pin?, username?, password? }` → `{ ok, message, ms }` |
+| POST | `/api/settings/arr` | `admin` | `{ service: "radarr" \| "sonarr", url?, api_key? }` → `ArrOptions`: what Radarr or Sonarr offers requests |
 | GET | `/api/fs?path=` | `admin` | `{ path: string \| null, parent: string \| null, entries: { name, path }[] }`: directories only (`path` left out: roots and drives) |
 | GET | `/api/network` | `admin` | `Network`: where Pley listens, and could |
 | PUT | `/api/network` | `admin` | `{ web, plex, plex_on_web?, discovery }` → `Network` |
@@ -2636,6 +2826,18 @@ interface LiveTuner {                  // a connection in use
   key, or with a `username`, a sign-in of that account (`password` left
   out: the saved one, for the saved username). `message` says what
   happened, for people.
+- **`settings/arr`** asks Radarr or Sonarr at `url` with `api_key` (not
+  saved), else the saved ones, for what [requests](#requests) can be sent
+  with. The saved key goes only to the saved address: a new `url` needs its
+  `api_key` (`400`). Where it can't be reached or refuses the key, `400`
+  with what went wrong in `message`, for people.
+- **`PUT /api/settings`** keeps `radarr_url` and `sonarr_url` as URLs are
+  written (`HTTP://Box:7878/` is `http://box:7878`), less a trailing `/`
+  (`""` = none): http or https, with a host and no password, else `400`. A new address needs its `radarr_api_key` or `sonarr_api_key` too
+  (`400`: the saved key goes to the saved address only), and `""` forgets
+  the key with the address. `requests` on without a TMDB key (turning them
+  on, or removing the key while they are), a limit above 1000, and a
+  `radarr_minimum_availability` other than those below answer `400`.
 - **`PUT /api/network`** answers once the new listeners listen or have
   tried for a moment (3 s at most). Saved in the config file for the next
   start (`plex_bind`: `"web"`, `"off"` or the addresses). `400` for
@@ -2704,6 +2906,37 @@ interface Settings {
                                     // API key's own (smaller) quota. A new username forgets the saved password
   opensubtitles_password?: string;  // PUT only, never sent back. Left out: the saved one stays; "" = none
   opensubtitles_password_set: boolean; // GET: a password is saved
+  // Requests (see Requests):
+  requests: boolean;                // people may ask for movies and shows (default false); needs a TMDB key
+  request_limit_movies: number;     // requests an account may make in 7 days, 0-1000 (administrators:
+  request_limit_seasons: number;    // no limit); 0 (default) = no limit. A show counts its seasons
+  radarr_url: string;               // "http://localhost:7878"; "" = no Radarr: movies approved are added by hand
+  radarr_api_key?: string;          // PUT only, never sent back. Left out: the saved one stays; "" = none
+  radarr_api_key_set: boolean;      // GET: a key is saved
+  radarr_quality_profile: number;   // Radarr's id; 0 = not chosen (approving fails until one is)
+  radarr_root_folder: string;       // "" = not chosen (approving fails until one is)
+  radarr_anime_quality_profile: number; // for anime; 0 = radarr_quality_profile
+  radarr_anime_root_folder: string; // for anime; "" = radarr_root_folder
+  radarr_minimum_availability: "announced" | "in_cinemas" | "released"; // when Radarr may take a release
+                                    // (default "released")
+  radarr_search: boolean;           // search as soon as a movie is added (default true)
+  sonarr_url: string;               // "http://localhost:8989"; "" = no Sonarr
+  sonarr_api_key?: string;          // as radarr_api_key
+  sonarr_api_key_set: boolean;
+  sonarr_quality_profile: number;
+  sonarr_root_folder: string;
+  sonarr_language_profile: number;  // Sonarr 3's language profile; 0 = its first (Sonarr 4 has none)
+  sonarr_anime_quality_profile: number;
+  sonarr_anime_root_folder: string;
+  sonarr_season_folders: boolean;   // a folder for each season (default true)
+  sonarr_search: boolean;           // search for the seasons asked for as soon as they're added (default true)
+}
+
+interface ArrOptions {
+  version: string;                  // "5.14.0.9383"
+  quality_profiles: { id: number; name: string }[];
+  root_folders: { path: string; free_bytes: number | null }[];
+  language_profiles: { id: number; name: string }[]; // Sonarr 3 only; [] otherwise
 }
 
 interface SystemInfo {

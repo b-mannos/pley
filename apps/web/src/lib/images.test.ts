@@ -38,6 +38,11 @@ describe("image sizes", () => {
     expect(sizedImage(null, 300)).toBeNull();
     expect(sizedImage("", 300)).toBeNull();
   });
+
+  it("leaves another site's images as they are", () => {
+    const tmdb = "https://image.tmdb.org/t/p/w342/abc.jpg";
+    expect(sizedImage(tmdb, 150)).toBe(tmdb);
+  });
 });
 
 describe("artwork fallbacks", () => {

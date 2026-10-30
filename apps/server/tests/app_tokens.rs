@@ -60,6 +60,16 @@ const FIRST_PARTY: &[(&str, &str)] = &[
     ("GET", "/api/me/apps"),
     ("DELETE", "/api/me/apps/{id}"),
     ("GET", "/api/activity"),
+    // Asking for movies and shows (an administrator decides).
+    ("GET", "/api/discover/search"),
+    ("GET", "/api/discover/movie/{tmdb_id}"),
+    ("GET", "/api/discover/show/{tmdb_id}"),
+    ("GET", "/api/discover/{list}"),
+    ("GET", "/api/requests"),
+    ("POST", "/api/requests"),
+    ("GET", "/api/requests/summary"),
+    ("GET", "/api/requests/{id}"),
+    ("DELETE", "/api/requests/{id}"),
 ];
 
 /// Administration.
@@ -109,6 +119,9 @@ const ADMIN: &[(&str, &str)] = &[
     ("GET", "/api/settings"),
     ("PUT", "/api/settings"),
     ("POST", "/api/settings/test"),
+    ("POST", "/api/settings/arr"),
+    ("POST", "/api/requests/{id}/approve"),
+    ("POST", "/api/requests/{id}/decline"),
     ("GET", "/api/network"),
     ("PUT", "/api/network"),
     ("GET", "/api/fs"),

@@ -6,6 +6,7 @@ import { connectionLost } from "@/lib/connection";
 import { testQueryClient } from "@/test/render";
 import { LOST_AFTER_MS, onServerEvent, useServerEvents } from "./events";
 import { keys } from "./hooks";
+import { requestKeys } from "./requests";
 import type { Activity, Library, ServerEvent } from "./types";
 
 /** Stands in for the browser's EventSource; tests drive it. */
@@ -288,6 +289,28 @@ describe("useServerEvents", () => {
     });
     expect(invalidated(client, keys.library(1))).toBe(false);
     expect(invalidated(client, keys.homeHubs)).toBe(false);
+  });
+
+  it("refreshes requests, Discover and the count waiting when a request changes", () => {
+    const { client, source } = setup();
+    client.setQueryData(requestKeys.summary, { pending: 0 });
+    client.setQueryData(requestKeys.title("movie", 603), { tmdb_id: 603 });
+    client.setQueryData(requestKeys.list({ status: null, mine: false }), { pages: [], pageParams: [] });
+    client.setQueryData(keys.item(5), { id: 5 });
+
+    act(() => source().send({ type: "requests_changed" }));
+    expect(invalidated(client, requestKeys.summary)).toBe(true);
+    expect(invalidated(client, requestKeys.title("movie", 603))).toBe(true);
+    expect(invalidated(client, requestKeys.list({ status: null, mine: false }))).toBe(true);
+    expect(invalidated(client, keys.item(5))).toBe(false);
+  });
+
+  it("refreshes requests after a reconnect", () => {
+    const { client, source } = setup();
+    act(() => source().open());
+    client.setQueryData(requestKeys.summary, { pending: 0 });
+    act(() => source().open());
+    expect(invalidated(client, requestKeys.summary)).toBe(true);
   });
 
   it("passes events on to whoever listens", () => {

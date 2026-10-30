@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { connectionLost, serverAnswers, setConnectionLost } from "@/lib/connection";
 import { keys } from "./hooks";
 import { liveKeys } from "./livetv";
+import { requestKeys } from "./requests";
 import type { Activity, Id, Library, ServerEvent } from "./types";
 
 /** How long the stream may be down before the pages say the server is out of reach: a restart takes a moment. */
@@ -105,6 +106,7 @@ export function useServerEvents(enabled: boolean) {
       void qc.invalidateQueries({ queryKey: ["history"] });
       void qc.invalidateQueries({ queryKey: keys.watchlist });
       void qc.invalidateQueries({ queryKey: liveKeys.all });
+      void qc.invalidateQueries({ queryKey: requestKeys.all });
     };
 
     // Metadata refreshes can emit many `library_changed` events in a burst;
@@ -231,6 +233,12 @@ export function useServerEvents(enabled: boolean) {
         case "live_tuners_changed":
           void qc.invalidateQueries({ queryKey: liveKeys.tuners });
           void qc.invalidateQueries({ queryKey: liveKeys.sources });
+          break;
+        // Statuses on Discover and the titles' pages, the lists of requests,
+        // the Requests count waiting for a decision.
+        case "requests_changed":
+        case "request_available":
+          void qc.invalidateQueries({ queryKey: requestKeys.all });
           break;
       }
       for (const listener of listeners) listener(ev);

@@ -13,6 +13,7 @@
 - Plays files as they are, or transcodes on the GPU
 - HDR10, HLG and Dolby Vision tone mapping
 - Live TV from M3U and Xtream Codes, with XMLTV guides
+- Requests for movies and shows, fetched by Radarr and Sonarr
 - Profiles, PINs and two-step sign-in
 - Works offline on the home network
 

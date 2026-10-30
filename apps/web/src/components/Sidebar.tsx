@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router";
-import { ArrowUpDown, Film, House, List, ListMusic, ListVideo, LoaderCircle, Music, Plus, Settings, Tv, Tv2, X } from "lucide-react";
+import { ArrowUpDown, Compass, Film, House, Inbox, List, ListMusic, ListVideo, LoaderCircle, Music, Plus, Settings, Tv, Tv2, X } from "lucide-react";
 import { useLibraries } from "@/api/hooks";
 import { useLiveSummary } from "@/api/livetv";
 import { usePlaylists } from "@/api/lists";
+import { mayRequest, useRequestSummary } from "@/api/requests";
 import type { LibraryKind } from "@/api/types";
 import { useAuth } from "@/auth";
 import { cn } from "@/lib/cn";
@@ -11,7 +12,7 @@ import { Logo } from "./Logo";
 import { keepTabInside } from "./Modal";
 import { SortLibrariesModal } from "./SortLibrariesModal";
 import { IconButton, Skeleton } from "./ui";
-import { libraryUrl, playlistUrl } from "@/lib/urls";
+import { discoverUrl, libraryUrl, playlistUrl, requestsUrl } from "@/lib/urls";
 
 export function LibraryIcon({ kind, className }: { kind: LibraryKind; className?: string }) {
   const cls = cn("size-[18px] shrink-0", className);
@@ -74,6 +75,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
             Live TV
           </NavItem>
         ) : null}
+        <RequestsNav />
       </div>
 
       <div className="mb-0.5 mt-5 flex h-7 items-center justify-between pl-3 pr-1 text-xs font-medium text-subtle">
@@ -129,6 +131,37 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
         </div>
       ) : null}
     </nav>
+  );
+}
+
+/** Discover and Requests, where this account may ask for titles; administrators see how many wait for them. */
+function RequestsNav() {
+  const summary = useRequestSummary();
+  if (!mayRequest(summary.data)) return null;
+  const waiting = summary.data.pending;
+  return (
+    <>
+      <NavItem to={discoverUrl()} icon={<Compass className="size-[18px]" />}>
+        Discover
+      </NavItem>
+      <NavItem
+        to={requestsUrl}
+        icon={<Inbox className="size-[18px]" />}
+        trailing={
+          // The spaces outside the spans, as names are made of their trimmed text: "Requests 3 waiting".
+          waiting > 0 ? (
+            <>
+              {" "}
+              <span className="min-w-5 rounded-full bg-accent px-1.5 text-center text-[11px] font-bold leading-5 text-accent-fg">
+                {waiting > 99 ? "99+" : waiting} <span className="sr-only">waiting</span>
+              </span>
+            </>
+          ) : null
+        }
+      >
+        Requests
+      </NavItem>
+    </>
   );
 }
 

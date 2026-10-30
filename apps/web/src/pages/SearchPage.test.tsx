@@ -31,7 +31,18 @@ describe("SearchPage", () => {
     const movies = screen.getByRole("heading", { name: "Movies 2" }).closest("section") as HTMLElement;
     expect(within(movies).getByText("1995")).toBeInTheDocument();
     // The query is trimmed.
-    expect(requests[0]?.path).toBe("/api/search?q=heat&limit=60");
+    expect(requests.find((r) => r.path.startsWith("/api/search"))?.path).toBe("/api/search?q=heat&limit=60");
+    // Without requests (here, a server without them), no way to Discover.
+    expect(screen.queryByRole("link", { name: /in Discover/ })).not.toBeInTheDocument();
+  });
+
+  it("offers to look in Discover where this account may ask for titles", async () => {
+    mockApi({
+      "GET /api/search": () => ({ items: [] }),
+      "GET /api/requests/summary": () => ({ enabled: true, access: "ask", movies_left: null, seasons_left: null, movies_next_at: null, seasons_next_at: null, pending: 0 }),
+    });
+    search("dune ");
+    expect(await screen.findByRole("link", { name: "Look for “dune” in Discover" })).toHaveAttribute("href", "/discover?q=dune");
   });
 
   it("invites a search without a query", () => {

@@ -30,6 +30,16 @@ describes how they are made.
 
 ### Added
 
+- Requests. Discover finds movies and shows on TMDB (trending, popular,
+  upcoming, anime, or a search) and marks what the libraries have. People
+  ask for a movie or a show's missing seasons; administrators approve or
+  decline them, and accounts may be allowed to have theirs approved as
+  asked, within limits per 7 days. Approved requests go to Radarr and
+  Sonarr, whose downloads' progress shows, and a request's maker is told
+  once a library has it. Turned on in Settings → Requests; who may ask is
+  in Settings → Users, where profiles without a password and accounts with
+  an age limit start without. `/api/discover`, `/api/requests` and
+  `POST /api/settings/arr` ([docs/API.md](../../docs/API.md#requests)).
 - Live TV: IPTV channels from an M3U playlist or an Xtream Codes account,
   with their XMLTV guide, watched in the web and desktop apps through the
   server, at home or away. A guide that scrolls through time, channel

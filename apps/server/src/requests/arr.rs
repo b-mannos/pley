@@ -1,0 +1,597 @@
+//! Radarr and Sonarr, through their API (v3): approved requests are added
+//! there to be found and downloaded, the settings list what they offer
+//! ([`Options`]), and their download queues say how far requests are.
+//!
+//! The API key goes in a header, only to the address saved with it, and
+//! never along a redirect.
+
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use reqwest::Method;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+use crate::settings::{MinimumAvailability, Settings};
+use crate::util::utc_secs;
+
+/// How long an answer may take: adding a title has them look it up.
+const TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a download queue is reused.
+const QUEUE_TTL: Duration = Duration::from_secs(10);
+/// Downloads a queue lists at most (one per episode for Sonarr).
+const QUEUE_SIZE: u32 = 1000;
+/// What an error quotes of an answer at most.
+const QUOTE: usize = 300;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Service {
+    Radarr,
+    Sonarr,
+}
+
+impl Service {
+    pub fn name(self) -> &'static str {
+        match self {
+            Service::Radarr => "Radarr",
+            Service::Sonarr => "Sonarr",
+        }
+    }
+
+    /// Its saved address and key, where both are.
+    pub fn saved(self, settings: &Settings) -> Option<Connection> {
+        let (url, key) = match self {
+            Service::Radarr => (&settings.radarr_url, &settings.radarr_api_key),
+            Service::Sonarr => (&settings.sonarr_url, &settings.sonarr_api_key),
+        };
+        (!url.is_empty() && !key.is_empty()).then(|| Connection { url: url.clone(), key: key.clone() })
+    }
+}
+
+/// Where Radarr or Sonarr is, and its key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Connection {
+    pub url: String,
+    pub key: String,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ArrError {
+    #[error("{0} rejected the API key")]
+    Unauthorized(&'static str),
+    #[error("{0} couldn't be reached: {1}")]
+    Unreachable(&'static str, String),
+    #[error("{0} refused: {1}")]
+    Refused(&'static str, String),
+    #[error("{0} answered something unexpected: {1}")]
+    Unexpected(&'static str, String),
+    /// Something to choose in the settings first, or to do by hand.
+    #[error("{0}")]
+    Needs(String),
+}
+
+/// What Radarr or Sonarr offers requests.
+#[derive(Debug, Clone, Serialize)]
+pub struct Options {
+    pub version: String,
+    pub quality_profiles: Vec<Profile>,
+    pub root_folders: Vec<RootFolder>,
+    /// Sonarr 3's; none otherwise.
+    pub language_profiles: Vec<Profile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Profile {
+    pub id: i64,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RootFolder {
+    pub path: String,
+    pub free_bytes: Option<i64>,
+}
+
+/// A title to add: what the request asks for, and what to add it with.
+#[derive(Debug, Clone)]
+pub struct Title<'a> {
+    pub tmdb_id: i64,
+    pub tvdb_id: Option<i64>,
+    pub anime: bool,
+    /// Shows: the seasons asked for.
+    pub seasons: &'a [i64],
+    /// Chosen when approving, instead of the settings'.
+    pub quality_profile: Option<i64>,
+    pub root_folder: Option<&'a str>,
+}
+
+/// How far a request's download is.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Download {
+    /// 0-1, of everything of it queued.
+    pub progress: f64,
+    pub state: DownloadState,
+    pub eta: Option<i64>,
+    /// Shows: episodes queued (movies: 1).
+    pub episodes: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DownloadState {
+    Queued,
+    Paused,
+    Importing,
+    Downloading,
+    Warning,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QueuePage {
+    #[serde(default)]
+    records: Vec<QueueRecord>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueRecord {
+    movie_id: Option<i64>,
+    series_id: Option<i64>,
+    season_number: Option<i64>,
+    /// Sonarr 3 names the season in the episode.
+    episode: Option<QueueEpisode>,
+    #[serde(default)]
+    size: f64,
+    #[serde(default)]
+    sizeleft: f64,
+    status: Option<String>,
+    tracked_download_state: Option<String>,
+    tracked_download_status: Option<String>,
+    estimated_completion_time: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QueueEpisode {
+    season_number: Option<i64>,
+}
+
+impl QueueRecord {
+    fn state(&self) -> DownloadState {
+        let tracked = self.tracked_download_state.as_deref().unwrap_or_default();
+        if matches!(self.tracked_download_status.as_deref(), Some("warning" | "error"))
+            || matches!(tracked, "importBlocked" | "failedPending" | "failed")
+        {
+            return DownloadState::Warning;
+        }
+        if matches!(tracked, "importPending" | "importing" | "imported") {
+            return DownloadState::Importing;
+        }
+        match self.status.as_deref().unwrap_or_default() {
+            "downloading" => DownloadState::Downloading,
+            "paused" => DownloadState::Paused,
+            "completed" => DownloadState::Importing,
+            "failed" | "warning" => DownloadState::Warning,
+            _ => DownloadState::Queued,
+        }
+    }
+
+    fn season(&self) -> Option<i64> {
+        self.season_number.or_else(|| self.episode.as_ref().and_then(|e| e.season_number))
+    }
+}
+
+/// The download of the records of one title: `None` for none.
+pub fn download(records: &[&QueueRecord]) -> Option<Download> {
+    if records.is_empty() {
+        return None;
+    }
+    let size: f64 = records.iter().map(|r| r.size.max(0.0)).sum();
+    let left: f64 = records.iter().map(|r| r.sizeleft.max(0.0)).sum();
+    let progress = if size > 0.0 { ((size - left) / size).clamp(0.0, 1.0) } else { 0.0 };
+    Some(Download {
+        progress: (progress * 1000.0).round() / 1000.0,
+        state: records.iter().map(|r| r.state()).max().unwrap_or(DownloadState::Queued),
+        eta: records.iter().filter_map(|r| r.estimated_completion_time.as_deref().and_then(utc_secs)).max(),
+        episodes: records.len() as i64,
+    })
+}
+
+/// A queue, as last fetched: its records, or why there are none.
+pub type Queue = Result<Arc<Vec<QueueRecord>>, String>;
+
+pub struct Arr {
+    http: reqwest::Client,
+    /// Radarr's queue, then Sonarr's, with when it was fetched and from where.
+    queues: [tokio::sync::Mutex<Option<(Instant, Connection, Queue)>>; 2],
+}
+
+impl Default for Arr {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Arr {
+    pub fn new() -> Self {
+        let http = reqwest::Client::builder()
+            .user_agent(concat!("pley/", env!("CARGO_PKG_VERSION")))
+            .timeout(TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("http client");
+        Self { http, queues: Default::default() }
+    }
+
+    async fn call<T: DeserializeOwned>(
+        &self,
+        service: Service,
+        to: &Connection,
+        method: Method,
+        path: &str,
+        query: &[(&str, String)],
+        body: Option<&Value>,
+    ) -> Result<T, ArrError> {
+        let name = service.name();
+        let mut req = self.http.request(method, format!("{}/api/v3{path}", to.url)).header("X-Api-Key", &to.key);
+        if !query.is_empty() {
+            req = req.query(query);
+        }
+        if let Some(body) = body {
+            req = req.json(body);
+        }
+        let resp = req.send().await.map_err(|e| ArrError::Unreachable(name, reason(&e.without_url())))?;
+        let status = resp.status();
+        if matches!(status.as_u16(), 401 | 403) {
+            return Err(ArrError::Unauthorized(name));
+        }
+        if status.is_redirection() {
+            let message = "it answered with a redirect: give its address with its base URL, as its own settings show";
+            return Err(ArrError::Unexpected(name, message.to_owned()));
+        }
+        if !status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(ArrError::Refused(name, message_of(&text).unwrap_or_else(|| format!("HTTP {status}"))));
+        }
+        resp.json::<T>().await.map_err(|e| ArrError::Unexpected(name, reason(&e.without_url())))
+    }
+
+    async fn get<T: DeserializeOwned>(
+        &self,
+        service: Service,
+        to: &Connection,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<T, ArrError> {
+        self.call(service, to, Method::GET, path, query, None).await
+    }
+
+    /// Its version, quality profiles, root folders and (Sonarr 3's)
+    /// language profiles.
+    pub async fn options(&self, service: Service, to: &Connection) -> Result<Options, ArrError> {
+        #[derive(Deserialize)]
+        struct Status {
+            version: String,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Folder {
+            path: String,
+            free_space: Option<i64>,
+        }
+        let status: Status = self.get(service, to, "/system/status", &[]).await?;
+        let quality_profiles: Vec<Profile> = self.get(service, to, "/qualityprofile", &[]).await?;
+        let folders: Vec<Folder> = self.get(service, to, "/rootfolder", &[]).await?;
+        let language_profiles = if service == Service::Sonarr && status.version.starts_with("3.") {
+            self.get(service, to, "/languageprofile", &[]).await?
+        } else {
+            Vec::new()
+        };
+        Ok(Options {
+            version: status.version,
+            quality_profiles,
+            root_folders: folders.into_iter().map(|f| RootFolder { path: f.path, free_bytes: f.free_space }).collect(),
+            language_profiles,
+        })
+    }
+
+    /// Adds a movie to Radarr, monitored, and searches for it; one there
+    /// already is monitored again and searched for unless it has a file.
+    /// Its id in Radarr.
+    pub async fn add_movie(&self, to: &Connection, settings: &Settings, title: &Title<'_>) -> Result<i64, ArrError> {
+        let radarr = Service::Radarr;
+        let tmdb = [("tmdbId", title.tmdb_id.to_string())];
+        let found: Vec<Value> = self.get(radarr, to, "/movie", &tmdb).await?;
+        if let Some(mut movie) = found.into_iter().next() {
+            let id = id_of(radarr, &movie)?;
+            if movie["monitored"] != json!(true) {
+                movie["monitored"] = json!(true);
+                let _: Value = self.call(radarr, to, Method::PUT, &format!("/movie/{id}"), &[], Some(&movie)).await?;
+            }
+            if settings.radarr_search && movie["hasFile"] != json!(true) {
+                let command = json!({"name": "MoviesSearch", "movieIds": [id]});
+                let _: Value = self.call(radarr, to, Method::POST, "/command", &[], Some(&command)).await?;
+            }
+            return Ok(id);
+        }
+        let (profile, folder) = choice(
+            radarr,
+            title,
+            (settings.radarr_quality_profile, &settings.radarr_root_folder),
+            (settings.radarr_anime_quality_profile, &settings.radarr_anime_root_folder),
+        )?;
+        let mut movie: Value = self.get(radarr, to, "/movie/lookup/tmdb", &tmdb).await?;
+        if !movie.is_object() {
+            return Err(ArrError::Unexpected(radarr.name(), "its lookup found no movie".to_owned()));
+        }
+        movie["qualityProfileId"] = json!(profile);
+        movie["rootFolderPath"] = json!(folder);
+        movie["monitored"] = json!(true);
+        movie["minimumAvailability"] = json!(match settings.radarr_minimum_availability {
+            MinimumAvailability::Announced => "announced",
+            MinimumAvailability::InCinemas => "inCinemas",
+            MinimumAvailability::Released => "released",
+        });
+        movie["addOptions"] = json!({"searchForMovie": settings.radarr_search});
+        if !movie["tags"].is_array() {
+            movie["tags"] = json!([]);
+        }
+        let added: Value = self.call(radarr, to, Method::POST, "/movie", &[], Some(&movie)).await?;
+        id_of(radarr, &added)
+    }
+
+    /// Adds a show to Sonarr with the seasons asked for monitored, and
+    /// searches for them; one there already gets them monitored too.
+    /// Its id in Sonarr.
+    pub async fn add_series(&self, to: &Connection, settings: &Settings, title: &Title<'_>) -> Result<i64, ArrError> {
+        let sonarr = Service::Sonarr;
+        let tvdb = title.tvdb_id.ok_or_else(|| {
+            ArrError::Needs(
+                "TMDB knows no TheTVDB id for this show, which Sonarr needs: add it to Sonarr by hand".into(),
+            )
+        })?;
+        let wanted = |season: &Value| season["seasonNumber"].as_i64().is_some_and(|n| title.seasons.contains(&n));
+        let found: Vec<Value> = self.get(sonarr, to, "/series", &[("tvdbId", tvdb.to_string())]).await?;
+        if let Some(mut series) = found.into_iter().next() {
+            let id = id_of(sonarr, &series)?;
+            series["monitored"] = json!(true);
+            for season in series["seasons"].as_array_mut().into_iter().flatten() {
+                if wanted(&*season) {
+                    season["monitored"] = json!(true);
+                }
+            }
+            let _: Value = self.call(sonarr, to, Method::PUT, &format!("/series/{id}"), &[], Some(&series)).await?;
+            if settings.sonarr_search {
+                for season in title.seasons {
+                    let command = json!({"name": "SeasonSearch", "seriesId": id, "seasonNumber": season});
+                    let _: Value = self.call(sonarr, to, Method::POST, "/command", &[], Some(&command)).await?;
+                }
+            }
+            return Ok(id);
+        }
+        let (profile, folder) = choice(
+            sonarr,
+            title,
+            (settings.sonarr_quality_profile, &settings.sonarr_root_folder),
+            (settings.sonarr_anime_quality_profile, &settings.sonarr_anime_root_folder),
+        )?;
+        let found: Vec<Value> = self.get(sonarr, to, "/series/lookup", &[("term", format!("tvdb:{tvdb}"))]).await?;
+        let Some(mut series) = found.into_iter().next().filter(Value::is_object) else {
+            return Err(ArrError::Refused(sonarr.name(), format!("it found no show with TheTVDB id {tvdb}")));
+        };
+        series["qualityProfileId"] = json!(profile);
+        series["rootFolderPath"] = json!(folder);
+        series["seasonFolder"] = json!(settings.sonarr_season_folders);
+        series["monitored"] = json!(true);
+        series["seriesType"] = json!(if title.anime { "anime" } else { "standard" });
+        // Sonarr 3 needs a language profile; Sonarr 4 has none, and no
+        // longer lists them.
+        let language = match settings.sonarr_language_profile {
+            0 => {
+                let profiles = self.get::<Vec<Profile>>(sonarr, to, "/languageprofile", &[]).await.ok();
+                profiles.and_then(|p| p.first().map(|p| p.id))
+            }
+            id => Some(id),
+        };
+        if let Some(language) = language {
+            series["languageProfileId"] = json!(language);
+        }
+        for season in series["seasons"].as_array_mut().into_iter().flatten() {
+            let monitored = wanted(&*season);
+            season["monitored"] = json!(monitored);
+        }
+        series["addOptions"] = json!({
+            "ignoreEpisodesWithFiles": true,
+            "ignoreEpisodesWithoutFiles": false,
+            "searchForMissingEpisodes": settings.sonarr_search,
+        });
+        if !series["tags"].is_array() {
+            series["tags"] = json!([]);
+        }
+        let added: Value = self.call(sonarr, to, Method::POST, "/series", &[], Some(&series)).await?;
+        id_of(sonarr, &added)
+    }
+
+    /// Whether Sonarr has a file for every episode of a season of a show
+    /// (counting files of several episodes as each of them).
+    pub async fn season_complete(&self, to: &Connection, series_id: i64, season: i64) -> Result<bool, ArrError> {
+        let series: Value = self.get(Service::Sonarr, to, &format!("/series/{series_id}"), &[]).await?;
+        let complete = series["seasons"].as_array().into_iter().flatten().any(|s| {
+            let stats = &s["statistics"];
+            let (files, episodes) = (stats["episodeFileCount"].as_i64(), stats["episodeCount"].as_i64());
+            s["seasonNumber"].as_i64() == Some(season)
+                && matches!((files, episodes), (Some(files), Some(episodes)) if episodes > 0 && files >= episodes)
+        });
+        Ok(complete)
+    }
+
+    /// What Radarr's or Sonarr's queue lists, fetched at most every 10
+    /// seconds: by movie or show id, with the season of each.
+    pub async fn queue(&self, service: Service, to: &Connection) -> Queue {
+        let mut cached = self.queues[service as usize].lock().await;
+        if let Some((at, from, queue)) = cached.as_ref()
+            && at.elapsed() < QUEUE_TTL
+            && from == to
+        {
+            return queue.clone();
+        }
+        let mut query = vec![("page", "1".to_owned()), ("pageSize", QUEUE_SIZE.to_string())];
+        match service {
+            Service::Radarr => query.push(("includeUnknownMovieItems", "false".into())),
+            Service::Sonarr => {
+                query.push(("includeUnknownSeriesItems", "false".into()));
+                query.push(("includeEpisode", "true".into()));
+            }
+        }
+        let queue = match self.get::<QueuePage>(service, to, "/queue", &query).await {
+            Ok(page) => Ok(Arc::new(page.records)),
+            Err(err) => {
+                tracing::debug!("{err}");
+                Err(err.to_string())
+            }
+        };
+        *cached = Some((Instant::now(), to.clone(), queue.clone()));
+        queue
+    }
+}
+
+/// The records of a queue for a movie (`seasons` none) or for some seasons
+/// of a show, by Radarr's or Sonarr's id.
+pub fn records_of<'a>(queue: &'a [QueueRecord], arr_id: i64, seasons: Option<&[i64]>) -> Vec<&'a QueueRecord> {
+    queue
+        .iter()
+        .filter(|r| match seasons {
+            None => r.movie_id == Some(arr_id),
+            Some(seasons) => r.series_id == Some(arr_id) && r.season().is_none_or(|s| seasons.contains(&s)),
+        })
+        .collect()
+}
+
+/// The quality profile and root folder a title goes with: those chosen
+/// when approving, else anime's own where set, else the settings'.
+fn choice<'a>(
+    service: Service,
+    title: &Title<'a>,
+    usual: (i64, &'a str),
+    anime: (i64, &'a str),
+) -> Result<(i64, &'a str), ArrError> {
+    let profile =
+        title.quality_profile.filter(|p| *p > 0).unwrap_or(if title.anime && anime.0 > 0 { anime.0 } else { usual.0 });
+    let folder = title.root_folder.filter(|f| !f.is_empty()).unwrap_or(if title.anime && !anime.1.is_empty() {
+        anime.1
+    } else {
+        usual.1
+    });
+    let name = service.name();
+    if profile <= 0 {
+        return Err(ArrError::Needs(format!("choose {name}'s quality profile in Settings → Requests")));
+    }
+    if folder.is_empty() {
+        return Err(ArrError::Needs(format!("choose {name}'s root folder in Settings → Requests")));
+    }
+    Ok((profile, folder))
+}
+
+fn id_of(service: Service, value: &Value) -> Result<i64, ArrError> {
+    value["id"].as_i64().ok_or_else(|| ArrError::Unexpected(service.name(), "no id in its answer".to_owned()))
+}
+
+/// What went wrong with a request, without the address (reqwest's own
+/// words, then their causes).
+fn reason(err: &reqwest::Error) -> String {
+    let mut text = err.to_string();
+    let mut source = std::error::Error::source(err);
+    while let Some(cause) = source {
+        text.push_str(&format!(": {cause}"));
+        source = cause.source();
+    }
+    quote(&text)
+}
+
+/// The message of an error answer: validation errors' (`[{ errorMessage }]`)
+/// or `{ message }`, else its text.
+fn message_of(text: &str) -> Option<String> {
+    let message = match serde_json::from_str::<Value>(text) {
+        Ok(Value::Array(errors)) => {
+            errors.iter().filter_map(|e| e["errorMessage"].as_str()).collect::<Vec<_>>().join("; ")
+        }
+        Ok(value) => value["message"].as_str().unwrap_or_default().to_owned(),
+        Err(_) => text.trim().to_owned(),
+    };
+    (!message.is_empty()).then(|| quote(&message))
+}
+
+fn quote(text: &str) -> String {
+    match text.char_indices().nth(QUOTE) {
+        Some((at, _)) => format!("{}…", &text[..at]),
+        None => text.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(value: Value) -> QueueRecord {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn a_download_adds_its_parts_up() {
+        let queue = vec![
+            record(json!({"seriesId": 7, "seasonNumber": 1, "size": 1000.0, "sizeleft": 250.0,
+                          "status": "downloading", "trackedDownloadState": "downloading",
+                          "trackedDownloadStatus": "ok", "estimatedCompletionTime": "2024-05-01T12:00:00Z"})),
+            record(json!({"seriesId": 7, "episode": {"seasonNumber": 2}, "size": 1000.0, "sizeleft": 1000.0,
+                          "status": "queued", "estimatedCompletionTime": "2024-05-01T13:00:00.5Z"})),
+            record(json!({"seriesId": 7, "seasonNumber": 3, "size": 5.0, "sizeleft": 0.0,
+                          "trackedDownloadState": "importBlocked"})),
+            record(json!({"movieId": 7, "size": 0.0, "status": "paused"})),
+        ];
+        let show = download(&records_of(&queue, 7, Some(&[1, 2]))).unwrap();
+        assert_eq!(show.state, DownloadState::Downloading);
+        assert_eq!((show.progress, show.episodes), (0.375, 2));
+        assert_eq!(show.eta, crate::util::utc_secs("2024-05-01T13:00:00Z"), "when the last one ends");
+        let blocked = download(&records_of(&queue, 7, Some(&[3]))).unwrap();
+        assert_eq!((blocked.state, blocked.progress), (DownloadState::Warning, 1.0));
+        let movie = download(&records_of(&queue, 7, None)).unwrap();
+        assert_eq!((movie.state, movie.progress, movie.episodes), (DownloadState::Paused, 0.0, 1));
+        assert!(download(&records_of(&queue, 8, None)).is_none());
+    }
+
+    #[test]
+    fn errors_say_what_they_said() {
+        let validation =
+            r#"[{"propertyName":"Path","errorMessage":"Path is already configured"},{"errorMessage":"Invalid"}]"#;
+        assert_eq!(message_of(validation).as_deref(), Some("Path is already configured; Invalid"));
+        assert_eq!(message_of(r#"{"message":"NotFound"}"#).as_deref(), Some("NotFound"));
+        assert_eq!(message_of(" <html>Bad gateway</html> ").as_deref(), Some("<html>Bad gateway</html>"));
+        assert_eq!(message_of("").as_deref(), None);
+        let long = "é".repeat(QUOTE + 5);
+        assert_eq!(quote(&long).chars().count(), QUOTE + 1);
+    }
+
+    #[test]
+    fn titles_go_with_what_was_chosen() {
+        let title = |anime: bool, quality_profile: Option<i64>, root_folder: Option<&'static str>| Title {
+            tmdb_id: 1,
+            tvdb_id: None,
+            anime,
+            seasons: &[],
+            quality_profile,
+            root_folder,
+        };
+        let usual = (4, "/movies");
+        let anime = (9, "/anime");
+        let radarr = Service::Radarr;
+        assert_eq!(choice(radarr, &title(false, None, None), usual, anime).unwrap(), (4, "/movies"));
+        assert_eq!(choice(radarr, &title(true, None, None), usual, anime).unwrap(), (9, "/anime"));
+        assert_eq!(choice(radarr, &title(true, None, None), usual, (0, "")).unwrap(), (4, "/movies"));
+        assert_eq!(choice(radarr, &title(true, Some(2), Some("/x")), usual, anime).unwrap(), (2, "/x"));
+        assert!(matches!(choice(radarr, &title(false, None, None), (0, "/m"), anime), Err(ArrError::Needs(_))));
+        assert!(matches!(choice(radarr, &title(false, None, None), (3, ""), anime), Err(ArrError::Needs(_))));
+    }
+}

@@ -9,9 +9,14 @@ export function bucketFor(cssWidth: number): number {
   return IMAGE_BUCKETS.find((b) => b >= need) ?? Math.max(...IMAGE_BUCKETS);
 }
 
-/** Append `w=<bucket>` to an image url returned by the API (which already carries `?v=`). */
+/**
+ * Append `w=<bucket>` to an image url returned by the API (which already
+ * carries `?v=`). Another site's (TMDB's, for titles no library has) comes
+ * in the size the API chose, as it is.
+ */
 export function sizedImage(url: string | null | undefined, cssWidth: number): string | null {
   if (!url) return null;
+  if (/^https?:\/\//.test(url)) return url;
   const sep = url.includes("?") ? "&" : "?";
   return `${url}${sep}w=${bucketFor(cssWidth)}`;
 }

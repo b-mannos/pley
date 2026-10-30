@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -132,12 +133,15 @@ pub async fn events(
     let slot = StreamSlot::take(token.as_deref())?;
     // Events about libraries the user can't open aren't theirs to see.
     let libraries = Arc::new(parking_lot::RwLock::new(access::library_ids(&state.db, &user).await?));
+    // Administrators' streams also get what administrators are told
+    // (requests changing), while the account is one.
+    let admin = Arc::new(AtomicBool::new(user.is_admin));
     // The session or app token is checked again every so often
     // (`Config::event_recheck`): the stream ends once it is signed out, it
     // expires or its user is disabled, and follows changes of access.
     let ended = tokio_util::sync::CancellationToken::new();
     {
-        let (state, libraries, ended) = (state.clone(), libraries.clone(), ended.clone());
+        let (state, libraries, admin, ended) = (state.clone(), libraries.clone(), admin.clone(), ended.clone());
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(state.config.event_recheck);
             tick.tick().await;
@@ -156,6 +160,7 @@ pub async fn events(
                 if let Ok(ids) = access::library_ids(&state.db, &user).await {
                     *libraries.write() = ids;
                 }
+                admin.store(user.is_admin, Ordering::Relaxed);
             }
         });
     }
@@ -165,8 +170,10 @@ pub async fn events(
     let stream = BroadcastStream::new(state.events.subscribe())
         .filter_map(|event| event.ok())
         // Events for one user (their My List, their stopped session) go to
-        // that user's streams only.
-        .filter(move |event| event.user_id().is_none_or(|id| id == me))
+        // that user's streams only, and to administrators' for some.
+        .filter(move |event| {
+            event.user_id().is_none_or(|id| id == me || (event.to_admins() && admin.load(Ordering::Relaxed)))
+        })
         .filter(move |event| match (event.library_id(), &*libraries.read()) {
             (Some(id), Some(ids)) => ids.contains(&id),
             _ => true,

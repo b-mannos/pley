@@ -217,6 +217,19 @@ Apps sign in on Pley's own page with OAuth 2.1.
 - A converted download several people asked for stops only when the last of
   them, or an administrator, cancels it.
 
+### Requests
+
+- Radarr's and Sonarr's API keys are never shown again once saved, only
+  whether one is.
+- A key goes only to the address it was saved with: a new address takes its
+  key again, and checking another address in Settings takes that address's
+  key. Their redirects aren't followed, so a key isn't sent on elsewhere.
+- Only administrators approve and decline, see everyone's requests, and ask
+  Radarr and Sonarr anything; others see their own.
+- Discover shows TMDB's titles whatever their rating, so profiles without a
+  password and accounts with an age limit may not ask until an administrator
+  allows it.
+
 ### The desktop app
 
 - Its window shows the server's own pages only; other sites open in the

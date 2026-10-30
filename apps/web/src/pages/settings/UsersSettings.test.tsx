@@ -297,3 +297,75 @@ describe("UsersSettings", () => {
     expect(await within(dialog).findByText("No apps use this account.")).toBeInTheDocument();
   });
 });
+
+describe("UsersSettings: requests", () => {
+  const boss: User = { ...admin, request_access: "auto" };
+  const bo: User = { ...testUser, id: 6, username: "bo", name: "Bo", is_admin: true, request_access: "auto" };
+  const annAsks: User = { ...ann, two_step: false, request_access: "ask" };
+
+  function serveRequests() {
+    const requests = mockApi({
+      "GET /api/users": () => [boss, annAsks, bo],
+      "GET /api/libraries": () => libraries,
+      "GET /api/users/1/apps": () => [],
+      "GET /api/users/1/devices": () => [],
+      "GET /api/users/3/apps": () => [],
+      "GET /api/users/3/devices": () => [],
+      "GET /api/users/6/apps": () => [],
+      "GET /api/users/6/devices": () => [],
+      "POST /api/users": (req) => ({ ...testUser, id: 7, is_admin: false, name: (req.body as { username: string }).username }),
+      "PATCH /api/users/3": (req) => ({ ...annAsks, ...(req.body as Partial<User>) }),
+      "PATCH /api/users/6": (req) => ({ ...bo, ...(req.body as Partial<User>) }),
+    });
+    renderWithProviders(<UsersSettings />, { user: boss });
+    return requests;
+  }
+
+  it("changes whether an account may ask, and whether it waits for approval", async () => {
+    const user = userEvent.setup();
+    const requests = serveRequests();
+    await user.click(await screen.findByRole("button", { name: /Ann/ }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Ann" });
+    expect(within(dialog).getByLabelText("Requests")).toHaveValue("ask");
+    await user.selectOptions(within(dialog).getByLabelText("Requests"), "auto");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Saved Ann")).toBeInTheDocument();
+    expect(requests.find((r) => r.method === "PATCH")?.body).toEqual({ request_access: "auto" });
+  });
+
+  it("shows administrators' requests as approved as made, and keeps what one demoted gets", async () => {
+    const user = userEvent.setup();
+    const requests = serveRequests();
+    await user.click(await screen.findByRole("button", { name: /Bo/ }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Bo" });
+    const select = within(dialog).getByLabelText("Requests");
+    expect(select).toBeDisabled();
+    expect(select).toHaveValue("auto");
+    await user.click(within(dialog).getByRole("switch", { name: "Administrator" }));
+    expect(select).toBeEnabled();
+    expect(select).toHaveValue("ask");
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Saved Bo")).toBeInTheDocument();
+    expect(requests.find((r) => r.method === "PATCH")?.body).toEqual({ is_admin: false, request_access: "ask" });
+  });
+
+  it("starts new accounts asking, but not managed profiles or those with an age limit", async () => {
+    const requests = serveRequests();
+    const { user, dialog } = await openAddDialog();
+    const select = within(dialog).getByLabelText("Requests");
+    expect(select).toHaveValue("ask");
+    await user.selectOptions(within(dialog).getByLabelText("Age limit"), "Kids (TV-Y7)");
+    expect(select).toHaveValue("off");
+    expect(within(dialog).getByText(/whatever their age rating/)).toBeInTheDocument();
+    await user.selectOptions(within(dialog).getByLabelText("Age limit"), "No limit");
+    await user.click(within(dialog).getByRole("button", { name: /Managed profile/ }));
+    expect(select).toHaveValue("off");
+
+    // Chosen, it stays.
+    await user.selectOptions(select, "ask");
+    await user.type(within(dialog).getByLabelText("Username"), "little");
+    await user.click(within(dialog).getByRole("button", { name: "Add user" }));
+    expect(await screen.findByText("Added little")).toBeInTheDocument();
+    expect(requests.find((r) => r.method === "POST")?.body).toMatchObject({ managed: true, request_access: "ask" });
+  });
+});

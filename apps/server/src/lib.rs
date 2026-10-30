@@ -14,6 +14,7 @@ pub mod collections;
 pub mod config;
 pub mod db;
 pub mod desktop;
+pub mod discover;
 pub mod discovery;
 pub mod error;
 pub mod events;
@@ -38,6 +39,7 @@ pub mod plex;
 pub mod providers;
 pub mod ratings;
 pub mod related;
+pub mod requests;
 pub mod resources;
 pub mod schedule;
 #[cfg(windows)]

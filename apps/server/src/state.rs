@@ -37,6 +37,8 @@ pub struct Inner {
     pub metadata: Arc<MetadataAgent>,
     /// Subtitle search and downloads (see [`crate::subtitles`]).
     pub opensubtitles: Arc<crate::providers::opensubtitles::OpenSubtitles>,
+    /// Movies and shows people ask for (`crate::requests`).
+    pub requests: Arc<crate::requests::Requests>,
     pub store: Arc<Store>,
     pub backups: Arc<Backups>,
     pub scanner: Arc<Scanner>,
@@ -119,6 +121,7 @@ impl AppState {
         ));
         let scanner =
             Scanner::new(db.clone(), transcoder.clone(), events.clone(), metadata.clone(), store.clone(), &config);
+        let requests = crate::requests::Requests::new(db.clone(), settings.clone(), events.clone(), metadata.clone());
         let watcher = LibraryWatcher::new(db.clone(), scanner.clone(), settings.clone());
         let images = Images::new(config.cache_dir().join("images"));
         let sessions = Arc::new(Sessions::default());
@@ -179,6 +182,7 @@ impl AppState {
                 transcoder,
                 metadata,
                 opensubtitles,
+                requests,
                 store,
                 backups,
                 scanner,
@@ -195,6 +199,7 @@ impl AppState {
         self.resources.start(self.stopping.clone());
         self.schedule.start(self.stopping.clone());
         self.live.start(self.stopping.clone());
+        self.requests.start(&self.events, self.stopping.clone());
         let metadata = self.metadata.clone();
         tokio::spawn(async move {
             metadata.prune_people().await;

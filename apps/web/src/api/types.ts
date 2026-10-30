@@ -35,7 +35,12 @@ export interface User {
   has_password: boolean;
   /** Signs in with a code from an authenticator app after the password. */
   two_step: boolean;
+  /** Requests: may not ask, asks an administrator, or approved as made ("auto" for administrators). Absent from servers before requests. */
+  request_access?: RequestAccess;
 }
+
+/** May not ask for titles; asks an administrator; approved as made. */
+export type RequestAccess = "off" | "ask" | "auto";
 
 /**
  * When subtitles come on by themselves: never, only forced ones (foreign
@@ -670,7 +675,11 @@ export type ServerEvent =
   /** Live TV's sources, channels or guide changed. */
   | { type: "live_channels_changed" }
   /** A live channel started or stopped being watched: the connections in use changed. */
-  | { type: "live_tuners_changed" };
+  | { type: "live_tuners_changed" }
+  /** A request was made, decided, withdrawn or became available (to its maker and administrators). */
+  | { type: "requests_changed" }
+  /** Something the user asked for is in a library now (`item_id`: where they may open it). */
+  | { type: "request_available"; request_id: Id; title: string; item_id: Id | null };
 
 /** `vulkan` (h264_vulkan) isn't offered: it can only be set through the API. */
 export type HwAccel = "auto" | "none" | "nvenc" | "qsv" | "amf" | "vaapi" | "videotoolbox" | "vulkan";
@@ -736,7 +745,46 @@ export interface Settings {
   opensubtitles_password?: string;
   /** A password is saved. */
   opensubtitles_password_set?: boolean;
+  /** People may ask for movies and shows (needs a TMDB key). Absent from servers before requests, as are those after it. */
+  requests?: boolean;
+  /** Requests an account may make in 7 days, 0–1000 (administrators: no limit); 0 = no limit. */
+  request_limit_movies?: number;
+  /** As many seasons (a show counts its seasons). */
+  request_limit_seasons?: number;
+  /** "http://localhost:7878"; "" = no Radarr: movies approved are added by hand. */
+  radarr_url?: string;
+  /** Sent only to change it (never sent back): left out, the saved one stays; "" = none. A new `radarr_url` needs it too. */
+  radarr_api_key?: string;
+  radarr_api_key_set?: boolean;
+  /** Radarr's id; 0 = not chosen (approving fails until one is). */
+  radarr_quality_profile?: number;
+  /** "" = not chosen (approving fails until one is). */
+  radarr_root_folder?: string;
+  /** For anime; 0 = `radarr_quality_profile`. */
+  radarr_anime_quality_profile?: number;
+  /** For anime; "" = `radarr_root_folder`. */
+  radarr_anime_root_folder?: string;
+  /** When Radarr may take a release. */
+  radarr_minimum_availability?: MinimumAvailability;
+  /** Search as soon as a movie is added. */
+  radarr_search?: boolean;
+  /** "http://localhost:8989"; "" = no Sonarr. */
+  sonarr_url?: string;
+  sonarr_api_key?: string;
+  sonarr_api_key_set?: boolean;
+  sonarr_quality_profile?: number;
+  sonarr_root_folder?: string;
+  /** Sonarr 3's language profile; 0 = its first (Sonarr 4 has none). */
+  sonarr_language_profile?: number;
+  sonarr_anime_quality_profile?: number;
+  sonarr_anime_root_folder?: string;
+  /** A folder for each season. */
+  sonarr_season_folders?: boolean;
+  /** Search for the seasons asked for as soon as they're added. */
+  sonarr_search?: boolean;
 }
+
+export type MinimumAvailability = "announced" | "in_cinemas" | "released";
 
 /** A service the settings can test (`POST /api/settings/test`). */
 export type TestedService = "tmdb" | "tvdb" | "tvmaze" | "musicbrainz" | "transcoder" | "opensubtitles";

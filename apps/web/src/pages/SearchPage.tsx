@@ -1,14 +1,16 @@
 import { Link, useSearchParams } from "react-router";
-import { Search } from "lucide-react";
+import { Compass, Search } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import { useSearch } from "@/api/hooks";
 import { programProgress, type Channel } from "@/api/livetv";
+import { mayRequest, useRequestSummary } from "@/api/requests";
 import type { ItemKind, ItemSummary } from "@/api/types";
 import { aspectFor, CardSkeleton, MediaCard } from "@/components/cards";
 import { PersonCard } from "@/components/PersonCard";
-import { Button, EmptyState, SectionTitle, Spinner } from "@/components/ui";
+import { Button, buttonClass, EmptyState, SectionTitle, Spinner } from "@/components/ui";
 import { useDocumentTitle, useElementWidth } from "@/lib/hooks";
 import { ChannelLogo, liveUrl, useNow } from "@/pages/livetv/common";
+import { discoverUrl } from "@/lib/urls";
 
 const GROUPS: { kind: ItemKind; title: string }[] = [
   { kind: "movie", title: "Movies" },
@@ -89,6 +91,8 @@ export function SearchPage() {
   const q = params.get("q") ?? "";
   useDocumentTitle(q ? `Search: ${q}` : "Search");
   const search = useSearch(q);
+  // Where this account may ask for titles: what the libraries lack, on TMDB.
+  const discover = mayRequest(useRequestSummary(q.trim() !== "").data);
 
   if (!q.trim()) {
     return (
@@ -133,7 +137,15 @@ export function SearchPage() {
         className="min-h-[60vh]"
         icon={<Search />}
         title={`No results for “${q}”`}
-        description="Try a different spelling or a shorter query."
+        description={discover ? "Try a different spelling or a shorter query, or look for it on TMDB and ask for it." : "Try a different spelling or a shorter query."}
+        action={
+          discover ? (
+            <Link to={discoverUrl(q)} className={buttonClass("secondary")}>
+              <Compass className="size-4" />
+              Look for “{q.trim()}” in Discover
+            </Link>
+          ) : undefined
+        }
       />
     );
   }
@@ -163,6 +175,14 @@ export function SearchPage() {
         const items = results.filter((r) => r.kind === kind);
         return items.length ? <ResultGroup key={kind} title={title} items={items} /> : null;
       })}
+      {discover ? (
+        <p className="text-sm text-muted">
+          Not here?{" "}
+          <Link to={discoverUrl(q)} className="font-medium text-accent hover:underline">
+            Look for “{q.trim()}” in Discover
+          </Link>
+        </p>
+      ) : null}
     </div>
   );
 }

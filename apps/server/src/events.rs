@@ -81,6 +81,23 @@ pub enum ServerEvent {
     /// A live channel started or stopped being pulled, or someone started
     /// or stopped watching one: the connections in use changed.
     LiveTunersChanged,
+    /// A request changed: made, approved, declined, failed, available,
+    /// withdrawn or deleted, or its maker may ask for more or less. To its
+    /// maker's streams and administrators' ([`ServerEvent::to_admins`]),
+    /// which fetch their requests and what Discover shows again.
+    RequestsChanged {
+        #[serde(skip)]
+        user_id: i64,
+    },
+    /// A request became available: to its maker's streams. `item_id`: the
+    /// library's title, where they may open it.
+    RequestAvailable {
+        #[serde(skip)]
+        user_id: i64,
+        request_id: i64,
+        title: String,
+        item_id: Option<i64>,
+    },
 }
 
 impl ServerEvent {
@@ -98,7 +115,9 @@ impl ServerEvent {
             | ServerEvent::UserStateChanged { .. }
             | ServerEvent::SessionStopped { .. }
             | ServerEvent::LiveChannelsChanged
-            | ServerEvent::LiveTunersChanged => None,
+            | ServerEvent::LiveTunersChanged
+            | ServerEvent::RequestsChanged { .. }
+            | ServerEvent::RequestAvailable { .. } => None,
         }
     }
 
@@ -108,9 +127,16 @@ impl ServerEvent {
             ServerEvent::WatchlistChanged { user_id }
             | ServerEvent::OwnLibrariesChanged { user_id }
             | ServerEvent::UserStateChanged { user_id, .. }
-            | ServerEvent::SessionStopped { user_id, .. } => Some(*user_id),
+            | ServerEvent::SessionStopped { user_id, .. }
+            | ServerEvent::RequestsChanged { user_id }
+            | ServerEvent::RequestAvailable { user_id, .. } => Some(*user_id),
             _ => None,
         }
+    }
+
+    /// Whether administrators' streams get it too, whoever it is for.
+    pub fn to_admins(&self) -> bool {
+        matches!(self, ServerEvent::RequestsChanged { .. })
     }
 }
 
@@ -171,5 +197,12 @@ mod tests {
         })
         .unwrap();
         assert_eq!(json, r#"{"type":"session_stopped","session_id":"s1","message":null,"by_admin":true}"#);
+        let event = ServerEvent::RequestsChanged { user_id: 4 };
+        assert_eq!((event.user_id(), event.to_admins()), (Some(4), true));
+        assert_eq!(serde_json::to_string(&event).unwrap(), r#"{"type":"requests_changed"}"#);
+        let event = ServerEvent::RequestAvailable { user_id: 4, request_id: 2, title: "Heat".into(), item_id: Some(9) };
+        assert_eq!((event.user_id(), event.to_admins()), (Some(4), false));
+        let json = serde_json::to_string(&event).unwrap();
+        assert_eq!(json, r#"{"type":"request_available","request_id":2,"title":"Heat","item_id":9}"#);
     }
 }

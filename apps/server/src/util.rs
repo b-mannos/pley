@@ -54,6 +54,38 @@ pub fn system_time_secs(t: SystemTime) -> i64 {
     t.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or_default()
 }
 
+/// `YYYY-MM-DD` (and whatever follows it) → unix seconds (UTC midnight).
+pub fn date_secs(date: &str) -> Option<i64> {
+    let mut parts = date.get(..10)?.split('-');
+    let (y, m, d): (i64, i64, i64) =
+        (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    // Days from civil (Howard Hinnant's algorithm).
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some((era * 146_097 + doe - 719_468) * 86_400)
+}
+
+/// A UTC time as `2024-05-01T12:30:45Z` (fractions of a second left out)
+/// → unix seconds.
+pub fn utc_secs(time: &str) -> Option<i64> {
+    let day = date_secs(time)?;
+    let clock = time.get(10..)?.strip_prefix('T')?.trim_end_matches('Z');
+    let mut parts = clock.split('.').next()?.split(':');
+    let (h, m, s): (i64, i64, i64) =
+        (parts.next()?.parse().ok()?, parts.next()?.parse().ok()?, parts.next()?.parse().ok()?);
+    if parts.next().is_some() || h > 23 || m > 59 || s > 60 {
+        return None;
+    }
+    Some(day + h * 3600 + m * 60 + s)
+}
+
 /// The UTC date and time of unix time `secs`: year, month, day, hour,
 /// minute and second.
 pub fn utc(secs: i64) -> [i64; 6] {
@@ -374,6 +406,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utc_times_are_read() {
+        assert_eq!(utc_secs("1970-01-02T00:00:01Z"), Some(86_401));
+        assert_eq!(utc_secs("2024-05-01T12:30:45.1234567Z"), Some(date_secs("2024-05-01").unwrap() + 45_045));
+        assert_eq!(utc(utc_secs("2024-02-29T23:59:59Z").unwrap()), [2024, 2, 29, 23, 59, 59]);
+        for wrong in ["2024-05-01", "2024-05-01T12:30Z", "2024-05-01T25:00:00Z", "2024-05-01T12:30:45+02:00", ""] {
+            assert_eq!(utc_secs(wrong), None, "{wrong}");
+        }
+    }
 
     #[cfg(windows)]
     #[test]

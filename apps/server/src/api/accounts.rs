@@ -16,6 +16,7 @@ use crate::auth::{
 };
 use crate::error::{ApiResult, AppError};
 use crate::events::ServerEvent;
+use crate::requests::RequestAccess;
 use crate::state::AppState;
 use crate::streams::{self, SubtitleMode};
 use crate::util::now;
@@ -62,6 +63,10 @@ pub struct NewUser {
     max_age: Option<i64>,
     #[serde(default)]
     pin: Option<String>,
+    /// Left out: profiles without a password and accounts with an age limit
+    /// may not ask for titles, others ask an administrator.
+    #[serde(default)]
+    request_access: Option<RequestAccess>,
 }
 
 fn yes() -> bool {
@@ -101,10 +106,15 @@ pub async fn create_user(
     if exists.is_some() {
         return Err(AppError::conflict(format!("user '{username}' already exists")));
     }
+    let request_access = body.request_access.unwrap_or(if body.managed || body.max_age.is_some() {
+        RequestAccess::Off
+    } else {
+        RequestAccess::Ask
+    });
     let id: i64 = sqlx::query_scalar(
         "INSERT INTO users (id, username, password_hash, display_name, is_admin, managed, home, all_libraries, max_age,
-                            pin_hash, created_at)
-         VALUES ((SELECT last + 1 FROM user_ids), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                            pin_hash, request_access, created_at)
+         VALUES ((SELECT last + 1 FROM user_ids), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(&username)
     .bind(password_hash)
@@ -115,6 +125,7 @@ pub async fn create_user(
     .bind(body.all_libraries)
     .bind(body.max_age)
     .bind(pin_hash)
+    .bind(request_access.as_str())
     .bind(now())
     .fetch_one(&state.db.write)
     .await?;
@@ -146,6 +157,8 @@ pub struct UserPatch {
     /// `null` removes the PIN.
     #[serde(default, deserialize_with = "nullable")]
     pin: Option<Option<String>>,
+    #[serde(default)]
+    request_access: Option<RequestAccess>,
 }
 
 pub async fn update_user(
@@ -271,9 +284,20 @@ pub async fn update_user(
             .execute(&state.db.write)
             .await?;
     }
+    if let Some(access) = body.request_access {
+        sqlx::query("UPDATE users SET request_access = ? WHERE id = ?")
+            .bind(access.as_str())
+            .bind(id)
+            .execute(&state.db.write)
+            .await?;
+    }
     state.auth.forget_user(id);
     if sees_otherwise {
         state.events.send(ServerEvent::OwnLibrariesChanged { user_id: id });
+    }
+    // What they may ask for changed: their summary is fetched again.
+    if body.request_access.is_some() || body.is_admin.is_some() {
+        state.events.send(ServerEvent::RequestsChanged { user_id: id });
     }
     Ok(Json(accounts::user(&state.db, id).await?.ok_or_else(|| AppError::not_found("user not found"))?))
 }
