@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LiveChannel, LiveProgram } from "../../src/api/types";
 import {
-  behindText,
   categoryKey,
   categoryName,
   cellAt,
@@ -155,10 +154,3 @@ describe("the guide", () => {
   });
 });
 
-describe("the timeshift", () => {
-  it("says how far behind live", () => {
-    expect(behindText(83_000)).toBe("1:23");
-    expect(behindText(5_000)).toBe("0:05");
-    expect(behindText(12 * 60_000)).toBe("12 min");
-  });
-});

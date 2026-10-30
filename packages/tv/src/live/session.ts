@@ -50,7 +50,7 @@ export function troubleOf(e: unknown, channel: string): Trouble {
   return { kind: "other", title: `${channel} didn't start`, message, canRetry: true };
 }
 
-export type LivePhase = "tuning" | "playing" | "buffering" | "paused" | "error";
+export type LivePhase = "tuning" | "playing" | "buffering" | "error";
 
 export interface LiveState {
   channel: LiveChannel;
@@ -64,50 +64,33 @@ export interface LiveState {
   tunes: number;
 }
 
-export interface LiveClock {
-  positionMs: number;
-  /** The timeshift window that can be sought in, on the engine's clock. */
-  window: { startMs: number; endMs: number } | null;
-  /** How far behind the live edge it plays. */
-  behindMs: number;
-}
-
-/** The engine's place this far from the window's end is live: the TVs' players stay three 2 s segments behind it. */
-export const LIVE_EDGE_MS = 6_000;
 /** The server waits for the channel's first segments before it answers the playlist. */
 const PLAYLIST_WAIT_MS = 45_000;
 /** No picture this long after the playlist came: the channel didn't start. */
 const START_WAIT_MS = 30_000;
-/** Paused, the player asks for nothing; the server lets a viewer go after 45 s of that, so the playlist is asked for this often. */
-const KEEP_WATCHING_MS = 20_000;
 /** Trying again after the engine fails, this many times, a second, then three later. */
 const RETRIES = 2;
 /** The audio is checked for a picture this long after it starts. */
 const PICTURE_CHECK_MS = 1_500;
-const CLOCK_MS = 500;
 
 /**
  * A live channel playing on the TV's own player (the web's LivePlayerPage
  * without the page): watching it on the server with this TV's id and a
- * keyed playlist address, the engine on that playlist, changing channels,
- * pause and the timeshift, the server told at once when watching ends.
+ * keyed playlist address, the engine on that playlist from its live edge,
+ * changing channels, the server told at once when watching ends. Live is
+ * live: no pause, rewind or skip.
  */
 export class LiveController {
   readonly state = signal<LiveState>(null as unknown as LiveState);
-  readonly clock = signal<LiveClock>({ positionMs: 0, window: null, behindMs: 0 });
   private readonly env: LiveEnv;
   private engineRef: PlayerEngine | null = null;
   private session: string | null = null;
-  private playlist: string | null = null;
   private generation = 0;
   private cancel: Cancel | null = null;
   private retries = 0;
-  private wantPlay = true;
   private startTimer: ReturnType<typeof setTimeout> | null = null;
   private pictureTimer: ReturnType<typeof setTimeout> | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
-  private clockTimer: ReturnType<typeof setInterval> | null = null;
-  private keepTimer: ReturnType<typeof setInterval> | null = null;
   private closed = false;
 
   constructor(channel: LiveChannel, env: LiveEnv) {
@@ -117,11 +100,6 @@ export class LiveController {
 
   get engine(): PlayerEngine | null {
     return this.engineRef;
-  }
-
-  /** Whether it plays (or will once it has tuned), rather than paused. */
-  get wantsToPlay(): boolean {
-    return this.wantPlay;
   }
 
   private patch(p: Partial<LiveState>): void {
@@ -144,7 +122,6 @@ export class LiveController {
   /** Watches `channel` from its live edge; what was watched before ends. */
   tune(channel: LiveChannel): void {
     this.retries = 0;
-    this.wantPlay = true;
     this.patch({ tunes: this.state.value.tunes + 1 });
     void this.start(channel);
   }
@@ -164,7 +141,6 @@ export class LiveController {
     this.engineRef?.stop();
     this.leave();
     this.patch({ channel, phase: "tuning", trouble: null, shown: false, audioOnly: false });
-    this.clock.value = { positionMs: 0, window: null, behindMs: 0 };
     const server = this.env.server;
     let watching: LiveWatching;
     try {
@@ -190,7 +166,6 @@ export class LiveController {
       return;
     }
     const playlist = server.url(watching.url);
-    this.playlist = playlist;
     try {
       // The channel's first segments, before the player asks: a TV's player gives up sooner than the server takes to tune.
       await server.media("GET", playlist, cancel, PLAYLIST_WAIT_MS);
@@ -201,25 +176,23 @@ export class LiveController {
     if (mine !== this.generation) return;
     const engine = this.ensureEngine();
     engine.prepare({ url: playlist, hls: true, live: true, mime: HLS_MIME, startMs: 0, durationHintMs: null, video: null, audioCodec: null }, true);
-    if (!this.wantPlay) engine.pause();
     this.startTimer = setTimeout(() => {
       if (mine === this.generation && !this.state.value.shown) this.onEngineError({ kind: "other", detail: "it didn't start in time" });
     }, START_WAIT_MS);
-    this.clockTimer = setInterval(() => this.tick(), CLOCK_MS);
   }
 
   private onStatus(s: EngineStatus): void {
     const st = this.state.value;
     if (st.phase === "error" || st.phase === "tuning") return;
     if (s === "buffering") this.patch({ phase: "buffering" });
-    else if (s === "ready") this.patch({ phase: this.wantPlay ? "playing" : "paused" });
+    else if (s === "ready") this.patch({ phase: "playing" });
     else if (s === "ended") this.onEngineError({ kind: "other", detail: "the stream ended" });
   }
 
   private onFirstFrame(): void {
     if (this.startTimer !== null) clearTimeout(this.startTimer);
     this.startTimer = null;
-    this.patch({ shown: true, phase: this.wantPlay ? "playing" : "paused" });
+    this.patch({ shown: true, phase: "playing" });
     const mine = this.generation;
     if (this.pictureTimer !== null) clearTimeout(this.pictureTimer);
     this.pictureTimer = setTimeout(() => {
@@ -268,69 +241,6 @@ export class LiveController {
     this.patch({ phase: "error", trouble });
   }
 
-  private tick(): void {
-    const engine = this.engineRef;
-    if (!engine) return;
-    const positionMs = engine.positionMs();
-    const window = engine.liveWindow?.() ?? null;
-    const behindMs = window ? Math.max(0, window.endMs - LIVE_EDGE_MS - positionMs) : 0;
-    const was = this.clock.value;
-    if (was.positionMs === positionMs && was.behindMs === behindMs && sameWindow(was.window, window)) return;
-    this.clock.value = { positionMs, window, behindMs };
-  }
-
-  play(): void {
-    this.wantPlay = true;
-    this.stopKeeping();
-    const st = this.state.value;
-    if (st.phase === "error") return;
-    this.engineRef?.play();
-    if (st.phase === "paused") this.patch({ phase: "playing" });
-  }
-
-  pause(): void {
-    this.wantPlay = false;
-    const st = this.state.value;
-    if (st.phase === "error") return;
-    this.engineRef?.pause();
-    if (st.phase === "playing" || st.phase === "buffering") this.patch({ phase: "paused" });
-    this.keepWatching();
-  }
-
-  togglePause(): void {
-    if (this.wantPlay) this.pause();
-    else this.play();
-  }
-
-  /** Whether the window can be sought in (the engine said where it is). */
-  get canSeek(): boolean {
-    return this.clock.value.window !== null && this.state.value.shown;
-  }
-
-  /** `ms` further (or back) in the timeshift window, never past the live edge. */
-  seekBy(ms: number): void {
-    const engine = this.engineRef;
-    const w = engine?.liveWindow?.() ?? null;
-    if (!engine || !w || !this.state.value.shown) return;
-    this.seekTo(engine.positionMs() + ms);
-  }
-
-  seekTo(ms: number): void {
-    const engine = this.engineRef;
-    const w = engine?.liveWindow?.() ?? null;
-    if (!engine || !w) return;
-    const target = Math.max(w.startMs, Math.min(w.endMs - LIVE_EDGE_MS, ms));
-    engine.seekTo(target);
-    this.clock.value = { positionMs: target, window: w, behindMs: Math.max(0, w.endMs - LIVE_EDGE_MS - target) };
-  }
-
-  /** Back to the live edge, playing. */
-  goLive(): void {
-    const w = this.engineRef?.liveWindow?.() ?? null;
-    if (w) this.seekTo(w.endMs);
-    this.play();
-  }
-
   /** The TV hid the app: watching ends on the server, to start again when it shows. */
   suspend(): void {
     this.generation++;
@@ -344,7 +254,6 @@ export class LiveController {
   resume(): void {
     if (this.closed) return;
     this.retries = 0;
-    this.wantPlay = true;
     void this.start(this.state.value.channel);
   }
 
@@ -363,31 +272,14 @@ export class LiveController {
   private leave(): void {
     const session = this.session;
     this.session = null;
-    this.playlist = null;
     if (session) void this.env.server.leaveChannel(session).catch(() => undefined);
-  }
-
-  private keepWatching(): void {
-    this.stopKeeping();
-    this.keepTimer = setInterval(() => {
-      const playlist = this.playlist;
-      if (playlist) void this.env.server.media("GET", playlist, undefined, 10_000).catch(() => undefined);
-    }, KEEP_WATCHING_MS);
-  }
-
-  private stopKeeping(): void {
-    if (this.keepTimer !== null) clearInterval(this.keepTimer);
-    this.keepTimer = null;
   }
 
   private clearTimers(): void {
     if (this.startTimer !== null) clearTimeout(this.startTimer);
     if (this.pictureTimer !== null) clearTimeout(this.pictureTimer);
     if (this.retryTimer !== null) clearTimeout(this.retryTimer);
-    if (this.clockTimer !== null) clearInterval(this.clockTimer);
     this.startTimer = this.pictureTimer = this.retryTimer = null;
-    this.clockTimer = null;
-    this.stopKeeping();
   }
 }
 
@@ -395,6 +287,3 @@ function isCancelled(e: unknown): boolean {
   return e instanceof NetworkError && e.cancelled;
 }
 
-function sameWindow(a: LiveClock["window"], b: LiveClock["window"]): boolean {
-  return a === b || (!!a && !!b && a.startMs === b.startMs && a.endMs === b.endMs);
-}

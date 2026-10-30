@@ -3,8 +3,8 @@ import { formatTimeOfDay } from "../format/format";
 
 /**
  * Live TV's rules that draw nothing (docs/API.md, "Live TV"): what's on,
- * the filters, changing channels, the guide's chunks and cells, and the
- * timeshift's words. The web app's (apps/web/src/pages/livetv) on a TV.
+ * the filters, changing channels, and the guide's chunks and cells. The
+ * web app's (apps/web/src/pages/livetv) on a TV.
  */
 
 /** The guide's columns: half an hour each. */
@@ -276,15 +276,3 @@ export function cellAt(cells: GuideCell[], t: number): number {
   return cells.length - 1;
 }
 
-// ---- the timeshift
-
-/** Within this much of the live edge counts as live: the TVs' players stay a few segments behind it. */
-export const LIVE_WITHIN_MS = 15_000;
-
-/** How far behind live: "1:23", or "12 min" from ten minutes. */
-export function behindText(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s >= 600) return `${Math.round(s / 60)} min`;
-  const sec = s % 60;
-  return `${Math.floor(s / 60)}:${sec < 10 ? "0" : ""}${sec}`;
-}

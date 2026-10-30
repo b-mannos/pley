@@ -22,9 +22,9 @@ describes how they are made.
   every channel by name, number or what's on and of the groups; a guide that
   moves through time and channel cards with what's on and next, a page at
   a time, so a lineup of tens of thousands opens at once. The player plays
-  a channel through AVPlay from its live edge, with what's on, Live (or
-  how far behind it), pause and rewind in the server's timeshift, the
-  channel list beside the picture, and CH+ and CH−, Up and Down within the category, or a
+  a channel through AVPlay from its live edge, live only (no pause, rewind
+  or skip), with what's on, a Live badge, the channel list beside the
+  picture, and CH+ and CH−, Up and Down within the category, or a
   channel's number to change channels; the remote's CH LIST and GUIDE keys
   work, and Back lands on the channel watched. When every connection is in
   use, the server's words say which channels hold them. Needs a server

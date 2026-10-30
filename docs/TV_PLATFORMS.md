@@ -383,10 +383,10 @@ the web, as the TVs' other administration does.
   channels within the category it was opened from, round its ends (the
   page `around` the channel, and the one before or after at its edges);
   digits tune by number among every channel; OK shows the controls (the
-  channel list, favourite, back and forward 10 s, Play/Pause, Live or how
-  far behind it, channel down and up). A live channel has no position
-  bar: Live sits with the buttons, and behind live it is the button that
-  goes back. The menu key (and Samsung's CH LIST) opens the channel list,
+  channel list, favourite, the Live badge, channel down and up). Live is
+  live: no pause, rewind or skip, so a live channel has no position bar,
+  Play/Pause, Rewind and Fast-forward do nothing, and Left and Right with
+  the controls hidden do nothing either. The menu key (and Samsung's CH LIST) opens the channel list,
   a page at a time as it scrolls, open at the channel playing, beside the
   picture: the picture and its controls move aside into the 520 px left of
   it (AVPlay's plane is placed there too) rather than going under it. Left
@@ -394,12 +394,7 @@ the web, as the TVs' other administration does.
   (changing to one of its channels makes CH+ and CH− follow it). What's on
   shows only when asked: Info, or OK with the controls; not as each
   channel starts. Tuning shows the channel's logo with the spinner centred
-  under it. Pause and rewind
-  stay within the server's timeshift window, as the engine reports it
-  (`video.seekable` on LG, AVPlay's `GET_LIVE_DURATION`); without one, the
-  10 s buttons hide. Paused, the playlist is asked for every 20 s, as the
-  server lets an HLS viewer go after 45 s of nothing. A channel with no
-  picture shows its logo and what's on.
+  under it. A channel with no picture shows its logo and what's on.
 - **Leaving:** `DELETE /api/live/sessions/{id}` on Back, on each change of
   channel, and when the TV hides the app (it watches again from live when
   it shows). A player failure is watched anew twice (1 s, then 3 s), then
@@ -467,9 +462,8 @@ Samsung, on a 2018–2019 set and a 2021 or later one:
 9. D-pad smoothness and memory on a 2018 set.
 10. Automatic's speed test on a remote network.
 11. Available subtitle fonts; AVPlay at 2× with sound.
-12. Live TV: a keyed live playlist from its edge; `GET_LIVE_DURATION`, pause
-    and rewind in the window; CH+, CH−, CH LIST and GUIDE registered; a
-    radio channel; `410` when a channel is stopped from the web.
+12. Live TV: a keyed live playlist from its edge; CH+, CH−, CH LIST and
+    GUIDE registered; a radio channel; `410` when a channel is stopped from the web.
 
 LG, on a webOS 4–6 set and a webOS 23 or later one:
 
@@ -488,7 +482,7 @@ LG, on a webOS 4–6 set and a webOS 23 or later one:
 11. Playback speed: pitch, streams and files, after a seek.
 12. Automatic's speed test on a remote network; available subtitle fonts.
 13. Live TV: a live playlist without `playTime` starting at its edge;
-    `video.seekable` for pause and rewind; CH+ and CH− as 33 and 34.
+    CH+ and CH− as 33 and 34.
 
 ## References
 

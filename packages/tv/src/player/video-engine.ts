@@ -233,15 +233,6 @@ export class VideoEngine implements PlayerEngine {
     return isFinite(d) && d > 0 ? d * 1000 : 0;
   }
 
-  /** A live stream's seekable range, as the element has it from the playlist. */
-  liveWindow(): { startMs: number; endMs: number } | null {
-    const s = this.video.seekable;
-    if (!s || !s.length) return null;
-    const startMs = s.start(0) * 1000;
-    const endMs = s.end(s.length - 1) * 1000;
-    return isFinite(startMs) && isFinite(endMs) && endMs > startMs ? { startMs, endMs } : null;
-  }
-
   bufferedMs(): number {
     const b = this.video.buffered;
     const at = this.video.currentTime;

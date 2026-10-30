@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../src/api/client";
 import type { LiveChannel, LiveWatching } from "../../src/api/types";
-import { LiveController, LIVE_EDGE_MS, type LiveServer } from "../../src/live/session";
+import { LiveController, type LiveServer } from "../../src/live/session";
 import type { EngineListener, EngineSource, PlayerEngine } from "../../src/player/engine";
 
 function channel(id: number): LiveChannel {
@@ -15,7 +15,6 @@ class FakeEngine implements PlayerEngine {
   sources: EngineSource[] = [];
   calls: string[] = [];
   position = 0;
-  window: { startMs: number; endMs: number } | null = null;
   width = 1280;
   setListener(l: EngineListener) {
     this.listener = l;
@@ -48,9 +47,6 @@ class FakeEngine implements PlayerEngine {
   }
   bufferedMs() {
     return this.position;
-  }
-  liveWindow() {
-    return this.window;
   }
   status() {
     return "ready" as const;
@@ -205,42 +201,17 @@ describe("a live channel on the TV's player", () => {
     expect(c.state.value.audioOnly).toBe(true);
   });
 
-  it("keeps the server told while paused, the player asking for nothing", async () => {
+  it("plays from the live edge and nothing else: no pause, no seek, nothing asked of the server while it plays", async () => {
     const { c, engine, asked } = setup();
     c.tune(channel(1));
     await vi.advanceTimersByTimeAsync(0);
     engine.listener!.firstFrame();
-    c.pause();
-    expect(c.state.value.phase).toBe("paused");
+    expect(c.state.value.phase).toBe("playing");
+    expect(engine.sources[0]?.startMs).toBe(0);
     const before = asked.length;
-    await vi.advanceTimersByTimeAsync(41_000);
-    expect(asked.slice(before)).toEqual(["GET /api/live/media/pley_mk_1/index.m3u8", "GET /api/live/media/pley_mk_1/index.m3u8"]);
-    c.play();
-    await vi.advanceTimersByTimeAsync(40_000);
-    expect(asked).toHaveLength(before + 2);
-    expect(engine.calls.slice(-2)).toEqual(["pause", "play"]);
-  });
-
-  it("moves in the timeshift window, never past its live edge", async () => {
-    const { c, engine } = setup();
-    c.tune(channel(1));
-    await vi.advanceTimersByTimeAsync(0);
-    engine.listener!.firstFrame();
-    engine.window = { startMs: 1_000_000, endMs: 1_300_000 };
-    engine.position = 1_294_000;
-    await vi.advanceTimersByTimeAsync(500);
-    expect(c.clock.value.behindMs).toBe(0);
-    expect(c.canSeek).toBe(true);
-    c.seekBy(-60_000);
-    expect(engine.position).toBe(1_234_000);
-    expect(c.clock.value.behindMs).toBe(60_000);
-    c.seekBy(-600_000);
-    expect(engine.position).toBe(1_000_000);
-    c.seekBy(600_000);
-    expect(engine.position).toBe(1_300_000 - LIVE_EDGE_MS);
-    c.pause();
-    c.goLive();
-    expect(engine.calls.slice(-2)).toEqual([`seek ${1_300_000 - LIVE_EDGE_MS}`, "play"]);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(asked).toHaveLength(before);
+    expect(engine.calls.filter((call) => call === "pause" || call.startsWith("seek"))).toEqual([]);
   });
 
   it("lets go of the session when the TV hides the app, and watches again when it shows", async () => {

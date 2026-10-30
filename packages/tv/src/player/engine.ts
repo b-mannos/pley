@@ -102,12 +102,6 @@ export interface PlayerEngine {
   /** False when `bufferedMs` only repeats the position (AVPlay doesn't say how far it has loaded). */
   readonly knowsBuffer?: boolean;
   /**
-   * A live source's window that can be sought in (the server keeps the
-   * timeshift's minutes), on the clock `positionMs` and `seekTo` use;
-   * `null` while unknown.
-   */
-  liveWindow?(): { startMs: number; endMs: number } | null;
-  /**
    * Where the picture goes, in the 960×540 canvas's px (the picture kept
    * whole inside it), or the whole screen (`null`). An engine on a plane of
    * its own (AVPlay) is told; one in the page follows its host's size.

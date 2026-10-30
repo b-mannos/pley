@@ -1124,10 +1124,6 @@ html.avplay .engine-host { background: transparent; }
 .reduced .live-badge.at-live .live-dot { animation: none; }
 /* With the buttons: centred on the 36 px buttons' line; behind live, a button that goes back to it. */
 .live-chip-box { position: relative; height: 36px; display: flex; align-items: center; margin-right: 6px; }
-.live-chip { height: 28px; padding: 0 10px; border-radius: 6px; transition: transform 120ms var(--unfocus-ease); }
-.live-chip[data-focused] { background: var(--accent); color: var(--on-accent); transform: scale(1.08); transition: transform 150ms var(--focus-ease); }
-.live-chip[data-focused] + .pbtn-label { opacity: 1; }
-.live-chip-box > .pbtn-label { top: 44px; }
 @keyframes live-pulse {
   0% { opacity: 1; }
   50% { opacity: 0.35; }

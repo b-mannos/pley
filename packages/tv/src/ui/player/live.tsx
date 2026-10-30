@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { LiveChannel, LiveGroups } from "../../api/types";
-import { behindText, categoryKey, categoryName, channelByNumber, channelName, formatSpan, formatTime, LIVE_WITHIN_MS, nowAndNext, parseCategory, programProgress, timeLeft, type LiveCategory } from "../../live/data";
+import { categoryKey, categoryName, channelByNumber, channelName, formatSpan, formatTime, nowAndNext, parseCategory, programProgress, timeLeft, type LiveCategory } from "../../live/data";
 import { ChannelPages } from "../../live/pages";
 import { LiveController } from "../../live/session";
 import { initMusic } from "../../player/music";
@@ -22,20 +22,17 @@ const HIDE_MS = 5_000;
 const BANNER_MS = 5_000;
 /** The ring shows after this long of waiting. */
 const RING_MS = 500;
-/** Left and Right move this far in the timeshift; held, three times as far. */
-const STEP_MS = 10_000;
 
 /** Where the picture goes beside the channel list (the side panel's 440 px), in canvas px. */
 const ASIDE = { left: 0, top: 0, width: 520, height: 540 };
 
-/** Keys the player takes whatever has focus. */
+/** Keys the player takes whatever has focus; Play, Pause, Rewind and Fast-forward do nothing (live is live). */
 const MEDIA_KEYS: Key[] = ["playPause", "play", "pause", "stop", "fastForward", "rewind", "next", "previous", "channelUp", "channelDown", "channelList", "guide", "info"];
 
 /**
  * A live channel playing (the web's LivePlayerPage on a TV): the TV's own
- * player under the page, what's on, Live (or how far behind it), pause and
- * rewind in the timeshift, the channel list with the categories, and
- * changing channels with CH+ and CH−, Up and Down within the category it
+ * player under the page from the live edge (no pause, rewind or skip),
+ * what's on, the channel list with the categories, and changing channels with CH+ and CH−, Up and Down within the category it
  * was opened from, or by a channel's number among every channel. Back
  * leaves, to the channel watched; the server is told at once.
  */
@@ -110,7 +107,6 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
   );
   const c = controller;
   const s = c.state.value;
-  const clock = c.clock.value;
   const channel = s.channel;
   /** Channel up and down stay in this category; its order is the one it had as it opened (Recently watched changes with each channel). */
   const [category, setCategory] = useState<LiveCategory>(p.category);
@@ -237,11 +233,6 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
       },
     );
   };
-  const seek = (ms: number) => {
-    if (!c.canSeek) return;
-    c.seekBy(ms);
-    if (!controls) show(ms < 0 ? "back10" : "fwd10");
-  };
   const toggleFavorite = () => {
     const on = !channel.favorite;
     ui.api.setLiveFavorite(channel.id, on).then(
@@ -272,25 +263,9 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
     if (MEDIA_KEYS.indexOf(key) >= 0) {
       if (e.type !== "down") return true;
       switch (key) {
-        case "playPause":
-          if (down) c.togglePause();
-          break;
-        case "play":
-          c.play();
-          break;
-        case "pause":
-          c.pause();
-          if (!controls) show("playpause");
-          break;
         case "stop":
         case "guide":
           if (down) leave();
-          break;
-        case "fastForward":
-          seek(e.repeat ? 3 * STEP_MS : STEP_MS);
-          break;
-        case "rewind":
-          seek(e.repeat ? -3 * STEP_MS : -STEP_MS);
           break;
         case "channelUp":
         case "next":
@@ -329,15 +304,11 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
     }
     if (!controls) {
       if (key === "ok") {
-        if (down) show("playpause");
+        if (down) show("channels");
         return true;
       }
       if (key === "up" || key === "down") {
         if (e.type === "down") zap(key === "up" ? 1 : -1);
-        return true;
-      }
-      if (key === "left" || key === "right") {
-        if (e.type === "down") seek((key === "right" ? 1 : -1) * (e.repeat ? 3 * STEP_MS : STEP_MS));
         return true;
       }
       if (key === "menu") {
@@ -373,7 +344,7 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
     const moved = () => {
       if (!ui.input.pointerMoved) return;
       lastInput.current = Date.now();
-      if (!controlsRef.current && !listRef.current && c.state.value.phase !== "error") show("playpause");
+      if (!controlsRef.current && !listRef.current && c.state.value.phase !== "error") show("channels");
     };
     document.addEventListener("mousemove", moved);
     return () => document.removeEventListener("mousemove", moved);
@@ -394,7 +365,6 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
   }, [s.phase === "error"]);
 
   const { on, next } = nowAndNext(channel, now);
-  const atLive = !clock.window || clock.behindMs < LIVE_WITHIN_MS;
   const trouble = s.phase === "error" ? s.trouble : null;
   const infoShown = (controls || banner) && !trouble && !(s.phase === "tuning" && !s.shown);
   const name = channelName(channel, category);
@@ -427,14 +397,9 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
               <PlayerButton fid="channels" icon="list" label="Channels" onSelect={() => setList(true)} />
               <PlayerButton fid="favorite" icon={channel.favorite ? "star" : "star-outline"} label={channel.favorite ? "Remove from favourites" : "Add to favourites"} onSelect={toggleFavorite} />
             </div>
-            <div class="row-centre">
-              {/* Without a window to seek in (the TV's player hasn't said one), only pause. */}
-              {clock.window && !list && <PlayerButton fid="back10" icon="rotate-ccw" skipSeconds={STEP_MS / 1000} label="Back 10 seconds" onSelect={() => seek(-STEP_MS)} />}
-              <PlayerButton fid="playpause" icon={c.wantsToPlay ? "pause" : "play"} label={c.wantsToPlay ? "Pause" : "Play"} big onSelect={() => c.togglePause()} />
-              {clock.window && !list && <PlayerButton fid="fwd10" icon="rotate-cw" skipSeconds={STEP_MS / 1000} label="Forward 10 seconds" onSelect={() => seek(STEP_MS)} />}
-            </div>
+            <div class="row-centre" />
             <div class="row-right">
-              <LiveChip atLive={atLive} behindMs={clock.behindMs} onGoLive={() => c.goLive()} />
+              <LiveChip />
               <PlayerButton fid="chdown" icon="chevron-down" label="Previous channel" onSelect={() => zap(-1)} />
               <PlayerButton fid="chup" icon="chevron-up" label="Next channel" onSelect={() => zap(1)} />
             </div>
@@ -487,31 +452,14 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
   );
 }
 
-/**
- * "LIVE" in red at the live edge; behind it, how far ("−0:42"), and OK
- * goes back to live. It sits with the buttons: a live channel has no
- * position bar.
- */
-function LiveChip(p: { atLive: boolean; behindMs: number; onGoLive: () => void }) {
-  if (p.atLive) {
-    return (
-      <div class="live-chip-box">
-        <span class="live-badge t-badge at-live" aria-label="Live">
-          <span class="live-dot" />
-          LIVE
-        </span>
-      </div>
-    );
-  }
+/** "LIVE" in red, with the buttons: a live channel has no position bar, and no going back in it. */
+function LiveChip() {
   return (
     <div class="live-chip-box">
-      <F class="live-badge live-chip t-badge" fid="golive" label={`${behindText(p.behindMs)} behind live. Go live`} onSelect={p.onGoLive}>
+      <span class="live-badge t-badge at-live" aria-label="Live">
         <span class="live-dot" />
-        {`−${behindText(p.behindMs)}`}
-      </F>
-      <div class="pbtn-label t-caption" aria-hidden="true">
-        Go live
-      </div>
+        LIVE
+      </span>
     </div>
   );
 }
