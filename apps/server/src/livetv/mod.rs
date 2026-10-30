@@ -1637,7 +1637,7 @@ impl LiveTv {
             name: c.display_name().to_owned(),
             number: c.display_number(),
             group: c.group_name.clone(),
-            logo: (!c.logo_url.is_empty()).then(|| format!("/api/live/channels/{}/logo", c.id)),
+            logo: logo_path(c),
             favorite: favorites.contains(&c.id),
             has_guide: programs.is_some_and(|p| !p.is_empty()),
             now: now_on,
@@ -1882,7 +1882,7 @@ impl LiveTv {
             name: c.display_name().to_owned(),
             number: c.display_number(),
             group: c.group_name.clone(),
-            logo: (!c.logo_url.is_empty()).then(|| format!("/api/live/channels/{}/logo", c.id)),
+            logo: logo_path(c),
             guide_id: c.guide_key().unwrap_or_default().to_owned(),
             has_guide: lineup.has_guide(c),
             hidden: c.hidden,
@@ -2062,6 +2062,20 @@ impl LiveTv {
         self.failed_pictures.lock().insert(url.to_owned(), Instant::now());
         kept.ok_or_else(|| AppError::not_found(failed))
     }
+}
+
+/// What a channel's logo is made into: changed, the apps' copies are
+/// asked for again (their addresses change).
+const LOGO_MAKING: &str = "2";
+
+/// The address of a channel's logo, if it has one: `?v=` changes with its
+/// provider's address and [`LOGO_MAKING`], so apps never keep an old one.
+fn logo_path(c: &ChannelRow) -> Option<String> {
+    if c.logo_url.is_empty() {
+        return None;
+    }
+    let version = Sha256::digest(format!("{LOGO_MAKING}\n{}", c.logo_url).as_bytes());
+    Some(format!("/api/live/channels/{}/logo?v={}", c.id, hex::encode(&version[..4])))
 }
 
 /// The formats a picture is kept in.
