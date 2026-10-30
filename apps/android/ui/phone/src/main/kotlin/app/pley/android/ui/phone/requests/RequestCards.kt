@@ -21,6 +21,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldBuffer
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -35,7 +39,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -265,12 +268,13 @@ internal fun rememberRequestActions(texts: RequestTexts, act: (MediaRequest, Car
 /** Decline (requests-v2 §9b): an optional reason, which the person who asked sees. */
 @Composable
 internal fun DeclineDialog(title: String, onDecline: (String?) -> Unit, onDismiss: () -> Unit) {
-    var reason by rememberSaveable { mutableStateOf("") }
+    // Kept as the screen turns; a reason pasted past the server's limit keeps its first characters.
+    val reason = rememberTextFieldState()
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(
-                onClick = { onDecline(reason.trim().takeIf { it.isNotEmpty() }) },
+                onClick = { onDecline(reason.text.toString().trim().takeIf { it.isNotEmpty() }) },
                 colors = ButtonDefaults.textButtonColors(contentColor = PleyColors.DangerText),
             ) { Text(stringResource(R.string.requests_decline), style = MaterialTheme.typography.labelLarge) }
         },
@@ -282,12 +286,12 @@ internal fun DeclineDialog(title: String, onDecline: (String?) -> Unit, onDismis
         title = { Text(stringResource(R.string.requests_decline_title, title), style = MaterialTheme.typography.headlineSmall) },
         text = {
             OutlinedTextField(
-                value = reason,
-                onValueChange = { reason = it.take(REASON_MAX) },
+                state = reason,
                 modifier = Modifier.fillMaxWidth().testTag(DECLINE_REASON),
                 label = { Text(stringResource(R.string.requests_decline_reason)) },
                 supportingText = { Text(stringResource(R.string.requests_decline_reason_hint)) },
-                maxLines = 4,
+                inputTransformation = ReasonLength,
+                lineLimits = TextFieldLineLimits.MultiLine(maxHeightInLines = 4),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                 shape = PleyShape.Field,
                 colors = OutlinedTextFieldDefaults.colors(
@@ -478,6 +482,13 @@ private const val MAX_COUNT = 99
 
 /** The longest reason a decline takes (the server's limit). */
 private const val REASON_MAX = 500
+
+/** A reason past [REASON_MAX] characters (pasted, say) keeps its first ones. */
+private object ReasonLength : InputTransformation {
+    override fun TextFieldBuffer.transformInput() {
+        if (length > REASON_MAX) replace(REASON_MAX, length, "")
+    }
+}
 
 private val POSTER_WIDTH = 64.dp
 

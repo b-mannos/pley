@@ -152,6 +152,9 @@ Sonarr fetch what is approved. On phones and tablets:
   for the `requests` and `approvals` scopes the server now lists.
 - The summary follows the event stream; without it, the app reads the
   summary every minute in the foreground and an open list every 30 s.
+  Download progress sends no events: a list, a title's page, a library
+  title or Discover's requests showing a download are read again every
+  10 s while they show.
 
 ### Offline and downloads
 

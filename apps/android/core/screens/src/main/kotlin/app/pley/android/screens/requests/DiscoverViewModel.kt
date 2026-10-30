@@ -24,6 +24,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -40,6 +41,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -85,7 +87,8 @@ sealed interface DiscoverSearch {
  * first trending title, then rows (Trending this week, Popular movies,
  * Popular shows, Coming to cinemas, Popular anime) read as they come into
  * view ([showRow]), page by page until a screenful and then as they
- * scroll ([more]), each title once; then the person's requests; a search
+ * scroll ([more]), each title once; then the person's requests (read
+ * again as requests change, and every 10 s while one downloads); a search
  * at the top. Badges follow requests_changed in rows already shown,
  * without reading the rows again.
  */
@@ -117,11 +120,21 @@ class DiscoverViewModel(
 
     private data class Head(val gate: RequestsState, val origin: String, val stale: Boolean, val yours: List<MediaRequest>)
 
+    /** While Discover shows and one of "Your requests" downloads, they're read again every 10 s: download progress sends no events. */
+    private val ticks: Flow<Unit> = yours.map { list -> list.any { it.moving } }.distinctUntilChanged().transformLatest { on ->
+        emit(Unit)
+        while (on) {
+            delay(RequestsViewModel.MOVING_MS)
+            readYours()
+        }
+    }
+
     val state: StateFlow<DiscoverUiState> = combine(
         combine(gate, deps.origin.map { it.orEmpty() }.distinctUntilChanged(), stale, yours, ::Head),
         rowStates,
         heroDetail,
-    ) { head, rowList, detail -> page(head, rowList, detail) }
+        ticks,
+    ) { head, rowList, detail, _ -> page(head, rowList, detail) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_MS), DiscoverUiState())
 
     private fun page(head: Head, rowList: List<DiscoverRow>, detail: DiscoverDetail?): DiscoverUiState {

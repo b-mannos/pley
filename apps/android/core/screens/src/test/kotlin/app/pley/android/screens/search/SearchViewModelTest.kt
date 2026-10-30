@@ -321,6 +321,21 @@ class SearchViewModelTest {
     }
 
     @Test
+    fun onTmdbReadsOnPastAPageWhoseTitlesAreAllInALibrary() = runTest(dispatcher) {
+        val requests = FakeRequests(summary)
+        val asked = mutableListOf<Int>()
+        requests.searches = { _, page, _ ->
+            asked += page
+            // missing=1 left out every title of the first page: it isn't the end.
+            if (page == 1) DiscoverPage(1, 2, emptyList()) else trending.copy(page = 2, totalPages = 2)
+        }
+        val vm = viewModel("robot", requests)
+        advanceUntilIdle()
+        assertEquals(listOf(1, 2), asked)
+        assertEquals(trending.results.map { it.tmdbId }, (vm.tmdb.value as TmdbSection.Ready).titles.map { it.tmdbId })
+    }
+
+    @Test
     fun onTmdbBadgesFollowRequests() = runTest(dispatcher) {
         val requests = FakeRequests(summary)
         val vm = viewModel("sub", requests)

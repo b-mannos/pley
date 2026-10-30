@@ -5,7 +5,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
@@ -21,9 +20,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
-import androidx.compose.ui.test.performSemanticsAction
-import androidx.compose.ui.text.AnnotatedString
-import androidx.test.platform.app.InstrumentationRegistry
+import androidx.compose.ui.test.performTextReplacement
 import app.pley.android.data.RequestNotice
 import app.pley.android.model.Decline
 import app.pley.android.model.NewRequest
@@ -86,8 +83,6 @@ class PhoneRequestsUiTest {
     private fun show(requests: FakeRequests = FakeRequests(), content: @Composable () -> Unit) {
         this.requests = requests
         RequestsTestApplication.graph = RequestsTestGraph(requests)
-        // A phone is used by touch: a dialog doesn't put the focus, and a blinking cursor, in its first field.
-        InstrumentationRegistry.getInstrumentation().setInTouchMode(true)
         compose.setContent {
             PhoneTheme {
                 val navigation = rememberPhoneNavigation(PleyKey.Home) {}
@@ -179,8 +174,7 @@ class PhoneRequestsUiTest {
         compose.onNode(hasText("Decline") and hasClickAction() and card(44)).performClick()
         compose.onNodeWithText("Decline “The Substance”?").assertExists()
         compose.onNodeWithText("The person who asked sees it.", useUnmergedTree = true).assertExists()
-        // Set as typing would, without the keyboard and its cursor.
-        compose.onNodeWithTag(DECLINE_REASON).performSemanticsAction(SemanticsActions.SetText) { it(AnnotatedString("Not this one")) }
+        compose.onNodeWithTag(DECLINE_REASON).performTextReplacement("  Not this one ")
         compose.onNode(hasText("Decline") and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
         waitForCall("declineRequest")
         assertEquals(listOf(44L, Decline("Not this one")), requests.api.calls("declineRequest").single().args)

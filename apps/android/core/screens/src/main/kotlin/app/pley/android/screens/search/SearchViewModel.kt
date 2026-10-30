@@ -20,6 +20,7 @@ import app.pley.android.screens.ScreensGraph
 import app.pley.android.screens.library.LibraryViewModel
 import app.pley.android.screens.library.TileFactory
 import app.pley.android.screens.library.TileLook
+import app.pley.android.screens.requests.Pages
 import app.pley.android.screens.requests.patchFor
 import java.util.IdentityHashMap
 import kotlinx.coroutines.CancellationException
@@ -226,13 +227,19 @@ class SearchViewModel<T : Any>(
 
     private fun onTmdb(q: String): Flow<TmdbSection> = flow {
         emit(TmdbSection.Loading(q))
-        var titles = try {
-            deps.requests.search(q, 1, missing = true).results.distinctBy { "${it.kind.wire}:${it.tmdbId}" }.take(TMDB_SHOWN)
+        // A short page, even an empty one (its titles all in a library), isn't the end: read on for enough to show.
+        var pages = Pages()
+        var read = 0
+        try {
+            do {
+                pages = pages.with(deps.requests.search(q, pages.page + 1, missing = true))
+            } while (pages.short(TMDB_SHOWN) && ++read < TMDB_PAGES)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
-            emptyList()
+            // What came before shows; with nothing, the section stays hidden.
         }
+        var titles = pages.titles.take(TMDB_SHOWN)
         if (titles.isEmpty()) {
             emit(TmdbSection.Hidden)
             return@flow
@@ -377,6 +384,9 @@ class SearchViewModel<T : Any>(
 
         /** How many of TMDB's titles "On TMDB" shows; See all on Discover has the rest. */
         const val TMDB_SHOWN = 12
+
+        /** The most of TMDB's pages "On TMDB" reads for them. */
+        const val TMDB_PAGES = 3
 
         /**
          * [results] in their groups and the groups' order (people, movies,

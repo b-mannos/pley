@@ -22,8 +22,8 @@ import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -46,6 +46,12 @@ class DiscoverViewModelTest {
     @After
     fun reset() = Dispatchers.resetMain()
 
+    /** "Your requests" are read every 10 s while one downloads, without end: these tests step the clock, never run it out. */
+    private fun TestScope.settle() {
+        advanceTimeBy(1_000)
+        runCurrent()
+    }
+
     private fun TestScope.viewModel(requests: FakeRequests, query: String = ""): DiscoverViewModel {
         val vm = DiscoverViewModel(query, RequestsDeps(requests, MutableStateFlow("http://pley"), MutableStateFlow(true), dispatcher))
         backgroundScope.launch { vm.state.collect {} }
@@ -57,7 +63,7 @@ class DiscoverViewModelTest {
     @Test
     fun theHeroIsTheFirstTrendingTitleWithItsMainAction() = runTest(dispatcher) {
         val vm = viewModel(FakeRequests())
-        advanceUntilIdle()
+        settle()
         val hero = vm.state.value.hero!!
         assertEquals("The Wild Robot", hero.title.title)
         // Its page was read for the exact action.
@@ -79,7 +85,7 @@ class DiscoverViewModelTest {
             }
         }
         val vm = viewModel(requests)
-        advanceUntilIdle()
+        settle()
         val row = vm.row(DiscoverList.Trending)
         assertEquals(listOf(1, 2, 3), asked)
         assertEquals(trending.results.map { it.tmdbId }, row.titles.map { it.tmdbId })
@@ -95,10 +101,10 @@ class DiscoverViewModelTest {
             DiscoverPage(page, 1, trending.results)
         }
         val vm = viewModel(requests)
-        advanceUntilIdle()
+        settle()
         assertEquals(listOf(DiscoverList.Trending), lists.distinct())
         vm.showRow(DiscoverList.Anime)
-        advanceUntilIdle()
+        settle()
         assertEquals(listOf(DiscoverList.Trending, DiscoverList.Anime), lists.distinct())
         assertEquals(6, vm.row(DiscoverList.Anime).titles.size)
     }
@@ -107,12 +113,12 @@ class DiscoverViewModelTest {
     fun badgesFollowARequestInRowsAlreadyShown() = runTest(dispatcher) {
         val requests = FakeRequests()
         val vm = viewModel(requests)
-        advanceUntilIdle()
+        settle()
         val pending = Fixtures.decode<RequestList>("requests/list.json").requests.first { it.id == 44L }
         requests.api.answer("request", pending.copy(id = 61, kind = TitleKind.Movie, tmdbId = 1184918))
         val pagesBefore = requests.api.calls.size
         requests.change(RequestChange(61, TitleKind.Movie, 1184918))
-        advanceUntilIdle()
+        settle()
         val robot = vm.row(DiscoverList.Trending).titles.first { it.tmdbId == 1184918L }
         assertEquals(TitleStatus.Requested, robot.status)
         assertEquals(TitleBadge.Requested, badgeOf(robot))
@@ -126,7 +132,7 @@ class DiscoverViewModelTest {
         val read = mutableListOf<Int>()
         requests.pages = { _, page -> read += page; trending }
         val vm = viewModel(requests)
-        advanceUntilIdle()
+        settle()
         assertEquals(RequestProblem.SignInAgain(RequestScope.Requests), vm.state.value.problem)
         assertEquals(emptyList<Int>(), read)
     }
@@ -137,11 +143,11 @@ class DiscoverViewModelTest {
         var down = true
         requests.pages = { _, page -> if (down) throw ApiException(503, "tmdb_down", "TMDB isn't answering") else trending.copy(page = page) }
         val vm = viewModel(requests)
-        advanceUntilIdle()
+        settle()
         assertEquals(RequestProblem.TmdbDown, vm.state.value.problem)
         down = false
         vm.retry()
-        advanceUntilIdle()
+        settle()
         assertEquals(null, vm.state.value.problem)
         assertEquals("The Wild Robot", vm.state.value.hero?.title?.title)
     }
@@ -151,11 +157,11 @@ class DiscoverViewModelTest {
         val requests = FakeRequests()
         val vm = viewModel(requests)
         val events = mutableListOf<RequestEvent>()
-        // Unconfined: an event is taken as it's sent, before advanceUntilIdle returns.
+        // Unconfined: an event is taken as it's sent, before the clock's step ends.
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.events.collect { events += it } }
-        advanceUntilIdle()
+        settle()
         vm.heroAction()
-        advanceUntilIdle()
+        settle()
         assertEquals(NewRequest(TitleKind.Movie, 1184918), requests.api.calls("ask").single().args.single())
         assertTrue(events.single() is RequestEvent.Asked)
 
@@ -165,9 +171,9 @@ class DiscoverViewModelTest {
         val other = viewModel(requests)
         val opened = mutableListOf<RequestEvent>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { other.events.collect { opened += it } }
-        advanceUntilIdle()
+        settle()
         other.heroAction()
-        advanceUntilIdle()
+        settle()
         assertEquals(RequestEvent.Open(PleyKey.DiscoverTitle(TitleKind.Show, 95396, pick = true)), opened.single())
 
         // Partly in a library: Open goes to what the library has.
@@ -176,9 +182,9 @@ class DiscoverViewModelTest {
         val third = viewModel(requests)
         val went = mutableListOf<RequestEvent>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { third.events.collect { went += it } }
-        advanceUntilIdle()
+        settle()
         third.heroAction()
-        advanceUntilIdle()
+        settle()
         assertEquals(RequestEvent.Open(PleyKey.Item(201)), went.single())
     }
 
@@ -192,13 +198,13 @@ class DiscoverViewModelTest {
         }
         val vm = viewModel(requests)
         backgroundScope.launch { vm.search.collect {} }
-        advanceUntilIdle()
+        settle()
         vm.onQueryChange("ro")
         advanceTimeBy(100)
         vm.onQueryChange("robot")
         advanceTimeBy(249)
         assertEquals(emptyList<Pair<String, Int>>(), asked)
-        advanceUntilIdle()
+        settle()
         // Three titles aren't a screenful: page 2 too.
         assertEquals(listOf("robot" to 1, "robot" to 2), asked)
         val ready = vm.search.value as DiscoverSearch.Ready
@@ -210,12 +216,34 @@ class DiscoverViewModelTest {
     fun yourRequestsShowForThoseWhoHaveAny() = runTest(dispatcher) {
         val requests = FakeRequests()
         val vm = viewModel(requests)
-        advanceUntilIdle()
+        settle()
         assertTrue(vm.state.value.yours.isNotEmpty())
         val none = FakeRequests(summary.copy(own = 0, unseen = 0))
         val other = viewModel(none)
-        advanceUntilIdle()
+        settle()
         assertEquals(emptyList<MediaRequest>(), other.state.value.yours)
         assertTrue(none.api.calls("requests").isEmpty())
+    }
+
+    @Test
+    fun yourRequestsAreReadAgainEvery10sWhileOneDownloads() = runTest(dispatcher) {
+        val requests = FakeRequests()
+        val vm = viewModel(requests)
+        settle()
+        // Breaking Bad (42) downloads: its progress sends no events.
+        assertTrue(vm.state.value.yours.any { it.id == 42L })
+        val reads = requests.api.calls("requests").size
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertEquals(reads + 1, requests.api.calls("requests").size)
+
+        // Once nothing downloads, they're read only as requests change.
+        requests.api.answer("requests", RequestList(total = 1, requests = listOf(Fixtures.decode<RequestList>("requests/list.json").requests.first { it.id == 44L })))
+        advanceTimeBy(10_000)
+        runCurrent()
+        val quiet = requests.api.calls("requests").size
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertEquals(quiet, requests.api.calls("requests").size)
     }
 }

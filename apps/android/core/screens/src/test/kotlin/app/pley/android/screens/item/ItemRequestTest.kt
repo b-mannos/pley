@@ -2,7 +2,9 @@ package app.pley.android.screens.item
 
 import app.pley.android.data.RequestChange
 import app.pley.android.model.ItemKind
+import app.pley.android.model.ItemRequest
 import app.pley.android.model.RequestAccess
+import app.pley.android.model.RequestList
 import app.pley.android.model.RequestSummary
 import app.pley.android.model.TitleKind
 import app.pley.android.model.TitleStatus
@@ -93,6 +95,28 @@ class ItemRequestTest {
         val state = model.request.value!!
         assertEquals(TitleStatus.Partial, state.status)
         assertTrue(!state.more)
+    }
+
+    @Test
+    fun `while its request downloads it's read again every 10 s`() = runTest(dispatcher) {
+        val requests = FakeRequests(summary)
+        val downloading = Fixtures.decode<RequestList>("requests/list.json").requests.first { it.id == 42L }
+        requests.api.answer("itemRequest", ItemRequest(TitleKind.Show, 1396, TitleStatus.Requested, downloading))
+        val model = model(requests)
+        data.set(show)
+        model.onShown()
+        assertEquals(1, requests.api.calls("itemRequest").size)
+        // Its progress sends no events.
+        advanceTimeBy(10_001)
+        assertEquals(2, requests.api.calls("itemRequest").size)
+
+        // Imported: read only as its requests change from then on.
+        requests.api.answer("itemRequest", ItemRequest(TitleKind.Show, 1396, TitleStatus.Library, null))
+        advanceTimeBy(10_000)
+        assertEquals(3, requests.api.calls("itemRequest").size)
+        advanceTimeBy(60_000)
+        assertEquals(3, requests.api.calls("itemRequest").size)
+        assertEquals(TitleStatus.Library, model.request.value?.status)
     }
 
     @Test

@@ -24,6 +24,8 @@ import app.pley.android.player.PlayRequest
 import app.pley.android.screens.PlayerLauncher
 import app.pley.android.screens.PleyKey
 import app.pley.android.screens.requests.ItemRequestState
+import app.pley.android.screens.requests.RequestsViewModel
+import app.pley.android.screens.requests.moving
 import app.pley.android.screens.screensGraph
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -31,6 +33,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -44,8 +47,10 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -215,9 +220,10 @@ class ItemViewModel(
     /**
      * What requests say of this movie or show (requests-v2 §6): asked for
      * once the page has drawn, never before, and only when the person may
-     * ask or has requests; read again when one of its requests changes.
-     * `null`: nothing to show (not a movie or show, no TMDB match, or
-     * requests don't apply).
+     * ask or has requests; read again when one of its requests changes, and
+     * every 10 s while its request downloads or goes into the library
+     * (download progress sends no events). `null`: nothing to show (not a
+     * movie or show, no TMDB match, or requests don't apply).
      */
     val request: StateFlow<ItemRequestState?> = combine(
         drawn,
@@ -234,12 +240,25 @@ class ItemViewModel(
     private data class RequestGate(val mayAsk: Boolean, val manage: Boolean)
 
     private fun itemRequests(gate: RequestGate): Flow<ItemRequestState?> = flow {
-        val first = readItemRequest() ?: return@flow emit(null)
-        emit(ItemRequestState.of(first, gate.mayAsk, gate.manage))
-        data.requests.changes
-            .filter { it.about(first.kind, first.tmdbId) || (it.requestId != null && it.requestId == first.request?.id) }
+        var shown = readItemRequest() ?: return@flow emit(null)
+        emit(ItemRequestState.of(shown, gate.mayAsk, gate.manage))
+        val downloading = MutableStateFlow(shown.request?.moving == true)
+        val changes = data.requests.changes
+            .filter { it.about(shown.kind, shown.tmdbId) || (it.requestId != null && it.requestId == shown.request?.id) }
             .debounce(REQUEST_CHANGES_MS)
-            .collect { readItemRequest()?.let { emit(ItemRequestState.of(it, gate.mayAsk, gate.manage)) } }
+            .map { }
+        val ticks = downloading.transformLatest { on ->
+            while (on) {
+                delay(RequestsViewModel.MOVING_MS)
+                emit(Unit)
+            }
+        }
+        merge(changes, ticks).collect {
+            val again = readItemRequest() ?: return@collect
+            shown = again
+            downloading.value = again.request?.moving == true
+            emit(ItemRequestState.of(again, gate.mayAsk, gate.manage))
+        }
     }
 
     private suspend fun readItemRequest(): ItemRequest? = try {
