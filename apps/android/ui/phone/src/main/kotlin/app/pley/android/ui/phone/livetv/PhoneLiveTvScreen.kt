@@ -14,13 +14,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -33,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,42 +52,49 @@ import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.tile.rememberSkeleton
+import app.pley.android.designsystem.tile.skeleton
+import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
 import app.pley.android.model.LiveProgram
-import app.pley.android.screens.livetv.ChannelFilter
+import app.pley.android.screens.livetv.ChannelPages
 import app.pley.android.screens.livetv.LivePage
+import app.pley.android.screens.livetv.LiveTv
 import app.pley.android.screens.livetv.LiveTvEvent
 import app.pley.android.screens.livetv.LiveTvViewModel
 import app.pley.android.screens.livetv.LiveView
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.EmptyState
 import app.pley.android.ui.phone.kit.ErrorState
-import app.pley.android.ui.phone.kit.PleyChip
 import app.pley.android.ui.phone.kit.PleyIconButton
 import app.pley.android.ui.phone.kit.PleyTopAppBar
-import app.pley.android.ui.phone.kit.TonalButton
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.shell.LocalPhoneShell
 import app.pley.android.ui.phone.shell.ReportLoad
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
- * Live TV on phones and tablets (the web's LiveTvPage): "Live TV" with a
- * button that switches between the guide and the channels, a search of
- * names, numbers and what's on, then chips for All, Favourites and each
- * group. The guide is channels down and time across; the channels are
- * cards under Recently watched. A channel plays at a tap; a programme's
- * details open in a sheet, with Watch and the favourite.
+ * Live TV on phones and tablets (the web's LiveTvPage, TiviMate's way):
+ * "Live TV" with a button that switches between the guide and the
+ * channels; the category in a picker (Favourites, Recently watched, All
+ * channels, the groups); a search of names, numbers and what's on. The
+ * guide is channels down and time across; the channels are cards. Both
+ * load a page of channels at a time as they scroll, and open back at the
+ * channel last watched. A channel plays at a tap; a programme's details
+ * open in a sheet, with Watch and the favourite.
  */
 @Composable
 internal fun PhoneLiveTvScreen() {
     val vm: LiveTvViewModel = viewModel(factory = LiveTvViewModel.Factory)
     val page by vm.state.collectAsStateWithLifecycle()
+    val channels by vm.channels.collectAsStateWithLifecycle()
     val now by vm.now.collectAsStateWithLifecycle()
     val navigator = LocalPhoneNavigator.current
     val shell = LocalPhoneShell.current
     val resources = LocalResources.current
-    var details by remember { mutableStateOf<Pair<Long, LiveProgram>?>(null) }
+    var details by remember { mutableStateOf<Pair<LiveChannel, LiveProgram>?>(null) }
+    var picking by remember { mutableStateOf(false) }
     LaunchedEffect(vm) {
         vm.events.collect { event ->
             when (event) {
@@ -99,8 +104,8 @@ internal fun PhoneLiveTvScreen() {
     }
     ReportLoad(
         when {
-            page.error != null -> Loadable.Failed(page.error!!, Unit)
-            page.channels != null -> Loadable.Ready(Unit, fresh = true)
+            channels.error != null -> Loadable.Failed(channels.error!!, Unit)
+            channels.total != null -> Loadable.Ready(Unit, fresh = true)
             else -> null
         },
     )
@@ -111,69 +116,66 @@ internal fun PhoneLiveTvScreen() {
             onBack = navigator::back,
             scrolled = { page.view == LiveView.Channels && grid.canScrollBackward },
             actions = {
-                if (!page.channels.isNullOrEmpty()) {
-                    val guide = page.view == LiveView.Guide
-                    PleyIconButton(
-                        if (guide) PleyIcons.LayoutGrid else PleyIcons.CalendarDays,
-                        stringResource(if (guide) R.string.livetv_show_channels else R.string.livetv_show_guide),
-                        onClick = { vm.setView(if (guide) LiveView.Channels else LiveView.Guide) },
-                        modifier = Modifier.testTag(LIVE_TV_VIEW),
-                    )
-                }
+                val guide = page.view == LiveView.Guide
+                PleyIconButton(
+                    if (guide) PleyIcons.LayoutGrid else PleyIcons.CalendarDays,
+                    stringResource(if (guide) R.string.livetv_show_channels else R.string.livetv_show_guide),
+                    onClick = { vm.setView(if (guide) LiveView.Channels else LiveView.Guide) },
+                    modifier = Modifier.testTag(LIVE_TV_VIEW),
+                )
             },
         )
-        val channels = page.channels
-        when {
-            !page.allowed -> Message(stringResource(R.string.livetv_not_allowed_title), stringResource(R.string.livetv_not_allowed_body))
-            channels == null && page.error != null -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                ErrorState(stringResource(R.string.livetv_failed), page.error!!, onRetry = vm::retry)
-            }
-            channels == null -> Box(Modifier.fillMaxSize())
-            channels.isEmpty() -> Message(stringResource(R.string.livetv_none_title), stringResource(R.string.livetv_none_body))
-            else -> {
-                Filters(page, onQuery = vm::setQuery, onFilter = vm::setFilter)
-                Box(Modifier.weight(1f).fillMaxWidth()) {
-                    when {
-                        page.shown.isEmpty() -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-                            EmptyState(
-                                title = stringResource(R.string.livetv_no_match_title),
-                                body = if (page.query.isNotBlank()) {
-                                    stringResource(R.string.livetv_no_match_search, page.query.trim())
-                                } else {
-                                    stringResource(R.string.livetv_no_match_group)
-                                },
-                                icon = PleyIcons.Search,
-                                action = { TonalButton(stringResource(R.string.livetv_show_every_channel), onClick = vm::showAll) },
-                            )
-                        }
-                        page.view == LiveView.Guide -> PhoneGuide(
-                            channels = page.shown,
-                            vm = vm,
-                            origin = page.origin,
-                            now = now,
-                            onWatch = vm::watch,
-                            onDetails = { channel, program -> details = channel.id to program },
-                        )
-                        else -> ChannelCards(page, now, grid, onWatch = vm::watch, onFavorite = vm::toggleFavorite) { channel, program ->
-                            details = channel.id to program
-                        }
-                    }
+        if (!page.allowed) {
+            Message(stringResource(R.string.livetv_not_allowed_title), stringResource(R.string.livetv_not_allowed_body))
+            return@Column
+        }
+        Filters(page, onQuery = vm::setQuery, onPick = { picking = true })
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            val total = channels.total
+            when {
+                total == null && channels.error != null -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    ErrorState(stringResource(R.string.livetv_failed), channels.error!!, onRetry = vm::retry)
                 }
+                total == null -> Box(Modifier.fillMaxSize())
+                total == 0 -> Empty(page)
+                page.view == LiveView.Guide -> PhoneGuide(
+                    vm = vm,
+                    channels = channels,
+                    category = page.category,
+                    origin = page.origin,
+                    now = now,
+                    onWatch = vm::watch,
+                    onDetails = { channel, program -> details = channel to program },
+                )
+                else -> ChannelCards(vm, channels, page, now, grid, onDetails = { channel, program -> details = channel to program })
             }
         }
     }
-    val shown = details?.let { (id, program) -> page.channels?.firstOrNull { it.id == id }?.let { it to program } }
-    if (shown != null) {
+    if (picking) {
+        CategorySheet(
+            groups = page.groups,
+            selected = page.category,
+            onSelect = {
+                picking = false
+                vm.setCategory(it)
+            },
+            onDismiss = { picking = false },
+        )
+    }
+    details?.let { (channel, program) ->
         ProgramSheet(
-            channel = shown.first,
-            program = shown.second,
+            channel = channel,
+            program = program,
             origin = page.origin,
             now = now,
             onWatch = {
                 details = null
-                vm.watch(shown.first)
+                vm.watch(channel)
             },
-            onFavorite = { vm.toggleFavorite(shown.first) },
+            onFavorite = {
+                vm.toggleFavorite(channel)
+                details = channel.copy(favorite = !channel.favorite) to program
+            },
             onDismiss = { details = null },
         )
     }
@@ -186,15 +188,68 @@ private fun Message(title: String, body: String) {
     }
 }
 
-/** The search field, then the chips: All, Favourites (with any), and each group (with two or more). */
+/** A category or search without channels: why, in its own words. */
 @Composable
-private fun Filters(page: LivePage, onQuery: (String) -> Unit, onFilter: (ChannelFilter) -> Unit) {
+private fun Empty(page: LivePage) {
+    when {
+        page.query.isNotBlank() -> Message(stringResource(R.string.livetv_no_match_title), stringResource(R.string.livetv_no_match_search, page.query.trim()))
+        page.category == LiveCategory.Favorites -> Message(stringResource(R.string.livetv_none_favorites_title), stringResource(R.string.livetv_none_favorites_body))
+        page.category == LiveCategory.Recent -> Message(stringResource(R.string.livetv_none_recent_title), stringResource(R.string.livetv_none_recent_body))
+        page.category is LiveCategory.Group -> Message(stringResource(R.string.livetv_no_match_title), stringResource(R.string.livetv_no_match_group))
+        else -> Message(stringResource(R.string.livetv_none_title), stringResource(R.string.livetv_none_body))
+    }
+}
+
+/** What a category is called: "Favourites", "UK · Sport". */
+@Composable
+internal fun categoryName(category: LiveCategory, page: LivePage): String = when (category) {
+    LiveCategory.All -> stringResource(R.string.livetv_category_all)
+    LiveCategory.Favorites -> stringResource(R.string.livetv_category_favorites)
+    LiveCategory.Recent -> stringResource(R.string.livetv_category_recent)
+    is LiveCategory.Group -> LiveTv.groupName(page.groups?.groups?.firstOrNull { it.name == category.name }, category.name)
+}
+
+/** The category's button (its icon, name and count, a chevron: it opens the picker), then the search. */
+@Composable
+private fun Filters(page: LivePage, onQuery: (String) -> Unit, onPick: () -> Unit) {
     val metrics = LocalPhoneMetrics.current
-    Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+    val count = when (val c = page.category) {
+        LiveCategory.All -> page.groups?.total
+        LiveCategory.Favorites -> page.groups?.favorites
+        LiveCategory.Recent -> page.groups?.recent
+        is LiveCategory.Group -> page.groups?.groups?.firstOrNull { it.name == c.name }?.count
+    }
+    Column(Modifier.fillMaxWidth().padding(start = metrics.marginStart, end = metrics.marginEnd, bottom = 8.dp)) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(start = metrics.marginStart, end = metrics.marginEnd, bottom = 8.dp)
+                .clip(PleyShape.Control)
+                .clickable(role = Role.Button, onClick = onPick)
+                .padding(vertical = 6.dp)
+                .testTag(LIVE_TV_CATEGORY),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(categoryIcon(page.category), contentDescription = null, size = 20.dp, tint = PleyColors.AccentBright)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                categoryName(page.category, page),
+                style = MaterialTheme.typography.titleMedium,
+                color = PleyColors.Fg,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (count != null) {
+                Text("  %,d".format(count), style = MaterialTheme.typography.bodyMedium, color = PleyColors.Subtle, maxLines = 1)
+            }
+            Spacer(Modifier.width(4.dp))
+            Icon(PleyIcons.ChevronDown, contentDescription = null, size = 18.dp, tint = PleyColors.Muted)
+            Spacer(Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
                 .height(44.dp)
                 .background(PleyColors.Surface3, PleyShape.Pill)
                 .padding(start = 14.dp, end = 4.dp),
@@ -223,49 +278,40 @@ private fun Filters(page: LivePage, onQuery: (String) -> Unit, onFilter: (Channe
                 Spacer(Modifier.width(10.dp))
             }
         }
-        LazyRow(
-            contentPadding = PaddingValues(start = metrics.marginStart, end = metrics.marginEnd),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.testTag(LIVE_TV_CHIPS),
-        ) {
-            item(key = "all") {
-                PleyChip("${stringResource(R.string.livetv_all)}  ${page.channels?.size ?: 0}", page.filter == ChannelFilter.All, { onFilter(ChannelFilter.All) })
-            }
-            if (page.favorites > 0) {
-                item(key = "favorites") {
-                    PleyChip(
-                        "${stringResource(R.string.livetv_favorites)}  ${page.favorites}",
-                        page.filter == ChannelFilter.Favorites,
-                        { onFilter(ChannelFilter.Favorites) },
-                        icon = PleyIcons.Star,
-                    )
-                }
-            }
-            if (page.groups.size > 1) {
-                items(page.groups, key = { "group:${it.name}" }) { group ->
-                    val filter = ChannelFilter.Group(group.name)
-                    PleyChip("${group.name}  ${group.count}", page.filter == filter, { onFilter(filter) })
-                }
-            }
-        }
     }
+}
+
+/** A category's icon: a star, the clock, the grid, a group's TV. */
+internal fun categoryIcon(category: LiveCategory) = when (category) {
+    LiveCategory.Favorites -> PleyIcons.Star
+    LiveCategory.Recent -> PleyIcons.History
+    LiveCategory.All -> PleyIcons.LayoutGrid
+    is LiveCategory.Group -> PleyIcons.TvMinimal
 }
 
 /**
  * The channels as cards, as many across as fit (one on a phone held
- * upright), under Recently watched when nothing is searched or filtered.
+ * upright), a page loaded at a time as they scroll, opening at the
+ * channel last watched.
  */
 @Composable
 private fun ChannelCards(
+    vm: LiveTvViewModel,
+    channels: ChannelPages,
     page: LivePage,
     now: Long,
-    grid: androidx.compose.foundation.lazy.grid.LazyGridState,
-    onWatch: (LiveChannel) -> Unit,
-    onFavorite: (LiveChannel) -> Unit,
+    grid: LazyGridState,
     onDetails: (LiveChannel, LiveProgram) -> Unit,
 ) {
     val metrics = LocalPhoneMetrics.current
-    val showRecent = page.recent.isNotEmpty() && page.query.isBlank() && page.filter == ChannelFilter.All
+    val landing by vm.landing.collectAsStateWithLifecycle()
+    val skeleton = rememberSkeleton(animated = true)
+    Landing(landing, page) { index -> if (index != null) grid.scrollToItem(index) else grid.scrollToItem(0) }
+    LaunchedEffect(grid) {
+        snapshotFlow { grid.layoutInfo.visibleItemsInfo.let { (it.firstOrNull()?.index ?: 0) to (it.lastOrNull()?.index ?: 0) } }
+            .distinctUntilChanged()
+            .collect { (first, last) -> vm.showingRows(first, last) }
+    }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(CARD_MIN),
         state = grid,
@@ -274,61 +320,39 @@ private fun ChannelCards(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (showRecent) {
-            item(key = "recent-title", span = { GridItemSpan(maxLineSpan) }, contentType = "header") {
-                Text(
-                    stringResource(R.string.livetv_recent),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = PleyColors.Fg,
-                    modifier = Modifier.padding(top = 4.dp),
+        items(count = channels.total ?: 0, key = { index -> channels[index]?.id ?: -index - 1L }, contentType = { "channel" }) { index ->
+            val channel = channels[index]
+            if (channel == null) {
+                Box(Modifier.fillMaxWidth().height(CARD_HEIGHT).skeleton(skeleton, PleyShape.Card))
+            } else {
+                ChannelCard(
+                    channel,
+                    LiveTv.channelName(channel, page.category),
+                    page.origin,
+                    now,
+                    onWatch = { vm.watch(channel) },
+                    onFavorite = { vm.toggleFavorite(channel) },
+                    onDetails = { onDetails(channel, it) },
                 )
             }
-            item(key = "recent", span = { GridItemSpan(maxLineSpan) }, contentType = "recent") {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(page.recent, key = { it.id }) { channel ->
-                        RecentCard(channel, page.origin, now, onClick = { onWatch(channel) })
-                    }
-                }
-            }
-            item(key = "all-title", span = { GridItemSpan(maxLineSpan) }, contentType = "header") {
-                Text(
-                    stringResource(R.string.livetv_all),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = PleyColors.Fg,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-            }
-        }
-        items(page.shown, key = { it.id }, contentType = { "channel" }) { channel ->
-            ChannelCard(channel, page.origin, now, onWatch = { onWatch(channel) }, onFavorite = { onFavorite(channel) }, onDetails = { onDetails(channel, it) })
         }
     }
 }
 
-/** A channel watched lately: its logo over its name and what's on. */
+/**
+ * Where a list opens: at [landing]'s channel, once per category, search
+ * and return from the player ([scrollTo] with its index, or `null` for
+ * the top).
+ */
 @Composable
-private fun RecentCard(channel: LiveChannel, origin: String, now: Long, onClick: () -> Unit) {
-    val on = channel.onAt(now)
-    Column(
-        Modifier
-            .width(148.dp)
-            .clip(PleyShape.Card)
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics(mergeDescendants = true) {},
-    ) {
-        Box {
-            ChannelTile(channel, origin, Modifier.fillMaxWidth().height(80.dp), name = true, style = MaterialTheme.typography.titleSmall)
-            if (on != null) ProgramProgress(on, now, Modifier.fillMaxWidth().align(Alignment.BottomCenter), track = PleyColors.ProgressTrackOnArt)
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(channel.name, style = MaterialTheme.typography.titleSmall, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(
-            on?.title ?: stringResource(if (channel.hasGuide) R.string.livetv_nothing_now else R.string.livetv_no_guide),
-            style = MaterialTheme.typography.bodySmall,
-            color = PleyColors.Muted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+internal fun Landing(landing: app.pley.android.screens.livetv.Landing?, page: LivePage, scrollTo: suspend (Int?) -> Unit) {
+    val placed = remember { mutableStateOf<Any?>(null) }
+    LaunchedEffect(landing, page.category, page.query) {
+        val l = landing ?: return@LaunchedEffect
+        if (l.category != page.category || l.query != page.query.trim()) return@LaunchedEffect
+        if (placed.value == l) return@LaunchedEffect
+        placed.value = l
+        scrollTo(l.index)
     }
 }
 
@@ -340,6 +364,7 @@ private fun RecentCard(channel: LiveChannel, origin: String, now: Long, onClick:
 @Composable
 private fun ChannelCard(
     channel: LiveChannel,
+    name: String,
     origin: String,
     now: Long,
     onWatch: () -> Unit,
@@ -350,13 +375,14 @@ private fun ChannelCard(
     val on = channel.onAt(now)
     val next = channel.nextAt(now)
     val watch = if (on != null) {
-        stringResource(R.string.livetv_watch_with_now, listOfNotNull(channel.number, channel.name).joinToString(" "), on.title)
+        stringResource(R.string.livetv_watch_with_now, listOfNotNull(channel.number, name).joinToString(" "), on.title)
     } else {
-        stringResource(R.string.livetv_watch, listOfNotNull(channel.number, channel.name).joinToString(" "))
+        stringResource(R.string.livetv_watch, listOfNotNull(channel.number, name).joinToString(" "))
     }
     Row(
         Modifier
             .fillMaxWidth()
+            .height(CARD_HEIGHT)
             .clip(PleyShape.Card)
             .background(PleyColors.Surface)
             .clickable(role = Role.Button, onClickLabel = watch, onClick = onWatch)
@@ -377,7 +403,7 @@ private fun ChannelCard(
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(channel.name, style = MaterialTheme.typography.titleSmall, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(name, style = MaterialTheme.typography.titleSmall, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (on != null) {
                 Row(
                     Modifier.clickable(role = Role.Button) { onDetails(on) }.padding(vertical = 2.dp),
@@ -421,10 +447,11 @@ private fun ChannelCard(
 
 /** Cards at least this wide: one column on a phone held upright, two or three on tablets. */
 private val CARD_MIN = 320.dp
+private val CARD_HEIGHT = 96.dp
 
 internal const val LIVE_TV_PAGE = "pley.live"
 internal const val LIVE_TV_VIEW = "pley.live.view"
+internal const val LIVE_TV_CATEGORY = "pley.live.category"
 internal const val LIVE_TV_SEARCH = "pley.live.search"
-internal const val LIVE_TV_CHIPS = "pley.live.chips"
 internal const val LIVE_TV_CHANNELS = "pley.live.channels"
 internal const val LIVE_TV_CHANNEL = "pley.live.channel."

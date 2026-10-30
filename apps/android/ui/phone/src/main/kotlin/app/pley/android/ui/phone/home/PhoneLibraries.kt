@@ -49,6 +49,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
@@ -237,7 +238,7 @@ private fun LiveTvRow(channels: Int, onClick: () -> Unit) {
         Column(Modifier.weight(1f)) {
             Text(stringResource(R.string.livetv_title), style = MaterialTheme.typography.titleMedium, color = PleyColors.Fg, maxLines = 1)
             Text(
-                if (channels == 1) stringResource(R.string.livetv_entry_one_channel) else stringResource(R.string.livetv_entry_channels, channels),
+                pluralStringResource(R.plurals.livetv_entry_channels, channels, channels),
                 style = MaterialTheme.typography.bodyMedium,
                 color = PleyColors.Muted,
                 maxLines = 1,

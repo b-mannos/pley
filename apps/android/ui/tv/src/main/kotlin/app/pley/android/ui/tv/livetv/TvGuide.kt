@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -32,6 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -68,14 +68,19 @@ import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.reducedMotion
+import app.pley.android.designsystem.tile.rememberSkeleton
+import app.pley.android.designsystem.tile.skeleton
+import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
 import app.pley.android.model.LiveProgram
+import app.pley.android.screens.livetv.ChannelPages
+import app.pley.android.screens.livetv.Landing
 import app.pley.android.screens.livetv.LiveTv
 import app.pley.android.screens.livetv.LiveTvViewModel
 import app.pley.android.ui.tv.R
-import app.pley.android.ui.tv.kit.LocalTvRailFocus
 import app.pley.android.ui.tv.kit.initialFocus
 import java.util.Calendar
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.math.roundToInt
 
 /**
@@ -86,27 +91,32 @@ import kotlin.math.roundToInt
  *
  * - Left and Right go to the programme before and after, the grid
  *   following by half hours; Left from the guide's first half hour goes to
- *   the rail;
- * - Up and Down keep the time and change channel; Up from the first goes
- *   to the chips above, Channel up and down page through the lineup;
+ *   the categories ([onLeave]);
+ * - Up and Down keep the time and change channel, the category's channels
+ *   loaded a page at a time as they come; Up from the first goes to the
+ *   tabs above, Channel up and down page through the lineup;
  * - OK on a programme on now (or a channel without guide) watches the
  *   channel, on another opens its details, as does holding OK or Menu;
  * - Back away from now comes back to now first.
+ *
+ * It opens on the channel last watched, when it is in the category.
  */
 @Composable
 internal fun TvGuide(
-    channels: List<LiveChannel>,
     vm: LiveTvViewModel,
+    pages: ChannelPages,
+    category: LiveCategory,
     origin: String,
     now: Long,
     onWatch: (LiveChannel) -> Unit,
     onDetails: (LiveChannel, LiveProgram) -> Unit,
+    onLeave: () -> Unit,
     modifier: Modifier = Modifier,
+    requester: FocusRequester = remember { FocusRequester() },
 ) {
     val guide by vm.guide.collectAsStateWithLifecycle()
     val start = vm.guideStart
     val end = start + LiveTv.GUIDE_SPAN_S
-    val rail = LocalTvRailFocus.current
     val focusManager = LocalFocusManager.current
     val density = LocalDensity.current
     val reduced = reducedMotion()
@@ -116,13 +126,22 @@ internal fun TvGuide(
     var left by rememberSaveable { mutableStateOf(leftFor(now, start)) }
     var focused by remember { mutableStateOf(false) }
     var held by remember { mutableStateOf(false) }
-    val requester = remember { FocusRequester() }
-    row = row.coerceIn(0, (channels.size - 1).coerceAtLeast(0))
-    val channel = channels.getOrNull(row)
+    val total = pages.total ?: 0
+    row = row.coerceIn(0, (total - 1).coerceAtLeast(0))
+    val channel = pages[row]
     val programs = guide.byChannel
     val current = channel?.let { at(programs[it.id], cursor) }
 
-    LaunchedEffect(left) { vm.showing(left, left + VIEW_S) }
+    LaunchedEffect(left) { vm.showingTimes(left, left + VIEW_S) }
+    // Opens on the channel last watched, once per category and return from the player.
+    val landing by vm.landing.collectAsStateWithLifecycle()
+    val placed = remember { mutableStateOf<Landing?>(null) }
+    LaunchedEffect(landing) {
+        val l = landing ?: return@LaunchedEffect
+        if (l.category != category || placed.value == l) return@LaunchedEffect
+        placed.value = l
+        row = l.index ?: 0
+    }
 
     /** Puts the cursor at [time] (a programme's start, or a half hour), the grid following it. */
     fun moveTo(time: Long) {
@@ -154,11 +173,17 @@ internal fun TvGuide(
         val last = visible.lastOrNull()?.index ?: 0
         if (row <= first || row >= last) rows.animateScrollToItem((row - 1).coerceAtLeast(0))
     }
+    LaunchedEffect(rows) {
+        snapshotFlow { rows.layoutInfo.visibleItemsInfo.let { (it.firstOrNull()?.index ?: 0) to (it.lastOrNull()?.index ?: 0) } }
+            .distinctUntilChanged()
+            .collect { (first, last) -> vm.showingRows(first, last) }
+    }
+    val skeleton = rememberSkeleton(animated = false)
 
     Column(modifier.testTag(TV_LIVE_GUIDE)) {
-        Focused(channel, current, origin, now, clock, Modifier.padding(start = PleyTv.Gutter, end = TvSafeArea.Horizontal).height(INFO_HEIGHT))
+        Focused(channel, channel?.let { LiveTv.channelName(it, category) }, current, origin, now, clock, Modifier.padding(end = TvSafeArea.Horizontal).height(INFO_HEIGHT))
         // The times across the top, the day at the left.
-        Row(Modifier.fillMaxWidth().height(28.dp).padding(start = PleyTv.Gutter - CHANNEL_INSET)) {
+        Row(Modifier.fillMaxWidth().height(28.dp)) {
             Box(Modifier.width(CHANNEL_WIDTH).fillMaxHeight().padding(start = CHANNEL_INSET), contentAlignment = Alignment.CenterStart) {
                 BasicText(dayOf(maxOf(left, start), now), style = PleyType.Tv.Caption.copy(color = PleyColors.Fg), maxLines = 1)
             }
@@ -196,8 +221,9 @@ internal fun TvGuide(
                         KeyEvent.KEYCODE_DPAD_LEFT -> {
                             if (!down) return@onPreviewKeyEvent true
                             val target = current?.start?.minus(1) ?: (cursor - LiveTv.SLOT_S)
-                            if (target < start) {
-                                rail?.focusCurrent()
+                            // A channel without programmes has no time to move through.
+                            if (target < start || channel == null || programs[channel.id].isNullOrEmpty()) {
+                                onLeave()
                             } else {
                                 val before = channel?.let { at(programs[it.id], target) }
                                 moveTo(before?.start?.coerceAtLeast(slot(target)) ?: slot(target))
@@ -217,7 +243,7 @@ internal fun TvGuide(
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            if (down && row < channels.lastIndex) row++
+                            if (down && row < total - 1) row++
                             true
                         }
                         KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
@@ -225,7 +251,7 @@ internal fun TvGuide(
                             true
                         }
                         KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
-                            if (down) row = (row + PAGE).coerceAtMost(channels.lastIndex)
+                            if (down) row = (row + PAGE).coerceAtMost((total - 1).coerceAtLeast(0))
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
@@ -259,9 +285,19 @@ internal fun TvGuide(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = TvSafeAreaBottom),
             ) {
-                itemsIndexed(channels, key = { _, c -> c.id }, contentType = { _, _ -> "row" }) { index, c ->
+                items(count = total, key = { index -> pages[index]?.id ?: -index - 1L }, contentType = { "row" }) { index ->
+                    val c = pages[index]
+                    if (c == null) {
+                        Row(Modifier.fillMaxWidth().height(ROW_HEIGHT).padding(vertical = 4.dp)) {
+                            Box(Modifier.width(CHANNEL_WIDTH - 8.dp).fillMaxHeight().skeleton(skeleton, PleyShape.Control))
+                            Spacer(Modifier.width(10.dp))
+                            Box(Modifier.weight(1f).fillMaxHeight().padding(end = TvSafeArea.Horizontal).skeleton(skeleton, PleyShape.Control))
+                        }
+                        return@items
+                    }
                     GuideRow(
                         channel = c,
+                        name = LiveTv.channelName(c, category),
                         programs = programs[c.id],
                         loaded = guide.loaded,
                         origin = origin,
@@ -279,7 +315,7 @@ internal fun TvGuide(
             val nowX = (now - start) * pxPerSecond
             Box(
                 Modifier
-                    .padding(start = PleyTv.Gutter - CHANNEL_INSET + CHANNEL_WIDTH, end = TvSafeArea.Horizontal)
+                    .padding(start = CHANNEL_WIDTH, end = TvSafeArea.Horizontal)
                     .fillMaxSize()
                     .clipToBounds(),
             ) {
@@ -297,14 +333,14 @@ internal fun TvGuide(
 
 /** What has focus, above the grid: its title, channel and times, and what the guide says of it. */
 @Composable
-private fun Focused(channel: LiveChannel?, program: LiveProgram?, origin: String, now: Long, clock: (Long) -> String, modifier: Modifier) {
+private fun Focused(channel: LiveChannel?, name: String?, program: LiveProgram?, origin: String, now: Long, clock: (Long) -> String, modifier: Modifier) {
     Row(modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f)) {
             if (channel == null) return@Column
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (program != null) BadgeOf(program, Modifier.padding(end = 8.dp))
                 BasicText(
-                    program?.title ?: channel.name,
+                    program?.title ?: name.orEmpty(),
                     style = PleyType.Tv.Section.copy(color = PleyColors.Fg),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -312,7 +348,7 @@ private fun Focused(channel: LiveChannel?, program: LiveProgram?, origin: String
             }
             val meta = buildList {
                 // Without a programme the title is the channel's name already.
-                if (program != null) add(listOfNotNull(channel.number, channel.name).joinToString(" ")) else channel.number?.let(::add)
+                if (program != null) add(listOfNotNull(channel.number, name).joinToString(" ")) else channel.number?.let(::add)
                 if (program != null) {
                     add("${dayOf(program.start, now)} ${spanOf(program, clock)}")
                     if (program.airingAt(now)) add(timeLeft(program, now))
@@ -343,6 +379,7 @@ private fun Focused(channel: LiveChannel?, program: LiveProgram?, origin: String
 @Composable
 private fun GuideRow(
     channel: LiveChannel,
+    name: String,
     programs: List<LiveProgram>?,
     loaded: Boolean,
     origin: String,
@@ -362,7 +399,6 @@ private fun GuideRow(
         Modifier
             .fillMaxWidth()
             .height(ROW_HEIGHT)
-            .padding(start = PleyTv.Gutter - CHANNEL_INSET)
             .drawBehind { drawLine(PleyColors.Surface4.copy(alpha = 0.6f), Offset(0f, size.height - 0.5f), Offset(size.width, size.height - 0.5f), 1f) },
     ) {
         Row(
@@ -383,7 +419,7 @@ private fun GuideRow(
                     if (channel.favorite) Icon(PleyIcons.Star, contentDescription = null, size = 12.dp, tint = PleyColors.Accent, modifier = Modifier.padding(start = 4.dp))
                 }
                 BasicText(
-                    channel.name,
+                    name,
                     style = PleyType.Tv.Label.copy(color = if (rowFocused) PleyColors.Fg else PleyColors.Muted),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -392,7 +428,7 @@ private fun GuideRow(
         }
         Box(Modifier.weight(1f).fillMaxHeight().padding(end = TvSafeArea.Horizontal).clipToBounds()) {
             if (visible.isEmpty() && loaded) {
-                val label = stringResource(if (channel.hasGuide) R.string.tv_livetv_no_info else R.string.tv_livetv_no_guide)
+                val label = if (channel.hasGuide) stringResource(R.string.tv_livetv_no_info) else name
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -482,11 +518,11 @@ private fun slot(time: Long): Long = Math.floorDiv(time, LiveTv.SLOT_S) * LiveTv
 /** Where the grid starts for [now]: the half hour before the one it is in, never before the guide. */
 private fun leftFor(now: Long, start: Long): Long = (slot(now) - LiveTv.SLOT_S).coerceAtLeast(start)
 
-/** The grid shows this much time: 2 h 40 at 4 dp a minute in its 640 dp. */
-private const val VIEW_S = 160 * 60L
-private val DP_PER_MINUTE = 4.dp
+/** The grid shows this much time: two hours at 3.6 dp a minute in its 432 dp, beside the categories. */
+private const val VIEW_S = 120 * 60L
+private val DP_PER_MINUTE = 3.6.dp
 private val ROW_HEIGHT = 52.dp
-private val CHANNEL_WIDTH = 176.dp
+private val CHANNEL_WIDTH = 160.dp
 
 /** The channel cell's filling starts this far left of the page's gutter, so its text lines up with it. */
 private val CHANNEL_INSET = 10.dp

@@ -7,6 +7,18 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import app.pley.android.model.LiveCategory
+import app.pley.android.screens.livetv.LiveTv
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
@@ -26,7 +38,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -104,7 +115,6 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     val engine by vm.engine.collectAsStateWithLifecycle()
     val channel by vm.channel.collectAsStateWithLifecycle()
-    val channels by vm.channels.collectAsStateWithLifecycle()
     val origin by vm.origin.collectAsStateWithLifecycle()
     val now by vm.now.collectAsStateWithLifecycle()
     val digits by vm.digits.collectAsStateWithLifecycle()
@@ -201,7 +211,7 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
         val shown = channel
         if (state.audioOnly && playing && shown != null) SoundOnly(shown, origin, now)
         when (val phase = state.phase) {
-            LivePhase.Tuning, LivePhase.Idle -> if (shown != null) Tuning(shown, origin, now)
+            LivePhase.Tuning, LivePhase.Idle -> if (shown != null) Tuning(vm, shown, origin, now)
             is LivePhase.Failed -> Trouble(
                 trouble = phase.trouble,
                 channel = shown,
@@ -212,9 +222,7 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
             )
             LivePhase.Playing -> Unit
         }
-        if (state.buffering && playing) {
-            Icon(PleyIcons.LoaderCircle, contentDescription = null, size = 48.dp, tint = PleyColors.Fg, modifier = Modifier.align(Alignment.Center))
-        }
+        if (state.buffering && playing) Spinner(Modifier.align(Alignment.Center))
         // What's on, with the window and the controls when asked for.
         AnimatedVisibility(
             visible = shown != null && playing && overlay != Overlay.Channels && (overlay == Overlay.Controls || showInfo),
@@ -237,13 +245,13 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
         Digits(digits, Modifier.align(Alignment.TopEnd))
         TvSidePanel(visible = overlay == Overlay.Channels, onDismiss = { overlay = Overlay.None }) {
             ChannelList(
-                channels = channels,
+                vm = vm,
                 current = state.channelId,
                 origin = origin,
                 now = now,
                 onTune = {
                     overlay = Overlay.None
-                    vm.tune(it.id)
+                    vm.tune(it.id, it)
                 },
             )
         }
@@ -252,11 +260,13 @@ internal fun TvLivePlayerScreen(vm: LivePlayerViewModel, onExit: () -> Unit) {
 
 /** The channel's logo, name and what's on while it is tuned. */
 @Composable
-private fun Tuning(channel: LiveChannel, origin: String, now: Long) {
+private fun Tuning(vm: LivePlayerViewModel, channel: LiveChannel, origin: String, now: Long) {
     Column(Modifier.fillMaxSize().background(Color.Black), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
         ChannelTile(channel, origin, Modifier.size(width = 200.dp, height = 112.dp), name = true, style = PleyType.Tv.Title, well = Color.White.copy(alpha = 0.06f), shape = PleyShape.Dialog)
-        Spacer(Modifier.height(20.dp))
-        BasicText(listOfNotNull(channel.number, channel.name).joinToString("  "), style = PleyType.Tv.Section.copy(color = PleyColors.Fg))
+        Spacer(Modifier.height(22.dp))
+        Spinner()
+        Spacer(Modifier.height(18.dp))
+        BasicText(listOfNotNull(channel.number, LiveTv.channelName(channel, vm.category)).joinToString("  "), style = PleyType.Tv.Section.copy(color = PleyColors.Fg))
         BasicText(
             channel.onAt(now)?.title ?: stringResource(R.string.tv_live_player_tuning),
             style = PleyType.Tv.Body.copy(color = PleyColors.Muted),
@@ -311,7 +321,7 @@ private fun InfoBar(
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     channel.number?.let { BasicText(it, style = PleyType.Tv.Label.copy(color = PleyColors.Muted), modifier = Modifier.padding(end = 8.dp)) }
-                    BasicText(channel.name, style = PleyType.Tv.Label.copy(color = PleyColors.Muted), maxLines = 1)
+                    BasicText(LiveTv.channelName(channel, vm.category), style = PleyType.Tv.Label.copy(color = PleyColors.Muted), maxLines = 1)
                     if (channel.favorite) Icon(PleyIcons.Star, contentDescription = null, size = 14.dp, tint = PleyColors.Accent, modifier = Modifier.padding(start = 6.dp))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
@@ -341,19 +351,6 @@ private fun InfoBar(
                 }
             }
             if (state.phase == LivePhase.Playing) LiveBadge(state)
-        }
-        if (state.canRewind && state.phase == LivePhase.Playing) {
-            Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                BasicText(
-                    stringResource(R.string.tv_live_player_window, (state.windowMs / 60_000).toInt().coerceAtLeast(1)),
-                    style = PleyType.Tv.Caption.copy(color = PleyColors.Muted),
-                )
-                Spacer(Modifier.width(12.dp))
-                Box(Modifier.weight(1f).height(4.dp).clip(PleyShape.Badge).background(Color.White.copy(alpha = 0.2f))) {
-                    val fraction = (state.positionMs.toFloat() / state.windowMs.coerceAtLeast(1)).coerceIn(0f, 1f)
-                    Box(Modifier.fillMaxHeight().fillMaxWidth(fraction).background(PleyColors.Accent))
-                }
-            }
         }
         if (controls) {
             Row(
@@ -487,15 +484,41 @@ private fun Trouble(
     }
 }
 
-/** The lineup in the side panel: what's on each, the channel watched first in focus. */
+/** A spinning ring in the accent, while a channel tunes or waits for data. */
 @Composable
-private fun ChannelList(channels: List<LiveChannel>, current: Long?, origin: String, now: Long, onTune: (LiveChannel) -> Unit) {
+private fun Spinner(modifier: Modifier = Modifier) {
+    val turn = rememberInfiniteTransition(label = "spinner")
+    val angle by turn.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "angle")
+    Canvas(modifier.size(36.dp)) {
+        val stroke = 3.dp.toPx()
+        drawArc(PleyColors.Accent, startAngle = angle, sweepAngle = 270f, useCenter = false, style = Stroke(stroke, cap = StrokeCap.Round))
+    }
+}
+
+/**
+ * The category's channels in the side panel, a page at a time as they
+ * scroll: what's on each, the channel watched first in focus.
+ */
+@Composable
+private fun ChannelList(vm: LivePlayerViewModel, current: Long?, origin: String, now: Long, onTune: (LiveChannel) -> Unit) {
+    val pages by vm.list.collectAsStateWithLifecycle()
+    val start by vm.listIndex.collectAsStateWithLifecycle()
     val list = rememberLazyListState()
-    val index = channels.indexOfFirst { it.id == current }.coerceAtLeast(0)
-    LaunchedEffect(Unit) { list.scrollToItem((index - 2).coerceAtLeast(0)) }
-    BasicText(stringResource(R.string.tv_live_player_channels), style = PleyType.Tv.Title.copy(color = PleyColors.Fg), modifier = Modifier.padding(start = 8.dp, bottom = 12.dp))
+    val index = start ?: 0
+    LaunchedEffect(start != null) { list.scrollToItem((index - 2).coerceAtLeast(0)) }
+    LaunchedEffect(list) {
+        snapshotFlow { list.layoutInfo.visibleItemsInfo.let { (it.firstOrNull()?.index ?: 0) to (it.lastOrNull()?.index ?: 0) } }
+            .distinctUntilChanged()
+            .collect { (first, last) -> vm.showingListRows(first, last) }
+    }
+    BasicText(categoryLabel(vm.category), style = PleyType.Tv.Title.copy(color = PleyColors.Fg), maxLines = 1, modifier = Modifier.padding(start = 8.dp, bottom = 12.dp))
     LazyColumn(state = list, contentPadding = PaddingValues(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.testTag(TV_LIVE_PLAYER_CHANNELS)) {
-        itemsIndexed(channels, key = { _, c -> c.id }) { i, channel ->
+        items(count = pages.total ?: 0, key = { i -> pages[i]?.id ?: -i - 1L }) { i ->
+            val channel = pages[i]
+            if (channel == null) {
+                Box(Modifier.fillMaxWidth().height(52.dp).clip(PleyShape.Control).background(Color.White.copy(alpha = 0.04f)))
+                return@items
+            }
             val on = channel.onAt(now)
             val isCurrent = channel.id == current
             Surface(
@@ -519,7 +542,7 @@ private fun ChannelList(channels: List<LiveChannel>, current: Long?, origin: Str
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         BasicText(
-                            listOfNotNull(channel.number, channel.name).joinToString("  "),
+                            listOfNotNull(channel.number, LiveTv.channelName(channel, vm.category)).joinToString("  "),
                             style = PleyType.Tv.Label.copy(color = content),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -533,6 +556,15 @@ private fun ChannelList(channels: List<LiveChannel>, current: Long?, origin: Str
             }
         }
     }
+}
+
+/** The channel list's heading: the category channel up and down go through. */
+@Composable
+private fun categoryLabel(category: LiveCategory): String = when (category) {
+    LiveCategory.All -> stringResource(R.string.tv_livetv_category_all)
+    LiveCategory.Favorites -> stringResource(R.string.tv_livetv_category_favorites)
+    LiveCategory.Recent -> stringResource(R.string.tv_livetv_category_recent)
+    is LiveCategory.Group -> LiveTv.splitRegion(category.name)?.let { (region, label) -> "$region · $label" } ?: category.name
 }
 
 /** What's on shows this long after tuning or a seek. */

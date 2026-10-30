@@ -29,7 +29,7 @@ import kotlinx.coroutines.launch
  */
 class TvLivePlayerActivity : ComponentActivity() {
     private val vm: LivePlayerViewModel by viewModels {
-        LivePlayerViewModel.factory(intent.getLongExtra(EXTRA_CHANNEL, 0))
+        LivePlayerViewModel.factory(intent.getLongExtra(EXTRA_CHANNEL, 0), intent.getStringExtra(EXTRA_CATEGORY) ?: "all")
     }
     private var attached: PlayerEngine? = null
     private var session: VideoMediaSession? = null
@@ -94,7 +94,10 @@ class TvLivePlayerActivity : ComponentActivity() {
         /** The channel to tune as it opens. */
         const val EXTRA_CHANNEL = "channel"
 
-        fun intent(context: Context, channelId: Long): Intent =
-            Intent(context, TvLivePlayerActivity::class.java).putExtra(EXTRA_CHANNEL, channelId)
+        /** The category it was chosen in (a LiveCategory's key): channel up and down stay in it. */
+        const val EXTRA_CATEGORY = "category"
+
+        fun intent(context: Context, channelId: Long, category: String): Intent =
+            Intent(context, TvLivePlayerActivity::class.java).putExtra(EXTRA_CHANNEL, channelId).putExtra(EXTRA_CATEGORY, category)
     }
 }

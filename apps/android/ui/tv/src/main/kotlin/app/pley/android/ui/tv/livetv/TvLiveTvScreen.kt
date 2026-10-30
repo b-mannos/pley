@@ -1,48 +1,64 @@
 package app.pley.android.ui.tv.livetv
 
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.tv.material3.ClickableSurfaceDefaults
+import androidx.tv.material3.Glow
+import androidx.tv.material3.LocalContentColor
+import androidx.tv.material3.Surface
 import app.pley.android.common.sentenceOf
 import app.pley.android.data.Loadable
 import app.pley.android.designsystem.PleyColors
@@ -51,17 +67,24 @@ import app.pley.android.designsystem.PleyTv
 import app.pley.android.designsystem.PleyType
 import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.Icon
+import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
 import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.designsystem.tile.TileCaption
 import app.pley.android.designsystem.tile.TileKind
 import app.pley.android.designsystem.tile.TileStyle
+import app.pley.android.designsystem.tile.rememberSkeleton
+import app.pley.android.designsystem.tile.skeleton
 import app.pley.android.designsystem.tile.tvTileSize
+import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
 import app.pley.android.model.LiveProgram
-import app.pley.android.screens.livetv.ChannelFilter
+import app.pley.android.screens.livetv.ChannelPages
+import app.pley.android.screens.livetv.GroupEntry
+import app.pley.android.screens.livetv.Landing
 import app.pley.android.screens.livetv.LivePage
+import app.pley.android.screens.livetv.LiveTv
 import app.pley.android.screens.livetv.LiveTvEvent
 import app.pley.android.screens.livetv.LiveTvViewModel
 import app.pley.android.screens.livetv.LiveView
@@ -71,32 +94,38 @@ import app.pley.android.ui.tv.kit.TvPillButton
 import app.pley.android.ui.tv.kit.TvSidePanel
 import app.pley.android.ui.tv.kit.TvTileFrame
 import app.pley.android.ui.tv.kit.initialFocus
-import app.pley.android.ui.tv.kit.railFade
 import app.pley.android.ui.tv.kit.railOnLeftStopOnRight
 import app.pley.android.ui.tv.kit.rememberFocusMemory
 import app.pley.android.ui.tv.kit.rememberedFocus
-import app.pley.android.ui.tv.library.TvChip
 import app.pley.android.ui.tv.library.TvMessage
 import app.pley.android.ui.tv.library.TvTab
 import app.pley.android.ui.tv.shell.ReportOffline
 import app.pley.android.ui.tv.shell.failedBody
 import app.pley.android.ui.tv.shell.failedTitle
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
- * Live TV on TV (the web's LiveTvPage, for a remote): "Live TV" with the
- * Guide and Channels tabs, then chips for All, Favourites and each group.
- * The guide ([TvGuide]) is the page's first focus; the channels are tiles
- * under Recently watched. OK on a channel watches it; holding OK (or
- * Menu) opens a side panel with what's on, Watch and the favourite.
+ * Live TV on TV (the web's LiveTvPage, TiviMate's way, for a remote):
+ * "Live TV" with the Guide and Channels tabs; down the left the
+ * categories (Favourites, Recently watched, All channels, then the
+ * provider's groups, those of a region under it, opened with OK); beside
+ * them the chosen category's guide ([TvGuide], the page's first focus) or
+ * tiles, a page of channels loaded at a time, opening on the channel last
+ * watched. OK on a channel watches it; holding OK (or Menu) opens a side
+ * panel with what's on, Watch and the favourite.
  */
 @Composable
 internal fun TvLiveTvScreen() {
     val vm: LiveTvViewModel = viewModel(factory = LiveTvViewModel.Factory)
     val page by vm.state.collectAsStateWithLifecycle()
+    val pages by vm.channels.collectAsStateWithLifecycle()
     val now by vm.now.collectAsStateWithLifecycle()
     val resources = LocalResources.current
-    var details by remember { mutableStateOf<Pair<Long, LiveProgram?>?>(null) }
+    var details by remember { mutableStateOf<Pair<LiveChannel, LiveProgram?>?>(null) }
     var notice by remember { mutableStateOf<String?>(null) }
+    val categories = remember { FocusRequester() }
+    val shownCategory = remember { FocusRequester() }
+    val content = remember { FocusRequester() }
     LaunchedEffect(vm) {
         vm.events.collect { event ->
             when (event) {
@@ -106,8 +135,8 @@ internal fun TvLiveTvScreen() {
     }
     ReportOffline(
         when {
-            page.error != null -> Loadable.Failed(page.error!!, Unit)
-            page.channels != null -> Loadable.Ready(Unit, fresh = true)
+            pages.error != null -> Loadable.Failed(pages.error!!, Unit)
+            pages.total != null -> Loadable.Ready(Unit, fresh = true)
             else -> null
         },
     )
@@ -123,52 +152,65 @@ internal fun TvLiveTvScreen() {
                     style = PleyType.Tv.PageTitle.copy(color = PleyColors.Fg),
                     modifier = Modifier.weight(1f).semantics { heading() },
                 )
-                if (!page.channels.isNullOrEmpty()) {
+                if (page.allowed) {
                     Row(Modifier.railOnLeftStopOnRight(rail).focusGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TvTab(stringResource(R.string.tv_livetv_guide), page.view == LiveView.Guide, { vm.setView(LiveView.Guide) })
                         TvTab(stringResource(R.string.tv_livetv_channels), page.view == LiveView.Channels, { vm.setView(LiveView.Channels) })
                     }
                 }
             }
-            val channels = page.channels
-            when {
-                !page.allowed -> TvMessage(stringResource(R.string.tv_livetv_not_allowed_title), stringResource(R.string.tv_livetv_not_allowed_body), top = 40.dp)
-                channels == null && page.error != null -> TvMessage(
-                    title = failedTitle(page.error!!, stringResource(R.string.tv_livetv_failed)),
-                    body = failedBody(page.error!!),
-                    action = stringResource(R.string.tv_livetv_retry),
-                    onAction = vm::retry,
-                    top = 40.dp,
+            if (!page.allowed) {
+                TvMessage(stringResource(R.string.tv_livetv_not_allowed_title), stringResource(R.string.tv_livetv_not_allowed_body), top = 40.dp)
+                return@Column
+            }
+            Row(Modifier.fillMaxSize().padding(top = 16.dp)) {
+                Categories(
+                    page = page,
+                    selectedRequester = shownCategory,
+                    onSelect = {
+                        vm.setCategory(it)
+                        runCatching { content.requestFocus() }
+                    },
+                    modifier = Modifier.padding(start = PleyTv.Gutter - CATEGORY_INSET).width(CATEGORIES_WIDTH).fillMaxHeight().focusRequester(categories),
                 )
-                channels == null -> Unit
-                channels.isEmpty() -> TvMessage(stringResource(R.string.tv_livetv_none_title), stringResource(R.string.tv_livetv_none_body), top = 40.dp)
-                else -> {
-                    Chips(page, onFilter = vm::setFilter)
+                Spacer(Modifier.width(16.dp))
+                val total = pages.total
+                Box(Modifier.weight(1f).fillMaxHeight()) {
                     when {
-                        page.shown.isEmpty() -> TvMessage(
-                            title = stringResource(R.string.tv_livetv_no_match),
-                            body = "",
-                            action = stringResource(R.string.tv_livetv_show_all),
-                            onAction = vm::showAll,
-                            top = 24.dp,
-                        )
-                        page.view == LiveView.Guide -> androidx.compose.runtime.key(page.filter) {
+                        total == null && pages.error != null -> Box(Modifier.focusRequester(content).focusGroup()) {
+                            TvMessage(
+                                title = failedTitle(pages.error!!, stringResource(R.string.tv_livetv_failed)),
+                                body = failedBody(pages.error!!),
+                                action = stringResource(R.string.tv_livetv_retry),
+                                onAction = vm::retry,
+                                top = 24.dp,
+                            )
+                        }
+                        total == null -> Unit
+                        total == 0 -> Empty(page)
+                        page.view == LiveView.Guide -> key(page.category) {
                             TvGuide(
-                                channels = page.shown,
                                 vm = vm,
+                                pages = pages,
+                                category = page.category,
                                 origin = page.origin,
                                 now = now,
                                 onWatch = vm::watch,
-                                onDetails = { channel, program -> details = channel.id to program },
-                                modifier = Modifier.weight(1f).padding(top = 12.dp),
+                                onDetails = { channel, program -> details = channel to program },
+                                // To the category shown; to the column when it is scrolled away.
+                                onLeave = { if (runCatching { shownCategory.requestFocus() }.isFailure) runCatching { categories.requestFocus() } },
+                                modifier = Modifier.fillMaxSize(),
+                                requester = content,
                             )
                         }
-                        else -> ChannelTiles(page, now, onWatch = vm::watch, onDetails = { details = it.id to it.onAt(now) })
+                        else -> key(page.category) {
+                            ChannelTiles(vm, pages, page, now, Modifier.focusRequester(content), onDetails = { details = it to it.onAt(now) })
+                        }
                     }
                 }
             }
         }
-        val shown = details?.let { (id, program) -> page.channels?.firstOrNull { it.id == id }?.let { it to program } }
+        val shown = details
         TvSidePanel(visible = shown != null, onDismiss = { details = null }) {
             if (shown != null) {
                 ProgramPanel(
@@ -180,7 +222,10 @@ internal fun TvLiveTvScreen() {
                         details = null
                         vm.watch(shown.first)
                     },
-                    onFavorite = { vm.toggleFavorite(shown.first) },
+                    onFavorite = {
+                        vm.toggleFavorite(shown.first)
+                        details = shown.first.copy(favorite = !shown.first.favorite) to shown.second
+                    },
                 )
             }
         }
@@ -203,70 +248,180 @@ internal fun TvLiveTvScreen() {
     }
 }
 
-/** All, Favourites (with any) and each group (with two or more), from the gutter. */
+/** A category or search without channels: why, in its own words. */
 @Composable
-private fun Chips(page: LivePage, onFilter: (ChannelFilter) -> Unit) {
+private fun Empty(page: LivePage) {
+    when (page.category) {
+        LiveCategory.Favorites -> TvMessage(stringResource(R.string.tv_livetv_none_favorites_title), stringResource(R.string.tv_livetv_none_favorites_body), top = 24.dp, takeFocus = false)
+        LiveCategory.Recent -> TvMessage(stringResource(R.string.tv_livetv_none_recent_title), stringResource(R.string.tv_livetv_none_recent_body), top = 24.dp, takeFocus = false)
+        is LiveCategory.Group -> TvMessage(stringResource(R.string.tv_livetv_no_match), "", top = 24.dp, takeFocus = false)
+        LiveCategory.All -> TvMessage(stringResource(R.string.tv_livetv_none_title), stringResource(R.string.tv_livetv_none_body), top = 24.dp, takeFocus = false)
+    }
+}
+
+/**
+ * The categories down the left (the web's CategoryRail): the marked ones
+ * and All channels with their counts, then every group, those of a region
+ * gathered under it, opened and closed with OK. OK on a category shows it
+ * and moves focus to its channels; Left goes to the rail. Focus comes
+ * back to the category shown.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun Categories(page: LivePage, selectedRequester: FocusRequester, onSelect: (LiveCategory) -> Unit, modifier: Modifier) {
     val rail = LocalTvRailFocus.current
-    LazyRow(
-        modifier = Modifier.fillMaxWidth().padding(top = 16.dp).railFade().railOnLeftStopOnRight(rail).testTag(TV_LIVE_CHIPS),
-        contentPadding = PaddingValues(start = PleyTv.Gutter, end = TvSafeArea.Horizontal),
-        horizontalArrangement = Arrangement.spacedBy(PleyTv.ButtonGap),
+    val groups = page.groups?.groups.orEmpty()
+    val tree = remember(groups) { LiveTv.groupTree(groups) }
+    val selectedRegion = (page.category as? LiveCategory.Group)?.let { s -> groups.firstOrNull { it.name == s.name }?.region }
+    var open by remember { mutableStateOf(setOfNotNull(selectedRegion)) }
+    CompositionLocalProvider(LocalSelectedCategory provides selectedRequester) {
+    LazyColumn(
+        modifier = modifier.railOnLeftStopOnRight(rail, stopRight = false).focusRestorer(selectedRequester).testTag(TV_LIVE_CATEGORIES),
+        contentPadding = PaddingValues(bottom = TvSafeArea.Vertical),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        item(key = "all") {
-            TvChip(stringResource(R.string.tv_livetv_count, stringResource(R.string.tv_livetv_all), page.channels?.size ?: 0), { onFilter(ChannelFilter.All) }, selected = page.filter == ChannelFilter.All)
-        }
-        if (page.favorites > 0) {
-            item(key = "favorites") {
-                TvChip(
-                    stringResource(R.string.tv_livetv_count, stringResource(R.string.tv_livetv_favorites), page.favorites),
-                    { onFilter(ChannelFilter.Favorites) },
-                    selected = page.filter == ChannelFilter.Favorites,
-                    icon = PleyIcons.Star,
-                )
+        item(key = "favorites") {
+            CategoryRow(PleyIcons.Star, stringResource(R.string.tv_livetv_category_favorites), page.groups?.favorites, page.category == LiveCategory.Favorites) {
+                onSelect(LiveCategory.Favorites)
             }
         }
-        if (page.groups.size > 1) {
-            items(page.groups, key = { "group:${it.name}" }) { group ->
-                val filter = ChannelFilter.Group(group.name)
-                TvChip(stringResource(R.string.tv_livetv_count, group.name, group.count), { onFilter(filter) }, selected = page.filter == filter)
+        item(key = "recent") {
+            CategoryRow(PleyIcons.History, stringResource(R.string.tv_livetv_category_recent), page.groups?.recent, page.category == LiveCategory.Recent) {
+                onSelect(LiveCategory.Recent)
+            }
+        }
+        item(key = "all") {
+            CategoryRow(PleyIcons.LayoutGrid, stringResource(R.string.tv_livetv_category_all), page.groups?.total, page.category == LiveCategory.All) {
+                onSelect(LiveCategory.All)
+            }
+        }
+        if (groups.size > 1) {
+            item(key = "groups") {
+                BasicText(
+                    stringResource(R.string.tv_livetv_groups).uppercase(),
+                    style = PleyType.Tv.Badge.copy(color = PleyColors.Subtle),
+                    modifier = Modifier.padding(start = CATEGORY_INSET, top = 14.dp, bottom = 6.dp),
+                )
+            }
+            for (entry in tree) {
+                when (entry) {
+                    is GroupEntry.Single -> item(key = "group:${entry.group.name}") {
+                        val category = LiveCategory.Group(entry.group.name)
+                        CategoryRow(null, entry.group.name, entry.group.count, page.category == category, indent = GROUP_INSET) { onSelect(category) }
+                    }
+                    is GroupEntry.Region -> {
+                        val expanded = entry.region in open
+                        item(key = "region:${entry.region}") {
+                            CategoryRow(if (expanded) PleyIcons.ChevronDown else PleyIcons.ChevronRight, entry.region, entry.count, selected = false) {
+                                open = if (expanded) open - entry.region else open + entry.region
+                            }
+                        }
+                        if (expanded) {
+                            items(entry.groups, key = { "group:${it.name}" }) { g ->
+                                val category = LiveCategory.Group(g.name)
+                                CategoryRow(null, g.label, g.count, page.category == category, indent = GROUP_INSET + 16.dp) { onSelect(category) }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
+}
 
-/** The channels as tiles, four across, under Recently watched when every channel shows. */
+/** The category shown's row takes this, so focus comes back to it. */
+private val LocalSelectedCategory = staticCompositionLocalOf<FocusRequester?> { null }
+
+/** One category: its icon, name and count; the one shown marked; focused, the accent fill. */
 @Composable
-private fun ChannelTiles(page: LivePage, now: Long, onWatch: (LiveChannel) -> Unit, onDetails: (LiveChannel) -> Unit) {
-    val rail = LocalTvRailFocus.current
+private fun CategoryRow(icon: PleyIcon?, name: String, count: Int?, selected: Boolean, indent: Dp = CATEGORY_INSET, onClick: () -> Unit) {
+    val requester = LocalSelectedCategory.current
+    val interactions = remember { MutableInteractionSource() }
+    val focused by interactions.collectIsFocusedAsState()
+    Surface(
+        onClick = onClick,
+        interactionSource = interactions,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp)
+            .then(if (selected && requester != null) Modifier.focusRequester(requester) else Modifier)
+            .semantics { this.selected = selected },
+        shape = ClickableSurfaceDefaults.shape(PleyShape.Control),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = if (selected) PleyColors.Surface3 else Color.Transparent,
+            contentColor = if (selected) PleyColors.Fg else PleyColors.Muted,
+            focusedContainerColor = PleyColors.Accent,
+            focusedContentColor = PleyColors.OnAccent,
+            pressedContainerColor = PleyColors.AccentBright,
+            pressedContentColor = PleyColors.OnAccent,
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f, pressedScale = 1f),
+        glow = ClickableSurfaceDefaults.glow(Glow.None, Glow.None, Glow.None),
+    ) {
+        val content = LocalContentColor.current
+        Row(Modifier.fillMaxSize().padding(start = indent, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) {
+                Icon(icon, contentDescription = null, size = 16.dp, tint = if (selected && !focused) PleyColors.Accent else content)
+                Spacer(Modifier.width(10.dp))
+            }
+            BasicText(name, style = PleyType.Tv.Label.copy(color = content), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (count != null) BasicText("%,d".format(count), style = PleyType.Tv.Caption.copy(color = content.copy(alpha = 0.7f)))
+        }
+    }
+}
+
+/** The channels as tiles, three across beside the categories, a page loaded at a time, opening on the channel last watched. */
+@Composable
+private fun ChannelTiles(
+    vm: LiveTvViewModel,
+    pages: ChannelPages,
+    page: LivePage,
+    now: Long,
+    modifier: Modifier,
+    onDetails: (LiveChannel) -> Unit,
+) {
+    val grid = rememberLazyGridState()
     val memory = rememberFocusMemory()
-    val recent = if (page.filter == ChannelFilter.All && page.query.isBlank()) page.recent.take(COLUMNS) else emptyList()
+    val landing by vm.landing.collectAsStateWithLifecycle()
+    val skeleton = rememberSkeleton(animated = false)
+    val placed = remember { mutableStateOf<Landing?>(null) }
+    var initial by remember { mutableStateOf(0) }
+    LaunchedEffect(landing) {
+        val l = landing ?: return@LaunchedEffect
+        if (l.category != page.category || placed.value == l) return@LaunchedEffect
+        placed.value = l
+        initial = l.index ?: 0
+        grid.scrollToItem(initial)
+    }
+    LaunchedEffect(grid) {
+        snapshotFlow { grid.layoutInfo.visibleItemsInfo.let { (it.firstOrNull()?.index ?: 0) to (it.lastOrNull()?.index ?: 0) } }
+            .distinctUntilChanged()
+            .collect { (first, last) -> vm.showingRows(first, last) }
+    }
     LazyVerticalGrid(
         columns = GridCells.Fixed(COLUMNS),
-        modifier = Modifier.fillMaxSize().railFade().railOnLeftStopOnRight(rail).testTag(TV_LIVE_TILES),
-        contentPadding = PaddingValues(start = PleyTv.Gutter, end = TvSafeArea.Horizontal, top = 20.dp, bottom = 48.dp),
+        state = grid,
+        modifier = modifier.fillMaxSize().focusGroup().testTag(TV_LIVE_TILES),
+        contentPadding = PaddingValues(end = TvSafeArea.Horizontal, top = 8.dp, bottom = 48.dp),
         horizontalArrangement = Arrangement.spacedBy(PleyTv.WideTileGap),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        if (recent.isNotEmpty()) {
-            item(key = "recent-title", span = { GridItemSpan(maxLineSpan) }, contentType = "header") {
-                BasicText(stringResource(R.string.tv_livetv_recent), style = PleyType.Tv.Section.copy(color = PleyColors.Fg))
+        items(count = pages.total ?: 0, key = { index -> pages[index]?.id ?: -index - 1L }, contentType = { "channel" }) { index ->
+            val channel = pages[index]
+            if (channel == null) {
+                Box(Modifier.size(TileKind.Episode.tvWidth, TileKind.Episode.tvHeight + 40.dp).skeleton(skeleton, PleyShape.TileTv))
+            } else {
+                ChannelTileCard(
+                    channel,
+                    LiveTv.channelName(channel, page.category),
+                    page.origin,
+                    now,
+                    Modifier.rememberedFocus(memory, "channel/${channel.id}", initial = index == initial),
+                    onWatch = vm::watch,
+                    onDetails = onDetails,
+                )
             }
-            itemsIndexed(recent, key = { _, c -> "recent:${c.id}" }, contentType = { _, _ -> "channel" }) { index, channel ->
-                ChannelTileCard(channel, page.origin, now, Modifier.rememberedFocus(memory, "recent/${channel.id}", initial = index == 0), onWatch, onDetails)
-            }
-            item(key = "all-title", span = { GridItemSpan(maxLineSpan) }, contentType = "header") {
-                BasicText(stringResource(R.string.tv_livetv_all_channels), style = PleyType.Tv.Section.copy(color = PleyColors.Fg), modifier = Modifier.padding(top = 8.dp))
-            }
-        }
-        itemsIndexed(page.shown, key = { _, c -> c.id }, contentType = { _, _ -> "channel" }) { index, channel ->
-            ChannelTileCard(
-                channel,
-                page.origin,
-                now,
-                Modifier.rememberedFocus(memory, "channel/${channel.id}", initial = recent.isEmpty() && index == 0),
-                onWatch,
-                onDetails,
-            )
         }
     }
 }
@@ -275,6 +430,7 @@ private fun ChannelTiles(page: LivePage, now: Long, onWatch: (LiveChannel) -> Un
 @Composable
 private fun ChannelTileCard(
     channel: LiveChannel,
+    name: String,
     origin: String,
     now: Long,
     focusModifier: Modifier,
@@ -289,7 +445,7 @@ private fun ChannelTileCard(
         focusModifier = focusModifier,
         caption = { focused ->
             TileCaption(
-                channel.name,
+                name,
                 on?.title ?: stringResource(if (channel.hasGuide) R.string.tv_livetv_nothing_now else R.string.tv_livetv_no_guide),
                 TileStyle.Tv,
                 emphasized = focused,
@@ -395,12 +551,19 @@ private fun ProgramPanel(
     }
 }
 
-/** Four 184 dp tiles, 18 apart, from the gutter. */
-private const val COLUMNS = 4
+/** Three 184 dp tiles, 18 apart, beside the categories. */
+private const val COLUMNS = 3
+
+/** The categories' column, and how far its rows' fill reaches left of the gutter, so their text lines up with it. */
+private val CATEGORIES_WIDTH = 210.dp
+private val CATEGORY_INSET = 12.dp
+
+/** A group's name starts where the categories' names do, after their icons. */
+private val GROUP_INSET = CATEGORY_INSET + 26.dp
 
 private const val NOTICE_MS = 4_000L
 
 internal const val TV_LIVE_TV = "pley.tv.live"
-internal const val TV_LIVE_CHIPS = "pley.tv.live.chips"
+internal const val TV_LIVE_CATEGORIES = "pley.tv.live.categories"
 internal const val TV_LIVE_TILES = "pley.tv.live.tiles"
 internal const val TV_LIVE_PROGRAM = "pley.tv.live.program"

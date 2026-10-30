@@ -35,13 +35,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.staticCompositionLocalOf
+import app.pley.android.designsystem.tile.rememberSkeleton
+import app.pley.android.designsystem.tile.skeleton
+import app.pley.android.model.LiveCategory
+import app.pley.android.screens.livetv.LiveTv
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -101,7 +106,6 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: (
     val state by vm.state.collectAsStateWithLifecycle()
     val engine by vm.engine.collectAsStateWithLifecycle()
     val channel by vm.channel.collectAsStateWithLifecycle()
-    val channels by vm.channels.collectAsStateWithLifecycle()
     val origin by vm.origin.collectAsStateWithLifecycle()
     val now by vm.now.collectAsStateWithLifecycle()
     val digits by vm.digits.collectAsStateWithLifecycle()
@@ -129,6 +133,7 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: (
         }
     }
 
+    CompositionLocalProvider(LocalCategory provides vm.category) {
     Box(Modifier.fillMaxSize().background(Color.Black).testTag(LIVE_PLAYER)) {
         VideoSurface(engine?.player, Modifier.fillMaxSize().testTag(TestTags.PLAYER_SURFACE))
         val density = LocalDensity.current
@@ -193,19 +198,23 @@ internal fun LivePlayerScreen(vm: LivePlayerViewModel, inPip: Boolean, onBack: (
                 modifier = Modifier.align(Alignment.CenterEnd),
             ) {
                 ChannelPanel(
-                    channels = channels,
+                    vm = vm,
                     current = state.channelId,
                     origin = origin,
                     now = now,
                     onTune = {
                         panel = false
-                        vm.tune(it.id)
+                        vm.tune(it.id, it)
                     },
                 )
             }
         }
     }
+    }
 }
+
+/** The category the player was opened from: names leave out the region its group says. */
+private val LocalCategory = staticCompositionLocalOf<LiveCategory> { LiveCategory.All }
 
 /** The channel's logo, name and what's on while it is tuned. */
 @Composable
@@ -215,17 +224,11 @@ private fun Tuning(channel: LiveChannel, origin: String, now: Long) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box {
-            ChannelTile(channel, origin, Modifier.size(width = 176.dp, height = 100.dp), name = true, style = MaterialTheme.typography.titleMedium, well = Color.White.copy(alpha = 0.06f), shape = PleyShape.Dialog)
-            CircularProgressIndicator(
-                Modifier.align(Alignment.BottomEnd).padding(0.dp).size(28.dp).background(Color.Black, PleyShape.Circle),
-                color = PleyColors.Accent,
-                trackColor = Color.Transparent,
-                strokeWidth = 3.dp,
-            )
-        }
+        ChannelTile(channel, origin, Modifier.size(width = 176.dp, height = 100.dp), name = true, style = MaterialTheme.typography.titleMedium, well = Color.White.copy(alpha = 0.06f), shape = PleyShape.Dialog)
         Spacer(Modifier.height(20.dp))
-        Text(listOfNotNull(channel.number, channel.name).joinToString("  "), style = MaterialTheme.typography.titleMedium, color = PleyColors.Fg)
+        CircularProgressIndicator(Modifier.size(28.dp), color = PleyColors.Accent, trackColor = Color.Transparent, strokeWidth = 3.dp)
+        Spacer(Modifier.height(16.dp))
+        Text(listOfNotNull(channel.number, LiveTv.channelName(channel, LocalCategory.current)).joinToString("  "), style = MaterialTheme.typography.titleMedium, color = PleyColors.Fg)
         Text(
             channel.onAt(now)?.title ?: stringResource(R.string.live_player_tuning),
             style = MaterialTheme.typography.bodyMedium,
@@ -278,7 +281,7 @@ private fun Controls(
                 ChannelTile(channel, origin, Modifier.padding(start = 4.dp).size(width = 56.dp, height = 34.dp), well = Color.White.copy(alpha = 0.1f))
                 Column(Modifier.weight(1f).padding(start = 12.dp)) {
                     Text(
-                        listOfNotNull(channel.number, channel.name).joinToString("  "),
+                        listOfNotNull(channel.number, LiveTv.channelName(channel, LocalCategory.current)).joinToString("  "),
                         style = MaterialTheme.typography.titleMedium,
                         color = PleyColors.Fg,
                         maxLines = 1,
@@ -333,44 +336,12 @@ private fun Controls(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(start = 16.dp, end = 8.dp, top = 40.dp, bottom = 8.dp),
         ) {
-            if (state.canRewind && state.phase == LivePhase.Playing) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        stringResource(R.string.live_player_window, (state.windowMs / 60_000).toInt().coerceAtLeast(1)),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = PleyColors.Muted,
-                    )
-                    var dragging by remember { mutableStateOf(false) }
-                    var value by remember { mutableFloatStateOf(0f) }
-                    val label = stringResource(R.string.live_player_position)
-                    Slider(
-                        value = if (dragging) value else state.positionMs.toFloat(),
-                        onValueChange = {
-                            onPoke()
-                            dragging = true
-                            value = it
-                        },
-                        onValueChangeFinished = {
-                            dragging = false
-                            vm.seekTo(value.toLong())
-                        },
-                        valueRange = 0f..state.windowMs.coerceAtLeast(1).toFloat(),
-                        colors = SliderDefaults.colors(
-                            thumbColor = PleyColors.Accent,
-                            activeTrackColor = PleyColors.Accent,
-                            inactiveTrackColor = Color.White.copy(alpha = 0.25f),
-                        ),
-                        modifier = Modifier.weight(1f).padding(horizontal = 12.dp).semantics { contentDescription = label },
-                    )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (state.phase == LivePhase.Playing) {
                     LiveBadge(state) {
                         onPoke()
                         vm.goLive()
                     }
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!state.canRewind && state.phase == LivePhase.Playing) {
-                    LiveBadge(state) {}
                     Spacer(Modifier.width(12.dp))
                 }
                 Text(
@@ -558,21 +529,28 @@ private fun TroubleCard(
     }
 }
 
-/** The channels beside the picture (the web's ChannelPanel): what's on each, to change to one; Favourites alone. */
+/**
+ * The channels beside the picture (the web's ChannelPanel): the category's
+ * channels a page at a time, what's on each, to change to one; it opens
+ * on the channel playing.
+ */
 @Composable
 private fun ChannelPanel(
-    channels: List<LiveChannel>,
+    vm: LivePlayerViewModel,
     current: Long?,
     origin: String,
     now: Long,
     onTune: (LiveChannel) -> Unit,
 ) {
-    var favorites by rememberSaveable { mutableStateOf(false) }
-    val shown = if (favorites) channels.filter { it.favorite } else channels
+    val pages by vm.list.collectAsStateWithLifecycle()
+    val start by vm.listIndex.collectAsStateWithLifecycle()
     val list = rememberLazyListState()
-    LaunchedEffect(Unit) {
-        val index = shown.indexOfFirst { it.id == current }
-        if (index > 0) list.scrollToItem((index - 2).coerceAtLeast(0))
+    val skeleton = rememberSkeleton(animated = true)
+    LaunchedEffect(start != null) { start?.let { list.scrollToItem((it - 2).coerceAtLeast(0)) } }
+    LaunchedEffect(list) {
+        snapshotFlow { list.layoutInfo.visibleItemsInfo.let { (it.firstOrNull()?.index ?: 0) to (it.lastOrNull()?.index ?: 0) } }
+            .distinctUntilChanged()
+            .collect { (first, last) -> vm.showingListRows(first, last) }
     }
     Column(
         Modifier
@@ -583,12 +561,21 @@ private fun ChannelPanel(
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .testTag(LIVE_PLAYER_PANEL),
     ) {
-        Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PleyChip(stringResource(R.string.live_player_all_channels), !favorites, { favorites = false })
-            if (channels.any { it.favorite }) PleyChip(stringResource(R.string.live_player_favorites_only), favorites, { favorites = true }, icon = PleyIcons.Star)
-        }
+        Text(
+            categoryLabel(vm.category),
+            style = MaterialTheme.typography.titleMedium,
+            color = PleyColors.Fg,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+        )
         LazyColumn(state = list, contentPadding = PaddingValues(bottom = 16.dp)) {
-            items(shown, key = { it.id }) { channel ->
+            items(count = pages.total ?: 0, key = { index -> pages[index]?.id ?: -index - 1L }) { index ->
+                val channel = pages[index]
+                if (channel == null) {
+                    Box(Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 16.dp, vertical = 8.dp).skeleton(skeleton, PleyShape.Field))
+                    return@items
+                }
                 val on = channel.onAt(now)
                 val isCurrent = channel.id == current
                 Row(
@@ -605,7 +592,7 @@ private fun ChannelPanel(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             channel.number?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = PleyColors.Subtle, modifier = Modifier.padding(end = 6.dp)) }
                             Text(
-                                channel.name,
+                                LiveTv.channelName(channel, vm.category),
                                 style = MaterialTheme.typography.titleSmall,
                                 color = if (isCurrent) PleyColors.AccentBright else PleyColors.Fg,
                                 maxLines = 1,
@@ -623,6 +610,15 @@ private fun ChannelPanel(
             }
         }
     }
+}
+
+/** The channel list's heading: the category channel up and down go through. */
+@Composable
+private fun categoryLabel(category: LiveCategory): String = when (category) {
+    LiveCategory.All -> stringResource(R.string.livetv_category_all)
+    LiveCategory.Favorites -> stringResource(R.string.livetv_category_favorites)
+    LiveCategory.Recent -> stringResource(R.string.livetv_category_recent)
+    is LiveCategory.Group -> LiveTv.splitRegion(category.name)?.let { (region, label) -> "$region · $label" } ?: category.name
 }
 
 /** Controls hide after this long untouched while playing. */

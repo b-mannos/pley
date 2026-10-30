@@ -2,15 +2,14 @@
 <resources>
     <!-- Live TV's page (apps/web/src/pages/livetv/LiveTvPage.tsx). -->
     <string name="livetv_title">Live TV</string>
-    <string name="livetv_entry_channels">%1$d channels</string>
-    <string name="livetv_entry_one_channel">1 channel</string>
+    <plurals name="livetv_entry_channels">
+        <item quantity="one">%1$,d channel</item>
+        <item quantity="other">%1$,d channels</item>
+    </plurals>
     <string name="livetv_show_guide">Show the guide</string>
     <string name="livetv_show_channels">Show the channels</string>
     <string name="livetv_search">Find a channel or what\'s on</string>
     <string name="livetv_search_clear">Clear</string>
-    <string name="livetv_all">All</string>
-    <string name="livetv_favorites">Favourites</string>
-    <string name="livetv_recent">Recently watched</string>
     <string name="livetv_failed">Live TV didn\'t load</string>
     <string name="livetv_not_allowed_title">Live TV isn\'t open to this profile</string>
     <string name="livetv_not_allowed_body">An administrator can open it in Pley\'s web app, under Settings → Live TV.</string>
@@ -19,7 +18,17 @@
     <string name="livetv_no_match_title">No channels match</string>
     <string name="livetv_no_match_search">Nothing called “%1$s” here.</string>
     <string name="livetv_no_match_group">No channels in this group.</string>
-    <string name="livetv_show_every_channel">Show every channel</string>
+    <string name="livetv_categories">Channel groups</string>
+    <string name="livetv_category_all">All channels</string>
+    <string name="livetv_category_favorites">Favourites</string>
+    <string name="livetv_category_recent">Recently watched</string>
+    <string name="livetv_groups">Groups</string>
+    <string name="livetv_find_group">Find a group</string>
+    <string name="livetv_no_group">No group called “%1$s”.</string>
+    <string name="livetv_none_favorites_title">No favourites yet</string>
+    <string name="livetv_none_favorites_body">Star a channel to find it here.</string>
+    <string name="livetv_none_recent_title">Nothing watched yet</string>
+    <string name="livetv_none_recent_body">The channels you watch show here, the last first.</string>
     <string name="livetv_favorite_failed">The favourite wasn\'t saved: %1$s</string>
 
     <!-- What's on. -->
@@ -40,7 +49,6 @@
     <string name="livetv_on_now">On now</string>
     <string name="livetv_watch">Watch %1$s</string>
     <string name="livetv_watch_with_now">Watch %1$s, now: %2$s</string>
-    <string name="livetv_guide">TV guide</string>
 
     <!-- A programme's details (ProgramModal.tsx). -->
     <string name="livetv_watch_now">Watch now</string>
@@ -64,13 +72,8 @@
     <string name="live_player_live">Live</string>
     <string name="live_player_go_live">Go live</string>
     <string name="live_player_behind">−%1$s</string>
-    <string name="live_player_window">−%1$d min</string>
-    <string name="live_player_position">Position</string>
     <string name="live_player_radio">Sound only</string>
     <string name="live_player_no_channel">No channel %1$s</string>
-    <string name="live_player_all_channels">All channels</string>
-    <string name="live_player_favorites_only">Favourites</string>
-    <string name="live_player_find_channel">Find a channel</string>
     <string name="live_player_retry">Try again</string>
     <string name="live_player_other_channels">Other channels</string>
     <string name="live_player_back_to_guide">Back to the guide</string>

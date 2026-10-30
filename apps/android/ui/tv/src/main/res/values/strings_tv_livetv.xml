@@ -4,10 +4,6 @@
     <string name="tv_livetv_title">Live TV</string>
     <string name="tv_livetv_guide">Guide</string>
     <string name="tv_livetv_channels">Channels</string>
-    <string name="tv_livetv_all">All</string>
-    <string name="tv_livetv_favorites">Favourites</string>
-    <string name="tv_livetv_recent">Recently watched</string>
-    <string name="tv_livetv_all_channels">All channels</string>
     <string name="tv_livetv_failed">Live TV didn\'t load</string>
     <string name="tv_livetv_retry">Try again</string>
     <string name="tv_livetv_not_allowed_title">Live TV isn\'t open to this profile</string>
@@ -15,9 +11,14 @@
     <string name="tv_livetv_none_title">No channels yet</string>
     <string name="tv_livetv_none_body">Channels appear here once an administrator adds an IPTV provider in Pley\'s web app.</string>
     <string name="tv_livetv_no_match">No channels in this group.</string>
-    <string name="tv_livetv_show_all">Show every channel</string>
-    <string name="tv_livetv_count">%1$s  %2$d</string>
-    <string name="tv_livetv_hint">OK watches · Hold OK for details · Back returns to now</string>
+    <string name="tv_livetv_category_all">All channels</string>
+    <string name="tv_livetv_category_favorites">Favourites</string>
+    <string name="tv_livetv_category_recent">Recently watched</string>
+    <string name="tv_livetv_groups">Groups</string>
+    <string name="tv_livetv_none_favorites_title">No favourites yet</string>
+    <string name="tv_livetv_none_favorites_body">Hold OK on a channel and add it to your favourites to find it here.</string>
+    <string name="tv_livetv_none_recent_title">Nothing watched yet</string>
+    <string name="tv_livetv_none_recent_body">The channels you watch show here, the last first.</string>
 
     <!-- What's on. -->
     <string name="tv_livetv_nothing_now">Nothing in the guide now</string>
@@ -52,10 +53,8 @@
     <string name="tv_live_player_forward_10">Forward 10 seconds</string>
     <string name="tv_live_player_go_live">Go live</string>
     <string name="tv_live_player_channels">Channels</string>
-    <string name="tv_live_player_favorite">Favourite</string>
     <string name="tv_live_player_live">Live</string>
     <string name="tv_live_player_behind">−%1$s</string>
-    <string name="tv_live_player_window">−%1$d min</string>
     <string name="tv_live_player_radio">Sound only</string>
     <string name="tv_live_player_no_channel">No channel %1$s</string>
     <string name="tv_live_player_hint">▲▼ change channel · OK for more</string>

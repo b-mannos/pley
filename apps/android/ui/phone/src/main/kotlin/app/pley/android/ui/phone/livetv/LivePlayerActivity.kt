@@ -48,7 +48,7 @@ import kotlinx.coroutines.launch
  */
 class LivePlayerActivity : ComponentActivity() {
     private val vm: LivePlayerViewModel by viewModels {
-        LivePlayerViewModel.factory(intent.getLongExtra(EXTRA_CHANNEL, 0))
+        LivePlayerViewModel.factory(intent.getLongExtra(EXTRA_CHANNEL, 0), intent.getStringExtra(EXTRA_CATEGORY) ?: "all")
     }
     private val inPip = mutableStateOf(false)
     private var attached: PlayerEngine? = null
@@ -124,30 +124,28 @@ class LivePlayerActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    /** A keyboard's or a remote's channel keys and digits on a tablet. */
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN) {
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
-                    vm.step(1)
-                    return true
-                }
-                KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
-                    vm.step(-1)
-                    return true
-                }
-                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_SPACE -> {
-                    vm.togglePlay()
-                    return true
-                }
+    /** A keyboard's or a remote's channel keys and digits on a tablet, where the screen didn't take them. */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        when (keyCode) {
+            KeyEvent.KEYCODE_CHANNEL_UP, KeyEvent.KEYCODE_PAGE_UP -> {
+                vm.step(1)
+                return true
             }
-            val digit = event.unicodeChar.toChar()
-            if (digit.isDigit() && currentFocus !is android.widget.EditText) {
-                vm.digit(digit)
+            KeyEvent.KEYCODE_CHANNEL_DOWN, KeyEvent.KEYCODE_PAGE_DOWN -> {
+                vm.step(-1)
+                return true
+            }
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_SPACE -> {
+                vm.togglePlay()
                 return true
             }
         }
-        return super.dispatchKeyEvent(event)
+        val digit = event.unicodeChar.toChar()
+        if (digit.isDigit()) {
+            vm.digit(digit)
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
     }
 
     /** The engine, once there is one: this window for it, and the media session while started. */
@@ -237,11 +235,14 @@ class LivePlayerActivity : ComponentActivity() {
         /** The channel to tune as it opens. */
         const val EXTRA_CHANNEL = "channel"
 
+        /** The category it was chosen in (a LiveCategory's key): channel up and down stay in it. */
+        const val EXTRA_CATEGORY = "category"
+
         private const val TABLET_DP = 600
         private const val REQUEST_PLAY_PAUSE = 2
         internal const val ACTION_PLAY_PAUSE = "app.pley.android.live.PLAY_PAUSE"
 
-        fun intent(context: Context, channelId: Long): Intent =
-            Intent(context, LivePlayerActivity::class.java).putExtra(EXTRA_CHANNEL, channelId)
+        fun intent(context: Context, channelId: Long, category: String): Intent =
+            Intent(context, LivePlayerActivity::class.java).putExtra(EXTRA_CHANNEL, channelId).putExtra(EXTRA_CATEGORY, category)
     }
 }

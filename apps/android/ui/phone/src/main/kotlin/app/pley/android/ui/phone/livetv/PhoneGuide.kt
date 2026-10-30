@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -36,6 +35,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -60,8 +60,12 @@ import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.PleyShape
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcons
+import app.pley.android.designsystem.tile.rememberSkeleton
+import app.pley.android.designsystem.tile.skeleton
+import app.pley.android.model.LiveCategory
 import app.pley.android.model.LiveChannel
 import app.pley.android.model.LiveProgram
+import app.pley.android.screens.livetv.ChannelPages
 import app.pley.android.screens.livetv.LiveTv
 import app.pley.android.screens.livetv.LiveTvViewModel
 import app.pley.android.ui.phone.R
@@ -70,6 +74,7 @@ import app.pley.android.ui.phone.theme.WidthClass
 import java.util.Calendar
 import kotlin.math.floor
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 /** The guide's measures: a narrow one for phones held upright, a wide one beyond. */
@@ -111,8 +116,9 @@ private class GuideScroll(initial: Float) {
  */
 @Composable
 internal fun PhoneGuide(
-    channels: List<LiveChannel>,
     vm: LiveTvViewModel,
+    channels: ChannelPages,
+    category: LiveCategory,
     origin: String,
     now: Long,
     onWatch: (LiveChannel) -> Unit,
@@ -136,7 +142,7 @@ internal fun PhoneGuide(
         // What is composed: from half a screen before the left edge to half a screen past the right.
         val viewFrom = start + ((bucket - 1) * half / pxPerSecond).toLong()
         val viewTo = start + ((bucket + 4) * half / pxPerSecond).toLong()
-        LaunchedEffect(viewFrom, viewTo) { vm.showing(viewFrom, viewTo) }
+        LaunchedEffect(viewFrom, viewTo) { vm.showingTimes(viewFrom, viewTo) }
         val nowX = (now - start) * pxPerSecond
         val nowInView by remember(nowX, viewport) { derivedStateOf { nowX >= scroll.x && nowX <= scroll.x + viewport } }
         val leftEdge = start + (scroll.x / pxPerSecond).toLong()
@@ -199,10 +205,25 @@ internal fun PhoneGuide(
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 val rows = rememberLazyListState()
+                val page by vm.state.collectAsStateWithLifecycle()
+                val landing by vm.landing.collectAsStateWithLifecycle()
+                Landing(landing, page) { index -> rows.scrollToItem(((index ?: 0) - 2).coerceAtLeast(0)) }
+                LaunchedEffect(rows) {
+                    snapshotFlow { rows.layoutInfo.visibleItemsInfo.let { (it.firstOrNull()?.index ?: 0) to (it.lastOrNull()?.index ?: 0) } }
+                        .distinctUntilChanged()
+                        .collect { (first, last) -> vm.showingRows(first, last) }
+                }
+                val skeleton = rememberSkeleton(animated = true)
                 LazyColumn(state = rows, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 72.dp)) {
-                    items(channels, key = { it.id }, contentType = { "row" }) { channel ->
+                    items(count = channels.total ?: 0, key = { index -> channels[index]?.id ?: -index - 1L }, contentType = { "row" }) { index ->
+                        val channel = channels[index]
+                        if (channel == null) {
+                            LoadingRow(layout, skeleton)
+                            return@items
+                        }
                         GuideRow(
                             channel = channel,
+                            name = LiveTv.channelName(channel, category),
                             programs = guide.byChannel[channel.id],
                             loaded = guide.loaded,
                             origin = origin,
@@ -252,10 +273,21 @@ internal fun PhoneGuide(
     }
 }
 
+/** A row whose channel is still on its way. */
+@Composable
+private fun LoadingRow(layout: GuideLayout, skeleton: app.pley.android.designsystem.tile.SkeletonState) {
+    Row(Modifier.fillMaxWidth().height(layout.rowHeight).padding(vertical = 4.dp, horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(width = 64.dp, height = 34.dp).skeleton(skeleton, PleyShape.Field))
+        Spacer(Modifier.width(16.dp))
+        Box(Modifier.weight(1f).fillMaxHeight().skeleton(skeleton, PleyShape.Field))
+    }
+}
+
 /** One channel's row: its cell (logo, number, name) and its programmes, placed by time. */
 @Composable
 private fun GuideRow(
     channel: LiveChannel,
+    name: String,
     programs: List<LiveProgram>?,
     loaded: Boolean,
     origin: String,
@@ -277,7 +309,7 @@ private fun GuideRow(
             .height(layout.rowHeight)
             .drawBehind { drawLine(PleyColors.Surface4.copy(alpha = 0.7f), Offset(0f, size.height - 0.5f), Offset(size.width, size.height - 0.5f), 1f) },
     ) {
-        val watch = stringResource(R.string.livetv_watch, listOfNotNull(channel.number, channel.name).joinToString(" "))
+        val watch = stringResource(R.string.livetv_watch, listOfNotNull(channel.number, name).joinToString(" "))
         Row(
             Modifier
                 .width(layout.channelWidth)
@@ -292,7 +324,7 @@ private fun GuideRow(
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     ChannelTile(channel, origin, Modifier.size(width = 64.dp, height = 34.dp))
                     Text(
-                        channel.number ?: channel.name,
+                        channel.number ?: name,
                         style = MaterialTheme.typography.labelSmall,
                         color = if (channel.favorite) PleyColors.AccentBright else PleyColors.Muted,
                         maxLines = 1,
@@ -310,7 +342,7 @@ private fun GuideRow(
                         Text(channel.number.orEmpty(), style = MaterialTheme.typography.bodySmall, color = PleyColors.Subtle, maxLines = 1)
                         if (channel.favorite) Icon(PleyIcons.Star, contentDescription = null, size = 12.dp, tint = PleyColors.Accent, modifier = Modifier.padding(start = 4.dp))
                     }
-                    Text(channel.name, style = MaterialTheme.typography.titleSmall, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(name, style = MaterialTheme.typography.titleSmall, color = PleyColors.Fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -325,12 +357,11 @@ private fun GuideRow(
                         .padding(start = 12.dp),
                     contentAlignment = Alignment.CenterStart,
                 ) {
-                    Text(
-                        stringResource(if (channel.hasGuide) R.string.livetv_no_info else R.string.livetv_no_guide),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = PleyColors.Subtle,
-                        maxLines = 1,
-                    )
+                    if (channel.hasGuide) {
+                        Text(stringResource(R.string.livetv_no_info), style = MaterialTheme.typography.bodySmall, color = PleyColors.Subtle, maxLines = 1)
+                    } else {
+                        Text(name, style = MaterialTheme.typography.bodyMedium, color = PleyColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
             for (program in visible) {

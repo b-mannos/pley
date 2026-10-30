@@ -8,6 +8,24 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Live TV, where the server has channels: from the Libraries tab on
+  phones and the rail on TVs. Favourites, Recently watched, All channels
+  and the provider's groups (a region's under it) are a picker on phones
+  and a column beside the guide on TVs. The guide scrolls through time
+  with now marked, or the channels show as cards; both load a page of
+  channels at a time, ask for the programmes of the rows in view only,
+  and open back at the channel last watched. In a group, names leave out
+  the region the group says. A programme's details come with Watch and
+  the favourite.
+- The live player: channel up and down within the group it was opened
+  from, a channel list, a typed number, what's on and next as it tunes,
+  pause and going back in what the server keeps (Live, or how far
+  behind), the server's own sentence when every connection is in use,
+  the channel's logo for radio, and picture in picture on phones.
+  Leaving lets the provider's connection go.
+
 ### Security
 
 - No other app on a TV can make Pley play a title through a Watch Next

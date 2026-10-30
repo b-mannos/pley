@@ -117,6 +117,39 @@ watching?" first, if asked). Not on phones or Fire TV.
 - **Badges**: Dolby Vision profile 7 is labelled FEL or MEL; a hybrid file
   shows both DV and HDR10+.
 
+## Live TV
+
+Live TV ([API.md](API.md#live-tv)) shows where `GET /api/live` says
+`available`: first in the phone's Libraries tab, after Home in the TV's
+rail. Its sources, lineup and connections are set up in the web app.
+
+- **Categories**: Favourites, Recently watched, All channels, then the
+  provider's groups in its order, a region's ("UK| Sport", "UK| News")
+  gathered under it. A picker on phones; a column beside the guide on
+  TVs, where Left from the guide's start goes to it.
+- **Pages**: a category's channels come 100 at a time (`browse`) as the
+  guide or the cards scroll, and the guide asks for the programmes of
+  the pages in view only (`ids`), six hours at a time; a provider of
+  50,000 channels opens at once. The groups and each category's first
+  page are snapshots; the rest is held in memory.
+- **The guide**: time across from half an hour before now, now marked;
+  on TVs focus moves by programme (Left and Right), Up and Down keep the
+  time, OK watches what's on now and opens a later programme's details,
+  holding OK or Menu opens them too, and Back goes back to now first.
+  A channel without a guide shows its name across it. Coming back from
+  the player, it opens on the channel last watched.
+- **The player** (`LivePlayerActivity`, `TvLivePlayerActivity`) tunes
+  with this device's client id, which ends what it watched before, so
+  zapping holds one connection. Channel up and down stay in the category
+  it was opened from, round its ends (Up and Channel up the next one on
+  TVs, a swipe or the chevrons on phones); a typed number tunes that
+  number among every channel. Paused, it tells the server every 20 s it
+  still watches; behind the live edge it says how far, and Live goes
+  back. `409` shows the server's sentence (which channels hold the
+  connections), with Try again and Other channels. Leaving (onStop, not
+  in picture in picture) lets the session go; coming back tunes again at
+  the live edge. The TV's display mode isn't matched for live channels.
+
 ## Offline
 
 The app needs no internet: the server signs Pley's own apps in itself. On
