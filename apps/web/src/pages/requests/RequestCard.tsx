@@ -100,13 +100,13 @@ export function CheckRow({
 }
 
 /** Why the approve dialog has less to choose from than it might, in a box of its own. */
-function ServiceNote({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
+function ServiceNote({ icon, title, children }: { icon: ReactNode; title: string; children?: ReactNode }) {
   return (
     <div className="flex gap-3 rounded-md border border-border bg-surface-2/60 px-3 py-2.5 text-sm">
       <span className="mt-0.5 shrink-0 [&>svg]:size-4">{icon}</span>
       <div className="min-w-0 space-y-0.5">
         <p className="font-medium text-fg">{title}</p>
-        <p className="text-muted">{children}</p>
+        {children ? <p className="text-muted">{children}</p> : null}
       </div>
     </div>
   );
@@ -132,6 +132,8 @@ export function ApproveDialog({ request, open, onClose }: { request: MediaReques
   const toast = useToast();
   const choices = options.data ? (request.kind === "movie" ? options.data.radarr : options.data.sonarr) : undefined;
   const lists = !!choices && choices.quality_profiles.length > 0 && choices.root_folders.length > 0;
+  // Connected, with nothing to choose from (or nothing known of it): approving sends the settings' choices.
+  const settingsOnly = !options.isPending && choices !== null && !lists;
   const asked = request.seasons ?? [];
   const pick = choices ? preselected(choices, request.anime) : { profile: null, folder: null };
   // What was picked instead of the preselected ones (`null`: nothing).
@@ -182,7 +184,7 @@ export function ApproveDialog({ request, open, onClose }: { request: MediaReques
             Cancel
           </Button>
           <Button variant="primary" onClick={submit} loading={approve.isPending} data-autofocus>
-            Approve
+            {settingsOnly ? "Approve with the settings' choices" : "Approve"}
           </Button>
         </>
       }
@@ -201,7 +203,7 @@ export function ApproveDialog({ request, open, onClose }: { request: MediaReques
           <>
             {choices.error ? (
               <ServiceNote icon={<TriangleAlert className="text-warning" />} title={choices.error}>
-                {lists ? "Its profiles and folders are the last ones it gave." : "Approving sends it with the settings' profile and folder."}
+                {lists ? "Its profiles and folders are the last ones it gave." : null}
               </ServiceNote>
             ) : null}
             {lists ? (
@@ -241,9 +243,7 @@ export function ApproveDialog({ request, open, onClose }: { request: MediaReques
           </>
         ) : (
           // The options couldn't be had at all: the settings' choices still can.
-          <ServiceNote icon={<TriangleAlert className="text-warning" />} title={`Couldn't load ${service(request)}'s profiles and folders`}>
-            Approving sends it with the settings' profile and folder.
-          </ServiceNote>
+          <ServiceNote icon={<TriangleAlert className="text-warning" />} title={`Couldn't load ${service(request)}'s profiles and folders`} />
         )}
         {asked.length > 1 ? (
           <fieldset className="space-y-1">
@@ -446,7 +446,7 @@ export function RequestActions({ request, summary, skip = [] }: { request: Media
                     setDialog("approve");
                   }}
                 >
-                  Approve with choices…
+                  Approve…
                 </MenuItem>
               ) : null}
               {menu.map((action) => (
@@ -479,17 +479,12 @@ export function RequestActions({ request, summary, skip = [] }: { request: Media
         message={
           dialog === "delete" ? (
             <>
-              It goes for everyone who asked for <strong className="text-fg">{request.title}</strong> or follows it. {service(request)} keeps what it has.
+              It goes for everyone who asked for <strong className="text-fg">{request.title}</strong> or follows it. Radarr and Sonarr keep what they have.
             </>
           ) : request.status === "declined" ? (
-            <>
-              <strong className="text-fg">{request.title}</strong> leaves your requests, and may be asked for again.
-            </>
+            "It may be asked for again."
           ) : (
-            <>
-              <strong className="text-fg">{request.title}</strong> won't be asked for any more
-              {request.watchers > 0 ? ", unless those who follow it keep it." : "."}
-            </>
+            `It won't be asked for any more${request.watchers > 0 ? ", unless those who follow it keep it." : "."}`
           )
         }
         onConfirm={() =>
@@ -563,7 +558,7 @@ function isReady(request: MediaRequest): boolean {
 /** Ready, in a library this account can't open: who can help (managers know). */
 function OutOfReach({ request, manage }: { request: MediaRequest; manage: boolean }) {
   if (manage || !isReady(request) || request.item_id !== null) return null;
-  return <p className="text-xs text-muted">It's in a library you can't open: an administrator can let you in.</p>;
+  return <p className="text-xs text-muted">Ready, in a library you can't open: ask an administrator</p>;
 }
 
 /**

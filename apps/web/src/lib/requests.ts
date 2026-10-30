@@ -403,11 +403,13 @@ export function actionLabel(action: RequestAction, request: Pick<MediaRequest, "
   }
 }
 
-/** What's asked before an action that can't be taken back, short enough for a dialog's title; `null` for one that needs no asking. */
-export function actionQuestion(action: RequestAction, request: Pick<MediaRequest, "status">): string | null {
+/** What's asked before an action that can't be taken back, as a dialog's title; `null` for one that needs no asking. */
+export function actionQuestion(action: RequestAction, request: Pick<MediaRequest, "status" | "title">): string | null {
   switch (action) {
     case "withdraw":
-      return request.status === "declined" ? "Remove this request?" : "Withdraw this request?";
+      return request.status === "declined"
+        ? `Remove ${quoted(request.title)} from your requests?`
+        : `Withdraw your request for ${quoted(request.title)}?`;
     case "delete":
       return "Delete this request?";
     default:

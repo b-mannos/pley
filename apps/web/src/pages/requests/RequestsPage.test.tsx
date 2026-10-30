@@ -63,7 +63,7 @@ describe("RequestsPage for managers", () => {
     expect(paths(requests)).toContain("/api/requests?attention=1&order=oldest&limit=50");
     // Choices of its own, from its menu.
     await user.click(within(first as HTMLElement).getByRole("button", { name: "More for The Matrix" }));
-    expect(screen.getByRole("menuitem", { name: "Approve with choices…" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Approve…" })).toBeInTheDocument();
   });
 
   it("shows everyone's requests, filtered by status as pressed buttons", async () => {
@@ -158,7 +158,7 @@ describe("RequestsPage for managers", () => {
     expect(requests.some((r) => r.method === "POST" && r.path === "/api/requests/1/handled")).toBe(true);
   });
 
-  it("deletes a request after asking, saying Radarr keeps what it has", async () => {
+  it("deletes a request after asking, saying Radarr and Sonarr keep what they have", async () => {
     const user = userEvent.setup();
     let list: MediaRequest[] = [makeRequest({ id: 7, status: "available", item_id: 70, actions: ["delete"] })];
     const requests = mockApi({
@@ -176,7 +176,7 @@ describe("RequestsPage for managers", () => {
     await user.click(within(row as HTMLElement).getByRole("button", { name: "More for The Matrix" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete" }));
     const dialog = screen.getByRole("dialog", { name: "Delete this request?" });
-    expect(dialog).toHaveTextContent("It goes for everyone who asked for The Matrix or follows it. Radarr keeps what it has.");
+    expect(dialog).toHaveTextContent("It goes for everyone who asked for The Matrix or follows it. Radarr and Sonarr keep what they have.");
     await user.click(within(dialog).getByRole("button", { name: "Delete" }));
     expect(await screen.findByText("No one has asked for anything yet.")).toBeInTheDocument();
     expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/requests/7");
@@ -258,8 +258,8 @@ describe("RequestsPage for everyone else", () => {
     });
     show(<RequestsPage />, "/requests", ann);
     await user.click(await screen.findByRole("button", { name: "Withdraw" }));
-    const dialog = screen.getByRole("dialog", { name: "Withdraw this request?" });
-    expect(dialog).toHaveTextContent("The Matrix won't be asked for any more.");
+    const dialog = screen.getByRole("dialog", { name: "Withdraw your request for “The Matrix”?" });
+    expect(dialog).toHaveTextContent("It won't be asked for any more.");
     await user.click(within(dialog).getByRole("button", { name: "Withdraw" }));
     expect(await screen.findByText("You haven't asked for anything yet.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Find something to ask for" })).toHaveAttribute("href", "/discover");

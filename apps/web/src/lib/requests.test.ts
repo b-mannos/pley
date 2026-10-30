@@ -280,8 +280,8 @@ describe("asking and actions", () => {
     expect(actionLabel("retry", pending)).toBe("Try again");
     expect(actionLabel("handled", pending)).toBe("Mark as added by hand");
     expect(actionLabel("ask_again", pending)).toBe("Request again");
-    expect(actionQuestion("withdraw", pending)).toBe("Withdraw this request?");
-    expect(actionQuestion("withdraw", declined)).toBe("Remove this request?");
+    expect(actionQuestion("withdraw", pending)).toBe("Withdraw your request for “The Matrix”?");
+    expect(actionQuestion("withdraw", declined)).toBe("Remove “The Matrix” from your requests?");
     expect(actionQuestion("delete", pending)).toBe("Delete this request?");
     expect(actionQuestion("approve", pending)).toBeNull();
   });

@@ -240,7 +240,7 @@ describe("TitlePage", () => {
     expect(within(list).getByText(/You asked/)).toBeInTheDocument();
     expect(within(list).queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     await user.click(within(list).getByRole("button", { name: "Withdraw" }));
-    const confirm = screen.getByRole("dialog", { name: "Withdraw this request?" });
+    const confirm = screen.getByRole("dialog", { name: "Withdraw your request for “The Matrix”?" });
     await user.click(within(confirm).getByRole("button", { name: "Withdraw" }));
     expect(await screen.findByRole("button", { name: "Request" })).toBeInTheDocument();
     expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/requests/5");
@@ -364,7 +364,7 @@ describe("TitlePage", () => {
     open("/discover/movie/603", testUser);
 
     await user.click(await screen.findByRole("button", { name: "More for The Matrix" }));
-    await user.click(screen.getByRole("menuitem", { name: "Approve with choices…" }));
+    await user.click(screen.getByRole("menuitem", { name: "Approve…" }));
     const dialog = screen.getByRole("dialog", { name: "Approve “The Matrix”" });
     // The settings' choices to begin with.
     expect(await within(dialog).findByLabelText("Quality profile")).toHaveValue("1");
@@ -389,11 +389,10 @@ describe("TitlePage", () => {
     open("/discover/movie/603", testUser);
 
     await user.click(await screen.findByRole("button", { name: "More for The Matrix" }));
-    await user.click(screen.getByRole("menuitem", { name: "Approve with choices…" }));
+    await user.click(screen.getByRole("menuitem", { name: "Approve…" }));
     const dialog = screen.getByRole("dialog", { name: "Approve “The Matrix”" });
     expect(await within(dialog).findByText("Radarr isn't answering")).toBeInTheDocument();
-    expect(within(dialog).getByText("Approving sends it with the settings' profile and folder.")).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Approve" }));
+    await user.click(within(dialog).getByRole("button", { name: "Approve with the settings' choices" }));
     expect(await screen.findByText("“The Matrix” was approved.")).toBeInTheDocument();
     expect(requests.find((r) => r.path === "/api/requests/5/approve")?.body).toEqual({});
   });
