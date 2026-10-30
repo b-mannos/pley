@@ -1,6 +1,6 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import type { DiscoverDetail, DiscoverTitle, MediaRequest, NewRequest } from "../../api/types";
+import type { DiscoverDetail, DiscoverTitle, ItemKind, ItemRequest, MediaRequest, NewRequest } from "../../api/types";
 import { displayAddress } from "../../auth/addresses";
 import {
   actionDone,
@@ -9,6 +9,7 @@ import {
   askRefusal,
   listAction,
   mainAction,
+  mayAsk,
   NO_ACCESS,
   problemWords,
   requestsProblem,
@@ -30,7 +31,7 @@ import { F, G } from "../kit/focusable";
 import { Icon, type IconName } from "../kit/icons";
 import { memo } from "../kit/memo";
 import { TileCaption, TILES } from "../kit/tile";
-import { Dialog, failedTitle, Message, problem, useApp } from "./common";
+import { Dialog, failedTitle, Message, problem, useAfterFrame, useApp, useLoad } from "./common";
 
 /*
  * What Discover, a title's page, the requests and the libraries' pages
@@ -69,6 +70,18 @@ export function DownloadBar(p: { progress: number; width?: number }) {
   return (
     <div class="download-bar" style={p.width ? `width:${p.width}px` : undefined} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)}>
       <div style={`width:${pct.toFixed(1)}%`} />
+    </div>
+  );
+}
+
+/** A request's stage under a library title's facts: the pill, and a download's bar beside it. */
+export function ItemRequestLine(p: { request: MediaRequest }) {
+  const app = useApp();
+  const words = stageOf(app, p.request);
+  return (
+    <div class="item-request" aria-label={words.text}>
+      <StagePill words={words} small />
+      {words.progress !== null && <DownloadBar progress={words.progress} width={120} />}
     </div>
   );
 }
@@ -226,6 +239,28 @@ export function usePoll(reload: () => void, ms: number | null): void {
     const t = setInterval(() => latest.current(), ms);
     return () => clearInterval(t);
   }, [ms, visible]);
+}
+
+/**
+ * A library title's request (§6), for a movie or show: asked once its page
+ * has drawn, never before, and only where the profile may ask or has asked
+ * before; again when requests change for the title. `null` while unknown,
+ * and for a title TMDB doesn't know.
+ */
+export function useItemRequest(itemId: number, kind: ItemKind): ItemRequest | null {
+  const app = useApp();
+  const ui = useUi();
+  const s = app.requests.value;
+  const wanted = (kind === "movie" || kind === "show") && !!s && s.enabled && s.sign_in_again !== "requests" && (mayAsk(s) || s.own > 0);
+  const [drawn, setDrawn] = useState(false);
+  useAfterFrame(() => setDrawn(true), []);
+  // The title's key once the server named it, so that its own changes ask again.
+  const key = useRef("");
+  const changes = useTitleChanges(key.current);
+  const loaded = useLoad((c) => (wanted && drawn ? ui.api.itemRequest(itemId, c) : Promise.resolve(null)), [itemId, wanted, drawn, changes]);
+  const r = wanted ? loaded.data : null;
+  if (r) key.current = titleKey(r);
+  return r;
 }
 
 /** Moves when requests changed for this title (`kind:tmdb_id`), or for many: what shows its requests asks again. */

@@ -284,7 +284,7 @@ body {
   justify-content: center;
   color: var(--fg);
 }
-.see-all .t-label { margin-top: 8px; }
+.see-all .t-label { margin-top: 8px; padding: 0 10px; text-align: center; }
 
 .skeleton { background: var(--surface2); border-radius: 2px; }
 

@@ -135,6 +135,16 @@ function TitlePage(p: { entry: Entry; detail: DiscoverDetail; pick: boolean }) {
     if (pickable) setPicker({ start: null });
   }, []);
 
+  // The picker gone, focus is back on what opened it; where that went too (it opened with the page), on the main action.
+  const picking = !!picker;
+  useLayoutEffect(() => {
+    if (picking) return;
+    const at = ui.focus.current;
+    if (at && at.isConnected) return;
+    const main = document.querySelector<HTMLElement>('.title-page [data-fid="main"]:not([data-fdisabled])');
+    if (main) ui.focus.focus(main);
+  }, [picking]);
+
   // A page with nothing to focus (it can't be asked for, and no rows): the rail, so the remote is never dead.
   useAfterFrame(() => {
     const page = document.querySelector(".title-page");
@@ -269,20 +279,7 @@ function TitlePage(p: { entry: Entry; detail: DiscoverDetail; pick: boolean }) {
       {showInfo && <TitleInfo detail={d} />}
       <SectionPage sections={sections} clipAbove={showInfo ? ROWS_LINE - 12 : undefined} focusedKey={section} />
       <div class="rail-fade" />
-      {picker && (
-        <SeasonPicker
-          detail={d}
-          start={picker.start}
-          onClose={() => setPicker(null)}
-          onAsked={() => {
-            setPicker(null);
-            if (picker.start !== null) return;
-            // Back to the main action, which now says how it's going.
-            const main = document.querySelector<HTMLElement>('.title-page [data-fid="main"]');
-            if (main) ui.focus.focus(main);
-          }}
-        />
-      )}
+      {picker && <SeasonPicker detail={d} start={picker.start} onClose={() => setPicker(null)} onAsked={() => setPicker(null)} />}
       {overview && <TextDialog title={d.title} text={[d.tagline ?? "", d.overview].filter(Boolean).join("\n\n")} onClose={() => setOverview(false)} />}
     </div>
   );

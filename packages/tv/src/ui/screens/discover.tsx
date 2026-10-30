@@ -573,7 +573,7 @@ function DiscoverHero(p: { title: DiscoverTitle; detail: DiscoverDetail | null; 
 }
 
 /** A row's place while its first page comes: its title and grey wells; nothing takes focus. */
-function RowSkeleton(p: { title: string }) {
+export function RowSkeleton(p: { title: string }) {
   const spec = TILES.poster;
   return (
     <div class="row" aria-label={`Loading ${p.title}`} role="status">

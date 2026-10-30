@@ -143,16 +143,17 @@ export function TileCaption(p: { title: string; subtitle: string }) {
   );
 }
 
-/** The last tile of a row that lists more: an arrow and "See all". */
+/** The last tile of a row that lists more: an arrow and "See all" (or where it goes: "See all on Discover"). */
 export const SeeAllTile = memo(SeeAllView);
 
-function SeeAllView(p: { kind: TileKind; fid?: string; onSelect: () => void; onFocus?: (el: HTMLElement) => void; style?: string }) {
+function SeeAllView(p: { kind: TileKind; fid?: string; label?: string; onSelect: () => void; onFocus?: (el: HTMLElement) => void; style?: string }) {
   const spec = TILES[p.kind];
+  const label = p.label ?? "See all";
   return (
-    <F class="tile" style={`width:${spec.w}px;${p.style ?? ""}`} fid={p.fid} label="See all" onSelect={p.onSelect} onFocus={p.onFocus}>
+    <F class="tile" style={`width:${spec.w}px;${p.style ?? ""}`} fid={p.fid} label={label} onSelect={p.onSelect} onFocus={p.onFocus}>
       <div class={`tile-well see-all${spec.round ? " round" : ""}`} style={`width:${spec.w}px;height:${spec.h}px`}>
         <Icon name="arrow-right" size={32} />
-        <div class="t-label">See all</div>
+        <div class="t-label">{label}</div>
         <div class="tile-ring" />
       </div>
       <div class="tile-caption" />

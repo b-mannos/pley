@@ -606,6 +606,7 @@
 .search-channel .tile-clip { display: flex; align-items: center; justify-content: center; background: var(--surface3); }
 .search-channel .search-channel-live { position: absolute; left: 6px; top: 6px; height: 17px; padding: 0 6px; font-size: 10px; }
 .search-channel .search-channel-progress { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 0; }
+.search-none { padding: 0 48px 0 96px; }
 
 .person-header { position: absolute; left: 96px; right: 48px; top: 58px; display: flex; align-items: center; }
 .person-photo {
@@ -830,6 +831,9 @@
 .title-note > .icon { margin: 2px 8px 0 0; }
 .hero-buttons > .download-bar,
 .item-buttons > .download-bar { margin-top: 4px; }
+/* A library title's request under its facts: the stage, a download's bar beside it. */
+.item-request { display: flex; align-items: center; margin-top: 10px; }
+.item-request > .download-bar { flex: none; margin: 0 0 0 12px; }
 
 /* ---------------------------------------------------------------- Discover */
 
