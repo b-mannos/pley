@@ -150,7 +150,7 @@ const ChannelListRow = memo(function ChannelListRow({
   const on = channel.now && channel.now.start <= now && channel.now.stop > now ? channel.now : null;
   return (
     <Link
-      to={liveUrl(channel.id, category)}
+      to={liveUrl(channel, category)}
       className="flex h-full items-center gap-3 border-b border-border/60 px-3 transition-colors hover:bg-surface-2 active:bg-surface-2"
       aria-label={`Watch ${channel.number ? `${channel.number} ` : ""}${channel.name}${on ? `, now: ${on.title}` : ""}`}
     >
@@ -201,7 +201,7 @@ export const ChannelCard = memo(function ChannelCard({
       )}
     >
       <Link
-        to={liveUrl(channel.id, category)}
+        to={liveUrl(channel, category)}
         className="relative block outline-none"
         aria-label={`Watch ${channel.number ? `${channel.number} ` : ""}${channel.name}${on ? `, now: ${on.title}` : ""}`}
       >

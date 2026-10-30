@@ -337,6 +337,10 @@ async fn channels_by_group_a_page_at_a_time() {
     assert_eq!((sport["total"].as_i64(), sport["offset"].as_i64()), (Some(2), Some(0)));
     assert_eq!(names(&sport), ["Two HD", "Ten"]);
     assert_eq!(sport["channels"][0]["now"]["title"], "Football", "what's on comes with the page");
+    // Channels name their source by its short id, which their addresses carry.
+    let uid = sport["channels"][0]["source_uid"].as_str().unwrap().to_owned();
+    assert_eq!(uid.len(), 6, "{uid}");
+    assert_eq!(app.get("/api/live/sources", &admin).await.body[0]["uid"], uid);
     let page = app.get("/api/live/browse?offset=1&limit=1", &bob).await.body;
     assert_eq!((page["total"].as_i64(), names(&page)), (Some(3), vec!["Two HD".to_owned()]));
     let ten = sport["channels"][1]["id"].as_i64().unwrap();

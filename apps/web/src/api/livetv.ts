@@ -36,6 +36,8 @@ export interface Program {
 export interface Channel {
   id: Id;
   source_id: Id;
+  /** Its source's short id, which its address carries: `/live/{source_uid}/{id}`. */
+  source_uid: string;
   name: string;
   number: string | null;
   group: string;
@@ -143,6 +145,8 @@ export interface XtreamAccount {
 
 export interface LiveSource {
   id: Id;
+  /** Its short id, which its channels' addresses carry. */
+  uid: string;
   name: string;
   kind: SourceKind;
   url: string;

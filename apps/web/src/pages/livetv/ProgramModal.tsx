@@ -50,7 +50,7 @@ export function ProgramModal({
           >
             {channel.favorite ? "Favourite" : "Add to favourites"}
           </Button>
-          <Button variant="primary" icon={<Play className="size-4 fill-current" />} onClick={() => void navigate(liveUrl(channel.id, category))}>
+          <Button variant="primary" icon={<Play className="size-4 fill-current" />} onClick={() => void navigate(liveUrl(channel, category))}>
             {airing ? "Watch now" : "Watch channel"}
           </Button>
         </>

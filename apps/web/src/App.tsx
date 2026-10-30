@@ -117,15 +117,17 @@ const router = createBrowserRouter([
           <PlayerFallback />,
         ),
       },
-      {
-        path: "/live/:channelId",
+      // A channel, named with its source's short id; `/live/:channelId`
+      // (older links) goes on to it.
+      ...["/live/:sourceUid/:channelId", "/live/:channelId"].map((path) => ({
+        path,
         ...onDemand(
           () => import("@/player/live/LivePlayerPage"),
           (m) => m.LivePlayerPage,
           (prefetch, params) => [prefetch(liveQueries.channel(Number(params.channelId)))],
           <PlayerFallback />,
         ),
-      },
+      })),
       {
         element: <AppLayout />,
         children: [

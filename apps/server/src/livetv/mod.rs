@@ -156,6 +156,8 @@ impl SourceKind {
 #[derive(Debug, Clone, Serialize)]
 pub struct Source {
     pub id: i64,
+    /// Its short id, which channel addresses name it by.
+    pub uid: String,
     pub name: String,
     pub kind: SourceKind,
     pub url: String,
@@ -222,6 +224,7 @@ pub struct SourceTest {
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct SourceRow {
     id: i64,
+    uid: String,
     name: String,
     kind: String,
     url: String,
@@ -278,6 +281,8 @@ pub struct Program {
 pub struct Channel {
     pub id: i64,
     pub source_id: i64,
+    /// Its source's short id: `/live/{source_uid}/{id}`.
+    pub source_uid: String,
     pub name: String,
     pub number: Option<String>,
     pub group: String,
@@ -465,6 +470,8 @@ pub(crate) struct Lineup {
     /// The guide's channels (by source) with programmes to come, as the
     /// lineup was read: the guide is read again only with a change.
     guided: HashSet<(i64, String)>,
+    /// Each source's short id, by source.
+    source_uids: HashMap<i64, String>,
 }
 
 impl Lineup {
@@ -832,6 +839,11 @@ impl LiveTv {
         Ok(self.source_rows().await.map_err(|e| AppError::Internal(e.into()))?.len())
     }
 
+    /// Each source's short id, by source.
+    async fn source_uids(&self) -> Result<HashMap<i64, String>, AppError> {
+        Ok(self.lineup().await?.source_uids.clone())
+    }
+
     async fn source_rows(&self) -> sqlx::Result<Vec<SourceRow>> {
         sqlx::query_as("SELECT * FROM live_sources ORDER BY id").fetch_all(&self.db.read).await
     }
@@ -871,6 +883,7 @@ impl LiveTv {
                     connections_in_use: in_use.get(&r.id).copied().unwrap_or(0),
                     refreshing: refreshing.contains(&r.id),
                     id: r.id,
+                    uid: r.uid,
                     name: r.name,
                     url: r.url,
                     username: r.username,
@@ -927,9 +940,10 @@ impl LiveTv {
             SourceKind::M3u => input.url.trim().to_owned(),
         };
         let id: i64 = sqlx::query_scalar(
-            "INSERT INTO live_sources (name, kind, url, username, password, guide_url, user_agent, max_connections, \
-             enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            "INSERT INTO live_sources (uid, name, kind, url, username, password, guide_url, user_agent, \
+             max_connections, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
         )
+        .bind(new_source_uid())
         .bind(input.name.trim())
         .bind(input.kind.as_str())
         .bind(url)
@@ -1027,6 +1041,7 @@ impl LiveTv {
         };
         let row = SourceRow {
             id: 0,
+            uid: String::new(),
             name: input.name.clone(),
             kind: input.kind.as_str().into(),
             url: if input.kind == SourceKind::Xtream { xtream::base(&input.url) } else { input.url.trim().into() },
@@ -1445,7 +1460,14 @@ impl LiveTv {
                 .map_err(|e| AppError::Internal(e.into()))?
                 .into_iter()
                 .collect();
-        let lineup = Arc::new(Lineup { rows, shown, names, groups, guided });
+        let source_uids = self
+            .source_rows()
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?
+            .into_iter()
+            .map(|s| (s.id, s.uid))
+            .collect();
+        let lineup = Arc::new(Lineup { rows, shown, names, groups, guided, source_uids });
         let mut kept = self.lineup.lock();
         // A change while it was read: this one is already out of date.
         if self.generation.load(Ordering::SeqCst) == generation {
@@ -1515,7 +1537,12 @@ impl LiveTv {
         Ok(out)
     }
 
-    fn channel_out(c: &ChannelRow, favorites: &HashSet<i64>, programs: Option<&Vec<Program>>) -> Channel {
+    fn channel_out(
+        c: &ChannelRow,
+        source_uid: &str,
+        favorites: &HashSet<i64>,
+        programs: Option<&Vec<Program>>,
+    ) -> Channel {
         let at = now();
         let mut upcoming = programs.into_iter().flatten().filter(|p| p.stop > at);
         let first = upcoming.next().cloned();
@@ -1527,6 +1554,7 @@ impl LiveTv {
         Channel {
             id: c.id,
             source_id: c.source_id,
+            source_uid: source_uid.to_owned(),
             name: c.display_name().to_owned(),
             number: c.display_number(),
             group: c.group_name.clone(),
@@ -1542,7 +1570,14 @@ impl LiveTv {
     async fn channels_out(&self, user: &AuthUser, rows: &[&ChannelRow]) -> Result<Vec<Channel>, AppError> {
         let favorites = self.favorites(user.id).await?;
         let programs = self.programs_of(rows, now(), now() + 12 * 3600).await?;
-        Ok(rows.iter().map(|c| Self::channel_out(c, &favorites, programs.get(&c.id))).collect())
+        let uids = self.source_uids().await?;
+        Ok(rows
+            .iter()
+            .map(|c| {
+                let uid = uids.get(&c.source_id).map_or("", String::as_str);
+                Self::channel_out(c, uid, &favorites, programs.get(&c.id))
+            })
+            .collect())
     }
 
     /// How many channels are shown.
@@ -1959,6 +1994,12 @@ fn split_region(name: &str) -> Option<(&str, &str)> {
     };
     let (region, rest) = (region.trim(), rest.trim().trim_start_matches(['|', ':', '-']).trim());
     (!region.is_empty() && region.chars().count() <= 16 && !rest.is_empty()).then_some((region, rest))
+}
+
+/// A short id for a new source: six hex digits, like those given to the
+/// sources there were before ids.
+fn new_source_uid() -> String {
+    uuid::Uuid::new_v4().simple().to_string()[..6].to_owned()
 }
 
 /// A provider's divider row rather than a channel: a name between runs of

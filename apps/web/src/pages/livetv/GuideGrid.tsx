@@ -326,7 +326,7 @@ const GuideRow = memo(function GuideRow({
       <button
         type="button"
         role="rowheader"
-        onClick={() => void navigate(liveUrl(channel.id, category))}
+        onClick={() => void navigate(liveUrl(channel, category))}
         className="group/ch sticky left-0 z-10 flex shrink-0 items-center gap-2.5 border-r border-border bg-surface px-2.5 text-left transition-colors hover:bg-surface-2"
         style={{ width: layout.channelWidth }}
         title={`Watch ${channel.name}`}

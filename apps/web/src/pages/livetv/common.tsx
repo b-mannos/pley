@@ -143,8 +143,13 @@ export function useIndexOf(category: LiveCategory, id: number | null): number | 
   return at < 0 ? null : around.data.offset + at;
 }
 
-/** `/live/:id`, with the category it was chosen in (channel up and down stay in it). */
-export function liveUrl(channelId: number, category?: LiveCategory): string {
+/**
+ * `/live/{source}/{channel}`: the channel, named with its source's short id
+ * (two sources' channels share numbers), and the category it was chosen in
+ * (channel up and down stay in it).
+ */
+export function liveUrl(channel: Pick<Channel, "id" | "source_uid">, category?: LiveCategory): string {
   const key = category ? categoryKey(category) : "all";
-  return key === "all" ? `/live/${channelId}` : `/live/${channelId}?in=${encodeURIComponent(key)}`;
+  const path = channel.source_uid ? `/live/${channel.source_uid}/${channel.id}` : `/live/${channel.id}`;
+  return key === "all" ? path : `${path}?in=${encodeURIComponent(key)}`;
 }

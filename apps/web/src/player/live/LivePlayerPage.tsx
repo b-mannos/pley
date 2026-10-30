@@ -77,7 +77,7 @@ function hlsTrouble(response: { code?: number; text?: string } | undefined, chan
 }
 
 export function LivePlayerPage() {
-  const { channelId } = useParams();
+  const { channelId, sourceUid } = useParams();
   const id = Number(channelId);
   const [params] = useSearchParams();
   const category = useMemo(() => parseCategory(params.get("in")), [params]);
@@ -87,12 +87,18 @@ export function LivePlayerPage() {
   const channel = current.data ?? null;
   const zap = useZap(category, id);
   useDocumentTitle(channel ? `${channel.name} · Live TV` : "Live TV");
+  // An address without its source's id (or an old one): the channel's own.
+  useEffect(() => {
+    if (channel && channel.source_uid && channel.source_uid !== sourceUid) {
+      void navigate(`${liveUrl(channel, category)}`, { replace: true });
+    }
+  }, [channel, sourceUid, category, navigate]);
 
   const tune = useCallback(
     (c: Channel, inCategory: LiveCategory = category) => {
       // What the list knows of it shows at once.
       qc.setQueryData(liveKeys.channel(c.id), c);
-      void navigate(liveUrl(c.id, inCategory), { replace: true });
+      void navigate(liveUrl(c, inCategory), { replace: true });
     },
     [navigate, qc, category],
   );

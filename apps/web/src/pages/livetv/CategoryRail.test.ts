@@ -51,8 +51,9 @@ describe("categories", () => {
   });
 
   it("travel with a channel to the player", () => {
-    expect(liveUrl(7)).toBe("/live/7");
-    expect(liveUrl(7, { kind: "all" })).toBe("/live/7");
-    expect(liveUrl(7, { kind: "group", group: "UK| Sport" })).toBe("/live/7?in=group%3AUK%7C%20Sport");
+    const seven = { id: 7, source_uid: "a1b2c3" };
+    expect(liveUrl(seven)).toBe("/live/a1b2c3/7");
+    expect(liveUrl(seven, { kind: "all" })).toBe("/live/a1b2c3/7");
+    expect(liveUrl(seven, { kind: "group", group: "UK| Sport" })).toBe("/live/a1b2c3/7?in=group%3AUK%7C%20Sport");
   });
 });
