@@ -15,7 +15,7 @@ use axum::http::{HeaderMap, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use futures::StreamExt;
 use parking_lot::Mutex;
-use pley::events::ServerEvent;
+use pley::events::{Audience, ServerEvent};
 use pley::requests::RequestStatus;
 use serde_json::{Value, json};
 use tokio::sync::broadcast::Receiver;
@@ -319,6 +319,11 @@ struct World {
 /// pley with TMDB at the stand-in (the other providers too; they are never
 /// asked here), empty movie and show libraries, and Ann, who asks.
 async fn world() -> World {
+    world_with(|_| {}).await
+}
+
+/// The same, with `adjust` changing pley's configuration.
+async fn world_with(adjust: impl FnOnce(&mut pley::Config)) -> World {
     let (services, base) = start_services().await;
     let app = TestApp::with_config(|c| {
         c.metadata_endpoints = Some(pley::providers::Endpoints {
@@ -330,6 +335,7 @@ async fn world() -> World {
             tmdb_images: format!("{base}/tmdb-images"),
             opensubtitles: format!("{base}/opensubtitles"),
         });
+        adjust(c);
     })
     .await;
     let admin = app.setup_admin().await;
@@ -1932,4 +1938,73 @@ async fn request_events_go_to_whom_they_are_for() {
     assert!(!told[2].contains("request"), "an administrator's app without `approvals`: {}", told[2]);
     assert!(told[3].contains("request_created") && told[3].contains(&changed), "a manager's: {}", told[3]);
     assert!(told[4].contains(&changed) && !told[4].contains(seen), "the session that saw it: {}", told[4]);
+}
+
+/// Waits till `stream` hears what is for managers (`manager`), or no longer
+/// does: its checks follow what its account is now.
+async fn hears_managers(w: &World, stream: &mut BodyDataStream, manager: bool) {
+    for _ in 0..50 {
+        w.app.state.events.send(ServerEvent::RequestsChanged {
+            to: Audience::of(Vec::new()),
+            request_id: None,
+            kind: None,
+            tmdb_id: None,
+        });
+        w.app.state.events.send(ServerEvent::LibrariesChanged);
+        if heard(stream).await.contains(r#""type":"requests_changed""#) == manager {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    panic!("the stream's checks didn't follow its account");
+}
+
+#[tokio::test]
+async fn an_apps_stream_hears_managers_while_its_account_is_an_administrator() {
+    let w = world_with(|c| c.event_recheck = Duration::from_millis(100)).await;
+    w.turn_on(json!({})).await;
+    let (_, bob_id) = w.app.user(&w.admin, "bob", json!({})).await;
+    let (bobs, _) = w.app.app_token(bob_id, "library requests approvals").await;
+    let mut stream = events(&w.app, &bobs).await;
+    assert_eq!(w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 603})).await.status, StatusCode::CREATED);
+    w.app.state.events.send(ServerEvent::LibrariesChanged);
+    let told = heard(&mut stream).await;
+    assert!(!told.contains("request"), "not a manager's: {told}");
+
+    // Made an administrator: a manager's stream from its next check on.
+    let made = w.app.patch(&format!("/api/users/{bob_id}"), &w.admin, json!({"is_admin": true})).await;
+    assert_eq!(made.status, StatusCode::OK, "{}", made.text());
+    heard(&mut stream).await;
+    hears_managers(&w, &mut stream, true).await;
+    let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 604})).await;
+    w.app.state.events.send(ServerEvent::LibrariesChanged);
+    let told = heard(&mut stream).await;
+    let created = format!(r#""type":"request_created","request_id":{},"#, asked.body["id"]);
+    assert!(told.contains(&created), "{told}");
+
+    // No longer one: no longer a manager's.
+    let made = w.app.patch(&format!("/api/users/{bob_id}"), &w.admin, json!({"is_admin": false})).await;
+    assert_eq!(made.status, StatusCode::OK, "{}", made.text());
+    heard(&mut stream).await;
+    hears_managers(&w, &mut stream, false).await;
+    assert_eq!(w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 605})).await.status, StatusCode::CREATED);
+    w.app.state.events.send(ServerEvent::LibrariesChanged);
+    let told = heard(&mut stream).await;
+    assert!(!told.contains("request_created"), "{told}");
+}
+
+#[tokio::test]
+async fn approving_from_several_sessions_at_once_answers_each_and_sends_once() {
+    let w = world().await;
+    w.turn_on(json!({})).await;
+    for (tmdb_id, action) in [(603, "approve"), (604, "handled")] {
+        let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": tmdb_id})).await;
+        let uri = format!("/api/requests/{}/{action}", asked.body["id"]);
+        let answers = futures::future::join_all((0..8).map(|_| w.app.post(&uri, &w.admin, json!({})))).await;
+        for answer in &answers {
+            assert_eq!(status(answer), (StatusCode::OK, "approved".to_owned()), "{action}: {}", answer.text());
+        }
+    }
+    w.app.state.requests.settled().await;
+    assert_eq!(w.services.radarr_calls("POST", "/movie").len(), 1, "sent once; the one added by hand never");
 }

@@ -2445,7 +2445,8 @@ An app's token without the route's scope is refused before all of it
   limits, and may be asked for again (`400` for an id below 1, an empty
   path, a season it doesn't ask for, none, or seasons of a movie). A
   request sent already, or being sent, is answered as it is (`200`: a
-  second approve, or a race); an available one answers `409`.
+  second approve), and so is one another session approved meanwhile (a
+  race); an available one answers `409`.
 - **Declining** (managers) a pending or failed request, or an approved one
   not yet available (others: `409`), keeps `reason` (500 characters at
   most) for its maker to read. The title is declined for its maker and its
@@ -2457,8 +2458,8 @@ An app's token without the route's scope is refused before all of it
   afterwards (`sent_to` `null`, `note` "Added by hand", stage `approved`),
   and waits for the library like any other; approving it makes it one to
   send after all (sent at once where Radarr or Sonarr is connected). One
-  added by hand already is answered as it is; one sent, being sent or
-  available answers `409`.
+  added by hand already, or by another session meanwhile, is answered as
+  it is; one sent, being sent or available answers `409`.
 - **Options** (managers, `GET /api/requests/options`): what approving may
   choose in Radarr and in Sonarr, each `null` where it isn't connected:
   their quality profiles and root folders, and the settings' choices, which

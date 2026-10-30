@@ -2497,7 +2497,7 @@ impl Requests {
     /// approved and not sent request is approved, keeping `approval`'s
     /// seasons of those asked for, and sent to Radarr or Sonarr in the
     /// background with what it chose. One sent already, or being sent, is
-    /// answered as it is.
+    /// answered as it is, as is one approved meanwhile (a race).
     pub async fn approve(
         self: &Arc<Self>,
         caller: &Caller<'_>,
@@ -2565,8 +2565,9 @@ impl Requests {
         .rows_affected()
             == 1;
         if !approved {
-            // Changed meanwhile: sent by now, or not to be approved.
-            if self.row(id).await?.is_some_and(|r| self.sent(&r)) {
+            // Changed meanwhile: approved by another session by now (which
+            // may not have started sending it yet), or not to be approved.
+            if self.row(id).await?.is_some_and(|r| r.status() == RequestStatus::Approved) {
                 return self.one(caller, id).await;
             }
             let message = |r: &MediaRequest| format!("this request changed meanwhile: it is {} now", r.status.as_str());
@@ -2735,8 +2736,8 @@ impl Requests {
 
     /// `POST /api/requests/{id}/handled`: approved as added to Radarr or
     /// Sonarr by hand, so never sent: a pending, failed, declined, or
-    /// approved and not sent one. One added by hand already is answered as
-    /// it is.
+    /// approved and not sent one. One added by hand already, or meanwhile
+    /// (a race), is answered as it is.
     pub async fn handled(&self, caller: &Caller<'_>, id: i64) -> RequestResult<MediaRequest> {
         let row = self.row(id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
         let status = row.status();
@@ -2768,6 +2769,11 @@ impl Requests {
         .await?
         .rows_affected();
         if done == 0 {
+            // Changed meanwhile: marked by another session by now, or not
+            // to be marked.
+            if self.row(id).await?.is_some_and(|r| r.status() == RequestStatus::Approved && r.hand()) {
+                return self.one(caller, id).await;
+            }
             let message = |r: &MediaRequest| format!("this request changed meanwhile: it is {} now", r.status.as_str());
             return Err(self.refused(caller, id, None, message).await);
         }
