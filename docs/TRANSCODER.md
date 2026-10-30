@@ -398,8 +398,10 @@ it comes, as the body of `PUT /v1/live/{id}/input` (chunked). FFmpeg reads it
 from its standard input: the caller holds the one connection to the channel,
 which IPTV providers count, and the transcoder needn't reach the provider.
 
-- The first 1.5 MB, or what came in 2.5 s, is probed (`ffprobe` on a pipe).
-  Then FFmpeg starts with that and the rest after it.
+- What came in the first 0.6 s is probed (`ffprobe` on a pipe); when that
+  doesn't give the picture's size yet (no keyframe came), the first 1.5 MB,
+  or what came in 2.5 s. Then FFmpeg starts with that and the rest after it,
+  looking no further into it itself.
 - Every player of a channel reads the same stream, so it is made for all of
   them: H.264 and AAC. The video is copied when it is H.264 already, 8-bit,
   no taller than `max_height` and, with `deinterlace` (the default),
@@ -409,9 +411,12 @@ which IPTV providers count, and the transcoder needn't reach the provider.
 - Interlaced video is deinterlaced with `yadif`: each field a frame (50 or
   60 a second) where a hardware encoder makes it, one frame of the two on
   x264.
-- The output is a live playlist of 2 s segments, `s{n}.ts`, with a keyframe
-  at each segment's start, keeping `window_seconds` (default 300) behind
-  the live edge for pausing and going back. Older segments are deleted.
+- The output is a live playlist of short segments, `s{n}.ts`, with a
+  keyframe at each segment's start: 1 s when transcoded, a copied
+  channel's own keyframe interval (often 2 s) when copied. It keeps
+  `window_seconds` (default 300) behind the live edge for pausing and
+  going back; older segments are deleted. The first playlist is answered
+  once 2 s of media is made, so a player starts with something in hand.
 - A transcode takes a transcode slot (`503 busy` when none is free); a copy
   doesn't.
 - The input ending, saying nothing for 20 s, or `DELETE` ends the channel.

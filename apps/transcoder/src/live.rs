@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-Restricted
 //! Live channels (IPTV): an MPEG-TS stream sent in as the channel sends it
 //! (`PUT /v1/live/{id}/input`) made into a live HLS stream, a sliding window
-//! of 2 s segments that every player of the channel reads.
+//! of short segments (1 s, or a copied channel's keyframe interval) that
+//! every player of the channel reads.
 //!
 //! The first megabyte or so of the input is probed to choose what is made:
 //! the video is copied when it is H.264 already (and progressive, unless
@@ -34,20 +35,25 @@ use crate::job::Slots;
 use crate::util::now_ms;
 
 /// Segment length, seconds: short, so a channel starts and changes quickly.
-const SEGMENT_SECONDS: u32 = 2;
+/// A transcode makes a keyframe this often; copied video is cut at its own
+/// keyframes, so its segments are as long as their interval (often 2 s).
+const SEGMENT_SECONDS: u32 = 1;
 /// What is kept behind the live edge by default, and at least (seconds).
 const DEFAULT_WINDOW: u32 = 300;
 const MIN_WINDOW: u32 = 30;
-/// Input probed before FFmpeg starts: this much, or what came in this long
-/// (what a channel takes to start, so short: a 2 s keyframe interval, the
-/// usual, falls within it).
+/// Input probed before FFmpeg starts: what came in the first moment, which
+/// usually says what the channel carries; when its picture's size isn't
+/// known yet (no keyframe came), this much, or what came in this long (a
+/// 2 s keyframe interval, the usual, falls within it). What a channel takes
+/// to start, so short.
+const QUICK_PROBE_WAIT: Duration = Duration::from_millis(600);
 const PROBE_BYTES: usize = 1_500_000;
 const PROBE_WAIT: Duration = Duration::from_millis(2500);
 /// How long the input may say nothing before the channel is taken for gone.
 const INPUT_STALL: Duration = Duration::from_secs(20);
-/// Segments a player waits for before its first playlist: enough to start
-/// without stalling at once.
-const START_SEGMENTS: u64 = 2;
+/// Media a player waits for before its first playlist: enough to start
+/// without stalling at once, ahead of what is still being made.
+const START_MS: u64 = 2000;
 const PLAYLIST_WAIT: Duration = Duration::from_secs(30);
 /// A channel nobody read anything of for this long is stopped (its caller
 /// stops it itself when its last viewer leaves; this is for a caller gone).
@@ -71,6 +77,8 @@ pub struct Live {
     inner: Mutex<Inner>,
     bytes_in: AtomicU64,
     segments: AtomicU64,
+    /// Media made so far, in milliseconds.
+    made_ms: AtomicU64,
     lag_ms: AtomicI64,
     last_access: Mutex<Instant>,
     /// Set while an input is being read: one at a time.
@@ -118,6 +126,7 @@ impl LiveManager {
             inner: Mutex::new(Inner::default()),
             bytes_in: AtomicU64::new(0),
             segments: AtomicU64::new(0),
+            made_ms: AtomicU64::new(0),
             lag_ms: AtomicI64::new(0),
             last_access: Mutex::new(Instant::now()),
             feeding: AtomicBool::new(false),
@@ -175,13 +184,28 @@ impl LiveManager {
         S: Stream<Item = Result<Bytes, E>> + Unpin,
         E: std::fmt::Display,
     {
-        // What comes first is probed, then given to FFmpeg ahead of the rest.
+        // What comes first is probed, then given to FFmpeg ahead of the rest:
+        // the first moment's, and more when that didn't say enough.
         let mut head: Vec<Bytes> = Vec::new();
         let mut head_len = 0usize;
         let mut first: Option<Instant> = None;
         let mut ended = false;
-        while head_len < PROBE_BYTES && first.is_none_or(|t| t.elapsed() < PROBE_WAIT) {
-            let wait = first.map_or(INPUT_STALL, |t| PROBE_WAIT.saturating_sub(t.elapsed()));
+        let mut until = QUICK_PROBE_WAIT;
+        let probed = loop {
+            let full = head_len >= PROBE_BYTES || first.is_some_and(|t| t.elapsed() >= until);
+            if full || ended {
+                if head_len == 0 {
+                    return Err(ApiError::Failed("the channel sent nothing".into()));
+                }
+                let found = probe(&self.ff, &head).await;
+                let last = ended || head_len >= PROBE_BYTES || until == PROBE_WAIT;
+                match found {
+                    Ok(p) if last || p.complete() => break p,
+                    Err(e) if last => return Err(e),
+                    _ => until = PROBE_WAIT,
+                }
+            }
+            let wait = first.map_or(INPUT_STALL, |t| until.saturating_sub(t.elapsed()));
             let next = tokio::select! {
                 next = tokio::time::timeout(wait, input.next()) => next,
                 () = live.stop.cancelled() => return Ok(()),
@@ -194,20 +218,13 @@ impl LiveManager {
                     head.push(chunk);
                 }
                 Ok(Some(Err(e))) => return Err(ApiError::Failed(format!("the channel's stream broke off: {e}"))),
-                Ok(None) => {
-                    ended = true;
-                    break;
-                }
+                Ok(None) => ended = true,
                 Err(_) if first.is_none() => {
                     return Err(ApiError::Timeout("the channel sent nothing".into()));
                 }
-                Err(_) => break,
+                Err(_) => {}
             }
-        }
-        if head_len == 0 {
-            return Err(ApiError::Failed("the channel sent nothing".into()));
-        }
-        let probed = probe(&self.ff, &head).await?;
+        };
         let plan = plan(&self.ff, &live.request, &probed)?;
         let slot = match plan.encoder {
             Some(enc) => Some(self.slots.take(enc.hardware).ok_or_else(|| {
@@ -407,7 +424,7 @@ impl Live {
                     }
                     _ => {}
                 }
-                if (self.segments.load(Relaxed) >= START_SEGMENTS || state == LiveState::Ended)
+                if (self.made_ms.load(Relaxed) >= START_MS || state == LiveState::Ended)
                     && let Ok(text) = tokio::fs::read_to_string(self.dir.join("index.m3u8")).await
                 {
                     return Ok(LiveFile::Playlist(text));
@@ -463,6 +480,7 @@ async fn watch_playlist(live: Arc<Live>) {
         let first = *first_at.get_or_insert_with(Instant::now);
         seen_upto = Some(upto);
         live.segments.store(upto, Relaxed);
+        live.made_ms.store(made_ms as u64, Relaxed);
         // The first segments come in a burst from the probed head; after,
         // a channel that keeps up makes media as fast as time passes.
         let first_ms = durations.first().copied().unwrap_or(0.0) * 1000.0;
@@ -537,6 +555,17 @@ async fn probe(ff: &Ffmpeg, head: &[Bytes]) -> ApiResult<Probed> {
         ));
     }
     Ok(probed)
+}
+
+impl Probed {
+    /// It says all a plan needs: the picture's size (a keyframe came), or
+    /// sound alone with no picture.
+    fn complete(&self) -> bool {
+        match &self.video {
+            Some(v) => v.width.is_some() && v.height.is_some(),
+            None => self.audio.is_some(),
+        }
+    }
 }
 
 fn parse_probe(json: &[u8]) -> Probed {
@@ -650,7 +679,8 @@ fn ffmpeg_args(plan: &Plan, window: u32) -> Vec<String> {
     let mut a: Vec<String> = Vec::new();
     let mut push = |items: &[&str]| a.extend(items.iter().map(|s| s.to_string()));
     push(&["-loglevel", "warning", "-fflags", "+genpts+discardcorrupt", "-err_detect", "ignore_err"]);
-    push(&["-probesize", "5000000", "-analyzeduration", "5000000", "-f", "mpegts", "-i", "pipe:0"]);
+    // The input was probed already: FFmpeg needn't look far into it again.
+    push(&["-probesize", "1000000", "-analyzeduration", "1000000", "-f", "mpegts", "-i", "pipe:0"]);
     if let Some(v) = &plan.video {
         a.extend(["-map".into(), format!("0:{}", v.index)]);
     }
@@ -821,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn hls_output_is_a_sliding_window_of_two_second_segments() {
+    fn hls_output_is_a_sliding_window_of_short_segments() {
         let plan = Plan {
             video: Some(stream("h264", 720, false)),
             audio: Some(ProbedStream { index: 1, codec: "mp2".into(), ..Default::default() }),
@@ -834,7 +864,7 @@ mod tests {
         let line = ffmpeg_args(&plan, 300).join(" ");
         assert!(line.contains("-i pipe:0"), "{line}");
         assert!(line.contains("-map 0:0 -map 0:1 -c:v copy -c:a aac -ac 2"), "{line}");
-        assert!(line.contains("-hls_time 2 -hls_list_size 150"), "{line}");
+        assert!(line.contains("-hls_time 1 -hls_list_size 300"), "{line}");
         assert!(line.contains("delete_segments") && line.contains("omit_endlist"), "{line}");
         assert!(line.ends_with("-hls_segment_filename s%d.ts index.m3u8"), "{line}");
     }
@@ -866,10 +896,10 @@ mod tests {
         };
         let line = video_args(&plan, &nvenc).join(" ");
         assert!(line.contains("yadif=mode=send_field:deint=interlaced,scale=-2:720,format=nv12"), "{line}");
-        assert!(line.contains("-g 100"), "{line}");
-        assert!(line.contains("-force_key_frames expr:gte(t,n_forced*2)"), "{line}");
+        assert!(line.contains("-g 50"), "{line}");
+        assert!(line.contains("-force_key_frames expr:gte(t,n_forced*1)"), "{line}");
         plan.encoder = Some(&x264);
         let line = video_args(&plan, &x264).join(" ");
-        assert!(line.contains("yadif=mode=send_frame") && line.contains("-g 50") && line.contains("libx264"), "{line}");
+        assert!(line.contains("yadif=mode=send_frame") && line.contains("-g 25") && line.contains("libx264"), "{line}");
     }
 }
