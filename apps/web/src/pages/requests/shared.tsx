@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { Ban, Check, CircleCheck, Clock, CloudOff, Inbox, KeyRound, LogIn } from "lucide-react";
 import { errorMessage } from "@/api/client";
+import { useLogout } from "@/api/hooks";
 import {
   requestProblem,
   useDiscoverList,
@@ -12,6 +13,7 @@ import {
   type MediaRequest,
   type RequestProblem,
 } from "@/api/requests";
+import { useOptionalAudioPlayer } from "@/audio/AudioPlayer";
 import { Artwork } from "@/components/Artwork";
 import { ASPECT_CLASS, CardSkeleton } from "@/components/cards";
 import { ArrowButton, HubRowSkeleton, useFittedRow } from "@/components/HubRow";
@@ -406,6 +408,8 @@ export function ProblemState({
           <Link to={TMDB_KEY_SETTING} className={buttonClass("primary")}>
             Check the key
           </Link>
+        ) : problem.kind === "sign_in" ? (
+          <SignInAgain />
         ) : words.retry && onRetry ? (
           <Button loading={retrying} onClick={onRetry}>
             Retry
@@ -413,6 +417,32 @@ export function ProblemState({
         ) : undefined
       }
     />
+  );
+}
+
+/**
+ * For a sign-in made before it could ask for titles (or approve them):
+ * signs out, and back to this page once signed in again.
+ */
+export function SignInAgain({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
+  const logout = useLogout();
+  const audio = useOptionalAudioPlayer();
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (
+    <Button
+      variant="primary"
+      size={size}
+      icon={<LogIn className={size === "lg" ? "size-5" : "size-4"} />}
+      loading={logout.isPending}
+      onClick={() => {
+        const next = location.pathname + location.search;
+        audio?.close();
+        logout.mutate(undefined, { onSettled: () => void navigate(`/login?next=${encodeURIComponent(next)}`, { replace: true }) });
+      }}
+    >
+      Sign in again
+    </Button>
   );
 }
 

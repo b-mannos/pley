@@ -202,9 +202,23 @@ describe("DiscoverPage", () => {
   });
 
   it("asks a sign-in without requests to sign in again, and nothing more", async () => {
-    const requests = mockApi({ "GET /api/requests/summary": () => makeSummary({ sign_in_again: "requests" }) });
-    renderWithProviders(<DiscoverPage />, { route: "/discover", user: ann });
+    const requests = mockApi({
+      "GET /api/requests/summary": () => makeSummary({ sign_in_again: "requests" }),
+      "POST /api/auth/logout": () => undefined,
+    });
+    renderWithProviders(
+      <>
+        <DiscoverPage />
+        <LocationDisplay />
+      </>,
+      { route: "/discover?list=anime", user: ann },
+    );
     expect(await screen.findByRole("heading", { name: "Sign in again to ask for movies and shows" })).toBeInTheDocument();
     expect(requests.some((r) => r.path.startsWith("/api/discover"))).toBe(false);
+
+    // Signing out first, so the sign-in comes back here.
+    await userEvent.click(screen.getByRole("button", { name: "Sign in again" }));
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/login?next=%2Fdiscover%3Flist%3Danime"));
+    expect(requests.some((r) => r.method === "POST" && r.path === "/api/auth/logout")).toBe(true);
   });
 });

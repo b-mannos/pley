@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
-import { Ban, Bell, Check, Clock, LogIn, Play, Plus, UserMinus } from "lucide-react";
+import { Ban, Bell, Check, Clock, Play, Plus, UserMinus } from "lucide-react";
 import { isApiError } from "@/api/client";
 import {
   useAskRequest,
@@ -28,7 +28,7 @@ import { NotFoundPage } from "../NotFoundPage";
 import { ContentRating, Genres, MetaLine, RatingBadge, Summary } from "../item/shared";
 import { failure, RequestCard } from "./RequestCard";
 import { SeasonPicker } from "./SeasonPicker";
-import { ProblemState, StagePill, TmdbCredit } from "./shared";
+import { ProblemState, SignInAgain, StagePill, TmdbCredit } from "./shared";
 
 function TitleSkeleton() {
   return (
@@ -132,10 +132,7 @@ export function MainActions({
         <div className="space-y-2">
           <p className="font-medium">Sign in again to ask for movies and shows</p>
           <p className="text-sm text-muted">This app signed in before it could ask. Signing in again lets it.</p>
-          <Link to="/login" className={buttonClass("primary", size)}>
-            <LogIn className={icon} />
-            Sign in again
-          </Link>
+          <SignInAgain size={size} />
         </div>
       );
       break;

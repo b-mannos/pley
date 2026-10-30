@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { Ban, Check, Compass, Inbox, LogIn, Search, X } from "lucide-react";
+import { Ban, Check, Compass, Inbox, Search, X } from "lucide-react";
 import { isApiError } from "@/api/client";
 import {
   hasRequests,
@@ -26,7 +26,7 @@ import { useDebouncedValue, useDocumentTitle, useOnChange } from "@/lib/hooks";
 import { allowanceText } from "@/lib/requests";
 import { discoverUrl } from "@/lib/urls";
 import { failure, RequestCard } from "./RequestCard";
-import { ProblemState, RequestsUnavailable } from "./shared";
+import { ProblemState, RequestsUnavailable, SignInAgain } from "./shared";
 
 const STATUSES: { status: RequestStatus; label: string }[] = [
   { status: "pending", label: "Pending" },
@@ -492,10 +492,7 @@ export function RequestsPage() {
       {data?.sign_in_again === "approvals" ? (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
           <span className="flex-1">Sign in again to approve and decline here.</span>
-          <Link to="/login" className={buttonClass("primary", "sm")}>
-            <LogIn className="size-4" />
-            Sign in again
-          </Link>
+          <SignInAgain size="sm" />
         </div>
       ) : null}
       {body}
