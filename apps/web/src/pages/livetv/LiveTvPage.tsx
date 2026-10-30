@@ -178,8 +178,8 @@ export function LiveTvPage() {
               onClick={() => setPicking(true)}
               className="flex h-9 min-w-0 items-center gap-2 rounded-md border border-border bg-surface px-3 text-left text-sm font-medium transition-colors hover:border-border-strong lg:hidden"
             >
-              <span className="truncate">{name}</span>
-              {total !== undefined ? <span className="text-xs tabular-nums text-subtle">{total.toLocaleString()}</span> : null}
+              <span className="truncate">{searching ? `Results for “${search.trim()}”` : name}</span>
+              {total !== undefined && !searching ? <span className="text-xs tabular-nums text-subtle">{total.toLocaleString()}</span> : null}
               <ChevronDown className="ml-auto size-4 shrink-0 text-subtle" />
             </button>
             <h2 className="hidden min-w-0 flex-1 items-baseline gap-2 lg:flex">
