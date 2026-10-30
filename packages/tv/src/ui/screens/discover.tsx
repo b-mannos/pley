@@ -164,6 +164,10 @@ export function DiscoverScreen(p: { entry: Entry; query?: string }) {
       ui.input.push((key, e) => {
         const words = text.trim();
         if (key !== "back" || !words || words === (p.query ?? "").trim()) return false;
+        // On the rail, Back is the rail's.
+        const page = document.querySelector(".discover-page");
+        const at = ui.focus.current;
+        if (!page || !at || !page.contains(at)) return false;
         if (e.type === "down" && !e.repeat) {
           setText("");
           focusField();
