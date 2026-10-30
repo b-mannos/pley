@@ -1,4 +1,4 @@
-import { ApiError, errorMessage, unreachable } from "./api/client";
+import { ApiError, errorMessage, unreachable, type RequestQuery } from "./api/client";
 import type {
   DiscoverDetail,
   DiscoverList,
@@ -48,6 +48,76 @@ export const STATUS_TABS: { status: RequestStatus; label: string }[] = [
   { status: "declined", label: "Declined" },
   { status: "failed", label: "Failed" },
 ];
+
+/** A tab of a list of requests: Needs attention (managers), All, or one status. */
+export type RequestsTab = "attention" | "all" | RequestStatus;
+
+/** The tabs, Needs attention first for managers (they open on it). */
+export function requestsTabs(manage: boolean): { tab: RequestsTab; label: string }[] {
+  const tabs: { tab: RequestsTab; label: string }[] = [{ tab: "all", label: "All" }];
+  for (const t of STATUS_TABS) tabs.push({ tab: t.status, label: t.label });
+  const attention: { tab: RequestsTab; label: string }[] = [{ tab: "attention", label: "Needs attention" }];
+  return manage ? attention.concat(tabs) : tabs;
+}
+
+/** What a tab with nothing in it says (`everyone`: a manager's list of everyone's). */
+export function requestsEmpty(tab: RequestsTab, everyone: boolean): string {
+  const whose = everyone ? "" : " of yours";
+  switch (tab) {
+    case "attention":
+      return "No requests need attention.";
+    case "pending":
+      return `No requests${whose} wait for a decision.`;
+    case "approved":
+      return `No requests${whose} are on their way.`;
+    case "available":
+      return `No requests${whose} are ready to watch yet.`;
+    case "declined":
+      return `No requests${whose} were declined.`;
+    case "failed":
+      return `No requests${whose} failed.`;
+    default:
+      return everyone ? "No one has asked for anything yet." : "You haven't asked for anything yet.";
+  }
+}
+
+/** The filters of the managers' list: movies or shows, one person's, a title's words. */
+export interface RequestFilters {
+  kind: TitleKind | null;
+  userId: number | null;
+  q: string;
+}
+
+/** The listing for a tab (Needs attention: `attention=1&order=oldest`) and the filters, the first `limit`. */
+export function requestsQuery(tab: RequestsTab, f: RequestFilters, limit: number): RequestQuery {
+  const q: RequestQuery = {};
+  if (tab === "attention") {
+    q.attention = true;
+    q.order = "oldest";
+  } else if (tab !== "all") q.status = [tab];
+  if (f.kind) q.kind = f.kind;
+  if (f.userId !== null) q.userId = f.userId;
+  const words = f.q.trim();
+  if (words) q.q = words;
+  q.offset = 0;
+  q.limit = limit;
+  return q;
+}
+
+/** Whether a request (as an action left it) still belongs on a tab: what was approved leaves Needs attention and Pending at once. */
+export function inRequestsTab(r: MediaRequest, tab: RequestsTab): boolean {
+  if (tab === "all") return true;
+  if (tab === "attention") return r.status === "pending" || (r.status === "failed" && r.retry_at === null);
+  return r.status === tab;
+}
+
+/** A tab's number: its status's count (every filter but the status applied), their sum for All, what waits for managers. */
+export function tabCount(tab: RequestsTab, counts: Record<RequestStatus, number> | null, s: RequestSummary | null): number | null {
+  if (tab === "attention") return s ? s.pending + s.failed : null;
+  if (!counts) return null;
+  if (tab === "all") return STATUS_TABS.reduce((n, t) => n + (counts[t.status] ?? 0), 0);
+  return counts[tab] ?? 0;
+}
 
 // ---- who sees what
 
@@ -116,6 +186,13 @@ export function titleBadge(t: { status: TitleStatus; item_id: number | null }): 
     default:
       return null;
   }
+}
+
+/** A badge's colour: what can be watched green, what is on its way blue, what was refused red. */
+export function titleTone(t: { status: TitleStatus; item_id: number | null }): Tone {
+  if (t.status === "library" || (t.status === "partial" && t.item_id !== null)) return "green";
+  if (t.status === "declined") return "red";
+  return "blue";
 }
 
 /** A tile's second line: the year, and in rows of both kinds which it is. */
@@ -188,6 +265,24 @@ export function mainAction(d: DiscoverDetail, s: RequestSummary | null, now = Da
   const left = d.kind === "movie" ? d.movies_left : d.seasons_left;
   const none = left !== null && left <= 0;
   if (d.status === "partial") return { kind: "more", itemId: d.item_id, more: hasMoreSeasons(d), ask, disabled: none };
+  return ask ? { kind: "request", disabled: none } : { kind: "noAccess" };
+}
+
+/**
+ * The main action from a list's title alone, while its details load or
+ * when they can't be had: never "Tell me too" for what this profile may
+ * have asked for itself.
+ */
+export function listAction(t: DiscoverTitle, s: RequestSummary | null): MainAction {
+  if (s && s.sign_in_again === "requests") return { kind: "signIn" };
+  if (t.status === "restricted") return { kind: "restricted", text: "Above this account's age limit" };
+  if (t.status === "library") return { kind: "open", itemId: t.item_id };
+  if (t.status === "declined") return { kind: "declined", text: "Declined." };
+  if (t.status === "requested") return { kind: "requested", request: null };
+  const ask = !s || s.access !== "off";
+  const left = s ? (t.kind === "movie" ? s.movies_left : s.seasons_left) : null;
+  const none = left !== null && left <= 0;
+  if (t.status === "partial") return { kind: "more", itemId: t.item_id, more: true, ask, disabled: none };
   return ask ? { kind: "request", disabled: none } : { kind: "noAccess" };
 }
 

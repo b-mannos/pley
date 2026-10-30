@@ -85,6 +85,8 @@ export interface RequestNotice {
   text: string;
   /** Open goes to the title in the library; `null` goes to Your requests. */
   itemId: number | null;
+  /** The title's poster (TMDB's, through the server); none for news of several. */
+  poster: string | null;
 }
 
 /** A title's badge as a request event left it, newer than the pages that drew it before `at`. */
@@ -837,7 +839,7 @@ export class AppState {
           this.requestsChanged(null);
         }
         if (this.remember([newsKey(e.request_id, complete)])) {
-          this.notify({ text: readyText(e.title, e.seasons, complete), itemId: e.item_id ?? null });
+          this.notify({ text: readyText(e.title, e.seasons, complete), itemId: e.item_id ?? null, poster: e.poster_url ?? null });
         }
         break;
       }
@@ -1040,8 +1042,8 @@ export class AppState {
       const one = news[0]!;
       this.notify(
         news.length === 1
-          ? { text: readyText(one.title, one.available_seasons, one.stage === "available"), itemId: one.item_id }
-          : { text: newsText(news.length), itemId: null },
+          ? { text: readyText(one.title, one.available_seasons, one.stage === "available"), itemId: one.item_id, poster: one.poster_url }
+          : { text: newsText(news.length), itemId: null, poster: null },
       );
     } catch {
       // Asked again with the next summary that has news.
