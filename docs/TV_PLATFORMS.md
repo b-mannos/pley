@@ -8,6 +8,8 @@ subtitles. Each shell adds its TV's player, remote keys, capability probe
 and packaging. Both follow the Android TV app ([ANDROID.md](ANDROID.md)):
 the same 960×540 layout, D-pad focus, screens and player features.
 
+Neither app is in a store: both are installed on a TV in developer mode.
+
 ## Why packaged web apps
 
 | | Samsung | LG |
@@ -456,43 +458,6 @@ icon.
 - **LG Simulator** (webOS 22 and later): the TV's Chromium without its
   media pipeline, so no `mediaOption`, DRM or TV formats. It downloads
   only through LG's license page.
-
-## What still needs a real TV
-
-Samsung, on a 2018–2019 set and a 2021 or later one:
-
-1. Install with a Samsung certificate; launch time.
-2. Time to first frame, direct and transcoded.
-3. HDR10+ from MKV, HLG, Dolby Vision profile 8 showing as HDR10.
-4. E-AC-3 Atmos to a receiver; TrueHD when Settings sends it.
-5. Audio track switching; AVPlay's subtitles silent; picture subtitles.
-6. fMP4 HLS on 2020–2021 sets; 4K HLS.
-7. A session stopped from the web (`410`), on Tizen 6.0+ and older.
-8. No screen saver; Home and back; the network dropping.
-9. D-pad smoothness and memory on a 2018 set.
-10. Automatic's speed test on a remote network.
-11. Available subtitle fonts; AVPlay at 2× with sound.
-12. Live TV: a keyed live playlist from its edge; CH+, CH−, CH LIST and
-    GUIDE registered; a radio channel; `410` when a channel is stopped from the web.
-
-LG, on a webOS 4–6 set and a webOS 23 or later one:
-
-1. Install in Developer Mode; launch time.
-2. Dolby Vision 5 and 8 from MP4, TS (and MKV on webOS 25); the remux
-   before webOS 25.
-3. Transcoded surround on webOS 23–24 and 26; if stereo, HLS through
-   hls.js.
-4. CORS on each firmware.
-5. Audio track switching; `audioTracks` order against the server's.
-6. `umsmediainfo` in Playback details; start position from `mediaOption`.
-7. DTS to a receiver on 2023–2024; what `tv.model.edidType` says.
-8. Back on the first screen; `requiredACG` on webOS 26.
-9. The Magic Remote: OK selects once, wheel moves a notch, pointer hides.
-10. Audio Guidance on each move; Samsung's Voice Guide.
-11. Playback speed: pitch, streams and files, after a seek.
-12. Automatic's speed test on a remote network; available subtitle fonts.
-13. Live TV: a live playlist without `playTime` starting at its edge;
-    CH+ and CH− as 33 and 34.
 
 ## References
 

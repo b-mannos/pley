@@ -111,7 +111,8 @@ resized once and cached; transcodes throttled to about twice real time.
 | Pley for Windows, macOS and Linux | Desktop (Tauri). Finds servers on the local network (or takes an address) and shows the server's web app | |
 | Pley for Android | Phones, tablets, Android TV, Google TV, Fire TV. Native, with its own player: plays more files as they are than a browser, music in the background, a remote-first interface on TVs | [docs/ANDROID.md](docs/ANDROID.md) |
 | Pley for Kodi | Kodi 20 and newer (LibreELEC, CoreELEC, Android TV boxes, computers). The Android TV app's screens, Kodi's own player, Skip Intro and Up Next | [docs/KODI.md](docs/KODI.md) |
-| Pley for Roku | Roku. Native; sideloaded for now | [docs/ROKU.md](docs/ROKU.md) |
+| Pley for Roku | Roku. Native; sideloaded (not in Roku's store) | [docs/ROKU.md](docs/ROKU.md) |
+| Pley for Samsung TV, Pley for LG TV | Tizen and webOS. The Android TV app's screens, playing through each TV's own player | [docs/TV_PLATFORMS.md](docs/TV_PLATFORMS.md) |
 
 The TV apps sign in with a code typed on the server's `/link` page; the
 others sign in on the server's own page.

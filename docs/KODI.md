@@ -165,8 +165,9 @@ part (`autoquality.py`):
   waits for a Kodi that does.
 - A conversion's bitrate is lowered as it is sent
   (`PUT /api/playback/{session}/bitrate`) in whole Mbps, above the
-  floors of #620; a server that refuses it (400, 404) is treated as one
-  whose bitrate can't change.
+  floors in [QUALITY.md](QUALITY.md#players-that-go-black-between-streams);
+  a server that refuses it (400, 404) is treated as one whose bitrate
+  can't change.
 - When Kodi's player gives up on the original (`onPlayBackError`), it plays
   again converted at the server's quality, once, from where it was; Kodi's
   "Playback failed" box shows meanwhile.
@@ -227,8 +228,8 @@ is Home. Setting it up (sources, lineup, settings) stays in the web app.
 - **What's on stays current**: every 30 s the rows near focus are redrawn;
   a channel whose programme ended is asked for again
   (`GET /api/live/channels/{id}`). Nothing asks for every channel
-  (`GET /api/live/channels`) or the whole guide: on a lineup of 56,000
-  channels (tested) the page opens at once.
+  (`GET /api/live/channels`) or the whole guide: on lineups of tens of
+  thousands of channels the page opens at once.
 - **Kodi's lists** (Settings → Screens → Kodi's lists, and skins'
   widgets): Live TV after Home's rows, with the same categories (a region
   a folder of its groups), each a page of 300 channels with Next page. A
@@ -408,8 +409,6 @@ for screenshots put this in `portable_data/userdata/advancedsettings.xml`:
 - Picture subtitles picked in Kodi's player during a converted stream (the
   profile's choice is drawn onto the video from the start). Files played
   as they are show every kind.
-- Not yet seen on a running Kodi: Automatic stepping back up, a bitrate
-  lowered as it is sent, and Kodi's player giving up on the original.
 - Live TV: a guide grid (Kodi draws one only for PVR add-ons), Kodi's
   Up and Down changing channel in the player, recording (none in Pley), and Live TV's
   administration (the web app's).

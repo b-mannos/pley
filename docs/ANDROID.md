@@ -230,8 +230,7 @@ Installing this app over the earlier web view app (0.1) keeps its saved
 servers and install id (`WebViewMigration`) and asks to sign in again. Its
 old session is ended on each server (`POST /api/auth/logout`, best effort)
 and its web view data deleted (`migration/WebViewCleanup`, checked by
-`CutoverTest`). The web app's hooks for the web view
-(`apps/web/src/lib/shell.ts`) go after one more release.
+`CutoverTest`).
 
 ## Modules
 
@@ -274,7 +273,7 @@ Rules the build keeps:
 ## Builds
 
 Two flavors: `store` (Google Play and the Amazon Appstore, no self-updater)
-and `direct` (the download the Pley server will offer). Release builds are
+and `direct` (an APK to sideload). Release builds are
 minified, and signed when the release key is given.
 
 The version is `appVersion` in `app/build.gradle.kts`, set by

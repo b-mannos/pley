@@ -293,8 +293,8 @@ end function
 ' plays on.
 
 ' The least a stream of lines (as named, aqNamedLines) is stepped down to
-' as it is sent: 8 Mbps for 4K, 3 Mbps for 1080p (docs/QUALITY.md), 1.5
-' for 720p and 1 below.
+' as it is sent: 8 Mbps for 4K, 3 Mbps for 1080p, 1.5 for 720p and 1
+' below (docs/QUALITY.md).
 function aqFloorKbps(lines as integer) as integer
     if lines > 1080 then return 8000
     if lines > 720 then return 3000

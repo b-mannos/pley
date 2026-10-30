@@ -198,7 +198,7 @@ the data folder down, starts Pley and prints its address and setup link.
   Setup, or by an administrator in **Settings → Network**). The firewall
   lets it through on private and domain networks only, unless you add
   public ones.
-- **Setup isn't signed yet**: SmartScreen warns (**More info → Run anyway**).
+- **Setup isn't signed**: SmartScreen warns (**More info → Run anyway**).
   Each release's installer has build provenance:
   `gh attestation verify <file> --repo <owner>/<repo>`.
 - **RedirectionGuard is off** for Setup. Otherwise the Pley it starts would
@@ -212,7 +212,8 @@ the data folder down, starts Pley and prints its address and setup link.
   **Pley Media Server logs**). The service is **Pley Media Server** in
   Services (`services.msc`).
 - **No GPU encoder** although the computer has one: run Setup again and turn
-  off **Let the service write only in its data folder**.
+  off **Let the service write only in its data folder**. It is on by
+  default.
 - **A NAS isn't reached**: choose **As a service, as a user of its own**,
   name the NAS the way the library paths do (`\\nas`, not its address, or
   the other way round), and give a user the NAS knows.
@@ -239,8 +240,8 @@ Or, around a release folder already built:
   GPL requires to go with it). Releases carry gyan.dev's full build, at the
   version and checksum set in `.github/workflows/server.yml`.
 - **`-Flavor <name>`** adds a name to the file, for an installer built with a
-  different FFmpeg: `-Flavor fel` makes
-  `pley-server-<version>-fel-windows-x86_64-setup.exe`.
+  different FFmpeg: `-Flavor custom` makes
+  `pley-server-<version>-custom-windows-x86_64-setup.exe`.
 - `scripts\build.ps1 -Installer` passes `-Ffmpeg` and `-Flavor` on.
 - `ISCC /DTest …` builds an installer that installs in the notification area
   without administrator rights (no shortcuts, no start at sign-in), to try

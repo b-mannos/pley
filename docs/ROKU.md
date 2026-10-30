@@ -25,9 +25,7 @@ server knows; nothing fetches it.
 installs in one go. The debug console (`telnet <address> 8085`) shows what
 the app prints and its errors.
 
-The manifest asks for SceneGraph 1.2 (every Roku OS from 9). Roku's store
-certification asks for 1.3 from October 2026, which needs Roku OS 15; the
-app uses nothing of 1.3, so it is a one-line change for the store.
+The manifest asks for SceneGraph 1.2 (every Roku OS from 9).
 
 ## What it does
 
@@ -64,9 +62,9 @@ more than one profile.
   episode's credits (or a playlist's next entry), and Pley's menu.
 
 Not offered: playback speed and audio delay, which the Video node lacks.
-Subtitles look as the Roku's caption settings say (Settings → Accessibility
-→ Captions style); the app never sets `captionStyle`, which would override
-them for the whole Roku.
+Subtitles look as the Roku's caption settings say (Settings →
+Accessibility → Captions style); the app never sets `captionStyle`, which
+would override them for the whole Roku.
 
 ## Playback
 
@@ -384,12 +382,8 @@ bun run images    # the nine-patch focus and watched-mark images
 
 ## Not yet
 
-- Playback speed and audio delay; another language in Find
-  subtitles….
+- Playback speed and audio delay; another language in Find subtitles….
 - Live updates from an https server: Home refreshes once a minute.
 - Audio other than the file's default played as it is.
-- The Show screen refetches its episodes each time it shows.
-- Seek previews (BIF files); rating titles; reordering a
-  playlist; "Always start as"; an editable music queue.
-- Roku's channel store: a developer account, certification, SceneGraph
-  1.3 and the launch beacons' order.
+- Seek previews (BIF files); rating titles; reordering a playlist;
+  "Always start as"; an editable music queue.

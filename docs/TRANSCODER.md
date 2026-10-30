@@ -618,6 +618,7 @@ the same options.
 | AMF | peak-constrained VBR: `-rc vbr_peak` |
 | x264, x265 | CRF 21 and 24 |
 | VAAPI | `-rc_mode VBR` (FFmpeg picks CBR when bitrate equals maxrate) |
+| Quick Sync | maxrate one bit above the bitrate, so FFmpeg picks VBR; `-mbbrc 1`. |
 | VideoToolbox | `-maxrate` kept (`DataRateLimits`, a hard limit over one second) |
 
 AMF HEVC needs no `-header_insertion_mode`: with `-forced_idr 1` FFmpeg sends
@@ -846,6 +847,7 @@ video is encoded in HEVC Main 10 instead of being tone mapped.
 - The master playlist names the output `hvc1.2.4.LLL.B0` with
   `VIDEO-RANGE=PQ` or `HLG`. The plan's `dynamic_range_out` says `hdr10`,
   `hlg` or `sdr` for transcodes.
+- Other hardware encoders stay off the zero-copy GPU paths for HDR.
 
 ### Frame grabs
 

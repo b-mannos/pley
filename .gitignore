@@ -70,3 +70,7 @@ pley.toml
 tombstone_*
 bugreport-*.zip
 hs_err_pid*
+
+# Notes to the author: kept on this computer, never shared.
+/docs/QUESTIONS.md
+/docs/*.local.md

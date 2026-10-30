@@ -158,7 +158,8 @@ def from_setting(value: str) -> str:
 
 def from_old_index(index: int) -> Optional[str]:
     """The quality a choice made before Automatic named, None for none.
-    Index 0 was both the default and Original, which can't be told apart: it isn't carried over, and Automatic is played."""
+    Index 0 was both the default and Original, which can't be told apart:
+    it isn't carried over, and Automatic is played."""
     if 0 < index < len(OLD_ORDER):
         return OLD_ORDER[index]
     return None
@@ -288,7 +289,7 @@ def stream_lines(quality: str, converted: bool, cap: Optional[str], file_named: 
 
 def floor_kbps(lines: Optional[int]) -> int:
     """The least a stream of `lines` is stepped down to as it is sent: 8 Mbps
-    for 4K, 3 Mbps for 1080p (docs/QUALITY.md), 1.5 for 720p and 1 below."""
+    for 4K, 3 Mbps for 1080p, 1.5 for 720p and 1 below (docs/QUALITY.md)."""
     for above, kbps in FLOORS:
         if (lines or 0) > above:
             return kbps

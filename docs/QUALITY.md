@@ -207,7 +207,7 @@ choice.
 Some players can't switch streams without a moment of black screen:
 Samsung's AVPlay and Kodi's player close one stream before opening the
 next, and Roku's Video node replaces its content the same way. LG's player
-is treated the same until a TV shows otherwise.
+is treated the same.
 
 On these players Automatic never switches streams while one plays well.
 It changes the stream as it is sent instead:

@@ -2,8 +2,8 @@
 ' ServerEvent JSON, docs/API.md), read from a socket of the Roku's own:
 ' roUrlTransfer gives an answer only once it is whole, and this one never
 ' ends. HTTP/1.1 by hand, so only for an http:// server: Roku's sockets
-' have no TLS, and a server reached by https keeps Home's minute-old rule
-'. The request and the parsing, without sockets;
+' have no TLS, and a server reached by https keeps Home's minute-old rule.
+' The request and the parsing, without sockets;
 ' components/tasks/EventsTask reads.
 
 ' The request for server's stream with the access token: { host, port,
