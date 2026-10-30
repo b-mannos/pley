@@ -98,6 +98,13 @@ describe("DiscoverPage", () => {
     expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
   });
 
+  it("says when an age limit leaves a list empty", async () => {
+    mockApi({ "GET /api/requests/summary": () => makeSummary(), "GET /api/discover/anime": () => page([]) });
+    renderWithProviders(<DiscoverPage />, { route: "/discover?list=anime", user: { ...ann, max_age: 12 } });
+    expect(await screen.findByRole("heading", { name: "Nothing here right now" })).toBeInTheDocument();
+    expect(screen.getByText("What TMDB lists here is above this profile's age limit.")).toBeInTheDocument();
+  });
+
   it("goes on past pages that came short (titles above an age limit left out), as they aren't the end", async () => {
     mockApi({
       "GET /api/requests/summary": () => makeSummary(),
@@ -155,6 +162,20 @@ describe("DiscoverPage", () => {
     expect(await screen.findByRole("heading", { name: "TMDB isn't answering" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     expect(requests.filter((r) => r.path.startsWith("/api/discover/search"))).toHaveLength(1);
+  });
+
+  it("says once that TMDB isn't answering, in place of every row, keeping the account's requests", async () => {
+    mockApi({
+      "GET /api/requests/summary": () => makeSummary({ own: 1 }),
+      ...lists(),
+      "GET /api/discover/trending": () => apiError(503, "tmdb_down", "TMDB didn't answer"),
+      "GET /api/requests": () => makeRequestList([makeRequest({ id: 4, title: "Heat", tmdb_id: 949, mine: true })]),
+    });
+    renderWithProviders(<DiscoverPage />, { route: "/discover", user: ann });
+    expect(await screen.findByRole("heading", { name: "TMDB isn't answering" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Retry" })).toHaveLength(1);
+    expect(await screen.findByRole("heading", { name: "Your requests" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Popular movies" })).not.toBeInTheDocument();
   });
 
   it("sends managers to the key TMDB refused, and tells others an administrator must check it", async () => {

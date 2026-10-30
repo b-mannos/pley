@@ -269,6 +269,27 @@ export function ScrollRow({
   );
 }
 
+/** A row of {@link ScrollRow}'s cards while they load, under its heading, as wide as they'll be. */
+export function ScrollRowSkeleton({ title, inset }: { title: string; inset?: boolean }) {
+  const { ref, width, perPage } = useFittedRow([118, 160]);
+  return (
+    <section aria-busy="true">
+      <div className={cn("mb-2 flex h-8 items-center", !inset && "px-4 sm:px-8")}>
+        <h2 className="truncate text-lg font-semibold tracking-tight">{title}</h2>
+      </div>
+      <div className={inset ? undefined : "px-4 sm:px-8"}>
+        <div ref={ref} className="-mx-1 flex gap-3.5 overflow-hidden px-1 pt-1 pb-2 sm:gap-4">
+          {Array.from({ length: Math.max(perPage, 4) }, (_, i) => (
+            <div key={i} className="shrink-0">
+              <CardSkeleton aspect="poster" width={width} fixed />
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /** A row of TMDB's titles, as {@link ScrollRow} lays them out. */
 export function TitleCards({ titles, ...row }: { titles: DiscoverTitle[]; title: string; link: string; linkLabel?: string; inset?: boolean }) {
   return (
@@ -305,15 +326,31 @@ type RequestDownloadState = NonNullable<MediaRequest["download"]>["state"];
 /**
  * Where a request is on its way to a library, in its colour: a download's
  * progress as a bar with its value, and what more there is to say under it
- * (when a failed one is tried again).
+ * (why a failed one failed, when it's tried again). `compact`: on one
+ * line, cut short where it doesn't fit (under a poster).
  */
-export function StagePill({ request, manage, className, line = true }: { request: MediaRequest; manage: boolean; className?: string; line?: boolean }) {
+export function StagePill({
+  request,
+  manage,
+  className,
+  line = true,
+  compact,
+}: {
+  request: MediaRequest;
+  manage: boolean;
+  className?: string;
+  line?: boolean;
+  compact?: boolean;
+}) {
   const words = stageWords(request, manage);
   const download = words.download;
   return (
     <div className={cn("min-w-0 space-y-1.5", className)}>
-      <span className={cn("inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-xs font-semibold", PILL_TONES[words.tone])}>
-        <span className="min-w-0 break-words">{words.label}</span>
+      <span
+        className={cn("inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-xs font-semibold", PILL_TONES[words.tone])}
+        title={compact ? words.label : undefined}
+      >
+        <span className={cn("min-w-0", compact ? "truncate" : "break-words")}>{words.label}</span>
       </span>
       {download ? (
         <div

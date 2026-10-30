@@ -67,7 +67,7 @@ describe("SearchPage", () => {
       "GET /api/discover/search": () => ({ page: 1, total_pages: 1, results: [makeTitle()] }),
     });
     search("matrix");
-    expect(await screen.findByText("Nothing in your libraries matches")).toBeInTheDocument();
+    expect(await screen.findByText("Nothing in your libraries matches.")).toBeInTheDocument();
     expect(await screen.findByRole("link", { name: "The Matrix, 1999, Movie" })).toBeInTheDocument();
     expect(screen.queryByText("No results for “matrix”")).not.toBeInTheDocument();
   });

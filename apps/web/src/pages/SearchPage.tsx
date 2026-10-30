@@ -12,7 +12,7 @@ import { useDocumentTitle, useElementWidth } from "@/lib/hooks";
 import { ChannelLogo, liveUrl, useNow } from "@/pages/livetv/common";
 import { problemWords } from "@/lib/requests";
 import { discoverUrl } from "@/lib/urls";
-import { TitleCards } from "./requests/shared";
+import { ScrollRowSkeleton, TitleCards } from "./requests/shared";
 
 const GROUPS: { kind: ItemKind; title: string }[] = [
   { kind: "movie", title: "Movies" },
@@ -101,20 +101,7 @@ function OnTmdb({ q, manage, alone }: { q: string; manage: boolean; alone: boole
   useFillPages(search, TMDB_TITLES, 3);
   const titles = uniqueTitles(search.data?.pages).slice(0, TMDB_TITLES);
 
-  if (search.isPending) {
-    return (
-      <section aria-busy="true">
-        <SectionTitle>On TMDB</SectionTitle>
-        <div className="flex gap-3.5 overflow-hidden sm:gap-4">
-          {Array.from({ length: 8 }, (_, i) => (
-            <div key={i} className="shrink-0">
-              <CardSkeleton aspect="poster" width={150} fixed />
-            </div>
-          ))}
-        </div>
-      </section>
-    );
-  }
+  if (search.isPending) return <ScrollRowSkeleton title="On TMDB" inset />;
   if (titles.length) return <TitleCards titles={titles} title="On TMDB" link={discoverUrl(q)} linkLabel="See all on Discover" inset />;
   // All TMDB has is in a library already: nothing to add under the libraries' results.
   if (!search.isError && !alone) return null;
@@ -197,7 +184,7 @@ export function SearchPage() {
         <div className="space-y-8 px-4 py-8 sm:px-8">
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Results for “{q}”</h1>
-            <p className="mt-1 text-sm text-muted">Nothing in your libraries matches</p>
+            <p className="mt-1 text-sm text-muted">Nothing in your libraries matches.</p>
           </div>
           {tmdb(true)}
         </div>

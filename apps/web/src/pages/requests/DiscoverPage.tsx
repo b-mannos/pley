@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { Ban, ChevronLeft, Inbox, Search, SearchX, X } from "lucide-react";
+import { Ban, ChevronLeft, Inbox, Search, SearchX, ShieldCheck, X } from "lucide-react";
 import { isApiError } from "@/api/client";
 import {
   hasRequests,
   requestFilter,
+  requestProblem,
   uniqueTitles,
   useDiscoverList,
   useDiscoverSearch,
@@ -24,7 +25,7 @@ import { HubRowSkeleton } from "@/components/HubRow";
 import { buttonClass, EmptyState, Skeleton, Spinner } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useDebouncedValue, useDocumentTitle, useOnChange } from "@/lib/hooks";
-import { kindLabel, problemWords, requestsBadge, stageWords } from "@/lib/requests";
+import { kindLabel, problemWords, requestsBadge, seasonsLabel, stageWords } from "@/lib/requests";
 import { discoverUrl, requestsUrl, titleUrl } from "@/lib/urls";
 import { MainActions } from "./TitlePage";
 import { ProblemState, RequestsUnavailable, ScrollRow, StagePill, TitleGrid, TitleGridSkeleton, TitleRow, TmdbCredit } from "./shared";
@@ -135,7 +136,8 @@ function SearchResults({ q, manage }: { q: string; manage: boolean }) {
   );
 }
 
-function ListGrid({ list, title, manage }: { list: DiscoverList; title: string; manage: boolean }) {
+/** One of TMDB's lists whole; `ageLimit`: titles above this profile's age limit are left out of it. */
+function ListGrid({ list, title, manage, ageLimit }: { list: DiscoverList; title: string; manage: boolean; ageLimit: boolean }) {
   const query = useDiscoverList(list);
   useFillPages(query, GRID_TITLES);
   const titles = uniqueTitles(query.data?.pages);
@@ -151,6 +153,17 @@ function ListGrid({ list, title, manage }: { list: DiscoverList; title: string; 
         <TitleGridSkeleton />
       ) : query.isError && !query.data ? (
         <ProblemState className="py-16" error={query.error} manage={manage} retrying={query.isFetching} onRetry={() => void query.refetch()} />
+      ) : !titles.length && !query.hasNextPage && !query.isFetching ? (
+        <EmptyState
+          icon={ageLimit ? <ShieldCheck /> : <SearchX />}
+          title="Nothing here right now"
+          description={ageLimit ? "What TMDB lists here is above this profile's age limit." : "TMDB has nothing in this list today."}
+          action={
+            <Link to={discoverUrl()} className={buttonClass("outline")}>
+              Back to Discover
+            </Link>
+          }
+        />
       ) : (
         <TitleGrid titles={titles} more={{ next: query.hasNextPage, loading: query.isFetchingNextPage, load: () => void query.fetchNextPage() }} />
       )}
@@ -161,7 +174,7 @@ function ListGrid({ list, title, manage }: { list: DiscoverList; title: string; 
 function HeroSkeleton() {
   return (
     <div className="px-4 sm:px-8" aria-hidden>
-      <Skeleton className="aspect-[16/9] max-h-[480px] w-full rounded-xl sm:aspect-[21/9]" />
+      <Skeleton className="min-h-[340px] w-full rounded-xl sm:min-h-[420px] lg:min-h-[480px]" />
     </div>
   );
 }
@@ -184,16 +197,19 @@ function Hero({ summary }: { summary: RequestSummary }) {
   return (
     <section aria-label="Trending now" className="px-4 sm:px-8">
       <div className="relative isolate overflow-hidden rounded-xl bg-surface-2 ring-1 ring-white/5">
-        <Artwork
-          candidates={first.backdrop_url ? [first.backdrop_url] : []}
-          width={1280}
-          alt=""
-          title={first.title}
-          bare
-          eager
-          className="absolute inset-0 -z-10"
-          imgClassName="object-cover object-[center_25%]"
-        />
+        {/* Placed by a box of its own: the picture's is positioned already (relative). */}
+        <div className="absolute inset-0 -z-10">
+          <Artwork
+            candidates={first.backdrop_url ? [first.backdrop_url] : []}
+            width={1280}
+            alt=""
+            title={first.title}
+            bare
+            eager
+            className="size-full"
+            imgClassName="object-cover object-[center_25%]"
+          />
+        </div>
         <div className="absolute inset-0 -z-10 bg-linear-to-t from-bg via-bg/60 to-transparent" />
         <div className="absolute inset-0 -z-10 bg-linear-to-r from-bg/90 via-bg/40 to-transparent" />
         <div className="flex min-h-[340px] flex-col justify-end gap-3 p-5 sm:min-h-[420px] sm:p-8 lg:min-h-[480px] lg:max-w-[60%]">
@@ -220,9 +236,10 @@ function Hero({ summary }: { summary: RequestSummary }) {
   );
 }
 
-/** A request as a poster in a row: its title and stage. */
+/** A request as a poster in a row: its title, what of it was asked for, and its stage. */
 function RequestPoster({ request, width, manage }: { request: MediaRequest; width: number; manage: boolean }) {
   const to = titleUrl(request.kind, request.tmdb_id);
+  const subtitle = seasonsLabel(request.seasons) || [request.year, kindLabel(request.kind)].filter(Boolean).join(" · ");
   return (
     <div className="group/card min-w-0" style={{ width }}>
       <Link
@@ -240,10 +257,13 @@ function RequestPoster({ request, width, manage }: { request: MediaRequest; widt
         />
       </Link>
       <div className="mt-2 space-y-1.5 px-0.5" aria-hidden>
-        <div className="truncate text-sm font-medium" title={request.title}>
-          {request.title}
+        <div>
+          <div className="truncate text-sm font-medium" title={request.title}>
+            {request.title}
+          </div>
+          <div className="truncate text-xs text-muted">{subtitle}</div>
         </div>
-        <StagePill request={request} manage={manage} line={false} />
+        <StagePill request={request} manage={manage} line={false} compact />
       </div>
     </div>
   );
@@ -289,6 +309,36 @@ function RequestsLink({ summary }: { summary: RequestSummary }) {
         </>
       ) : null}
     </Link>
+  );
+}
+
+/**
+ * Discover's rows: the first trending title large, TMDB's lists, then this
+ * account's requests. Where TMDB can't be used at all (it refused the key,
+ * or isn't answering), one notice says so in place of every row.
+ */
+function DiscoverHome({ summary }: { summary: RequestSummary }) {
+  const trending = useDiscoverList("trending");
+  const problem = trending.data ? null : requestProblem(trending.error);
+  const yours = summary.own > 0 ? <YourRequestsRow summary={summary} /> : null;
+  if (problem?.kind === "tmdb_key" || problem?.kind === "tmdb_down") {
+    return (
+      <>
+        <ProblemState className="py-12" problem={problem} manage={summary.manage} retrying={trending.isFetching} onRetry={() => void trending.refetch()} />
+        {yours}
+      </>
+    );
+  }
+  return (
+    <>
+      <Hero summary={summary} />
+      <div className="space-y-8">
+        {LISTS.map((l) => (
+          <TitleRow key={l.list} list={l.list} title={l.title} link={`/discover?list=${l.list}`} />
+        ))}
+        {yours}
+      </div>
+    </>
   );
 }
 
@@ -371,18 +421,10 @@ export function DiscoverPage() {
         </div>
       ) : list ? (
         <div className="px-4 sm:px-8">
-          <ListGrid list={list.list} title={list.title} manage={data.manage} />
+          <ListGrid list={list.list} title={list.title} manage={data.manage} ageLimit={me.max_age !== null} />
         </div>
       ) : (
-        <>
-          <Hero summary={data} />
-          <div className="space-y-8">
-            {LISTS.map((l) => (
-              <TitleRow key={l.list} list={l.list} title={l.title} link={`/discover?list=${l.list}`} />
-            ))}
-            {data.own > 0 ? <YourRequestsRow summary={data} /> : null}
-          </div>
-        </>
+        <DiscoverHome summary={data} />
       )}
 
       <TmdbCredit full className="px-4 sm:px-8" />

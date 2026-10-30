@@ -76,18 +76,22 @@ function released(title: DiscoverDetail): string | null {
 /**
  * The one thing a title's page offers (the first that applies), with
  * its request's stage where there is one, and what's left to ask for
- * once nothing is. `onPick` opens the season picker.
+ * once nothing is. `onPick` opens the season picker. `listed`: the page
+ * lists the title's requests, each with its stage and what may be done
+ * to it, so this says neither again.
  */
 export function MainActions({
   title,
   summary,
   onPick,
   size = "lg",
+  listed,
 }: {
   title: DiscoverDetail;
   summary: RequestSummary | undefined;
   onPick: () => void;
   size?: "md" | "lg";
+  listed?: boolean;
 }) {
   const toast = useToast();
   const ask = useAskRequest();
@@ -123,7 +127,7 @@ export function MainActions({
     </Button>
   );
   const notOpen = <p className="text-sm text-muted">Requests aren't open to this account.</p>;
-  const stage = (r: MediaRequest | null) => (r ? <StagePill request={r} manage={manage} className="basis-full" /> : null);
+  const stage = (r: MediaRequest | null) => (r && !listed ? <StagePill request={r} manage={manage} className="basis-full" /> : null);
 
   let body;
   switch (action.kind) {
@@ -176,7 +180,7 @@ export function MainActions({
             <Bell className={icon} />
             Following
           </span>
-          {action.request ? (
+          {action.request && !listed ? (
             <Button
               variant="ghost"
               size={size}
@@ -229,7 +233,10 @@ export function MainActions({
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2.5">{body}</div>
       {allowance && !off && action.kind !== "open" && action.kind !== "restricted" ? (
-        <p className="text-xs text-danger">{allowance.text}</p>
+        <p className="flex items-start gap-1.5 text-xs text-muted">
+          <Clock className="mt-px size-3.5 shrink-0 text-warning" aria-hidden />
+          {allowance.text}
+        </p>
       ) : null}
     </div>
   );
@@ -238,7 +245,14 @@ export function MainActions({
 /** A season's state, from the server's word for it: its request's stage where this account sees the request. */
 function SeasonState({ season, title, manage }: { season: DiscoverSeason; title: DiscoverDetail; manage: boolean }) {
   const request = season.request_id !== null ? title.requests.find((r) => r.id === season.request_id) : undefined;
-  if (season.state === "requested" && request) return <StagePill request={request} manage={manage} line={false} className="shrink-0" />;
+  if (season.state === "requested" && request) {
+    // A request partly ready speaks of the seasons that are: this one isn't, so it says how its download goes, briefly.
+    if (request.stage !== "partial") return <StagePill request={request} manage={manage} line={false} className="shrink-0" />;
+    if (request.download) {
+      const download = { ...request.download, eta: null };
+      return <StagePill request={{ ...request, stage: "downloading", download }} manage={manage} line={false} className="shrink-0" />;
+    }
+  }
   const text = seasonStateText(season);
   if (!text) return null;
   if (season.state === "library") return <Badge tone="success">{text}</Badge>;
@@ -339,6 +353,7 @@ function TitleView({ title, picking, setPicking }: { title: DiscoverDetail; pick
   const show = title.kind === "show";
   const numbered = (title.seasons ?? []).filter((s) => s.number > 0);
   const manage = summary.data?.manage ?? false;
+  const listed = title.requests.length > 0 && !!summary.data;
 
   return (
     <div className="relative min-h-[calc(100vh-4rem)] animate-fade-in">
@@ -374,20 +389,20 @@ function TitleView({ title, picking, setPicking }: { title: DiscoverDetail; pick
             />
             <Genres genres={title.genres} />
             <div className="pt-1">
-              <MainActions title={title} summary={summary.data} onPick={() => setPicking(true)} />
+              <MainActions title={title} summary={summary.data} listed={listed} onPick={() => setPicking(true)} />
             </div>
             {title.tagline ? <p className="text-base italic text-fg/75">{title.tagline}</p> : null}
             <Summary text={title.overview} />
           </div>
         </div>
 
-        {title.requests.length && summary.data ? (
+        {listed && summary.data ? (
           <section className="mt-12">
             <SectionTitle>
               {title.requests.length === 1 ? "Request" : "Requests"}{" "}
               {title.requests.length > 1 ? <span className="ml-1 text-sm font-normal text-subtle">{title.requests.length}</span> : null}
             </SectionTitle>
-            <ul className="divide-y divide-white/[0.05] overflow-hidden rounded-lg border border-border bg-surface/80">
+            <ul className="divide-y divide-white/[0.05] rounded-lg border border-border bg-surface/80">
               {title.requests.map((r) => (
                 <RequestCard key={r.id} request={r} summary={summary.data} showTitle={false} />
               ))}

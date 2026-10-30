@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
-import { Ban, Check, Ellipsis, Hand, Play, RotateCw, Trash2, Undo2, UserMinus } from "lucide-react";
+import { Ban, Check, Ellipsis, Hand, Play, Plug, RotateCw, Settings2, Trash2, TriangleAlert, Undo2, UserMinus } from "lucide-react";
 import { errorMessage } from "@/api/client";
 import {
   requestProblem,
@@ -99,6 +99,19 @@ export function CheckRow({
   );
 }
 
+/** Why the approve dialog has less to choose from than it might, in a box of its own. */
+function ServiceNote({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
+  return (
+    <div className="flex gap-3 rounded-md border border-border bg-surface-2/60 px-3 py-2.5 text-sm">
+      <span className="mt-0.5 shrink-0 [&>svg]:size-4">{icon}</span>
+      <div className="min-w-0 space-y-0.5">
+        <p className="font-medium text-fg">{title}</p>
+        <p className="text-muted">{children}</p>
+      </div>
+    </div>
+  );
+}
+
 /** The profile and folder a request is preselected with: anime's for anime, else the settings' own. */
 function preselected(choices: ArrChoices, anime: boolean): { profile: number | null; folder: string | null } {
   return {
@@ -169,7 +182,7 @@ export function ApproveDialog({ request, open, onClose }: { request: MediaReques
             Cancel
           </Button>
           <Button variant="primary" onClick={submit} loading={approve.isPending} data-autofocus>
-            {lists ? "Approve" : "Approve with the settings' choices"}
+            Approve
           </Button>
         </>
       }
@@ -181,12 +194,16 @@ export function ApproveDialog({ request, open, onClose }: { request: MediaReques
             <Skeleton className="h-14" />
           </div>
         ) : choices === null ? (
-          <p className="text-sm text-muted">
-            {service(request)} isn't connected: it stays approved until it is, or until someone adds it by hand.
-          </p>
+          <ServiceNote icon={<Plug className="text-subtle" />} title={`${service(request)} isn't connected`}>
+            It stays approved until it is, or until someone adds it by hand.
+          </ServiceNote>
         ) : choices ? (
           <>
-            {choices.error ? <p className="text-sm text-danger">{choices.error}</p> : null}
+            {choices.error ? (
+              <ServiceNote icon={<TriangleAlert className="text-warning" />} title={choices.error}>
+                {lists ? "Its profiles and folders are the last ones it gave." : "Approving sends it with the settings' profile and folder."}
+              </ServiceNote>
+            ) : null}
             {lists ? (
               <>
                 <Field label="Quality profile" htmlFor={`approve-profile-${request.id}`}>
@@ -224,7 +241,9 @@ export function ApproveDialog({ request, open, onClose }: { request: MediaReques
           </>
         ) : (
           // The options couldn't be had at all: the settings' choices still can.
-          <p className="text-sm text-muted">Couldn't load {service(request)}'s profiles and folders.</p>
+          <ServiceNote icon={<TriangleAlert className="text-warning" />} title={`Couldn't load ${service(request)}'s profiles and folders`}>
+            Approving sends it with the settings' profile and folder.
+          </ServiceNote>
         )}
         {asked.length > 1 ? (
           <fieldset className="space-y-1">
@@ -345,11 +364,12 @@ const ACTION_ICONS: Record<RequestAction, ReactNode> = {
 const IN_MENU: RequestAction[] = ["handled", "delete"];
 
 /**
- * What this session may do to a request, exactly as the server lists
- * them, in its order: approving with the settings' choices or with a
- * dialog, declining with a reason, withdrawing and deleting after asking.
+ * What this session may do to a request, as the server lists them, in its
+ * order (but those in `skip`, which the page offers otherwise): approving
+ * with the settings' choices, or with choices of its own from the menu,
+ * declining with a reason, withdrawing and deleting after asking.
  */
-export function RequestActions({ request, summary }: { request: MediaRequest; summary: RequestSummary }) {
+export function RequestActions({ request, summary, skip = [] }: { request: MediaRequest; summary: RequestSummary; skip?: RequestAction[] }) {
   const toast = useToast();
   const approve = useApproveRequest();
   const handled = useHandledRequest();
@@ -383,64 +403,72 @@ export function RequestActions({ request, summary }: { request: MediaRequest; su
     }
   };
 
-  const buttons = request.actions.filter((a) => !IN_MENU.includes(a));
-  const menu = request.actions.filter((a) => IN_MENU.includes(a));
+  const actions = request.actions.filter((a) => !skip.includes(a));
+  const buttons = actions.filter((a) => !IN_MENU.includes(a));
+  const menu = actions.filter((a) => IN_MENU.includes(a));
+  const choosing = actions.includes("approve");
   const question = dialog === "withdraw" || dialog === "delete" ? actionQuestion(dialog, request) : null;
 
+  if (!actions.length) return null;
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {buttons.map((action) =>
-        action === "approve" ? (
-          <span key={action} className="contents">
-            <Button variant="primary" size="sm" icon={ACTION_ICONS.approve} loading={approve.isPending} disabled={busy} onClick={() => run("approve")}>
-              {actionLabel("approve", request)}
-            </Button>
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => setDialog("approve")}>
-              Approve…
-            </Button>
-          </span>
-        ) : (
-          <Button
-            key={action}
-            variant={action === "retry" || action === "ask_again" ? "outline" : action === "decline" ? "outline" : "ghost"}
-            size="sm"
-            icon={ACTION_ICONS[action]}
-            loading={(action === "retry" && approve.isPending) || (action === "ask_again" && ask.isPending) || (action === "unwatch" && unwatch.isPending)}
-            disabled={busy}
-            onClick={() => run(action)}
-          >
-            {actionLabel(action, request)}
-          </Button>
-        ),
-      )}
-      {menu.length ? (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {buttons.map((action) => (
+        <Button
+          key={action}
+          variant={action === "approve" ? "primary" : action === "retry" || action === "ask_again" || action === "decline" ? "outline" : "ghost"}
+          size="sm"
+          icon={ACTION_ICONS[action]}
+          loading={
+            ((action === "approve" || action === "retry") && approve.isPending) || (action === "ask_again" && ask.isPending) || (action === "unwatch" && unwatch.isPending)
+          }
+          disabled={busy}
+          onClick={() => run(action)}
+        >
+          {actionLabel(action, request)}
+        </Button>
+      ))}
+      {menu.length || choosing ? (
         <Menu
+          className="w-max"
           trigger={({ open, toggle }) => (
             <IconButton size="sm" label={`More for ${request.title}`} aria-haspopup="menu" aria-expanded={open} onClick={toggle} disabled={busy}>
               <Ellipsis className="size-4" />
             </IconButton>
           )}
         >
-          {(close) =>
-            menu.map((action) => (
-              <MenuItem
-                key={action}
-                icon={ACTION_ICONS[action]}
-                danger={action === "delete"}
-                onClick={() => {
-                  close();
-                  run(action);
-                }}
-              >
-                {actionLabel(action, request)}
-              </MenuItem>
-            ))
-          }
+          {(close) => (
+            <>
+              {choosing ? (
+                <MenuItem
+                  icon={<Settings2 />}
+                  onClick={() => {
+                    close();
+                    setDialog("approve");
+                  }}
+                >
+                  Approve with choices…
+                </MenuItem>
+              ) : null}
+              {menu.map((action) => (
+                <MenuItem
+                  key={action}
+                  icon={ACTION_ICONS[action]}
+                  danger={action === "delete"}
+                  onClick={() => {
+                    close();
+                    run(action);
+                  }}
+                >
+                  {actionLabel(action, request)}
+                </MenuItem>
+              ))}
+            </>
+          )}
         </Menu>
       ) : null}
 
-      {request.actions.includes("approve") ? <ApproveDialog request={request} open={dialog === "approve"} onClose={() => setDialog(null)} /> : null}
-      {request.actions.includes("decline") ? <DeclineDialog request={request} open={dialog === "decline"} onClose={() => setDialog(null)} /> : null}
+      {choosing ? <ApproveDialog request={request} open={dialog === "approve"} onClose={() => setDialog(null)} /> : null}
+      {actions.includes("decline") ? <DeclineDialog request={request} open={dialog === "decline"} onClose={() => setDialog(null)} /> : null}
       <ConfirmModal
         open={question !== null}
         onClose={() => setDialog(null)}
@@ -451,10 +479,12 @@ export function RequestActions({ request, summary }: { request: MediaRequest; su
         message={
           dialog === "delete" ? (
             <>
-              It goes for everyone who asked for <strong className="text-fg">{request.title}</strong> or follows it.
+              It goes for everyone who asked for <strong className="text-fg">{request.title}</strong> or follows it. {service(request)} keeps what it has.
             </>
           ) : request.status === "declined" ? (
-            "It may be asked for again."
+            <>
+              <strong className="text-fg">{request.title}</strong> leaves your requests, and may be asked for again.
+            </>
           ) : (
             <>
               <strong className="text-fg">{request.title}</strong> won't be asked for any more
@@ -478,27 +508,18 @@ export function RequestActions({ request, summary }: { request: MediaRequest; su
 
 /** Who asked, for managers (or "Asked for by someone else"), and when. */
 function Asker({ request, manage }: { request: MediaRequest; manage: boolean }) {
-  const by = request.requested_by;
+  const by = request.mine ? null : request.requested_by;
   return (
-    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-subtle">
-      {request.mine ? (
-        <span>
-          You asked <When ts={request.created_at} />
-        </span>
-      ) : by ? (
-        <>
-          <Avatar user={by} size="xs" />
-          <span>
-            <span className="text-muted">{by.name}</span> asked <When ts={request.created_at} />
-          </span>
-        </>
-      ) : (
-        <span>
-          Asked for by someone else <When ts={request.created_at} />
-        </span>
-      )}
-      {request.watching && !request.mine ? <span>· You follow it</span> : null}
-      {manage && request.watchers > 0 ? <span>· {request.watchers === 1 ? "1 follows it" : `${request.watchers} follow it`}</span> : null}
+    <div className="flex items-center gap-1.5 text-xs text-subtle">
+      {by ? <Avatar user={by} size="xs" /> : null}
+      {/* One block of words, so a long name wraps them rather than leaving the picture alone on a line. */}
+      <p className="min-w-0">
+        {request.mine ? "You asked" : by ? <span className="text-muted">{by.name}</span> : "Asked for by someone else"}
+        {request.mine || !by ? " " : " asked "}
+        <When ts={request.created_at} />
+        {request.watching && !request.mine ? " · You follow it" : null}
+        {manage && request.watchers > 0 ? ` · ${request.watchers === 1 ? "1 follows it" : `${request.watchers} follow it`}` : null}
+      </p>
     </div>
   );
 }
@@ -535,25 +556,23 @@ function Notes({ request, manage }: { request: MediaRequest; manage: boolean }) 
   );
 }
 
-/** Ready: Watch where this account can open it, or who can help where it can't. */
-function Ready({ request, manage }: { request: MediaRequest; manage: boolean }) {
-  if (request.stage !== "available" && request.stage !== "partial") return null;
-  if (request.item_id !== null) {
-    return (
-      <Link to={itemUrl(request.item_id)} className={buttonClass("secondary", "sm")}>
-        <Play className="size-3.5 fill-current" />
-        Watch
-      </Link>
-    );
-  }
-  return manage ? null : <p className="text-xs text-muted">Ready, in a library you can't open: ask an administrator</p>;
+function isReady(request: MediaRequest): boolean {
+  return request.stage === "available" || request.stage === "partial";
+}
+
+/** Ready, in a library this account can't open: who can help (managers know). */
+function OutOfReach({ request, manage }: { request: MediaRequest; manage: boolean }) {
+  if (manage || !isReady(request) || request.item_id !== null) return null;
+  return <p className="text-xs text-muted">It's in a library you can't open: an administrator can let you in.</p>;
 }
 
 /**
  * A request in a list: its poster and title (unless the list is on the
- * title's page), its seasons, a stage pill with a download's progress, who
- * asked and when, the reason or note, and what this session may do.
- * `selected` puts a checkbox before it, for deciding on several at once.
+ * title's page, which offers Open and Request itself), its seasons, a stage
+ * pill with a download's progress, who asked and when, the reason or note,
+ * and what this session may do. `onSelect` puts a checkbox before it, for
+ * deciding on several at once; `checkboxes`: the list has them, so one
+ * without keeps their room.
  */
 export function RequestCard({
   request,
@@ -561,70 +580,90 @@ export function RequestCard({
   showTitle = true,
   selected,
   onSelect,
+  checkboxes,
 }: {
   request: MediaRequest;
   summary: RequestSummary;
   showTitle?: boolean;
   selected?: boolean;
   onSelect?: (selected: boolean) => void;
+  checkboxes?: boolean;
 }) {
   const manage = summary.manage;
   const seasons = seasonsLabel(request.seasons);
   const to = titleUrl(request.kind, request.tmdb_id);
+  const skip: RequestAction[] = showTitle ? [] : ["ask_again"];
+  // Ready, where this account can open it: Watch.
+  const watch = showTitle && isReady(request) ? request.item_id : null;
+  const actionable = watch !== null || request.actions.some((a) => !skip.includes(a));
   return (
-    <li className={cn("flex gap-3 px-4 py-3.5", request.unseen && "bg-accent/[0.04]")}>
-      {onSelect ? (
-        <label className="flex shrink-0 cursor-pointer items-start pt-1">
-          <input
-            type="checkbox"
-            className="peer sr-only"
-            checked={!!selected}
-            onChange={(e) => onSelect(e.target.checked)}
-            aria-label={`Select ${request.title}`}
-          />
-          <Checkbox checked={!!selected} />
-        </label>
-      ) : null}
-      {showTitle ? (
-        <Link to={to} className="shrink-0" tabIndex={-1} aria-hidden>
-          <Artwork
-            candidates={request.poster_url ? [request.poster_url] : []}
-            width={56}
-            alt=""
-            title=""
-            bare
-            className="aspect-[2/3] w-14 rounded ring-1 ring-white/5"
-          />
-        </Link>
-      ) : null}
-      <div className="flex min-w-0 flex-1 flex-col gap-3 md:flex-row md:items-start">
+    <li className={cn("flex flex-col gap-3 px-4 py-3.5 first:rounded-t-lg last:rounded-b-lg md:flex-row md:items-start", request.unseen && "bg-accent/[0.04]")}>
+      <div className="flex min-w-0 flex-1 gap-3">
+        {onSelect ? (
+          <label className="flex shrink-0 cursor-pointer items-start pt-1">
+            <input
+              type="checkbox"
+              className="peer sr-only"
+              checked={!!selected}
+              onChange={(e) => onSelect(e.target.checked)}
+              aria-label={`Select ${request.title}`}
+            />
+            <Checkbox checked={!!selected} />
+          </label>
+        ) : checkboxes ? (
+          <span className="w-4 shrink-0" />
+        ) : null}
+        {showTitle ? (
+          <Link to={to} className="shrink-0" tabIndex={-1} aria-hidden>
+            <Artwork
+              candidates={request.poster_url ? [request.poster_url] : []}
+              width={56}
+              alt=""
+              title=""
+              bare
+              className="aspect-[2/3] w-14 rounded ring-1 ring-white/5"
+            />
+          </Link>
+        ) : null}
         <div className="min-w-0 flex-1 space-y-1.5">
-          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            {showTitle ? (
-              <Link to={to} className="truncate font-medium transition-colors hover:text-accent">
-                {request.title}
-              </Link>
-            ) : (
-              <span className="font-medium">{seasons || kindLabel(request.kind)}</span>
-            )}
-            {showTitle && request.year ? <span className="text-sm text-subtle">{request.year}</span> : null}
-            {showTitle ? (
-              <span className="text-xs text-subtle">
-                {kindLabel(request.kind)}
-                {seasons ? ` · ${seasons}` : ""}
-              </span>
-            ) : null}
-            {request.unseen ? <span className="sr-only">, new</span> : null}
-          </div>
+          {showTitle || seasons || request.unseen ? (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              {showTitle ? (
+                <Link to={to} className="truncate font-medium transition-colors hover:text-accent">
+                  {request.title}
+                </Link>
+              ) : seasons ? (
+                <span className="font-medium">{seasons}</span>
+              ) : null}
+              {showTitle && request.year ? <span className="text-sm text-subtle">{request.year}</span> : null}
+              {showTitle ? (
+                <span className="text-xs text-subtle">
+                  {kindLabel(request.kind)}
+                  {seasons ? ` · ${seasons}` : ""}
+                </span>
+              ) : null}
+              {request.unseen ? (
+                <span className="self-center rounded-full bg-accent/15 px-1.5 text-[10px] font-semibold uppercase leading-4 tracking-wider text-accent">New</span>
+              ) : null}
+            </div>
+          ) : null}
           <StagePill request={request} manage={manage} />
+          <OutOfReach request={request} manage={manage} />
           <Asker request={request} manage={manage} />
           <Notes request={request} manage={manage} />
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2 md:max-w-[55%] md:justify-end">
-          <Ready request={request} manage={manage} />
-          <RequestActions request={request} summary={summary} />
-        </div>
       </div>
+      {actionable ? (
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 md:max-w-[55%]">
+          {watch !== null ? (
+            <Link to={itemUrl(watch)} className={buttonClass("secondary", "sm")}>
+              <Play className="size-3.5 fill-current" />
+              Watch
+            </Link>
+          ) : null}
+          <RequestActions request={request} summary={summary} skip={skip} />
+        </div>
+      ) : null}
     </li>
   );
 }

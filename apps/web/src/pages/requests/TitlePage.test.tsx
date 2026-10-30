@@ -192,6 +192,37 @@ describe("TitlePage", () => {
     expect(within(seasons).getAllByRole("listitem").at(-1)).toHaveTextContent(/^Specials/);
   });
 
+  it("says how the download goes for a season a request partly ready still lacks", async () => {
+    const request = makeRequest({
+      id: 7,
+      kind: "show",
+      tmdb_id: 1399,
+      title: "Dark",
+      seasons: [1, 2],
+      available_seasons: [1],
+      status: "approved",
+      stage: "partial",
+      mine: true,
+      download: { progress: 0.3, state: "downloading", eta: now() + 5 * 3600, episodes: 10 },
+    });
+    mockApi({
+      "GET /api/discover/show/1399": () =>
+        makeShowDetail({
+          status: "partial",
+          item_id: 40,
+          seasons: [makeSeason(1, { in_library: 10, state: "library", request_id: 7 }), makeSeason(2, { requested: true, state: "requested", request_id: 7 })],
+          requests: [request],
+        }),
+      "GET /api/requests/summary": () => makeSummary(),
+    });
+    open("/discover/show/1399");
+    const seasons = (await screen.findByRole("heading", { name: "Seasons" })).closest("section") as HTMLElement;
+    const row = within(seasons).getByText("Season 2").closest("li") as HTMLElement;
+    expect(within(row).getByText("Downloading 30%")).toBeInTheDocument();
+    expect(within(row).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "30");
+    expect(within(seasons).queryByText("Season 1 ready")).not.toBeInTheDocument();
+  });
+
   it("lets the account withdraw what it asked for", async () => {
     const user = userEvent.setup();
     let mine: MediaRequest[] = [makeRequest({ id: 5, mine: true, actions: ["withdraw"] })];
@@ -209,7 +240,7 @@ describe("TitlePage", () => {
     expect(within(list).getByText(/You asked/)).toBeInTheDocument();
     expect(within(list).queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     await user.click(within(list).getByRole("button", { name: "Withdraw" }));
-    const confirm = screen.getByRole("dialog", { name: "Withdraw your request for “The Matrix”?" });
+    const confirm = screen.getByRole("dialog", { name: "Withdraw this request?" });
     await user.click(within(confirm).getByRole("button", { name: "Withdraw" }));
     expect(await screen.findByRole("button", { name: "Request" })).toBeInTheDocument();
     expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/requests/5");
@@ -240,8 +271,11 @@ describe("TitlePage", () => {
     });
     open("/discover/movie/603");
     expect(await screen.findByText("Following")).toBeInTheDocument();
-    expect(screen.getAllByText("Searching").length).toBeGreaterThan(0);
-    await user.click(screen.getAllByRole("button", { name: "Stop following" })[0] as HTMLElement);
+    // Its stage, and Stop following, once: with the request, in the list.
+    const list = await screen.findByRole("list");
+    expect(within(list).getByText("Searching")).toBeInTheDocument();
+    expect(screen.getAllByText("Searching")).toHaveLength(1);
+    await user.click(within(list).getByRole("button", { name: "Stop following" }));
     await waitFor(() => expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/requests/6/watch")).toBe(true));
   });
 
@@ -329,7 +363,8 @@ describe("TitlePage", () => {
     });
     open("/discover/movie/603", testUser);
 
-    await user.click(await screen.findByRole("button", { name: "Approve…" }));
+    await user.click(await screen.findByRole("button", { name: "More for The Matrix" }));
+    await user.click(screen.getByRole("menuitem", { name: "Approve with choices…" }));
     const dialog = screen.getByRole("dialog", { name: "Approve “The Matrix”" });
     // The settings' choices to begin with.
     expect(await within(dialog).findByLabelText("Quality profile")).toHaveValue("1");
@@ -353,10 +388,12 @@ describe("TitlePage", () => {
     });
     open("/discover/movie/603", testUser);
 
-    await user.click(await screen.findByRole("button", { name: "Approve…" }));
+    await user.click(await screen.findByRole("button", { name: "More for The Matrix" }));
+    await user.click(screen.getByRole("menuitem", { name: "Approve with choices…" }));
     const dialog = screen.getByRole("dialog", { name: "Approve “The Matrix”" });
     expect(await within(dialog).findByText("Radarr isn't answering")).toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Approve with the settings' choices" }));
+    expect(within(dialog).getByText("Approving sends it with the settings' profile and folder.")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Approve" }));
     expect(await screen.findByText("“The Matrix” was approved.")).toBeInTheDocument();
     expect(requests.find((r) => r.path === "/api/requests/5/approve")?.body).toEqual({});
   });

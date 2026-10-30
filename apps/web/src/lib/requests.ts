@@ -322,8 +322,9 @@ export function downloadText(download: RequestDownload | null, now = nowSeconds(
 }
 
 /**
- * A request's stage pill. A failed one tells managers why; others hear
- * that an administrator will look at it, or when it's tried again.
+ * A request's stage pill. A failed one tells managers why, under it (the
+ * service's own words, often long); others hear that an administrator
+ * will look at it. Both hear when it's tried again.
  */
 export function stageWords(request: MediaRequest, manage: boolean, now = nowSeconds()): StageWords {
   let label: string;
@@ -359,14 +360,13 @@ export function stageWords(request: MediaRequest, manage: boolean, now = nowSeco
     case "declined":
       label = "Declined";
       break;
-    case "failed":
-      if (manage) label = request.reason ? `Couldn't send: ${request.reason}` : "Couldn't send";
-      else {
-        label = "Not sent yet";
-        line = "It couldn't be sent to download yet: an administrator will look at it.";
-      }
-      if (request.retry_at) line = `Trying again ${untilText(request.retry_at, now)}.`;
+    case "failed": {
+      const reason = manage ? request.reason : null;
+      label = manage ? "Couldn't send" : "Not sent yet";
+      line = manage ? reason : "It couldn't be sent to download yet: an administrator will look at it.";
+      if (request.retry_at) line = [reason && sentence(reason), `Trying again ${untilText(request.retry_at, now)}.`].filter(Boolean).join(" ");
       break;
+    }
   }
   const download = request.stage === "downloading" || request.stage === "importing" || request.stage === "partial" ? request.download : null;
   return { label, tone: STAGE_TONES[request.stage], line, download };
@@ -403,15 +403,13 @@ export function actionLabel(action: RequestAction, request: Pick<MediaRequest, "
   }
 }
 
-/** What's asked before an action that can't be taken back; `null` for one that needs no asking. */
-export function actionQuestion(action: RequestAction, request: Pick<MediaRequest, "status" | "title">): string | null {
+/** What's asked before an action that can't be taken back, short enough for a dialog's title; `null` for one that needs no asking. */
+export function actionQuestion(action: RequestAction, request: Pick<MediaRequest, "status">): string | null {
   switch (action) {
     case "withdraw":
-      return request.status === "declined"
-        ? `Remove ${quoted(request.title)} from your requests?`
-        : `Withdraw your request for ${quoted(request.title)}?`;
+      return request.status === "declined" ? "Remove this request?" : "Withdraw this request?";
     case "delete":
-      return "Delete this request? Radarr and Sonarr keep what they have.";
+      return "Delete this request?";
     default:
       return null;
   }
@@ -435,10 +433,10 @@ export function createdText(name: string, title: string, seasons: number[] | nul
   return `${name} asked for ${quoted(title)}${seasons?.length ? ` (${seasonsLabel(seasons)})` : ""}.`;
 }
 
-/** Managers: "“Heat” couldn't be sent to Radarr: {reason}". */
+/** Managers: "“Heat” couldn't be sent to Radarr: {reason}." */
 export function failedText(title: string, kind: TitleKind, reason: string | null): string {
   const to = `${quoted(title)} couldn't be sent to ${kind === "movie" ? "Radarr" : "Sonarr"}`;
-  return reason ? `${to}: ${reason}` : `${to}.`;
+  return reason ? `${to}: ${sentence(reason)}` : `${to}.`;
 }
 
 /** What an unseen request's news was, as a notice says it; `null` for none to tell. */
@@ -523,7 +521,7 @@ export function problemWords(
         ? words("TMDB refused this server's key", "Check it in Settings → Server.", { settings: true })
         : words("TMDB refused this server's key", "An administrator needs to check it.");
     case "tmdb_down":
-      return words("TMDB isn't answering", null, { retry: true });
+      return words("TMDB isn't answering", "Try again in a moment.", { retry: true });
     case "no_access":
       return words("Requests aren't open to this account", "An administrator can let it ask for movies and shows.");
     case "sign_in":
@@ -550,9 +548,14 @@ export function problemWords(
 /** A problem as one line, for a notice. */
 export function problemText(...args: Parameters<typeof problemWords>): string {
   const { title, text } = problemWords(...args);
-  return text ? `${title}${/[.!?]$/.test(title) ? "" : "."} ${text}` : title;
+  return text ? `${sentence(title)} ${text}` : title;
 }
 
 function capitalize(text: string): string {
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+}
+
+/** Words that end as a sentence does, with a full stop if they had none. */
+function sentence(text: string): string {
+  return /[.!?]$/.test(text) ? text : `${text}.`;
 }

@@ -251,12 +251,13 @@ describe("stage pills", () => {
 
   it("tells managers why a request failed, and others that it will be looked at", () => {
     const failed = makeRequest({ status: "failed", reason: "Radarr isn't answering" });
-    expect(stageWords(failed, true)).toMatchObject({ label: "Couldn't send: Radarr isn't answering", tone: "danger", line: null });
+    expect(stageWords(failed, true)).toMatchObject({ label: "Couldn't send", tone: "danger", line: "Radarr isn't answering" });
+    expect(stageWords({ ...failed, retry_at: NOW + 5 * 60 }, true, NOW).line).toBe("Radarr isn't answering. Trying again in 5 min.");
     expect(stageWords({ ...failed, reason: null }, false)).toMatchObject({
       label: "Not sent yet",
       line: "It couldn't be sent to download yet: an administrator will look at it.",
     });
-    expect(stageWords({ ...failed, reason: null, retry_at: NOW + 5 * 60 }, false, NOW).line).toBe("Trying again in 5 min.");
+    expect(stageWords({ ...failed, retry_at: NOW + 5 * 60 }, false, NOW).line).toBe("Trying again in 5 min.");
   });
 });
 
@@ -279,9 +280,9 @@ describe("asking and actions", () => {
     expect(actionLabel("retry", pending)).toBe("Try again");
     expect(actionLabel("handled", pending)).toBe("Mark as added by hand");
     expect(actionLabel("ask_again", pending)).toBe("Request again");
-    expect(actionQuestion("withdraw", pending)).toBe("Withdraw your request for “The Matrix”?");
-    expect(actionQuestion("withdraw", declined)).toBe("Remove “The Matrix” from your requests?");
-    expect(actionQuestion("delete", pending)).toBe("Delete this request? Radarr and Sonarr keep what they have.");
+    expect(actionQuestion("withdraw", pending)).toBe("Withdraw this request?");
+    expect(actionQuestion("withdraw", declined)).toBe("Remove this request?");
+    expect(actionQuestion("delete", pending)).toBe("Delete this request?");
     expect(actionQuestion("approve", pending)).toBeNull();
   });
 });
@@ -296,7 +297,7 @@ describe("notices", () => {
     expect(decidedText("Heat", "declined", null)).toBe("“Heat” was declined.");
     expect(createdText("Ann", "Dark", [1, 2, 3])).toBe("Ann asked for “Dark” (Seasons 1–3).");
     expect(createdText("Ann", "Heat", null)).toBe("Ann asked for “Heat”.");
-    expect(failedText("Heat", "movie", "Radarr refused the key")).toBe("“Heat” couldn't be sent to Radarr: Radarr refused the key");
+    expect(failedText("Heat", "movie", "Radarr refused the key")).toBe("“Heat” couldn't be sent to Radarr: Radarr refused the key.");
     expect(failedText("Dark", "show", null)).toBe("“Dark” couldn't be sent to Sonarr.");
     expect(newsCountText(3)).toBe("3 of your requests have news");
   });

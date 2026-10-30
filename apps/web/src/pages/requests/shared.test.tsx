@@ -50,7 +50,8 @@ describe("StagePill", () => {
   it("tells managers why one failed, and others that an administrator will look at it", () => {
     const failed = makeRequest({ status: "failed", reason: "no quality profile is chosen" });
     const { unmount } = renderWithProviders(<StagePill request={failed} manage />);
-    expect(screen.getByText("Couldn't send: no quality profile is chosen").parentElement).toHaveClass("bg-danger/15");
+    expect(screen.getByText("Couldn't send").parentElement).toHaveClass("bg-danger/15");
+    expect(screen.getByText("no quality profile is chosen")).toBeInTheDocument();
     unmount();
 
     renderWithProviders(<StagePill request={failed} manage={false} />);

@@ -44,6 +44,7 @@ const rows = async () => within(await screen.findByRole("list")).getAllByRole("l
 
 describe("RequestsPage for managers", () => {
   it("opens on what needs them, oldest first, saying why a request failed", async () => {
+    const user = userEvent.setup();
     const requests = mockApi({
       "GET /api/requests/summary": () => manager,
       "GET /api/requests": () => makeRequestList([matrix, heat, failed], 3, people),
@@ -55,11 +56,14 @@ describe("RequestsPage for managers", () => {
     expect(within(tabs).getByRole("tab", { name: "Needs attention 3" })).toHaveAttribute("aria-selected", "true");
     const [first, , third] = await rows();
     expect(within(first as HTMLElement).getByRole("button", { name: "Approve" })).toBeInTheDocument();
-    expect(within(first as HTMLElement).getByRole("button", { name: "Approve…" })).toBeInTheDocument();
     expect(third).toHaveTextContent("Seasons 1–3");
-    expect(within(third as HTMLElement).getByText("Couldn't send: no root folder is chosen")).toBeInTheDocument();
+    expect(within(third as HTMLElement).getByText("Couldn't send")).toBeInTheDocument();
+    expect(within(third as HTMLElement).getByText("no root folder is chosen")).toBeInTheDocument();
     expect(within(third as HTMLElement).getByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(paths(requests)).toContain("/api/requests?attention=1&order=oldest&limit=50");
+    // Choices of its own, from its menu.
+    await user.click(within(first as HTMLElement).getByRole("button", { name: "More for The Matrix" }));
+    expect(screen.getByRole("menuitem", { name: "Approve with choices…" })).toBeInTheDocument();
   });
 
   it("shows everyone's requests, filtered by status as pressed buttons", async () => {
@@ -154,7 +158,7 @@ describe("RequestsPage for managers", () => {
     expect(requests.some((r) => r.method === "POST" && r.path === "/api/requests/1/handled")).toBe(true);
   });
 
-  it("deletes a request after asking, saying Radarr and Sonarr keep what they have", async () => {
+  it("deletes a request after asking, saying Radarr keeps what it has", async () => {
     const user = userEvent.setup();
     let list: MediaRequest[] = [makeRequest({ id: 7, status: "available", item_id: 70, actions: ["delete"] })];
     const requests = mockApi({
@@ -171,16 +175,33 @@ describe("RequestsPage for managers", () => {
     expect(within(row as HTMLElement).getByRole("link", { name: "Watch" })).toHaveAttribute("href", itemUrl(70));
     await user.click(within(row as HTMLElement).getByRole("button", { name: "More for The Matrix" }));
     await user.click(screen.getByRole("menuitem", { name: "Delete" }));
-    const dialog = screen.getByRole("dialog", { name: "Delete this request? Radarr and Sonarr keep what they have." });
+    const dialog = screen.getByRole("dialog", { name: "Delete this request?" });
+    expect(dialog).toHaveTextContent("It goes for everyone who asked for The Matrix or follows it. Radarr keeps what it has.");
     await user.click(within(dialog).getByRole("button", { name: "Delete" }));
     expect(await screen.findByText("No one has asked for anything yet.")).toBeInTheDocument();
     expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/requests/7");
   });
 
-  it("says when nothing waits for them", async () => {
+  it("says when nothing waits for them, with the way to everyone's", async () => {
+    const user = userEvent.setup();
     mockApi({ "GET /api/requests/summary": () => makeSummary({ access: "auto", manage: true }), "GET /api/requests": () => makeRequestList([]) });
     show(<RequestsPage />);
     expect(await screen.findByText("Nothing waits for you.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "See all requests" }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/requests?view=all");
+  });
+
+  it("clears its filters when nothing matches them", async () => {
+    const user = userEvent.setup();
+    mockApi({
+      "GET /api/requests/summary": () => manager,
+      "GET /api/requests": (req) => (req.path.includes("q=zzz") ? makeRequestList([]) : makeRequestList([matrix], 1, people)),
+    });
+    show(<RequestsPage />, "/requests?view=all&kind=movie&q=zzz");
+    expect(await screen.findByText("No requests match.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\/requests\?view=all$/);
+    expect(await screen.findByText("The Matrix")).toBeInTheDocument();
   });
 
   it("asks an app that may not approve to sign in again", async () => {
@@ -237,7 +258,8 @@ describe("RequestsPage for everyone else", () => {
     });
     show(<RequestsPage />, "/requests", ann);
     await user.click(await screen.findByRole("button", { name: "Withdraw" }));
-    const dialog = screen.getByRole("dialog", { name: "Withdraw your request for “The Matrix”?" });
+    const dialog = screen.getByRole("dialog", { name: "Withdraw this request?" });
+    expect(dialog).toHaveTextContent("The Matrix won't be asked for any more.");
     await user.click(within(dialog).getByRole("button", { name: "Withdraw" }));
     expect(await screen.findByText("You haven't asked for anything yet.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Find something to ask for" })).toHaveAttribute("href", "/discover");
@@ -272,6 +294,14 @@ describe("RequestsPage for everyone else", () => {
     expect(await screen.findByText("The Last One")).toBeInTheDocument();
     expect(paths(requests)).toContain("/api/requests?offset=50&limit=50");
     expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
+  });
+
+  it("leaves the filters out for someone who never asked for anything", async () => {
+    mockApi({ "GET /api/requests/summary": () => makeSummary(), "GET /api/requests": () => makeRequestList([]) });
+    show(<RequestsPage />, "/requests", ann);
+    expect(await screen.findByText("You haven't asked for anything yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Status" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
   });
 
   it("says requests are off when the server says so", async () => {

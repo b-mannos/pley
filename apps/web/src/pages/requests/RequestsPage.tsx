@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { Ban, Check, Compass, Inbox, Search, X } from "lucide-react";
+import { Ban, Check, CircleCheck, Compass, Inbox, Search, SearchX, X } from "lucide-react";
 import { isApiError } from "@/api/client";
 import {
   hasRequests,
@@ -85,16 +85,19 @@ function TitleSearch({ q, onChange }: { q: string; onChange: (q: string) => void
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debounced]);
   return (
-    <div className="relative w-full sm:w-64">
+    <div className="relative min-w-0 flex-1 sm:w-56 sm:flex-none">
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-subtle" />
-      <TextInput
+      <input
         ref={inputRef}
         type="search"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Title"
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setValue("");
+        }}
+        placeholder="Find a title"
         aria-label="Requests for titles containing"
-        className="h-9 rounded-full pl-9 pr-8 [&::-webkit-search-cancel-button]:hidden"
+        className="h-9 w-full rounded-full border border-border bg-surface-2 pl-9 pr-8 text-sm text-fg placeholder:text-subtle transition-colors focus:border-accent/70 focus:bg-surface-3 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
       />
       {value ? (
         <button
@@ -115,8 +118,8 @@ function TitleSearch({ q, onChange }: { q: string; onChange: (q: string) => void
 
 /** What a list with nothing in it says. */
 function emptyText(view: View, filter: RequestFilter, manage: boolean): string {
-  if (view === "attention") return "Nothing waits for you.";
   if (filter.q || filter.kind || filter.userId) return "No requests match.";
+  if (view === "attention") return "Nothing waits for you.";
   const whose = manage && view === "all" ? "" : " of yours";
   switch (filter.status[0]) {
     case "pending":
@@ -196,16 +199,18 @@ function BulkBar({ picked, clear, summary }: { picked: MediaRequest[]; clear: ()
     <div
       role="region"
       aria-label="Requests picked"
-      className="sticky bottom-4 z-20 flex flex-wrap items-center gap-3 rounded-lg border border-border-strong bg-surface-2 px-4 py-3 shadow-xl shadow-black/50"
+      className="sticky bottom-4 z-20 flex flex-wrap items-center gap-x-3 gap-y-2.5 rounded-lg border border-border-strong bg-surface-2 px-4 py-3 shadow-xl shadow-black/50"
     >
-      <span className="text-sm font-medium">{pluralize(picked.length, "request")} picked</span>
-      <div className="flex flex-1 flex-wrap justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={clear} disabled={decide.isPending}>
-          Clear
-        </Button>
+      <span className="min-w-0 flex-1 text-sm font-medium">{pluralize(picked.length, "request")} picked</span>
+      <Button variant="ghost" size="sm" onClick={clear} disabled={decide.isPending}>
+        Clear
+      </Button>
+      {/* On a phone, the decisions take a line of their own, half each. */}
+      <div className="flex w-full gap-2 sm:w-auto">
         <Button
           variant="outline"
           size="sm"
+          className="flex-1 sm:flex-none"
           icon={<Ban className="size-3.5" />}
           disabled={!declinable.length || decide.isPending}
           onClick={() => setDeclining(true)}
@@ -215,6 +220,7 @@ function BulkBar({ picked, clear, summary }: { picked: MediaRequest[]; clear: ()
         <Button
           variant="primary"
           size="sm"
+          className="flex-1 sm:flex-none"
           icon={<Check className="size-4" />}
           disabled={!approvable.length}
           loading={decide.isPending && !declining}
@@ -234,11 +240,19 @@ function BulkBar({ picked, clear, summary }: { picked: MediaRequest[]; clear: ()
   );
 }
 
+/** The list as it will be: a poster, a title, a stage and who asked, in each row. */
 function ListSkeleton() {
   return (
-    <div className="space-y-2" aria-busy>
+    <div className="divide-y divide-white/[0.05] rounded-lg border border-border bg-surface" aria-busy>
       {Array.from({ length: 4 }, (_, i) => (
-        <Skeleton key={i} className="h-24" />
+        <div key={i} className="flex gap-3 px-4 py-3.5">
+          <Skeleton className="aspect-[2/3] w-14 shrink-0 rounded" />
+          <div className="min-w-0 flex-1 space-y-2.5 pt-1">
+            <Skeleton className="h-4 w-48 max-w-full" />
+            <Skeleton className="h-5 w-32 rounded-full" />
+            <Skeleton className="h-3 w-40 max-w-full" />
+          </div>
+        </div>
       ))}
     </div>
   );
@@ -301,93 +315,113 @@ function RequestsView({ summary }: { summary: RequestSummary }) {
     );
   }
 
+  const setView = (v: View) => {
+    const p = new URLSearchParams(params);
+    if (v === "attention") p.delete("view");
+    else p.set("view", v);
+    p.delete("status");
+    setParams(p, { replace: true });
+  };
+  const filtered = filter.status.length > 0 || filter.kind !== null || filter.userId !== null || filter.q !== "";
+  const clearFilters = () => {
+    const p = new URLSearchParams(params);
+    for (const key of ["status", "kind", "user", "q"]) p.delete(key);
+    setParams(p, { replace: true });
+  };
+  // Someone who never asked for anything has nothing to filter.
+  const filters = manage || summary.own > 0 || filtered;
+  const pickable = manage && shown.some(decidable);
+
   const attention = summary.pending + summary.failed;
+  // Managers' by the tabs; others', after the filters (first, on a phone).
+  const search = (
+    <div className={cn("flex w-full items-center gap-2 sm:ml-auto sm:w-auto", !manage && "max-sm:order-first")}>
+      {manage && view !== "mine" && (people.length > 1 || userId !== null) ? (
+        <Select aria-label="Who asked" className="max-w-40 shrink-0" value={userId ?? ""} onChange={(e) => setParam("user", e.target.value || null)}>
+          <option value="">Everyone</option>
+          {people.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </Select>
+      ) : null}
+      <TitleSearch q={q} onChange={(next) => setParam("q", next || null)} />
+    </div>
+  );
   return (
     <div className="space-y-5">
       {manage ? (
-        <div className="scrollbar-none -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-          <div className="flex w-max rounded-lg bg-surface-2 p-1" role="tablist" aria-label="Requests">
-            {(
-              [
-                ["attention", "Needs attention", attention],
-                ["all", "All requests", null],
-                ["mine", "Yours", summary.unseen || null],
-              ] as const
-            ).map(([v, label, count]) => (
-              <button
-                key={v}
-                type="button"
-                role="tab"
-                aria-selected={view === v}
-                onClick={() => {
-                  const p = new URLSearchParams(params);
-                  if (v === "attention") p.delete("view");
-                  else p.set("view", v);
-                  p.delete("status");
-                  setParams(p, { replace: true });
-                }}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-                  view === v ? "bg-surface-3 text-fg shadow" : "text-muted hover:text-fg",
-                )}
-              >
-                {label}
-                {count ? (
-                  <>
-                    {" "}
-                    <span
-                      className={cn(
-                        "min-w-5 rounded-full px-1.5 text-center text-[11px] font-semibold tabular-nums",
-                        v === "attention" && summary.failed > 0 ? "bg-danger text-white" : v === "attention" ? "bg-warning text-black" : "bg-white/10 text-fg/80",
-                      )}
-                    >
-                      {count}
-                    </span>
-                  </>
-                ) : null}
-              </button>
-            ))}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="scrollbar-none max-w-full overflow-x-auto">
+            <div className="flex w-max rounded-lg bg-surface-2 p-1" role="tablist" aria-label="Requests">
+              {(
+                [
+                  ["attention", "Needs attention", attention],
+                  ["all", "All requests", null],
+                  ["mine", "Yours", summary.unseen || null],
+                ] as const
+              ).map(([v, label, count]) => (
+                <button
+                  key={v}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === v}
+                  onClick={() => setView(v)}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+                    view === v ? "bg-surface-3 text-fg shadow" : "text-muted hover:text-fg",
+                  )}
+                >
+                  {label}
+                  {count ? (
+                    <>
+                      {" "}
+                      <span
+                        className={cn(
+                          "min-w-5 rounded-full px-1.5 text-center text-[11px] font-semibold tabular-nums",
+                          v === "attention" && summary.failed > 0 ? "bg-danger text-white" : v === "attention" ? "bg-warning text-black" : "bg-white/10 text-fg/80",
+                        )}
+                      >
+                        {count}
+                      </span>
+                    </>
+                  ) : null}
+                </button>
+              ))}
+            </div>
           </div>
+          {search}
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2">
-        {view !== "attention" ? (
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Status">
-            <FilterButton pressed={status === null} onClick={() => setParam("status", null)}>
-              All
-            </FilterButton>
-            {STATUSES.map((s) => (
-              <FilterButton key={s.status} pressed={status === s.status} count={first?.counts[s.status]} onClick={() => setParam("status", status === s.status ? null : s.status)}>
-                {s.label}
+      {filters ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {view !== "attention" ? (
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Status">
+              <FilterButton pressed={status === null} onClick={() => setParam("status", null)}>
+                All
               </FilterButton>
-            ))}
-          </div>
-        ) : null}
-        <div className="flex flex-wrap gap-2" role="group" aria-label="Kind">
-          <FilterButton pressed={kind === "movie"} onClick={() => setParam("kind", kind === "movie" ? null : "movie")}>
-            Movies
-          </FilterButton>
-          <FilterButton pressed={kind === "show"} onClick={() => setParam("kind", kind === "show" ? null : "show")}>
-            Shows
-          </FilterButton>
-        </div>
-        <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
-          {manage && view !== "mine" && (people.length > 1 || userId !== null) ? (
-            <Select aria-label="Who asked" value={userId ?? ""} onChange={(e) => setParam("user", e.target.value || null)}>
-              <option value="">Everyone</option>
-              {people.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
+              {STATUSES.map((s) => (
+                <FilterButton key={s.status} pressed={status === s.status} count={first?.counts[s.status]} onClick={() => setParam("status", status === s.status ? null : s.status)}>
+                  {s.label}
+                </FilterButton>
               ))}
-            </Select>
+            </div>
           ) : null}
-          <TitleSearch q={q} onChange={(next) => setParam("q", next || null)} />
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Kind">
+            <FilterButton pressed={kind === "movie"} onClick={() => setParam("kind", kind === "movie" ? null : "movie")}>
+              Movies
+            </FilterButton>
+            <FilterButton pressed={kind === "show"} onClick={() => setParam("kind", kind === "show" ? null : "show")}>
+              Shows
+            </FilterButton>
+          </div>
+          {manage ? null : search}
         </div>
-      </div>
+      ) : null}
 
-      {allowance ? (
+      {allowance && summary.access !== "off" ? (
         <p className="text-xs text-subtle">
           {allowance.text}
           {allowance.limits ? ` ${allowance.limits}` : ""}
@@ -397,25 +431,49 @@ function RequestsView({ summary }: { summary: RequestSummary }) {
       {requests.isPending ? (
         <ListSkeleton />
       ) : shown.length === 0 ? (
-        <EmptyState
-          icon={<Inbox />}
-          title={emptyText(view, filter, manage)}
-          action={
-            mayRequest(summary) && view === "mine" && status === null && !q && !kind ? (
-              <Link to={discoverUrl()} className={buttonClass("primary")}>
-                Find something to ask for
-              </Link>
-            ) : undefined
-          }
-        />
+        filtered ? (
+          <EmptyState
+            icon={<SearchX />}
+            title={emptyText(view, filter, manage)}
+            action={
+              <Button variant="outline" onClick={clearFilters}>
+                Clear filters
+              </Button>
+            }
+          />
+        ) : view === "attention" ? (
+          <EmptyState
+            icon={<CircleCheck />}
+            title={emptyText(view, filter, manage)}
+            description="New requests, and those that couldn't be sent, show up here."
+            action={
+              <Button variant="outline" onClick={() => setView("all")}>
+                See all requests
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={<Inbox />}
+            title={emptyText(view, filter, manage)}
+            action={
+              mayRequest(summary) && view === "mine" ? (
+                <Link to={discoverUrl()} className={buttonClass("primary")}>
+                  Find something to ask for
+                </Link>
+              ) : undefined
+            }
+          />
+        )
       ) : (
         <div className="space-y-3">
-          <ul className="divide-y divide-white/[0.05] overflow-hidden rounded-lg border border-border bg-surface" aria-busy={requests.isFetching}>
+          <ul className="divide-y divide-white/[0.05] rounded-lg border border-border bg-surface" aria-busy={requests.isFetching}>
             {shown.map((r) => (
               <RequestCard
                 key={r.id}
                 request={r}
                 summary={summary}
+                checkboxes={pickable}
                 selected={picked.has(r.id)}
                 onSelect={
                   manage && decidable(r)

@@ -101,7 +101,7 @@ describe("RequestNotices", () => {
     emit(created);
     expect(await screen.findByText("Ann asked for “Dark” (Seasons 1–3).")).toBeInTheDocument();
     emit(failed);
-    expect(await screen.findByText("“Heat” couldn't be sent to Radarr: Radarr isn't answering")).toBeInTheDocument();
+    expect(await screen.findByText("“Heat” couldn't be sent to Radarr: Radarr isn't answering.")).toBeInTheDocument();
     // Approved as they were made: nothing waits.
     emit({ ...created, request_id: 8, title: "Heat", status: "approved" });
     expect(screen.queryByText(/asked for “Heat”/)).not.toBeInTheDocument();
