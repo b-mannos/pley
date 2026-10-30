@@ -215,8 +215,9 @@ Rules the code keeps:
   screens offer. It is asked with each profile, when the event stream
   connects, a second after request events (once for those that come
   together), after the person acts on a request, and each minute without
-  the event stream. An older server's `404` turns requests off until the
-  stream connects again or the app starts.
+  the event stream. An older server's `404`, or a `403` from one built
+  before apps could ask, turns requests off until the stream connects
+  again or the app starts.
 - **Request changes:** a request event gives every tile of its title, on
   covered screens too, its new badge (`GET /api/requests/{id}`), and the
   screen on top that shows requests asks again; nothing reloads whole.
