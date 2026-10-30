@@ -436,9 +436,11 @@ def refresh_listing() -> None:
         xbmc.executebuiltin("NotifyAll(%s,changed)" % ADDON_ID)
 
 
-def notify(message: str, error: bool = False) -> None:
-    icon = xbmcgui.NOTIFICATION_ERROR if error else xbmcgui.NOTIFICATION_INFO
-    xbmcgui.Dialog().notification("Pley", message, icon, 5000)
+def notify(message: str, error: bool = False, icon=None, ms: int = 5000) -> None:
+    """A notice; `icon`: a picture's address (a poster) for Kodi's own icon."""
+    if not icon:
+        icon = xbmcgui.NOTIFICATION_ERROR if error else xbmcgui.NOTIFICATION_INFO
+    xbmcgui.Dialog().notification("Pley", message, icon, ms)
 
 
 def ask_sign_out() -> bool:

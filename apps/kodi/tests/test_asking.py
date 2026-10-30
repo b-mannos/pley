@@ -186,8 +186,13 @@ class DiscoverTest(Case):
         self.answers["GET /api/requests/summary"] = (200, dict(ON, unseen=1))
         self.assertEqual(self.labels(self.run_plugin("")), ["Playlists", "Search", "Discover", "Your requests (1)", "Settings"])
         del xbmcplugin.calls[:]
+        self.run_plugin("")
+        self.assertEqual(len(self.sent("GET", "/api/requests/summary")), 1, "kept: the service reads it again on its events")
+        del xbmcplugin.calls[:]
+        kodi.clear_property(requests.SUMMARY)
         self.answers["GET /api/requests/summary"] = (404, {"code": "not_found", "message": "an older server"})
         self.assertEqual(self.labels(self.run_plugin("")), ["Playlists", "Search", "Settings"])
+        self.assertEqual(json.loads(kodi.get_property(requests.SUMMARY)), {"enabled": False}, "off until asked again")
 
 
 class ListTest(Case):

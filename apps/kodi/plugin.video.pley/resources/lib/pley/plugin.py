@@ -223,11 +223,13 @@ class Plugin(asking.Asking):
             self.action(kodi.text("choose_server"), {"route": "choose_server"}, "DefaultNetwork.png")
             return self.end()
         client = self.client()
+        # The summary as the service keeps it (read again on its events):
+        # asked here only when it has none yet.
         home, libraries, live, summary = api.together(
             lambda: client.get("/api/hubs/home"),
             lambda: client.get("/api/libraries"),
             lambda: livetv.summary(client),
-            lambda: self.requests_summary(fresh=True),
+            self.requests_summary,
         )
         for hub in home.get("hubs", []):
             self.folder(hub["title"], {"route": "hub", "key": hub["key"]}, "DefaultRecentlyAddedMovies.png")
