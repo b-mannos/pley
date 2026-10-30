@@ -1,7 +1,7 @@
 import { signal } from "@preact/signals";
-import { Api, unreachable } from "./api/client";
+import { Api, isApiError, unreachable } from "./api/client";
 import { EventStream } from "./api/events";
-import type { Hub, HouseholdProfile, ItemDetail, Library, ServerEvent, User } from "./api/types";
+import type { Hub, HouseholdProfile, ItemDetail, Library, LiveChannel, LiveSummary, ServerEvent, User } from "./api/types";
 import { origin } from "./auth/addresses";
 import { SignedOutError, Tokens, type KeyValue } from "./auth/tokens";
 import { xhrTransport, type Transport } from "./net/transport";
@@ -52,6 +52,8 @@ const HOUSEHOLD_KEY = "pley.household";
 /** Who is watching and their libraries, as last heard: the rail and the library pages before the server answers. */
 const ME_KEY = "pley.me";
 const LIBRARIES_KEY = "pley.libraries";
+/** Whether Live TV shows, as last heard: the rail draws its entry before the server answers. */
+const LIVE_KEY = "pley.live";
 const SERVERS_KEY = "pley.servers";
 /** The household's profiles, as last heard; kept per server (`pley.householdProfiles.<server>`). */
 const PROFILES_KEY = "pley.householdProfiles";
@@ -99,6 +101,12 @@ export class AppState {
   readonly api = signal<Api | null>(null);
   readonly me = signal<User | null>(null);
   readonly libraries = signal<Library[] | null>(null);
+  /** Whether Live TV shows (the rail's entry), and the channels watched last; `null` until the server says (or on a server without it). */
+  readonly live = signal<LiveSummary | null>(null);
+  /** Bumped when Live TV's channels or guide change on the server: its pages ask again. */
+  readonly liveChanges = signal(0);
+  /** Live TV's channels as last fetched: the player starts with them, and its channel list shows them before it asks again. */
+  liveChannels: LiveChannel[] | null = null;
   readonly profiles = signal<HouseholdProfile[] | null>(null);
   readonly settings = signal<Settings>(DEFAULT_SETTINGS);
   readonly home = signal<Hub[] | null>(null);
@@ -170,9 +178,11 @@ export class AppState {
     const home = readJson<Hub[]>(this.store, HOME_KEY);
     const me = readJson<User>(this.store, ME_KEY);
     const libraries = readJson<Library[]>(this.store, LIBRARIES_KEY);
+    const live = readJson<LiveSummary>(this.store, LIVE_KEY);
     this.home.value = Array.isArray(home) ? home : null;
     this.me.value = me && typeof me === "object" && typeof me.id === "number" ? me : null;
     this.libraries.value = Array.isArray(libraries) ? libraries : null;
+    this.live.value = live && typeof live === "object" && typeof live.available === "boolean" && Array.isArray(live.recent) ? live : null;
   }
 
   /** The first screen, from what the TV kept. */
@@ -300,6 +310,8 @@ export class AppState {
     this.homeError.value = null;
     this.items.clear();
     this.me.value = null;
+    this.live.value = null;
+    this.liveChannels = null;
     await this.loadAccount();
     void this.loadHome();
   }
@@ -339,6 +351,8 @@ export class AppState {
     this.accountError.value = null;
     this.me.value = null;
     this.libraries.value = null;
+    this.live.value = null;
+    this.liveChannels = null;
     this.profiles.value = null;
     this.offline.value = false;
     this.offlineNotice.value = false;
@@ -370,6 +384,7 @@ export class AppState {
     this.store.remove(HOME_KEY);
     this.store.remove(ME_KEY);
     this.store.remove(LIBRARIES_KEY);
+    this.store.remove(LIVE_KEY);
   }
 
   /**
@@ -398,6 +413,31 @@ export class AppState {
       (profiles) => this.keepHousehold(profiles),
       () => undefined,
     );
+    void this.loadLive();
+  }
+
+  /**
+   * Whether Live TV shows for this profile (`GET /api/live`), kept so the
+   * rail has it at the next launch before the server answers. A server
+   * without Live TV (`404`) shows none; one out of reach leaves what was
+   * kept.
+   */
+  async loadLive(): Promise<void> {
+    const api = this.api.value;
+    if (!api) return;
+    const who = this.me.value?.id;
+    let summary: LiveSummary | null;
+    try {
+      summary = await api.liveSummary();
+    } catch (e) {
+      if (!isApiError(e, 404) && !isApiError(e, 403)) return;
+      summary = null;
+    }
+    // Another profile, sign-in or server since: the answer was the one before's.
+    if (this.api.value !== api || this.me.value?.id !== who) return;
+    this.live.value = summary;
+    if (summary) this.store.set(LIVE_KEY, JSON.stringify(summary));
+    else this.store.remove(LIVE_KEY);
   }
 
   private keepLibraries(libraries: Library[]): void {
@@ -564,6 +604,7 @@ export class AppState {
     void this.loadHome();
     // Who is watching and the libraries, when the last try failed or none came yet.
     if (this.accountError.value !== null || !this.libraries.value) void this.loadAccount().catch(() => undefined);
+    else void this.loadLive();
     this.changes.value++;
   }
 
@@ -632,6 +673,10 @@ export class AppState {
         break;
       case "watchlist_changed":
         this.refresh();
+        break;
+      case "live_channels_changed":
+        void this.loadLive();
+        this.liveChanges.value++;
         break;
       case "user_state_changed": {
         // The item, its parent and grandparent; with `children`, everything under the first as well.

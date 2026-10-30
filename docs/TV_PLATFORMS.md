@@ -223,6 +223,7 @@ details) and, for HLS, 4K allowed.
 | `ui/focus.ts`, `ui/input.ts`, `ui/keys.ts` | Focus (rows, grids, remembered places), remote keys (held keys at most every 100 ms, long OK), LG's Magic Remote pointer and wheel |
 | `ui/shell/`, `ui/screens/`, `ui/kit/` | The rail, back stack and screens: Home, libraries (A–Z, the profile's order), items, people, collections, playlists (smart ones from a library's filters), search, music, Settings, Diagnostics, history |
 | `player/` | Playback: the play request, recovery, quality, Up Next, skip markers, seek previews, sleep timer, reports, background music |
+| `live/` | Live TV: what's on, the filters, the guide's chunks and cells, and a channel watched on the TV's player |
 | `subs/` | Subtitles drawn by the app: text as WebVTT, pictures (PGS, VobSub, DVB) decoded from the server's `.mks` onto a canvas |
 | `caps/` | The server's direct-play rules, so Playback details can say why |
 
@@ -340,6 +341,51 @@ the browser and applies to the iPhone's fullscreen player, and Find
 subtitles also uploads a file (.srt, .vtt, .ass, .ssa, up to 2 MB) and
 deletes added tracks where the server allows (`deletable`).
 
+### Live TV
+
+The web app's Live TV ([API.md](API.md#live-tv)) on a remote. The rail has
+Live TV after Home when `GET /api/live` says `available` (kept on the TV,
+so it shows at launch); sources, the lineup and the options stay in Pley on
+the web, as the TVs' other administration does.
+
+- **The page:** Guide or Channels (kept on the TV), All, Favourites and a
+  Groups panel. The guide shows two and a half hours, four px a minute,
+  with now marked; Up and Down keep the time focus is at, Left and Right
+  go programme by programme and move the guide through time, rewind and
+  fast-forward (or Previous and Next) move it two hours, CH+ and CH− a
+  screen of channels, and Back comes back to now before it goes to the
+  rail. It is asked for in six-hour chunks as it moves; only the rows near
+  the screen are drawn. OK on what's on watches the channel; on anything
+  else (or a long OK, or the menu key) it opens the programme's details,
+  with Watch and the channel's favourite. Channels shows cards with what's
+  on, its progress and what's next, the ones watched last first. Typing a
+  channel's number goes to it.
+- **The player:** `POST …/watch` with this TV's id (`pley.installId`), so
+  changing channels holds one connection, and `keyed_urls`, so AVPlay and
+  LG's pipeline play the playlist without the token. The app waits for the
+  playlist (the server answers once the channel's first segments are
+  made), then plays it from its live edge (LG: no `playTime` in the
+  `mediaOption`). Up and Down, CH+ and CH−, Previous and Next change
+  channels; digits tune by number; OK shows the controls (the channel list,
+  favourite, back and forward 10 s, Play/Pause, Go live, channel down and
+  up); the menu key (and Samsung's CH LIST) opens the channel list; Info
+  shows what's on. A banner says what's on for 5 s at each channel; LIVE
+  turns grey with how far behind once paused or rewound. Pause and rewind
+  stay within the server's timeshift window, as the engine reports it
+  (`video.seekable` on LG, AVPlay's `GET_LIVE_DURATION`); without one, the
+  10 s buttons hide. Paused, the playlist is asked for every 20 s, as the
+  server lets an HLS viewer go after 45 s of nothing. A channel with no
+  picture shows its logo and what's on.
+- **Leaving:** `DELETE /api/live/sessions/{id}` on Back, on each change of
+  channel, and when the TV hides the app (it watches again from live when
+  it shows). A player failure is watched anew twice (1 s, then 3 s), then
+  said, with Try again, Other channels and Back; `409` shows the server's
+  words naming the channels holding the connections; an older server
+  without keyed addresses is asked to be updated.
+- **Keys:** Samsung's `ChannelUp`, `ChannelDown`, `ChannelList` and `Guide`
+  are registered; LG's CH+ and CH− are 33 and 34 (Page Up and Page Down
+  on a keyboard).
+
 ## Building
 
 With Bun, from the repository root (`bun install` first). A `bunfig.toml`
@@ -397,6 +443,9 @@ Samsung, on a 2018–2019 set and a 2021 or later one:
 9. D-pad smoothness and memory on a 2018 set.
 10. Automatic's speed test on a remote network.
 11. Available subtitle fonts; AVPlay at 2× with sound.
+12. Live TV: a keyed live playlist from its edge; `GET_LIVE_DURATION`, pause
+    and rewind in the window; CH+, CH−, CH LIST and GUIDE registered; a
+    radio channel; `410` when a channel is stopped from the web.
 
 LG, on a webOS 4–6 set and a webOS 23 or later one:
 
@@ -414,6 +463,8 @@ LG, on a webOS 4–6 set and a webOS 23 or later one:
 10. Audio Guidance on each move; Samsung's Voice Guide.
 11. Playback speed: pitch, streams and files, after a seek.
 12. Automatic's speed test on a remote network; available subtitle fonts.
+13. Live TV: a live playlist without `playTime` starting at its edge;
+    `video.seekable` for pause and rewind; CH+ and CH− as 33 and 34.
 
 ## References
 

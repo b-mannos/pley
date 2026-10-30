@@ -25,6 +25,10 @@ export const REGISTERED = [
   "Info",
   "Caption",
   "Tools",
+  "ChannelUp",
+  "ChannelDown",
+  "ChannelList",
+  "Guide",
   "0",
   "1",
   "2",
@@ -54,6 +58,10 @@ const BY_NAME: Record<string, Key> = {
   Info: "info",
   Caption: "captions",
   Tools: "menu",
+  ChannelUp: "channelUp",
+  ChannelDown: "channelDown",
+  ChannelList: "channelList",
+  Guide: "guide",
 };
 
 /** The codes Samsung documents for its remote, used until the TV tells its own. */
@@ -74,6 +82,10 @@ const DEFAULT_CODES: Record<number, Key> = {
   457: "info",
   10221: "captions",
   10135: "menu",
+  427: "channelUp",
+  428: "channelDown",
+  10073: "channelList",
+  458: "guide",
 };
 
 /** Key codes to meanings: Samsung's names from the TV (codes differ between models), else the documented codes. */

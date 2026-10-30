@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { tierOf, tizenCaps } from "../src/caps";
 import { avplayError, statusOf } from "../src/engine";
 import { yearOfTizen, type TizenFacts } from "../src/facts";
-import { keyMap } from "../src/platform";
+import { keyMap, REGISTERED } from "../src/platform";
 
 function tv(over: Partial<TizenFacts>): TizenFacts {
   return {
@@ -134,5 +134,16 @@ describe("Samsung's remote", () => {
     expect(map[10009]).toBe("back");
     expect(map[10221]).toBe("captions");
     expect(keyMap(null)[415]).toBe("play");
+  });
+
+  it("has Live TV's channel keys, by name or by Samsung's codes", () => {
+    const map = keyMap([
+      { name: "ChannelUp", code: 427 },
+      { name: "ChannelDown", code: 428 },
+      { name: "ChannelList", code: 10073 },
+    ]);
+    expect([map[427], map[428], map[10073]]).toEqual(["channelUp", "channelDown", "channelList"]);
+    expect(keyMap(null)[458]).toBe("guide");
+    expect(REGISTERED).toEqual(expect.arrayContaining(["ChannelUp", "ChannelDown", "ChannelList", "Guide"]));
   });
 });

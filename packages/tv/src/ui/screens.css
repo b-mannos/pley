@@ -966,3 +966,151 @@ html.avplay .engine-host { background: transparent; }
 .compact-readout { position: absolute; left: 48px; top: 27px; max-width: 480px; padding: 8px 12px; border-radius: 6px; background: rgba(11, 13, 16, 0.72); z-index: 4; }
 .compact-readout .readout-fact { padding: 1px 0; }
 .toast.low { top: 79px; }
+
+/* ---------------------------------------------------------------- Live TV */
+
+.live-page { position: absolute; left: 0; top: 0; width: 960px; height: 540px; overflow: hidden; background: var(--bg); }
+.lines-6 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden; }
+.live-number { color: var(--subtle); margin-right: 8px; }
+.live-star { color: var(--accent); margin-left: 6px; flex: none; }
+/* A logo on its well, kept within it whatever its shape; a channel without one shows its number on a gradient. */
+.live-logo { position: relative; flex: none; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 4px; background: var(--surface3); box-sizing: border-box; }
+.live-logo > img { max-width: 84%; max-height: 80%; object-fit: contain; }
+.live-logo-text { color: rgba(233, 235, 239, 0.88); text-align: center; padding: 0 6px; word-wrap: break-word; }
+.live-progress { position: relative; flex: 1; min-width: 0; height: 3px; border-radius: 2px; background: rgba(233, 235, 239, 0.2); overflow: hidden; }
+.live-progress > div { height: 100%; background: var(--accent); }
+.live-progress.wide { flex: none; width: 200px; margin: 0 10px; }
+.live-mark { flex: none; padding: 2px 5px; margin-right: 6px; border-radius: 2px; }
+.live-mark.live { background: #e5484d; color: #fff; }
+.live-mark.new { background: rgba(56, 189, 248, 0.2); color: var(--accent-bright); }
+/* A channel number typed on the remote, at the top right while it waits for more. */
+.live-digits { position: absolute; right: 48px; top: 27px; z-index: 45; padding: 6px 18px; border-radius: 6px; background: rgba(11, 13, 16, 0.88); box-shadow: inset 0 0 0 1px var(--surface4); }
+.live-digits-n { display: block; font-size: 36px; line-height: 44px; font-weight: 700; letter-spacing: 4px; color: var(--fg); }
+
+/* The guide: channels down at 96, programmes across from 288 to 912, four px a minute. */
+.live-guide { position: absolute; left: 0; top: 0; width: 960px; height: 540px; }
+.guide-head { position: absolute; left: 0; width: 960px; height: 28px; z-index: 3; }
+.guide-day { position: absolute; left: 96px; top: 0; width: 184px; height: 28px; line-height: 28px; }
+.guide-times { position: absolute; left: 288px; top: 0; width: 624px; height: 28px; overflow: hidden; }
+.guide-track { position: absolute; left: 0; top: 0; height: 100%; will-change: transform; transition: transform 200ms var(--focus-ease); }
+.guide-slot { position: absolute; top: 4px; height: 20px; line-height: 20px; padding-left: 8px; white-space: nowrap; color: var(--muted); box-shadow: inset 1px 0 0 var(--outline); }
+.guide-now-label { position: absolute; top: 5px; transform: translateX(-50%); padding: 2px 6px; border-radius: 3px; background: var(--accent); color: var(--on-accent); z-index: 2; }
+.guide-body { position: absolute; left: 0; right: 0; bottom: 0; overflow: hidden; }
+.guide-rows { position: relative; will-change: transform; transition: transform 200ms var(--focus-ease); }
+.guide-now-line { position: absolute; top: 0; width: 1.5px; margin-left: -0.75px; background: var(--accent); opacity: 0.75; pointer-events: none; z-index: 2; }
+.guide-row { position: absolute; left: 0; width: 960px; height: 52px; }
+.guide-channel { position: absolute; left: 96px; top: 0; width: 184px; height: 52px; box-sizing: border-box; padding: 0 10px 0 8px; border-radius: 4px; background: var(--surface2); color: var(--fg); display: flex; align-items: center; }
+.guide-logo { margin-right: 10px; border-radius: 3px; }
+.guide-channel-text { flex: 1; min-width: 0; }
+.guide-channel-number { display: flex; align-items: center; height: 17px; color: var(--subtle); }
+.guide-channel[data-focused] { background: var(--accent); color: var(--on-accent); }
+.guide-channel[data-focused] .guide-channel-number,
+.guide-channel[data-focused] .live-star { color: var(--on-accent); }
+.guide-cells { position: absolute; left: 288px; top: 0; width: 624px; height: 52px; overflow: hidden; }
+.guide-cell { position: absolute; top: 0; height: 52px; box-sizing: border-box; border-radius: 4px; background: var(--surface2); color: var(--fg); overflow: hidden; }
+.guide-cell.on { background: rgba(56, 189, 248, 0.12); box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.35); }
+.guide-cell.past { opacity: 0.55; }
+.guide-cell.empty { background: rgba(233, 235, 239, 0.035); }
+.guide-cell-text { height: 100%; box-sizing: border-box; padding: 0 10px; display: flex; flex-direction: column; justify-content: center; }
+.guide-cell-title { display: flex; align-items: center; min-width: 0; }
+.guide-cell-sub { margin-top: 2px; color: var(--muted); }
+.guide-cell-progress { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); }
+.guide-cell[data-focused] { background: var(--accent); color: var(--on-accent); opacity: 1; box-shadow: none; }
+.guide-cell[data-focused] .guide-cell-sub { color: rgba(3, 19, 31, 0.8); }
+.guide-cell[data-focused] .guide-cell-progress { background: var(--on-accent); }
+.guide-cell[data-focused] .live-mark.new { background: rgba(3, 19, 31, 0.15); color: var(--on-accent); }
+.guide-cell[data-pressed],
+.guide-channel[data-pressed] { background: var(--accent-bright); }
+.holding .guide-rows,
+.holding .guide-track,
+.reduced .guide-rows,
+.reduced .guide-track { transition: none !important; }
+
+/* The channels as cards, two a row from 96 to 912. */
+.row-header + .live-card-row { margin-top: 14px; }
+.live-card-row { display: flex; padding-left: 96px; }
+.live-card-row > * + *,
+.live-card-track > * + * { margin-left: 16px; }
+/* The recent row slides; it is cut at the rail's edge, with room for the focused card to grow. */
+.live-card-viewport { position: relative; margin: 8px 0 0 80px; padding: 6px 0 6px 16px; overflow: hidden; }
+.live-card-track { display: flex; will-change: transform; transition: transform 220ms cubic-bezier(0.2, 0, 0, 1); }
+.holding .live-card-track,
+.reduced .live-card-track { transition: none !important; }
+.live-card { position: relative; flex: none; width: 400px; height: 92px; box-sizing: border-box; padding: 12px; border-radius: 6px; background: var(--surface2); color: var(--fg); display: flex; align-items: center; transition: transform 120ms var(--unfocus-ease); }
+.live-card-text { flex: 1; min-width: 0; margin-left: 14px; }
+.live-card-name { display: flex; align-items: center; min-width: 0; }
+.live-card-title { font-weight: 700; min-width: 0; }
+.live-card-now { margin-top: 2px; }
+.live-card-progress { display: flex; align-items: center; margin-top: 5px; }
+.live-card-sub { color: var(--muted); }
+.live-card-progress + .live-card-sub { margin-top: 3px; }
+.live-card[data-focused] { background: var(--accent); color: var(--on-accent); transform: scale(1.04); transition: transform 150ms var(--focus-ease); z-index: 1; }
+.live-card[data-pressed] { background: var(--accent-bright); transform: scale(1.02); }
+.live-card[data-focused] .live-card-sub,
+.live-card[data-focused] .live-number,
+.live-card[data-focused] .live-star { color: rgba(3, 19, 31, 0.8); }
+.live-card[data-focused] .live-progress { background: rgba(3, 19, 31, 0.2); }
+.live-card[data-focused] .live-progress > div { background: var(--on-accent); }
+
+/* A programme's details in the side panel. */
+.live-panel-channel { display: flex; align-items: center; padding: 8px 16px 4px; }
+.live-panel-text { padding: 8px 16px 14px; }
+.live-panel-facts { display: flex; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.live-panel-facts > * + * { margin-left: 8px; }
+.live-panel-facts .live-mark { margin-right: 0; }
+.live-panel-progress { display: flex; align-items: center; margin-top: 10px; }
+
+/* The live player: what's on above the timeshift's bar, at the left. */
+.live-info { position: absolute; left: 48px; right: 48px; top: 290px; opacity: 0; transition: opacity 200ms var(--focus-ease); z-index: 3; pointer-events: none; }
+.live-info.in { opacity: 1; }
+.reduced .live-info { transition: none; }
+.live-now { display: flex; align-items: flex-start; }
+.live-now-logo { margin-right: 18px; border-radius: 6px; background: rgba(34, 39, 49, 0.85); }
+.live-now-text { flex: 1; min-width: 0; max-width: 640px; }
+.live-now-title { display: flex; align-items: center; min-width: 0; margin-top: 4px; }
+.live-now-time { display: flex; align-items: center; margin-top: 6px; }
+/* LIVE in red at the live edge; how far behind it on grey otherwise. */
+.live-badge { display: inline-flex; align-items: center; height: 21px; padding: 0 8px; border-radius: 2px; background: rgba(233, 235, 239, 0.16); color: var(--fg); letter-spacing: 0.6px; }
+.live-badge.at-live { background: #e5484d; color: #fff; }
+.live-dot { width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; opacity: 0.7; }
+.live-badge.at-live .live-dot { opacity: 1; animation: live-pulse 1600ms ease-in-out infinite; }
+.reduced .live-badge.at-live .live-dot { animation: none; }
+@keyframes live-pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.35; }
+  100% { opacity: 1; }
+}
+/* Tuning: the channel's logo and what's on, on black, until its picture comes. */
+.live-tuning { position: absolute; left: 0; top: 0; width: 960px; height: 540px; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 4; }
+.live-tuning-ring { position: absolute; right: -14px; bottom: -14px; width: 32px; height: 32px; }
+.live-tuning-ring > div { width: 28px; height: 28px; border-radius: 50%; border: 2px solid rgba(233, 235, 239, 0.3); border-top-color: var(--accent); animation: spin 1000ms linear infinite; }
+/* Sound without a picture (a radio channel): its logo, in place of the black. */
+.live-radio { position: absolute; left: 0; top: 0; width: 960px; height: 540px; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(to bottom, #12151a, #0b0d10); pointer-events: none; }
+.live-radio-line { display: flex; align-items: center; margin-top: 8px; }
+.live-radio-line > * + * { margin-left: 8px; }
+/* The channel list over the picture, in the wide side panel. */
+.side-panel.live-list { padding: 27px 0 0 0; }
+.live-list-head { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 32px 0 28px; }
+.live-list-filter { display: flex; }
+.live-list-filter > * + * { margin-left: 4px; }
+.live-list-box { position: absolute; left: 12px; right: 24px; top: 84px; bottom: 0; overflow: hidden; }
+.live-list-rows { position: relative; will-change: transform; transition: transform 200ms var(--focus-ease); }
+.holding .live-list-rows,
+.reduced .live-list-rows { transition: none !important; }
+.live-list-row { position: absolute; left: 0; right: 0; height: 56px; box-sizing: border-box; padding: 0 12px 0 4px; border-radius: 6px; display: flex; align-items: center; color: var(--fg); }
+.live-list-number { width: 36px; flex: none; margin-right: 12px; text-align: right; color: var(--subtle); }
+.live-list-text { flex: 1; min-width: 0; margin-left: 12px; }
+.live-list-name { display: flex; align-items: center; min-width: 0; }
+.live-list-sub { margin: 1px 0 4px; color: var(--muted); }
+.live-list-row .live-progress { height: 2px; }
+.live-list-row.current .live-list-name .t-label { color: var(--accent-bright); }
+.live-list-playing { margin-left: 10px; flex: none; color: var(--accent); }
+.live-list-row[data-focused] { background: var(--accent); color: var(--on-accent); }
+.live-list-row[data-focused] .live-list-number,
+.live-list-row[data-focused] .live-list-sub,
+.live-list-row[data-focused] .live-list-playing,
+.live-list-row[data-focused] .live-star,
+.live-list-row.current[data-focused] .live-list-name .t-label { color: var(--on-accent); }
+.live-list-row[data-focused] .live-progress { background: rgba(3, 19, 31, 0.2); }
+.live-list-row[data-focused] .live-progress > div { background: var(--on-accent); }
+.live-list-row[data-pressed] { background: var(--accent-bright); }

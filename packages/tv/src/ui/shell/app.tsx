@@ -13,9 +13,13 @@ import { Toast } from "../kit/toast";
 import { Navigator, type Entry, type PageKey } from "./navigator";
 import { currentEntry, OFFLINE_TEXT, Rail, railEntries, type RailApi } from "./rail";
 
-/** Pages without the rail: sign-in, "Who's watching?" and the player. */
+/** Pages without the rail: sign-in, "Who's watching?" and the players. */
 function railless(key: PageKey | undefined): boolean {
-  return !key || key.name === "servers" || key.name === "link" || key.name === "profiles" || key.name === "player";
+  return !key || key.name === "servers" || key.name === "link" || key.name === "profiles" || isPlayer(key);
+}
+
+function isPlayer(key: PageKey | undefined): boolean {
+  return !!key && (key.name === "player" || key.name === "livePlayer");
 }
 
 export interface ShellProps {
@@ -66,7 +70,7 @@ export function App(p: ShellProps) {
     }
   });
 
-  const toRail = () => !railless(nav.root?.key) && nav.top?.key.name !== "player" && !!rail.current?.focusCurrent();
+  const toRail = () => !railless(nav.root?.key) && !isPlayer(nav.top?.key) && !!rail.current?.focusCurrent();
   // What plays (the music) ends on the server first, a second at most: its session would otherwise be kept 90 s.
   const leaveApp = () => {
     state.endPlayback();
@@ -222,10 +226,11 @@ export function App(p: ShellProps) {
     return () => clearTimeout(t);
   }, [toast.value?.id]);
 
-  const showRail = !railless(stack[0]?.key) && top?.key.name !== "player" && !!api;
+  const showRail = !railless(stack[0]?.key) && !isPlayer(top?.key) && !!api;
   const libraries = state.libraries.value;
   const playing = music.now.value !== null;
-  const entries = useMemo(() => railEntries(libraries, playing), [libraries, playing]);
+  const live = !!state.live.value?.available;
+  const entries = useMemo(() => railEntries(libraries, playing, live), [libraries, playing, live]);
   return (
     <AppContext.Provider value={state}>
       <UiContext.Provider value={ui}>

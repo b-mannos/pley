@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../src/api/client";
 import type { ItemDetail, ServerEvent } from "../src/api/types";
 import type { KeyValue } from "../src/auth/tokens";
 import type { Platform } from "../src/platform";
@@ -237,5 +238,42 @@ describe("the quality setting", () => {
     const other = memoryStore();
     other.set("pley.settings", JSON.stringify({ quality: "8m" }));
     expect(open(other).settings.value.quality).toBe("8m");
+  });
+});
+
+describe("Live TV", () => {
+  const platform = (store: KeyValue) => ({ name: "webos", clientId: "test", storage: store }) as unknown as Platform;
+  const summary = { available: true, allowed: true, channels: 5, sources: 1, recent: [3] };
+
+  it("shows where the server says so, kept for the next launch, and goes on a server without it", async () => {
+    const store = memoryStore();
+    const app = new AppState(platform(store), () => Promise.reject(new Error("no network in tests")));
+    let answer: () => Promise<unknown> = () => Promise.resolve(summary);
+    (app.api as { value: unknown }).value = { liveSummary: () => answer() };
+    await app.loadLive();
+    expect(app.live.value).toEqual(summary);
+    expect(new AppState(platform(store), () => Promise.reject(new Error("no network"))).live.value).toEqual(summary);
+    // Out of reach: what was kept stays.
+    answer = () => Promise.reject(new Error("nothing answers there"));
+    await app.loadLive();
+    expect(app.live.value).toEqual(summary);
+    // A server without Live TV.
+    answer = () => Promise.reject(new ApiError(404, "not_found", "no route"));
+    await app.loadLive();
+    expect(app.live.value).toBeNull();
+    expect(store.get("pley.live")).toBeNull();
+  });
+
+  it("asks again when its channels change on the server", () => {
+    const { app, hear } = setup();
+    let asked = 0;
+    (app.api.value as unknown as { liveSummary: () => Promise<unknown> }).liveSummary = () => {
+      asked++;
+      return Promise.resolve(summary);
+    };
+    const before = app.liveChanges.value;
+    hear({ type: "live_channels_changed" });
+    expect(app.liveChanges.value).toBe(before + 1);
+    expect(asked).toBe(1);
   });
 });

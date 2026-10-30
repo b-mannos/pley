@@ -15,6 +15,8 @@ import { AlbumScreen, ArtistScreen, NowPlayingScreen } from "./music";
 import { AddToPlaylistScreen, NewPlaylistScreen, PlaylistScreen, PlaylistsScreen } from "./playlists";
 import { DiagnosticsScreen, HistoryScreen, SettingsScreen } from "./settings";
 import { PlayerScreen } from "../player/player";
+import { LivePlayerScreen } from "../player/live";
+import { LiveTvScreen } from "./livetv";
 
 /** One page of the back stack, by its key (the Android app's TvEntries). */
 export function Screen(p: { entry: Entry; state: AppState }) {
@@ -89,6 +91,12 @@ export function Screen(p: { entry: Entry; state: AppState }) {
       break;
     case "player":
       page = <PlayerScreen request={key.request} pressedAt={key.pressedAt} />;
+      break;
+    case "live":
+      page = <LiveTvScreen entry={p.entry} />;
+      break;
+    case "livePlayer":
+      page = <LivePlayerScreen channelId={key.channelId} pressedAt={key.pressedAt} />;
       break;
   }
   return <AppContext.Provider value={p.state}>{page}</AppContext.Provider>;

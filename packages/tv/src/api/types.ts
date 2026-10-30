@@ -416,7 +416,73 @@ export type ServerEvent =
   /** Watch state changed here or on another device: the item, then its parent and grandparent; `children`: everything under the first too. */
   | { type: "user_state_changed"; item_ids: Id[]; children?: boolean }
   | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean }
-  | { type: "scan_started" | "scan_progress" | "scan_finished"; library_id: Id };
+  | { type: "scan_started" | "scan_progress" | "scan_finished"; library_id: Id }
+  /** Live TV's sources, channels or guide changed: ask again. */
+  | { type: "live_channels_changed" }
+  /** A live channel was tuned or let go, or its viewers changed. */
+  | { type: "live_tuners_changed" };
+
+// ---- Live TV (docs/API.md, "Live TV")
+
+/** `GET /api/live`: whether to show Live TV at all. */
+export interface LiveSummary {
+  /** Open to this profile, and it has channels: the rail shows Live TV. */
+  available: boolean;
+  /** Open to this profile (it may have no channels yet). */
+  allowed: boolean;
+  channels: number;
+  /** Sources set up (administrators; 0 for others). */
+  sources: number;
+  /** The channels watched last, newest first. */
+  recent: Id[];
+}
+
+export interface LiveProgram {
+  channel_id: Id;
+  start: Timestamp;
+  stop: Timestamp;
+  title: string;
+  subtitle: string | null;
+  description: string | null;
+  categories: string[];
+  /** The picture's address on this server, when the guide has one. */
+  image: string | null;
+  season: number | null;
+  episode: number | null;
+  is_new: boolean;
+  is_live: boolean;
+  rating: string | null;
+}
+
+export interface LiveChannel {
+  id: Id;
+  source_id: Id;
+  name: string;
+  number: string | null;
+  group: string;
+  /** The logo's address on this server, when the channel has one. */
+  logo: string | null;
+  favorite: boolean;
+  /** The guide has programmes for it. */
+  has_guide: boolean;
+  now: LiveProgram | null;
+  next: LiveProgram | null;
+}
+
+/** `GET /api/live/guide`: programmes by channel id, between `from` and `to`. */
+export interface LiveGuide {
+  from: Timestamp;
+  to: Timestamp;
+  programs: Record<string, LiveProgram[]>;
+}
+
+/** `POST /api/live/channels/{id}/watch`: the session, and the playlist's address (keyed when asked). */
+export interface LiveWatching {
+  session_id: string;
+  url: string;
+  kind: "hls";
+  channel: LiveChannel;
+}
 
 export interface HistoryEntry {
   id: Id;

@@ -30,6 +30,18 @@ describe("the rail", () => {
     expect(ids(2, true)).toEqual(["search", "home", "library:1", "library:2", "playlists", "collections", "now-playing"]);
   });
 
+  it("puts Live TV after Home where the server has channels, the libraries making room from the last", () => {
+    const live = (n: number, nowPlaying = false) => railEntries(libraries(n), nowPlaying, true).top.map((e) => e.id);
+    expect(live(2)).toEqual(["search", "home", "live", "library:1", "library:2", "playlists", "collections"]);
+    // Collections goes first; then the last library, which Libraries lists.
+    expect(live(3)).toEqual(["search", "home", "live", "library:1", "library:2", "library:3", "playlists"]);
+    expect(live(5)).toEqual(["search", "home", "live", "library:1", "library:2", "libraries", "playlists"]);
+    expect(live(3, true)).toEqual(["search", "home", "live", "library:1", "libraries", "playlists", "now-playing"]);
+    expect(live(0)).toEqual(["search", "home", "live", "playlists"]);
+    expect(railEntries(libraries(2), false, true).top[2]!.key).toEqual({ name: "live" });
+    expect(currentEntry({ name: "live" }, railEntries(libraries(2), false, true))).toBe("live");
+  });
+
   it("marks the entry that opened the stack's first page", () => {
     const rail = railEntries(libraries(5), true);
     expect(currentEntry({ name: "nowPlaying" }, rail)).toBe("now-playing");

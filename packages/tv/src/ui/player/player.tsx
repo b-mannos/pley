@@ -594,7 +594,7 @@ function PlayerView(p: { controller: PlaybackController; host: { current: HTMLDi
  * alone until focused, its label 8 under it while focused. `skipSeconds`
  * draws the turning arrow with its number inside.
  */
-function PlayerButton(p: { fid: string; icon: IconName; label: string; big?: boolean; iconSize?: number; skipSeconds?: number; onSelect: () => void }) {
+export function PlayerButton(p: { fid: string; icon: IconName; label: string; big?: boolean; iconSize?: number; skipSeconds?: number; onSelect: () => void }) {
   return (
     <div class={`pbtn-box${p.big ? " big" : ""}`}>
       <F class={`pbtn${p.big ? " big" : ""}`} fid={p.fid} label={p.label} onSelect={p.onSelect}>
@@ -646,7 +646,7 @@ function PlayerTimes(p: { controller: PlaybackController; live: boolean }) {
 }
 
 /** The time of day, as the clock on the wall has it: drawn again on the minute. */
-function TimeOfDay(p: { hours24: boolean }) {
+export function TimeOfDay(p: { hours24: boolean }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const t = setTimeout(() => setNow(new Date()), 60_000 - (Date.now() % 60_000) + 50);

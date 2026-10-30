@@ -266,6 +266,19 @@ export class AvplayEngine implements PlayerEngine {
     return this.positionMs();
   }
 
+  /** A live stream's window, as AVPlay reads it from the playlist ("start|end", ms on its own clock). */
+  liveWindow(): { startMs: number; endMs: number } | null {
+    if (!this.source?.live) return null;
+    try {
+      const parts = String(this.player.getStreamingProperty("GET_LIVE_DURATION")).split("|");
+      const startMs = Number(parts[0]);
+      const endMs = Number(parts[1]);
+      return parts.length === 2 && isFinite(startMs) && isFinite(endMs) && endMs > startMs ? { startMs, endMs } : null;
+    } catch {
+      return null;
+    }
+  }
+
   readonly knowsBuffer = false;
 
   /** A stream's bandwidth as AVPlay measures it (bits a second); nothing for a file. */

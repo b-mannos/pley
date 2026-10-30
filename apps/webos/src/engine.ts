@@ -46,7 +46,8 @@ export class WebosEngine extends VideoEngine {
     const option: Record<string, unknown> = {
       htmlMediaOption: { useUMSMediaInfo: true },
       option: {
-        transmission: { playTime: { start: Math.max(0, Math.round(source.startMs)) } },
+        // A live channel starts at its live edge: a start position would be read from its window's beginning.
+        ...(source.live ? {} : { transmission: { playTime: { start: Math.max(0, Math.round(source.startMs)) } } }),
         ...(source.hls ? { adaptiveStreaming: { maxWidth: 3840, maxHeight: 2160 } } : {}),
       },
     };

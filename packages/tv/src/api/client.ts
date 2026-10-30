@@ -10,6 +10,10 @@ import type {
   ItemDetail,
   ItemSummary,
   Library,
+  LiveChannel,
+  LiveGuide,
+  LiveSummary,
+  LiveWatching,
   NetworkAnswer,
   NetworkReport,
   LibrarySort,
@@ -400,7 +404,7 @@ export class Api {
       if (res.status < 200 || res.status >= 300) throw toError(res);
       return typeof res.body === "string" ? res.body : "";
     };
-    if (/^(https?:\/\/[^/]+)?\/api\/media\//.test(full)) {
+    if (/^(https?:\/\/[^/]+)?\/api\/(live\/)?media\//.test(full)) {
       return this.http({ method, url: full, headers: { Accept: "*/*" }, responseType: "text", timeoutMs, cancel }).then(answered);
     }
     return this.send(full, { method, responseType: "text", headers: { Accept: "*/*" }, cancel, timeoutMs }).then(answered);
@@ -472,6 +476,44 @@ export class Api {
 
   trickplay(fileId: Id, cancel?: Cancel): Promise<Trickplay> {
     return this.get(`/api/files/${fileId}/trickplay`, { cancel });
+  }
+
+  // ---- Live TV
+
+  /** Whether to show Live TV, and the channels watched last. */
+  liveSummary(cancel?: Cancel): Promise<LiveSummary> {
+    return this.get("/api/live", { cancel });
+  }
+
+  /** The channels by number, each with what's on now and next. */
+  liveChannels(cancel?: Cancel): Promise<LiveChannel[]> {
+    return this.get("/api/live/channels", { cancel });
+  }
+
+  /** The guide between `from` and `to` (unix seconds; two days at most). */
+  liveGuide(from: number, to: number, cancel?: Cancel): Promise<LiveGuide> {
+    return this.get("/api/live/guide", { query: { from, to }, cancel });
+  }
+
+  setLiveFavorite(channelId: Id, favorite: boolean): Promise<unknown> {
+    return this.call(favorite ? "PUT" : "DELETE", `/api/live/channels/${channelId}/favorite`);
+  }
+
+  /**
+   * Starts watching a channel on this TV (`clientId`: what it watched
+   * before ends). The playlist's address carries a key of its own, for
+   * the TV's player, which can't send the token. The server waits for
+   * the provider when it tunes the channel.
+   */
+  watchChannel(channelId: Id, clientId: string, cancel?: Cancel): Promise<LiveWatching> {
+    return this.send(`/api/live/channels/${channelId}/watch`, { method: "POST", body: { client_id: clientId, keyed_urls: true }, cancel, timeoutMs: 45_000 }).then(
+      (r) => r.body as LiveWatching,
+    );
+  }
+
+  /** Stops watching: the connection is let go once nobody else watches. */
+  leaveChannel(session: string): Promise<unknown> {
+    return this.call("DELETE", `/api/live/sessions/${encodeURIComponent(session)}`);
   }
 }
 

@@ -29,7 +29,11 @@ export type PageKey =
   | { name: "history" }
   | { name: "diagnostics" }
   | { name: "nowPlaying" }
-  | { name: "player"; request: PlayRequest; pressedAt: number };
+  | { name: "player"; request: PlayRequest; pressedAt: number }
+  /** Live TV: the guide, or the channels as cards. */
+  | { name: "live" }
+  /** A live channel playing (and the ones changed to from it). */
+  | { name: "livePlayer"; channelId: number; pressedAt: number };
 
 export type LibraryTab = "recommended" | "library" | "collections";
 

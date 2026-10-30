@@ -13,6 +13,18 @@ describes how they are made.
 - The token goes only to the server's own origin, never to an address
   elsewhere that the server hands out.
 
+### Added
+
+- Live TV, where the server has IPTV channels for the profile: a guide
+  that moves through time, channel cards with what's on and next, groups,
+  favourites and the channels watched last, and a programme's details. The
+  player plays a channel through AVPlay from its live edge, with what's on,
+  the Live badge, pause and rewind in the server's timeshift, the channel
+  list, and CH+ and CH−, Up and Down, or the channel's number to change
+  channels; the remote's CH LIST and GUIDE keys work. When every connection
+  is in use, the server's words say which channels hold them. Needs a
+  server that gives the TV's player keyed live addresses.
+
 ### Fixed
 
 - Picture subtitles the server is still copying out of a big file show

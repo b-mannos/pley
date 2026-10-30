@@ -23,6 +23,12 @@ export type Key =
   | "previous"
   | "captions"
   | "audio"
+  /** CH+ and CH−: Live TV's next and previous channel. */
+  | "channelUp"
+  | "channelDown"
+  /** The remote's channel list and guide keys (Samsung's CH LIST and GUIDE). */
+  | "channelList"
+  | "guide"
   | "red"
   | "green"
   | "yellow"
@@ -85,6 +91,11 @@ export function standardKey(e: KeyboardEvent): Key | null {
       return "blue";
     case 457:
       return "info";
+    // LG's CH+ and CH− (and a keyboard's Page Up and Page Down).
+    case 33:
+      return "channelUp";
+    case 34:
+      return "channelDown";
     default:
       if (e.keyCode >= 48 && e.keyCode <= 57) return `digit${e.keyCode - 48}`;
       if (e.keyCode >= 96 && e.keyCode <= 105) return `digit${e.keyCode - 96}`;

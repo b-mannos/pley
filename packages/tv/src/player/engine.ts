@@ -30,6 +30,8 @@ export interface EngineSource {
   } | null;
   /** The audio stream's codec, when played as it is (passthrough or decode). */
   audioCodec: string | null;
+  /** A live channel's HLS: it starts at the live edge, whatever `startMs` says. */
+  live?: boolean;
 }
 
 /** An audio track as the engine knows it, in the file's order. */
@@ -99,6 +101,12 @@ export interface PlayerEngine {
   bufferedMs(): number;
   /** False when `bufferedMs` only repeats the position (AVPlay doesn't say how far it has loaded). */
   readonly knowsBuffer?: boolean;
+  /**
+   * A live source's window that can be sought in (the server keeps the
+   * timeshift's minutes), on the clock `positionMs` and `seekTo` use;
+   * `null` while unknown.
+   */
+  liveWindow?(): { startMs: number; endMs: number } | null;
   /** How fast the network brings the stream, kbps, when the engine measures it; `null` when it can't say. */
   bandwidthKbps?(): number | null;
   /**

@@ -156,5 +156,7 @@ describe("LG facts", () => {
     expect(key(19)).toBe("pause");
     expect(key(1536)).toBeNull();
     expect(key(49)).toBe("digit1");
+    // CH+ and CH−, for Live TV.
+    expect([key(33), key(34)]).toEqual(["channelUp", "channelDown"]);
   });
 });

@@ -24,34 +24,39 @@ export interface RailEntries {
 }
 
 /**
- * The rail's entries (the Android app's RailItems): Search, Home, up to
- * three libraries, then Libraries when there are more, Playlists, and
- * Collections when there are three or fewer; Settings at the foot. While
- * music has a queue, Now Playing comes last: added when there is room,
- * else in Collections' place, else in the last library's (which Libraries
- * lists).
+ * The rail's entries (the Android app's RailItems): Search, Home, Live TV
+ * where the server has channels for this profile, up to three libraries,
+ * then Libraries when there are more, Playlists, and Collections when
+ * there are three or fewer; Settings at the foot. While music has a queue,
+ * Now Playing comes last. Seven fit: past that, Collections goes first,
+ * then the libraries from the last, Libraries listing them.
  */
-export function railEntries(libraries: Library[] | null, nowPlaying = false): RailEntries {
+export function railEntries(libraries: Library[] | null, nowPlaying = false, live = false): RailEntries {
   const libs = libraries ?? [];
   const icon = (l: Library): IconName => (l.kind === "movies" ? "clapperboard" : l.kind === "shows" ? "tv" : l.kind === "music" ? "music" : "film");
-  let top: RailEntry[] = [
-    { id: "search", label: "Search", icon: "search", key: { name: "search" } },
-    { id: "home", label: "Home", icon: "house", key: { name: "home" } },
-  ];
-  for (const l of libs.slice(0, MAX_LIBRARIES)) top.push({ id: `library:${l.id}`, label: l.name, icon: icon(l), key: { name: "library", id: l.id } });
-  if (libs.length > MAX_LIBRARIES) top.push({ id: "libraries", label: "Libraries", icon: "layers", key: { name: "libraries" } });
-  top.push({ id: "playlists", label: "Playlists", icon: "list-music", key: { name: "playlists" } });
-  if (libs.length > 0 && libs.length <= MAX_LIBRARIES) {
-    const first = libs.filter((l) => l.kind !== "music")[0] ?? libs[0]!;
-    top.push({ id: "collections", label: "Collections", icon: "layers", key: { name: "collections", libraryId: first.id } });
-  }
-  if (nowPlaying) {
-    if (top.length >= MAX_ITEMS) {
-      const lastLibrary = top.filter((e) => e.key.name === "library").pop();
-      const out = top.some((e) => e.id === "collections") ? "collections" : lastLibrary?.id;
-      top = top.filter((e) => e.id !== out);
+  let shown = Math.min(libs.length, MAX_LIBRARIES);
+  let collections = libs.length > 0 && libs.length <= MAX_LIBRARIES;
+  const build = (): RailEntry[] => {
+    const top: RailEntry[] = [
+      { id: "search", label: "Search", icon: "search", key: { name: "search" } },
+      { id: "home", label: "Home", icon: "house", key: { name: "home" } },
+    ];
+    if (live) top.push({ id: "live", label: "Live TV", icon: "tv-minimal", key: { name: "live" } });
+    for (const l of libs.slice(0, shown)) top.push({ id: `library:${l.id}`, label: l.name, icon: icon(l), key: { name: "library", id: l.id } });
+    if (libs.length > shown) top.push({ id: "libraries", label: "Libraries", icon: "layers", key: { name: "libraries" } });
+    top.push({ id: "playlists", label: "Playlists", icon: "list-music", key: { name: "playlists" } });
+    if (collections) {
+      const first = libs.filter((l) => l.kind !== "music")[0] ?? libs[0]!;
+      top.push({ id: "collections", label: "Collections", icon: "layers", key: { name: "collections", libraryId: first.id } });
     }
-    top.push({ id: "now-playing", label: "Now Playing", icon: "audio-lines", key: { name: "nowPlaying" } });
+    if (nowPlaying) top.push({ id: "now-playing", label: "Now Playing", icon: "audio-lines", key: { name: "nowPlaying" } });
+    return top;
+  };
+  let top = build();
+  while (top.length > MAX_ITEMS && (collections || shown > 0)) {
+    if (collections) collections = false;
+    else shown--;
+    top = build();
   }
   return { top, settings: { id: "settings", label: "Settings", icon: "settings", key: { name: "settings" } } };
 }
