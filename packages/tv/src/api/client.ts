@@ -296,7 +296,8 @@ export class Api {
     return this.get(`/api/people/${id}`, { cancel });
   }
 
-  search(q: string, cancel?: Cancel): Promise<{ items: ItemSummary[]; people?: PersonSummary[] }> {
+  /** Items, people and (where Live TV is open to the profile) up to 12 Live TV channels. */
+  search(q: string, cancel?: Cancel): Promise<{ items: ItemSummary[]; people?: PersonSummary[]; channels?: LiveChannel[] }> {
     return this.get("/api/search", { query: { q, limit: 60 }, cancel });
   }
 
@@ -520,11 +521,28 @@ export class Api {
    * Starts watching a channel on this TV (`clientId`: what it watched
    * before ends). The playlist's address carries a key of its own, for
    * the TV's player, which can't send the token. The server waits for
-   * the provider when it tunes the channel.
+   * the provider when it tunes the channel. Every connection being in use
+   * (`409`, with `connections`), `takeOver` is the channel whose
+   * connection to take, one the `409` said may be.
    */
-  watchChannel(channelId: Id, clientId: string, cancel?: Cancel): Promise<LiveWatching> {
-    return this.send(`/api/live/channels/${channelId}/watch`, { method: "POST", body: { client_id: clientId, keyed_urls: true }, cancel, timeoutMs: 45_000 }).then(
-      (r) => r.body as LiveWatching,
+  watchChannel(channelId: Id, clientId: string, cancel?: Cancel, takeOver?: Id): Promise<LiveWatching> {
+    const body: Record<string, unknown> = { client_id: clientId, keyed_urls: true };
+    if (takeOver !== undefined) body.take_over = takeOver;
+    return this.send(`/api/live/channels/${channelId}/watch`, { method: "POST", body, cancel, timeoutMs: 45_000 }).then((r) => r.body as LiveWatching);
+  }
+
+  /**
+   * Why a watching session ended (someone took its connection over, say),
+   * or null while it goes on. Asked with the token: a keyed address only
+   * says the session has gone.
+   */
+  whyLiveEnded(session: string, cancel?: Cancel): Promise<string | null> {
+    return this.get(`/api/live/sessions/${encodeURIComponent(session)}/plan`, { cancel, timeoutMs: 8_000 }).then(
+      () => null,
+      (e: unknown) => {
+        if (isApiError(e, 410)) return e.message;
+        throw e;
+      },
     );
   }
 

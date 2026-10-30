@@ -1,24 +1,27 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import type { ItemSummary, PersonSummary } from "../../api/types";
+import type { ItemSummary, LiveChannel, PersonSummary } from "../../api/types";
 import { cardSubtitle, episodeLabel } from "../../format/format";
+import { nowAndNext, programProgress } from "../../live/data";
 import { Cancel } from "../../net/transport";
 import { useUi } from "../context";
 import { Chip, TextButton } from "../kit/buttons";
 import { TextField } from "../kit/field";
-import { G } from "../kit/focusable";
+import { F, G } from "../kit/focusable";
 import { Row, rowHeight, SectionPage, type Section } from "../kit/row";
-import { ArtTile, Tile, type TileKind } from "../kit/tile";
+import { ArtTile, Tile, TILES, TileCaption, type TileKind } from "../kit/tile";
 import type { Entry } from "../shell/navigator";
 import { failedTitle, problem, useApp } from "./common";
 import { pageOf } from "./item-actions";
 import { RowsSkeleton } from "./library";
+import { ChannelLogo, ProgressLine, useNow } from "./live-kit";
 
 const RECENTS = 10;
 const ROWS_TOP = 96;
 
 /** The groups results come in, in order, with their headers and tiles. */
-const GROUPS: { kind: ItemSummary["kind"] | "person"; title: string; tile: TileKind }[] = [
+const GROUPS: { kind: ItemSummary["kind"] | "person" | "channel"; title: string; tile: TileKind }[] = [
   { kind: "person", title: "People", tile: "person" },
+  { kind: "channel", title: "Live TV", tile: "landscape" },
   { kind: "movie", title: "Movies", tile: "poster" },
   { kind: "show", title: "Shows", tile: "poster" },
   { kind: "season", title: "Seasons", tile: "poster" },
@@ -28,7 +31,7 @@ const GROUPS: { kind: ItemSummary["kind"] | "person"; title: string; tile: TileK
   { kind: "track", title: "Tracks", tile: "square" },
 ];
 
-type Results = { items: ItemSummary[]; people: PersonSummary[] };
+type Results = { items: ItemSummary[]; people: PersonSummary[]; channels: LiveChannel[] };
 
 /** The recent searches kept on this TV, per server and profile. */
 function recentKey(server: string | null, user: number | null): string {
@@ -45,8 +48,9 @@ function subtitleOf(item: ItemSummary): string {
 
 /**
  * Search (TvSearchScreen): the field, typed with the TV's keyboard (and
- * its microphone); results 250 ms after typing pauses, grouped in rows;
- * recent searches while the field is empty.
+ * its microphone); results 250 ms after typing pauses, grouped in rows
+ * (Live TV channels among them, where it is open to the profile); recent
+ * searches while the field is empty.
  */
 export function SearchScreen(p: { entry: Entry; query?: string }) {
   const app = useApp();
@@ -65,6 +69,7 @@ export function SearchScreen(p: { entry: Entry; query?: string }) {
     }
   });
   const cancel = useRef<Cancel | null>(null);
+  const now = useNow(30_000);
   const fieldRef = useRef<HTMLElement | null>(null);
 
   const remember = (q: string) => {
@@ -96,7 +101,7 @@ export function SearchScreen(p: { entry: Entry; query?: string }) {
       ui.api.search(query, c).then(
         (r) => {
           if (c.cancelled) return;
-          const res = { items: r.items.filter((i) => i.kind !== "extra"), people: r.people ?? [] };
+          const res = { items: r.items.filter((i) => i.kind !== "extra"), people: r.people ?? [], channels: r.channels ?? [] };
           setResults(res);
           setShownQuery(query);
           // New results: Back from one of them comes to it, not to where the last ones were.
@@ -166,6 +171,43 @@ export function SearchScreen(p: { entry: Entry; query?: string }) {
                   onSelect={() => {
                     remember(query);
                     ui.nav.open({ name: "person", id: person.id });
+                  }}
+                />
+              )}
+            />
+          ),
+        });
+        continue;
+      }
+      if (g.kind === "channel") {
+        // Kept from a search before this TV knew of channels: none.
+        const channels = results.channels ?? [];
+        if (!channels.length) continue;
+        sections.push({
+          key: "channels",
+          height: rowHeight("landscape"),
+          anchor: ROWS_TOP,
+          render: (onFocus) => (
+            <Row
+              title={g.title}
+              kind="landscape"
+              items={channels}
+              keyOf={(x) => x.id}
+              enterAt={rowIndex.channels}
+              onLeftEdge={ui.toRail}
+              onFocusIndex={(i) => {
+                rowIndex.channels = i;
+                onFocus();
+              }}
+              tile={(channel, _i, place) => (
+                <ChannelTile
+                  channel={channel}
+                  now={now}
+                  onFocus={place.onFocus}
+                  onSelect={() => {
+                    remember(query);
+                    app.keepLiveChannel(channel);
+                    ui.nav.open({ name: "livePlayer", channelId: channel.id, category: "all", pressedAt: Date.now() });
                   }}
                 />
               )}
@@ -283,7 +325,7 @@ export function SearchScreen(p: { entry: Entry; query?: string }) {
         <div class="search-notice">
           <div class="t-title c-fg">Search your libraries</div>
           <div class="t-body c-muted" style="margin-top:8px">
-            Find movies, shows, episodes, people, artists, albums and tracks. Press OK on the field to type, or use your keyboard's microphone.
+            Find movies, shows, episodes, people, artists, albums, tracks and Live TV channels. Press OK on the field to type, or use your keyboard's microphone.
           </div>
         </div>
       )}
@@ -304,5 +346,31 @@ export function SearchScreen(p: { entry: Entry; query?: string }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** A Live TV channel found: its logo on the tile, what's on and how far it is; OK plays it. */
+function ChannelTile(p: { channel: LiveChannel; now: number; onFocus: (el: HTMLElement) => void; onSelect: () => void }) {
+  const spec = TILES.landscape;
+  const c = p.channel;
+  const { on } = nowAndNext(c, p.now);
+  const title = `${c.number ? `${c.number} ` : ""}${c.name}`;
+  const subtitle = on ? on.title : c.group;
+  return (
+    <F class="tile" style={`width:${spec.w}px`} fid={`channel/${c.id}`} label={[title, on ? `now: ${on.title}` : "", "Live TV"].filter(Boolean).join(", ")} onSelect={p.onSelect} onFocus={p.onFocus}>
+      <div class="tile-well search-channel" style={`width:${spec.w}px;height:${spec.h}px`}>
+        <div class="tile-clip">
+          <ChannelLogo channel={c} width={136} height={76} showName />
+          <span class="live-badge t-badge at-live search-channel-live" aria-hidden="true">
+            <span class="live-dot" />
+            LIVE
+          </span>
+          {on && <ProgressLine fraction={programProgress(on, p.now)} class="search-channel-progress" />}
+          <div class="tile-hairline" />
+        </div>
+        <div class="tile-ring" />
+      </div>
+      <TileCaption title={title} subtitle={subtitle} />
+    </F>
   );
 }

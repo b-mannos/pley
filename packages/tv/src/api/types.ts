@@ -510,6 +510,19 @@ export interface LiveWatching {
   channel: LiveChannel;
 }
 
+/** A connection of a source whose connections are all in use (a `409` from watching, its `connections`). */
+export interface LiveBusyConnection {
+  channel_id: Id;
+  channel_name: string;
+  /** Who watches it: named to administrators only. */
+  watchers: string[];
+  people: number;
+  /** Only you watch it (on another device). */
+  yours: boolean;
+  /** You may take it over: it's yours, or you're an administrator and nobody watching it is. */
+  can_take_over: boolean;
+}
+
 export interface HistoryEntry {
   id: Id;
   viewed_at: Timestamp;

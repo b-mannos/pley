@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
-import type { LiveChannel, LiveGroups } from "../../api/types";
+import type { LiveBusyConnection, LiveChannel, LiveGroups } from "../../api/types";
 import { categoryKey, categoryName, channelByNumber, channelName, formatSpan, formatTime, nowAndNext, parseCategory, programProgress, timeLeft, type LiveCategory } from "../../live/data";
 import { ChannelPages } from "../../live/pages";
-import { LiveController } from "../../live/session";
+import { holders, LiveController } from "../../live/session";
 import { initMusic } from "../../player/music";
 import type { Key } from "../keys";
 import { useUi } from "../context";
@@ -20,8 +20,8 @@ import { PlayerButton, TimeOfDay } from "./player";
 const HIDE_MS = 5_000;
 /** What's on shows this long after a channel starts. */
 const BANNER_MS = 5_000;
-/** The ring shows after this long of waiting. */
-const RING_MS = 500;
+/** The ring shows once a stall has lasted this long: a stream that stutters for a moment doesn't flicker it. */
+const RING_MS = 700;
 
 /** Where the picture goes beside the channel list (the side panel's 440 px), in canvas px. */
 const ASIDE = { left: 0, top: 0, width: 520, height: 540 };
@@ -171,7 +171,7 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
     return () => clearTimeout(t);
   }, [banner, s.phase, s.tunes]);
 
-  // The ring after half a second of waiting, once the channel's own card has gone.
+  // The ring once a stall has lasted 0.7 s, after the channel's own card has gone.
   const waiting = s.phase === "buffering" || (s.phase === "tuning" && s.shown);
   useEffect(() => {
     if (!waiting) {
@@ -354,10 +354,11 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
   const listRef = useRef(list);
   listRef.current = list;
 
-  // Hidden controls leave focus on the video's holder; an error, on its first button.
+  // Hidden controls leave focus on the video's holder; an error, on its first button (a connection to take over first).
   useEffect(() => {
     if (controls || list) return;
-    focusFid(s.phase === "error" ? (s.trouble?.canRetry ? "retry" : "back") : "video");
+    const takeable = s.trouble?.connections?.find((x) => x.can_take_over);
+    focusFid(s.phase === "error" ? (takeable ? `take/${takeable.channel_id}` : s.trouble?.canRetry ? "retry" : "back") : "video");
   }, [controls, list, s.phase === "error", s.trouble]);
   // An error closes the controls.
   useEffect(() => {
@@ -366,6 +367,7 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
 
   const { on, next } = nowAndNext(channel, now);
   const trouble = s.phase === "error" ? s.trouble : null;
+  const busy = trouble?.connections ?? [];
   const infoShown = (controls || banner) && !trouble && !(s.phase === "tuning" && !s.shown);
   const name = channelName(channel, category);
   return (
@@ -413,20 +415,24 @@ function LivePlayerView(p: { first: LiveChannel; category: LiveCategory; pressed
       </div>
       {trouble && (
         <div class="player-error live-error">
-          <ChannelLogo channel={channel} width={128} height={72} />
-          <div class="t-label c-muted" style="margin-top:12px">
+          {!busy.length && <ChannelLogo channel={channel} width={128} height={72} />}
+          <div class="t-label c-muted" style={busy.length ? "" : "margin-top:12px"}>
             {channel.number && <span class="live-number">{channel.number}</span>}
             {name}
           </div>
           <div class="t-page c-fg" style="text-align:center;margin-top:16px">
             {trouble.title}
           </div>
-          {trouble.message && (
-            <div class="t-body c-muted lines-4" style="margin-top:12px;text-align:center">
-              {sentence(trouble.message)}
-            </div>
+          {busy.length ? (
+            <BusyConnections connections={busy} onTakeOver={(id) => c.takeOver(id)} />
+          ) : (
+            trouble.message && (
+              <div class="t-body c-muted lines-4" style="margin-top:12px;text-align:center">
+                {sentence(trouble.message)}
+              </div>
+            )
           )}
-          <G kind="row" class="buttons" style="margin-top:32px;justify-content:center">
+          <G kind="row" class="buttons" style={`margin-top:${busy.length ? 24 : 32}px;justify-content:center`}>
             {trouble.canRetry && <Pill label="Try again" icon="refresh-cw" fid="retry" onSelect={() => c.retry()} />}
             <Pill label="Other channels" icon="list" fid="others" onSelect={() => setList(true)} />
             <TextButton label="Back" fid="back" onSelect={leave} />
@@ -499,6 +505,43 @@ function NowCard(p: { channel: LiveChannel; name: string; on: OnNow; next: Retur
 }
 
 /** The channel being tuned: its logo, the spinner centred under it, and what's on, on black. */
+/** Connections shown at most on the busy card; past them, how many more. */
+const BUSY_SHOWN = 4;
+
+/**
+ * Every connection in use: what each watches, who holds it ("You, on
+ * another device", names to administrators, or how many), and "Watch here
+ * instead" where it may be taken over.
+ */
+function BusyConnections(p: { connections: LiveBusyConnection[]; onTakeOver: (channelId: number) => void }) {
+  const n = p.connections.length;
+  const shown = p.connections.slice(0, BUSY_SHOWN);
+  return (
+    <>
+      <div class="t-body c-muted" style="margin-top:8px;text-align:center">
+        {n === 1 ? "Its one connection is watching:" : `Its ${n} connections are watching:`}
+      </div>
+      <G kind="col" class="live-busy">
+        {shown.map((x) => (
+          <div key={x.channel_id} class="live-busy-row">
+            <div class="live-busy-text">
+              <div class="t-label c-fg one-line">{x.channel_name}</div>
+              <div class="t-caption c-muted one-line">{holders(x)}</div>
+            </div>
+            {x.can_take_over && <Pill label="Watch here instead" fid={`take/${x.channel_id}`} onSelect={() => p.onTakeOver(x.channel_id)} />}
+          </div>
+        ))}
+      </G>
+      {n > BUSY_SHOWN && <div class="t-caption c-muted" style="margin-top:6px">{`and ${n - BUSY_SHOWN} more`}</div>}
+      {!p.connections.some((x) => x.can_take_over) && (
+        <div class="t-caption c-subtle" style="margin-top:10px;text-align:center">
+          A channel already being watched can be joined, or try again once one is stopped.
+        </div>
+      )}
+    </>
+  );
+}
+
 function TuningCard(p: { channel: LiveChannel; name: string; on: OnNow }) {
   return (
     <div class="live-tuning" role="status" aria-label={`Tuning ${p.name}`}>

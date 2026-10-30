@@ -26,9 +26,11 @@ describes how they are made.
   pause, rewind or skip), with what's on, a Live badge, the channel list
   beside the picture, and CH+ and CH−, Up and Down within the
   category, or a channel's number to change channels; Back lands on the
-  channel watched. When every connection is in use, the server's words say
-  which channels hold them. Needs a server that gives the TV's player
-  keyed live addresses.
+  channel watched. When every connection is in use, the player lists what
+  each watches and who, with "Watch here instead" where one may be taken
+  over; a connection taken from the TV says who took it. The app's search
+  finds channels too, in a Live TV row. Needs a server that gives the
+  TV's player keyed live addresses.
 
 ### Fixed
 

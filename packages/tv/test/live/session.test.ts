@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../src/api/client";
 import type { LiveChannel, LiveWatching } from "../../src/api/types";
-import { LiveController, type LiveServer } from "../../src/live/session";
+import { holders, LiveController, type LiveServer } from "../../src/live/session";
 import type { EngineListener, EngineSource, PlayerEngine } from "../../src/player/engine";
 
 function channel(id: number): LiveChannel {
@@ -71,10 +71,12 @@ class FakeEngine implements PlayerEngine {
 /** The server: each watch answered by `answer` (a session and a keyed address unless it says otherwise). */
 function fakeServer(answer?: (id: number, n: number) => Promise<LiveWatching>) {
   const asked: string[] = [];
+  /** Why the server says a session ended, by session. */
+  const ended: Record<string, string> = {};
   let n = 0;
   const server: LiveServer = {
-    watchChannel: (id, client) => {
-      asked.push(`watch ${id} ${client}`);
+    watchChannel: (id, client, _cancel, takeOver) => {
+      asked.push(`watch ${id} ${client}${takeOver !== undefined ? ` taking ${takeOver}` : ""}`);
       n++;
       return answer ? answer(id, n) : Promise.resolve({ session_id: `s${n}`, url: `/api/live/media/pley_mk_${n}/index.m3u8`, kind: "hls", channel: channel(id) });
     },
@@ -86,16 +88,17 @@ function fakeServer(answer?: (id: number, n: number) => Promise<LiveWatching>) {
       asked.push(`${method} ${url.replace("http://tv.test", "")}`);
       return Promise.resolve("#EXTM3U");
     },
+    whyLiveEnded: (session) => Promise.resolve(ended[session] ?? null),
     url: (path) => `http://tv.test${path}`,
   };
-  return { server, asked };
+  return { server, asked, ended };
 }
 
 function setup(answer?: (id: number, n: number) => Promise<LiveWatching>) {
   const engine = new FakeEngine();
-  const { server, asked } = fakeServer(answer);
+  const { server, asked, ended } = fakeServer(answer);
   const c = new LiveController(channel(1), { server, engine: () => engine, clientId: "webos-tv" });
-  return { c, engine, asked };
+  return { c, engine, asked, ended };
 }
 
 beforeEach(() => {
@@ -150,6 +153,26 @@ describe("a live channel on the TV's player", () => {
     expect(asked.filter((a) => a.indexOf("watch") === 0)).toHaveLength(2);
   });
 
+  it("lists what holds each connection, and takes one over where it may", async () => {
+    const connections = [
+      { channel_id: 7, channel_name: "Sport", watchers: [], people: 1, yours: true, can_take_over: true },
+      { channel_id: 8, channel_name: "Films", watchers: ["ana", "bo"], people: 2, yours: false, can_take_over: false },
+    ];
+    const { c, asked } = setup((id, n) =>
+      n === 1
+        ? Promise.reject(new ApiError(409, "conflict", "Provider allows 2 connections at once.", { code: "conflict", message: "", connections }))
+        : Promise.resolve({ session_id: `s${n}`, url: "/api/live/media/pley_mk_x/index.m3u8", kind: "hls", channel: channel(id) }),
+    );
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(c.state.value.trouble?.connections).toEqual(connections);
+    expect(c.state.value.trouble?.connections?.map(holders)).toEqual(["You, on another device", "ana, bo"]);
+    c.takeOver(7);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked.filter((a) => a.indexOf("watch") === 0)).toEqual(["watch 1 webos-tv", "watch 1 webos-tv taking 7"]);
+    expect(c.state.value.phase).toBe("tuning");
+  });
+
   it("asks a server without keyed addresses to be updated, rather than failing in the player", async () => {
     const { c, engine } = setup((id) => Promise.resolve({ session_id: "old", url: "/api/live/sessions/old/index.m3u8", kind: "hls", channel: channel(id) }));
     c.tune(channel(1));
@@ -169,6 +192,7 @@ describe("a live channel on the TV's player", () => {
     await vi.advanceTimersByTimeAsync(3_000);
     expect(asked.filter((a) => a.indexOf("watch") === 0)).toHaveLength(3);
     engine.listener!.error({ kind: "network", detail: "gone" });
+    await vi.advanceTimersByTimeAsync(0);
     expect(c.state.value.phase).toBe("error");
     expect(c.state.value.trouble).toMatchObject({ title: "Ch 1 stopped", canRetry: true });
     // A session that ends with an error is let go.
@@ -180,7 +204,49 @@ describe("a live channel on the TV's player", () => {
     c.tune(channel(1));
     await vi.advanceTimersByTimeAsync(0);
     engine.listener!.error({ kind: "stopped", message: "Stopped by the administrator." });
+    await vi.advanceTimersByTimeAsync(0);
     expect(c.state.value.trouble).toMatchObject({ kind: "stopped", message: "Stopped by the administrator." });
+  });
+
+  it("says who took the connection over, as the server tells it, rather than watching again", async () => {
+    const { c, engine, asked, ended } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    ended.s1 = "ana started watching Films on this connection.";
+    engine.listener!.error({ kind: "network", detail: "the playlist went" });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(c.state.value.trouble).toMatchObject({ kind: "stopped", title: "Watching stopped", message: "ana started watching Films on this connection." });
+    expect(asked.filter((a) => a.indexOf("watch") === 0)).toHaveLength(1);
+    // Its session is gone already: nothing to leave.
+    expect(asked).not.toContain("leave s1");
+  });
+
+  it("asks the server why a stall lasts, the TV's player saying nothing of a playlist gone", async () => {
+    const { c, engine, asked, ended } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    engine.listener!.status("buffering");
+    await vi.advanceTimersByTimeAsync(5_000);
+    // Still watching on the server: it waits on.
+    expect(c.state.value.phase).toBe("buffering");
+    engine.listener!.status("ready");
+    engine.listener!.status("buffering");
+    ended.s1 = "Watching moved to Films on another device.";
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(c.state.value.trouble).toMatchObject({ kind: "stopped", message: "Watching moved to Films on another device." });
+    expect(asked.filter((a) => a.indexOf("watch") === 0)).toHaveLength(1);
+  });
+
+  it("watches anew after a stall of 20 s", async () => {
+    const { c, engine, asked } = setup();
+    c.tune(channel(1));
+    await vi.advanceTimersByTimeAsync(0);
+    engine.listener!.firstFrame();
+    engine.listener!.status("buffering");
+    await vi.advanceTimersByTimeAsync(21_000);
+    expect(asked.filter((a) => a.indexOf("watch") === 0)).toHaveLength(2);
   });
 
   it("gives up on a channel whose picture never comes", async () => {

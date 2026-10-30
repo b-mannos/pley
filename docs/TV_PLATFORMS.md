@@ -394,13 +394,23 @@ the web, as the TVs' other administration does.
   (changing to one of its channels makes CH+ and CH− follow it). What's on
   shows only when asked: Info, or OK with the controls; not as each
   channel starts. Tuning shows the channel's logo with the spinner centred
-  under it. A channel with no picture shows its logo and what's on.
+  under it; a stall shows the spinner only once it has lasted 0.7 s. A
+  channel with no picture shows its logo and what's on. The app's search
+  has a Live TV row of the channels it finds (`channels`, up to 12); OK
+  plays one.
 - **Leaving:** `DELETE /api/live/sessions/{id}` on Back, on each change of
   channel, and when the TV hides the app (it watches again from live when
   it shows). A player failure is watched anew twice (1 s, then 3 s), then
-  said, with Try again, Other channels and Back; `409` shows the server's
-  words naming the channels holding the connections; an older server
-  without keyed addresses is asked to be updated.
+  said, with Try again, Other channels and Back. `409` lists its
+  `connections`: each channel, then "You, on another device", the names
+  (to administrators) or "Someone else"/"N people", and "Watch here
+  instead" where `can_take_over`, which watches again with `take_over`.
+  The TV's player says nothing of a playlist gone (`410`), so a stall of
+  5 s asks the server (`GET /api/live/sessions/{id}/plan`, with the token:
+  a keyed address only says the session has gone) whether watching ended
+  and why, and shows its words ("Watching moved to Film Four on another
+  device."); a stall of 20 s is a failure. An older server without keyed
+  addresses is asked to be updated.
 - **Keys:** Samsung's `ChannelUp`, `ChannelDown`, `ChannelList` and `Guide`
   are registered; LG's CH+ and CH− are 33 and 34 (Page Up and Page Down
   on a keyboard).
