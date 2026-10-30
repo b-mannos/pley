@@ -398,10 +398,10 @@ it comes, as the body of `PUT /v1/live/{id}/input` (chunked). FFmpeg reads it
 from its standard input: the caller holds the one connection to the channel,
 which IPTV providers count, and the transcoder needn't reach the provider.
 
-- What came in the first 0.6 s is probed (`ffprobe` on a pipe); when that
-  doesn't give the picture's size yet (no keyframe came), the first 1.5 MB,
-  or what came in 2.5 s. Then FFmpeg starts with that and the rest after it,
-  looking no further into it itself.
+- What came in is probed (`ffprobe` on a pipe) 0.3, 0.6, 1, 1.5 and 2.5 s
+  after the first byte, until a look gives the picture's size (a keyframe
+  came); at 2.5 s, or with 1.5 MB in, whatever it gives. Then FFmpeg starts
+  with that and the rest after it, looking no further into it itself.
 - Every player of a channel reads the same stream, so it is made for all of
   them: H.264 and AAC. The video is copied when it is H.264 already, 8-bit,
   no taller than `max_height` and, with `deinterlace` (the default),

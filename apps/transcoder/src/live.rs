@@ -41,14 +41,19 @@ const SEGMENT_SECONDS: u32 = 1;
 /// What is kept behind the live edge by default, and at least (seconds).
 const DEFAULT_WINDOW: u32 = 300;
 const MIN_WINDOW: u32 = 30;
-/// Input probed before FFmpeg starts: what came in the first moment, which
-/// usually says what the channel carries; when its picture's size isn't
-/// known yet (no keyframe came), this much, or what came in this long (a
-/// 2 s keyframe interval, the usual, falls within it). What a channel takes
-/// to start, so short.
-const QUICK_PROBE_WAIT: Duration = Duration::from_millis(600);
+/// Input probed before FFmpeg starts: what came in by each of these moments
+/// after its first byte, until one says what the channel carries (its
+/// picture's size known: a keyframe came); at the last, or with this much
+/// in, whatever it says. A 2 s keyframe interval, the usual, falls within
+/// it. What a channel takes to start, so looked at early and often.
+const PROBE_STEPS: [Duration; 5] = [
+    Duration::from_millis(300),
+    Duration::from_millis(600),
+    Duration::from_millis(1000),
+    Duration::from_millis(1500),
+    Duration::from_millis(2500),
+];
 const PROBE_BYTES: usize = 1_500_000;
-const PROBE_WAIT: Duration = Duration::from_millis(2500);
 /// How long the input may say nothing before the channel is taken for gone.
 const INPUT_STALL: Duration = Duration::from_secs(20);
 /// Media a player waits for before its first playlist: enough to start
@@ -190,19 +195,26 @@ impl LiveManager {
         let mut head_len = 0usize;
         let mut first: Option<Instant> = None;
         let mut ended = false;
-        let mut until = QUICK_PROBE_WAIT;
+        let mut step = 0;
         let probed = loop {
+            let until = PROBE_STEPS[step];
             let full = head_len >= PROBE_BYTES || first.is_some_and(|t| t.elapsed() >= until);
             if full || ended {
                 if head_len == 0 {
                     return Err(ApiError::Failed("the channel sent nothing".into()));
                 }
                 let found = probe(&self.ff, &head).await;
-                let last = ended || head_len >= PROBE_BYTES || until == PROBE_WAIT;
+                let last = ended || head_len >= PROBE_BYTES || step == PROBE_STEPS.len() - 1;
                 match found {
                     Ok(p) if last || p.complete() => break p,
                     Err(e) if last => return Err(e),
-                    _ => until = PROBE_WAIT,
+                    // Not enough yet: the next moment, past any this look took.
+                    _ => {
+                        let elapsed = first.map_or(Duration::ZERO, |t| t.elapsed());
+                        step = (step + 1..PROBE_STEPS.len())
+                            .find(|&s| PROBE_STEPS[s] > elapsed)
+                            .unwrap_or(PROBE_STEPS.len() - 1);
+                    }
                 }
             }
             let wait = first.map_or(INPUT_STALL, |t| until.saturating_sub(t.elapsed()));
