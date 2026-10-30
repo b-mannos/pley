@@ -1,6 +1,7 @@
 //! Requests: people ask for movies and shows the libraries don't have,
-//! found on TMDB ([`crate::discover`]). Administrators approve or decline
-//! them (their own, and those of accounts allowed to, are approved as
+//! found on TMDB ([`crate::discover`]). Managers (administrators, from
+//! pley's own sign-in or apps allowed `approvals`) approve or decline them
+//! (administrators' own, and those of accounts allowed to, are approved as
 //! made); approved ones go to Radarr or Sonarr ([`arr`]) where they are
 //! connected, and a request is available once a library has it: the movie,
 //! or every season asked for, whole. See docs/API.md, Requests.
@@ -12,8 +13,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Json;
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use bytes::Bytes;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -21,37 +23,50 @@ use tokio_util::sync::CancellationToken;
 
 use crate::accounts::avatar_url;
 use crate::auth::AuthUser;
+use crate::auth::scopes::Scope;
 use crate::catalog::{ME_CTE, VISIBLE};
 use crate::db::Db;
-use crate::discover::{self, CastMember, Details, Discover, Found, List, TitleKind, image_url};
+use crate::discover::pictures::{self, Picture, Pictures, Unavailable};
+use crate::discover::{self, CastMember, Details, Discover, Found, List, TitleKind};
 use crate::error::AppError;
 use crate::events::{EventBus, ServerEvent};
 use crate::metadata::{MetadataAgent, TmdbError};
-use crate::settings::{Settings, SettingsStore};
+use crate::ratings::rating_age;
+use crate::settings::SettingsStore;
 use crate::util::{now, utc};
 use arr::{Arr, Download, Service};
 
 /// What the limits count: requests of the last 7 days.
 pub const LIMIT_WINDOW: i64 = 7 * 86_400;
+/// How long a declined request keeps its title from being asked for again
+/// by the account that made or followed it.
+pub const DECLINED_FOR: i64 = 30 * 86_400;
 /// How often the libraries are looked at for what is asked for (and after
 /// every scan).
 const SYNC_EVERY: Duration = Duration::from_secs(300);
 /// Statuses of requests still asking for their title.
 const ACTIVE: &str = "('pending', 'approved', 'failed')";
+/// Requests of `r` an account made or follows (binds the account's id
+/// twice).
+const MINE: &str =
+    "(r.user_id = ? OR EXISTS (SELECT 1 FROM request_watchers w WHERE w.request_id = r.id AND w.user_id = ?))";
+/// How long a library title's page waits for TMDB.
+const ITEM_WAIT: Duration = Duration::from_secs(2);
 /// Requests listed at once, by default and at most.
 const LIST_LIMIT: i64 = 50;
 const LIST_MAX: i64 = 200;
 /// A reason given for declining, and a root folder chosen, at most.
 const REASON_MAX: usize = 500;
 const FOLDER_MAX: usize = 512;
-/// Titles whose other ids are looked up at once.
+/// Titles whose details (or other ids) are looked up at once.
 const LOOKUPS: usize = 8;
 
 /// Whether an account may ask for titles.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RequestAccess {
     /// May not ask.
+    #[default]
     Off,
     /// Asks an administrator.
     Ask,
@@ -112,15 +127,43 @@ impl RequestStatus {
     }
 }
 
-/// What a request endpoint answers when it can't: requests off (`503`,
-/// `setup: false`), TMDB refusing or away (`503`, `setup: true`), or an
-/// API error.
+/// What a request endpoint answers when it can't, as `{ code, message, … }`
+/// (docs/API.md, Requests: errors).
 #[derive(Debug, thiserror::Error)]
 pub enum RequestError {
+    /// `503 unavailable`, `setup: false`.
     #[error("requests are off: an administrator can turn them on in Settings → Requests")]
     Off,
+    /// `503 tmdb_key`, `setup: true`, `retry: false`.
+    #[error("TMDB refused this server's key: an administrator can check it in Settings → Server")]
+    TmdbKey,
+    /// `503 tmdb_down`, `setup: true`.
+    #[error("TMDB isn't answering: try again in a moment")]
+    TmdbDown,
+    /// `403 no_access`: the account may not ask.
+    #[error("requests aren't open to this account: an administrator can open them in Settings → Users")]
+    NoAccess,
+    /// `403 restricted`: above the account's age limit, saying why.
     #[error("{0}")]
-    Tmdb(String),
+    Restricted(String),
+    /// `409 in_library`: the libraries the account can open have it all.
+    #[error("{0}")]
+    InLibrary(String),
+    /// `409 declined`: declined for this account lately; `retry_at`: when
+    /// it may ask again.
+    #[error("{message}")]
+    Declined { message: String, retry_at: i64 },
+    /// `429 too_many_requests` (and `Retry-After`): past the limit;
+    /// `retry_at`: when enough of what counts stops counting for all that
+    /// was asked, `None` when that is more than the limit itself.
+    #[error("{message}")]
+    Limit { message: String, retry_at: Option<i64> },
+    /// `409 conflict`, with the request as it is now (`request`).
+    #[error("{message}")]
+    Conflict { message: String, request: Box<MediaRequest> },
+    /// `502`: TMDB's picture server didn't answer, or not with a picture.
+    #[error("TMDB's pictures aren't answering: try again in a moment")]
+    PictureDown,
     #[error(transparent)]
     App(#[from] AppError),
 }
@@ -137,12 +180,10 @@ impl From<TmdbError> for RequestError {
     fn from(err: TmdbError) -> Self {
         match err {
             TmdbError::NotFound => RequestError::App(AppError::not_found("TMDB doesn't know this title")),
-            TmdbError::Unauthorized => {
-                RequestError::Tmdb("TMDB rejected the API key: an administrator can check it in Settings".into())
-            }
+            TmdbError::Unauthorized => RequestError::TmdbKey,
             TmdbError::Other(err) => {
                 tracing::warn!("TMDB: {err:#}");
-                RequestError::Tmdb("TMDB couldn't be reached: try again in a moment".into())
+                RequestError::TmdbDown
             }
         }
     }
@@ -150,36 +191,130 @@ impl From<TmdbError> for RequestError {
 
 impl IntoResponse for RequestError {
     fn into_response(self) -> Response {
-        let setup = match self {
+        let message = self.to_string();
+        let (status, body) = match self {
             RequestError::App(err) => return err.into_response(),
-            RequestError::Off => false,
-            RequestError::Tmdb(_) => true,
+            RequestError::Off => {
+                (StatusCode::SERVICE_UNAVAILABLE, json!({ "code": "unavailable", "message": message, "setup": false }))
+            }
+            RequestError::TmdbKey => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({ "code": "tmdb_key", "message": message, "setup": true, "retry": false }),
+            ),
+            RequestError::TmdbDown => {
+                (StatusCode::SERVICE_UNAVAILABLE, json!({ "code": "tmdb_down", "message": message, "setup": true }))
+            }
+            RequestError::NoAccess => (StatusCode::FORBIDDEN, json!({ "code": "no_access", "message": message })),
+            RequestError::Restricted(_) => (StatusCode::FORBIDDEN, json!({ "code": "restricted", "message": message })),
+            RequestError::InLibrary(_) => (StatusCode::CONFLICT, json!({ "code": "in_library", "message": message })),
+            RequestError::Declined { retry_at, .. } => {
+                (StatusCode::CONFLICT, json!({ "code": "declined", "message": message, "retry_at": retry_at }))
+            }
+            RequestError::Limit { retry_at, .. } => {
+                let body = json!({ "code": "too_many_requests", "message": message, "retry_at": retry_at });
+                let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
+                if let Some(at) = retry_at {
+                    response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from((at - now()).max(1)));
+                }
+                return response;
+            }
+            RequestError::Conflict { request, .. } => {
+                (StatusCode::CONFLICT, json!({ "code": "conflict", "message": message, "request": request }))
+            }
+            RequestError::PictureDown => {
+                let body = json!({ "code": "tmdb_down", "message": message });
+                let headers = [(header::CACHE_CONTROL, HeaderValue::from_static("no-store"))];
+                return (StatusCode::BAD_GATEWAY, headers, Json(body)).into_response();
+            }
         };
-        let body = json!({ "code": "unavailable", "message": self.to_string(), "setup": setup });
-        (StatusCode::SERVICE_UNAVAILABLE, Json(body)).into_response()
+        (status, Json(body)).into_response()
     }
 }
 
 // ------------------------------------------------------------------ what the API shows
 
-#[derive(Debug, Clone, Serialize)]
+/// Who asks, and what their session may do with requests: what asking
+/// does, whether the settings' limits apply, and whether it manages
+/// requests (see [`Requests::caller`]).
+#[derive(Debug, Clone, Copy)]
+pub struct Caller<'a> {
+    pub user: &'a AuthUser,
+    pub access: RequestAccess,
+    /// The settings' limits apply (never to an administrator's own
+    /// requests).
+    pub limited: bool,
+    /// Approves and declines, sees and deletes everyone's requests
+    /// ([`AuthUser::manages_requests`]).
+    pub manager: bool,
+}
+
+/// `GET /api/requests/summary`: what this session may do with requests,
+/// and what there is to see.
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct Summary {
     pub enabled: bool,
     pub access: RequestAccess,
     pub movies_left: Option<i64>,
     pub seasons_left: Option<i64>,
+    /// The limits that apply, per 7 days.
+    pub movies_limit: Option<i64>,
+    pub seasons_limit: Option<i64>,
     /// With none left of a kind: when one more may be asked for.
     pub movies_next_at: Option<i64>,
     pub seasons_next_at: Option<i64>,
+    /// This session manages requests.
+    pub manage: bool,
+    /// Managers: requests waiting for a decision.
     pub pending: i64,
+    /// Managers: failed requests the server won't try again by itself.
+    pub failed: i64,
+    /// Requests the account made or follows that became available, partly
+    /// available or declined since it last looked.
+    pub unseen: i64,
+    /// Requests the account made or follows.
+    pub own: i64,
+    /// When the newest change was among the requests this session sees.
+    pub changed_at: Option<i64>,
+    /// The scope an app should sign in again for: `requests` to ask at
+    /// all, `approvals` to manage (an administrator's, on pley's own apps).
+    pub sign_in_again: Option<&'static str>,
 }
 
+/// A title for one account, the first of these that holds (docs/API.md,
+/// Discover): in a library it can open, above its age limit, asked for
+/// (all it lacks), declined for it lately, partly there or asked for, or
+/// none of these (it may be asked for).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TitleStatus {
     Library,
+    Restricted,
     Requested,
+    Declined,
+    Partial,
     None,
+}
+
+/// A season of a show for one account, the first that holds: whole in a
+/// library it can open, asked for by an active request, nothing aired yet,
+/// some of what aired there, none of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SeasonState {
+    Library,
+    Requested,
+    Unaired,
+    Partial,
+    Missing,
+}
+
+/// A request this account made or followed that was declined lately: why
+/// (its maker sees the reason), when, and when it may be asked for again.
+#[derive(Debug, Clone, Serialize)]
+pub struct Declined {
+    pub reason: Option<String>,
+    pub at: i64,
+    pub again_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -217,9 +352,23 @@ pub struct DiscoverDetail {
     pub network: Option<String>,
     pub show_status: Option<String>,
     pub anime: bool,
+    pub imdb_id: Option<String>,
     pub cast: Vec<CastMember>,
     pub seasons: Option<Vec<DiscoverSeason>>,
+    /// The newest request for it this account made or followed that was
+    /// declined within [`DECLINED_FOR`].
+    pub declined: Option<Declined>,
+    /// Why this account can't ask for it (its age limit).
+    pub restriction: Option<String>,
+    /// This account follows an active request for it.
+    pub watching: bool,
+    /// This account's and those it follows (everyone's, for managers),
+    /// newest first.
     pub requests: Vec<MediaRequest>,
+    pub movies_left: Option<i64>,
+    pub seasons_left: Option<i64>,
+    pub movies_next_at: Option<i64>,
+    pub seasons_next_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -230,8 +379,32 @@ pub struct DiscoverSeason {
     pub aired: i64,
     pub air_date: Option<String>,
     pub poster_url: Option<String>,
+    /// Episodes of it in the libraries this account can open.
     pub in_library: i64,
+    /// An active request asks for it.
     pub requested: bool,
+    pub state: SeasonState,
+    /// A request for it this account made or followed was declined within
+    /// [`DECLINED_FOR`].
+    pub declined: bool,
+    /// The active request asking for it, where this account made or follows
+    /// it (any, for managers).
+    pub request_id: Option<i64>,
+}
+
+/// `GET /api/items/{id}/request`: what a library title's page shows of
+/// requests for it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ItemRequest {
+    pub kind: TitleKind,
+    pub tmdb_id: i64,
+    pub status: TitleStatus,
+    /// The newest active request for it this account made or follows (any,
+    /// for managers).
+    pub request: Option<MediaRequest>,
+    /// The seasons the picker would offer first with no limit (`[]` for
+    /// movies); `None` while TMDB's details of it aren't known.
+    pub askable: Option<Vec<i64>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -295,7 +468,7 @@ pub struct Approval {
 #[derive(Debug, Clone, Default)]
 pub struct ListQuery {
     pub status: Option<RequestStatus>,
-    /// Administrators: their own only.
+    /// Managers: only their own and those they follow.
     pub mine: bool,
     pub offset: i64,
     pub limit: Option<i64>,
@@ -368,8 +541,8 @@ impl RequestRow {
             tmdb_id: self.tmdb_id,
             title: self.title.clone(),
             year: self.year,
-            poster_url: image_url(self.poster_path.as_deref(), "w342"),
-            backdrop_url: image_url(self.backdrop_path.as_deref(), "w1280"),
+            poster_url: pictures::url(Picture::Poster, self.poster_path.as_deref()),
+            backdrop_url: pictures::url(Picture::Backdrop, self.backdrop_path.as_deref()),
             seasons: self.seasons(),
             available_seasons: seasons_of(&self.available_seasons),
             anime: self.anime,
@@ -417,42 +590,186 @@ impl Known {
     fn of(details: &Details) -> Known {
         Known { tmdb_id: details.tmdb_id, tvdb_id: details.tvdb_id, imdb_id: details.imdb_id.clone() }
     }
-}
 
-/// What the libraries and requests have of a title, for one account.
-#[derive(Debug, Clone, Copy, Default)]
-struct Mark {
-    library: bool,
-    item_id: Option<i64>,
-    requested: bool,
-    request_id: Option<i64>,
-}
-
-impl Mark {
-    fn status(&self) -> TitleStatus {
-        if self.library {
-            TitleStatus::Library
-        } else if self.requested {
-            TitleStatus::Requested
-        } else {
-            TitleStatus::None
-        }
+    fn tmdb(tmdb_id: i64) -> Known {
+        Known { tmdb_id, tvdb_id: None, imdb_id: None }
     }
 }
 
-fn title_of(found: &Found, mark: Mark) -> DiscoverTitle {
+/// A library's title, with the ids metadata gave it.
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct LibraryTitle {
+    kind: String,
+    tmdb_id: Option<i64>,
+    tvdb_id: Option<i64>,
+    imdb_id: Option<String>,
+}
+
+/// An active request for a title, as one account sees it.
+#[derive(Debug, Clone)]
+struct Active {
+    id: i64,
+    /// Shows: the seasons it asks for.
+    seasons: Vec<i64>,
+    /// The account made or follows it (or manages requests).
+    theirs: bool,
+    /// The account follows it.
+    follows: bool,
+}
+
+/// What the libraries and requests have of a title, for one account.
+#[derive(Debug, Clone, Default)]
+struct Mark {
+    /// The title in a library the account can open (the first found).
+    item_id: Option<i64>,
+    /// Shows: every library show the account can open that is this one.
+    shows: Vec<i64>,
+    /// Its active requests, whoever made them, newest first.
+    active: Vec<Active>,
+    /// The account's last request for it (made or followed) was declined
+    /// within [`DECLINED_FOR`].
+    declined: bool,
+    /// Shows: the seasons of its requests declined within it.
+    declined_seasons: HashSet<i64>,
+    /// The newest of those declines.
+    refusal: Option<Declined>,
+}
+
+impl Mark {
+    fn requested(&self) -> bool {
+        !self.active.is_empty()
+    }
+
+    /// Shows: the seasons its active requests ask for.
+    fn asked(&self) -> HashSet<i64> {
+        self.active.iter().flat_map(|a| a.seasons.iter().copied()).collect()
+    }
+
+    /// The newest active request the account made or follows (any, for
+    /// managers).
+    fn request_id(&self) -> Option<i64> {
+        self.active.iter().find(|a| a.theirs).map(|a| a.id)
+    }
+
+    /// The same, asking for season `n`.
+    fn season_request(&self, n: i64) -> Option<i64> {
+        self.active.iter().find(|a| a.theirs && a.seasons.contains(&n)).map(|a| a.id)
+    }
+
+    fn watching(&self) -> bool {
+        self.active.iter().any(|a| a.follows)
+    }
+}
+
+/// A title's status for one account (see [`TitleStatus`]). `lacking`: a
+/// show's aired seasons but specials that no library it can open has whole,
+/// from its details; `None` for movies, and shows whose details aren't
+/// known (one in a library it can open is then `library`, one asked for
+/// `requested`).
+fn status_of(kind: TitleKind, mark: &Mark, lacking: Option<&[i64]>, restricted: bool) -> TitleStatus {
+    let in_library = mark.item_id.is_some();
+    let Some(lacking) = lacking.filter(|_| kind == TitleKind::Show) else {
+        return if in_library {
+            TitleStatus::Library
+        } else if restricted {
+            TitleStatus::Restricted
+        } else if mark.requested() {
+            TitleStatus::Requested
+        } else if mark.declined {
+            TitleStatus::Declined
+        } else {
+            TitleStatus::None
+        };
+    };
+    let asked = mark.asked();
+    let unasked: Vec<i64> = lacking.iter().copied().filter(|n| !asked.contains(n)).collect();
+    if in_library && lacking.is_empty() {
+        TitleStatus::Library
+    } else if restricted {
+        TitleStatus::Restricted
+    } else if mark.requested() && unasked.is_empty() {
+        TitleStatus::Requested
+    } else if mark.declined || (!unasked.is_empty() && unasked.iter().all(|n| mark.declined_seasons.contains(n))) {
+        // Its last request was declined, or what is left to ask for was.
+        TitleStatus::Declined
+    } else if (in_library || mark.requested()) && !unasked.is_empty() {
+        TitleStatus::Partial
+    } else {
+        TitleStatus::None
+    }
+}
+
+/// A show's aired seasons but specials that no library with these `counts`
+/// has whole.
+fn lacking(details: &Details, counts: &HashMap<i64, (i64, i64)>) -> Vec<i64> {
+    details
+        .seasons
+        .iter()
+        .filter(|s| s.number > 0 && s.aired > 0 && whole(counts, s) != Whole::Yes)
+        .map(|s| s.number)
+        .collect()
+}
+
+/// A season's state for one account (see [`SeasonState`]).
+fn season_state(season: &discover::Season, counts: &HashMap<i64, (i64, i64)>, asked: &HashSet<i64>) -> SeasonState {
+    if whole(counts, season) == Whole::Yes {
+        SeasonState::Library
+    } else if asked.contains(&season.number) {
+        SeasonState::Requested
+    } else if season.aired <= 0 {
+        SeasonState::Unaired
+    } else if counts.get(&season.number).is_some_and(|c| c.0 > 0) {
+        SeasonState::Partial
+    } else {
+        SeasonState::Missing
+    }
+}
+
+/// The seasons the season picker ticks first, were there no limit: those
+/// missing or partly there, but specials and those declined lately; none of
+/// a title the account can't ask for.
+fn askable(details: &Details, counts: &HashMap<i64, (i64, i64)>, mark: &Mark, restricted: bool) -> Vec<i64> {
+    if restricted {
+        return Vec::new();
+    }
+    let asked = mark.asked();
+    details
+        .seasons
+        .iter()
+        .filter(|s| s.number > 0 && !mark.declined_seasons.contains(&s.number))
+        .filter(|s| matches!(season_state(s, counts, &asked), SeasonState::Missing | SeasonState::Partial))
+        .map(|s| s.number)
+        .collect()
+}
+
+/// Whether a title rated `certification` is above `user`'s age limit:
+/// unrated ones are, for an account with one, as in the libraries.
+fn restricted(user: &AuthUser, certification: Option<&str>) -> bool {
+    user.max_age.is_some_and(|max| certification.and_then(rating_age).is_none_or(|age| age > max))
+}
+
+/// Why an account with an age limit can't ask for a title rated
+/// `certification`.
+fn restriction(certification: Option<&str>) -> String {
+    match certification.map(str::trim).filter(|c| !c.is_empty()) {
+        Some(rating) => format!("Rated {rating}: above this account's age limit"),
+        None => "Not rated: with an age limit, this account may ask for rated titles only".to_owned(),
+    }
+}
+
+fn title_of(found: &Found, mark: &Mark, status: TitleStatus) -> DiscoverTitle {
     DiscoverTitle {
         kind: found.kind,
         tmdb_id: found.tmdb_id,
         title: found.title.clone(),
         year: found.year,
         overview: found.overview.clone(),
-        poster_url: image_url(found.poster_path.as_deref(), "w342"),
-        backdrop_url: image_url(found.backdrop_path.as_deref(), "w1280"),
+        poster_url: pictures::url(Picture::Poster, found.poster_path.as_deref()),
+        backdrop_url: pictures::url(Picture::Backdrop, found.backdrop_path.as_deref()),
         rating: found.rating,
-        status: mark.status(),
+        status,
         item_id: mark.item_id,
-        request_id: mark.request_id,
+        request_id: mark.request_id(),
     }
 }
 
@@ -481,40 +798,79 @@ fn whole(counts: &HashMap<i64, (i64, i64)>, season: &discover::Season) -> Whole 
     }
 }
 
-/// How much more an account may ask for in [`LIMIT_WINDOW`].
+// ------------------------------------------------------------------ limits
+
+/// What counts toward an account's limits in [`LIMIT_WINDOW`], and the
+/// limits that apply to it.
 #[derive(Debug, Clone, Default)]
 struct Quota {
-    movies_left: Option<i64>,
-    seasons_left: Option<i64>,
-    /// When the oldest request counted of each kind stops counting.
-    movies_free_at: Option<i64>,
-    seasons_free_at: Option<i64>,
+    /// The settings' limits; `None`: none, or none apply.
+    movies_limit: Option<i64>,
+    seasons_limit: Option<i64>,
+    /// What counts, oldest first: when each request was made, and how much
+    /// of the limit it takes (a movie 1, a show its seasons).
+    movies: Vec<(i64, i64)>,
+    seasons: Vec<(i64, i64)>,
 }
 
 impl Quota {
-    /// With none left of `kind`: when the oldest request counted stops
-    /// counting, and one more may be asked for.
-    fn next_at(&self, kind: TitleKind) -> Option<i64> {
-        let (left, free_at) = match kind {
-            TitleKind::Movie => (self.movies_left, self.movies_free_at),
-            TitleKind::Show => (self.seasons_left, self.seasons_free_at),
-        };
-        free_at.filter(|_| left == Some(0))
+    fn of(&self, kind: TitleKind) -> (Option<i64>, &[(i64, i64)]) {
+        match kind {
+            TitleKind::Movie => (self.movies_limit, &self.movies),
+            TitleKind::Show => (self.seasons_limit, &self.seasons),
+        }
     }
 
-    /// Refuses asking for `count` of `kind` past the limit.
-    fn allows(&self, kind: TitleKind, count: i64) -> Result<(), AppError> {
-        let (left, free_at, one, many) = match kind {
-            TitleKind::Movie => (self.movies_left, self.movies_free_at, "movie", "movies"),
-            TitleKind::Show => (self.seasons_left, self.seasons_free_at, "season", "seasons"),
+    /// How many more of `kind` may be asked for now; `None`: no limit.
+    fn left(&self, kind: TitleKind) -> Option<i64> {
+        let (limit, counted) = self.of(kind);
+        limit.map(|limit| (limit - counted.iter().map(|c| c.1).sum::<i64>()).max(0))
+    }
+
+    /// When enough of what counts stops counting for `more` of `kind` to
+    /// be asked for; `None` with no limit, when they may be already, and
+    /// when `more` is past the limit itself. With `more` 1: when one more
+    /// may be, once none is left.
+    fn free_at(&self, kind: TitleKind, more: i64) -> Option<i64> {
+        let (limit, counted) = self.of(kind);
+        let limit = limit.filter(|limit| more <= *limit)?;
+        let mut used: i64 = counted.iter().map(|c| c.1).sum();
+        if used + more <= limit {
+            return None;
+        }
+        counted.iter().find_map(|(at, count)| {
+            used -= count;
+            (used + more <= limit).then_some(at + LIMIT_WINDOW)
+        })
+    }
+
+    /// Refuses asking for `count` of `kind` past the limit, saying when all
+    /// of it may be asked for.
+    fn allows(&self, kind: TitleKind, count: i64) -> RequestResult<()> {
+        let (Some(limit), Some(left)) = (self.of(kind).0, self.left(kind)) else { return Ok(()) };
+        if count <= left {
+            return Ok(());
+        }
+        let (one, many) = match kind {
+            TitleKind::Movie => ("movie", "movies"),
+            TitleKind::Show => ("season", "seasons"),
         };
-        let Some(left) = left.filter(|left| count > *left) else { return Ok(()) };
-        let from = free_at.map(|at| format!(" from {}", day(at))).unwrap_or_default();
-        Err(AppError::TooManyRequests(match left {
-            0 => format!("this account has asked for all the {many} it may in 7 days: it may ask again{from}"),
-            1 => format!("this account may ask for 1 more {one} for now"),
-            n => format!("this account may ask for {n} more {many} for now"),
-        }))
+        let retry_at = self.free_at(kind, count);
+        let message = match (left, retry_at) {
+            (_, None) => {
+                let what = if limit == 1 { one } else { many };
+                format!("this account may ask for at most {limit} {what} per 7 days: ask for fewer")
+            }
+            (0, Some(at)) => {
+                format!(
+                    "this account has asked for all the {many} it may for now: it may ask for more from {}",
+                    day(at)
+                )
+            }
+            (1, Some(_)) => format!("this account may ask for 1 more {one} for now"),
+            (left, Some(_)) => format!("this account may ask for {left} more {many} for now"),
+        };
+        Err(RequestError::Limit { message, retry_at })
     }
 }
 
@@ -531,6 +887,7 @@ pub struct Requests {
     settings: Arc<SettingsStore>,
     events: EventBus,
     discover: Discover,
+    pictures: Pictures,
     arr: Arr,
     /// Requests are made one at a time: two at once can't both find a title
     /// not asked for yet.
@@ -540,10 +897,17 @@ pub struct Requests {
 }
 
 impl Requests {
-    pub fn new(db: Db, settings: Arc<SettingsStore>, events: EventBus, metadata: Arc<MetadataAgent>) -> Arc<Self> {
+    pub fn new(
+        db: Db,
+        settings: Arc<SettingsStore>,
+        events: EventBus,
+        metadata: Arc<MetadataAgent>,
+        pictures: Pictures,
+    ) -> Arc<Self> {
         Arc::new(Self {
             discover: Discover::new(metadata, settings.clone()),
             arr: Arr::new(),
+            pictures,
             db,
             settings,
             events,
@@ -562,32 +926,53 @@ impl Requests {
         settings.requests && !settings.tmdb_api_key.is_empty()
     }
 
-    fn on(&self) -> RequestResult<()> {
+    /// Refuses while requests are off (or TMDB has no key).
+    pub fn on(&self) -> RequestResult<()> {
         if self.enabled() { Ok(()) } else { Err(RequestError::Off) }
     }
 
-    /// Whether `user` may ask: administrators are approved as they ask.
-    pub async fn access(&self, user: &AuthUser) -> sqlx::Result<RequestAccess> {
-        if user.is_admin {
-            return Ok(RequestAccess::Auto);
+    /// Who `user` is to requests ([`Caller`]). An administrator's account
+    /// asks without limits: approved as it asks from pley's own sign-in and
+    /// apps, and for a manager to approve from other publishers' apps.
+    /// Other accounts ask as their `request_access` says.
+    pub async fn caller<'a>(&self, user: &'a AuthUser) -> sqlx::Result<Caller<'a>> {
+        let manager = user.manages_requests();
+        if user.account_admin {
+            let access = if user.first_party() { RequestAccess::Auto } else { RequestAccess::Ask };
+            return Ok(Caller { user, access, limited: false, manager });
         }
         let access: Option<String> = sqlx::query_scalar("SELECT request_access FROM users WHERE id = ?")
             .bind(user.id)
             .fetch_optional(&self.db.read)
             .await?;
-        Ok(access.as_deref().map_or(RequestAccess::Off, RequestAccess::parse))
+        let access = access.as_deref().map_or(RequestAccess::Off, RequestAccess::parse);
+        Ok(Caller { user, access, limited: true, manager })
     }
 
-    /// Requests are on and `user` may ask: how.
-    async fn asker(&self, user: &AuthUser) -> RequestResult<RequestAccess> {
+    /// Requests are on: who `user` is to them. Every route but the summary
+    /// starts here (or with [`Self::asker`], [`Self::manager`]): an account
+    /// that may not ask keeps its own requests.
+    pub async fn reader<'a>(&self, user: &'a AuthUser) -> RequestResult<Caller<'a>> {
         self.on()?;
-        match self.access(user).await? {
-            RequestAccess::Off => Err(AppError::forbidden(
-                "this account may not ask for titles: an administrator can allow it in Settings → Users",
-            )
-            .into()),
-            access => Ok(access),
+        Ok(self.caller(user).await?)
+    }
+
+    /// The same, for Discover and asking: the account may ask.
+    pub async fn asker<'a>(&self, user: &'a AuthUser) -> RequestResult<Caller<'a>> {
+        let caller = self.reader(user).await?;
+        if caller.access == RequestAccess::Off {
+            return Err(RequestError::NoAccess);
         }
+        Ok(caller)
+    }
+
+    /// The same, for approving and declining: `user` manages requests.
+    pub async fn manager<'a>(&self, user: &'a AuthUser) -> RequestResult<Caller<'a>> {
+        let caller = self.reader(user).await?;
+        if !caller.manager {
+            return Err(AppError::forbidden("only administrators approve and decline requests").into());
+        }
+        Ok(caller)
     }
 
     fn changed(&self, user_id: i64) {
@@ -596,134 +981,254 @@ impl Requests {
 
     // -------------------------------------------------------------- reading
 
-    /// `GET /api/requests/summary`.
+    /// `GET /api/requests/summary`: for any session. While requests are
+    /// off, and for an app that can't ask, every number is 0.
     pub async fn summary(&self, user: &AuthUser) -> sqlx::Result<Summary> {
-        let access = self.access(user).await?;
-        let quota = if user.is_admin { Quota::default() } else { self.quota(user.id, &self.settings.get()).await? };
-        let pending = if user.is_admin {
-            sqlx::query_scalar("SELECT COUNT(*) FROM requests WHERE status = 'pending'")
-                .fetch_one(&self.db.read)
-                .await?
-        } else {
-            0
-        };
+        let caller = self.caller(user).await?;
+        let enabled = self.enabled();
+        if !enabled || !user.allowed(Scope::Requests) {
+            return Ok(Summary {
+                enabled,
+                access: caller.access,
+                movies_left: Some(0),
+                seasons_left: Some(0),
+                movies_limit: Some(0),
+                seasons_limit: Some(0),
+                // Only where signing in again lets the app ask.
+                sign_in_again: (enabled && caller.access != RequestAccess::Off).then_some("requests"),
+                ..Summary::default()
+            });
+        }
+        let quota = self.quota(&caller).await?;
+        let (pending, failed, unseen, own, changed_at): (i64, i64, i64, i64, Option<i64>) =
+            sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                "SELECT COALESCE(SUM(status = 'pending'), 0), COALESCE(SUM(status = 'failed' AND retry_at IS NULL), 0),
+                        COALESCE(SUM(mine AND news_at > COALESCE((SELECT requests_seen_at FROM users WHERE id = ?), 0)), 0),
+                        COALESCE(SUM(mine), 0), MAX(CASE WHEN mine OR ? THEN updated_at END)
+                 FROM (SELECT r.status, r.retry_at, r.news_at, r.updated_at, {MINE} AS mine FROM requests r)"
+            )))
+            .bind(user.id)
+            .bind(caller.manager)
+            .bind(user.id)
+            .bind(user.id)
+            .fetch_one(&self.db.read)
+            .await?;
+        // An administrator's app of pley's own that was signed in before it
+        // could manage requests.
+        let approvals =
+            user.account_admin && user.app.is_some() && user.first_party() && !user.allowed(Scope::Approvals);
         Ok(Summary {
-            enabled: self.enabled(),
-            access,
-            movies_left: quota.movies_left,
-            seasons_left: quota.seasons_left,
-            movies_next_at: quota.next_at(TitleKind::Movie),
-            seasons_next_at: quota.next_at(TitleKind::Show),
-            pending,
+            enabled,
+            access: caller.access,
+            movies_left: quota.left(TitleKind::Movie),
+            seasons_left: quota.left(TitleKind::Show),
+            movies_limit: quota.movies_limit,
+            seasons_limit: quota.seasons_limit,
+            movies_next_at: quota.free_at(TitleKind::Movie, 1),
+            seasons_next_at: quota.free_at(TitleKind::Show, 1),
+            manage: caller.manager,
+            pending: if caller.manager { pending } else { 0 },
+            failed: if caller.manager { failed } else { 0 },
+            unseen,
+            own,
+            changed_at,
+            sign_in_again: approvals.then_some("approvals"),
         })
     }
 
-    async fn quota(&self, user_id: i64, settings: &Settings) -> sqlx::Result<Quota> {
+    /// What counts toward `caller`'s limits: its own requests of the last 7
+    /// days, but those declined, those failed that the server won't try
+    /// again and those it inherited as their earliest follower (following
+    /// one costs nothing). None where limits don't apply.
+    async fn quota(&self, caller: &Caller<'_>) -> sqlx::Result<Quota> {
+        if !caller.limited {
+            return Ok(Quota::default());
+        }
+        let settings = self.settings.get();
+        let limit = |limit: u32| (limit > 0).then_some(i64::from(limit));
+        let mut quota = Quota {
+            movies_limit: limit(settings.request_limit_movies),
+            seasons_limit: limit(settings.request_limit_seasons),
+            ..Quota::default()
+        };
+        if quota.movies_limit.is_none() && quota.seasons_limit.is_none() {
+            return Ok(quota);
+        }
         let rows: Vec<(String, Option<String>, i64)> = sqlx::query_as(
             "SELECT kind, seasons, created_at FROM requests
-             WHERE user_id = ? AND created_at > ? AND status != 'declined' ORDER BY created_at",
+             WHERE user_id = ? AND created_at > ? AND inherited_at IS NULL
+               AND (status IN ('pending', 'approved', 'available') OR (status = 'failed' AND retry_at IS NOT NULL))
+             ORDER BY created_at, id",
         )
-        .bind(user_id)
+        .bind(caller.user.id)
         .bind(now() - LIMIT_WINDOW)
         .fetch_all(&self.db.read)
         .await?;
-        let (mut movies, mut seasons) = ((0, None), (0, None));
-        for (kind, list, at) in rows {
-            let (used, oldest): &mut (i64, Option<i64>) = if kind == "movie" { &mut movies } else { &mut seasons };
-            *used += if kind == "movie" { 1 } else { list.as_deref().map_or(0, |l| seasons_of(l).len() as i64) };
-            if oldest.is_none() {
-                *oldest = Some(at + LIMIT_WINDOW);
+        for (kind, seasons, at) in rows {
+            match TitleKind::parse(&kind) {
+                Some(TitleKind::Movie) => quota.movies.push((at, 1)),
+                _ => quota.seasons.push((at, seasons.as_deref().map_or(0, |s| seasons_of(s).len() as i64))),
             }
         }
-        let left = |limit: u32, used: i64| (limit > 0).then(|| (i64::from(limit) - used).max(0));
-        Ok(Quota {
-            movies_left: left(settings.request_limit_movies, movies.0),
-            seasons_left: left(settings.request_limit_seasons, seasons.0),
-            movies_free_at: movies.1,
-            seasons_free_at: seasons.1,
-        })
+        Ok(quota)
     }
 
     /// `GET /api/discover/{list}`.
-    pub async fn discover(&self, user: &AuthUser, list: List, page: u32) -> RequestResult<DiscoverPage> {
-        self.asker(user).await?;
-        let found = self.discover.list(list, page).await?;
-        self.page(user, &found).await
+    pub async fn discover(&self, caller: &Caller<'_>, list: List, page: u32) -> RequestResult<DiscoverPage> {
+        // For an account with an age limit, TMDB itself keeps the movie
+        // lists within it, so that few are left out.
+        let ceiling = match (caller.user.max_age, list) {
+            (Some(max_age), List::Movies | List::Upcoming) => self.discover.ceiling(max_age).await,
+            _ => None,
+        };
+        let found = self.discover.list(list, page, ceiling.as_deref()).await?;
+        self.page(caller, &found, false).await
     }
 
-    /// `GET /api/discover/search`.
-    pub async fn search(&self, user: &AuthUser, text: &str, page: u32) -> RequestResult<DiscoverPage> {
-        self.asker(user).await?;
+    /// `GET /api/discover/search`; `missing`: without the titles a library
+    /// the account can open has.
+    pub async fn search(
+        &self,
+        caller: &Caller<'_>,
+        text: &str,
+        page: u32,
+        missing: bool,
+    ) -> RequestResult<DiscoverPage> {
         let found = self.discover.search(text, page).await?;
-        self.page(user, &found).await
+        self.page(caller, &found, missing).await
     }
 
-    async fn page(&self, user: &AuthUser, found: &discover::Page) -> RequestResult<DiscoverPage> {
-        let marks = self.marks(user, &found.results).await?;
-        let results = found
+    /// A page of TMDB's titles as `caller` sees them. For an account with
+    /// an age limit, those above it are left out (and unrated ones, and
+    /// those whose details TMDB doesn't give), as in the libraries.
+    async fn page(&self, caller: &Caller<'_>, found: &discover::Page, missing: bool) -> RequestResult<DiscoverPage> {
+        let user = caller.user;
+        let mut marks: HashMap<(TitleKind, i64), Mark> = HashMap::new();
+        for kind in [TitleKind::Movie, TitleKind::Show] {
+            let known: Vec<Known> =
+                found.results.iter().filter(|t| t.kind == kind).map(|t| Known::tmdb(t.tmdb_id)).collect();
+            for (tmdb_id, mark) in self.marks(caller, kind, &known).await? {
+                marks.insert((kind, tmdb_id), mark);
+            }
+        }
+        // Details where they matter: the seasons of shows a library has or
+        // a request asks for, and every title's certification for an
+        // account with an age limit.
+        let limited = user.max_age.is_some();
+        let wanted: Vec<(TitleKind, i64)> = found
             .results
             .iter()
-            .map(|t| title_of(t, marks.get(&(t.kind, t.tmdb_id)).copied().unwrap_or_default()))
+            .filter(|t| {
+                limited
+                    || (t.kind == TitleKind::Show
+                        && marks.get(&(t.kind, t.tmdb_id)).is_some_and(|m| m.item_id.is_some() || m.requested()))
+            })
+            .map(|t| (t.kind, t.tmdb_id))
             .collect();
+        // Made before they run, as in `marks`.
+        let lookups: Vec<_> = wanted.iter().map(|(kind, id)| self.discover.details(*kind, *id)).collect();
+        let answers: Vec<_> = futures::stream::iter(lookups).buffered(LOOKUPS).collect().await;
+        let mut details: HashMap<(TitleKind, i64), Arc<Details>> = HashMap::new();
+        for (key, answer) in wanted.into_iter().zip(answers) {
+            match answer {
+                Ok(answer) => {
+                    details.insert(key, answer);
+                }
+                Err(err) => tracing::debug!("TMDB: {} {}'s details: {err}", key.0.as_str(), key.1),
+            }
+        }
+        let mut results = Vec::new();
+        for title in &found.results {
+            let key = (title.kind, title.tmdb_id);
+            let known = details.get(&key);
+            if known.is_some_and(|d| d.adult)
+                || (limited && known.is_none_or(|d| restricted(user, d.certification.as_deref())))
+            {
+                continue;
+            }
+            let mark = marks.get(&key).cloned().unwrap_or_default();
+            let lacking = match known {
+                Some(details) if title.kind == TitleKind::Show => {
+                    Some(lacking(details, &self.season_counts(&mark.shows).await?))
+                }
+                _ => None,
+            };
+            let status = status_of(title.kind, &mark, lacking.as_deref(), false);
+            if missing && status == TitleStatus::Library {
+                continue;
+            }
+            results.push(title_of(title, &mark, status));
+        }
         Ok(DiscoverPage { page: found.page, total_pages: found.total_pages, results })
     }
 
-    /// What the libraries and requests have of `titles`, for `user`.
-    async fn marks(&self, user: &AuthUser, titles: &[Found]) -> sqlx::Result<HashMap<(TitleKind, i64), Mark>> {
-        let mut marks: HashMap<(TitleKind, i64), Mark> = HashMap::new();
-        for kind in [TitleKind::Movie, TitleKind::Show] {
-            let known: Vec<Known> = titles
-                .iter()
-                .filter(|t| t.kind == kind)
-                .map(|t| Known { tmdb_id: t.tmdb_id, tvdb_id: None, imdb_id: None })
+    /// What the libraries it can open and the requests have of these titles
+    /// of `kind`, for `caller`, by TMDB's id.
+    async fn marks(&self, caller: &Caller<'_>, kind: TitleKind, known: &[Known]) -> sqlx::Result<HashMap<i64, Mark>> {
+        let mut marks: HashMap<i64, Mark> = HashMap::new();
+        if known.is_empty() {
+            return Ok(marks);
+        }
+        let user_id = caller.user.id;
+        let mut found = self.in_library(user_id, kind, known).await?;
+        // Shows a TV source other than TMDB named have no TMDB id: the
+        // ones not found are looked for by their other ids.
+        if kind == TitleKind::Show && self.shows_without_tmdb().await? {
+            let missing: Vec<usize> = (0..known.len())
+                .filter(|i| known[*i].tvdb_id.is_none() && known[*i].imdb_id.is_none())
+                .filter(|i| !found.iter().any(|f| f.0 == *i && f.2))
                 .collect();
-            if known.is_empty() {
-                continue;
-            }
-            let mut found = self.in_library(user.id, kind, &known).await?;
-            // Shows a TV source other than TMDB named have no TMDB id: the
-            // ones not found are looked for by their other ids.
-            if kind == TitleKind::Show && self.shows_without_tmdb().await? {
-                let missing: Vec<usize> = (0..known.len()).filter(|i| !found.iter().any(|f| f.0 == *i)).collect();
-                // Made before they run: a stream mapping borrowed indexes
-                // would keep the handlers' futures from being `Send`.
-                let lookups: Vec<_> = missing.iter().map(|i| self.discover.show_ids(known[*i].tmdb_id)).collect();
-                let ids: Vec<_> = futures::stream::iter(lookups).buffered(LOOKUPS).collect().await;
-                let (mut others, mut index) = (Vec::new(), Vec::new());
-                for (i, ids) in missing.iter().zip(ids) {
-                    match ids {
-                        Ok(ids) if ids.tvdb_id.is_some() || ids.imdb_id.is_some() => {
-                            others.push(Known {
-                                tmdb_id: known[*i].tmdb_id,
-                                tvdb_id: ids.tvdb_id,
-                                imdb_id: ids.imdb_id.clone(),
-                            });
-                            index.push(*i);
-                        }
-                        Ok(_) => {}
-                        Err(err) => tracing::debug!("TMDB: a show's ids: {err}"),
+            // Made before they run: a stream mapping borrowed indexes
+            // would keep the handlers' futures from being `Send`.
+            let lookups: Vec<_> = missing.iter().map(|i| self.discover.show_ids(known[*i].tmdb_id)).collect();
+            let ids: Vec<_> = futures::stream::iter(lookups).buffered(LOOKUPS).collect().await;
+            let (mut others, mut index) = (Vec::new(), Vec::new());
+            for (i, ids) in missing.iter().zip(ids) {
+                match ids {
+                    Ok(ids) if ids.tvdb_id.is_some() || ids.imdb_id.is_some() => {
+                        others.push(Known {
+                            tmdb_id: known[*i].tmdb_id,
+                            tvdb_id: ids.tvdb_id,
+                            imdb_id: ids.imdb_id.clone(),
+                        });
+                        index.push(*i);
                     }
-                }
-                if !others.is_empty() {
-                    let more = self.in_library(user.id, kind, &others).await?;
-                    found.extend(more.into_iter().map(|(j, item, visible)| (index[j], item, visible)));
+                    Ok(_) => {}
+                    Err(err) => tracing::debug!("TMDB: a show's ids: {err}"),
                 }
             }
-            for (i, item, visible) in found {
-                let mark = marks.entry((kind, known[i].tmdb_id)).or_default();
-                mark.library = true;
-                if visible && mark.item_id.is_none() {
-                    mark.item_id = Some(item);
-                }
+            if !others.is_empty() {
+                let more = self.in_library(user_id, kind, &others).await?;
+                found.extend(more.into_iter().map(|(j, item, visible)| (index[j], item, visible)));
             }
-            let ids: Vec<i64> = known.iter().map(|k| k.tmdb_id).collect();
-            for (tmdb_id, id, maker) in self.active_requests(kind, &ids).await? {
-                let mark = marks.entry((kind, tmdb_id)).or_default();
-                mark.requested = true;
-                if mark.request_id.is_none() && (user.is_admin || maker == user.id) {
-                    mark.request_id = Some(id);
-                }
+        }
+        // Libraries the account can't open don't count: it may ask for
+        // what only they have.
+        for (i, item, _) in found.into_iter().filter(|f| f.2) {
+            let mark = marks.entry(known[i].tmdb_id).or_default();
+            mark.item_id.get_or_insert(item);
+            if kind == TitleKind::Show && !mark.shows.contains(&item) {
+                mark.shows.push(item);
             }
+        }
+        let ids: Vec<i64> = known.iter().map(|k| k.tmdb_id).collect();
+        for (tmdb_id, id, seasons, mine, follows) in self.active_requests(user_id, kind, &ids).await? {
+            marks.entry(tmdb_id).or_default().active.push(Active {
+                id,
+                seasons: seasons.as_deref().map(seasons_of).unwrap_or_default(),
+                theirs: mine || caller.manager,
+                follows,
+            });
+        }
+        let since = now() - DECLINED_FOR;
+        let mut newest = HashSet::new();
+        for (tmdb_id, status, seasons, reason, decided_at) in self.own_requests(user_id, kind, &ids).await? {
+            let last = newest.insert(tmdb_id);
+            let Some(at) = decided_at.filter(|at| status == "declined" && *at > since) else { continue };
+            let mark = marks.entry(tmdb_id).or_default();
+            mark.declined |= last;
+            mark.declined_seasons.extend(seasons.as_deref().map(seasons_of).unwrap_or_default());
+            mark.refusal.get_or_insert(Declined { reason, at, again_at: at + DECLINED_FOR });
         }
         Ok(marks)
     }
@@ -789,18 +1294,52 @@ impl Requests {
     }
 
     /// Active requests for any of these titles, newest first: TMDB's id,
-    /// the request's, and its maker's.
-    async fn active_requests(&self, kind: TitleKind, tmdb_ids: &[i64]) -> sqlx::Result<Vec<(i64, i64, i64)>> {
+    /// the request's, its seasons, and whether `user_id` made or follows it
+    /// and follows it.
+    async fn active_requests(
+        &self,
+        user_id: i64,
+        kind: TitleKind,
+        tmdb_ids: &[i64],
+    ) -> sqlx::Result<Vec<(i64, i64, Option<String>, bool, bool)>> {
         let sql = format!(
-            "SELECT tmdb_id, id, user_id FROM requests
-             WHERE kind = ? AND tmdb_id IN ({}) AND status IN {ACTIVE} ORDER BY id DESC",
+            "SELECT r.tmdb_id, r.id, r.seasons, {MINE},
+                    EXISTS (SELECT 1 FROM request_watchers w WHERE w.request_id = r.id AND w.user_id = ?)
+             FROM requests r WHERE r.kind = ? AND r.tmdb_id IN ({}) AND r.status IN {ACTIVE} ORDER BY r.id DESC",
             vec!["?"; tmdb_ids.len()].join(",")
         );
-        let mut query = sqlx::query_as::<_, (i64, i64, i64)>(sqlx::AssertSqlSafe(sql.as_str())).bind(kind.as_str());
+        let mut query = sqlx::query_as::<_, (i64, i64, Option<String>, bool, bool)>(sqlx::AssertSqlSafe(sql.as_str()))
+            .bind(user_id)
+            .bind(user_id)
+            .bind(user_id)
+            .bind(kind.as_str());
         for id in tmdb_ids {
             query = query.bind(id);
         }
         query.fetch_all(&self.db.read).await
+    }
+
+    /// `user_id`'s requests for any of these titles, made or followed,
+    /// newest first: TMDB's id, the status, the seasons, the reason it was
+    /// declined (its own only), and when it was decided.
+    #[allow(clippy::type_complexity)]
+    async fn own_requests(
+        &self,
+        user_id: i64,
+        kind: TitleKind,
+        tmdb_ids: &[i64],
+    ) -> sqlx::Result<Vec<(i64, String, Option<String>, Option<String>, Option<i64>)>> {
+        let sql = format!(
+            "SELECT r.tmdb_id, r.status, r.seasons, CASE WHEN r.user_id = ? THEN r.reason END, r.decided_at
+             FROM requests r WHERE r.kind = ? AND r.tmdb_id IN ({}) AND {MINE}
+             ORDER BY r.created_at DESC, r.id DESC",
+            vec!["?"; tmdb_ids.len()].join(",")
+        );
+        let mut query = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str())).bind(user_id).bind(kind.as_str());
+        for id in tmdb_ids {
+            query = query.bind(id);
+        }
+        query.bind(user_id).bind(user_id).fetch_all(&self.db.read).await
     }
 
     /// Episodes the libraries have of each season of these shows (the most
@@ -829,57 +1368,49 @@ impl Requests {
     }
 
     /// `GET /api/discover/movie/{tmdb_id}` and `…/show/{tmdb_id}`.
-    pub async fn detail(&self, user: &AuthUser, kind: TitleKind, tmdb_id: i64) -> RequestResult<DiscoverDetail> {
-        self.asker(user).await?;
-        let details = self.discover.details(kind, tmdb_id).await?;
-        let library = self.in_library(user.id, kind, &[Known::of(&details)]).await?;
-        let active = self.active_requests(kind, &[tmdb_id]).await?;
-        let mark = Mark {
-            library: !library.is_empty(),
-            item_id: library.iter().find(|l| l.2).map(|l| l.1),
-            requested: !active.is_empty(),
-            request_id: active.iter().find(|a| user.is_admin || a.2 == user.id).map(|a| a.1),
-        };
-        let seasons = match kind {
-            TitleKind::Movie => None,
-            TitleKind::Show => {
-                let shows: Vec<i64> = library.iter().map(|l| l.1).collect();
-                let counts = self.season_counts(&shows).await?;
-                let asked = self.asked_seasons(tmdb_id).await?;
-                Some(
-                    details
-                        .seasons
-                        .iter()
-                        .map(|s| DiscoverSeason {
-                            number: s.number,
-                            name: s.name.clone(),
-                            episodes: s.episodes,
-                            aired: s.aired,
-                            air_date: s.air_date.clone(),
-                            poster_url: image_url(s.poster_path.as_deref(), "w342"),
-                            in_library: counts.get(&s.number).map_or(0, |c| c.0),
-                            requested: asked.contains(&s.number),
-                        })
-                        .collect(),
-                )
-            }
-        };
-        let rows = self.title_rows(user, kind, tmdb_id).await?;
+    pub async fn detail(&self, caller: &Caller<'_>, kind: TitleKind, tmdb_id: i64) -> RequestResult<DiscoverDetail> {
+        let user = caller.user;
+        let details = self.title(caller, kind, tmdb_id).await?;
+        let mark = self.marks(caller, kind, &[Known::of(&details)]).await?.remove(&tmdb_id).unwrap_or_default();
+        let counts = self.season_counts(&mark.shows).await?;
+        let restricted = restricted(user, details.certification.as_deref());
+        let lacking = (kind == TitleKind::Show).then(|| lacking(&details, &counts));
+        let status = status_of(kind, &mark, lacking.as_deref(), restricted);
+        let asked = mark.asked();
+        let seasons = (kind == TitleKind::Show).then(|| {
+            details
+                .seasons
+                .iter()
+                .map(|s| DiscoverSeason {
+                    number: s.number,
+                    name: s.name.clone(),
+                    episodes: s.episodes,
+                    aired: s.aired,
+                    air_date: s.air_date.clone(),
+                    poster_url: pictures::url(Picture::Poster, s.poster_path.as_deref()),
+                    in_library: counts.get(&s.number).map_or(0, |c| c.0),
+                    requested: asked.contains(&s.number),
+                    state: season_state(s, &counts, &asked),
+                    declined: mark.declined_seasons.contains(&s.number),
+                    request_id: mark.season_request(s.number),
+                })
+                .collect()
+        });
+        let rows = self.title_rows(caller, kind, tmdb_id).await?;
         let requests = self.dtos(user, rows).await?;
+        let quota = self.quota(caller).await?;
         let found = Found {
             kind,
             tmdb_id,
             title: details.title.clone(),
             year: details.year,
             overview: details.overview.clone(),
-            poster_path: None,
+            poster_path: details.poster_path.clone(),
             backdrop_path: details.backdrop_path.clone(),
             rating: details.rating,
         };
-        let mut title = title_of(&found, mark);
-        title.poster_url = image_url(details.poster_path.as_deref(), "w500");
         Ok(DiscoverDetail {
-            title,
+            title: title_of(&found, &mark, status),
             original_title: details.original_title.clone(),
             tagline: details.tagline.clone(),
             genres: details.genres.clone(),
@@ -889,34 +1420,114 @@ impl Requests {
             network: details.network.clone(),
             show_status: details.show_status.clone(),
             anime: details.anime,
+            imdb_id: details.imdb_id.clone(),
             cast: details.cast.clone(),
             seasons,
+            declined: mark.refusal.clone(),
+            restriction: restricted.then(|| restriction(details.certification.as_deref())),
+            watching: mark.watching(),
             requests,
+            movies_left: quota.left(TitleKind::Movie),
+            seasons_left: quota.left(TitleKind::Show),
+            movies_next_at: quota.free_at(TitleKind::Movie, 1),
+            seasons_next_at: quota.free_at(TitleKind::Show, 1),
         })
     }
 
-    /// The seasons active requests ask for of a show.
-    async fn asked_seasons(&self, tmdb_id: i64) -> sqlx::Result<HashSet<i64>> {
-        let lists: Vec<Option<String>> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT seasons FROM requests WHERE kind = 'show' AND tmdb_id = ? AND status IN {ACTIVE}"
-        )))
-        .bind(tmdb_id)
-        .fetch_all(&self.db.read)
-        .await?;
-        Ok(lists.iter().flatten().flat_map(|l| seasons_of(l)).collect())
+    /// A title's details, where `caller` may see it: TMDB's adult titles
+    /// are for managers only.
+    async fn title(&self, caller: &Caller<'_>, kind: TitleKind, tmdb_id: i64) -> RequestResult<Arc<Details>> {
+        let unknown = || RequestError::from(AppError::not_found("TMDB doesn't know this title"));
+        if tmdb_id <= 0 {
+            return Err(unknown());
+        }
+        let details = self.discover.details(kind, tmdb_id).await?;
+        if details.adult && !caller.manager {
+            return Err(unknown());
+        }
+        Ok(details)
     }
 
-    /// Requests for a title: `user`'s, everyone's for administrators;
-    /// newest first.
-    async fn title_rows(&self, user: &AuthUser, kind: TitleKind, tmdb_id: i64) -> sqlx::Result<Vec<RequestRow>> {
+    /// `GET /api/items/{id}/request`: a movie or show of the libraries
+    /// `caller` can open, as Discover sees it. TMDB is waited for
+    /// [`ITEM_WAIT`] at most in all, for which title the item is and its
+    /// details (they go on to the cache after).
+    pub async fn for_item(self: &Arc<Self>, caller: &Caller<'_>, item_id: i64) -> RequestResult<ItemRequest> {
+        let user = caller.user;
+        let sql = format!(
+            "{ME_CTE} SELECT i.kind, i.tmdb_id, i.tvdb_id, i.imdb_id FROM items i
+               LEFT JOIN items p ON p.id = i.parent_id LEFT JOIN items gp ON gp.id = i.grandparent_id
+             WHERE i.id = ? AND {VISIBLE}"
+        );
+        let item: Option<LibraryTitle> = sqlx::query_as(sqlx::AssertSqlSafe(sql.as_str()))
+            .bind(user.id)
+            .bind(item_id)
+            .fetch_optional(&self.db.read)
+            .await?;
+        let LibraryTitle { kind, tmdb_id, tvdb_id, imdb_id } =
+            item.ok_or_else(|| AppError::not_found(format!("item {item_id} not found")))?;
+        let kind = TitleKind::parse(&kind).ok_or_else(|| AppError::not_found("only movies and shows are asked for"))?;
+        let unknown = || RequestError::from(AppError::not_found("TMDB doesn't know this title"));
+        let until = tokio::time::Instant::now() + ITEM_WAIT;
+        // Named by TheTVDB or IMDb only: TMDB says which title it is.
+        let tmdb_id = match tmdb_id.filter(|id| *id > 0) {
+            Some(id) => id,
+            None => {
+                let (this, imdb) = (self.clone(), imdb_id.clone());
+                let find = tokio::spawn(async move { this.discover.find(kind, tvdb_id, imdb.as_deref()).await });
+                match tokio::time::timeout_at(until, find).await {
+                    Ok(Ok(found)) => found?.ok_or_else(unknown)?,
+                    // Still asking: the answer is kept for the next time.
+                    Ok(Err(_)) | Err(_) => return Err(RequestError::TmdbDown),
+                }
+            }
+        };
+        let this = self.clone();
+        let fetch = tokio::spawn(async move { this.discover.details(kind, tmdb_id).await });
+        let details = match tokio::time::timeout_at(until, fetch).await {
+            Ok(Ok(Ok(details))) => Some(details),
+            Ok(Ok(Err(TmdbError::NotFound))) => return Err(unknown()),
+            Ok(Ok(Err(err))) => {
+                tracing::debug!("TMDB: {} {tmdb_id}'s details: {err}", kind.as_str());
+                None
+            }
+            Ok(Err(_)) | Err(_) => None,
+        };
+        if details.as_ref().is_some_and(|d| d.adult) && !caller.manager {
+            return Err(unknown());
+        }
+        let known = match &details {
+            Some(details) => Known::of(details),
+            None => Known { tmdb_id, tvdb_id, imdb_id },
+        };
+        let mark = self.marks(caller, kind, &[known]).await?.remove(&tmdb_id).unwrap_or_default();
+        let counts = self.season_counts(&mark.shows).await?;
+        let restricted = details.as_ref().is_some_and(|d| restricted(user, d.certification.as_deref()));
+        let lacking = details.as_ref().filter(|_| kind == TitleKind::Show).map(|d| lacking(d, &counts));
+        let status = status_of(kind, &mark, lacking.as_deref(), restricted);
+        let askable = match kind {
+            TitleKind::Movie => Some(Vec::new()),
+            TitleKind::Show => details.as_ref().map(|d| askable(d, &counts, &mark, restricted)),
+        };
+        let request = match mark.request_id() {
+            Some(id) => self.dtos(user, self.row(id).await?.into_iter().collect()).await?.pop(),
+            None => None,
+        };
+        Ok(ItemRequest { kind, tmdb_id, status, request, askable })
+    }
+
+    /// Requests for a title `caller` may see (its own and those it follows;
+    /// everyone's for managers), newest first.
+    async fn title_rows(&self, caller: &Caller<'_>, kind: TitleKind, tmdb_id: i64) -> sqlx::Result<Vec<RequestRow>> {
         sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {COLUMNS} FROM {TABLES} WHERE r.kind = ? AND r.tmdb_id = ? AND (? OR r.user_id = ?)
+            "SELECT {COLUMNS} FROM {TABLES} WHERE r.kind = ? AND r.tmdb_id = ? AND (? OR {MINE})
              ORDER BY r.created_at DESC, r.id DESC"
         )))
         .bind(kind.as_str())
         .bind(tmdb_id)
-        .bind(user.is_admin)
-        .bind(user.id)
+        .bind(caller.manager)
+        .bind(caller.user.id)
+        .bind(caller.user.id)
         .fetch_all(&self.db.read)
         .await
     }
@@ -924,6 +1535,18 @@ impl Requests {
     async fn row(&self, id: i64) -> sqlx::Result<Option<RequestRow>> {
         sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {COLUMNS} FROM {TABLES} WHERE r.id = ?")))
             .bind(id)
+            .fetch_optional(&self.db.read)
+            .await
+    }
+
+    /// Request `id`, where `caller` may see it: its own, or one it follows
+    /// (any, for managers).
+    async fn row_for(&self, caller: &Caller<'_>, id: i64) -> sqlx::Result<Option<RequestRow>> {
+        sqlx::query_as(sqlx::AssertSqlSafe(format!("SELECT {COLUMNS} FROM {TABLES} WHERE r.id = ? AND (? OR {MINE})")))
+            .bind(id)
+            .bind(caller.manager)
+            .bind(caller.user.id)
+            .bind(caller.user.id)
             .fetch_optional(&self.db.read)
             .await
     }
@@ -959,15 +1582,17 @@ impl Requests {
     }
 
     /// `GET /api/requests`.
-    pub async fn list(&self, user: &AuthUser, query: ListQuery) -> RequestResult<RequestList> {
-        self.asker(user).await?;
-        let everyone = user.is_admin && !query.mine;
-        let counted: Vec<(String, i64)> =
-            sqlx::query_as("SELECT r.status, COUNT(*) FROM requests r WHERE (? OR r.user_id = ?) GROUP BY r.status")
-                .bind(everyone)
-                .bind(user.id)
-                .fetch_all(&self.db.read)
-                .await?;
+    pub async fn list(&self, caller: &Caller<'_>, query: ListQuery) -> RequestResult<RequestList> {
+        let user = caller.user;
+        let everyone = caller.manager && !query.mine;
+        let counted: Vec<(String, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT r.status, COUNT(*) FROM requests r WHERE (? OR {MINE}) GROUP BY r.status"
+        )))
+        .bind(everyone)
+        .bind(user.id)
+        .bind(user.id)
+        .fetch_all(&self.db.read)
+        .await?;
         let mut counts: BTreeMap<RequestStatus, i64> = RequestStatus::ALL.into_iter().map(|s| (s, 0)).collect();
         for (status, count) in counted {
             if let Some(status) = RequestStatus::parse(&status) {
@@ -980,10 +1605,11 @@ impl Requests {
         };
         let limit = query.limit.unwrap_or(LIST_LIMIT).clamp(1, LIST_MAX);
         let rows: Vec<RequestRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {COLUMNS} FROM {TABLES} WHERE (? OR r.user_id = ?) AND (? IS NULL OR r.status = ?)
+            "SELECT {COLUMNS} FROM {TABLES} WHERE (? OR {MINE}) AND (? IS NULL OR r.status = ?)
              ORDER BY r.created_at DESC, r.id DESC LIMIT ? OFFSET ?"
         )))
         .bind(everyone)
+        .bind(user.id)
         .bind(user.id)
         .bind(query.status.map(RequestStatus::as_str))
         .bind(query.status.map(RequestStatus::as_str))
@@ -995,74 +1621,103 @@ impl Requests {
     }
 
     /// `GET /api/requests/{id}`.
-    pub async fn get(&self, user: &AuthUser, id: i64) -> RequestResult<MediaRequest> {
-        self.asker(user).await?;
-        self.one(user, id).await
+    pub async fn get(&self, caller: &Caller<'_>, id: i64) -> RequestResult<MediaRequest> {
+        self.one(caller, id).await
     }
 
-    /// A request `user` may see.
-    async fn one(&self, user: &AuthUser, id: i64) -> RequestResult<MediaRequest> {
-        let row = self.row(id).await?.filter(|r| user.is_admin || r.user_id == user.id);
-        let row = row.ok_or_else(|| AppError::not_found("no such request"))?;
-        Ok(self.dtos(user, vec![row]).await?.remove(0))
+    /// A request `caller` may see.
+    async fn one(&self, caller: &Caller<'_>, id: i64) -> RequestResult<MediaRequest> {
+        let row = self.row_for(caller, id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
+        Ok(self.dtos(caller.user, vec![row]).await?.remove(0))
+    }
+
+    /// Whether `user` may read a request naming account `id` (its maker,
+    /// or who decided it): apps load their pictures, beside those of their
+    /// household.
+    pub async fn names(&self, user: &AuthUser, id: i64) -> sqlx::Result<bool> {
+        if !self.enabled() || !user.allowed(Scope::Requests) {
+            return Ok(false);
+        }
+        // Managers read everyone's requests; others, who decided theirs.
+        sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM requests r
+                            WHERE (? AND (r.user_id = ? OR r.decided_by = ?)) OR (r.user_id = ? AND r.decided_by = ?))",
+        )
+        .bind(user.manages_requests())
+        .bind(id)
+        .bind(id)
+        .bind(user.id)
+        .bind(id)
+        .fetch_one(&self.db.read)
+        .await
+    }
+
+    /// `GET /api/discover/images/{kind}/{file}`: one of TMDB's pictures, at
+    /// the size TMDB has for a client drawing it `width` pixels wide.
+    pub async fn picture(&self, kind: &str, file: &str, width: Option<u32>) -> RequestResult<Bytes> {
+        let missing = || RequestError::from(AppError::not_found("no such picture"));
+        let kind = Picture::parse(kind).filter(|_| pictures::valid_file(file)).ok_or_else(missing)?;
+        match self.pictures.get(kind.size(width), file).await {
+            Ok(bytes) => Ok(bytes),
+            Err(Unavailable::Missing) => Err(missing()),
+            Err(Unavailable::Failed) => Err(RequestError::PictureDown),
+        }
     }
 
     // -------------------------------------------------------------- changing
 
     /// `POST /api/requests`.
-    pub async fn create(&self, user: &AuthUser, new: NewRequest) -> RequestResult<MediaRequest> {
-        let access = self.asker(user).await?;
-        if new.kind == TitleKind::Movie && new.seasons.is_some() {
-            return Err(AppError::bad_request("movies have no seasons").into());
+    pub async fn create(&self, caller: &Caller<'_>, new: NewRequest) -> RequestResult<MediaRequest> {
+        let user = caller.user;
+        match (new.kind, new.seasons.as_deref()) {
+            (TitleKind::Movie, Some(_)) => return Err(AppError::bad_request("movies have no seasons").into()),
+            (TitleKind::Show, Some([])) => return Err(AppError::bad_request("ask for at least one season").into()),
+            _ => {}
         }
-        if new.tmdb_id <= 0 {
-            return Err(AppError::not_found("TMDB doesn't know this title").into());
+        let details = self.title(caller, new.kind, new.tmdb_id).await?;
+        if restricted(user, details.certification.as_deref()) {
+            return Err(RequestError::Restricted(restriction(details.certification.as_deref())));
         }
-        let details = self.discover.details(new.kind, new.tmdb_id).await?;
+        if let Some(n) = new.seasons.iter().flatten().find(|n| !details.seasons.iter().any(|s| s.number == **n)) {
+            return Err(AppError::bad_request(format!("TMDB lists no season {n} of {}", details.title)).into());
+        }
         let making = self.making.lock().await;
-        let library = self.in_library(user.id, new.kind, &[Known::of(&details)]).await?;
-        let active = self.active_requests(new.kind, &[new.tmdb_id]).await?;
+        let mark = self.marks(caller, new.kind, &[Known::of(&details)]).await?.remove(&new.tmdb_id).unwrap_or_default();
         let seasons = match new.kind {
-            TitleKind::Movie if !library.is_empty() => {
-                return Err(AppError::conflict("a library has this movie already").into());
+            TitleKind::Movie if mark.item_id.is_some() => {
+                return Err(RequestError::InLibrary("a library this account can open has this movie already".into()));
             }
-            TitleKind::Movie if !active.is_empty() => {
+            TitleKind::Movie if mark.requested() => {
                 return Err(AppError::conflict("this movie is asked for already").into());
             }
             TitleKind::Movie => None,
             TitleKind::Show => {
-                let listed: Vec<i64> = details.seasons.iter().map(|s| s.number).collect();
                 let mut wanted = match new.seasons {
-                    Some(asked) => {
-                        if let Some(n) = asked.iter().find(|n| !listed.contains(n)) {
-                            let message = format!("TMDB lists no season {n} of {}", details.title);
-                            return Err(AppError::bad_request(message).into());
-                        }
-                        asked
-                    }
-                    None => listed.iter().copied().filter(|n| *n > 0).collect(),
+                    Some(asked) => asked,
+                    None => details.seasons.iter().map(|s| s.number).filter(|n| *n > 0).collect(),
                 };
                 wanted.sort_unstable();
                 wanted.dedup();
                 if wanted.is_empty() {
-                    return Err(AppError::bad_request("ask for at least one season").into());
+                    let message = format!("TMDB lists no seasons of {} yet", details.title);
+                    return Err(AppError::bad_request(message).into());
                 }
-                let shows: Vec<i64> = library.iter().map(|l| l.1).collect();
-                let counts = self.season_counts(&shows).await?;
-                let asked = self.asked_seasons(new.tmdb_id).await?;
+                let counts = self.season_counts(&mark.shows).await?;
                 let there = |n: i64| details.seasons.iter().any(|s| s.number == n && whole(&counts, s) == Whole::Yes);
+                if wanted.iter().all(|n| there(*n)) {
+                    let message = "the libraries this account can open have these seasons whole";
+                    return Err(RequestError::InLibrary(message.into()));
+                }
+                let asked = mark.asked();
                 let left: Vec<i64> = wanted.into_iter().filter(|n| !asked.contains(n) && !there(*n)).collect();
                 if left.is_empty() {
-                    let message = "a library has these seasons whole, or they're asked for already";
-                    return Err(AppError::conflict(message).into());
+                    return Err(AppError::conflict("these seasons are asked for already, or there").into());
                 }
                 Some(left)
             }
         };
-        if !user.is_admin {
-            let quota = self.quota(user.id, &self.settings.get()).await?;
-            quota.allows(new.kind, seasons.as_ref().map_or(1, |s| s.len() as i64))?;
-        }
+        let quota = self.quota(caller).await?;
+        quota.allows(new.kind, seasons.as_ref().map_or(1, |s| s.len() as i64))?;
         let at = now();
         let id: i64 = sqlx::query_scalar(
             "INSERT INTO requests (kind, tmdb_id, tvdb_id, imdb_id, title, year, poster_path, backdrop_path, seasons,
@@ -1087,15 +1742,14 @@ impl Requests {
         drop(making);
         tracing::info!("{} asked for {} (request {id})", user.username, details.title);
         self.changed(user.id);
-        if access == RequestAccess::Auto {
+        if caller.access == RequestAccess::Auto {
             self.send(id, user.id, &Approval::default()).await?;
         }
-        self.one(user, id).await
+        self.one(caller, id).await
     }
 
     /// `POST /api/requests/{id}/approve`.
-    pub async fn approve(&self, admin: &AuthUser, id: i64, approval: Approval) -> RequestResult<MediaRequest> {
-        self.on()?;
+    pub async fn approve(&self, caller: &Caller<'_>, id: i64, approval: Approval) -> RequestResult<MediaRequest> {
         let approval = Approval {
             quality_profile: approval.quality_profile,
             root_folder: approval.root_folder.map(|f| f.trim().to_owned()),
@@ -1107,11 +1761,11 @@ impl Requests {
             return Err(AppError::bad_request("a root folder is a folder's path").into());
         }
         let row = self.row(id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
-        if !self.send(id, admin.id, &approval).await? {
+        if !self.send(id, caller.user.id, &approval).await? {
             let message = format!("this request is {}: only pending and failed ones are approved", row.status);
             return Err(AppError::conflict(message).into());
         }
-        self.one(admin, id).await
+        self.one(caller, id).await
     }
 
     /// Approves a pending or failed request as `decider`, and adds it to
@@ -1157,8 +1811,13 @@ impl Requests {
             match added {
                 Ok(arr_id) => {
                     tracing::info!("request {id}: {} added to {}", row.title, service.name());
-                    sqlx::query("UPDATE requests SET arr_id = ? WHERE id = ?")
+                    let sent_to = match kind {
+                        TitleKind::Movie => "radarr",
+                        TitleKind::Show => "sonarr",
+                    };
+                    sqlx::query("UPDATE requests SET arr_id = ?, sent_to = ? WHERE id = ?")
                         .bind(arr_id)
+                        .bind(sent_to)
                         .bind(id)
                         .execute(&self.db.write)
                         .await?;
@@ -1182,8 +1841,7 @@ impl Requests {
     }
 
     /// `POST /api/requests/{id}/decline`.
-    pub async fn decline(&self, admin: &AuthUser, id: i64, reason: Option<String>) -> RequestResult<MediaRequest> {
-        self.on()?;
+    pub async fn decline(&self, caller: &Caller<'_>, id: i64, reason: Option<String>) -> RequestResult<MediaRequest> {
         let reason = reason.map(|r| r.trim().to_owned()).filter(|r| !r.is_empty());
         if reason.as_ref().is_some_and(|r| r.chars().count() > REASON_MAX) {
             return Err(AppError::bad_request(format!("a reason is {REASON_MAX} characters at most")).into());
@@ -1191,11 +1849,13 @@ impl Requests {
         let row = self.row(id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
         let at = now();
         let declined = sqlx::query(
-            "UPDATE requests SET status = 'declined', reason = ?, decided_by = ?, decided_at = ?, updated_at = ?
+            "UPDATE requests SET status = 'declined', reason = ?, decided_by = ?, decided_at = ?, updated_at = ?,
+                                 news_at = ?
              WHERE id = ? AND status IN ('pending', 'failed')",
         )
         .bind(reason)
-        .bind(admin.id)
+        .bind(caller.user.id)
+        .bind(at)
         .bind(at)
         .bind(at)
         .bind(id)
@@ -1207,26 +1867,38 @@ impl Requests {
             return Err(AppError::conflict(message).into());
         }
         self.changed(row.user_id);
-        self.one(admin, id).await
+        self.one(caller, id).await
     }
 
     /// `DELETE /api/requests/{id}`: its maker withdraws it while it isn't
-    /// approved; administrators delete any.
-    pub async fn delete(&self, user: &AuthUser, id: i64) -> RequestResult<()> {
-        self.asker(user).await?;
-        let row = self.row(id).await?.filter(|r| user.is_admin || r.user_id == user.id);
+    /// approved; managers delete any.
+    pub async fn delete(&self, caller: &Caller<'_>, id: i64) -> RequestResult<()> {
+        let row = self.row(id).await?.filter(|r| caller.manager || r.user_id == caller.user.id);
         let row = row.ok_or_else(|| AppError::not_found("no such request"))?;
         let deleted =
             sqlx::query("DELETE FROM requests WHERE id = ? AND (? OR status IN ('pending', 'declined', 'failed'))")
                 .bind(id)
-                .bind(user.is_admin)
+                .bind(caller.manager)
                 .execute(&self.db.write)
                 .await?
                 .rows_affected();
         if deleted == 0 {
-            return Err(AppError::conflict("an approved request stays: an administrator can delete it").into());
+            let message = format!("this request is {}: an administrator can delete it", row.status);
+            return Err(AppError::conflict(message).into());
         }
         self.changed(row.user_id);
+        Ok(())
+    }
+
+    /// `POST /api/requests/seen`: what had news for `caller` is seen, on
+    /// its other devices too.
+    pub async fn seen(&self, caller: &Caller<'_>) -> RequestResult<()> {
+        sqlx::query("UPDATE users SET requests_seen_at = ? WHERE id = ?")
+            .bind(now())
+            .bind(caller.user.id)
+            .execute(&self.db.write)
+            .await?;
+        self.changed(caller.user.id);
         Ok(())
     }
 
@@ -1278,16 +1950,26 @@ impl Requests {
                     have.push(*n);
                 }
             }
+            let before = seasons_of(&row.available_seasons);
             if !asked.is_empty() && have.len() == asked.len() {
                 self.available(&row, item, &have).await?;
-            } else if have != seasons_of(&row.available_seasons) || row.item_id != Some(item.0) {
-                sqlx::query("UPDATE requests SET available_seasons = ?, item_id = ?, updated_at = ? WHERE id = ?")
-                    .bind(seasons_json(&have))
-                    .bind(item.0)
-                    .bind(now())
-                    .bind(row.id)
-                    .execute(&self.db.write)
-                    .await?;
+            } else if have != before || row.item_id != Some(item.0) {
+                // Seasons newly there are news to those waiting.
+                let news = have.iter().any(|n| !before.contains(n));
+                let at = now();
+                sqlx::query(
+                    "UPDATE requests SET available_seasons = ?, item_id = ?, updated_at = ?,
+                                         news_at = CASE WHEN ? THEN ? ELSE news_at END
+                     WHERE id = ?",
+                )
+                .bind(seasons_json(&have))
+                .bind(item.0)
+                .bind(at)
+                .bind(news)
+                .bind(at)
+                .bind(row.id)
+                .execute(&self.db.write)
+                .await?;
                 self.changed(row.user_id);
             }
         }
@@ -1300,11 +1982,12 @@ impl Requests {
         let at = now();
         let done = sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE requests SET status = 'available', item_id = ?, available_seasons = ?, available_at = ?,
-                 updated_at = ?
+                 updated_at = ?, news_at = ?
              WHERE id = ? AND status IN {ACTIVE}"
         )))
         .bind(item.0)
         .bind(seasons_json(seasons))
+        .bind(at)
         .bind(at)
         .bind(at)
         .bind(row.id)
@@ -1387,23 +2070,104 @@ mod tests {
     }
 
     #[test]
-    fn limits_say_when_they_free_up() {
+    fn a_seasons_state_is_the_first_that_holds() {
+        let counts = HashMap::from([(1, (10, 10)), (2, (4, 10)), (3, (2, 2))]);
+        let asked = HashSet::from([3, 6]);
+        assert_eq!(season_state(&season(1, 10), &counts, &asked), SeasonState::Library);
+        assert_eq!(season_state(&season(2, 10), &counts, &asked), SeasonState::Partial, "files of two episodes?");
+        assert_eq!(season_state(&season(3, 8), &counts, &asked), SeasonState::Requested);
+        assert_eq!(season_state(&season(4, 0), &counts, &asked), SeasonState::Unaired);
+        assert_eq!(season_state(&season(5, 8), &counts, &asked), SeasonState::Missing);
+        assert_eq!(season_state(&season(6, 0), &counts, &asked), SeasonState::Requested, "asked for before it airs");
+    }
+
+    fn active(id: i64, seasons: &[i64], theirs: bool) -> Active {
+        Active { id, seasons: seasons.to_vec(), theirs, follows: false }
+    }
+
+    #[test]
+    fn a_titles_status_is_the_first_that_holds() {
+        let movie = |mark: &Mark, restricted| status_of(TitleKind::Movie, mark, None, restricted);
+        let mut mark = Mark::default();
+        assert_eq!(movie(&mark, false), TitleStatus::None);
+        mark.declined = true;
+        assert_eq!(movie(&mark, false), TitleStatus::Declined);
+        mark.active.push(active(7, &[], false));
+        assert_eq!(movie(&mark, false), TitleStatus::Requested);
+        assert_eq!((mark.request_id(), mark.watching()), (None, false), "someone else's");
+        assert_eq!(movie(&mark, true), TitleStatus::Restricted);
+        mark.item_id = Some(3);
+        assert_eq!(movie(&mark, true), TitleStatus::Library);
+
+        // A library show lacking seasons 2 and 3.
+        let show = |mark: &Mark, lacking: &[i64]| status_of(TitleKind::Show, mark, Some(lacking), false);
+        let mut mark = Mark { item_id: Some(3), ..Mark::default() };
+        assert_eq!(show(&mark, &[]), TitleStatus::Library);
+        assert_eq!(show(&mark, &[2, 3]), TitleStatus::Partial);
+        mark.active.push(active(8, &[2], true));
+        assert_eq!(show(&mark, &[2, 3]), TitleStatus::Partial);
+        mark.declined_seasons.insert(3);
+        assert_eq!(show(&mark, &[2, 3]), TitleStatus::Declined, "what is left was declined");
+        mark.active.push(active(9, &[3], false));
+        assert_eq!(show(&mark, &[2, 3]), TitleStatus::Requested, "everything it lacks is asked for");
+        assert_eq!((mark.request_id(), mark.season_request(2), mark.season_request(3)), (Some(8), Some(8), None));
+        let unknown = Mark { active: vec![active(8, &[1], true)], ..Mark::default() };
+        assert_eq!(status_of(TitleKind::Show, &unknown, None, false), TitleStatus::Requested, "seasons not known");
+        assert_eq!(show(&Mark::default(), &[1]), TitleStatus::None);
+    }
+
+    #[test]
+    fn age_limits_keep_unrated_titles_out() {
+        let user = |max_age| AuthUser {
+            id: 2,
+            username: "ann".into(),
+            is_admin: false,
+            account_admin: false,
+            all_libraries: true,
+            max_age,
+            app: None,
+        };
+        assert!(!restricted(&user(None), None));
+        assert!(restricted(&user(Some(13)), None), "unrated");
+        assert!(restricted(&user(Some(13)), Some("R")));
+        assert!(!restricted(&user(Some(13)), Some("PG-13")));
+        assert_eq!(restriction(Some("R")), "Rated R: above this account's age limit");
+        assert_eq!(restriction(Some(" ")), "Not rated: with an age limit, this account may ask for rated titles only");
+    }
+
+    #[test]
+    fn limits_say_when_enough_stops_counting() {
         let at = crate::util::date_secs("2026-11-03").unwrap() + 14 * 3600 + 5 * 60;
-        let quota =
-            Quota { movies_left: Some(0), seasons_left: Some(2), movies_free_at: Some(at), seasons_free_at: None };
-        assert_eq!((quota.next_at(TitleKind::Movie), quota.next_at(TitleKind::Show)), (Some(at), None));
-        let refused = quota.allows(TitleKind::Movie, 1).unwrap_err().to_string();
+        let quota = Quota {
+            movies_limit: Some(1),
+            seasons_limit: Some(5),
+            movies: vec![(at - LIMIT_WINDOW, 1)],
+            seasons: vec![(at - LIMIT_WINDOW, 2), (at + 3600 - LIMIT_WINDOW, 1)],
+        };
+        assert_eq!((quota.left(TitleKind::Movie), quota.left(TitleKind::Show)), (Some(0), Some(2)));
+        assert_eq!((quota.free_at(TitleKind::Movie, 1), quota.free_at(TitleKind::Show, 1)), (Some(at), None));
+        let Err(RequestError::Limit { message, retry_at }) = quota.allows(TitleKind::Movie, 1) else { panic!() };
         assert_eq!(
-            refused,
-            "this account has asked for all the movies it may in 7 days: it may ask again from 2026-11-03 14:05 UTC"
+            (message.as_str(), retry_at),
+            (
+                "this account has asked for all the movies it may for now: it may ask for more from 2026-11-03 14:05 UTC",
+                Some(at)
+            )
         );
         assert!(quota.allows(TitleKind::Show, 2).is_ok());
+        // Four seasons need the oldest request's two to stop counting; five
+        // need all three.
+        let Err(RequestError::Limit { message, retry_at }) = quota.allows(TitleKind::Show, 4) else { panic!() };
+        assert_eq!((message.as_str(), retry_at), ("this account may ask for 2 more seasons for now", Some(at)));
+        assert_eq!(quota.free_at(TitleKind::Show, 5), Some(at + 3600));
+        let Err(RequestError::Limit { message, retry_at }) = quota.allows(TitleKind::Show, 6) else { panic!() };
         assert_eq!(
-            quota.allows(TitleKind::Show, 3).unwrap_err().to_string(),
-            "this account may ask for 2 more seasons for now"
+            (message.as_str(), retry_at),
+            ("this account may ask for at most 5 seasons per 7 days: ask for fewer", None)
         );
         let none = Quota::default();
-        assert!(none.allows(TitleKind::Movie, 100).is_ok() && none.next_at(TitleKind::Movie).is_none(), "no limit");
+        assert!(none.allows(TitleKind::Movie, 100).is_ok(), "no limit");
+        assert_eq!((none.left(TitleKind::Movie), none.free_at(TitleKind::Movie, 1)), (None, None));
     }
 
     #[test]

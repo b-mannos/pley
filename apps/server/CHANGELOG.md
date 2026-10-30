@@ -27,6 +27,9 @@ describes how they are made.
 - quick-xml 0.41 for XMLTV guides (RUSTSEC-2026-0194, RUSTSEC-2026-0195).
   A guide's title or description holding an HTML entity (`&nbsp;`) no
   longer comes out empty.
+- Radarr's and Sonarr's addresses can't be link-local (`169.254.0.0/16`,
+  `fe80::/10`), and whatever answers there in their stead is never quoted
+  back: only its HTTP status.
 
 ### Added
 
@@ -60,6 +63,18 @@ describes how they are made.
   `keyed_urls` gets a playlist address with a key of its own
   (`/api/live/media/{key}/index.m3u8`), so the Samsung and LG apps play it
   through the TV's own player.
+- Requests in Pley's apps: they ask with the new `requests` scope, and an
+  administrator's Pley apps approve and decline with `approvals`; an app
+  signed in before is told to sign in again. Discover's pictures come
+  through the server at the size each screen draws them, kept for 30 days,
+  so no app contacts TMDB. Discover marks shows partly in a library, titles
+  declined lately, and each season's state; accounts with an age limit see
+  only titles within it. A library title's page can show its request
+  (`GET /api/items/{id}/request`). The request summary says what an account
+  may do and what is new for it, and apps hear when to fetch it again.
+- Accounts made from an invitation with an age limit, or given one later,
+  don't ask for titles until an administrator lets them; accounts that may
+  not ask still see and withdraw their own requests.
 - The web app draws picture subtitles (PGS, VobSub, DVB) over the video
   itself, so the file still plays as it is, or its stream keeps HDR,
   rather than having them burned in.

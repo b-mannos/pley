@@ -98,6 +98,15 @@ pub enum ServerEvent {
         title: String,
         item_id: Option<i64>,
     },
+    /// What the request summary says may have changed: requests were turned
+    /// on or off, their limits or TMDB's key changed (`user_id: None`: to
+    /// every stream, apps' without `requests` included), or one account's
+    /// access to them (its request access, administrator role, age limit or
+    /// libraries). Clients fetch the summary again.
+    RequestsSettingsChanged {
+        #[serde(skip)]
+        user_id: Option<i64>,
+    },
 }
 
 impl ServerEvent {
@@ -117,7 +126,8 @@ impl ServerEvent {
             | ServerEvent::LiveChannelsChanged
             | ServerEvent::LiveTunersChanged
             | ServerEvent::RequestsChanged { .. }
-            | ServerEvent::RequestAvailable { .. } => None,
+            | ServerEvent::RequestAvailable { .. }
+            | ServerEvent::RequestsSettingsChanged { .. } => None,
         }
     }
 
@@ -130,6 +140,7 @@ impl ServerEvent {
             | ServerEvent::SessionStopped { user_id, .. }
             | ServerEvent::RequestsChanged { user_id }
             | ServerEvent::RequestAvailable { user_id, .. } => Some(*user_id),
+            ServerEvent::RequestsSettingsChanged { user_id } => *user_id,
             _ => None,
         }
     }
@@ -204,5 +215,10 @@ mod tests {
         assert_eq!((event.user_id(), event.to_admins()), (Some(4), false));
         let json = serde_json::to_string(&event).unwrap();
         assert_eq!(json, r#"{"type":"request_available","request_id":2,"title":"Heat","item_id":9}"#);
+        let everyone = ServerEvent::RequestsSettingsChanged { user_id: None };
+        assert_eq!((everyone.user_id(), everyone.to_admins()), (None, false));
+        assert_eq!(serde_json::to_string(&everyone).unwrap(), r#"{"type":"requests_settings_changed"}"#);
+        let one = ServerEvent::RequestsSettingsChanged { user_id: Some(4) };
+        assert_eq!((one.user_id(), one.to_admins()), (Some(4), false));
     }
 }

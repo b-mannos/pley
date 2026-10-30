@@ -210,7 +210,8 @@ impl Listener {
             | ServerEvent::LiveChannelsChanged
             | ServerEvent::LiveTunersChanged
             | ServerEvent::RequestsChanged { .. }
-            | ServerEvent::RequestAvailable { .. } => Ok(Vec::new()),
+            | ServerEvent::RequestAvailable { .. }
+            | ServerEvent::RequestsSettingsChanged { .. } => Ok(Vec::new()),
         };
         result.unwrap_or_else(|err| {
             tracing::debug!("notification socket: {err}");

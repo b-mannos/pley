@@ -290,14 +290,22 @@ pub async fn update_user(
             .bind(id)
             .execute(&state.db.write)
             .await?;
+    } else if current.max_age.is_none() && matches!(body.max_age, Some(Some(_))) {
+        // An age limit added: the account no longer asks until an
+        // administrator lets it, as those made with one.
+        sqlx::query("UPDATE users SET request_access = 'off' WHERE id = ? AND request_access = 'ask'")
+            .bind(id)
+            .execute(&state.db.write)
+            .await?;
     }
     state.auth.forget_user(id);
     if sees_otherwise {
         state.events.send(ServerEvent::OwnLibrariesChanged { user_id: id });
     }
-    // What they may ask for changed: their summary is fetched again.
-    if body.request_access.is_some() || body.is_admin.is_some() {
-        state.events.send(ServerEvent::RequestsChanged { user_id: id });
+    // What they may ask for, and what Discover shows them, changed: their
+    // summary is fetched again.
+    if body.request_access.is_some() || sees_otherwise {
+        state.events.send(ServerEvent::RequestsSettingsChanged { user_id: Some(id) });
     }
     Ok(Json(accounts::user(&state.db, id).await?.ok_or_else(|| AppError::not_found("user not found"))?))
 }
@@ -606,7 +614,8 @@ pub async fn delete_avatar(State(state): State<AppState>, user: AuthUser) -> Api
 }
 
 pub async fn avatar(State(state): State<AppState>, user: AuthUser, Path(id): Path<i64>) -> ApiResult<Response> {
-    // Apps see their own profile's picture, and those of its household.
+    // Apps see their own profile's picture, those of its household, and
+    // those of the people named in the requests they may read.
     if user.app.is_some() && id != user.id {
         let household: bool = sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM users me, users them
@@ -616,7 +625,7 @@ pub async fn avatar(State(state): State<AppState>, user: AuthUser, Path(id): Pat
         .bind(id)
         .fetch_one(&state.db.read)
         .await?;
-        if !household {
+        if !household && !state.requests.names(&user, id).await? {
             return Err(AppError::not_found("no picture"));
         }
     }
@@ -812,15 +821,20 @@ pub async fn accept_invite(
         return Err(AppError::conflict(format!("the username '{username}' is taken")));
     }
     // Invited people are friends of the server, not members of the home.
+    // With an age limit, they don't ask for titles until an administrator
+    // lets them (as accounts made with one).
+    let request_access = if invite.max_age.is_some() { RequestAccess::Off } else { RequestAccess::Ask };
     let id: i64 = sqlx::query_scalar(
-        "INSERT INTO users (id, username, password_hash, display_name, home, all_libraries, max_age, created_at)
-         VALUES ((SELECT last + 1 FROM user_ids), ?, ?, ?, 0, ?, ?, ?) RETURNING id",
+        "INSERT INTO users (id, username, password_hash, display_name, home, all_libraries, max_age, request_access,
+                            created_at)
+         VALUES ((SELECT last + 1 FROM user_ids), ?, ?, ?, 0, ?, ?, ?, ?) RETURNING id",
     )
     .bind(&username)
     .bind(hash)
     .bind(body.display_name.map(|n| n.trim().to_owned()).filter(|n| !n.is_empty()))
     .bind(invite.all_libraries)
     .bind(invite.max_age)
+    .bind(request_access.as_str())
     .bind(now())
     .fetch_one(&mut *tx)
     .await?;

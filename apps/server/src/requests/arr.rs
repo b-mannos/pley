@@ -254,7 +254,8 @@ impl Arr {
         }
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(ArrError::Refused(name, message_of(&text).unwrap_or_else(|| format!("HTTP {status}"))));
+            let message = message_of(&text).unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
+            return Err(ArrError::Refused(name, message));
         }
         resp.json::<T>().await.map_err(|e| ArrError::Unexpected(name, reason(&e.without_url())))
     }
@@ -512,14 +513,12 @@ fn reason(err: &reqwest::Error) -> String {
 }
 
 /// The message of an error answer: validation errors' (`[{ errorMessage }]`)
-/// or `{ message }`, else its text.
+/// or `{ message }`; `None` for anything else, whose text isn't quoted (a
+/// proxy's page, or whatever answers at an address that isn't Radarr's).
 fn message_of(text: &str) -> Option<String> {
-    let message = match serde_json::from_str::<Value>(text) {
-        Ok(Value::Array(errors)) => {
-            errors.iter().filter_map(|e| e["errorMessage"].as_str()).collect::<Vec<_>>().join("; ")
-        }
-        Ok(value) => value["message"].as_str().unwrap_or_default().to_owned(),
-        Err(_) => text.trim().to_owned(),
+    let message = match serde_json::from_str::<Value>(text).ok()? {
+        Value::Array(errors) => errors.iter().filter_map(|e| e["errorMessage"].as_str()).collect::<Vec<_>>().join("; "),
+        value => value["message"].as_str().unwrap_or_default().to_owned(),
     };
     (!message.is_empty()).then(|| quote(&message))
 }
@@ -568,8 +567,9 @@ mod tests {
             r#"[{"propertyName":"Path","errorMessage":"Path is already configured"},{"errorMessage":"Invalid"}]"#;
         assert_eq!(message_of(validation).as_deref(), Some("Path is already configured; Invalid"));
         assert_eq!(message_of(r#"{"message":"NotFound"}"#).as_deref(), Some("NotFound"));
-        assert_eq!(message_of(" <html>Bad gateway</html> ").as_deref(), Some("<html>Bad gateway</html>"));
+        assert_eq!(message_of(" <html>Bad gateway</html> ").as_deref(), None, "only HTTP 502 is said");
         assert_eq!(message_of("").as_deref(), None);
+        assert_eq!(message_of(r#"{"title":"oops"}"#).as_deref(), None);
         let long = "é".repeat(QUOTE + 5);
         assert_eq!(quote(&long).chars().count(), QUOTE + 1);
     }

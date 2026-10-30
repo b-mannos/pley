@@ -1,6 +1,6 @@
-//! Requests and Discover, against local stand-ins for TMDB, Radarr and
-//! Sonarr that answer like their APIs for a handful of titles and keep what
-//! they were sent. Nothing leaves the machine.
+//! Requests and Discover, against local stand-ins for TMDB (its API and its
+//! picture server), Radarr and Sonarr that answer like them for a handful
+//! of titles and keep what they were sent. Nothing leaves the machine.
 
 mod common;
 
@@ -11,7 +11,7 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::{BodyDataStream, Bytes};
 use axum::extract::{Query, State};
-use axum::http::{HeaderMap, Method, StatusCode, Uri};
+use axum::http::{HeaderMap, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use futures::StreamExt;
 use parking_lot::Mutex;
@@ -23,6 +23,8 @@ use common::TestApp;
 const KEY: &str = "test-key";
 const RADARR_KEY: &str = "radarr-key";
 const SONARR_KEY: &str = "sonarr-key";
+/// What TMDB's picture server answers: the start of a JPEG.
+const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F', 0, 1];
 
 /// What one of the services was sent.
 #[derive(Debug, Clone)]
@@ -41,6 +43,10 @@ struct Services {
     radarr: Arc<Mutex<Vec<Call>>>,
     sonarr: Arc<Mutex<Vec<Call>>>,
     tmdb: Arc<Mutex<Vec<String>>>,
+    /// What TMDB's picture server was asked for (`/w342/matrix.jpg`).
+    pictures: Arc<Mutex<Vec<String>>>,
+    /// The picture server fails this many times before it answers.
+    picture_failures: Arc<Mutex<u32>>,
     movies: Arc<Mutex<Vec<Value>>>,
     series: Arc<Mutex<Vec<Value>>>,
     /// Radarr refuses this many movies added before it takes one.
@@ -58,10 +64,11 @@ impl Services {
 }
 
 fn movie_details(id: i64) -> Option<Value> {
-    let (title, date, imdb) = match id {
-        603 => ("The Matrix", "1999-03-31", "tt0133093"),
-        604 => ("The Matrix Reloaded", "2003-05-15", "tt0234215"),
-        605 => ("The Matrix Revolutions", "2003-11-05", "tt0242653"),
+    let (title, date, imdb, rated) = match id {
+        603 => ("The Matrix", "1999-03-31", "tt0133093", "R"),
+        604 => ("The Matrix Reloaded", "2003-05-15", "tt0234215", "R"),
+        605 => ("The Matrix Revolutions", "2003-11-05", "tt0242653", "R"),
+        606 => ("Toy Robots", "2010-06-18", "tt1000606", "G"),
         _ => return None,
     };
     Some(json!({
@@ -69,10 +76,10 @@ fn movie_details(id: i64) -> Option<Value> {
         "tagline": "Welcome to the Real World.", "release_date": date, "runtime": 136,
         "genres": [{"id": 28, "name": "Action"}, {"id": 878, "name": "Science Fiction"}],
         "production_companies": [{"name": "Village Roadshow Pictures"}],
-        "poster_path": "/matrix.jpg", "backdrop_path": "/matrix-wide.jpg",
+        "poster_path": "/matrix.jpg", "backdrop_path": "/matrixwide.jpg",
         "vote_average": 8.2, "vote_count": 25000, "imdb_id": imdb,
         "keywords": {"keywords": [{"id": 310, "name": "artificial intelligence"}]},
-        "release_dates": {"results": [{"iso_3166_1": "US", "release_dates": [{"certification": ""}, {"certification": "R"}]}]},
+        "release_dates": {"results": [{"iso_3166_1": "US", "release_dates": [{"certification": ""}, {"certification": rated}]}]},
         "credits": {"cast": [{"name": "Keanu Reeves", "character": "Neo", "profile_path": "/keanu.jpg"}]}
     }))
 }
@@ -98,6 +105,18 @@ fn tmdb_answer(path: &str, query: &[(String, String)]) -> Option<Value> {
             _ => vec![],
         }}),
         "/search/movie" | "/search/tv" => json!({"results": []}),
+        "/certification/movie/list" => json!({"certifications": {"US": [
+            {"certification": "NR", "order": 0}, {"certification": "G", "order": 1},
+            {"certification": "PG", "order": 2}, {"certification": "PG-13", "order": 3},
+            {"certification": "R", "order": 4}, {"certification": "NC-17", "order": 5}
+        ]}}),
+        // Popular movies rated at most the ceiling asked for.
+        "/discover/movie" if param("certification.lte").is_some() => json!({"page": 1, "total_pages": 1, "results": [
+            {"id": 606, "title": "Toy Robots", "release_date": "2010-06-18", "vote_average": 7.1, "vote_count": 900}
+        ]}),
+        "/find/81189" if param("external_source") == Some("tvdb_id") => {
+            json!({"movie_results": [], "tv_results": [{"id": 1396}]})
+        }
         "/tv/1396" => json!({
             "name": "Breaking Bad", "original_name": "Breaking Bad", "original_language": "en", "origin_country": ["US"],
             "overview": "A chemistry teacher.", "first_air_date": "2008-01-20", "status": "Ended",
@@ -231,6 +250,19 @@ async fn serve(
     body: Bytes,
 ) -> Response {
     let path = uri.path();
+    // Every picture but `gone.jpg`.
+    if let Some(path) = path.strip_prefix("/tmdb-images") {
+        s.pictures.lock().push(path.to_owned());
+        let mut failures = s.picture_failures.lock();
+        if *failures > 0 {
+            *failures -= 1;
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        }
+        if path.ends_with("/gone.jpg") {
+            return StatusCode::NOT_FOUND.into_response();
+        }
+        return ([(header::CONTENT_TYPE, "image/jpeg")], JPEG).into_response();
+    }
     if let Some(path) = path.strip_prefix("/tmdb") {
         s.tmdb.lock().push(format!("{path}?{}", uri.query().unwrap_or_default()));
         if !query.iter().any(|(k, v)| k == "api_key" && v == KEY) {
@@ -293,6 +325,7 @@ async fn world() -> World {
             musicbrainz: format!("{base}/mb"),
             cover_art: format!("{base}/caa"),
             tmdb: format!("{base}/tmdb"),
+            tmdb_images: format!("{base}/tmdb-images"),
             opensubtitles: format!("{base}/opensubtitles"),
         });
     })
@@ -367,31 +400,73 @@ async fn requests_stay_off_until_turned_on() {
     let w = world().await;
     let summary = w.app.get("/api/requests/summary", &w.ann).await;
     assert_eq!(summary.status, StatusCode::OK);
-    assert_eq!(summary.body["enabled"], json!(false));
-    assert_eq!(summary.body["access"], json!("ask"));
-    for uri in ["/api/discover/trending", "/api/discover/search?q=matrix", "/api/requests", "/api/discover/movie/603"] {
+    assert_eq!(
+        summary.body,
+        json!({"enabled": false, "access": "ask", "movies_left": 0, "seasons_left": 0, "movies_limit": 0,
+               "seasons_limit": 0, "movies_next_at": null, "seasons_next_at": null, "manage": false, "pending": 0,
+               "failed": 0, "unseen": 0, "own": 0, "changed_at": null, "sign_in_again": null}),
+        "every number 0"
+    );
+    for uri in [
+        "/api/discover/trending",
+        "/api/discover/search?q=matrix",
+        "/api/requests",
+        "/api/discover/movie/603",
+        "/api/discover/images/poster/matrix.jpg",
+        "/api/items/1/request",
+    ] {
         let off = w.app.get(uri, &w.ann).await;
         assert_eq!(off.status, StatusCode::SERVICE_UNAVAILABLE, "{uri}");
         assert_eq!((&off.body["code"], &off.body["setup"]), (&json!("unavailable"), &json!(false)), "{uri}");
     }
+    // Before anything else is looked at.
+    let off = w.app.post("/api/requests/seen", &w.ann, json!({})).await;
+    assert_eq!(off.status, StatusCode::SERVICE_UNAVAILABLE);
+    let off = w.app.get("/api/requests/abc", &w.ann).await;
+    assert_eq!(off.status, StatusCode::SERVICE_UNAVAILABLE);
     // They find titles on TMDB.
     let refused = w.app.put("/api/settings", &w.admin, json!({"requests": true})).await;
     assert_eq!(refused.status, StatusCode::BAD_REQUEST);
+    let mut events = w.app.state.events.subscribe();
     w.turn_on(json!({})).await;
+    let heard: Vec<ServerEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+    assert!(
+        heard.iter().any(|e| matches!(e, ServerEvent::RequestsSettingsChanged { user_id: None })),
+        "every app fetches its summary again"
+    );
     let summary = w.app.get("/api/requests/summary", &w.admin).await;
     assert_eq!(
         summary.body,
-        json!({"enabled": true, "access": "auto", "movies_left": null, "seasons_left": null,
-               "movies_next_at": null, "seasons_next_at": null, "pending": 0})
+        json!({"enabled": true, "access": "auto", "movies_left": null, "seasons_left": null, "movies_limit": null,
+               "seasons_limit": null, "movies_next_at": null, "seasons_next_at": null, "manage": true, "pending": 0,
+               "failed": 0, "unseen": 0, "own": 0, "changed_at": null, "sign_in_again": null})
     );
-    // A key TMDB refuses: Discover says TMDB is the trouble.
+    // Malformed requests are answered as the rest.
+    let bad = w.app.get("/api/requests/abc", &w.ann).await;
+    assert_eq!((bad.status, &bad.body["code"]), (StatusCode::BAD_REQUEST, &json!("bad_request")), "{}", bad.text());
+    let bad = w.app.send_body(Method::POST, "/api/requests", &w.ann, "application/json", b"{\"kind\":".to_vec()).await;
+    assert_eq!((bad.status, &bad.body["code"]), (StatusCode::BAD_REQUEST, &json!("bad_request")), "{}", bad.text());
+    let bad = w.ask(&w.ann, json!({"kind": "film", "tmdb_id": 603})).await;
+    assert_eq!((bad.status, &bad.body["code"]), (StatusCode::BAD_REQUEST, &json!("bad_request")), "{}", bad.text());
+    let bad =
+        w.app.send_body(Method::POST, "/api/requests/1/decline", &w.admin, "application/json", b"[".to_vec()).await;
+    assert_eq!((bad.status, &bad.body["code"]), (StatusCode::BAD_REQUEST, &json!("bad_request")), "{}", bad.text());
+    let bad = w.app.get("/api/discover/movie/x", &w.ann).await;
+    assert_eq!((bad.status, &bad.body["code"]), (StatusCode::BAD_REQUEST, &json!("bad_request")), "{}", bad.text());
+    // A key TMDB refuses: Discover says TMDB is the trouble, and that
+    // trying again won't help.
     let reply = w.app.put("/api/settings", &w.admin, json!({"tmdb_api_key": "wrong"})).await;
     assert_eq!(reply.status, StatusCode::OK);
     w.app.wait_for_scans().await;
     let refused = w.app.get("/api/discover/trending", &w.ann).await;
     assert_eq!(refused.status, StatusCode::SERVICE_UNAVAILABLE);
-    assert_eq!(refused.body["setup"], json!(true), "{}", refused.text());
-    assert!(refused.body["message"].as_str().unwrap().contains("TMDB rejected the API key"));
+    assert_eq!(
+        (&refused.body["code"], &refused.body["setup"], &refused.body["retry"]),
+        (&json!("tmdb_key"), &json!(true), &json!(false)),
+        "{}",
+        refused.text()
+    );
+    assert!(refused.body["message"].as_str().unwrap().starts_with("TMDB refused this server's key"));
     // Nor are Radarr's and Sonarr's keys ever shown.
     let settings = w.app.get("/api/settings", &w.admin).await;
     assert!(!settings.mentions(RADARR_KEY) && !settings.mentions(SONARR_KEY), "{}", settings.text());
@@ -413,7 +488,7 @@ async fn a_movie_is_asked_for_approved_sent_to_radarr_and_found() {
     assert_eq!(results.len(), 2, "people are left out: {results:?}");
     assert_eq!(results[0]["kind"], json!("movie"));
     assert_eq!(results[0]["status"], json!("none"));
-    assert_eq!(results[0]["poster_url"], json!("https://image.tmdb.org/t/p/w342/matrix.jpg"));
+    assert_eq!(results[0]["poster_url"], json!("/api/discover/images/poster/matrix.jpg"), "through pley");
     assert_eq!((results[0]["year"].as_i64(), results[0]["rating"].as_f64()), (Some(1999), Some(8.2)));
     assert_eq!((&results[1]["kind"], &results[1]["title"]), (&json!("show"), &json!("Breaking Bad")));
     assert_eq!(trending.body["total_pages"], json!(3));
@@ -486,7 +561,14 @@ async fn a_movie_is_asked_for_approved_sent_to_radarr_and_found() {
     let matrix = &trending.body["results"][0];
     assert_eq!((&matrix["status"], &matrix["item_id"]), (&json!("library"), &json!(item)), "{matrix}");
     let more = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 603})).await;
-    assert_eq!(more.status, StatusCode::CONFLICT, "a library has it");
+    assert_eq!((more.status, &more.body["code"]), (StatusCode::CONFLICT, &json!("in_library")), "a library has it");
+    let page = w.app.get(&format!("/api/items/{item}/request"), &w.ann).await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.text());
+    assert_eq!(
+        (&page.body["kind"], &page.body["tmdb_id"], &page.body["status"]),
+        (&json!("movie"), &json!(603), &json!("library"))
+    );
+    assert_eq!((&page.body["request"], &page.body["askable"]), (&Value::Null, &json!([])), "none active");
 
     let list = w.app.get("/api/requests", &w.ann).await;
     assert_eq!((&list.body["total"], &list.body["counts"]["available"]), (&json!(1), &json!(1)));
@@ -509,20 +591,45 @@ async fn a_show_is_asked_for_the_seasons_a_library_lacks() {
     .await;
     w.identify("Breaking Bad", "tvdb_id = 81189, tmdb_id = NULL").await;
 
+    let show = w.app.ids(w.shows, &w.admin).await["Breaking Bad"];
     let detail = w.app.get("/api/discover/show/1396", &w.ann).await;
     assert_eq!(detail.status, StatusCode::OK, "{}", detail.text());
-    assert_eq!(detail.body["status"], json!("library"));
+    assert_eq!(
+        (&detail.body["status"], &detail.body["item_id"]),
+        (&json!("partial"), &json!(show)),
+        "season 2 to come"
+    );
     assert_eq!(detail.body["certification"], json!("TV-MA"));
-    assert_eq!(detail.body["poster_url"], json!("https://image.tmdb.org/t/p/w500/bb.jpg"));
-    let seasons: Vec<(i64, i64, i64)> = detail.body["seasons"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|s| (s["number"].as_i64().unwrap(), s["aired"].as_i64().unwrap(), s["in_library"].as_i64().unwrap()))
-        .collect();
-    assert_eq!(seasons, [(0, 2, 0), (1, 3, 3), (2, 2, 0)]);
+    assert_eq!(detail.body["imdb_id"], json!("tt0903747"));
+    assert_eq!(detail.body["poster_url"], json!("/api/discover/images/poster/bb.jpg"));
+    let seasons = |detail: &common::Reply| -> Vec<(i64, i64, i64, String)> {
+        detail.body["seasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| {
+                let number = |name: &str| s[name].as_i64().unwrap();
+                (number("number"), number("aired"), number("in_library"), s["state"].as_str().unwrap().to_owned())
+            })
+            .collect()
+    };
+    let state = |n: i64, aired, there, state: &str| (n, aired, there, state.to_owned());
+    assert_eq!(seasons(&detail), [state(0, 2, 0, "missing"), state(1, 3, 3, "library"), state(2, 2, 0, "missing")]);
+    assert_eq!((&detail.body["declined"], &detail.body["restriction"]), (&Value::Null, &Value::Null));
+    assert_eq!((&detail.body["watching"], &detail.body["requests"]), (&json!(false), &json!([])));
     let trending = w.app.get("/api/discover/trending", &w.ann).await;
-    assert_eq!(trending.body["results"][1]["status"], json!("library"), "by TheTVDB's id");
+    let found = &trending.body["results"][1];
+    assert_eq!((&found["status"], &found["item_id"]), (&json!("partial"), &json!(show)), "by TheTVDB's id");
+    // Its page in the library: TMDB says which title it is.
+    let page = w.app.get(&format!("/api/items/{show}/request"), &w.ann).await;
+    assert_eq!(
+        page.body,
+        json!({"kind": "show", "tmdb_id": 1396, "status": "partial", "request": null, "askable": [2]}),
+        "{}",
+        page.text()
+    );
+    assert!(w.services.tmdb.lock().iter().any(|r| r.starts_with("/find/81189?")));
+    assert_eq!(w.app.get("/api/items/999999/request", &w.ann).await.status, StatusCode::NOT_FOUND);
 
     let unknown = w.ask(&w.ann, json!({"kind": "show", "tmdb_id": 1396, "seasons": [5]})).await;
     assert_eq!(unknown.status, StatusCode::BAD_REQUEST);
@@ -539,7 +646,13 @@ async fn a_show_is_asked_for_the_seasons_a_library_lacks() {
     let requested: Vec<bool> =
         detail.body["seasons"].as_array().unwrap().iter().map(|s| s["requested"].as_bool().unwrap()).collect();
     assert_eq!(requested, [false, false, true]);
+    assert_eq!(seasons(&detail)[2], state(2, 2, 0, "requested"));
+    assert_eq!(detail.body["seasons"][2]["request_id"], json!(id));
+    assert_eq!((&detail.body["status"], &detail.body["request_id"]), (&json!("requested"), &json!(id)));
     assert_eq!(detail.body["requests"][0]["id"], json!(id), "administrators see everyone's");
+    let page = w.app.get(&format!("/api/items/{show}/request"), &w.ann).await;
+    assert_eq!((&page.body["status"], &page.body["askable"]), (&json!("requested"), &json!([])));
+    assert_eq!(page.body["request"]["id"], json!(id), "hers");
 
     let approved = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
     assert_eq!(status(&approved), (StatusCode::OK, "approved".to_owned()), "{}", approved.text());
@@ -585,9 +698,12 @@ async fn anime_goes_to_its_own_folder_and_limits_count_seasons() {
     let detail = w.app.get("/api/discover/show/9001", &w.ann).await;
     assert_eq!((&detail.body["anime"], &detail.body["original_title"]), (&json!(true), &json!("Uchuu no Kaubōi")));
 
+    // All three seasons: more than the limit itself.
     let too_many = w.ask(&w.ann, json!({"kind": "show", "tmdb_id": 9001})).await;
     assert_eq!(too_many.status, StatusCode::TOO_MANY_REQUESTS);
-    assert_eq!(too_many.body["message"], json!("this account may ask for 2 more seasons for now"));
+    assert_eq!(too_many.body["message"], json!("this account may ask for at most 2 seasons per 7 days: ask for fewer"));
+    assert_eq!(too_many.body["retry_at"], Value::Null);
+    assert!(!too_many.headers.contains_key(header::RETRY_AFTER), "waiting won't help");
     // Approved as asked, to anime's own folder.
     let asked = w.ask(&w.ann, json!({"kind": "show", "tmdb_id": 9001, "seasons": [2, 1]})).await;
     assert_eq!(status(&asked), (StatusCode::CREATED, "approved".to_owned()), "{}", asked.text());
@@ -596,15 +712,24 @@ async fn anime_goes_to_its_own_folder_and_limits_count_seasons() {
     let series = &w.services.sonarr_calls("POST", "/series")[0].body;
     assert_eq!((&series["rootFolderPath"], &series["seriesType"]), (&json!("/anime"), &json!("anime")));
 
+    let made = asked.body["created_at"].as_i64().unwrap();
     let none_left = w.ask(&w.ann, json!({"kind": "show", "tmdb_id": 9001, "seasons": [3]})).await;
     assert_eq!(none_left.status, StatusCode::TOO_MANY_REQUESTS);
     assert!(none_left.body["message"].as_str().unwrap().starts_with("this account has asked for all the seasons"));
+    assert_eq!(
+        (&none_left.body["code"], &none_left.body["retry_at"]),
+        (&json!("too_many_requests"), &json!(made + 7 * 86_400))
+    );
+    let wait: i64 = none_left.headers[header::RETRY_AFTER].to_str().unwrap().parse().unwrap();
+    assert!((7 * 86_400 - 60..=7 * 86_400).contains(&wait), "{wait}");
     let summary = w.app.get("/api/requests/summary", &w.ann).await;
     assert_eq!((&summary.body["access"], &summary.body["seasons_left"]), (&json!("auto"), &json!(0)));
-    assert_eq!(summary.body["movies_left"], json!(1));
-    let made = asked.body["created_at"].as_i64().unwrap();
+    assert_eq!((&summary.body["movies_left"], &summary.body["own"]), (&json!(1), &json!(1)));
+    assert_eq!((&summary.body["movies_limit"], &summary.body["seasons_limit"]), (&json!(1), &json!(2)));
     assert_eq!(summary.body["seasons_next_at"], json!(made + 7 * 86_400));
     assert_eq!(summary.body["movies_next_at"], Value::Null, "movies are left");
+    let detail = w.app.get("/api/discover/show/9001", &w.ann).await;
+    assert_eq!((&detail.body["seasons_left"], &detail.body["seasons_next_at"]), (&json!(0), &json!(made + 7 * 86_400)));
     // Administrators have no limit, and a show there already gets the
     // seasons asked for monitored and searched for.
     let more = w.ask(&w.admin, json!({"kind": "show", "tmdb_id": 9001, "seasons": [3]})).await;
@@ -628,6 +753,14 @@ async fn failures_say_why_and_approving_again_retries() {
     let failed = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
     assert_eq!(status(&failed), (StatusCode::OK, "failed".to_owned()));
     assert_eq!(failed.body["reason"], json!("Radarr refused: Root folder is not writable"));
+    // Left for a manager: counted for them, not against her limits.
+    let summary = w.app.get("/api/requests/summary", &w.admin).await;
+    assert_eq!((&summary.body["pending"], &summary.body["failed"]), (&json!(0), &json!(1)));
+    let summary = w.app.get("/api/requests/summary", &w.ann).await;
+    assert_eq!(
+        (&summary.body["manage"], &summary.body["failed"], &summary.body["own"]),
+        (&json!(false), &json!(0), &json!(1))
+    );
     // Again, with another profile and folder.
     let approved = w
         .app
@@ -711,20 +844,288 @@ async fn who_may_ask() {
     let (teen, _) = w.app.user(&w.admin, "teen", json!({"max_age": 13})).await;
     let summary = w.app.get("/api/requests/summary", &teen).await;
     assert_eq!((&summary.body["enabled"], &summary.body["access"]), (&json!(true), &json!("off")));
-    for uri in ["/api/discover/trending", "/api/requests"] {
-        assert_eq!(w.app.get(uri, &teen).await.status, StatusCode::FORBIDDEN, "{uri}");
+    for uri in ["/api/discover/trending", "/api/discover/movie/603"] {
+        let refused = w.app.get(uri, &teen).await;
+        assert_eq!((refused.status, &refused.body["code"]), (StatusCode::FORBIDDEN, &json!("no_access")), "{uri}");
     }
-    assert_eq!(w.ask(&teen, json!({"kind": "movie", "tmdb_id": 603})).await.status, StatusCode::FORBIDDEN);
+    let refused = w.ask(&teen, json!({"kind": "movie", "tmdb_id": 603})).await;
+    assert_eq!((refused.status, &refused.body["code"]), (StatusCode::FORBIDDEN, &json!("no_access")));
+    // Pictures, and its own requests, it still has.
+    let list = w.app.get("/api/requests", &teen).await;
+    assert_eq!((list.status, &list.body["total"]), (StatusCode::OK, &json!(0)));
+    let poster = w.app.get("/api/discover/images/poster/matrix.jpg", &teen).await;
+    assert_eq!(poster.status, StatusCode::OK);
 
+    let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 604})).await;
+    let id = asked.body["id"].as_i64().unwrap();
     let mut events = w.app.state.events.subscribe();
     let user = format!("/api/users/{}", w.ann_id);
     let reply = w.app.patch(&user, &w.admin, json!({"request_access": "off"})).await;
     assert_eq!(reply.body["request_access"], json!("off"));
     let heard: Vec<ServerEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
-    assert!(heard.iter().any(|e| matches!(e, ServerEvent::RequestsChanged { user_id } if *user_id == w.ann_id)));
+    assert!(heard.iter().any(|e| matches!(e,
+        ServerEvent::RequestsSettingsChanged { user_id: Some(user_id) } if *user_id == w.ann_id)));
     assert_eq!(w.app.get("/api/discover/trending", &w.ann).await.status, StatusCode::FORBIDDEN);
+    // She keeps hers: she reads and withdraws it.
+    let summary = w.app.get("/api/requests/summary", &w.ann).await;
+    assert_eq!((&summary.body["access"], &summary.body["own"]), (&json!("off"), &json!(1)));
+    assert_eq!(w.app.get(&format!("/api/requests/{id}"), &w.ann).await.status, StatusCode::OK);
+    assert_eq!(w.app.delete(&format!("/api/requests/{id}"), &w.ann).await.status, StatusCode::NO_CONTENT);
     let wrong = w.app.patch(&user, &w.admin, json!({"request_access": "always"})).await;
     assert!(wrong.status.is_client_error());
+
+    // An age limit added: no more asking until an administrator lets it,
+    // unless the same change says so.
+    let (_, bob) = w.app.user(&w.admin, "bob", json!({})).await;
+    let (_, cid) = w.app.user(&w.admin, "cid", json!({})).await;
+    let limited = w.app.patch(&format!("/api/users/{bob}"), &w.admin, json!({"max_age": 13})).await;
+    assert_eq!(limited.body["request_access"], json!("off"), "{}", limited.text());
+    let both =
+        w.app.patch(&format!("/api/users/{cid}"), &w.admin, json!({"max_age": 13, "request_access": "ask"})).await;
+    assert_eq!(both.body["request_access"], json!("ask"), "{}", both.text());
+    w.app.patch(&format!("/api/users/{bob}"), &w.admin, json!({"request_access": "ask"})).await;
+    let changed = w.app.patch(&format!("/api/users/{bob}"), &w.admin, json!({"max_age": 16})).await;
+    assert_eq!(changed.body["request_access"], json!("ask"), "only adding one changes it");
+}
+
+#[tokio::test]
+async fn age_limits_keep_titles_above_them_out() {
+    let w = world().await;
+    w.turn_on(json!({})).await;
+    let (teen, teen_id) = w.app.user(&w.admin, "teen", json!({"max_age": 13})).await;
+    let let_ask = w.app.patch(&format!("/api/users/{teen_id}"), &w.admin, json!({"request_access": "ask"})).await;
+    assert_eq!(let_ask.body["request_access"], json!("ask"));
+    // Rated R and TV-MA: left out, even when that leaves a page empty.
+    let trending = w.app.get("/api/discover/trending", &teen).await;
+    assert_eq!(trending.status, StatusCode::OK, "{}", trending.text());
+    assert_eq!((&trending.body["results"], &trending.body["total_pages"]), (&json!([]), &json!(3)));
+    let found = w.app.get("/api/discover/search?q=matrix", &teen).await;
+    assert_eq!(found.body["results"], json!([]));
+    // Popular movies come from TMDB within the limit.
+    let movies = w.app.get("/api/discover/movies", &teen).await;
+    assert_eq!(common::titles(&movies.body["results"]), ["Toy Robots"], "{}", movies.text());
+    let asked: Vec<String> =
+        w.services.tmdb.lock().iter().filter(|r| r.starts_with("/discover/movie?")).cloned().collect();
+    assert!(asked[0].contains("certification.lte=PG-13") && asked[0].contains("certification_country=US"), "{asked:?}");
+    // A title page reached another way says why.
+    let detail = w.app.get("/api/discover/movie/603", &teen).await;
+    assert_eq!(
+        (&detail.body["status"], &detail.body["restriction"]),
+        (&json!("restricted"), &json!("Rated R: above this account's age limit")),
+        "{}",
+        detail.text()
+    );
+    let refused = w.ask(&teen, json!({"kind": "movie", "tmdb_id": 603})).await;
+    assert_eq!(
+        (refused.status, &refused.body["code"], &refused.body["message"]),
+        (StatusCode::FORBIDDEN, &json!("restricted"), &json!("Rated R: above this account's age limit"))
+    );
+    let asked = w.ask(&teen, json!({"kind": "movie", "tmdb_id": 606})).await;
+    assert_eq!(asked.status, StatusCode::CREATED, "{}", asked.text());
+    // Without one, nothing is left out.
+    let trending = w.app.get("/api/discover/trending", &w.ann).await;
+    assert_eq!(trending.body["results"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn pictures_come_through_pley_and_are_kept() {
+    let w = world().await;
+    w.turn_on(json!({})).await;
+    let poster = w.app.get("/api/discover/images/poster/matrix.jpg", &w.ann).await;
+    assert_eq!(poster.status, StatusCode::OK, "{}", poster.text());
+    assert_eq!(poster.bytes, JPEG);
+    assert_eq!(poster.headers[header::CONTENT_TYPE], "image/jpeg");
+    assert_eq!(poster.headers[header::CACHE_CONTROL], "private, max-age=604800, immutable");
+    let kept = w.app.state.config.cache_dir().join("discover").join("w342").join("matrix.jpg");
+    assert_eq!(std::fs::read(&kept).unwrap(), JPEG, "kept as a file");
+    // Kept: TMDB isn't asked again. Each width gets TMDB's size for it.
+    assert_eq!(w.app.get("/api/discover/images/poster/matrix.jpg", &w.ann).await.bytes, JPEG);
+    for uri in [
+        "/api/discover/images/poster/matrix.jpg?w=100",
+        "/api/discover/images/backdrop/matrixwide.jpg?w=3840",
+        "/api/discover/images/profile/keanu.jpg?w=300",
+        "/api/discover/images/still/episode.png?w=wide",
+    ] {
+        assert_eq!(w.app.get(uri, &w.ann).await.status, StatusCode::OK, "{uri}");
+    }
+    assert_eq!(
+        *w.services.pictures.lock(),
+        ["/w342/matrix.jpg", "/w154/matrix.jpg", "/original/matrixwide.jpg", "/h632/keanu.jpg", "/w300/episode.png"]
+    );
+
+    // TMDB has no such picture: believed for a while.
+    for _ in 0..2 {
+        let gone = w.app.get("/api/discover/images/poster/gone.jpg", &w.ann).await;
+        assert_eq!((gone.status, &gone.body["code"]), (StatusCode::NOT_FOUND, &json!("not_found")));
+    }
+    assert_eq!(w.services.pictures.lock().iter().filter(|p| p.ends_with("/gone.jpg")).count(), 1);
+    // TMDB failing: said so, and nothing kept or remembered.
+    *w.services.picture_failures.lock() = 1;
+    let down = w.app.get("/api/discover/images/poster/later.jpg", &w.ann).await;
+    assert_eq!((down.status, &down.body["code"]), (StatusCode::BAD_GATEWAY, &json!("tmdb_down")), "{}", down.text());
+    assert_eq!(down.headers[header::CACHE_CONTROL], "no-store");
+    assert_eq!(w.app.get("/api/discover/images/poster/later.jpg", &w.ann).await.status, StatusCode::OK);
+    // TMDB's own names and kinds only: nothing else is asked for.
+    let asked = w.services.pictures.lock().len();
+    for uri in [
+        "/api/discover/images/poster/matrix.svg",
+        "/api/discover/images/poster/..%2Fsecret.jpg",
+        "/api/discover/images/poster/a-b.jpg",
+        "/api/discover/images/logo/matrix.jpg",
+    ] {
+        let refused = w.app.get(uri, &w.ann).await;
+        assert_eq!((refused.status, &refused.body["code"]), (StatusCode::NOT_FOUND, &json!("not_found")), "{uri}");
+    }
+    assert_eq!(w.services.pictures.lock().len(), asked);
+
+    // Apps: with `requests`, the token in the header.
+    let (app, _) = w.app.app_token(w.ann_id, "library requests").await;
+    assert_eq!(w.app.get("/api/discover/images/poster/matrix.jpg", &app).await.status, StatusCode::OK);
+    let (library, _) = w.app.app_token(w.ann_id, "library").await;
+    let refused = w.app.get("/api/discover/images/poster/matrix.jpg", &library).await;
+    assert_eq!((refused.status, &refused.body["code"]), (StatusCode::FORBIDDEN, &json!("insufficient_scope")));
+    let in_url = format!("/api/discover/images/poster/matrix.jpg?token={app}");
+    assert_eq!(w.app.call(Method::GET, &in_url, None, None, &[]).await.status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn news_is_unseen_until_looked_at() {
+    let w = world().await;
+    w.turn_on(json!({})).await;
+    let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 604})).await;
+    let id = asked.body["id"].as_i64().unwrap();
+    let summary = w.app.get("/api/requests/summary", &w.ann).await;
+    assert_eq!((&summary.body["own"], &summary.body["unseen"]), (&json!(1), &json!(0)), "asking is no news");
+    assert_eq!(summary.body["changed_at"], asked.body["updated_at"]);
+    let summary = w.app.get("/api/requests/summary", &w.admin).await;
+    assert_eq!((&summary.body["pending"], &summary.body["own"]), (&json!(1), &json!(0)));
+    assert_eq!(summary.body["changed_at"], asked.body["updated_at"], "managers: everyone's");
+    let (bob, _) = w.app.user(&w.admin, "bob", json!({})).await;
+    assert_eq!(w.app.get("/api/requests/summary", &bob).await.body["changed_at"], Value::Null, "not his");
+
+    let declined = w.app.post(&format!("/api/requests/{id}/decline"), &w.admin, json!({"reason": "No"})).await;
+    assert_eq!(status(&declined), (StatusCode::OK, "declined".to_owned()));
+    assert_eq!(w.app.get("/api/requests/summary", &w.ann).await.body["unseen"], json!(1));
+    let mut events = w.app.state.events.subscribe();
+    let seen = w.app.post("/api/requests/seen", &w.ann, json!({})).await;
+    assert_eq!(seen.status, StatusCode::NO_CONTENT);
+    let heard: Vec<ServerEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
+    assert!(
+        heard.iter().any(|e| matches!(e, ServerEvent::RequestsChanged { user_id } if *user_id == w.ann_id)),
+        "her other devices clear their badges too"
+    );
+    assert_eq!(w.app.get("/api/requests/summary", &w.ann).await.body["unseen"], json!(0));
+
+    // Declined lately: Discover says so, and until when.
+    let detail = w.app.get("/api/discover/movie/604", &w.ann).await;
+    assert_eq!(detail.body["status"], json!("declined"), "{}", detail.text());
+    let at = declined.body["decided_at"].as_i64().unwrap();
+    assert_eq!(detail.body["declined"], json!({"reason": "No", "at": at, "again_at": at + 30 * 86_400}));
+    let found = w.app.get("/api/discover/search?q=matrix", &w.ann).await;
+    assert_eq!(found.body["results"][1]["status"], json!("declined"));
+    let found = w.app.get("/api/discover/search?q=matrix", &bob).await;
+    assert_eq!(found.body["results"][1]["status"], json!("none"), "declined for her only");
+}
+
+#[tokio::test]
+async fn apps_ask_with_requests_and_manage_with_approvals() {
+    let w = world().await;
+    w.turn_on(json!({})).await;
+    // Signed in before it could ask: told to sign in again, every number 0.
+    let (old, _) = w.app.app_token(w.ann_id, "library play").await;
+    let summary = w.app.get("/api/requests/summary", &old).await;
+    assert_eq!(summary.status, StatusCode::OK, "any app");
+    assert_eq!((&summary.body["access"], &summary.body["sign_in_again"]), (&json!("ask"), &json!("requests")));
+    assert_eq!((&summary.body["movies_left"], &summary.body["manage"]), (&json!(0), &json!(false)));
+    let refused = w.app.get("/api/discover/trending", &old).await;
+    assert_eq!((refused.status, &refused.body["code"]), (StatusCode::FORBIDDEN, &json!("insufficient_scope")));
+    // pley's own apps ask with `requests`; `approvals` does nothing for her.
+    let (anns, _) = w.app.app_token(w.ann_id, "library requests approvals").await;
+    let summary = w.app.get("/api/requests/summary", &anns).await;
+    assert_eq!((&summary.body["sign_in_again"], &summary.body["manage"]), (&Value::Null, &json!(false)));
+    let asked = w.ask(&anns, json!({"kind": "movie", "tmdb_id": 603})).await;
+    assert_eq!(status(&asked), (StatusCode::CREATED, "pending".to_owned()), "{}", asked.text());
+    let id = asked.body["id"].as_i64().unwrap();
+    let refused = w.app.post(&format!("/api/requests/{id}/approve"), &anns, json!({})).await;
+    assert_eq!((refused.status, &refused.body["code"]), (StatusCode::FORBIDDEN, &json!("forbidden")));
+
+    // An administrator's: approved as it asks, managing with `approvals`.
+    let (admins, _) = w.app.app_token(1, "library requests").await;
+    let summary = w.app.get("/api/requests/summary", &admins).await;
+    assert_eq!(
+        (&summary.body["access"], &summary.body["manage"], &summary.body["sign_in_again"], &summary.body["pending"]),
+        (&json!("auto"), &json!(false), &json!("approvals"), &json!(0))
+    );
+    let refused = w.app.post(&format!("/api/requests/{id}/approve"), &admins, json!({})).await;
+    assert_eq!((refused.status, &refused.body["code"]), (StatusCode::FORBIDDEN, &json!("insufficient_scope")));
+    assert_eq!(w.app.get(&format!("/api/requests/{id}"), &admins).await.status, StatusCode::NOT_FOUND, "hers");
+    let (manager, _) = w.app.app_token(1, "library requests approvals").await;
+    let summary = w.app.get("/api/requests/summary", &manager).await;
+    assert_eq!(
+        (&summary.body["manage"], &summary.body["pending"], &summary.body["sign_in_again"]),
+        (&json!(true), &json!(1), &Value::Null)
+    );
+    let approved = w.app.post(&format!("/api/requests/{id}/approve"), &manager, json!({})).await;
+    assert_eq!(status(&approved), (StatusCode::OK, "approved".to_owned()), "{}", approved.text());
+    let me = w.app.get("/api/auth/me", &manager).await;
+    assert_eq!((&me.body["is_admin"], &me.body["request_access"]), (&json!(false), &json!("auto")));
+
+    // Other publishers' apps can't be allowed `approvals`, and an
+    // administrator's requests from them wait for a manager.
+    let other = w
+        .app
+        .state
+        .auth
+        .issue(pley::auth::grants::NewGrant {
+            user_id: 1,
+            approved_by: 1,
+            client_id: "https://player.example/client.json".into(),
+            client_name: Some("Player".into()),
+            scopes: pley::auth::scopes::Scopes::parse("library requests").unwrap(),
+            refresh: false,
+            first_party: false,
+            session_hash: None,
+            user_agent: None,
+            ip: None,
+        })
+        .await
+        .unwrap()
+        .access_token;
+    let summary = w.app.get("/api/requests/summary", &other).await;
+    assert_eq!((&summary.body["access"], &summary.body["sign_in_again"]), (&json!("ask"), &Value::Null));
+    assert_eq!(w.app.get("/api/auth/me", &other).await.body["request_access"], json!("ask"));
+    let asked = w.ask(&other, json!({"kind": "movie", "tmdb_id": 605})).await;
+    assert_eq!(status(&asked), (StatusCode::CREATED, "pending".to_owned()), "{}", asked.text());
+
+    // Apps load the pictures of the people named in the requests they may
+    // read, beside their household's.
+    let (_, dee) = w.app.user(&w.admin, "dee", json!({"home": false})).await;
+    let avatars = w.app.state.config.data_dir.join("avatars");
+    std::fs::create_dir_all(&avatars).unwrap();
+    for id in [1, dee] {
+        std::fs::write(avatars.join(format!("{id}.jpg")), JPEG).unwrap();
+        sqlx::query("UPDATE users SET avatar = ? WHERE id = ?")
+            .bind(format!("{id}.jpg"))
+            .bind(id)
+            .execute(&w.app.state.db.write)
+            .await
+            .unwrap();
+    }
+    let picture = |token: String, id: i64| {
+        let app = &w.app;
+        async move { app.get(&format!("/api/users/{id}/avatar"), &token).await.status }
+    };
+    let (dees, _) = w.app.app_token(dee, "library requests").await;
+    assert_eq!(picture(dees.clone(), 1).await, StatusCode::NOT_FOUND);
+    assert_eq!(picture(manager.clone(), dee).await, StatusCode::NOT_FOUND);
+    let asked = w.ask(&dees, json!({"kind": "movie", "tmdb_id": 604})).await;
+    let id = asked.body["id"].as_i64().unwrap();
+    assert_eq!(picture(manager.clone(), dee).await, StatusCode::OK, "who asked");
+    assert_eq!(picture(dees.clone(), 1).await, StatusCode::NOT_FOUND, "nobody decided yet");
+    w.app.post(&format!("/api/requests/{id}/decline"), &manager, json!({})).await;
+    assert_eq!(picture(dees.clone(), 1).await, StatusCode::OK, "who decided");
+    let (library, _) = w.app.app_token(dee, "library").await;
+    assert_eq!(picture(library, 1).await, StatusCode::NOT_FOUND, "an app that can't read requests");
 }
 
 /// `/api/events` as `token`'s account hears it.

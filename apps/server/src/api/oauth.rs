@@ -409,8 +409,8 @@ fn check_request(params: &[(String, String)], client: &clients::Client, issuer: 
 
 /// The scopes an app asks for in `scope` (here and at the device endpoint):
 /// none means `library`; names pley doesn't know (openid among them),
-/// `profiles` for apps by other publishers, and more than the app's
-/// description allows are refused.
+/// `profiles` and `approvals` for apps by other publishers, and more than
+/// the app's description allows are refused.
 fn asked_scopes(scope: Option<&str>, client: &clients::Client) -> Result<Scopes, ReturnedError> {
     let fail = |description: &str| ReturnedError { error: "invalid_scope", description: description.to_owned() };
     let asked = match scope.map(Scopes::parse) {
@@ -428,6 +428,10 @@ fn asked_scopes(scope: Option<&str>, client: &clients::Client) -> Result<Scopes,
     if asked.contains(Scope::Profiles) && !client.first_party {
         // A profile's PIN is typed into the app: pley's own apps only.
         return Err(fail("only Pley's own apps can switch profiles (profiles): ask the app's publisher to fix it"));
+    }
+    if asked.contains(Scope::Approvals) && !client.first_party {
+        // Deciding what everyone asks for: pley's own apps only.
+        return Err(fail("only Pley's own apps can approve requests (approvals): ask the app's publisher to fix it"));
     }
     if client.scope_cap.as_deref().is_some_and(|cap| !asked.is_subset_of(Scopes::from_stored(cap))) {
         return Err(fail("this app asked for more than its description allows: ask the app's publisher to fix it"));

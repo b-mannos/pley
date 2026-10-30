@@ -278,6 +278,18 @@ pub(crate) fn arr_url(value: &str) -> Result<String, AppError> {
     if !plain {
         return Err(wrong());
     }
+    // Where clouds answer for the machine itself (169.254.169.254), never
+    // where Radarr or Sonarr is.
+    let link_local = match url.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_link_local(),
+        Some(url::Host::Ipv6(ip)) => {
+            (ip.segments()[0] & 0xffc0) == 0xfe80 || ip.to_ipv4_mapped().is_some_and(|ip| ip.is_link_local())
+        }
+        _ => false,
+    };
+    if link_local {
+        return Err(AppError::bad_request(format!("{value} is a link-local address: Radarr and Sonarr aren't there")));
+    }
     Ok(url.as_str().trim_end_matches('/').to_owned())
 }
 
@@ -1245,6 +1257,9 @@ mod tests {
             serde_json::json!({"radarr_url": "localhost:7878"}),
             serde_json::json!({"sonarr_url": "ftp://box.lan"}),
             serde_json::json!({"radarr_url": "http://user:pw@box.lan:7878"}),
+            serde_json::json!({"radarr_url": "http://169.254.169.254/latest"}),
+            serde_json::json!({"sonarr_url": "http://[fe80::1]:8989"}),
+            serde_json::json!({"sonarr_url": "http://[::ffff:169.254.1.1]:8989"}),
             serde_json::json!({"request_limit_movies": 1001}),
             serde_json::json!({"radarr_quality_profile": -1}),
         ] {

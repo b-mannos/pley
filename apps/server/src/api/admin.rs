@@ -65,6 +65,15 @@ pub async fn put_settings(
     if crate::providers::settings_changed(&state.db, &before, &after).await? {
         state.scanner.enqueue_all(false).await?;
     }
+    // Requests turned on or off, other limits, another TMDB key: every app
+    // fetches its summary again.
+    if before.requests != after.requests
+        || before.request_limit_movies != after.request_limit_movies
+        || before.request_limit_seasons != after.request_limit_seasons
+        || before.tmdb_api_key != after.tmdb_api_key
+    {
+        state.events.send(crate::events::ServerEvent::RequestsSettingsChanged { user_id: None });
+    }
     Ok(Json(after.for_admin()))
 }
 

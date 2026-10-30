@@ -114,6 +114,7 @@ pub fn router(state: AppState) -> Router {
         .route("/items/{id}/analyze", post(items::analyze))
         .route("/items/{id}/images/{kind}", get(items::image))
         .route("/items/{id}/collections", get(collections::for_item))
+        .route("/items/{id}/request", get(requests::item_request))
         .route(
             "/items/{id}/subtitles",
             post(subtitles::add).layer(DefaultBodyLimit::max(crate::subtitles::MAX_BYTES + 64 * 1024)),
@@ -132,9 +133,11 @@ pub fn router(state: AppState) -> Router {
         .route("/discover/search", get(requests::search))
         .route("/discover/movie/{tmdb_id}", get(requests::movie))
         .route("/discover/show/{tmdb_id}", get(requests::show))
+        .route("/discover/images/{kind}/{file}", get(requests::image))
         .route("/discover/{list}", get(requests::discover))
         .route("/requests", get(requests::list).post(requests::create))
         .route("/requests/summary", get(requests::summary))
+        .route("/requests/seen", post(requests::seen))
         .route("/requests/{id}", get(requests::get).delete(requests::delete))
         .route("/requests/{id}/approve", post(requests::approve))
         .route("/requests/{id}/decline", post(requests::decline))

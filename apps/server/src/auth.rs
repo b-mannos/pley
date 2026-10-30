@@ -25,7 +25,7 @@ use dashmap::DashMap;
 use sha2::{Digest, Sha256};
 
 use self::grants::{ACCESS_PREFIX, APP_TOKEN_PREFIX, IssueError, Issued, NewGrant, RefreshError, RefreshInput};
-use self::scopes::{Need, Scopes};
+use self::scopes::{Need, Scope, Scopes};
 use crate::db::Db;
 use crate::error::AppError;
 use crate::state::AppState;
@@ -43,6 +43,10 @@ pub struct AuthUser {
     /// Administrator rights for this request: the account's role for pley's
     /// own sign-in, never for an app's token.
     pub is_admin: bool,
+    /// The account is an administrator, whatever the token: what requests
+    /// go by (an administrator's own are approved as made, and pley's apps
+    /// allowed `approvals` manage them, see [`AuthUser::manages_requests`]).
+    pub account_admin: bool,
     /// Every library, or only the ones in `user_libraries` (see [`crate::access`]).
     pub all_libraries: bool,
     /// Age limit for movies and shows; `None` = unrestricted.
@@ -76,10 +80,34 @@ impl AuthUser {
             id,
             username,
             is_admin,
+            account_admin: is_admin,
             all_libraries,
             max_age: if is_admin { None } else { max_age },
             app: None,
         }))
+    }
+
+    /// Whether this is pley's own sign-in (the web, the desktop app's
+    /// window) or one of pley's own apps, not an app by another publisher.
+    pub fn first_party(&self) -> bool {
+        self.app.as_ref().is_none_or(|app| crate::oauth::clients::builtin(&app.client_id).is_some())
+    }
+
+    /// Whether this request manages requests (approves and declines them,
+    /// sees and deletes everyone's): an administrator's own sign-in, or one
+    /// of pley's own apps on an administrator's account allowed `approvals`
+    /// (no other app can be).
+    pub fn manages_requests(&self) -> bool {
+        match &self.app {
+            None => self.is_admin,
+            Some(app) => self.account_admin && app.scopes.contains(Scope::Approvals) && self.first_party(),
+        }
+    }
+
+    /// Whether this request may use what `scope` allows: pley's own sign-in
+    /// always, an app when its token has it.
+    pub fn allowed(&self, scope: Scope) -> bool {
+        self.app.as_ref().is_none_or(|app| app.scopes.contains(scope))
     }
 }
 
@@ -482,6 +510,7 @@ impl AuthService {
             id,
             username,
             is_admin,
+            account_admin: is_admin,
             all_libraries,
             max_age: if is_admin { None } else { max_age },
             app: None,
@@ -595,6 +624,7 @@ impl AuthService {
             id: row.id,
             username: row.username,
             is_admin: false,
+            account_admin: row.role_admin,
             all_libraries: row.all_libraries || row.role_admin,
             max_age: if row.role_admin { None } else { row.max_age },
             app: Some(Arc::new(AppAccess {
@@ -1208,6 +1238,7 @@ mod tests {
                 id: 1,
                 username: "kid".into(),
                 is_admin: false,
+                account_admin: false,
                 all_libraries: false,
                 max_age: Some(12),
                 app: None
@@ -1216,6 +1247,7 @@ mod tests {
         let admin = auth.create_session(2, None, None).await.unwrap();
         let admin = auth.validate(&admin).await.unwrap();
         assert_eq!(admin.max_age, None, "administrators have no age limit");
+        assert!(admin.is_admin && admin.account_admin && admin.manages_requests() && admin.first_party());
         assert!(auth.validate("not-a-token").await.is_none());
     }
 

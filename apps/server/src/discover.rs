@@ -1,8 +1,12 @@
 //! Discover: movies and shows found on TMDB, for people to ask for
 //! ([`crate::requests`]): lists, search and a title's details, as TMDB has
-//! them. Each answer is reused for a while (per metadata language), so
-//! browsing doesn't ask TMDB again for every page shown.
+//! them, with their pictures served by pley ([`pictures`]). Each answer is
+//! reused for a while (per metadata language), so browsing doesn't ask TMDB
+//! again for every page shown.
 
+pub mod pictures;
+
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -11,13 +15,19 @@ use dashmap::DashMap;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::metadata::{IMAGES, MetadataAgent, TmdbError};
+use crate::metadata::{MetadataAgent, TmdbError};
+use crate::ratings::rating_age;
 use crate::settings::SettingsStore;
-use crate::util::{date_secs, now};
+use crate::util::{date_secs, now, utc};
+use pictures::Picture;
 
 /// How long lists and searches are reused, and titles' details.
 const PAGE_TTL: Duration = Duration::from_secs(3600);
 const DETAILS_TTL: Duration = Duration::from_secs(6 * 3600);
+/// How long TMDB's list of certifications is reused.
+const CERTIFICATIONS_TTL: Duration = Duration::from_secs(24 * 3600);
+/// Coming to cinemas: movies released within this many days.
+const UPCOMING_DAYS: i64 = 28;
 /// Answers kept of each sort at most: past it, the expired ones go (all of
 /// them, should none be).
 const CACHE_MAX: usize = 1000;
@@ -119,6 +129,9 @@ pub struct Details {
     pub backdrop_path: Option<String>,
     pub rating: Option<f64>,
     pub anime: bool,
+    /// TMDB's adult titles: never in lists or search, and only managers
+    /// see them otherwise.
+    pub adult: bool,
     pub imdb_id: Option<String>,
     pub tvdb_id: Option<i64>,
     pub cast: Vec<CastMember>,
@@ -149,11 +162,6 @@ pub struct CastMember {
 pub struct ExternalIds {
     pub imdb_id: Option<String>,
     pub tvdb_id: Option<i64>,
-}
-
-/// TMDB's picture `path` (`/abc.jpg`) at `size` (`w342`).
-pub fn image_url(path: Option<&str>, size: &str) -> Option<String> {
-    path.filter(|p| p.starts_with('/')).map(|p| format!("{IMAGES}/{size}{p}"))
 }
 
 /// Answers kept for a while.
@@ -195,6 +203,11 @@ pub struct Discover {
     pages: Cache<(String, String), Page>,
     details: Cache<(String, TitleKind, i64), Details>,
     external_ids: Cache<i64, ExternalIds>,
+    /// TMDB's id of a title known by TheTVDB's id or IMDb's (`None`: it has
+    /// none), by kind and `tvdb:<id>` or `imdb:<id>`.
+    found: Cache<(TitleKind, String), Option<i64>>,
+    /// Movie certifications by country, in TMDB's order.
+    certifications: Cache<(), HashMap<String, Vec<String>>>,
 }
 
 impl Discover {
@@ -205,6 +218,8 @@ impl Discover {
             pages: Cache::new(PAGE_TTL),
             details: Cache::new(DETAILS_TTL),
             external_ids: Cache::new(DETAILS_TTL),
+            found: Cache::new(DETAILS_TTL),
+            certifications: Cache::new(CERTIFICATIONS_TTL),
         }
     }
 
@@ -212,14 +227,37 @@ impl Discover {
         self.settings.get().metadata_language.clone()
     }
 
-    /// A page (from 1) of a list.
-    pub(crate) async fn list(&self, list: List, page: u32) -> Result<Arc<Page>, TmdbError> {
-        let (path, mut query): Query = match list {
-            List::Trending => ("/trending/all/week".into(), vec![]),
-            List::Movies => ("/movie/popular".into(), vec![]),
-            List::Shows => ("/tv/popular".into(), vec![]),
-            List::Upcoming => ("/movie/upcoming".into(), vec![("region", self.metadata.region())]),
-            List::Anime => (
+    /// A page (from 1) of a list. `ceiling`: the highest movie
+    /// certification of the metadata region an account may ask for (see
+    /// [`Discover::ceiling`]): popular and upcoming movies then come from
+    /// TMDB's discover search, rated at most that.
+    pub(crate) async fn list(&self, list: List, page: u32, ceiling: Option<&str>) -> Result<Arc<Page>, TmdbError> {
+        let region = self.metadata.region();
+        let rated = |ceiling: &str, mut query: Vec<(&'static str, String)>| {
+            query.push(("certification_country", region.clone()));
+            query.push(("certification.lte", ceiling.to_owned()));
+            query.push(("include_adult", "false".into()));
+            query.push(("sort_by", "popularity.desc".into()));
+            query
+        };
+        let (path, mut query): Query = match (list, ceiling) {
+            (List::Trending, _) => ("/trending/all/week".into(), vec![]),
+            (List::Movies, None) => ("/movie/popular".into(), vec![]),
+            (List::Movies, Some(ceiling)) => ("/discover/movie".into(), rated(ceiling, vec![])),
+            (List::Shows, _) => ("/tv/popular".into(), vec![]),
+            (List::Upcoming, None) => ("/movie/upcoming".into(), vec![("region", region.clone())]),
+            (List::Upcoming, Some(ceiling)) => {
+                // What /movie/upcoming lists: released in cinemas soon.
+                let from = now();
+                let upcoming = vec![
+                    ("region", region.clone()),
+                    ("with_release_type", "2|3".into()),
+                    ("release_date.gte", day(from)),
+                    ("release_date.lte", day(from + UPCOMING_DAYS * 86_400)),
+                ];
+                ("/discover/movie".into(), rated(ceiling, upcoming))
+            }
+            (List::Anime, _) => (
                 "/discover/tv".into(),
                 vec![("with_keywords", ANIME_KEYWORD.to_string()), ("sort_by", "popularity.desc".into())],
             ),
@@ -294,12 +332,102 @@ impl Discover {
         Ok(self.external_ids.put(tmdb_id, ids))
     }
 
+    /// TMDB's id of a title known by TheTVDB's id (shows) or IMDb's, the
+    /// first it finds by; `None` when it knows neither.
+    pub(crate) async fn find(
+        &self,
+        kind: TitleKind,
+        tvdb_id: Option<i64>,
+        imdb_id: Option<&str>,
+    ) -> Result<Option<i64>, TmdbError> {
+        let tvdb = tvdb_id.filter(|_| kind == TitleKind::Show).map(|id| ("tvdb_id", id.to_string()));
+        let imdb = imdb_id.filter(|id| id.starts_with("tt")).map(|id| ("imdb_id", id.to_owned()));
+        for (source, id) in [tvdb, imdb].into_iter().flatten() {
+            let key = (kind, format!("{source}:{id}"));
+            let found = match self.found.get(&key) {
+                Some(found) => *found,
+                None => {
+                    let answer: FindResults =
+                        self.get(&format!("/find/{id}"), &[("external_source", source.into())]).await?;
+                    let results = if kind == TitleKind::Movie { answer.movie_results } else { answer.tv_results };
+                    *self.found.put(key, results.first().map(|r| r.id))
+                }
+            };
+            if found.is_some() {
+                return Ok(found);
+            }
+        }
+        Ok(None)
+    }
+
+    /// The highest movie certification of the metadata region that an age
+    /// limit of `max_age` allows (TMDB's own order), for lists TMDB filters
+    /// itself; `None` when the region has none (or TMDB doesn't say), and
+    /// every title is checked as it comes.
+    pub(crate) async fn ceiling(&self, max_age: i64) -> Option<String> {
+        let all = match self.certifications.get(&()) {
+            Some(all) => all,
+            None => {
+                let answer: CertificationList = match self.get("/certification/movie/list", &[]).await {
+                    Ok(answer) => answer,
+                    Err(err) => {
+                        tracing::debug!("TMDB: its certifications: {err}");
+                        return None;
+                    }
+                };
+                let by_country = answer
+                    .certifications
+                    .into_iter()
+                    .map(|(country, mut list)| {
+                        list.sort_by_key(|c| c.order);
+                        (country, list.into_iter().map(|c| c.certification).collect())
+                    })
+                    .collect();
+                self.certifications.put((), by_country)
+            }
+        };
+        let region = self.metadata.region();
+        all.get(&region)?.iter().rev().find(|c| rating_age(c).is_some_and(|age| age <= max_age)).cloned()
+    }
+
     async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T, TmdbError> {
         self.metadata.get(path, query).await
     }
 }
 
+/// `2026-11-03`, in UTC.
+fn day(secs: i64) -> String {
+    let [y, m, d, ..] = utc(secs);
+    format!("{y}-{m:02}-{d:02}")
+}
+
 // ------------------------------------------------------------------ TMDB's answers
+
+#[derive(Deserialize)]
+struct FindResults {
+    #[serde(default)]
+    movie_results: Vec<FoundId>,
+    #[serde(default)]
+    tv_results: Vec<FoundId>,
+}
+
+#[derive(Deserialize)]
+struct FoundId {
+    id: i64,
+}
+
+#[derive(Deserialize)]
+struct CertificationList {
+    #[serde(default)]
+    certifications: HashMap<String, Vec<RawCertification>>,
+}
+
+#[derive(Deserialize)]
+struct RawCertification {
+    certification: String,
+    #[serde(default)]
+    order: i64,
+}
 
 #[derive(Deserialize)]
 struct RawPage {
@@ -459,6 +587,8 @@ struct RawMovie {
     backdrop_path: Option<String>,
     vote_average: Option<f64>,
     vote_count: Option<i64>,
+    #[serde(default)]
+    adult: bool,
     imdb_id: Option<String>,
     keywords: Option<MovieKeywords>,
     release_dates: Option<ReleaseDates>,
@@ -496,6 +626,7 @@ impl RawMovie {
             poster_path: self.poster_path,
             backdrop_path: self.backdrop_path,
             rating: rating(self.vote_average, self.vote_count),
+            adult: self.adult,
             imdb_id: self.imdb_id.filter(|i| i.starts_with("tt")),
             tvdb_id: None,
             cast: cast(self.credits),
@@ -523,6 +654,8 @@ struct RawShow {
     backdrop_path: Option<String>,
     vote_average: Option<f64>,
     vote_count: Option<i64>,
+    #[serde(default)]
+    adult: bool,
     status: Option<String>,
     #[serde(default)]
     seasons: Vec<RawSeason>,
@@ -597,6 +730,7 @@ impl RawShow {
             poster_path: self.poster_path,
             backdrop_path: self.backdrop_path,
             rating: rating(self.vote_average, self.vote_count),
+            adult: self.adult,
             imdb_id: ids.imdb_id.filter(|i| i.starts_with("tt")),
             tvdb_id: ids.tvdb_id.filter(|id| *id > 0),
             cast: cast(self.aggregate_credits),
@@ -641,7 +775,7 @@ fn cast(credits: Option<Credits>) -> Vec<CastMember> {
         .take(CAST)
         .map(|c| CastMember {
             character: c.character.or_else(|| c.roles.into_iter().find_map(|r| r.character)).filter(|c| !c.is_empty()),
-            photo_url: image_url(c.profile_path.as_deref(), "w185"),
+            photo_url: pictures::url(Picture::Profile, c.profile_path.as_deref()),
             name: c.name,
         })
         .collect()
@@ -711,10 +845,14 @@ mod tests {
         let titles: Vec<_> = page.results.iter().map(|t| (t.kind, t.tmdb_id, t.year, t.rating)).collect();
         assert_eq!(titles, [(TitleKind::Movie, 1, Some(1995), Some(7.9)), (TitleKind::Show, 2, Some(1998), None)]);
         assert_eq!(
-            image_url(page.results[0].poster_path.as_deref(), "w342").as_deref(),
-            Some("https://image.tmdb.org/t/p/w342/heat.jpg")
+            pictures::url(Picture::Poster, page.results[0].poster_path.as_deref()).as_deref(),
+            Some("/api/discover/images/poster/heat.jpg")
         );
-        assert_eq!(image_url(Some("heat.jpg"), "w342"), None);
+    }
+
+    #[test]
+    fn upcoming_days_are_utc_dates() {
+        assert_eq!(day(date_secs("2026-11-03").unwrap() + 23 * 3600), "2026-11-03");
     }
 
     #[test]
