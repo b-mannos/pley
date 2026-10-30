@@ -14,8 +14,8 @@ use crate::auth::{AdminUser, AuthUser};
 use crate::error::{ApiResult, AppError};
 use crate::livetv::tuner::{Tune, TunerStatus, ViewerKind, Watching};
 use crate::livetv::{
-    AdminChannel, AdminGroup, Category, Channel, ChannelPage, ChannelPatch, Groups, Guide, LiveSettings, Source,
-    SourceInput, SourceTest,
+    AdminChannel, AdminGroup, AdminPage, Category, Channel, ChannelPage, ChannelPatch, Groups, Guide, LineupFilter,
+    LiveSettings, Source, SourceInput, SourceTest,
 };
 use crate::state::AppState;
 use crate::util::now;
@@ -403,6 +403,25 @@ pub async fn admin_channels(
     Ok(Json(state.live.admin_channels(query.source_id).await?))
 }
 
+#[derive(Deserialize)]
+pub struct LineupPageQuery {
+    #[serde(flatten)]
+    filter: LineupFilter,
+    #[serde(default)]
+    offset: Option<usize>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+/// A page of the lineup as administrators see it, filtered.
+pub async fn admin_page(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Query(query): Query<LineupPageQuery>,
+) -> ApiResult<Json<AdminPage>> {
+    Ok(Json(state.live.admin_page(&query.filter, query.offset.unwrap_or(0), query.limit.unwrap_or(100)).await?))
+}
+
 pub async fn admin_groups(State(state): State<AppState>, _admin: AdminUser) -> ApiResult<Json<Vec<AdminGroup>>> {
     Ok(Json(state.live.admin_groups().await?))
 }
@@ -414,6 +433,9 @@ pub struct ChannelsPatch {
     /// Every channel of these groups, as well as `ids`.
     #[serde(default)]
     groups: Vec<String>,
+    /// Every channel this filter keeps, as well.
+    #[serde(default)]
+    filter: Option<LineupFilter>,
     #[serde(flatten)]
     patch: ChannelPatch,
 }
@@ -431,6 +453,9 @@ pub async fn patch_channels(
     let mut ids = req.ids;
     if !req.groups.is_empty() {
         ids.extend(state.live.group_channels(&req.groups).await?);
+    }
+    if let Some(filter) = &req.filter {
+        ids.extend(state.live.admin_ids(filter).await?);
     }
     state.live.patch_channels(&ids, &req.patch).await?;
     Ok(StatusCode::NO_CONTENT)

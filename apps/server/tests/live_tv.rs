@@ -362,6 +362,18 @@ async fn channels_by_group_a_page_at_a_time() {
     assert_eq!(keys, [&one_id.to_string()]);
     assert_eq!(app.get("/api/live/guide?ids=x", &bob).await.status, StatusCode::BAD_REQUEST);
 
+    // Administrators' lineup, a page at a time and filtered.
+    let page = app.get("/api/live/lineup/page?group=Sport&limit=1", &admin).await.body;
+    assert_eq!((page["total"].as_i64(), page["channels"].as_array().unwrap().len()), (Some(2), 1));
+    assert_eq!(page["channels"][0]["name"], "Two HD");
+    let page = app.get("/api/live/lineup/page?state=no-guide&q=ten", &admin).await.body;
+    assert_eq!(page["total"], 1, "{page}");
+    assert_eq!(app.get("/api/live/lineup/page", &bob).await.status, StatusCode::FORBIDDEN);
+    let hidden = app.patch("/api/live/lineup", &admin, json!({"filter": {"group": "Sport", "q": "two"}, "hidden": true})).await;
+    assert_eq!(hidden.status, StatusCode::NO_CONTENT);
+    assert_eq!(app.get("/api/live/lineup/page?state=hidden", &admin).await.body["total"], 1);
+    app.patch("/api/live/lineup", &admin, json!({"filter": {"state": "hidden"}, "hidden": false})).await;
+
     // A whole group hidden, and shown again.
     let hidden = app.patch("/api/live/lineup", &admin, json!({"groups": ["Sport"], "hidden": true})).await;
     assert_eq!(hidden.status, StatusCode::NO_CONTENT);

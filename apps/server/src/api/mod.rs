@@ -158,6 +158,7 @@ pub fn router(state: AppState) -> Router {
         .route("/live/sources/{id}/refresh", post(livetv::refresh_source))
         .route("/live/lineup", get(livetv::admin_channels).patch(livetv::patch_channels))
         .route("/live/lineup/groups", get(livetv::admin_groups))
+        .route("/live/lineup/page", get(livetv::admin_page))
         .route("/live/tuners", get(livetv::tuners))
         .route("/live/tuners/{channel}", delete(livetv::stop_tuner))
         .route("/conversions/{id}", get(playback::conversion).delete(playback::cancel_conversion))

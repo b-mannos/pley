@@ -123,6 +123,7 @@ const ADMIN: &[(&str, &str)] = &[
     ("GET", "/api/live/lineup"),
     ("PATCH", "/api/live/lineup"),
     ("GET", "/api/live/lineup/groups"),
+    ("GET", "/api/live/lineup/page"),
     ("GET", "/api/live/tuners"),
     ("DELETE", "/api/live/tuners/{channel}"),
 ];

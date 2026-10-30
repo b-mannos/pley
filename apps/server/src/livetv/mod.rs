@@ -472,6 +472,42 @@ impl Lineup {
     }
 }
 
+/// Which of the lineup's channels administrators list.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum LineupState {
+    #[default]
+    All,
+    Shown,
+    Hidden,
+    NoGuide,
+    Offline,
+}
+
+/// The lineup's channels to list or change: of a source, of a group, in a
+/// state, matching a name or a number's beginning.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct LineupFilter {
+    #[serde(default)]
+    pub source_id: Option<i64>,
+    #[serde(default)]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub state: LineupState,
+    #[serde(default)]
+    pub q: Option<String>,
+}
+
+/// A page of the lineup as administrators see it.
+#[derive(Debug, Serialize)]
+pub struct AdminPage {
+    pub total: usize,
+    /// Of `total`, how many are hidden.
+    pub hidden: usize,
+    pub offset: usize,
+    pub channels: Vec<AdminChannel>,
+}
+
 /// A group as administrators see it: hidden channels counted too.
 #[derive(Debug, Clone, Serialize)]
 pub struct AdminGroup {
@@ -1650,28 +1686,70 @@ impl LiveTv {
     pub async fn admin_channels(&self, source: Option<i64>) -> Result<Vec<AdminChannel>, AppError> {
         let lineup = self.lineup().await?;
         let rows = lineup.rows.iter().filter(|c| source.is_none_or(|s| c.source_id == s));
-        Ok(rows
-            .map(|c| AdminChannel {
-                id: c.id,
-                source_id: c.source_id,
-                name: c.display_name().to_owned(),
-                number: c.display_number(),
-                group: c.group_name.clone(),
-                logo: (!c.logo_url.is_empty()).then(|| format!("/api/live/channels/{}/logo", c.id)),
-                guide_id: c.guide_key().unwrap_or_default().to_owned(),
-                has_guide: lineup.has_guide(c),
-                hidden: c.hidden,
-                source_name: c.name.clone(),
-                source_number: c.number.clone(),
-                source_guide_id: c.guide_id.clone(),
-                matched_guide_id: c.matched_guide_id.clone(),
-                custom_name: c.custom_name.clone(),
-                custom_number: c.custom_number.clone(),
-                custom_guide_id: c.custom_guide_id.clone(),
-                offline: c.offline(),
-                offline_since: c.offline_since,
-            })
-            .collect())
+        Ok(rows.map(|c| Self::admin_channel(&lineup, c)).collect())
+    }
+
+    /// The lineup's channels `filter` keeps (hidden ones too), by index.
+    fn admin_matching<'a>(lineup: &'a Lineup, filter: &LineupFilter) -> impl Iterator<Item = &'a ChannelRow> {
+        let search = filter.q.as_deref().unwrap_or("").trim().to_lowercase();
+        lineup.rows.iter().enumerate().filter_map(move |(i, c)| {
+            let keep = filter.source_id.is_none_or(|s| c.source_id == s)
+                && filter.group.as_ref().is_none_or(|g| c.group_name == *g)
+                && match filter.state {
+                    LineupState::All => true,
+                    LineupState::Shown => !c.hidden,
+                    LineupState::Hidden => c.hidden,
+                    LineupState::NoGuide => !lineup.has_guide(c),
+                    LineupState::Offline => c.offline(),
+                }
+                && (search.is_empty()
+                    || lineup.names[i].contains(&search)
+                    || c.name.to_lowercase().contains(&search)
+                    || c.display_number().is_some_and(|n| n.starts_with(&search)));
+            keep.then_some(c)
+        })
+    }
+
+    /// A page of the lineup as administrators see it, `filter` applied.
+    pub async fn admin_page(&self, filter: &LineupFilter, offset: usize, limit: usize) -> Result<AdminPage, AppError> {
+        let lineup = self.lineup().await?;
+        let matching: Vec<&ChannelRow> = Self::admin_matching(&lineup, filter).collect();
+        let offset = offset.min(matching.len());
+        let end = (offset + limit.clamp(1, MAX_PAGE)).min(matching.len());
+        Ok(AdminPage {
+            total: matching.len(),
+            hidden: matching.iter().filter(|c| c.hidden).count(),
+            offset,
+            channels: matching[offset..end].iter().map(|c| Self::admin_channel(&lineup, c)).collect(),
+        })
+    }
+
+    /// The ids of every channel `filter` keeps.
+    pub async fn admin_ids(&self, filter: &LineupFilter) -> Result<Vec<i64>, AppError> {
+        Ok(Self::admin_matching(&*self.lineup().await?, filter).map(|c| c.id).collect())
+    }
+
+    fn admin_channel(lineup: &Lineup, c: &ChannelRow) -> AdminChannel {
+        AdminChannel {
+            id: c.id,
+            source_id: c.source_id,
+            name: c.display_name().to_owned(),
+            number: c.display_number(),
+            group: c.group_name.clone(),
+            logo: (!c.logo_url.is_empty()).then(|| format!("/api/live/channels/{}/logo", c.id)),
+            guide_id: c.guide_key().unwrap_or_default().to_owned(),
+            has_guide: lineup.has_guide(c),
+            hidden: c.hidden,
+            source_name: c.name.clone(),
+            source_number: c.number.clone(),
+            source_guide_id: c.guide_id.clone(),
+            matched_guide_id: c.matched_guide_id.clone(),
+            custom_name: c.custom_name.clone(),
+            custom_number: c.custom_number.clone(),
+            custom_guide_id: c.custom_guide_id.clone(),
+            offline: c.offline(),
+            offline_since: c.offline_since,
+        }
     }
 
     /// Every group, hidden channels' too, with how many of each are hidden.
