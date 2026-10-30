@@ -1708,6 +1708,13 @@ a key of their own instead. Pley's Samsung and LG apps ask for keyed URLs.
 - Logs leave the key out (`/api/media/…/12.ts`).
 - Everything else the player asks for (subtitles, seek previews, its
   reports) goes with the token as usual.
+- **Live TV** works the same way: `POST /api/live/channels/{id}/watch`
+  with `keyed_urls: true` answers `url` as
+  `/api/live/media/{key}/index.m3u8`, whose segments are named relatively.
+  The key opens that watching session's playlist and segments only, and
+  ends with it (left, gone quiet for 45 s, or ended by another `watch`
+  from the device), the account and the app's sign-in: `410
+  session_stopped` then, as for the session's own address.
 
 ### Network memory and speed test
 
@@ -2332,9 +2339,10 @@ when another channel needs the connection).
 | GET | `/api/live/guide` | `library` | `?from=&to=&ids=` (unix seconds; default half an hour ago to six hours on, two days at most; `ids`: the channels wanted, with commas between, else every one) → `{ from, to, programs: { [channel_id]: LiveProgram[] } }` |
 | PUT | `/api/live/channels/{id}/favorite` | `play` | `204` |
 | DELETE | `/api/live/channels/{id}/favorite` | `play` | `204` |
-| POST | `/api/live/channels/{id}/watch` | `play` | optional `{ client_id? }` → `{ session_id, url, kind: "hls", channel: LiveChannel }`: `url` is the channel's live HLS playlist |
+| POST | `/api/live/channels/{id}/watch` | `play` | optional `{ client_id?, keyed_urls? }` → `{ session_id, url, kind: "hls", channel: LiveChannel }`: `url` is the channel's live HLS playlist; with `keyed_urls`, an address carrying a key of its own ([Keyed URLs](#keyed-urls)) |
 | GET | `/api/live/channels/{id}/stream.ts` | `play` | `?client_id=`: the channel's MPEG-TS as the provider sends it, for as long as it is read (VLC, Kodi, TVs that read MPEG-TS) |
 | GET | `/api/live/sessions/{session}/{file}` | `play` | `index.m3u8` or a segment of a watching session |
+| GET | `/api/live/media/{key}/{file}` | `public` (the key) | the same, for a session watched with `keyed_urls` |
 | DELETE | `/api/live/sessions/{session}` | `play` | `204`: stops watching; `404` when not yours or already gone |
 | GET | `/api/live/settings` | `admin` | `LiveSettings` |
 | PUT | `/api/live/settings` | `admin` | `LiveSettings` → `LiveSettings` |

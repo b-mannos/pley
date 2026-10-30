@@ -13,7 +13,7 @@ use std::time::Duration;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::{Request, StatusCode, header};
+use axum::http::{Method, Request, StatusCode, header};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use futures::StreamExt;
@@ -500,4 +500,53 @@ async fn sources_are_tested_and_their_errors_said() {
     let id = added.body["id"].as_i64().unwrap();
     assert_eq!(app.delete(&format!("/api/live/sources/{id}"), &admin).await.status, StatusCode::NO_CONTENT);
     assert!(app.get("/api/live/sources", &admin).await.body.as_array().unwrap().is_empty());
+}
+
+/// A TV's own player can't send the token: `keyed_urls` gives it an address
+/// whose key opens that watching session's files, and nothing else.
+#[tokio::test]
+async fn keyed_addresses_open_their_session_alone() {
+    let (base, _) = provider().await;
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (_, bob) = app.user(&admin, "bob", json!({})).await;
+    let added = app
+        .post(
+            "/api/live/sources",
+            &admin,
+            json!({"name": "Provider", "kind": "m3u", "url": format!("{base}/list.m3u"), "max_connections": 2}),
+        )
+        .await;
+    assert_eq!(added.status, StatusCode::CREATED, "{:?}", added.body);
+    wait_until_read(&app, &admin).await;
+    let one = app.get("/api/live/channels", &admin).await.body[0]["id"].as_i64().unwrap();
+
+    let (tv, _) = app.app_token(bob, "library play").await;
+    let watch = format!("/api/live/channels/{one}/watch");
+    let watching = app.app_call(Method::POST, &watch, &tv, Some(json!({"client_id": "tv", "keyed_urls": true}))).await;
+    assert_eq!(watching.status, StatusCode::OK, "{:?}", watching.body);
+    let url = watching.body["url"].as_str().unwrap().to_owned();
+    let session = watching.body["session_id"].as_str().unwrap().to_owned();
+    assert!(url.starts_with("/api/live/media/pley_mk_") && url.ends_with("/index.m3u8"), "{url}");
+    assert!(!url.contains(&session), "the address carries the key, not the session");
+
+    // Without a token, the key opens the session's segments (none made yet: no transcoder here).
+    let segment = url.replace("index.m3u8", "s0.ts");
+    let keyed = app.call(Method::GET, &segment, None, None, &[]).await;
+    assert_eq!(keyed.status, StatusCode::NOT_FOUND, "{:?}", keyed.body);
+    assert_eq!(keyed.body["message"], "the channel is starting again");
+    // Another key opens nothing, and the key is no token.
+    let wrong = app.call(Method::GET, "/api/live/media/pley_mk_wrong/s0.ts", None, None, &[]).await;
+    assert_eq!(wrong.status, StatusCode::GONE);
+    let key = url.trim_start_matches("/api/live/media/").split('/').next().unwrap().to_owned();
+    assert_eq!(app.get("/api/live/channels", &key).await.status, StatusCode::UNAUTHORIZED);
+
+    // Asked for without keyed_urls, the address needs the token.
+    let plain = app.post(&watch, &admin, json!({"client_id": "web"})).await;
+    assert!(plain.body["url"].as_str().unwrap().starts_with("/api/live/sessions/"), "{:?}", plain.body);
+
+    // Leaving ends the key.
+    let left = app.app_call(Method::DELETE, &format!("/api/live/sessions/{session}"), &tv, None).await;
+    assert_eq!(left.status, StatusCode::NO_CONTENT);
+    assert_eq!(app.call(Method::GET, &segment, None, None, &[]).await.status, StatusCode::GONE);
 }

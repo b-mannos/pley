@@ -83,6 +83,11 @@ struct Viewer {
     started_at: i64,
     last_seen: Instant,
     kind: ViewerKind,
+    /// Its keyed addresses' key, for a player that can't send the
+    /// Authorization header (a TV's own player).
+    media_key: Option<String>,
+    /// The app sign-in it was started with: the key ends with it.
+    app_grant: Option<i64>,
 }
 
 /// Someone watching, as administrators see it.
@@ -400,12 +405,15 @@ impl Tuners {
 
     /// Starts `user` watching `tune.channel`: through the tuner already
     /// pulling it, or a new one when its source has a connection free.
+    /// `keyed`: the HLS playlist's address carries a key of its own instead
+    /// of needing the token (docs/API.md, "Keyed URLs").
     pub async fn watch(
         self: &Arc<Self>,
         user: &AuthUser,
         tune: Tune<'_>,
         client_id: Option<String>,
         kind: ViewerKind,
+        keyed: bool,
     ) -> Result<Watching, AppError> {
         let channel_id = tune.channel.id;
         // What this device watched before ends: its connection is free.
@@ -422,6 +430,11 @@ impl Tuners {
             }
         };
         let session_id = uuid::Uuid::new_v4().simple().to_string();
+        let media_key = (keyed && kind == ViewerKind::Hls).then(crate::playback::new_media_key);
+        let url = match &media_key {
+            Some(key) => format!("/api/live/media/{key}/index.m3u8"),
+            None => format!("/api/live/sessions/{session_id}/index.m3u8"),
+        };
         self.viewers.lock().insert(
             session_id.clone(),
             Viewer {
@@ -433,11 +446,23 @@ impl Tuners {
                 started_at: now(),
                 last_seen: Instant::now(),
                 kind,
+                media_key,
+                app_grant: user.app.as_ref().map(|app| app.grant_id),
             },
         );
         tuner.state.lock().idle_since = None;
         self.events.send(ServerEvent::LiveTunersChanged);
-        Ok(Watching { url: format!("/api/live/sessions/{session_id}/index.m3u8"), session_id, kind })
+        Ok(Watching { url, session_id, kind })
+    }
+
+    /// The session a keyed address's `key` opens, who watches in it, and
+    /// the app sign-in it was started with.
+    pub fn by_media_key(&self, key: &str) -> Option<(String, i64, Option<i64>)> {
+        self.viewers
+            .lock()
+            .values()
+            .find(|v| v.media_key.as_deref().is_some_and(|k| crate::playback::same_key(k, key)))
+            .map(|v| (v.id.clone(), v.user_id, v.app_grant))
     }
 
     fn start_tuner(self: &Arc<Self>, user: &AuthUser, tune: &Tune<'_>) -> Result<Arc<Tuner>, AppError> {

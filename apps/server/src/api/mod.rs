@@ -150,6 +150,7 @@ pub fn router(state: AppState) -> Router {
         .route("/live/guide", get(livetv::guide))
         .route("/live/sessions/{session}", delete(livetv::leave))
         .route("/live/sessions/{session}/{file}", get(livetv::session_file))
+        .route("/live/media/{key}/{file}", get(livetv::keyed_file))
         .route("/live/settings", get(livetv::get_settings).put(livetv::put_settings))
         .route("/live/sources", get(livetv::sources).post(livetv::add_source))
         .route("/live/sources/test", post(livetv::test_source))
@@ -368,8 +369,11 @@ pub(crate) fn wants_summaries(query: &HashMap<String, String>) -> bool {
 /// Authorization header are never logged.
 pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
     // A keyed media address carries its session's key in the path.
-    let path = match uri.path().strip_prefix("/api/media/") {
-        Some(rest) => format!("/api/media/…{}", rest.find('/').map_or("", |at| &rest[at..])),
+    let keyed = ["/api/media/", "/api/live/media/"]
+        .into_iter()
+        .find_map(|prefix| uri.path().strip_prefix(prefix).map(|rest| (prefix, rest)));
+    let path = match keyed {
+        Some((prefix, rest)) => format!("{prefix}…{}", rest.find('/').map_or("", |at| &rest[at..])),
         None => uri.path().to_owned(),
     };
     let Some(query) = uri.query() else { return path };
@@ -455,6 +459,7 @@ mod tests {
         // A keyed media address's key is in its path.
         assert_eq!(loggable_uri(&"/api/media/pley_mk_abc/12.ts".parse().unwrap()), "/api/media/…/12.ts");
         assert_eq!(loggable_uri(&"/api/media/pley_mk_abc".parse().unwrap()), "/api/media/…");
+        assert_eq!(loggable_uri(&"/api/live/media/pley_mk_abc/s12.ts".parse().unwrap()), "/api/live/media/…/s12.ts");
     }
 
     #[test]

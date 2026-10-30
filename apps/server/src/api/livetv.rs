@@ -196,6 +196,10 @@ pub struct WatchRequest {
     /// The device watching: what it watched before ends.
     #[serde(default)]
     client_id: Option<String>,
+    /// The player can't send the Authorization header (a TV's own player):
+    /// the playlist's address carries a key instead.
+    #[serde(default)]
+    keyed_urls: bool,
 }
 
 #[derive(Serialize)]
@@ -211,6 +215,7 @@ async fn start_watching(
     id: i64,
     client_id: Option<String>,
     kind: ViewerKind,
+    keyed: bool,
 ) -> ApiResult<(Watching, Channel)> {
     state.live.check_access(user)?;
     let channel = state.live.channel(user, id).await?;
@@ -219,7 +224,7 @@ async fn start_watching(
     let watching = state
         .live
         .tuners
-        .watch(user, Tune { channel: &row, source_name, max_connections, user_agent }, client_id, kind)
+        .watch(user, Tune { channel: &row, source_name, max_connections, user_agent }, client_id, kind, keyed)
         .await?;
     state.live.watched(user.id, id).await;
     Ok((watching, channel))
@@ -232,8 +237,9 @@ pub async fn watch(
     Path(id): Path<i64>,
     body: Option<Json<WatchRequest>>,
 ) -> ApiResult<Json<WatchInfo>> {
-    let client_id = body.and_then(|Json(b)| b.client_id);
-    let (watching, channel) = start_watching(&state, &user, id, client_id, ViewerKind::Hls).await?;
+    let body = body.map(|Json(b)| b).unwrap_or_default();
+    let (watching, channel) =
+        start_watching(&state, &user, id, body.client_id, ViewerKind::Hls, body.keyed_urls).await?;
     Ok(Json(WatchInfo { watching, channel }))
 }
 
@@ -246,7 +252,7 @@ pub async fn stream(
     Query(query): Query<HashMap<String, String>>,
 ) -> ApiResult<Response> {
     let client_id = query.get("client_id").cloned();
-    let (watching, _) = start_watching(&state, &user, id, client_id, ViewerKind::Stream).await?;
+    let (watching, _) = start_watching(&state, &user, id, client_id, ViewerKind::Stream, false).await?;
     let body = state.live.tuners.stream(&watching.session_id, &user)?;
     Response::builder()
         .header(header::CONTENT_TYPE, "video/mp2t")
@@ -261,17 +267,42 @@ pub async fn session_file(
     user: AuthUser,
     Path((session, file)): Path<(String, String)>,
 ) -> ApiResult<Response> {
+    session_media(&state, &user, &session, &file).await
+}
+
+/// `GET /api/live/media/{key}/{file}`: a watching session's playlist or
+/// segment for a player that can't send the Authorization header, a TV's own
+/// player (docs/API.md, "Keyed URLs"). The key `watch` gave for
+/// `keyed_urls` stands in for the token, for that session alone; it ends
+/// with the session, the account and the app's sign-in.
+pub async fn keyed_file(
+    State(state): State<AppState>,
+    Path((key, file)): Path<(String, String)>,
+) -> ApiResult<Response> {
+    let gone = || AppError::SessionStopped(Some("this channel isn't being watched any more".into()));
+    let (session, user_id, grant) = state.live.tuners.by_media_key(&key).ok_or_else(gone)?;
+    let mut user = AuthUser::load(&state.db, user_id).await?.ok_or_else(gone)?;
+    if let Some(grant) = grant {
+        // Signed out since: the key goes with the token.
+        let access = crate::auth::grants::access_of(&state.db, grant).await?.ok_or_else(gone)?;
+        user.is_admin = false;
+        user.app = Some(std::sync::Arc::new(access));
+    }
+    session_media(&state, &user, &session, &file).await
+}
+
+async fn session_media(state: &AppState, user: &AuthUser, session: &str, file: &str) -> ApiResult<Response> {
     if file == "index.m3u8" {
         let settings = state.live.settings();
         let hwaccel = state.settings.get().hwaccel;
-        let text = state.live.tuners.playlist(&session, &user, &settings, hwaccel).await?;
+        let text = state.live.tuners.playlist(session, user, &settings, hwaccel).await?;
         return Ok((
             [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl"), (header::CACHE_CONTROL, "no-cache")],
             text,
         )
             .into_response());
     }
-    let upstream = state.live.tuners.segment(&session, &user, &file).await?;
+    let upstream = state.live.tuners.segment(session, user, file).await?;
     let mut response = Response::builder()
         .header(header::CONTENT_TYPE, "video/mp2t")
         .header(header::CACHE_CONTROL, "private, max-age=60");

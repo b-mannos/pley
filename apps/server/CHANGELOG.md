@@ -41,6 +41,10 @@ describes how they are made.
   and channel up and down stay in the group. Lineups of tens of
   thousands of channels open at once: the apps fetch a page of channels
   and the guide of those in view.
+- Live TV for players that can't send the token: a channel watched with
+  `keyed_urls` gets a playlist address with a key of its own
+  (`/api/live/media/{key}/index.m3u8`), so the Samsung and LG apps play it
+  through the TV's own player.
 - The web app draws picture subtitles (PGS, VobSub, DVB) over the video
   itself, so the file still plays as it is, or its stream keeps HDR,
   rather than having them burned in.

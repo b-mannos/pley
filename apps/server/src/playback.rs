@@ -1585,7 +1585,7 @@ pub fn new_media_key() -> String {
 
 /// Whether `a` and `b` are the same key, in time that doesn't depend on
 /// where they differ.
-fn same_key(a: &str, b: &str) -> bool {
+pub(crate) fn same_key(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
