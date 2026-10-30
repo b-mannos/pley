@@ -4,6 +4,8 @@
 
 <p align="center">A self-hosted media server for movies, shows, music and live TV.</p>
 
+<p align="center"><sub>Pley is still in testing: expect rough edges, and keep backups of your data.</sub></p>
+
 ![Pley's Home in the web app](docs/images/web-home.jpg)
 
 ## Features
