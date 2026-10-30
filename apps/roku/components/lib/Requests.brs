@@ -480,30 +480,44 @@ function reqStatusOfRequest(status as integer, data as dynamic) as string
 end function
 
 ' Discover's hero, the first trending title left: { title, line,
-' overview, backdrop, buttons, actions, tmdbKind, tmdbId, libraryId }.
-' actions: "open" (the library's title), "request" (the title's page,
-' asking at once), "details".
-function reqHero(title as object, summary as object, server as string) as object
+' overview, backdrop, buttons, actions, note, tmdbKind, tmdbId,
+' libraryId }. Its main action, as far as a list's title tells it (its
+' page has the rest): actions "open" (the library's title), "request"
+' (Request, or Request more seasons for a show partly there: the title's
+' page, asking at once), "details". With nothing of its kind left to ask
+' for, Request goes and note says so (Roku's buttons can't be disabled).
+function reqHero(title as object, summary as object, server as string, now as integer) as object
     tile = reqTitleTile(title, server)
     parts = [tile.subtitle]
     rating = httpNumber(title.rating, 0)
     if rating > 0 then parts.Push("★ " + fmtOneDecimal(rating))
     if tile.badge <> "" then parts.Push(tile.badge)
+    remaining = summary.moviesLeft
+    if tile.tmdbKind = "show" then remaining = summary.seasonsLeft
     buttons = []
     actions = []
+    note = ""
     if tile.libraryId > 0 and (tile.status = "library" or tile.status = "partial")
         buttons.Push("Open")
         actions.Push("open")
     end if
-    if tile.status = "none" and reqMayAsk(summary)
-        buttons.Push("Request")
-        actions.Push("request")
+    if reqMayAsk(summary) and (tile.status = "none" or tile.status = "partial")
+        if remaining = 0
+            note = reqAllowance(summary, now).text
+        else if tile.status = "none"
+            buttons.Push("Request")
+            actions.Push("request")
+        else
+            buttons.Push("Request more seasons")
+            actions.Push("request")
+        end if
     end if
     buttons.Push("Details")
     actions.Push("details")
     return {
         title: tile.title,
         line: parts.Join(" · "),
+        note: note,
         overview: httpClean(title.overview, 400, false),
         backdrop: urlImage(server, title.backdrop_url, contentBackdropWidth()),
         buttons: buttons,
@@ -995,14 +1009,18 @@ function reqStage(request as object, manage as boolean, now as integer, zone as 
 end function
 
 ' A waiting request's day: "Out Nov 4" (a movie), "Airs Nov 4" (a show's
-' next episode, its time within a day: "Airs 9:05 PM"), "Not out yet"
-' when not known. Radarr knows a release by its day only: a movie's is
-' never a time.
+' next episode; within a day, its time: "Airs 9:05 PM", or "Airs tomorrow
+' at 9:05 PM" past midnight), "Not out yet" when not known. Radarr knows a
+' release by its day only: a movie's is never a time.
 function reqWaitingText(request as object, now as integer, zone as integer) as string
     at = httpNumber(request.stage_at, 0)
     if at <= 0 then return "Not out yet"
     if httpString(request.kind) = "movie" then return "Out " + fmtDay(at, now, zone)
-    if at > now and at - now < 86400 then return "Airs " + fmtTimeOfDay(at, zone)
+    if at > now and at - now < 86400
+        clock = fmtTimeOfDay(at, zone)
+        if fmtMonthDay(at, zone, true) = fmtMonthDay(now, zone, true) then return "Airs " + clock
+        return "Airs tomorrow at " + clock
+    end if
     return "Airs " + fmtDay(at, now, zone)
 end function
 

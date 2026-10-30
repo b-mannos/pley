@@ -14,6 +14,7 @@ sub init()
     m.heroLine = m.top.findNode("heroLine")
     m.heroOverview = m.top.findNode("heroOverview")
     m.heroButtons = m.top.findNode("heroButtons")
+    m.heroNote = m.top.findNode("heroNote")
     m.rows = m.top.findNode("rows")
     m.problem = m.top.findNode("problem")
     m.problemTitle = m.top.findNode("problemTitle")
@@ -320,10 +321,11 @@ end sub
 
 sub drawHero()
     if m.heroTitle = invalid then return
-    m.heroShown = reqHero(m.heroTitle, reqSummaryOf(m.top.requestSummary), m.global.session.server)
+    m.heroShown = reqHero(m.heroTitle, reqSummaryOf(m.top.requestSummary), m.global.session.server, CreateObject("roDateTime").AsSeconds())
     m.heroName.text = m.heroShown.title
     m.heroLine.text = m.heroShown.line
     m.heroOverview.text = m.heroShown.overview
+    m.heroNote.text = m.heroShown.note
     if FormatJson(m.heroButtons.buttons) <> FormatJson(m.heroShown.buttons) then m.heroButtons.buttons = m.heroShown.buttons
     if m.backdrop.uri <> m.heroShown.backdrop
         m.backdrop.setHttpAgent(m.top.getScene().getHttpAgent())
@@ -407,6 +409,22 @@ sub onSummary()
     if m.problemShown <> invalid then return
     showChips(summary)
     drawHero()
+    addRequestsRow(summary)
+end sub
+
+' A first request, asked for since the page showed: Your requests comes
+' after TMDB's lists, loaded as it comes into view like them.
+sub addRequestsRow(summary as object)
+    if not reqShowsRequests(summary) or summary.own <= 0 or m.rows.content = invalid then return
+    for each list in m.lists
+        if list.key = "requests" then return
+    end for
+    m.lists.Push({ key: "requests", title: "Your requests", state: "waiting", page: 0, seen: {} })
+    row = m.rows.content.createChild("ContentNode")
+    row.title = "Your requests"
+    nodesAppend(row, reqSkeletonTiles())
+    position = m.rows.rowItemFocused
+    if m.rows.isInFocusChain() and position <> invalid and position.Count() = 2 then ensureRows(position[0] + 1)
 end sub
 
 ' --- The remote ---

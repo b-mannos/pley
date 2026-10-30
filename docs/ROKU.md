@@ -131,11 +131,13 @@ its number counts what waits: a manager's pending and failed requests
 (red while some failed) and their own news, anyone else's news.
 
 - **Discover**, for those who may ask: a hero for the first trending title
-  (its main action and Details), then rows of posters with their badges
-  ("In library", "Partly in library", "Requested", "Declined"): Trending
-  this week, Popular movies, Popular shows, Coming to cinemas, Popular
-  anime, each loaded as it comes into view and ending with See all (a grid,
-  a page at a time); then Your requests. Search at the top looks on TMDB.
+  (its main action and Details; once nothing of its kind is left to ask
+  for, the limit's line in place of Request), then rows of posters with
+  their badges ("In library", "Partly in library", "Requested",
+  "Declined"): Trending this week, Popular movies, Popular shows, Coming to
+  cinemas, Popular anime, each loaded as it comes into view and ending with
+  See all (a grid, a page at a time); then Your requests, from the first
+  one asked for. Search at the top looks on TMDB.
 - **A TMDB title's page:** backdrop and poster, year, runtime or seasons,
   certification, genres, rating, tagline and overview; one main action
   (Open, Request, Request more seasons, Tell me too) or the line that says
