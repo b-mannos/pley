@@ -1,0 +1,15 @@
+<Project>
+
+  <!-- Settings every project of the native Samsung app shares. -->
+  <PropertyGroup>
+    <!-- The app's version; tizen-manifest.xml carries the same. -->
+    <Version>0.0.1</Version>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <Company>Pley</Company>
+    <Product>Pley for Samsung TV</Product>
+  </PropertyGroup>
+
+</Project>

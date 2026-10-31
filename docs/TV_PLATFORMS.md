@@ -14,9 +14,11 @@ and packaging. Both follow the [Android TV app](ANDROID.md): the same
 | Player | AVPlay, Samsung's player, on the hardware video plane | `<video src>`, handed to LG's media pipeline (uMediaServer) |
 | Oldest TV | 2018 (Tizen 4.0, Chromium 56); Samsung's store takes new media apps for 2021 (Tizen 6.0) and later | 2018 (webOS 4.0, Chromium 53) |
 
-Neither maker lets outside developers ship native apps, so both apps are web
-apps that hand the file's address to the TV's own player, with its hardware
-decoders, HDR and sound output. No video goes through a JavaScript player.
+Both are web apps that hand the file's address to the TV's own player, with
+its hardware decoders, HDR and sound output. No video goes through a
+JavaScript player. LG's TVs run only web apps from outside developers.
+Samsung's also run Tizen .NET apps, and a native Samsung app is being built
+beside the web one ([The native Samsung app](#the-native-samsung-app)).
 
 Neither app is in a store: both are installed on a TV in developer mode.
 
@@ -25,6 +27,7 @@ Neither app is in a store: both are installed on a TV in developer mode.
 - [Building and testing](#building-and-testing)
 - [Releases](#releases)
 - [Known limits](#known-limits)
+- [The native Samsung app](#the-native-samsung-app)
 
 ## Install
 
@@ -364,6 +367,60 @@ Store requirements:
 
 - No playback speed on Samsung.
 - No subtitle upload or delete on either TV.
+
+## The native Samsung app
+
+Pley for Samsung TV, native, is the Samsung app rewritten in C# for Tizen
+.NET, so its screens are drawn by the TV's own graphics engine (NUI) rather
+than a web engine. It runs on Tizen 9 TVs and is built beside the web app,
+which stays the Samsung app until the native one has its features. So far
+it shows a start screen with its version and the TV's model and Tizen
+version.
+
+| | |
+|---|---|
+| Folder | `apps/tizen-native` |
+| Package | Tizen .NET app (`.tpk`, id `app.pley.tizen`), named "Pley (native)" on the TV |
+| Screens | NUI, Samsung's C# toolkit on its DALi engine |
+| Oldest TV | Tizen 9 |
+
+### How it is built
+
+- `src/Pley.Tv.Core` is the logic without Tizen (.NET Standard 2.0): what
+  `packages/tv` does outside its screens, ported to C#. It runs on any
+  computer, so its tests need no TV.
+- `src/Pley.Tv.Tizen` is the app: NUI screens on the Core, the TV's player,
+  remote keys and keyboard, and packaging.
+- The two apps answer the same questions the same way: the tests of both
+  run the fixtures in `packages/tv/test/fixtures`, inputs with the answers
+  `packages/tv` gives. A rule that changes in one app fails the other's
+  tests until it changes there too.
+
+### Building and installing
+
+It needs the .NET 8 SDK, and to sign the package the Tizen CLI and the
+Samsung certificate profile of [On a Samsung TV](#on-a-samsung-tv).
+
+```sh
+dotnet test apps/tizen-native/test/Pley.Tv.Core.Tests   # the Core's tests
+bun run tizen-native                                     # apps/tizen-native/out/pley-tizen.tpk, signed
+tizen install -n pley-tizen.tpk -t <target> -- apps/tizen-native/out
+tizen run -p app.pley.tizen -t <target>
+bun scripts/check-nuget-licenses.mjs                     # the licences of the packages it ships with
+```
+
+### On the TV
+
+- **60 frames a second** is the most an app's screens get, also on panels
+  sold as 120 Hz, which reach 120 from HDMI sources. On a 2023 set with
+  Tizen 9, DALi updates the screens 60 times a second even with its own
+  limit lifted (`DALI_DISABLE_VSYNC_RENDER`,
+  `NUIApplication.SetMaximumRenderFrameRate`), and Samsung's cloud gaming
+  specification says 60 too. It draws nothing while nothing moves.
+- **Packages the TV has itself** (`System.Text.Json` and the rest of .NET)
+  are loaded from the TV, whatever version the app carries, so the app must
+  ask for one no newer than the TV's: a newer one fails to load
+  (`FileLoadException`).
 
 ## References
 

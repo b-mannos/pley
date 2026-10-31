@@ -1,0 +1,16 @@
+<Project Sdk="Tizen.NET.Sdk/1.2.1">
+
+  <!-- The Tizen app: NUI screens on the Core logic, packaged as a .tpk. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>tizen90</TargetFramework>
+    <AssemblyName>Pley.Tv.Tizen</AssemblyName>
+    <!-- The SDK asks for a Tizen.NET build NuGet no longer has and takes the next one up. -->
+    <NoWarn>$(NoWarn);NU1603</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pley.Tv.Core\Pley.Tv.Core.csproj" />
+  </ItemGroup>
+
+</Project>
