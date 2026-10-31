@@ -57,6 +57,9 @@ sealed class Shell
 
     public Sheet? Top => sheets.Count > 0 ? sheets[sheets.Count - 1] : null;
 
+    /// <summary>A covering sheet (a player) is on screen, under a panel or a list of its own or not.</summary>
+    public bool Covered => sheets.Exists(s => s.Covers);
+
     /// <summary>The app went to the background (false) or came back in front (true): what plays lets go, then starts again.</summary>
     public event Action<bool>? Shown;
 

@@ -45,8 +45,9 @@ class App : NUIApplication
         live.OnChange(() => liveEntry?.Refresh());
         music = AppMusicServer.Player(state, () => new TizenMediaEngine(video: false), () => Platform.Facts(), new ContextScheduler());
         // The remote's media keys drive the music wherever the app is, as Android's media session has
-        // them, except under a player, which has its own.
-        musicKeys = new MediaKeys(shell.Input, () => music.Active && shell.Top?.Covers != true, Media);
+        // them, except under a player, which has its own: its panels and lists over it included, as the
+        // TV's media key service reaches every listener whatever is on top.
+        musicKeys = new MediaKeys(shell.Input, () => music.Active && !shell.Covered, Media);
         shell.Shown += MusicShown;
         // The server ended the sign-in (revoked, or the refresh token spent): sign in again.
         state.SignedOut.Changed += signedOut =>

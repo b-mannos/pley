@@ -42,8 +42,6 @@ sealed class PlayerScreen : Sheet
     const float PreviewTop = 212, OverlayBottom = 489, OverlayBottomShown = 355;
     /// <summary>The spinner shows once playback has waited this long (the Android app's 500 ms).</summary>
     const long SpinnerAfterMs = 500;
-    /// <summary>The same media key from NUI and from the media key service this soon after counts once.</summary>
-    const long MediaTwiceMs = 250;
 
     readonly Shell shell;
     readonly AppState state;
@@ -54,6 +52,7 @@ sealed class PlayerScreen : Sheet
     readonly PlayerModel model;
     readonly Seeker seeker;
     readonly IDisposable keys;
+    readonly MediaKeys mediaKeys;
     readonly List<IDisposable> watches = new List<IDisposable>();
 
     readonly View black;
@@ -294,15 +293,9 @@ sealed class PlayerScreen : Sheet
         Root.Add(upNext.Group);
 
         keys = shell.Input.Push(OnKey);
-        // The remote's media keys may come through the media key service rather than the window.
-        try
-        {
-            global::Tizen.System.MediaKey.Event += OnMediaKey;
-        }
-        catch (Exception)
-        {
-            // Not on this TV: the window's keys only.
-        }
+        // The media keys, from the window or the TV's media key service, are the player's whatever
+        // shows over it; pushed after the other keys, they come first.
+        mediaKeys = new MediaKeys(shell.Input, () => !gone, OnMedia);
         gate.HoldEnded += Released;
         shell.Shown += AppShown;
         model.Toast += ShowToast;
@@ -793,12 +786,6 @@ sealed class PlayerScreen : Sheet
     bool OnKey(string key, bool down)
     {
         if (gone) return false;
-        var media = MediaOf(key);
-        if (media != null)
-        {
-            if (down) OnMedia(media.Value);
-            return true;
-        }
         if (RemoteKeys.Captions(key))
         {
             if (down && error == null) captionsRemembered = model.ToggleCaptions(captionsRemembered);
@@ -844,42 +831,9 @@ sealed class PlayerScreen : Sheet
         return false;
     }
 
-    enum MediaAction
-    {
-        Play,
-        Pause,
-        PlayPause,
-        Rewind,
-        Forward,
-        Next,
-        Previous,
-        Stop,
-    }
-
-    static MediaAction? MediaOf(string key) => key switch
-    {
-        "XF86AudioPlay" => MediaAction.Play,
-        "XF86AudioPause" => MediaAction.Pause,
-        "XF86AudioPlayPause" => MediaAction.PlayPause,
-        "XF86AudioRewind" => MediaAction.Rewind,
-        "XF86AudioForward" => MediaAction.Forward,
-        "XF86AudioStop" => MediaAction.Stop,
-        _ when RemoteKeys.NextTrack(key) => MediaAction.Next,
-        _ when RemoteKeys.PreviousTrack(key) => MediaAction.Previous,
-        _ => null,
-    };
-
-    MediaAction? lastMedia;
-    long lastMediaAt;
-
     /// <summary>A media key, from the window or the media key service: Play, Pause, fast forward and rewind (30 s), Next and Previous, Stop.</summary>
     void OnMedia(MediaAction action)
     {
-        if (gone) return;
-        var now = Environment.TickCount64;
-        if (lastMedia == action && now - lastMediaAt < MediaTwiceMs) return;
-        lastMedia = action;
-        lastMediaAt = now;
         // An error on screen: only Stop, which leaves.
         if (error != null && action != MediaAction.Stop) return;
         switch (action)
@@ -910,24 +864,6 @@ sealed class PlayerScreen : Sheet
                 Close();
                 break;
         }
-    }
-
-    void OnMediaKey(object? sender, global::Tizen.System.MediaKeyEventArgs e)
-    {
-        if (e.Status != global::Tizen.System.MediaKeyEventArgs.KeyStatus.Pressed) return;
-        MediaAction? action = e.Value switch
-        {
-            global::Tizen.System.MediaKeyEventArgs.KeyValue.Play => MediaAction.Play,
-            global::Tizen.System.MediaKeyEventArgs.KeyValue.Pause => MediaAction.Pause,
-            global::Tizen.System.MediaKeyEventArgs.KeyValue.PlayPause => MediaAction.PlayPause,
-            global::Tizen.System.MediaKeyEventArgs.KeyValue.Rewind => MediaAction.Rewind,
-            global::Tizen.System.MediaKeyEventArgs.KeyValue.FastForward => MediaAction.Forward,
-            global::Tizen.System.MediaKeyEventArgs.KeyValue.Next => MediaAction.Next,
-            global::Tizen.System.MediaKeyEventArgs.KeyValue.Previous => MediaAction.Previous,
-            global::Tizen.System.MediaKeyEventArgs.KeyValue.Stop => MediaAction.Stop,
-            _ => null,
-        };
-        if (action != null) OnUi(() => OnMedia(action.Value));
     }
 
     /// <summary>
@@ -1139,14 +1075,7 @@ sealed class PlayerScreen : Sheet
         tick.Stop();
         spin.Stop();
         keys.Dispose();
-        try
-        {
-            global::Tizen.System.MediaKey.Event -= OnMediaKey;
-        }
-        catch (Exception)
-        {
-            // It never took.
-        }
+        mediaKeys.Dispose();
         gate.HoldEnded -= Released;
         shell.Shown -= AppShown;
         model.Toast -= ShowToast;
