@@ -47,3 +47,11 @@ It has no releases yet: it is built and installed by hand
   search: the photo, the name and what of theirs is in your libraries,
   then a row per role (Acting, Directing…) with the year and the part
   under each title.
+- Collections in the native app: the rail's Collections lists every movie
+  and show library's collections, a row each; a collection's page has its
+  backdrop, TMDB or Smart badge, what it holds, Play and Shuffle, and its
+  titles in a grid that scrolls up over the backdrop.
+- Watch history in the native app: the profile's plays, newest first, with
+  when and on which device; OK opens one, the cross or OK held removes it,
+  and Show more loads the next 15. Settings, where it opens from, comes
+  next.
