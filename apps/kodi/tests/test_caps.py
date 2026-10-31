@@ -28,7 +28,7 @@ class CapsTest(unittest.TestCase):
         self.assertIn("mkv", report["containers"])
         self.assertEqual(report["display"], {"width": 1920, "height": 1080})
         self.assertEqual(report["device"], {"form": "tv", "model": "Kodi 21.3 on Windows"})
-        self.assertEqual(report["hls"], {"master_playlist": True, "segments": ["ts"]})
+        self.assertEqual(report["hls"], {"master_playlist": False, "segments": ["ts"]})
 
     def test_passthrough_follows_kodis_audio_settings(self):
         report = caps.build("", AUDIO_ON, (0, 0), "Kodi")

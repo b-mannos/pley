@@ -8,6 +8,12 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Fixed
+
+- Dolby Vision the server repackages (with HDR10+, or profile 7 outside
+  CoreELEC) plays as its HDR10 or HDR10+ base layer, as the server says,
+  instead of being sent as Dolby Vision that Kodi showed as HDR10.
+
 ## [0.1.0] - 2026-10-30
 
 ### Added

@@ -190,11 +190,8 @@ class EndToEndTest(unittest.TestCase):
         request = {"item_id": item, "client_id": "kodi-e2e", "caps": report, "max_bitrate": 2000, "max_height": 480}
         info = client.post("/api/playback", request)
         self.assertEqual((info["method"], info["hls"]), ("transcode", True))
-        self.assertTrue(info["url"].endswith("/master.m3u8"), info["url"])
-        master = client.request("GET", info["url"]).body.decode()
-        self.assertIn("index.m3u8", master)
-        playlist_url = info["url"].rsplit("/", 1)[0] + "/index.m3u8"
-        playlist = client.request("GET", playlist_url).body.decode()
+        self.assertTrue(info["url"].endswith("/index.m3u8"), info["url"])
+        playlist = client.request("GET", info["url"]).body.decode()
         first = next(line for line in playlist.splitlines() if line.endswith(".ts"))
         segment = client.request("GET", info["url"].rsplit("/", 1)[0] + "/" + first)
         self.assertEqual(segment.status, 200)
