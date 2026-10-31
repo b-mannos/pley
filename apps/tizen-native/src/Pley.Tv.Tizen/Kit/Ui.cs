@@ -200,6 +200,17 @@ static class Text
         if (style.Tracking != 0 && CharacterSpacing != null) CharacterSpacing.SetValue(label, Ui.Dp(style.Tracking));
     }
 
+    /// <summary>
+    /// The width in dp a label needs for its text on one line. NaturalSize can leave out the
+    /// tracking set through CharacterSpacing and rounds to the pixel, so a label sized to it
+    /// exactly can end in "…"; this adds the tracking and a little room.
+    /// </summary>
+    public static float Width(TextLabel label)
+    {
+        var spacing = CharacterSpacing?.GetValue(label) is float s ? s : 0;
+        return (label.NaturalSize.Width + spacing * (label.Text?.Length ?? 0)) / Ui.Scale + 3;
+    }
+
     /// <summary>Each style's line height in its font, in pixels, measured once.</summary>
     static readonly System.Collections.Generic.Dictionary<(float, string, string), float> FontLines = new System.Collections.Generic.Dictionary<(float, string, string), float>();
 

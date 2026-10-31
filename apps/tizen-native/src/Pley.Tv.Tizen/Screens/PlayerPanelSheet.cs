@@ -257,7 +257,7 @@ sealed class PlayerPanelSheet : Sheet
                 },
             };
             value = Text.Label(row.Value ?? "", PleyType.Label, PleyColors.Fg);
-            var valueWidth = value.NaturalSize.Width / Ui.Scale + 2;
+            var valueWidth = Text.Width(value);
             var textWidth = width - 2 * Pad - Glyph - 12 - valueWidth - 12 - Glyph;
             label = Text.Label(row.Label, PleyType.Label, PleyColors.Fg, width: textWidth);
             hint = PanelColumn.Lines(row.Supporting ?? "", PleyType.Caption, PleyColors.Muted, textWidth, 2);

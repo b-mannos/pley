@@ -135,7 +135,7 @@ sealed class SkipButton : View
     {
         if (label.Text == text) return;
         label.Text = text;
-        var textWidth = label.NaturalSize.Width / Ui.Scale + 1;
+        var textWidth = Text.Width(label);
         WidthDp = Pad + textWidth + 8 + Glyph + Pad;
         Size = new Size(Ui.Dp(WidthDp), Ui.Dp(Height));
         label.Size = new Size(Ui.Dp(textWidth), Ui.Dp(Height));
@@ -264,7 +264,7 @@ sealed class UpNextView : View
             icon.Position = new Position(Ui.Dp(20), Ui.Dp((Height - Icon) / 2));
             Add(icon);
             label = Text.Label(PlayerText.PlayNow, PleyType.Label, PleyColors.Fg);
-            var labelWidth = label.NaturalSize.Width / Ui.Scale + 1;
+            var labelWidth = Text.Width(label);
             label.Size = new Size(Ui.Dp(labelWidth), Ui.Dp(Height));
             label.Position = new Position(Ui.Dp(20 + Icon + 10), 0);
             Add(label);
@@ -295,7 +295,7 @@ sealed class UpNextView : View
                 if (reduced)
                 {
                     words.Text = PlayerText.NextIn(n);
-                    var w = words.NaturalSize.Width / Ui.Scale + 1;
+                    var w = Text.Width(words);
                     words.Size = new Size(Ui.Dp(w), Ui.Dp(Height));
                     extra = 12 + w;
                 }
@@ -377,7 +377,7 @@ sealed class SleepNoticeView : View
         shownSeconds = secondsLeft;
         // As wide as its longest count, so it doesn't shrink as the seconds go.
         text.Text = SleepText.Notice(30);
-        var w = text.NaturalSize.Width / Ui.Scale + 2;
+        var w = Text.Width(text);
         text.Text = SleepText.Notice(secondsLeft);
         text.Size = new Size(Ui.Dp(w), Ui.Dp(PleyTv.ButtonHeight));
         keep.Position = new Position(Ui.Dp(20 + Glyph + 16 + w + 16), Ui.Dp(8));
@@ -409,7 +409,7 @@ sealed class ToastView : View
         text.Text = toast.Text;
         text.TextColor = toast.Error ? PleyColors.DangerText : PleyColors.Fg;
         var inner = MaxWidth - 2 * PadX;
-        var w = Math.Min(inner, text.NaturalSize.Width / Ui.Scale + 2);
+        var w = Math.Min(inner, Text.Width(text));
         var h = Math.Min(Math.Max(text.GetHeightForWidth(Ui.Dp(w)), Text.LineHeight(PleyType.Label)), Text.LineHeight(PleyType.Label) * 3);
         text.Size = new Size(Ui.Dp(w), h);
         WidthDp = w + 2 * PadX;
@@ -449,7 +449,7 @@ sealed class MethodBadge : View
             : PleyColors.Accent;
         text.Text = method;
         text.TextColor = colour;
-        var w = text.NaturalSize.Width / Ui.Scale + 1;
+        var w = Text.Width(text);
         text.Size = new Size(Ui.Dp(w), Text.LineHeight(PleyType.Caption));
         WidthDp = w + 16;
         Size = new Size(Ui.Dp(WidthDp), Text.LineHeight(PleyType.Caption) + Ui.Dp(6));

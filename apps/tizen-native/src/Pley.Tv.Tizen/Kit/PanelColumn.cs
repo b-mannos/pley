@@ -237,9 +237,11 @@ sealed class PanelChoice : View
         var textHeight = label.SizeHeight / Ui.Scale;
         if (!string.IsNullOrEmpty(line))
         {
-            supporting = Text.Label(line!, PleyType.Caption, PleyColors.Muted, width: room);
+            // Two lines where Android has one: a quality's hint ("4K · HDR10 · 62 Mbps") is longer
+            // than the panel in the TV's font, and "…" would hide the part that tells them apart.
+            supporting = PanelColumn.Lines(line!, PleyType.Caption, PleyColors.Muted, room, 2);
             Add(supporting);
-            textHeight += Text.LineHeight(PleyType.Caption) / Ui.Scale;
+            textHeight += supporting.SizeHeight / Ui.Scale;
         }
         var height = Math.Max(MinHeight, Math.Max(textHeight, lead) + 16);
         Size = new Size(Ui.Dp(width), Ui.Dp(height));

@@ -63,7 +63,7 @@ sealed class ButtonView : View
     {
         label.Text = text;
         var padding = kind == ButtonKind.Pill ? 20 : 16;
-        var textWidth = label.NaturalSize.Width / Ui.Scale;
+        var textWidth = Text.Width(label);
         var iconRoom = icon != null ? PleyTv.IconSize + 8 : 0;
         if (maxWidth > 0) textWidth = Math.Min(textWidth, maxWidth - padding * 2 - iconRoom);
         var content = textWidth + iconRoom;
