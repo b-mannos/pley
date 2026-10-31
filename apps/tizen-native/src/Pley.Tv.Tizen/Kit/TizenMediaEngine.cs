@@ -98,6 +98,15 @@ sealed class TizenMediaEngine : IVideoEngine
         lastPosition = source.Live ? 0 : Math.Max(0, source.StartMs);
         var p = new Media.Player();
         player = p;
+        SetStatus(mine, EngineStatus.Buffering);
+        _ = Open(p, source, mine);
+    }
+
+    async Task Open(Media.Player p, EngineSource s, int mine)
+    {
+        // The player before (this engine's or another's) has let go of the video plane first.
+        await Releasing;
+        if (mine != generation) return;
         try
         {
             if (video) p.Display = new Media.Display(Window.Instance);
@@ -106,22 +115,17 @@ sealed class TizenMediaEngine : IVideoEngine
             p.PlaybackInterrupted += (_, _) => Post(mine, () => Fail(new EngineError.Other("the TV took its player for something else")));
             p.BufferingProgressChanged += (_, e) => Post(mine, () => Buffering(e.Percent < 100));
             p.VideoStreamChanged += (_, e) => Post(mine, () => Picture(e.Size.Width, e.Size.Height));
-            p.SetSource(new Media.MediaUriSource(source.Url));
+            p.SetSource(new Media.MediaUriSource(s.Url));
         }
         catch (Exception e)
         {
             Post(mine, () => Fail(ErrorOf(e)));
             return;
         }
-        SetStatus(mine, EngineStatus.Buffering);
-        _ = Open(p, source, mine);
-    }
-
-    async Task Open(Media.Player p, EngineSource s, int mine)
-    {
         try
         {
-            await p.PrepareAsync();
+            preparing = p.PrepareAsync();
+            await preparing;
             if (mine != generation) return;
             prepared = true;
             if (video)
@@ -433,12 +437,45 @@ sealed class TizenMediaEngine : IVideoEngine
     }
 
     /// <summary>The player let go: stopped, unprepared and disposed.</summary>
+    /// <summary>
+    /// The players being let go, one after another: the next player claims the video plane only
+    /// once they have. Shared by every engine, as the TV has one video plane.
+    /// </summary>
+    static Task Releasing = Task.CompletedTask;
+
+    /// <summary>The prepare of the player playing, while it runs.</summary>
+    Task? preparing;
+
     void Close()
     {
         var p = player;
+        var prepare = preparing;
         player = null;
+        preparing = null;
         prepared = false;
         if (p == null) return;
+        Releasing = Release(p, prepare, Releasing);
+    }
+
+    /// <summary>
+    /// Lets <paramref name="p"/> go. One still preparing can't be stopped: let go then, it went
+    /// on preparing and held the video plane, and the next source played with sound and no
+    /// picture (the TV's menu under a channel or a film). So it goes once its prepare has ended.
+    /// </summary>
+    static async Task Release(Media.Player p, Task? prepare, Task before)
+    {
+        await before;
+        if (prepare != null)
+        {
+            try
+            {
+                await prepare;
+            }
+            catch (Exception)
+            {
+                // It failed: there is nothing to stop.
+            }
+        }
         try
         {
             if (p.State is Media.PlayerState.Playing or Media.PlayerState.Paused) p.Stop();
@@ -446,7 +483,7 @@ sealed class TizenMediaEngine : IVideoEngine
         }
         catch (Exception)
         {
-            // Already stopped, or still preparing.
+            // Already stopped.
         }
         try
         {
