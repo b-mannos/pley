@@ -266,6 +266,7 @@ async fn start_fake() -> (Fake, String) {
                         conversions: true,
                         conversions_mp4: true,
                         live_bitrate: true,
+                        trickplay_version: 1,
                         ..Default::default()
                     },
                     limits: Limits { max_jobs: 8, max_hw_jobs: 0 },
@@ -561,6 +562,7 @@ async fn start_fake() -> (Fake, String) {
                     rows: 2,
                     count: 6,
                     sheets: 1,
+                    version: 1,
                 })
                 .into_response()
             }),
@@ -1585,6 +1587,54 @@ async fn seek_previews_are_made_once_per_file() {
     assert_eq!(app.get(&format!("/api/files/{broken}/trickplay"), admin).await.status, StatusCode::NOT_FOUND);
     assert_eq!(app.state.trickplay.pending(), 0);
     assert_eq!(w.fake.previews.lock().len(), 2);
+}
+
+#[tokio::test]
+async fn seek_previews_an_earlier_version_made_are_made_again() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    // Library work whenever nothing plays, whatever else keeps the processors busy.
+    let settings = json!({"seek_previews": true, "library_work": "idle", "library_work_max_cpu": 100});
+    app.put("/api/settings", admin, settings).await;
+    let clip = app.file_of(w.movies["Clip"]).await;
+    let path: String = sqlx::query_scalar("SELECT path FROM media_files WHERE id = ?")
+        .bind(clip)
+        .fetch_one(&app.state.db.read)
+        .await
+        .unwrap();
+    let media = app.state.store.media_dir(&app.state.store.fingerprint_of(clip, &path, None).await.unwrap()).unwrap();
+    // As an earlier version left them: no version, and chapter images cut from them.
+    let index = json!({"id": "old", "interval_ms": 10_000, "width": 8, "height": 4, "columns": 5, "rows": 2, "count": 6, "sheets": 1});
+    std::fs::create_dir_all(media.join("trickplay")).unwrap();
+    std::fs::write(media.join("trickplay").join("index.json"), index.to_string()).unwrap();
+    std::fs::write(media.join("trickplay").join("0.jpg"), b"old sheet").unwrap();
+    std::fs::create_dir_all(media.join("chapters")).unwrap();
+    std::fs::write(media.join("chapters").join("0.jpg"), b"old chapter").unwrap();
+    let previews = format!("/api/files/{clip}/trickplay");
+    assert_eq!(app.get(&previews, admin).await.body["id"], "old", "they serve meanwhile");
+
+    app.state.trickplay.request_all().await;
+    let mut made = Value::Null;
+    for _ in 0..200 {
+        let reply = app.get(&previews, admin).await;
+        if reply.body["id"] == "previews1" {
+            made = reply.body;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!((&made["id"], &made["version"]), (&json!("previews1"), &json!(1)), "made again: {made}");
+    assert_ne!(std::fs::read(media.join("trickplay").join("0.jpg")).unwrap(), b"old sheet");
+    // Chapter images go with the sheets they came from, once those are replaced.
+    eventually(|| !media.join("chapters").join("0.jpg").exists()).await;
+
+    // As the transcoder makes them now: not made again.
+    eventually(|| app.state.trickplay.pending() == 0).await;
+    let asked = w.fake.previews.lock().iter().filter(|p| p.ends_with("Clip (2020).mp4")).count();
+    app.state.trickplay.request_all().await;
+    assert_eq!(app.state.trickplay.pending(), 0, "current previews aren't queued again");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(w.fake.previews.lock().iter().filter(|p| p.ends_with("Clip (2020).mp4")).count(), asked);
 }
 
 #[tokio::test]

@@ -205,6 +205,7 @@ before using what it names:
 | `hls_variants` | jobs make lower renditions (`variants`) |
 | `live_bitrate` | `POST /v1/jobs/{id}/bitrate` works |
 | `live` | `/v1/live` works |
+| `trickplay_version` | the version of the seek previews it makes (`TrickplayInfo.version`); `0` from older transcoders |
 
 ### Media
 
@@ -233,12 +234,17 @@ version (path, size, modification time).
 | `width?` | thumbnail width in pixels (default 320) |
 
 It returns `TrickplayInfo {id, interval_ms, width, height, columns, rows,
-count, sheets}`. Thumbnail `k` shows the video at `k × interval_ms`; each
-sheet holds `columns × rows` of them, left to right, top to bottom.
+count, sheets, version}`. Thumbnail `k` shows the video at `k × interval_ms`;
+each sheet holds `columns × rows` of them, left to right, top to bottom.
 `GET /v1/trickplay/{id}/{n}.jpg` returns sheet `n` (`0` to `sheets - 1`).
 
 - Only keyframes are decoded. HDR and Dolby Vision are tone mapped with
   libplacebo when available.
+- Sheets are JPEGs at FFmpeg's quality 7. `version` says how a set was
+  made: it goes up whenever sets are made otherwise (1: quality 7 rather
+  than 5), and a server makes the previews it keeps again when they are
+  older than the transcoder's `trickplay_version`. Sets older transcoders
+  made lack it (`0`).
 - A set is cached per file version for a day, or until every sheet has been
   fetched: fetch them all in one go and keep them.
 

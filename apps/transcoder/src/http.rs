@@ -843,7 +843,7 @@ mod tests {
     async fn preview_sheets_go_once_all_have_been_fetched() {
         let dir = tempfile::tempdir().unwrap();
         let addr = serve(dir.path(), None).await;
-        let id = "0123abcd-2000-320";
+        let id = "0123abcd-2000-320-v1";
         let set = dir.path().join("trickplay").join(id);
         std::fs::create_dir_all(&set).unwrap();
         let info = TrickplayInfo {
@@ -855,6 +855,7 @@ mod tests {
             rows: 10,
             count: 150,
             sheets: 2,
+            version: 1,
         };
         std::fs::write(set.join("index.json"), serde_json::to_vec(&info).unwrap()).unwrap();
         std::fs::write(set.join("0.jpg"), b"sheet 0").unwrap();

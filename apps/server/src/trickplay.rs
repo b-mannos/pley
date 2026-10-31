@@ -73,6 +73,17 @@ pub struct TrickplayService {
 struct Queues {
     opened: VecDeque<i64>,
     library: VecDeque<i64>,
+    /// Files whose previews an earlier version made: made again last, in
+    /// the hours for the rest of the libraries (those there serve until then).
+    refresh: VecDeque<i64>,
+}
+
+/// The queue a file was taken from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Opened,
+    Library,
+    Refresh,
 }
 
 /// What `TrickplayInfo` says about a tile: its sheet and position.
@@ -142,6 +153,13 @@ impl TrickplayService {
         serde_json::from_slice(&bytes).ok()
     }
 
+    /// Whether previews are as the transcoder makes them now. Those an
+    /// earlier version made are made again; with a transcoder that doesn't
+    /// say (an older one, or none yet), all are.
+    fn current(&self, info: &TrickplayInfo) -> bool {
+        info.version >= self.transcoder.trickplay_version()
+    }
+
     pub fn sheet(&self, file: &FileRow, n: u32) -> Option<PathBuf> {
         Some(self.dir(file)?.join(format!("{n}.jpg"))).filter(|p| p.is_file())
     }
@@ -174,6 +192,7 @@ impl TrickplayService {
                     return;
                 }
                 queues.library.retain(|id| *id != file_id);
+                queues.refresh.retain(|id| *id != file_id);
             }
             queues.opened.push_back(file_id);
         } else if new {
@@ -185,8 +204,21 @@ impl TrickplayService {
         self.queued.notify_one();
     }
 
-    /// Queue every video file without previews, newest first (when previews
-    /// are made for whole libraries).
+    /// Queue a file whose previews an earlier version made, to be made again
+    /// after everything else, unless it is queued or failed.
+    fn enqueue_refresh(&self, file_id: i64, fingerprint: &str) {
+        if self.failed.lock().get(&file_id).map(String::as_str) == Some(fingerprint)
+            || !self.pending.lock().insert(file_id)
+        {
+            return;
+        }
+        self.queues.lock().refresh.push_back(file_id);
+        self.queued.notify_one();
+    }
+
+    /// Queue every video file without previews, newest first, then those
+    /// whose previews an earlier version made (when previews are made for
+    /// whole libraries).
     pub async fn request_all(&self) {
         let settings = self.settings.get();
         if !settings.seek_previews || !settings.previews_in_background {
@@ -199,13 +231,31 @@ impl TrickplayService {
                 return;
             }
         };
+        // What the transcoder makes now tells which previews are older; at
+        // start-up it may not have answered yet.
+        if !self.transcoder.is_available() {
+            self.transcoder.wait_ready(Duration::from_secs(60)).await;
+        }
+        let current = self.transcoder.trickplay_version();
         // Which ones have previews is a question for the disk (one look per
-        // file): asked off the async workers.
+        // file, and a read of those an earlier version may have made): asked
+        // off the async workers.
         let store = self.store.clone();
-        let missing = tokio::task::spawn_blocking(move || {
-            let done =
-                |fp: &str| store.media_dir(fp).is_some_and(|dir| dir.join("trickplay").join("index.json").is_file());
-            files.into_iter().filter(|(_, fp)| !fp.as_deref().is_some_and(done)).collect::<Vec<_>>()
+        let (missing, older) = tokio::task::spawn_blocking(move || {
+            let (mut missing, mut older) = (Vec::new(), Vec::new());
+            for (id, fp) in files {
+                let index =
+                    fp.as_deref().and_then(|fp| store.media_dir(fp)).map(|d| d.join("trickplay").join("index.json"));
+                match (index.filter(|path| path.is_file()), fp) {
+                    (Some(index), Some(fp)) => {
+                        if current > 0 && version_of(&index) < current {
+                            older.push((id, fp));
+                        }
+                    }
+                    (_, fp) => missing.push((id, fp)),
+                }
+            }
+            (missing, older)
         })
         .await
         .unwrap_or_default();
@@ -216,6 +266,14 @@ impl TrickplayService {
         let queued = self.pending().saturating_sub(before);
         if queued > 0 {
             tracing::info!("making seek previews for {queued} files in the background");
+        }
+        let before = self.pending();
+        for (id, fingerprint) in &older {
+            self.enqueue_refresh(*id, fingerprint);
+        }
+        let queued = self.pending().saturating_sub(before);
+        if queued > 0 {
+            tracing::info!("making the seek previews of {queued} files again: an earlier version made them");
         }
     }
 
@@ -249,15 +307,19 @@ impl TrickplayService {
                 } else {
                     None
                 };
-                opened.map(|id| (id, true)).or_else(|| {
+                opened.map(|id| (id, Kind::Opened)).or_else(|| {
                     // A library's previews read whole files: what is likely
-                    // to be watched soon first.
+                    // to be watched soon first, those made before last.
                     let soon = soon?;
                     let at = queues.library.iter().position(|id| soon.files.contains(id));
-                    queues.library.remove(at.or(later.then_some(0))?).map(|id| (id, false))
+                    match at.or(later.then_some(0)).and_then(|at| queues.library.remove(at)) {
+                        Some(id) => Some((id, Kind::Library)),
+                        None if later => queues.refresh.pop_front().map(|id| (id, Kind::Refresh)),
+                        None => None,
+                    }
                 })
             };
-            let Some((file_id, opened)) = next else {
+            let Some((file_id, kind)) = next else {
                 // Until something is queued, a playback starts or ends, or a
                 // look again (the start is over, or playback may have ended).
                 let wait = starting.map_or(IDLE_LOOK, |left| left.min(IDLE_LOOK));
@@ -270,7 +332,7 @@ impl TrickplayService {
             // Transcodes come first, a playback's or a download's.
             self.transcoder.not_transcoding().await;
             if self.sessions.starting_for().is_some() {
-                self.requeue(file_id, opened);
+                self.requeue(file_id, kind);
                 continue;
             }
             // A playback starting meanwhile stops this one (dropping the
@@ -286,7 +348,7 @@ impl TrickplayService {
                 }
                 () = self.sessions.started_since(starts) => {
                     tracing::debug!("seek previews for file {file_id} put off: a playback is starting");
-                    self.requeue(file_id, opened);
+                    self.requeue(file_id, kind);
                 }
             }
         }
@@ -296,7 +358,11 @@ impl TrickplayService {
     /// [`Scheduler::turn`]): those of what is likely to be watched soon
     /// (given then), and the rest.
     async fn library_turn(&self) -> (Option<Arc<Soon>>, bool) {
-        if self.queues.lock().library.is_empty() || self.schedule.turn(Class::Soon).is_err() {
+        let empty = {
+            let queues = self.queues.lock();
+            queues.library.is_empty() && queues.refresh.is_empty()
+        };
+        if empty || self.schedule.turn(Class::Soon).is_err() {
             return (None, false);
         }
         (Some(self.schedule.soon().await), self.schedule.turn(Class::Later).is_ok())
@@ -309,13 +375,17 @@ impl TrickplayService {
     }
 
     /// Put a file whose previews were put off back at the head of its queue.
-    fn requeue(&self, file_id: i64, opened: bool) {
+    fn requeue(&self, file_id: i64, kind: Kind) {
         let mut queues = self.queues.lock();
-        if !opened && queues.opened.contains(&file_id) {
+        if kind != Kind::Opened && queues.opened.contains(&file_id) {
             // Someone opened it meanwhile: it is queued already.
             return;
         }
-        let queue = if opened { &mut queues.opened } else { &mut queues.library };
+        let queue = match kind {
+            Kind::Opened => &mut queues.opened,
+            Kind::Library => &mut queues.library,
+            Kind::Refresh => &mut queues.refresh,
+        };
         queue.retain(|id| *id != file_id);
         queue.push_front(file_id);
     }
@@ -324,7 +394,7 @@ impl TrickplayService {
         let Some(mut file) = catalog::file(&self.db, file_id).await? else { return Ok(()) };
         let fingerprint = self.store.fingerprint_of(file.id, &file.path, file.fingerprint.as_deref()).await?;
         file.fingerprint = Some(fingerprint.clone());
-        if self.index(&file).is_some() {
+        if self.index(&file).is_some_and(|info| self.current(&info)) {
             return Ok(());
         }
         if !self.transcoder.is_available() && !self.transcoder.wait_ready(Duration::from_secs(60)).await {
@@ -350,8 +420,29 @@ impl TrickplayService {
             tokio::fs::write(part.join(format!("{n}.jpg")), bytes).await?;
         }
         tokio::fs::write(part.join("index.json"), serde_json::to_vec(&info)?).await?;
-        let _ = tokio::fs::remove_dir_all(&target).await;
-        tokio::fs::rename(&part, &target).await?;
+        // Previews made before serve until the new ones take their place.
+        let old = target.with_extension("old");
+        let _ = tokio::fs::remove_dir_all(&old).await;
+        let replaced = tokio::fs::rename(&target, &old).await.is_ok();
+        if let Err(err) = tokio::fs::rename(&part, &target).await {
+            if replaced {
+                let _ = tokio::fs::rename(&old, &target).await;
+            }
+            return Err(err.into());
+        }
+        if replaced {
+            let _ = tokio::fs::remove_dir_all(&old).await;
+            // Their chapter images were cut from the sheets replaced.
+            if let Some(chapters) = self.chapters_dir(&file) {
+                let lock = self.cut_lock(file.id);
+                let _guard = lock.lock().await;
+                let _ = tokio::fs::remove_dir_all(chapters).await;
+            }
+        }
+        if !self.current(&info) {
+            // Made by a transcoder older than the one asked: not again until a restart.
+            self.failed.lock().insert(file.id, fingerprint);
+        }
         // Chapter images come from the same sheets; make them while they are warm.
         if file.media_info().is_some_and(|m| m.chapters.len() > 1)
             && let Err(err) = self.chapter_images(&file).await
@@ -431,9 +522,10 @@ impl TrickplayService {
         else {
             return Ok(None);
         };
-        let path = self
-            .bif_cache
-            .join(format!("{fingerprint}-{}-{}x{}-{}.bif", info.interval_ms, info.width, info.height, info.count));
+        let path = self.bif_cache.join(format!(
+            "{fingerprint}-{}-{}-{}x{}-{}.bif",
+            info.version, info.interval_ms, info.width, info.height, info.count
+        ));
         // Read rather than looked for: the cache's clean-up may remove it in between.
         if let Ok(bytes) = tokio::fs::read(&path).await {
             return Ok(Some(bytes));
@@ -532,6 +624,15 @@ async fn remove_old_bifs(db: &Db, store: Arc<Store>) {
     }
 }
 
+/// The version of the previews whose index is at `index`; 0 when it
+/// doesn't say (made before versions), or can't be read (made again).
+fn version_of(index: &Path) -> u32 {
+    std::fs::read(index)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<TrickplayInfo>(&bytes).ok())
+        .map_or(0, |info| info.version)
+}
+
 /// Write `bytes` to `path` whole, through a temporary file of its own in
 /// `dir`: a file played from two libraries may be cut by both at once.
 fn save(dir: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -602,7 +703,23 @@ mod tests {
             rows: 10,
             count: 150,
             sheets: 2,
+            version: 1,
         }
+    }
+
+    #[test]
+    fn versions_of_previews_made_before_are_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let index = dir.path().join("index.json");
+        std::fs::write(&index, serde_json::to_vec(&info()).unwrap()).unwrap();
+        assert_eq!(version_of(&index), 1);
+        // As earlier versions wrote it: no version.
+        let mut before = serde_json::to_value(info()).unwrap();
+        before.as_object_mut().unwrap().remove("version");
+        std::fs::write(&index, before.to_string()).unwrap();
+        assert_eq!(version_of(&index), 0);
+        std::fs::write(&index, b"not json").unwrap();
+        assert_eq!(version_of(&index), 0, "made again");
     }
 
     #[test]

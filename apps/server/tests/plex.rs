@@ -491,6 +491,7 @@ async fn preview_indexes_and_chapter_thumbs() {
         rows: 2,
         count: 10,
         sheets: 1,
+        version: 0,
     };
     std::fs::write(dir.join("index.json"), serde_json::to_vec(&trickplay).unwrap()).unwrap();
 

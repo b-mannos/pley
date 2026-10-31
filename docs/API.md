@@ -1526,7 +1526,7 @@ removed or reordered (`400`).
 | GET | `/api/files/{id}/subtitles/{index}.vtt?offset_ms=` | `play` | WebVTT of a text subtitle track |
 | GET | `/api/files/{id}/subtitles/{index}.mks` | `play` | a picture subtitle track in a Matroska file of its own (`video/x-matroska`) |
 | GET | `/api/files/{id}/subtitles/{index}.sup` | `play` | a PGS track as a `.sup` file (Kodi's) |
-| GET | `/api/files/{id}/trickplay` | `play` | seek-bar previews: `{ id, interval_ms, width, height, columns, rows, count, sheets }` |
+| GET | `/api/files/{id}/trickplay` | `play` | seek-bar previews: `{ id, interval_ms, width, height, columns, rows, count, sheets, version }` |
 | GET | `/api/files/{id}/trickplay/{n}.jpg?v={id}` | `play` | preview sprite sheet `n` |
 | GET | `/api/files/{id}/chapters/{n}.jpg` | `play` | picture of chapter `n` (0-based) |
 
@@ -1586,6 +1586,10 @@ removed or reordered (`400`).
   playback's first 30 s nor while anything is transcoded: a playback that
   starts puts off the file being done, which is made again later. Those of
   whole libraries wait for [library work](#library-work)'s hours.
+  Previews an earlier version made (`version` lower than what the
+  transcoder makes now) are made again as library work, after the files
+  that have none and only in the hours for the rest of the libraries;
+  they serve until then.
 - **Sprite sheets**: thumbnail `k` is at column `k % columns`, row
   `k / columns` of sheet `k / (columns × rows)`, and shows the video at
   `k × interval_ms`.

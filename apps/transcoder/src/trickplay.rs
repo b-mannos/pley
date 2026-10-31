@@ -30,6 +30,10 @@ const ROWS: u32 = 10;
 /// Thumbnails are small and seen in passing: at their size 7 looks no
 /// different from 5, and takes a fifth less space.
 const QUALITY: &str = "7";
+/// The version of the sets made here ([`TrickplayInfo::version`]), raised
+/// whenever they are made otherwise, so that servers make theirs again. 1:
+/// sheets at [`QUALITY`] 7 rather than 5.
+pub const VERSION: u32 = 1;
 const TIMEOUT: Duration = Duration::from_secs(60 * 60);
 /// Sets whose fetched sheets are tracked at once (sets fetched only in part
 /// are forgotten beyond that, and left to cache pruning).
@@ -115,7 +119,8 @@ impl Trickplay {
         let (src_w, src_h) = (video.width.unwrap_or(1920).max(2), video.height.unwrap_or(1080).max(2));
         let height = ((width as f64 * src_h as f64 / src_w as f64 / 2.0).round() as u32 * 2).max(2);
 
-        let id = format!("{}-{interval}-{width}", file_key(path)?);
+        // A set made by another version is another set.
+        let id = format!("{}-{interval}-{width}-v{VERSION}", file_key(path)?);
         let dir = self.dir.join(&id);
         if let Some(info) = read_index(&dir) {
             touch(&dir.join("index.json"));
@@ -183,6 +188,7 @@ impl Trickplay {
             rows: ROWS,
             count: count.min(sheets * per_sheet),
             sheets,
+            version: VERSION,
         };
         tokio::fs::write(part.join("index.json"), serde_json::to_vec(&info).map_err(anyhow::Error::from)?).await?;
         let _ = tokio::fs::remove_dir_all(&dir).await;

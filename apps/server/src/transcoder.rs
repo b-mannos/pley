@@ -275,6 +275,12 @@ impl Transcoder {
         self.info().is_some_and(|info| info.capabilities.subtitle_matroska)
     }
 
+    /// The version of the seek previews the transcoder makes
+    /// ([`TrickplayInfo::version`]): 0 from older ones, or before it answered.
+    pub fn trickplay_version(&self) -> u32 {
+        self.info().map_or(0, |info| info.capabilities.trickplay_version)
+    }
+
     /// Whether the transcoder answers for a picture track's Matroska with
     /// what it has copied so far ([`Transcoder::subtitle_matroska_so_far`]);
     /// older ones answer only once it is whole.

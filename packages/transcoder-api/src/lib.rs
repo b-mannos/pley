@@ -617,6 +617,10 @@ pub struct Capabilities {
     /// live HLS stream (`/v1/live`). Older transcoders lack it.
     #[serde(default)]
     pub live: bool,
+    /// The version of the seek previews this transcoder makes
+    /// ([`TrickplayInfo::version`]). Older transcoders lack it (0).
+    #[serde(default)]
+    pub trickplay_version: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -1538,6 +1542,12 @@ pub struct TrickplayInfo {
     pub count: u32,
     /// Number of sheets, `0.jpg` to `{sheets - 1}.jpg`.
     pub sheets: u32,
+    /// How the sheets were made: a transcoder making them otherwise (their
+    /// quality, size or spacing) has a higher one
+    /// ([`Capabilities::trickplay_version`]). Sets made by older transcoders
+    /// lack it (0).
+    #[serde(default)]
+    pub version: u32,
 }
 
 /// Error body returned by the transcoder for non-2xx responses.

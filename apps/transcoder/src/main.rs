@@ -478,6 +478,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
             hls_variants: true,
             live_bitrate: true,
             live: true,
+            trickplay_version: trickplay::VERSION,
             ..ff.caps.clone()
         },
         limits,
