@@ -163,15 +163,15 @@ public sealed class Api
     /// <paramref name="timeoutMs"/> is how long the server may stay silent (10 s without).
     /// </summary>
     public async Task<HttpResponse> Send(string path, string method = "GET", object? body = null, IEnumerable<KeyValuePair<string, object?>>? query = null,
-        CancellationToken cancel = default, int? timeoutMs = null, ResponseType responseType = ResponseType.Json, Action<long>? onProgress = null)
+        CancellationToken cancel = default, int? timeoutMs = null, ResponseType responseType = ResponseType.Json, Action<long>? onProgress = null, string? accept = null)
     {
         var token = await tokens.AccessToken().ConfigureAwait(false) ?? throw new SignedOutException();
-        var res = await Once(path, method, body, query, cancel, timeoutMs, responseType, onProgress, token).ConfigureAwait(false);
+        var res = await Once(path, method, body, query, cancel, timeoutMs, responseType, onProgress, token, accept).ConfigureAwait(false);
         if (res.Status == 401 && OwnServer(path) && InvalidToken(res.Header("WWW-Authenticate")))
         {
             var fresh = await Refreshed(token).ConfigureAwait(false);
             // Once: a 401 after a refresh is the answer.
-            if (fresh != null) res = await Once(path, method, body, query, cancel, timeoutMs, responseType, onProgress, fresh).ConfigureAwait(false);
+            if (fresh != null) res = await Once(path, method, body, query, cancel, timeoutMs, responseType, onProgress, fresh, accept).ConfigureAwait(false);
         }
         if (res.Status >= 200 && res.Status < 300) return res;
         throw ToError(res);
@@ -204,9 +204,9 @@ public sealed class Api
     }
 
     Task<HttpResponse> Once(string path, string method, object? body, IEnumerable<KeyValuePair<string, object?>>? query, CancellationToken cancel,
-        int? timeoutMs, ResponseType responseType, Action<long>? onProgress, string token)
+        int? timeoutMs, ResponseType responseType, Action<long>? onProgress, string token, string? accept)
     {
-        var headers = new Dictionary<string, string> { ["Accept"] = "application/json" };
+        var headers = new Dictionary<string, string> { ["Accept"] = accept ?? "application/json" };
         if (OwnServer(path)) headers["Authorization"] = "Bearer " + token;
         string? text = null;
         if (body != null)
@@ -401,11 +401,50 @@ public sealed class Api
     }
 
     /// <summary>
-    /// GET /api/playback/{session}: whether the session goes on. Gone, it is a 404; stopped from
-    /// elsewhere, a <see cref="SessionStoppedException"/>.
+    /// GET /api/playback/{session}: how it plays now, with its transcode's live numbers. Gone, it is
+    /// a 404; stopped from elsewhere, a <see cref="SessionStoppedException"/>.
     /// </summary>
-    public Task<JsonElement?> PlaybackStatus(string session, CancellationToken cancel = default) =>
-        Call("GET", $"/api/playback/{Uri.EscapeDataString(session)}", cancel: cancel);
+    public Task<SessionStatus> PlaybackStatus(string session, CancellationToken cancel = default, int? timeoutMs = null) =>
+        Get<SessionStatus>($"/api/playback/{Uri.EscapeDataString(session)}", cancel: cancel, timeoutMs: timeoutMs);
+
+    /// <summary>
+    /// PUT /api/playback/{session}/bitrate: a converted stream (<see cref="PlaybackInfo.LiveBitrate"/>)
+    /// goes on at <paramref name="kbps"/> from the segments not yet fetched; the answer is what it goes on at.
+    /// </summary>
+    public Task<BitrateAnswer> SetBitrate(string session, long kbps) =>
+        Call<BitrateAnswer>("PUT", $"/api/playback/{Uri.EscapeDataString(session)}/bitrate", new Dictionary<string, object?> { ["max_bitrate"] = kbps });
+
+    /// <summary>
+    /// A subtitle track's WebVTT at <paramref name="url"/> (the session's <see cref="SubtitleTrack.Url"/>).
+    /// The transcoder may still be reading it out of its file: it has two minutes, and an answer
+    /// marked <c>X-Pley-Complete: 0</c> is a part, to ask for again.
+    /// </summary>
+    public async Task<SubtitleText> Subtitles(string url, CancellationToken cancel = default)
+    {
+        var res = await Send(url, cancel: cancel, timeoutMs: 120_000, responseType: ResponseType.Text, accept: "text/vtt").ConfigureAwait(false);
+        return new SubtitleText(res.Text ?? "", (res.Header("X-Pley-Complete") ?? "").Trim() != "0");
+    }
+
+    /// <summary>GET /api/files/{id}/trickplay: the file's seek previews; null while the server makes them (its 404).</summary>
+    public async Task<TrickplayInfo?> Trickplay(long fileId, CancellationToken cancel = default)
+    {
+        try
+        {
+            return await Get<TrickplayInfo>($"/api/files/{fileId}/trickplay", cancel: cancel).ConfigureAwait(false);
+        }
+        catch (ApiException e) when (e.Status == 404)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Where sheet <paramref name="sheet"/> of a file's previews is, for the set <paramref name="version"/> (<see cref="TrickplayInfo.Id"/>).</summary>
+    public string TrickplaySheetUrl(long fileId, int sheet, string version) =>
+        Url($"/api/files/{fileId}/trickplay/{sheet}.jpg?v={Uri.EscapeDataString(version)}");
+
+    /// <summary>Whether the server answers at all: a player reconnecting without a session to ask about.</summary>
+    public Task<JsonElement?> Reachable(int timeoutMs, CancellationToken cancel = default) =>
+        Send("/api/server", cancel: cancel, timeoutMs: timeoutMs).ContinueWith(t => t.GetAwaiter().GetResult().Json(), cancel, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
     // ---- live TV (docs/API.md, "Live TV")
 

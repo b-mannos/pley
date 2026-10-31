@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Pley.Tv.Core.Api;
+using Pley.Tv.Core.Player;
 
 namespace Pley.Tv.Core.Ui;
 

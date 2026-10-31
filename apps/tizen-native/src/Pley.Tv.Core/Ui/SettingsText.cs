@@ -1,49 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Pley.Tv.Core.Player;
 
 namespace Pley.Tv.Core.Ui;
-
-/// <summary>A quality the player offers (docs/QUALITY.md): the original, Automatic, or a transcode capped at a bitrate and lines.</summary>
-public sealed record QualityPreset(string Id, int? MaxBitrateKbps, int? MaxHeight)
-{
-    public const string OriginalId = "original";
-    public const string AutomaticId = "auto";
-
-    public bool Original => Id == OriginalId;
-
-    /// <summary>Automatic: the original, lower only when it doesn't play well.</summary>
-    public bool Automatic => Id == AutomaticId;
-}
-
-/// <summary>The player's qualities, in its menu's order (the Android app's Qualities).</summary>
-public static class Qualities
-{
-    public static readonly QualityPreset Original = new QualityPreset(QualityPreset.OriginalId, null, null);
-    public static readonly QualityPreset Automatic = new QualityPreset(QualityPreset.AutomaticId, null, null);
-
-    /// <summary>The transcodes, in the menu's order: the two 4K ones, then 1080p and below.</summary>
-    public static readonly IReadOnlyList<QualityPreset> Transcodes = new[]
-    {
-        new QualityPreset("30m", 30_000, 2160),
-        new QualityPreset("15m", 15_000, 2160),
-        new QualityPreset("20m", 20_000, 1080),
-        new QualityPreset("12m", 12_000, 1080),
-        new QualityPreset("8m", 8_000, 1080),
-        new QualityPreset("4m", 4_000, 720),
-        new QualityPreset("2m", 2_000, 480),
-    };
-
-    /// <summary>The menu, as on every app: Original, Automatic, then the transcodes.</summary>
-    public static readonly IReadOnlyList<QualityPreset> All = new[] { Original, Automatic }.Concat(Transcodes).ToList();
-
-    /// <summary>What the settings keep for <paramref name="preset"/>: "Original", or its id ("auto", "8m").</summary>
-    public static string IdOf(QualityPreset preset) => preset.Original ? "Original" : preset.Id;
-
-    /// <summary>A setting's value: a preset's id ("8m", "auto"), or "Original" as the settings say it; the original for anything else.</summary>
-    public static QualityPreset ByIdOrLabel(string? value) =>
-        value == null ? Original : All.FirstOrDefault(p => string.Equals(p.Id, value, StringComparison.OrdinalIgnoreCase)) ?? Original;
-}
 
 /// <summary>What Settings and the Me page say (the Android app's strings_tv_account.xml and strings_tv_shell.xml's settings).</summary>
 public static class SettingsText

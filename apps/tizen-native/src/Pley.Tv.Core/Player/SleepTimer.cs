@@ -63,6 +63,9 @@ public sealed class SleepTimer
     /// <summary>The notice shows this long before the timer pauses.</summary>
     public const long NoticeMs = 30_000;
 
+    /// <summary>On TV, a video paused by the timer this long, the player leaves.</summary>
+    public const long LeaveAfterMs = 10 * 60_000;
+
     const long SecondMs = 1_000;
     const long MinuteMs = 60_000;
 
