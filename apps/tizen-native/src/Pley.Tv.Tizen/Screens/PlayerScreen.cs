@@ -708,7 +708,9 @@ sealed class PlayerScreen : Sheet
         ends.Text = s.Phase.Kind == PhaseKind.Paused
             ? PlayerText.EndsAt(DateTime.Now.AddMilliseconds(Math.Max(0, duration - position)).ToString("t", CultureInfo.CurrentCulture))
             : "";
-        if (!ReferenceEquals(s.Chapters, segmentsOf) || duration != segmentsFor) Segments(s.Chapters, duration);
+        // Broken where the chapters' cards start, Skip Intro and the credits among them.
+        var marks = Cards();
+        if (!ReferenceEquals(marks, segmentsOf) || duration != segmentsFor) Segments(marks, duration);
         var width = track.SizeWidth;
         float X(long ms) => duration > 0 ? (float)(width * Math.Max(0, Math.Min(1, ms / (double)duration))) : 0;
         // Blue up to the thumb: where it plays, or where a seek or a chapter focused would take it.
