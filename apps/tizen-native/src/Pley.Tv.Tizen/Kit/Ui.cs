@@ -200,7 +200,7 @@ static class Text
     /// or as much of it as fits with "…" after.
     /// </summary>
     public static string Fit(string text, TextStyle style, float widthDp) =>
-        Fit(text, Ui.Dp(style.Size), style.Family, Weight(style.Weight), Ui.Dp(widthDp));
+        Fit(text, Ui.Dp(style.Size), style.Family, style.Weight, Ui.Dp(widthDp));
 
     /// <summary>
     /// Puts <paramref name="text"/> in <paramref name="label"/>, cut to fit its width as
@@ -208,33 +208,66 @@ static class Text
     /// text changes. A label sized to its text after takes the text as it is.
     /// </summary>
     public static void Show(TextLabel label, string text) =>
-        label.Text = label.MultiLine || label.SizeWidth <= 0 ? text : Fit(text, label.PixelSize, label.FontFamily, label.FontStyle, label.SizeWidth);
+        label.Text = label.MultiLine || label.SizeWidth <= 0 ? text : Fit(text, label.PixelSize, label.FontFamily, WeightOf(label), label.SizeWidth);
 
-    static string Fit(string text, float pixelSize, string family, PropertyMap weight, float widthPx)
+    /// <summary>
+    /// Text as fitted, by font and width: a grid's rows come and go as it scrolls, and a tile's
+    /// title is fitted again at each focus, so each is measured once. Emptied when it grows large.
+    /// </summary>
+    static readonly System.Collections.Generic.Dictionary<string, string> Fitted = new System.Collections.Generic.Dictionary<string, string>();
+
+    const int FittedMost = 4000;
+
+    static string Fit(string text, float pixelSize, string family, string weight, float widthPx)
     {
+        if (text.Length == 0) return text;
+        var key = $"{pixelSize}|{family}|{weight}|{widthPx}|{text}";
+        if (Fitted.TryGetValue(key, out var known)) return known;
         // A pixel or two of room: NaturalSize rounds to the pixel.
         var room = widthPx - 2;
-        if (text.Length == 0 || Measure(text, pixelSize, family, weight) <= room) return text;
-        // The longest start that fits with "…" after it.
-        int fits = 0, over = text.Length;
-        while (over - fits > 1)
+        string fitted;
+        if (Measure(text, pixelSize, family, weight) <= room) fitted = text;
+        else
         {
-            var mid = (fits + over) / 2;
-            if (Measure(text.Substring(0, mid).TrimEnd() + "…", pixelSize, family, weight) <= room) fits = mid;
-            else over = mid;
+            // The longest start that fits with "…" after it.
+            int fits = 0, over = text.Length;
+            while (over - fits > 1)
+            {
+                var mid = (fits + over) / 2;
+                if (Measure(text.Substring(0, mid).TrimEnd() + "…", pixelSize, family, weight) <= room) fits = mid;
+                else over = mid;
+            }
+            fitted = fits == 0 ? "…" : text.Substring(0, fits).TrimEnd() + "…";
         }
-        return fits == 0 ? "…" : text.Substring(0, fits).TrimEnd() + "…";
+        if (Fitted.Count >= FittedMost) Fitted.Clear();
+        Fitted[key] = fitted;
+        return fitted;
     }
 
+    /// <summary>The font <see cref="measurer"/> is set to, so it is set again only when it changes.</summary>
+    static (float, string, string) measuring;
+
     /// <summary>The width in pixels <paramref name="text"/> takes on one line in that font.</summary>
-    static float Measure(string text, float pixelSize, string family, PropertyMap weight)
+    static float Measure(string text, float pixelSize, string family, string weight)
     {
         measurer ??= new TextLabel();
-        measurer.PixelSize = pixelSize;
-        measurer.FontFamily = family;
-        measurer.FontStyle = weight;
+        if (measuring != (pixelSize, family, weight))
+        {
+            measuring = (pixelSize, family, weight);
+            measurer.PixelSize = pixelSize;
+            measurer.FontFamily = family;
+            measurer.FontStyle = Weight(weight);
+        }
         measurer.Text = text;
         return measurer.NaturalSize.Width;
+    }
+
+    /// <summary>The weight a label's font style names ("normal", "medium", "bold").</summary>
+    static string WeightOf(TextLabel label)
+    {
+        using var style = label.FontStyle;
+        using var value = style.Find(0, "weight");
+        return value != null && value.Get(out string weight) ? weight : PleyType.Regular;
     }
 
     /// <summary>The fonts the app ships: Roboto, before any text is drawn.</summary>
