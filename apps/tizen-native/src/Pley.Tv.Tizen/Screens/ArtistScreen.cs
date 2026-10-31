@@ -60,7 +60,7 @@ sealed class ArtistScreen : ShellPage
 
     public override void Enter()
     {
-        if (!Tree.Enter(Group)) Shell.FocusRail();
+        if (!Tree.Enter(Group)) Wait();
     }
 
     public override void Gone()
@@ -158,6 +158,7 @@ sealed class ArtistScreen : ShellPage
 
     void ShowReady(MusicPageState<ArtistView>.Ready ready, bool first)
     {
+        Waited();
         var artist = ready.Page;
         var back = artist.BackdropUrl != null ? Artwork.Absolute(artist.BackdropUrl, artist.Origin) : null;
         if (back != shownBackdrop)

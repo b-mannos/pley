@@ -48,7 +48,7 @@ sealed class PersonScreen : ShellPage
 
     public override void Enter()
     {
-        if (!Tree.Enter(Group)) Shell.FocusRail();
+        if (!Tree.Enter(Group)) Wait();
     }
 
     public override void Gone()

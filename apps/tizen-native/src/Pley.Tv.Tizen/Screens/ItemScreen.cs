@@ -91,7 +91,7 @@ sealed class ItemScreen : ShellPage
 
     public override void Enter()
     {
-        if (!Tree.Enter(Group)) Shell.FocusRail();
+        if (!Tree.Enter(Group)) Wait();
     }
 
     void OnTold(ItemEvent e) => Shell.Toast(ItemText.Toast(e).Text);

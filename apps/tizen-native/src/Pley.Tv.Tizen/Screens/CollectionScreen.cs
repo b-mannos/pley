@@ -102,12 +102,12 @@ sealed class CollectionScreen : ShellPage
     }
 
     /// <summary>
-    /// Nothing on the page can take focus yet: the rail has it, and the page takes it back once
-    /// it can, unless someone has moved on meanwhile.
+    /// Nothing on the page can take focus yet: it waits on the page (the rail keeps it if it
+    /// already has it), and the page takes it once it can, unless someone has moved on meanwhile.
     /// </summary>
     void ToRail()
     {
-        if (Tree.Current == null || Tree.Current.Parent != Shell.Rail.Group) Shell.FocusRail();
+        if (Tree.Current == null || Tree.Current.Parent != Shell.Rail.Group) Wait();
         waiting = true;
         waitingOn = Tree.Current;
     }

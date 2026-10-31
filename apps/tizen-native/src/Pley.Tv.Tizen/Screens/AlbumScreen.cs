@@ -68,7 +68,7 @@ sealed class AlbumScreen : ShellPage
 
     public override void Enter()
     {
-        if (!Tree.Enter(Group)) Shell.FocusRail();
+        if (!Tree.Enter(Group)) Wait();
     }
 
     public override void Gone()
@@ -333,6 +333,7 @@ sealed class AlbumScreen : ShellPage
     void Start(AlbumView album)
     {
         if (started || buttons == null || list == null) return;
+        Waited();
         if (model.HighlightId != null && album.TracksLoading)
         {
             // Opened from a track: it takes focus once the tracks come; Play holds it meanwhile.

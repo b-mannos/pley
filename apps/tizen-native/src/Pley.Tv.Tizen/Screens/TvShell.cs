@@ -38,6 +38,26 @@ abstract class ShellPage
     public virtual void Gone()
     {
     }
+
+    /// <summary>A focus that shows nothing, for a page with nothing to focus yet.</summary>
+    protected FocusItem Waiting { get; } = new FocusItem("waiting");
+
+    /// <summary>
+    /// Nothing on the page can take focus yet (it loads): focus waits on the page, showing
+    /// nothing, and the page takes it on once it can. Given to the rail instead, the rail opened
+    /// for a moment on the way to every page that loads (a search result's item).
+    /// </summary>
+    protected bool Wait()
+    {
+        if (Waiting.Parent != Group) Group.Add(Waiting);
+        return Tree.Focus(Waiting);
+    }
+
+    /// <summary>The page can take focus now: the waiting focus goes, so entering the page never lands on it.</summary>
+    protected void Waited()
+    {
+        if (Waiting.Parent == Group) Group.Remove(Waiting);
+    }
 }
 
 /// <summary>
