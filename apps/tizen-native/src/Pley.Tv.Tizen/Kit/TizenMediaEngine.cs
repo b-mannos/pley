@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Pley.Tv.Core.Player;
 using Tizen.NUI;
 using Media = Tizen.Multimedia;
+using Timer = Tizen.NUI.Timer;
 
 namespace Pley.Tv.Tizen.Kit;
 
@@ -113,7 +114,6 @@ sealed class TizenMediaEngine : IVideoEngine
             p.ErrorOccurred += (_, e) => Post(mine, () => Fail(ErrorOf(e.Error)));
             p.PlaybackCompleted += (_, _) => Post(mine, Completed);
             p.PlaybackInterrupted += (_, _) => Post(mine, () => Fail(new EngineError.Other("the TV took its player for something else")));
-            p.BufferingProgressChanged += (_, e) => Post(mine, () => Buffering(e.Percent < 100));
             p.VideoStreamChanged += (_, e) => Post(mine, () => Picture(e.Size.Width, e.Size.Height));
             p.SetSource(new Media.MediaUriSource(s.Url));
         }
@@ -355,16 +355,82 @@ sealed class TizenMediaEngine : IVideoEngine
         if (!started)
         {
             started = true;
-            Post(mine, () => Started?.Invoke());
+            if (watch == null)
+            {
+                watch = new Timer(WatchMs);
+                watch.Tick += (s, e) =>
+                {
+                    Watch();
+                    return true;
+                };
+            }
+            watchedAt = -1;
+            stillFor = 0;
+            moved = false;
+            firstAt = -1;
+            watch.Start();
+            // Started once the position moves (Watch), not now: Start returns before the first
+            // picture, and the screen's black lifting then showed what was under the app.
+            SetStatus(mine, EngineStatus.Buffering);
         }
         UpdatePlaying(mine);
     }
 
-    void Buffering(bool waiting)
+    /// <summary>
+    /// Whether it waits for data, once playing. Tizen's player says how full its buffer is
+    /// (BufferingProgressChanged), not that it waits: a stream plays on under 100 %, and taken as
+    /// waiting, a channel went to its spinner within seconds, and Live TV tuned it again after 5.
+    /// So it waits when its position stands still for <see cref="StillMs"/> while it should play,
+    /// and plays again once the position moves.
+    /// </summary>
+    void Watch()
     {
-        if (!prepared || status == EngineStatus.Ended) return;
-        SetStatus(generation, waiting ? EngineStatus.Buffering : EngineStatus.Ready);
+        var p = player;
+        if (p == null || !started || status == EngineStatus.Ended) return;
+        bool playing;
+        long position;
+        try
+        {
+            playing = p.State == Media.PlayerState.Playing;
+            position = playing ? lastPosition = p.GetPlayPosition() : lastPosition;
+        }
+        catch (Exception)
+        {
+            return;
+        }
+        if (!moved)
+        {
+            // Started: the position has moved on from where it began, so pictures come.
+            if (!playing) return;
+            if (firstAt < 0) firstAt = position;
+            if (position < firstAt + FirstMoveMs) return;
+            moved = true;
+            watchedAt = position;
+            stillFor = 0;
+            Post(generation, () => Started?.Invoke());
+            SetStatus(generation, EngineStatus.Ready);
+            return;
+        }
+        if (!wanted || !playing || position != watchedAt)
+        {
+            watchedAt = position;
+            stillFor = 0;
+            if (status == EngineStatus.Buffering) SetStatus(generation, EngineStatus.Ready);
+            return;
+        }
+        stillFor += (int)WatchMs;
+        if (stillFor >= StillMs) SetStatus(generation, EngineStatus.Buffering);
     }
+
+    const uint WatchMs = 500;
+    const int StillMs = 1500;
+    /// <summary>How far the position moves from where it began before the source counts as started.</summary>
+    const long FirstMoveMs = 200;
+    bool moved;
+    long firstAt = -1;
+    long watchedAt = -1;
+    int stillFor;
+    Timer? watch;
 
     void Picture(int width, int height)
     {
@@ -450,6 +516,7 @@ sealed class TizenMediaEngine : IVideoEngine
     {
         var p = player;
         var prepare = preparing;
+        watch?.Stop();
         player = null;
         preparing = null;
         prepared = false;
