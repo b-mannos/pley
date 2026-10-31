@@ -221,6 +221,9 @@ public sealed class AppState
     }
 
     public Signal<string?> Server { get; } = new Signal<string?>(null);
+
+    /// <summary>Where this TV keeps things, for what keeps its own (the player's subtitle offsets).</summary>
+    public IKeyValue Storage => store;
     public Signal<Api.Api?> Api { get; } = new Signal<Api.Api?>(null);
     public Signal<User?> Me { get; } = new Signal<User?>(null);
     public Signal<IReadOnlyList<Library>?> Libraries { get; } = new Signal<IReadOnlyList<Library>?>(null);
