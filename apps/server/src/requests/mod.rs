@@ -2979,7 +2979,8 @@ impl Requests {
         }
         let _one = self.syncing.lock().await;
         let rows: Vec<RequestRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {COLUMNS} FROM {TABLES} WHERE r.status IN {ACTIVE} ORDER BY r.id"
+            "SELECT {COLUMNS} FROM {TABLES}
+             WHERE r.status IN {ACTIVE} OR (r.status = 'available' AND r.item_id IS NULL) ORDER BY r.id"
         )))
         .fetch_all(&self.db.read)
         .await?;
@@ -2988,6 +2989,18 @@ impl Requests {
             // As its maker sees the library: theirs to open, where they may.
             let library = self.in_library(row.user_id, row.kind(), &[row.known()]).await?;
             let Some(item) = library.iter().find(|l| l.2).or(library.first()).map(|l| (l.1, l.2)) else { continue };
+            if row.status() == RequestStatus::Available {
+                // Gone and back (replaced, or scanned again): no news, as
+                // it was told of once.
+                sqlx::query("UPDATE requests SET item_id = ?, updated_at = ? WHERE id = ? AND item_id IS NULL")
+                    .bind(item.0)
+                    .bind(now())
+                    .bind(row.id)
+                    .execute(&self.db.write)
+                    .await?;
+                self.changed(row.id, row.kind(), row.tmdb_id).await;
+                continue;
+            }
             let asked = row.seasons().unwrap_or_default();
             if row.kind() == TitleKind::Movie {
                 self.available(&row, item, &asked).await?;

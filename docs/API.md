@@ -2531,7 +2531,8 @@ An app's token without the route's scope is refused before all of it
 - **`download`**: an approved request's download in Radarr or Sonarr while
   one is queued or running, looked up at most every 10 seconds.
 - **`stage`**: a pending, declined or failed request's is its `status`; an
-  available one whose title no library has any more is `gone`. An approved
+  available one whose title no library has any more is `gone` (available
+  again once a library has it, without news). An approved
   one is `downloading` or `importing` while `download` says so, `partial`
   while some of the seasons asked for are ready, `searching` once sent to
   Radarr or Sonarr, and `approved` while it isn't sent: being sent, with no

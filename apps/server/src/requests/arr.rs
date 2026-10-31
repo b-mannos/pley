@@ -20,6 +20,10 @@ use crate::util::utc_secs;
 const TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a download queue is reused.
 const QUEUE_TTL: Duration = Duration::from_secs(10);
+/// How long a queue may take: listings wait for it.
+const QUEUE_WAIT: Duration = Duration::from_secs(5);
+/// How long a queue that couldn't be read isn't asked for again.
+const QUEUE_RETRY: Duration = Duration::from_secs(60);
 /// Downloads a queue lists at most (one per episode for Sonarr).
 const QUEUE_SIZE: u32 = 1000;
 /// What an error quotes of an answer at most.
@@ -498,11 +502,12 @@ impl Arr {
     }
 
     /// What Radarr's or Sonarr's queue lists, fetched at most every 10
-    /// seconds: by movie or show id, with the season of each.
+    /// seconds (a minute after it couldn't be): by movie or show id, with
+    /// the season of each.
     pub async fn queue(&self, service: Service, to: &Connection) -> Queue {
         let mut cached = self.queues[service as usize].lock().await;
         if let Some((at, from, queue)) = cached.as_ref()
-            && at.elapsed() < QUEUE_TTL
+            && at.elapsed() < if queue.is_ok() { QUEUE_TTL } else { QUEUE_RETRY }
             && from == to
         {
             return queue.clone();
@@ -515,12 +520,14 @@ impl Arr {
                 query.push(("includeEpisode", "true".into()));
             }
         }
-        let queue = match self.get::<QueuePage>(service, to, "/queue", &query).await {
-            Ok(page) => Ok(Arc::new(page.records)),
-            Err(err) => {
+        let fetched = tokio::time::timeout(QUEUE_WAIT, self.get::<QueuePage>(service, to, "/queue", &query)).await;
+        let queue = match fetched {
+            Ok(Ok(page)) => Ok(Arc::new(page.records)),
+            Ok(Err(err)) => {
                 tracing::debug!("{err}");
                 Err(err.to_string())
             }
+            Err(_) => Err(format!("{} didn't answer in time", service.name())),
         };
         *cached = Some((Instant::now(), to.clone(), queue.clone()));
         queue

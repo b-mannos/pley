@@ -1227,6 +1227,14 @@ async fn a_request_says_where_it_is_and_whose_it_is() {
     sqlx::query("DELETE FROM items WHERE id = ?").bind(item).execute(&w.app.state.db.write).await.unwrap();
     let hers = w.app.get(&format!("/api/requests/{matrix}"), &w.ann).await;
     assert_eq!((&hers.body["stage"], &hers.body["item_id"]), (&json!("gone"), &Value::Null));
+
+    // And back: linked again.
+    w.add(w.movies, &["movies/The Matrix (1999) - 4K.mkv"]).await;
+    w.identify("The Matrix", "tmdb_id = 603").await;
+    w.app.state.requests.sync().await.unwrap();
+    let hers = w.app.get(&format!("/api/requests/{matrix}"), &w.ann).await;
+    assert_eq!(hers.body["stage"], json!("available"), "{}", hers.text());
+    assert!(hers.body["item_id"].is_i64());
 }
 
 #[tokio::test]
