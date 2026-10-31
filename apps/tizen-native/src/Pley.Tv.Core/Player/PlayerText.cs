@@ -110,16 +110,25 @@ public static class PlayerText
 
     /// <summary>A chapter's name in the Chapters panel: its title, else "Chapter 3".</summary>
     public static string ChapterTitle(ChapterMark chapter, int index) =>
-        string.IsNullOrWhiteSpace(chapter.Title) ? $"Chapter {(index + 1).ToString(CultureInfo.InvariantCulture)}" : chapter.Title!;
+        NameOf(chapter) ?? $"Chapter {(index + 1).ToString(CultureInfo.InvariantCulture)}";
 
     /// <summary>The seek preview's chapter line: "Chapter 3", a title that names itself so, or "Chapter 3 · The Heist".</summary>
     public static string ChapterLine(ChapterMark chapter, int index)
     {
         var number = (index + 1).ToString(CultureInfo.InvariantCulture);
-        var name = string.IsNullOrWhiteSpace(chapter.Title) ? null : chapter.Title;
+        var name = NameOf(chapter);
         if (name == null) return $"Chapter {number}";
         return name.StartsWith("Chapter", StringComparison.OrdinalIgnoreCase) ? name : $"Chapter {number} · {name}";
     }
+
+    /// <summary>
+    /// A chapter's own name: its title, unless it has none or the title is only where it starts
+    /// ("00:06:19.212", as mkvmerge names chapters), which says nothing a viewer can use.
+    /// </summary>
+    static string? NameOf(ChapterMark chapter) =>
+        string.IsNullOrWhiteSpace(chapter.Title) || TimeName.IsMatch(chapter.Title!.Trim()) ? null : chapter.Title;
+
+    static readonly Regex TimeName = new Regex(@"^\d{1,2}(:\d{2}){1,2}([.,]\d+)?$", RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Where Next goes (the Android app's TvPlayerScreen): an episode plays what comes next (null

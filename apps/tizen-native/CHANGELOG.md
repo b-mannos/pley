@@ -124,3 +124,11 @@ It has no releases yet: it is built and installed by hand
   player, drawn by the app as the web app draws them: a film plays on as it
   is when one is chosen, and Sync moves them like text. A server too old to
   send them has them burned into the video instead.
+- In the native app's player, OK with the controls hidden shows them on
+  the scrubber, as Up does, rather than pausing; OK on the scrubber plays
+  and pauses. Up on the scrubber opens the film's chapters as a row of
+  cards (each one's picture, name and start), pausing while it shows:
+  Left and Right go through them, moving the scrubber to each one's
+  start, and OK goes there. Chapters named only for where they start
+  ("00:06:19.212") are numbered instead. The scrubber is blue up to its
+  thumb while seeking.

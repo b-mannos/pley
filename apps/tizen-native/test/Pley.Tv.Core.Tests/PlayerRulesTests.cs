@@ -285,6 +285,25 @@ public class PlayerScreenRulesTests
         Assert.Equal("Chapter 3", PlayerText.ChapterLine(Chapters[2], 2));
     }
 
+    [Theory]
+    [InlineData("00:06:19.212")]
+    [InlineData("00:06:19")]
+    [InlineData("6:19")]
+    [InlineData(" 01:02:03,500 ")]
+    public void A_chapter_named_only_for_where_it_starts_is_numbered(string title)
+    {
+        var chapter = new ChapterMark(title, 379_212, 500_000, null);
+        Assert.Equal("Chapter 2", PlayerText.ChapterTitle(chapter, 1));
+        Assert.Equal("Chapter 2", PlayerText.ChapterLine(chapter, 1));
+    }
+
+    [Fact]
+    public void A_chapter_with_a_time_in_a_real_name_keeps_it()
+    {
+        var chapter = new ChapterMark("Act 2: 12:00 at Noon", 0, 1, null);
+        Assert.Equal("Act 2: 12:00 at Noon", PlayerText.ChapterTitle(chapter, 0));
+    }
+
     [Fact]
     public void Next_goes_to_a_chapter_more_than_a_second_ahead_previous_restarts_one_3_s_in()
     {

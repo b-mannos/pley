@@ -19,15 +19,16 @@ namespace Pley.Tv.Tizen.Screens;
 /// plane under the window, with the subtitles drawn over it.
 /// <list type="bullet">
 /// <item><b>Controls hidden.</b> Only the video and subtitles show; Skip, Up Next and the sleep
-/// timer's notice are all that appear unasked. OK plays and pauses (a showing Skip takes it), Left
-/// and Right seek (<see cref="Seeker"/>), Up shows the controls on the scrubber, Down on Play/Pause.
+/// timer's notice are all that appear unasked. OK shows the controls on the scrubber, as Up does (a
+/// showing Skip takes it); Left and Right seek (<see cref="Seeker"/>), Down shows them on Play/Pause.
 /// OK during or just after a seek confirms it and plays on.</item>
 /// <item><b>Controls shown.</b> The title, the method badge and the clock at the top; the times,
 /// the scrubber (with its chapters and the marker playing) and the control row at the bottom, over
-/// a black scrim; focus moves as usual. The row's buttons open the side panels
+/// a black scrim; focus moves as usual; OK on the scrubber plays and pauses, and Up on it opens the
+/// chapters as a row of cards (<see cref="ChapterStrip"/>). The row's buttons open the side panels
 /// (<see cref="PlayerPanelSheet"/>). They go 5 s after the last key while it plays, unless paused,
 /// scrubbing or in a panel.</item>
-/// <item><b>Back</b> walks out: a panel, then Up Next, then the controls, then the player.</item>
+/// <item><b>Back</b> walks out: a panel, then Up Next, then the chapters, then the controls, then the player.</item>
 /// <item><b>Media keys</b> work whatever shows; CAPTIONS turns the subtitles off and on.</item>
 /// </list>
 /// The model reports to the server through the app's reporter, so the last report goes out after
@@ -78,6 +79,11 @@ sealed class PlayerScreen : Sheet
     readonly View thumb;
     readonly View thumbRing;
     readonly SeekPreviewView preview;
+    readonly ChapterStrip chapterStrip;
+    /// <summary>The top of the chapters' cards: over the times, under the seek preview.</summary>
+    static readonly float ChaptersTop = TimesTop - 8 - ChapterStrip.CardHeight - 12;
+    /// <summary>The start of the chapter focused in the cards: the scrubber and the preview show it.</summary>
+    long? chapterAt;
     readonly FocusItem scrubber;
     readonly FocusGroup row = new FocusGroup(Axis.Row, "controls");
     readonly PlayerButton previous;
@@ -213,6 +219,9 @@ sealed class PlayerScreen : Sheet
         controls.Add(thumbRing);
         thumb = new View { Size = new Size(Ui.Dp(Thumb), Ui.Dp(Thumb)), CornerRadius = Ui.Dp(Thumb / 2), BackgroundColor = PleyColors.Fg };
         controls.Add(thumb);
+        chapterStrip = new ChapterStrip(images, model.Preview, GoToChapter, CloseChapters);
+        chapterStrip.PositionY = Ui.Dp(ChaptersTop);
+        controls.Add(chapterStrip);
         preview = new SeekPreviewView(images);
         preview.Hide();
         controls.Add(preview);
@@ -278,6 +287,11 @@ sealed class PlayerScreen : Sheet
                     case "Left":
                     case "Right":
                         if (down && !Busy) Step(key == "Left" ? -1 : 1);
+                        return true;
+                    case "Up":
+                        // The chapters as cards over the scrubber, where there are any; else Up moves on.
+                        if (model.State.Value.Chapters.Count == 0) return false;
+                        if (down) OpenChapters();
                         return true;
                     case "Down":
                         if (down) Tree.Focus(playPause.Item);
@@ -667,7 +681,7 @@ sealed class PlayerScreen : Sheet
         if (gone) return;
         var now = Environment.TickCount64;
         // The controls go 5 s after the last key, unless paused, scrubbing or in a panel.
-        if (shown && panel == null && model.State.Value.Phase.WantsToPlay && hideAt > 0 && now >= hideAt && seeker.Target == null) ShowControls(false);
+        if (shown && panel == null && model.State.Value.Phase.WantsToPlay && hideAt > 0 && now >= hideAt && seeker.Target == null && !chapterStrip.Open) ShowControls(false);
         Waiting();
         if (shown) Layout();
     }
@@ -678,7 +692,7 @@ sealed class PlayerScreen : Sheet
         var s = model.State.Value;
         var duration = model.Clock.Value.DurationMs;
         var position = model.LivePositionMs();
-        var at = seeker.Target ?? position;
+        var at = chapterAt ?? seeker.Target ?? position;
         elapsed.Text = PlayerText.Time(at);
         remaining.Text = PlayerText.Remaining(at, duration);
         var time = DateTime.Now.ToString("t", CultureInfo.CurrentCulture);
@@ -694,7 +708,8 @@ sealed class PlayerScreen : Sheet
         if (!ReferenceEquals(s.Chapters, segmentsOf) || duration != segmentsFor) Segments(s.Chapters, duration);
         var width = track.SizeWidth;
         float X(long ms) => duration > 0 ? (float)(width * Math.Max(0, Math.Min(1, ms / (double)duration))) : 0;
-        var playedTo = X(position);
+        // Blue up to the thumb: where it plays, or where a seek or a chapter focused would take it.
+        var playedTo = X(at);
         foreach (var (part, from, to) in segments) part.SizeWidth = Math.Max(0, Math.Min(playedTo, to) - from);
         var cx = track.PositionX + X(at);
         var cy = Ui.Dp(TrackCentre);
@@ -766,7 +781,7 @@ sealed class PlayerScreen : Sheet
     /// </summary>
     void Preview(long? target, long duration)
     {
-        if (!shown || target is not long t)
+        if (!shown || chapterStrip.Open || target is not long t)
         {
             previewAt = null;
             preview.Hide();
@@ -822,8 +837,13 @@ sealed class PlayerScreen : Sheet
             case "KP_Enter":
                 // Skip or Keep watching has focus: OK is theirs.
                 if (Tree.Current != null) return false;
-                // On the way up, as OK selects elsewhere.
-                if (!down) Ok();
+                // On the way up, as OK selects elsewhere: the controls, on the scrubber, as Up shows them;
+                // OK on the scrubber plays and pauses. Just after a seek, it confirms it.
+                if (!down)
+                {
+                    if (seeker.Target != null) Ok();
+                    else ShowControls(true, scrubber);
+                }
                 return true;
             case "Left":
             case "Right":
@@ -963,8 +983,53 @@ sealed class PlayerScreen : Sheet
     }
 
     /// <summary>Shows or hides the controls; shown, focus goes to <paramref name="focus"/> (where it was, when null and already shown).</summary>
+    /// <summary>
+    /// The chapters as cards over the scrubber, on the chapter where the scrubber is. It pauses
+    /// while they show, as YouTube's TV app does, and plays on as it was once they go; as focus goes
+    /// through them, the scrubber's thumb shows the chapter's start.
+    /// </summary>
+    void OpenChapters()
+    {
+        playOnAfterChapters = model.WantsToPlay;
+        if (playOnAfterChapters) model.Pause();
+        chapterStrip.Focused = start =>
+        {
+            chapterAt = start;
+            Layout();
+        };
+        chapterStrip.Show(model.State.Value.Chapters, seeker.Target ?? model.LivePositionMs());
+        if (chapterStrip.Item.Parent == null) Root.Add(chapterStrip.Item);
+        Tree.Focus(chapterStrip.Item);
+        Poke();
+    }
+
+    /// <summary>Whether it played when the chapters opened: it plays on when they go.</summary>
+    bool playOnAfterChapters;
+
+    /// <summary>The cards go; focus back on the scrubber, and it plays on if it played before.</summary>
+    void CloseChapters()
+    {
+        if (!chapterStrip.Open) return;
+        chapterAt = null;
+        if (playOnAfterChapters && !gone) model.Play();
+        playOnAfterChapters = false;
+        chapterStrip.Hide();
+        if (chapterStrip.Item.Parent != null) Root.Remove(chapterStrip.Item);
+        if (shown) Tree.Focus(scrubber);
+        Layout();
+    }
+
+    /// <summary>A chapter chosen: it goes to its start, and the cards go (playing on if it played before).</summary>
+    void GoToChapter(long startMs)
+    {
+        seeker.Cancel();
+        model.SeekTo(startMs);
+        CloseChapters();
+    }
+
     void ShowControls(bool on, FocusItem? focus = null)
     {
+        if (!on) CloseChapters();
         if (on)
         {
             if (focus != null && Tree.Current != focus) Tree.Focus(focus);
@@ -992,6 +1057,11 @@ sealed class PlayerScreen : Sheet
         if (error == null && model.State.Value.UpNext != null)
         {
             model.CancelUpNext();
+            return true;
+        }
+        if (error == null && chapterStrip.Open)
+        {
+            CloseChapters();
             return true;
         }
         if (error == null && shown)
