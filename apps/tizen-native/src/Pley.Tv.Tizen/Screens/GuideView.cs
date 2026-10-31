@@ -172,6 +172,7 @@ sealed class GuideView : View
     {
         now = value;
         Draw();
+        MoveBars();
     }
 
     /// <summary>The list opens at the channel last watched (once per landing).</summary>
@@ -368,6 +369,7 @@ sealed class GuideView : View
         foreach (var i in rows.Keys.Where(i => i < first || i > last).ToList())
         {
             rows[i].View.Dispose();
+            bars.Remove(i);
             rows.Remove(i);
         }
         for (var i = first; i <= last; i++)
@@ -421,10 +423,24 @@ sealed class GuideView : View
     void Build(int i, ProgramsLook look)
     {
         if (rows.TryGetValue(i, out var drawn)) drawn.View.Dispose();
+        barsMade.Clear();
         var view = ProgramsRow(look);
         view.PositionY = Ui.Dp(i * GuideLayout.RowHeight);
         rowsTimeLayer.Add(view);
         rows[i] = (look, view);
+        bars[i] = barsMade.ToList();
+    }
+
+    /// <summary>The bars of the programmes airing in each row made, to move with the time without making the row again.</summary>
+    readonly Dictionary<int, List<(View Bar, LiveProgram Program, float Width)>> bars = new Dictionary<int, List<(View Bar, LiveProgram Program, float Width)>>();
+    readonly List<(View Bar, LiveProgram Program, float Width)> barsMade = new List<(View Bar, LiveProgram Program, float Width)>();
+
+    /// <summary>The airing programmes' bars to now, in place (a row's bars go with it, so none is disposed).</summary>
+    void MoveBars()
+    {
+        foreach (var row in bars.Values)
+            foreach (var (bar, program, width) in row)
+                bar.SizeWidth = Ui.Dp(width * program.ProgressAt(now));
     }
 
     /// <summary>Rows to make again, a few a frame, nearest the focused row first.</summary>
@@ -503,16 +519,21 @@ sealed class GuideView : View
     /// </summary>
     bool Same(ProgramsLook a, ProgramsLook b)
     {
-        if (!SameChannel(a.Channel, b.Channel) || a.Left != b.Left || a.Now != b.Now || a.Focus != b.Focus) return false;
-        if (ReferenceEquals(a.Programs, b.Programs) && a.Loaded == b.Loaded) return true;
+        if (!SameChannel(a.Channel, b.Channel) || a.Left != b.Left || a.Focus != b.Focus) return false;
         var x = GuideLayout.Visible(a.Programs, a.Left, cursor.Start);
-        var y = GuideLayout.Visible(b.Programs, b.Left, cursor.Start);
+        var y = ReferenceEquals(a.Programs, b.Programs) ? x : GuideLayout.Visible(b.Programs, b.Left, cursor.Start);
         if (x.Count != y.Count) return false;
         // Whether the guide is still loading tells only a row with nothing in view what to say;
         // it changes with every answer asked for, and compared for every row made them all again.
         if (x.Count == 0) return a.Loaded == b.Loaded;
         for (var i = 0; i < x.Count; i++)
+        {
             if (x[i].Start != y[i].Start || x[i].Stop != y[i].Stop || x[i].Title != y[i].Title) return false;
+            // The time only matters where a programme began or ended between the two (its colour,
+            // its bar); the bars of those airing move in place (MoveBars). Compared as it was, every
+            // row was made again at each 15 s tick, all the while the guide showed.
+            if (x[i].AiringAt(a.Now) != y[i].AiringAt(b.Now) || (x[i].Stop <= a.Now) != (y[i].Stop <= b.Now)) return false;
+        }
         return true;
     }
 
@@ -599,14 +620,16 @@ sealed class GuideView : View
             }
             if (airing)
             {
-                cell.Add(new View
+                var bar = new View
                 {
                     Position = new Position(0, Ui.Dp(cellHeight - GuideLayout.ProgressHeight)),
                     Size = new Size(Ui.Dp(cellWidth * program.ProgressAt(look.Now)), Ui.Dp(GuideLayout.ProgressHeight)),
                     BackgroundColor = focused ? PleyColors.OnAccent : PleyColors.Accent,
                     // The cell doesn't clip (a GPU pass a cell): the bar takes its bottom left corner itself.
                     CornerRadius = new Vector4(0, 0, 0, Ui.Dp(PleyShape.ControlRadius)),
-                });
+                };
+                cell.Add(bar);
+                barsMade.Add((bar, program, cellWidth));
             }
             row.Add(cell);
         }

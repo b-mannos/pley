@@ -204,6 +204,7 @@ sealed class ChannelCardsView : View
         readonly TextLabel? name;
         readonly TextLabel? onNow;
         View? progress;
+        LiveProgram? progressOf;
         bool focused;
         Animation? look;
 
@@ -277,9 +278,17 @@ sealed class ChannelCardsView : View
         {
             if (Disposed || Channel == null || onNow == null) return;
             Text.Show(onNow, LiveText.OnNowOf(Channel, now));
+            var on = Channel.OnAt(now);
+            // The same programme on: its bar moves in place, rather than made again at each 15 s tick.
+            if (on != null && progress != null && progressOf is { } was && was.Start == on.Start && was.Stop == on.Stop)
+            {
+                if (progress.ChildCount > 0 && progress.GetChildAt(0) is View fill) fill.SizeWidth = Ui.Dp(Kind.Width * on.ProgressAt(now));
+                return;
+            }
             progress?.Dispose();
             progress = null;
-            if (Channel.OnAt(now) is not { } on) return;
+            progressOf = on;
+            if (on == null) return;
             progress = LiveViews.Progress(on, now, Kind.Width, PleyColors.ProgressTrackOnArt);
             progress.PositionY = Ui.Dp(Kind.Height - 3);
             well.Add(progress);
