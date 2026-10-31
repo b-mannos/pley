@@ -375,8 +375,8 @@ sealed class PlayerScreen : Sheet
     void Render(PlayerState s)
     {
         if (gone) return;
-        title.Text = s.Title;
-        line.Text = s.Subtitle ?? "";
+        Text.Show(title, s.Title);
+        Text.Show(line, s.Subtitle ?? "");
         if (s.Method != null) method.Set(s.Method);
         method.SetVisible(s.Method != null);
         PlaceMethod();
@@ -700,7 +700,9 @@ sealed class PlayerScreen : Sheet
         var cy = Ui.Dp(TrackCentre);
         thumb.Position = new Position(cx - thumb.SizeWidth / 2, cy - thumb.SizeHeight / 2);
         thumbRing.Position = new Position(cx - thumbRing.SizeWidth / 2, cy - thumbRing.SizeHeight / 2);
-        if (seeker.BadgeAt is long b)
+        // Not over the seek preview, whose time and chapter say where it goes: Android shows no
+        // badge with the controls up, and here it sat on the preview's chapter line.
+        if (seeker.BadgeAt is long b && !(shown && seeker.Target != null))
         {
             badge.Text = PlayerText.Badge(b);
             badge.PositionX = Math.Max(track.PositionX, Math.Min(track.PositionX + width - badge.SizeWidth, cx - badge.SizeWidth / 2));
@@ -710,7 +712,7 @@ sealed class PlayerScreen : Sheet
         // "Intro" or "Credits" under the span of the marker playing.
         if (Markers.Active(s.Markers, position) is { } marker && duration > 0)
         {
-            markerLabel.Text = Markers.Name(marker);
+            Text.Show(markerLabel, Markers.Name(marker));
             var mid = track.PositionX + X((marker.StartMs + marker.EndMs) / 2);
             markerLabel.PositionX = Math.Max(track.PositionX, Math.Min(track.PositionX + width - markerLabel.SizeWidth, mid - markerLabel.SizeWidth / 2));
             markerLabel.Show();
