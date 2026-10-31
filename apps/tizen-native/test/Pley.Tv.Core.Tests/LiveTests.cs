@@ -236,12 +236,19 @@ public class GuideCursorTests
     }
 
     [Fact]
-    public void A_channel_without_programmes_has_no_time_to_move_through()
+    public void A_channel_without_programmes_moves_through_time_by_half_hours_both_ways()
     {
         var c = new GuideCursor(Start, Now);
-        Assert.False(c.MoveLeft(null));
         c.MoveRight(null);
         Assert.Equal(GuideCursor.Slot(Now) + LiveRules.SlotS, c.Cursor);
+        // Left comes back the way Right went, rather than leave the guide from there, and goes on
+        // to the guide's first half hour; only from there does it leave for the categories.
+        Assert.True(c.MoveLeft(null));
+        Assert.Equal(GuideCursor.Slot(Now), c.Cursor);
+        while (c.MoveLeft(null)) Assert.True(c.Cursor >= Start);
+        Assert.Equal(GuideCursor.Slot(Start), GuideCursor.Slot(c.Cursor));
+        c.BackToNow(Now);
+        c.MoveRight(null);
         Assert.Equal(GuideOk.Watch, c.Ok(new LiveChannel { Id = 1 }, null, Now));
         Assert.Equal(GuideOk.None, c.Ok(null, null, Now));
     }

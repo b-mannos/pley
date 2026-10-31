@@ -34,9 +34,9 @@ static class LiveViews
             Size = new Size(Ui.Dp(widthDp), Ui.Dp(heightDp)),
             BackgroundColor = track,
             CornerRadius = Ui.Dp(PleyShape.BadgeRadius),
-            ClippingMode = ClippingModeType.ClipChildren,
         };
-        bar.Add(new View { Size = new Size(Ui.Dp(widthDp * program.ProgressAt(now)), Ui.Dp(heightDp)), BackgroundColor = PleyColors.Accent });
+        // No clip (a GPU pass a bar): the filled part rounds its own corners.
+        bar.Add(new View { Size = new Size(Ui.Dp(widthDp * program.ProgressAt(now)), Ui.Dp(heightDp)), BackgroundColor = PleyColors.Accent, CornerRadius = Ui.Dp(PleyShape.BadgeRadius) });
         return bar;
     }
 
@@ -104,13 +104,13 @@ sealed class ChannelLogoView : View
         inset = insetDp;
         Size = new Size(Ui.Dp(widthDp), Ui.Dp(heightDp));
         CornerRadius = Ui.Dp(radiusDp);
-        ClippingMode = ClippingModeType.ClipChildren;
+        // No clip (a GPU pass a logo, dozens in the guide): the logo and its name sit inside the well.
         var text = LiveText.LogoLabel(channel, name);
         var (from, to) = Placeholder.Colors(text);
         Background = Gradients.Diagonal(AvatarView.Rgb(from), AvatarView.Rgb(to));
         var s = style ?? PleyType.Label;
         var lines = name && heightDp >= s.Line * 2 + 12 ? 2 : 1;
-        label = Text.Label(text, s, LiveViews.Alpha(PleyColors.Fg, 0.85f), maxLines: lines);
+        label = Text.Label(lines == 1 ? Text.Fit(text, s, widthDp - 8) : text, s, LiveViews.Alpha(PleyColors.Fg, 0.85f), maxLines: lines);
         label.Size = new Size(Ui.Dp(widthDp - 8), Ui.Dp(heightDp - 4));
         label.Position = new Position(Ui.Dp(4), Ui.Dp(2));
         label.HorizontalAlignment = HorizontalAlignment.Center;

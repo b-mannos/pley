@@ -167,8 +167,10 @@ public sealed class GuideCursor
     {
         var current = Current(programs);
         var target = current != null ? current.Start - 1 : Cursor - LiveRules.SlotS;
-        // A channel without programmes has no time to move through.
-        if (target < Start || programs == null || programs.Count == 0) return false;
+        // Only from the guide's first half hour. Where a channel has no programmes it goes back a
+        // half hour at a time, as Right goes on: refused there, Left took focus to the categories
+        // from wherever Right had gone, with no way back through the time.
+        if (target < Start) return false;
         var before = LiveRules.At(programs, target);
         MoveTo(before != null ? Math.Max(before.Start, Slot(target)) : Slot(target));
         return true;

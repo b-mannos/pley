@@ -136,6 +136,7 @@ sealed class GuideView : View
         timeLayer.PositionX = -Ui.Dp(GuideLayout.Scroll(cursor.Left, cursor.Start));
         headerLayer.PositionX = timeLayer.PositionX;
 
+        catchUp.Tick += (s, e) => CatchUp();
         Item = new FocusItem("guide")
         {
             Selected = Ok,
@@ -194,6 +195,12 @@ sealed class GuideView : View
 
     IReadOnlyList<LiveProgram>? Programs(int row) => pages[row] is { } c ? guide.Of(c.Id) : null;
 
+    /// <summary>How long after Left last moved within the guide a Left at its start still stays: taps in a row.</summary>
+    const int EdgePauseMs = 500;
+
+    /// <summary>When Left last moved within the guide (Environment.TickCount).</summary>
+    int leftMovedAt = Environment.TickCount - EdgePauseMs;
+
     bool OnKey(string key, bool down)
     {
         if (Disposed) return false;
@@ -202,8 +209,14 @@ sealed class GuideView : View
         {
             case "Left":
                 if (!down) return true;
-                if (!cursor.MoveLeft(programs)) Scrolling.Left(gate, toCategories);
-                else Moved();
+                if (cursor.MoveLeft(programs))
+                {
+                    leftMovedAt = Environment.TickCount;
+                    Moved();
+                }
+                // Out to the categories on a press of its own: not under a held key, nor straight
+                // after Left went back through the programmes (taps in a row stop at the guide's start).
+                else if (unchecked(Environment.TickCount - leftMovedAt) >= EdgePauseMs) Scrolling.Left(gate, toCategories);
                 return true;
             case "Right":
                 if (!down) return true;
@@ -361,7 +374,7 @@ sealed class GuideView : View
         {
             var c = pages[i];
             var rowFocused = focused && i == cursor.Row;
-            if (!cells.TryGetValue(i, out var cell) || !Equals(cell.Channel, c))
+            if (!cells.TryGetValue(i, out var cell) || !SameChannel(cell.Channel, c))
             {
                 cell?.Dispose();
                 cell = new GuideChannelCell(c, c != null ? LiveRules.ChannelName(c, listed) : "", origin, images, width);
@@ -370,15 +383,80 @@ sealed class GuideView : View
                 cells[i] = cell;
             }
             cell.Focus(rowFocused);
-            var list = c != null ? guide.Of(c.Id) : null;
-            var look = new ProgramsLook(c, list, guide.Loaded, cursor.Left, now, rowFocused ? cursor.Current(list)?.Start ?? -1 : null);
-            if (rows.TryGetValue(i, out var drawn) && drawn.Look == look) continue;
-            drawn.View?.Dispose();
-            var view = ProgramsRow(look);
-            view.PositionY = Ui.Dp(i * GuideLayout.RowHeight);
-            rowsTimeLayer.Add(view);
-            rows[i] = (look, view);
+            var look = LookOf(i, rowFocused);
+            later.Remove(i);
+            if (rows.TryGetValue(i, out var drawn) && Same(drawn.Look, look)) continue;
+            // Now: a row coming into view, and the rows focus came to and left. The others (an answer
+            // filling a screen of rows, ten at 10 to 15 ms each) catch up a few at a time, frame by frame.
+            if (drawn.View != null && !rowFocused && drawn.Look.Focus == null)
+            {
+                later.Add(i);
+                continue;
+            }
+            // A row coming into view (a screen of them when the guide pages) shows its still bars
+            // at once, and its programmes as it catches up.
+            if (drawn.View == null && !rowFocused)
+            {
+                Build(i, look with { Programs = null, Loaded = false });
+                later.Add(i);
+                continue;
+            }
+            Build(i, look);
         }
+        if (later.Count > 0 && !catchingUp)
+        {
+            catchingUp = true;
+            catchUp.Start();
+        }
+    }
+
+    /// <summary>How row <paramref name="i"/> is to look now.</summary>
+    ProgramsLook LookOf(int i, bool rowFocused)
+    {
+        var c = pages[i];
+        var list = c != null ? guide.Of(c.Id) : null;
+        return new ProgramsLook(c, list, guide.Loaded, cursor.Left, now, rowFocused ? cursor.Current(list)?.Start ?? -1 : null);
+    }
+
+    void Build(int i, ProgramsLook look)
+    {
+        if (rows.TryGetValue(i, out var drawn)) drawn.View.Dispose();
+        var view = ProgramsRow(look);
+        view.PositionY = Ui.Dp(i * GuideLayout.RowHeight);
+        rowsTimeLayer.Add(view);
+        rows[i] = (look, view);
+    }
+
+    /// <summary>Rows to make again, a few a frame, nearest the focused row first.</summary>
+    readonly HashSet<int> later = new HashSet<int>();
+
+    /// <summary>The time a frame's catching up may take, in ms: what is left of a 60 Hz frame.</summary>
+    const double CatchUpMs = 8;
+
+    readonly Timer catchUp = new Timer(16);
+    bool catchingUp;
+
+    /// <summary>Makes again the rows waiting, nearest the focused row first, until a frame's time is spent.</summary>
+    bool CatchUp()
+    {
+        if (Disposed)
+        {
+            catchingUp = false;
+            return false;
+        }
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var focused = Item.Focused;
+        while (later.Count > 0 && watch.Elapsed.TotalMilliseconds < CatchUpMs)
+        {
+            var i = later.OrderBy(r => Math.Abs(r - cursor.Row)).First();
+            later.Remove(i);
+            // Gone out of view meanwhile.
+            if (!rows.TryGetValue(i, out var drawn)) continue;
+            var look = LookOf(i, focused && i == cursor.Row);
+            if (!Same(drawn.Look, look)) Build(i, look);
+        }
+        catchingUp = later.Count > 0;
+        return catchingUp;
     }
 
     void Info(LiveChannel? channel, LiveProgram? program)
@@ -416,6 +494,36 @@ sealed class GuideView : View
 
     /// <summary>What a row of programmes shows: drawn again only when it changes.</summary>
     readonly record struct ProgramsLook(LiveChannel? Channel, IReadOnlyList<LiveProgram>? Programs, bool Loaded, long Left, long Now, long? Focus);
+
+    /// <summary>
+    /// Whether a row drawn as <paramref name="a"/> looks as <paramref name="b"/> would: its
+    /// programmes compared by those in view. Each guide answer (one for every move up or down,
+    /// for the rows coming into view) brings new lists of the same programmes, and compared as
+    /// lists every row in view was made again at each move.
+    /// </summary>
+    bool Same(ProgramsLook a, ProgramsLook b)
+    {
+        if (!SameChannel(a.Channel, b.Channel) || a.Left != b.Left || a.Now != b.Now || a.Focus != b.Focus) return false;
+        if (ReferenceEquals(a.Programs, b.Programs) && a.Loaded == b.Loaded) return true;
+        var x = GuideLayout.Visible(a.Programs, a.Left, cursor.Start);
+        var y = GuideLayout.Visible(b.Programs, b.Left, cursor.Start);
+        if (x.Count != y.Count) return false;
+        // Whether the guide is still loading tells only a row with nothing in view what to say;
+        // it changes with every answer asked for, and compared for every row made them all again.
+        if (x.Count == 0) return a.Loaded == b.Loaded;
+        for (var i = 0; i < x.Count; i++)
+            if (x[i].Start != y[i].Start || x[i].Stop != y[i].Stop || x[i].Title != y[i].Title) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Whether two answers' records of a channel draw the same: by what is drawn of it, as its
+    /// records hold lists (its programmes' categories) that make each answer's records unequal.
+    /// </summary>
+    static bool SameChannel(LiveChannel? a, LiveChannel? b) =>
+        a == null || b == null
+            ? a == b
+            : a.Id == b.Id && a.Name == b.Name && a.Number == b.Number && a.Logo == b.Logo && a.HasGuide == b.HasGuide && a.Favorite == b.Favorite;
 
     /// <summary>A channel's programmes in time, x from the guide's start: the focused one in the accent, what airs marked, what ended dimmed.</summary>
     View ProgramsRow(ProgramsLook look)
@@ -467,7 +575,6 @@ sealed class GuideView : View
                 Size = new Size(Ui.Dp(cellWidth), Ui.Dp(cellHeight)),
                 CornerRadius = Ui.Dp(PleyShape.ControlRadius),
                 BackgroundColor = focused ? PleyColors.Accent : airing ? LiveViews.PrimaryContainer : PleyColors.Surface2,
-                ClippingMode = ClippingModeType.ClipChildren,
                 Opacity = program.Stop <= look.Now && !focused ? GuideLayout.PastAlpha : 1f,
             };
             if (airing && !focused)
@@ -497,6 +604,8 @@ sealed class GuideView : View
                     Position = new Position(0, Ui.Dp(cellHeight - GuideLayout.ProgressHeight)),
                     Size = new Size(Ui.Dp(cellWidth * program.ProgressAt(look.Now)), Ui.Dp(GuideLayout.ProgressHeight)),
                     BackgroundColor = focused ? PleyColors.OnAccent : PleyColors.Accent,
+                    // The cell doesn't clip (a GPU pass a cell): the bar takes its bottom left corner itself.
+                    CornerRadius = new Vector4(0, 0, 0, Ui.Dp(PleyShape.ControlRadius)),
                 });
             }
             row.Add(cell);
@@ -508,6 +617,7 @@ sealed class GuideView : View
     {
         if (Disposed) return;
         slide?.Stop();
+        catchUp.Stop();
         base.Dispose(type);
     }
 }
