@@ -669,6 +669,36 @@ class LiveScreenTest(unittest.TestCase):
         self.assertFalse(self.win.made[L.rail_group(L.RAIL_LIVE)].visible)
         self.assertEqual(self.win.rail_entry("live"), L.RAIL_HOME)
 
+    def test_the_rail_follows_live_tv_set_up_or_emptied(self):
+        movies = {"id": 1, "name": "Movies", "kind": "movies"}
+        summary = {"available": False, "allowed": True, "channels": 0}
+
+        class Server:
+            def get(inner, path, **query):
+                return [movies] if path == "/api/libraries" else dict(summary)
+
+        class Page:
+            rail = "home"
+
+            def refresh(inner):
+                pass
+
+        win = test_window.FakeWindow()
+        win.session.client = Server()
+        win.session.get = win.session.client.get
+        win.session.details, win.session.lock = {}, window.threading.Lock()
+        win.libraries, win.live, win.screen = [movies], dict(summary), Page()
+        win.setup_rail()
+        self.assertFalse(win.made[L.rail_group(L.RAIL_LIVE)].visible)
+        # An administrator adds a source: live_channels_changed, and the rail has Live TV.
+        summary.update(available=True, channels=5)
+        win.changed()
+        self.assertTrue(win.made[L.rail_group(L.RAIL_LIVE)].visible)
+        # Its last source removed: the rail loses it again.
+        summary.update(available=False, channels=0)
+        win.changed()
+        self.assertFalse(win.made[L.rail_group(L.RAIL_LIVE)].visible)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -82,7 +82,7 @@ sub onStreamRefused(event as object)
     uiGet("/api/auth/me", "")
 end sub
 
-' Watch state, My List or libraries changed elsewhere: Home asks again
+' Watch state, My List, libraries or Live TV changed elsewhere: Home asks again
 ' (now if it shows, else as it shows); a stream of this Roku's stopped from
 ' elsewhere ends at once.
 sub onServerEvent(event as object)

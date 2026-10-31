@@ -8,6 +8,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Fixed
+
+- Home's menu shows or drops Live TV as soon as it is set up or its last
+  source removed, as it does for libraries.
+
 ## [0.1.0] - 2026-10-30
 
 ### Added
