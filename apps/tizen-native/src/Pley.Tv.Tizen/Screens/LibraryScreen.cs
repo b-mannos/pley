@@ -241,6 +241,8 @@ sealed class LibraryScreen : ShellPage
             made.Group.Exit = d => d switch
             {
                 Direction.Left => Scrolling.Left(gate, Shell.FocusRail),
+                // A held key stays in the grid: the A to Z jump (Right) and the chips (Up) take a press of their own.
+                Direction.Right or Direction.Up => gate.Holding,
                 // The grid's last row: Down stays.
                 Direction.Down => true,
                 _ => false,
@@ -514,6 +516,8 @@ sealed class LibraryScreen : ShellPage
         {
             Direction.Left => Scrolling.Left(gate, Shell.FocusRail),
             Direction.Down or Direction.Right => true,
+            // A held Up stays in the grid: the tabs take a press of their own.
+            Direction.Up => gate.Holding,
             _ => false,
         };
         body.Add(made);
