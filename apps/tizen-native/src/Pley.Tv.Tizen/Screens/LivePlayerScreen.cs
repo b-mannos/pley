@@ -284,7 +284,10 @@ sealed class LivePlayerScreen : Sheet
             logos.Clear();
         }
         var playing = state.Playing;
-        black.Opacity = playing && !state.AudioOnly ? 0 : 1;
+        // Clear only once pictures come: the engine says it plays when Start returns, before the
+        // first frame, and the window is clear here, so while it buffers what is under the app
+        // (the TV's menu) would show round the spinner. A stall goes to black with the spinner.
+        black.Opacity = playing && !state.Buffering && !state.AudioOnly ? 0 : 1;
         if (state.Buffering && playing) Spin(spinner, spin, true);
         else Spin(spinner, spin, false);
 
