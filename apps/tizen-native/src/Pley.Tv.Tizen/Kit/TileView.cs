@@ -152,6 +152,18 @@ sealed class TileView : View
 
     bool quiet;
 
+    /// <summary>Shows focus as it is now, at once: a tile made in place of another that had it (a grid's page loaded).</summary>
+    public void Sync() => Look(Focus.Focused, instant: true);
+
+    /// <summary>A grid reuses its positions' focus items for new tiles: this one stops listening to its own.</summary>
+    protected override void Dispose(DisposeTypes type)
+    {
+        if (Disposed) return;
+        Focus.FocusChanged -= OnFocus;
+        focusAnimation?.Stop();
+        base.Dispose(type);
+    }
+
     void OnFocus(bool on)
     {
         if (!quiet) Look(on, instant: false);

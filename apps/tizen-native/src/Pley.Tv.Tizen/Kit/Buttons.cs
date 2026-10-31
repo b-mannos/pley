@@ -104,6 +104,18 @@ sealed class ButtonView : View
         }
     }
 
+    /// <summary>The icon's colour at rest, when not the label's (a chip's accent check).</summary>
+    public Color? IconInk
+    {
+        set
+        {
+            iconInk = value;
+            Look(Item.Focused);
+        }
+    }
+
+    Color? iconInk;
+
     /// <summary>Width in dp, for laying buttons out in a row.</summary>
     public float WidthDp => SizeWidth / Ui.Scale;
 
@@ -116,7 +128,7 @@ sealed class ButtonView : View
         if (kind == ButtonKind.Pill) BorderlineColor = focused ? Color.Transparent : PleyColors.Control;
         var content = focused ? PleyColors.OnAccent : ink;
         label.TextColor = content;
-        if (icon != null) icon.Color = content;
+        if (icon != null) icon.Color = focused ? content : iconInk ?? content;
         focusAnimation?.Stop();
         var scale = focused ? PleyShape.PillScale : 1f;
         focusAnimation = new Animation(focused ? PleyMotion.FocusMs : PleyMotion.UnfocusMs)
