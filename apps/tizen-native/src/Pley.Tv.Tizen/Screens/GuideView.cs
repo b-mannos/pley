@@ -341,7 +341,7 @@ sealed class GuideView : View
         var programs = Programs(cursor.Row);
         var current = channel != null ? cursor.Current(programs) : null;
         Info(channel, current);
-        day.Text = clock.Day(Math.Max(cursor.Left, cursor.Start), now);
+        Text.Show(day, clock.Day(Math.Max(cursor.Left, cursor.Start), now));
         nowLine.PositionX = Ui.Dp(GuideLayout.X(now, cursor.Start) - GuideLayout.NowLineWidth / 2);
 
         var shown = (int)Math.Ceiling(rowsHeight / GuideLayout.RowHeight);
@@ -399,10 +399,10 @@ sealed class GuideView : View
             info.Add(badge);
             x = badge.SizeWidth + Ui.Dp(8);
         }
-        title.Text = program?.Title ?? name;
+        Text.Show(title, program?.Title ?? name);
         title.PositionX = x;
         title.SizeWidth = Ui.Dp(width - TileWidth - TileGap) - x;
-        meta.Text = LiveText.GuideMeta(channel, name, program, now, clock);
+        Text.Show(meta, LiveText.GuideMeta(channel, name, program, now, clock));
         words.Text = LiveText.GuideText(program) ?? "";
         if (tileChannel != channel.Id || tile == null)
         {

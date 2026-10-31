@@ -87,7 +87,7 @@ sealed class LibraryScreen : ShellPage
 
     void Show(LibraryState s)
     {
-        name.Text = s.Library?.Name ?? "";
+        Text.Show(name, s.Library?.Name ?? "");
         var page = LibraryText.PageMessage(s);
         ShowTabs(page != null ? Array.Empty<LibraryTab>() : s.Tabs, s.Params.Tab);
         if (page != null)
@@ -313,7 +313,7 @@ sealed class LibraryScreen : ShellPage
         var line = LibraryText.CountLine(s);
         if (list.SequenceEqual(shownChips))
         {
-            if (count != null && line != null) count.Text = line;
+            if (count != null && line != null) Text.Show(count, line);
             return;
         }
         var focusedChip = Tree.Current?.Parent == chips ? Tree.Current.Name : null;

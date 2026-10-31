@@ -79,9 +79,9 @@ static class LiveViews
     /// <summary>A label of <paramref name="style"/> sized to its text, for a line of parts.</summary>
     public static TextLabel Fitted(string text, TextStyle style, Color color, float maxWidthDp)
     {
-        var label = Text.Label(text, style, color);
-        var width = Math.Min(label.NaturalSize.Width + 2, Ui.Dp(maxWidthDp));
-        label.Size = new Size(width, Text.LineHeight(style));
+        var label = Text.Label(Text.Fit(text, style, maxWidthDp), style, color);
+        var width = Math.Min(Text.Width(label), maxWidthDp);
+        label.Size = new Size(Ui.Dp(width), Text.LineHeight(style));
         return label;
     }
 }

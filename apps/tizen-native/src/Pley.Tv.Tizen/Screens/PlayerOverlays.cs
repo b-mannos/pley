@@ -217,7 +217,7 @@ sealed class UpNextView : View
         play.Countdown(card.SecondsLeft, reduced);
         if (ItemId == card.ItemId) return;
         ItemId = card.ItemId;
-        heading.Text = PlayerText.EpisodeLine(card.Heading) ?? card.Heading;
+        Text.Show(heading, PlayerText.EpisodeLine(card.Heading) ?? card.Heading);
         name.Text = card.Title;
         var nameHeight = Math.Min(Math.Max(name.GetHeightForWidth(Ui.Dp(Width - 2 * Pad)), Text.LineHeight(PleyType.Title)), Text.LineHeight(PleyType.Title) * 2);
         name.SizeHeight = nameHeight;
@@ -520,7 +520,7 @@ sealed class SeekPreviewView : View
     {
         if (Disposed) return;
         time.Text = PlayerText.Time(targetMs);
-        chapter.Text = chapterLine ?? "";
+        Text.Show(chapter, chapterLine ?? "");
         HasPicture = frameAt != null || chapterImage != null;
         frame.SetVisible(HasPicture);
         var under = HasPicture ? PictureHeight + 6 : 0;

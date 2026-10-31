@@ -381,7 +381,7 @@ sealed class PinPad : View
                 });
             }
         }
-        error.Text = step.Error ?? "";
+        Text.Show(error, step.Error ?? "");
         if (step.Shakes != shownShakes)
         {
             shownShakes = step.Shakes;

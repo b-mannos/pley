@@ -166,27 +166,75 @@ static class PleyMotion
 
 /// <summary>
 /// Text the way the Android app sets it: the style's size and weight, one line unless asked,
-/// ellipsized. Not its tracking (letterSpacing): the TV's NUI has that only as CharacterSpacing,
-/// which its API doesn't name, and with it set, labels made after the first screens drew as "…"
-/// alone (tile captions, headers). It adds a fraction of a pixel a letter; text keeps the font's
-/// own spacing.
+/// ending in "…" when it doesn't fit. Not its tracking (letterSpacing): the TV's NUI has that only
+/// as CharacterSpacing, which its API doesn't name; it adds a fraction of a pixel a letter, so
+/// text keeps the font's own spacing.
+///
+/// A line is cut to fit here (<see cref="Fit"/>), not by NUI's ellipsis: on the TV, labels the
+/// pages made drew as "…" alone (tile captions, row headers, Live TV's categories), whether
+/// their text fitted or not, until something laid them out again.
 /// </summary>
 static class Text
 {
     public static TextLabel Label(string text, TextStyle style, Color color, int maxLines = 1, float width = 0)
     {
-        var label = new TextLabel(text)
+        var label = new TextLabel(maxLines == 1 && width > 0 ? Fit(text, style, width) : text)
         {
             PixelSize = Ui.Dp(style.Size),
             TextColor = color,
             MultiLine = maxLines > 1,
-            Ellipsis = true,
+            Ellipsis = maxLines > 1,
             FontFamily = style.Family,
             FontStyle = Weight(style.Weight),
             VerticalAlignment = VerticalAlignment.Center,
         };
         if (width > 0) label.Size = new Size(Ui.Dp(width), LineHeight(style) * maxLines);
         return label;
+    }
+
+    /// <summary>One measuring label, never on screen: measuring on a fresh label each time costs a label each time.</summary>
+    static TextLabel? measurer;
+
+    /// <summary>
+    /// <paramref name="text"/> as it fits on one line <paramref name="widthDp"/> wide: as it is,
+    /// or as much of it as fits with "…" after.
+    /// </summary>
+    public static string Fit(string text, TextStyle style, float widthDp) =>
+        Fit(text, Ui.Dp(style.Size), style.Family, Weight(style.Weight), Ui.Dp(widthDp));
+
+    /// <summary>
+    /// Puts <paramref name="text"/> in <paramref name="label"/>, cut to fit its width as
+    /// <see cref="Fit(string, TextStyle, float)"/> does: for a one-line label of a set width whose
+    /// text changes. A label sized to its text after takes the text as it is.
+    /// </summary>
+    public static void Show(TextLabel label, string text) =>
+        label.Text = label.MultiLine || label.SizeWidth <= 0 ? text : Fit(text, label.PixelSize, label.FontFamily, label.FontStyle, label.SizeWidth);
+
+    static string Fit(string text, float pixelSize, string family, PropertyMap weight, float widthPx)
+    {
+        // A pixel or two of room: NaturalSize rounds to the pixel.
+        var room = widthPx - 2;
+        if (text.Length == 0 || Measure(text, pixelSize, family, weight) <= room) return text;
+        // The longest start that fits with "…" after it.
+        int fits = 0, over = text.Length;
+        while (over - fits > 1)
+        {
+            var mid = (fits + over) / 2;
+            if (Measure(text.Substring(0, mid).TrimEnd() + "…", pixelSize, family, weight) <= room) fits = mid;
+            else over = mid;
+        }
+        return fits == 0 ? "…" : text.Substring(0, fits).TrimEnd() + "…";
+    }
+
+    /// <summary>The width in pixels <paramref name="text"/> takes on one line in that font.</summary>
+    static float Measure(string text, float pixelSize, string family, PropertyMap weight)
+    {
+        measurer ??= new TextLabel();
+        measurer.PixelSize = pixelSize;
+        measurer.FontFamily = family;
+        measurer.FontStyle = weight;
+        measurer.Text = text;
+        return measurer.NaturalSize.Width;
     }
 
     /// <summary>The fonts the app ships: Roboto, before any text is drawn.</summary>

@@ -21,6 +21,8 @@ sealed class TileView : View
     readonly TextLabel? placeholder;
     readonly TextLabel title;
     readonly TextLabel? subtitle;
+    /// <summary>The whole title, fitted again to the caption's width in the weight it shows (bold while focused is wider).</summary>
+    readonly string titleText;
     Animation? focusAnimation;
     bool pictureAsked;
 
@@ -89,6 +91,7 @@ sealed class TileView : View
         Add(frame);
 
         var captionTop = h + Ui.Dp(PleyTv.TilesToCaption);
+        titleText = model.Title;
         title = Text.Label(model.Title, PleyType.Caption, PleyColors.Fg, width: kind.Width);
         title.Position = new Position(0, captionTop);
         if (kind.Round) title.HorizontalAlignment = HorizontalAlignment.Center;
@@ -175,7 +178,9 @@ sealed class TileView : View
         if (Disposed) return;
         // Drawn over its neighbours and their captions while focused.
         if (on) RaiseToTop();
-        title.FontStyle = Text.Weight(on ? PleyType.Bold : PleyType.Caption.Weight);
+        var weight = on ? PleyType.Bold : PleyType.Caption.Weight;
+        title.FontStyle = Text.Weight(weight);
+        title.Text = Text.Fit(titleText, PleyType.Caption with { Weight = weight }, kind.Width);
         var scale = on ? (kind.Round ? PleyShape.AvatarScale : PleyShape.TileScale) : 1f;
         focusAnimation?.Stop();
         if (instant)

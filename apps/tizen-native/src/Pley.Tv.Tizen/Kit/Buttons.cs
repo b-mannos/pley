@@ -65,7 +65,12 @@ sealed class ButtonView : View
         var padding = kind == ButtonKind.Pill ? 20 : 16;
         var textWidth = Text.Width(label);
         var iconRoom = icon != null ? PleyTv.IconSize + 8 : 0;
-        if (maxWidth > 0) textWidth = Math.Min(textWidth, maxWidth - padding * 2 - iconRoom);
+        if (maxWidth > 0 && textWidth > maxWidth - padding * 2 - iconRoom)
+        {
+            // Wider than the button may grow: cut to fit with "…" (Text.Fit), as NUI's own ellipsis isn't to be trusted.
+            textWidth = maxWidth - padding * 2 - iconRoom;
+            label.Text = Text.Fit(text, PleyType.Label, textWidth);
+        }
         var content = textWidth + iconRoom;
         var width = Math.Max(content + padding * 2, kind == ButtonKind.Pill ? PillMinWidth : 0);
         Size = new Size(Ui.Dp(width), Ui.Dp(PleyTv.ButtonHeight));

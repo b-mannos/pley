@@ -276,7 +276,7 @@ sealed class ChannelCardsView : View
         public void Now(long now)
         {
             if (Disposed || Channel == null || onNow == null) return;
-            onNow.Text = LiveText.OnNowOf(Channel, now);
+            Text.Show(onNow, LiveText.OnNowOf(Channel, now));
             progress?.Dispose();
             progress = null;
             if (Channel.OnAt(now) is not { } on) return;

@@ -193,7 +193,7 @@ sealed class RailView : View
         public FocusItem Item { get; }
         public View Box { get; }
 
-        public void SetLabel(string text) => label.Text = text;
+        public void SetLabel(string text) => Text.Show(label, text);
 
         /// <summary>The avatar's second line, under its name.</summary>
         public void SetSecondLine(string text)

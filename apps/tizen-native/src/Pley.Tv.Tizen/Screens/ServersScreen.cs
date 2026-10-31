@@ -346,13 +346,13 @@ sealed class ServerRowView : View
         icon.Color = ink;
         name.TextColor = ink;
         var danger = false;
-        if (connecting) line.Text = $"Connecting to {Row.Address}…";
+        if (connecting) Text.Show(line, $"Connecting to {Row.Address}…");
         else if (Row.Unreachable)
         {
-            line.Text = "Can't reach it";
+            Text.Show(line, "Can't reach it");
             danger = true;
         }
-        else line.Text = Row.Address;
+        else Text.Show(line, Row.Address);
         line.TextColor = danger && !focused ? PleyColors.DangerText : soft;
         if (tag != null) tag.TextColor = tagWarns && !focused ? PleyColors.DangerText : soft;
     }

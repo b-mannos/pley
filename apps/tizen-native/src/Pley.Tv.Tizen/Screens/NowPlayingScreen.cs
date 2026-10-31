@@ -267,14 +267,14 @@ sealed class NowPlayingScreen : ShellPage
             title.SizeHeight = Math.Min(Math.Max(title.GetHeightForWidth(Ui.Dp(ColumnWidth)), Text.LineHeight(PleyType.PageTitle)), Text.LineHeight(PleyType.PageTitle) * 2);
             Place();
         }
-        byline!.Text = now.Byline;
+        Text.Show(byline!, now.Byline);
         Status(now);
     }
 
     void Status(NowPlaying now)
     {
         if (status == null) return;
-        status.Text = model.Status;
+        Text.Show(status, model.Status);
         status.TextColor = now.Error != null ? PleyColors.DangerText : PleyColors.Subtle;
     }
 

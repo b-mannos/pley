@@ -200,10 +200,10 @@ sealed class LiveChannelListSheet : Sheet
                 Add(lead);
                 x += size + (picking ? 10 : 8);
             }
-            label.Text = picking ? LiveText.ChannelGroups : LiveText.CategoryLabel(category ?? new LiveCategory.All());
-            label.TextColor = ink;
             var room = width - x - 8 - (picking ? 0 : 26);
-            label.Size = new Size(Math.Min(label.NaturalSize.Width + 2, Ui.Dp(room)), Ui.Dp(HeadingHeight));
+            label.Text = Text.Fit(picking ? LiveText.ChannelGroups : LiveText.CategoryLabel(category ?? new LiveCategory.All()), PleyType.Title, room);
+            label.TextColor = ink;
+            label.Size = new Size(Ui.Dp(Math.Min(Text.Width(label), room)), Ui.Dp(HeadingHeight));
             label.PositionX = Ui.Dp(x);
             if (picking) return;
             chevron = Icons.Icon("chevron-down", 18, ink);
@@ -414,7 +414,7 @@ sealed class LiveChannelListSheet : Sheet
         {
             if (Disposed || Channel == null || onNow == null || name == null) return;
             var on = Channel.OnAt(now);
-            onNow.Text = on?.Title ?? "";
+            Text.Show(onNow, on?.Title ?? "");
             // Without what's on, the name sits in the middle.
             var block = PleyType.Label.Line + (on != null ? PleyType.Caption.Line : 0);
             name.PositionY = Ui.Dp((RowHeight - block) / 2);

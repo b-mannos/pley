@@ -119,7 +119,7 @@ sealed class HistoryScreen : ShellPage
         model.Dispose();
     }
 
-    void OnFailed(Exception e) => problem.Text = Errors.Message(e);
+    void OnFailed(Exception e) => Text.Show(problem, Errors.Message(e));
 
     /// <summary>Whether the page may take focus on its own: it has none, or it is still where the page opened.</summary>
     bool TakesFocus()
@@ -131,7 +131,7 @@ sealed class HistoryScreen : ShellPage
 
     void Show(HistoryState state)
     {
-        count.Text = state is HistoryState.Ready r ? HistoryText.Count(r.Total) : "";
+        Text.Show(count, state is HistoryState.Ready r ? HistoryText.Count(r.Total) : "");
         if (HistoryText.Message(state) is { } message)
         {
             var kind = "message:" + message.Title + message.Action;
