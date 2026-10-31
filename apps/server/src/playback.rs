@@ -64,8 +64,9 @@ pub struct Caps {
     /// it included): `"hdr10"`, `"hdr10plus"`, `"hlg"`, `"dolby_vision"`.
     #[serde(default)]
     pub hdr_types: Option<Vec<String>>,
-    /// The Dolby Vision profiles decoded, each with its highest level; sent
-    /// only when the screen shows Dolby Vision.
+    /// The Dolby Vision profiles decoded, each with its highest level; used
+    /// only when `hdr_types` has `"dolby_vision"`. Without it, they say the
+    /// player decodes Dolby Vision and its screen is what doesn't show it.
     #[serde(default)]
     pub dolby_vision_profiles: Option<Vec<DolbyVisionDecoder>>,
     /// Audio codecs decoded on the device, by FFmpeg's names.
@@ -865,11 +866,45 @@ pub fn video_range_shown(v: &MediaStream, caps: &Caps, delivery: Delivery) -> Op
                 // insisted on gets here.
                 format!("{dolby_vision} not decoded (wrong colours)")
             } else {
-                format!("{} (Dolby Vision base layer)", base_layer_name(v, caps))
+                format!("{} (Dolby Vision base layer, as {})", base_layer_name(v, caps), base_layer_why(v, caps))
             }
         }
     };
     Some(shown)
+}
+
+/// Why a Dolby Vision stream the player gets as it is, or copied, shows as
+/// its base layer: the screen, the player, or a stream that doesn't say
+/// it's Dolby Vision. A player that lists profiles but no Dolby Vision
+/// screen decodes it: its screen is what's missing.
+fn base_layer_why(v: &MediaStream, caps: &Caps) -> String {
+    let profile = v.dv_profile.unwrap_or(0);
+    if decodes_dolby_vision(v, caps) {
+        return if caps.is_v2() && v.hdr10plus == Some(true) {
+            "Dolby Vision with HDR10+ doesn't play here".to_owned()
+        } else {
+            "this player's remuxes can't name Dolby Vision".to_owned()
+        };
+    }
+    if !caps.is_v2() {
+        return if caps.dolby_vision {
+            format!("this player doesn't decode profile {profile}")
+        } else {
+            "this player doesn't show Dolby Vision".to_owned()
+        };
+    }
+    let decoders = caps.dolby_vision_profiles.as_deref().unwrap_or_default();
+    if !caps.shows("dolby_vision") {
+        return if decoders.is_empty() {
+            "this player doesn't show Dolby Vision".to_owned()
+        } else {
+            "this screen doesn't show Dolby Vision".to_owned()
+        };
+    }
+    match decoders.iter().find(|d| d.profile == profile).and_then(|d| v.dv_level.zip(d.max_level)) {
+        Some((level, max)) if level > max => format!("level {level} is above this player's {max}"),
+        _ => format!("this player doesn't decode profile {profile}"),
+    }
 }
 
 /// What a version 2 player gets when its HDR video is converted (docs/API.md,

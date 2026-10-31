@@ -9,6 +9,13 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Fixed
+
+- The player's details say why Dolby Vision plays as its HDR10, HLG or
+  SDR base layer: the screen doesn't show it, the player doesn't decode
+  its profile or level, or the player's remuxes can't name it ("HDR10
+  (Dolby Vision base layer, as this screen doesn't show Dolby Vision)").
+
 ## [0.1.0] - 2026-10-30
 
 ### Security

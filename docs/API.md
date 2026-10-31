@@ -438,7 +438,12 @@ interface PlaybackInfo {
                                     // null when a quality was asked for
   video_range: string | null;       // what the screen gets of HDR video, for the player's details (null for
                                     // SDR): "Dolby Vision P8.1", "Dolby Vision P7 FEL", "HDR10+", "HLG",
-                                    // "HDR10 (Dolby Vision base layer)", "HDR10+ (Dolby Vision base layer)",
+                                    // "HDR10 (Dolby Vision base layer, as this screen doesn't show Dolby
+                                    // Vision)", "HDR10+ (Dolby Vision base layer, as this player doesn't
+                                    // decode profile 7)": the base layer plays for the screen, the
+                                    // player's profiles or level, a remux that can't name Dolby Vision,
+                                    // or HDR10+ in the stream;
+                                    // "HDR10 (Dolby Vision base layer)" when the video is converted from it,
                                     // "Dolby Vision P8.1 (converted from P7 FEL)",
                                     // "Dolby Vision P8.1 (HDR10+ left out)",
                                     // "HDR10 (this screen doesn't show HDR10+)", "HDR10 (HDR10+ left out)",
@@ -1632,7 +1637,8 @@ removed or reordered (`400`).
       max_level?: number;         // numbered as a stream's `level` (HEVC 5.1 = 153, H.264 5.1 = 51)
     }[];
     hdr_types?: ("hdr10" | "hdr10plus" | "hlg" | "dolby_vision")[]; // what the screen shows, a decoder feeding it
-    dolby_vision_profiles?: { profile: number; max_level?: number }[]; // only with a Dolby Vision screen
+    dolby_vision_profiles?: { profile: number; max_level?: number }[]; // decoded; used only with
+                                  // `dolby_vision` in hdr_types, else they say the screen is what lacks it
     audio_decode?: string[];      // decoded on the device
     audio_passthrough?: string[]; // sent as they are to a receiver: "ac3", "eac3", "truehd", "dts"
     audio_channels?: number;      // the most channels the output takes: 2, 6, 8

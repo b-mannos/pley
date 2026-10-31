@@ -263,25 +263,27 @@ fn version_1_profile_5_is_never_repackaged() {
     }
 }
 
+/// What the screen gets of `info` in `container`, as the player's details
+/// say it, from a transcoder that keeps HDR.
+fn screen_gets(caps: Value, container: &str, info: &MediaInfo) -> String {
+    let mut req = request(caps.clone());
+    req.hdr_transcodes = true;
+    let d = decide(&file(container), Some(info), &info.streams, &req);
+    let delivery = match (d.method, d.video.as_ref()) {
+        (Method::Direct, _) => Delivery::Direct,
+        (_, Some(v)) if v.mode == VideoMode::Copy => {
+            Delivery::Copy { dolby_vision: v.dolby_vision, hdr10plus_stripped: v.strip_hdr10plus }
+        }
+        (_, Some(v)) => Delivery::Converted(v.dynamic_range.dynamic_range()),
+        _ => unreachable!(),
+    };
+    video_range_shown(&info.streams[0], &request(caps).caps, delivery).unwrap()
+}
+
 /// What each player's screen gets, as the player's details say it.
 #[test]
 fn what_the_screen_gets() {
-    let shown = |caps: Value, row: &str| {
-        let info = source(row);
-        // A transcoder that keeps HDR.
-        let mut req = request(caps.clone());
-        req.hdr_transcodes = true;
-        let d = decide(&file("mkv"), Some(&info), &info.streams, &req);
-        let delivery = match (d.method, d.video.as_ref()) {
-            (Method::Direct, _) => Delivery::Direct,
-            (_, Some(v)) if v.mode == VideoMode::Copy => {
-                Delivery::Copy { dolby_vision: v.dolby_vision, hdr10plus_stripped: v.strip_hdr10plus }
-            }
-            (_, Some(v)) => Delivery::Converted(v.dynamic_range.dynamic_range()),
-            _ => unreachable!(),
-        };
-        video_range_shown(&info.streams[0], &request(caps).caps, delivery).unwrap()
-    };
+    let shown = |caps: Value, row: &str| screen_gets(caps, "mkv", &source(row));
     #[rustfmt::skip]
     let hdr10plus_screen = |mut caps: Value| {
         caps["hdr_types"] = json!(["hdr10", "hdr10plus", "hlg"]);
@@ -305,11 +307,11 @@ fn what_the_screen_gets() {
             google_tv_streamer(),
             [
                 "HDR10 (converted from Dolby Vision P5)",
-                "HDR10 (Dolby Vision base layer)",
-                "HDR10 (Dolby Vision base layer)",
+                "HDR10 (Dolby Vision base layer, as this screen doesn't show Dolby Vision)",
+                "HDR10 (Dolby Vision base layer, as this screen doesn't show Dolby Vision)",
                 "HDR10 (converted from Dolby Vision P8.4)",
-                "HDR10 (Dolby Vision base layer)",
-                "HDR10 (Dolby Vision base layer)",
+                "HDR10 (Dolby Vision base layer, as this screen doesn't show Dolby Vision)",
+                "HDR10 (Dolby Vision base layer, as this screen doesn't show Dolby Vision)",
             ],
         ),
         // HDR10 and HLG, no HDR10+.
@@ -318,11 +320,11 @@ fn what_the_screen_gets() {
             fire_tv_lite(),
             [
                 "HDR10 (converted from Dolby Vision P5)",
-                "HDR10 (Dolby Vision base layer)",
-                "HDR10 (Dolby Vision base layer)",
-                "HLG (Dolby Vision base layer)",
-                "HDR10 (Dolby Vision base layer)",
-                "HDR10 (Dolby Vision base layer)",
+                "HDR10 (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
+                "HDR10 (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
+                "HLG (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
+                "HDR10 (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
+                "HDR10 (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
             ],
         ),
         // Its screen shows HDR10+.
@@ -331,11 +333,11 @@ fn what_the_screen_gets() {
             hdr10plus_screen(fire_tv_lite()),
             [
                 "HDR10 (converted from Dolby Vision P5)",
-                "HDR10 (Dolby Vision base layer)",
-                "HDR10 (Dolby Vision base layer)",
-                "HLG (Dolby Vision base layer)",
-                "HDR10+ (Dolby Vision base layer)",
-                "HDR10+ (Dolby Vision base layer)",
+                "HDR10 (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
+                "HDR10 (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
+                "HLG (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
+                "HDR10+ (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
+                "HDR10+ (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
             ],
         ),
         (
@@ -343,11 +345,11 @@ fn what_the_screen_gets() {
             chrome(),
             [
                 "SDR (tone-mapped)",
-                "HDR10 (Dolby Vision base layer)",
-                "HDR10 (Dolby Vision base layer)",
-                "HLG (Dolby Vision base layer)",
-                "HDR10+ (Dolby Vision base layer)",
-                "HDR10+ (Dolby Vision base layer)",
+                "HDR10 (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
+                "HDR10 (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
+                "HLG (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
+                "HDR10+ (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
+                "HDR10+ (Dolby Vision base layer, as this player doesn't show Dolby Vision)",
             ],
         ),
     ];
@@ -397,6 +399,45 @@ fn what_the_screen_gets() {
         video_range_shown(&fel, &caps(fire_tv_4k_max()), to81).unwrap(),
         "Dolby Vision P8.1 (converted from P7 FEL)"
     );
+}
+
+/// A Dolby Vision stream that plays as its base layer says why: the screen,
+/// the player, the stream's level, or a remux that can't name it.
+#[test]
+fn why_the_base_layer_plays() {
+    let why = |caps: Value, container: &str, info: &MediaInfo| {
+        let shown = screen_gets(caps, container, info);
+        shown.split_once(" (Dolby Vision base layer, as ").map(|(_, why)| why.trim_end_matches(')').to_owned())
+    };
+    let row = |name: &str| source(name);
+    // The streamer decodes Dolby Vision; its HDR10 monitor doesn't show it.
+    assert_eq!(why(google_tv_streamer(), "mkv", &row("P8.1")).unwrap(), "this screen doesn't show Dolby Vision");
+    assert_eq!(why(fire_tv_lite(), "mkv", &row("P8.1")).unwrap(), "this player doesn't show Dolby Vision");
+    // Without a master playlist profile 7 isn't converted to 8.1.
+    assert_eq!(
+        why(without_master(fire_tv_4k_max()), "mkv", &row("P7")).unwrap(),
+        "this player doesn't decode profile 7"
+    );
+    assert_eq!(
+        why(without_master(fire_tv_4k_max()), "mkv", &row("P8.1+")).unwrap(),
+        "Dolby Vision with HDR10+ doesn't play here"
+    );
+    assert_eq!(
+        why(without_master(fire_tv_4k_max()), "m2ts", &row("P8.1")).unwrap(),
+        "this player's remuxes can't name Dolby Vision"
+    );
+    // 4K at 24 fps needs level 6, above the decoder's.
+    let mut level_5 = fire_tv_4k_max();
+    level_5["dolby_vision_profiles"] = json!([{"profile": 8, "max_level": 5}]);
+    let mut uhd = row("P8.1");
+    (uhd.streams[0].width, uhd.streams[0].height) = (Some(3840), Some(2160));
+    assert_eq!(why(level_5, "mkv", &uhd).unwrap(), "level 6 is above this player's 5");
+    // Version 1: a player that decodes Dolby Vision decodes no profile 7.
+    let mut safari = chrome();
+    safari["dolby_vision"] = json!(true);
+    assert_eq!(why(safari.clone(), "mkv", &row("P7")).unwrap(), "this player doesn't decode profile 7");
+    assert_eq!(why(safari, "mkv", &row("P8.1")).unwrap(), "this player's remuxes can't name Dolby Vision");
+    assert_eq!(why(chrome(), "mkv", &row("P8.1")).unwrap(), "this player doesn't show Dolby Vision");
 }
 
 #[test]
