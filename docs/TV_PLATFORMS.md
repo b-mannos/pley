@@ -395,11 +395,13 @@ and favourites) and its live player (changing channel, number keys, what's
 on, the channel list, and why a channel doesn't play); and the player:
 the stream on the TV's own player, chosen with the TV's capabilities,
 seeking with Left and Right with previews of where to, the scrubber with
-its chapters and the transport controls, text subtitles in Settings' look
-(the CAPTIONS key turns them off and on), Skip Intro and Skip Credits, Up
-Next (the next episode, or the next in a playlist or collection),
-recovering by itself from stalls and a server out of reach, and Try again
-when it can't play. The player's panels and the other pages come next.
+its chapters and the control row, text subtitles in Settings' look (the
+CAPTIONS key turns them off and on), the side panels (Subtitles with Sync
+and the subtitles' look, Audio, Quality, Chapters, the sleep timer, Speed
+where the TV's player has other speeds, and Info), Skip Intro and Skip
+Credits, Up Next (the next episode, or the next in a playlist or
+collection), recovering by itself from stalls and a server out of reach,
+and Try again when it can't play. The other pages come next.
 
 | | |
 |---|---|

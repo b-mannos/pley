@@ -24,8 +24,10 @@ namespace Pley.Tv.Tizen.Screens;
 /// OK during or just after a seek confirms it and plays on.</item>
 /// <item><b>Controls shown.</b> The title, the method badge and the clock at the top; the times,
 /// the scrubber (with its chapters and the marker playing) and the control row at the bottom, over
-/// a black scrim; focus moves as usual. They go 5 s after the last key while it plays.</item>
-/// <item><b>Back</b> walks out: Up Next, then the controls, then the player.</item>
+/// a black scrim; focus moves as usual. The row's buttons open the side panels
+/// (<see cref="PlayerPanelSheet"/>). They go 5 s after the last key while it plays, unless paused,
+/// scrubbing or in a panel.</item>
+/// <item><b>Back</b> walks out: a panel, then Up Next, then the controls, then the player.</item>
 /// <item><b>Media keys</b> work whatever shows; CAPTIONS turns the subtitles off and on.</item>
 /// </list>
 /// The model reports to the server through the app's reporter, so the last report goes out after
@@ -82,12 +84,20 @@ sealed class PlayerScreen : Sheet
     readonly PlayerButton playPause;
     readonly PlayerButton forward10;
     readonly PlayerButton next;
+    readonly PlayerButton chapters;
+    readonly PlayerButton sleep;
+    readonly PlayerButton speed;
+    readonly PlayerButton subtitlesButton;
+    readonly PlayerButton audio;
+    readonly PlayerButton quality;
+    readonly PlayerButton info;
     readonly SkipButton skip;
     readonly SleepNoticeView notice;
     readonly UpNextView upNext;
     readonly ToastView toast;
     readonly Timer tick;
 
+    PlayerPanelSheet? panel;
     View? error;
     FocusGroup? errorButtons;
     PlayerPhase? errorShown;
@@ -199,12 +209,20 @@ sealed class PlayerScreen : Sheet
         preview.Hide();
         controls.Add(preview);
 
-        // The control row: Previous · Back 10 · Play/Pause · Forward 10 · Next, centred.
+        // The control row: Chapters · Sleep timer · Speed at the left; Previous · Back 10 ·
+        // Play/Pause · Forward 10 · Next centred; Subtitles · Audio · Quality · Info at the right.
+        chapters = new PlayerButton(PlayerText.Chapters, "list-video", Button, PleyTv.IconSize, () => OpenPanel(PlayerPanelKind.Chapters));
+        sleep = new PlayerButton(PlayerText.Sleep, "moon", Button, PleyTv.IconSize, () => OpenPanel(PlayerPanelKind.Sleep));
+        speed = new PlayerButton(PlayerText.Speed, "fast-forward", Button, PleyTv.IconSize, () => OpenPanel(PlayerPanelKind.Speed));
         previous = new PlayerButton(PlayerText.Previous, "skip-back", Button, TransportIcon, () => model.Previous(seeker.Target ?? model.LivePositionMs()));
         back10 = new PlayerButton(PlayerText.Back10, "rotate-ccw", Button, TransportIcon, () => Jump(-1));
         playPause = new PlayerButton(PlayerText.Pause, "pause", PlayButton, PlayIcon, PlayPause);
         forward10 = new PlayerButton(PlayerText.Forward10, "rotate-cw", Button, TransportIcon, () => Jump(1));
         next = new PlayerButton(PlayerText.Next, "skip-forward", Button, TransportIcon, () => model.Next(seeker.Target ?? model.LivePositionMs()));
+        subtitlesButton = new PlayerButton(PlayerText.Subtitles, "captions", Button, PleyTv.IconSize, () => OpenPanel(PlayerPanelKind.Subtitles));
+        audio = new PlayerButton(PlayerText.Audio, "audio-lines", Button, PleyTv.IconSize, () => OpenPanel(PlayerPanelKind.Audio));
+        quality = new PlayerButton(PlayerText.Quality, "gauge", Button, PleyTv.IconSize, () => OpenPanel(PlayerPanelKind.Quality));
+        info = new PlayerButton(PlayerText.Info, "info", Button, PleyTv.IconSize, () => OpenPanel(PlayerPanelKind.Info));
         foreach (var b in RowButtons)
         {
             b.Hide();
@@ -308,7 +326,7 @@ sealed class PlayerScreen : Sheet
     /// <summary>Starting or between sessions: Left, Right and OK wait, as on Android.</summary>
     bool Busy => model.State.Value.Phase.Kind == PhaseKind.Preparing;
 
-    IEnumerable<PlayerButton> RowButtons => new[] { previous, back10, playPause, forward10, next };
+    IEnumerable<PlayerButton> RowButtons => new[] { chapters, sleep, speed, previous, back10, playPause, forward10, next, subtitlesButton, audio, quality, info };
 
     static Size Canvas() => new Size(Ui.Dp(PleyTv.CanvasWidth), Ui.Dp(PleyTv.CanvasHeight));
 
@@ -442,8 +460,11 @@ sealed class PlayerScreen : Sheet
     }
 
     /// <summary>
-    /// The control row for <paramref name="options"/>: Previous and Next around the transport when
-    /// an episode or chapters have them. Focus stays on the button it was on, else Play/Pause.
+    /// The control row for <paramref name="options"/> (the Android app's TvControlRow): Chapters
+    /// when the file has them, the sleep timer and Speed (where the TV's player has other speeds)
+    /// from the left safe edge; Previous and Next around the transport when an episode or chapters
+    /// have them, centred; Subtitles, Audio and Quality when there is a choice, and Info, to the
+    /// right safe edge. Focus goes along them all; it stays on the button it was on, else Play/Pause.
     /// </summary>
     void BuildRow(RowOptions options)
     {
@@ -453,23 +474,55 @@ sealed class PlayerScreen : Sheet
         var wasInRow = focused != null && focused.Parent == row;
         row.Clear();
         foreach (var b in RowButtons) b.Hide();
+        var left = new List<PlayerButton>();
+        if (options.Chapters) left.Add(chapters);
+        left.Add(sleep);
+        if (options.Speed) left.Add(speed);
         var centre = new List<PlayerButton>();
         if (options.PreviousNext) centre.Add(previous);
         centre.Add(back10);
         centre.Add(playPause);
         centre.Add(forward10);
         if (options.PreviousNext) centre.Add(next);
-        var x = (PleyTv.CanvasWidth - (centre.Sum(b => b.SizeDp) + TransportGap * (centre.Count - 1))) / 2;
-        foreach (var b in centre)
+        var right = new List<PlayerButton>();
+        if (options.Subtitles) right.Add(subtitlesButton);
+        if (options.Audio) right.Add(audio);
+        if (options.Quality) right.Add(quality);
+        right.Add(info);
+        void Lay(List<PlayerButton> buttons, float x, float gap)
         {
-            b.Position = new Position(Ui.Dp(x), Ui.Dp(RowTop + (PlayButton - b.SizeDp) / 2));
-            x += b.SizeDp + TransportGap;
-            b.Show();
-            row.Add(b.Item);
+            foreach (var b in buttons)
+            {
+                // The smaller ones' centres in line with Play/Pause's.
+                b.Position = new Position(Ui.Dp(x), Ui.Dp(RowTop + (PlayButton - b.SizeDp) / 2));
+                x += b.SizeDp + gap;
+                b.Show();
+                row.Add(b.Item);
+            }
         }
+        static float Width(List<PlayerButton> buttons, float gap) => buttons.Sum(b => b.SizeDp) + gap * (buttons.Count - 1);
+        Lay(left, PleyTv.SafeHorizontal, PleyTv.ButtonGap);
+        Lay(centre, (PleyTv.CanvasWidth - Width(centre, TransportGap)) / 2, TransportGap);
+        Lay(right, PleyTv.CanvasWidth - PleyTv.SafeHorizontal - Width(right, PleyTv.ButtonGap), PleyTv.ButtonGap);
         if (wasInRow && focused!.Parent != row) Tree.Focus(playPause.Item);
         else if (!wasInRow) row.RememberChild(row.Children.ToList().IndexOf(playPause.Item));
     }
+
+    /// <summary>A side panel over the controls, which stay while it shows; focus comes back to its button when it closes.</summary>
+    void OpenPanel(PlayerPanelKind kind)
+    {
+        if (gone || panel != null) return;
+        var sheet = new PlayerPanelSheet(shell, model, kind);
+        panel = sheet;
+        sheet.Gone += () =>
+        {
+            panel = null;
+            if (!gone) Poke();
+        };
+        sheet.Show();
+    }
+
+    void ClosePanel() => panel?.Close();
 
     /// <summary>
     /// Skip and the sleep notice, as the state says. Skip shows while its marker runs, unless Up
@@ -521,6 +574,7 @@ sealed class PlayerScreen : Sheet
             if (upNextShown) return;
             upNextShown = true;
             seeker.Cancel();
+            ClosePanel();
             ShowControls(false);
             foreach (var item in upNext.Group.Children.OfType<FocusItem>()) item.Shown = true;
             Fade.To(upNext, true);
@@ -609,7 +663,8 @@ sealed class PlayerScreen : Sheet
     {
         if (gone) return;
         var now = Environment.TickCount64;
-        if (shown && model.State.Value.Phase.WantsToPlay && hideAt > 0 && now >= hideAt && seeker.Target == null) ShowControls(false);
+        // The controls go 5 s after the last key, unless paused, scrubbing or in a panel.
+        if (shown && panel == null && model.State.Value.Phase.WantsToPlay && hideAt > 0 && now >= hideAt && seeker.Target == null) ShowControls(false);
         Waiting();
         if (shown) Layout();
     }
@@ -1015,6 +1070,7 @@ sealed class PlayerScreen : Sheet
         HideError();
         errorShown = phase;
         seeker.Cancel();
+        ClosePanel();
         var view = new View { Size = Canvas(), BackgroundColor = Color.Black };
         var width = PleyTv.CanvasWidth - 320;
         var heading = Text.Label(phase.Title ?? PlayerText.ErrorTitle, PleyType.PageTitle, PleyColors.Fg, width: width);
@@ -1071,6 +1127,7 @@ sealed class PlayerScreen : Sheet
     void Close()
     {
         if (gone) return;
+        ClosePanel();
         shell.Pop(this);
     }
 

@@ -102,3 +102,9 @@ It has no releases yet: it is built and installed by hand
   previews while scrubbing, chapters on the scrubber with Previous and
   Next, how it plays beside the clock, and messages at the top right. A
   playback the server stops says why and leaves after 20 seconds.
+- The native app's player has Android TV's control row and side panels:
+  Subtitles (the track, Sync, and the subtitles' size, background, font
+  and position), Audio, Quality (with Play original after it switched by
+  itself), Chapters, Sleep timer, Speed where the TV plays other speeds,
+  and Info, the playback's details, read again each second. The sleep
+  timer says "Pausing in 30 s" with Keep watching before it pauses.
