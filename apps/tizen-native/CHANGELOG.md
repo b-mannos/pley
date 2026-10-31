@@ -43,3 +43,7 @@ It has no releases yet: it is built and installed by hand
   keyboard, results come as you type, in rows (People, Movies, Shows,
   Seasons, Episodes, Artists, Albums, Tracks), and the last 10 searches
   show as chips before you type.
+- People's pages in the native app, from Cast on an item's page or from
+  search: the photo, the name and what of theirs is in your libraries,
+  then a row per role (Acting, Directing…) with the year and the part
+  under each title.
