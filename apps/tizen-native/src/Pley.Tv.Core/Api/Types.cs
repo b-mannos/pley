@@ -245,6 +245,12 @@ public record Collection
     public long LibraryId { get; init; }
     public string Title { get; init; } = "";
     public string? Summary { get; init; }
+    /// <summary>Mirrors a TMDB movie collection.</summary>
+    public bool Automatic { get; init; }
+    /// <summary>The order of its items: "release", "title" or "custom" (an administrator's).</summary>
+    public string? Sort { get; init; }
+    /// <summary>Smart collections: the library filter that fills them (Plex's syntax).</summary>
+    public string? SmartFilter { get; init; }
     public long ItemCount { get; init; }
     public string PosterUrl { get; init; } = "";
     public string BackdropUrl { get; init; } = "";

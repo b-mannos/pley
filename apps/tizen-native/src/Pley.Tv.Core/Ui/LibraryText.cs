@@ -84,6 +84,8 @@ public enum MessageAction
     None,
     Retry,
     ClearFilters,
+    /// <summary>Back to the page before (a person or playlist not found, an empty history).</summary>
+    Back,
 }
 
 /// <summary>
@@ -97,6 +99,7 @@ public sealed record LibraryMessage(string Title, string Body, MessageAction Act
     {
         MessageAction.Retry => LibraryText.Retry,
         MessageAction.ClearFilters => LibraryText.ClearFilters,
+        MessageAction.Back => ItemText.Back,
         _ => null,
     };
 }
