@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using Pley.Tv.Core;
 using Pley.Tv.Core.Player;
@@ -20,6 +21,9 @@ class App : NUIApplication
     LiveTvEntry? liveEntry;
     /// <summary>The app's one music player: it plays on behind every page, and ends with the profile, the sign-in or the server.</summary>
     MusicPlayer music = null!;
+    MediaKeys? musicKeys;
+    /// <summary>The music was playing as the app went to the background: it plays again when the app is back.</summary>
+    bool musicWasPlaying;
 
     protected override void OnCreate()
     {
@@ -38,6 +42,10 @@ class App : NUIApplication
         // The lineup changed (the server's events, a reconnection): whether Live TV has channels may have too.
         live.OnChange(() => liveEntry?.Refresh());
         music = AppMusicServer.Player(state, () => new TizenMediaEngine(video: false), () => Platform.Facts(), new ContextScheduler());
+        // The remote's media keys drive the music wherever the app is, as Android's media session has
+        // them, except under a player, which has its own.
+        musicKeys = new MediaKeys(shell.Input, () => music.Active && shell.Top?.Covers != true, Media);
+        shell.Shown += MusicShown;
         // The server ended the sign-in (revoked, or the refresh token spent): sign in again.
         state.SignedOut.Changed += signedOut =>
         {
@@ -64,6 +72,62 @@ class App : NUIApplication
     {
         base.OnResume();
         shell.Visible(true);
+    }
+
+    protected override void OnTerminate()
+    {
+        musicKeys?.Dispose();
+        base.OnTerminate();
+    }
+
+    /// <summary>
+    /// The app went to the background (false) or came back (true). A hidden app on a Samsung TV
+    /// gives up the TV's one media pipeline, so the music lets go of it and of its session, keeping
+    /// its place, and plays on from there when the app is back.
+    /// </summary>
+    void MusicShown(bool shown)
+    {
+        if (!shown)
+        {
+            musicWasPlaying = music.Now.Value is { } now && (now.Playing || (now.Loading && now.Error == null));
+            music.YieldToVideo();
+            return;
+        }
+        if (!musicWasPlaying) return;
+        musicWasPlaying = false;
+        music.Play();
+    }
+
+    /// <summary>A media key for the music: Play, Pause, either, the next or previous track, 10 s back or on, and Stop, which pauses.</summary>
+    void Media(MediaAction action)
+    {
+        var now = music.Now.Value;
+        var playing = now != null && (now.Playing || (now.Loading && now.Error == null));
+        switch (action)
+        {
+            case MediaAction.Play:
+                if (!playing) music.Play();
+                break;
+            case MediaAction.Pause:
+            case MediaAction.Stop:
+                if (playing) music.Pause();
+                break;
+            case MediaAction.PlayPause:
+                music.Toggle();
+                break;
+            case MediaAction.Next:
+                music.Next();
+                break;
+            case MediaAction.Previous:
+                music.Previous();
+                break;
+            case MediaAction.Rewind:
+            case MediaAction.Forward:
+                var p = music.Position();
+                var to = p.PositionMs + (action == MediaAction.Forward ? NowPlayingModel.SeekMs : -NowPlayingModel.SeekMs);
+                music.SeekTo(Math.Max(0, p.DurationMs > 0 ? Math.Min(to, p.DurationMs) : to));
+                break;
+        }
     }
 
     /// <summary>Shows the page for <paramref name="key"/>, in place of what is on screen.</summary>
@@ -144,12 +208,15 @@ class App : NUIApplication
                 }),
             ArtistPage artist => new ArtistScreen(tv, new ArtistModel(new AppItemSource(state), music, new ContextScheduler(), artist.ArtistId), images, gate, k => Go(tv, k)),
             AlbumPage album => new AlbumScreen(tv, new AlbumModel(new AppItemSource(state), music, new ContextScheduler(), album.AlbumId, album.TrackId), images, gate, k => Go(tv, k)),
+            PageKey.NowPlaying => new NowPlayingScreen(tv, shell, new NowPlayingModel(music, state.Server.Value ?? ""), images, gate),
             _ => null,
         };
         // Live TV in the rail while this profile has channels: asked again for each sign-in and profile.
         if (liveEntry == null) liveEntry = new LiveTvEntry(live, new ContextScheduler());
         else liveEntry.Refresh();
         tv.Follow(liveEntry);
+        // Now Playing in the rail while music has a queue.
+        tv.Follow(music.Now);
         // Back from the player: Home asks again, for the new resume point and Continue Watching.
         tv.Play = request =>
         {

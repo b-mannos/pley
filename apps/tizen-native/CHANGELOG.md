@@ -95,3 +95,9 @@ It has no releases yet: it is built and installed by hand
   artist (which opens their page), its rating and its tracks by disc, where
   OK plays the album from a track or pauses the one playing. Music plays on
   behind the other pages, and pauses for a film or a channel.
+- Now Playing in the native app, in the rail while music plays: the album
+  art, the track, the scrubber (Left and Right seek 10 s), Shuffle,
+  Previous, Play/Pause, Next and the sleep timer, and the queue, where OK
+  plays a track. It dims after two minutes without a key. The remote's
+  media keys play, pause and skip the music from any page; it pauses while
+  the app is hidden and plays on when it comes back.

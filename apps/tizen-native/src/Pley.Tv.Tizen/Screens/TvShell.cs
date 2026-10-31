@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Pley.Tv.Core;
 using Pley.Tv.Core.Api;
 using Pley.Tv.Core.Live;
+using Pley.Tv.Core.Player;
 using Pley.Tv.Core.Ui;
 using Pley.Tv.Tizen.Kit;
 using Tizen.NUI;
@@ -58,6 +59,7 @@ sealed class TvShell : Sheet
     readonly Timer toastTimer = new Timer(3_500);
     IReadOnlyList<RailItem> railItems = Array.Empty<RailItem>();
     LiveTvEntry? liveTv;
+    bool nowPlaying;
 
     public TvShell(AppState state, Action<RailItem> onRail, Action onProfile) : base("shell", Axis.Row)
     {
@@ -191,10 +193,10 @@ sealed class TvShell : Sheet
         page.Enter();
     }
 
-    /// <summary>The rail's entries for the libraries, with Live TV while it has channels.</summary>
+    /// <summary>The rail's entries for the libraries, with Live TV while it has channels and Now Playing while music has a queue.</summary>
     void RailItems()
     {
-        railItems = Pley.Tv.Core.Ui.Rail.Items(state.Libraries.Value ?? Array.Empty<Library>(), liveTv: liveTv?.Channels.Value > 0);
+        railItems = Pley.Tv.Core.Ui.Rail.Items(state.Libraries.Value ?? Array.Empty<Library>(), nowPlaying: nowPlaying, liveTv: liveTv?.Channels.Value > 0);
         Rail.SetItems(railItems);
         MarkCurrent();
     }
@@ -204,6 +206,17 @@ sealed class TvShell : Sheet
     {
         liveTv = entry;
         watches.Add(entry.Channels.Watch(_ => RailItems()));
+    }
+
+    /// <summary>Now Playing shows in the rail while <paramref name="now"/> has a track; the rail changes only as it comes and goes.</summary>
+    public void Follow(Signal<NowPlaying?> now)
+    {
+        watches.Add(now.Watch(n =>
+        {
+            if ((n != null) == nowPlaying) return;
+            nowPlaying = n != null;
+            RailItems();
+        }));
     }
 
     void MarkCurrent() => Rail.SetCurrent(RootKey == null ? null : Core.Ui.Rail.Current(RootKey, railItems));

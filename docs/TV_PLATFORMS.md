@@ -393,11 +393,15 @@ what it tells the server it plays); Live TV's page (the categories and
 their search, the guide and the channels' tiles, a programme's details
 and favourites) and its live player (changing channel, number keys, what's
 on, the channel list, and why a channel doesn't play); music's artist and
-album pages (Play, Shuffle, the albums, the tracks by disc), with the music
-playing on behind the other pages and pausing for a video; and a first
-player: the stream on the TV's own player, seeking with Left and Right,
-and the scrubber and transport controls. Subtitles, the player's panels
-and the other pages come next.
+album pages (Play, Shuffle, the albums, the tracks by disc) and Now Playing
+(the scrubber, the controls, the sleep timer and the queue), with the
+music playing on behind the other pages, driven by the remote's media keys
+from any of them, and pausing for a video; and a first player: the stream
+on the TV's own player, seeking with Left and Right, and the scrubber and
+transport controls. Unlike Android's, its music pauses while the app is
+hidden, since a hidden app gives up the TV's player, and plays on from
+there when the app is back. Subtitles, the player's panels and the other
+pages come next.
 
 | | |
 |---|---|
