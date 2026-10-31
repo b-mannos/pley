@@ -1,4 +1,6 @@
+using System.Threading.Tasks;
 using Pley.Tv.Core;
+using Pley.Tv.Core.Player;
 using Pley.Tv.Core.Ui;
 using Pley.Tv.Tizen.Kit;
 using Pley.Tv.Tizen.Screens;
@@ -106,6 +108,10 @@ class App : NUIApplication
             PageKey.Playlist playlist => new PlaylistScreen(tv, shell, new PlaylistModel(new AppPlaylistSource(state), playlist.PlaylistId, new ContextScheduler()), images, gate, k => Go(tv, k)),
             AddToPlaylistPage add => new AddToPlaylistScreen(tv, shell, new AddToPlaylistModel(new AppPlaylistSource(state), add, new ContextScheduler()), add, images),
             NewPlaylistPage or SaveSmartPlaylistPage => new NewPlaylistScreen(tv, shell, new NewPlaylistModel(new AppPlaylistSource(state), NewPlaylistMode.Of(key)!, new ContextScheduler()), key),
+            PageKey.Settings => new SettingsScreen(tv, shell, Settings(), images, k => Go(tv, k), k => Restart(tv, k)),
+            // What the TV reports when it asks to play, Settings' passthrough choices with it.
+            DiagnosticsPage => new DiagnosticsScreen(tv, new DiagnosticsModel(Platform.Version(), () => Task.FromResult(Platform.Facts()), new ContextScheduler(),
+                facts => TizenCaps.Of(facts, state.Settings.Value.Passthrough))),
             _ => null,
         };
         // Back from the player: Home asks again, for the new resume point and Continue Watching.
@@ -118,6 +124,17 @@ class App : NUIApplication
     }
 
     HomeScreen Home(TvShell tv) => new HomeScreen(tv, new HomeModel(state, new ContextScheduler()), images, gate, item => Go(tv, new PageKey.Item(item.Id)));
+
+    /// <summary>Settings, with the Me page for its Profile and the TV's facts under "Open diagnostics".</summary>
+    SettingsModel Settings() =>
+        new SettingsModel(new AppSettingsSource(state, DiagnosticsText.DeviceFacts(Platform.Facts())), new MeModel(new AppMeSource(state), new ContextScheduler()));
+
+    /// <summary>Starts over at <paramref name="key"/>: a page of the shell's, or a screen of its own (Who's watching?, the servers).</summary>
+    void Restart(TvShell tv, PageKey key)
+    {
+        if (tv.PageOf?.Invoke(key) is { } page) tv.Restart(page);
+        else Go(key);
+    }
 
     /// <summary>Opens a page from another: an item's, over the one it was opened from; one the app doesn't have yet says so.</summary>
     void Go(TvShell tv, PageKey key)

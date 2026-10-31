@@ -61,5 +61,16 @@ It has no releases yet: it is built and installed by hand
   titles in a grid that scrolls up over the backdrop.
 - Watch history in the native app: the profile's plays, newest first, with
   when and on which device; OK opens one, the cross or OK held removes it,
-  and Show more loads the next 15. Settings, where it opens from, comes
-  next.
+  and Show more loads the next 15. It opens from Settings' Profile.
+- Settings in the native app, from the rail, as on Android TV: Profile
+  (switching profile, the audio and subtitle defaults, Watch history,
+  sorting libraries, always starting as a profile, and the account on the
+  web, with its address and QR code), Playback (quality, the next episode
+  by itself, playback details), Audio (passing surround sound through per
+  format, which the TV now tells the server when it plays), Subtitles and
+  display, Server (switching server), the TV's facts, About with the
+  licences, and Sign out, which asks first. Choices open in a side panel.
+- Diagnostics in the native app, from Settings: the app's version and the
+  TV's facts, then what it tells the server it plays (HDR, the decoders and
+  their limits, the sound it decodes and sends to a receiver, the streams
+  it reads), a line each, with Check again if the check fails.

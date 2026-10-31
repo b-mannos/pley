@@ -247,7 +247,8 @@ sealed class PlayerScreen : Sheet
             title.Text = PlayerText.Title(item);
             line.Text = PlayerText.Line(item) ?? "";
             durationMs = item.DurationMs ?? 0;
-            var caps = TizenCaps.Of(Facts());
+            // What Settings' passthrough choices turn on or off goes with what the TV says it plays.
+            var caps = TizenCaps.Of(Platform.Facts(), state.Settings.Value.Passthrough);
             var body = PlayRequests.Body(request, state.InstallId(), caps);
             session = await PlaybackSession.Start(api, request.ItemId, body, reporter);
             if (gone)
@@ -263,16 +264,6 @@ sealed class PlayerScreen : Sheet
             Fail(e is ApiException or NetworkException ? Errors.Message(e) : "The TV's player couldn't open it.");
         }
     }
-
-    /// <summary>What this TV is, for the server's choice of how to send it.</summary>
-    static TizenFacts Facts()
-    {
-        var version = Info("http://tizen.org/feature/platform.version");
-        var tizen = double.TryParse(version, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : 9;
-        return new TizenFacts { Tizen = tizen, Year = TizenFacts.YearOf(tizen), Model = Info("http://tizen.org/system/model_name") ?? "Samsung TV" };
-    }
-
-    static string? Info(string key) => global::Tizen.System.Information.TryGetValue(key, out string value) ? value : null;
 
     async Task Open(string url, long startMs)
     {

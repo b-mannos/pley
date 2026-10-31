@@ -386,11 +386,13 @@ searches); people's pages (the photo, the name and a row per role); the
 rail's Collections and a collection's page, with Play and Shuffle; the
 watch history page; playlists (their covers, a playlist's page with
 moving and removing entries, Rename and Delete, Add to playlist, New
-playlist and saving a library's filters as a smart playlist); and a first
-player: the stream on the TV's own player, seeking with Left and Right,
-and the scrubber and transport controls.
-Subtitles, the player's panels and the other pages come next; Settings,
-which leads to the watch history, is one of them.
+playlist and saving a library's filters as a smart playlist); Settings
+(its categories and their rows, the side panels of choices, the web
+page's address and QR code, signing out); Diagnostics (the TV's facts and
+what it tells the server it plays); and a first player: the stream on the
+TV's own player, seeking with Left and Right, and the scrubber and
+transport controls. Subtitles, the player's panels and the other pages
+come next.
 
 | | |
 |---|---|

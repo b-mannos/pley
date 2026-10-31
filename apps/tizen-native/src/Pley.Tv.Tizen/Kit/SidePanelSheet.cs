@@ -13,7 +13,8 @@ namespace Pley.Tv.Tizen.Kit;
 /// focus inside it, starting on the row it is given (the current choice); Back closes it, and the
 /// page's focus is where it was. Rows are 44 tall, Body text with an optional icon, a value in
 /// Caption and a check or a chevron; focused, an accent pill, never scaled. Rows past the screen
-/// scroll into view.
+/// scroll into view. A row with a hint (what a choice does) has it under its label in Caption,
+/// and grows to fit both.
 /// </summary>
 sealed class SidePanelSheet : Sheet
 {
@@ -22,7 +23,8 @@ sealed class SidePanelSheet : Sheet
     /// <summary>A row as the panel draws it.</summary>
     /// <param name="Value">Muted beside the label (a library's genre chosen).</param>
     /// <param name="Opens">A chevron: the row opens another list.</param>
-    public sealed record Line(string Label, bool Heading = false, bool Checked = false, string? Icon = null, string? Value = null, bool Opens = false);
+    /// <param name="Hint">Under the label, muted: what the choice does (Settings' choices).</param>
+    public sealed record Line(string Label, bool Heading = false, bool Checked = false, string? Icon = null, string? Value = null, bool Opens = false, string? Hint = null);
 
     readonly Shell shell;
     readonly View list = new View();
@@ -92,12 +94,13 @@ sealed class SidePanelSheet : Sheet
             list.Add(view);
             group.Add(view.Item);
             var top = y;
+            var height = view.HeightDp;
             view.Item.FocusChanged += on =>
             {
-                if (on) Reveal(top, viewport.SizeHeight / Ui.Scale);
+                if (on) Reveal(top, height, viewport.SizeHeight / Ui.Scale);
             };
             if (i == focus || first == null && i > focus) first ??= view.Item;
-            y += RowHeight + 4;
+            y += height + 4;
         }
         first ??= group.Children.Count > 0 ? group.Children[0] as FocusItem : null;
         if (first != null) Tree.Focus(first);
@@ -108,18 +111,19 @@ sealed class SidePanelSheet : Sheet
     public void Close() => shell.Pop(this);
 
     /// <summary>Keeps the focused row inside the panel's room.</summary>
-    void Reveal(float top, float room)
+    void Reveal(float top, float height, float room)
     {
         if (top < scroll) scroll = top;
-        else if (top + RowHeight > scroll + room) scroll = top + RowHeight - room;
+        else if (top + height > scroll + room) scroll = top + height - room;
         list.PositionY = -Ui.Dp(scroll);
     }
 
-    /// <summary>One row: its label in Body, an optional 20 dp icon, a muted value, an accent check when chosen or a chevron.</summary>
+    /// <summary>One row: its label in Body, an optional 20 dp icon, a muted value or hint, an accent check when chosen or a chevron.</summary>
     sealed class PanelRowView : View
     {
         readonly TextLabel label;
         readonly TextLabel? value;
+        readonly TextLabel? hint;
         readonly ImageView? icon;
         readonly ImageView? check;
         readonly ImageView? chevron;
@@ -128,6 +132,7 @@ sealed class SidePanelSheet : Sheet
         {
             Size = new Size(Ui.Dp(width), Ui.Dp(RowHeight));
             CornerRadius = Ui.Dp(RowHeight / 2);
+            HeightDp = RowHeight;
             Item = new FocusItem(row.Label) { Selected = choose };
             float x = 16;
             if (row.Icon != null)
@@ -160,13 +165,48 @@ sealed class SidePanelSheet : Sheet
                 Add(value);
                 right -= 120 + 12;
             }
-            label = Text.Label(row.Label, PleyType.Body, PleyColors.Fg, width: Math.Max(40, right - x));
-            label.Position = new Position(Ui.Dp(x), Ui.Dp((RowHeight - PleyType.Body.Line) / 2));
-            Add(label);
+            var room = Math.Max(40, right - x);
+            if (row.Hint != null)
+            {
+                // The label on up to two lines and the hint on up to three, 8 dp above and below.
+                label = Text.Label(row.Label, PleyType.Body, PleyColors.Fg, maxLines: 2, width: room);
+                hint = Text.Label(row.Hint, PleyType.Caption, PleyColors.Muted, maxLines: 3, width: room);
+                var labelHeight = Fit(label, PleyType.Body, room, 2);
+                var hintHeight = Fit(hint, PleyType.Caption, room, 3);
+                var height = Math.Max(Ui.Dp(RowHeight), labelHeight + hintHeight + Ui.Dp(16));
+                var textTop = (height - labelHeight - hintHeight) / 2;
+                label.Position = new Position(Ui.Dp(x), textTop);
+                hint.Position = new Position(Ui.Dp(x), textTop + labelHeight);
+                Add(label);
+                Add(hint);
+                SizeHeight = height;
+                HeightDp = height / Ui.Scale;
+                foreach (var end in new View?[] { icon, check, chevron })
+                    if (end != null) end.PositionY = (height - Ui.Dp(PleyTv.IconSize)) / 2;
+            }
+            else
+            {
+                label = Text.Label(row.Label, PleyType.Body, PleyColors.Fg, width: room);
+                label.Position = new Position(Ui.Dp(x), Ui.Dp((RowHeight - PleyType.Body.Line) / 2));
+                Add(label);
+            }
             Item.FocusChanged += Look;
         }
 
         public FocusItem Item { get; }
+
+        /// <summary>The row's height in dp: 44, or more for a hint.</summary>
+        public float HeightDp { get; }
+
+        /// <summary>Gives <paramref name="text"/> the height of its lines at <paramref name="widthDp"/>, <paramref name="max"/> at most; in pixels.</summary>
+        static float Fit(TextLabel text, TextStyle style, float widthDp, int max)
+        {
+            var line = Text.LineHeight(style);
+            var height = Math.Min(Math.Max(text.GetHeightForWidth(Ui.Dp(widthDp)), line), line * max);
+            text.VerticalAlignment = VerticalAlignment.Top;
+            text.SizeHeight = height;
+            return height;
+        }
 
         void Look(bool focused)
         {
@@ -177,6 +217,7 @@ sealed class SidePanelSheet : Sheet
             if (icon != null) icon.Color = ink;
             if (chevron != null) chevron.Color = ink;
             if (value != null) value.TextColor = focused ? PleyColors.OnAccent : PleyColors.Muted;
+            if (hint != null) hint.TextColor = focused ? PleyColors.OnAccent : PleyColors.Muted;
             if (check != null) check.Color = focused ? PleyColors.OnAccent : PleyColors.Accent;
         }
     }
