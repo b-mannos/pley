@@ -39,3 +39,7 @@ It has no releases yet: it is built and installed by hand
   player; Left and Right seek 10 s, presses adding up and a held key
   scrubbing; the title, clock, scrubber and Back 10 · Play/Pause ·
   Forward 10 over a scrim; where it stopped goes to the server.
+- Collections in the native app: the rail's Collections lists every movie
+  and show library's collections, a row each; a collection's page has its
+  backdrop, TMDB or Smart badge, what it holds, Play and Shuffle, and its
+  titles in a grid that scrolls up over the backdrop.

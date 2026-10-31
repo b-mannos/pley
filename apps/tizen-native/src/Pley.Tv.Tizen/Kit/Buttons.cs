@@ -223,6 +223,17 @@ sealed class RoundButton : View
 
     public void SetText(string text) => label.Text = text;
 
+    /// <summary>Disabled, it is at 40 % and can't take focus, as a text button (a collection of one has no Shuffle).</summary>
+    public bool Enabled
+    {
+        get => Item.Enabled;
+        set
+        {
+            Item.Enabled = value;
+            Opacity = value ? 1f : 0.4f;
+        }
+    }
+
     void Look(bool focused)
     {
         // Let go already: a focus change can still reach it on its way to the view in its place.
