@@ -83,8 +83,8 @@ public class KeyRepeatGateTests
             if (t >= 400 && t % 50 < 17) gate.Admit("Down", true);
             if (gate.Tick() != null) moves++;
         }
-        // Nothing for 180 ms, then one every 60 ms: about 31.
-        Assert.InRange(moves, 29, 32);
+        // Nothing for 180 ms, then one every 45 ms: about 41.
+        Assert.InRange(moves, 39, 43);
         Assert.True(gate.GlideMs > gate.Interval);
     }
 

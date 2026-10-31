@@ -660,6 +660,8 @@ sealed class SeasonsView : View
         row.PositionY = Ui.Dp(rowTop);
         Add(row);
         Group.Add(row.Group);
+        // The section is the first under the hero: its episodes are near from the start.
+        row.ShowPictures();
         // Focus comes into the row on the episode to watch.
         var at = seasons.Focus is { } id ? episodes.ToList().FindIndex(e => e.Item.Id == id) : -1;
         if (at >= 0) row.Group.RememberChild(at);

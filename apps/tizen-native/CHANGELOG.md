@@ -17,4 +17,6 @@ It has no releases yet: it is built and installed by hand
   manager; Who's watching? with PINs; and Home, with the hero, the
   server's rows and the rail; item pages, with seasons and episodes, Extras,
   Cast, More Like This and the side panels; in Roboto as on Android, driven
-  by the remote, a held key sliding a row along under a still highlight.
+  by the remote, a held key sliding a row along under a still highlight;
+  pictures load as rows come near the screen, and a tile without one shows
+  its title on a gradient of its own, as on Android.

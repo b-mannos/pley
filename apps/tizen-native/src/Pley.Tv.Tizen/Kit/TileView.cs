@@ -16,6 +16,7 @@ sealed class TileView : View
     readonly TileKind kind;
     readonly View frame;
     readonly View ring;
+    readonly View well;
     readonly ImageView picture;
     readonly TextLabel? placeholder;
     readonly TextLabel title;
@@ -54,19 +55,22 @@ sealed class TileView : View
             Opacity = 0,
         };
         frame.Add(ring);
-        var well = new View
+        // Until the picture comes, and when there is none: the title's own gradient with the title on it
+        // (the Android app's Placeholder); people's round tiles have no title on theirs.
+        var (from, to) = Placeholder.Colors(model.Title);
+        well = new View
         {
             Size = new Size(w, h),
-            BackgroundColor = PleyColors.Surface2,
+            Background = Gradients.Diagonal(AvatarView.Rgb(from), AvatarView.Rgb(to)),
             CornerRadius = radius,
             ClippingMode = ClippingModeType.ClipChildren,
         };
         frame.Add(well);
         if (!kind.Round)
         {
-            placeholder = Text.Label(model.Title, PleyType.Title, PleyColors.Muted, maxLines: 4);
-            placeholder.Size = new Size(w - Ui.Dp(16), h - Ui.Dp(16));
-            placeholder.Position = new Position(Ui.Dp(8), Ui.Dp(8));
+            placeholder = Text.Label(model.Title, PleyType.Title, new Color(PleyColors.Fg.R, PleyColors.Fg.G, PleyColors.Fg.B, 0.7f), maxLines: 4);
+            placeholder.Size = new Size(w - Ui.Dp(24), h - Ui.Dp(24));
+            placeholder.Position = new Position(Ui.Dp(12), Ui.Dp(12));
             placeholder.HorizontalAlignment = HorizontalAlignment.Center;
             placeholder.VerticalAlignment = VerticalAlignment.Center;
             well.Add(placeholder);
@@ -120,6 +124,12 @@ sealed class TileView : View
             picture.ResourceUrl = file;
             var fade = new Animation(PleyMotion.ImageFadeMs);
             fade.AnimateTo(picture, "Opacity", 1f);
+            // Once the picture is in, the well under it is Surface2, as on Android: a picture that
+            // doesn't cover the box (a logo with clear parts) shows no gradient through it.
+            fade.Finished += (s, e) =>
+            {
+                if (!Disposed) well.BackgroundColor = PleyColors.Surface2;
+            };
             fade.Play();
         });
     }

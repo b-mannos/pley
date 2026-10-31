@@ -110,7 +110,6 @@ sealed class HomeScreen : ShellPage
     public override bool Back()
     {
         if (!inRows) return false;
-        column?.ScrollToTop();
         page.ForgetLast();
         heroButtons.Group.ForgetLast();
         SetInRows(false);
@@ -377,7 +376,12 @@ sealed class HomeScreen : ShellPage
     {
         if (on == inRows) return;
         inRows = on;
-        if (!on) model.Focus(null);
+        if (!on)
+        {
+            model.Focus(null);
+            // Up from the first row, as Back: the rows go back down under the hero.
+            column?.ScrollToTop();
+        }
         reveal?.Stop();
         reveal = new Animation(PleyMotion.RevealMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
         reveal.AnimateTo(hero, "Opacity", on ? 0f : 1f);

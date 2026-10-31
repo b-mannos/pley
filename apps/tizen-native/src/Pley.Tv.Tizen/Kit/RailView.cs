@@ -237,6 +237,24 @@ sealed class RailView : View
 /// <summary>Gradients as NUI draws them: a visual on the view's background.</summary>
 static class Gradients
 {
+    /// <summary>A 135° gradient, from the top left corner to the bottom right, as CSS draws it.</summary>
+    public static PropertyMap Diagonal(Color from, Color to)
+    {
+        var offsets = new PropertyArray();
+        offsets.Add(new PropertyValue(0f));
+        offsets.Add(new PropertyValue(1f));
+        var colors = new PropertyArray();
+        colors.Add(new PropertyValue(from));
+        colors.Add(new PropertyValue(to));
+        var map = new PropertyMap();
+        map.Add(Visual.Property.Type, new PropertyValue((int)Visual.Type.Gradient));
+        map.Add(GradientVisualProperty.StartPosition, new PropertyValue(new Vector2(-0.5f, -0.5f)));
+        map.Add(GradientVisualProperty.EndPosition, new PropertyValue(new Vector2(0.5f, 0.5f)));
+        map.Add(GradientVisualProperty.StopOffset, new PropertyValue(offsets));
+        map.Add(GradientVisualProperty.StopColor, new PropertyValue(colors));
+        return map;
+    }
+
     public static PropertyMap Horizontal(Color from, Color to, float stop = 0)
     {
         var offsets = new PropertyArray();

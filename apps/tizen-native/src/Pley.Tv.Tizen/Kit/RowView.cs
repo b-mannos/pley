@@ -31,6 +31,8 @@ sealed class RowView : View
     int focused = -1;
     /// <summary>Which way the row is sliding under a held key: 1, -1, or 0 when it isn't.</summary>
     int sliding;
+    /// <summary>Focus moved in this row under a held key: its pictures are asked for when the key comes up.</summary>
+    bool heldHere;
 
     public RowView(string? title, IReadOnlyList<TileModel> models, TileKind kind, KeyRepeatGate gate, Images images,
         Action<TileModel> onOpen, Action<TileModel>? onActions, Func<bool> toRail, Action<TileModel>? onFocus = null, Func<FocusItem, bool>? focusItem = null)
@@ -84,7 +86,6 @@ sealed class RowView : View
         Group.ChildFocused += ScrollTo;
         gate.HoldEnded += Landed;
         Size = new Size(Ui.Dp(PleyTv.CanvasWidth), top + Ui.Dp(kind.Height + PleyTv.TilesToCaption + PleyTv.CaptionHeight));
-        LoadPictures(0);
     }
 
     public FocusGroup Group { get; }
@@ -108,7 +109,9 @@ sealed class RowView : View
     {
         var from = focused;
         focused = index;
-        LoadPictures(index);
+        // Under a held key, pictures wait: tiles flown past ask for none, and where focus lands loads them.
+        if (gate.Holding) heldHere = true;
+        else LoadPictures(index);
         var direction = from < 0 ? 0 : Math.Sign(index - from);
         // A held key: the row slides on by itself, at the hold's pace, until the key comes up.
         if (gate.Holding && direction != 0 && CanSlide(index, direction))
@@ -188,7 +191,16 @@ sealed class RowView : View
         scroll.Play();
     }
 
-    void Landed() => EndSlide(land: true);
+    void Landed()
+    {
+        EndSlide(land: true);
+        if (!heldHere) return;
+        heldHere = false;
+        LoadPictures(Math.Max(0, focused));
+    }
+
+    /// <summary>Asks for the pictures on screen: the page brings the row near.</summary>
+    public void ShowPictures() => LoadPictures(Math.Max(0, focused));
 
     protected override void Dispose(global::Tizen.NUI.DisposeTypes type)
     {
@@ -223,6 +235,11 @@ sealed class RowColumnView : View
     readonly List<View> rows = new List<View>();
     /// <summary>Each section's line, where its top comes when it has focus.</summary>
     readonly List<float> lines = new List<float>();
+    /// <summary>Rows below the focused one that ask for their pictures ahead.</summary>
+    const int RowsNear = 2;
+    int current;
+    /// <summary>Focus moved between rows under a held key: rows near where it lands load when the key comes up.</summary>
+    bool heldHere;
     Animation? scroll;
 
     /// <param name="firstAtTop">The first row stays where the page put it (a page with a header); false: it comes to the line too (Home, whose hero goes as the rows come up).</param>
@@ -237,6 +254,7 @@ sealed class RowColumnView : View
         Add(content);
         Group = new FocusGroup(Axis.Column, "rows");
         Group.ChildFocused += ScrollTo;
+        gate.HoldEnded += Landed;
     }
 
     public FocusGroup Group { get; }
@@ -257,10 +275,15 @@ sealed class RowColumnView : View
         rows.Add(row);
         content.Add(row);
         Group.Add(group);
+        // The rows on screen at first ask for their pictures; the rest, as they come near.
+        if (rows.Count <= RowsNear) (row as RowView)?.ShowPictures();
     }
 
     void ScrollTo(int index)
     {
+        current = index;
+        if (gate.Holding) heldHere = true;
+        else Near(index);
         // The first row stays where the page put it; others bring their header to the line.
         var target = index == 0 && firstAtTop ? Top : Ui.Dp(lines[index]) - rows[index].PositionY;
         scroll?.Stop();
@@ -274,6 +297,26 @@ sealed class RowColumnView : View
             if (index > 0 && i < index) rows[i].Hide();
             else rows[i].Show();
         }
+    }
+
+    /// <summary>Rows near the screen's one with focus ask for their pictures: the row above and two below.</summary>
+    void Near(int index)
+    {
+        for (var i = Math.Max(0, index - 1); i <= Math.Min(rows.Count - 1, index + RowsNear); i++) (rows[i] as RowView)?.ShowPictures();
+    }
+
+    void Landed()
+    {
+        if (!heldHere) return;
+        heldHere = false;
+        Near(current);
+    }
+
+    protected override void Dispose(global::Tizen.NUI.DisposeTypes type)
+    {
+        if (Disposed) return;
+        gate.HoldEnded -= Landed;
+        base.Dispose(type);
     }
 
     /// <summary>Back to the page's top: the first row where the page put it, every row drawn.</summary>

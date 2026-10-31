@@ -17,8 +17,8 @@ public sealed class KeyRepeatGate
 {
     /// <summary>How long a key is down before focus starts moving by itself.</summary>
     public const long HoldDelayMs = 180;
-    /// <summary>The time between moves while a key is held: about 16 a second.</summary>
-    public const long MoveIntervalMs = 60;
+    /// <summary>The time between moves while a key is held: about 22 a second.</summary>
+    public const long MoveIntervalMs = 45;
     /// <summary>How long focus rests before backdrops and details follow it.</summary>
     public const long RestMs = 400;
     /// <summary>Repeats come every 50 ms; this long without one means the key is up.</summary>
