@@ -88,9 +88,34 @@ sealed class Shell
     public void Pop(Sheet sheet)
     {
         if (!sheets.Remove(sheet)) return;
-        Remove(sheet);
-        if (sheet.Covers) Uncovered();
+        if (!sheet.Covers)
+        {
+            Remove(sheet);
+            return;
+        }
+        // A player lets go of the TV's player as it goes, which holds the UI thread while the video
+        // plane empties. Done before the window is opaque again, the last frame drawn is the clear
+        // one, and what is under the app (the TV's menu) shows for that moment. So the pages come
+        // back and are drawn first, and the player goes a few frames later.
+        sheet.View.Hide();
+        sheet.Tree.Blur();
+        Uncovered();
+        var later = new Timer(LetGoMs);
+        later.Tick += (s, e) =>
+        {
+            leaving.Remove(later);
+            Remove(sheet);
+            return false;
+        };
+        leaving.Add(later);
+        later.Start();
     }
+
+    /// <summary>Time for a frame or two (at 60 Hz) to be drawn before a covering sheet lets go.</summary>
+    const uint LetGoMs = 80;
+
+    /// <summary>Timers for sheets on their way out, held so they aren't collected before they fire.</summary>
+    readonly List<Timer> leaving = new List<Timer>();
 
     /// <summary>Sheets under the top covering one go; the window is clear while one shows.</summary>
     void Uncovered()

@@ -7,6 +7,7 @@ using Pley.Tv.Core.Ui;
 using Pley.Tv.Tizen.Kit;
 using Pley.Tv.Tizen.Screens;
 using Tizen.NUI;
+using Tizen.NUI.BaseComponents;
 
 namespace Pley.Tv.Tizen;
 
@@ -34,6 +35,9 @@ class App : NUIApplication
         Ui.Measure(window);
         Text.LoadFonts();
         window.BackgroundColor = PleyColors.Bg;
+        // NUI draws its own highlight round the view with key focus (a text field while typing),
+        // at the field's inner text box, not its edge; the app draws focus itself, as Android does.
+        FocusManager.Instance.FocusIndicator = new View();
         gate = new KeyRepeatGate();
         shell = new Shell(window, gate, Exit);
         images = new Images(Current.DirectoryInfo.Cache);
