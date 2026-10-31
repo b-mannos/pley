@@ -1012,7 +1012,7 @@ export class AppState {
   }
 
   /**
-   * News that came while the app wasn't listening (§7): the profile's
+   * News that came while the app wasn't listening: the profile's
    * unseen requests, of which TVs announce what is ready to watch, each
    * once and only what is newer than the last announced: one title by its
    * words, several as "3 of your requests have news".

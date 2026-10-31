@@ -67,7 +67,7 @@ class SearchDeps(
 }
 
 /**
- * "On TMDB" (requests-v2 §6): the first of TMDB's titles for the query
+ * "On TMDB": the first of TMDB's titles for the query
  * that no library has, after the libraries' results, while asking works.
  */
 sealed interface TmdbSection {

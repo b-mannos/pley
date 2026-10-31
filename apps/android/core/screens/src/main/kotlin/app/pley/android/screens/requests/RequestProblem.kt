@@ -6,7 +6,7 @@ import app.pley.android.network.ApiException
 import app.pley.android.network.OfflineException
 
 /**
- * Why a request route refused, as the screens say it (requests-v2 §8).
+ * Why a request route refused, as the screens say it.
  * A 503 with pley's JSON is an answer, never the server being away: only
  * [Offline] is.
  */

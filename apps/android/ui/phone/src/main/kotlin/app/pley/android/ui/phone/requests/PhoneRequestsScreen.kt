@@ -81,7 +81,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 
 /**
- * Your requests (requests-v2 §4, §9b), and for managers everyone's
+ * Your requests, and for managers everyone's
  * (Requests), opening on Needs attention: the views with how many each
  * holds, movies or shows, and for managers a person, their own and a
  * title; then the cards, read on as the list scrolls and pulled to read

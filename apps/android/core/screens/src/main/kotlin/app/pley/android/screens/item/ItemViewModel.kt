@@ -218,7 +218,7 @@ class ItemViewModel(
     private val drawn = MutableStateFlow(false)
 
     /**
-     * What requests say of this movie or show (requests-v2 §6): asked for
+     * What requests say of this movie or show: asked for
      * once the page has drawn, never before, and only when the person may
      * ask or has requests; read again when one of its requests changes, and
      * every 10 s while its request downloads or goes into the library

@@ -184,7 +184,7 @@ def used_up(detail: dict) -> bool:
 
 
 def main_action(detail: dict, s) -> str:
-    """What a title's page offers first (requests-v2 §9a): "sign_in",
+    """What a title's page offers first: "sign_in",
     "restricted", "open", "in_library", "declined", "requested",
     "following", "tell_me_too", "more_seasons", "request", and in place of
     asking "no_access" or "used_up"."""
@@ -313,7 +313,7 @@ def downloading(download, text, now: float) -> str:
 
 
 def stage(request: dict, text, manage: bool, now: float) -> tuple:
-    """A request's stage pill (requests-v2 §9a), and its colour."""
+    """A request's stage pill, and its colour."""
     kind = request.get("stage") or request.get("status")
     color = STAGE_COLORS.get(kind, BLUE)
     if kind == "pending":
@@ -423,7 +423,7 @@ def ask(client, kind: str, tmdb_id: int, seasons=None) -> tuple:
 
 
 def asked(request: dict, following: bool, text, title: str = "") -> str:
-    """What asking did, in a sentence (requests-v2 §9a)."""
+    """What asking did, in a sentence."""
     title = request.get("title") or title
     if following:
         return text("asked_following") % title
@@ -435,7 +435,7 @@ def asked(request: dict, following: bool, text, title: str = "") -> str:
 
 
 def allowance(left: dict, s, text, now: float) -> list:
-    """The allowance lines (requests-v2 §9a): what this account may still
+    """The allowance lines: what this account may still
     ask for in 7 days, or when it may ask for more, then its limits; none
     without limits. `left`: the title's details or the summary."""
     movies, seasons = left.get("movies_left"), left.get("seasons_left")
@@ -475,8 +475,8 @@ def allowance(left: dict, s, text, now: float) -> list:
 
 
 def problem(error: api.ApiError, text, manage: bool = False, s=None, kind=None, now: float = 0.0, scope: str = "requests") -> tuple:
-    """What to say when requests can't be used, or asking was refused
-    (requests-v2 §8): (title, body, whether Try again may help). `scope`:
+    """What to say when requests can't be used, or asking was refused:
+    (title, body, whether Try again may help). `scope`:
     what the refused call needed (deciding needs `approvals`)."""
     code, body = error.code, error.body or {}
     if error.status == 503 and code == "unavailable" and not body.get("setup"):

@@ -125,7 +125,7 @@ export function usePages(
 type Focused = { title: DiscoverTitle } | { request: MediaRequest };
 
 /**
- * Discover (§9b): a hero for the first trending title with a line of its
+ * Discover: a hero for the first trending title with a line of its
  * overview and its main action, then TMDB's rows of posters with their
  * badges, then this profile's requests; TMDB's search at the top, which
  * shows its results as a grid in place of the rows while it has words.
@@ -662,7 +662,7 @@ function GridNote(p: { title: string; body: string; onRetry?: () => void }) {
   );
 }
 
-/** Why a grid's first page didn't come, in the words of requests (§9a) or the app's. */
+/** Why a grid's first page didn't come, in the words of requests or the app's. */
 function gridProblem(e: unknown, title: string): { title: string; body: string; retry: boolean } {
   const words = problemWords(requestsProblem(e), false);
   return words ?? { title: failedTitle(e, title), body: problem(e), retry: true };

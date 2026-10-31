@@ -68,7 +68,7 @@ const ACTION_ICONS: Record<ActionId, IconName> = {
 };
 
 /**
- * Your requests, or for managers Requests (§9b): tabs by status, managers'
+ * Your requests, or for managers Requests: tabs by status, managers'
  * opening on Needs attention (pending, and failed ones the server won't
  * try again), with filters for movies or shows, a person and a title;
  * cards with the poster, the seasons, who asked and when, the reason or
@@ -264,7 +264,7 @@ function RequestsPage(p: { entry: Entry }) {
       void app.loadRequests(true);
     };
     if (a === "ask_again") {
-      // Asking again is asking (§4): its toast says how it went.
+      // Asking again is asking: its toast says how it went.
       void askFor(app, ui, { kind: r.kind, tmdb_id: r.tmdb_id, seasons: r.seasons && r.seasons.length ? r.seasons : undefined }).then(() => busy.current.delete(r.id));
       return;
     }

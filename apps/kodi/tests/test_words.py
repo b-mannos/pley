@@ -97,7 +97,7 @@ DAY = 86400
 
 
 class WhenTest(unittest.TestCase):
-    """Times as the apps say them, which Kodi can't (requests-v2 §9a)."""
+    """Times as the apps say them, which Kodi can't."""
 
     def test_how_far_away_it_is(self):
         self.assertEqual(words.relative(NOW + 20 * 60, NOW), "in 20 min")

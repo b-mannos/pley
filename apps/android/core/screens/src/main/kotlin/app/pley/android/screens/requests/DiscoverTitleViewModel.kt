@@ -63,7 +63,7 @@ sealed interface TitleUiState {
 }
 
 /**
- * A title found on TMDB (requests-v2 §3, §9a, §9b), for the phone and the
+ * A title found on TMDB, for the phone and the
  * TV: its details, its one main action, its seasons with their states, and
  * the season picker; the requests for it (this account's and those it
  * follows; everyone's for managers) with their actions. While it shows,

@@ -59,7 +59,7 @@ export function seasonBadge(s: DiscoverSeason): { text: string; tone: Tone } | n
 }
 
 /**
- * A movie or show from TMDB (§9b): its backdrop, the hero with its facts,
+ * A movie or show from TMDB: its backdrop, the hero with its facts,
  * tagline and overview and its one main action, its seasons each with its
  * state (a requested one with its own stage), the cast, and the season
  * picker (`pick`: it opens with the page, from Request more seasons).
@@ -425,7 +425,7 @@ function SeasonTileView(p: {
 }
 
 /**
- * Which seasons? (§3): every season, specials last; the askable missing
+ * Which seasons?: every season, specials last; the askable missing
  * and partly had ones ticked as it opens, lowest first, up to what may
  * still be asked for; seasons not aired yet and specials offered
  * unticked; the others say what they are and can't be ticked. Ticking

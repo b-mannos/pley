@@ -60,7 +60,7 @@ import app.pley.android.ui.phone.shell.LocalPhoneShell
 import kotlinx.coroutines.flow.Flow
 
 /*
- * The pieces the phone's request screens share (requests-v2 §9): the
+ * The pieces the phone's request screens share: the
  * words, posters with their status badges, stage pills in their colours,
  * the download bar, the states a page can't show in, and what a screen
  * tells once.
@@ -118,7 +118,7 @@ private fun toneOf(tone: PillTone): Tone = when (tone) {
 }
 
 /**
- * A request's stage (requests-v2 §9b): its words beside a dot, tinted by
+ * A request's stage: its words beside a dot, tinted by
  * what it means: waiting for approval amber; approved, waiting, searching,
  * downloading and importing blue; ready green; declined and failed red;
  * gone gray.
@@ -189,7 +189,7 @@ internal fun TmdbCredit(modifier: Modifier = Modifier) {
 }
 
 /**
- * Why a page can't show (requests-v2 §9b): requests off, no access, sign
+ * Why a page can't show: requests off, no access, sign
  * in again (with Sign in again), TMDB's key refused, TMDB away or the
  * server out of reach (with Retry), a title not found. [failed] heads
  * any other failure ("Couldn't load Discover").

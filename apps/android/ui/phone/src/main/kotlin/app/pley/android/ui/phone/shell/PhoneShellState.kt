@@ -116,7 +116,7 @@ class PhoneShellState internal constructor(
     private val requestTexts by lazy { RequestTexts(resources) }
 
     /**
-     * Tells [notice], news of the person's requests (requests-v2 §9a), in a
+     * Tells [notice], news of the person's requests, in a
      * toast with Open: a title ready to watch opens it, the rest open the
      * requests. One that couldn't be sent reads as an error.
      */

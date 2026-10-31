@@ -83,7 +83,7 @@ sealed interface DiscoverSearch {
 }
 
 /**
- * Discover (requests-v2 §3, §9b), for the phone and the TV: a hero for the
+ * Discover, for the phone and the TV: a hero for the
  * first trending title, then rows (Trending this week, Popular movies,
  * Popular shows, Coming to cinemas, Popular anime) read as they come into
  * view ([showRow]), page by page until a screenful and then as they

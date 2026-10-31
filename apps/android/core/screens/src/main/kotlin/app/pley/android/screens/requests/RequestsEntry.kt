@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 /**
- * The ways into requests (requests-v2 §2), for the shells' menus and the
+ * The ways into requests, for the shells' menus and the
  * search screens: Discover, and Your requests (Requests for managers)
  * carrying one number, in the danger colour while failed requests wait
  * for a manager.

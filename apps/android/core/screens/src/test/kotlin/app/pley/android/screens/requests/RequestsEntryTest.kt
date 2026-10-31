@@ -8,7 +8,7 @@ import app.pley.android.testing.Fixtures
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** The ways into requests: which show, and the one number they carry (requests-v2 §2). */
+/** The ways into requests: which show, and the one number they carry. */
 class RequestsEntryTest {
     private val summary: RequestSummary = Fixtures.decode("requests/summary.json")
     private val manager: RequestSummary = Fixtures.decode("requests/summary_manager.json")

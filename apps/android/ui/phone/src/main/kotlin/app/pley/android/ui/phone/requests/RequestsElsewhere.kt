@@ -30,7 +30,7 @@ import app.pley.android.ui.phone.kit.TonalButton
 import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 
 /*
- * What requests show on the app's other screens (requests-v2 §2, §6): the
+ * What requests show on the app's other screens: the
  * ways in on Me, the number on Me's tab, and a library title's request.
  */
 

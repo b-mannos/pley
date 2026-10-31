@@ -52,7 +52,7 @@ import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 
 /*
- * Discover in search (requests-v2 §6): the way to Discover before typing,
+ * Discover in search: the way to Discover before typing,
  * and "On TMDB" after the libraries' results, with See all on Discover.
  */
 

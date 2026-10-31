@@ -93,7 +93,7 @@ import app.pley.android.ui.phone.theme.WidthClass
 import java.util.Locale
 
 /**
- * A title found on TMDB (requests-v2 §3, §9a, §9b), laid out as a
+ * A title found on TMDB, laid out as a
  * library's title page is: the backdrop fading into the page with the
  * poster, the title, year · certification · runtime or seasons · rating,
  * the genres; the one main action; the tagline and overview. Then the
@@ -426,7 +426,7 @@ private fun CastRow(cast: List<CastMember>, origin: String, modifier: Modifier =
 }
 
 /**
- * The season picker ("Which seasons?", requests-v2 §3): every season,
+ * The season picker ("Which seasons?"): every season,
  * specials last, those that may be asked for ticked lowest first up to
  * what's left; the rest show their state and can't be ticked. Ticking
  * more than may be asked for disables Request and shows the allowance in

@@ -55,8 +55,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * What requests are for the profile in use, from GET /api/requests/summary
- * (requests-v2 §2): whether any of it shows, and what.
+ * What requests are for the profile in use, from GET /api/requests/summary:
+ * whether any of it shows, and what.
  */
 sealed interface RequestsState {
     /** Not known yet: starting, or the server never answered. */

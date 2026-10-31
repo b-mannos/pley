@@ -1,4 +1,4 @@
-"""Requests' news, in the service (requests-v2 §7). The summary is read as
+"""Requests' news, in the service. The summary is read as
 Kodi starts, when the sign-in or its profile changes, when the event stream
 opens, when the plugin did something to requests (requests.ASKING), soon
 after request events, and every minute while the stream is down; it is
@@ -63,7 +63,7 @@ class News:
         self.reading = False
         self.polled = float("-inf")
         # Off on a server without requests for apps: asked again only when
-        # the stream opens again (requests-v2 §2).
+        # the stream opens again.
         self.off = False
         self.stream_open = False
         # A request event came since the summary was last read: its unseen

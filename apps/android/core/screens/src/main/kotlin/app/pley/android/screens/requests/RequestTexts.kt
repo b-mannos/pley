@@ -26,7 +26,7 @@ import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 /**
- * Requests' words (requests-v2 §9a) from [res], for the phone and the TV:
+ * Requests' words from [res], for the phone and the TV:
  * what the rules decide, said. Times are relative to [now] (unix seconds)
  * and days are in [zone]: "in 3 days", "tomorrow", "Out Nov 4".
  */

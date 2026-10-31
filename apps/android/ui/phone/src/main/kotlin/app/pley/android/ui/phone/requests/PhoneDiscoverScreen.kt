@@ -97,7 +97,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 
 /**
- * Discover on the phone (requests-v2 §3, §9b): TMDB's search at the top;
+ * Discover on the phone: TMDB's search at the top;
  * then a hero for the first trending title, with its main action; rows of
  * posters with their status badges (Trending this week, Popular movies,
  * Popular shows, Coming to cinemas, Popular anime), each read as it comes

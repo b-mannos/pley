@@ -23,7 +23,7 @@ from .profiles import sentence
 SCREENFUL = 20
 PAGES = 5
 REQUESTS_PAGE = 50
-# Pictures at the sizes TMDB has (requests-v2 §3).
+# Pictures at the sizes TMDB has.
 POSTER = 500
 BACKDROP = 1280
 SEASON_POSTER = 342
@@ -341,7 +341,7 @@ class Asking:
         return found, s
 
     def route_title(self) -> None:
-        """A TMDB title's main action (requests-v2 §9a), on OK; `more`:
+        """A TMDB title's main action, on OK; `more`:
         Request more seasons, from its menu; `season`: one of its seasons,
         from its seasons' list."""
         kind = "show" if self.params.get("kind") == "show" else "movie"

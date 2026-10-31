@@ -16,7 +16,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
-/** Requests' words (requests-v2 §9a), on a fixed clock: 2025-10-30 12:00 UTC. */
+/** Requests' words, on a fixed clock: 2025-10-30 12:00 UTC. */
 @RunWith(RobolectricTestRunner::class)
 class RequestTextsTest {
     private val now = 1_761_825_600L

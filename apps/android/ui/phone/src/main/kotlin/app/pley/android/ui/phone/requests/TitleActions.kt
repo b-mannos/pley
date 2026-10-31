@@ -43,7 +43,7 @@ internal class TitleActionHandlers(
 )
 
 /**
- * A title's one main action (requests-v2 §9a), the first that applies:
+ * A title's one main action, the first that applies:
  * Sign in again; a restriction's words; Open; why it was declined;
  * Requested or Following (inert) with the request's stage and Stop
  * following; Tell me too; Open and Request more seasons; Request. With

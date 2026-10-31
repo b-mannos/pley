@@ -77,7 +77,7 @@ import app.pley.android.ui.phone.kit.PrimaryButton
 import app.pley.android.ui.phone.kit.TonalButton
 
 /**
- * One request (requests-v2 §9b): its poster ([poster]), title, year and
+ * One request: its poster ([poster]), title, year and
  * seasons, its stage pill (with the download's bar), who asked and when,
  * the reason or the note, where it went (managers), and its actions:
  * the main one or two as buttons, the rest under More actions. Tapping
@@ -265,7 +265,7 @@ internal fun rememberRequestActions(texts: RequestTexts, act: (MediaRequest, Car
     }
 }
 
-/** Decline (requests-v2 §9b): an optional reason, which the person who asked sees. */
+/** Decline: an optional reason, which the person who asked sees. */
 @Composable
 internal fun DeclineDialog(title: String, onDecline: (String?) -> Unit, onDismiss: () -> Unit) {
     // Kept as the screen turns; a reason pasted past the server's limit keeps its first characters.
@@ -314,7 +314,7 @@ internal fun DeclineDialog(title: String, onDecline: (String?) -> Unit, onDismis
 }
 
 /**
- * Approve… (requests-v2 §9b, phones): the quality profile and the folder
+ * Approve… (phones): the quality profile and the folder
  * (starting on the settings' choices, anime's for anime), and for shows
  * the seasons asked for, all ticked. Without the service's lists (not
  * connected, or still reading them) it approves with the settings'

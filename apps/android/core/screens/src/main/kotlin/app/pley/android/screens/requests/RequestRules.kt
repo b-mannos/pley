@@ -19,7 +19,7 @@ import app.pley.android.model.TitleKind
 import app.pley.android.model.TitleStatus
 
 /*
- * Requests' rules, as every client keeps them (requests-v2 §3, §4, §9a):
+ * Requests' rules, as every client keeps them:
  * pure functions of what the server answered, shared by the phone and the
  * TV. Their words are RequestTexts'.
  */
@@ -206,7 +206,7 @@ enum class Ask {
     Limit,
 }
 
-/** A title page's one main action, the first that applies (§9a). */
+/** A title page's one main action, the first that applies. */
 sealed interface MainAction {
     /** This sign-in came before requests: only "Sign in again". */
     data object SignInAgain : MainAction

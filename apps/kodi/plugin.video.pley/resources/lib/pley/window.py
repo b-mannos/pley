@@ -1646,7 +1646,7 @@ class Item(Screen):
 
     def ask_about(self) -> None:
         """Once the page has drawn, never before: what of a show may still
-        be asked for (requests-v2 §6), where this profile may ask."""
+        be asked for, where this profile may ask."""
         d = self.detail
         if d.get("kind") != "show" or not requests.may_ask(self.win.requests_summary(ask=False)):
             self.asking = None
@@ -2370,7 +2370,7 @@ def collection_tile(base: str, collection: dict) -> xbmcgui.ListItem:
 
 class Search(Screen):
     """Search (TvSearchScreen): the field, then what was found, by kind;
-    where this profile may ask, On TMDB after them (requests-v2 §6): titles
+    where this profile may ask, On TMDB after them: titles
     the libraries don't have, looked for beside their search and never
     waited for, their row coming once they do."""
 

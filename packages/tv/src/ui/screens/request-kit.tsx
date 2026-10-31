@@ -254,7 +254,7 @@ export function usePoll(reload: () => void, ms: number | null): void {
 }
 
 /**
- * A library title's request (§6), for a movie or show: asked once its page
+ * A library title's request, for a movie or show: asked once its page
  * has drawn, never before, and only where the profile may ask or has asked
  * before; again when requests change for the title. `null` while unknown,
  * and for a title TMDB doesn't know.
@@ -291,7 +291,7 @@ export function useTitleChanges(key: string): number {
 }
 
 /**
- * A title's one main action (§9a) as buttons, with the stage and a
+ * A title's one main action as buttons, with the stage and a
  * download's bar beside [Requested] or [Following], then what it says
  * under them: the stage's line, the allowance (for the title's kind) when
  * nothing is left to ask for, why it can't be asked for. Focus that was
@@ -513,7 +513,7 @@ const PROBLEM_ICONS: Partial<Record<RequestsProblem["kind"], IconName>> = {
 };
 
 /**
- * A page that can't show requests, saying why (§9a): off, not open to
+ * A page that can't show requests, saying why: off, not open to
  * this account (its requests still reachable when it has some), signing
  * in again, TMDB's key or TMDB not answering (Retry); anything else in the
  * app's own words, with Retry.

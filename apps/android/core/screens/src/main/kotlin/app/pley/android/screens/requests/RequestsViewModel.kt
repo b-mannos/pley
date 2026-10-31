@@ -143,7 +143,7 @@ data class RequestsUiState(
 )
 
 /**
- * Your requests (requests-v2 §4, §9b), and for managers everyone's,
+ * Your requests, and for managers everyone's,
  * opening on Needs attention (`attention=1&order=oldest`), with filters
  * (movies or shows, a person, a title) and their actions. Each card offers
  * exactly the server's actions. The list follows requests_changed (one
