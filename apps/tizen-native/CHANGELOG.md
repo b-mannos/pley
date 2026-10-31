@@ -10,5 +10,6 @@ It has no releases yet: it is built and installed by hand
 
 ### Added
 
-- A native app for Samsung TVs with Tizen 9, beside the web app: its start
-  screen shows its version and the TV's model and Tizen version.
+- A native app for Samsung TVs with Tizen 9, beside the web app: so far a
+  start screen with the Android TV app's rail and rows of placeholder
+  tiles, driven by the remote.

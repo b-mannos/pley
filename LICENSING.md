@@ -16,7 +16,7 @@ own licences.
 | **Pley for Android** | `apps/android` | Restricted | A native app for phones, tablets and TVs (Kotlin and Compose): AndroidX, Media3, OkHttp, Coil and kotlinx under Apache-2.0, Lucide's icons under ISC, Nayuki's QR code generator under MIT |
 | **Pley for Roku** | `apps/roku` | Restricted | A native SceneGraph app in BrightScript, built with BrighterScript (MIT), which adds its runtime helpers, bslib (MIT), to the package |
 | **Pley for Samsung TV and LG TV** | `apps/tizen`, `apps/webos`, `packages/tv` | Restricted | Web apps for the TVs' own engines in TypeScript: Preact and its signals (MIT), Lucide's icons (ISC, and MIT for those from Feather), a QR code generator (MIT) and the Roboto font (OFL-1.1) |
-| **Pley for Samsung TV, native** | `apps/tizen-native` | Restricted | A Tizen .NET app in C# with NUI screens, on Tizen.NET (Apache-2.0) and .NET Standard (MIT), which the TV provides |
+| **Pley for Samsung TV, native** | `apps/tizen-native` | Restricted | A Tizen .NET app in C# with NUI screens, on Tizen.NET (Apache-2.0) and .NET Standard (MIT), which the TV provides, and Lucide's icons (ISC, and MIT for those from Feather) |
 | **Pley for Kodi** | `apps/kodi` | **GPL-2.0-or-later** (`plugin.video.pley/LICENSE.txt`) | A Kodi add-on in Python, on Python's standard library alone, with pictures drawn from Lucide's icons under ISC |
 
 ## The Kodi add-on
@@ -122,6 +122,10 @@ What each build contains of others' work, and where its notices are:
   `@fontsource/roboto`). The build writes the full licences of the packages
   in the bundle into `NOTICES.txt` in `dist/` (so into the .wgt and the
   .ipk). Settings → About lists them.
+- The native Samsung app draws Lucide's icons (ISC, and MIT for those
+  Lucide took from Feather), copied as SVG files by
+  `apps/tizen-native/scripts/icons.mjs` with their licence beside them
+  (`shared/res/icons/LICENSE.txt`, in the .tpk).
 - The tools that build the JavaScript apps (Bun, Vite, TypeScript and the
   rest) aren't shipped.
 - Builds of Pley carry `LICENSE` (as `LICENSE.txt`) and this file.

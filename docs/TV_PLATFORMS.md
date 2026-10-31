@@ -374,8 +374,7 @@ Pley for Samsung TV, native, is the Samsung app rewritten in C# for Tizen
 .NET, so its screens are drawn by the TV's own graphics engine (NUI) rather
 than a web engine. It runs on Tizen 9 TVs and is built beside the web app,
 which stays the Samsung app until the native one has its features. So far
-it shows a start screen with its version and the TV's model and Tizen
-version.
+it shows a start screen with the rail and rows of placeholder tiles.
 
 | | |
 |---|---|
