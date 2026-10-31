@@ -1,4 +1,6 @@
+using System.Threading.Tasks;
 using Pley.Tv.Core;
+using Pley.Tv.Core.Player;
 using Pley.Tv.Core.Ui;
 using Pley.Tv.Tizen.Kit;
 using Pley.Tv.Tizen.Screens;
@@ -103,6 +105,9 @@ class App : NUIApplication
             // Settings' Watch history row opens it, as on Android TV.
             PageKey.History => new HistoryScreen(tv, new HistoryModel(new AppHistorySource(state), new ContextScheduler()), images, gate, k => Go(tv, k)),
             PageKey.Settings => new SettingsScreen(tv, shell, Settings(), images, k => Go(tv, k), k => Restart(tv, k)),
+            // What the TV reports when it asks to play, Settings' passthrough choices with it.
+            DiagnosticsPage => new DiagnosticsScreen(tv, new DiagnosticsModel(Platform.Version(), () => Task.FromResult(Platform.Facts()), new ContextScheduler(),
+                facts => TizenCaps.Of(facts, state.Settings.Value.Passthrough))),
             _ => null,
         };
         // Back from the player: Home asks again, for the new resume point and Continue Watching.

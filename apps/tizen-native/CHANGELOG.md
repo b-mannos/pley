@@ -62,3 +62,7 @@ It has no releases yet: it is built and installed by hand
   format, which the TV now tells the server when it plays), Subtitles and
   display, Server (switching server), the TV's facts, About with the
   licences, and Sign out, which asks first. Choices open in a side panel.
+- Diagnostics in the native app, from Settings: the app's version and the
+  TV's facts, then what it tells the server it plays (HDR, the decoders and
+  their limits, the sound it decodes and sends to a receiver, the streams
+  it reads), a line each, with Check again if the check fails.
