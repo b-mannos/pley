@@ -214,10 +214,13 @@ sealed class CategoryColumnView : View
     {
         if (Disposed) return;
         var focused = HoldsFocus ? tree.Current!.Name : null;
+        // The search field stays where it is: taken off the screen while typing, the TV closes its
+        // keyboard, and every letter typed rebuilds the rows under it.
         foreach (var child in content.Children.ToList())
         {
+            if (child == search) continue;
             content.Remove(child);
-            if (child != search) child.Dispose();
+            child.Dispose();
         }
         Group.Clear();
         laid.Clear();
@@ -231,7 +234,7 @@ sealed class CategoryColumnView : View
                 case CategoryRow.Search:
                     if (search == null) break;
                     search.Position = new Position(Ui.Dp(LiveCategories.Inset - 10), Ui.Dp(y));
-                    content.Add(search);
+                    if (search.GetParent() != content) content.Add(search);
                     Group.Add(search.Item);
                     laid.Add((row, search.Item, y));
                     if (search.Item.Name == focused) again = search.Item;

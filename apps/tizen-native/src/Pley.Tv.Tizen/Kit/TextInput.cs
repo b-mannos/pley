@@ -68,6 +68,9 @@ sealed class TextInput : View
         Add(field);
         Item = new FocusItem("field") { Selected = Start };
         Item.FocusChanged += _ => Look();
+        // Taken off the screen while typing (a page rebuilt round it): the TV closes its keyboard, so
+        // typing ends here too, or the field would go on taking every key the remote sends.
+        RemovedFromWindow += (s, e) => Stop();
         Look();
     }
 
