@@ -26,6 +26,10 @@ use crate::util::{MEDIA_INPUT_OPTIONS, background_priority, file_key, input_arg,
 
 const COLUMNS: u32 = 10;
 const ROWS: u32 = 10;
+/// JPEG quality of the sheets (FFmpeg's `-q:v`, 2 to 31, lower is better).
+/// Thumbnails are small and seen in passing: at their size 7 looks no
+/// different from 5, and takes a fifth less space.
+const QUALITY: &str = "7";
 const TIMEOUT: Duration = Duration::from_secs(60 * 60);
 /// Sets whose fetched sheets are tracked at once (sets fetched only in part
 /// are forgotten beyond that, and left to cache pruning).
@@ -154,7 +158,7 @@ impl Trickplay {
         // Decoding keyframes only is what makes this cheap.
         cmd.args(["-skip_frame", "nokey"]).args(MEDIA_INPUT_OPTIONS).arg("-i").arg(input_arg(path));
         cmd.args(["-map", &format!("0:{}", video.index), "-an", "-sn", "-dn", "-vf", &filter]);
-        cmd.args(["-fps_mode", "passthrough", "-c:v", "mjpeg", "-q:v", "5", "-start_number", "0"]);
+        cmd.args(["-fps_mode", "passthrough", "-c:v", "mjpeg", "-q:v", QUALITY, "-start_number", "0"]);
         cmd.arg(part.join("%d.jpg"));
         background_priority(&mut cmd);
         let started = std::time::Instant::now();

@@ -9,6 +9,12 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- Seek-bar previews take about a fifth less space: they are saved at a
+  JPEG quality that looks the same at their size. Previews made before keep
+  theirs.
+
 ## [0.1.0] - 2026-10-30
 
 ### Security
