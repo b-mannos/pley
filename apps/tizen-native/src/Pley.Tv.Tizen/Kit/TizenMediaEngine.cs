@@ -110,7 +110,16 @@ sealed class TizenMediaEngine : IVideoEngine
         if (mine != generation) return;
         try
         {
-            if (video) p.Display = new Media.Display(Window.Instance);
+            if (video)
+            {
+                // The window's alpha off and on again before each player takes the display: played
+                // one after another under the window's alpha (the next episode, a channel tuned
+                // again, a film after a film), every second player showed the TV's menu where its
+                // picture was, with its sound. The screen is black here, as it starts.
+                Window.Instance.SetTransparency(false);
+                Window.Instance.SetTransparency(true);
+                p.Display = new Media.Display(Window.Instance);
+            }
             p.ErrorOccurred += (_, e) => Post(mine, () => Fail(ErrorOf(e.Error)));
             p.PlaybackCompleted += (_, _) => Post(mine, Completed);
             p.PlaybackInterrupted += (_, _) => Post(mine, () => Fail(new EngineError.Other("the TV took its player for something else")));
