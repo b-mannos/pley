@@ -432,15 +432,22 @@ sealed class GuideView : View
     }
 
     /// <summary>The bars of the programmes airing in each row made, to move with the time without making the row again.</summary>
-    readonly Dictionary<int, List<(View Bar, LiveProgram Program, float Width)>> bars = new Dictionary<int, List<(View Bar, LiveProgram Program, float Width)>>();
-    readonly List<(View Bar, LiveProgram Program, float Width)> barsMade = new List<(View Bar, LiveProgram Program, float Width)>();
+    readonly Dictionary<int, List<(View Bar, float Left, float Width)>> bars = new Dictionary<int, List<(View Bar, float Left, float Width)>>();
+    readonly List<(View Bar, float Left, float Width)> barsMade = new List<(View Bar, float Left, float Width)>();
 
     /// <summary>The airing programmes' bars to now, in place (a row's bars go with it, so none is disposed).</summary>
+    /// <summary>
+    /// An airing programme's bar, in dp: from its cell's left (<paramref name="left"/>, on the guide's
+    /// time line) to now's line. As the share played of the whole programme, a programme begun before
+    /// the guide (its cell starting at the guide's edge) had its bar run past now.
+    /// </summary>
+    float BarWidth(float left, float width, long at) => Math.Max(0, Math.Min(width, GuideLayout.X(at, cursor.Start) - left));
+
     void MoveBars()
     {
         foreach (var row in bars.Values)
-            foreach (var (bar, program, width) in row)
-                bar.SizeWidth = Ui.Dp(width * program.ProgressAt(now));
+            foreach (var (bar, left, width) in row)
+                bar.SizeWidth = Ui.Dp(BarWidth(left, width, now));
     }
 
     /// <summary>Rows to make again, a few a frame, nearest the focused row first.</summary>
@@ -623,13 +630,13 @@ sealed class GuideView : View
                 var bar = new View
                 {
                     Position = new Position(0, Ui.Dp(cellHeight - GuideLayout.ProgressHeight)),
-                    Size = new Size(Ui.Dp(cellWidth * program.ProgressAt(look.Now)), Ui.Dp(GuideLayout.ProgressHeight)),
+                    Size = new Size(Ui.Dp(BarWidth(x + GuideLayout.CellInsetX, cellWidth, look.Now)), Ui.Dp(GuideLayout.ProgressHeight)),
                     BackgroundColor = focused ? PleyColors.OnAccent : PleyColors.Accent,
                     // The cell doesn't clip (a GPU pass a cell): the bar takes its bottom left corner itself.
                     CornerRadius = new Vector4(0, 0, 0, Ui.Dp(PleyShape.ControlRadius)),
                 };
                 cell.Add(bar);
-                barsMade.Add((bar, program, cellWidth));
+                barsMade.Add((bar, x + GuideLayout.CellInsetX, cellWidth));
             }
             row.Add(cell);
         }
