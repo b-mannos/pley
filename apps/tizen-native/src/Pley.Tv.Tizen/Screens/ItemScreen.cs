@@ -347,21 +347,30 @@ sealed class ItemScreen : ShellPage
         }
     }
 
-    /// <summary>A side panel over the page: Audio and subtitles, More, or a tile's actions.</summary>
+    /// <summary>
+    /// A side panel over the page: Audio and subtitles, More, or a tile's actions. Choosing a version
+    /// or a track keeps Audio and subtitles open, its check on the new choice (the Android app's
+    /// TvPanels: focus stays in the panel until Back closes it); any other row closes its panel.
+    /// </summary>
     void Panel(SidePanel panel, ItemSummary item)
     {
-        new SidePanelSheet(layers, panel, row =>
+        SidePanelSheet? sheet = null;
+        sheet = new SidePanelSheet(layers, panel, row =>
         {
+            var track = false;
             switch (row.Kind)
             {
                 case PanelRowKind.Version when row.Value is { } file:
                     model.ChooseVersion(file);
+                    track = true;
                     break;
                 case PanelRowKind.Audio:
                     model.ChooseAudio(row.Value is { } audio ? (int)audio : null);
+                    track = true;
                     break;
                 case PanelRowKind.Subtitle:
                     model.ChooseSubtitle(row.Value is { } subtitle ? (int)subtitle : null);
+                    track = true;
                     break;
                 case PanelRowKind.Rating:
                     model.Rate(row.Value is { } stars ? (int)stars : null);
@@ -376,8 +385,14 @@ sealed class ItemScreen : ShellPage
                     model.Perform(action, item);
                     break;
             }
-            return false;
-        }).Show();
+            if (!track || shown == null || ItemText.TracksPanel(shown) is not { } again) return false;
+            // Shown again over itself with the choice made, focus on the row chosen.
+            var at = panel.Rows.ToList().IndexOf(row);
+            sheet!.Close();
+            Panel(again with { Focus = at >= 0 && at < again.Rows.Count ? at : again.Focus }, item);
+            return true;
+        });
+        sheet.Show();
     }
 
     void FullSummary(ItemPage page)
