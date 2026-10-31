@@ -1,6 +1,7 @@
 # cargo-deny configuration (https://github.com/EmbarkStudios/cargo-deny).
 #   cargo install cargo-deny && cargo deny check licenses
-# Third-party crates must be permissively licensed. Our own crates are
+# Third-party crates must be under permissive licences that the AGPL-3.0
+# accepts (so not the old OpenSSL licence, for one). Our own crates are
 # unpublished (`publish = false`) and skipped here; scripts/check-licenses.ps1
 # also keeps copyleft-only crates out of the server and the transcoder, and
 # the transcoder out of the server (see LICENSING.md).
@@ -27,7 +28,6 @@ allow = [
     "Unicode-DFS-2016",
     "BSL-1.0",
     "CDLA-Permissive-2.0",
-    "OpenSSL",
 ]
 
 [licenses.private]

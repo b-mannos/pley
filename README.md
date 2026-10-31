@@ -51,5 +51,6 @@ Then [first start](docs/CONFIGURATION.md#first-start).
 
 ## License
 
-Restricted, terms to be determined ([LICENSE](LICENSE)). The Kodi add-on is
-GPL-2.0-or-later. Third-party notices: [LICENSING.md](LICENSING.md).
+Pley is free software under the GNU Affero General Public License, version
+3 ([LICENSE](LICENSE)). The Kodi add-on is GPL-2.0-or-later. What that
+means, and third-party notices: [LICENSING.md](LICENSING.md).
