@@ -137,3 +137,5 @@ It has no releases yet: it is built and installed by hand
   episode by itself too), its title shows at the top for a few seconds.
 - Back on the native app's first screen asks "Exit Pley?" (Cancel, Exit) as
   the web Samsung app does, rather than leaving at once.
+- The native app's Home no longer pauses to draw its rows again when the
+  server's answer is the same as what it shows.

@@ -53,7 +53,14 @@ sealed class MemoryKeyValue : IKeyValue
 
     public string? Get(string key) => Values.TryGetValue(key, out var v) ? v : null;
 
-    public void Set(string key, string value) => Values[key] = value;
+    public void Set(string key, string value)
+    {
+        Values[key] = value;
+        Written.Add(key);
+    }
+
+    /// <summary>The keys set, in order, each time.</summary>
+    public List<string> Written { get; } = new List<string>();
 
     public void Remove(string key) => Values.Remove(key);
 }

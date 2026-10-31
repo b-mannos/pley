@@ -144,6 +144,44 @@ public class StateTests
     }
 
     [Fact]
+    public async Task The_same_home_again_is_neither_shown_nor_saved_again()
+    {
+        var store = new MemoryKeyValue();
+        var scheduler = new FakeScheduler();
+        var server = new FakeServer();
+        var title = "Continue watching";
+        server.On("GET", Home + "/api/auth/me", 200, MeJson);
+        server.On("GET", Home + "/api/libraries", 200, "[]");
+        server.On("GET", Home + "/api/oauth/profiles", 200, "[]");
+        server.On("GET", Home + "/api/hubs/home", _ => (200, Hubs(title)));
+        var state = State(store, server, scheduler);
+        SignIn(state, store, scheduler);
+        await state.LoadAccount();
+        await state.LoadHome();
+        var key = $"pley.home.{Home}.1";
+        var shown = state.Home.Value;
+        var changes = 0;
+        state.Home.Changed += _ => changes++;
+        store.Written.Clear();
+        await state.LoadHome();
+        Assert.Same(shown, state.Home.Value);
+        Assert.Equal(0, changes);
+        Assert.DoesNotContain(key, store.Written);
+        // After a launch, from what was saved: the same.
+        var again = State(store, server, scheduler);
+        shown = again.Home.Value;
+        await again.LoadAccount();
+        await again.LoadHome();
+        Assert.Same(shown, again.Home.Value);
+        Assert.DoesNotContain(key, store.Written);
+        // Something changed: shown and saved.
+        title = "Recently added";
+        await again.LoadHome();
+        Assert.Equal("Recently added", again.Home.Value!.Single().Title);
+        Assert.Contains(key, store.Written);
+    }
+
+    [Fact]
     public async Task Shows_the_notice_for_6_s_when_the_server_goes_and_comes_back_when_its_events_connect()
     {
         var store = new MemoryKeyValue();

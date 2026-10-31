@@ -200,6 +200,11 @@ public sealed class AppState
     IDisposable? stateTimer, noticeTimer;
     /// <summary>The profile signed in on the server in use, when known: whose saved Home and libraries show.</summary>
     long? profile;
+    /// <summary>
+    /// <see cref="Home"/> as JSON, as saved: the server's answer the same as Home shows (coming
+    /// back to Home, or after a launch from what was saved) is neither drawn nor saved again.
+    /// </summary>
+    string? homeJson;
     /// <summary>Playbacks on top: Home and the pages wait to ask again until they end (their own reports change the watch state too).</summary>
     int holds;
     /// <summary>The libraries' order changes on their way to the server, one at a time.</summary>
@@ -267,11 +272,12 @@ public sealed class AppState
     public Tokens? TokenStore => tokens;
     public bool SignedIn => tokens?.SignedIn == true;
 
-    T? Read<T>(string key, JsonSerializerOptions? options = null) where T : class
+    T? Read<T>(string key, JsonSerializerOptions? options = null) where T : class => Parse<T>(store.Get(key), options);
+
+    static T? Parse<T>(string? text, JsonSerializerOptions? options = null) where T : class
     {
         try
         {
-            var text = store.Get(key);
             return string.IsNullOrEmpty(text) ? null : JsonSerializer.Deserialize<T>(text!, options ?? ApiJson.Options);
         }
         catch (JsonException)
@@ -430,7 +436,8 @@ public sealed class AppState
         }
         var id = profile.Value;
         // What was saved is trusted only in shape: a store another build wrote, or a damaged one, is left out.
-        Home.Value = Read<List<Hub>>(SavedKey(HomeKey, server, id));
+        homeJson = store.Get(SavedKey(HomeKey, server, id));
+        Home.Value = Parse<List<Hub>>(homeJson);
         Me.Value = Read<User>(SavedKey(MeKey, server, id)) is { Id: > 0 } me ? me : null;
         Libraries.Value = Read<List<Library>>(SavedKey(LibrariesKey, server, id));
     }
@@ -439,6 +446,12 @@ public sealed class AppState
     void Save<T>(string key, T value)
     {
         if (Server.Value != null && profile != null) Write(SavedKey(key, Server.Value, profile.Value), value);
+    }
+
+    /// <summary>Keeps <paramref name="json"/>, already written, for the profile in use, when it is known.</summary>
+    void SaveJson(string key, string json)
+    {
+        if (Server.Value != null && profile != null) store.Set(SavedKey(key, Server.Value, profile.Value), json);
     }
 
     IReadOnlyList<long> RecentProfiles(string server) => Read<List<long>>($"{RecentProfilesKey}.{server}", Camel) ?? new List<long>();
@@ -673,9 +686,16 @@ public sealed class AppState
             // Another server or profile since: the answer was the one before's.
             if (Api.Value != api || profile != who) return;
             var failedBefore = HomeError.Value != null;
-            Home.Value = hubs;
+            // Lists aren't equal by their rows: the same answer, as JSON, leaves Home as it is
+            // rather than making all its rows again (a third of a second on the slower TVs).
+            var json = JsonSerializer.Serialize(hubs, ApiJson.Options);
+            if (Home.Value == null || json != homeJson)
+            {
+                homeJson = json;
+                Home.Value = hubs;
+                SaveJson(HomeKey, json);
+            }
             HomeError.Value = null;
-            Save(HomeKey, hubs);
             if (failedBefore) ServerAnswered();
         }
         catch (Exception e)
