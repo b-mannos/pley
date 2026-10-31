@@ -385,9 +385,11 @@ search (the field and the TV's keyboard, results in rows, recent
 searches); people's pages (the photo, the name and a row per role); the
 rail's Collections and a collection's page, with Play and Shuffle; the
 watch history page; Live TV's page (the categories and their search, the
-guide and the channels' tiles, a programme's details and favourites); and
-a first player: the stream on the TV's own player, seeking with Left and
-Right, and the scrubber and transport controls.
+guide and the channels' tiles, a programme's details and favourites) and
+its live player (changing channel, number keys, what's on, the channel
+list, and why a channel doesn't play); and a first player: the stream on
+the TV's own player, seeking with Left and Right, and the scrubber and
+transport controls.
 Subtitles, the player's panels and the other pages come next; Settings,
 which leads to the watch history, is one of them.
 

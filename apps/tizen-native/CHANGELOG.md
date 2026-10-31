@@ -62,3 +62,11 @@ It has no releases yet: it is built and installed by hand
   down, or the channels as tiles; OK held, Menu or Info opens what's on
   with Watch and the favourite. It opens as it was left, at the channel
   last watched.
+- Watching Live TV in the native app: the channel full screen on the TV's
+  own player; Up, Down and Channel up and down change channel, number keys
+  tune one; OK shows what's on with the channel list and the favourite,
+  Info shows what's on for a moment, Menu or Guide opens the channel list,
+  where another group or a search can be chosen. A channel that doesn't
+  start says why, with Try again or, every connection being in use, Watch
+  here instead. The channel lets go of its connection while the app is
+  hidden and tunes again when it comes back.

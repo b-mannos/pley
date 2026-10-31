@@ -57,6 +57,12 @@ sealed class Shell
 
     public Sheet? Top => sheets.Count > 0 ? sheets[sheets.Count - 1] : null;
 
+    /// <summary>The app went to the background (false) or came back in front (true): what plays lets go, then starts again.</summary>
+    public event Action<bool>? Shown;
+
+    /// <summary>The app says it is hidden or shown again.</summary>
+    public void Visible(bool shown) => Shown?.Invoke(shown);
+
     /// <summary>Shows <paramref name="page"/> in place of everything on screen.</summary>
     public void Show(Sheet page)
     {

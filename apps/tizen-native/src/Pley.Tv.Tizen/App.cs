@@ -47,6 +47,20 @@ class App : NUIApplication
         });
     }
 
+    /// <summary>The app went to the background: what plays lets go (Live TV's connection).</summary>
+    protected override void OnPause()
+    {
+        base.OnPause();
+        shell.Visible(false);
+    }
+
+    /// <summary>Back in front: what was let go plays again.</summary>
+    protected override void OnResume()
+    {
+        base.OnResume();
+        shell.Visible(true);
+    }
+
     /// <summary>Shows the page for <paramref name="key"/>, in place of what is on screen.</summary>
     void Go(PageKey key)
     {
@@ -108,7 +122,8 @@ class App : NUIApplication
             PageKey.Collection collection => new CollectionScreen(tv, new CollectionModel(new AppCollectionSource(state), collection.CollectionId, new ContextScheduler()), images, gate, k => Go(tv, k)),
             // Settings' Watch history row opens it, as on Android TV.
             PageKey.History => new HistoryScreen(tv, new HistoryModel(new AppHistorySource(state), new ContextScheduler()), images, gate, k => Go(tv, k)),
-            PageKey.LiveTv => new LiveTvScreen(tv, shell, new LiveTvModel(live, new ContextScheduler()), images, gate, (_, _) => tv.Toast("Watching a channel comes next in the native app.")),
+            PageKey.LiveTv => new LiveTvScreen(tv, shell, new LiveTvModel(live, new ContextScheduler()), images, gate,
+                (watch, back) => new LivePlayerScreen(shell, live, watch, images, gate, back).Show()),
             _ => null,
         };
         // Live TV in the rail while this profile has channels: asked again for each sign-in and profile.
