@@ -28,6 +28,14 @@ It has no releases yet: it is built and installed by hand
 - A tile's actions in the native app: OK held or the Menu key on a tile on
   Home or a library page opens them in a side panel (Play, the watched
   marks, Continue Watching, My List and the pages they lead to).
+- Playlists in the native app: the rail's Playlists opens their covers, and
+  a playlist's page plays or shuffles it; holding OK or More on an entry
+  plays from it, goes to it, moves it up and down or removes it, and the
+  playlist can be renamed or deleted.
+- Adding to playlists in the native app: "Add to playlist" on an item or a
+  tile's actions opens a side panel to add it to one of your playlists or
+  name a new one; New playlist makes an empty one for movies and TV or
+  music, and a library's "Save as…" saves its filters as a smart playlist.
 - Item pages in the native app end with Details: who made it and the
   facts, the versions (OK chooses which plays) and Media info, which OK
   opens: each file and every stream in full.
