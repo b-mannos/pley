@@ -12,7 +12,8 @@ namespace Pley.Tv.Tizen.Kit;
 /// typing, leaving focus on the field. Pads type into it too (<see cref="Type"/>).
 ///
 /// 44 dp, Surface2, radius 4, Body. At rest a 1 dp Control edge; focused or typing a 2 dp
-/// AccentBright edge, without scale (fields are wide).
+/// AccentBright edge, without scale (fields are wide). With an icon (search's glyph), the icon
+/// comes first, Muted at rest and Fg focused, 12 dp before the text.
 /// </summary>
 sealed class TextInput : View
 {
@@ -20,21 +21,30 @@ sealed class TextInput : View
 
     readonly Input input;
     readonly TextField field;
+    readonly ImageView? icon;
     IDisposable? keys;
     bool editing;
 
     public TextInput(Input input, float width, string placeholder, InputMethod.PanelLayoutType layout = InputMethod.PanelLayoutType.Normal,
-        InputMethod.ActionButtonTitleType action = InputMethod.ActionButtonTitleType.Search)
+        InputMethod.ActionButtonTitleType action = InputMethod.ActionButtonTitleType.Search, string? iconName = null)
     {
         this.input = input;
         Size = new Size(Ui.Dp(width), Ui.Dp(Height));
         CornerRadius = Ui.Dp(PleyShape.FieldRadius);
         BackgroundColor = PleyColors.Surface2;
         BorderlineOffset = -1;
+        var left = 16f;
+        if (iconName != null)
+        {
+            icon = Icons.Icon(iconName, PleyTv.IconSize, PleyColors.Muted);
+            icon.Position = new Position(Ui.Dp(left), Ui.Dp((Height - PleyTv.IconSize) / 2));
+            Add(icon);
+            left += PleyTv.IconSize + 12;
+        }
         field = new TextField
         {
-            Size = new Size(Ui.Dp(width - 32), Ui.Dp(Height)),
-            Position = new Position(Ui.Dp(16), 0),
+            Size = new Size(Ui.Dp(width - left - 16), Ui.Dp(Height)),
+            Position = new Position(Ui.Dp(left), 0),
             PixelSize = Ui.Dp(PleyType.Body.Size),
             TextColor = PleyColors.Fg,
             PlaceholderText = placeholder,
@@ -142,6 +152,7 @@ sealed class TextInput : View
         var ring = editing || Item.Focused;
         BorderlineWidth = Ui.Dp(ring ? 2 : 1);
         BorderlineColor = ring ? PleyColors.AccentBright : PleyColors.Control;
+        if (icon != null) icon.Color = ring ? PleyColors.Fg : PleyColors.Muted;
     }
 
     protected override void Dispose(global::Tizen.NUI.DisposeTypes type)

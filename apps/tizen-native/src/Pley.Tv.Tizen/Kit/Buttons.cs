@@ -25,13 +25,16 @@ sealed class ButtonView : View
     readonly ButtonKind kind;
     readonly TextLabel label;
     readonly ImageView? icon;
+    readonly float maxWidth;
     Color ink;
     Color? rest;
     Animation? focusAnimation;
 
-    public ButtonView(string text, ButtonKind kind, Action onClick, Color? color = null, string? iconName = null)
+    /// <param name="maxWidth">The widest it grows, in dp (a recent search's chip); a longer label ends in "…". 0: as wide as its label.</param>
+    public ButtonView(string text, ButtonKind kind, Action onClick, Color? color = null, string? iconName = null, float maxWidth = 0)
     {
         this.kind = kind;
+        this.maxWidth = maxWidth;
         ink = color ?? PleyColors.Fg;
         Item = new FocusItem(text) { Selected = onClick };
         label = Text.Label(text, PleyType.Label, ink);
@@ -61,7 +64,9 @@ sealed class ButtonView : View
         label.Text = text;
         var padding = kind == ButtonKind.Pill ? 20 : 16;
         var textWidth = label.NaturalSize.Width / Ui.Scale;
-        var content = textWidth + (icon != null ? PleyTv.IconSize + 8 : 0);
+        var iconRoom = icon != null ? PleyTv.IconSize + 8 : 0;
+        if (maxWidth > 0) textWidth = Math.Min(textWidth, maxWidth - padding * 2 - iconRoom);
+        var content = textWidth + iconRoom;
         var width = Math.Max(content + padding * 2, kind == ButtonKind.Pill ? PillMinWidth : 0);
         Size = new Size(Ui.Dp(width), Ui.Dp(PleyTv.ButtonHeight));
         var x = (width - content) / 2;
