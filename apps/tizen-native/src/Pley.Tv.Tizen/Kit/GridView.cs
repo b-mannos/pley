@@ -99,6 +99,9 @@ sealed class GridView : View
             foreach (var cell in cells.Values) cell.Dispose();
             cells.Clear();
             drawn.Clear();
+            // The positions' focus items go: tiles that listen to them go too.
+            while (spare.Count > 0) spare.Pop().Dispose();
+            counts.Clear();
             Group.Clear();
             items = new FocusItem[total];
             for (var i = 0; i < total; i++)
@@ -170,7 +173,13 @@ sealed class GridView : View
         LoadPictures();
     }
 
-    /// <summary>Rows on screen and one either side have views; others go.</summary>
+    /// <summary>Tiles off screen, kept to show the rows coming on: making a row's tiles was most of a move's cost.</summary>
+    readonly Stack<TileView> spare = new Stack<TileView>();
+
+    /// <summary>A position's count badge (a collection's titles), on the tile showing it.</summary>
+    readonly Dictionary<int, View> counts = new Dictionary<int, View>();
+
+    /// <summary>Rows on screen and one either side have views; others go, their tiles kept for the rows coming.</summary>
     void Draw()
     {
         if (Disposed) return;
@@ -180,9 +189,7 @@ sealed class GridView : View
         foreach (var position in cells.Keys.ToList())
         {
             if (position >= first && position <= last) continue;
-            cells[position].Dispose();
-            cells.Remove(position);
-            drawn.Remove(position);
+            Let(position);
         }
         for (var p = first; p <= last; p++)
         {
@@ -190,11 +197,11 @@ sealed class GridView : View
             if (cells.TryGetValue(p, out var cell))
             {
                 if (ReferenceEquals(drawn[p], tile)) continue;
-                cell.Dispose();
+                Let(p);
             }
             cell = tile != null ? Tile(p, tile) : new SkeletonCell(kind, items[p], gate);
             cell.Position = new Position(Ui.Dp(PleyTv.Gutter + p % Columns * (kind.Width + PleyTv.TileGap)), Ui.Dp(p / Columns * pitch));
-            content.Add(cell);
+            if (cell.GetParent() == null) content.Add(cell);
             cells[p] = cell;
             drawn[p] = tile;
         }
@@ -203,10 +210,39 @@ sealed class GridView : View
         if (!gate.Holding) LoadPictures();
     }
 
+    /// <summary>The cell at <paramref name="position"/> goes: a tile is kept for another, hidden; a skeleton goes.</summary>
+    void Let(int position)
+    {
+        var cell = cells[position];
+        if (counts.TryGetValue(position, out var count))
+        {
+            count.Dispose();
+            counts.Remove(position);
+        }
+        if (cell is TileView tile)
+        {
+            tile.Hide();
+            spare.Push(tile);
+        }
+        else cell.Dispose();
+        cells.Remove(position);
+        drawn.Remove(position);
+    }
+
     View Tile(int position, TileModel tile)
     {
-        var view = new TileView(tile, kind, items[position], gate, images);
-        view.Sync();
+        TileView view;
+        if (spare.Count > 0)
+        {
+            view = spare.Pop();
+            view.Bind(tile, items[position]);
+            view.Show();
+        }
+        else
+        {
+            view = new TileView(tile, kind, items[position], gate, images);
+            view.Sync();
+        }
         if (badgeAt?.Invoke(position) is { } badge)
         {
             var text = Text.Label(badge, PleyType.Badge, PleyColors.Fg);
@@ -222,6 +258,7 @@ sealed class GridView : View
             text.VerticalAlignment = VerticalAlignment.Center;
             pill.Add(text);
             view.Add(pill);
+            counts[position] = pill;
         }
         return view;
     }

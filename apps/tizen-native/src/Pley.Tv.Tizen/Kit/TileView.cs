@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Pley.Tv.Core.Ui;
 using Tizen.NUI;
 using Tizen.NUI.BaseComponents;
@@ -14,26 +15,36 @@ namespace Pley.Tv.Tizen.Kit;
 sealed class TileView : View
 {
     readonly TileKind kind;
+    readonly Images images;
+    readonly KeyRepeatGate gate;
+    readonly float w, h, radius;
     readonly View frame;
     readonly View ring;
     readonly View well;
     readonly ImageView picture;
     readonly TextLabel? placeholder;
+    /// <summary>The progress bar, the watched tick or count and the badges, made again for each tile shown.</summary>
+    readonly View overlays;
     readonly TextLabel title;
-    readonly TextLabel? subtitle;
+    readonly TextLabel subtitle;
+    FocusItem focus;
     /// <summary>The whole title, fitted again to the caption's width in the weight it shows (bold while focused is wider).</summary>
-    readonly string titleText;
+    string titleText = "";
     Animation? focusAnimation;
     bool pictureAsked;
+    /// <summary>Which tile it shows, counted up at each: a picture asked for an earlier one is dropped.</summary>
+    int shown;
 
     public TileView(TileModel model, TileKind kind, FocusItem focus, KeyRepeatGate gate, Images images)
     {
         this.kind = kind;
+        this.images = images;
+        this.gate = gate;
+        this.focus = focus;
         Model = model;
-        Focus = focus;
-        var w = Ui.Dp(kind.Width);
-        var h = Ui.Dp(kind.Height);
-        var radius = kind.Round ? w / 2 : Ui.Dp(PleyShape.TileRadius);
+        w = Ui.Dp(kind.Width);
+        h = Ui.Dp(kind.Height);
+        radius = kind.Round ? w / 2 : Ui.Dp(PleyShape.TileRadius);
         Size = new Size(w, h + Ui.Dp(PleyTv.TilesToCaption + PleyTv.CaptionHeight));
 
         // The well and its ring scale together, about the well's centre.
@@ -43,7 +54,8 @@ sealed class TileView : View
             PivotPoint = global::Tizen.NUI.PivotPoint.Center,
             PositionUsesPivotPoint = false,
         };
-        // The ring: a 3 dp stroke centred 4.5 dp outside the well, so 3 dp clear of it.
+        // The ring: a 3 dp stroke centred 4.5 dp outside the well, so 3 dp clear of it. Hidden at
+        // rest rather than drawn clear: a grid has thirty tiles on screen.
         var reach = Ui.Dp(PleyShape.RingOffset + PleyShape.RingStroke / 2);
         ring = new View
         {
@@ -56,21 +68,17 @@ sealed class TileView : View
             CornerRadius = kind.Round ? (w + 2 * reach) / 2 : radius + reach,
             Opacity = 0,
         };
+        ring.Hide();
         frame.Add(ring);
         // Until the picture comes, and when there is none: the title's own gradient with the title on it
-        // (the Android app's Placeholder); people's round tiles have no title on theirs.
-        var (from, to) = Placeholder.Colors(model.Title);
-        well = new View
-        {
-            Size = new Size(w, h),
-            Background = Gradients.Diagonal(AvatarView.Rgb(from), AvatarView.Rgb(to)),
-            CornerRadius = radius,
-            ClippingMode = ClippingModeType.ClipChildren,
-        };
+        // (the Android app's Placeholder); people's round tiles have no title on theirs. The well
+        // doesn't clip: each clip is a pass of its own for the TV's GPU, and the picture rounds its
+        // own corners, as the progress bar does.
+        well = new View { Size = new Size(w, h), CornerRadius = radius };
         frame.Add(well);
         if (!kind.Round)
         {
-            placeholder = Text.Label(model.Title, PleyType.Title, new Color(PleyColors.Fg.R, PleyColors.Fg.G, PleyColors.Fg.B, 0.7f), maxLines: 4);
+            placeholder = Text.Label("", PleyType.Title, new Color(PleyColors.Fg.R, PleyColors.Fg.G, PleyColors.Fg.B, 0.7f), maxLines: 4);
             placeholder.Size = new Size(w - Ui.Dp(24), h - Ui.Dp(24));
             placeholder.Position = new Position(Ui.Dp(12), Ui.Dp(12));
             placeholder.HorizontalAlignment = HorizontalAlignment.Center;
@@ -87,33 +95,69 @@ sealed class TileView : View
             FittingMode = FittingModeType.ScaleToFill,
         };
         well.Add(picture);
-        Overlays(well, model, w, h);
+        overlays = new View { Size = new Size(w, h) };
+        well.Add(overlays);
         Add(frame);
 
         var captionTop = h + Ui.Dp(PleyTv.TilesToCaption);
-        titleText = model.Title;
-        title = Text.Label(model.Title, PleyType.Caption, PleyColors.Fg, width: kind.Width);
+        title = Text.Label("", PleyType.Caption, PleyColors.Fg, width: kind.Width);
         title.Position = new Position(0, captionTop);
-        if (kind.Round) title.HorizontalAlignment = HorizontalAlignment.Center;
-        Add(title);
-        if (model.Subtitle.Length > 0)
+        subtitle = Text.Label("", PleyType.Caption, PleyColors.Muted, width: kind.Width);
+        subtitle.Position = new Position(0, captionTop + Ui.Dp(PleyType.Caption.Line));
+        if (kind.Round)
         {
-            subtitle = Text.Label(model.Subtitle, PleyType.Caption, PleyColors.Muted, width: kind.Width);
-            subtitle.Position = new Position(0, captionTop + Ui.Dp(PleyType.Caption.Line));
-            if (kind.Round) subtitle.HorizontalAlignment = HorizontalAlignment.Center;
-            Add(subtitle);
+            title.HorizontalAlignment = HorizontalAlignment.Center;
+            subtitle.HorizontalAlignment = HorizontalAlignment.Center;
         }
+        Add(title);
+        Add(subtitle);
 
-        this.images = images;
-        this.gate = gate;
+        Fill(model);
         focus.FocusChanged += OnFocus;
     }
 
-    readonly Images images;
-    readonly KeyRepeatGate gate;
+    public TileModel Model { get; private set; }
+    public FocusItem Focus => focus;
 
-    public TileModel Model { get; }
-    public FocusItem Focus { get; }
+    /// <summary>
+    /// Shows another tile in this one, with the focus item of its place: a grid reuses its tiles as
+    /// rows scroll by rather than make new ones, which is most of what a row costs.
+    /// </summary>
+    public void Bind(TileModel model, FocusItem item)
+    {
+        if (!ReferenceEquals(item, focus))
+        {
+            focus.FocusChanged -= OnFocus;
+            focus = item;
+            focus.FocusChanged += OnFocus;
+        }
+        focusAnimation?.Stop();
+        quiet = false;
+        Fill(model);
+        Sync();
+    }
+
+    /// <summary>The tile's own parts: placeholder, overlays, caption; its picture is asked for again.</summary>
+    void Fill(TileModel model)
+    {
+        Model = model;
+        shown++;
+        pictureAsked = false;
+        picture.Opacity = 0;
+        picture.ResourceUrl = "";
+        var (from, to) = Placeholder.Colors(model.Title);
+        well.Background = Gradients.Diagonal(AvatarView.Rgb(from), AvatarView.Rgb(to));
+        if (placeholder != null) placeholder.Text = model.Title;
+        foreach (var child in overlays.Children.ToList())
+        {
+            overlays.Remove(child);
+            child.Dispose();
+        }
+        Overlays(overlays, model, w, h);
+        titleText = model.Title;
+        title.Text = Text.Fit(titleText, PleyType.Caption with { Weight = focus.Focused ? PleyType.Bold : PleyType.Caption.Weight }, kind.Width);
+        subtitle.Text = Text.Fit(model.Subtitle, PleyType.Caption, kind.Width);
+    }
 
     /// <summary>Asks for the picture once the tile is near the screen; it fades in over the placeholder.</summary>
     public void LoadPicture()
@@ -121,9 +165,11 @@ sealed class TileView : View
         if (pictureAsked || Model.Images.Count == 0) return;
         pictureAsked = true;
         picture.Opacity = 0;
+        var mine = shown;
         images.Load(Model.Images, kind.Width, file =>
         {
-            if (file == null || Disposed) return;
+            // Gone, or showing another tile by now.
+            if (file == null || Disposed || mine != shown) return;
             picture.ResourceUrl = file;
             var fade = new Animation(PleyMotion.ImageFadeMs);
             fade.AnimateTo(picture, "Opacity", 1f);
@@ -131,7 +177,7 @@ sealed class TileView : View
             // doesn't cover the box (a logo with clear parts) shows no gradient through it.
             fade.Finished += (s, e) =>
             {
-                if (!Disposed) well.BackgroundColor = PleyColors.Surface2;
+                if (!Disposed && mine == shown) well.BackgroundColor = PleyColors.Surface2;
             };
             fade.Play();
         });
@@ -183,10 +229,13 @@ sealed class TileView : View
         title.Text = Text.Fit(titleText, PleyType.Caption with { Weight = weight }, kind.Width);
         var scale = on ? (kind.Round ? PleyShape.AvatarScale : PleyShape.TileScale) : 1f;
         focusAnimation?.Stop();
+        // The ring shows while focused, and is hidden again once it has faded.
+        if (on) ring.Show();
         if (instant)
         {
             frame.Scale = new Vector3(scale, scale, 1);
             ring.Opacity = on ? 1 : 0;
+            if (!on) ring.Hide();
             return;
         }
         // A held key moves focus every 60 ms: each change lasts until the next has begun, evenly, so focus glides.
@@ -197,6 +246,10 @@ sealed class TileView : View
         };
         focusAnimation.AnimateTo(frame, "Scale", new Vector3(scale, scale, 1));
         focusAnimation.AnimateTo(ring, "Opacity", on ? 1f : 0f);
+        if (!on) focusAnimation.Finished += (s, e) =>
+        {
+            if (!Disposed && !Focus.Focused) ring.Hide();
+        };
         focusAnimation.Play();
     }
 
@@ -207,8 +260,11 @@ sealed class TileView : View
         var bar = model.Progress > 0 ? Ui.Dp(4) : 0;
         if (bar > 0)
         {
-            well.Add(new View { Size = new Size(w, bar), Position = new Position(0, h - bar), BackgroundColor = PleyColors.ProgressTrackOnArt });
-            well.Add(new View { Size = new Size(w * Math.Min(1f, model.Progress), bar), Position = new Position(0, h - bar), BackgroundColor = PleyColors.Accent });
+            // The well doesn't clip: the bar takes the well's bottom corners itself (top left, top right, bottom right, bottom left).
+            var corner = Ui.Dp(PleyShape.TileRadius);
+            var played = Math.Min(1f, model.Progress);
+            well.Add(new View { Size = new Size(w, bar), Position = new Position(0, h - bar), BackgroundColor = PleyColors.ProgressTrackOnArt, CornerRadius = new Vector4(0, 0, corner, corner) });
+            well.Add(new View { Size = new Size(w * played, bar), Position = new Position(0, h - bar), BackgroundColor = PleyColors.Accent, CornerRadius = new Vector4(0, 0, played >= 1f ? corner : 0, corner) });
         }
         if (model.Unwatched > 0)
         {
