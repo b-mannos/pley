@@ -256,7 +256,6 @@ sealed class LivePlayerScreen : Sheet
         digitsText.PixelSize = Ui.Dp(style.Size);
         digitsText.FontFamily = style.Family;
         digitsText.FontStyle = Text.Weight(style.Weight);
-        Text.Track(digitsText, style);
         digitsText.Text = text;
         var w = digitsText.NaturalSize.Width;
         var h = Text.LineHeight(style);

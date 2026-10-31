@@ -164,7 +164,13 @@ static class PleyMotion
     public const int FocusMs = 150, UnfocusMs = 120, PressMs = 100, RevealMs = 150, BackdropMs = 300, RestMs = 400, OverlayMs = 200, ScreenMs = 220, ImageFadeMs = 150;
 }
 
-/// <summary>Text the way the Android app sets it: the style's size and weight, one line unless asked, ellipsized.</summary>
+/// <summary>
+/// Text the way the Android app sets it: the style's size and weight, one line unless asked,
+/// ellipsized. Not its tracking (letterSpacing): the TV's NUI has that only as CharacterSpacing,
+/// which its API doesn't name, and with it set, labels made after the first screens drew as "…"
+/// alone (tile captions, headers). It adds a fraction of a pixel a letter; text keeps the font's
+/// own spacing.
+/// </summary>
 static class Text
 {
     public static TextLabel Label(string text, TextStyle style, Color color, int maxLines = 1, float width = 0)
@@ -179,7 +185,6 @@ static class Text
             FontStyle = Weight(style.Weight),
             VerticalAlignment = VerticalAlignment.Center,
         };
-        Track(label, style);
         if (width > 0) label.Size = new Size(Ui.Dp(width), LineHeight(style) * maxLines);
         return label;
     }
@@ -189,30 +194,15 @@ static class Text
         FontClient.Instance.AddCustomFontDirectory($"{(global::Tizen.Applications.Application.Current.DirectoryInfo.SharedResource)}fonts");
 
     /// <summary>
-    /// NUI's CharacterSpacing (in pixels), which the TV's NUI has and the API 9 reference doesn't
-    /// name; without it, text keeps the font's own spacing.
-    /// </summary>
-    static readonly System.Reflection.PropertyInfo? CharacterSpacing = typeof(TextLabel).GetProperty("CharacterSpacing");
-
-    /// <summary>The style's tracking, as Android's letterSpacing: sp added between letters.</summary>
-    public static void Track(TextLabel label, TextStyle style)
-    {
-        if (style.Tracking != 0 && CharacterSpacing != null) CharacterSpacing.SetValue(label, Ui.Dp(style.Tracking));
-    }
-
-    /// <summary>
     /// The width in dp a label needs for its text on one line. It is measured on a fresh label
     /// of the same font: a label already sized for other text (the player's badge going from
-    /// "Direct play" to "Transcoding") can measure as that size's "…". NaturalSize can also
-    /// leave out the tracking set through CharacterSpacing and rounds to the pixel, so this adds
-    /// the tracking and a little room.
+    /// "Direct play" to "Transcoding") can measure as that size's "…". NaturalSize rounds to the
+    /// pixel, so this adds a little room.
     /// </summary>
     public static float Width(TextLabel label)
     {
-        var text = label.Text ?? "";
-        var spacing = CharacterSpacing?.GetValue(label) is float s ? s : 0;
-        using var probe = new TextLabel(text) { PixelSize = label.PixelSize, FontFamily = label.FontFamily, FontStyle = label.FontStyle };
-        return (probe.NaturalSize.Width + spacing * text.Length) / Ui.Scale + 3;
+        using var probe = new TextLabel(label.Text ?? "") { PixelSize = label.PixelSize, FontFamily = label.FontFamily, FontStyle = label.FontStyle };
+        return probe.NaturalSize.Width / Ui.Scale + 3;
     }
 
     /// <summary>Each style's line height in its font, in pixels, measured once.</summary>
