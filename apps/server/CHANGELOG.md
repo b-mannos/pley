@@ -41,8 +41,8 @@ describes how they are made.
   non-H.264 channels are converted, on the graphics card where there is
   one. Settings → Live TV has the sources, the groups (a whole group or
   region hidden at once), the lineup (hide, rename, renumber, pick a
-  guide channel) and who is watching what. Channels are browsed by group,
-  as TiviMate does: groups named by region ("UK| Sport") fold under it,
+  guide channel) and who is watching what. Channels are browsed by group:
+  groups named by region ("UK| Sport") fold under it,
   and channel up and down stay in the group. Lineups of tens of
   thousands of channels open at once: the apps fetch a page of channels
   and the guide of those in view.

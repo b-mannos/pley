@@ -44,7 +44,7 @@ export interface Jump {
 }
 
 /**
- * Live TV (the web's LiveTvPage), as TiviMate shows it: a category of
+ * Live TV (the web's LiveTvPage): a category of
  * channels at a time, in the guide (channels down, time across) or as
  * cards with what's on now and next. Left from the channels opens the
  * categories: Favourites, Recently watched, All channels, then the

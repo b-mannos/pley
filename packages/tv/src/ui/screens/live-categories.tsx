@@ -67,7 +67,7 @@ export function categoryLines(groups: LiveGroups | null, open: string | null): L
 }
 
 /**
- * Live TV's categories, as TiviMate lists them, in a panel at the left:
+ * Live TV's categories, in a panel at the left:
  * Search at its head (the TV's keyboard; every channel, whatever category
  * was open; Left goes to it from anywhere in the list), then Favourites,
  * Recently watched and All channels, the regions and the other groups.

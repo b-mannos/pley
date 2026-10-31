@@ -81,7 +81,7 @@ import app.pley.android.ui.phone.theme.LocalPhoneMetrics
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
- * Live TV on phones and tablets (the web's LiveTvPage, TiviMate's way):
+ * Live TV on phones and tablets (the web's LiveTvPage):
  * "Live TV" with a button that switches between the guide and the
  * channels; the category in a picker (Favourites, Recently watched, All
  * channels, the groups); a search of names, numbers and what's on. The

@@ -2603,7 +2603,7 @@ class Playlist(Grid):
 
 
 class Live(Screen):
-    """Live TV (livetv.py), as TiviMate and the web lay it out: the
+    """Live TV (livetv.py), as the web lays it out: the
     categories (Search, Favourites, Recently watched, All channels, then
     the groups, those of a region gathered under it), the channels of the
     one focus rests on by number with what's on now, and beside them the
@@ -2873,7 +2873,7 @@ class Live(Screen):
 
     def moved(self, control_id: int, action: int) -> None:
         if control_id == L.LIVE_CATEGORIES:
-            # As TiviMate: the channels follow focus once it rests.
+            # The channels follow focus once it rests.
             self.win.rest(self.rested_on_category)
         elif control_id == L.LIVE_LIST:
             self.win.rest(lambda: self.win.screen is self and self.rested_on_channel())

@@ -391,7 +391,7 @@ class Plugin:
     # --------------------------------------------------------------- Live TV
 
     def route_live(self) -> None:
-        """Live TV (livetv.py), as TiviMate lays it out: Favourites, Recently
+        """Live TV (livetv.py), by category: Favourites, Recently
         watched and All channels, then the groups, those of a region
         gathered under it. Nothing asks for more than a page of channels."""
         found = livetv.groups(self.client())

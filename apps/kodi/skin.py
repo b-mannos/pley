@@ -983,8 +983,8 @@ def live_category(focused: bool) -> list:
 
 
 def live_page() -> ET.Element:
-    """Live TV (livetv.py), as TiviMate and the web's LiveTvPage lay it
-    out: the categories, the channels of the one shown by number with
+    """Live TV (livetv.py), as the web's LiveTvPage lays it out: the
+    categories, the channels of the one shown by number with
     what's on now, and beside them what the focused channel shows now and
     next, which Kodi reads from the list's item as focus moves."""
     scroll = {"text": "200", "attrs": {"tween": "cubic", "easing": "out"}}

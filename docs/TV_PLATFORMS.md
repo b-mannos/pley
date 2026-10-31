@@ -138,9 +138,8 @@ transcode free for two (`503`), the old session ends first.
 
 ### Live TV
 
-Live TV works as in the [Android app](ANDROID.md#live-tv), laid out as
-TiviMate does. The rail shows it after Home, remembered on the TV so it
-shows at launch. On these TVs:
+Live TV works as in the [Android app](ANDROID.md#live-tv). The rail
+shows it after Home, remembered on the TV so it shows at launch. On these TVs:
 
 - **Categories:** Left from the channels opens them, with Search at their
   head (the TV's own keyboard). Back leaves search results for the category

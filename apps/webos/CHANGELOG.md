@@ -18,7 +18,7 @@ describes how they are made.
 ### Added
 
 - Live TV, where the server has IPTV channels for the profile, by
-  category as TiviMate shows it: Favourites, Recently watched, All
+  category: Favourites, Recently watched, All
   channels, the regions in alphabetical order, each opening to its
   groups, and the other groups; one search, with the TV's keyboard, of
   every channel by name, number or what's on and of the groups; a guide that

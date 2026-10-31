@@ -1045,7 +1045,7 @@ html.avplay .engine-host { background: transparent; }
 .guide-channel.loading { background: rgba(25, 29, 36, 0.6); }
 .live-list-row.loading .skeleton { margin-left: 0; }
 
-/* Live TV's categories, as TiviMate lists them: a panel at the left, over the page. */
+/* Live TV's categories: a panel at the left, over the page. */
 .live-cats { position: absolute; top: 0; bottom: 0; width: 320px; box-sizing: border-box; background: var(--surface2); box-shadow: inset -1px 0 0 var(--surface4); transform: translateX(-24px); opacity: 0; transition: transform 200ms var(--focus-ease), opacity 200ms var(--focus-ease); overflow: hidden; }
 .live-cats.in { transform: none; opacity: 1; }
 .reduced .live-cats { transition: none; }

@@ -278,7 +278,7 @@ def profiles_left(count: int) -> int:
     return (WIDTH - span) // 2
 
 
-# Live TV (livetv.py), as TiviMate and the web's LiveTvPage lay it out:
+# Live TV (livetv.py), as the web's LiveTvPage lays it out:
 # the categories (Search, Favourites, Recently watched, All channels and
 # the groups, a region's under it), the channels of the one shown by
 # number with what's on now under its name and count, and beside them the

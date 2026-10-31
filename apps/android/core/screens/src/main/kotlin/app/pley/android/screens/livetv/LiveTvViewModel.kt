@@ -93,7 +93,7 @@ sealed interface LiveTvEvent {
 }
 
 /**
- * Live TV (apps/web/src/pages/livetv/LiveTvPage.tsx), TiviMate's way: the
+ * Live TV (apps/web/src/pages/livetv/LiveTvPage.tsx): the
  * categories first (Favourites, Recently watched, All channels, then the
  * provider's groups, those of a region gathered under it), then the
  * chosen one's channels, a page at a time as they scroll, as a guide that

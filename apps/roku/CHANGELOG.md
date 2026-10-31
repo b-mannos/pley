@@ -12,7 +12,7 @@ describes how they are made.
 
 ### Added
 
-- Live TV, where the server has channels, as TiviMate lays it out:
+- Live TV, where the server has channels, by category:
   Search pinned at the top (every channel, and the groups whose names
   match; Replay opens it from anywhere), Favourites,
   Recently watched, All channels, the regions in alphabetical order and

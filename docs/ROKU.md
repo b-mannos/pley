@@ -96,9 +96,9 @@ the code is `components/lib/AutoQuality.brs`. On Roku:
 
 ### Live TV
 
-Live TV works as in the [Android app](ANDROID.md#live-tv), laid out as
-TiviMate does. On Roku (`components/screens/LiveTvScreen`,
-`LivePlayerScreen`, `components/lib/Live.brs`):
+Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
+(`components/screens/LiveTvScreen`, `LivePlayerScreen`,
+`components/lib/Live.brs`):
 
 - **Paging:** channels come 50 at a time, and the guide only for those 50
   (`GET /api/live/guide?ids=`).

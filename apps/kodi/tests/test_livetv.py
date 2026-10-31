@@ -517,7 +517,7 @@ class LiveScreenTest(unittest.TestCase):
         self.assertEqual(labels[5:8], ["UK", "Sport", "News"])
         self.assertEqual(self.win.made[L.LIVE_CATEGORIES].items[5].properties["region"], "open")
         self.assertEqual(self.win.made[L.LIVE_CATEGORIES].items[6].properties["inner"], "1")
-        # Focus resting on a category shows its channels (TiviMate's way).
+        # Focus resting on a category shows its channels.
         found.selected = 6
         self.win.focused = L.LIVE_CATEGORIES
         self.screen.moved(L.LIVE_CATEGORIES, window.DOWN)

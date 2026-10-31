@@ -121,7 +121,7 @@ import app.pley.android.ui.tv.shell.failedTitle
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
- * Live TV on TV (the web's LiveTvPage, TiviMate's way, for a remote):
+ * Live TV on TV (the web's LiveTvPage, for a remote):
  * "Live TV" with the Guide and Channels tabs; down the left the
  * categories (Favourites, Recently watched, All channels, then the
  * provider's groups, those of a region under it, opened with OK); beside
