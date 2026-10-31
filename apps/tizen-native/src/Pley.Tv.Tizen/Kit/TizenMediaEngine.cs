@@ -108,18 +108,21 @@ sealed class TizenMediaEngine : IVideoEngine
         // The player before (this engine's or another's) has let go of the video plane first.
         await Releasing;
         if (mine != generation) return;
+        if (video)
+        {
+            // The window without its alpha for a few frames, then with it again, before each player
+            // takes the display: played one after another under the window's alpha (the next
+            // episode, a channel tuned again), every second player showed the TV's menu where its
+            // picture was, with its sound. Off and on at once did nothing: the window has to be
+            // drawn without it. The screen is black here, as it starts.
+            Window.Instance.SetTransparency(false);
+            await Task.Delay(OpaqueMs);
+            if (mine != generation) return;
+            Window.Instance.SetTransparency(true);
+        }
         try
         {
-            if (video)
-            {
-                // The window's alpha off and on again before each player takes the display: played
-                // one after another under the window's alpha (the next episode, a channel tuned
-                // again, a film after a film), every second player showed the TV's menu where its
-                // picture was, with its sound. The screen is black here, as it starts.
-                Window.Instance.SetTransparency(false);
-                Window.Instance.SetTransparency(true);
-                p.Display = new Media.Display(Window.Instance);
-            }
+            if (video) p.Display = new Media.Display(Window.Instance);
             p.ErrorOccurred += (_, e) => Post(mine, () => Fail(ErrorOf(e.Error)));
             p.PlaybackCompleted += (_, _) => Post(mine, Completed);
             p.PlaybackInterrupted += (_, _) => Post(mine, () => Fail(new EngineError.Other("the TV took its player for something else")));
@@ -522,6 +525,9 @@ sealed class TizenMediaEngine : IVideoEngine
     /// once they have. Shared by every engine, as the TV has one video plane.
     /// </summary>
     static Task Releasing = Task.CompletedTask;
+
+    /// <summary>How long the window goes without its alpha before a player takes the display: a few frames.</summary>
+    const int OpaqueMs = 120;
 
     /// <summary>The prepare of the player playing, while it runs.</summary>
     Task? preparing;
