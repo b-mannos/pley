@@ -201,14 +201,18 @@ static class Text
     }
 
     /// <summary>
-    /// The width in dp a label needs for its text on one line. NaturalSize can leave out the
-    /// tracking set through CharacterSpacing and rounds to the pixel, so a label sized to it
-    /// exactly can end in "…"; this adds the tracking and a little room.
+    /// The width in dp a label needs for its text on one line. It is measured on a fresh label
+    /// of the same font: a label already sized for other text (the player's badge going from
+    /// "Direct play" to "Transcoding") can measure as that size's "…". NaturalSize can also
+    /// leave out the tracking set through CharacterSpacing and rounds to the pixel, so this adds
+    /// the tracking and a little room.
     /// </summary>
     public static float Width(TextLabel label)
     {
+        var text = label.Text ?? "";
         var spacing = CharacterSpacing?.GetValue(label) is float s ? s : 0;
-        return (label.NaturalSize.Width + spacing * (label.Text?.Length ?? 0)) / Ui.Scale + 3;
+        using var probe = new TextLabel(text) { PixelSize = label.PixelSize, FontFamily = label.FontFamily, FontStyle = label.FontStyle };
+        return (probe.NaturalSize.Width + spacing * text.Length) / Ui.Scale + 3;
     }
 
     /// <summary>Each style's line height in its font, in pixels, measured once.</summary>
