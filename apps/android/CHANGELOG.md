@@ -20,6 +20,8 @@ describes how they are made.
   it from a device that doesn't decode it.
 - The player's Decoded line says HEVC and HDR10 for Dolby Vision played
   as its base layer, not Dolby Vision.
+- Dolby Vision details call a profile 8 with the Blu-ray's base layer
+  "Profile 8", as its label does, not "Profile 8.6".
 
 ## [0.1.0] - 2026-10-30
 

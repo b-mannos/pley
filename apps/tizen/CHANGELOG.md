@@ -50,6 +50,8 @@ describes how they are made.
   only on a network the TV measured below 1.5 times the file's bitrate in
   the last 2 minutes, or, where it measured nothing, the second such wait
   within 5 minutes.
+- Dolby Vision details call a profile 8 with the Blu-ray's base layer
+  "Profile 8", as its label does, not "Profile 8.6".
 
 ## [0.0.1] - 2026-10-29
 
