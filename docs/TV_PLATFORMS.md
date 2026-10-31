@@ -399,7 +399,8 @@ music playing on behind the other pages, driven by the remote's media keys
 from any of them, and pausing for a video; and the player: the stream on
 the TV's own player, chosen with the TV's capabilities, seeking with Left
 and Right with previews of where to, the scrubber with its chapters (Up
-on it opens them as a row of cards to go to) and
+on it opens them as a row of cards to go to, Skip Intro and the credits
+among them) and
 the control row, text subtitles in Settings' look (the CAPTIONS key turns
 them off and on), picture subtitles (PGS, VobSub, DVB) decoded from the
 server's `.mks` and drawn as the web app draws them, burned in by the

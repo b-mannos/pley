@@ -127,8 +127,10 @@ It has no releases yet: it is built and installed by hand
 - In the native app's player, OK with the controls hidden shows them on
   the scrubber, as Up does, rather than pausing; OK on the scrubber plays
   and pauses. Up on the scrubber opens the film's chapters as a row of
-  cards (each one's picture, name and start), pausing while it shows:
+  cards (each one's picture, name and start), with Skip Intro and the
+  credits among them, pausing while it shows:
   Left and Right go through them, moving the scrubber to each one's
   start, and OK goes there. Chapters named only for where they start
   ("00:06:19.212") are numbered instead. The scrubber is blue up to its
-  thumb while seeking.
+  thumb while seeking. The Skip Intro and Skip Credits button shows only
+  while the controls are hidden.

@@ -290,9 +290,9 @@ sealed class PlayerScreen : Sheet
                         if (down && !Busy) Step(key == "Left" ? -1 : 1);
                         return true;
                     case "Up":
-                        // Skip Intro or Skip Credits, while it shows, is first: Up goes to it, as on Android.
-                        // Else the chapters as cards over the scrubber, where there are any; else Up moves on.
-                        if (skipShown || model.State.Value.Chapters.Count == 0) return false;
+                        // The chapters as cards over the scrubber, Skip Intro and the credits among them,
+                        // where there are any; else Up moves on.
+                        if (Cards().Count == 0) return false;
                         if (down) OpenChapters();
                         return true;
                     case "Down":
@@ -552,7 +552,8 @@ sealed class PlayerScreen : Sheet
     {
         var s = model.State.Value;
         var free = error == null && s.UpNext == null;
-        var skipNow = s.SkipLabel != null && free && !(shown && seeker.Target != null);
+        // Only with the controls hidden: with them, the chapters' row (Up on the scrubber) has Skip Intro.
+        var skipNow = s.SkipLabel != null && free && !shown;
         if (skipNow) skip.SetLabel(s.SkipLabel!);
         var noticeNow = s.Sleep.SecondsLeft != null && error == null;
         if (s.Sleep.SecondsLeft is int left) notice.Set(left);
@@ -830,7 +831,7 @@ sealed class PlayerScreen : Sheet
         }
         if (RemoteKeys.Info(key) || RemoteKeys.Menu(key) || RemoteKeys.Guide(key))
         {
-            if (down) ShowControls(true, skipShown ? skip.Item : scrubber);
+            if (down) ShowControls(true, scrubber);
             return true;
         }
         switch (key)
@@ -990,6 +991,22 @@ sealed class PlayerScreen : Sheet
     /// while they show, as YouTube's TV app does, and plays on as it was once they go; as focus goes
     /// through them, the scrubber's thumb shows the chapter's start.
     /// </summary>
+    /// <summary>The chapters' row's cards (<see cref="Markers.Cards"/>), made again only when the chapters or markers change.</summary>
+    IReadOnlyList<ChapterMark> Cards()
+    {
+        var s = model.State.Value;
+        if (!ReferenceEquals(s.Chapters, cardsChapters) || !ReferenceEquals(s.Markers, cardsMarkers))
+        {
+            cardsChapters = s.Chapters;
+            cardsMarkers = s.Markers;
+            cards = Markers.Cards(s.Chapters, s.Markers);
+        }
+        return cards;
+    }
+
+    IReadOnlyList<ChapterMark> cards = Array.Empty<ChapterMark>();
+    object? cardsChapters, cardsMarkers;
+
     void OpenChapters()
     {
         playOnAfterChapters = model.WantsToPlay;
@@ -999,7 +1016,7 @@ sealed class PlayerScreen : Sheet
             chapterAt = start;
             Layout();
         };
-        chapterStrip.Show(model.State.Value.Chapters, seeker.Target ?? model.LivePositionMs());
+        chapterStrip.Show(Cards(), seeker.Target ?? model.LivePositionMs());
         if (chapterStrip.Item.Parent == null) Root.Add(chapterStrip.Item);
         Tree.Focus(chapterStrip.Item);
         Poke();
