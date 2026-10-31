@@ -22,10 +22,10 @@ public sealed record TizenFacts
     /// <summary>The sound output: "PCM", "DOLBY", "DOLBY_DIGITAL_PLUS", "DTS"; null when unknown (nothing passed through).</summary>
     public string? OutputMode { get; init; }
     /// <summary>
-    /// The app draws picture subtitles (PGS, VobSub, DVB) from the server's .mks. The native app
-    /// has no decoder for them yet: without one, the server burns them into a stream.
+    /// The app draws picture subtitles (PGS, VobSub, DVB) from the server's .mks, as the web app
+    /// does on every Samsung TV. Off, the server burns them into a stream.
     /// </summary>
-    public bool PictureSubtitles { get; init; }
+    public bool PictureSubtitles { get; init; } = true;
 
     static readonly (double Version, int Year)[] Years =
     {
@@ -44,14 +44,15 @@ public sealed record TizenFacts
 /// <summary>
 /// What a Samsung TV plays, reported to the server (capabilities version 2) so it sends files as
 /// they are whenever the TV's player takes them: the web app's tizenCaps (apps/tizen/src/caps.ts),
-/// the same report for the same TV, but for picture subtitles, which it claims only when it draws
-/// them. Samsung TVs show no Dolby Vision. As JSON for the play request.
+/// the same report for the same TV. Picture subtitles are claimed when the app draws them
+/// (<see cref="TizenFacts.PictureSubtitles"/>). Samsung TVs show no Dolby Vision. As JSON for the
+/// play request.
 /// </summary>
 public static class TizenCaps
 {
     static readonly string[] Containers = { "mkv", "mp4", "m4v", "mov", "ts", "m2ts", "mpegts", "webm", "avi", "mpg", "mpeg", "mp3", "m4a", "aac", "flac", "ogg", "oga", "wav", "mka" };
 
-    /// <summary>Subtitles the app draws itself as WebVTT from the server.</summary>
+    /// <summary>Subtitles the app draws itself as WebVTT from the server; pictures come from their .mks.</summary>
     static readonly string[] TextSubtitles = { "subrip", "ass", "ssa", "webvtt", "mov_text" };
 
     /// <summary>Picture subtitles, drawn from their .mks when the app can (<see cref="TizenFacts.PictureSubtitles"/>).</summary>

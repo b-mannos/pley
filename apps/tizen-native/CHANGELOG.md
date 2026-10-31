@@ -120,3 +120,7 @@ It has no releases yet: it is built and installed by hand
   plays a track. It dims after two minutes without a key. The remote's
   media keys play, pause and skip the music from any page; it pauses while
   the app is hidden and plays on when it comes back.
+- Picture subtitles (Blu-ray PGS, DVD VobSub and DVB) in the native app's
+  player, drawn by the app as the web app draws them: a film plays on as it
+  is when one is chosen, and Sync moves them like text. A server too old to
+  send them has them burned into the video instead.

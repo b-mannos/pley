@@ -425,6 +425,19 @@ public sealed class Api
         return new SubtitleText(res.Text ?? "", (res.Header("X-Pley-Complete") ?? "").Trim() != "0");
     }
 
+    /// <summary>
+    /// The server's .mks of picture subtitle track <paramref name="url"/>
+    /// (<c>/api/files/{id}/subtitles/{n}.mks</c>). The server reads the whole file to make it the
+    /// first time, minutes for a big one on a network share, so it may stay silent for 15; an
+    /// answer marked <c>X-Pley-Complete: 0</c> is a part, to ask for again. An older server
+    /// answers 404, an older transcoder 503.
+    /// </summary>
+    public async Task<SubtitlePictures> PictureSubtitles(string url, CancellationToken cancel = default)
+    {
+        var res = await Send(url, cancel: cancel, timeoutMs: 15 * 60_000, responseType: ResponseType.Bytes, accept: "video/x-matroska").ConfigureAwait(false);
+        return new SubtitlePictures(res.Bytes ?? new byte[0], (res.Header("X-Pley-Complete") ?? "").Trim() != "0");
+    }
+
     /// <summary>GET /api/files/{id}/trickplay: the file's seek previews; null while the server makes them (its 404).</summary>
     public async Task<TrickplayInfo?> Trickplay(long fileId, CancellationToken cancel = default)
     {

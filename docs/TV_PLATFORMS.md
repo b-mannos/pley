@@ -222,7 +222,7 @@ bun run --cwd apps/webos build       # only an app's dist/ (apps/tizen too); --d
 
 - The picture subtitle decoders are in `packages/picture-subtitles`, which
   the web app uses too: plain TypeScript without dependencies, compiled by
-  each TV build for its own engine.
+  each TV build for its own engine. The native Samsung app has them in C#.
 - Each shell has `facts.ts` (what the TV says about itself; LG's system
   services in `luna.ts`), `caps.ts` (the capability report, with snapshot
   tests of real sets), `engine.ts` (AVPlay, or `<video>` with
@@ -400,7 +400,9 @@ from any of them, and pausing for a video; and the player: the stream on
 the TV's own player, chosen with the TV's capabilities, seeking with Left
 and Right with previews of where to, the scrubber with its chapters and
 the control row, text subtitles in Settings' look (the CAPTIONS key turns
-them off and on), the side panels (Subtitles with Sync and the subtitles'
+them off and on), picture subtitles (PGS, VobSub, DVB) decoded from the
+server's `.mks` and drawn as the web app draws them, burned in by the
+server only when it can't make that file, the side panels (Subtitles with Sync and the subtitles'
 look, Audio, Quality, Chapters, the sleep timer, Speed where the TV's
 player has other speeds, and Info), Skip Intro and Skip Credits, Up Next
 (the next episode, or the next in a playlist or collection), recovering by
@@ -426,6 +428,10 @@ is back. The other pages come next.
   app's tests for the same rules.
 - `src/Pley.Tv.Tizen` is the app: NUI screens on the Core, the TV's player,
   remote keys and keyboard, and packaging.
+- The picture subtitle decoders (`src/Pley.Tv.Core/Subtitles/Pictures`)
+  are `packages/picture-subtitles` in C#, with its tests. Each bitmap's
+  RGBA bytes become a NUI texture (`PixelData`), shown by an image scaled
+  from the subtitle plane to the screen.
 - The Core's tests also run the fixtures in `packages/tv/test/fixtures`,
   inputs with the answers `packages/tv` gives, so the two Samsung apps
   answer the same questions the same way. Where the Android app is

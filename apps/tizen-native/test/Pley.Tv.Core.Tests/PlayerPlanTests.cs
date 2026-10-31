@@ -283,12 +283,15 @@ public class CapsPolicyTests
         Assert.Contains("eac3", caps.AudioPassthrough);
         Assert.Contains(caps.Video, v => v.Codec == "hevc" && v.MaxLevel == 156);
         Assert.Equal(3840, caps.Display!.Width);
-        // No picture subtitles claimed while the app can't draw them: the server burns them in.
-        Assert.False(caps.PictureSubtitlesSideload);
-        Assert.DoesNotContain("hdmv_pgs_subtitle", caps.SubtitleCodecs);
-        var drawn = ClientCaps.Of(TizenCaps.Of(new TizenFacts { PictureSubtitles = true }));
-        Assert.True(drawn.PictureSubtitlesSideload);
-        Assert.Contains("hdmv_pgs_subtitle", drawn.SubtitleCodecs);
+        // Picture subtitles are drawn from the server's .mks, as the web app's report says.
+        Assert.True(caps.PictureSubtitlesSideload);
+        Assert.Contains("hdmv_pgs_subtitle", caps.SubtitleCodecs);
+        Assert.Contains("dvd_subtitle", caps.SubtitleCodecs);
+        Assert.Contains("dvb_subtitle", caps.SubtitleCodecs);
+        // Not claimed when not drawn: the server burns them in.
+        var burned = ClientCaps.Of(TizenCaps.Of(new TizenFacts { PictureSubtitles = false }));
+        Assert.False(burned.PictureSubtitlesSideload);
+        Assert.DoesNotContain("hdmv_pgs_subtitle", burned.SubtitleCodecs);
     }
 }
 

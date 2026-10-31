@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Pley.Tv.Core.Api;
 using Pley.Tv.Core.Auth;
 using Pley.Tv.Core.Net;
+using Pley.Tv.Core.Subtitles.Pictures;
 using Pley.Tv.Core.Ui;
 
 namespace Pley.Tv.Core.Player;
@@ -22,8 +23,9 @@ namespace Pley.Tv.Core.Player;
 /// the server out of reach mid-playback is waited for ("Reconnecting…") rather than failed at once.</item>
 /// <item><b>Tracks.</b> Audio switched by the engine in direct play, a new session for streams.
 /// Text subtitles are always drawn by the app from the server's WebVTT (<see cref="Cues"/>);
-/// pictures are burned in by the server, as the app has no decoder for them. Choices are saved
-/// with PUT /api/items/{id}/streams, the audio only when picked.</item>
+/// pictures (PGS, VobSub, DVB) from the server's .mks of them (<see cref="Picture"/>), burned in
+/// by the server only when it can't make that file. Choices are saved with PUT
+/// /api/items/{id}/streams, the audio only when picked.</item>
 /// <item><b>Markers, Up Next, the sleep timer, speed</b>, and a session the server stopped: it says
 /// so and plays no more.</item>
 /// </list>
@@ -65,12 +67,6 @@ public sealed class PlayerModel : IDisposable
     /// <summary>Between its questions: 0.5 s, 1 s, then every 2 s.</summary>
     static readonly long[] OutageStepsMs = { 500, 1_000, 2_000 };
 
-    /// <summary>
-    /// Whether this app draws picture subtitles from the server's .mks. It can't yet (PGS and VobSub
-    /// need a decoder of their own), so pictures are burned in by the server.
-    /// </summary>
-    const bool DrawsPictures = false;
-
     readonly IPlayerSource source;
     readonly Func<IVideoEngine> engineFactory;
     readonly IScheduler scheduler;
@@ -102,6 +98,8 @@ public sealed class PlayerModel : IDisposable
     IReadOnlyList<Marker> markers = new Marker[0];
     /// <summary>The mode a Dolby Vision guard asked for, for this item's later sessions too.</summary>
     string? guardMode;
+    /// <summary>The server has no .mks of picture subtitles (an older server or transcoder): they are burned in from then on.</summary>
+    bool picturesUnavailable;
 
     PlaybackInfo? info;
     bool sessionEnded = true;
@@ -156,7 +154,8 @@ public sealed class PlayerModel : IDisposable
         this.reporter = reporter ?? new SessionReporter();
         pressedAt = scheduler.Elapsed;
         offsets = new SubtitleOffsets(source.Storage, () => source.ProfileId);
-        presenter = new SubtitlePresenter(scheduler, source.Subtitles, LivePositionMs, () => offset, () => State.Value.Speed, () => Notice(SessionText.SubtitlesFailed));
+        presenter = new SubtitlePresenter(scheduler, source.Subtitles, LivePositionMs, () => offset, () => State.Value.Speed, () => Notice(SessionText.SubtitlesFailed),
+            source.PictureSubtitles, PicturesFailed);
         sleep = new SleepTimer(scheduler, ItemLeftMs, () => item?.Id, OnSleep);
         sleep.State.Changed += s => Update(st => st with { Sleep = s });
         lastPositionMs = request.StartMs;
@@ -169,6 +168,9 @@ public sealed class PlayerModel : IDisposable
 
     /// <summary>The text subtitles showing now, at the playhead moved by the offset; empty when none. The screen draws them.</summary>
     public Signal<IReadOnlyList<Cue>> Cues => presenter.Shown;
+
+    /// <summary>The picture subtitles showing now (PGS, VobSub, DVB), at the playhead moved by the offset; null when none. The screen draws them.</summary>
+    public Signal<PictureFrame?> Picture => presenter.Picture;
 
     /// <summary>A message for the top right: the playback's notices, a transcode it chose, a slow server, the CAPTIONS key.</summary>
     public event Action<PlayerToast>? Toast;
@@ -336,8 +338,8 @@ public sealed class PlayerModel : IDisposable
         }
         // Automatic audio names no track: the server picks it again for each session.
         var wanted = audioPicked ? audio : null;
-        // Unlike Android's, this player draws no picture subtitles: chosen, they are asked to be burned
-        // in, as for a stream, wherever the file would play as it is.
+        // Picture subtitles this player can't draw (the server makes no .mks of them) are asked to be
+        // burned in, as for a stream, wherever the file would play as it is.
         var streaming = PlaybackPlan.Streams(mode, decision, chosen, wanted, caps) || (PlaybackPlan.IsImage(subtitle) && !Sideload);
         var choices = new PlaybackPlan.Choices(chosen, atMs, wanted, subtitle, quality, mode, streaming, Sideload);
         var sent = Body(detail.Id, choices);
@@ -461,12 +463,13 @@ public sealed class PlayerModel : IDisposable
         SetClock(positionMs: atMs);
     }
 
-    /// <summary>Picture subtitles are drawn here unless the app can't draw them (it can't yet).</summary>
-    bool Sideload => PlaybackPlan.SideloadsPictures(caps, DrawsPictures);
+    /// <summary>Picture subtitles are drawn here, as the report says, unless the server can't make them.</summary>
+    bool Sideload => PlaybackPlan.SideloadsPictures(caps, !picturesUnavailable);
 
     /// <summary>
     /// The tracks chosen, where they play: the engine switches a file's audio in direct play; text
-    /// subtitles come from the server's WebVTT, drawn by the app; pictures are burned in.
+    /// subtitles come from the server's WebVTT and pictures from its .mks, drawn by the app; nothing
+    /// is drawn for pictures the server burns in.
     /// </summary>
     void ApplyTracks()
     {
@@ -478,13 +481,27 @@ public sealed class PlayerModel : IDisposable
             if (engine.SelectAudio(PlaybackPlan.AudioStreams(file).ToList().IndexOf(audio), audio.Language) && !audio.Default) QuietFrames();
         }
         var sub = subtitle;
-        if (sub == null || PlaybackPlan.IsImage(sub))
+        if (sub == null)
         {
             presenter.Hide();
             return;
         }
-        var path = s.Subtitles.FirstOrDefault(t => t.Index == sub.Index)?.Url ?? PlaybackPlan.TextSubtitlesPath(s.FileId, sub.Index);
-        presenter.Show(source.Url(path));
+        if (!PlaybackPlan.IsImage(sub))
+        {
+            var path = s.Subtitles.FirstOrDefault(t => t.Index == sub.Index)?.Url ?? PlaybackPlan.TextSubtitlesPath(s.FileId, sub.Index);
+            presenter.Show(source.Url(path));
+        }
+        else if (!s.BurnSubtitles && Sideload) presenter.ShowPictures(source.Url(PlaybackPlan.PictureSubtitlesPath(s.FileId, sub.Index)));
+        else presenter.Hide();
+    }
+
+    /// <summary>The server can't make the .mks (an older server or transcoder): picture subtitles are burned in from now on.</summary>
+    void PicturesFailed()
+    {
+        if (closed || stopped) return;
+        picturesUnavailable = true;
+        PublishChoices();
+        if (PlaybackPlan.IsImage(subtitle) && info is { BurnSubtitles: false }) Restart(LivePositionMs());
     }
 
     /// <summary>An audio track switched in place: the frames it drops aren't counted, and counting starts afresh after.</summary>
@@ -945,7 +962,7 @@ public sealed class PlayerModel : IDisposable
         Restart(LivePositionMs());
     }
 
-    /// <summary>The subtitle track <paramref name="index"/>, or none (null). Pictures, burned in by the server, take a new session.</summary>
+    /// <summary>The subtitle track <paramref name="index"/>, or none (null). Pictures the server burns in take a new session.</summary>
     public void SelectSubtitle(int? index)
     {
         MediaStream? chosen = null;
