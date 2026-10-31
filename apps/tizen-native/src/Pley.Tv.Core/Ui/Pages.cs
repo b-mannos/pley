@@ -12,7 +12,8 @@ public abstract record PageKey
     public sealed record Profiles : PageKey;
     public sealed record Home : PageKey;
     public sealed record Libraries : PageKey;
-    public sealed record Library(long LibraryId) : PageKey;
+    /// <summary>A library's page: on <paramref name="Tab"/> (null: the one it was left on), in <paramref name="View"/> (a row's See all, "sort=added&amp;order=desc").</summary>
+    public sealed record Library(long LibraryId, LibraryTab? Tab = null, string? View = null) : PageKey;
     public sealed record Collections(long LibraryId) : PageKey;
     public sealed record Collection(long CollectionId) : PageKey;
     public sealed record Item(long ItemId) : PageKey;
