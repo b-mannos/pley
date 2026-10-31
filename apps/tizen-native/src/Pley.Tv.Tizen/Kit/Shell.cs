@@ -126,13 +126,16 @@ sealed class Shell
             if (i < cover) sheets[i].View.Hide();
             else sheets[i].View.Show();
         }
-        // The window takes an alpha the first time one covers: until then, nothing needs to see through it.
-        if (cover >= 0 && !transparent)
+        // The window has an alpha while a covering sheet shows, and none otherwise, set each time.
+        // Set once and kept, only its colour changing, every second player showed the TV's menu
+        // where its picture was, with its sound; and an opaque window is less for the TV to draw.
+        var clear = cover >= 0;
+        if (clear != transparent)
         {
-            window.SetTransparency(true);
-            transparent = true;
+            window.SetTransparency(clear);
+            transparent = clear;
         }
-        window.BackgroundColor = cover >= 0 ? Color.Transparent : PleyColors.Bg;
+        window.BackgroundColor = clear ? Color.Transparent : PleyColors.Bg;
     }
 
     bool transparent;
