@@ -158,6 +158,18 @@ sealed class Shell
         }
         if (top.Back?.Invoke() == true) return;
         if (sheets.Count > 1) Pop(top);
-        else exit();
+        else AskExit(exit);
+    }
+
+    /// <summary>
+    /// Back on the first screen asks "Exit Pley?" first, as Samsung's rule for apps has it and the
+    /// web Samsung app does: Exit (focused) leaves, Cancel or Back stays.
+    /// </summary>
+    void AskExit(Action exit)
+    {
+        var dialog = new Dialog(this, "Exit Pley?", "");
+        dialog.Button("Cancel", dialog.Close);
+        dialog.Button("Exit", exit, initial: true);
+        dialog.Show();
     }
 }
