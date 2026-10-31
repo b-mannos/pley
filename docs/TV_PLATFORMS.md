@@ -398,20 +398,22 @@ album pages (Play, Shuffle, the albums, the tracks by disc) and Now Playing
 music playing on behind the other pages, driven by the remote's media keys
 from any of them, and pausing for a video; and the player: the stream on
 the TV's own player, chosen with the TV's capabilities, seeking with Left
-and Right with previews of where to, the scrubber with its chapters (Up
-on it opens them as a row of cards to go to, Skip Intro and the credits
-among them) and
-the control row, text subtitles in Settings' look (the CAPTIONS key turns
-them off and on), picture subtitles (PGS, VobSub, DVB) decoded from the
-server's `.mks` and drawn as the web app draws them, burned in by the
-server only when it can't make that file, the side panels (Subtitles with Sync and the subtitles'
-look, Audio, Quality, Chapters, the sleep timer, Speed where the TV's
-player has other speeds, and Info), Skip Intro and Skip Credits, Up Next
-(the next episode, or the next in a playlist or collection), recovering by
-itself from stalls and a server out of reach, and Try again when it can't
-play. Unlike Android's, its music pauses while the app is hidden, since a
-hidden app gives up the TV's player, and plays on from there when the app
-is back. The other pages come next.
+and Right with previews of where to, OK showing the controls, the
+scrubber with its chapters (Up on it opens them as a row of cards to go
+to, Skip Intro and the credits among them) and the control row, the title
+for a few seconds as each item begins, text subtitles in Settings' look
+(the CAPTIONS key turns them off and on), picture subtitles (PGS, VobSub,
+DVB) decoded from the server's `.mks` and drawn as the web app draws them,
+burned in by the server only when it can't make that file, the side
+panels (Subtitles with Sync and the subtitles' look, Audio, Quality,
+Chapters, the sleep timer, Speed where the TV's player has other speeds,
+and Info), Skip Intro and Skip Credits while the controls are hidden, Up
+Next (the next episode, or the next in a playlist or collection),
+recovering by itself from stalls and a server out of reach, and Try again
+when it can't play. Back on its first screen asks "Exit Pley?". Unlike
+Android's, its music pauses while the app is hidden, since a hidden app
+gives up the TV's player, and plays on from there when the app is back.
+The other pages come next.
 
 | | |
 |---|---|
