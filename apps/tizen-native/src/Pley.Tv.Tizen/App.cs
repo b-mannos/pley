@@ -1,4 +1,5 @@
 using Pley.Tv.Core;
+using Pley.Tv.Core.Live;
 using Pley.Tv.Core.Ui;
 using Pley.Tv.Tizen.Kit;
 using Pley.Tv.Tizen.Screens;
@@ -13,6 +14,8 @@ class App : NUIApplication
     AppState state = null!;
     Images images = null!;
     KeyRepeatGate gate = null!;
+    AppLiveSource live = null!;
+    LiveTvEntry? liveEntry;
 
     protected override void OnCreate()
     {
@@ -27,6 +30,9 @@ class App : NUIApplication
         state = new AppState(Platform.Of());
         // Pictures come through the API in use, with its token.
         state.Api.Watch(api => images.Api = api);
+        live = new AppLiveSource(state);
+        // The lineup changed (the server's events, a reconnection): whether Live TV has channels may have too.
+        live.OnChange(() => liveEntry?.Refresh());
         // The server ended the sign-in (revoked, or the refresh token spent): sign in again.
         state.SignedOut.Changed += signedOut =>
         {
@@ -102,8 +108,13 @@ class App : NUIApplication
             PageKey.Collection collection => new CollectionScreen(tv, new CollectionModel(new AppCollectionSource(state), collection.CollectionId, new ContextScheduler()), images, gate, k => Go(tv, k)),
             // Settings' Watch history row opens it, as on Android TV.
             PageKey.History => new HistoryScreen(tv, new HistoryModel(new AppHistorySource(state), new ContextScheduler()), images, gate, k => Go(tv, k)),
+            PageKey.LiveTv => new LiveTvScreen(tv, shell, new LiveTvModel(live, new ContextScheduler()), images, gate, (_, _) => tv.Toast("Watching a channel comes next in the native app.")),
             _ => null,
         };
+        // Live TV in the rail while this profile has channels: asked again for each sign-in and profile.
+        if (liveEntry == null) liveEntry = new LiveTvEntry(live, new ContextScheduler());
+        else liveEntry.Refresh();
+        tv.Follow(liveEntry);
         // Back from the player: Home asks again, for the new resume point and Continue Watching.
         tv.Play = request => new PlayerScreen(shell, state, request, gate, () => _ = state.LoadHome()).Show();
         tv.Actions = (id, continueWatching) => TileActions.Open(shell, state, id, continueWatching, r => tv.Play?.Invoke(r), k => Go(tv, k), tv.Toast);

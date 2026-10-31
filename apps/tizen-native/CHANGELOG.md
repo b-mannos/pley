@@ -55,3 +55,10 @@ It has no releases yet: it is built and installed by hand
   when and on which device; OK opens one, the cross or OK held removes it,
   and Show more loads the next 15. Settings, where it opens from, comes
   next.
+- Live TV in the native app, in the rail after Home while the profile has
+  channels: the categories under the search (Favourites, Recently watched,
+  All channels, the provider's groups and regions), and the guide, which
+  moves through time with Left and Right and pages with Channel up and
+  down, or the channels as tiles; OK held, Menu or Info opens what's on
+  with Watch and the favourite. It opens as it was left, at the channel
+  last watched.

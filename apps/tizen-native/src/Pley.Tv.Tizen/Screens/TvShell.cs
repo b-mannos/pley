@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Pley.Tv.Core;
 using Pley.Tv.Core.Api;
+using Pley.Tv.Core.Live;
 using Pley.Tv.Core.Ui;
 using Pley.Tv.Tizen.Kit;
 using Tizen.NUI;
@@ -56,6 +57,7 @@ sealed class TvShell : Sheet
     readonly TextLabel toastText;
     readonly Timer toastTimer = new Timer(3_500);
     IReadOnlyList<RailItem> railItems = Array.Empty<RailItem>();
+    LiveTvEntry? liveTv;
 
     public TvShell(AppState state, Action<RailItem> onRail, Action onProfile) : base("shell", Axis.Row)
     {
@@ -91,12 +93,7 @@ sealed class TvShell : Sheet
         };
 
         Back = OnBack;
-        watches.Add(state.Libraries.Watch(libraries =>
-        {
-            railItems = Pley.Tv.Core.Ui.Rail.Items(libraries ?? Array.Empty<Library>());
-            Rail.SetItems(railItems);
-            MarkCurrent();
-        }));
+        watches.Add(state.Libraries.Watch(_ => RailItems()));
         watches.Add(state.Me.Watch(me => Rail.SetProfile(me == null ? null : new RailProfile(me.Name, AvatarView.Rgb(ProfileColors.Of(me.Name, me.AvatarColor))))));
         Gone += () =>
         {
@@ -192,6 +189,21 @@ sealed class TvShell : Sheet
         slot.Clear();
         slot.Add(page.Group);
         page.Enter();
+    }
+
+    /// <summary>The rail's entries for the libraries, with Live TV while it has channels.</summary>
+    void RailItems()
+    {
+        railItems = Pley.Tv.Core.Ui.Rail.Items(state.Libraries.Value ?? Array.Empty<Library>(), liveTv: liveTv?.Channels.Value > 0);
+        Rail.SetItems(railItems);
+        MarkCurrent();
+    }
+
+    /// <summary>Live TV shows in the rail while <paramref name="entry"/> says it has channels.</summary>
+    public void Follow(LiveTvEntry entry)
+    {
+        liveTv = entry;
+        watches.Add(entry.Channels.Watch(_ => RailItems()));
     }
 
     void MarkCurrent() => Rail.SetCurrent(RootKey == null ? null : Core.Ui.Rail.Current(RootKey, railItems));
