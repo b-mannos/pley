@@ -173,6 +173,11 @@ sealed class CategoryColumnView : View
         ClippingMode = ClippingModeType.ClipChildren;
         Add(content);
         Group = new FocusGroup(Axis.Column, "categories");
+        // The search field is first: focused, the column goes back to its top so all of it shows.
+        if (search != null) search.Item.FocusChanged += on =>
+        {
+            if (on && !Disposed) Reveal(0);
+        };
     }
 
     public FocusGroup Group { get; }
@@ -287,7 +292,12 @@ sealed class CategoryColumnView : View
     void Reveal(float top)
     {
         var room = height - PleyTv.SafeVertical;
-        if (top < scroll) scroll = Math.Max(0, top - LiveCategories.RowHeight);
+        if (top < scroll)
+        {
+            scroll = Math.Max(0, top - LiveCategories.RowHeight);
+            // Going up, scrolled less than the search field's room, its top would sit under the column's edge.
+            if (search != null && scroll < SearchRoom + Gap) scroll = 0;
+        }
         else if (top + LiveCategories.RowHeight > scroll + room) scroll = top + LiveCategories.RowHeight - room;
         var a = new Animation(PleyMotion.FocusMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
         a.AnimateTo(content, "PositionY", -Ui.Dp(scroll));
@@ -319,11 +329,13 @@ sealed class CategoryColumnView : View
             var right = width - 10;
             if (number != null)
             {
-                count = Text.Label(LiveText.Count(number.Value), PleyType.Caption, PleyColors.Muted, width: 60);
-                count.HorizontalAlignment = HorizontalAlignment.End;
-                count.Position = new Position(Ui.Dp(right - 60), Ui.Dp((LiveCategories.RowHeight - PleyType.Caption.Line) / 2));
+                // As wide as the number, as Android has it: the name takes the rest of the row.
+                count = Text.Label(LiveText.Count(number.Value), PleyType.Caption, PleyColors.Muted);
+                var countWidth = Text.Width(count);
+                count.Size = new Size(Ui.Dp(countWidth), Ui.Dp(PleyType.Caption.Line));
+                count.Position = new Position(Ui.Dp(right - countWidth), Ui.Dp((LiveCategories.RowHeight - PleyType.Caption.Line) / 2));
                 Add(count);
-                right -= 60 + 6;
+                right -= countWidth + 8;
             }
             label = Text.Label(name, PleyType.Label, PleyColors.Muted, width: Math.Max(20, right - x));
             label.Position = new Position(Ui.Dp(x), Ui.Dp((LiveCategories.RowHeight - PleyType.Label.Line) / 2));

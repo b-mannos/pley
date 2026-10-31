@@ -101,6 +101,9 @@ sealed class LiveTvScreen : ShellPage
 
         Group.Add(tabs);
         Group.Add(body);
+        // Up from the top of the categories or the guide goes to the tabs on a press; a held Up
+        // stops there, as a held Left stops at a row's start rather than open the rail.
+        body.Exit = d => d == Direction.Up && gate.Holding;
         body.Add(categories.Group);
         body.Add(content);
 
