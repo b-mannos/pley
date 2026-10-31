@@ -15,6 +15,8 @@ describes how they are made.
   SDR base layer: the screen doesn't show it, the player doesn't decode
   its profile or level, or the player's remuxes can't name it ("HDR10
   (Dolby Vision base layer, as this screen doesn't show Dolby Vision)").
+- The web app's title page shows the quality badges (4K, DV P8.1,
+  HDR10…) of the version picked, not always the first version's.
 
 ## [0.1.0] - 2026-10-30
 
