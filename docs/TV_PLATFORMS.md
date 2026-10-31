@@ -392,10 +392,12 @@ page's address and QR code, signing out); Diagnostics (the TV's facts and
 what it tells the server it plays); Live TV's page (the categories and
 their search, the guide and the channels' tiles, a programme's details
 and favourites) and its live player (changing channel, number keys, what's
-on, the channel list, and why a channel doesn't play); and a first
-player: the stream on the TV's own player, seeking with Left and Right,
-and the scrubber and transport controls. Subtitles, the player's panels
-and the other pages come next.
+on, the channel list, and why a channel doesn't play); and the player:
+the stream on the TV's own player, chosen with the TV's capabilities,
+seeking with Left and Right, the scrubber and transport controls,
+recovering by itself from stalls and a server out of reach, and Try again
+when it can't play. Subtitles, the player's panels and the other pages
+come next.
 
 | | |
 |---|---|

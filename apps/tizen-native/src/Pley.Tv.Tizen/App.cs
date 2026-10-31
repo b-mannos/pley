@@ -18,6 +18,8 @@ class App : NUIApplication
     KeyRepeatGate gate = null!;
     AppLiveSource live = null!;
     LiveTvEntry? liveEntry;
+    /// <summary>The players' reports to the server, in order: one for the app, so a player's last report goes out after it closed.</summary>
+    readonly SessionReporter reporter = new SessionReporter();
 
     protected override void OnCreate()
     {
@@ -141,7 +143,7 @@ class App : NUIApplication
         else liveEntry.Refresh();
         tv.Follow(liveEntry);
         // Back from the player: Home asks again, for the new resume point and Continue Watching.
-        tv.Play = request => new PlayerScreen(shell, state, request, gate, () => _ = state.LoadHome()).Show();
+        tv.Play = request => new PlayerScreen(shell, state, request, reporter, gate, () => _ = state.LoadHome()).Show();
         tv.Actions = (id, continueWatching) => TileActions.Open(shell, state, id, continueWatching, r => tv.Play?.Invoke(r), k => Go(tv, k), tv.Toast);
         shell.Show(tv);
         tv.Restart(Home(tv));

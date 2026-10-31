@@ -1,52 +1,51 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
-using System.Threading.Tasks;
 using Pley.Tv.Core;
-using Pley.Tv.Core.Api;
-using Pley.Tv.Core.Net;
 using Pley.Tv.Core.Player;
 using Pley.Tv.Core.Ui;
 using Pley.Tv.Tizen.Kit;
 using Tizen.NUI;
 using Tizen.NUI.BaseComponents;
-using Media = Tizen.Multimedia;
 using Timer = Tizen.NUI.Timer;
 
 namespace Pley.Tv.Tizen.Screens;
 
 /// <summary>
-/// The player (design spec Â§2.7; the Android app's TvPlayerScreen): a session on the server, its
-/// stream on the TV's own player, on the video plane under the window. Hidden controls: OK plays
-/// and pauses, Left and Right seek (<see cref="Seeker"/>), Up and Down show the controls. Shown:
-/// the title and clock at the top; the times, scrubber and Back 10 Â· Play/Pause Â· Forward 10 at the
+/// The player (design spec §2.7; the Android app's TvPlayerScreen) over the Core's
+/// <see cref="PlayerModel"/>: the server's session on the TV's own player, on the video plane
+/// under the window. Hidden controls: OK plays and pauses, Left and Right seek
+/// (<see cref="Seeker"/>), Up shows the controls on the scrubber, Down on Play/Pause. Shown: the
+/// title and clock at the top; the times, scrubber and Back 10 · Play/Pause · Forward 10 at the
 /// bottom, over a black scrim; they go 5 s after the last key while it plays. Back hides them,
-/// then stops: the session reports where it stopped and ends.
+/// then leaves. The model reports where it is to the server, through the app's reporter, so the
+/// last report goes out after the screen closed.
 /// </summary>
 sealed class PlayerScreen : Sheet
 {
-    /// <summary>The controls go this long after the last key while playing.</summary>
-    const int HideAfterMs = 5_000;
-    /// <summary>Where it is goes to the server this often while playing; paused, less often.</summary>
-    const long ProgressMs = 10_000, PausedHeartbeatMs = 30_000;
     const float TimesTop = 399, TrackCentre = 425, RowTop = 441, TrackHeight = 4, Thumb = 10, ThumbFocused = 12;
     const float Button = 36, PlayButton = 44, TransportIcon = 24, PlayIcon = 26, TransportGap = 16;
+    /// <summary>The spinner shows once playback has waited this long (the Android app's 500 ms).</summary>
+    const long SpinnerAfterMs = 500;
+    /// <summary>The same media key from NUI and from the media key service this soon after counts once.</summary>
+    const long MediaTwiceMs = 250;
 
     readonly Shell shell;
-    readonly AppState state;
-    readonly PlayRequest request;
     readonly KeyRepeatGate gate;
     readonly Action closed;
     readonly SynchronizationContext? ui = SynchronizationContext.Current;
-    readonly SessionReporter reporter = new SessionReporter();
+    readonly PlayerModel model;
     readonly Seeker seeker;
     readonly IDisposable keys;
+    readonly List<IDisposable> watches = new List<IDisposable>();
 
     readonly View black;
     readonly View bars;
     readonly View spinner;
     readonly Animation spin;
+    readonly TextLabel reconnecting;
     readonly View controls;
     readonly TextLabel title;
     readonly TextLabel line;
@@ -62,42 +61,39 @@ sealed class PlayerScreen : Sheet
     readonly FocusItem scrubber;
     readonly PlayerButton playPause;
     readonly Timer tick;
-    View? error;
 
-    Media.Player? player;
-    PlaybackSession? session;
-    long durationMs;
-    long lastPosition;
-    long lastReport;
+    View? error;
+    FocusGroup? errorButtons;
+    PlayerPhase? errorShown;
     bool shown;
-    bool playing;
-    bool started;
     bool gone;
+    bool? wants;
+    bool covered = true;
+    /// <summary>After an error, black stays until the next session's first picture.</summary>
+    bool awaitingFrame;
+    long? lastFirstFrame;
+    long waitingSince = -1;
     Animation? fade;
+    Animation? coverFade;
     long hideAt;
 
-    public PlayerScreen(Shell shell, AppState state, PlayRequest request, KeyRepeatGate gate, Action closed) : base("player")
+    /// <param name="reporter">The app's reports queue: the last "stopped" goes out after the screen closed.</param>
+    /// <param name="closed">The screen went (Home asks again for the resume points).</param>
+    public PlayerScreen(Shell shell, AppState state, PlayRequest request, IReporter reporter, KeyRepeatGate gate, Action closed) : base("player")
     {
         Covers = true;
         this.shell = shell;
-        this.state = state;
-        this.request = request;
         this.gate = gate;
         this.closed = closed;
-        lastPosition = request.StartMs;
-        seeker = new Seeker(Position, () => durationMs, SeekTo);
+        var source = new AppPlayerSource(state, () => Caps(state));
+        model = new PlayerModel(request, source, Engine, new ContextScheduler(), reporter);
+        seeker = new Seeker(model.LivePositionMs, () => model.Clock.Value.DurationMs, SeekTo);
 
         // Black until the first picture: the video plane under it shows nothing of the page meanwhile.
         black = new View { Size = Canvas(), BackgroundColor = Color.Black };
         View.Add(black);
         bars = new View { Size = Canvas() };
         View.Add(bars);
-        spinner = Spinner();
-        spinner.Position = new Position(Ui.Dp(PleyTv.CanvasWidth / 2 - 20), Ui.Dp(PleyTv.CanvasHeight / 2 - 20));
-        View.Add(spinner);
-        spin = new Animation(1000) { Looping = true };
-        spin.AnimateBy(spinner, "Orientation", new Rotation(new Radian(new Degree(360)), PositionAxis.Z));
-        spin.Play();
 
         controls = new View { Size = Canvas(), Opacity = 0 };
         controls.Add(Scrim());
@@ -135,10 +131,11 @@ sealed class PlayerScreen : Sheet
         played = new View { Size = new Size(0, Ui.Dp(TrackHeight)), CornerRadius = Ui.Dp(TrackHeight / 2), BackgroundColor = PleyColors.Accent };
         track.Add(played);
         controls.Add(track);
+        var ring = ThumbFocused + 2 * PleyShape.ThumbRingOffset + 2 * PleyShape.ThumbRingStroke;
         thumbRing = new View
         {
-            Size = new Size(Ui.Dp(ThumbFocused + 2 * PleyShape.ThumbRingOffset + 2 * PleyShape.ThumbRingStroke), Ui.Dp(ThumbFocused + 2 * PleyShape.ThumbRingOffset + 2 * PleyShape.ThumbRingStroke)),
-            CornerRadius = Ui.Dp((ThumbFocused + 2 * PleyShape.ThumbRingOffset + 2 * PleyShape.ThumbRingStroke) / 2),
+            Size = new Size(Ui.Dp(ring), Ui.Dp(ring)),
+            CornerRadius = Ui.Dp(ring / 2),
             BorderlineWidth = Ui.Dp(PleyShape.ThumbRingStroke),
             BorderlineColor = PleyColors.AccentBright,
             BorderlineOffset = -1,
@@ -149,10 +146,10 @@ sealed class PlayerScreen : Sheet
         thumb = new View { Size = new Size(Ui.Dp(Thumb), Ui.Dp(Thumb)), CornerRadius = Ui.Dp(Thumb / 2), BackgroundColor = PleyColors.Fg };
         controls.Add(thumb);
 
-        // Back 10 Â· Play/Pause Â· Forward 10, centred; the smaller ones' centres in line with Play/Pause's.
-        var back10 = new PlayerButton("Back 10 seconds", "rotate-ccw", Button, TransportIcon, () => Jump(-1));
-        playPause = new PlayerButton("Pause", "pause", PlayButton, PlayIcon, PlayPause);
-        var forward10 = new PlayerButton("Forward 10 seconds", "rotate-cw", Button, TransportIcon, () => Jump(1));
+        // Back 10 · Play/Pause · Forward 10, centred; the smaller ones' centres in line with Play/Pause's.
+        var back10 = new PlayerButton(PlayerText.Back10, "rotate-ccw", Button, TransportIcon, () => Jump(-1));
+        playPause = new PlayerButton(PlayerText.Pause, "pause", PlayButton, PlayIcon, PlayPause);
+        var forward10 = new PlayerButton(PlayerText.Forward10, "rotate-cw", Button, TransportIcon, () => Jump(1));
         var rowWidth = Button * 2 + PlayButton + TransportGap * 2;
         var x = (PleyTv.CanvasWidth - rowWidth) / 2;
         back10.Position = new Position(Ui.Dp(x), Ui.Dp(RowTop + (PlayButton - Button) / 2));
@@ -163,15 +160,40 @@ sealed class PlayerScreen : Sheet
         controls.Add(forward10);
         View.Add(controls);
 
-        // Focus: the scrubber over the row; Left and Right on the scrubber seek.
+        spinner = Spinner();
+        spinner.Position = new Position(Ui.Dp(PleyTv.CanvasWidth / 2 - 20), Ui.Dp(PleyTv.CanvasHeight / 2 - 20));
+        spinner.Hide();
+        View.Add(spinner);
+        spin = new Animation(1000) { Looping = true };
+        spin.AnimateBy(spinner, "Orientation", new Rotation(new Radian(new Degree(360)), PositionAxis.Z));
+        // "Reconnecting…" 16 dp under the ring, on the seek badge's backing: the picture behind it can be anything.
+        reconnecting = Text.Label(PlayerText.Reconnecting, PleyType.Label, PleyColors.Fg);
+        reconnecting.HorizontalAlignment = HorizontalAlignment.Center;
+        var reconnectingWidth = reconnecting.NaturalSize.Width / Ui.Scale + 24;
+        reconnecting.Size = new Size(Ui.Dp(reconnectingWidth), Ui.Dp(PleyType.Label.Line + 12));
+        reconnecting.Position = new Position(Ui.Dp((PleyTv.CanvasWidth - reconnectingWidth) / 2), Ui.Dp(PleyTv.CanvasHeight / 2 + 20 + 16));
+        reconnecting.BackgroundColor = new Color(PleyColors.Bg.R, PleyColors.Bg.G, PleyColors.Bg.B, 0.6f);
+        reconnecting.Hide();
+        View.Add(reconnecting);
+
+        // Focus: the scrubber over the row; Left and Right on the scrubber seek, Down goes to Play/Pause.
         scrubber = new FocusItem("scrubber")
         {
             Selected = Ok,
             OwnKey = (key, down) =>
             {
-                if (key != "Left" && key != "Right") return false;
-                if (down) Step(key == "Left" ? -1 : 1);
-                return true;
+                switch (key)
+                {
+                    case "Left":
+                    case "Right":
+                        if (down && !Busy) Step(key == "Left" ? -1 : 1);
+                        return true;
+                    case "Down":
+                        if (down) Tree.Focus(playPause.Item);
+                        return true;
+                    default:
+                        return false;
+                }
             },
         };
         scrubber.FocusChanged += on =>
@@ -201,6 +223,7 @@ sealed class PlayerScreen : Sheet
             // Not on this TV: the window's keys only.
         }
         gate.HoldEnded += Released;
+        shell.Shown += AppShown;
         Back = OnBack;
         Gone += Ended;
 
@@ -211,9 +234,13 @@ sealed class PlayerScreen : Sheet
             return !gone;
         };
         tick.Start();
+        watches.Add(model.State.Watch(Render));
     }
 
     bool Disposed => gone;
+
+    /// <summary>Starting or between sessions: Left, Right and OK wait, as on Android.</summary>
+    bool Busy => model.State.Value.Phase.Kind == PhaseKind.Preparing;
 
     static Size Canvas() => new Size(Ui.Dp(PleyTv.CanvasWidth), Ui.Dp(PleyTv.CanvasHeight));
 
@@ -225,77 +252,98 @@ sealed class PlayerScreen : Sheet
         return label;
     }
 
-    /// <summary>Shows the player and starts: the item's title, a session, its stream.</summary>
-    public void Show()
+    /// <summary>What the TV says it plays, with Settings' passthrough choices; null when it can't say.</summary>
+    static IReadOnlyDictionary<string, object?>? Caps(AppState state)
     {
-        shell.Push(this);
-        _ = Start();
-    }
-
-    async Task Start()
-    {
-        var api = state.Api.Value;
-        if (api == null)
-        {
-            Fail("You're signed out of your server.");
-            return;
-        }
         try
         {
-            var item = await api.Item(request.ItemId);
-            if (gone) return;
-            title.Text = PlayerText.Title(item);
-            line.Text = PlayerText.Line(item) ?? "";
-            durationMs = item.DurationMs ?? 0;
-            // What Settings' passthrough choices turn on or off goes with what the TV says it plays.
-            var caps = TizenCaps.Of(Platform.Facts(), state.Settings.Value.Passthrough);
-            var body = PlayRequests.Body(request, state.InstallId(), caps);
-            session = await PlaybackSession.Start(api, request.ItemId, body, reporter);
-            if (gone)
-            {
-                session.End(request.StartMs);
-                return;
-            }
-            if (session.Info.DurationMs > 0) durationMs = session.Info.DurationMs;
-            await Open(api.Url(session.Info.Url), request.StartMs);
-        }
-        catch (Exception e) when (!gone)
-        {
-            Fail(e is ApiException or NetworkException ? Errors.Message(e) : "The TV's player couldn't open it.");
-        }
-    }
-
-    async Task Open(string url, long startMs)
-    {
-        var p = new Media.Player();
-        player = p;
-        p.Display = new Media.Display(Window.Instance);
-        p.SetSource(new Media.MediaUriSource(url));
-        p.PlaybackCompleted += (_, _) => OnUi(Completed);
-        p.ErrorOccurred += (_, e) => OnUi(() => Fail($"The TV's player stopped: {e.Error}."));
-        p.BufferingProgressChanged += (_, e) => OnUi(() => Buffering(e.Percent < 100));
-        p.VideoStreamChanged += (_, e) => OnUi(() => Bars(e.Size.Width, e.Size.Height));
-        await p.PrepareAsync();
-        if (gone) return;
-        p.DisplaySettings.Mode = Media.PlayerDisplayMode.LetterBox;
-        try
-        {
-            var size = p.StreamInfo.GetVideoProperties().Size;
-            Bars(size.Width, size.Height);
+            return TizenCaps.Of(Platform.Facts(), state.Settings.Value.Passthrough);
         }
         catch (Exception)
         {
-            // No video (or not known yet): no bars until the stream says its size.
+            // The server decides alone, as for a client that sends no report.
+            return null;
         }
-        // The stream's timeline is the file's: a conversion that starts there still seeks there.
-        if (startMs >= 1000) await p.SetPlayPositionAsync((int)startMs, false);
+    }
+
+    /// <summary>The TV's player for the video: on the video plane, its picture's size telling where black bars go.</summary>
+    IVideoEngine Engine()
+    {
+        var engine = new TizenMediaEngine(video: true);
+        engine.VideoSize += Bars;
+        return engine;
+    }
+
+    /// <summary>Shows the player and starts: the item's details, a session, its stream.</summary>
+    public void Show()
+    {
+        shell.Push(this);
+        model.Start();
+    }
+
+    // ---- what the playback says
+
+    void Render(PlayerState s)
+    {
         if (gone) return;
-        p.Start();
-        playing = true;
-        started = true;
-        Buffering(false);
-        Reveal(black, false);
-        Report(force: true);
+        title.Text = s.Title;
+        line.Text = s.Subtitle ?? "";
+        var wantsToPlay = s.Phase.WantsToPlay;
+        if (wants != wantsToPlay)
+        {
+            wants = wantsToPlay;
+            playPause.Set(wantsToPlay ? PlayerText.Pause : PlayerText.Play, wantsToPlay ? "pause" : "play");
+        }
+        var isError = s.Phase.Kind == PhaseKind.Error;
+        if (lastFirstFrame == null && s.FirstFrameMs != null) awaitingFrame = false;
+        lastFirstFrame = s.FirstFrameMs;
+        if (isError) awaitingFrame = true;
+        Cover(s.FirstFrameMs == null || awaitingFrame);
+        var waiting = !isError && s.Phase.Kind is PhaseKind.Preparing or PhaseKind.Buffering;
+        if (!waiting) waitingSince = -1;
+        else if (waitingSince < 0) waitingSince = Environment.TickCount64;
+        Waiting();
+        if (isError)
+        {
+            if (errorShown != s.Phase) ShowError(s.Phase);
+        }
+        else if (error != null) HideError();
+        // The end, with nothing next: back to where playing started.
+        if (s.Phase.Kind == PhaseKind.Ended) OnUi(Close);
+    }
+
+    /// <summary>Black over the video plane: until the first picture, and after an error until the next one.</summary>
+    void Cover(bool on)
+    {
+        if (covered == on) return;
+        covered = on;
+        coverFade?.Stop();
+        if (on)
+        {
+            black.Opacity = 1;
+            return;
+        }
+        coverFade = new Animation(PleyMotion.OverlayMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
+        coverFade.AnimateTo(black, "Opacity", 0f);
+        coverFade.Play();
+    }
+
+    /// <summary>The spinner, once playback has waited 500 ms; "Reconnecting…" under it while the server is out of reach.</summary>
+    void Waiting()
+    {
+        var on = waitingSince >= 0 && Environment.TickCount64 - waitingSince >= SpinnerAfterMs;
+        if (on && !spinner.Visibility)
+        {
+            spinner.Show();
+            spin.Play();
+        }
+        else if (!on && spinner.Visibility)
+        {
+            spinner.Hide();
+            spin.Stop();
+        }
+        if (on && model.State.Value.Reconnecting) reconnecting.Show();
+        else reconnecting.Hide();
     }
 
     /// <summary>
@@ -315,14 +363,11 @@ sealed class PlayerScreen : Sheet
         var w = Ui.Dp(PleyTv.CanvasWidth);
         var h = Ui.Dp(PleyTv.CanvasHeight);
         var scale = Math.Min(w / videoWidth, h / videoHeight);
-        var shownW = videoWidth * scale;
-        var shownH = videoHeight * scale;
-        var left = (float)Math.Floor((w - shownW) / 2);
-        var top = (float)Math.Floor((h - shownH) / 2);
+        var left = (float)Math.Floor((w - videoWidth * scale) / 2);
+        var top = (float)Math.Floor((h - videoHeight * scale) / 2);
         void Bar(float x, float y, float bw, float bh)
         {
-            if (bw < 1 || bh < 1) return;
-            bars.Add(new View { Position = new Position(x, y), Size = new Size(bw, bh), BackgroundColor = Color.Black });
+            if (bw >= 1 && bh >= 1) bars.Add(new View { Position = new Position(x, y), Size = new Size(bw, bh), BackgroundColor = Color.Black });
         }
         if (top >= 1)
         {
@@ -336,52 +381,30 @@ sealed class PlayerScreen : Sheet
         }
     }
 
-    void OnUi(Action action)
-    {
-        if (ui == null) action();
-        else ui.Post(_ =>
-        {
-            if (!gone) action();
-        }, null);
-    }
-
-    long Position()
-    {
-        if (player != null && started)
-        {
-            try
-            {
-                lastPosition = player.GetPlayPosition();
-            }
-            catch (Exception)
-            {
-                // Between states: the last one known.
-            }
-        }
-        return lastPosition;
-    }
-
     void Tick()
     {
         if (gone) return;
         var now = Environment.TickCount64;
-        if (shown && playing && hideAt > 0 && now >= hideAt && seeker.Target == null) ShowControls(false);
-        Report(force: false);
+        if (shown && model.State.Value.Phase.WantsToPlay && hideAt > 0 && now >= hideAt && seeker.Target == null) ShowControls(false);
+        Waiting();
         if (shown) Layout();
     }
 
     /// <summary>The times, the played part and the thumb, at the target while a seek is coming.</summary>
     void Layout()
     {
-        var position = Position();
+        var duration = model.Clock.Value.DurationMs;
+        var position = model.LivePositionMs();
         var at = seeker.Target ?? position;
         elapsed.Text = PlayerText.Time(at);
-        remaining.Text = PlayerText.Remaining(at, durationMs);
+        remaining.Text = PlayerText.Remaining(at, duration);
         clock.Text = DateTime.Now.ToString("t", CultureInfo.CurrentCulture);
-        ends.Text = playing ? "" : $"Ends at {DateTime.Now.AddMilliseconds(Math.Max(0, durationMs - position)).ToString("t", CultureInfo.CurrentCulture)}";
+        ends.Text = model.State.Value.Phase.Kind == PhaseKind.Paused
+            ? PlayerText.EndsAt(DateTime.Now.AddMilliseconds(Math.Max(0, duration - position)).ToString("t", CultureInfo.CurrentCulture))
+            : "";
         var width = track.SizeWidth;
-        var fraction = durationMs > 0 ? Math.Max(0, Math.Min(1, at / (double)durationMs)) : 0;
-        played.SizeWidth = (float)(width * Math.Max(0, Math.Min(1, position / (double)Math.Max(1, durationMs))));
+        var fraction = duration > 0 ? Math.Max(0, Math.Min(1, at / (double)duration)) : 0;
+        played.SizeWidth = (float)(width * Math.Max(0, Math.Min(1, position / (double)Math.Max(1, duration))));
         var cx = track.PositionX + (float)(width * fraction);
         var cy = Ui.Dp(TrackCentre);
         thumb.Position = new Position(cx - thumb.SizeWidth / 2, cy - thumb.SizeHeight / 2);
@@ -395,41 +418,19 @@ sealed class PlayerScreen : Sheet
         else badge.Hide();
     }
 
-    void Report(bool force)
-    {
-        if (session == null || !started) return;
-        var now = Environment.TickCount64;
-        if (!force && now - lastReport < (playing ? ProgressMs : PausedHeartbeatMs)) return;
-        lastReport = now;
-        session.Progress(Position(), playing);
-    }
+    // ---- keys
 
-    void Buffering(bool on)
-    {
-        if (gone) return;
-        if (on) spinner.Show();
-        else spinner.Hide();
-    }
-
-    /// <summary>The keys while the controls are hidden; shown, focus has them (Back is the sheet's).</summary>
+    /// <summary>The keys while the controls are hidden; shown, focus has them (Back is the sheet's). Media keys work whatever shows.</summary>
     bool OnKey(string key, bool down)
     {
-        if (gone || error != null) return false;
-        var media = key switch
-        {
-            "XF86AudioPlay" => MediaAction.Play,
-            "XF86AudioPause" => MediaAction.Pause,
-            "XF86AudioPlayPause" => MediaAction.PlayPause,
-            "XF86AudioRewind" => MediaAction.Rewind,
-            "XF86AudioForward" => MediaAction.Forward,
-            "XF86AudioStop" => MediaAction.Stop,
-            _ => (MediaAction?)null,
-        };
+        if (gone) return false;
+        var media = MediaOf(key);
         if (media != null)
         {
             if (down) OnMedia(media.Value);
             return true;
         }
+        if (shell.Top != this || error != null) return false;
         if (shown)
         {
             Poke();
@@ -444,17 +445,17 @@ sealed class PlayerScreen : Sheet
                 return true;
             case "Left":
             case "Right":
-                if (down)
+                if (down && !Busy)
                 {
-                    ShowControls(true, scrubberFocus: true);
+                    ShowControls(true, scrubber);
                     Step(key == "Left" ? -1 : 1);
                 }
                 return true;
             case "Up":
-                if (down) ShowControls(true, scrubberFocus: true);
+                if (down) ShowControls(true, scrubber);
                 return true;
             case "Down":
-                if (down) ShowControls(true, scrubberFocus: false);
+                if (down) ShowControls(true, playPause.Item);
                 return true;
         }
         return false;
@@ -470,8 +471,16 @@ sealed class PlayerScreen : Sheet
         Stop,
     }
 
-    /// <summary>The same media key from NUI and from the media key service this soon after counts once.</summary>
-    const long MediaTwiceMs = 250;
+    static MediaAction? MediaOf(string key) => key switch
+    {
+        "XF86AudioPlay" => MediaAction.Play,
+        "XF86AudioPause" => MediaAction.Pause,
+        "XF86AudioPlayPause" => MediaAction.PlayPause,
+        "XF86AudioRewind" => MediaAction.Rewind,
+        "XF86AudioForward" => MediaAction.Forward,
+        "XF86AudioStop" => MediaAction.Stop,
+        _ => null,
+    };
 
     MediaAction? lastMedia;
     long lastMediaAt;
@@ -479,17 +488,21 @@ sealed class PlayerScreen : Sheet
     /// <summary>A media key, from the window or the media key service: Play, Pause, fast forward and rewind (30 s), Stop.</summary>
     void OnMedia(MediaAction action)
     {
+        if (gone) return;
         var now = Environment.TickCount64;
         if (lastMedia == action && now - lastMediaAt < MediaTwiceMs) return;
         lastMedia = action;
         lastMediaAt = now;
+        // An error on screen: only Stop, which leaves.
+        if (error != null && action != MediaAction.Stop) return;
         switch (action)
         {
             case MediaAction.Play:
-                if (!playing) PlayPause();
+                model.Play();
                 break;
             case MediaAction.Pause:
-                if (playing) PlayPause();
+                model.Pause();
+                if (!shown && shell.Top == this) ShowControls(true, scrubber);
                 break;
             case MediaAction.PlayPause:
                 PlayPause();
@@ -522,11 +535,36 @@ sealed class PlayerScreen : Sheet
         if (action != null) OnUi(() => OnMedia(action.Value));
     }
 
-    /// <summary>OK on the video or the scrubber: confirms a seek coming or just made, else plays or pauses.</summary>
+    /// <summary>
+    /// OK on the video or the scrubber: during or just after a seek it goes there, playing (paused,
+    /// it plays from there); else it plays or pauses.
+    /// </summary>
     void Ok()
     {
-        if (seeker.Confirm()) return;
+        if (seeker.Confirm())
+        {
+            if (!model.WantsToPlay) model.Play();
+            Layout();
+            return;
+        }
         PlayPause();
+    }
+
+    void PlayPause()
+    {
+        if (Busy) return;
+        if (model.WantsToPlay)
+        {
+            model.Pause();
+            // Paused, the controls stay; playing again, they go after a while.
+            if (shell.Top == this) ShowControls(true, shown ? null : scrubber);
+        }
+        else
+        {
+            model.Play();
+            if (shown) Poke();
+        }
+        Layout();
     }
 
     void Step(int direction)
@@ -536,13 +574,7 @@ sealed class PlayerScreen : Sheet
         else
         {
             seeker.Press(direction);
-            var press = seeker.Presses;
-            After(Seeker.SettleMs, () => seeker.Settle(press));
-            After(Seeker.BadgeMs, () =>
-            {
-                seeker.HideBadge(press);
-                Layout();
-            });
+            Settle();
         }
         Layout();
     }
@@ -550,12 +582,23 @@ sealed class PlayerScreen : Sheet
     /// <summary>Back and Forward: a step of 10 s each, as Left and Right; fast forward and rewind 30 s.</summary>
     void Jump(int steps)
     {
+        if (Busy) return;
         seeker.Press(Math.Sign(steps), Seeker.StepMs * Math.Abs(steps));
-        var press = seeker.Presses;
-        After(Seeker.SettleMs, () => seeker.Settle(press));
-        After(Seeker.BadgeMs, () => seeker.HideBadge(press));
+        Settle();
         if (shown) Poke();
         Layout();
+    }
+
+    /// <summary>Presses in a row seek once they stop; the badge goes a little later.</summary>
+    void Settle()
+    {
+        var press = seeker.Presses;
+        After(Seeker.SettleMs, () => seeker.Settle(press));
+        After(Seeker.BadgeMs, () =>
+        {
+            seeker.HideBadge(press);
+            Layout();
+        });
     }
 
     void Released()
@@ -566,79 +609,33 @@ sealed class PlayerScreen : Sheet
 
     void SeekTo(long ms)
     {
-        lastPosition = ms;
+        // A while after a seek, OK plays and pauses again.
         var number = seeker.Seeks + 1;
         After(Seeker.ConfirmMs, () => seeker.Settled(number));
-        var p = player;
-        if (p == null || !started) return;
-        spinner.Show();
-        _ = Seek(p, ms);
+        model.SeekTo(ms);
     }
 
-    async Task Seek(Media.Player p, long ms)
+    /// <summary>Shows or hides the controls; shown, focus goes to <paramref name="focus"/> (where it was, when null and already shown).</summary>
+    void ShowControls(bool on, FocusItem? focus = null)
     {
-        try
+        if (on)
         {
-            await p.SetPlayPositionAsync((int)Math.Max(0, ms), false);
+            if (focus != null && Tree.Current != focus) Tree.Focus(focus);
+            else if (Tree.Current == null) Tree.Focus(scrubber);
+            Poke();
         }
-        catch (Exception)
-        {
-            // A seek the player refuses leaves it playing where it was.
-        }
-        if (gone) return;
-        spinner.Hide();
-        Report(force: true);
-    }
-
-    void PlayPause()
-    {
-        var p = player;
-        if (p == null || !started) return;
-        try
-        {
-            if (playing) p.Pause();
-            else p.Start();
-            playing = !playing;
-        }
-        catch (Exception)
-        {
-            return;
-        }
-        playPause.Set(playing ? "Pause" : "Play", playing ? "pause" : "play");
-        // Paused, the controls stay; playing again, they go after a while.
-        if (!playing) ShowControls(true, scrubberFocus: Tree.Current == null || Tree.Current == scrubber);
-        else Poke();
-        Report(force: true);
-        Layout();
-    }
-
-    void ShowControls(bool on, bool scrubberFocus = true)
-    {
-        if (on && !shown)
-        {
-            if (scrubberFocus) Tree.Focus(scrubber);
-            else Tree.Focus(playPause.Item);
-        }
-        else if (on && scrubberFocus && Tree.Current != scrubber) Tree.Focus(scrubber);
-        if (!on) Tree.Blur();
-        if (on) Poke();
+        else Tree.Blur();
         if (shown == on) return;
         shown = on;
-        Reveal(controls, on);
+        fade?.Stop();
+        fade = new Animation(PleyMotion.OverlayMs) { DefaultAlphaFunction = new AlphaFunction(on ? AlphaFunction.BuiltinFunctions.EaseOut : AlphaFunction.BuiltinFunctions.EaseIn) };
+        fade.AnimateTo(controls, "Opacity", on ? 1f : 0f);
+        fade.Play();
         Layout();
     }
 
     /// <summary>A key came: the controls stay a while longer.</summary>
-    void Poke() => hideAt = Environment.TickCount64 + HideAfterMs;
-
-    void Reveal(View view, bool on)
-    {
-        if (view == controls) fade?.Stop();
-        var a = new Animation(PleyMotion.OverlayMs) { DefaultAlphaFunction = new AlphaFunction(on ? AlphaFunction.BuiltinFunctions.EaseOut : AlphaFunction.BuiltinFunctions.EaseIn) };
-        a.AnimateTo(view, "Opacity", on ? 1f : 0f);
-        a.Play();
-        if (view == controls) fade = a;
-    }
+    void Poke() => hideAt = Environment.TickCount64 + PlayerText.HideAfterMs;
 
     bool OnBack()
     {
@@ -651,41 +648,76 @@ sealed class PlayerScreen : Sheet
         return true;
     }
 
-    void Completed()
+    /// <summary>The app went to the background: it pauses, as the TV takes its player back.</summary>
+    void AppShown(bool visible)
     {
-        lastPosition = durationMs;
-        Close();
+        if (!gone && !visible) model.Pause();
     }
 
-    /// <summary>Can't play: "Can't play this item", why, and Back, centred on black (design spec Â§8).</summary>
-    void Fail(string why)
+    // ---- errors
+
+    /// <summary>
+    /// A playback that stopped (design spec §8): its heading, why, and "Try again" (focused) when it
+    /// may help, with Back; else Back alone. Centred on black.
+    /// </summary>
+    void ShowError(PlayerPhase phase)
     {
-        if (gone) return;
-        StopPlayer();
-        spinner.Hide();
-        controls.Hide();
-        black.Opacity = 1;
-        error?.Unparent();
-        error = new View { Size = Canvas(), BackgroundColor = Color.Black };
+        HideError();
+        errorShown = phase;
+        seeker.Cancel();
+        ShowControls(false);
+        var view = new View { Size = Canvas(), BackgroundColor = Color.Black };
         var width = PleyTv.CanvasWidth - 320;
-        var heading = Text.Label("Can't play this item", PleyType.PageTitle, PleyColors.Fg, width: width);
+        var heading = Text.Label(phase.Title ?? PlayerText.ErrorTitle, PleyType.PageTitle, PleyColors.Fg, width: width);
         heading.HorizontalAlignment = HorizontalAlignment.Center;
-        heading.Position = new Position(Ui.Dp(160), Ui.Dp(190));
-        error.Add(heading);
-        var text = Text.Label(why, PleyType.Body, PleyColors.Muted, maxLines: 4, width: width);
-        text.HorizontalAlignment = HorizontalAlignment.Center;
-        text.Position = new Position(Ui.Dp(160), Ui.Dp(190 + PleyType.PageTitle.Line + 12));
-        error.Add(text);
-        var buttons = new ButtonRow();
-        buttons.Add(new ButtonView("Back", ButtonKind.Pill, Close, iconName: "arrow-left"));
-        buttons.Position = new Position(Ui.Dp((PleyTv.CanvasWidth - buttons.WidthDp) / 2), Ui.Dp(190 + PleyType.PageTitle.Line + 12 + PleyType.Body.Line * 4 + 32));
-        error.Add(buttons);
-        View.Add(error);
-        Root.Clear();
+        var message = Text.Label(phase.Message ?? "", PleyType.Body, PleyColors.Muted, maxLines: 4, width: width);
+        message.HorizontalAlignment = HorizontalAlignment.Center;
+        message.VerticalAlignment = VerticalAlignment.Top;
+        var messageHeight = Math.Min(Math.Max(message.GetHeightForWidth(Ui.Dp(width)), Text.LineHeight(PleyType.Body)), Text.LineHeight(PleyType.Body) * 4) / Ui.Scale;
+        message.SizeHeight = Ui.Dp(messageHeight);
+        var buttons = new ButtonRow(12);
+        ButtonView first;
+        if (phase.CanRetry)
+        {
+            first = buttons.Add(new ButtonView(PlayerText.TryAgain, ButtonKind.Pill, Retry, iconName: "refresh-cw"));
+            buttons.Add(new ButtonView(PlayerText.BackLabel, ButtonKind.Text, Close));
+        }
+        else first = buttons.Add(new ButtonView(PlayerText.BackLabel, ButtonKind.Pill, Close, iconName: "arrow-left"));
+        var block = PleyType.PageTitle.Line + 12 + messageHeight + 32 + PleyTv.ButtonHeight;
+        var top = (PleyTv.CanvasHeight - block) / 2;
+        heading.Position = new Position(Ui.Dp(160), Ui.Dp(top));
+        message.Position = new Position(Ui.Dp(160), Ui.Dp(top + PleyType.PageTitle.Line + 12));
+        buttons.Position = new Position(Ui.Dp((PleyTv.CanvasWidth - buttons.WidthDp) / 2), Ui.Dp(top + PleyType.PageTitle.Line + 12 + messageHeight + 32));
+        view.Add(heading);
+        view.Add(message);
+        view.Add(buttons);
+        View.Add(view);
+        error = view;
+        // Up and Down stay on the buttons: the controls under them are hidden.
+        buttons.Group.Exit = d => d is Direction.Up or Direction.Down;
+        errorButtons = buttons.Group;
         Root.Add(buttons.Group);
-        Tree.Enter(buttons.Group);
-        if (session != null && !session.Ended) session.End(lastPosition);
+        Tree.Focus(first.Item);
     }
+
+    void HideError()
+    {
+        errorShown = null;
+        if (errorButtons != null)
+        {
+            if (Tree.Current?.Parent == errorButtons) Tree.Blur();
+            Root.Remove(errorButtons);
+            errorButtons = null;
+        }
+        if (error == null) return;
+        error.Unparent();
+        error.Dispose();
+        error = null;
+    }
+
+    void Retry() => model.Retry();
+
+    // ---- leaving
 
     void Close()
     {
@@ -693,11 +725,10 @@ sealed class PlayerScreen : Sheet
         shell.Pop(this);
     }
 
-    /// <summary>Off the screen: the session says where it stopped and ends; the TV's player is let go.</summary>
+    /// <summary>Off the screen: the model reports where it stopped and ends the session; the TV's player is let go.</summary>
     void Ended()
     {
         if (gone) return;
-        var position = Position();
         gone = true;
         tick.Stop();
         spin.Stop();
@@ -711,36 +742,29 @@ sealed class PlayerScreen : Sheet
             // It never took.
         }
         gate.HoldEnded -= Released;
-        StopPlayer();
-        session?.End(position);
+        shell.Shown -= AppShown;
+        foreach (var w in watches) w.Dispose();
+        watches.Clear();
+        model.Close();
         closed();
     }
 
-    void StopPlayer()
+    void OnUi(Action action)
     {
-        var p = player;
-        player = null;
-        started = false;
-        playing = false;
-        if (p == null) return;
-        try
+        if (ui == null) action();
+        else ui.Post(_ =>
         {
-            if (p.State == Media.PlayerState.Playing || p.State == Media.PlayerState.Paused) p.Stop();
-            if (p.State != Media.PlayerState.Idle) p.Unprepare();
-        }
-        catch (Exception)
-        {
-            // Already stopped.
-        }
-        p.Dispose();
+            if (!gone) action();
+        }, null);
     }
 
-    static void After(long ms, Action action)
+    /// <summary>Runs <paramref name="action"/> after <paramref name="ms"/>, unless the player has gone by then.</summary>
+    void After(long ms, Action action)
     {
-        var timer = new Timer((uint)ms);
+        var timer = new Timer((uint)Math.Max(1, ms));
         timer.Tick += (_, _) =>
         {
-            action();
+            if (!gone) action();
             timer.Dispose();
             return false;
         };
@@ -774,7 +798,7 @@ sealed class PlayerScreen : Sheet
     }
 
     /// <summary>
-    /// A button of the player (design spec Â§2.5): its glyph alone on the scrim; focused, the accent
+    /// A button of the player (design spec §2.5): its glyph alone on the scrim; focused, the accent
     /// fills a control square behind it, 1.08 larger, and its label fades in 8 dp below.
     /// </summary>
     sealed class PlayerButton : View

@@ -89,3 +89,8 @@ It has no releases yet: it is built and installed by hand
   start says why, with Try again or, every connection being in use, Watch
   here instead. The channel lets go of its connection while the app is
   hidden and tunes again when it comes back.
+- The native app's player plays as Android TV's does: it chooses how the
+  file plays with the TV's capabilities, recovers by itself from a stall
+  or a format the TV refuses, waits for a server out of reach
+  ("Reconnecting…") and plays on where it was, and says why it can't play,
+  with Try again and Back. It pauses when the app goes to the background.
