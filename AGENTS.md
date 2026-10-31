@@ -52,8 +52,8 @@ authors', so it can be licensed on other terms too.
 
 - Add no dependency that is only available under a copyleft licence (GPL,
   LGPL, AGPL and the like) to the server, the transcoder or any app other
-  than the Kodi add-on, and none under a licence the AGPL doesn't accept.
-  `scripts/check-licenses.ps1` and `deny.toml` enforce this for Rust.
+  than the Kodi add-on. `scripts/check-licenses.ps1` and `deny.toml` enforce
+  this for Rust.
 - The transcoder runs `ffmpeg` and `ffprobe` as programs. Never link
   FFmpeg's libraries into it: that would bind it to FFmpeg's GPL.
 - The server never depends on the `pley-transcoder` crate; it talks to the

@@ -15,8 +15,6 @@ In short, the AGPL means:
   source code too (the licence's section 13). Running Pley unchanged asks
   nothing more.
 
-The licence's own text is what counts.
-
 | Component | Path | License | Contents |
 |---|---|---|---|
 | **Pley server** | `apps/server`, `apps/web` | AGPL-3.0-only | Libraries, scanner, metadata, users, sessions, HTTP API, web UI |
@@ -32,9 +30,7 @@ The licence's own text is what counts.
 
 Pley's source is at <https://github.com/pley-media-server/pley>, and each
 release is tagged there (`server-v<version>`, `android-v<version>` and so
-on, [docs/RELEASING.md](docs/RELEASING.md)). The transcoder gives the same
-address in `GET /v1/info` and `pley-transcoder --license`; a changed build
-gives its own.
+on, [docs/RELEASING.md](docs/RELEASING.md)).
 
 ## The Kodi add-on
 
@@ -80,16 +76,15 @@ Pley's own code is wholly its authors', so they can license it on other
 terms besides the AGPL. A dependency that is only available under a
 copyleft licence (GPL, LGPL, AGPL and the like), or FFmpeg linked in, would
 bind the programs that use it to that licence's terms too, which only its
-own authors could waive. And every third-party licence has to be one the
-AGPL accepts: permissive ones (MIT, BSD, Apache-2.0, ISC and the like).
+own authors could waive.
 
 - **No copyleft code in Pley's own programs.** `scripts/check-licenses.ps1`
   walks the real dependency graphs of the server and the transcoder and fails
   on any crate that is only available under a copyleft licence (GPL, LGPL,
   AGPL and the like), and on the server depending on the transcoder crate
   (they are separate programs that talk over HTTP, `docs/TRANSCODER.md`).
-  `cargo deny check licenses` allows only permissive licences that the AGPL
-  accepts for third-party crates (`deny.toml`). CI runs both.
+  `cargo deny check licenses` allows only permissive licences for
+  third-party crates (`deny.toml`). CI runs both.
 - **No FFmpeg and no GPL code in the Android app.** It plays with Media3 and
   the device's own decoders; the server's transcoder converts what the
   device can't play. `scripts/check-android.ps1`, run by CI after the release
