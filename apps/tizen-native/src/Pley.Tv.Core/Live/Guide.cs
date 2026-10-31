@@ -215,7 +215,10 @@ public sealed class GuideCursor
 
     /// <summary>Whether Back first brings the guide back to now: focus is on something not airing, or the grid moved.</summary>
     public bool AwayFromNow(IReadOnlyList<LiveProgram>? programs, long now) =>
-        Current(programs)?.AiringAt(now) != true || Left != LeftFor(now, Start);
+        Left != LeftFor(now, Start)
+        // Where there is no programme (a channel without a guide), now's half hour: taken as away
+        // there always, Back went on coming back to now and never left the guide.
+        || (Current(programs) is { } on ? !on.AiringAt(now) : Slot(Cursor) != Slot(now));
 
     public void BackToNow(long now)
     {

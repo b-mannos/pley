@@ -254,6 +254,19 @@ public class GuideCursorTests
     }
 
     [Fact]
+    public void On_a_channel_without_programmes_back_comes_to_now_once_then_leaves()
+    {
+        var c = new GuideCursor(Start, Now);
+        // At now on a channel without a guide: not away, so Back leaves the guide.
+        Assert.False(c.AwayFromNow(null, Now));
+        c.MoveRight(null);
+        c.MoveRight(null);
+        Assert.True(c.AwayFromNow(null, Now));
+        c.BackToNow(Now);
+        Assert.False(c.AwayFromNow(null, Now));
+    }
+
+    [Fact]
     public void Up_and_down_keep_the_time_and_channel_up_and_down_move_five_rows()
     {
         var c = new GuideCursor(Start, Now);
