@@ -47,6 +47,9 @@ install it on a TV in developer mode.
 4. With a Samsung certificate, run `tizen install-permit -t <target>` once.
 5. `tizen install -n pley.wgt -t <target> -- apps/tizen/out`.
 
+The native Samsung app installs the same way, as a `.tpk`
+([Setting up](#setting-up)).
+
 ### On an LG TV
 
 1. Install **Developer Mode** from LG's store and sign in with an LG
@@ -443,18 +446,48 @@ The other pages come next.
   `expires_in`), the native app follows it, and its test says which
   fixture case it answers differently.
 
-### Building and installing
+### Setting up
 
-It needs the .NET 8 SDK, and to sign the package the Tizen CLI and the
-Samsung certificate profile of [On a Samsung TV](#on-a-samsung-tv).
+On the computer:
+
+1. The **.NET 8 SDK**. The build fetches Tizen .NET's own build tools
+   (`Tizen.NET.Sdk`) from NuGet by itself.
+2. The **Tizen SDK 10.0** ([Commands](#commands)), for its CLI (`tizen`,
+   `sdb`) and Certificate Manager; `TIZEN_STUDIO` names its folder when
+   it isn't on the PATH. In its Package Manager, under Extension SDK,
+   install **Samsung Certificate Extension**.
+
+For each TV:
+
+1. **Developer mode:** Apps, `12345` on the remote, Developer mode On
+   with the computer's IP address, then restart the TV.
+2. **Its DUID**, which the certificate lists: `duid` in
+   `http://<TV address>:8001/api/v2/`, or Certificate Manager reads it
+   from a TV connected with `sdb connect <TV address>`.
+3. **A certificate that lists it.** In Certificate Manager, `+`, Samsung,
+   TV: an author certificate (keep its password, and reuse it for later
+   profiles), then a distributor certificate with privilege Public and
+   the DUIDs of every TV the package is for. The profile's name is
+   `PLEY_TIZEN_PROFILE` when packaging. A TV added later takes a new
+   profile with the same author certificate and a distributor certificate
+   listing all the DUIDs, and a package signed again with it.
+4. **Its permit,** once per TV and certificate:
+   `tizen install-permit -t <target>`, with the target `sdb devices`
+   names.
+
+### Building and installing
 
 ```sh
 dotnet test apps/tizen-native/test/Pley.Tv.Core.Tests   # the Core's tests
-bun run tizen-native                                     # apps/tizen-native/out/pley-tizen.tpk, signed
+PLEY_TIZEN_PROFILE=<profile> bun run tizen-native        # apps/tizen-native/out/pley-tizen.tpk, signed
 tizen install -n pley-tizen.tpk -t <target> -- apps/tizen-native/out
 tizen run -p app.pley.tizen -t <target>
 bun scripts/check-nuget-licenses.mjs                     # the licences of the packages it ships with
 ```
+
+`tizen run` brings the app to the front when it is running already; an
+install ends it, so installing again starts it afresh. It is named
+"Pley (native)" among the TV's apps.
 
 ### Profiling
 
