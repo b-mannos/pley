@@ -51,7 +51,8 @@ keeps its saved servers and asks you to sign in again.
   turned off in the system's settings isn't used. Dolby Vision the screen
   doesn't show there plays as its HDR10, HLG or SDR base layer, and the
   player's details say why ("HDR10 (Dolby Vision base layer, as this
-  screen doesn't show Dolby Vision)").
+  screen doesn't show Dolby Vision)"). Their Decoded line names what the
+  decoder makes: HEVC and HDR10 for a base layer.
 
 ### Audio and subtitles
 

@@ -18,6 +18,8 @@ describes how they are made.
 - With a server from the same release, the player's details say why
   Dolby Vision plays as its base layer, telling a screen that doesn't show
   it from a device that doesn't decode it.
+- The player's Decoded line says HEVC and HDR10 for Dolby Vision played
+  as its base layer, not Dolby Vision.
 
 ## [0.1.0] - 2026-10-30
 

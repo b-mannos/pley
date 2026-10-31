@@ -197,7 +197,7 @@ class Media3Engine(
         reconnect.buffered(player.bufferedPosition)
         publishReconnecting()
     }
-    private val analytics = PlaybackAnalytics(now, ::isHardware) { stats -> mutableState.update { it.copy(stats = stats) } }
+    private val analytics = PlaybackAnalytics(now, ::isHardware, ::decoderMime) { stats -> mutableState.update { it.copy(stats = stats) } }
 
     private var window: Window? = null
     private var frameRate: FrameRateController? = null
@@ -407,6 +407,8 @@ class Media3Engine(
     }
 
     private fun isHardware(name: String): Boolean? = details?.input?.decoders?.firstOrNull { it.name == name }?.hardware
+
+    private fun decoderMime(name: String): String? = details?.input?.decoders?.firstOrNull { it.name == name }?.mime
 
     /** [EngineState.reconnecting] as the watcher has it, looked at again while it lasts. */
     private fun publishReconnecting() {
