@@ -67,6 +67,15 @@ sealed class PlayerScreen : Sheet
     readonly TextLabel reconnecting;
     readonly View controls;
     readonly TextLabel title;
+    readonly View banner;
+    readonly TextLabel bannerTitle;
+    readonly TextLabel bannerLine;
+    /// <summary>The item the banner last showed for: another one beginning shows it again.</summary>
+    long? bannerFor;
+    bool bannerDue;
+    /// <summary>The banner's height and how long it shows.</summary>
+    const float BannerHeight = 120;
+    const int BannerMs = 4000;
     readonly TextLabel line;
     readonly MethodBadge method;
     readonly TextLabel clock;
@@ -159,6 +168,16 @@ sealed class PlayerScreen : Sheet
         scrim = Scrim();
         scrim.Opacity = 0;
         View.Add(scrim);
+        // The title banner: what plays, at the controls' place over the top of their scrim, for a
+        // few seconds as each item begins (the next episode playing by itself), the controls hidden.
+        banner = new View { Size = new Size(Ui.Dp(PleyTv.CanvasWidth), Ui.Dp(BannerHeight)), Opacity = 0, Background = TopScrim() };
+        bannerTitle = Text.Label("", PleyType.Title, PleyColors.Fg, width: PleyTv.CanvasWidth - PleyTv.SafeHorizontal - 300);
+        bannerTitle.Position = new Position(Ui.Dp(PleyTv.SafeHorizontal), Ui.Dp(PleyTv.SafeVertical));
+        banner.Add(bannerTitle);
+        bannerLine = Text.Label("", PleyType.Label, PleyColors.Muted, width: PleyTv.CanvasWidth - PleyTv.SafeHorizontal - 300);
+        bannerLine.Position = new Position(Ui.Dp(PleyTv.SafeHorizontal), Ui.Dp(PleyTv.SafeVertical + PleyType.Title.Line + 4));
+        banner.Add(bannerLine);
+        View.Add(banner);
         // Picture subtitles where their plane puts them, under the controls, as on the web app.
         pictures = new PictureSubtitleView();
         View.Add(pictures);
@@ -393,6 +412,7 @@ sealed class PlayerScreen : Sheet
         if (gone) return;
         Text.Show(title, s.Title);
         Text.Show(line, s.Subtitle ?? "");
+        Banner(s);
         if (s.Method != null) method.Set(s.Method);
         method.SetVisible(s.Method != null);
         PlaceMethod();
@@ -1051,6 +1071,8 @@ sealed class PlayerScreen : Sheet
     void ShowControls(bool on, FocusItem? focus = null)
     {
         if (!on) CloseChapters();
+        // The controls have the title: the banner makes way.
+        if (on && banner.Opacity > 0) Fade.To(banner, false, PleyMotion.OverlayMs);
         if (on)
         {
             if (focus != null && Tree.Current != focus) Tree.Focus(focus);
@@ -1222,6 +1244,49 @@ sealed class PlayerScreen : Sheet
     }
 
     /// <summary>The black scrim behind the controls: 65 % at the top, 25 % through the middle, 90 % at the bottom.</summary>
+    /// <summary>The banner's shade: black at the controls' scrim's top (65 %) to clear at its foot.</summary>
+    static PropertyMap TopScrim()
+    {
+        var offsets = new PropertyArray();
+        var colors = new PropertyArray();
+        foreach (var (at, alpha) in new[] { (0f, 0.65f), (1f, 0f) })
+        {
+            offsets.Add(new PropertyValue(at));
+            colors.Add(new PropertyValue(new Color(0, 0, 0, alpha)));
+        }
+        var map = new PropertyMap();
+        map.Add(Visual.Property.Type, new PropertyValue((int)Visual.Type.Gradient));
+        map.Add(GradientVisualProperty.StartPosition, new PropertyValue(new Vector2(0, -0.5f)));
+        map.Add(GradientVisualProperty.EndPosition, new PropertyValue(new Vector2(0, 0.5f)));
+        map.Add(GradientVisualProperty.StopOffset, new PropertyValue(offsets));
+        map.Add(GradientVisualProperty.StopColor, new PropertyValue(colors));
+        return map;
+    }
+
+    /// <summary>
+    /// The banner, as an item begins playing (the next episode by itself, or the first): what plays,
+    /// for a few seconds, unless the controls show, which have it already.
+    /// </summary>
+    void Banner(PlayerState s)
+    {
+        if (s.ItemId != bannerFor)
+        {
+            bannerFor = s.ItemId;
+            bannerDue = true;
+        }
+        if (!bannerDue || s.Phase.Kind != PhaseKind.Playing) return;
+        bannerDue = false;
+        if (shown) return;
+        Text.Show(bannerTitle, s.Title);
+        Text.Show(bannerLine, s.Subtitle ?? "");
+        Fade.To(banner, true, PleyMotion.OverlayMs);
+        var item = s.ItemId;
+        After(BannerMs, () =>
+        {
+            if (bannerFor == item) Fade.To(banner, false, PleyMotion.OverlayMs);
+        });
+    }
+
     static View Scrim()
     {
         var offsets = new PropertyArray();
