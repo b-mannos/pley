@@ -254,6 +254,20 @@ public class GuideCursorTests
     }
 
     [Fact]
+    public void On_a_channel_without_programmes_each_press_moves_the_view_a_half_hour()
+    {
+        var c = new GuideCursor(Start, Now);
+        var left = c.Left;
+        c.MoveRight(null);
+        Assert.Equal(left + LiveRules.SlotS, c.Left);
+        c.MoveRight(null);
+        Assert.Equal(left + 2 * LiveRules.SlotS, c.Left);
+        Assert.True(c.Cursor >= c.Left && c.Cursor < c.Left + GuideLayout.ViewS);
+        Assert.True(c.MoveLeft(null));
+        Assert.Equal(left + LiveRules.SlotS, c.Left);
+    }
+
+    [Fact]
     public void On_a_channel_without_programmes_back_comes_to_now_once_then_leaves()
     {
         var c = new GuideCursor(Start, Now);

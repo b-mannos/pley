@@ -171,16 +171,38 @@ public sealed class GuideCursor
         // half hour at a time, as Right goes on: refused there, Left took focus to the categories
         // from wherever Right had gone, with no way back through the time.
         if (target < Start) return false;
+        if (current == null && Blank(programs) && Left > Start)
+        {
+            // Nothing in view: the view goes back a half hour with the cursor, as Right goes on.
+            Left = Math.Max(Start, Left - LiveRules.SlotS);
+            Cursor = Math.Max(Left, Slot(target));
+            return true;
+        }
         var before = LiveRules.At(programs, target);
         MoveTo(before != null ? Math.Max(before.Start, Slot(target)) : Slot(target));
         return true;
     }
 
+    /// <summary>Whether the row has nothing in view (a channel without a guide): the cursor would move unseen in it.</summary>
+    bool Blank(IReadOnlyList<LiveProgram>? programs) => GuideLayout.Visible(programs, Left, Start).Count == 0;
+
     /// <summary>Right on the focused row's <paramref name="programs"/>: the next programme, or the next half hour; never past the guide.</summary>
     public void MoveRight(IReadOnlyList<LiveProgram>? programs)
     {
-        var target = Current(programs)?.Stop ?? Slot(Cursor) + LiveRules.SlotS;
-        if (target < End) MoveTo(target);
+        var current = Current(programs);
+        var target = current?.Stop ?? Slot(Cursor) + LiveRules.SlotS;
+        if (target >= End) return;
+        var lastLeft = Math.Max(Start, End - GuideLayout.ViewS);
+        if (current == null && Blank(programs) && Left < lastLeft)
+        {
+            // Nothing in view (a channel without a guide): the view moves on a half hour with the
+            // cursor at each press. Moved alone, the cursor went unseen until it neared the edge, and
+            // Right seemed to take two presses where Left took one.
+            Left = Math.Min(lastLeft, Left + LiveRules.SlotS);
+            Cursor = Math.Max(Left, target);
+            return;
+        }
+        MoveTo(target);
     }
 
     /// <summary>Up: false from the first row, where focus leaves for the tabs above.</summary>
