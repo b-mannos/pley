@@ -375,8 +375,9 @@ Pley for Samsung TV, native, is the Samsung app rewritten in C# for Tizen
 than a web engine. It runs on Tizen 9 TVs and is built beside the web app,
 which stays the Samsung app until the native one has its features. So far
 it has the Android TV app's "Choose your server" screen (servers found on
-the network, an address pad and the TV's keyboard, forgetting a server)
-and the rail and rows of placeholder tiles.
+the network, an address pad and the TV's keyboard, forgetting a server),
+its sign-in with a code and a QR code, and the rail and rows of
+placeholder tiles.
 
 | | |
 |---|---|

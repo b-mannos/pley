@@ -29,6 +29,7 @@ static class Platform
         Version = Version(),
         OsVersion = Info("http://tizen.org/feature/platform.version"),
         Model = Info("http://tizen.org/system/model_name"),
+        TokenVault = new KeyManagerVault(),
     };
 
     /// <summary>The version people see: "0.0.1", without the commit.</summary>

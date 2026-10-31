@@ -48,6 +48,13 @@ class App : NUIApplication
                 };
                 shell.Show(servers);
                 break;
+            case PageKey.Link link:
+                var model = new LinkModel(new AppLinkSource(state), new ContextScheduler(), link.Server);
+                model.Done += () => Go(new PageKey.Home());
+                var screen = new LinkScreen(model, ChangeServer);
+                shell.Show(screen);
+                screen.Started();
+                break;
             case PageKey.Home:
                 shell.Show(KitDemo());
                 break;

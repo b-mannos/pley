@@ -11,6 +11,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Pley.Tv.Core\Pley.Tv.Core.csproj" />
+    <!-- The link screen's QR code: Nayuki's generator, as the Android app has it, under MIT. -->
+    <PackageReference Include="Net.Codecrete.QrCodeGenerator" Version="3.2.1" />
   </ItemGroup>
 
 </Project>
