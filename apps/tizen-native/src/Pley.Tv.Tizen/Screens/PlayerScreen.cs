@@ -24,8 +24,9 @@ namespace Pley.Tv.Tizen.Screens;
 /// OK during or just after a seek confirms it and plays on.</item>
 /// <item><b>Controls shown.</b> The title, the method badge and the clock at the top; the times,
 /// the scrubber (with its chapters and the marker playing) and the control row at the bottom, over
-/// a black scrim; focus moves as usual; OK on the scrubber plays and pauses, and Up on it opens the
-/// chapters as a row of cards (<see cref="ChapterStrip"/>). The row's buttons open the side panels
+/// a black scrim; focus moves as usual; OK on the scrubber plays and pauses, and Up on it goes to Skip
+/// while it shows, else opens the chapters as a row of cards (<see cref="ChapterStrip"/>). The row's
+/// buttons open the side panels
 /// (<see cref="PlayerPanelSheet"/>). They go 5 s after the last key while it plays, unless paused,
 /// scrubbing or in a panel.</item>
 /// <item><b>Back</b> walks out: a panel, then Up Next, then the chapters, then the controls, then the player.</item>
@@ -289,8 +290,9 @@ sealed class PlayerScreen : Sheet
                         if (down && !Busy) Step(key == "Left" ? -1 : 1);
                         return true;
                     case "Up":
-                        // The chapters as cards over the scrubber, where there are any; else Up moves on.
-                        if (model.State.Value.Chapters.Count == 0) return false;
+                        // Skip Intro or Skip Credits, while it shows, is first: Up goes to it, as on Android.
+                        // Else the chapters as cards over the scrubber, where there are any; else Up moves on.
+                        if (skipShown || model.State.Value.Chapters.Count == 0) return false;
                         if (down) OpenChapters();
                         return true;
                     case "Down":
