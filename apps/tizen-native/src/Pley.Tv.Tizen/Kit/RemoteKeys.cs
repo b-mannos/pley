@@ -17,6 +17,13 @@ static class RemoteKeys
 
     public static bool Menu(string key) => key is "XF86SysMenu" or "XF86Menu" or "Menu";
 
+    /// <summary>The remote's subtitles key (CC, or Samsung's SUBT.).</summary>
+    public static bool Captions(string key) => key is "XF86Caption" or "XF86Subtitle" or "XF86ClosedCaption";
+
+    public static bool NextTrack(string key) => key is "XF86AudioNext";
+
+    public static bool PreviousTrack(string key) => key is "XF86AudioPrev";
+
     /// <summary>Play, pause, rewind, fast forward and skip: what Live TV, watched as it airs, has none of.</summary>
     public static bool Transport(string key) => key is "XF86AudioPlay" or "XF86AudioPause" or "XF86AudioPlayPause" or "XF86AudioRewind" or "XF86AudioForward"
         or "XF86AudioNext" or "XF86AudioPrev";

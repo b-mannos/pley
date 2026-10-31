@@ -14,25 +14,38 @@ using Timer = Tizen.NUI.Timer;
 namespace Pley.Tv.Tizen.Screens;
 
 /// <summary>
-/// The player (design spec §2.7; the Android app's TvPlayerScreen) over the Core's
-/// <see cref="PlayerModel"/>: the server's session on the TV's own player, on the video plane
-/// under the window. Hidden controls: OK plays and pauses, Left and Right seek
-/// (<see cref="Seeker"/>), Up shows the controls on the scrubber, Down on Play/Pause. Shown: the
-/// title and clock at the top; the times, scrubber and Back 10 · Play/Pause · Forward 10 at the
-/// bottom, over a black scrim; they go 5 s after the last key while it plays. Back hides them,
-/// then leaves. The model reports where it is to the server, through the app's reporter, so the
-/// last report goes out after the screen closed.
+/// The player (design spec §2.7, TV addendum §5.2; the Android app's TvPlayerScreen) over the
+/// Core's <see cref="PlayerModel"/>: the server's session on the TV's own player, on the video
+/// plane under the window, with the subtitles drawn over it.
+/// <list type="bullet">
+/// <item><b>Controls hidden.</b> Only the video and subtitles show; Skip, Up Next and the sleep
+/// timer's notice are all that appear unasked. OK plays and pauses (a showing Skip takes it), Left
+/// and Right seek (<see cref="Seeker"/>), Up shows the controls on the scrubber, Down on Play/Pause.
+/// OK during or just after a seek confirms it and plays on.</item>
+/// <item><b>Controls shown.</b> The title, the method badge and the clock at the top; the times,
+/// the scrubber (with its chapters and the marker playing) and the control row at the bottom, over
+/// a black scrim; focus moves as usual. They go 5 s after the last key while it plays.</item>
+/// <item><b>Back</b> walks out: Up Next, then the controls, then the player.</item>
+/// <item><b>Media keys</b> work whatever shows; CAPTIONS turns the subtitles off and on.</item>
+/// </list>
+/// The model reports to the server through the app's reporter, so the last report goes out after
+/// the screen closed. A playback the server stopped says why and leaves after 20 s; paused by the
+/// sleep timer for 10 minutes, the player leaves.
 /// </summary>
 sealed class PlayerScreen : Sheet
 {
-    const float TimesTop = 399, TrackCentre = 425, RowTop = 441, TrackHeight = 4, Thumb = 10, ThumbFocused = 12;
+    const float TimesTop = 399, TrackCentre = 425, RowTop = 441, TrackHeight = 4, Thumb = 10, ThumbFocused = 12, ChapterGap = 2;
     const float Button = 36, PlayButton = 44, TransportIcon = 24, PlayIcon = 26, TransportGap = 16;
+    /// <summary>The seek preview's top, and Skip's, the sleep notice's and Up Next's bottom edges, controls hidden and shown.</summary>
+    const float PreviewTop = 212, OverlayBottom = 489, OverlayBottomShown = 355;
     /// <summary>The spinner shows once playback has waited this long (the Android app's 500 ms).</summary>
     const long SpinnerAfterMs = 500;
     /// <summary>The same media key from NUI and from the media key service this soon after counts once.</summary>
     const long MediaTwiceMs = 250;
 
     readonly Shell shell;
+    readonly AppState state;
+    readonly Images images;
     readonly KeyRepeatGate gate;
     readonly Action closed;
     readonly SynchronizationContext? ui = SynchronizationContext.Current;
@@ -43,28 +56,46 @@ sealed class PlayerScreen : Sheet
 
     readonly View black;
     readonly View bars;
+    readonly SubtitleView subtitles;
     readonly View spinner;
     readonly Animation spin;
     readonly TextLabel reconnecting;
     readonly View controls;
     readonly TextLabel title;
     readonly TextLabel line;
+    readonly MethodBadge method;
     readonly TextLabel clock;
     readonly TextLabel ends;
     readonly TextLabel elapsed;
     readonly TextLabel remaining;
     readonly TextLabel badge;
+    readonly TextLabel markerLabel;
     readonly View track;
-    readonly View played;
+    readonly List<(View Played, float From, float To)> segments = new List<(View, float, float)>();
     readonly View thumb;
     readonly View thumbRing;
+    readonly SeekPreviewView preview;
     readonly FocusItem scrubber;
+    readonly FocusGroup row = new FocusGroup(Axis.Row, "controls");
+    readonly PlayerButton previous;
+    readonly PlayerButton back10;
     readonly PlayerButton playPause;
+    readonly PlayerButton forward10;
+    readonly PlayerButton next;
+    readonly SkipButton skip;
+    readonly SleepNoticeView notice;
+    readonly UpNextView upNext;
+    readonly ToastView toast;
     readonly Timer tick;
 
     View? error;
     FocusGroup? errorButtons;
     PlayerPhase? errorShown;
+    RowOptions? rowOptions;
+    IReadOnlyList<ChapterMark>? segmentsOf;
+    long segmentsFor = -1;
+    long? previewAt;
+    string? clockText;
     bool shown;
     bool gone;
     bool? wants;
@@ -73,16 +104,27 @@ sealed class PlayerScreen : Sheet
     bool awaitingFrame;
     long? lastFirstFrame;
     long waitingSince = -1;
+    bool skipShown;
+    bool noticeShown;
+    bool upNextShown;
+    bool stoppedLeaving;
+    bool sleepLeaving;
+    int sleepToken;
+    int toastSerial;
+    /// <summary>The subtitles the CAPTIONS key turned off, to turn back on.</summary>
+    int? captionsRemembered;
     Animation? fade;
     Animation? coverFade;
     long hideAt;
 
     /// <param name="reporter">The app's reports queue: the last "stopped" goes out after the screen closed.</param>
     /// <param name="closed">The screen went (Home asks again for the resume points).</param>
-    public PlayerScreen(Shell shell, AppState state, PlayRequest request, IReporter reporter, KeyRepeatGate gate, Action closed) : base("player")
+    public PlayerScreen(Shell shell, AppState state, PlayRequest request, IReporter reporter, Images images, KeyRepeatGate gate, Action closed) : base("player")
     {
         Covers = true;
         this.shell = shell;
+        this.state = state;
+        this.images = images;
         this.gate = gate;
         this.closed = closed;
         var source = new AppPlayerSource(state, () => Caps(state));
@@ -94,9 +136,12 @@ sealed class PlayerScreen : Sheet
         View.Add(black);
         bars = new View { Size = Canvas() };
         View.Add(bars);
-
         controls = new View { Size = Canvas(), Opacity = 0 };
         controls.Add(Scrim());
+        View.Add(controls);
+        // Over the controls' scrim, which mustn't dim them; above the controls while they show.
+        subtitles = new SubtitleView(state.Settings.Value);
+        View.Add(subtitles);
         title = Text.Label("", PleyType.Title, PleyColors.Fg, width: PleyTv.CanvasWidth - PleyTv.SafeHorizontal - 300);
         title.Position = new Position(Ui.Dp(PleyTv.SafeHorizontal), Ui.Dp(PleyTv.SafeVertical));
         controls.Add(title);
@@ -105,6 +150,9 @@ sealed class PlayerScreen : Sheet
         controls.Add(line);
         clock = RightAligned(PleyType.Label, PleyColors.Muted, PleyTv.SafeVertical);
         controls.Add(clock);
+        method = new MethodBadge();
+        method.Hide();
+        controls.Add(method);
         ends = RightAligned(PleyType.Label, PleyColors.Muted, PleyTv.SafeVertical + PleyType.Label.Line + 2);
         controls.Add(ends);
 
@@ -120,16 +168,18 @@ sealed class PlayerScreen : Sheet
         badge.HorizontalAlignment = HorizontalAlignment.Center;
         badge.PositionY = Ui.Dp(TimesTop - PleyType.Label.Line - 6);
         controls.Add(badge);
+        markerLabel = Text.Label("", PleyType.Caption, PleyColors.Muted, width: 160);
+        markerLabel.HorizontalAlignment = HorizontalAlignment.Center;
+        markerLabel.PositionY = Ui.Dp(TrackCentre + 6);
+        markerLabel.Hide();
+        controls.Add(markerLabel);
 
+        // The track: a segment between each chapter's start, each with its played part.
         track = new View
         {
             Position = new Position(Ui.Dp(PleyTv.SafeHorizontal), Ui.Dp(TrackCentre - TrackHeight / 2)),
             Size = new Size(Ui.Dp(width), Ui.Dp(TrackHeight)),
-            CornerRadius = Ui.Dp(TrackHeight / 2),
-            BackgroundColor = new Color(PleyColors.Fg.R, PleyColors.Fg.G, PleyColors.Fg.B, 0.25f),
         };
-        played = new View { Size = new Size(0, Ui.Dp(TrackHeight)), CornerRadius = Ui.Dp(TrackHeight / 2), BackgroundColor = PleyColors.Accent };
-        track.Add(played);
         controls.Add(track);
         var ring = ThumbFocused + 2 * PleyShape.ThumbRingOffset + 2 * PleyShape.ThumbRingStroke;
         thumbRing = new View
@@ -145,20 +195,31 @@ sealed class PlayerScreen : Sheet
         controls.Add(thumbRing);
         thumb = new View { Size = new Size(Ui.Dp(Thumb), Ui.Dp(Thumb)), CornerRadius = Ui.Dp(Thumb / 2), BackgroundColor = PleyColors.Fg };
         controls.Add(thumb);
+        preview = new SeekPreviewView(images);
+        preview.Hide();
+        controls.Add(preview);
 
-        // Back 10 · Play/Pause · Forward 10, centred; the smaller ones' centres in line with Play/Pause's.
-        var back10 = new PlayerButton(PlayerText.Back10, "rotate-ccw", Button, TransportIcon, () => Jump(-1));
+        // The control row: Previous · Back 10 · Play/Pause · Forward 10 · Next, centred.
+        previous = new PlayerButton(PlayerText.Previous, "skip-back", Button, TransportIcon, () => model.Previous(seeker.Target ?? model.LivePositionMs()));
+        back10 = new PlayerButton(PlayerText.Back10, "rotate-ccw", Button, TransportIcon, () => Jump(-1));
         playPause = new PlayerButton(PlayerText.Pause, "pause", PlayButton, PlayIcon, PlayPause);
-        var forward10 = new PlayerButton(PlayerText.Forward10, "rotate-cw", Button, TransportIcon, () => Jump(1));
-        var rowWidth = Button * 2 + PlayButton + TransportGap * 2;
-        var x = (PleyTv.CanvasWidth - rowWidth) / 2;
-        back10.Position = new Position(Ui.Dp(x), Ui.Dp(RowTop + (PlayButton - Button) / 2));
-        playPause.Position = new Position(Ui.Dp(x + Button + TransportGap), Ui.Dp(RowTop));
-        forward10.Position = new Position(Ui.Dp(x + Button + TransportGap + PlayButton + TransportGap), Ui.Dp(RowTop + (PlayButton - Button) / 2));
-        controls.Add(back10);
-        controls.Add(playPause);
-        controls.Add(forward10);
-        View.Add(controls);
+        forward10 = new PlayerButton(PlayerText.Forward10, "rotate-cw", Button, TransportIcon, () => Jump(1));
+        next = new PlayerButton(PlayerText.Next, "skip-forward", Button, TransportIcon, () => model.Next(seeker.Target ?? model.LivePositionMs()));
+        foreach (var b in RowButtons)
+        {
+            b.Hide();
+            controls.Add(b);
+        }
+
+        skip = new SkipButton(model.Skip) { Opacity = 0 };
+        skip.Item.Shown = false;
+        View.Add(skip);
+        notice = new SleepNoticeView(model.KeepWatching) { Opacity = 0 };
+        notice.Keep.Shown = false;
+        View.Add(notice);
+        upNext = new UpNextView(images, state.Settings.Value.ReduceMotion, model.PlayNext, model.CancelUpNext) { Opacity = 0 };
+        foreach (var item in upNext.Group.Children.OfType<FocusItem>()) item.Shown = false;
+        View.Add(upNext);
 
         spinner = Spinner();
         spinner.Position = new Position(Ui.Dp(PleyTv.CanvasWidth / 2 - 20), Ui.Dp(PleyTv.CanvasHeight / 2 - 20));
@@ -173,10 +234,14 @@ sealed class PlayerScreen : Sheet
         reconnecting.Size = new Size(Ui.Dp(reconnectingWidth), Ui.Dp(PleyType.Label.Line + 12));
         reconnecting.Position = new Position(Ui.Dp((PleyTv.CanvasWidth - reconnectingWidth) / 2), Ui.Dp(PleyTv.CanvasHeight / 2 + 20 + 16));
         reconnecting.BackgroundColor = new Color(PleyColors.Bg.R, PleyColors.Bg.G, PleyColors.Bg.B, 0.6f);
+        reconnecting.CornerRadius = Ui.Dp(PleyShape.ControlRadius);
         reconnecting.Hide();
         View.Add(reconnecting);
+        toast = new ToastView();
+        toast.Hide();
+        View.Add(toast);
 
-        // Focus: the scrubber over the row; Left and Right on the scrubber seek, Down goes to Play/Pause.
+        // Focus, top to bottom: Skip, the sleep notice, the scrubber, the row, Up Next.
         scrubber = new FocusItem("scrubber")
         {
             Selected = Ok,
@@ -204,13 +269,11 @@ sealed class PlayerScreen : Sheet
             thumb.CornerRadius = Ui.Dp((on ? ThumbFocused : Thumb) / 2);
             Layout();
         };
+        Root.Add(skip.Item);
+        Root.Add(notice.Group);
         Root.Add(scrubber);
-        var row = new FocusGroup(Axis.Row, "transport");
-        row.Add(back10.Item);
-        row.Add(playPause.Item);
-        row.Add(forward10.Item);
-        row.RememberChild(1);
         Root.Add(row);
+        Root.Add(upNext.Group);
 
         keys = shell.Input.Push(OnKey);
         // The remote's media keys may come through the media key service rather than the window.
@@ -224,6 +287,7 @@ sealed class PlayerScreen : Sheet
         }
         gate.HoldEnded += Released;
         shell.Shown += AppShown;
+        model.Toast += ShowToast;
         Back = OnBack;
         Gone += Ended;
 
@@ -235,12 +299,16 @@ sealed class PlayerScreen : Sheet
         };
         tick.Start();
         watches.Add(model.State.Watch(Render));
+        watches.Add(model.Cues.Watch(subtitles.Show));
+        watches.Add(state.Settings.Watch(subtitles.Restyle));
     }
 
     bool Disposed => gone;
 
     /// <summary>Starting or between sessions: Left, Right and OK wait, as on Android.</summary>
     bool Busy => model.State.Value.Phase.Kind == PhaseKind.Preparing;
+
+    IEnumerable<PlayerButton> RowButtons => new[] { previous, back10, playPause, forward10, next };
 
     static Size Canvas() => new Size(Ui.Dp(PleyTv.CanvasWidth), Ui.Dp(PleyTv.CanvasHeight));
 
@@ -288,12 +356,16 @@ sealed class PlayerScreen : Sheet
         if (gone) return;
         title.Text = s.Title;
         line.Text = s.Subtitle ?? "";
+        if (s.Method != null) method.Set(s.Method);
+        method.SetVisible(s.Method != null);
+        PlaceMethod();
         var wantsToPlay = s.Phase.WantsToPlay;
         if (wants != wantsToPlay)
         {
             wants = wantsToPlay;
             playPause.Set(wantsToPlay ? PlayerText.Pause : PlayerText.Play, wantsToPlay ? "pause" : "play");
         }
+        BuildRow(RowOptions.Of(s));
         var isError = s.Phase.Kind == PhaseKind.Error;
         if (lastFirstFrame == null && s.FirstFrameMs != null) awaitingFrame = false;
         lastFirstFrame = s.FirstFrameMs;
@@ -308,8 +380,33 @@ sealed class PlayerScreen : Sheet
             if (errorShown != s.Phase) ShowError(s.Phase);
         }
         else if (error != null) HideError();
+        UpNext(s.UpNext);
+        Overlays();
+        // The server stopped the playback: the error says why, then the player leaves.
+        if (s.StoppedByServer && !stoppedLeaving)
+        {
+            stoppedLeaving = true;
+            After(PlayerText.StoppedLeaveMs, Close);
+        }
+        // Paused by the sleep timer for 10 minutes: the player leaves.
+        var asleep = s.Sleep.Fired && s.Phase.Kind == PhaseKind.Paused;
+        if (asleep && !sleepLeaving)
+        {
+            sleepLeaving = true;
+            var token = ++sleepToken;
+            After(SleepTimer.LeaveAfterMs, () =>
+            {
+                if (token == sleepToken) Close();
+            });
+        }
+        else if (!asleep && sleepLeaving)
+        {
+            sleepLeaving = false;
+            sleepToken++;
+        }
         // The end, with nothing next: back to where playing started.
         if (s.Phase.Kind == PhaseKind.Ended) OnUi(Close);
+        if (shown) Layout();
     }
 
     /// <summary>Black over the video plane: until the first picture, and after an error until the next one.</summary>
@@ -323,9 +420,7 @@ sealed class PlayerScreen : Sheet
             black.Opacity = 1;
             return;
         }
-        coverFade = new Animation(PleyMotion.OverlayMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
-        coverFade.AnimateTo(black, "Opacity", 0f);
-        coverFade.Play();
+        coverFade = Fade.To(black, false, PleyMotion.OverlayMs);
     }
 
     /// <summary>The spinner, once playback has waited 500 ms; "Reconnecting…" under it while the server is out of reach.</summary>
@@ -344,6 +439,135 @@ sealed class PlayerScreen : Sheet
         }
         if (on && model.State.Value.Reconnecting) reconnecting.Show();
         else reconnecting.Hide();
+    }
+
+    /// <summary>
+    /// The control row for <paramref name="options"/>: Previous and Next around the transport when
+    /// an episode or chapters have them. Focus stays on the button it was on, else Play/Pause.
+    /// </summary>
+    void BuildRow(RowOptions options)
+    {
+        if (options == rowOptions) return;
+        rowOptions = options;
+        var focused = Tree.Current;
+        var wasInRow = focused != null && focused.Parent == row;
+        row.Clear();
+        foreach (var b in RowButtons) b.Hide();
+        var centre = new List<PlayerButton>();
+        if (options.PreviousNext) centre.Add(previous);
+        centre.Add(back10);
+        centre.Add(playPause);
+        centre.Add(forward10);
+        if (options.PreviousNext) centre.Add(next);
+        var x = (PleyTv.CanvasWidth - (centre.Sum(b => b.SizeDp) + TransportGap * (centre.Count - 1))) / 2;
+        foreach (var b in centre)
+        {
+            b.Position = new Position(Ui.Dp(x), Ui.Dp(RowTop + (PlayButton - b.SizeDp) / 2));
+            x += b.SizeDp + TransportGap;
+            b.Show();
+            row.Add(b.Item);
+        }
+        if (wasInRow && focused!.Parent != row) Tree.Focus(playPause.Item);
+        else if (!wasInRow) row.RememberChild(row.Children.ToList().IndexOf(playPause.Item));
+    }
+
+    /// <summary>
+    /// Skip and the sleep notice, as the state says. Skip shows while its marker runs, unless Up
+    /// Next, an error or a seek preview is on screen, and takes focus while the controls are hidden;
+    /// the notice takes it as Skip does, Skip first.
+    /// </summary>
+    void Overlays()
+    {
+        var s = model.State.Value;
+        var free = error == null && s.UpNext == null;
+        var skipNow = s.SkipLabel != null && free && !(shown && seeker.Target != null);
+        if (skipNow) skip.SetLabel(s.SkipLabel!);
+        var noticeNow = s.Sleep.SecondsLeft != null && error == null;
+        if (s.Sleep.SecondsLeft is int left) notice.Set(left);
+        if (skipNow != skipShown)
+        {
+            skipShown = skipNow;
+            skip.Item.Shown = skipNow;
+            Fade.To(skip, skipNow);
+            if (skipNow && !shown && shell.Top == this && free) Tree.Focus(skip.Item);
+            else if (!skipNow && Tree.Current == skip.Item) Refocus();
+        }
+        if (noticeNow != noticeShown)
+        {
+            noticeShown = noticeNow;
+            notice.Keep.Shown = noticeNow;
+            Fade.To(notice, noticeNow);
+            if (noticeNow && !skipShown && !shown && shell.Top == this && free) Tree.Focus(notice.Keep);
+            else if (!noticeNow && Tree.Current == notice.Keep) Refocus();
+        }
+        PlaceOverlays();
+    }
+
+    /// <summary>Focus where it goes when what had it went: the scrubber with the controls shown, else Skip or the notice, else nowhere.</summary>
+    void Refocus()
+    {
+        if (shown) Tree.Focus(scrubber);
+        else if (skipShown) Tree.Focus(skip.Item);
+        else if (noticeShown) Tree.Focus(notice.Keep);
+        else Tree.Blur();
+    }
+
+    /// <summary>Up Next takes the screen's attention: the controls make way, Play now has focus; Back cancels it.</summary>
+    void UpNext(UpNextCard? card)
+    {
+        if (card != null)
+        {
+            upNext.Set(card);
+            if (upNextShown) return;
+            upNextShown = true;
+            seeker.Cancel();
+            ShowControls(false);
+            foreach (var item in upNext.Group.Children.OfType<FocusItem>()) item.Shown = true;
+            Fade.To(upNext, true);
+            PlaceOverlays();
+            Tree.Focus(upNext.PlayNow);
+        }
+        else if (upNextShown)
+        {
+            upNextShown = false;
+            var had = Tree.Current?.Parent == upNext.Group;
+            foreach (var item in upNext.Group.Children.OfType<FocusItem>()) item.Shown = false;
+            Fade.To(upNext, false);
+            if (had) Refocus();
+        }
+    }
+
+    /// <summary>Skip, the notice and Up Next at the bottom; Skip and the notice above the controls while they show; the toast under the clock then.</summary>
+    void PlaceOverlays()
+    {
+        var bottom = shown ? OverlayBottomShown : OverlayBottom;
+        var right = PleyTv.CanvasWidth - PleyTv.SafeHorizontal;
+        skip.Position = new Position(Ui.Dp(right - skip.WidthDp), Ui.Dp(bottom - 40));
+        notice.Position = new Position(Ui.Dp(PleyTv.SafeHorizontal), Ui.Dp(bottom - notice.HeightDp));
+        upNext.Position = new Position(Ui.Dp(right - UpNextView.Width), Ui.Dp(OverlayBottom - upNext.HeightDp));
+        toast.Position = new Position(Ui.Dp(right - toast.WidthDp), Ui.Dp(PleyTv.SafeVertical + (shown ? 52 : 0)));
+    }
+
+    /// <summary>The method badge, 12 dp left of the clock.</summary>
+    void PlaceMethod()
+    {
+        var clockWidth = clock.NaturalSize.Width / Ui.Scale;
+        method.Position = new Position(Ui.Dp(PleyTv.CanvasWidth - PleyTv.SafeHorizontal - clockWidth - 12 - method.WidthDp),
+            Ui.Dp(PleyTv.SafeVertical) + (Text.LineHeight(PleyType.Label) - method.SizeHeight) / 2);
+    }
+
+    void ShowToast(PlayerToast t)
+    {
+        if (gone) return;
+        var serial = ++toastSerial;
+        toast.Set(t);
+        PlaceOverlays();
+        toast.Show();
+        toast.RaiseToTop();
+        After(t.Ms, () =>
+        {
+            if (serial == toastSerial) toast.Hide();
+        });
     }
 
     /// <summary>
@@ -390,22 +614,31 @@ sealed class PlayerScreen : Sheet
         if (shown) Layout();
     }
 
-    /// <summary>The times, the played part and the thumb, at the target while a seek is coming.</summary>
+    /// <summary>The times, the played part, the thumb, the marker playing and the seek preview, at the target while a seek is coming.</summary>
     void Layout()
     {
+        var s = model.State.Value;
         var duration = model.Clock.Value.DurationMs;
         var position = model.LivePositionMs();
         var at = seeker.Target ?? position;
         elapsed.Text = PlayerText.Time(at);
         remaining.Text = PlayerText.Remaining(at, duration);
-        clock.Text = DateTime.Now.ToString("t", CultureInfo.CurrentCulture);
-        ends.Text = model.State.Value.Phase.Kind == PhaseKind.Paused
+        var time = DateTime.Now.ToString("t", CultureInfo.CurrentCulture);
+        if (time != clockText)
+        {
+            clockText = time;
+            clock.Text = time;
+            PlaceMethod();
+        }
+        ends.Text = s.Phase.Kind == PhaseKind.Paused
             ? PlayerText.EndsAt(DateTime.Now.AddMilliseconds(Math.Max(0, duration - position)).ToString("t", CultureInfo.CurrentCulture))
             : "";
+        if (!ReferenceEquals(s.Chapters, segmentsOf) || duration != segmentsFor) Segments(s.Chapters, duration);
         var width = track.SizeWidth;
-        var fraction = duration > 0 ? Math.Max(0, Math.Min(1, at / (double)duration)) : 0;
-        played.SizeWidth = (float)(width * Math.Max(0, Math.Min(1, position / (double)Math.Max(1, duration))));
-        var cx = track.PositionX + (float)(width * fraction);
+        float X(long ms) => duration > 0 ? (float)(width * Math.Max(0, Math.Min(1, ms / (double)duration))) : 0;
+        var playedTo = X(position);
+        foreach (var (part, from, to) in segments) part.SizeWidth = Math.Max(0, Math.Min(playedTo, to) - from);
+        var cx = track.PositionX + X(at);
         var cy = Ui.Dp(TrackCentre);
         thumb.Position = new Position(cx - thumb.SizeWidth / 2, cy - thumb.SizeHeight / 2);
         thumbRing.Position = new Position(cx - thumbRing.SizeWidth / 2, cy - thumbRing.SizeHeight / 2);
@@ -416,11 +649,92 @@ sealed class PlayerScreen : Sheet
             badge.Show();
         }
         else badge.Hide();
+        // "Intro" or "Credits" under the span of the marker playing.
+        if (Markers.Active(s.Markers, position) is { } marker && duration > 0)
+        {
+            markerLabel.Text = Markers.Name(marker);
+            var mid = track.PositionX + X((marker.StartMs + marker.EndMs) / 2);
+            markerLabel.PositionX = Math.Max(track.PositionX, Math.Min(track.PositionX + width - markerLabel.SizeWidth, mid - markerLabel.SizeWidth / 2));
+            markerLabel.Show();
+        }
+        else markerLabel.Hide();
+        Preview(seeker.Target, duration);
+        Overlays();
+    }
+
+    /// <summary>The track's segments, a 2 dp gap at each chapter's start.</summary>
+    void Segments(IReadOnlyList<ChapterMark> chapters, long duration)
+    {
+        segmentsOf = chapters;
+        segmentsFor = duration;
+        foreach (var child in track.Children.ToList())
+        {
+            track.Remove(child);
+            child.Dispose();
+        }
+        segments.Clear();
+        var w = track.SizeWidth;
+        var gap = Ui.Dp(ChapterGap);
+        var edges = new List<float> { 0 };
+        if (duration > 0)
+            edges.AddRange(chapters.Select(c => (float)(w * c.StartMs / (double)duration)).Where(x => x > gap && x < w - gap));
+        edges.Add(w);
+        var h = Ui.Dp(TrackHeight);
+        for (var i = 0; i < edges.Count - 1; i++)
+        {
+            var a = edges[i] + (i == 0 ? 0 : gap / 2);
+            var b = edges[i + 1] - (i == edges.Count - 2 ? 0 : gap / 2);
+            if (b <= a) continue;
+            var part = new View
+            {
+                Position = new Position(a, 0),
+                Size = new Size(b - a, h),
+                CornerRadius = h / 2,
+                BackgroundColor = new Color(PleyColors.Fg.R, PleyColors.Fg.G, PleyColors.Fg.B, 0.25f),
+                ClippingMode = ClippingModeType.ClipChildren,
+            };
+            var played = new View { Size = new Size(0, h), CornerRadius = h / 2, BackgroundColor = PleyColors.Accent };
+            part.Add(played);
+            track.Add(part);
+            segments.Add((played, a, b));
+        }
+    }
+
+    /// <summary>
+    /// The seek preview while a seek is coming and the controls show: centred on the target, kept
+    /// in the safe area; asked for every 2 s of the target at most.
+    /// </summary>
+    void Preview(long? target, long duration)
+    {
+        if (!shown || target is not long t)
+        {
+            previewAt = null;
+            preview.Hide();
+            return;
+        }
+        var bucket = t / Trickplay.StepMs * Trickplay.StepMs;
+        if (bucket != previewAt)
+        {
+            previewAt = bucket;
+            var chapters = model.State.Value.Chapters;
+            var index = PlayerText.ChapterAt(chapters, t);
+            var chapter = index is int i ? chapters[i] : null;
+            var frame = model.Preview(bucket);
+            preview.Set(t, frame, frame == null ? chapter?.ImageUrl : null, index is int n ? PlayerText.ChapterLine(chapters[n], n) : null);
+        }
+        var fraction = duration > 0 ? Math.Max(0, Math.Min(1, t / (double)duration)) : 0;
+        var centre = PleyTv.SafeHorizontal + (float)((PleyTv.CanvasWidth - 2 * PleyTv.SafeHorizontal) * fraction);
+        var x = Math.Max(PleyTv.SafeHorizontal, Math.Min(PleyTv.CanvasWidth - PleyTv.SafeHorizontal - SeekPreviewView.PictureWidth, centre - SeekPreviewView.PictureWidth / 2));
+        preview.Position = new Position(Ui.Dp(x), Ui.Dp(preview.HasPicture ? PreviewTop : PreviewTop + SeekPreviewView.PictureHeight + 6));
+        preview.Show();
     }
 
     // ---- keys
 
-    /// <summary>The keys while the controls are hidden; shown, focus has them (Back is the sheet's). Media keys work whatever shows.</summary>
+    /// <summary>
+    /// The keys before focus has them: media keys and CAPTIONS whatever shows; with the controls
+    /// hidden, OK, the arrows and the keys that show the controls. Shown, focus has the keys (Back is the sheet's).
+    /// </summary>
     bool OnKey(string key, bool down)
     {
         if (gone) return false;
@@ -430,16 +744,30 @@ sealed class PlayerScreen : Sheet
             if (down) OnMedia(media.Value);
             return true;
         }
+        if (RemoteKeys.Captions(key))
+        {
+            if (down && error == null) captionsRemembered = model.ToggleCaptions(captionsRemembered);
+            return true;
+        }
         if (shell.Top != this || error != null) return false;
+        // Up Next: its two buttons, nothing above or below them.
+        if (model.State.Value.UpNext != null) return key is "Up" or "Down";
         if (shown)
         {
             Poke();
             return false;
         }
+        if (RemoteKeys.Info(key) || RemoteKeys.Menu(key) || RemoteKeys.Guide(key))
+        {
+            if (down) ShowControls(true, skipShown ? skip.Item : scrubber);
+            return true;
+        }
         switch (key)
         {
             case "Return":
             case "KP_Enter":
+                // Skip or Keep watching has focus: OK is theirs.
+                if (Tree.Current != null) return false;
                 // On the way up, as OK selects elsewhere.
                 if (!down) Ok();
                 return true;
@@ -468,6 +796,8 @@ sealed class PlayerScreen : Sheet
         PlayPause,
         Rewind,
         Forward,
+        Next,
+        Previous,
         Stop,
     }
 
@@ -479,13 +809,15 @@ sealed class PlayerScreen : Sheet
         "XF86AudioRewind" => MediaAction.Rewind,
         "XF86AudioForward" => MediaAction.Forward,
         "XF86AudioStop" => MediaAction.Stop,
+        _ when RemoteKeys.NextTrack(key) => MediaAction.Next,
+        _ when RemoteKeys.PreviousTrack(key) => MediaAction.Previous,
         _ => null,
     };
 
     MediaAction? lastMedia;
     long lastMediaAt;
 
-    /// <summary>A media key, from the window or the media key service: Play, Pause, fast forward and rewind (30 s), Stop.</summary>
+    /// <summary>A media key, from the window or the media key service: Play, Pause, fast forward and rewind (30 s), Next and Previous, Stop.</summary>
     void OnMedia(MediaAction action)
     {
         if (gone) return;
@@ -502,7 +834,7 @@ sealed class PlayerScreen : Sheet
                 break;
             case MediaAction.Pause:
                 model.Pause();
-                if (!shown && shell.Top == this) ShowControls(true, scrubber);
+                if (!shown && shell.Top == this && model.State.Value.UpNext == null) ShowControls(true, scrubber);
                 break;
             case MediaAction.PlayPause:
                 PlayPause();
@@ -512,6 +844,12 @@ sealed class PlayerScreen : Sheet
                 break;
             case MediaAction.Forward:
                 Jump(3);
+                break;
+            case MediaAction.Next:
+                model.Next(seeker.Target ?? model.LivePositionMs());
+                break;
+            case MediaAction.Previous:
+                model.Previous(seeker.Target ?? model.LivePositionMs());
                 break;
             case MediaAction.Stop:
                 Close();
@@ -529,6 +867,8 @@ sealed class PlayerScreen : Sheet
             global::Tizen.System.MediaKeyEventArgs.KeyValue.PlayPause => MediaAction.PlayPause,
             global::Tizen.System.MediaKeyEventArgs.KeyValue.Rewind => MediaAction.Rewind,
             global::Tizen.System.MediaKeyEventArgs.KeyValue.FastForward => MediaAction.Forward,
+            global::Tizen.System.MediaKeyEventArgs.KeyValue.Next => MediaAction.Next,
+            global::Tizen.System.MediaKeyEventArgs.KeyValue.Previous => MediaAction.Previous,
             global::Tizen.System.MediaKeyEventArgs.KeyValue.Stop => MediaAction.Stop,
             _ => null,
         };
@@ -557,7 +897,7 @@ sealed class PlayerScreen : Sheet
         {
             model.Pause();
             // Paused, the controls stay; playing again, they go after a while.
-            if (shell.Top == this) ShowControls(true, shown ? null : scrubber);
+            if (shell.Top == this && model.State.Value.UpNext == null) ShowControls(true, shown ? null : scrubber);
         }
         else
         {
@@ -593,7 +933,11 @@ sealed class PlayerScreen : Sheet
     void Settle()
     {
         var press = seeker.Presses;
-        After(Seeker.SettleMs, () => seeker.Settle(press));
+        After(Seeker.SettleMs, () =>
+        {
+            seeker.Settle(press);
+            Layout();
+        });
         After(Seeker.BadgeMs, () =>
         {
             seeker.HideBadge(press);
@@ -624,14 +968,15 @@ sealed class PlayerScreen : Sheet
             else if (Tree.Current == null) Tree.Focus(scrubber);
             Poke();
         }
-        else Tree.Blur();
-        if (shown == on) return;
-        shown = on;
-        fade?.Stop();
-        fade = new Animation(PleyMotion.OverlayMs) { DefaultAlphaFunction = new AlphaFunction(on ? AlphaFunction.BuiltinFunctions.EaseOut : AlphaFunction.BuiltinFunctions.EaseIn) };
-        fade.AnimateTo(controls, "Opacity", on ? 1f : 0f);
-        fade.Play();
-        Layout();
+        if (shown != on)
+        {
+            shown = on;
+            fade?.Stop();
+            fade = Fade.To(controls, on, PleyMotion.OverlayMs);
+            subtitles.Lift(on);
+            Layout();
+        }
+        if (!on) Refocus();
     }
 
     /// <summary>A key came: the controls stay a while longer.</summary>
@@ -639,6 +984,11 @@ sealed class PlayerScreen : Sheet
 
     bool OnBack()
     {
+        if (error == null && model.State.Value.UpNext != null)
+        {
+            model.CancelUpNext();
+            return true;
+        }
         if (error == null && shown)
         {
             ShowControls(false);
@@ -665,7 +1015,6 @@ sealed class PlayerScreen : Sheet
         HideError();
         errorShown = phase;
         seeker.Cancel();
-        ShowControls(false);
         var view = new View { Size = Canvas(), BackgroundColor = Color.Black };
         var width = PleyTv.CanvasWidth - 320;
         var heading = Text.Label(phase.Title ?? PlayerText.ErrorTitle, PleyType.PageTitle, PleyColors.Fg, width: width);
@@ -679,7 +1028,7 @@ sealed class PlayerScreen : Sheet
         ButtonView first;
         if (phase.CanRetry)
         {
-            first = buttons.Add(new ButtonView(PlayerText.TryAgain, ButtonKind.Pill, Retry, iconName: "refresh-cw"));
+            first = buttons.Add(new ButtonView(PlayerText.TryAgain, ButtonKind.Pill, model.Retry, iconName: "refresh-cw"));
             buttons.Add(new ButtonView(PlayerText.BackLabel, ButtonKind.Text, Close));
         }
         else first = buttons.Add(new ButtonView(PlayerText.BackLabel, ButtonKind.Pill, Close, iconName: "arrow-left"));
@@ -692,11 +1041,13 @@ sealed class PlayerScreen : Sheet
         view.Add(message);
         view.Add(buttons);
         View.Add(view);
+        toast.RaiseToTop();
         error = view;
         // Up and Down stay on the buttons: the controls under them are hidden.
         buttons.Group.Exit = d => d is Direction.Up or Direction.Down;
         errorButtons = buttons.Group;
         Root.Add(buttons.Group);
+        ShowControls(false);
         Tree.Focus(first.Item);
     }
 
@@ -714,8 +1065,6 @@ sealed class PlayerScreen : Sheet
         error.Dispose();
         error = null;
     }
-
-    void Retry() => model.Retry();
 
     // ---- leaving
 
@@ -743,6 +1092,7 @@ sealed class PlayerScreen : Sheet
         }
         gate.HoldEnded -= Released;
         shell.Shown -= AppShown;
+        model.Toast -= ShowToast;
         foreach (var w in watches) w.Dispose();
         watches.Clear();
         model.Close();
@@ -795,71 +1145,5 @@ sealed class PlayerScreen : Sheet
         map.Add(GradientVisualProperty.StopOffset, new PropertyValue(offsets));
         map.Add(GradientVisualProperty.StopColor, new PropertyValue(colors));
         return new View { Size = Canvas(), Background = map };
-    }
-
-    /// <summary>
-    /// A button of the player (design spec §2.5): its glyph alone on the scrim; focused, the accent
-    /// fills a control square behind it, 1.08 larger, and its label fades in 8 dp below.
-    /// </summary>
-    sealed class PlayerButton : View
-    {
-        readonly View box;
-        readonly float iconSize;
-        ImageView icon;
-        readonly TextLabel label;
-
-        public PlayerButton(string text, string iconName, float size, float iconSize, Action onClick)
-        {
-            this.iconSize = iconSize;
-            Size = new Size(Ui.Dp(size), Ui.Dp(size));
-            Item = new FocusItem(text) { Selected = onClick };
-            box = new View
-            {
-                Size = new Size(Ui.Dp(size), Ui.Dp(size)),
-                CornerRadius = Ui.Dp(PleyShape.ControlRadius),
-                PivotPoint = global::Tizen.NUI.PivotPoint.Center,
-                PositionUsesPivotPoint = false,
-            };
-            icon = Glyph(iconName);
-            box.Add(icon);
-            Add(box);
-            label = Text.Label(text, PleyType.Caption, PleyColors.Fg, width: 200);
-            label.HorizontalAlignment = HorizontalAlignment.Center;
-            label.Position = new Position(Ui.Dp(size / 2 - 100), Ui.Dp(size + 8));
-            label.Opacity = 0;
-            Add(label);
-            Item.FocusChanged += Look;
-        }
-
-        public FocusItem Item { get; }
-
-        ImageView Glyph(string name)
-        {
-            var glyph = Icons.Icon(name, iconSize, PleyColors.Fg);
-            var inset = (SizeWidth - Ui.Dp(iconSize)) / 2;
-            glyph.Position = new Position(inset, inset);
-            return glyph;
-        }
-
-        public void Set(string text, string iconName)
-        {
-            if (Disposed) return;
-            label.Text = text;
-            box.Remove(icon);
-            icon.Dispose();
-            icon = Glyph(iconName);
-            icon.Color = Item.Focused ? PleyColors.OnAccent : PleyColors.Fg;
-            box.Add(icon);
-        }
-
-        void Look(bool focused)
-        {
-            if (Disposed) return;
-            box.BackgroundColor = focused ? PleyColors.Accent : Color.Transparent;
-            icon.Color = focused ? PleyColors.OnAccent : PleyColors.Fg;
-            var scale = focused ? PleyShape.RoundScale : 1f;
-            box.Scale = new Vector3(scale, scale, 1);
-            label.Opacity = focused ? 1 : 0;
-        }
     }
 }

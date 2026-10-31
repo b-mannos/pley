@@ -94,3 +94,11 @@ It has no releases yet: it is built and installed by hand
   or a format the TV refuses, waits for a server out of reach
   ("Reconnecting…") and plays on where it was, and says why it can't play,
   with Try again and Back. It pauses when the app goes to the background.
+- Subtitles in the native app's player: text subtitles over the video in
+  Settings' size, background, font and position, gliding up above the
+  controls while they show; the remote's CAPTIONS key turns them off and
+  back on. Skip Intro and Skip Credits, Up Next with its countdown (the
+  next episode, or the next video of a playlist or collection), seek
+  previews while scrubbing, chapters on the scrubber with Previous and
+  Next, how it plays beside the clock, and messages at the top right. A
+  playback the server stops says why and leaves after 20 seconds.
