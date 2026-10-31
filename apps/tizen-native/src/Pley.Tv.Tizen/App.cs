@@ -97,6 +97,8 @@ class App : NUIApplication
             PageKey.Library library => new LibraryScreen(tv, shell, new LibraryModel(new AppLibrarySource(state), library, new ContextScheduler()), images, gate, k => Go(tv, k)),
             PageKey.Playlists => new PlaylistsScreen(tv, new PlaylistsModel(new AppPlaylistSource(state), new ContextScheduler()), images, gate, k => Go(tv, k)),
             PageKey.Playlist playlist => new PlaylistScreen(tv, shell, new PlaylistModel(new AppPlaylistSource(state), playlist.PlaylistId, new ContextScheduler()), images, gate, k => Go(tv, k)),
+            AddToPlaylistPage add => new AddToPlaylistScreen(tv, shell, new AddToPlaylistModel(new AppPlaylistSource(state), add, new ContextScheduler()), add, images),
+            NewPlaylistPage or SaveSmartPlaylistPage => new NewPlaylistScreen(tv, shell, new NewPlaylistModel(new AppPlaylistSource(state), NewPlaylistMode.Of(key)!, new ContextScheduler()), key),
             _ => null,
         };
         // Back from the player: Home asks again, for the new resume point and Continue Watching.

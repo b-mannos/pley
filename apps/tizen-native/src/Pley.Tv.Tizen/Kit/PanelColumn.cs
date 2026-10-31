@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Pley.Tv.Core.Ui;
 using Tizen.NUI;
 using Tizen.NUI.BaseComponents;
@@ -49,19 +50,55 @@ sealed class PanelColumn : View
     /// <summary>The content's height in dp, between the safe area's top and bottom.</summary>
     public static float Room => PleyTv.CanvasHeight - 2 * PleyTv.SafeVertical;
 
+    /// <summary>Where the parts end so far, to take away what comes after it later (<see cref="ClearFrom"/>).</summary>
+    public readonly struct Mark
+    {
+        internal Mark(int views, int items, float bottom)
+        {
+            Views = views;
+            Items = items;
+            Bottom = bottom;
+        }
+
+        internal int Views { get; }
+        internal int Items { get; }
+        internal float Bottom { get; }
+    }
+
+    /// <summary>Where the parts end now.</summary>
+    public Mark Here => new Mark(list.Children.Count, Group.Children.Count, bottom);
+
     /// <summary>Takes every part away (the panel shows something else now).</summary>
     public void Clear()
     {
-        foreach (var child in list.Children.ToArray())
-        {
-            list.Remove(child);
-            child.Dispose();
-        }
-        Group.Clear();
-        bottom = 0;
+        ClearFrom(new Mark(0, 0, 0));
         scroll = 0;
         list.PositionY = 0;
     }
+
+    /// <summary>Takes away the parts placed after <paramref name="mark"/>: the rows under a field that stays as it is, typing and all.</summary>
+    public void ClearFrom(Mark mark)
+    {
+        var views = list.Children.ToArray();
+        for (var i = views.Length - 1; i >= mark.Views; i--)
+        {
+            list.Remove(views[i]);
+            views[i].Dispose();
+        }
+        var items = Group.Children.ToArray();
+        for (var i = items.Length - 1; i >= mark.Items; i--)
+        {
+            if (items[i] is FocusItem item && reveals.TryGetValue(item, out var reveal))
+            {
+                item.FocusChanged -= reveal;
+                reveals.Remove(item);
+            }
+            Group.Remove(items[i]);
+        }
+        bottom = mark.Bottom;
+    }
+
+    readonly System.Collections.Generic.Dictionary<FocusItem, Action<bool>> reveals = new System.Collections.Generic.Dictionary<FocusItem, Action<bool>>();
 
     /// <summary>
     /// Adds <paramref name="view"/> under the parts so far, <paramref name="x"/> in and
@@ -77,10 +114,13 @@ sealed class PanelColumn : View
         if (item != null)
         {
             Group.Add(item);
-            item.FocusChanged += on =>
+            if (reveals.TryGetValue(item, out var before)) item.FocusChanged -= before;
+            Action<bool> reveal = on =>
             {
                 if (on && !Disposed) Reveal(top, height);
             };
+            reveals[item] = reveal;
+            item.FocusChanged += reveal;
         }
         return view;
     }
