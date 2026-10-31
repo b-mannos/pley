@@ -377,8 +377,9 @@ which stays the Samsung app until the native one has its features. So far
 it has the Android TV app's "Choose your server" screen (servers found on
 the network, an address pad and the TV's keyboard, forgetting a server),
 its sign-in with a code and a QR code, Who's watching? with PINs, and
-Home: the hero, the server's rows and the rail. Playing, item pages and
-the other pages come next.
+Home: the hero, the server's rows and the rail, and item pages: the hero
+and its buttons, seasons and episodes, Extras, Cast and More Like This,
+and the side panels. Playing and the other pages come next.
 
 | | |
 |---|---|

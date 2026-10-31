@@ -5,24 +5,20 @@ namespace Pley.Tv.Core.Ui;
 
 /// <summary>
 /// D-pad rule 5, held keys (the Android app's KeyRepeatGate). A press moves focus once. Held for
-/// 250 ms, focus moves on the app's own clock (<see cref="Tick"/>): sooner than the TV's repeats,
-/// which begin after 400 ms and come unevenly, and only say the key is still down. It speeds up
-/// the longer the key is held, as the PSP's XMB did: from 12.5 moves a second to 40 within 0.7 s,
-/// smoothly. Rows glide and tiles change their focus look evenly over a little more than the time
-/// between moves (<see cref="GlideMs"/>), so each step runs into the next without a pause; and
-/// backdrops and details wait until focus has rested 400 ms (<see cref="Rested"/>).
+/// 180 ms, focus moves on the app's own clock (<see cref="Tick"/>) at a flat pace: sooner and more
+/// evenly than the TV's repeats, which begin after 400 ms, come unevenly, and only say the key is
+/// still down. A row scrolls under a held key as one continuous slide at that pace, the PSP's XMB
+/// way, until <see cref="HoldEnded"/>; a page's rows step, each glide lasting a little over the
+/// time between moves (<see cref="GlideMs"/>), so each runs into the next. Backdrops and details
+/// wait until focus has rested 400 ms (<see cref="Rested"/>).
 /// NUI's key events carry no repeat count: a key that goes down again before coming up repeats.
 /// </summary>
 public sealed class KeyRepeatGate
 {
     /// <summary>How long a key is down before focus starts moving by itself.</summary>
-    public const long HoldDelayMs = 250;
-    /// <summary>The time between moves when a hold begins: 12.5 a second.</summary>
-    public const long MoveIntervalMs = 80;
-    /// <summary>The time between moves at full speed: 40 a second.</summary>
-    public const long FastestIntervalMs = 25;
-    /// <summary>How long into a hold focus reaches full speed.</summary>
-    public const long RampMs = 700;
+    public const long HoldDelayMs = 180;
+    /// <summary>The time between moves while a key is held: about 16 a second.</summary>
+    public const long MoveIntervalMs = 60;
     /// <summary>How long focus rests before backdrops and details follow it.</summary>
     public const long RestMs = 400;
     /// <summary>Repeats come every 50 ms; this long without one means the key is up.</summary>
@@ -34,7 +30,6 @@ public sealed class KeyRepeatGate
     readonly HashSet<string> down = new HashSet<string>();
     long lastMove = long.MinValue / 2;
     long nextMove;
-    long holdStart;
     long lastKey = long.MinValue / 2;
     long pressedAt;
     string? held;
@@ -49,8 +44,11 @@ public sealed class KeyRepeatGate
     /// <summary>Whether a direction key is down: <see cref="Tick"/> is worth calling.</summary>
     public bool Down => pressed != null || Holding;
 
-    /// <summary>The time between moves now: 80 ms, less the longer the key is held.</summary>
-    public long Interval { get; private set; } = MoveIntervalMs;
+    /// <summary>The time between moves while a key is held.</summary>
+    public long Interval => MoveIntervalMs;
+
+    /// <summary>A hold ended: the key came up, or its key-up was lost. A row sliding under it settles.</summary>
+    public event Action? HoldEnded;
 
     /// <summary>How long a held move's glide lasts: a little over <see cref="Interval"/>, so the next starts before it ends.</summary>
     public int GlideMs => (int)(Interval * 5 / 4);
@@ -73,7 +71,6 @@ public sealed class KeyRepeatGate
                 pressed = key;
                 pressedAt = now;
                 lastMove = now;
-                Interval = MoveIntervalMs;
                 return true;
             }
             if (!Holding || held != key) Hold(key, now);
@@ -81,10 +78,11 @@ public sealed class KeyRepeatGate
         }
         down.Remove(key);
         if (pressed == key) pressed = null;
+        var wasHolding = Holding;
         Holding = false;
         held = null;
-        Interval = MoveIntervalMs;
         lastMove = now;
+        if (wasHolding) HoldEnded?.Invoke();
         return true;
     }
 
@@ -99,7 +97,6 @@ public sealed class KeyRepeatGate
         // Down long enough: the hold begins, before the TV's own repeats would.
         if (!Holding && pressed != null && down.Contains(pressed) && now - pressedAt >= HoldDelayMs) Hold(pressed, now);
         if (!Holding || held == null || now < nextMove) return null;
-        Interval = IntervalAt(now - holdStart);
         // Kept to the pace: a late frame doesn't push the next move later, nor does a stall bring a burst.
         nextMove = Math.Max(nextMove + Interval, now + Interval / 2);
         lastMove = now;
@@ -110,18 +107,8 @@ public sealed class KeyRepeatGate
     {
         Holding = true;
         held = key;
-        holdStart = now;
-        Interval = MoveIntervalMs;
         // The first held move is due at once.
         nextMove = now;
-    }
-
-    /// <summary>The time between moves <paramref name="heldMs"/> into a hold: 80 ms easing to 25 over 0.7 s.</summary>
-    public static long IntervalAt(long heldMs)
-    {
-        var t = Math.Min(1.0, Math.Max(0.0, heldMs / (double)RampMs));
-        var eased = t * t * (3 - 2 * t);
-        return (long)Math.Round(MoveIntervalMs - (MoveIntervalMs - FastestIntervalMs) * eased);
     }
 
     /// <summary>Whether focus has rested: no key held, and nothing moved for <see cref="RestMs"/>.</summary>
@@ -144,11 +131,13 @@ public sealed class KeyRepeatGate
     {
         if (Down && clock() - lastKey > LostKeyUpMs)
         {
+            var wasHolding = Holding;
             Holding = false;
             held = null;
             pressed = null;
             down.Clear();
             lastMove = lastKey;
+            if (wasHolding) HoldEnded?.Invoke();
         }
     }
 }

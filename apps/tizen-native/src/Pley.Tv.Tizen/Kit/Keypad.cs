@@ -83,6 +83,7 @@ sealed class PadKeyView : View
         };
         Item.FocusChanged += focused =>
         {
+            if (Disposed) return;
             Look();
             focusAnimation?.Stop();
             var scale = focused ? PleyShape.RoundScale : 1f;
@@ -119,6 +120,8 @@ sealed class PadKeyView : View
 
     void Look()
     {
+        // Let go already: a focus change can still reach it on its way to the view in its place.
+        if (Disposed) return;
         BackgroundColor = flashing ? PleyColors.Surface4 : Item.Focused ? PleyColors.Accent : PleyColors.Surface3;
         var ink = Item.Focused && !flashing ? PleyColors.OnAccent : PleyColors.Fg;
         if (glyph != null) glyph.TextColor = ink;

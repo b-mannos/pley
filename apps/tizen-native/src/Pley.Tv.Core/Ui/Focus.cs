@@ -117,6 +117,12 @@ public class FocusGroup : FocusNode
     /// <summary>Forgets the child focused last: coming back lands on the first (a page put back at its top).</summary>
     public void ForgetLast() => Last = -1;
 
+    /// <summary>Coming back lands on the child at <paramref name="index"/> (an item's episode to watch).</summary>
+    public void RememberChild(int index)
+    {
+        if (index >= 0 && index < children.Count) Last = index;
+    }
+
     public IReadOnlyList<FocusNode> Children => children;
 
     /// <summary>

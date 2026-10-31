@@ -124,14 +124,45 @@ sealed class TileView : View
         });
     }
 
+    /// <summary>
+    /// While its row slides under a held key, the row draws one ring that stays still and the tiles
+    /// keep their resting look; set back, the tile shows its focus again.
+    /// </summary>
+    public bool Quiet
+    {
+        get => quiet;
+        set
+        {
+            if (quiet == value) return;
+            quiet = value;
+            if (!value) Look(Focus.Focused, instant: false);
+            else if (Focus.Focused) Look(false, instant: true);
+        }
+    }
+
+    bool quiet;
+
     void OnFocus(bool on)
     {
+        if (!quiet) Look(on, instant: false);
+    }
+
+    void Look(bool on, bool instant)
+    {
+        // Let go already: a focus change can still reach it on its way to the view in its place.
+        if (Disposed) return;
         // Drawn over its neighbours and their captions while focused.
         if (on) RaiseToTop();
         title.FontStyle = Text.Weight(on ? PleyType.Bold : PleyType.Caption.Weight);
         var scale = on ? (kind.Round ? PleyShape.AvatarScale : PleyShape.TileScale) : 1f;
         focusAnimation?.Stop();
-        // A held key moves focus every 100 ms, then faster: each change lasts until the next has begun, evenly, so focus glides along the row.
+        if (instant)
+        {
+            frame.Scale = new Vector3(scale, scale, 1);
+            ring.Opacity = on ? 1 : 0;
+            return;
+        }
+        // A held key moves focus every 60 ms: each change lasts until the next has begun, evenly, so focus glides.
         var held = gate.Holding;
         focusAnimation = new Animation(held ? gate.GlideMs : on ? PleyMotion.FocusMs : PleyMotion.UnfocusMs)
         {

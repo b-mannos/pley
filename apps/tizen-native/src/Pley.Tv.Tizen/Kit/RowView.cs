@@ -10,8 +10,8 @@ namespace Pley.Tv.Tizen.Kit;
 /// A row of tiles (the Android app's TvRow, design spec §2.4, D-pad rules 2 to 5): a header, then
 /// the tiles, whose focused tile's left edge stays at the gutter (x = 96) while the row moves under
 /// it, unless every tile fits on screen unscrolled. It is one focus group that comes back to the
-/// tile focused last; Left from its first tile enters the rail, Right stops at its end. While a key
-/// repeats it glides, faster the longer the key is held.
+/// tile focused last; Left from its first tile enters the rail, Right stops at its end. Under a held
+/// key it slides on at a flat pace beneath a ring that stays still, and settles when the key comes up.
 /// </summary>
 sealed class RowView : View
 {
@@ -20,18 +20,27 @@ sealed class RowView : View
 
     readonly TileKind kind;
     readonly KeyRepeatGate gate;
+    /// <summary>Puts focus on a tile: where a slide lands.</summary>
+    readonly Func<FocusItem, bool>? focusItem;
     readonly View strip;
     readonly List<TileView> tiles = new List<TileView>();
+    /// <summary>The ring that stays still at the gutter while the row slides under a held key.</summary>
+    readonly View slideRing;
     Animation? scroll;
+    Animation? slide;
+    int focused = -1;
+    /// <summary>Which way the row is sliding under a held key: 1, -1, or 0 when it isn't.</summary>
+    int sliding;
 
     public RowView(string? title, IReadOnlyList<TileModel> models, TileKind kind, KeyRepeatGate gate, Images images,
-        Action<TileModel> onOpen, Action<TileModel>? onActions, Func<bool> toRail, Action<TileModel>? onFocus = null)
+        Action<TileModel> onOpen, Action<TileModel>? onActions, Func<bool> toRail, Action<TileModel>? onFocus = null, Func<FocusItem, bool>? focusItem = null)
     {
         this.kind = kind;
         this.gate = gate;
+        this.focusItem = focusItem;
         Group = new FocusGroup(Axis.Row, title);
         // D-pad rule 3: Left from the first tile goes to the rail's current item; Right stops at the end.
-        Group.Exit = d => d == Direction.Right || (d == Direction.Left && toRail());
+        Group.Exit = d => d == Direction.Right || (d == Direction.Left && Scrolling.Left(gate, toRail));
         var top = 0f;
         if (title != null)
         {
@@ -42,6 +51,19 @@ sealed class RowView : View
         }
         strip = new View { Position = new Position(Ui.Dp(PleyTv.Gutter), top) };
         Add(strip);
+        var reach = Ui.Dp(PleyShape.RingOffset + PleyShape.RingStroke / 2);
+        var w = Ui.Dp(kind.Width);
+        var h = Ui.Dp(kind.Height);
+        slideRing = new View
+        {
+            Size = new Size(w + 2 * reach, h + 2 * reach),
+            Position = new Position(Ui.Dp(PleyTv.Gutter) - reach, top - reach),
+            BorderlineWidth = Ui.Dp(PleyShape.RingStroke),
+            BorderlineColor = PleyColors.AccentBright,
+            BorderlineOffset = -1f,
+            CornerRadius = kind.Round ? (w + 2 * reach) / 2 : Ui.Dp(PleyShape.TileRadius) + reach,
+        };
+        slideRing.Hide();
         var step = Ui.Dp(kind.Width + kind.Gap);
         for (var i = 0; i < models.Count; i++)
         {
@@ -58,7 +80,9 @@ sealed class RowView : View
             tiles.Add(tile);
             strip.Add(tile);
         }
+        Add(slideRing);
         Group.ChildFocused += ScrollTo;
+        gate.HoldEnded += Landed;
         Size = new Size(Ui.Dp(PleyTv.CanvasWidth), top + Ui.Dp(kind.Height + PleyTv.TilesToCaption + PleyTv.CaptionHeight));
         LoadPictures(0);
     }
@@ -82,12 +106,95 @@ sealed class RowView : View
 
     void ScrollTo(int index)
     {
+        var from = focused;
+        focused = index;
+        LoadPictures(index);
+        var direction = from < 0 ? 0 : Math.Sign(index - from);
+        // A held key: the row slides on by itself, at the hold's pace, until the key comes up.
+        if (gate.Holding && direction != 0 && CanSlide(index, direction))
+        {
+            if (sliding != direction) Slide(direction);
+            return;
+        }
+        if (sliding != 0) EndSlide(land: false);
         var x = Ui.Dp(PleyTv.Gutter) + OffsetFor(index);
         scroll?.Stop();
         scroll = Scrolling.Glide(gate);
         scroll.AnimateTo(strip, "PositionX", x);
         scroll.Play();
-        LoadPictures(index);
+    }
+
+    /// <summary>
+    /// Whether the row can slide <paramref name="direction"/> with focus at <paramref name="index"/>:
+    /// the focused tile is at the gutter, where the slide's ring stays, and the strip has room to
+    /// move. Near the row's end, where tiles don't come to the gutter, focus steps across them
+    /// first, so the ring never leaps from the tile to the gutter.
+    /// </summary>
+    bool CanSlide(int index, int direction)
+    {
+        var atGutter = Math.Abs(OffsetFor(index) + index * Ui.Dp(kind.Width + kind.Gap)) < 0.5f;
+        return atGutter && (direction > 0 ? OffsetFor(index) > OffsetFor(tiles.Count - 1) : index > 0);
+    }
+
+    /// <summary>
+    /// The PSP's XMB way: the strip slides to the row's end as one animation, at a tile per move of
+    /// the hold (NUI runs it on its own thread, so nothing the app does makes it hitch), under a ring
+    /// that stays still at the gutter; the tiles keep their resting look meanwhile.
+    /// </summary>
+    void Slide(int direction)
+    {
+        scroll?.Stop();
+        slide?.Stop();
+        sliding = direction;
+        foreach (var t in tiles) t.Quiet = true;
+        slideRing.Show();
+        var target = Ui.Dp(PleyTv.Gutter) + OffsetFor(direction > 0 ? tiles.Count - 1 : 0);
+        var from = strip.CurrentPosition.X;
+        var perMs = Ui.Dp(kind.Width + kind.Gap) / gate.Interval;
+        var ms = (int)(Math.Abs(target - from) / perMs);
+        if (ms <= 0) return;
+        slide = new Animation(ms) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.Linear) };
+        slide.AnimateTo(strip, "PositionX", target);
+        slide.Play();
+    }
+
+    /// <summary>
+    /// The slide ends. The key came up (<paramref name="land"/>): focus lands on the tile under the
+    /// ring, or the next one the way it was going, so the row only ever settles forward; the focus
+    /// the hold's clock moved along can be a tile either side of it. Or the slide reached where the
+    /// tiles stop coming to the gutter, and focus steps on from there as it is.
+    /// </summary>
+    void EndSlide(bool land)
+    {
+        if (sliding == 0) return;
+        var direction = sliding;
+        sliding = 0;
+        slide?.Stop();
+        slide = null;
+        slideRing.Hide();
+        foreach (var t in tiles) t.Quiet = false;
+        var target = Math.Max(0, focused);
+        if (land)
+        {
+            var under = (Ui.Dp(PleyTv.Gutter) - strip.CurrentPosition.X) / Ui.Dp(kind.Width + kind.Gap);
+            target = direction > 0 ? (int)Math.Ceiling(under - 0.01) : (int)Math.Floor(under + 0.01);
+            target = Math.Max(0, Math.Min(tiles.Count - 1, target));
+            // Focus there scrolls the row to it (ScrollTo), the hold being over.
+            if (target != focused && focusItem != null && focusItem(tiles[target].Focus)) return;
+        }
+        scroll?.Stop();
+        scroll = new Animation(PleyMotion.FocusMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
+        scroll.AnimateTo(strip, "PositionX", Ui.Dp(PleyTv.Gutter) + OffsetFor(target));
+        scroll.Play();
+    }
+
+    void Landed() => EndSlide(land: true);
+
+    protected override void Dispose(global::Tizen.NUI.DisposeTypes type)
+    {
+        if (Disposed) return;
+        gate.HoldEnded -= Landed;
+        base.Dispose(type);
     }
 
     /// <summary>Asks for the pictures of the tiles on screen with focus at <paramref name="index"/>, and a few past them.</summary>
@@ -113,7 +220,9 @@ sealed class RowColumnView : View
     readonly float headerY;
     readonly bool firstAtTop;
     readonly View content;
-    readonly List<RowView> rows = new List<RowView>();
+    readonly List<View> rows = new List<View>();
+    /// <summary>Each section's line, where its top comes when it has focus.</summary>
+    readonly List<float> lines = new List<float>();
     Animation? scroll;
 
     /// <param name="firstAtTop">The first row stays where the page put it (a page with a header); false: it comes to the line too (Home, whose hero goes as the rows come up).</param>
@@ -135,20 +244,25 @@ sealed class RowColumnView : View
     /// <summary>Where the first row starts while the page is at its top, in pixels.</summary>
     public float Top { get; }
 
-    public void Add(RowView row)
+    public void Add(RowView row) => Add(row, row.Group);
+
+    /// <summary>A section that isn't a plain row (an item's seasons and episodes), with its focus group.</summary>
+    /// <param name="line">Where its top comes when it has focus; the page's line (y = 172) without.</param>
+    public void Add(View row, FocusGroup group, float? line = null)
     {
+        lines.Add(line ?? headerY);
         var y = 0f;
         foreach (var r in rows) y += r.SizeHeight + Ui.Dp(PleyTv.RowGap);
         row.PositionY = y;
         rows.Add(row);
         content.Add(row);
-        Group.Add(row.Group);
+        Group.Add(group);
     }
 
     void ScrollTo(int index)
     {
         // The first row stays where the page put it; others bring their header to the line.
-        var target = index == 0 && firstAtTop ? Top : Ui.Dp(headerY) - rows[index].PositionY;
+        var target = index == 0 && firstAtTop ? Top : Ui.Dp(lines[index]) - rows[index].PositionY;
         scroll?.Stop();
         scroll = Scrolling.Glide(gate);
         scroll.AnimateTo(content, "PositionY", target);
@@ -176,6 +290,12 @@ sealed class RowColumnView : View
 /// <summary>How rows and pages move to their focused tile or row.</summary>
 static class Scrolling
 {
+    /// <summary>
+    /// Left from the start of a row (D-pad rule 3): the rail on a press. A held Left stops there, so
+    /// scrolling back along a row never opens the rail by itself; true either way, focus staying put.
+    /// </summary>
+    public static bool Left(KeyRepeatGate gate, Func<bool> toRail) => gate.Holding || toRail();
+
     /// <summary>
     /// A move's animation: eased over 150 ms for a press; for a held key, evenly over a little more
     /// than the time to the next move (<see cref="KeyRepeatGate.GlideMs"/>), so each step runs into

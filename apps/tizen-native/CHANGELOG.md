@@ -15,5 +15,6 @@ It has no releases yet: it is built and installed by hand
   network, an address pad, the TV's keyboard and forgetting a server; its
   sign-in with a code and a QR code, the tokens kept sealed by the TV's key
   manager; Who's watching? with PINs; and Home, with the hero, the
-  server's rows and the rail, in Roboto as on Android, driven by the
-  remote, a held key speeding up the longer it is held.
+  server's rows and the rail; item pages, with seasons and episodes, Extras,
+  Cast, More Like This and the side panels; in Roboto as on Android, driven
+  by the remote, a held key sliding a row along under a still highlight.

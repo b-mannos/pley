@@ -215,6 +215,11 @@ public sealed record MediaStream
     public int? Level { get; init; }
     public string? Profile { get; init; }
     public string? PixFmt { get; init; }
+    public bool? Interlaced { get; init; }
+    /// <summary>ffprobe's names: "smpte2084", "arib-std-b67", "bt2020", "bt2020nc".</summary>
+    public string? ColorTransfer { get; init; }
+    public string? ColorPrimaries { get; init; }
+    public string? ColorSpace { get; init; }
     public bool? DecodeOrderTimes { get; init; }
     public int? Channels { get; init; }
     public string? ChannelLayout { get; init; }

@@ -137,6 +137,8 @@ sealed class TextInput : View
 
     void Look()
     {
+        // Let go already: a focus change can still reach it on its way to the view in its place.
+        if (Disposed) return;
         var ring = editing || Item.Focused;
         BorderlineWidth = Ui.Dp(ring ? 2 : 1);
         BorderlineColor = ring ? PleyColors.AccentBright : PleyColors.Control;

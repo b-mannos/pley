@@ -336,6 +336,8 @@ sealed class ServerRowView : View
 
     void Look()
     {
+        // Let go already: a focus change can still reach it on its way to the view in its place.
+        if (Disposed) return;
         var focused = Item.Focused;
         BackgroundColor = focused ? PleyColors.Accent : Color.Transparent;
         var ink = focused ? PleyColors.OnAccent : PleyColors.Fg;

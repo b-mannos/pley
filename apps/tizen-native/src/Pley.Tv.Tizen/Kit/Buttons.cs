@@ -25,7 +25,8 @@ sealed class ButtonView : View
     readonly ButtonKind kind;
     readonly TextLabel label;
     readonly ImageView? icon;
-    readonly Color ink;
+    Color ink;
+    Color? rest;
     Animation? focusAnimation;
 
     public ButtonView(string text, ButtonKind kind, Action onClick, Color? color = null, string? iconName = null)
@@ -83,13 +84,35 @@ sealed class ButtonView : View
         }
     }
 
+    /// <summary>The fill at rest in place of the kind's (a season tab: Surface3 for the season shown).</summary>
+    public Color? Rest
+    {
+        set
+        {
+            rest = value;
+            Look(Item.Focused);
+        }
+    }
+
+    /// <summary>The label's colour at rest (a season tab: Muted, Fg for the season shown).</summary>
+    public Color Ink
+    {
+        set
+        {
+            ink = value;
+            Look(Item.Focused);
+        }
+    }
+
     /// <summary>Width in dp, for laying buttons out in a row.</summary>
     public float WidthDp => SizeWidth / Ui.Scale;
 
     void Look(bool focused)
     {
+        // Let go already: a focus change can still reach it on its way to the view in its place.
+        if (Disposed) return;
         var fill = kind == ButtonKind.Pill ? 0.12f : 0.08f;
-        BackgroundColor = focused ? PleyColors.Accent : new Color(PleyColors.Fg.R, PleyColors.Fg.G, PleyColors.Fg.B, fill);
+        BackgroundColor = focused ? PleyColors.Accent : rest ?? new Color(PleyColors.Fg.R, PleyColors.Fg.G, PleyColors.Fg.B, fill);
         if (kind == ButtonKind.Pill) BorderlineColor = focused ? Color.Transparent : PleyColors.Control;
         var content = focused ? PleyColors.OnAccent : ink;
         label.TextColor = content;
@@ -190,6 +213,8 @@ sealed class RoundButton : View
 
     void Look(bool focused)
     {
+        // Let go already: a focus change can still reach it on its way to the view in its place.
+        if (Disposed) return;
         box.BackgroundColor = focused ? PleyColors.Accent : PleyColors.OnArt;
         box.BorderlineColor = focused ? Color.Transparent : PleyColors.Control;
         icon.Color = focused ? PleyColors.OnAccent : PleyColors.Fg;

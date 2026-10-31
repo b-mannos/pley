@@ -17,7 +17,7 @@ namespace Pley.Tv.Tizen.Screens;
 /// about the focused tile, and the backdrop and the info block follow the tile once focus has
 /// rested 400 ms. Back from the rows puts the page back at its hero and focus on the rail's Home.
 /// </summary>
-sealed class HomeScreen : Sheet
+sealed class HomeScreen : ShellPage
 {
     /// <summary>The text column over backdrops: x 96 to 560.</summary>
     const float TextColumn = 464;
@@ -25,13 +25,11 @@ sealed class HomeScreen : Sheet
     const float FirstRowTop = 384;
     const float HeroTop = 52, TitleBox = 72;
 
-    readonly Shell shell;
-    readonly AppState state;
     readonly HomeModel model;
     readonly Images images;
     readonly KeyRepeatGate gate;
-    readonly RailView rail;
-    readonly FocusGroup page = new FocusGroup(Axis.Column, "page");
+    readonly Action<ItemSummary> open;
+    readonly FocusGroup page;
     readonly BackdropView backdrop;
     readonly ScrimView scrim;
     readonly View hero = new View();
@@ -43,9 +41,6 @@ sealed class HomeScreen : Sheet
     readonly RoundButton watched;
     readonly View infoBlock = new View { Opacity = 0 };
     readonly View body = new View { WidthResizePolicy = ResizePolicyType.FillToParent, HeightResizePolicy = ResizePolicyType.FillToParent };
-    readonly View toast;
-    readonly TextLabel toastText;
-    readonly Timer toastTimer = new Timer(3_500);
     readonly List<IDisposable> watches = new List<IDisposable>();
     RowColumnView? column;
     IReadOnlyList<HomeRow> shownRows = Array.Empty<HomeRow>();
@@ -57,13 +52,14 @@ sealed class HomeScreen : Sheet
     Animation? reveal;
     string shownKind = "";
 
-    public HomeScreen(Shell shell, AppState state, HomeModel model, Images images, KeyRepeatGate gate, Action<RailItem> onRail, Action onProfile) : base("home", Axis.Row)
+    /// <param name="open">Opens an item's page.</param>
+    public HomeScreen(TvShell shell, HomeModel model, Images images, KeyRepeatGate gate, Action<ItemSummary> open) : base(shell, new PageKey.Home(), "home")
     {
-        this.shell = shell;
-        this.state = state;
         this.model = model;
         this.images = images;
         this.gate = gate;
+        this.open = open;
+        page = Group;
         View.BackgroundColor = PleyColors.Bg;
 
         backdrop = new BackdropView(images);
@@ -76,7 +72,10 @@ sealed class HomeScreen : Sheet
         heroButtons = new ButtonRow();
         resume = heroButtons.Add(new ButtonView("Resume", ButtonKind.Pill, () => Play(false), iconName: "play"));
         fromStart = new RoundButton("From start", "rotate-ccw", () => Play(true));
-        info = new RoundButton("Info", "info", () => Toast("Item pages come next in the native app."));
+        info = new RoundButton("Info", "info", () =>
+        {
+            if (heroInfo != null) open(heroInfo.Item);
+        });
         watched = new RoundButton("Mark as watched", "circle-check", () =>
         {
             if (heroInfo != null) model.SetWatched(heroInfo.Item, !heroInfo.Watched);
@@ -85,79 +84,37 @@ sealed class HomeScreen : Sheet
         View.Add(hero);
         View.Add(body);
 
-        // The rows' fade under the collapsed rail: Bg to x = 56, clear from 72.
-        View.Add(new View
-        {
-            Size = new Size(Ui.Dp(PleyTv.RailFadeClearFrom), Ui.Dp(PleyTv.CanvasHeight)),
-            Background = Gradients.Horizontal(PleyColors.Bg, new Color(PleyColors.Bg.R, PleyColors.Bg.G, PleyColors.Bg.B, 0), PleyTv.RailFadeSolidUntil / PleyTv.RailFadeClearFrom),
-        });
-        rail = new RailView(Tree, onRail, onProfile);
-        rail.SetCurrent("home");
-        View.Add(rail);
-
-        toast = new View
-        {
-            Position = new Position(Ui.Dp(PleyTv.Gutter), Ui.Dp(PleyTv.CanvasHeight - PleyTv.SafeVertical - 38)),
-            CornerRadius = Ui.Dp(PleyShape.ControlRadius),
-            BackgroundColor = PleyColors.Surface3,
-        };
-        toastText = Text.Label("", PleyType.Label, PleyColors.Fg);
-        toastText.Position = new Position(Ui.Dp(20), 0);
-        toast.Add(toastText);
-        toast.Hide();
-        View.Add(toast);
-        toastTimer.Tick += (s, e) =>
-        {
-            toast.Hide();
-            return false;
-        };
-
-        Root.Add(rail.Group);
-        Root.Add(page);
         page.ChildFocused += i => SetInRows(page.Children[i] != heroButtons.Group);
-        heroButtons.Group.Exit = d => d == Direction.Left && rail.FocusCurrent();
-        Back = OnBack;
+        heroButtons.Group.Exit = d => d == Direction.Left && Scrolling.Left(gate, Shell.FocusRail);
 
-        watches.Add(state.Libraries.Watch(libraries => rail.SetItems(Rail.Items(libraries ?? Array.Empty<Library>()))));
-        watches.Add(state.Me.Watch(me => rail.SetProfile(me == null ? null : new RailProfile(me.Name, AvatarView.Rgb(ProfileColors.Of(me.Name, me.AvatarColor))))));
         watches.Add(model.State.Watch(Show));
         watches.Add(model.Info.Watch(_ => FollowFocus()));
-        Gone += () =>
-        {
-            foreach (var w in watches) w.Dispose();
-            model.Dispose();
-            toastTimer.Stop();
-            skeletonTimer?.Stop();
-        };
     }
 
-    /// <summary>A short message at the foot of the page, gone after 3.5 s.</summary>
-    public void Toast(string text)
+    public override void Gone()
     {
-        toastText.Text = text;
-        var width = toastText.NaturalSize.Width;
-        toastText.Size = new Size(width + 2, Ui.Dp(38));
-        toast.Size = new Size(width + Ui.Dp(40), Ui.Dp(38));
-        toast.Show();
-        toastTimer.Stop();
-        toastTimer.Start();
+        foreach (var w in watches) w.Dispose();
+        model.Dispose();
+        skeletonTimer?.Stop();
     }
 
-    void Play(bool fromStart) => Toast("Playback comes next in the native app.");
-
-    bool OnBack()
+    /// <summary>Focus back on Home: on the tile it left from, or Resume.</summary>
+    public override void Enter()
     {
-        var current = Tree.Current;
-        if (current == null || current.Parent == rail.Group) return false;
-        // Back from the rows: the page goes back to its hero (focus on Resume), then to the rail.
-        if (inRows)
-        {
-            column?.ScrollToTop();
-            page.ForgetLast();
-            heroButtons.Group.ForgetLast();
-            SetInRows(false);
-        }
-        rail.FocusCurrent();
+        if (!Tree.Enter(Group)) Shell.FocusRail();
+    }
+
+    void Play(bool fromStart) => Shell.Toast("Playback comes next in the native app.");
+
+    /// <summary>Back from the rows: the page goes back to its hero (focus on Resume), and focus to the rail.</summary>
+    public override bool Back()
+    {
+        if (!inRows) return false;
+        column?.ScrollToTop();
+        page.ForgetLast();
+        heroButtons.Group.ForgetLast();
+        SetInRows(false);
+        Shell.FocusRail();
         return true;
     }
 
@@ -244,7 +201,7 @@ sealed class HomeScreen : Sheet
         }
         else
         {
-            rail.FocusCurrent();
+            Shell.FocusRail();
         }
     }
 
@@ -263,7 +220,7 @@ sealed class HomeScreen : Sheet
         Block(g, 387, 180, 17);
         var tile = TileKind.Landscape;
         for (var i = 0; i < 4; i++) Block(g + (tile.Width + tile.Gap) * i, 422, tile.Width, tile.Height, PleyShape.TileRadius);
-        rail.FocusCurrent();
+        Shell.FocusRail();
     }
 
     void ShowReady(HomeState.Ready s)
@@ -299,16 +256,20 @@ sealed class HomeScreen : Sheet
             foreach (var item in row.Items) itemsByTile[(row.Key, item.Id)] = item;
             var rowKey = row.Key;
             column.Add(new RowView(row.Title, models, kind, gate, images,
-                m => Toast("Item pages come next in the native app."),
-                m => Toast("Actions come next in the native app."),
-                rail.FocusCurrent,
+                m =>
+                {
+                    if (itemsByTile.TryGetValue((rowKey, m.Id), out var item)) open(item);
+                },
+                m => Shell.Toast("Actions come next in the native app."),
+                Shell.FocusRail,
                 m =>
                 {
                     if (!itemsByTile.TryGetValue((rowKey, m.Id), out var item)) return;
                     model.Focus(item, row.After(item));
                     // Its backdrop loads now, focus may rest on it next; not for every tile a held key passes.
                     if (!gate.Holding) images.Load(HomeRules.Backdrop(item, s.Origin), BackdropView.WidthDp, _ => { });
-                }));
+                },
+                Tree.Focus));
         }
         page.Add(column.Group);
         body.Add(column);
@@ -316,7 +277,7 @@ sealed class HomeScreen : Sheet
         FocusItem? again = null;
         if (focusedKey != null) again = Find(column.Group, focusedKey);
         if (again != null) Tree.Focus(again);
-        else if (hadFocus == null || hadFocus.Parent != rail.Group) Tree.Focus(resume.Item);
+        else if (hadFocus == null || hadFocus.Parent != Shell.Rail.Group) Tree.Focus(resume.Item);
     }
 
     static FocusItem? Find(FocusGroup group, string name)
@@ -477,6 +438,18 @@ static class MetaLine
 
     public static View Of(HomeMeta meta, string lead = "")
     {
+        var parts = new List<MetaPart>();
+        if (meta.Year.Length > 0) parts.Add(new MetaPart.Text(meta.Year));
+        if (meta.ContentRating != null) parts.Add(new MetaPart.ContentRating(meta.ContentRating));
+        if (meta.Runtime.Length > 0) parts.Add(new MetaPart.Text(meta.Runtime));
+        if (meta.Rating != null) parts.Add(new MetaPart.Rating(meta.Rating));
+        if (meta.QualityBadges.Count > 0) parts.Add(new MetaPart.Badges(meta.QualityBadges));
+        return Of(parts, lead);
+    }
+
+    /// <summary>The line of <paramref name="parts"/>, in their order (an item page's own).</summary>
+    public static View Of(IReadOnlyList<MetaPart> parts, string lead = "")
+    {
         var line = new View { Size = new Size(Ui.Dp(Width), Ui.Dp(Height)) };
         float x = 0;
         var first = true;
@@ -523,37 +496,34 @@ static class MetaLine
             if (l.SizeWidth > Ui.Dp(Width * 0.6f)) l.SizeWidth = Ui.Dp(Width * 0.6f);
             Place(l);
         }
-        if (meta.Year.Length > 0)
+        foreach (var part in parts)
         {
-            Separate();
-            Place(Label(meta.Year, PleyColors.Muted));
-        }
-        if (meta.ContentRating != null)
-        {
-            Separate();
-            Place(Badge(meta.ContentRating));
-        }
-        if (meta.Runtime.Length > 0)
-        {
-            Separate();
-            Place(Label(meta.Runtime, PleyColors.Muted));
-        }
-        if (meta.Rating != null)
-        {
-            Separate();
-            var star = Icons.Icon("star", 14, PleyColors.Accent);
-            star.PositionY = Ui.Dp((Height - 14) / 2);
-            Place(star);
-            x -= Gap - 4;
-            Place(Label(meta.Rating, PleyColors.Fg));
-        }
-        if (meta.QualityBadges.Count > 0)
-        {
-            Separate();
-            foreach (var b in meta.QualityBadges)
+            switch (part)
             {
-                Place(Badge(b));
-                x -= Gap - 6;
+                case MetaPart.Text t:
+                    Separate();
+                    Place(Label(t.Value, PleyColors.Muted));
+                    break;
+                case MetaPart.ContentRating c:
+                    Separate();
+                    Place(Badge(c.Value));
+                    break;
+                case MetaPart.Rating r:
+                    Separate();
+                    var star = Icons.Icon("star", 14, PleyColors.Accent);
+                    star.PositionY = Ui.Dp((Height - 14) / 2);
+                    Place(star);
+                    x -= Gap - 4;
+                    Place(Label(r.Value, PleyColors.Fg));
+                    break;
+                case MetaPart.Badges b when b.Values.Count > 0:
+                    Separate();
+                    foreach (var value in b.Values)
+                    {
+                        Place(Badge(value));
+                        x -= Gap - 6;
+                    }
+                    break;
             }
         }
         return line;
@@ -632,12 +602,14 @@ sealed class ScrimView : View
     public static readonly (float From, float To) Hero = (220, 410);
     /// <summary>Home in the rows, under the info block.</summary>
     public static readonly (float From, float To) Rows = (120, 300);
+    /// <summary>Item pages.</summary>
+    public static readonly (float From, float To) Item = (260, 500);
 
     readonly View fade;
     readonly View solid;
     Animation? move;
 
-    public ScrimView()
+    public ScrimView((float From, float To)? place = null)
     {
         Size = new Size(Ui.Dp(PleyTv.CanvasWidth), Ui.Dp(PleyTv.CanvasHeight));
         var offsets = new PropertyArray();
@@ -671,7 +643,7 @@ sealed class ScrimView : View
         solid = new View { BackgroundColor = PleyColors.Bg, Size = new Size(Ui.Dp(PleyTv.CanvasWidth), Ui.Dp(PleyTv.CanvasHeight)) };
         Add(fade);
         Add(solid);
-        Place(Hero, animate: false);
+        Place(place ?? Hero, animate: false);
     }
 
     public void Set((float From, float To) where) => Place(where, animate: true);

@@ -275,6 +275,8 @@ sealed class ProfileChoice : View
 
     void Focus(bool on)
     {
+        // Let go already: a focus change can still reach it on its way to the view in its place.
+        if (Disposed) return;
         name.FontStyle = Text.Weight(on ? PleyType.Bold : PleyType.Medium);
         focusAnimation?.Stop();
         var scale = on ? PleyShape.AvatarScale : 1f;

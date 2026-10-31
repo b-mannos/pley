@@ -80,13 +80,32 @@ class App : NUIApplication
     /// <summary>Home, with the rail; what was saved shows at once, and the server is asked for the rest.</summary>
     void ShowHome()
     {
-        HomeScreen? home = null;
-        home = new HomeScreen(shell, state, new HomeModel(state, new ContextScheduler()), images, gate,
-            item => home!.Toast($"{item.Label} comes next in the native app."),
+        TvShell? tv = null;
+        tv = new TvShell(state,
+            item =>
+            {
+                if (item.Slot == RailSlot.Home) tv!.Restart(Home(tv));
+                else tv!.Toast($"{item.Label} comes next in the native app.");
+            },
             () => Go(new PageKey.Profiles()));
-        shell.Show(home);
+        tv.PageOf = key => key switch
+        {
+            PageKey.Item item => new ItemScreen(tv, shell, new ItemModel(new AppItemSource(state), item.ItemId, new ContextScheduler()), images, gate, k => Go(tv, k)),
+            PageKey.Home => Home(tv),
+            _ => null,
+        };
+        shell.Show(tv);
+        tv.Restart(Home(tv));
         _ = state.LoadAccount();
         _ = state.LoadHome();
+    }
+
+    HomeScreen Home(TvShell tv) => new HomeScreen(tv, new HomeModel(state, new ContextScheduler()), images, gate, item => Go(tv, new PageKey.Item(item.Id)));
+
+    /// <summary>Opens a page from another: an item's, over the one it was opened from; one the app doesn't have yet says so.</summary>
+    void Go(TvShell tv, PageKey key)
+    {
+        if (!tv.Open(key)) tv.Toast("That page comes next in the native app.");
     }
 
     /// <summary>A code for a phone to approve: a profile that needs its password, or (id 0) any profile.</summary>
