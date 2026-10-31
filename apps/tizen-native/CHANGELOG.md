@@ -74,3 +74,18 @@ It has no releases yet: it is built and installed by hand
   TV's facts, then what it tells the server it plays (HDR, the decoders and
   their limits, the sound it decodes and sends to a receiver, the streams
   it reads), a line each, with Check again if the check fails.
+- Live TV in the native app, in the rail after Home while the profile has
+  channels: the categories under the search (Favourites, Recently watched,
+  All channels, the provider's groups and regions), and the guide, which
+  moves through time with Left and Right and pages with Channel up and
+  down, or the channels as tiles; OK held, Menu or Info opens what's on
+  with Watch and the favourite. It opens as it was left, at the channel
+  last watched.
+- Watching Live TV in the native app: the channel full screen on the TV's
+  own player; Up, Down and Channel up and down change channel, number keys
+  tune one; OK shows what's on with the channel list and the favourite,
+  Info shows what's on for a moment, Menu or Guide opens the channel list,
+  where another group or a search can be chosen. A channel that doesn't
+  start says why, with Try again or, every connection being in use, Watch
+  here instead. The channel lets go of its connection while the app is
+  hidden and tunes again when it comes back.

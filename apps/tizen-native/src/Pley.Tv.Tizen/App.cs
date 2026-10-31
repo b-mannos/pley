@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using Pley.Tv.Core;
 using Pley.Tv.Core.Player;
+using Pley.Tv.Core.Live;
 using Pley.Tv.Core.Ui;
 using Pley.Tv.Tizen.Kit;
 using Pley.Tv.Tizen.Screens;
@@ -15,6 +16,8 @@ class App : NUIApplication
     AppState state = null!;
     Images images = null!;
     KeyRepeatGate gate = null!;
+    AppLiveSource live = null!;
+    LiveTvEntry? liveEntry;
 
     protected override void OnCreate()
     {
@@ -29,6 +32,9 @@ class App : NUIApplication
         state = new AppState(Platform.Of());
         // Pictures come through the API in use, with its token.
         state.Api.Watch(api => images.Api = api);
+        live = new AppLiveSource(state);
+        // The lineup changed (the server's events, a reconnection): whether Live TV has channels may have too.
+        live.OnChange(() => liveEntry?.Refresh());
         // The server ended the sign-in (revoked, or the refresh token spent): sign in again.
         state.SignedOut.Changed += signedOut =>
         {
@@ -41,6 +47,20 @@ class App : NUIApplication
             StartPage.Profiles => new PageKey.Profiles(),
             _ => new PageKey.Home(),
         });
+    }
+
+    /// <summary>The app went to the background: what plays lets go (Live TV's connection).</summary>
+    protected override void OnPause()
+    {
+        base.OnPause();
+        shell.Visible(false);
+    }
+
+    /// <summary>Back in front: what was let go plays again.</summary>
+    protected override void OnResume()
+    {
+        base.OnResume();
+        shell.Visible(true);
     }
 
     /// <summary>Shows the page for <paramref name="key"/>, in place of what is on screen.</summary>
@@ -112,8 +132,14 @@ class App : NUIApplication
             // What the TV reports when it asks to play, Settings' passthrough choices with it.
             DiagnosticsPage => new DiagnosticsScreen(tv, new DiagnosticsModel(Platform.Version(), () => Task.FromResult(Platform.Facts()), new ContextScheduler(),
                 facts => TizenCaps.Of(facts, state.Settings.Value.Passthrough))),
+            PageKey.LiveTv => new LiveTvScreen(tv, shell, new LiveTvModel(live, new ContextScheduler()), images, gate,
+                (watch, back) => new LivePlayerScreen(shell, live, watch, images, gate, back).Show()),
             _ => null,
         };
+        // Live TV in the rail while this profile has channels: asked again for each sign-in and profile.
+        if (liveEntry == null) liveEntry = new LiveTvEntry(live, new ContextScheduler());
+        else liveEntry.Refresh();
+        tv.Follow(liveEntry);
         // Back from the player: Home asks again, for the new resume point and Continue Watching.
         tv.Play = request => new PlayerScreen(shell, state, request, gate, () => _ = state.LoadHome()).Show();
         tv.Actions = (id, continueWatching) => TileActions.Open(shell, state, id, continueWatching, r => tv.Play?.Invoke(r), k => Go(tv, k), tv.Toast);
