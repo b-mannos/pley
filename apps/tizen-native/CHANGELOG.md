@@ -108,3 +108,15 @@ It has no releases yet: it is built and installed by hand
   itself), Chapters, Sleep timer, Speed where the TV plays other speeds,
   and Info, the playback's details, read again each second. The sleep
   timer says "Pausing in 30 s" with Keep watching before it pauses.
+- Music's pages in the native app, from a music library, Home or search:
+  an artist's page with their picture, Play and Shuffle for every track of
+  theirs and their albums, newest first; an album's page with its art, the
+  artist (which opens their page), its rating and its tracks by disc, where
+  OK plays the album from a track or pauses the one playing. Music plays on
+  behind the other pages, and pauses for a film or a channel.
+- Now Playing in the native app, in the rail while music plays: the album
+  art, the track, the scrubber (Left and Right seek 10 s), Shuffle,
+  Previous, Play/Pause, Next and the sleep timer, and the queue, where OK
+  plays a track. It dims after two minutes without a key. The remote's
+  media keys play, pause and skip the music from any page; it pauses while
+  the app is hidden and plays on when it comes back.

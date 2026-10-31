@@ -189,18 +189,22 @@ sealed class ButtonRow : View
 
 /// <summary>
 /// An icon button (the Android app's TvRoundButton): From start, Info, Watched. A 40 dp square with a
-/// control's corners, a 20 dp icon and the pill's Control edge, on Bg at 80 % over a backdrop. Its
-/// label fades in 6 dp below while it has focus; the room for it is kept, so a row never jumps.
+/// control's corners, a 20 dp icon and the pill's Control edge, on Bg at 80 % over a backdrop (on
+/// Surface3 off one). Its label fades in 6 dp below while it has focus; the room for it is kept, so
+/// a row never jumps.
 /// </summary>
 sealed class RoundButton : View
 {
     readonly View box;
     readonly ImageView icon;
     readonly TextLabel label;
+    readonly Color rest;
     Animation? focusAnimation;
 
-    public RoundButton(string text, string iconName, Action onClick)
+    /// <param name="onArt">Over a backdrop or art (Bg at 80 %); false on the page's own ground (Surface3).</param>
+    public RoundButton(string text, string iconName, Action onClick, bool onArt = true)
     {
+        rest = onArt ? PleyColors.OnArt : PleyColors.Surface3;
         Size = new Size(Ui.Dp(PleyTv.ButtonHeight), Ui.Dp(PleyTv.ButtonHeight));
         Item = new FocusItem(text) { Selected = onClick };
         box = new View
@@ -243,7 +247,7 @@ sealed class RoundButton : View
     {
         // Let go already: a focus change can still reach it on its way to the view in its place.
         if (Disposed) return;
-        box.BackgroundColor = focused ? PleyColors.Accent : PleyColors.OnArt;
+        box.BackgroundColor = focused ? PleyColors.Accent : rest;
         box.BorderlineColor = focused ? Color.Transparent : PleyColors.Control;
         icon.Color = focused ? PleyColors.OnAccent : PleyColors.Fg;
         focusAnimation?.Stop();
