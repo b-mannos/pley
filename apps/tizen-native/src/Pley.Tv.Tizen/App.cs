@@ -18,6 +18,8 @@ class App : NUIApplication
     KeyRepeatGate gate = null!;
     AppLiveSource live = null!;
     LiveTvEntry? liveEntry;
+    /// <summary>The app's one music player: it plays on behind every page, and ends with the profile, the sign-in or the server.</summary>
+    MusicPlayer music = null!;
 
     protected override void OnCreate()
     {
@@ -35,6 +37,7 @@ class App : NUIApplication
         live = new AppLiveSource(state);
         // The lineup changed (the server's events, a reconnection): whether Live TV has channels may have too.
         live.OnChange(() => liveEntry?.Refresh());
+        music = AppMusicServer.Player(state, () => new TizenMediaEngine(video: false), () => Platform.Facts(), new ContextScheduler());
         // The server ended the sign-in (revoked, or the refresh token spent): sign in again.
         state.SignedOut.Changed += signedOut =>
         {
@@ -133,7 +136,14 @@ class App : NUIApplication
             DiagnosticsPage => new DiagnosticsScreen(tv, new DiagnosticsModel(Platform.Version(), () => Task.FromResult(Platform.Facts()), new ContextScheduler(),
                 facts => TizenCaps.Of(facts, state.Settings.Value.Passthrough))),
             PageKey.LiveTv => new LiveTvScreen(tv, shell, new LiveTvModel(live, new ContextScheduler()), images, gate,
-                (watch, back) => new LivePlayerScreen(shell, live, watch, images, gate, back).Show()),
+                (watch, back) =>
+                {
+                    // A channel takes the TV's one media pipeline: the music lets go of it first.
+                    music.YieldToVideo();
+                    new LivePlayerScreen(shell, live, watch, images, gate, back).Show();
+                }),
+            ArtistPage artist => new ArtistScreen(tv, new ArtistModel(new AppItemSource(state), music, new ContextScheduler(), artist.ArtistId), images, gate, k => Go(tv, k)),
+            AlbumPage album => new AlbumScreen(tv, new AlbumModel(new AppItemSource(state), music, new ContextScheduler(), album.AlbumId, album.TrackId), images, gate, k => Go(tv, k)),
             _ => null,
         };
         // Live TV in the rail while this profile has channels: asked again for each sign-in and profile.
@@ -141,7 +151,12 @@ class App : NUIApplication
         else liveEntry.Refresh();
         tv.Follow(liveEntry);
         // Back from the player: Home asks again, for the new resume point and Continue Watching.
-        tv.Play = request => new PlayerScreen(shell, state, request, gate, () => _ = state.LoadHome()).Show();
+        tv.Play = request =>
+        {
+            // A video takes the TV's one media pipeline: the music pauses and lets go of its session, keeping its place.
+            music.YieldToVideo();
+            new PlayerScreen(shell, state, request, gate, () => _ = state.LoadHome()).Show();
+        };
         tv.Actions = (id, continueWatching) => TileActions.Open(shell, state, id, continueWatching, r => tv.Play?.Invoke(r), k => Go(tv, k), tv.Toast);
         shell.Show(tv);
         tv.Restart(Home(tv));
@@ -149,7 +164,8 @@ class App : NUIApplication
         _ = state.LoadHome();
     }
 
-    HomeScreen Home(TvShell tv) => new HomeScreen(tv, new HomeModel(state, new ContextScheduler()), images, gate, item => Go(tv, new PageKey.Item(item.Id)));
+    /// <summary>Home: a tile opens its item's page, an artist's or album's their music page, a track its album.</summary>
+    HomeScreen Home(TvShell tv) => new HomeScreen(tv, new HomeModel(state, new ContextScheduler()), images, gate, item => Go(tv, SearchRules.Opens(item)));
 
     /// <summary>Settings, with the Me page for its Profile and the TV's facts under "Open diagnostics".</summary>
     SettingsModel Settings() =>

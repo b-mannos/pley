@@ -89,3 +89,9 @@ It has no releases yet: it is built and installed by hand
   start says why, with Try again or, every connection being in use, Watch
   here instead. The channel lets go of its connection while the app is
   hidden and tunes again when it comes back.
+- Music's pages in the native app, from a music library, Home or search:
+  an artist's page with their picture, Play and Shuffle for every track of
+  theirs and their albums, newest first; an album's page with its art, the
+  artist (which opens their page), its rating and its tracks by disc, where
+  OK plays the album from a track or pauses the one playing. Music plays on
+  behind the other pages, and pauses for a film or a channel.

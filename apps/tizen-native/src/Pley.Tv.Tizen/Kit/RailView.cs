@@ -255,7 +255,12 @@ static class Gradients
         return map;
     }
 
-    public static PropertyMap Horizontal(Color from, Color to, float stop = 0)
+    public static PropertyMap Horizontal(Color from, Color to, float stop = 0) => Linear(from, to, stop, new Vector2(-0.5f, 0), new Vector2(0.5f, 0));
+
+    /// <summary>From the top down: <paramref name="from"/> until <paramref name="stop"/> (0 to 1), then to <paramref name="to"/> at the foot.</summary>
+    public static PropertyMap Vertical(Color from, Color to, float stop = 0) => Linear(from, to, stop, new Vector2(0, -0.5f), new Vector2(0, 0.5f));
+
+    static PropertyMap Linear(Color from, Color to, float stop, Vector2 start, Vector2 end)
     {
         var offsets = new PropertyArray();
         var colors = new PropertyArray();
@@ -270,8 +275,8 @@ static class Gradients
         colors.Add(new PropertyValue(to));
         var map = new PropertyMap();
         map.Add(Visual.Property.Type, new PropertyValue((int)Visual.Type.Gradient));
-        map.Add(GradientVisualProperty.StartPosition, new PropertyValue(new Vector2(-0.5f, 0)));
-        map.Add(GradientVisualProperty.EndPosition, new PropertyValue(new Vector2(0.5f, 0)));
+        map.Add(GradientVisualProperty.StartPosition, new PropertyValue(start));
+        map.Add(GradientVisualProperty.EndPosition, new PropertyValue(end));
         map.Add(GradientVisualProperty.StopOffset, new PropertyValue(offsets));
         map.Add(GradientVisualProperty.StopColor, new PropertyValue(colors));
         return map;
