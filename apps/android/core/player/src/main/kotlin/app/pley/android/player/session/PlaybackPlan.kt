@@ -276,8 +276,10 @@ object DvGuards {
             5 -> if (info.method == PlaybackMethod.Remux && !keepsDolbyVision(info)) PlaybackMode.Transcode else null
             7 -> {
                 val report = caps?.report
-                // Quirks (the Shield's) are in the snapshot's profiles already.
-                val decodesP7 = report?.dolbyVisionProfiles.orEmpty().any { it.profile == 7 }
+                // Quirks (the Shield's) are in the snapshot's profiles already;
+                // they're listed on any screen, and decoded only on a Dolby Vision one.
+                val decodesP7 = DynamicRange.DolbyVision in report?.hdrTypes.orEmpty() &&
+                    report?.dolbyVisionProfiles.orEmpty().any { it.profile == 7 }
                 when {
                     info.method != PlaybackMethod.Direct || decodesP7 -> null
                     DynamicRange.Hdr10 in report?.hdrTypes.orEmpty() || report?.hdr == true -> PlaybackMode.Remux

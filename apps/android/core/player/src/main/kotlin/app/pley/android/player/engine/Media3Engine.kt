@@ -129,9 +129,13 @@ class Media3Engine(
 
     private val details: CapsDetails? get() = caps()?.details
 
+    /** Whether the video being played comes out as Dolby Vision ([ModeChoice.dolbyVisionShown]); read on Media3's thread. */
+    @Volatile
+    private var dolbyVisionShown: Boolean? = null
+
     private val rules = DecoderRules(
         policy = { details?.policy ?: DecoderPolicy(tv = profile.isTv) },
-        dolbyVisionScreen = { details?.takeIf { it.input != null }?.let { DynamicRange.DolbyVision in it.screenHdrTypes } },
+        dolbyVisionShown = { dolbyVisionShown },
     )
 
     private val loadControl = PleyLoadControl(BufferPlan.of(profile))
@@ -261,6 +265,7 @@ class Media3Engine(
         mutableState.update { EngineState(stats = it.stats) }
         val asked = matchRequest(source)
         request = asked
+        dolbyVisionShown = details?.let { ModeChoice.dolbyVisionShown(it, asked, sdk) }
         matchPending = asked != null
         Log.i(TAG, "prepare at $startMs ms: play $playWhenReady, display match ${if (asked != null) "asked" else "none"}, window ${window != null}")
         snapToKeyFrame = startMs > 0 && !music && !source.hls

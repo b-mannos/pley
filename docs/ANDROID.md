@@ -45,6 +45,13 @@ keeps its saved servers and asks you to sign in again.
   permission before the app searches the network.
 - **Watch Next** (Android TV and Google TV): the home screen's row shows
   the profile's Continue Watching, ten at most.
+- **Dolby Vision and HDR** go by the display modes a video plays in: the
+  one in use, and those of its size the TV switches to for the frame rate
+  (the device's match-content setting, or Settings → Playback). A format
+  turned off in the system's settings isn't used. Dolby Vision the screen
+  doesn't show there plays as its HDR10, HLG or SDR base layer, and the
+  player's details say why ("HDR10 (Dolby Vision base layer, as this
+  screen doesn't show Dolby Vision)").
 
 ### Audio and subtitles
 

@@ -56,7 +56,7 @@ class PleyRenderersFactory(
             .setEventHandler(eventHandler)
             .setEventListener(eventListener)
             .setMaxDroppedFramesToNotify(MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY)
-        out.add(PolicyVideoRenderer(builder, rules))
+        out.add(PolicyVideoRenderer(builder, context, rules))
     }
 
     override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink? {
@@ -69,11 +69,14 @@ class PleyRenderersFactory(
 
 /**
  * Media3's video renderer, asking the decoder lists through a selector that
- * knows the format: the same renderer otherwise.
+ * knows the format, with Dolby Vision decoders first for Dolby Vision that
+ * comes out as Dolby Vision ([DecoderRules.dolbyVisionDecoders]): the same
+ * renderer otherwise.
  */
 @OptIn(markerClass = [UnstableApi::class])
 internal class PolicyVideoRenderer(
     builder: MediaCodecVideoRenderer.Builder,
+    private val context: Context,
     private val rules: DecoderRules,
 ) : MediaCodecVideoRenderer(builder) {
     override fun supportsFormat(mediaCodecSelector: MediaCodecSelector, format: Format): Int =
@@ -83,5 +86,7 @@ internal class PolicyVideoRenderer(
         mediaCodecSelector: MediaCodecSelector,
         format: Format,
         requiresSecureDecoder: Boolean,
-    ): List<MediaCodecInfo> = super.getDecoderInfos(rules.selectorFor(mediaCodecSelector, format), format, requiresSecureDecoder)
+    ): List<MediaCodecInfo> =
+        rules.dolbyVisionDecoders(context, mediaCodecSelector, format, requiresSecureDecoder, configuration.tunneling)
+            ?: super.getDecoderInfos(rules.selectorFor(mediaCodecSelector, format), format, requiresSecureDecoder)
 }
