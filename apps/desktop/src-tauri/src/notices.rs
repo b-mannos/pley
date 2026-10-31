@@ -8,7 +8,7 @@
 //! dropped stream (the computer slept, the network went), what changed for
 //! the account meanwhile is told of in one notice.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -277,8 +277,9 @@ struct Told {
     /// stream opened; `None` until it first opens, which tells of nothing
     /// old (the page does, as it opens).
     newest: Option<i64>,
-    /// The requests heard of as they changed: not told of twice.
-    heard: HashSet<i64>,
+    /// The requests heard of as they changed, with the stage they reached
+    /// then: not told of twice, but told of again once they move on.
+    heard: HashMap<i64, String>,
 }
 
 impl Told {
@@ -293,8 +294,8 @@ impl Told {
         };
         self.newest = Some(latest.map_or(newest, |latest| latest.max(newest)));
         let news: Vec<&Listed> =
-            listed.into_iter().filter(|r| r.updated_at > newest && !self.heard.contains(&r.id)).collect();
-        self.heard.extend(news.iter().map(|r| r.id));
+            listed.into_iter().filter(|r| r.updated_at > newest && self.heard.get(&r.id) != Some(&r.stage)).collect();
+        self.heard.extend(news.iter().map(|r| (r.id, r.stage.clone())));
         news
     }
 }
@@ -405,8 +406,14 @@ async fn listen(client: &reqwest::Client, server: &Url, shell: &dyn Shell, name:
         };
         for data in stream.read(&chunk) {
             let heard = heard(&data);
-            if let Heard::RequestAvailable { request_id, .. } | Heard::RequestDecided { request_id, .. } = &heard {
-                told.heard.insert(*request_id);
+            match &heard {
+                Heard::RequestAvailable { request_id, complete, .. } => {
+                    told.heard.insert(*request_id, if *complete { "available" } else { "partial" }.to_string());
+                }
+                Heard::RequestDecided { request_id, status, .. } => {
+                    told.heard.insert(*request_id, status.clone());
+                }
+                _ => {}
             }
             match notice(&heard) {
                 Some(body) if !shell.in_front() => shell.show(name, &body),
@@ -643,7 +650,9 @@ mod tests {
         assert!(told.catch_up(&[news(1, "Heat", "available", 100), news(2, "Ran", "declined", 50)]).is_empty());
         assert!(told.catch_up(&[news(1, "Heat", "available", 100)]).is_empty());
         // One heard of as it changed isn't told of again; one seen isn't news.
-        told.heard.insert(4);
+        told.heard.insert(4, "available".to_string());
+        // One heard of at an earlier stage (approved) is told of once it's ready.
+        told.heard.insert(5, "approved".to_string());
         let seen = Listed { unseen: false, ..news(6, "Big", "available", 180) };
         let listed = [
             news(5, "Up", "available", 170),
