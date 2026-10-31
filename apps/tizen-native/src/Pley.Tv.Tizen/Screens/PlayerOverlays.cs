@@ -435,6 +435,8 @@ sealed class MethodBadge : View
         tint.CornerRadius = Ui.Dp(PleyShape.BadgeRadius);
         Add(tint);
         text = Text.Label("", PleyType.Caption, PleyColors.Fg);
+        // The label has a little room past its text (Text.Width): centred, the text stays in the badge's middle.
+        text.HorizontalAlignment = HorizontalAlignment.Center;
         text.Position = new Position(Ui.Dp(8), Ui.Dp(3));
         Add(text);
     }
