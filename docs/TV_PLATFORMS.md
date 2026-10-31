@@ -454,6 +454,24 @@ tizen run -p app.pley.tizen -t <target>
 bun scripts/check-nuget-licenses.mjs                     # the licences of the packages it ships with
 ```
 
+### Profiling
+
+A profiling build measures the app on a TV: what happens when (startup,
+pages drawn, the player, Live TV's guide), each time the UI thread is held
+for more than 66 ms and what came before it, pictures, memory every 5
+seconds, and the frame rate, which also shows over the screen's top right.
+It keeps its last marks in the app's data folder, so the marks before a
+crash are sent at the next start. Its marks go as lines to a listener on a
+computer the TV reaches:
+
+```sh
+node apps/tizen-native/scripts/metrics.mjs     # writes apps/tizen-native/out/metrics.log, prints its address
+PLEY_TIZEN_METRICS=http://<computer>:7531 bun run tizen-native
+```
+
+A build without `PLEY_TIZEN_METRICS` has none of this: the calls of
+`Kit/Profile.cs` are left out when it is compiled.
+
 ### On the TV
 
 - **60 frames a second** is the most an app's screens get, also on panels

@@ -188,6 +188,7 @@ sealed class CategoryColumnView : View
     /// <summary>The rows for <paramref name="groups"/>, <paramref name="selected"/> marked; focus stays on the row it was on.</summary>
     public void Show(LiveGroups? groups, LiveCategory selected, IReadOnlyList<LiveGroup>? found = null)
     {
+        Profile.Mark("live categories: show");
         this.groups = groups;
         this.selected = selected;
         this.found = found;

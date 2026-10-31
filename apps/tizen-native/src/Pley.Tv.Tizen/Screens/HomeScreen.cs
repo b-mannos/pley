@@ -132,7 +132,9 @@ sealed class HomeScreen : ShellPage
         {
             if (shownKind != kind) ClearBody();
             shownKind = kind;
+            var drawn = Profile.Start();
             ShowReady(ready);
+            Profile.Took("Home drawn", drawn);
             return;
         }
         if (shownKind == kind && s is not HomeState.Empty) return;

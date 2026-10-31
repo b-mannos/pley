@@ -59,7 +59,9 @@ sealed class Images
                 if (cancel.IsCancellationRequested) return;
                 var url = Artwork.Sized(candidate, px);
                 if (missing.ContainsKey(url)) continue;
+                var asked = Profile.Start();
                 file = await loading.GetOrAdd(url, u => Fetch(u, cancel)).ConfigureAwait(false);
+                if (file != null) Profile.Picture(asked);
                 loading.TryRemove(url, out _);
                 if (file != null) break;
             }

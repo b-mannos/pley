@@ -78,6 +78,7 @@ sealed class ChannelCardsView : View
 
     public void SetPages(ChannelPages value)
     {
+        Profile.Mark("live cards: pages");
         pages = value;
         if (index >= Total) index = Math.Max(0, Total - 1);
         Draw();

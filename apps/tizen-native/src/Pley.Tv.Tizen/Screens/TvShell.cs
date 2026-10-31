@@ -154,9 +154,11 @@ sealed class TvShell : Sheet
     /// <summary>Opens the page of <paramref name="key"/> over the one on top; false when the app has none for it yet.</summary>
     public bool Open(PageKey key)
     {
+        var opened = Profile.Start();
         var page = PageOf?.Invoke(key);
         if (page == null) return false;
         Open(page);
+        Profile.Took($"page {key.GetType().Name} shown", opened);
         return true;
     }
 

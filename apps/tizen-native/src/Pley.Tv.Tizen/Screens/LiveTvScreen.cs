@@ -158,6 +158,7 @@ sealed class LiveTvScreen : ShellPage
 
     void OnState(LivePage page)
     {
+        Profile.Mark("live page: state");
         if (gone) return;
         if (page.Allowed != allowedShown)
         {

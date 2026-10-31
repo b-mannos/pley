@@ -156,6 +156,7 @@ sealed class GuideView : View
 
     public void SetPages(ChannelPages value)
     {
+        Profile.Mark("live guide: pages");
         pages = value;
         cursor.Fit(Total);
         ShowingRows();
@@ -164,6 +165,7 @@ sealed class GuideView : View
 
     public void SetPrograms(GuidePrograms value)
     {
+        Profile.Mark("live guide: programmes");
         guide = value;
         Draw();
     }
@@ -178,6 +180,7 @@ sealed class GuideView : View
     /// <summary>The list opens at the channel last watched (once per landing).</summary>
     public void Land(Landing? landing)
     {
+        Profile.Mark("live guide: land");
         if (landing == null || landing.Category != listed || placed == landing) return;
         placed = landing;
         cursor.Place(landing.Index ?? 0, Total);
@@ -349,6 +352,7 @@ sealed class GuideView : View
     /// <summary>Draws what changed: the focused programme's description, and the rows in view (and one either side).</summary>
     void Draw()
     {
+        Profile.Mark("live guide: draw");
         if (Disposed) return;
         var focused = Item.Focused;
         var channel = pages[cursor.Row];
@@ -462,6 +466,7 @@ sealed class GuideView : View
     /// <summary>Makes again the rows waiting, nearest the focused row first, until a frame's time is spent.</summary>
     bool CatchUp()
     {
+        Profile.Mark("live guide: catch up");
         if (Disposed)
         {
             catchingUp = false;

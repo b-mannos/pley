@@ -9,6 +9,18 @@
     <NoWarn>$(NoWarn);NU1603</NoWarn>
   </PropertyGroup>
 
+  <!-- A profiling build (scripts/package.mjs, PLEY_TIZEN_METRICS): Kit/Profile.cs's calls are
+       compiled in, and send their marks to PleyMetrics. Without it, they're left out. -->
+  <PropertyGroup Condition="'$(PleyMetrics)' != ''">
+    <DefineConstants>$(DefineConstants);PROFILE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(PleyMetrics)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>PleyMetrics</_Parameter1>
+      <_Parameter2>$(PleyMetrics)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Pley.Tv.Core\Pley.Tv.Core.csproj" />
     <!-- The link screen's QR code: Nayuki's generator, as the Android app has it, under MIT. -->

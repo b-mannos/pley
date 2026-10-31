@@ -105,7 +105,9 @@ sealed class ItemScreen : ShellPage
             case ItemState.Ready ready:
                 if (shownKind != "ready") Clear();
                 shownKind = "ready";
+                var drawn = Profile.Start();
                 ShowPage(ready.Page);
+                Profile.Took("item page drawn", drawn);
                 return;
             case ItemState.Loading:
                 if (shownKind == "loading") return;

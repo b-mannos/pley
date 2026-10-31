@@ -3,6 +3,8 @@
 // "pley-dev"), as the web app's package script does. A TV in developer mode
 // installs only packages signed with a Samsung certificate. The .NET SDK
 // builds the .tpk; the CLI, found on PATH or in TIZEN_STUDIO, signs it.
+// PLEY_TIZEN_METRICS (an address of scripts/metrics.mjs, http://<pc>:7531)
+// makes a profiling build that sends its marks there; without it, none.
 
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
@@ -24,7 +26,12 @@ if (studio && !existsSync(cli)) {
 }
 
 // The commit goes into the informational version, which the app shows beside its version.
-execFileSync("dotnet", ["build", project, "-c", "Release", "-nologo", `-p:SourceRevisionId=${commit()}`], { stdio: "inherit" });
+// Always given, so a build after a profiling one compiles the profiling out again.
+const metrics = process.env.PLEY_TIZEN_METRICS ?? "";
+execFileSync("dotnet", ["build", project, "-c", "Release", "-nologo", `-p:SourceRevisionId=${commit()}`, `-p:PleyMetrics=${metrics}`], {
+  stdio: "inherit",
+});
+if (metrics) console.log(`A profiling build: its marks go to ${metrics}`);
 
 const tpk = readdirSync(bin, { recursive: true })
   .filter((f) => String(f).endsWith(".tpk"))

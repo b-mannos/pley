@@ -33,6 +33,8 @@ class App : NUIApplication
         base.OnCreate();
         var window = Window.Instance;
         Ui.Measure(window);
+        // A profiling build's marks, stalls and frame rate, from here (none in other builds).
+        Profile.Begin(window, Current.DirectoryInfo.Data);
         Text.LoadFonts();
         window.BackgroundColor = PleyColors.Bg;
         // NUI draws its own highlight round the view with key focus (a text field while typing),
@@ -41,7 +43,9 @@ class App : NUIApplication
         gate = new KeyRepeatGate();
         shell = new Shell(window, gate, Exit);
         images = new Images(Current.DirectoryInfo.Cache);
+        var made = Profile.Start();
         state = new AppState(Platform.Of());
+        Profile.Took("app state", made);
         // Pictures come through the API in use, with its token.
         state.Api.Watch(api => images.Api = api);
         live = new AppLiveSource(state);
@@ -83,6 +87,7 @@ class App : NUIApplication
 
     protected override void OnTerminate()
     {
+        Profile.End();
         musicKeys?.Dispose();
         base.OnTerminate();
     }
@@ -229,13 +234,18 @@ class App : NUIApplication
         {
             // A video takes the TV's one media pipeline: the music pauses and lets go of its session, keeping its place.
             music.YieldToVideo();
+            var opened = Profile.Start();
             new PlayerScreen(shell, state, request, reporter, images, gate, () => _ = state.LoadHome()).Show();
+            Profile.Took("player shown", opened);
         };
         tv.Actions = (id, continueWatching) => TileActions.Open(shell, state, id, continueWatching, r => tv.Play?.Invoke(r), k => Go(tv, k), tv.Toast);
         shell.Show(tv);
+        var shown = Profile.Start();
         tv.Restart(Home(tv));
+        Profile.Took("Home shown", shown);
         _ = state.LoadAccount();
-        _ = state.LoadHome();
+        var home = state.LoadHome();
+        Profile.Ends("Home's data", home);
     }
 
     /// <summary>Home: a tile opens its item's page, an artist's or album's their music page, a track its album.</summary>

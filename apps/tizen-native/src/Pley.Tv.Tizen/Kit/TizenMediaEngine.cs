@@ -99,6 +99,7 @@ sealed class TizenMediaEngine : IVideoEngine
         lastPosition = source.Live ? 0 : Math.Max(0, source.StartMs);
         var p = new Media.Player();
         player = p;
+        Profile.Mark("engine: source given, preparing");
         SetStatus(mine, EngineStatus.Buffering);
         _ = Open(p, source, mine);
     }
@@ -140,6 +141,7 @@ sealed class TizenMediaEngine : IVideoEngine
             await preparing;
             if (mine != generation) return;
             prepared = true;
+            Profile.Mark("engine: prepared");
             if (video)
             {
                 p.DisplaySettings.Mode = Media.PlayerDisplayMode.LetterBox;
@@ -419,6 +421,7 @@ sealed class TizenMediaEngine : IVideoEngine
             if (firstAt < 0) firstAt = position;
             if (position < firstAt + FirstMoveMs) return;
             moved = true;
+            Profile.Mark("engine: picture moving (black lifts)");
             watch!.Interval = WatchMs;
             watchedAt = position;
             stillFor = 0;
