@@ -8,6 +8,12 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Signing in says when the server requires two-step sign-in: on a phone,
+  you set it up on the server's page as you sign in; on a TV, the phone
+  that approves the code sets it up for whoever hasn't.
+
 ## [0.1.0] - 2026-10-30
 
 ### Added
