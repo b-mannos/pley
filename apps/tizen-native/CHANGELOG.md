@@ -43,3 +43,7 @@ It has no releases yet: it is built and installed by hand
   and show library's collections, a row each; a collection's page has its
   backdrop, TMDB or Smart badge, what it holds, Play and Shuffle, and its
   titles in a grid that scrolls up over the backdrop.
+- Watch history in the native app: the profile's plays, newest first, with
+  when and on which device; OK opens one, the cross or OK held removes it,
+  and Show more loads the next 15. Settings, where it opens from, comes
+  next.

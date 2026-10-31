@@ -98,6 +98,8 @@ class App : NUIApplication
             // Every movie and show library's collections, whichever library the key names, as the Android TV app has it.
             PageKey.Collections collections => new CollectionsScreen(tv, collections, new CollectionsModel(new AppCollectionSource(state), new ContextScheduler(), only: null), images, gate, k => Go(tv, k)),
             PageKey.Collection collection => new CollectionScreen(tv, new CollectionModel(new AppCollectionSource(state), collection.CollectionId, new ContextScheduler()), images, gate, k => Go(tv, k)),
+            // Settings' Watch history row opens it, as on Android TV.
+            PageKey.History => new HistoryScreen(tv, new HistoryModel(new AppHistorySource(state), new ContextScheduler()), images, gate, k => Go(tv, k)),
             _ => null,
         };
         // Back from the player: Home asks again, for the new resume point and Continue Watching.

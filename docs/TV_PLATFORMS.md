@@ -381,10 +381,11 @@ Home: the hero, the server's rows and the rail, and item pages: the hero
 and its buttons, seasons and episodes, Extras, Cast and More Like This,
 and the side panels; library pages (the chips and panels, the grid with
 the A to Z jump, Recommended and Collections) and the Libraries page; the
-rail's Collections and a collection's page, with Play and Shuffle; and
-a first player: the stream on the TV's own player,
+rail's Collections and a collection's page, with Play and Shuffle; the
+watch history page; and a first player: the stream on the TV's own player,
 seeking with Left and Right, and the scrubber and transport controls.
-Subtitles, the player's panels and the other pages come next.
+Subtitles, the player's panels and the other pages come next; Settings,
+which leads to the watch history, is one of them.
 
 | | |
 |---|---|
