@@ -9,24 +9,8 @@ describes how they are made.
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-10-30
-
 ### Security
 
-- A session signed out, or whose account was disabled or changed, could
-  keep working for up to a minute when it was being checked at that
-  moment.
-- An administrator's own PIN changes only in Account, with the password,
-  no longer through the users list with the session alone.
-- The transcoder's folder for segments in memory (`/dev/shm`) is never one
-  another account on the computer made first.
-- A file's attached fonts are taken 1,000 at most.
-- An account keeps at most 200 networks remembered for Automatic quality.
-- Subtitles from OpenSubtitles download over https only.
-- ctutils 0.4.7 (RUSTSEC-2026-0385).
-- quick-xml 0.41 for XMLTV guides (RUSTSEC-2026-0194, RUSTSEC-2026-0195).
-  A guide's title or description holding an HTML entity (`&nbsp;`) no
-  longer comes out empty.
 - Radarr's and Sonarr's addresses can't be link-local (`169.254.0.0/16`,
   `fe80::/10`), and whatever answers there in their stead is never quoted
   back: only its HTTP status.
@@ -43,26 +27,6 @@ describes how they are made.
   in Settings → Users, where profiles without a password and accounts with
   an age limit start without. `/api/discover`, `/api/requests` and
   `POST /api/settings/arr` ([docs/API.md](../../docs/API.md#requests)).
-- Live TV: IPTV channels from an M3U playlist or an Xtream Codes account,
-  with their XMLTV guide, watched in the web and desktop apps through the
-  server, at home or away. A guide that scrolls through time, channel
-  cards with what's on, favourites, recently watched, and a player with
-  channel up and down, a channel list, pause and rewind (five minutes by
-  default) and picture in picture. The server holds the provider's
-  connections: a channel watched on several devices takes one, and when
-  all are in use the apps say which channels hold them. Interlaced and
-  non-H.264 channels are converted, on the graphics card where there is
-  one. Settings → Live TV has the sources, the groups (a whole group or
-  region hidden at once), the lineup (hide, rename, renumber, pick a
-  guide channel) and who is watching what. Channels are browsed by group:
-  groups named by region ("UK| Sport") fold under it,
-  and channel up and down stay in the group. Lineups of tens of
-  thousands of channels open at once: the apps fetch a page of channels
-  and the guide of those in view.
-- Live TV for players that can't send the token: a channel watched with
-  `keyed_urls` gets a playlist address with a key of its own
-  (`/api/live/media/{key}/index.m3u8`), so the Samsung and LG apps play it
-  through the TV's own player.
 - Requests in Pley's apps: they ask with the new `requests` scope, and an
   administrator's Pley apps approve and decline with `approvals`; an app
   signed in before is told to sign in again. Discover's pictures come
@@ -97,6 +61,48 @@ describes how they are made.
   request changed and go only to whom it concerns: a new request to
   administrators, a decision to its maker and followers, a request ready
   to each account that can open it, a failure to administrators.
+
+## [0.1.0] - 2026-10-30
+
+### Security
+
+- A session signed out, or whose account was disabled or changed, could
+  keep working for up to a minute when it was being checked at that
+  moment.
+- An administrator's own PIN changes only in Account, with the password,
+  no longer through the users list with the session alone.
+- The transcoder's folder for segments in memory (`/dev/shm`) is never one
+  another account on the computer made first.
+- A file's attached fonts are taken 1,000 at most.
+- An account keeps at most 200 networks remembered for Automatic quality.
+- Subtitles from OpenSubtitles download over https only.
+- ctutils 0.4.7 (RUSTSEC-2026-0385).
+- quick-xml 0.41 for XMLTV guides (RUSTSEC-2026-0194, RUSTSEC-2026-0195).
+  A guide's title or description holding an HTML entity (`&nbsp;`) no
+  longer comes out empty.
+
+### Added
+
+- Live TV: IPTV channels from an M3U playlist or an Xtream Codes account,
+  with their XMLTV guide, watched in the web and desktop apps through the
+  server, at home or away. A guide that scrolls through time, channel
+  cards with what's on, favourites, recently watched, and a player with
+  channel up and down, a channel list, pause and rewind (five minutes by
+  default) and picture in picture. The server holds the provider's
+  connections: a channel watched on several devices takes one, and when
+  all are in use the apps say which channels hold them. Interlaced and
+  non-H.264 channels are converted, on the graphics card where there is
+  one. Settings → Live TV has the sources, the groups (a whole group or
+  region hidden at once), the lineup (hide, rename, renumber, pick a
+  guide channel) and who is watching what. Channels are browsed by group:
+  groups named by region ("UK| Sport") fold under it,
+  and channel up and down stay in the group. Lineups of tens of
+  thousands of channels open at once: the apps fetch a page of channels
+  and the guide of those in view.
+- Live TV for players that can't send the token: a channel watched with
+  `keyed_urls` gets a playlist address with a key of its own
+  (`/api/live/media/{key}/index.m3u8`), so the Samsung and LG apps play it
+  through the TV's own player.
 - The web app draws picture subtitles (PGS, VobSub, DVB) over the video
   itself, so the file still plays as it is, or its stream keeps HDR,
   rather than having them burned in.
