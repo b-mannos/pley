@@ -440,6 +440,12 @@ sealed class ItemScreen : ShellPage
                 m => { if (byId.TryGetValue(m.Id, out var r)) Panel(ItemText.ActionsPanel(r), r); },
                 Shell.FocusRail, focusItem: Tree.Focus));
         }
+        if (ItemText.HasDetails(page))
+        {
+            var details = new ItemDetailsView(page, model.ChooseVersion);
+            details.Group.Exit = d => d == Direction.Left ? Scrolling.Left(gate, Shell.FocusRail) : d is Direction.Right or Direction.Down;
+            column.Add(details, details.Group);
+        }
         body.Add(column);
         if (Group.Children.Count == 0) Group.Add(heroButtons.Group);
         Group.Add(column.Group);
@@ -455,6 +461,10 @@ sealed class ItemScreen : ShellPage
             string.Join(",", page.Extras.Select(e => e.Id)),
             string.Join(",", page.Cast.Select(c => c.Id)) + ";" + string.Join(",", page.Details.Crew.SelectMany(c => c.People).Select(p => p.Id)),
             string.Join(",", page.Related.Select(r => r.Id)),
+            // The details: their facts, the version that plays, the files.
+            string.Join(";", ItemText.Facts(page.Details).Select(f => f.Label + "=" + f.Value)),
+            string.Join(",", page.Details.Versions.Select(v => v.Id + (v.Selected ? "*" : ""))),
+            string.Join(",", page.MediaInfo.Select(m => m.Id)),
         });
 
     static FocusItem? Find(FocusGroup group, string name)
