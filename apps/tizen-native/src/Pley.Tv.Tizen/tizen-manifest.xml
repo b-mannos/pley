@@ -9,5 +9,7 @@
   </ui-application>
   <privileges>
     <privilege>http://tizen.org/privilege/internet</privilege>
+    <!-- The TV's own address and network: the address pad's first digits, and searching the network. -->
+    <privilege>http://tizen.org/privilege/network.get</privilege>
   </privileges>
 </manifest>

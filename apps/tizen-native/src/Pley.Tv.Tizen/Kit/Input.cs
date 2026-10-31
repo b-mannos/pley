@@ -15,13 +15,13 @@ sealed class Input
     /// <summary>How long OK is held before it counts as a long press (Android's long-press timeout).</summary>
     const long LongPressMs = 500;
 
-    readonly FocusTree tree;
+    readonly Func<FocusTree?> tree;
     readonly KeyRepeatGate gate;
     readonly List<Func<string, bool, bool>> handlers = new List<Func<string, bool, bool>>();
     long okDownAt = -1;
     bool okLong;
 
-    public Input(Window window, FocusTree tree, KeyRepeatGate gate)
+    public Input(Window window, Func<FocusTree?> tree, KeyRepeatGate gate)
     {
         this.tree = tree;
         this.gate = gate;
@@ -46,23 +46,24 @@ sealed class Input
     void OnKey(string key, bool down)
     {
         if (!gate.Admit(key, down)) return;
-        var item = tree.Current;
+        var focus = tree();
+        var item = focus?.Current;
         if (item?.OwnKey?.Invoke(key, down) == true) return;
         for (var i = handlers.Count - 1; i >= 0; i--)
             if (handlers[i](key, down)) return;
         switch (key)
         {
             case "Up":
-                if (down) tree.Move(Direction.Up);
+                if (down) focus?.Move(Direction.Up);
                 break;
             case "Down":
-                if (down) tree.Move(Direction.Down);
+                if (down) focus?.Move(Direction.Down);
                 break;
             case "Left":
-                if (down) tree.Move(Direction.Left);
+                if (down) focus?.Move(Direction.Left);
                 break;
             case "Right":
-                if (down) tree.Move(Direction.Right);
+                if (down) focus?.Move(Direction.Right);
                 break;
             case "Return":
             case "KP_Enter":

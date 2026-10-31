@@ -10,6 +10,7 @@ It has no releases yet: it is built and installed by hand
 
 ### Added
 
-- A native app for Samsung TVs with Tizen 9, beside the web app: so far a
-  start screen with the Android TV app's rail and rows of placeholder
-  tiles, driven by the remote.
+- A native app for Samsung TVs with Tizen 9, beside the web app: so far the
+  Android TV app's "Choose your server" screen, with servers found on the
+  network, an address pad, the TV's keyboard and forgetting a server, and
+  its rail and rows of placeholder tiles, driven by the remote.

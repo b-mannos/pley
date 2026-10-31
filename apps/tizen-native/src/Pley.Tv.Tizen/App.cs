@@ -1,9 +1,9 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
+using Pley.Tv.Core;
 using Pley.Tv.Core.Ui;
 using Pley.Tv.Tizen.Kit;
+using Pley.Tv.Tizen.Screens;
 using Tizen.NUI;
 using Tizen.NUI.BaseComponents;
 
@@ -12,8 +12,10 @@ namespace Pley.Tv.Tizen;
 /// <summary>Pley for Samsung TV, native: a NUI window the remote drives.</summary>
 class App : NUIApplication
 {
-    FocusTree tree = null!;
-    Input input = null!;
+    Shell shell = null!;
+    AppState state = null!;
+    Images images = null!;
+    KeyRepeatGate gate = null!;
 
     protected override void OnCreate()
     {
@@ -21,17 +23,73 @@ class App : NUIApplication
         var window = Window.Instance;
         Ui.Measure(window);
         window.BackgroundColor = PleyColors.Bg;
-        var gate = new KeyRepeatGate();
-        var root = new FocusGroup(Axis.Row, "root");
-        tree = new FocusTree(root);
-        input = new Input(window, tree, gate) { Back = Exit };
-        var images = new Images(Current.DirectoryInfo.Cache);
-        KitDemo(window, root, gate, images);
+        gate = new KeyRepeatGate();
+        shell = new Shell(window, gate, Exit);
+        images = new Images(Current.DirectoryInfo.Cache);
+        state = new AppState(Platform.Of());
+        Go(state.Start() switch
+        {
+            StartPage.Servers => new PageKey.Servers(),
+            StartPage.Link => new PageKey.Link(state.Server.Value ?? ""),
+            StartPage.Profiles => new PageKey.Profiles(),
+            _ => new PageKey.Home(),
+        });
+    }
+
+    /// <summary>Shows the page for <paramref name="key"/>, in place of what is on screen.</summary>
+    void Go(PageKey key)
+    {
+        switch (key)
+        {
+            case PageKey.Servers:
+                var servers = new ServersScreen(shell, new ServersModel(new AppServersSource(state), new ContextScheduler()))
+                {
+                    Chosen = chosen => Go(chosen.Next),
+                };
+                shell.Show(servers);
+                break;
+            case PageKey.Home:
+                shell.Show(KitDemo());
+                break;
+            default:
+                shell.Show(NotYet(key));
+                break;
+        }
+    }
+
+    /// <summary>A page the native app doesn't have yet: what comes there, and the way back to the server list.</summary>
+    Sheet NotYet(PageKey key)
+    {
+        var page = new Sheet("not-yet");
+        page.View.Add(Onboarding.BrandGlow());
+        var server = state.Server.Value ?? "";
+        var title = Text.Label(key is PageKey.Link ? "Sign in" : "Who's watching?", PleyType.PageTitle, PleyColors.Fg, width: 700);
+        title.Position = new Position(Ui.Dp(96), Ui.Dp(27));
+        var body = Text.Label($"{Pley.Tv.Core.Auth.Servers.HostPort(server)} is chosen. This screen comes next in the native app.", PleyType.Body, PleyColors.Muted, maxLines: 2, width: 600);
+        body.Position = new Position(Ui.Dp(96), Ui.Dp(80));
+        page.View.Add(title);
+        page.View.Add(body);
+        var row = new ButtonRow { Position = new Position(Ui.Dp(96), Ui.Dp(140)) };
+        row.Add(new ButtonView("Change server", ButtonKind.Text, ChangeServer));
+        row.Add(new ButtonView("Show the kit", ButtonKind.Text, () => shell.Show(KitDemo())));
+        page.View.Add(row);
+        page.Root.Add(row.Group);
+        page.Tree.Enter(row.Group);
+        return page;
+    }
+
+    void ChangeServer()
+    {
+        state.ForgetServer();
+        Go(new PageKey.Servers());
     }
 
     /// <summary>The kit on placeholder rows, while the screens are built: focus, rows, the page's scrolling.</summary>
-    void KitDemo(Window window, FocusGroup root, KeyRepeatGate gate, Images images)
+    Sheet KitDemo()
     {
+        var sheet = new Sheet("home", Axis.Row);
+        var tree = sheet.Tree;
+        var root = sheet.Root;
         TextLabel? said = null;
         var railView = new RailView(tree, item => said!.Text = $"Rail: {item.Label}", () => said!.Text = "Rail: Who's watching?");
         root.Add(railView.Group);
@@ -48,7 +106,7 @@ class App : NUIApplication
         var page = root.Add(new FocusGroup(Axis.Column, "page"));
         var title = Text.Label("Pley", PleyType.PageTitle, PleyColors.Fg);
         title.Position = new Position(Ui.Dp(PleyTv.Gutter), Ui.Dp(PleyTv.SafeVertical));
-        var version = Text.Label($"Pley for Samsung TV {VersionShown()} · the kit, on placeholder rows", PleyType.Body, PleyColors.Muted);
+        var version = Text.Label($"Pley for Samsung TV {Platform.Version()} · the kit, on placeholder rows", PleyType.Body, PleyColors.Muted);
         version.Position = new Position(Ui.Dp(PleyTv.Gutter), Ui.Dp(PleyTv.SafeVertical + 40));
         said = version;
         var column = new RowColumnView(gate, top: 110);
@@ -63,46 +121,24 @@ class App : NUIApplication
             column.Add(new RowView(name, models, kind, gate, images, m => version.Text = $"Opened {m.Title}", m => version.Text = $"Actions of {m.Title}", ToRail));
         }
         page.Add(column.Group);
-        window.Add(column);
-        window.Add(title);
-        window.Add(version);
+        sheet.View.Add(column);
+        sheet.View.Add(title);
+        sheet.View.Add(version);
         // The rows' fade under the rail: Bg to x = 56, clear from 72.
-        window.Add(new View
+        sheet.View.Add(new View
         {
             Size = new Size(Ui.Dp(PleyTv.RailFadeClearFrom), Ui.Dp(PleyTv.CanvasHeight)),
-            Background = Fade(),
+            Background = Gradients.Horizontal(PleyColors.Bg, new Color(PleyColors.Bg.R, PleyColors.Bg.G, PleyColors.Bg.B, 0), PleyTv.RailFadeSolidUntil / PleyTv.RailFadeClearFrom),
         });
-        window.Add(railView);
+        sheet.View.Add(railView);
         tree.Enter(page);
-    }
-
-    static PropertyMap Fade()
-    {
-        var stops = new PropertyArray();
-        stops.Add(new PropertyValue(0f));
-        stops.Add(new PropertyValue(PleyTv.RailFadeSolidUntil / PleyTv.RailFadeClearFrom));
-        stops.Add(new PropertyValue(1f));
-        var colors = new PropertyArray();
-        colors.Add(new PropertyValue(PleyColors.Bg));
-        colors.Add(new PropertyValue(PleyColors.Bg));
-        colors.Add(new PropertyValue(new Color(PleyColors.Bg.R, PleyColors.Bg.G, PleyColors.Bg.B, 0)));
-        var map = new PropertyMap();
-        map.Add(Visual.Property.Type, new PropertyValue((int)Visual.Type.Gradient));
-        map.Add(GradientVisualProperty.StartPosition, new PropertyValue(new Vector2(-0.5f, 0)));
-        map.Add(GradientVisualProperty.EndPosition, new PropertyValue(new Vector2(0.5f, 0)));
-        map.Add(GradientVisualProperty.StopOffset, new PropertyValue(stops));
-        map.Add(GradientVisualProperty.StopColor, new PropertyValue(colors));
-        return map;
-    }
-
-    /// <summary>The version and the commit it was built from: "0.0.1 (1a2b3c4d5)".</summary>
-    static string VersionShown()
-    {
-        var info = typeof(App).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "";
-        var plus = info.IndexOf('+');
-        if (plus < 0) return info;
-        var commit = info.Substring(plus + 1);
-        return $"{info.Substring(0, plus)} ({(commit.Length > 9 ? commit.Substring(0, 9) : commit)})";
+        // Back on the kit: to the server list, while there is no Home to go back to.
+        sheet.Back = () =>
+        {
+            ChangeServer();
+            return true;
+        };
+        return sheet;
     }
 
     static void Main(string[] args) => new App().Run(args);
