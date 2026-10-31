@@ -215,15 +215,16 @@ sealed class UpNextView : View
     {
         if (Disposed) return;
         play.Countdown(card.SecondsLeft, reduced);
+        PlaceCancel();
         if (ItemId == card.ItemId) return;
         ItemId = card.ItemId;
         Text.Show(heading, PlayerText.EpisodeLine(card.Heading) ?? card.Heading);
         name.Text = card.Title;
         var nameHeight = Math.Min(Math.Max(name.GetHeightForWidth(Ui.Dp(Width - 2 * Pad)), Text.LineHeight(PleyType.Title)), Text.LineHeight(PleyType.Title) * 2);
         name.SizeHeight = nameHeight;
-        var rowTop = ImageHeight + Pad + PleyType.Caption.Line + nameHeight / Ui.Scale + 16;
+        rowTop = ImageHeight + Pad + PleyType.Caption.Line + nameHeight / Ui.Scale + 16;
         play.Position = new Position(Ui.Dp(Pad), Ui.Dp(rowTop));
-        cancel.Position = new Position(Ui.Dp(Pad) + play.SizeWidth + Ui.Dp(12), Ui.Dp(rowTop + (PlayNowButton.Height - PleyTv.ButtonHeight) / 2));
+        PlaceCancel();
         HeightDp = rowTop + PlayNowButton.Height + Pad;
         Size = new Size(Ui.Dp(Width), Ui.Dp(HeightDp));
         still.Opacity = 0;
@@ -237,6 +238,19 @@ sealed class UpNextView : View
                 Fade.To(still, true, PleyMotion.ImageFadeMs);
             });
         }
+    }
+
+    float rowTop;
+
+    /// <summary>
+    /// Cancel after Play now, placed again each time Play now's width changes (its countdown's ring
+    /// or words come and go), with room for both to grow as focus scales them: placed once, Play
+    /// now grew into it.
+    /// </summary>
+    void PlaceCancel()
+    {
+        var growth = (PleyShape.PillScale - 1) / 2 * (play.SizeWidth + cancel.SizeWidth);
+        cancel.Position = new Position(Ui.Dp(Pad) + play.SizeWidth + Ui.Dp(12) + growth, Ui.Dp(rowTop + (PlayNowButton.Height - PleyTv.ButtonHeight) / 2));
     }
 
     /// <summary>"Play now", focused when the card shows, with the countdown's ring (or words) inside it.</summary>
