@@ -85,17 +85,23 @@ class App : NUIApplication
             item =>
             {
                 if (item.Slot == RailSlot.Home) tv!.Restart(Home(tv));
-                else tv!.Toast($"{item.Label} comes next in the native app.");
+                else if (tv!.PageOf?.Invoke(item.Key) is { } page) tv.Restart(page);
+                else tv.Toast($"{item.Label} comes next in the native app.");
             },
             () => Go(new PageKey.Profiles()));
         tv.PageOf = key => key switch
         {
             PageKey.Item item => new ItemScreen(tv, shell, new ItemModel(new AppItemSource(state), item.ItemId, new ContextScheduler()), images, gate, k => Go(tv, k)),
             PageKey.Home => Home(tv),
+            PageKey.Libraries => new LibrariesScreen(tv, shell, new LibrariesModel(new AppLibrarySource(state), new ContextScheduler()), gate, k => Go(tv, k)),
+            PageKey.Library library => new LibraryScreen(tv, shell, new LibraryModel(new AppLibrarySource(state), library, new ContextScheduler()), images, gate, k => Go(tv, k)),
+            PageKey.Person person => new PersonScreen(tv, new PersonModel(new AppPersonSource(state), person.PersonId, new ContextScheduler()), images, gate, k => Go(tv, k)),
+            PageKey.Search search =>new SearchScreen(tv, shell, new SearchModel(new AppSearchSource(state), new ContextScheduler(), search.Query), images, gate, k => Go(tv, k)),
             _ => null,
         };
         // Back from the player: Home asks again, for the new resume point and Continue Watching.
         tv.Play = request => new PlayerScreen(shell, state, request, gate, () => _ = state.LoadHome()).Show();
+        tv.Actions = (id, continueWatching) => TileActions.Open(shell, state, id, continueWatching, r => tv.Play?.Invoke(r), k => Go(tv, k), tv.Toast);
         shell.Show(tv);
         tv.Restart(Home(tv));
         _ = state.LoadAccount();

@@ -110,6 +110,54 @@ public static class Format
         }
     }
 
+    /// <summary>Seconds per unit, and the age below which that unit is used, as the web's table.</summary>
+    static readonly (long Below, string Unit, long Seconds)[] RelativeUnits =
+    {
+        (60, "second", 1),
+        (3_600, "minute", 60),
+        (86_400, "hour", 3_600),
+        (86_400L * 7, "day", 86_400),
+        (86_400L * 30, "week", 86_400L * 7),
+        (86_400L * 365, "month", 86_400L * 30),
+        (long.MaxValue, "year", 86_400L * 365),
+    };
+
+    /// <summary>
+    /// Unix seconds → "3 minutes ago", "in 5 hours", "yesterday", "last week", "now": the largest
+    /// unit that fits, worded as the web's Intl.RelativeTimeFormat words it in English with
+    /// numeric "auto". "never" without a time.
+    /// </summary>
+    public static string Relative(long? ts, long nowSeconds)
+    {
+        if (ts == null || ts == 0) return "never";
+        var diff = ts.Value - nowSeconds;
+        var age = Math.Abs(diff);
+        var (_, unit, seconds) = RelativeUnits.First(u => age < u.Below);
+        // Math.round of Kotlin and JavaScript: halves go up.
+        var value = (long)Math.Floor(diff / (double)seconds + 0.5);
+        switch (value)
+        {
+            case 0:
+                return unit switch
+                {
+                    "second" => "now",
+                    "day" => "today",
+                    _ => $"this {unit}",
+                };
+            case -1 when unit == "day":
+                return "yesterday";
+            case -1 when unit is "week" or "month" or "year":
+                return $"last {unit}";
+            case 1 when unit == "day":
+                return "tomorrow";
+            case 1 when unit is "week" or "month" or "year":
+                return $"next {unit}";
+        }
+        var n = Math.Abs(value);
+        var words = n == 1 ? $"1 {unit}" : $"{n} {unit}s";
+        return value < 0 ? $"{words} ago" : $"in {words}";
+    }
+
     /// <summary>How much of an item has been played, 0 to 1.</summary>
     public static float ProgressFraction(long positionMs, long? durationMs)
     {

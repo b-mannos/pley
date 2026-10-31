@@ -129,6 +129,9 @@ sealed class TvShell : Sheet
     /// <summary>Plays what a page asks for, in the player over everything; the app sets it.</summary>
     public Action<PlayRequest>? Play { get; set; }
 
+    /// <summary>A tile's actions (OK held, Menu): the item, and whether its tile is in Continue Watching; the app sets it.</summary>
+    public Action<long, bool>? Actions { get; set; }
+
     /// <summary>Opens the page of <paramref name="key"/> over the one on top; false when the app has none for it yet.</summary>
     public bool Open(PageKey key)
     {

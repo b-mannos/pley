@@ -55,6 +55,9 @@ public static class Qualities
     /// <summary>The preset with <paramref name="id"/>, else the original.</summary>
     public static QualityPreset ById(string? id) => All.FirstOrDefault(q => q.Id == id) ?? Original;
 
+    /// <summary>What the settings keep for <paramref name="preset"/>: "Original", or its id ("auto", "8m").</summary>
+    public static string IdOf(QualityPreset preset) => preset.Original ? "Original" : preset.Id;
+
     /// <summary>A setting's value: a preset's id ("8m", "auto"), or "Original" as the settings say it.</summary>
     public static QualityPreset ByIdOrLabel(string? value) =>
         value == null ? Original : All.FirstOrDefault(q => string.Equals(q.Id, value, StringComparison.OrdinalIgnoreCase)) ?? Original;

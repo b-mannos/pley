@@ -222,7 +222,7 @@ public class PlayerModelTests
 
         var p = new PlayerHarness().Add(PlayerHarness.Movie(1)).Add(PlayerHarness.Movie(5));
         p.Source.Queues[9] = new[] { new ItemSummary { Id = 1, Kind = "movie" }, new ItemSummary { Id = 3, Kind = "track" }, new ItemSummary { Id = 5, Kind = "movie" } };
-        p.Start(new PlayRequest(1, 0, true, Queue: new PlayQueue("playlist", 9)));
+        p.Start(new PlayRequest(1, 0, true, Queue: new PlayQueue.Playlist(9)));
         p.End();
         Assert.Equal(5, p.State.UpNext!.ItemId);
         Assert.Equal("Up next", p.State.UpNext.Heading);
@@ -260,13 +260,13 @@ public class PlayerModelTests
     {
         h.Add(PlayerHarness.Movie());
         h.Start(new PlayRequest(1, 0, true));
-        h.Engine.Fail(new EngineError.Unsupported(Audio: true, Container: false, "audio"));
+        h.Engine.Fail(new EngineError.Unsupported("audio", Audio: true, Container: false));
         Assert.Equal("remux", h.LastBody["mode"]);
         h.Source.Answer = _ => FakePlayerSource.Stream(10, "remux");
-        h.Engine.Fail(new EngineError.Unsupported(Audio: true, Container: false, "audio"));
+        h.Engine.Fail(new EngineError.Unsupported("audio", Audio: true, Container: false));
         Assert.Equal("transcode", h.LastBody["mode"]);
         h.Source.Answer = _ => FakePlayerSource.Stream(10);
-        h.Engine.Fail(new EngineError.Unsupported(Audio: true, Container: false, "audio"));
+        h.Engine.Fail(new EngineError.Unsupported("audio", Audio: true, Container: false));
         Assert.Equal(PlayerPhase.Error(SessionText.ErrorUnplayable, canRetry: false), h.State.Phase);
     }
 
@@ -408,7 +408,7 @@ public class PlayerModelTests
         Assert.Equal(("1080p · 10 Mbps", "Dynamically adjust to conditions"), (h.State.Qualities[0].Hint, h.State.Qualities[1].Hint));
         h.Model.SelectQuality("original");
         Assert.Single(h.Source.Bodies);
-        Assert.Equal(("original", "Original"), (h.Source.Settings.Quality, h.State.Quality));
+        Assert.Equal(("Original", "Original"), (h.Source.Settings.Quality, h.State.Quality));
         h.Model.SelectQuality("8m");
         Assert.Equal((8_000, 1_080, "transcode"), ((int)h.LastBody["max_bitrate"]!, (int)h.LastBody["max_height"]!, (string)h.LastBody["mode"]!));
         Assert.Equal("8 Mbps 1080p", h.State.Quality);
@@ -462,8 +462,8 @@ public class PlayerModelTests
         h.Add(PlayerHarness.Episode(1, 1)).Add(next);
         h.Source.NextOf[1] = next;
         h.Start(new PlayRequest(1, 0, true));
-        h.Model.SetSleep(SleepChoice.EndOfItem);
-        Assert.Equal(SleepChoice.EndOfItem, h.State.Sleep.Choice);
+        h.Model.SetSleep(new SleepChoice.EndOfItem());
+        Assert.Equal(new SleepChoice.EndOfItem(), h.State.Sleep.Set);
         h.End();
         Assert.True(h.State.Sleep.Fired);
         Assert.False(h.Model.WantsToPlay);
@@ -477,7 +477,7 @@ public class PlayerModelTests
     {
         h.Add(PlayerHarness.Movie());
         h.Start(new PlayRequest(1, 0, true));
-        h.Model.SetSleep(SleepChoice.After(15));
+        h.Model.SetSleep(new SleepChoice.Minutes(15));
         h.Play(15 * 60_000);
         Assert.False(h.Engine.Playing);
         Assert.True(h.State.Sleep.Fired);
@@ -646,11 +646,11 @@ public class PlayerPanelTests
         h.Model.Previous(1_202_000);
         Assert.Equal(600_000, h.Engine.Seeks.Last());
 
-        h.Model.SetSleep(SleepChoice.After(30));
+        h.Model.SetSleep(new SleepChoice.Minutes(30));
         var sleep = h.Model.Panel(PlayerPanelKind.Sleep);
         Assert.Equal(new[] { "Off", "15 min", "30 min", "45 min", "60 min", "90 min", "End of this episode" }, sleep.Rows.Select(r => r.Label));
         Assert.Equal((2, "30 min left"), (sleep.Focus, sleep.Rows[2].Supporting));
         Assert.False(h.Model.Choose(sleep.Rows[0]));
-        Assert.Equal(SleepChoice.Off, h.State.Sleep.Choice);
+        Assert.Equal(new SleepChoice.Off(), h.State.Sleep.Set);
     }
 }

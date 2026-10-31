@@ -24,6 +24,8 @@ sealed class RowView : View
     readonly Func<FocusItem, bool>? focusItem;
     readonly View strip;
     readonly List<TileView> tiles = new List<TileView>();
+    /// <summary>The row's last slot when it has more than it shows: "See all".</summary>
+    readonly SeeAllTile? seeAll;
     /// <summary>The ring that stays still at the gutter while the row slides under a held key.</summary>
     readonly View slideRing;
     Animation? scroll;
@@ -35,7 +37,8 @@ sealed class RowView : View
     bool heldHere;
 
     public RowView(string? title, IReadOnlyList<TileModel> models, TileKind kind, KeyRepeatGate gate, Images images,
-        Action<TileModel> onOpen, Action<TileModel>? onActions, Func<bool> toRail, Action<TileModel>? onFocus = null, Func<FocusItem, bool>? focusItem = null)
+        Action<TileModel> onOpen, Action<TileModel>? onActions, Func<bool> toRail, Action<TileModel>? onFocus = null, Func<FocusItem, bool>? focusItem = null,
+        (string Label, Action Open)? seeAll = null)
     {
         this.kind = kind;
         this.gate = gate;
@@ -82,6 +85,12 @@ sealed class RowView : View
             tiles.Add(tile);
             strip.Add(tile);
         }
+        if (seeAll is { } more)
+        {
+            var item = Group.Add(new FocusItem($"{title}/see-all") { Selected = more.Open });
+            this.seeAll = new SeeAllTile(kind, more.Label, item) { Position = new Position(models.Count * step, 0) };
+            strip.Add(this.seeAll);
+        }
         Add(slideRing);
         Group.ChildFocused += ScrollTo;
         gate.HoldEnded += Landed;
@@ -90,6 +99,9 @@ sealed class RowView : View
 
     public FocusGroup Group { get; }
 
+    /// <summary>The places along the row: its tiles, and See all.</summary>
+    int Slots => tiles.Count + (seeAll != null ? 1 : 0);
+
     /// <summary>
     /// Where the strip sits for the tile at <paramref name="index"/>: its left edge at the gutter,
     /// or as far as the row goes; a row whose tiles all fit stays where it starts.
@@ -97,7 +109,7 @@ sealed class RowView : View
     float OffsetFor(int index)
     {
         var step = Ui.Dp(kind.Width + kind.Gap);
-        var content = tiles.Count * step - Ui.Dp(kind.Gap);
+        var content = Slots * step - Ui.Dp(kind.Gap);
         var room = Ui.Dp(PleyTv.CanvasWidth - PleyTv.Gutter - PleyTv.SafeHorizontal);
         if (content <= room) return 0;
         // The row's end padding (the safe area and a tile) lets the last tile come in from the edge.
@@ -136,7 +148,7 @@ sealed class RowView : View
     bool CanSlide(int index, int direction)
     {
         var atGutter = Math.Abs(OffsetFor(index) + index * Ui.Dp(kind.Width + kind.Gap)) < 0.5f;
-        return atGutter && (direction > 0 ? OffsetFor(index) > OffsetFor(tiles.Count - 1) : index > 0);
+        return atGutter && (direction > 0 ? OffsetFor(index) > OffsetFor(Slots - 1) : index > 0);
     }
 
     /// <summary>
@@ -151,7 +163,7 @@ sealed class RowView : View
         sliding = direction;
         foreach (var t in tiles) t.Quiet = true;
         slideRing.Show();
-        var target = Ui.Dp(PleyTv.Gutter) + OffsetFor(direction > 0 ? tiles.Count - 1 : 0);
+        var target = Ui.Dp(PleyTv.Gutter) + OffsetFor(direction > 0 ? Slots - 1 : 0);
         var from = strip.CurrentPosition.X;
         var perMs = Ui.Dp(kind.Width + kind.Gap) / gate.Interval;
         var ms = (int)(Math.Abs(target - from) / perMs);
@@ -181,9 +193,9 @@ sealed class RowView : View
         {
             var under = (Ui.Dp(PleyTv.Gutter) - strip.CurrentPosition.X) / Ui.Dp(kind.Width + kind.Gap);
             target = direction > 0 ? (int)Math.Ceiling(under - 0.01) : (int)Math.Floor(under + 0.01);
-            target = Math.Max(0, Math.Min(tiles.Count - 1, target));
+            target = Math.Max(0, Math.Min(Slots - 1, target));
             // Focus there scrolls the row to it (ScrollTo), the hold being over.
-            if (target != focused && focusItem != null && focusItem(tiles[target].Focus)) return;
+            if (target != focused && focusItem != null && focusItem(target < tiles.Count ? tiles[target].Focus : seeAll!.Focus)) return;
         }
         scroll?.Stop();
         scroll = new Animation(PleyMotion.FocusMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };

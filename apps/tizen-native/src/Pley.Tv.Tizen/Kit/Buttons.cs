@@ -25,13 +25,16 @@ sealed class ButtonView : View
     readonly ButtonKind kind;
     readonly TextLabel label;
     readonly ImageView? icon;
+    readonly float maxWidth;
     Color ink;
     Color? rest;
     Animation? focusAnimation;
 
-    public ButtonView(string text, ButtonKind kind, Action onClick, Color? color = null, string? iconName = null)
+    /// <param name="maxWidth">The widest it grows, in dp (a recent search's chip); a longer label ends in "…". 0: as wide as its label.</param>
+    public ButtonView(string text, ButtonKind kind, Action onClick, Color? color = null, string? iconName = null, float maxWidth = 0)
     {
         this.kind = kind;
+        this.maxWidth = maxWidth;
         ink = color ?? PleyColors.Fg;
         Item = new FocusItem(text) { Selected = onClick };
         label = Text.Label(text, PleyType.Label, ink);
@@ -61,7 +64,9 @@ sealed class ButtonView : View
         label.Text = text;
         var padding = kind == ButtonKind.Pill ? 20 : 16;
         var textWidth = label.NaturalSize.Width / Ui.Scale;
-        var content = textWidth + (icon != null ? PleyTv.IconSize + 8 : 0);
+        var iconRoom = icon != null ? PleyTv.IconSize + 8 : 0;
+        if (maxWidth > 0) textWidth = Math.Min(textWidth, maxWidth - padding * 2 - iconRoom);
+        var content = textWidth + iconRoom;
         var width = Math.Max(content + padding * 2, kind == ButtonKind.Pill ? PillMinWidth : 0);
         Size = new Size(Ui.Dp(width), Ui.Dp(PleyTv.ButtonHeight));
         var x = (width - content) / 2;
@@ -104,6 +109,18 @@ sealed class ButtonView : View
         }
     }
 
+    /// <summary>The icon's colour at rest, when not the label's (a chip's accent check).</summary>
+    public Color? IconInk
+    {
+        set
+        {
+            iconInk = value;
+            Look(Item.Focused);
+        }
+    }
+
+    Color? iconInk;
+
     /// <summary>Width in dp, for laying buttons out in a row.</summary>
     public float WidthDp => SizeWidth / Ui.Scale;
 
@@ -116,7 +133,7 @@ sealed class ButtonView : View
         if (kind == ButtonKind.Pill) BorderlineColor = focused ? Color.Transparent : PleyColors.Control;
         var content = focused ? PleyColors.OnAccent : ink;
         label.TextColor = content;
-        if (icon != null) icon.Color = content;
+        if (icon != null) icon.Color = focused ? content : iconInk ?? content;
         focusAnimation?.Stop();
         var scale = focused ? PleyShape.PillScale : 1f;
         focusAnimation = new Animation(focused ? PleyMotion.FocusMs : PleyMotion.UnfocusMs)

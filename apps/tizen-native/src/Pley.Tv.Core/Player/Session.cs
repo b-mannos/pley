@@ -51,12 +51,31 @@ public sealed class SessionReporter : IReporter
     }
 }
 
+/// <summary>A session on the server as a player reports to it: <see cref="PlaybackSession"/>, or a fake in tests.</summary>
+public interface IPlaybackSession
+{
+    PlaybackInfo Info { get; }
+
+    string Id { get; }
+
+    bool Ended { get; }
+
+    /// <summary>"playing" or "paused" at <paramref name="positionMs"/>, so the session and its conversion stay alive.</summary>
+    void Progress(long positionMs, bool playing);
+
+    /// <summary>Reports "stopped" at <paramref name="positionMs"/>, then deletes the session.</summary>
+    void End(long positionMs);
+
+    /// <summary>The server stopped the session itself: "stopped" keeps the resume point, and nothing is deleted.</summary>
+    void StoppedByServer(long positionMs);
+}
+
 /// <summary>
 /// One session on the server (POST /api/playback; the Android app's ServerPlaybackSession): its
 /// progress reports and its end. Ending it reports "stopped" at the last position, then deletes it
 /// (and any conversion); it ends once.
 /// </summary>
-public sealed class PlaybackSession
+public sealed class PlaybackSession : IPlaybackSession
 {
     readonly Api.Api api;
     readonly SessionReporter reporter;
@@ -160,4 +179,21 @@ public static class PlayRequests
             ["keyed_urls"] = true,
             ["caps"] = caps,
         };
+
+    /// <summary>
+    /// The body for a music track: from <paramref name="startMs"/> when past its start, as the
+    /// server chooses unless <paramref name="transcode"/> (the TV couldn't decode it as it is),
+    /// under music's own client id (<c>{install id}-music</c>), so a video starting doesn't end the
+    /// music's session nor the other way round.
+    /// </summary>
+    public static Dictionary<string, object?> MusicBody(long itemId, long startMs, bool transcode, string clientId, IReadOnlyDictionary<string, object?> caps)
+    {
+        var body = new Dictionary<string, object?> { ["item_id"] = itemId };
+        if (startMs > 0) body["start_ms"] = startMs;
+        body["mode"] = transcode ? "transcode" : "auto";
+        body["client_id"] = clientId + "-music";
+        body["keyed_urls"] = true;
+        body["caps"] = caps;
+        return body;
+    }
 }

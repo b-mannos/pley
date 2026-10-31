@@ -191,6 +191,15 @@ sealed class PlayerScreen : Sheet
         Root.Add(row);
 
         keys = shell.Input.Push(OnKey);
+        // The remote's media keys may come through the media key service rather than the window.
+        try
+        {
+            global::Tizen.System.MediaKey.Event += OnMediaKey;
+        }
+        catch (Exception)
+        {
+            // Not on this TV: the window's keys only.
+        }
         gate.HoldEnded += Released;
         Back = OnBack;
         Gone += Ended;
@@ -415,26 +424,20 @@ sealed class PlayerScreen : Sheet
     bool OnKey(string key, bool down)
     {
         if (gone || error != null) return false;
-        switch (key)
+        var media = key switch
         {
-            case "XF86AudioPlay":
-                if (down && !playing) PlayPause();
-                return true;
-            case "XF86AudioPause":
-                if (down && playing) PlayPause();
-                return true;
-            case "XF86AudioPlayPause":
-                if (down) PlayPause();
-                return true;
-            case "XF86AudioRewind":
-                if (down) Jump(-3);
-                return true;
-            case "XF86AudioForward":
-                if (down) Jump(3);
-                return true;
-            case "XF86AudioStop":
-                if (down) Close();
-                return true;
+            "XF86AudioPlay" => MediaAction.Play,
+            "XF86AudioPause" => MediaAction.Pause,
+            "XF86AudioPlayPause" => MediaAction.PlayPause,
+            "XF86AudioRewind" => MediaAction.Rewind,
+            "XF86AudioForward" => MediaAction.Forward,
+            "XF86AudioStop" => MediaAction.Stop,
+            _ => (MediaAction?)null,
+        };
+        if (media != null)
+        {
+            if (down) OnMedia(media.Value);
+            return true;
         }
         if (shown)
         {
@@ -464,6 +467,68 @@ sealed class PlayerScreen : Sheet
                 return true;
         }
         return false;
+    }
+
+    enum MediaAction
+    {
+        Play,
+        Pause,
+        PlayPause,
+        Rewind,
+        Forward,
+        Stop,
+    }
+
+    /// <summary>The same media key from NUI and from the media key service this soon after counts once.</summary>
+    const long MediaTwiceMs = 250;
+
+    MediaAction? lastMedia;
+    long lastMediaAt;
+
+    /// <summary>A media key, from the window or the media key service: Play, Pause, fast forward and rewind (30 s), Stop.</summary>
+    void OnMedia(MediaAction action)
+    {
+        var now = Environment.TickCount64;
+        if (lastMedia == action && now - lastMediaAt < MediaTwiceMs) return;
+        lastMedia = action;
+        lastMediaAt = now;
+        switch (action)
+        {
+            case MediaAction.Play:
+                if (!playing) PlayPause();
+                break;
+            case MediaAction.Pause:
+                if (playing) PlayPause();
+                break;
+            case MediaAction.PlayPause:
+                PlayPause();
+                break;
+            case MediaAction.Rewind:
+                Jump(-3);
+                break;
+            case MediaAction.Forward:
+                Jump(3);
+                break;
+            case MediaAction.Stop:
+                Close();
+                break;
+        }
+    }
+
+    void OnMediaKey(object? sender, global::Tizen.System.MediaKeyEventArgs e)
+    {
+        if (e.Status != global::Tizen.System.MediaKeyEventArgs.KeyStatus.Pressed) return;
+        MediaAction? action = e.Value switch
+        {
+            global::Tizen.System.MediaKeyEventArgs.KeyValue.Play => MediaAction.Play,
+            global::Tizen.System.MediaKeyEventArgs.KeyValue.Pause => MediaAction.Pause,
+            global::Tizen.System.MediaKeyEventArgs.KeyValue.PlayPause => MediaAction.PlayPause,
+            global::Tizen.System.MediaKeyEventArgs.KeyValue.Rewind => MediaAction.Rewind,
+            global::Tizen.System.MediaKeyEventArgs.KeyValue.FastForward => MediaAction.Forward,
+            global::Tizen.System.MediaKeyEventArgs.KeyValue.Stop => MediaAction.Stop,
+            _ => null,
+        };
+        if (action != null) OnUi(() => OnMedia(action.Value));
     }
 
     /// <summary>OK on the video or the scrubber: confirms a seek coming or just made, else plays or pauses.</summary>
@@ -646,6 +711,14 @@ sealed class PlayerScreen : Sheet
         tick.Stop();
         spin.Stop();
         keys.Dispose();
+        try
+        {
+            global::Tizen.System.MediaKey.Event -= OnMediaKey;
+        }
+        catch (Exception)
+        {
+            // It never took.
+        }
         gate.HoldEnded -= Released;
         StopPlayer();
         session?.End(position);

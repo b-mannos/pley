@@ -10,11 +10,13 @@ using Pley.Tv.Core.Ui;
 namespace Pley.Tv.Core.Tests;
 
 /// <summary>The TV's player in a test: it does what it is told at once, and a test moves it on (the web TV app's fake engine).</summary>
-sealed class FakeEngine : IPlayerEngine
+sealed class FakeVideoEngine : IVideoEngine
 {
-    IEngineListener? listener;
+    public event Action<EngineStatus>? StatusChanged;
+    public event Action? Started;
+    public event Action<bool>? PlayingChanged;
+    public event Action<EngineError>? Failed;
 
-    public string Name => "fake";
     public List<EngineSource> Prepared { get; } = new List<EngineSource>();
     public List<long> Seeks { get; } = new List<long>();
     public List<(int Ordinal, string? Language)> AudioSwitches { get; } = new List<(int, string?)>();
@@ -28,11 +30,13 @@ sealed class FakeEngine : IPlayerEngine
     public bool KnowsBuffer => true;
     public EngineStatus Status { get; set; } = EngineStatus.Idle;
     public bool Playing { get; set; }
+    public bool? HasVideo => true;
     public IReadOnlyList<double> Speeds { get; set; } = new double[0];
     public FrameCounts? Frames { get; set; }
     public EngineStats? StatsGiven { get; set; }
 
-    public void SetListener(IEngineListener? l) => listener = l;
+    /// <summary>Whether the player still listens.</summary>
+    public bool Heard => StatusChanged != null;
 
     public void Prepare(EngineSource source, bool play)
     {
@@ -85,17 +89,18 @@ sealed class FakeEngine : IPlayerEngine
     public void Show()
     {
         Status = EngineStatus.Ready;
-        listener?.FirstFrame();
-        listener?.Status(EngineStatus.Ready);
+        Started?.Invoke();
+        StatusChanged?.Invoke(EngineStatus.Ready);
+        PlayingChanged?.Invoke(Playing);
     }
 
     public void Tell(EngineStatus status)
     {
         Status = status;
-        listener?.Status(status);
+        StatusChanged?.Invoke(status);
     }
 
-    public void Fail(EngineError error) => listener?.Error(error);
+    public void Fail(EngineError error) => Failed?.Invoke(error);
 }
 
 /// <summary>Reports sent at once, in order: a test reads them as they were made.</summary>
@@ -218,7 +223,7 @@ sealed class FakePlayerSource : IPlayerSource
 
     public Task<ItemSummary?> Next(long itemId) => Task.FromResult(NextOf.TryGetValue(itemId, out var next) ? next : null);
 
-    public Task<IReadOnlyList<ItemSummary>> Queue(PlayQueue queue) => Task.FromResult(Queues.TryGetValue(queue.Id, out var items) ? items : new ItemSummary[0]);
+    public Task<IReadOnlyList<ItemSummary>> Queue(PlayQueue queue) => Task.FromResult(Queues.TryGetValue(queue is PlayQueue.Playlist p ? p.PlaylistId : ((PlayQueue.Collection)queue).CollectionId, out var items) ? items : new ItemSummary[0]);
 
     public Task SetStreams(long itemId, long? fileId, int? audio, int? subtitle)
     {
@@ -256,7 +261,7 @@ sealed class PlayerHarness
 {
     public readonly FakeScheduler Clock = new FakeScheduler();
     public readonly FakePlayerSource Source = new FakePlayerSource();
-    public readonly FakeEngine Engine = new FakeEngine();
+    public readonly FakeVideoEngine Engine = new FakeVideoEngine();
     public readonly List<PlayerToast> Toasts = new List<PlayerToast>();
     public PlayerModel Model = null!;
 

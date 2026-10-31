@@ -152,6 +152,18 @@ sealed class TileView : View
 
     bool quiet;
 
+    /// <summary>Shows focus as it is now, at once: a tile made in place of another that had it (a grid's page loaded).</summary>
+    public void Sync() => Look(Focus.Focused, instant: true);
+
+    /// <summary>A grid reuses its positions' focus items for new tiles: this one stops listening to its own.</summary>
+    protected override void Dispose(DisposeTypes type)
+    {
+        if (Disposed) return;
+        Focus.FocusChanged -= OnFocus;
+        focusAnimation?.Stop();
+        base.Dispose(type);
+    }
+
     void OnFocus(bool on)
     {
         if (!quiet) Look(on, instant: false);
@@ -240,5 +252,72 @@ sealed class TileView : View
             well.Add(box);
             x += box.SizeWidth + Ui.Dp(4);
         }
+    }
+}
+
+/// <summary>
+/// The last tile of a row that has more (the Android app's TvSeeAllTile, design spec §2.4): a well of
+/// the row's tile size on Surface2 with an arrow and "See all", focused like any tile so Right stays
+/// meaningful at the row's end.
+/// </summary>
+sealed class SeeAllTile : View
+{
+    readonly View frame;
+    readonly View ring;
+
+    public SeeAllTile(TileKind kind, string label, FocusItem focus)
+    {
+        Focus = focus;
+        var w = Ui.Dp(kind.Width);
+        var h = Ui.Dp(kind.Height);
+        var radius = kind.Round ? w / 2 : Ui.Dp(PleyShape.TileRadius);
+        Size = new Size(w, h + Ui.Dp(PleyTv.TilesToCaption + PleyTv.CaptionHeight));
+        frame = new View { Size = new Size(w, h), PivotPoint = global::Tizen.NUI.PivotPoint.Center, PositionUsesPivotPoint = false };
+        var reach = Ui.Dp(PleyShape.RingOffset + PleyShape.RingStroke / 2);
+        ring = new View
+        {
+            Size = new Size(w + 2 * reach, h + 2 * reach),
+            Position = new Position(-reach, -reach),
+            BackgroundColor = Color.Transparent,
+            BorderlineWidth = Ui.Dp(PleyShape.RingStroke),
+            BorderlineColor = PleyColors.AccentBright,
+            BorderlineOffset = -1f,
+            CornerRadius = kind.Round ? (w + 2 * reach) / 2 : radius + reach,
+            Opacity = 0,
+        };
+        frame.Add(ring);
+        var well = new View { Size = new Size(w, h), CornerRadius = radius, BackgroundColor = PleyColors.Surface2 };
+        var text = Text.Label(label, PleyType.Label, PleyColors.Fg, width: kind.Width - 8);
+        text.HorizontalAlignment = HorizontalAlignment.Center;
+        var block = 32 + 8 + PleyType.Label.Line;
+        var top = (kind.Height - block) / 2;
+        var arrow = Icons.Icon("arrow-right", 32, PleyColors.Fg);
+        arrow.Position = new Position((w - Ui.Dp(32)) / 2, Ui.Dp(top));
+        well.Add(arrow);
+        text.Position = new Position(Ui.Dp(4), Ui.Dp(top + 32 + 8));
+        well.Add(text);
+        frame.Add(well);
+        Add(frame);
+        focus.FocusChanged += Look;
+    }
+
+    public FocusItem Focus { get; }
+
+    void Look(bool on)
+    {
+        if (Disposed) return;
+        if (on) RaiseToTop();
+        var scale = on ? PleyShape.TileScale : 1f;
+        var a = new Animation(on ? PleyMotion.FocusMs : PleyMotion.UnfocusMs);
+        a.AnimateTo(frame, "Scale", new Vector3(scale, scale, 1));
+        a.AnimateTo(ring, "Opacity", on ? 1f : 0f);
+        a.Play();
+    }
+
+    protected override void Dispose(DisposeTypes type)
+    {
+        if (Disposed) return;
+        Focus.FocusChanged -= Look;
+        base.Dispose(type);
     }
 }

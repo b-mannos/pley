@@ -29,27 +29,6 @@ public enum Failure
     Engine,
 }
 
-/// <summary>What went wrong in the TV's player, in the terms recovery decides on (the Android app's EngineError).</summary>
-public abstract record EngineError(string Detail)
-{
-    /// <summary>It can't decode or open this: <paramref name="Audio"/> when the audio failed, <paramref name="Container"/> when the file did.</summary>
-    public sealed record Unsupported(bool Audio, bool Container, string Detail) : EngineError(Detail);
-
-    /// <summary>The stream's server answered <paramref name="Status"/>.</summary>
-    public sealed record Http(int Status, string Detail) : EngineError(Detail);
-
-    /// <summary>410 with <c>session_stopped</c>: stopped from elsewhere, with what the one who stopped it wrote.</summary>
-    public sealed record Stopped(string? Message, string Detail) : EngineError(Detail);
-
-    /// <summary>The playlist couldn't be read.</summary>
-    public sealed record Playlist(string Detail) : EngineError(Detail);
-
-    /// <summary>No connection, or no answer in time.</summary>
-    public sealed record Network(string Detail) : EngineError(Detail);
-
-    public sealed record Other(string Detail) : EngineError(Detail);
-}
-
 /// <summary>What the recovery ladder says to do.</summary>
 public abstract record RecoveryAction
 {

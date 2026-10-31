@@ -235,6 +235,11 @@ public sealed class AppState
     public Signal<Exception?> AccountError { get; } = new Signal<Exception?>(null);
     /// <summary>Bumped by the server's events, so screens that list things fetch again.</summary>
     public Signal<int> Changes { get; } = new Signal<int>(0);
+    /// <summary>
+    /// Bumped when this app changed a playlist (made, renamed, deleted, added to, reordered): the
+    /// playlists' pages fetch again. The server sends no event for them.
+    /// </summary>
+    public Signal<int> PlaylistChanges { get; } = new Signal<int>(0);
     /// <summary>The libraries being scanned now, from the server's events and the libraries' <c>scanning</c>.</summary>
     public Signal<IReadOnlyList<ScanState>> Scans { get; } = new Signal<IReadOnlyList<ScanState>>(new ScanState[0]);
     /// <summary>The server signed the TV out: show sign-in.</summary>

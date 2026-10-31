@@ -168,9 +168,9 @@ public static class PlayerPanels
             case PlayerPanelKind.Sleep:
                 Choices(SleepChoice.All.Select(choice =>
                 {
-                    var on = state.Sleep.Choice == choice;
-                    var left = on && choice.Kind == SleepKind.Minutes && state.Sleep.MinutesLeft != null ? SleepTexts.Summary(state.Sleep) : null;
-                    return new PlayerRow(PlayerRowKind.Choice, SleepTexts.Choice(choice), on, left, Action: new PlayerRowAction.Sleep(choice));
+                    var on = state.Sleep.Set == choice;
+                    var left = on && choice is SleepChoice.Minutes && state.Sleep.MinutesLeft != null ? SleepText.Summary(state.Sleep) : null;
+                    return new PlayerRow(PlayerRowKind.Choice, SleepText.Choice(choice), on, left, Action: new PlayerRowAction.Sleep(choice));
                 }));
                 break;
             case PlayerPanelKind.Speed:

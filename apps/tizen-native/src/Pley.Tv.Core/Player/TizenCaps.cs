@@ -59,7 +59,12 @@ public static class TizenCaps
 
     // ffprobe's levels: H.264 4.2 = 42, 5.1 = 51; HEVC 4.1 = 123, 5.1 = 153, 5.2 = 156, 6.1 = 183.
 
-    public static Dictionary<string, object?> Of(TizenFacts f)
+    /// <param name="choices">
+    /// Settings' passthrough choice per sound format (<see cref="Settings.PassthroughFormats"/>):
+    /// On sends a format to the receiver whatever the TV's sound output says, Off never does
+    /// (the server converts it); Auto, or a format left out, follows the sound output.
+    /// </param>
+    public static Dictionary<string, object?> Of(TizenFacts f, IReadOnlyDictionary<string, PassthroughMode>? choices = null)
     {
         var y = f.Year;
         var video = new List<Dictionary<string, object?>>();
@@ -94,10 +99,17 @@ public static class TizenCaps
         var dtsDecoded = y <= 2017;
         if (dtsDecoded) decode.Add("dts");
         var mode = (f.OutputMode ?? "").ToUpperInvariant();
-        var passthrough = new List<string>();
-        if (mode == "DOLBY_DIGITAL_PLUS") passthrough.AddRange(new[] { "ac3", "eac3" });
-        else if (mode == "DOLBY") passthrough.Add("ac3");
-        else if (mode == "DTS" && dtsDecoded) passthrough.Add("dts");
+        var formats = new List<string>();
+        if (mode == "DOLBY_DIGITAL_PLUS") formats.AddRange(new[] { "ac3", "eac3", "eac3-joc" });
+        else if (mode == "DOLBY") formats.Add("ac3");
+        else if (mode == "DTS" && dtsDecoded) formats.Add("dts");
+        foreach (var choice in choices ?? new Dictionary<string, PassthroughMode>())
+        {
+            if (choice.Value == PassthroughMode.On && !formats.Contains(choice.Key)) formats.Add(choice.Key);
+            else if (choice.Value == PassthroughMode.Off) formats.Remove(choice.Key);
+        }
+        // Atmos travels in E-AC-3 and DTS-HD in DTS: the server knows them by their codec.
+        var passthrough = PassthroughCodecs.Where(c => formats.Any(x => CodecOf(x) == c)).ToList();
 
         var display = f.Uhd8k ? (7680, 4320) : f.Uhd ? (3840, 2160) : (1920, 1080);
         return new Dictionary<string, object?>
@@ -124,6 +136,15 @@ public static class TizenCaps
             ["device"] = new Dictionary<string, object?> { ["form"] = "tv", ["tier"] = Tier(f), ["fire_tv"] = false, ["model"] = f.Model },
         };
     }
+
+    static readonly string[] PassthroughCodecs = { "ac3", "eac3", "truehd", "dts" };
+
+    static string CodecOf(string format) => format switch
+    {
+        "eac3-joc" => "eac3",
+        "dts-hd" => "dts",
+        _ => format,
+    };
 
     /// <summary>Low for 2018 sets, mid until 2021, high after.</summary>
     public static string Tier(TizenFacts f) => f.Year <= 2018 ? "low" : f.Year <= 2021 ? "mid" : "high";

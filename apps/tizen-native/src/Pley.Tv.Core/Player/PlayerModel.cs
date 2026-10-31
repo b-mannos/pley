@@ -72,7 +72,7 @@ public sealed class PlayerModel : IDisposable
     const bool DrawsPictures = false;
 
     readonly IPlayerSource source;
-    readonly Func<IPlayerEngine> engineFactory;
+    readonly Func<IVideoEngine> engineFactory;
     readonly IScheduler scheduler;
     readonly IReporter reporter;
     readonly SubtitleOffsets offsets;
@@ -81,9 +81,10 @@ public sealed class PlayerModel : IDisposable
     readonly Recovery recovery = new Recovery();
     readonly StruggleMeter struggle = new StruggleMeter();
     readonly CreditsGate credits = new CreditsGate();
-    readonly EngineEvents events;
+    /// <summary>Where the engine is, as its events said; Idle until it opens a source.</summary>
+    EngineStatus engineStatus = EngineStatus.Idle;
 
-    IPlayerEngine? engine;
+    IVideoEngine? engine;
     PlayRequest current;
     ItemDetail? item;
     IReadOnlyDictionary<string, object?>? report;
@@ -146,14 +147,13 @@ public sealed class PlayerModel : IDisposable
 
     /// <param name="engine">Makes the engine, once the item's details are in.</param>
     /// <param name="reporter">The app's reports queue, so a player that closes still gets its end out; one of its own without.</param>
-    public PlayerModel(PlayRequest request, IPlayerSource source, Func<IPlayerEngine> engine, IScheduler scheduler, IReporter? reporter = null)
+    public PlayerModel(PlayRequest request, IPlayerSource source, Func<IVideoEngine> engine, IScheduler scheduler, IReporter? reporter = null)
     {
         current = request;
         this.source = source;
         engineFactory = engine;
         this.scheduler = scheduler;
         this.reporter = reporter ?? new SessionReporter();
-        events = new EngineEvents(this);
         pressedAt = scheduler.Elapsed;
         offsets = new SubtitleOffsets(source.Storage, () => source.ProfileId);
         presenter = new SubtitlePresenter(scheduler, source.Subtitles, LivePositionMs, () => offset, () => State.Value.Speed, () => Notice(SessionText.SubtitlesFailed));
@@ -174,7 +174,7 @@ public sealed class PlayerModel : IDisposable
     public event Action<PlayerToast>? Toast;
 
     /// <summary>The engine, once the item's details came.</summary>
-    public IPlayerEngine? Engine => engine;
+    public IVideoEngine? Engine => engine;
 
     /// <summary>Play or pause, from what the player means to do now.</summary>
     public bool WantsToPlay => wantPlay;
@@ -216,7 +216,7 @@ public sealed class PlayerModel : IDisposable
             if (engine == null)
             {
                 engine = engineFactory();
-                engine.SetListener(events);
+                Attach(engine);
             }
             Update(s => s with { Speeds = engine.Speeds });
             report = source.Caps();
@@ -391,14 +391,16 @@ public sealed class PlayerModel : IDisposable
         var source_ = new EngineSource(
             source.Url(started.Url),
             started.Hls,
-            started.Hls ? null : PlaybackPlan.MimeTypeOf(chosen.Container),
-            atMs,
-            started.DurationMs > 0 ? started.DurationMs : chosen.DurationMs ?? detail.DurationMs,
-            video == null ? null : new EngineVideo(
+            StartMs: atMs,
+            DurationHintMs: started.DurationMs > 0 ? started.DurationMs : chosen.DurationMs ?? detail.DurationMs,
+            Mime: started.Hls ? null : PlaybackPlan.MimeTypeOf(chosen.Container),
+            Video: video == null ? null : new EngineVideo(
                 // A conversion keeps the frame rate; its codec and dynamic range are the server's to choose.
                 converted ? "unknown" : video.Codec, video.Width, video.Height, video.FrameRate,
                 converted ? "sdr" : CapsPolicy.RangeOf(video), converted ? null : video.DvProfile, video.BitDepth ?? 8),
-            started.AudioConverted ? null : audio?.Codec);
+            AudioCodec: started.AudioConverted ? null : audio?.Codec);
+        // The engine says where it is by its events, which come after this returns.
+        engineStatus = EngineStatus.Buffering;
         engine.Prepare(source_, wantPlay);
         if (State.Value.Speed != 1) engine.SetSpeed(State.Value.Speed);
         ApplyTracks();
@@ -494,21 +496,31 @@ public sealed class PlayerModel : IDisposable
 
     // ---------------------------------------------------------------- engine events
 
-    sealed class EngineEvents : IEngineListener
+    void Attach(IVideoEngine e)
     {
-        readonly PlayerModel model;
+        e.StatusChanged += OnStatus;
+        e.Started += OnFirstFrame;
+        e.PlayingChanged += OnPlaying;
+        e.Failed += OnError;
+    }
 
-        public EngineEvents(PlayerModel model) => this.model = model;
+    void Detach(IVideoEngine e)
+    {
+        e.StatusChanged -= OnStatus;
+        e.Started -= OnFirstFrame;
+        e.PlayingChanged -= OnPlaying;
+        e.Failed -= OnError;
+    }
 
-        public void Status(EngineStatus status) => model.OnStatus(status);
-
-        public void FirstFrame() => model.OnFirstFrame();
-
-        public void Error(EngineError error) => model.OnError(error);
+    /// <summary>It plays again by itself (after waiting for data): the screen says so.</summary>
+    void OnPlaying(bool playing)
+    {
+        if (playing && info != null && !closed && !ended && outage == null && engineStatus == EngineStatus.Ready) Phase(PlayerPhase.Playing);
     }
 
     void OnStatus(EngineStatus status)
     {
+        engineStatus = status;
         if (info == null || closed) return;
         switch (status)
         {
@@ -697,7 +709,7 @@ public sealed class PlayerModel : IDisposable
         var s = info;
         if (e == null || s == null || closed || sessionEnded) return;
         var now = scheduler.Elapsed;
-        var status = e.Status;
+        var status = engineStatus;
         var moving = mediaShown && status == EngineStatus.Ready && e.Playing && !ended;
         if (mediaShown && !ended)
         {
@@ -875,9 +887,9 @@ public sealed class PlayerModel : IDisposable
         {
             struggle.Reset();
             if (!ended) Report("paused");
-            if (engine?.Status == EngineStatus.Ready) Phase(PlayerPhase.Paused);
+            if (engineStatus == EngineStatus.Ready) Phase(PlayerPhase.Paused);
         }
-        else if (engine?.Status == EngineStatus.Ready) Phase(PlayerPhase.Playing);
+        else if (engineStatus == EngineStatus.Ready) Phase(PlayerPhase.Playing);
         ArmProgress();
     }
 
@@ -1024,7 +1036,7 @@ public sealed class PlayerModel : IDisposable
         var before = quality;
         picked = choice;
         quality = choice.Automatic ? Qualities.Original : choice;
-        source.UpdateSettings(s => s with { Quality = choice.Id });
+        source.UpdateSettings(s => s with { Quality = Qualities.IdOf(choice) });
         var same = quality.Id == before.Id;
         if (!same) recovery.QualityChanged();
         Update(s => s with { SuggestLowerQuality = false, Note = same ? NoteNow() : null, CanPlayOriginal = same && CanPlayOriginal() });
@@ -1243,7 +1255,7 @@ public sealed class PlayerModel : IDisposable
         StopCountdown();
         foreach (var t in new[] { tickTimer, seekReportTimer, detailsTimer, trickplayTimer, progressTimer }) t?.Dispose();
         unsubscribe?.Dispose();
-        engine?.SetListener(null);
+        if (engine != null) Detach(engine);
         engine?.Release();
         engine = null;
     }
@@ -1603,7 +1615,7 @@ public sealed class PlayerModel : IDisposable
         if (outage != o || closed || stopped) return;
         var at = lastPositionMs;
         EndOutage();
-        if (!sessionGone && !o.EngineFailed && engine != null && engine.Playing && engine.Status == EngineStatus.Ready)
+        if (!sessionGone && !o.EngineFailed && engine != null && engine.Playing && engineStatus == EngineStatus.Ready)
         {
             Phase(PlayerPhase.Playing);
             return;

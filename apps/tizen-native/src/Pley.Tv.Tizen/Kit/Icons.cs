@@ -9,12 +9,15 @@ namespace Pley.Tv.Tizen.Kit;
 /// </summary>
 static class Icons
 {
+    /// <summary>Where an icon's file is, to change an icon in place.</summary>
+    public static string Url(string name) => $"{(global::Tizen.Applications.Application.Current.DirectoryInfo.SharedResource)}icons/{name}.svg";
+
     public static ImageView Icon(string name, float sizeDp, Color tint)
     {
         var px = (int)Ui.Dp(sizeDp);
         return new ImageView
         {
-            ResourceUrl = $"{(global::Tizen.Applications.Application.Current.DirectoryInfo.SharedResource)}icons/{name}.svg",
+            ResourceUrl = Url(name),
             Size = new Size(px, px),
             DesiredWidth = px,
             DesiredHeight = px,

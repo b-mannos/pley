@@ -12,11 +12,14 @@ namespace Pley.Tv.Core.Ui;
 /// <summary>An artist's music page.</summary>
 public sealed record ArtistPage(long ArtistId) : PageKey;
 
-/// <summary>An album's music page (a track opens its album's).</summary>
-public sealed record AlbumPage(long AlbumId) : PageKey;
+/// <summary>An album's music page (a track opens its album's, <paramref name="TrackId"/> picked out).</summary>
+public sealed record AlbumPage(long AlbumId, long? TrackId = null) : PageKey;
 
 /// <summary>Choosing a playlist to add <paramref name="ItemId"/> to.</summary>
 public sealed record AddToPlaylistPage(long ItemId) : PageKey;
+
+/// <summary>New playlist, an empty one: its title and what it plays.</summary>
+public sealed record NewPlaylistPage : PageKey;
 
 /// <summary>
 /// What an item page shows: a movie, show, season or episode, as apps/web/src/pages/item shows

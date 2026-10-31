@@ -328,16 +328,18 @@ public sealed class Api
         return Call<Playlist>("POST", "/api/playlists", body);
     }
 
-    public Task<JsonElement?> RenamePlaylist(long id, string title) => Call("PATCH", $"/api/playlists/{id}", new Dictionary<string, object?> { ["title"] = title });
+    /// <summary>The playlist renamed, with its entries.</summary>
+    public Task<PlaylistDetail> RenamePlaylist(long id, string title) =>
+        Call<PlaylistDetail>("PATCH", $"/api/playlists/{id}", new Dictionary<string, object?> { ["title"] = title });
 
     public Task<JsonElement?> DeletePlaylist(long id) => Call("DELETE", $"/api/playlists/{id}");
 
     /// <summary>Takes one entry out (the item stays in its library).</summary>
     public Task<JsonElement?> RemoveFromPlaylist(long id, long entryId) => Call("DELETE", $"/api/playlists/{id}/items/{entryId}");
 
-    /// <summary>The entries in their new order, every one of them.</summary>
-    public Task<JsonElement?> ReorderPlaylist(long id, IReadOnlyList<long> entryIds) =>
-        Call("PUT", $"/api/playlists/{id}/order", new Dictionary<string, object?> { ["entry_ids"] = entryIds });
+    /// <summary>The entries in their new order (these first, the rest after); the playlist in it.</summary>
+    public Task<PlaylistDetail> ReorderPlaylist(long id, IReadOnlyList<long> entryIds) =>
+        Call<PlaylistDetail>("PUT", $"/api/playlists/{id}/order", new Dictionary<string, object?> { ["entry_ids"] = entryIds });
 
     /// <summary>A smart playlist: a library's listing by <paramref name="filter"/> (Plex's syntax), which keeps up with the library by itself.</summary>
     public Task<Playlist> CreateSmartPlaylist(string title, long libraryId, string filter) =>
@@ -398,7 +400,10 @@ public sealed class Api
         return Call("POST", $"/api/items/{itemId}/progress", body);
     }
 
-    /// <summary>GET /api/playback/{session}: how it plays now, with its transcode's live numbers.</summary>
+    /// <summary>
+    /// GET /api/playback/{session}: how it plays now, with its transcode's live numbers. Gone, it is
+    /// a 404; stopped from elsewhere, a <see cref="SessionStoppedException"/>.
+    /// </summary>
     public Task<SessionStatus> PlaybackStatus(string session, CancellationToken cancel = default, int? timeoutMs = null) =>
         Get<SessionStatus>($"/api/playback/{Uri.EscapeDataString(session)}", cancel: cancel, timeoutMs: timeoutMs);
 
@@ -440,6 +445,107 @@ public sealed class Api
     /// <summary>Whether the server answers at all: a player reconnecting without a session to ask about.</summary>
     public Task<JsonElement?> Reachable(int timeoutMs, CancellationToken cancel = default) =>
         Send("/api/server", cancel: cancel, timeoutMs: timeoutMs).ContinueWith(t => t.GetAwaiter().GetResult().Json(), cancel, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+    // ---- live TV (docs/API.md, "Live TV")
+
+    /// <summary>The longest the server takes to tune a channel before it answers.</summary>
+    const int WatchTimeoutMs = 45_000;
+
+    public Task<LiveSummary> LiveSummary(CancellationToken cancel = default) => Get<LiveSummary>("/api/live", cancel: cancel);
+
+    public Task<LiveGroups> LiveGroups(CancellationToken cancel = default) => Get<LiveGroups>("/api/live/groups", cancel: cancel);
+
+    /// <summary>A page of <paramref name="category"/>'s channels matching <paramref name="q"/>; with <paramref name="around"/>, the page that holds that channel.</summary>
+    public Task<LiveChannelPage> LiveBrowse(LiveCategory category, string? q = null, int offset = 0, int limit = 100, long? around = null, CancellationToken cancel = default)
+    {
+        var words = q?.Trim();
+        return Get<LiveChannelPage>("/api/live/browse", new[]
+        {
+            Q("category", category.Wire),
+            Q("group", (category as LiveCategory.Group)?.Name),
+            Q("q", string.IsNullOrEmpty(words) ? null : words),
+            Q("offset", around == null ? offset : (object?)null),
+            Q("limit", limit),
+            Q("around", around),
+        }, cancel);
+    }
+
+    public Task<LiveChannel> LiveChannel(long id, CancellationToken cancel = default) => Get<LiveChannel>($"/api/live/channels/{id}", cancel: cancel);
+
+    /// <summary>The programmes of channels <paramref name="ids"/> between <paramref name="from"/> and <paramref name="to"/> (unix seconds).</summary>
+    public Task<LiveGuide> LiveGuide(long from, long to, IReadOnlyList<long> ids, CancellationToken cancel = default) =>
+        Get<LiveGuide>("/api/live/guide", new[]
+        {
+            Q("from", from), Q("to", to), Q("ids", string.Join(",", ids.Select(i => i.ToString(System.Globalization.CultureInfo.InvariantCulture)))),
+        }, cancel);
+
+    public Task<JsonElement?> SetFavoriteChannel(long id, bool favorite) =>
+        Call(favorite ? "PUT" : "DELETE", $"/api/live/channels/{id}/favorite");
+
+    /// <summary>
+    /// POST /api/live/channels/{id}/watch with keyed URLs (the TV's player can't send the
+    /// Authorization header): <paramref name="clientId"/> ends what this TV watched before.
+    /// <paramref name="takeOver"/>: every connection in use, the channel whose connection to take.
+    /// </summary>
+    public async Task<LiveWatching> WatchChannel(long id, string clientId, long? takeOver = null, CancellationToken cancel = default)
+    {
+        var body = new Dictionary<string, object?> { ["client_id"] = clientId, ["keyed_urls"] = true };
+        if (takeOver != null) body["take_over"] = takeOver;
+        return Read<LiveWatching>(await Send($"/api/live/channels/{id}/watch", "POST", body, cancel: cancel, timeoutMs: WatchTimeoutMs).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Why a watching session ended (someone took its connection over, say), or null while it goes
+    /// on. Asked of its plan with the token: a keyed address only says the session has gone.
+    /// </summary>
+    public async Task<string?> WhyLiveEnded(string session, CancellationToken cancel = default)
+    {
+        try
+        {
+            await Send($"/api/live/sessions/{Uri.EscapeDataString(session)}/plan", cancel: cancel, timeoutMs: 8_000).ConfigureAwait(false);
+            return null;
+        }
+        catch (ApiException e) when (e.Status == 410)
+        {
+            return e.Message;
+        }
+    }
+
+    /// <summary>Stops watching now; a session already gone (left by itself, stopped by an administrator) is left all the same.</summary>
+    public async Task LeaveChannel(string session)
+    {
+        try
+        {
+            await Call("DELETE", $"/api/live/sessions/{Uri.EscapeDataString(session)}").ConfigureAwait(false);
+        }
+        catch (ApiException e) when (e.Status == 404)
+        {
+            // Gone already.
+        }
+    }
+
+    /// <summary>
+    /// A playlist or segment at <paramref name="url"/>, as the TV's player would ask for it: a keyed
+    /// address goes without the token (its key is its own), anything else with it.
+    /// </summary>
+    public async Task<string> Media(string url, int timeoutMs, CancellationToken cancel = default)
+    {
+        var full = Url(url);
+        if (!KeyedMedia.IsMatch(full))
+            return (await Send(full, cancel: cancel, timeoutMs: timeoutMs, responseType: ResponseType.Text).ConfigureAwait(false)).Text ?? "";
+        var res = await http(new HttpRequest
+        {
+            Url = full,
+            Headers = new Dictionary<string, string> { ["Accept"] = "*/*" },
+            ResponseType = ResponseType.Text,
+            TimeoutMs = timeoutMs,
+            Cancel = cancel,
+        }).ConfigureAwait(false);
+        if (res.Status >= 200 && res.Status < 300) return res.Text ?? "";
+        throw ToError(res);
+    }
+
+    static readonly Regex KeyedMedia = new Regex(@"^(https?://[^/]+)?/api/(live/)?media/", RegexOptions.CultureInvariant);
 
     /// <summary>
     /// The refusal <paramref name="res"/> is: Pley's JSON, or the plain text a body or query the

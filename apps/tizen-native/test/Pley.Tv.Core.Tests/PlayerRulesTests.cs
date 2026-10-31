@@ -10,9 +10,9 @@ namespace Pley.Tv.Core.Tests;
 /// <summary>The recovery ladder's transitions and budgets (the Android app's RecoveryTest).</summary>
 public class RecoveryTests
 {
-    static readonly EngineError UnsupportedAudio = new EngineError.Unsupported(Audio: true, Container: false, "audio");
-    static readonly EngineError UnsupportedContainer = new EngineError.Unsupported(Audio: false, Container: true, "container");
-    static readonly EngineError UnsupportedVideo = new EngineError.Unsupported(Audio: false, Container: false, "video");
+    static readonly EngineError UnsupportedAudio = new EngineError.Unsupported("audio", Audio: true, Container: false);
+    static readonly EngineError UnsupportedContainer = new EngineError.Unsupported("container", Audio: false, Container: true);
+    static readonly EngineError UnsupportedVideo = new EngineError.Unsupported("video", Audio: false, Container: false);
 
     [Fact]
     public void Direct_play_falls_back_to_a_remux_for_h264_and_hevc_when_only_the_audio_or_container_failed_then_a_transcode()
@@ -231,126 +231,11 @@ public class MarkersTests
         Assert.Null(NextUp.NextIn(items, 99));
         Assert.True(NextUp.HasNext("episode", null));
         Assert.False(NextUp.HasNext("movie", null));
-        Assert.True(NextUp.HasNext("movie", new PlayQueue("playlist", 1)));
+        Assert.True(NextUp.HasNext("movie", new PlayQueue.Playlist(1)));
         Assert.Equal(0, NextUp.StartOf(Of(1, "episode") with { UserState = new UserState { PositionMs = 50_000, Watched = true } }));
         Assert.Equal(50_000, NextUp.StartOf(Of(1, "episode") with { UserState = new UserState { PositionMs = 50_000 } }));
         Assert.Equal("S1 · E2", NextUp.LabelOf(Of(1, "episode") with { ParentIndex = 1, Index = 2 }));
         Assert.Null(NextUp.LabelOf(Of(1, "movie")));
-    }
-}
-
-/// <summary>The sleep timer on a clock moved by hand (the Android app's SleepTimerTest).</summary>
-public class SleepTimerTests
-{
-    const long Minute = 60_000;
-    readonly FakeScheduler clock = new FakeScheduler();
-    int fired;
-    long? left;
-    object? key = 1L;
-
-    SleepTimer Timer() => new SleepTimer(clock, () => left, () => key, () => fired++);
-
-    [Fact]
-    public void Minutes_count_down_the_notice_shows_the_last_30_s_once_a_second_then_it_pauses()
-    {
-        var t = Timer();
-        t.Set(SleepChoice.After(15));
-        Assert.Equal(SleepChoice.After(15), t.State.Value.Choice);
-        Assert.Equal(15, t.State.Value.MinutesLeft);
-        Assert.Null(t.State.Value.SecondsLeft);
-        clock.Advance(14 * Minute + 29_000);
-        Assert.Null(t.State.Value.SecondsLeft);
-        clock.Advance(1_000);
-        Assert.Equal(30, t.State.Value.SecondsLeft);
-        clock.Advance(15_000);
-        Assert.Equal(15, t.State.Value.SecondsLeft);
-        Assert.Equal(0, fired);
-        clock.Advance(15_000);
-        Assert.Equal(1, fired);
-        Assert.Equal(new SleepState(SleepChoice.Off, Fired: true), t.State.Value);
-        // Playing again ends the pause it made.
-        t.Resumed();
-        Assert.False(t.State.Value.Fired);
-    }
-
-    [Fact]
-    public void Keep_watching_adds_the_same_time_again()
-    {
-        var t = Timer();
-        t.Set(SleepChoice.After(30));
-        clock.Advance(30 * Minute - 10_000);
-        Assert.Equal(10, t.State.Value.SecondsLeft);
-        t.Extend();
-        Assert.Null(t.State.Value.SecondsLeft);
-        Assert.Equal(31, t.State.Value.MinutesLeft);
-        clock.Advance(20_000);
-        Assert.Equal(0, fired);
-        clock.Advance(30 * Minute);
-        Assert.Equal(1, fired);
-    }
-
-    [Fact]
-    public void Off_stops_it()
-    {
-        var t = Timer();
-        t.Set(SleepChoice.After(15));
-        clock.Advance(10 * Minute);
-        t.Set(SleepChoice.Off);
-        clock.Advance(10 * Minute);
-        Assert.Equal(0, fired);
-        Assert.Equal(SleepState.Idle, t.State.Value);
-    }
-
-    [Fact]
-    public void The_end_of_the_item_ends_it_with_its_notice_by_the_items_time_left()
-    {
-        var t = Timer();
-        left = 10 * Minute;
-        t.Set(SleepChoice.EndOfItem);
-        Assert.True(t.EndsWith(1L));
-        Assert.Null(t.State.Value.SecondsLeft);
-        left = 25_000;
-        clock.Advance(1_000);
-        Assert.Equal(25, t.State.Value.SecondsLeft);
-        // Paused: the time left stays.
-        clock.Advance(5_000);
-        Assert.Equal(25, t.State.Value.SecondsLeft);
-        Assert.Equal(0, fired);
-        Assert.True(t.ItemEnded(1L));
-        Assert.Equal(1, fired);
-        Assert.True(t.State.Value.Fired);
-        Assert.False(t.ItemEnded(2L));
-    }
-
-    [Fact]
-    public void Keep_watching_at_the_end_of_an_item_waits_for_the_next_ones_end()
-    {
-        var t = Timer();
-        left = 20_000;
-        t.Set(SleepChoice.EndOfItem);
-        Assert.Equal(20, t.State.Value.SecondsLeft);
-        t.Extend();
-        clock.Advance(1_000);
-        Assert.Null(t.State.Value.SecondsLeft);
-        Assert.False(t.EndsWith(1L));
-        Assert.False(t.ItemEnded(1L));
-        Assert.Equal(0, fired);
-        // The next item: its end is the timer's.
-        key = 2L;
-        left = 15_000;
-        clock.Advance(1_000);
-        Assert.Equal(15, t.State.Value.SecondsLeft);
-        Assert.True(t.ItemEnded(2L));
-        Assert.Equal(1, fired);
-    }
-
-    [Fact]
-    public void The_menus_words()
-    {
-        Assert.Equal(new[] { "Off", "15 min", "30 min", "45 min", "60 min", "90 min", "End of this episode" }, SleepChoice.All.Select(SleepTexts.Choice));
-        Assert.Equal("42 min left", SleepTexts.Summary(new SleepState(SleepChoice.After(60), MinutesLeft: 42)));
-        Assert.Equal("End of this episode", SleepTexts.Summary(new SleepState(SleepChoice.EndOfItem)));
-        Assert.Equal("Pausing in 30 s", SleepTexts.Notice(30));
     }
 }
 

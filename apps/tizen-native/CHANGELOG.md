@@ -20,8 +20,30 @@ It has no releases yet: it is built and installed by hand
   by the remote, a held key sliding a row along under a still highlight;
   pictures load as rows come near the screen, and a tile without one shows
   its title on a gradient of its own, as on Android.
+- Library pages in the native app: the name and tabs, the chips (Sort,
+  Filter, Unwatched, Genre, Year) and their side panels, the grid of
+  posters with the A to Z jump, Recommended and Collections; and the
+  Libraries page, where the profile can sort them. The rail's libraries open
+  them.
+- A tile's actions in the native app: OK held or the Menu key on a tile on
+  Home or a library page opens them in a side panel (Play, the watched
+  marks, Continue Watching, My List and the pages they lead to).
+- Item pages in the native app end with Details: who made it and the
+  facts, the versions (OK chooses which plays) and Media info, which OK
+  opens: each file and every stream in full.
+- Rows with more than they show end with See all, which opens the library
+  sorted and filtered as the row is (Recommended's collections: the
+  Collections tab).
 - Playing in the native app: a session on the server with the TV's
   capabilities, as the web Samsung app reports them, on the TV's own
   player; Left and Right seek 10 s, presses adding up and a held key
   scrubbing; the title, clock, scrubber and Back 10 · Play/Pause ·
   Forward 10 over a scrim; where it stopped goes to the server.
+- Search in the native app, from the rail: OK on the field opens the TV's
+  keyboard, results come as you type, in rows (People, Movies, Shows,
+  Seasons, Episodes, Artists, Albums, Tracks), and the last 10 searches
+  show as chips before you type.
+- People's pages in the native app, from Cast on an item's page or from
+  search: the photo, the name and what of theirs is in your libraries,
+  then a row per role (Acting, Directing…) with the year and the part
+  under each title.
