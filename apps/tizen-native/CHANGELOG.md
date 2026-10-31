@@ -133,4 +133,7 @@ It has no releases yet: it is built and installed by hand
   start, and OK goes there. Chapters named only for where they start
   ("00:06:19.212") are numbered instead. The scrubber is blue up to its
   thumb while seeking. The Skip Intro and Skip Credits button shows only
-  while the controls are hidden.
+  while the controls are hidden. As each item begins playing (the next
+  episode by itself too), its title shows at the top for a few seconds.
+- Back on the native app's first screen asks "Exit Pley?" (Cancel, Exit) as
+  the web Samsung app does, rather than leaving at once.
