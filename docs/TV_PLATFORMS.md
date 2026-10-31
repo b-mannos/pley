@@ -380,9 +380,11 @@ its sign-in with a code and a QR code, Who's watching? with PINs, and
 Home: the hero, the server's rows and the rail, and item pages: the hero
 and its buttons, seasons and episodes, Extras, Cast and More Like This,
 and the side panels; library pages (the chips and panels, the grid with
-the A to Z jump, Recommended and Collections) and the Libraries page; and
-a first player: the stream on the TV's own player,
-seeking with Left and Right, and the scrubber and transport controls.
+the A to Z jump, Recommended and Collections) and the Libraries page;
+playlists (their covers, and a playlist's page with moving and removing
+entries, Rename and Delete); and a first player: the stream on the TV's
+own player, seeking with Left and Right, and the scrubber and transport
+controls.
 Subtitles, the player's panels and the other pages come next.
 
 | | |
