@@ -99,6 +99,7 @@ class App : NUIApplication
         };
         // Back from the player: Home asks again, for the new resume point and Continue Watching.
         tv.Play = request => new PlayerScreen(shell, state, request, gate, () => _ = state.LoadHome()).Show();
+        tv.Actions = (id, continueWatching) => TileActions.Open(shell, state, id, continueWatching, r => tv.Play?.Invoke(r), k => Go(tv, k), tv.Toast);
         shell.Show(tv);
         tv.Restart(Home(tv));
         _ = state.LoadAccount();

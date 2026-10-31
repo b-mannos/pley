@@ -232,7 +232,11 @@ sealed class LibraryScreen : ShellPage
                 var id = cells?.IdAt(p) ?? -1;
                 if (id >= 0) go(model.State.Value.Opens(id));
             };
-            made.Actions = (_, _) => Shell.Toast("Actions come next in the native app.");
+            made.Actions = (p, _) =>
+            {
+                var id = cells?.IdAt(p) ?? -1;
+                if (id >= 0) Shell.Actions?.Invoke(id, false);
+            };
             made.Showing += model.Showing;
             made.Group.Exit = d => d switch
             {
@@ -439,7 +443,7 @@ sealed class LibraryScreen : ShellPage
                     var at = IndexOf(r.Tiles, tile);
                     if (at >= 0 && at < r.Opens.Count) go(r.Opens[at]);
                 },
-                r.IsCollections ? null : _ => Shell.Toast("Actions come next in the native app."),
+                r.IsCollections ? null : tile => Shell.Actions?.Invoke(tile.Id, r.ContinueWatching),
                 Shell.FocusRail, focusItem: Tree.Focus));
         }
         body.Add(column);

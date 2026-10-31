@@ -267,7 +267,7 @@ sealed class HomeScreen : ShellPage
                 {
                     if (itemsByTile.TryGetValue((rowKey, m.Id), out var item)) open(item);
                 },
-                m => Shell.Toast("Actions come next in the native app."),
+                m => Shell.Actions?.Invoke(m.Id, row.ContinueWatching),
                 Shell.FocusRail,
                 m =>
                 {

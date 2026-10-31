@@ -25,6 +25,9 @@ It has no releases yet: it is built and installed by hand
   posters with the A to Z jump, Recommended and Collections; and the
   Libraries page, where the profile can sort them. The rail's libraries open
   them.
+- A tile's actions in the native app: OK held or the Menu key on a tile on
+  Home or a library page opens them in a side panel (Play, the watched
+  marks, Continue Watching, My List and the pages they lead to).
 - Playing in the native app: a session on the server with the TV's
   capabilities, as the web Samsung app reports them, on the TV's own
   player; Left and Right seek 10 s, presses adding up and a held key
