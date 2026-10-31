@@ -226,18 +226,24 @@ static class Text
         // A pixel or two of room: NaturalSize rounds to the pixel.
         var room = widthPx - 2;
         string fitted;
-        if (Measure(text, pixelSize, family, weight) <= room) fitted = text;
+        var whole = Measure(text, pixelSize, family, weight);
+        if (whole <= room) fitted = text;
         else
         {
-            // The longest start that fits with "…" after it.
-            int fits = 0, over = text.Length;
-            while (over - fits > 1)
+            // The longest start that fits with "…" after it: from where the width says, a letter or
+            // two either way, as each measuring lays the text out (a guide's row has dozens of titles).
+            bool Fits(int n) => Measure(text.Substring(0, n).TrimEnd() + "…", pixelSize, family, weight) <= room;
+            var n = System.Math.Max(1, System.Math.Min(text.Length - 1, (int)(text.Length * room / whole)));
+            if (Fits(n))
             {
-                var mid = (fits + over) / 2;
-                if (Measure(text.Substring(0, mid).TrimEnd() + "…", pixelSize, family, weight) <= room) fits = mid;
-                else over = mid;
+                while (n + 1 < text.Length && Fits(n + 1)) n++;
             }
-            fitted = fits == 0 ? "…" : text.Substring(0, fits).TrimEnd() + "…";
+            else
+            {
+                do n--;
+                while (n > 0 && !Fits(n));
+            }
+            fitted = n == 0 ? "…" : text.Substring(0, n).TrimEnd() + "…";
         }
         if (Fitted.Count >= FittedMost) Fitted.Clear();
         Fitted[key] = fitted;
