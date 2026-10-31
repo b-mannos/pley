@@ -56,6 +56,9 @@ public interface IPlayerSource
     /// <summary>A text subtitle track's WebVTT at an absolute address.</summary>
     Task<SubtitleText> Subtitles(string url);
 
+    /// <summary>The server's .mks of a picture subtitle track at an absolute address.</summary>
+    Task<SubtitlePictures> PictureSubtitles(string url);
+
     /// <summary>The file's seek previews; null while the server makes them.</summary>
     Task<TrickplayInfo?> Trickplay(long fileId);
 
@@ -126,6 +129,8 @@ public sealed class AppPlayerSource : IPlayerSource
     public Task Reachable(int timeoutMs) => Api.Reachable(timeoutMs);
 
     public Task<SubtitleText> Subtitles(string url) => Api.Subtitles(url);
+
+    public Task<SubtitlePictures> PictureSubtitles(string url) => Api.PictureSubtitles(url);
 
     public Task<TrickplayInfo?> Trickplay(long fileId) => Api.Trickplay(fileId);
 

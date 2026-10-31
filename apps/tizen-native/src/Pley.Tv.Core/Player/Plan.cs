@@ -92,7 +92,7 @@ public static class PlaybackPlan
         return (requested is int r ? subs.FirstOrDefault(s => s.Index == r) : null) ?? subs.FirstOrDefault(s => s.Index == file?.SelectedSubtitle);
     }
 
-    /// <summary>Subtitles shown as pictures (PGS, VobSub): a stream burns them into the video unless the player draws them.</summary>
+    /// <summary>Subtitles shown as pictures (PGS, VobSub, DVB): a stream burns them into the video unless the player draws them.</summary>
     public static bool IsImage(MediaStream? stream) => stream != null && stream.TextBased == false;
 
     /// <summary>Whether pictures are drawn by the player from the server's .mks rather than burned in: the report says so and the player can read them.</summary>

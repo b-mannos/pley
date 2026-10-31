@@ -234,6 +234,75 @@ public class SubtitlePresenterTests
         Assert.Null(p.Showing);
         Assert.Empty(clock.Pending);
     }
+
+    static readonly byte[] Shown = PictureKit.PgsDisplaySet(0x80, true, rle: new[] { 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0 });
+    static readonly byte[] Cleared = PictureKit.PgsDisplaySet(0x00, false);
+
+    SubtitlePresenter WithPictures(Queue<Func<SubtitlePictures>> mks, List<string> unavailable) => new SubtitlePresenter(clock, url =>
+    {
+        asked.Add(url);
+        return Task.FromResult(answers.Dequeue()());
+    }, () => position, () => offset, () => 1, () => failures++, url =>
+    {
+        asked.Add(url);
+        return Task.FromResult(mks.Dequeue()());
+    }, () => unavailable.Add("unavailable"));
+
+    [Fact]
+    public void A_partial_picture_track_is_asked_for_every_3_s_until_whole()
+    {
+        var first = PictureKit.Mks("S_HDMV/PGS", new[] { new PictureKit.MksBlock(1000, Shown) });
+        var whole = PictureKit.Mks("S_HDMV/PGS", new[] { new PictureKit.MksBlock(1000, Shown), new PictureKit.MksBlock(3000, Cleared), new PictureKit.MksBlock(5000, Shown) });
+        var mks = new Queue<Func<SubtitlePictures>>();
+        mks.Enqueue(() => new SubtitlePictures(first, Complete: false));
+        mks.Enqueue(() => new SubtitlePictures(whole, Complete: true));
+        var unavailable = new List<string>();
+        var p = WithPictures(mks, unavailable);
+        position = 4_000;
+        p.ShowPictures("http://pley/api/files/7/subtitles/4.mks");
+        Assert.True(p.ShowingPictures);
+        // Only the first picture so far: it shows until another comes.
+        Assert.Equal(100, p.Picture.Value!.Bitmaps.Single().X);
+        Assert.Empty(p.Shown.Value);
+        clock.Advance(3_000);
+        // The whole track: cleared at 3 s, shown again at 5 s.
+        Assert.Null(p.Picture.Value);
+        position = 5_000;
+        p.Refresh();
+        Assert.NotNull(p.Picture.Value);
+        clock.Advance(30_000);
+        Assert.Equal(2, asked.Count);
+
+        // The same track again changes nothing; text in its place clears the picture.
+        p.ShowPictures("http://pley/api/files/7/subtitles/4.mks");
+        Assert.Equal(2, asked.Count);
+        answers.Enqueue(() => new SubtitleText(Vtt, Complete: true));
+        p.Show("http://pley/api/files/7/subtitles/2.vtt");
+        Assert.Null(p.Picture.Value);
+        Assert.False(p.ShowingPictures);
+        Assert.Empty(unavailable);
+        Assert.Equal(0, failures);
+    }
+
+    [Fact]
+    public void Pictures_the_server_cant_make_or_this_app_cant_decode_are_unavailable()
+    {
+        var mks = new Queue<Func<SubtitlePictures>>();
+        mks.Enqueue(() => throw new ApiException(503, "transcoder_unavailable", "no transcoder"));
+        mks.Enqueue(() => new SubtitlePictures(PictureKit.Mks("S_TEXT/UTF8", new[] { new PictureKit.MksBlock(1000, Shown) }), Complete: true));
+        mks.Enqueue(() => throw new ApiException(500, "internal", "broken"));
+        var unavailable = new List<string>();
+        var p = WithPictures(mks, unavailable);
+        p.ShowPictures("http://pley/a.mks");
+        Assert.Single(unavailable);
+        Assert.Null(p.Showing);
+        p.ShowPictures("http://pley/b.mks");
+        Assert.Equal(2, unavailable.Count);
+        // Anything else is a failure to load, as for text.
+        p.ShowPictures("http://pley/c.mks");
+        Assert.Equal(2, unavailable.Count);
+        Assert.Equal(1, failures);
+    }
 }
 
 /// <summary>How it plays, in words (the Android app's PiecesTest's details and TvReadoutTest).</summary>

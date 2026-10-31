@@ -110,6 +110,9 @@ public sealed record BitrateAnswer(long Bitrate);
 /// <summary>A subtitle track's WebVTT, and whether it is whole (<c>X-Pley-Complete</c>: 0 while still being read out of its file).</summary>
 public sealed record SubtitleText(string Text, bool Complete);
 
+/// <summary>The server's .mks of a picture subtitle track, and whether it is whole (<c>X-Pley-Complete</c>: 0 while still being read out of its file).</summary>
+public sealed record SubtitlePictures(byte[] Bytes, bool Complete);
+
 /// <summary>
 /// GET /api/files/{id}/trickplay: the seek-bar previews of a file, tiled into JPEG sheets.
 /// Thumbnail k shows the video at k × <see cref="IntervalMs"/>; it is at column k % columns, row

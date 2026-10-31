@@ -128,29 +128,116 @@ public class PlayerModelTests
         Assert.Equal(SessionText.SubtitlesFailed, h.Toasts.Single().Text);
     }
 
+    const string PgsMks = ItemKit.Origin + "/api/files/10/subtitles/4.mks";
+
+    /// <summary>A PGS track that shows a picture from 1 s and clears at 3 s.</summary>
+    static SubtitlePictures PgsTrack()
+    {
+        var shown = PictureKit.PgsDisplaySet(0x80, true, rle: new[] { 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0 });
+        var cleared = PictureKit.PgsDisplaySet(0x00, false);
+        return new SubtitlePictures(PictureKit.Mks("S_HDMV/PGS", new[] { new PictureKit.MksBlock(1000, shown), new PictureKit.MksBlock(3000, cleared) }), Complete: true);
+    }
+
+    /// <summary>The server burns in pictures it is asked to, into a stream; without, the file plays as it is.</summary>
+    void BurnsWhenAsked() => h.Source.Answer = body => body.ContainsKey("subtitle_index")
+        ? FakePlayerSource.Stream(10) with { BurnSubtitles = true, SubtitleIndex = (int)body["subtitle_index"]! }
+        : FakePlayerSource.Direct(10);
+
     /// <summary>
-    /// Unlike Android's, this player draws no picture subtitles: chosen for a file that plays as it
-    /// is, they are asked to be burned in, which the server does in a transcode.
+    /// The player draws picture subtitles from the server's .mks, as the web TV app does: chosen,
+    /// the file plays on as it is, and they follow the playhead and the offset like text.
     /// </summary>
     [Fact]
-    public void Picture_subtitles_are_burned_in_by_a_new_session_and_back()
+    public void Picture_subtitles_are_drawn_from_the_servers_mks_in_the_same_session()
     {
         h.Add(PlayerHarness.Movie());
-        h.Source.Answer = body => body.ContainsKey("subtitle_index")
-            ? FakePlayerSource.Stream(10) with { BurnSubtitles = true, SubtitleIndex = (int)body["subtitle_index"]! }
-            : FakePlayerSource.Direct(10);
+        BurnsWhenAsked();
+        h.Source.Mks[PgsMks] = PgsTrack();
         h.Start(new PlayRequest(1, 0, true));
-        Assert.True(h.State.Subtitles.Single(t => t.Index == 4).BurnIn);
+        Assert.False(h.State.Subtitles.Single(t => t.Index == 4).BurnIn);
+        h.Model.SelectSubtitle(4);
+        Assert.Single(h.Source.Bodies);
+        Assert.False(h.LastBody.ContainsKey("subtitle_index"));
+        Assert.True(h.State.SubtitleSync);
+        Assert.Null(h.Model.Picture.Value);
+        h.Play(1_000);
+        var frame = h.Model.Picture.Value!;
+        Assert.Equal((1920, 1080), (frame.PlaneWidth, frame.PlaneHeight));
+        Assert.Equal((100, 900, 4, 2), (frame.Bitmaps.Single().X, frame.Bitmaps.Single().Y, frame.Bitmaps.Single().Width, frame.Bitmaps.Single().Height));
+        Assert.Empty(h.Model.Cues.Value);
+        // Moved 1.5 s later: not yet at 1.5 s, shown at 2.5 s.
+        h.Play(500);
+        h.Model.SetSubtitleOffset(1_500);
+        Assert.Null(h.Model.Picture.Value);
+        h.Play(1_000);
+        Assert.NotNull(h.Model.Picture.Value);
+        // Cleared by the next display set, 3 s in the track's time.
+        h.Play(2_000);
+        Assert.Null(h.Model.Picture.Value);
+        h.Model.SelectSubtitle(null);
+        Assert.Null(h.Model.Picture.Value);
+        Assert.Single(h.Source.Bodies);
+        Assert.Equal(new[] { PgsMks }, h.Source.MksAsked);
+    }
+
+    /// <summary>
+    /// A server that can't make the .mks (404 from an older server, 503 from an older transcoder):
+    /// pictures are burned in from then on, by a new session from where it was, as the web TV app does.
+    /// </summary>
+    [Theory]
+    [InlineData(404)]
+    [InlineData(503)]
+    public void Picture_subtitles_are_burned_in_when_the_server_cant_make_them(int status)
+    {
+        h.Add(PlayerHarness.Movie());
+        BurnsWhenAsked();
+        h.Source.MksFailure = new ApiException(status, "unavailable", "no pictures here");
+        h.Start(new PlayRequest(1, 0, true));
+        h.Play(2_000);
         h.Model.SelectSubtitle(4);
         Assert.Equal(2, h.Source.Bodies.Count);
         Assert.Equal(4, h.LastBody["subtitle_index"]);
+        Assert.Equal(2_000L, h.LastBody["start_ms"]);
         Assert.True(h.Engine.Prepared.Last().Hls);
+        Assert.True(h.State.Subtitles.Single(t => t.Index == 4).BurnIn);
         Assert.False(h.State.SubtitleSync);
-        Assert.Empty(h.Model.Cues.Value);
+        Assert.Null(h.Model.Picture.Value);
+        Assert.Empty(h.Toasts);
         h.Engine.Show();
         h.Model.SelectSubtitle(null);
         Assert.Equal(3, h.Source.Bodies.Count);
         Assert.False(h.LastBody.ContainsKey("subtitle_index"));
+        // Chosen again, they are burned in at once: the .mks isn't asked for again.
+        h.Engine.Show();
+        h.Model.SelectSubtitle(4);
+        Assert.Equal(4, h.Source.Bodies.Count);
+        Assert.Equal(4, h.LastBody["subtitle_index"]);
+        Assert.Single(h.Source.MksAsked);
+    }
+
+    [Fact]
+    public void Picture_subtitles_that_cant_be_read_say_so_and_play_on()
+    {
+        h.Add(PlayerHarness.Movie());
+        h.Source.Mks[PgsMks] = new SubtitlePictures(new byte[] { 1, 2, 3, 4 }, Complete: true);
+        h.Start(new PlayRequest(1, 0, true, SubtitleIndex: 4));
+        Assert.Equal(SessionText.SubtitlesFailed, h.Toasts.Single().Text);
+        Assert.Single(h.Source.Bodies);
+        Assert.Null(h.Model.Picture.Value);
+    }
+
+    /// <summary>A report that claims no picture subtitles (an app that can't draw them) has them burned in.</summary>
+    [Fact]
+    public void Picture_subtitles_are_burned_in_when_the_report_doesnt_claim_them()
+    {
+        h.Add(PlayerHarness.Movie());
+        BurnsWhenAsked();
+        h.Source.Report = TizenCaps.Of(new TizenFacts { OutputMode = "DOLBY_DIGITAL_PLUS", PictureSubtitles = false });
+        h.Start(new PlayRequest(1, 0, true));
+        Assert.True(h.State.Subtitles.Single(t => t.Index == 4).BurnIn);
+        h.Model.SelectSubtitle(4);
+        Assert.Equal(4, h.LastBody["subtitle_index"]);
+        Assert.Empty(h.Source.MksAsked);
     }
 
     [Fact]

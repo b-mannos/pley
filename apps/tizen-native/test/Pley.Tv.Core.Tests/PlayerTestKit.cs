@@ -146,6 +146,11 @@ sealed class FakePlayerSource : IPlayerSource
     public Func<string, SessionStatus>? Status { get; set; }
     public Exception? StatusFailure { get; set; }
     public Dictionary<string, SubtitleText> Vtt { get; } = new Dictionary<string, SubtitleText>();
+    /// <summary>The server's .mks of picture tracks by address; one missing is answered with <see cref="MksFailure"/>.</summary>
+    public Dictionary<string, SubtitlePictures> Mks { get; } = new Dictionary<string, SubtitlePictures>();
+    /// <summary>How a .mks that isn't there fails: a 404, as a server without them.</summary>
+    public Exception MksFailure { get; set; } = new ApiException(404, "not_found", "no such track");
+    public List<string> MksAsked { get; } = new List<string>();
     public Func<long, TrickplayInfo?> TrickplayAnswer { get; set; } = _ => null;
     public int TrickplayAsks { get; private set; }
     public Dictionary<long, ItemSummary?> NextOf { get; } = new Dictionary<long, ItemSummary?>();
@@ -212,6 +217,12 @@ sealed class FakePlayerSource : IPlayerSource
 
     public Task<SubtitleText> Subtitles(string url) =>
         Vtt.TryGetValue(url, out var text) ? Task.FromResult(text) : Task.FromException<SubtitleText>(new ApiException(404, "not_found", "no such track"));
+
+    public Task<SubtitlePictures> PictureSubtitles(string url)
+    {
+        MksAsked.Add(url);
+        return Mks.TryGetValue(url, out var mks) ? Task.FromResult(mks) : Task.FromException<SubtitlePictures>(MksFailure);
+    }
 
     public Task<TrickplayInfo?> Trickplay(long fileId)
     {

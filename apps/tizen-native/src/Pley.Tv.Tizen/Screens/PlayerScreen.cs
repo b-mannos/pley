@@ -57,6 +57,8 @@ sealed class PlayerScreen : Sheet
 
     readonly View black;
     readonly View bars;
+    readonly View scrim;
+    readonly PictureSubtitleView pictures;
     readonly SubtitleView subtitles;
     readonly View spinner;
     readonly Animation spin;
@@ -123,6 +125,7 @@ sealed class PlayerScreen : Sheet
     /// <summary>The subtitles the CAPTIONS key turned off, to turn back on.</summary>
     int? captionsRemembered;
     Animation? fade;
+    Animation? scrimFade;
     Animation? coverFade;
     long hideAt;
 
@@ -145,8 +148,14 @@ sealed class PlayerScreen : Sheet
         View.Add(black);
         bars = new View { Size = Canvas() };
         View.Add(bars);
+        // The controls' scrim fades with them, under the picture subtitles so they stay clear over it.
+        scrim = Scrim();
+        scrim.Opacity = 0;
+        View.Add(scrim);
+        // Picture subtitles where their plane puts them, under the controls, as on the web app.
+        pictures = new PictureSubtitleView();
+        View.Add(pictures);
         controls = new View { Size = Canvas(), Opacity = 0 };
-        controls.Add(Scrim());
         View.Add(controls);
         // Over the controls' scrim, which mustn't dim them; above the controls while they show.
         subtitles = new SubtitleView(state.Settings.Value);
@@ -311,6 +320,7 @@ sealed class PlayerScreen : Sheet
         tick.Start();
         watches.Add(model.State.Watch(Render));
         watches.Add(model.Cues.Watch(subtitles.Show));
+        watches.Add(model.Picture.Watch(pictures.Show));
         watches.Add(state.Settings.Watch(subtitles.Restyle));
     }
 
@@ -964,6 +974,8 @@ sealed class PlayerScreen : Sheet
             shown = on;
             fade?.Stop();
             fade = Fade.To(controls, on, PleyMotion.OverlayMs);
+            scrimFade?.Stop();
+            scrimFade = Fade.To(scrim, on, PleyMotion.OverlayMs);
             subtitles.Lift(on);
             Layout();
         }
@@ -1082,6 +1094,8 @@ sealed class PlayerScreen : Sheet
         foreach (var w in watches) w.Dispose();
         watches.Clear();
         model.Close();
+        // The pictures' textures go now, not when the view is collected.
+        pictures.Show(null);
         closed();
     }
 

@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Pley.Tv.Core.Api;
 using Pley.Tv.Core.Auth;
+using Pley.Tv.Core.Subtitles.Pictures;
 
 namespace Pley.Tv.Core.Player;
 
@@ -361,12 +362,12 @@ public sealed class SubtitleOffsets
 }
 
 /// <summary>
-/// The text subtitles this TV draws (the web TV app's SubtitlePresenter, the Android app's
+/// The subtitles this TV draws (the web TV app's SubtitlePresenter, the Android app's
 /// ServerSubtitles): the server's WebVTT, asked for again every 3 s while the track is still being
-/// read out of its file, each answer merged. What shows is worked out at the playhead moved by the
-/// offset, again at each change (20 to 250 ms away, at the playback's speed; 500 ms when nothing
-/// changes any more). Picture subtitles aren't drawn here: they need a decoder of PGS and VobSub
-/// this app doesn't have, so the server burns them in.
+/// read out of its file, each answer merged; or the server's .mks of a picture track (PGS, VobSub,
+/// DVB), asked for again the same way, its pictures decoded only when shown. What shows is worked
+/// out at the playhead moved by the offset, again at each change (20 to 250 ms away, at the
+/// playback's speed; 500 ms when nothing changes any more).
 /// </summary>
 public sealed class SubtitlePresenter
 {
@@ -376,20 +377,27 @@ public sealed class SubtitlePresenter
 
     readonly IScheduler scheduler;
     readonly Func<string, Task<SubtitleText>> fetch;
+    readonly Func<string, Task<SubtitlePictures>>? fetchPictures;
     readonly Func<long> position;
     readonly Func<long> offset;
     readonly Func<double> speed;
     readonly Action onFailed;
+    readonly Action? onPicturesUnavailable;
     IDisposable? retry;
     IDisposable? tick;
     SubtitleIndex? index;
+    PictureSubtitles? pictures;
+    bool showingPictures;
     string shownKey = "";
     int generation;
     bool active = true;
 
     /// <param name="fetch">The WebVTT at an absolute address, and whether it is whole.</param>
     /// <param name="onFailed">The track couldn't be loaded: said once per choice.</param>
-    public SubtitlePresenter(IScheduler scheduler, Func<string, Task<SubtitleText>> fetch, Func<long> position, Func<long> offset, Func<double> speed, Action onFailed)
+    /// <param name="fetchPictures">The .mks of a picture track at an absolute address, and whether it is whole.</param>
+    /// <param name="onPicturesUnavailable">The server can't make picture subtitles (404 from an older server, 503 from an older transcoder).</param>
+    public SubtitlePresenter(IScheduler scheduler, Func<string, Task<SubtitleText>> fetch, Func<long> position, Func<long> offset, Func<double> speed, Action onFailed,
+        Func<string, Task<SubtitlePictures>>? fetchPictures = null, Action? onPicturesUnavailable = null)
     {
         this.scheduler = scheduler;
         this.fetch = fetch;
@@ -397,31 +405,52 @@ public sealed class SubtitlePresenter
         this.offset = offset;
         this.speed = speed;
         this.onFailed = onFailed;
+        this.fetchPictures = fetchPictures;
+        this.onPicturesUnavailable = onPicturesUnavailable;
     }
 
     /// <summary>The cues showing now, earliest first; empty when none.</summary>
     public Signal<IReadOnlyList<Cue>> Shown { get; } = new Signal<IReadOnlyList<Cue>>(new Cue[0]);
 
+    /// <summary>The picture showing now, never empty; null when none.</summary>
+    public Signal<PictureFrame?> Picture { get; } = new Signal<PictureFrame?>(null);
+
     /// <summary>The address of the track shown; null when none.</summary>
     public string? Showing { get; private set; }
+
+    /// <summary>Whether the track shown is the .mks of a picture track.</summary>
+    public bool ShowingPictures => Showing != null && showingPictures;
 
     /// <summary>Shows the server's WebVTT at <paramref name="url"/>; the same track again keeps what was fetched.</summary>
     public void Show(string url)
     {
-        if (Showing == url)
+        if (Showing == url && !showingPictures)
         {
             Refresh();
             return;
         }
-        Reset(url);
-        Publish(new Cue[0], "");
+        Reset(url, false);
+        Clear();
         Fetch(url, generation);
+    }
+
+    /// <summary>Shows the server's .mks of a picture track at <paramref name="url"/>; the same track again keeps what was fetched.</summary>
+    public void ShowPictures(string url)
+    {
+        if (Showing == url && showingPictures)
+        {
+            Refresh();
+            return;
+        }
+        Reset(url, true);
+        Clear();
+        FetchPictures(url, generation);
     }
 
     public void Hide()
     {
-        Reset(null);
-        Publish(new Cue[0], "");
+        Reset(null, false);
+        Clear();
     }
 
     /// <summary>The position jumped, or the offset changed: look again now.</summary>
@@ -446,7 +475,7 @@ public sealed class SubtitlePresenter
         Refresh();
     }
 
-    void Reset(string? url)
+    void Reset(string? url, bool isPictures)
     {
         generation++;
         retry?.Dispose();
@@ -454,7 +483,9 @@ public sealed class SubtitlePresenter
         retry = null;
         tick = null;
         Showing = url;
+        showingPictures = isPictures;
         index = null;
+        pictures = null;
         shownKey = "";
     }
 
@@ -480,17 +511,68 @@ public sealed class SubtitlePresenter
         });
     }
 
+    void FetchPictures(string url, int at)
+    {
+        if (fetchPictures == null)
+        {
+            Showing = null;
+            onPicturesUnavailable?.Invoke();
+            return;
+        }
+        Ui.Plays.When(scheduler, () => ReadPictures(fetchPictures, url), answer =>
+        {
+            if (at != generation) return;
+            var subs = PictureSubtitles.Of(answer.Track);
+            if (subs == null)
+            {
+                // A codec this app can't decode: the server burns it in instead.
+                Showing = null;
+                onPicturesUnavailable?.Invoke();
+                return;
+            }
+            // Each answer holds every picture found so far: the later one replaces the earlier.
+            pictures = subs;
+            Refresh();
+            if (!answer.Complete) retry = scheduler.After(PartialRetryMs, () => FetchPictures(url, at));
+        }, e =>
+        {
+            if (at != generation) return;
+            Showing = null;
+            if (e is ApiException { Status: 404 or 503 }) onPicturesUnavailable?.Invoke();
+            else onFailed();
+        });
+    }
+
+    /// <summary>The .mks fetched and read, off the UI thread: a film's track can be megabytes.</summary>
+    static async Task<(PictureTrack Track, bool Complete)> ReadPictures(Func<string, Task<SubtitlePictures>> fetch, string url)
+    {
+        var answer = await fetch(url).ConfigureAwait(false);
+        return (Mks.ReadPictureTrack(answer.Bytes), answer.Complete);
+    }
+
     void Update()
     {
-        if (Showing == null || !active || index == null) return;
+        if (Showing == null || !active) return;
         var pos = position();
         var shift = offset();
         var at = SubtitleSync.TrackTime(pos, shift);
-        var cues = index.At(at);
-        Publish(cues, string.Join(",", cues.Select(c => $"{c.StartMs}-{c.EndMs}")));
+        long? change;
+        if (index != null)
+        {
+            var cues = index.At(at);
+            Publish(cues, null, string.Join(",", cues.Select(c => $"{c.StartMs}-{c.EndMs}")));
+            change = SubtitleSync.UntilChange(index, pos, shift);
+        }
+        else if (pictures != null)
+        {
+            var shown = pictures.FrameAt(at);
+            Publish(new Cue[0], shown?.Frame, shown is { } s ? $"p{s.Index}" : "");
+            change = pictures.NextChange(at) - at;
+        }
+        else return;
         var rate = speed() > 0 ? speed() : 1;
         // Media time: at 2× a change comes in half the time.
-        var wait = SubtitleSync.UntilChange(index, pos, shift) is long change ? Math.Max(MinWaitMs, Math.Min(MaxWaitMs, (long)(change / rate))) : IdleWaitMs;
+        var wait = change is long until ? Math.Max(MinWaitMs, Math.Min(MaxWaitMs, (long)(until / rate))) : IdleWaitMs;
         tick = scheduler.After(wait, () =>
         {
             tick = null;
@@ -498,11 +580,13 @@ public sealed class SubtitlePresenter
         });
     }
 
-    void Publish(IReadOnlyList<Cue> cues, string key)
+    void Clear() => Publish(new Cue[0], null, "");
+
+    void Publish(IReadOnlyList<Cue> cues, PictureFrame? picture, string key)
     {
         if (key == shownKey && key.Length > 0) return;
-        if (key.Length == 0 && Shown.Value.Count == 0) return;
         shownKey = key;
-        Shown.Value = cues;
+        if (cues.Count > 0 || Shown.Value.Count > 0) Shown.Value = cues;
+        Picture.Value = picture;
     }
 }
