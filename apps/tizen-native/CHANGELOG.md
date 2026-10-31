@@ -31,6 +31,9 @@ It has no releases yet: it is built and installed by hand
 - Item pages in the native app end with Details: who made it and the
   facts, the versions (OK chooses which plays) and Media info, which OK
   opens: each file and every stream in full.
+- Rows with more than they show end with See all, which opens the library
+  sorted and filtered as the row is (Recommended's collections: the
+  Collections tab).
 - Playing in the native app: a session on the server with the TV's
   capabilities, as the web Samsung app reports them, on the TV's own
   player; Left and Right seek 10 s, presses adding up and a held key

@@ -444,7 +444,9 @@ sealed class LibraryScreen : ShellPage
                     if (at >= 0 && at < r.Opens.Count) go(r.Opens[at]);
                 },
                 r.IsCollections ? null : tile => Shell.Actions?.Invoke(tile.Id, r.ContinueWatching),
-                Shell.FocusRail, focusItem: Tree.Focus));
+                Shell.FocusRail, focusItem: Tree.Focus,
+                seeAll: r.IsCollections ? (LibraryText.SeeAll, () => model.Select(LibraryTab.Collections))
+                    : r.SeeAll is { } view ? (LibraryText.SeeAll, () => model.SeeAll(view)) : null));
         }
         body.Add(column);
         content.Add(column.Group);

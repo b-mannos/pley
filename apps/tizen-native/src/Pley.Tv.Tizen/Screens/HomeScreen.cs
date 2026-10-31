@@ -276,7 +276,11 @@ sealed class HomeScreen : ShellPage
                     // Its backdrop loads now, focus may rest on it next; not for every tile a held key passes.
                     if (!gate.Holding) images.Load(HomeRules.Backdrop(item, s.Origin), BackdropView.WidthDp, _ => { });
                 },
-                Tree.Focus));
+                Tree.Focus,
+                row.SeeAll is { } more ? (LibraryText.SeeAll, () =>
+                {
+                    if (!Shell.Open(new PageKey.Library(more.LibraryId, LibraryTab.Library, more.View))) Shell.Toast("That page comes next in the native app.");
+                }) : null));
         }
         page.Add(column.Group);
         body.Add(column);
