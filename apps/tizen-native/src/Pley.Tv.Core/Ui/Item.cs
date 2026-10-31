@@ -18,6 +18,9 @@ public sealed record AlbumPage(long AlbumId) : PageKey;
 /// <summary>Choosing a playlist to add <paramref name="ItemId"/> to.</summary>
 public sealed record AddToPlaylistPage(long ItemId) : PageKey;
 
+/// <summary>New playlist, an empty one: its title and what it plays.</summary>
+public sealed record NewPlaylistPage : PageKey;
+
 /// <summary>
 /// What an item page shows: a movie, show, season or episode, as apps/web/src/pages/item shows
 /// them (the Android app's ItemUiState). The screen only lays it out and puts its words on it.

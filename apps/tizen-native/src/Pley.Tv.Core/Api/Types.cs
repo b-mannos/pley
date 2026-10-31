@@ -265,7 +265,9 @@ public record Playlist
     public long ItemCount { get; init; }
     public long DurationMs { get; init; }
     public IReadOnlyList<string> Artwork { get; init; } = new string[0];
+    /// <summary>Smart playlists: the listing of <see cref="LibraryId"/> they play.</summary>
     public string? SmartFilter { get; init; }
+    public long? LibraryId { get; init; }
 }
 
 public sealed record PlaylistEntry
