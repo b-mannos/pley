@@ -20,3 +20,8 @@ It has no releases yet: it is built and installed by hand
   by the remote, a held key sliding a row along under a still highlight;
   pictures load as rows come near the screen, and a tile without one shows
   its title on a gradient of its own, as on Android.
+- Playing in the native app: a session on the server with the TV's
+  capabilities, as the web Samsung app reports them, on the TV's own
+  player; Left and Right seek 10 s, presses adding up and a held key
+  scrubbing; the title, clock, scrubber and Back 10 · Play/Pause ·
+  Forward 10 over a scrim; where it stopped goes to the server.

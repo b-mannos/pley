@@ -379,7 +379,9 @@ the network, an address pad and the TV's keyboard, forgetting a server),
 its sign-in with a code and a QR code, Who's watching? with PINs, and
 Home: the hero, the server's rows and the rail, and item pages: the hero
 and its buttons, seasons and episodes, Extras, Cast and More Like This,
-and the side panels. Playing and the other pages come next.
+and the side panels; and a first player: the stream on the TV's own player,
+seeking with Left and Right, and the scrubber and transport controls.
+Subtitles, the player's panels and the other pages come next.
 
 | | |
 |---|---|

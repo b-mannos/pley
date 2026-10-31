@@ -23,6 +23,12 @@ class Sheet
     public FocusGroup Root { get; }
     public FocusTree Tree { get; }
 
+    /// <summary>
+    /// Drawn over nothing: what is under it goes while it shows, and the window is clear there, so
+    /// the TV's video plane under the window shows through (the player).
+    /// </summary>
+    public bool Covers { get; init; }
+
     /// <summary>Back: true when the sheet took it (closed a pad, went back a step).</summary>
     public Func<bool>? Back { get; set; }
 
@@ -58,6 +64,7 @@ sealed class Shell
         sheets.Clear();
         sheets.Add(page);
         window.Add(page.View);
+        Uncovered();
     }
 
     /// <summary>Puts <paramref name="sheet"/> (a dialog) over what is on screen.</summary>
@@ -65,6 +72,7 @@ sealed class Shell
     {
         sheets.Add(sheet);
         window.Add(sheet.View);
+        if (sheet.Covers) Uncovered();
     }
 
     /// <summary>Takes <paramref name="sheet"/> off the screen; focus is again where it was under it.</summary>
@@ -72,7 +80,28 @@ sealed class Shell
     {
         if (!sheets.Remove(sheet)) return;
         Remove(sheet);
+        if (sheet.Covers) Uncovered();
     }
+
+    /// <summary>Sheets under the top covering one go; the window is clear while one shows.</summary>
+    void Uncovered()
+    {
+        var cover = sheets.FindLastIndex(s => s.Covers);
+        for (var i = 0; i < sheets.Count; i++)
+        {
+            if (i < cover) sheets[i].View.Hide();
+            else sheets[i].View.Show();
+        }
+        // The window takes an alpha the first time one covers: until then, nothing needs to see through it.
+        if (cover >= 0 && !transparent)
+        {
+            window.SetTransparency(true);
+            transparent = true;
+        }
+        window.BackgroundColor = cover >= 0 ? Color.Transparent : PleyColors.Bg;
+    }
+
+    bool transparent;
 
     static void Remove(Sheet sheet)
     {

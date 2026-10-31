@@ -1,0 +1,132 @@
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Pley.Tv.Core.Api;
+using Pley.Tv.Core.Ui;
+
+namespace Pley.Tv.Core.Player;
+
+/// <summary>
+/// Sends playbacks' reports one after the other (the Android app's SessionReporter): a player
+/// that closes still gets its last position and its session's end to the server, in the order
+/// they were made (progress, then "stopped", then DELETE). Best effort: a failure is dropped, as on
+/// the web and Android.
+/// </summary>
+public sealed class SessionReporter
+{
+    readonly object gate = new object();
+    Task tail = Task.CompletedTask;
+
+    public void Send(Func<Task> report)
+    {
+        lock (gate)
+        {
+            tail = tail.ContinueWith(async _ =>
+            {
+                try
+                {
+                    await report().ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // Best effort: the next report says where the player is anyway.
+                }
+            }, TaskScheduler.Default).Unwrap();
+        }
+    }
+
+    /// <summary>Completes once everything queued so far went out.</summary>
+    public Task Flush()
+    {
+        lock (gate) return tail;
+    }
+}
+
+/// <summary>
+/// One session on the server (POST /api/playback; the Android app's ServerPlaybackSession): its
+/// progress reports and its end. Ending it reports "stopped" at the last position, then deletes it
+/// (and any conversion); it ends once.
+/// </summary>
+public sealed class PlaybackSession
+{
+    readonly Api.Api api;
+    readonly SessionReporter reporter;
+
+    public PlaybackSession(Api.Api api, long itemId, PlaybackInfo info, SessionReporter reporter)
+    {
+        this.api = api;
+        this.reporter = reporter;
+        ItemId = itemId;
+        Info = info;
+    }
+
+    public long ItemId { get; }
+    public PlaybackInfo Info { get; }
+    public string Id => Info.SessionId;
+    public bool Ended { get; private set; }
+
+    /// <summary>"playing" or "paused" at <paramref name="positionMs"/>, so the session and its conversion stay alive.</summary>
+    public void Progress(long positionMs, bool playing)
+    {
+        if (Ended) return;
+        Report(positionMs, playing ? "playing" : "paused");
+    }
+
+    /// <summary>Reports "stopped" at <paramref name="positionMs"/>, then DELETE /api/playback/{session}.</summary>
+    public void End(long positionMs)
+    {
+        if (Ended) return;
+        Ended = true;
+        Report(positionMs, "stopped");
+        reporter.Send(() => api.StopPlayback(Id));
+    }
+
+    /// <summary>The server stopped the session itself: "stopped" keeps the resume point, and nothing is deleted.</summary>
+    public void StoppedByServer(long positionMs)
+    {
+        if (Ended) return;
+        Ended = true;
+        Report(positionMs, "stopped");
+    }
+
+    void Report(long positionMs, string state)
+    {
+        var duration = Info.DurationMs > 0 ? Info.DurationMs : (long?)null;
+        reporter.Send(() => api.Progress(ItemId, Math.Max(0, positionMs), duration, state, Id));
+    }
+
+    /// <summary>
+    /// Starts a session for <paramref name="request"/>. The request isn't cancelled halfway: the
+    /// server may have made the session (and its conversion) already.
+    /// </summary>
+    public static async Task<PlaybackSession> Start(Api.Api api, long itemId, IReadOnlyDictionary<string, object?> request, SessionReporter reporter)
+    {
+        var info = await api.StartPlayback(request).ConfigureAwait(false);
+        return new PlaybackSession(api, itemId, info, reporter);
+    }
+}
+
+/// <summary>What goes in the body of POST /api/playback (the Android app's PlaybackPlan, packages/tv's playbackRequest).</summary>
+public static class PlayRequests
+{
+    /// <summary>
+    /// The body for <paramref name="request"/>: the file and audio only when picked (else the
+    /// server chooses the one this TV plays best), Automatic quality, and keyed addresses, since the
+    /// TV's player can't send the Authorization header.
+    /// </summary>
+    public static Dictionary<string, object?> Body(PlayRequest request, string clientId, IReadOnlyDictionary<string, object?> caps)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["item_id"] = request.ItemId,
+            ["start_ms"] = Math.Max(0, request.StartMs),
+            ["mode"] = "auto",
+            ["client_id"] = clientId,
+            ["keyed_urls"] = true,
+            ["caps"] = caps,
+        };
+        if (request.FileId != null) body["file_id"] = request.FileId;
+        if (request.AudioIndex != null) body["audio_index"] = request.AudioIndex;
+        return body;
+    }
+}

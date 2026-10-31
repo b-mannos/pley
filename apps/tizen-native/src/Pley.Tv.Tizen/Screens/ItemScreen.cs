@@ -96,7 +96,7 @@ sealed class ItemScreen : ShellPage
 
     void OnTold(ItemEvent e) => Shell.Toast(ItemText.Toast(e).Text);
 
-    void OnPlay(PlayRequest request) => Shell.Toast("Playback comes next in the native app.");
+    void OnPlay(PlayRequest request) => Shell.Play?.Invoke(request);
 
     void Show(ItemState state)
     {

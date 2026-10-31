@@ -94,6 +94,8 @@ class App : NUIApplication
             PageKey.Home => Home(tv),
             _ => null,
         };
+        // Back from the player: Home asks again, for the new resume point and Continue Watching.
+        tv.Play = request => new PlayerScreen(shell, state, request, gate, () => _ = state.LoadHome()).Show();
         shell.Show(tv);
         tv.Restart(Home(tv));
         _ = state.LoadAccount();

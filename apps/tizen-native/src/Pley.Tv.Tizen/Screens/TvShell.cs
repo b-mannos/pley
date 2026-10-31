@@ -126,6 +126,9 @@ sealed class TvShell : Sheet
     /// <summary>Makes the page for a key: set by the app, which knows every page.</summary>
     public Func<PageKey, ShellPage?>? PageOf { get; set; }
 
+    /// <summary>Plays what a page asks for, in the player over everything; the app sets it.</summary>
+    public Action<PlayRequest>? Play { get; set; }
+
     /// <summary>Opens the page of <paramref name="key"/> over the one on top; false when the app has none for it yet.</summary>
     public bool Open(PageKey key)
     {

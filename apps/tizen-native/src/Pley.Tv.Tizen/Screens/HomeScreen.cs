@@ -104,7 +104,15 @@ sealed class HomeScreen : ShellPage
         if (!Tree.Enter(Group)) Shell.FocusRail();
     }
 
-    void Play(bool fromStart) => Shell.Toast("Playback comes next in the native app.");
+    /// <summary>Resume (or Play) and From start on the hero: a film or episode plays; anything else opens its page.</summary>
+    void Play(bool fromStart)
+    {
+        var item = heroInfo?.Item;
+        if (item == null) return;
+        if (item.Kind is "movie" or "episode" or "extra")
+            Shell.Play?.Invoke(new PlayRequest(item.Id, fromStart || item.UserState.Watched ? 0 : item.UserState.PositionMs, fromStart));
+        else open(item);
+    }
 
     /// <summary>Back from the rows: the page goes back to its hero (focus on Resume), and focus to the rail.</summary>
     public override bool Back()

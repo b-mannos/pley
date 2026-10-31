@@ -377,6 +377,27 @@ public sealed class Api
         return Call("PUT", $"/api/items/{itemId}/streams", body);
     }
 
+    // ---- playback
+
+    /// <summary>
+    /// POST /api/playback: a session for <paramref name="request"/> (its JSON body, snake_case).
+    /// The server may start a conversion first, so it has a minute.
+    /// </summary>
+    public async Task<PlaybackInfo> StartPlayback(IReadOnlyDictionary<string, object?> request, CancellationToken cancel = default) =>
+        Read<PlaybackInfo>(await Send("/api/playback", "POST", request, cancel: cancel, timeoutMs: 60_000).ConfigureAwait(false));
+
+    /// <summary>DELETE /api/playback/{session}: the session and its conversion end.</summary>
+    public Task<JsonElement?> StopPlayback(string session) => Call("DELETE", $"/api/playback/{Uri.EscapeDataString(session)}");
+
+    /// <summary>POST /api/items/{id}/progress, with the session, so it and its conversion stay alive.</summary>
+    public Task<JsonElement?> Progress(long itemId, long positionMs, long? durationMs, string state, string? session)
+    {
+        var body = new Dictionary<string, object?> { ["position_ms"] = positionMs, ["state"] = state };
+        if (durationMs != null) body["duration_ms"] = durationMs;
+        if (session != null) body["session_id"] = session;
+        return Call("POST", $"/api/items/{itemId}/progress", body);
+    }
+
     /// <summary>
     /// The refusal <paramref name="res"/> is: Pley's JSON, or the plain text a body or query the
     /// server couldn't read gets (400, 415, 422), as one short line; never a page's HTML.

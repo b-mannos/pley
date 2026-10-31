@@ -153,6 +153,8 @@ static class PleyShape
     public const float BadgeRadius = 2, TileRadius = 4, FieldRadius = 4, ControlRadius = 6, CardRadius = 6, DialogRadius = 8;
     /// <summary>The focus ring: a 3 dp AccentBright stroke centred 4.5 dp outside the tile.</summary>
     public const float RingStroke = 3, RingOffset = 4.5f;
+    /// <summary>A focused scrubber thumb's ring: a 2 dp stroke 2 dp clear of it.</summary>
+    public const float ThumbRingStroke = 2, ThumbRingOffset = 2;
     public const float TileScale = 1.08f, TilePressedScale = 1.04f, RoundScale = 1.08f, AvatarScale = 1.1f, PillScale = 1.05f;
 }
 
