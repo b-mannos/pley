@@ -328,16 +328,18 @@ public sealed class Api
         return Call<Playlist>("POST", "/api/playlists", body);
     }
 
-    public Task<JsonElement?> RenamePlaylist(long id, string title) => Call("PATCH", $"/api/playlists/{id}", new Dictionary<string, object?> { ["title"] = title });
+    /// <summary>The playlist renamed, with its entries.</summary>
+    public Task<PlaylistDetail> RenamePlaylist(long id, string title) =>
+        Call<PlaylistDetail>("PATCH", $"/api/playlists/{id}", new Dictionary<string, object?> { ["title"] = title });
 
     public Task<JsonElement?> DeletePlaylist(long id) => Call("DELETE", $"/api/playlists/{id}");
 
     /// <summary>Takes one entry out (the item stays in its library).</summary>
     public Task<JsonElement?> RemoveFromPlaylist(long id, long entryId) => Call("DELETE", $"/api/playlists/{id}/items/{entryId}");
 
-    /// <summary>The entries in their new order, every one of them.</summary>
-    public Task<JsonElement?> ReorderPlaylist(long id, IReadOnlyList<long> entryIds) =>
-        Call("PUT", $"/api/playlists/{id}/order", new Dictionary<string, object?> { ["entry_ids"] = entryIds });
+    /// <summary>The entries in their new order (these first, the rest after); the playlist in it.</summary>
+    public Task<PlaylistDetail> ReorderPlaylist(long id, IReadOnlyList<long> entryIds) =>
+        Call<PlaylistDetail>("PUT", $"/api/playlists/{id}/order", new Dictionary<string, object?> { ["entry_ids"] = entryIds });
 
     /// <summary>A smart playlist: a library's listing by <paramref name="filter"/> (Plex's syntax), which keeps up with the library by itself.</summary>
     public Task<Playlist> CreateSmartPlaylist(string title, long libraryId, string filter) =>

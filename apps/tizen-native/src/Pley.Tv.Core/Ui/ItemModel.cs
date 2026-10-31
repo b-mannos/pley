@@ -24,7 +24,17 @@ public abstract record ItemEvent
 /// the audio only when picked there, else the server picks the track the device plays best.
 /// </summary>
 /// <param name="FileId">The version, when the item has several.</param>
-public sealed record PlayRequest(long ItemId, long StartMs, bool FromStart, long? FileId = null, int? AudioIndex = null, int? SubtitleIndex = null);
+/// <param name="Queue">A playlist or collection to keep playing from, in its order, when this item ends.</param>
+public sealed record PlayRequest(long ItemId, long StartMs, bool FromStart, long? FileId = null, int? AudioIndex = null, int? SubtitleIndex = null,
+    PlayQueue? Queue = null);
+
+/// <summary>Where the next item comes from when one ends (the Android app's PlayQueue).</summary>
+public abstract record PlayQueue
+{
+    public sealed record Playlist(long PlaylistId) : PlayQueue;
+
+    public sealed record Collection(long CollectionId) : PlayQueue;
+}
 
 /// <summary>What item pages read and change: the app's state, or a fake in tests.</summary>
 public interface IItemSource
