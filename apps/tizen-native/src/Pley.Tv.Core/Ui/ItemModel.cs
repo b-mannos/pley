@@ -24,7 +24,12 @@ public abstract record ItemEvent
 /// the audio only when picked there, else the server picks the track the device plays best.
 /// </summary>
 /// <param name="FileId">The version, when the item has several.</param>
-public sealed record PlayRequest(long ItemId, long StartMs, bool FromStart, long? FileId = null, int? AudioIndex = null, int? SubtitleIndex = null);
+/// <param name="Queue">The playlist or collection it plays through: what plays after it comes from there.</param>
+public sealed record PlayRequest(long ItemId, long StartMs, bool FromStart, long? FileId = null, int? AudioIndex = null, int? SubtitleIndex = null, PlayQueue? Queue = null);
+
+/// <summary>A playlist or collection played through, video after video.</summary>
+/// <param name="Kind">"playlist" or "collection".</param>
+public sealed record PlayQueue(string Kind, long Id);
 
 /// <summary>What item pages read and change: the app's state, or a fake in tests.</summary>
 public interface IItemSource

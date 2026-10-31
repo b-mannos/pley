@@ -21,6 +21,11 @@ public sealed record TizenFacts
     public bool? Ac4 { get; init; }
     /// <summary>The sound output: "PCM", "DOLBY", "DOLBY_DIGITAL_PLUS", "DTS"; null when unknown (nothing passed through).</summary>
     public string? OutputMode { get; init; }
+    /// <summary>
+    /// The app draws picture subtitles (PGS, VobSub, DVB) from the server's .mks. The native app
+    /// has no decoder for them yet: without one, the server burns them into a stream.
+    /// </summary>
+    public bool PictureSubtitles { get; init; }
 
     static readonly (double Version, int Year)[] Years =
     {
@@ -39,14 +44,18 @@ public sealed record TizenFacts
 /// <summary>
 /// What a Samsung TV plays, reported to the server (capabilities version 2) so it sends files as
 /// they are whenever the TV's player takes them: the web app's tizenCaps (apps/tizen/src/caps.ts),
-/// the same report for the same TV. Samsung TVs show no Dolby Vision. As JSON for the play request.
+/// the same report for the same TV, but for picture subtitles, which it claims only when it draws
+/// them. Samsung TVs show no Dolby Vision. As JSON for the play request.
 /// </summary>
 public static class TizenCaps
 {
     static readonly string[] Containers = { "mkv", "mp4", "m4v", "mov", "ts", "m2ts", "mpegts", "webm", "avi", "mpg", "mpeg", "mp3", "m4a", "aac", "flac", "ogg", "oga", "wav", "mka" };
 
-    /// <summary>Subtitles the app draws itself: text as WebVTT from the server, pictures from their .mks.</summary>
-    static readonly string[] Subtitles = { "subrip", "ass", "ssa", "webvtt", "mov_text", "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle" };
+    /// <summary>Subtitles the app draws itself as WebVTT from the server.</summary>
+    static readonly string[] TextSubtitles = { "subrip", "ass", "ssa", "webvtt", "mov_text" };
+
+    /// <summary>Picture subtitles, drawn from their .mks when the app can (<see cref="TizenFacts.PictureSubtitles"/>).</summary>
+    static readonly string[] PictureSubtitles = { "hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle" };
 
     // ffprobe's levels: H.264 4.2 = 42, 5.1 = 51; HEVC 4.1 = 123, 5.1 = 153, 5.2 = 156, 6.1 = 183.
 
@@ -105,9 +114,10 @@ public static class TizenCaps
             ["audio_decode"] = decode,
             ["audio_passthrough"] = passthrough.Distinct().ToArray(),
             ["audio_channels"] = passthrough.Count > 0 ? 8 : 6,
-            ["subtitle_codecs"] = Subtitles,
+            // Pictures it can't draw aren't claimed: the server burns them in instead.
+            ["subtitle_codecs"] = f.PictureSubtitles ? TextSubtitles.Concat(PictureSubtitles).ToArray() : TextSubtitles,
             ["audio_track_switching"] = true,
-            ["picture_subtitles_sideload"] = true,
+            ["picture_subtitles_sideload"] = f.PictureSubtitles,
             // One size per stream (no variants): the TV's player may go black moving between sizes (docs/QUALITY.md).
             ["hls"] = new Dictionary<string, object?> { ["master_playlist"] = true, ["segments"] = y >= 2020 ? new[] { "ts", "fmp4" } : new[] { "ts" } },
             ["display"] = new Dictionary<string, object?> { ["width"] = display.Item1, ["height"] = display.Item2, ["refresh_rates"] = new[] { 50, 60 } },

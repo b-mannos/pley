@@ -6,13 +6,22 @@ using Pley.Tv.Core.Ui;
 
 namespace Pley.Tv.Core.Player;
 
+/// <summary>Sends reports to the server one after the other, in the order they were made; best effort.</summary>
+public interface IReporter
+{
+    void Send(Func<Task> report);
+
+    /// <summary>Completes once everything queued so far went out.</summary>
+    Task Flush();
+}
+
 /// <summary>
 /// Sends playbacks' reports one after the other (the Android app's SessionReporter): a player
 /// that closes still gets its last position and its session's end to the server, in the order
 /// they were made (progress, then "stopped", then DELETE). Best effort: a failure is dropped, as on
 /// the web and Android.
 /// </summary>
-public sealed class SessionReporter
+public sealed class SessionReporter : IReporter
 {
     readonly object gate = new object();
     Task tail = Task.CompletedTask;
@@ -116,17 +125,39 @@ public static class PlayRequests
     /// </summary>
     public static Dictionary<string, object?> Body(PlayRequest request, string clientId, IReadOnlyDictionary<string, object?> caps)
     {
-        var body = new Dictionary<string, object?>
-        {
-            ["item_id"] = request.ItemId,
-            ["start_ms"] = Math.Max(0, request.StartMs),
-            ["mode"] = "auto",
-            ["client_id"] = clientId,
-            ["keyed_urls"] = true,
-            ["caps"] = caps,
-        };
+        var body = Base(request.ItemId, request.StartMs, "auto", clientId, caps);
         if (request.FileId != null) body["file_id"] = request.FileId;
         if (request.AudioIndex != null) body["audio_index"] = request.AudioIndex;
         return body;
     }
+
+    /// <summary>
+    /// The body for <paramref name="choices"/> (the Android app's PlaybackPlan.request): the file
+    /// always; the audio and subtitle indexes only when the server has to act on them
+    /// (<see cref="PlaybackPlan.AudioIndexFor"/>, <see cref="PlaybackPlan.SubtitleIndexFor"/>); a
+    /// quality's caps; <paramref name="keepPrevious"/> when it is made ready while the session
+    /// before plays on. <paramref name="read"/> is <paramref name="caps"/> as the plan reads it.
+    /// </summary>
+    public static Dictionary<string, object?> Body(long itemId, PlaybackPlan.Choices choices, string clientId, IReadOnlyDictionary<string, object?> caps, ClientCaps? read, bool keepPrevious = false)
+    {
+        var body = Base(itemId, choices.StartMs, choices.Mode, clientId, caps);
+        body["file_id"] = choices.File.Id;
+        if (PlaybackPlan.AudioIndexFor(choices, read) is int audio) body["audio_index"] = audio;
+        if (PlaybackPlan.SubtitleIndexFor(choices) is int subtitle) body["subtitle_index"] = subtitle;
+        if (choices.Quality.MaxBitrateKbps is int kbps) body["max_bitrate"] = kbps;
+        if (choices.Quality.MaxHeight is int lines) body["max_height"] = lines;
+        if (keepPrevious) body["keep_previous"] = true;
+        return body;
+    }
+
+    static Dictionary<string, object?> Base(long itemId, long startMs, string mode, string clientId, IReadOnlyDictionary<string, object?> caps) =>
+        new Dictionary<string, object?>
+        {
+            ["item_id"] = itemId,
+            ["start_ms"] = Math.Max(0, startMs),
+            ["mode"] = mode,
+            ["client_id"] = clientId,
+            ["keyed_urls"] = true,
+            ["caps"] = caps,
+        };
 }
