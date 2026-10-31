@@ -1,12 +1,13 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace Pley.Tv.Core;
 
 /// <summary>
-/// Server addresses as people type them and as the app keeps them: the web
-/// TV app's <c>auth/addresses.ts</c>, which answers the same
-/// (packages/tv/test/fixtures/addresses.json).
+/// Server addresses as people type them and as the app keeps them: the Android app's
+/// <c>Servers</c> and <c>Addresses</c>, which the web TV app's <c>auth/addresses.ts</c> answers
+/// the same in most cases (packages/tv/test/fixtures/addresses.json).
 /// </summary>
 public static class Addresses
 {
@@ -18,8 +19,10 @@ public static class Addresses
         "this server's address isn't on your network and its connection isn't encrypted: open it by its https address to sign in";
 
     // Digits are spelled [0-9]: .NET's \d takes every script's digits, and `\z` ends the text where JavaScript's `$` does.
+    // A user name before the host is passed over, as Java's URI does for the Android app; a host
+    // name is ASCII letters, digits, dots and hyphens, so `my_nas` isn't one there either.
     static readonly Regex Absolute = new Regex(
-        @"^([a-zA-Z][a-zA-Z0-9+.-]*)://(\[[0-9a-fA-F:.]+\]|[^/?#:@\s]+)(?::([0-9]{1,5}))?(?:[/?#].*)?\z",
+        @"^([a-zA-Z][a-zA-Z0-9+.-]*)://(?:[^/?#@\s\[\]]*@)?(\[[0-9a-fA-F:.]+\]|[a-zA-Z0-9.-]+)(?::([0-9]{1,5}))?(?:[/?#].*)?\z",
         RegexOptions.CultureInvariant);
 
     static readonly Regex Scheme = new Regex(@"^[a-zA-Z][a-zA-Z0-9+.-]*://", RegexOptions.CultureInvariant);
@@ -114,22 +117,23 @@ public static class Addresses
     /// <summary>
     /// Whether <paramref name="url"/>'s server is on the home network itself (a private address,
     /// a name without dots, <c>.local</c>…), which accepts a connection at once or never: not a
-    /// Tailscale address, which may be far away (the Android app's LocalRoute.isHomeHost).
+    /// Tailscale address, which may be far away, nor this device (the Android app's
+    /// LocalRoute.isHomeHost).
     /// </summary>
     public static bool AtHome(string url)
     {
         var p = Parse(url);
         if (p == null) return false;
         var h = Unbracket(p.Host);
-        if (h.EndsWith(".ts.net")) return false;
-        var v4 = IPv4.Match(h);
-        if (v4.Success)
-        {
-            var a = double.Parse(v4.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
-            var b = double.Parse(v4.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
-            if (a == 100 && b >= 64 && b <= 127) return false;
-        }
-        return IsLocalHost(h);
+        if (h.Length == 0) return false;
+        var literal = h.IndexOf(':') >= 0 || h.All(c => (c >= '0' && c <= '9') || c == '.');
+        if (!literal) return h != "localhost" && !h.EndsWith(".ts.net") && IsLocalHost(h);
+        if (!System.Net.IPAddress.TryParse(h, out var address) || System.Net.IPAddress.IsLoopback(address)) return false;
+        var b = address.GetAddressBytes();
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            return b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168) || (b[0] == 169 && b[1] == 254);
+        // Link-local (fe80::/10), the old site-local (fec0::/10) and unique local (fc00::/7), as Java reads them.
+        return address.IsIPv6LinkLocal || address.IsIPv6SiteLocal || (b[0] & 0xfe) == 0xfc;
     }
 
     /// <summary>Whether a connection to <paramref name="url"/> would travel unencrypted beyond the local network.</summary>

@@ -16,6 +16,29 @@ public interface IKeyValue
     void Remove(string key);
 }
 
+/// <summary>
+/// Seals what is kept of a sign-in, so the tokens aren't readable where the app keeps its
+/// other things (the Android app's Vault, whose key lives in the Android Keystore). Each value
+/// is bound to <c>aad</c>, the server it belongs to, so one server's tokens can't be passed off
+/// as another's.
+/// </summary>
+public interface ITokenVault
+{
+    /// <summary><paramref name="plain"/> sealed with <paramref name="aad"/>; throws when it can't be.</summary>
+    byte[] Seal(byte[] plain, string aad);
+
+    /// <summary>What <see cref="Seal"/> sealed with <paramref name="aad"/>; null when it wasn't, or the key is gone.</summary>
+    byte[]? Open(byte[] sealedValue, string aad);
+}
+
+/// <summary>Keeps tokens as they are: for tests, and until the TV gives a vault of its own.</summary>
+public sealed class PlainVault : ITokenVault
+{
+    public byte[] Seal(byte[] plain, string aad) => plain;
+
+    public byte[]? Open(byte[] sealedValue, string aad) => sealedValue;
+}
+
 /// <summary>The tokens of one server, as kept.</summary>
 /// <param name="ExpiresAt">When the access token ends, in ms since the epoch.</param>
 public sealed record StoredTokens(
@@ -25,29 +48,25 @@ public sealed record StoredTokens(
     long ExpiresAt,
     string Scope,
     string TokenEndpoint,
-    string RevocationEndpoint);
+    string RevocationEndpoint)
+{
+    // Never print the tokens.
+    public override string ToString() => $"StoredTokens {{ Issuer = {Issuer}, Scope = {Scope} }}";
+}
 
 /// <summary>A token endpoint's error (RFC 6749 §5.2), with Pley's <c>reason</c> for profile switches.</summary>
 public sealed record OAuthError(string Error, string? Description, string? Reason);
 
-public sealed record TokenResponse(string AccessToken, string? RefreshToken, long ExpiresIn, string Scope);
+/// <summary>A token answer (RFC 6749 §5.1).</summary>
+public sealed record TokenResponse(string AccessToken, string? RefreshToken, long ExpiresIn, string Scope)
+{
+    public override string ToString() => $"TokenResponse {{ ExpiresIn = {ExpiresIn}, Scope = {Scope} }}";
+}
 
+/// <summary>The token endpoint said no: in the server's words, or its error code, or its status.</summary>
 public class TokenException : AuthException
 {
-    /// <summary>RFC 6749's error codes in words, for a refusal that came without a description (rather than "Invalid_client.").</summary>
-    static readonly Dictionary<string, string> Words = new Dictionary<string, string>
-    {
-        ["invalid_client"] = "the server doesn't know this app",
-        ["unauthorized_client"] = "the server doesn't let this app sign in this way",
-        ["invalid_grant"] = "the server refused this sign-in",
-        ["access_denied"] = "the sign-in was refused",
-        ["expired_token"] = "the code expired",
-        ["invalid_scope"] = "the server refused what this app asked for",
-        ["invalid_request"] = "the server didn't understand the request",
-        ["unsupported_grant_type"] = "the server doesn't take this kind of sign-in",
-    };
-
-    public TokenException(int status, OAuthError? oauth) : base(MessageOf(status, oauth))
+    public TokenException(int status, OAuthError? oauth) : base(oauth?.Description ?? oauth?.Error ?? $"the server refused (HTTP {status})")
     {
         Status = status;
         OAuth = oauth;
@@ -55,14 +74,6 @@ public class TokenException : AuthException
 
     public int Status { get; }
     public OAuthError? OAuth { get; }
-
-    static string MessageOf(int status, OAuthError? oauth)
-    {
-        var code = oauth?.Error ?? "";
-        if (!string.IsNullOrEmpty(oauth?.Description)) return oauth!.Description!;
-        if (Words.TryGetValue(code, out var words)) return words;
-        return code.Length > 0 ? $"the server refused ({code.Replace('_', ' ')})" : $"the server refused (HTTP {status})";
-    }
 }
 
 public class SignedOutException : AuthException
@@ -75,16 +86,23 @@ public class SignedOutException : AuthException
 /// <summary>Why the TV is signed out.</summary>
 public enum SignOutReason
 {
+    /// <summary>The server ended the sign-in.</summary>
     Ended,
+    /// <summary>A token answer held more than this app asks for; its grant was ended.</summary>
     WiderScope,
+    /// <summary>The tokens were kept but can't be read anymore (the vault's key went, or what was kept is damaged).</summary>
+    Unreadable,
 }
 
-/// <summary>The web TV app's <c>auth/tokens.ts</c>: reading and sending token requests.</summary>
+/// <summary>The Android app's token requests: reading and sending them.</summary>
 public static class TokenRequests
 {
     public const string WiderScopeMessage = "the server allowed more than this app asks for: signed out";
 
-    /// <summary>RFC 6749 §5.1: without <c>expires_in</c>, an hour, Pley's own.</summary>
+    /// <summary>Why tokens couldn't be sealed: they aren't used, and the person signs in again.</summary>
+    public const string Unkept = "the sign-in couldn't be kept on this device: sign in again";
+
+    /// <summary>Pley's access tokens last an hour; an answer without expires_in is read as that.</summary>
     const long DefaultExpiresIn = 3600;
 
     const string Unreadable = "the server's answer can't be read: try again";
@@ -94,35 +112,52 @@ public static class TokenRequests
         if (body is not { ValueKind: JsonValueKind.Object } r) throw new AuthException(Unreadable);
         var access = Json.String(r, "access_token");
         if (string.IsNullOrEmpty(access)) throw new AuthException(Unreadable);
-        var type = Json.String(r, "token_type");
-        if (type != null && type.ToLowerInvariant() != "bearer") throw new AuthException(Unreadable);
+        // RFC 6749 §5.1: token_type is required, and Pley's apps take bearer tokens only.
+        if (!string.Equals(Json.String(r, "token_type"), "Bearer", StringComparison.OrdinalIgnoreCase)) throw new AuthException(Unreadable);
+        long expiresIn = DefaultExpiresIn;
+        if (Json.Field(r, "expires_in") != null)
+        {
+            var given = Json.Number(r, "expires_in");
+            if (given is not > 0) throw new AuthException(Unreadable);
+            expiresIn = (long)given.Value;
+            if (expiresIn <= 0) throw new AuthException(Unreadable);
+        }
         var refresh = Json.String(r, "refresh_token");
-        var expiresIn = Json.Number(r, "expires_in");
+        var scope = Json.String(r, "scope");
         return new TokenResponse(
             access!,
             string.IsNullOrEmpty(refresh) ? null : refresh,
-            expiresIn is > 0 ? (long)expiresIn.Value : DefaultExpiresIn,
-            // RFC 6749 §5.1: a scope left out is the one asked for.
-            Json.String(r, "scope") ?? askedScope);
+            expiresIn,
+            // Without a scope, the server issued what was asked (RFC 6749 §5.1).
+            string.IsNullOrEmpty(scope) ? askedScope : scope!);
     }
 
     public static OAuthError? ParseOAuthError(JsonElement? body)
     {
         if (body is not { ValueKind: JsonValueKind.Object } r) return null;
         var error = Json.String(r, "error");
-        return error == null ? null : new OAuthError(error, Json.String(r, "error_description"), Json.String(r, "reason"));
+        if (string.IsNullOrEmpty(error)) return null;
+        // The description is shown as it is: one short line without control characters.
+        var description = Plain.Of(Json.String(r, "error_description"));
+        var reason = Json.String(r, "reason");
+        return new OAuthError(error!, description.Length == 0 ? null : description, string.IsNullOrEmpty(reason) ? null : reason);
     }
 
     /// <summary>The scope names in <paramref name="answer"/> that <paramref name="asked"/> doesn't hold.</summary>
     public static IReadOnlyList<string> ExtraScopes(string answer, string asked)
     {
         var have = asked.Split(' ').Where(s => s.Length > 0).ToList();
-        return answer.Split(' ').Where(s => s.Length > 0 && !have.Contains(s)).ToList();
+        return answer.Split(' ').Where(s => s.Length > 0 && !have.Contains(s)).Distinct().ToList();
     }
 
-    /// <summary>POSTs <paramref name="fields"/> to a token endpoint; the answer's JSON, or a <see cref="TokenException"/>.</summary>
+    /// <summary>
+    /// POSTs <paramref name="fields"/> to a token endpoint, without following a redirect (codes and
+    /// tokens go to the address the metadata named, or nowhere) and never over plain http beyond
+    /// the home network; the answer's JSON, or a <see cref="TokenException"/>.
+    /// </summary>
     public static async Task<JsonElement?> PostForm(Transport http, string url, IEnumerable<KeyValuePair<string, string>> fields)
     {
+        PlainHttp.Check(url);
         var res = await http(new HttpRequest
         {
             Method = "POST",
@@ -130,7 +165,7 @@ public static class TokenRequests
             Headers = new Dictionary<string, string> { ["Content-Type"] = "application/x-www-form-urlencoded", ["Accept"] = "application/json" },
             Body = Transports.Form(fields),
             ResponseType = ResponseType.Json,
-            TimeoutMs = 15_000,
+            TimeoutMs = Metadata.ReadTimeoutMs,
         }).ConfigureAwait(false);
         if (res.Status < 200 || res.Status >= 300) throw new TokenException(res.Status, ParseOAuthError(res.Json()));
         return res.Json();
@@ -151,7 +186,7 @@ public static class TokenRequests
         catch (NetworkException)
         {
         }
-        catch (TokenException)
+        catch (AuthException)
         {
         }
     }
@@ -164,6 +199,7 @@ public static class TokenRequests
 /// The tokens of one server: the access token while it works, a new pair from the refresh token
 /// when it doesn't. Refreshes happen one at a time (the server ends the sign-in when a refresh
 /// token is used twice), and the new refresh token is saved before the new access token is used.
+/// They are kept sealed by the vault (<see cref="ITokenVault"/>).
 /// </summary>
 public sealed class Tokens
 {
@@ -173,22 +209,26 @@ public sealed class Tokens
     /// <summary>How long a refreshed token counts as just issued: refused within this, the sign-in is over.</summary>
     public const long JustIssuedMs = 60_000;
 
-    static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-
     readonly SemaphoreSlim queue = new SemaphoreSlim(1, 1);
+    readonly object kept = new object();
     readonly IKeyValue store;
+    readonly ITokenVault vault;
     readonly Transport http;
     readonly Action<SignOutReason> onSignedOut;
     readonly Func<long> clock;
     /// <summary>The access token the last refresh or profile switch gave, and when.</summary>
     (string Token, long At)? lastIssued;
+    /// <summary>What was read last, and as what, so requests don't each open the vault.</summary>
+    (string Text, StoredTokens Tokens)? opened;
 
-    public Tokens(string issuer, string clientId, IKeyValue store, Transport http, Action<SignOutReason>? onSignedOut = null, Func<long>? clock = null)
+    public Tokens(string issuer, string clientId, IKeyValue store, Transport http, Action<SignOutReason>? onSignedOut = null, Func<long>? clock = null,
+        ITokenVault? vault = null)
     {
         Issuer = issuer;
         ClientId = clientId;
         this.store = store;
         this.http = http;
+        this.vault = vault ?? new PlainVault();
         this.onSignedOut = onSignedOut ?? (_ => { });
         this.clock = clock ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
     }
@@ -198,24 +238,115 @@ public sealed class Tokens
 
     string Key => $"pley.tokens.{Issuer}";
 
+    /// <summary>
+    /// The tokens kept, opened; null when signed out. Tokens kept but unreadable (the vault's key
+    /// went, or a field is missing) are removed, and the TV is signed out with
+    /// <see cref="SignOutReason.Unreadable"/>.
+    /// </summary>
     public StoredTokens? Load()
     {
-        var text = store.Get(Key);
-        if (string.IsNullOrEmpty(text)) return null;
+        bool unreadable;
+        StoredTokens? tokens;
+        lock (kept)
+        {
+            var text = store.Get(Key);
+            if (string.IsNullOrEmpty(text))
+            {
+                opened = null;
+                return null;
+            }
+            if (opened is { } o && o.Text == text) return o.Tokens;
+            tokens = Open(text!);
+            unreadable = tokens == null;
+            if (unreadable) store.Remove(Key);
+            opened = tokens == null ? null : (text!, tokens);
+        }
+        if (unreadable) onSignedOut(SignOutReason.Unreadable);
+        return tokens;
+    }
+
+    /// <summary>Whether tokens are kept, without opening them: for choosing the first screen. They may still turn out unreadable.</summary>
+    public bool Kept => !string.IsNullOrEmpty(store.Get(Key));
+
+    StoredTokens? Open(string text)
+    {
         try
         {
-            var o = JsonSerializer.Deserialize<StoredTokens>(text!, JsonOptions);
-            return o != null && !string.IsNullOrEmpty(o.AccessToken) && o.Issuer == Issuer ? o : null;
+            byte[]? plain;
+            try
+            {
+                plain = vault.Open(Convert.FromBase64String(text), Issuer);
+            }
+            catch (Exception e) when (e is not FormatException)
+            {
+                // The vault failed (its key went with a reset): as unreadable as a damaged value.
+                plain = null;
+            }
+            if (plain == null) return null;
+            using var doc = JsonDocument.Parse(plain);
+            var o = doc.RootElement;
+            var issuer = Json.String(o, "issuer");
+            var access = Json.String(o, "accessToken");
+            var refresh = Json.Field(o, "refreshToken");
+            var expiresAt = Json.Number(o, "expiresAt");
+            var scope = Json.String(o, "scope");
+            var tokenEndpoint = Json.String(o, "tokenEndpoint");
+            var revocationEndpoint = Json.String(o, "revocationEndpoint");
+            // Every field is checked: tokens kept by another build, or damaged, aren't used.
+            if (issuer != Issuer || string.IsNullOrEmpty(access) || expiresAt == null || scope == null ||
+                string.IsNullOrEmpty(tokenEndpoint) || string.IsNullOrEmpty(revocationEndpoint) ||
+                (refresh != null && refresh.Value.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)))
+            {
+                return null;
+            }
+            var refreshToken = refresh is { ValueKind: JsonValueKind.String } r ? r.GetString() : null;
+            return new StoredTokens(issuer!, access!, string.IsNullOrEmpty(refreshToken) ? null : refreshToken, (long)expiresAt.Value, scope, tokenEndpoint!, revocationEndpoint!);
         }
-        catch (JsonException)
+        catch (Exception e) when (e is FormatException or JsonException or ArgumentException)
         {
             return null;
         }
     }
 
-    void Save(StoredTokens tokens) => store.Set(Key, JsonSerializer.Serialize(tokens, JsonOptions));
+    /// <summary>Keeps <paramref name="tokens"/>, sealed; when that fails, they aren't used.</summary>
+    void Save(StoredTokens tokens)
+    {
+        var json = JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, object?>
+        {
+            ["issuer"] = tokens.Issuer,
+            ["accessToken"] = tokens.AccessToken,
+            ["refreshToken"] = tokens.RefreshToken,
+            ["expiresAt"] = tokens.ExpiresAt,
+            ["scope"] = tokens.Scope,
+            ["tokenEndpoint"] = tokens.TokenEndpoint,
+            ["revocationEndpoint"] = tokens.RevocationEndpoint,
+        });
+        byte[] sealedValue;
+        try
+        {
+            sealedValue = vault.Seal(json, Issuer);
+        }
+        catch (Exception e) when (e is not AuthException)
+        {
+            throw new AuthException(TokenRequests.Unkept, e);
+        }
+        var text = Convert.ToBase64String(sealedValue);
+        lock (kept)
+        {
+            opened = null;
+            store.Set(Key, text);
+            opened = (text, tokens);
+        }
+    }
 
-    void Wipe() => store.Remove(Key);
+    void Wipe()
+    {
+        lock (kept)
+        {
+            store.Remove(Key);
+            opened = null;
+        }
+    }
 
     public bool SignedIn => Load() != null;
 

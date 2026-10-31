@@ -386,15 +386,20 @@ version.
 
 ### How it is built
 
-- `src/Pley.Tv.Core` is the logic without Tizen (.NET Standard 2.0): what
-  `packages/tv` does outside its screens, ported to C#. It runs on any
-  computer, so its tests need no TV.
+- It is a port of the Android TV app: its screens, its words and its rules
+  (sign-in, servers, the API client, the rail, tiles). The web TV app
+  (`packages/tv`) is itself a port of the Android one.
+- `src/Pley.Tv.Core` is the logic without Tizen (.NET Standard 2.0). It
+  runs on any computer, so its tests need no TV; they include the Android
+  app's tests for the same rules.
 - `src/Pley.Tv.Tizen` is the app: NUI screens on the Core, the TV's player,
   remote keys and keyboard, and packaging.
-- The two apps answer the same questions the same way: the tests of both
-  run the fixtures in `packages/tv/test/fixtures`, inputs with the answers
-  `packages/tv` gives. A rule that changes in one app fails the other's
-  tests until it changes there too.
+- The Core's tests also run the fixtures in `packages/tv/test/fixtures`,
+  inputs with the answers `packages/tv` gives, so the two Samsung apps
+  answer the same questions the same way. Where the Android app is
+  stricter (a token answer without `token_type`, a device code without
+  `expires_in`), the native app follows it, and its test says which
+  fixture case it answers differently.
 
 ### Building and installing
 

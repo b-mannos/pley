@@ -10,7 +10,7 @@ using Pley.Tv.Core.Net;
 
 namespace Pley.Tv.Core.Api;
 
-/// <summary>An answer that isn't 2xx, with Pley's <c>{ code, message }</c>.</summary>
+/// <summary>An answer that isn't 2xx, with Pley's <c>{ code, message }</c>: the message is the server's sentence, written for people.</summary>
 public class ApiException : Exception
 {
     public ApiException(int status, string code, string message, JsonElement? body = null) : base(message)
@@ -29,32 +29,57 @@ public class ApiException : Exception
 /// <summary>A playback session stopped from elsewhere (<c>410 session_stopped</c>), with what the one who stopped it wrote.</summary>
 public class SessionStoppedException : ApiException
 {
-    public SessionStoppedException(string? note) : base(410, "session_stopped", note ?? "Playback was stopped by the server's administrator") => Note = note;
+    /// <summary>What the player says, the Android app's words: who stopped it, then their note on a line of its own.</summary>
+    public const string ByAdmin = "Playback was stopped by the server's administrator.";
+
+    public SessionStoppedException(string? note)
+        : base(410, "session_stopped", string.IsNullOrWhiteSpace(note) ? ByAdmin : ByAdmin + "\n" + note!.Trim()) => Note = note;
 
     public string? Note { get; }
 }
 
-/// <summary>How errors read to people, and whether the server answered at all.</summary>
+/// <summary>The server answered with something that isn't what Pley answers: another program, or a much older Pley.</summary>
+public class UnreadableAnswerException : Exception
+{
+    public UnreadableAnswerException(int status, Exception? inner = null) : base("the server's answer can't be read: is it Pley, and up to date?", inner) =>
+        Status = status;
+
+    public int Status { get; }
+}
+
+/// <summary>How errors read to people, and whether the server answered at all: the Android app's <c>describe</c> and <c>sentenceOf</c>.</summary>
 public static class Errors
 {
-    /// <summary>What to show for an error, as a sentence.</summary>
-    public static string Message(Exception e)
-    {
-        var text = e.Message;
-        return text.Length > 0 ? char.ToUpperInvariant(text[0]) + text.Substring(1) : text;
-    }
+    /// <summary>A failed page's title when the server answered nothing.</summary>
+    public const string OfflineTitle = "Can't reach your server";
 
-    /// <summary>The server answered nothing: no connection, no answer in time, or a gateway in front of it saying it has none (502–504).</summary>
-    public static bool Unreachable(Exception e) => e switch
+    /// <summary>Why <paramref name="e"/> happened, in a few words in lower case: "no answer in time".</summary>
+    public static string Describe(Exception e) => e switch
     {
-        NetworkException n => !n.Cancelled,
-        ApiException a => a.Status is 502 or 503 or 504,
-        _ => false,
+        JsonException => "that isn't a Pley server",
+        _ => e.Message,
     };
 
+    /// <summary><paramref name="text"/> as a sentence: a capital first, a full stop last (the app's own texts come in lower case, without one).</summary>
+    public static string AsSentence(string text)
+    {
+        var t = text.Trim();
+        if (t.Length == 0) return t;
+        var capital = char.ToUpperInvariant(t[0]) + t.Substring(1);
+        return ".…!?".IndexOf(capital[capital.Length - 1]) >= 0 ? capital : capital + ".";
+    }
+
+    /// <summary>What to show for an error, as a sentence: "No answer in time."</summary>
+    public static string Message(Exception e) => AsSentence(Describe(e));
+
+    /// <summary>The server answered nothing: no connection, or no answer in time. A refusal, a 502 among them, is an answer.</summary>
+    public static bool Unreachable(Exception e) => e is NetworkException { Cancelled: false };
+
     /// <summary>Why the server answered nothing, as the Android app says it: "Nothing answers there." or "No answer in time."</summary>
-    public static string UnreachableReason(Exception e) =>
-        e is NetworkException n && n.Message == Transports.TimedOut ? "No answer in time." : "Nothing answers there.";
+    public static string UnreachableReason(Exception e) => Message(e);
+
+    /// <summary>A failed page's text when the server answered nothing: why, and what to check.</summary>
+    public static string OfflineBody(Exception e) => $"{Message(e)} Check that the server is on and that this device is on its network.";
 }
 
 // Answers whose shape is an envelope around the types.
@@ -88,37 +113,38 @@ public sealed record LibraryQuery
     public bool? Watched { get; init; }
     public string? Genre { get; init; }
     public int? Year { get; init; }
-    public int? Offset { get; init; }
+    /// <summary>Always sent, as the Android app sends it: the first page is at 0.</summary>
+    public int Offset { get; init; }
     public int? Limit { get; init; }
 }
 
 /// <summary>
 /// Pley's API for one server, as one signed-in app: every request carries the access token in
-/// <c>Authorization: Bearer</c> (the only place Pley takes an app's token), refreshed once on
-/// <c>invalid_token</c>. The web TV app's <c>api/client.ts</c>.
+/// <c>Authorization: Bearer</c> (the only place Pley takes an app's token) to the server's own
+/// address only, refreshed once on <c>invalid_token</c>. The Android app's <c>HttpPleyApi</c>.
 /// </summary>
 public sealed class Api
 {
-    /// <summary>A server at home accepts at once or never: after this long without an answer, a quick question tells which.</summary>
-    public const int HomeWaitMs = 3_000;
+    /// <summary>The most of a refusal's body read: they are a sentence.</summary>
+    const int MaxErrorBody = 16 * 1024;
+
+    /// <summary>The longest message kept from a refusal.</summary>
+    const int MaxErrorText = 300;
 
     static readonly Regex Absolute = new Regex(@"^https?://", RegexOptions.CultureInvariant);
-    static readonly Regex InvalidToken = new Regex("invalid_token", RegexOptions.CultureInvariant);
+    static readonly Regex InvalidTokenParam = new Regex(@"(^|[\s,])error\s*=\s*""?invalid_token""?(\s*,|\s*$)", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     /// <summary>Request bodies: written as given, nulls included (a null clears a field; a field left out keeps it).</summary>
     static readonly JsonSerializerOptions BodyOptions = new JsonSerializerOptions();
 
     readonly Tokens tokens;
     readonly Transport http;
-    /// <summary>The server is on the home network: a request it doesn't answer within 3 s gets a quick question.</summary>
-    readonly bool homeNetwork;
 
     public Api(string server, Tokens tokens, Transport http)
     {
         Server = server;
         this.tokens = tokens;
         this.http = http;
-        homeNetwork = Addresses.AtHome(server);
     }
 
     public string Server { get; }
@@ -132,21 +158,49 @@ public sealed class Api
     /// </summary>
     bool OwnServer(string path) => Addresses.Origin(Url(path)) == Addresses.Origin(Server);
 
-    /// <summary>The raw answer of an authenticated request; errors as <see cref="ApiException"/>.</summary>
+    /// <summary>
+    /// The raw answer of an authenticated request; errors as <see cref="ApiException"/>.
+    /// <paramref name="timeoutMs"/> is how long the server may stay silent (10 s without).
+    /// </summary>
     public async Task<HttpResponse> Send(string path, string method = "GET", object? body = null, IEnumerable<KeyValuePair<string, object?>>? query = null,
         CancellationToken cancel = default, int? timeoutMs = null, ResponseType responseType = ResponseType.Json, Action<long>? onProgress = null)
     {
         var token = await tokens.AccessToken().ConfigureAwait(false) ?? throw new SignedOutException();
         var res = await Once(path, method, body, query, cancel, timeoutMs, responseType, onProgress, token).ConfigureAwait(false);
-        if (res.Status == 401 && IsInvalidToken(res) && OwnServer(path))
+        if (res.Status == 401 && OwnServer(path) && InvalidToken(res.Header("WWW-Authenticate")))
         {
-            // Refused just after a refresh: the server no longer takes this sign-in.
-            if (await tokens.RefusedAfterRefresh(token).ConfigureAwait(false)) throw new SignedOutException();
-            var fresh = await tokens.Refresh(token).ConfigureAwait(false);
-            res = await Once(path, method, body, query, cancel, timeoutMs, responseType, onProgress, fresh).ConfigureAwait(false);
+            var fresh = await Refreshed(token).ConfigureAwait(false);
+            // Once: a 401 after a refresh is the answer.
+            if (fresh != null) res = await Once(path, method, body, query, cancel, timeoutMs, responseType, onProgress, fresh).ConfigureAwait(false);
         }
         if (res.Status >= 200 && res.Status < 300) return res;
         throw ToError(res);
+    }
+
+    /// <summary>
+    /// A new token in place of <paramref name="sent"/>, which the server refused; null when the
+    /// refusal is the answer: refused moments after a refresh (the sign-in ends), or a refresh
+    /// that failed.
+    /// </summary>
+    async Task<string?> Refreshed(string sent)
+    {
+        try
+        {
+            if (await tokens.RefusedAfterRefresh(sent).ConfigureAwait(false)) return null;
+            return await tokens.Refresh(sent).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is AuthException or NetworkException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Whether a WWW-Authenticate value is a Bearer challenge with error="invalid_token" (RFC 6750 §3).</summary>
+    public static bool InvalidToken(string? header)
+    {
+        var h = (header ?? "").Trim();
+        if (!h.StartsWith("Bearer", StringComparison.OrdinalIgnoreCase) || (h.Length > 6 && !char.IsWhiteSpace(h[6]))) return false;
+        return InvalidTokenParam.IsMatch(h.Substring(6));
     }
 
     Task<HttpResponse> Once(string path, string method, object? body, IEnumerable<KeyValuePair<string, object?>>? query, CancellationToken cancel,
@@ -160,47 +214,19 @@ public sealed class Api
             headers["Content-Type"] = "application/json";
             text = JsonSerializer.Serialize(body, BodyOptions);
         }
-        var req = new HttpRequest
+        return http(new HttpRequest
         {
             Method = method,
             Url = Transports.WithQuery(Url(path), query),
             Headers = headers,
             Body = text,
             ResponseType = responseType,
-            TimeoutMs = timeoutMs ?? Transports.DefaultTimeoutMs,
+            TimeoutMs = timeoutMs ?? Transports.ReadTimeoutMs,
+            // The API's redirects are followed (a collection's picture is its item's); the token stays on this server.
+            FollowRedirects = true,
             Cancel = cancel,
             OnProgress = onProgress,
-        };
-        return homeNetwork ? Watched(req, Url("/api/server")) : http(req);
-    }
-
-    /// <summary>
-    /// <paramref name="req"/> to a server on the home network, which a TV can't give a connect
-    /// timeout of its own (the Android app gives it 3 s): when it hasn't answered in 3 s, the
-    /// server is asked a quick question, and if that gets no answer in 3 s either, the request
-    /// gives up with "no answer in time". A server that is only slow (a conversion starting)
-    /// answers the question, and the request waits as long as it was going to.
-    /// </summary>
-    async Task<HttpResponse> Watched(HttpRequest req, string ping)
-    {
-        using var own = CancellationTokenSource.CreateLinkedTokenSource(req.Cancel);
-        var main = http(req with { Cancel = own.Token });
-        // A request given up on still fails later; that failure is seen here, not left unobserved.
-        _ = main.ContinueWith(t => t.Exception, TaskContinuationOptions.OnlyOnFaulted);
-        var waited = await Task.WhenAny(main, Task.Delay(HomeWaitMs, own.Token)).ConfigureAwait(false);
-        if (waited == main || own.IsCancellationRequested) return await main.ConfigureAwait(false);
-        var pingFailed = http(new HttpRequest
-        {
-            Url = ping,
-            Headers = new Dictionary<string, string> { ["Accept"] = "application/json" },
-            ResponseType = ResponseType.Json,
-            TimeoutMs = HomeWaitMs,
-            Cancel = own.Token,
-        }).ContinueWith(t => t.Exception?.InnerException is NetworkException { Cancelled: false }, TaskScheduler.Default);
-        if (await Task.WhenAny(main, pingFailed).ConfigureAwait(false) == main || !await pingFailed.ConfigureAwait(false))
-            return await main.ConfigureAwait(false);
-        own.Cancel();
-        throw new NetworkException(Transports.TimedOut);
+        });
     }
 
     public async Task<T> Get<T>(string path, IEnumerable<KeyValuePair<string, object?>>? query = null, CancellationToken cancel = default, int? timeoutMs = null)
@@ -222,11 +248,11 @@ public sealed class Api
     {
         try
         {
-            return JsonSerializer.Deserialize<T>(res.Text ?? "null", ApiJson.Options) ?? throw new ApiException(res.Status, "bad_answer", "the server's answer can't be read");
+            return JsonSerializer.Deserialize<T>(res.Text ?? "null", ApiJson.Options) ?? throw new UnreadableAnswerException(res.Status);
         }
-        catch (JsonException)
+        catch (JsonException e)
         {
-            throw new ApiException(res.Status, "bad_answer", "the server's answer can't be read");
+            throw new UnreadableAnswerException(res.Status, e);
         }
     }
 
@@ -338,8 +364,6 @@ public sealed class Api
 
     public Task<JsonElement?> MarkUnwatched(long id) => Call("POST", $"/api/items/{id}/unwatched");
 
-    public Task<JsonElement?> Prefetch(long id) => Call("POST", $"/api/items/{id}/prefetch");
-
     /// <summary>
     /// The tracks picked for an item (the whole show for an episode). <paramref name="keepAudio"/>
     /// leaves the audio picked before as it is.
@@ -353,27 +377,35 @@ public sealed class Api
         return Call("PUT", $"/api/items/{itemId}/streams", body);
     }
 
-    static bool IsInvalidToken(HttpResponse res)
-    {
-        var challenge = res.Header("WWW-Authenticate") ?? "";
-        // A bare 401 from an older server counts too: the token is what failed.
-        return challenge.Length == 0 || InvalidToken.IsMatch(challenge);
-    }
-
+    /// <summary>
+    /// The refusal <paramref name="res"/> is: Pley's JSON, or the plain text a body or query the
+    /// server couldn't read gets (400, 415, 422), as one short line; never a page's HTML.
+    /// </summary>
     static ApiException ToError(HttpResponse res)
     {
-        var code = StatusCode(res.Status);
-        var message = $"the server refused (HTTP {res.Status})";
-        var body = res.Json();
-        string? bodyMessage = null;
-        if (body is { ValueKind: JsonValueKind.Object } o)
+        var text = res.Text ?? "";
+        if (text.Length > MaxErrorBody) text = text.Substring(0, MaxErrorBody);
+        var start = text.TrimStart();
+        JsonElement? json = null;
+        if (start.StartsWith("{", StringComparison.Ordinal))
         {
-            code = Json.String(o, "code") ?? code;
-            bodyMessage = Json.String(o, "message");
-            message = bodyMessage ?? message;
+            try
+            {
+                using var doc = JsonDocument.Parse(text);
+                json = doc.RootElement.Clone();
+            }
+            catch (JsonException)
+            {
+                json = null;
+            }
         }
-        if (res.Status == 410 && code == "session_stopped") return new SessionStoppedException(bodyMessage);
-        return new ApiException(res.Status, code, message, body is { ValueKind: JsonValueKind.Object } ? body : null);
+        var bodyMessage = json is { } o ? Plain.FirstLine(Json.String(o, "message"), MaxErrorText) : "";
+        var code = (json is { } c ? Json.String(c, "code") : null) is { Length: > 0 } given ? given : StatusCode(res.Status);
+        var message = bodyMessage.Length > 0 ? bodyMessage
+            : json == null && !start.StartsWith("<", StringComparison.Ordinal) && Plain.FirstLine(text, MaxErrorText) is { Length: > 0 } line ? line
+            : $"the server refused (HTTP {res.Status})";
+        if (res.Status == 410 && code == "session_stopped") return new SessionStoppedException(bodyMessage.Length > 0 ? bodyMessage : null);
+        return new ApiException(res.Status, code, message, json);
     }
 
     static string StatusCode(int status) => status switch

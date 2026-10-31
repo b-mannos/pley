@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Pley.Tv.Core.Api;
 using Pley.Tv.Core.Auth;
@@ -10,29 +11,107 @@ using Pley.Tv.Core.Net;
 
 namespace Pley.Tv.Core;
 
-/// <summary>What a person sets on this TV (Settings).</summary>
+/// <summary>Subtitle backgrounds.</summary>
+public enum SubtitleBackground
+{
+    None,
+    DarkBox,
+}
+
+/// <summary>Subtitle typefaces: the system's sans serif (the default), serif and monospace, and its casual hand where it has one.</summary>
+public enum SubtitleFont
+{
+    Sans,
+    Serif,
+    Monospace,
+    Casual,
+}
+
+/// <summary>Sending a sound format to the receiver as it is, or decoding it here.</summary>
+public enum PassthroughMode
+{
+    Auto,
+    On,
+    Off,
+}
+
+/// <summary>How big the cards of a grid are: more small ones, or fewer large ones.</summary>
+public enum GridDensity
+{
+    Small,
+    Medium,
+    Large,
+}
+
+/// <summary>Matching the TV's display mode to the video.</summary>
+public enum FrameRateMatching
+{
+    /// <summary>For videos of 10 minutes or more, following the TV's own setting.</summary>
+    Auto,
+    Always,
+    Off,
+}
+
+/// <summary>
+/// What a person sets on this TV (Settings), not the profile's: those live on the server. The
+/// Android app's settings, as a TV has them; the defaults are what the app does without being asked.
+/// </summary>
 public sealed record Settings
 {
-    /// <summary>"small", "normal", "large" or "largest".</summary>
-    public string SubtitleSize { get; init; } = "normal";
-    public bool SubtitleBox { get; init; }
-    public string SubtitleFont { get; init; } = "default";
-    public string SubtitlePosition { get; init; } = "bottom";
-    /// <summary>Up Next plays after its 10 s countdown.</summary>
+    /// <summary>Automatic: the original, lower only when it doesn't play well (docs/QUALITY.md).</summary>
+    public const string Automatic = "auto";
+
+    /// <summary>Subtitle sizes offered: 3.8, 4.8, 6 and 7.6 % of the video's height.</summary>
+    public static readonly IReadOnlyList<float> SubtitleSizes = new[] { 0.038f, 0.048f, 0.06f, 0.076f };
+
+    /// <summary>Subtitle positions offered: at the bottom, then raised by 5, 10 and 15 % of the video's height.</summary>
+    public static readonly IReadOnlyList<float> SubtitleRaises = new[] { 0f, 0.05f, 0.1f, 0.15f };
+
+    /// <summary>
+    /// The sound formats with a passthrough choice: Dolby Digital, Dolby Digital Plus, Atmos (in
+    /// Dolby Digital Plus), TrueHD, DTS and DTS-HD.
+    /// </summary>
+    public static readonly IReadOnlyList<string> PassthroughFormats = new[] { "ac3", "eac3", "eac3-joc", "truehd", "dts", "dts-hd" };
+
+    /// <summary>The quality last picked ("auto", "Original" or a preset's id); Automatic until one is.</summary>
+    public string Quality { get; init; } = Automatic;
+    public FrameRateMatching FrameRateMatching { get; init; } = FrameRateMatching.Auto;
+    /// <summary>Per format of <see cref="PassthroughFormats"/>; a format left out is Auto.</summary>
+    public IReadOnlyDictionary<string, PassthroughMode> Passthrough { get; init; } = new Dictionary<string, PassthroughMode>();
+    /// <summary>Under Advanced.</summary>
+    public bool Tunneling { get; init; }
+    /// <summary>A share of the video's height: one of <see cref="SubtitleSizes"/>.</summary>
+    public float SubtitleSize { get; init; } = 0.048f;
+    public SubtitleBackground SubtitleBackground { get; init; } = SubtitleBackground.None;
+    public SubtitleFont SubtitleFont { get; init; } = SubtitleFont.Sans;
+    /// <summary>How far text subtitles sit above the bottom, a share of the video's height: one of <see cref="SubtitleRaises"/>.</summary>
+    public float SubtitleRaise { get; init; }
+    /// <summary>Up Next plays after its countdown.</summary>
     public bool AutoplayNext { get; init; } = true;
-    public bool ReduceMotion { get; init; }
     /// <summary>The compact readout over the video while the controls are hidden.</summary>
     public bool PlaybackDetails { get; init; }
-    /// <summary>The quality last picked ("auto", "original", "8m"…); Automatic until one is.</summary>
-    public string Quality { get; init; } = "auto";
-    /// <summary>Send TrueHD to the receiver as it is (the TV can't promise it).</summary>
-    public bool PassthroughTrueHd { get; init; }
-    /// <summary>Send DTS to the receiver as it is.</summary>
-    public bool PassthroughDts { get; init; }
+    public GridDensity GridDensity { get; init; } = GridDensity.Medium;
+    /// <summary>Move less, whatever the TV says.</summary>
+    public bool ReduceMotion { get; init; }
+
+    /// <summary>The passthrough choice for <paramref name="format"/> ("eac3"…).</summary>
+    public PassthroughMode PassthroughOf(string format) => Passthrough.TryGetValue(format, out var mode) ? mode : PassthroughMode.Auto;
+
+    /// <summary>These settings as they may be: a size or a raise not offered is the nearest one offered, a format not offered goes.</summary>
+    public Settings Allowed() => this with
+    {
+        Quality = string.IsNullOrWhiteSpace(Quality) ? Automatic : Quality,
+        Passthrough = (Passthrough ?? new Dictionary<string, PassthroughMode>())
+            .Where(p => PassthroughFormats.Contains(p.Key) && p.Value != PassthroughMode.Auto)
+            .ToDictionary(p => p.Key, p => p.Value),
+        SubtitleSize = SubtitleSizes.OrderBy(s => Math.Abs(s - SubtitleSize)).First(),
+        SubtitleRaise = SubtitleRaises.OrderBy(s => Math.Abs(s - SubtitleRaise)).First(),
+    };
 }
 
 /// <summary>A server this TV signed in to or chose, newest first on the server list.</summary>
-public sealed record SavedServer(string Url, string Name, long LastUsed);
+/// <param name="Id">The server's own id, when it was found by broadcast: the same server at a new address.</param>
+public sealed record SavedServer(string Url, string Name, long LastUsed, string? Id = null);
 
 /// <summary>The first screen, from what the TV kept (no network): the Android app's StartGate.</summary>
 public enum StartPage
@@ -44,39 +123,65 @@ public enum StartPage
 }
 
 /// <summary>What the TV app gives the shared state: its client id, its name, and where it keeps things.</summary>
-public sealed record AppPlatform(string Name, string ClientId, IKeyValue Storage);
+public sealed record AppPlatform(string Name, string ClientId, IKeyValue Storage)
+{
+    /// <summary>The app's version, for its User-Agent.</summary>
+    public string Version { get; init; } = "?";
+    /// <summary>The TV's Tizen version ("9.0"), for the User-Agent: the server shows it on the app's row.</summary>
+    public string? OsVersion { get; init; }
+    /// <summary>The TV's model, for the User-Agent: two TVs of a household tell apart.</summary>
+    public string? Model { get; init; }
+    /// <summary>Seals the tokens where they are kept; without one they are kept as they are.</summary>
+    public ITokenVault? TokenVault { get; init; }
+    /// <summary>Makes the HTTP handlers; Core's own (<see cref="Transports.DefaultHandler"/>) without.</summary>
+    public HandlerFactory? Handlers { get; init; }
+
+    /// <summary>How every request introduces the app.</summary>
+    public string UserAgent => UserAgents.Of(Version, OsVersion, Model);
+}
 
 /// <summary>
 /// The app's state: the server signed in to, its API and tokens, who is watching, the
 /// libraries, the settings, Home as last seen (drawn first at the next launch), and the
-/// server's events. The web TV app's <c>state.ts</c>; it lives on the UI thread, where its
-/// awaits come back to.
+/// server's events. It lives on the UI thread, where its awaits come back to.
 /// </summary>
 public sealed class AppState
 {
     const string ServerKey = "pley.server";
     const string SettingsKey = "pley.settings";
-    /// <summary>Set once a quality is picked: the settings saved before Automatic held Original whether picked or not.</summary>
-    const string QualityPickedKey = "pley.qualityPicked";
-    const string HomeKey = "pley.home";
+    /// <summary>"Always start as": one profile for the whole TV, as on Android.</summary>
+    const string AlwaysStartAsKey = "pley.alwaysStartAs";
     /// <summary>How many profiles the server's household has, as last heard; kept per server.</summary>
     const string HouseholdKey = "pley.household";
-    /// <summary>Who is watching and their libraries, as last heard: the rail and the library pages before the server answers.</summary>
-    const string MeKey = "pley.me";
-    const string LibrariesKey = "pley.libraries";
     const string ServersKey = "pley.servers";
     /// <summary>The household's profiles, as last heard; kept per server.</summary>
     const string ProfilesKey = "pley.householdProfiles";
-    /// <summary>How long an item's details are kept for pages and playbacks.</summary>
-    const long ItemTtlMs = 5 * 60_000;
+    /// <summary>The profile last used on a server, and the last few used there, newest first.</summary>
+    const string ProfileKey = "pley.profile";
+    const string RecentProfilesKey = "pley.recentProfiles";
+    /// <summary>Home, who is watching and their libraries, as last heard, per server and profile: drawn before the server answers.</summary>
+    const string HomeKey = "pley.home";
+    const string MeKey = "pley.me";
+    const string LibrariesKey = "pley.libraries";
+    /// <summary>Profiles per server whose Home and libraries stay saved.</summary>
+    const int ProfilesSaved = 3;
+    /// <summary>Item details kept for pages and playbacks; the least recently used go first.</summary>
+    const int ItemsKept = 50;
+    /// <summary>A detail older than this is shown while it is asked for again; reconnecting asks again for what is older.</summary>
+    public const long RevalidateMs = 30_000;
     /// <summary>Watch state changes come in bursts (an episode, its season and show; a play reaching 90 %): gathered this long.</summary>
     const long StateGatherMs = 300;
+    /// <summary>A library's changes come in bursts during a scan: gathered this long.</summary>
+    const long LibraryGatherMs = 1_500;
     /// <summary>How long "Showing what Pley had saved. Reconnecting…" shows: as long as an error's toast.</summary>
     const long OfflineNoticeMs = 6_000;
-    /// <summary>While the server is out of reach it is asked this often (and given as long to answer).</summary>
-    const int OfflineAskMs = 5_000;
 
     static readonly JsonSerializerOptions Camel = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    static readonly JsonSerializerOptions SettingsJson = new JsonSerializerOptions
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter() },
+    };
 
     readonly AppPlatform platform;
     readonly Transport http;
@@ -89,32 +194,30 @@ public sealed class AppState
     readonly LinkedList<long> itemOrder = new LinkedList<long>();
     readonly HashSet<long> stateIds = new HashSet<long>();
     readonly HashSet<long> stateParents = new HashSet<long>();
+    readonly Dictionary<long, IDisposable> libraryTimers = new Dictionary<long, IDisposable>();
     Tokens? tokens;
     EventStream? events;
-    IDisposable? libraryTimer, stateTimer, noticeTimer, awayTimer;
+    IDisposable? stateTimer, noticeTimer;
+    /// <summary>The profile signed in on the server in use, when known: whose saved Home and libraries show.</summary>
+    long? profile;
     /// <summary>Playbacks on top: Home and the pages wait to ask again until they end (their own reports change the watch state too).</summary>
     int holds;
     /// <summary>The libraries' order changes on their way to the server, one at a time.</summary>
     Task orderQueue = Task.CompletedTask;
-    long lastSync;
+    /// <summary>When the events last brought everything up to date (<see cref="IScheduler.Elapsed"/>).</summary>
+    long? lastSync;
 
+    /// <param name="http">Sends the app's requests; Core's transport over <see cref="AppPlatform.Handlers"/> without.</param>
     public AppState(AppPlatform platform, Transport? http = null, EventConnect? connect = null, IScheduler? scheduler = null)
     {
         this.platform = platform;
-        this.http = http ?? Transports.Http;
-        this.connect = connect ?? EventStream.Http;
+        this.http = Transports.WithUserAgent(http ?? Transports.Create(platform.Handlers), platform.UserAgent);
+        this.connect = connect ?? EventStream.Over(platform.Handlers);
         this.scheduler = scheduler ?? new ContextScheduler();
         store = platform.Storage;
-        var kept = Read<Settings>(SettingsKey, Camel) ?? new Settings();
-        // Original was the default before Automatic, and was saved along with any other setting: unless picked, it is Automatic now.
-        if (kept.Quality == "original" && store.Get(QualityPickedKey) != "1") kept = kept with { Quality = "auto" };
-        Settings = new Signal<Settings>(kept);
+        Settings = new Signal<Settings>(Read<Settings>(SettingsKey, SettingsJson)?.Allowed() ?? new Settings());
         var server = store.Get(ServerKey);
         if (!string.IsNullOrEmpty(server)) Use(server!);
-        // What was saved is trusted only in shape: a store another build wrote, or a damaged one, is left out.
-        Home.Value = Read<List<Hub>>(HomeKey);
-        Me.Value = Read<User>(MeKey) is { Id: > 0 } me ? me : null;
-        Libraries.Value = Read<List<Library>>(LibrariesKey);
     }
 
     public Signal<string?> Server { get; } = new Signal<string?>(null);
@@ -129,14 +232,16 @@ public sealed class AppState
     public Signal<Exception?> AccountError { get; } = new Signal<Exception?>(null);
     /// <summary>Bumped by the server's events, so screens that list things fetch again.</summary>
     public Signal<int> Changes { get; } = new Signal<int>(0);
+    /// <summary>The libraries being scanned now, from the server's events and the libraries' <c>scanning</c>.</summary>
+    public Signal<IReadOnlyList<ScanState>> Scans { get; } = new Signal<IReadOnlyList<ScanState>>(new ScanState[0]);
     /// <summary>The server signed the TV out: show sign-in.</summary>
     public Signal<bool> SignedOut { get; } = new Signal<bool>(false);
     /// <summary>Whether the TV shows the app (not another app, its home screen or standby).</summary>
     public Signal<bool> Visible { get; } = new Signal<bool>(true);
     /// <summary>
     /// The server answered a screen nothing (the Android app's TvOfflineState): what shows is what
-    /// was saved. Raised by a load the server couldn't answer, lowered by its events connecting or
-    /// a screen's fresh answer after a failure.
+    /// was saved. Raised by a load the network failed, lowered by the server's events connecting
+    /// or a screen's fresh answer after a failure. A refusal (a 502 among them) is an answer.
     /// </summary>
     public Signal<bool> Offline { get; } = new Signal<bool>(false);
     /// <summary>"Showing what Pley had saved. Reconnecting…" shows, for 6 s from going offline; then the rail's avatar keeps a mark.</summary>
@@ -148,6 +253,7 @@ public sealed class AppState
     /// </summary>
     public bool ProfileGatePassed { get; set; }
 
+    /// <summary>The app's transport: every request introduces the app (<see cref="AppPlatform.UserAgent"/>).</summary>
     public Transport Http => http;
     public AppPlatform Platform => platform;
     public Tokens? TokenStore => tokens;
@@ -168,15 +274,24 @@ public sealed class AppState
 
     void Write<T>(string key, T value, JsonSerializerOptions? options = null) => store.Set(key, JsonSerializer.Serialize(value, options ?? ApiJson.Options));
 
-    /// <summary>The first screen, from what the TV kept.</summary>
+    /// <summary>The first screen, from what the TV kept (the tokens aren't opened for it).</summary>
     public StartPage Start()
     {
         if (Server.Value == null) return StartPage.Servers;
-        if (tokens?.SignedIn != true) return StartPage.Link;
+        if (tokens?.Kept != true) return StartPage.Link;
         return HouseholdSize() > 1 && AlwaysStartAs() == null ? StartPage.Profiles : StartPage.Home;
     }
 
-    /// <summary>Signs in to <paramref name="server"/> from now on (its tokens, if the TV has them).</summary>
+    Tokens NewTokens(string issuer, Action<SignOutReason>? onSignedOut = null) =>
+        new Tokens(issuer, platform.ClientId, store, http, onSignedOut, () => scheduler.Now, platform.TokenVault);
+
+    /// <summary>The tokens of <paramref name="issuer"/>: the server in use's own, so a sign-in kept there is the one it uses.</summary>
+    public Tokens TokensFor(string issuer) => issuer == Server.Value && tokens != null ? tokens : NewTokens(issuer);
+
+    /// <summary>Signing in with a code, its tokens kept for the server they come from.</summary>
+    public DeviceSignIn DeviceSignIn() => new DeviceSignIn(http, platform.ClientId, TokensFor, () => scheduler.Now);
+
+    /// <summary>Signs in to <paramref name="server"/> from now on (its tokens, if the TV has them), showing what was saved from it.</summary>
     public void Use(string server)
     {
         var home = Addresses.Origin(server);
@@ -187,13 +302,16 @@ public sealed class AppState
         if (Server.Value != null && Server.Value != home) LeaveServer();
         Server.Value = home;
         store.Set(ServerKey, home);
-        tokens = new Tokens(home, platform.ClientId, store, http, _ =>
+        tokens = NewTokens(home, _ => scheduler.Post(() =>
         {
+            // Told by whichever request found out, on whichever thread: the screens hear it here.
             SignedOut.Value = true;
             events?.Stop();
-        }, () => scheduler.Now);
+        }));
         Api.Value = new Api.Api(home, tokens, http);
         SignedOut.Value = false;
+        profile = long.TryParse(store.Get($"{ProfileKey}.{home}"), out var id) ? id : null;
+        ShowSaved();
     }
 
     /// <summary>The servers this TV chose, most recently used first.</summary>
@@ -201,21 +319,24 @@ public sealed class AppState
         (Read<List<SavedServer>>(ServersKey, Camel) ?? new List<SavedServer>())
             .Where(s => s != null && !string.IsNullOrEmpty(s.Url)).OrderByDescending(s => s.LastUsed).ToList();
 
-    /// <summary>Keeps <paramref name="url"/> on the server list, as used now.</summary>
-    public void RememberServer(string url, string name)
+    /// <summary>
+    /// Keeps <paramref name="url"/> on the server list, as used now; it replaces a row with the
+    /// same address or the same <paramref name="id"/> (a server found at a new address).
+    /// </summary>
+    public void RememberServer(string url, string name, string? id = null)
     {
         var home = Addresses.Origin(url);
         if (home == null) return;
-        var list = SavedServers().Where(s => s.Url != home).ToList();
-        list.Insert(0, new SavedServer(home, name, scheduler.Now));
-        Write(ServersKey, list.Take(20).ToList(), Camel);
+        var list = SavedServers().Where(s => s.Url != home && (id == null || s.Id != id)).ToList();
+        list.Insert(0, new SavedServer(home, name, scheduler.Now, id));
+        Write(ServersKey, list, Camel);
     }
 
-    /// <summary>Whether the TV has a sign-in for <paramref name="url"/>.</summary>
+    /// <summary>Whether the TV has a sign-in for <paramref name="url"/> (not opened: it may still turn out unreadable).</summary>
     public bool HasTokens(string url)
     {
         var home = Addresses.Origin(url);
-        return home != null && new Tokens(home, platform.ClientId, store, http).SignedIn;
+        return home != null && NewTokens(home).Kept;
     }
 
     /// <summary>
@@ -235,14 +356,13 @@ public sealed class AppState
         return id!;
     }
 
-    /// <summary>The profile "Always start as" names for this server; null asks who's watching.</summary>
-    public long? AlwaysStartAs() => long.TryParse(store.Get($"pley.alwaysStartAs.{Server.Value ?? ""}"), out var id) ? id : null;
+    /// <summary>The profile "Always start as" names, for the whole TV; null asks who's watching.</summary>
+    public long? AlwaysStartAs() => long.TryParse(store.Get(AlwaysStartAsKey), out var id) ? id : null;
 
     public void SetAlwaysStartAs(long? id)
     {
-        var key = $"pley.alwaysStartAs.{Server.Value ?? ""}";
-        if (id == null) store.Remove(key);
-        else store.Set(key, id.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (id == null) store.Remove(AlwaysStartAsKey);
+        else store.Set(AlwaysStartAsKey, id.Value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     /// <summary>How many profiles the household had when last asked (1 while unknown).</summary>
@@ -268,17 +388,78 @@ public sealed class AppState
         foreach (var fn in leavers.ToList()) fn();
     }
 
-    /// <summary>The app acts as another profile now: what was shown for the one before goes.</summary>
-    public async Task Switched()
+    /// <summary>
+    /// The app acts as another profile now, <paramref name="to"/> when the screen knows which:
+    /// what was saved for it shows at once, and the server is asked for the rest.
+    /// </summary>
+    public async Task Switched(long? to = null)
     {
         EndPlayback();
-        ForgetAccount();
-        Home.Value = null;
         HomeError.Value = null;
+        AccountError.Value = null;
         ForgetItems();
-        Me.Value = null;
+        profile = to;
+        if (to != null && Server.Value != null) KeepProfile(Server.Value, to.Value);
+        ShowSaved();
         await LoadAccount();
         _ = LoadHome();
+    }
+
+    // ---- what was saved, per server and profile
+
+    string SavedKey(string key, string server, long id) => $"{key}.{server}.{id.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+
+    /// <summary>Home, who is watching and their libraries as last heard from the profile in use: none when it isn't known.</summary>
+    void ShowSaved()
+    {
+        var server = Server.Value;
+        if (server == null || profile == null)
+        {
+            Home.Value = null;
+            Me.Value = null;
+            Libraries.Value = null;
+            return;
+        }
+        var id = profile.Value;
+        // What was saved is trusted only in shape: a store another build wrote, or a damaged one, is left out.
+        Home.Value = Read<List<Hub>>(SavedKey(HomeKey, server, id));
+        Me.Value = Read<User>(SavedKey(MeKey, server, id)) is { Id: > 0 } me ? me : null;
+        Libraries.Value = Read<List<Library>>(SavedKey(LibrariesKey, server, id));
+    }
+
+    /// <summary>Keeps <paramref name="value"/> for the profile in use, when it is known.</summary>
+    void Save<T>(string key, T value)
+    {
+        if (Server.Value != null && profile != null) Write(SavedKey(key, Server.Value, profile.Value), value);
+    }
+
+    IReadOnlyList<long> RecentProfiles(string server) => Read<List<long>>($"{RecentProfilesKey}.{server}", Camel) ?? new List<long>();
+
+    /// <summary><paramref name="id"/> is the profile in use on <paramref name="server"/>: the last three keep what was saved for them.</summary>
+    void KeepProfile(string server, long id)
+    {
+        store.Set($"{ProfileKey}.{server}", id.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var recent = RecentProfiles(server).Where(p => p != id).ToList();
+        recent.Insert(0, id);
+        foreach (var old in recent.Skip(ProfilesSaved)) ForgetSaved(server, old);
+        Write($"{RecentProfilesKey}.{server}", recent.Take(ProfilesSaved).ToList(), Camel);
+    }
+
+    void ForgetSaved(string server, long id)
+    {
+        store.Remove(SavedKey(HomeKey, server, id));
+        store.Remove(SavedKey(MeKey, server, id));
+        store.Remove(SavedKey(LibrariesKey, server, id));
+    }
+
+    /// <summary>Everything saved from <paramref name="server"/>: signed out of it, or it was forgotten.</summary>
+    void ForgetSaved(string server)
+    {
+        var ids = RecentProfiles(server).ToList();
+        if (long.TryParse(store.Get($"{ProfileKey}.{server}"), out var current)) ids.Add(current);
+        foreach (var id in ids.Distinct()) ForgetSaved(server, id);
+        store.Remove($"{RecentProfilesKey}.{server}");
+        store.Remove($"{ProfileKey}.{server}");
     }
 
     /// <summary>Forgets a server of the list: its sign-in ends, and what was saved from it goes.</summary>
@@ -287,8 +468,11 @@ public sealed class AppState
         var home = Addresses.Origin(url);
         if (home == null) return;
         Write(ServersKey, SavedServers().Where(s => s.Url != home).ToList(), Camel);
-        var those = home == Server.Value && tokens != null ? tokens : new Tokens(home, platform.ClientId, store, http);
+        var those = home == Server.Value && tokens != null ? tokens : NewTokens(home);
         if (home == Server.Value) ForgetServer();
+        ForgetSaved(home);
+        store.Remove($"{HouseholdKey}.{home}");
+        store.Remove($"{ProfilesKey}.{home}");
         try
         {
             await those.SignOut();
@@ -299,37 +483,38 @@ public sealed class AppState
         }
     }
 
-    /// <summary>Forgets the server in use (Change server).</summary>
+    /// <summary>Leaves the server in use (Change server): what was saved from it stays for when it is chosen again.</summary>
     public void ForgetServer()
     {
         EndPlayback();
         events?.Stop();
         events = null;
         store.Remove(ServerKey);
-        var server = Server.Value ?? "";
-        store.Remove($"{HouseholdKey}.{server}");
-        store.Remove($"{ProfilesKey}.{server}");
         LeaveServer();
         Server.Value = null;
         Api.Value = null;
         tokens = null;
+        profile = null;
     }
 
     /// <summary>What was shown from the server in use goes: another one comes, or none.</summary>
     void LeaveServer()
     {
         EndPlayback();
-        ForgetAccount();
         ForgetItems();
+        foreach (var t in libraryTimers.Values) t.Dispose();
+        libraryTimers.Clear();
         Home.Value = null;
         HomeError.Value = null;
         AccountError.Value = null;
         Me.Value = null;
         Libraries.Value = null;
         Profiles.Value = null;
+        Scans.Value = new ScanState[0];
         Offline.Value = false;
         OfflineNotice.Value = false;
         ProfileGatePassed = false;
+        lastSync = null;
     }
 
     public async Task SignOutNow()
@@ -338,28 +523,22 @@ public sealed class AppState
         // What plays ends while the sign-in that made it still works.
         EndPlayback();
         if (tokens != null) await tokens.SignOut();
-        ForgetAccount();
+        if (Server.Value != null) ForgetSaved(Server.Value);
+        profile = null;
         Home.Value = null;
+        Me.Value = null;
+        Libraries.Value = null;
+        ForgetItems();
         SignedOut.Value = true;
     }
 
     public void UpdateSettings(Func<Settings, Settings> change)
     {
-        var before = Settings.Value;
-        Settings.Value = change(before);
-        Write(SettingsKey, Settings.Value, Camel);
-        if (Settings.Value.Quality != before.Quality) store.Set(QualityPickedKey, "1");
+        Settings.Value = change(Settings.Value).Allowed();
+        Write(SettingsKey, Settings.Value, SettingsJson);
     }
 
     // ---- what the server has
-
-    /// <summary>What was saved of the profile signed in (Home, who it is, its libraries): another profile, sign-in or server comes.</summary>
-    void ForgetAccount()
-    {
-        store.Remove(HomeKey);
-        store.Remove(MeKey);
-        store.Remove(LibrariesKey);
-    }
 
     /// <summary>
     /// Who is watching, the libraries and the household, after sign-in or a profile switch; kept,
@@ -381,14 +560,29 @@ public sealed class AppState
         }
         catch (Exception e)
         {
-            AccountError.Value = e;
-            if (Errors.Unreachable(e)) ServerAway();
+            if (Api.Value == api)
+            {
+                AccountError.Value = e;
+                if (Errors.Unreachable(e)) ServerAway();
+            }
             throw;
         }
+        // Another server or sign-in since: the answer was the one before's.
+        if (Api.Value != api) return;
+        var failedBefore = AccountError.Value != null;
         AccountError.Value = null;
+        if (profile != me.Id && Server.Value != null)
+        {
+            // The server acts as another profile than the one saved (switched on another device, or a first sign-in).
+            var first = profile == null;
+            profile = me.Id;
+            KeepProfile(Server.Value, me.Id);
+            if (first && Home.Value != null) Save(HomeKey, Home.Value);
+        }
         Me.Value = me;
-        Write(MeKey, me);
+        Save(MeKey, me);
         KeepLibraries(libraries);
+        if (failedBefore) ServerAnswered();
         _ = KeepProfiles(api);
     }
 
@@ -407,7 +601,23 @@ public sealed class AppState
     void KeepLibraries(IReadOnlyList<Library> libraries)
     {
         Libraries.Value = libraries;
-        Write(LibrariesKey, libraries);
+        Save(LibrariesKey, libraries);
+        HeardLibraries(libraries);
+    }
+
+    async Task LoadLibrariesQuietly()
+    {
+        var api = Api.Value;
+        if (api == null) return;
+        try
+        {
+            var libraries = await api.Libraries();
+            if (Api.Value == api) KeepLibraries(libraries);
+        }
+        catch (Exception)
+        {
+            // Asked again with the next change, or the next time the pages ask.
+        }
     }
 
     /// <summary>
@@ -448,17 +658,21 @@ public sealed class AppState
     {
         var api = Api.Value;
         if (api == null) return;
+        var who = profile;
         try
         {
             var hubs = (await api.Home()).Hubs;
+            // Another server or profile since: the answer was the one before's.
+            if (Api.Value != api || profile != who) return;
             var failedBefore = HomeError.Value != null;
             Home.Value = hubs;
             HomeError.Value = null;
-            Write(HomeKey, hubs);
+            Save(HomeKey, hubs);
             if (failedBefore) ServerAnswered();
         }
         catch (Exception e)
         {
+            if (Api.Value != api || profile != who) return;
             HomeError.Value = e;
             if (Errors.Unreachable(e)) ServerAway();
         }
@@ -468,8 +682,8 @@ public sealed class AppState
 
     /// <summary>
     /// A screen's load got no answer: the notice shows for 6 s (again each time the server goes),
-    /// then the rail's mark. Meanwhile the server is asked every 5 s, so the event stream, backing
-    /// off up to 30 s between tries, reconnects as soon as it answers and the screens come back.
+    /// then the rail's mark. The event stream, reconnecting by itself, brings the screens back
+    /// once the server answers; so does a screen's own fresh answer.
     /// </summary>
     public void ServerAway()
     {
@@ -482,43 +696,6 @@ public sealed class AppState
             noticeTimer = null;
             OfflineNotice.Value = false;
         });
-        AskWhileAway();
-    }
-
-    void AskWhileAway()
-    {
-        awayTimer?.Dispose();
-        awayTimer = scheduler.After(OfflineAskMs, async () =>
-        {
-            awayTimer = null;
-            var api = Api.Value;
-            if (!Offline.Value || api == null) return;
-            if (!Visible.Value)
-            {
-                AskWhileAway();
-                return;
-            }
-            try
-            {
-                await api.Get<JsonElement>("/api/server", timeoutMs: OfflineAskMs);
-            }
-            catch (Exception)
-            {
-                AskWhileAway();
-                return;
-            }
-            if (!Offline.Value) return;
-            // A stream waiting to reconnect connects now, and its connection lowers it; one still
-            // connected (a page failed in a short blip) can't, so the app does, and asks again.
-            if (events?.RetryNow() == true)
-            {
-                AskWhileAway();
-                return;
-            }
-            ServerAnswered();
-            ForgetItems();
-            Refresh();
-        });
     }
 
     /// <summary>The server answers again: its events connected, or a screen that had failed got a fresh answer.</summary>
@@ -527,25 +704,31 @@ public sealed class AppState
         if (!Offline.Value) return;
         noticeTimer?.Dispose();
         noticeTimer = null;
-        awayTimer?.Dispose();
-        awayTimer = null;
         Offline.Value = false;
         OfflineNotice.Value = false;
     }
 
+    // ---- item details
+
     /// <summary>
-    /// Item details the app saw lately, to start a page or a playback without waiting. The
-    /// server's events take out what changed; a detail older than 5 minutes goes anyway, in case
-    /// one was missed (a resume point moved on another device while the event stream was down).
+    /// The detail of item <paramref name="id"/> the app saw lately, to start a page or a playback
+    /// without waiting; null when none is kept. The server's events take out what changed; one
+    /// older than <see cref="RevalidateMs"/> (<see cref="CachedItemAge"/>) is shown while the page
+    /// asks for it again.
     /// </summary>
     public ItemDetail? CachedItem(long id)
     {
         if (!items.TryGetValue(id, out var kept)) return null;
-        if (scheduler.Now - kept.At <= ItemTtlMs) return kept.Detail;
-        items.Remove(id);
         itemOrder.Remove(id);
-        return null;
+        itemOrder.AddLast(id);
+        return kept.Detail;
     }
+
+    /// <summary>How long ago the kept detail of item <paramref name="id"/> came from the server, in ms; null when none is kept.</summary>
+    public long? CachedItemAge(long id) => items.TryGetValue(id, out var kept) ? scheduler.Elapsed - kept.At : null;
+
+    /// <summary>Whether the kept detail of item <paramref name="id"/> should be asked for again: none, or older than <see cref="RevalidateMs"/>.</summary>
+    public bool CachedItemStale(long id) => !(CachedItemAge(id) < RevalidateMs);
 
     public async Task<ItemDetail> Item(long id)
     {
@@ -559,8 +742,8 @@ public sealed class AppState
     {
         itemOrder.Remove(detail.Id);
         itemOrder.AddLast(detail.Id);
-        items[detail.Id] = (detail, scheduler.Now);
-        if (items.Count > 40)
+        items[detail.Id] = (detail, scheduler.Elapsed);
+        while (items.Count > ItemsKept)
         {
             items.Remove(itemOrder.First!.Value);
             itemOrder.RemoveFirst();
@@ -571,6 +754,18 @@ public sealed class AppState
     {
         items.Clear();
         itemOrder.Clear();
+    }
+
+    /// <summary>The kept details that <paramref name="match"/> go.</summary>
+    void ForgetItems(Func<ItemDetail, long, bool> match)
+    {
+        foreach (var id in items.Keys.ToList())
+        {
+            var (detail, at) = items[id];
+            if (!match(detail, at)) continue;
+            items.Remove(id);
+            itemOrder.Remove(id);
+        }
     }
 
     /// <summary>
@@ -620,6 +815,29 @@ public sealed class AppState
         }
     }
 
+    // ---- scans
+
+    /// <summary>The scans now <paramref name="next"/>; one that ends has changed what Home shows, so Home asks once more.</summary>
+    void UpdateScans(IReadOnlyList<ScanState> next)
+    {
+        var was = Scans.Value.Count > 0;
+        Scans.Value = next;
+        if (was && next.Count == 0 && holds == 0) _ = LoadHome();
+    }
+
+    void Scan(long libraryId, float? progress) =>
+        UpdateScans(Scans.Value.Where(s => s.LibraryId != libraryId).Append(new ScanState(libraryId, progress)).ToList());
+
+    /// <summary>A fresh list of libraries: which are scanning now.</summary>
+    void HeardLibraries(IReadOnlyList<Library> libraries)
+    {
+        var scanning = new HashSet<long>(libraries.Where(l => l.Scanning).Select(l => l.Id));
+        var kept = Scans.Value.Where(s => scanning.Contains(s.LibraryId)).ToList();
+        var added = scanning.Where(id => kept.All(s => s.LibraryId != id)).Select(id => new ScanState(id, null));
+        var next = kept.Concat(added).ToList();
+        if (next.Count != Scans.Value.Count || Scans.Value.Except(next).Any()) UpdateScans(next);
+    }
+
     // ---- the server's events
 
     public IDisposable OnEvent(Action<ServerEvent> listener)
@@ -637,28 +855,31 @@ public sealed class AppState
         public void Dispose() => undo();
     }
 
-    /// <summary>Follows the server's events while the app is shown and signed in.</summary>
+    /// <summary>Follows the server's events while the app is shown and signed in; a stream the server refused starts again here.</summary>
     public void Listen(bool on)
     {
         var server = Server.Value;
         if (!on || server == null || tokens?.SignedIn != true)
         {
             events?.Stop();
+            // Scans are heard from the events only: none while they aren't followed.
+            Scans.Value = new ScanState[0];
             return;
         }
-        events ??= new EventStream(server, tokens, HandleEvent, Reconnected, connect, scheduler);
+        events ??= new EventStream(server, tokens, HandleEvent, Reconnected, connect, scheduler, platform.UserAgent);
         events.Start();
     }
 
     void Reconnected()
     {
-        // Nothing is replayed: what is older than 30 s, or anything after the server was out of reach, is fetched again.
+        // Nothing is replayed: what is older than 30 s, or anything after the server was out of reach, is asked again.
         var away = Offline.Value;
         ServerAnswered();
-        if (away || scheduler.Now - lastSync > 30_000)
+        var now = scheduler.Elapsed;
+        if (away || lastSync == null || now - lastSync.Value >= RevalidateMs)
         {
-            lastSync = scheduler.Now;
-            ForgetItems();
+            lastSync = now;
+            ForgetItems((_, at) => away || now - at >= RevalidateMs);
             Refresh();
         }
     }
@@ -667,20 +888,39 @@ public sealed class AppState
     {
         switch (e.Type)
         {
+            case "scan_started":
+                Scan(e.LibraryId!.Value, null);
+                break;
+            case "scan_progress":
+                Scan(e.LibraryId!.Value, e.Total > 0 ? Math.Max(0f, Math.Min(1f, (float)e.Processed / e.Total)) : null);
+                break;
+            case "scan_finished":
+                UpdateScans(Scans.Value.Where(s => s.LibraryId != e.LibraryId).ToList());
+                break;
             case "library_changed":
-                // Changes come in bursts during scans: once 1.5 s after the last.
-                libraryTimer?.Dispose();
-                libraryTimer = scheduler.After(1_500, () =>
+            {
+                // Changes come in bursts during scans: each library's once, 1.5 s after its last.
+                var id = e.LibraryId!.Value;
+                if (libraryTimers.TryGetValue(id, out var waiting)) waiting.Dispose();
+                libraryTimers[id] = scheduler.After(LibraryGatherMs, () =>
                 {
-                    libraryTimer = null;
-                    Refresh();
+                    libraryTimers.Remove(id);
+                    LibraryChanged(id);
                 });
                 break;
+            }
             case "libraries_changed":
+                // Which titles this profile may see may have changed with them: whatever shows them, and who the profile is.
+                ForgetItems();
                 _ = LoadAccountQuietly();
-                Refresh();
+                if (holds == 0)
+                {
+                    _ = LoadHome();
+                    Changes.Value++;
+                }
                 break;
             case "watchlist_changed":
+                ForgetItems();
                 Refresh();
                 break;
             case "user_state_changed":
@@ -693,24 +933,35 @@ public sealed class AppState
         foreach (var l in eventListeners.ToList()) l(e);
     }
 
-    /// <summary>The watch state changes of the last 0.3 s: their details go, and Home and the pages ask again once (with a pending library change).</summary>
+    /// <summary>A library's items changed: their details go, and its listings, the libraries and Home ask again.</summary>
+    void LibraryChanged(long libraryId)
+    {
+        ForgetItems((d, _) => d.LibraryId == libraryId);
+        if (holds > 0) return;
+        _ = LoadHome();
+        _ = LoadLibrariesQuietly();
+        Changes.Value++;
+    }
+
+    /// <summary>
+    /// The watch state changes of the last 0.3 s: their details go, and Home and the pages ask
+    /// again once, with the library changes waiting (a play that ends sends both).
+    /// </summary>
     void ApplyStateChanges()
     {
         stateTimer = null;
         bool Under(long? p) => p != null && stateParents.Contains(p.Value);
-        foreach (var id in items.Keys.ToList())
-        {
-            var d = items[id].Detail;
-            if (stateIds.Contains(id) || Under(d.ParentId) || Under(d.GrandparentId))
-            {
-                items.Remove(id);
-                itemOrder.Remove(id);
-            }
-        }
+        ForgetItems((d, _) => stateIds.Contains(d.Id) || Under(d.ParentId) || Under(d.GrandparentId));
         stateIds.Clear();
         stateParents.Clear();
-        libraryTimer?.Dispose();
-        libraryTimer = null;
+        var libraries = libraryTimers.Keys.ToList();
+        foreach (var id in libraries)
+        {
+            libraryTimers[id].Dispose();
+            ForgetItems((d, _) => d.LibraryId == id);
+        }
+        libraryTimers.Clear();
         Refresh();
+        if (libraries.Count > 0 && holds == 0) _ = LoadLibrariesQuietly();
     }
 }

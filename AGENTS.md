@@ -85,8 +85,10 @@ is GPL-2.0-or-later.
 **Every app.** A feature people see is expected on every app (web and
 desktop, Android phone and TV, Samsung, LG, Kodi, Roku), the same way,
 unless the platform can't; the app's doc says what it can't do. The native
-Samsung app ports `packages/tv`'s logic to C#: a rule both have is pinned by
-a fixture in `packages/tv/test/fixtures`, and changes in both, with it.
+Samsung app ports the Android TV app to C#, its screens and its rules. A
+rule it shares with `packages/tv` is pinned by a fixture in
+`packages/tv/test/fixtures`, and changes in both, with it; where Android
+differs, the native app follows Android and its test says so.
 
 **The brand** is written Pley in everything people read. Ids, binaries,
 paths, packages and protocol tokens stay lowercase `pley`.

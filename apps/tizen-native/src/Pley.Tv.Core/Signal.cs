@@ -53,8 +53,14 @@ public sealed class Signal<T>
 /// <summary>Time and timers: the UI thread's on the TV, a clock moved by hand in tests.</summary>
 public interface IScheduler
 {
-    /// <summary>Milliseconds since the epoch.</summary>
+    /// <summary>Milliseconds since the epoch: for times that are kept, never for how long something took.</summary>
     long Now { get; }
+
+    /// <summary>
+    /// Milliseconds on a clock that only moves forward (the system's clock can be set back or
+    /// ahead): for how long something took or has been held.
+    /// </summary>
+    long Elapsed { get; }
 
     /// <summary>Runs <paramref name="action"/> on the UI thread after <paramref name="ms"/>; disposing cancels it.</summary>
     IDisposable After(long ms, Action action);
@@ -67,8 +73,11 @@ public interface IScheduler
 public sealed class ContextScheduler : IScheduler
 {
     readonly SynchronizationContext? context = SynchronizationContext.Current;
+    readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
 
     public long Now => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+    public long Elapsed => clock.ElapsedMilliseconds;
 
     public IDisposable After(long ms, Action action)
     {

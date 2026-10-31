@@ -1,6 +1,8 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Pley.Tv.Core.Api;
 
@@ -21,8 +23,8 @@ public sealed record User
     public string? AvatarColor { get; init; }
     public string? AudioLanguage { get; init; }
     public string? SubtitleLanguage { get; init; }
-    /// <summary>"off", "forced", "foreign" or "always".</summary>
-    public string SubtitleMode { get; init; } = "off";
+    /// <summary>"off", "forced", "foreign" or "always"; forced, as the server's own default, when it doesn't say.</summary>
+    public string SubtitleMode { get; init; } = "forced";
     /// <summary>An app's token: what it was allowed ("library play").</summary>
     public string? Scope { get; init; }
 }
@@ -274,8 +276,12 @@ public sealed record HouseholdProfile
     public string? AvatarUrl { get; init; }
     public string? AvatarColor { get; init; }
     public bool Current { get; init; }
-    /// <summary>"none", "pin", "password" or "locked".</summary>
-    public string Needs { get; init; } = "none";
+    /// <summary>"none", "pin", "password" or "locked", as the server says it; "unknown" when it doesn't.</summary>
+    public string Needs { get; init; } = "unknown";
+
+    /// <summary>What switching to it takes: <see cref="Needs"/>, with anything this app doesn't know read as "locked".</summary>
+    [JsonIgnore]
+    public string Takes => Needs is "none" or "pin" or "password" ? Needs : "locked";
 }
 
 /// <summary>A library's sorts, as the server names them.</summary>
@@ -292,13 +298,46 @@ public static class LibrarySort
     public const string Bitrate = "bitrate";
 }
 
-/// <summary>Reading and writing the API's JSON: snake_case names, as the server writes them.</summary>
+/// <summary>
+/// Reading and writing the API's JSON as the Android app's PleyJson does: snake_case names, as
+/// the server writes them; keys this app doesn't know skipped; and a null where the app expects
+/// a value read as the field's default (a list stays empty, a number 0), so a newer or older
+/// server's answer doesn't fail as a whole.
+/// </summary>
 public static class ApiJson
 {
+#pragma warning disable SYSLIB0020 // The only way .NET 6 has to leave a field's default in place of a null it reads.
     public static readonly JsonSerializerOptions Options = new JsonSerializerOptions
     {
         PropertyNamingPolicy = new SnakeCase(),
+        IgnoreNullValues = true,
+        Converters = { new NullAsDefault() },
     };
+#pragma warning restore SYSLIB0020
+
+    /// <summary>A null where a number or a yes/no is expected reads as 0 or false; its nullable kin keep their null.</summary>
+    sealed class NullAsDefault : JsonConverterFactory
+    {
+        static readonly JsonSerializerOptions Builtin = new JsonSerializerOptions();
+
+        public override bool CanConvert(Type type) =>
+            type == typeof(long) || type == typeof(int) || type == typeof(double) || type == typeof(float) || type == typeof(bool);
+
+        public override JsonConverter CreateConverter(Type type, JsonSerializerOptions options) =>
+            (JsonConverter)Activator.CreateInstance(typeof(Of<>).MakeGenericType(type))!;
+
+        sealed class Of<T> : JsonConverter<T> where T : struct
+        {
+            readonly JsonConverter<T> builtin = (JsonConverter<T>)Builtin.GetConverter(typeof(T));
+
+            public override bool HandleNull => true;
+
+            public override T Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options) =>
+                reader.TokenType == JsonTokenType.Null ? default : builtin.Read(ref reader, type, Builtin);
+
+            public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options) => builtin.Write(writer, value, Builtin);
+        }
+    }
 
     /// <summary>"DisplayName" as "display_name", "Hdr10plus" as "hdr10plus". .NET 6 has no policy of its own for this.</summary>
     sealed class SnakeCase : JsonNamingPolicy

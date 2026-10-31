@@ -27,14 +27,19 @@ public sealed record DeviceCode(
     int IntervalSeconds,
     string TokenEndpoint,
     string RevocationEndpoint,
-    string Scope);
+    string Scope)
+{
+    // Never print the device code.
+    public override string ToString() => $"DeviceCode {{ Server = {Server}, UserCode = {UserCode} }}";
+}
 
 /// <summary>Where a code stands.</summary>
 public abstract record DevicePoll
 {
     public sealed record Waiting : DevicePoll;
 
-    public sealed record SignedIn(StoredTokens Tokens) : DevicePoll;
+    /// <summary>Signed in at <paramref name="Issuer"/>, as the profile the approver picked: the tokens are kept already.</summary>
+    public sealed record SignedIn(string Issuer) : DevicePoll;
 
     public sealed record Denied : DevicePoll;
 
@@ -49,7 +54,8 @@ public abstract record DevicePoll
 /// <summary>
 /// The device authorization grant (RFC 8628 §3) against a Pley server: POST client_id and scope
 /// to the metadata's device_authorization_endpoint for a code, then ask the token endpoint with
-/// it until someone answers. The web TV app's <c>auth/device.ts</c>.
+/// it until someone answers. The tokens it gets go through the scope guard, and replace (and
+/// end) the ones the TV held for that server. The Android app's <c>DeviceGrant</c>.
 /// </summary>
 public sealed class DeviceSignIn
 {
@@ -65,30 +71,40 @@ public sealed class DeviceSignIn
     /// <summary>The waits after network failures in a row.</summary>
     public static readonly long[] BackoffMs = { 2_000, 4_000, 8_000, 16_000, 30_000 };
 
+    const string Unreadable = "the server's answer can't be read: try again";
+
     readonly Transport http;
     readonly string clientId;
+    readonly Func<string, Tokens> tokensOf;
     readonly Func<long> clock;
     readonly Func<long, CancellationToken, Task> sleep;
 
-    public DeviceSignIn(Transport http, string clientId, Func<long>? clock = null, Func<long, CancellationToken, Task>? sleep = null)
+    /// <param name="tokensOf">The tokens of a server, by its issuer: where an approved code's tokens are kept.</param>
+    public DeviceSignIn(Transport http, string clientId, Func<string, Tokens> tokensOf, Func<long>? clock = null, Func<long, CancellationToken, Task>? sleep = null)
     {
         this.http = http;
         this.clientId = clientId;
+        this.tokensOf = tokensOf;
         this.clock = clock ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         this.sleep = sleep ?? ((ms, cancel) => Task.Delay(TimeSpan.FromMilliseconds(ms), cancel));
     }
 
-    /// <summary>The scope to ask for: what the server offers of Pley's own.</summary>
+    /// <summary>
+    /// The scope to ask for: what the server offers of Pley's own. Servers without profile
+    /// switching don't know "profiles" and would refuse the whole sign-in for it; one that offers
+    /// none of them is asked for "library".
+    /// </summary>
     public static string ScopeFor(ServerMetadata metadata)
     {
         var offered = metadata.ScopesSupported;
-        return string.Join(" ", offered == null ? AllScopes : AllScopes.Where(offered.Contains));
+        var asked = offered == null ? AllScopes : AllScopes.Where(offered.Contains).ToArray();
+        return string.Join(" ", asked.Length == 0 ? new[] { "library" } : asked);
     }
 
     public async Task<DeviceCode> Start(string server)
     {
         var home = Addresses.Origin(server) ?? throw new AuthException("that isn't a server address");
-        if (Addresses.IsUnencrypted(home)) throw new AuthException(Addresses.Unencrypted);
+        PlainHttp.Check(home);
         var metadata = await Metadata.Fetch(http, home).ConfigureAwait(false);
         if (!metadata.SignsInWithCodes) throw new AuthException(Metadata.NoCodes);
         var scope = ScopeFor(metadata);
@@ -99,18 +115,9 @@ public sealed class DeviceSignIn
                 ("client_id", clientId),
                 ("scope", scope))).ConfigureAwait(false);
         }
-        catch (TokenException e) when (e.OAuth?.Error is "invalid_client" or "unauthorized_client")
+        catch (NetworkException e)
         {
-            // A server from before Pley's TV apps were built in.
-            throw new AuthException("this server doesn't know Pley's TV apps yet: update it");
-        }
-        catch (TokenException e) when (e.Status == 429)
-        {
-            throw new AuthException("too many TVs are signing in here right now: try again in a minute");
-        }
-        catch (NetworkException)
-        {
-            throw new UnreachableException();
+            throw new UnreachableException(e);
         }
         return ParseDeviceCode(answer, home, metadata, scope, clock());
     }
@@ -118,7 +125,8 @@ public sealed class DeviceSignIn
     /// <summary>
     /// Asks whether <paramref name="code"/> was approved, every interval (slower when the server
     /// says so), until it is signed in, denied or expired; <paramref name="onUpdate"/> hears each
-    /// change. Stops early, answering Waiting, when <paramref name="stop"/> is cancelled.
+    /// change. Approved, its tokens are kept before it says so. Stops early, answering Waiting,
+    /// when <paramref name="stop"/> is cancelled.
     /// </summary>
     public async Task<DevicePoll> Poll(DeviceCode code, Action<DevicePoll> onUpdate, CancellationToken stop)
     {
@@ -153,8 +161,7 @@ public sealed class DeviceSignIn
                     ("device_code", code.DeviceCodeValue),
                     ("client_id", clientId))).ConfigureAwait(false);
                 failures = 0;
-                var parsed = TokenRequests.ParseTokenResponse(answer, code.Scope);
-                outcome = new DevicePoll.SignedIn(TokenRequests.Stored(parsed, code.Issuer, code.TokenEndpoint, code.RevocationEndpoint, clock()));
+                outcome = await Keep(code, answer).ConfigureAwait(false);
             }
             catch (TokenException e)
             {
@@ -172,6 +179,7 @@ public sealed class DeviceSignIn
                     case "expired_token":
                         outcome = new DevicePoll.Expired();
                         break;
+                    // invalid_grant: the code is unknown, or was collected already.
                     case "invalid_grant":
                         outcome = new DevicePoll.Failed("this code doesn't work anymore: get a new one");
                         break;
@@ -186,9 +194,10 @@ public sealed class DeviceSignIn
             }
             catch (AuthException e)
             {
+                // Refused by the app itself: plain http beyond the home network.
                 outcome = new DevicePoll.Failed(e.Message);
             }
-            if (stop.IsCancellationRequested) return new DevicePoll.Waiting();
+            if (stop.IsCancellationRequested && outcome is not DevicePoll.SignedIn) return new DevicePoll.Waiting();
             if (outcome != null) return Done(outcome);
             if (failures > 0)
             {
@@ -203,32 +212,69 @@ public sealed class DeviceSignIn
         }
     }
 
+    /// <summary>Keeps the tokens in <paramref name="answer"/>: what to show.</summary>
+    async Task<DevicePoll> Keep(DeviceCode code, JsonElement? answer)
+    {
+        try
+        {
+            var parsed = TokenRequests.ParseTokenResponse(answer, code.Scope);
+            var fresh = TokenRequests.Stored(parsed, code.Issuer, code.TokenEndpoint, code.RevocationEndpoint, clock());
+            await tokensOf(code.Issuer).Install(fresh, code.Scope).ConfigureAwait(false);
+            return new DevicePoll.SignedIn(code.Issuer);
+        }
+        catch (AuthException e)
+        {
+            // Unreadable, more than was asked (ended already), or not kept.
+            return new DevicePoll.Failed(e.Message);
+        }
+    }
+
     /// <summary>The code in <paramref name="body"/>, the answer of <paramref name="server"/>'s device authorization endpoint (§3.2).</summary>
     public static DeviceCode ParseDeviceCode(JsonElement? body, string server, ServerMetadata metadata, string scope, long now)
     {
-        var bad = new AuthException("the server's answer can't be read: try again");
+        var bad = new AuthException(Unreadable);
         if (body is not { ValueKind: JsonValueKind.Object } o) throw bad;
         var deviceCode = Json.String(o, "device_code");
-        var userCode = Json.String(o, "user_code");
-        var uri = Json.String(o, "verification_uri");
-        if (string.IsNullOrEmpty(deviceCode) || string.IsNullOrEmpty(userCode) || uri == null) throw bad;
+        if (string.IsNullOrEmpty(deviceCode)) throw bad;
+        var userCode = Shown(Json.String(o, "user_code") ?? "");
+        if (userCode.Length == 0) throw bad;
+        var uri = Link(Json.String(o, "verification_uri")) ?? throw bad;
         // The page to open must be this server's own: a code typed elsewhere would sign someone else's TV in.
         if (Addresses.Origin(uri) != metadata.Issuer) throw new AuthException("this server sends people to another address to approve TVs: Pley doesn't");
-        var complete = Json.String(o, "verification_uri_complete");
+        var complete = Link(Json.String(o, "verification_uri_complete"));
         if (complete != null && Addresses.Origin(complete) != metadata.Issuer) complete = null;
-        var expiresIn = Json.Number(o, "expires_in") is > 0 and var e ? e : 600;
-        var interval = Json.Number(o, "interval") is > 0 and var i ? i : DefaultIntervalSeconds;
+        // Without a lifetime the code can't be shown honestly: Pley's servers always send one.
+        var expiresIn = (long)(Json.Number(o, "expires_in") ?? 0);
+        if (expiresIn <= 0) throw bad;
+        var given = Json.Number(o, "interval");
+        var interval = given is > 0 ? (int)given.Value : DefaultIntervalSeconds;
         return new DeviceCode(
             server,
             metadata.Issuer,
             deviceCode!,
-            userCode!,
+            userCode,
             uri,
             complete,
-            now + (long)(expiresIn * 1000),
-            (int)interval,
+            now + expiresIn * 1000,
+            interval > 0 ? interval : DefaultIntervalSeconds,
             metadata.TokenEndpoint,
             metadata.RevocationEndpoint,
             scope);
+    }
+
+    /// <summary>A user code as people read it: 8 letters as <c>BCDF-GHJK</c>, anything else as sent.</summary>
+    public static string Shown(string code)
+    {
+        var letters = new string(code.ToUpperInvariant().Where(char.IsLetterOrDigit).ToArray());
+        return letters.Length == 8 ? letters.Substring(0, 4) + "-" + letters.Substring(4) : Plain.Of(code);
+    }
+
+    /// <summary><paramref name="text"/> when it is a web address to show (http or https, with a host), else null.</summary>
+    static string? Link(string? text)
+    {
+        var clean = Plain.Of(text);
+        if (clean.Length == 0 || clean != text || clean.Any(char.IsWhiteSpace)) return null;
+        if (!Uri.TryCreate(clean, UriKind.Absolute, out var uri)) return null;
+        return (uri.Scheme == "http" || uri.Scheme == "https") && uri.Host.Length > 0 ? clean : null;
     }
 }
