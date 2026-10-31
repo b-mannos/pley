@@ -202,11 +202,12 @@ export function useServerEvents(enabled: boolean) {
       void qc.invalidateQueries({ queryKey: requestKeys.searches, refetchType: "none" });
     };
     // Without the stream, what shows requests asks again now and then (and
-    // the summary every minute): it learns so at its next answer.
+    // the summary every minute). A query sets its next poll as it answers,
+    // so what shows requests is asked at once: idle ones start polling.
     const live = (value: boolean) => {
       if (eventsLive() === value) return;
       setEventsLive(value);
-      if (!value) void qc.invalidateQueries({ queryKey: requestKeys.summary });
+      if (!value) void qc.invalidateQueries({ queryKey: requestKeys.all, predicate: (q) => !isTmdbList(q.queryKey) });
     };
 
     // Metadata refreshes can emit many `library_changed` events in a burst;
