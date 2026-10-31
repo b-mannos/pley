@@ -368,6 +368,8 @@ sealed class TizenMediaEngine : IVideoEngine
             stillFor = 0;
             moved = false;
             firstAt = -1;
+            // Often until it starts, so the picture shows as soon as it moves; then every half second.
+            watch.Interval = StartWatchMs;
             watch.Start();
             // Started once the position moves (Watch), not now: Start returns before the first
             // picture, and the screen's black lifting then showed what was under the app.
@@ -405,6 +407,7 @@ sealed class TizenMediaEngine : IVideoEngine
             if (firstAt < 0) firstAt = position;
             if (position < firstAt + FirstMoveMs) return;
             moved = true;
+            watch!.Interval = WatchMs;
             watchedAt = position;
             stillFor = 0;
             Post(generation, () => Started?.Invoke());
@@ -423,6 +426,8 @@ sealed class TizenMediaEngine : IVideoEngine
     }
 
     const uint WatchMs = 500;
+    /// <summary>How often the position is read until it first moves: the screen's black lifts then.</summary>
+    const uint StartWatchMs = 100;
     const int StillMs = 1500;
     /// <summary>How far the position moves from where it began before the source counts as started.</summary>
     const long FirstMoveMs = 200;
