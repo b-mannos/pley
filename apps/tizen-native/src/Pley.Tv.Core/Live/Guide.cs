@@ -166,6 +166,15 @@ public sealed class GuideCursor
     public bool MoveLeft(IReadOnlyList<LiveProgram>? programs)
     {
         var current = Current(programs);
+        if (current != null && current.Start <= Start && Left > Start)
+        {
+            // The programme began with the guide or before it, and the view is scrolled on: the view
+            // goes back through it first, a screen at a time. Gone by the programme alone, Left took
+            // focus to the categories with the view still scrolled on, the time before it unseen.
+            Left = Math.Max(Start, Math.Max(Slot(current.Start), Left - (GuideLayout.ViewS - LiveRules.SlotS)));
+            Cursor = Math.Max(Math.Max(current.Start, Start), Left);
+            return true;
+        }
         var target = current != null ? current.Start - 1 : Cursor - LiveRules.SlotS;
         // Only from the guide's first half hour. Where a channel has no programmes it goes back a
         // half hour at a time, as Right goes on: refused there, Left took focus to the categories

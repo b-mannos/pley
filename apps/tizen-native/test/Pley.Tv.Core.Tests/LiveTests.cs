@@ -254,6 +254,34 @@ public class GuideCursorTests
     }
 
     [Fact]
+    public void Left_goes_back_through_a_long_programme_before_it_leaves_the_guide()
+    {
+        // A five-hour programme from the guide's start, then another.
+        var row = new[]
+        {
+            FakeLive.Program(1, Start, Start + 18_000, "Long"),
+            FakeLive.Program(1, Start + 18_000, Start + 21_600, "Next"),
+        };
+        var c = new GuideCursor(Start, Now);
+        c.MoveRight(row);
+        Assert.Equal("Next", c.Current(row)?.Title);
+        Assert.True(c.Left > Start);
+        Assert.True(c.MoveLeft(row));
+        Assert.Equal("Long", c.Current(row)?.Title);
+        // Back through the long programme a screen at a time, the view with it, to the guide's start.
+        var lefts = new List<long>();
+        while (c.Left > Start)
+        {
+            Assert.True(c.MoveLeft(row));
+            Assert.Equal("Long", c.Current(row)?.Title);
+            lefts.Add(c.Left);
+        }
+        Assert.True(lefts.Count >= 2);
+        // Only from there does Left leave for the categories.
+        Assert.False(c.MoveLeft(row));
+    }
+
+    [Fact]
     public void On_a_channel_without_programmes_each_press_moves_the_view_a_half_hour()
     {
         var c = new GuideCursor(Start, Now);
