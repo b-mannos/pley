@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using Net.Codecrete.QrCodeGenerator;
 using Pley.Tv.Core;
 using Pley.Tv.Core.Ui;
 using Pley.Tv.Tizen.Kit;
@@ -243,51 +242,8 @@ sealed class LinkScreen : Sheet
             child.Dispose();
         }
         qrBox.BackgroundColor = code != null ? Color.White : PleyColors.Surface2;
-        if (code != null) DrawQr(code.Qr);
-    }
-
-    /// <summary>
-    /// A QR code of <paramref name="text"/>, black on the white tile with its 4-module quiet zone:
-    /// each module a whole number of pixels, the code centred in what is left (tv-addendum §4.2).
-    /// Each row's dark runs are one view.
-    /// </summary>
-    void DrawQr(string text)
-    {
-        QrCode qr;
-        try
-        {
-            qr = QrCode.EncodeText(text, QrCode.Ecc.Medium);
-        }
-        catch (Exception)
-        {
-            // Too long for a QR code: the address and code still show.
-            return;
-        }
-        const int Quiet = 4;
-        var modules = qr.Size + Quiet * 2;
-        var box = (int)Ui.Dp(QrSize);
-        var cell = Math.Max(1, box / modules);
-        var origin = (box - cell * modules) / 2 + Quiet * cell;
-        for (var y = 0; y < qr.Size; y++)
-        {
-            var x = 0;
-            while (x < qr.Size)
-            {
-                if (!qr.GetModule(x, y))
-                {
-                    x++;
-                    continue;
-                }
-                var start = x;
-                while (x < qr.Size && qr.GetModule(x, y)) x++;
-                qrBox.Add(new View
-                {
-                    Position = new Position(origin + start * cell, origin + y * cell),
-                    Size = new Size((x - start) * cell, cell),
-                    BackgroundColor = Color.Black,
-                });
-            }
-        }
+        // Too long for a QR code: the address and code still show.
+        if (code != null) Qr.Draw(qrBox, code.Qr, (int)Ui.Dp(QrSize));
     }
 
     /// <summary>For about half a second: a 64 dp success tile with a check, and "Signed in as Anna"; the code and the way back go.</summary>

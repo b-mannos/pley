@@ -102,6 +102,7 @@ class App : NUIApplication
             PageKey.Collection collection => new CollectionScreen(tv, new CollectionModel(new AppCollectionSource(state), collection.CollectionId, new ContextScheduler()), images, gate, k => Go(tv, k)),
             // Settings' Watch history row opens it, as on Android TV.
             PageKey.History => new HistoryScreen(tv, new HistoryModel(new AppHistorySource(state), new ContextScheduler()), images, gate, k => Go(tv, k)),
+            PageKey.Settings => new SettingsScreen(tv, shell, Settings(), images, k => Go(tv, k), k => Restart(tv, k)),
             _ => null,
         };
         // Back from the player: Home asks again, for the new resume point and Continue Watching.
@@ -114,6 +115,17 @@ class App : NUIApplication
     }
 
     HomeScreen Home(TvShell tv) => new HomeScreen(tv, new HomeModel(state, new ContextScheduler()), images, gate, item => Go(tv, new PageKey.Item(item.Id)));
+
+    /// <summary>Settings, with the Me page for its Profile and the TV's facts under "Open diagnostics".</summary>
+    SettingsModel Settings() =>
+        new SettingsModel(new AppSettingsSource(state, DiagnosticsText.DeviceFacts(Platform.Facts())), new MeModel(new AppMeSource(state), new ContextScheduler()));
+
+    /// <summary>Starts over at <paramref name="key"/>: a page of the shell's, or a screen of its own (Who's watching?, the servers).</summary>
+    void Restart(TvShell tv, PageKey key)
+    {
+        if (tv.PageOf?.Invoke(key) is { } page) tv.Restart(page);
+        else Go(key);
+    }
 
     /// <summary>Opens a page from another: an item's, over the one it was opened from; one the app doesn't have yet says so.</summary>
     void Go(TvShell tv, PageKey key)

@@ -1,6 +1,8 @@
+using System.Globalization;
 using System.Reflection;
 using Pley.Tv.Core;
 using Pley.Tv.Core.Auth;
+using Pley.Tv.Core.Player;
 using Tizen.Applications;
 
 namespace Pley.Tv.Tizen;
@@ -38,6 +40,19 @@ static class Platform
         var info = typeof(Platform).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
         var plus = info.IndexOf('+');
         return plus < 0 ? info : info.Substring(0, plus);
+    }
+
+    /// <summary>
+    /// What this TV is, for the server's choice of how to send it, Diagnostics and Settings: its
+    /// Tizen version (which tells the model year) and model, as the system says them. The rest is
+    /// TizenFacts' own: a 4K HDR panel, and nothing known of the sound output, so nothing passed
+    /// through but what Settings turns on.
+    /// </summary>
+    public static TizenFacts Facts()
+    {
+        var version = Info("http://tizen.org/feature/platform.version");
+        var tizen = double.TryParse(version, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : 9;
+        return new TizenFacts { Tizen = tizen, Year = TizenFacts.YearOf(tizen), Model = Info("http://tizen.org/system/model_name") ?? "Samsung TV" };
     }
 
     static string? Info(string key) => global::Tizen.System.Information.TryGetValue(key, out string value) ? value : null;

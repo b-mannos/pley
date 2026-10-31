@@ -384,10 +384,11 @@ the A to Z jump, Recommended and Collections) and the Libraries page;
 search (the field and the TV's keyboard, results in rows, recent
 searches); people's pages (the photo, the name and a row per role); the
 rail's Collections and a collection's page, with Play and Shuffle; the
-watch history page; and a first player: the stream on the TV's own player,
-seeking with Left and Right, and the scrubber and transport controls.
-Subtitles, the player's panels and the other pages come next; Settings,
-which leads to the watch history, is one of them.
+watch history page; Settings (its categories and their rows, the side
+panels of choices, the web page's address and QR code, signing out); and a
+first player: the stream on the TV's own player, seeking with Left and
+Right, and the scrubber and transport controls. Subtitles, the player's
+panels and the other pages come next.
 
 | | |
 |---|---|
