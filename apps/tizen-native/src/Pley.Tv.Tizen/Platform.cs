@@ -12,7 +12,13 @@ sealed class PreferenceStore : IKeyValue
 {
     public string? Get(string key) => Preference.Contains(key) ? Preference.Get<string>(key) : null;
 
-    public void Set(string key, string value) => Preference.Set(key, value);
+    public void Set(string key, string value)
+    {
+        // A write can hold the UI thread for 400 ms while the TV's storage is busy, and most of the
+        // app's are of the value already there (the server, the household, at each launch).
+        if (Get(key) == value) return;
+        Preference.Set(key, value);
+    }
 
     public void Remove(string key)
     {
