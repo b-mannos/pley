@@ -37,7 +37,8 @@ protect your server.
   only ([deploy/docker/README.md](deploy/docker/README.md#security)).
 - **Turn on two-step sign-in** for administrators of a server reachable from
   the internet (**Account → Two-step sign-in**), and keep the recovery codes
-  somewhere safe.
+  somewhere safe. To have everyone use it, require it
+  (**Settings → Server → Sign-in**).
 - **Leave apps by other publishers off** (**Settings → Server → Apps**)
   unless you need one.
 
@@ -73,10 +74,12 @@ protect your server.
 
 ### Two-step sign-in
 
-- Optional. After the password, it takes a code from an authenticator app
-  (TOTP) or one of ten recovery codes.
+- Optional, unless an administrator requires it. After the password, it
+  takes a code from an authenticator app (TOTP) or one of ten recovery
+  codes.
 - Turning it on takes the password and a first code; turning it off, the
-  password and a code.
+  password and a code. Moving it to another authenticator app takes the
+  password and a code of the current one, then the new app's first code.
 - A code works once. Wrong codes are limited to 5 every 15 minutes per
   account, and after 100 in a row only a recovery code signs in.
 - Authenticator secrets are encrypted with a key kept in the data folder
@@ -84,6 +87,22 @@ protect your server.
   Recovery codes are stored hashed.
 - Switching to a profile with a password takes its code too. Apps sign in on
   the same page, so they take the code as well.
+- **Required of everyone** (`require_two_step`): only an administrator who
+  uses it can turn it on, so nobody locks themselves out. Everyone with a
+  password and without it is signed out everywhere, browsers and apps; no
+  session or app token of an account without it works while it is
+  required, checked on every request and refresh. Each sets it up at their
+  next sign-in, after the password, before any session exists; a PIN never
+  sets it up. It can't be turned off then, only moved to another app.
+- Until someone sets it up, their password alone lets whoever has it set it
+  up with their own authenticator app. A secret being set up goes only to
+  the sign-in it was shown to: another one with the password gets a new
+  secret, which replaces it, so the owner sees their QR code stop working
+  rather than share it unknowingly. Once it is required, check
+  **Settings → Users** for people who haven't set it up yet. An
+  administrator who resets someone's two-step sign-in signs them out too.
+- While the server can't use `secret.key`, nobody can set it up, so nobody
+  is asked to: the log says so at start.
 
 ### Sessions
 

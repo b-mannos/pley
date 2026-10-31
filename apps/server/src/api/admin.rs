@@ -23,10 +23,25 @@ pub async fn get_settings(State(state): State<AppState>, _admin: AdminUser) -> J
 
 pub async fn put_settings(
     State(state): State<AppState>,
-    _admin: AdminUser,
+    AdminUser(admin): AdminUser,
     Json(mut patch): Json<SettingsPatch>,
 ) -> ApiResult<Json<AdminSettings>> {
     let before = state.settings.get();
+    if patch.require_two_step == Some(true) && !before.require_two_step {
+        // Whoever turns it on uses it, so nobody locks themselves out, and
+        // everyone else can set it up.
+        if !state.two_step.can_set_up() {
+            return Err(AppError::bad_request(format!(
+                "two-step sign-in can't be set up on this server: it can't use its {} (the log says why)",
+                crate::two_step::KEY_FILE
+            )));
+        }
+        if !state.two_step.is_on(admin.id).await? {
+            return Err(AppError::bad_request(
+                "turn on two-step sign-in for your own account first (Account → Two-step sign-in)",
+            ));
+        }
+    }
     // A choice that can't work here is refused; one saved before (another
     // GPU, another FFmpeg) stays, and the transcoder does without it.
     let info = state.transcoder.info();
@@ -59,12 +74,38 @@ pub async fn put_settings(
         let ended = state.auth.end_grants_except_clients(crate::oauth::clients::BUILTIN_IDS).await?;
         tracing::info!("apps by other publishers were turned off: {} signed out", ended.len());
     }
+    if before.require_two_step != after.require_two_step {
+        require_two_step(&state, after.require_two_step).await?;
+    }
     // A new key or source: fetch metadata for everything that has none yet
     // (shows are fetched again from a new TV source).
     if crate::providers::settings_changed(&state.db, &before, &after).await? {
         state.scanner.enqueue_all(false).await?;
     }
     Ok(Json(after.for_admin()))
+}
+
+/// Requires two-step sign-in of every account with a password, or stops
+/// requiring it. Turned on, whoever signs in with a password alone is
+/// signed out everywhere, browsers and apps, and sets it up at their next
+/// sign-in; sessions and apps that slip past this (one signing in at that
+/// moment) stop working anyway ([`crate::auth::AuthService::require_two_step`]).
+async fn require_two_step(state: &AppState, on: bool) -> ApiResult<()> {
+    state.auth.require_two_step(on && state.two_step.can_set_up());
+    if !on {
+        tracing::info!("two-step sign-in is no longer required");
+        return Ok(());
+    }
+    let without = state.two_step.accounts_without().await?;
+    for &id in &without {
+        state.oauth.forget_user(id);
+        state.auth.sign_out_everywhere(id, None).await?;
+    }
+    tracing::info!(
+        "two-step sign-in is required: {} account(s) without it were signed out, and set it up at their next sign-in",
+        without.len()
+    );
+    Ok(())
 }
 
 /// The transcoder's operating system, when known: a managed one runs on

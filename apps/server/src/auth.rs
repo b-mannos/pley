@@ -11,7 +11,7 @@ pub mod scopes;
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use argon2::Argon2;
@@ -354,6 +354,9 @@ pub struct AuthService {
     /// Bumped by every forget before it forgets: a validation that read the
     /// database before a forget doesn't cache what it read.
     epoch: AtomicU64,
+    /// Every account with a password must use two-step sign-in (see
+    /// [`AuthService::require_two_step`]).
+    two_step_required: AtomicBool,
     /// Failed password and PIN attempts.
     pub throttle: crate::accounts::Throttle,
     /// The code that sets up a server without accounts from elsewhere.
@@ -394,11 +397,48 @@ impl AuthService {
             cache: DashMap::new(),
             apps: DashMap::new(),
             epoch: AtomicU64::new(0),
+            two_step_required: AtomicBool::new(false),
             throttle: Default::default(),
             setup: Default::default(),
             #[cfg(test)]
             pauses: Pauses::default(),
         }
+    }
+
+    /// Whether every account with a password must use two-step sign-in: the
+    /// `require_two_step` setting, while authenticator apps can be set up.
+    pub fn two_step_required(&self) -> bool {
+        self.two_step_required.load(Ordering::SeqCst)
+    }
+
+    /// Requires two-step sign-in of every account with a password, or not.
+    /// While it is required, the sessions and app tokens of an account
+    /// without it don't work, nor of an app allowed by one, and their
+    /// refresh tokens get nothing: whatever was signed in with a password
+    /// alone. Cached ones are read again.
+    pub fn require_two_step(&self, on: bool) {
+        self.two_step_required.store(on, Ordering::SeqCst);
+        self.epoch.fetch_add(1, Ordering::SeqCst);
+        self.cache.clear();
+        self.apps.clear();
+    }
+
+    /// Whether `user_id` is kept out because the server requires two-step
+    /// sign-in and they don't use it, for what doesn't come through
+    /// [`AuthService::validate`]: the keyed addresses of a playback started
+    /// before it was required.
+    pub async fn lacks_two_step(&self, user_id: i64) -> sqlx::Result<bool> {
+        if !self.two_step_required() {
+            return Ok(false);
+        }
+        let row: Option<bool> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT {} FROM users u WHERE u.id = ?",
+            without_two_step("u")
+        )))
+        .bind(user_id)
+        .fetch_optional(&self.db.read)
+        .await?;
+        Ok(row.unwrap_or(false))
     }
 
     pub async fn create_session(
@@ -454,14 +494,17 @@ impl AuthService {
         // the query runs keeps what it read out of the cache.
         let epoch = self.epoch.load(Ordering::SeqCst);
         #[allow(clippy::type_complexity)]
-        let row: Option<(i64, String, bool, bool, Option<i64>, bool, i64, i64)> = sqlx::query_as(
-            "SELECT u.id, u.username, u.is_admin, u.all_libraries, u.max_age, u.disabled, s.expires_at, s.last_seen_at
-             FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
-        )
-        .bind(&key)
-        .fetch_optional(&self.db.read)
-        .await
-        .ok()?;
+        let row: Option<(i64, String, bool, bool, Option<i64>, bool, bool, i64, i64)> =
+            sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                "SELECT u.id, u.username, u.is_admin, u.all_libraries, u.max_age, u.disabled, {}, s.expires_at,
+                        s.last_seen_at
+                 FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?",
+                without_two_step("u")
+            )))
+            .bind(&key)
+            .fetch_optional(&self.db.read)
+            .await
+            .ok()?;
         #[cfg(test)]
         {
             let gate = self.pauses.after_query.lock().take();
@@ -470,11 +513,13 @@ impl AuthService {
                 gate.release.notified().await;
             }
         }
-        let Some((id, username, is_admin, all_libraries, max_age, disabled, expires_at, last_seen_at)) = row else {
+        let Some((id, username, is_admin, all_libraries, max_age, disabled, no_two_step, expires_at, last_seen_at)) =
+            row
+        else {
             self.cache.remove(&key);
             return None;
         };
-        if expires_at <= now || disabled {
+        if expires_at <= now || disabled || (no_two_step && self.two_step_required()) {
             self.cache.remove(&key);
             return None;
         }
@@ -587,7 +632,8 @@ impl AuthService {
             return None;
         };
         let expires_at = row.token_expires.min(row.grant_expires).min(row.ends_at.unwrap_or(i64::MAX));
-        if expires_at <= now || row.disabled || row.approver_disabled {
+        let no_two_step = row.user_without_two_step || row.approver_without_two_step;
+        if expires_at <= now || row.disabled || row.approver_disabled || (no_two_step && self.two_step_required()) {
             self.apps.remove(&key);
             return None;
         }
@@ -610,16 +656,19 @@ impl AuthService {
 
     /// What the database says about the access token whose SHA-256 is `key`.
     async fn app_row(&self, key: &str) -> sqlx::Result<Option<AppRow>> {
-        let row = sqlx::query_as(
+        let row = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT u.id, u.username, u.is_admin AS role_admin, u.all_libraries, u.max_age, u.disabled,
-                    a.disabled AS approver_disabled, t.expires_at AS token_expires, g.id AS grant_id, g.client_id,
+                    a.disabled AS approver_disabled, {} AS user_without_two_step,
+                    {} AS approver_without_two_step, t.expires_at AS token_expires, g.id AS grant_id, g.client_id,
                     g.scope, g.approved_by, g.expires_at AS grant_expires, g.ends_at
              FROM app_tokens t
              JOIN app_grants g ON g.id = t.grant_id
              JOIN users u ON u.id = g.user_id
              JOIN users a ON a.id = g.approved_by
              WHERE t.token_hash = ? AND t.kind = 'access'",
-        )
+            without_two_step("u"),
+            without_two_step("a")
+        )))
         .bind(key)
         .fetch_optional(&self.db.read)
         .await;
@@ -673,7 +722,7 @@ impl AuthService {
     /// Exchanges an app's refresh token (see [`grants::refresh`]).
     pub async fn refresh(&self, input: RefreshInput) -> Result<Issued, RefreshError> {
         let client = input.client_id.clone();
-        let result = grants::refresh(&self.db, input).await;
+        let result = grants::refresh(&self.db, input, self.two_step_required()).await;
         match &result {
             // Its oldest access tokens may be gone.
             Ok(issued) => self.forget_grants(&[issued.grant_id]),
@@ -742,6 +791,15 @@ impl AuthService {
     }
 }
 
+/// SQL that is true when the account of the `users` row `alias` signs in
+/// with a password and doesn't use two-step sign-in: what a server that
+/// requires it doesn't let in ([`AuthService::require_two_step`]).
+pub(crate) fn without_two_step(alias: &str) -> String {
+    format!(
+        "({alias}.password_hash NOT LIKE '!%' AND NOT EXISTS (SELECT 1 FROM two_step w WHERE w.user_id = {alias}.id))"
+    )
+}
+
 /// What [`AuthService::validate_app`] reads about a token.
 #[derive(sqlx::FromRow)]
 struct AppRow {
@@ -752,6 +810,10 @@ struct AppRow {
     max_age: Option<i64>,
     disabled: bool,
     approver_disabled: bool,
+    /// The profile it acts as, or whoever allowed it, signs in with a
+    /// password alone ([`without_two_step`]).
+    user_without_two_step: bool,
+    approver_without_two_step: bool,
     token_expires: i64,
     grant_id: i64,
     client_id: String,

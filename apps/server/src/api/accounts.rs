@@ -8,7 +8,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 
-use super::auth::{Me, confirm_password, login_response, me};
+use super::auth::{Me, confirm_password, login_response, me, second_step};
 use super::nullable;
 use crate::accounts::{self, NO_PASSWORD, UserDto};
 use crate::auth::{
@@ -805,5 +805,9 @@ pub async fn accept_invite(
         accounts::set_libraries(&state.db, id, &invite.library_ids).await?;
     }
     tracing::info!("'{username}' joined with an invitation");
-    login_response(&state, id, &headers, ip.as_deref()).await
+    // A server that requires two-step sign-in answers as a sign-in that sets
+    // it up does: the account is made, and the person goes on signing in to
+    // it with its first code.
+    second_step(&state, id, &username, None, None).await?;
+    login_response(&state, id, &headers, ip.as_deref(), None).await
 }

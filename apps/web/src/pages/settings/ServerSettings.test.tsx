@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { ServiceTestResult, Settings } from "@/api/types";
-import { mockApi, renderWithProviders, testQueryClient } from "@/test/render";
+import { mockApi, renderWithProviders, testQueryClient, testUser } from "@/test/render";
 import { ServerSettings } from "./ServerSettings";
 import { TestButton } from "./SettingsForm";
 
@@ -57,6 +57,61 @@ describe("ServerSettings", () => {
     expect(await screen.findByText("Settings saved")).toBeInTheDocument();
     await waitFor(() => expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ third_party_apps: true }));
     expect(screen.getByRole("switch", { name: "Apps by other publishers" })).toBeChecked();
+  });
+
+  it("requires two-step sign-in only from an administrator who uses it", async () => {
+    mockApi({ "GET /api/settings": () => ({ ...SETTINGS, require_two_step: false }), "GET /api/system": () => ({}), "GET /api/users": () => [] });
+    renderWithProviders(<ServerSettings />, { user: { ...testUser, two_step: false } });
+    expect(await screen.findByRole("switch", { name: "Require two-step sign-in" })).toBeDisabled();
+    expect(screen.getByText(/Turn on two-step sign-in for your own account first/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute("href", "/account");
+  });
+
+  it("says who gets signed out, requires two-step sign-in, and reads the server's status again", async () => {
+    const user = userEvent.setup();
+    let required = false;
+    const requests = mockApi({
+      "GET /api/settings": () => ({ ...SETTINGS, require_two_step: required }),
+      "GET /api/system": () => ({}),
+      "GET /api/server": () => ({ name: "Den", version: "1.0.0", setup_required: false, two_step_required: required }),
+      "GET /api/users": () => [
+        { ...testUser, two_step: true },
+        { ...testUser, id: 2, name: "Bob" },
+        { ...testUser, id: 3, name: "Cy" },
+        { ...testUser, id: 4, name: "Kid", managed: true, has_password: false },
+        { ...testUser, id: 5, name: "Old", disabled: true },
+      ],
+      "PUT /api/settings": (req) => {
+        required = !!(req.body as Partial<Settings>).require_two_step;
+        return { ...SETTINGS, ...(req.body as Partial<Settings>) };
+      },
+    });
+    renderWithProviders(<ServerSettings />, { user: { ...testUser, two_step: true } });
+
+    const toggle = await screen.findByRole("switch", { name: "Require two-step sign-in" });
+    expect(toggle).toBeEnabled();
+    expect(toggle).not.toBeChecked();
+    await user.click(toggle);
+    expect(await screen.findByText(/Saving signs out 2 people who haven't set it up/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Settings saved")).toBeInTheDocument();
+    await waitFor(() => expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ require_two_step: true }));
+    await waitFor(() => expect(requests.filter((r) => r.path === "/api/server").length).toBeGreaterThan(0));
+    expect(screen.queryByText(/Saving signs out/)).not.toBeInTheDocument();
+  });
+
+  it("says when the server can't hold a requirement that is saved", async () => {
+    mockApi({
+      "GET /api/settings": () => ({ ...SETTINGS, require_two_step: true }),
+      "GET /api/system": () => ({}),
+      "GET /api/server": () => ({ name: "Den", version: "1.0.0", setup_required: false, two_step_required: false }),
+      "GET /api/users": () => [],
+    });
+    renderWithProviders(<ServerSettings />, { user: { ...testUser, two_step: false } });
+    const toggle = await screen.findByRole("switch", { name: "Require two-step sign-in" });
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeEnabled();
+    expect(await screen.findByText(/can't set up authenticator apps right now/)).toBeInTheDocument();
   });
 
   it("lists apps again once turning other publishers off signed them out", async () => {

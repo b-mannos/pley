@@ -72,6 +72,11 @@ curl -s -X POST http://localhost:7539/api/auth/login \
 # {"user":{…},"token":"<token>"}
 ```
 
+An account with two-step sign-in adds `"code"`, a code from its
+authenticator app. When the server requires two-step sign-in, a tool's
+account uses it too: requiring it signs the account out, so sign in as it
+on the web once to set it up, then ask for a new token with a code.
+
 Accepted:
 
 - this API's way: the `X-Plex-Token` header or query parameter;

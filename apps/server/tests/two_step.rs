@@ -91,9 +91,10 @@ async fn turning_it_on_takes_the_password_and_a_first_code() {
     let users = app.get("/api/users", &admin).await.body;
     assert!(users.as_array().unwrap().iter().any(|u| u["username"] == "bob" && u["two_step"] == true));
 
-    // Once: another authenticator means turning it off first.
+    // Setting it up again moves it to another authenticator, which takes a
+    // code of this one too, as turning it off does.
     let again = app.post("/api/me/two-step/setup", &bob, json!({"password": "test-pass-1"})).await;
-    assert_eq!(again.status, StatusCode::CONFLICT);
+    assert_eq!((again.status, &again.body["code"]), (StatusCode::UNAUTHORIZED, &json!("two_step")));
 
     // The database alone can't make codes: the secret is sealed, the
     // recovery codes hashed.
