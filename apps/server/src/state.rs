@@ -142,7 +142,7 @@ impl AppState {
             sessions.clone(),
             schedule.clone(),
             store.clone(),
-            config.cache_dir().join("trickplay"),
+            config.cache_dir(),
             stopping.clone(),
         );
         let live =

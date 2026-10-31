@@ -14,6 +14,10 @@ describes how they are made.
 - Seek-bar previews take about a fifth less space: they are saved at a
   JPEG quality that looks the same at their size. Previews made before keep
   theirs.
+- The seek previews Plex apps take (their BIF index, larger than the
+  previews themselves) are kept in the cache for 30 days instead of for good
+  beside the previews, and made again when asked for. Those kept so far are
+  removed at the first start.
 
 ## [0.1.0] - 2026-10-30
 

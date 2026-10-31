@@ -11,11 +11,13 @@
 //! download being converted meanwhile pauses them (the transcoder holds its
 //! FFmpeg until the conversion is done).
 //!
-//! Chapter images and Plex's BIF index (`index-sd.bif`) are cut from the
-//! sprite sheets, so they cost no extra decoding of the video.
+//! Chapter images and Plex's BIF index are cut from the sprite sheets, so
+//! they cost no extra decoding of the video. The BIF index, larger than the
+//! sheets it is cut from, is kept in the cache, for the titles Plex apps
+//! played lately, rather than beside them.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -41,6 +43,9 @@ const JPEG_QUALITY: u8 = 82;
 /// A chapter's image is taken this far into it (or 20 % of it, if shorter),
 /// past black frames and fades at the cut.
 const CHAPTER_OFFSET_MS: i64 = 4_000;
+/// The settings row saying the BIF indexes earlier versions kept beside the
+/// previews are gone.
+const OLD_BIFS_REMOVED: &str = "old_bifs_removed";
 
 pub struct TrickplayService {
     db: Db,
@@ -49,6 +54,8 @@ pub struct TrickplayService {
     sessions: Arc<Sessions>,
     schedule: Arc<Scheduler>,
     store: Arc<Store>,
+    /// Plex's BIF indexes (`<data>/cache/bif`).
+    bif_cache: PathBuf,
     /// Files waiting: the ones people opened first, then the libraries'.
     queues: Mutex<Queues>,
     /// A file was queued.
@@ -96,7 +103,7 @@ impl TrickplayService {
         sessions: Arc<Sessions>,
         schedule: Arc<Scheduler>,
         store: Arc<Store>,
-        legacy_cache: PathBuf,
+        cache: PathBuf,
         stopping: CancellationToken,
     ) -> Arc<Self> {
         let service = Arc::new(Self {
@@ -106,6 +113,7 @@ impl TrickplayService {
             sessions,
             schedule,
             store,
+            bif_cache: cache.join("bif"),
             queues: Mutex::default(),
             queued: tokio::sync::Notify::new(),
             pending: Mutex::default(),
@@ -114,9 +122,12 @@ impl TrickplayService {
             stopping,
         });
         // Earlier versions kept previews in the cache, keyed by file id.
+        let legacy_cache = cache.join("trickplay");
         tokio::spawn(async move {
             let _ = tokio::fs::remove_dir_all(legacy_cache).await;
         });
+        let (db, store) = (service.db.clone(), service.store.clone());
+        tokio::spawn(async move { remove_old_bifs(&db, store).await });
         tokio::spawn(service.clone().worker());
         service
     }
@@ -411,20 +422,29 @@ impl TrickplayService {
         .await
     }
 
-    /// Plex's BIF index of the previews (`index-sd.bif`), made once.
-    pub async fn bif(&self, file: &FileRow) -> anyhow::Result<Option<PathBuf>> {
-        let (Some(info), Some(sheets)) = (self.index(file), self.dir(file)) else { return Ok(None) };
-        let path = sheets.join("index-sd.bif");
-        if path.is_file() {
-            return Ok(Some(path));
+    /// Plex's BIF index of the previews: the one in the cache, or else one
+    /// cut from the sheets and kept there. It is named by the previews it is
+    /// cut from, so previews made again otherwise get another one.
+    pub async fn bif(&self, file: &FileRow) -> anyhow::Result<Option<Vec<u8>>> {
+        let (Some(info), Some(sheets), Some(fingerprint)) =
+            (self.index(file), self.dir(file), file.fingerprint.as_deref())
+        else {
+            return Ok(None);
+        };
+        let path = self
+            .bif_cache
+            .join(format!("{fingerprint}-{}-{}x{}-{}.bif", info.interval_ms, info.width, info.height, info.count));
+        // Read rather than looked for: the cache's clean-up may remove it in between.
+        if let Ok(bytes) = tokio::fs::read(&path).await {
+            return Ok(Some(bytes));
         }
         let lock = self.cut_lock(file.id);
         let _guard = lock.lock().await;
-        if path.is_file() {
-            return Ok(Some(path));
+        if let Ok(bytes) = tokio::fs::read(&path).await {
+            return Ok(Some(bytes));
         }
-        let target = path.clone();
-        crate::util::blocking(move || {
+        let dir = self.bif_cache.clone();
+        let bytes = crate::util::blocking(move || {
             let mut frames = Vec::with_capacity(info.count as usize);
             for sheet in 0..info.sheets {
                 let img = image::open(sheets.join(format!("{sheet}.jpg")))?.to_rgb8();
@@ -440,21 +460,88 @@ impl TrickplayService {
                 }
             }
             let bytes = bif_bytes(&frames, info.interval_ms.clamp(1, i64::from(u32::MAX)) as u32);
-            let tmp = target.with_extension("bif.tmp");
-            std::fs::write(&tmp, bytes)?;
-            std::fs::rename(&tmp, &target)?;
-            Ok(())
+            // Not kept (a full disk) costs only another cut next time.
+            if let Err(err) = save(&dir, &path, &bytes) {
+                tracing::debug!("could not keep {}: {err}", path.display());
+            }
+            Ok(bytes)
         })
         .await?;
-        Ok(Some(path))
+        Ok(Some(bytes))
     }
 
     /// The preview frame at `ms`, out of the BIF index.
     pub async fn frame_at(&self, file: &FileRow, ms: i64) -> anyhow::Result<Option<Vec<u8>>> {
-        let Some(path) = self.bif(file).await? else { return Ok(None) };
-        let bytes = tokio::fs::read(&path).await?;
-        Ok(bif_frame(&bytes, ms).map(<[u8]>::to_vec))
+        let Some(bif) = self.bif(file).await? else { return Ok(None) };
+        Ok(bif_frame(&bif, ms).map(<[u8]>::to_vec))
     }
+}
+
+/// Earlier versions kept the BIF index beside the previews, for good: those
+/// go, once. A Plex app that asks again gets one cut into the cache.
+async fn remove_old_bifs(db: &Db, store: Arc<Store>) {
+    let done: sqlx::Result<Option<String>> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?")
+        .bind(OLD_BIFS_REMOVED)
+        .fetch_optional(&db.read)
+        .await;
+    if !matches!(done, Ok(None)) {
+        return;
+    }
+    // Only video files have previews.
+    let fingerprints: Vec<String> = match sqlx::query_scalar(
+        "SELECT DISTINCT fingerprint FROM media_files
+         WHERE video_codec IS NOT NULL AND fingerprint IS NOT NULL AND fingerprint != ''",
+    )
+    .fetch_all(&db.read)
+    .await
+    {
+        Ok(fingerprints) => fingerprints,
+        Err(err) => {
+            tracing::warn!("listing the media folders that may hold old BIF indexes: {err}");
+            return;
+        }
+    };
+    let removed = crate::util::blocking(move || {
+        let (mut count, mut bytes) = (0u64, 0u64);
+        for fingerprint in &fingerprints {
+            let Some(dir) = store.media_dir(fingerprint) else { continue };
+            let path = dir.join("trickplay").join("index-sd.bif");
+            if let Ok(meta) = std::fs::metadata(&path)
+                && std::fs::remove_file(&path).is_ok()
+            {
+                count += 1;
+                bytes += meta.len();
+            }
+        }
+        Ok((count, bytes))
+    })
+    .await;
+    let Ok((count, bytes)) = removed else { return };
+    if let Err(err) = sqlx::query("INSERT OR IGNORE INTO settings (key, value) VALUES (?, '1')")
+        .bind(OLD_BIFS_REMOVED)
+        .execute(&db.write)
+        .await
+    {
+        tracing::warn!("saving that the old BIF indexes are gone: {err}");
+    }
+    if count > 0 {
+        tracing::info!(
+            "removed {count} BIF indexes kept beside seek previews ({} MB freed): they are kept in the cache now",
+            bytes / 1_000_000
+        );
+    }
+}
+
+/// Write `bytes` to `path` whole, through a temporary file of its own in
+/// `dir`: a file played from two libraries may be cut by both at once.
+fn save(dir: &Path, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let tmp = dir.join(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
+    let saved = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
+    if saved.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    saved
 }
 
 const BIF_MAGIC: [u8; 8] = [0x89, b'B', b'I', b'F', 0x0d, 0x0a, 0x1a, 0x0a];
@@ -537,5 +624,52 @@ mod tests {
         assert_eq!(bif_frame(&bif, 7_400), Some(&b"second"[..]));
         assert_eq!(bif_frame(&bif, 60_000), Some(&b"third"[..]));
         assert_eq!(bif_frame(b"not a bif", 0), None);
+    }
+
+    #[tokio::test]
+    async fn old_bif_indexes_go_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("pley.db")).await.unwrap();
+        for sql in [
+            "INSERT INTO libraries (id, name, kind, paths, created_at) VALUES (1, 'Movies', 'movies', '[]', 0)",
+            "INSERT INTO items (id, library_id, kind, key, title, sort_title, added_at, updated_at)
+             VALUES (1, 1, 'movie', 'm', 'M', 'm', 0, 0)",
+            "INSERT INTO media_files (item_id, library_id, path, size, mtime, fingerprint, video_codec, added_at, updated_at)
+             VALUES (1, 1, '/m/a.mkv', 1, 0, '0123456789abcdef', 'h264', 0, 0)",
+        ] {
+            sqlx::query(sql).execute(&db.write).await.unwrap();
+        }
+        let store = Arc::new(Store::new(
+            db.clone(),
+            &dir.path().join("metadata"),
+            &dir.path().join("media"),
+            &dir.path().join("cache"),
+        ));
+        let previews = store.media_dir("0123456789abcdef").unwrap().join("trickplay");
+        std::fs::create_dir_all(&previews).unwrap();
+        for name in ["0.jpg", "index.json", "index-sd.bif"] {
+            std::fs::write(previews.join(name), b"kept").unwrap();
+        }
+
+        remove_old_bifs(&db, store.clone()).await;
+        assert!(!previews.join("index-sd.bif").exists(), "the BIF index goes");
+        assert!(previews.join("0.jpg").is_file() && previews.join("index.json").is_file(), "the previews stay");
+
+        // Done once: what is there afterwards isn't looked for again.
+        std::fs::write(previews.join("index-sd.bif"), b"kept").unwrap();
+        remove_old_bifs(&db, store).await;
+        assert!(previews.join("index-sd.bif").is_file());
+    }
+
+    #[test]
+    fn kept_files_are_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("bif");
+        let path = cache.join("0123456789abcdef-10000-320x180-150.bif");
+        save(&cache, &path, b"first").unwrap();
+        save(&cache, &path, b"second").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"second");
+        let names: Vec<_> = std::fs::read_dir(&cache).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(names.len(), 1, "no temporary file left: {names:?}");
     }
 }
