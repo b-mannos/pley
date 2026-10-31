@@ -139,3 +139,6 @@ It has no releases yet: it is built and installed by hand
   the web Samsung app does, rather than leaving at once.
 - The native app's Home no longer pauses to draw its rows again when the
   server's answer is the same as what it shows.
+- The native app's rows (Home, libraries, item pages) show sooner: the
+  tiles past the screen's edge are made just after, and the app no longer
+  pauses to save what is already saved.
