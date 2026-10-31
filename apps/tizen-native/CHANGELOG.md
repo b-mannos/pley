@@ -14,4 +14,6 @@ It has no releases yet: it is built and installed by hand
   Android TV app's "Choose your server" screen, with servers found on the
   network, an address pad, the TV's keyboard and forgetting a server; its
   sign-in with a code and a QR code, the tokens kept sealed by the TV's key
-  manager; and its rail and rows of placeholder tiles, driven by the remote.
+  manager; Who's watching? with PINs; and Home, with the hero, the
+  server's rows and the rail, in Roboto as on Android, driven by the
+  remote, a held key speeding up the longer it is held.

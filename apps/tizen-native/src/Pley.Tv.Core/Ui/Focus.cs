@@ -114,6 +114,9 @@ public class FocusGroup : FocusNode
     /// <summary>The child focused last, or -1.</summary>
     public int Last { get; internal set; } = -1;
 
+    /// <summary>Forgets the child focused last: coming back lands on the first (a page put back at its top).</summary>
+    public void ForgetLast() => Last = -1;
+
     public IReadOnlyList<FocusNode> Children => children;
 
     /// <summary>

@@ -40,6 +40,7 @@ sealed class TextInput : View
             PlaceholderText = placeholder,
             PlaceholderTextColor = PleyColors.Muted,
             PrimaryCursorColor = PleyColors.AccentBright,
+            FontFamily = PleyType.Roboto,
             FontStyle = Text.Weight(PleyType.Regular),
             VerticalAlignment = VerticalAlignment.Center,
             EnableSelection = false,

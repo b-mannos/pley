@@ -19,6 +19,8 @@ public sealed record User
     public bool? IsAdmin { get; init; }
     /// <summary>A profile without a password, reached by switching.</summary>
     public bool? Managed { get; init; }
+    /// <summary>The profile has a PIN: a TV starting as it asks for it.</summary>
+    public bool HasPin { get; init; }
     public string? AvatarUrl { get; init; }
     public string? AvatarColor { get; init; }
     public string? AudioLanguage { get; init; }

@@ -9,7 +9,7 @@ namespace Pley.Tv.Tizen.Kit;
 /// A tile on TV (the Android app's TvTile and ArtworkTile, design spec §2.3, D-pad rule 8): the
 /// well with its picture, or the title on a placeholder until the picture comes, and its overlays;
 /// a caption under it. Focused, the well grows to 1.08 and gets the accent ring around it, and the
-/// caption turns bold. While a key repeats it snaps to its focus look (rule 5).
+/// caption turns bold. While a key repeats its focus look changes evenly over the time between moves.
 /// </summary>
 sealed class TileView : View
 {
@@ -131,16 +131,11 @@ sealed class TileView : View
         title.FontStyle = Text.Weight(on ? PleyType.Bold : PleyType.Caption.Weight);
         var scale = on ? (kind.Round ? PleyShape.AvatarScale : PleyShape.TileScale) : 1f;
         focusAnimation?.Stop();
-        if (gate.Holding)
+        // A held key moves focus every 100 ms, then faster: each change lasts until the next has begun, evenly, so focus glides along the row.
+        var held = gate.Holding;
+        focusAnimation = new Animation(held ? gate.GlideMs : on ? PleyMotion.FocusMs : PleyMotion.UnfocusMs)
         {
-            // Held keys snap (rule 5).
-            frame.Scale = new Vector3(scale, scale, 1);
-            ring.Opacity = on ? 1 : 0;
-            return;
-        }
-        focusAnimation = new Animation(on ? PleyMotion.FocusMs : PleyMotion.UnfocusMs)
-        {
-            DefaultAlphaFunction = new AlphaFunction(on ? AlphaFunction.BuiltinFunctions.EaseOut : AlphaFunction.BuiltinFunctions.EaseIn),
+            DefaultAlphaFunction = new AlphaFunction(held ? AlphaFunction.BuiltinFunctions.Linear : on ? AlphaFunction.BuiltinFunctions.EaseOut : AlphaFunction.BuiltinFunctions.EaseIn),
         };
         focusAnimation.AnimateTo(frame, "Scale", new Vector3(scale, scale, 1));
         focusAnimation.AnimateTo(ring, "Opacity", on ? 1f : 0f);

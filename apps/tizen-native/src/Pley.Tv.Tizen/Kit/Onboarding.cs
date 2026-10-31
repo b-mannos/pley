@@ -50,10 +50,12 @@ static class Onboarding
         {
             PixelSize = Ui.Dp(height * 0.75f),
             TextColor = PleyColors.Fg,
+            FontFamily = PleyType.Roboto,
             FontStyle = Text.Weight(PleyType.Bold),
             VerticalAlignment = VerticalAlignment.Center,
             Position = new Position(px + Ui.Dp(height * 0.4f), 0),
         };
+        Text.Track(word, PleyType.PageTitle);
         word.Size = new Size(word.NaturalSize.Width + 2, px);
         row.SizeWidth = word.PositionX + word.SizeWidth;
         row.Add(mark);

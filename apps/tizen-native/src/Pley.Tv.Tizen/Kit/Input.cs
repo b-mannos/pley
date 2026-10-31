@@ -18,6 +18,8 @@ sealed class Input
     readonly Func<FocusTree?> tree;
     readonly KeyRepeatGate gate;
     readonly List<Func<string, bool, bool>> handlers = new List<Func<string, bool, bool>>();
+    /// <summary>While a key is held, focus moves on this clock, about once a frame, not on the remote's uneven repeats.</summary>
+    readonly Timer hold = new Timer(16);
     long okDownAt = -1;
     bool okLong;
 
@@ -26,6 +28,12 @@ sealed class Input
         this.tree = tree;
         this.gate = gate;
         window.KeyEvent += (s, e) => OnKey(e.Key.KeyPressedName, e.Key.State == Key.StateType.Down);
+        hold.Tick += (s, e) =>
+        {
+            var direction = gate.Tick();
+            if (direction != null) Dispatch(direction, true);
+            return gate.Down;
+        };
     }
 
     /// <summary>Back: closes what is on top or goes back a page; the shell sets it.</summary>
@@ -45,7 +53,14 @@ sealed class Input
 
     void OnKey(string key, bool down)
     {
-        if (!gate.Admit(key, down)) return;
+        var admitted = gate.Admit(key, down);
+        // A direction is down: if it stays down, the hold's clock moves focus from 250 ms on.
+        if (gate.Down && !hold.IsRunning()) hold.Start();
+        if (admitted) Dispatch(key, down);
+    }
+
+    void Dispatch(string key, bool down)
+    {
         var focus = tree();
         var item = focus?.Current;
         if (item?.OwnKey?.Invoke(key, down) == true) return;
@@ -54,16 +69,16 @@ sealed class Input
         switch (key)
         {
             case "Up":
-                if (down) focus?.Move(Direction.Up);
+                if (down) Move(focus, Direction.Up);
                 break;
             case "Down":
-                if (down) focus?.Move(Direction.Down);
+                if (down) Move(focus, Direction.Down);
                 break;
             case "Left":
-                if (down) focus?.Move(Direction.Left);
+                if (down) Move(focus, Direction.Left);
                 break;
             case "Right":
-                if (down) focus?.Move(Direction.Right);
+                if (down) Move(focus, Direction.Right);
                 break;
             case "Return":
             case "KP_Enter":
@@ -81,6 +96,8 @@ sealed class Input
                 break;
         }
     }
+
+    static void Move(FocusTree? focus, Direction direction) => focus?.Move(direction);
 
     void Ok(FocusItem? item, bool down)
     {

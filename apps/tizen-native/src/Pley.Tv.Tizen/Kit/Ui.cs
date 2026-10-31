@@ -68,20 +68,27 @@ static class PleyColors
         new Color(((rgb >> 16) & 0xff) / 255f, ((rgb >> 8) & 0xff) / 255f, (rgb & 0xff) / 255f, alpha);
 }
 
-/// <summary>A text style: size and line height in sp, and weight (the Android app's PleyType).</summary>
-sealed record TextStyle(float Size, float Line, string Weight);
+/// <summary>A text style: size and line height in sp, weight, tracking in sp and face (the Android app's PleyType).</summary>
+sealed record TextStyle(float Size, float Line, string Weight, float Tracking = 0, string Family = PleyType.Roboto);
 
-/// <summary>Pley's TV type (PleyType.Tv, design spec §1.2): weights 400, 500 and 700 only.</summary>
+/// <summary>
+/// Pley's TV type (PleyType.Tv, design spec §1.2): Roboto, as the Android app has it, which the app
+/// ships (shared/res/fonts, made by scripts/fonts.mjs); weights 400, 500 and 700 only.
+/// </summary>
 static class PleyType
 {
+    public const string Roboto = "Roboto";
+    /// <summary>The TV's own monospaced face, for the link code (the web TV app's fallback).</summary>
+    public const string Monospace = "monospace";
+
     public const string Regular = "normal";
-    public const string Medium = "semiBold";
+    public const string Medium = "medium";
     public const string Bold = "bold";
 
     /// <summary>A title without logo art; 2 lines at most.</summary>
-    public static readonly TextStyle HeroTitle = new TextStyle(38, 44, Bold);
+    public static readonly TextStyle HeroTitle = new TextStyle(38, 44, Bold, -0.5f);
     /// <summary>Library, Search, Settings, Who's watching?</summary>
-    public static readonly TextStyle PageTitle = new TextStyle(28, 34, Bold);
+    public static readonly TextStyle PageTitle = new TextStyle(28, 34, Bold, -0.25f);
     /// <summary>Row headers.</summary>
     public static readonly TextStyle Section = new TextStyle(18, 24, Bold);
     /// <summary>Episode titles in info blocks; panel and dialog titles; placeholder titles on tiles.</summary>
@@ -91,13 +98,13 @@ static class PleyType
     /// <summary>Lists, settings rows, instructions, 2-line summaries.</summary>
     public static readonly TextStyle Body = new TextStyle(14, 20, Regular);
     /// <summary>Buttons, the metadata line, tabs, chips.</summary>
-    public static readonly TextStyle Label = new TextStyle(14, 18, Medium);
+    public static readonly TextStyle Label = new TextStyle(14, 18, Medium, 0.1f);
     /// <summary>Tile captions, scrubber times.</summary>
-    public static readonly TextStyle Caption = new TextStyle(13, 17, Medium);
+    public static readonly TextStyle Caption = new TextStyle(13, 17, Medium, 0.2f);
     /// <summary>Quality badges, as written ("1080p").</summary>
-    public static readonly TextStyle Badge = new TextStyle(11, 13, Bold);
-    /// <summary>The link code.</summary>
-    public static readonly TextStyle Code = new TextStyle(48, 56, Bold);
+    public static readonly TextStyle Badge = new TextStyle(11, 13, Bold, 0.4f);
+    /// <summary>The link code, in a monospaced face.</summary>
+    public static readonly TextStyle Code = new TextStyle(48, 56, Bold, 4, Monospace);
     /// <summary>PIN and address pad keys.</summary>
     public static readonly TextStyle PinDigit = new TextStyle(28, 28, Medium);
 }
@@ -166,11 +173,49 @@ static class Text
             TextColor = color,
             MultiLine = maxLines > 1,
             Ellipsis = true,
+            FontFamily = style.Family,
             FontStyle = Weight(style.Weight),
             VerticalAlignment = VerticalAlignment.Center,
         };
-        if (width > 0) label.Size = new Size(Ui.Dp(width), maxLines > 1 ? Ui.Dp(style.Line * maxLines) : Ui.Dp(style.Line));
+        Track(label, style);
+        if (width > 0) label.Size = new Size(Ui.Dp(width), LineHeight(style) * maxLines);
         return label;
+    }
+
+    /// <summary>The fonts the app ships: Roboto, before any text is drawn.</summary>
+    public static void LoadFonts() =>
+        FontClient.Instance.AddCustomFontDirectory($"{(global::Tizen.Applications.Application.Current.DirectoryInfo.SharedResource)}fonts");
+
+    /// <summary>
+    /// NUI's CharacterSpacing (in pixels), which the TV's NUI has and the API 9 reference doesn't
+    /// name; without it, text keeps the font's own spacing.
+    /// </summary>
+    static readonly System.Reflection.PropertyInfo? CharacterSpacing = typeof(TextLabel).GetProperty("CharacterSpacing");
+
+    /// <summary>The style's tracking, as Android's letterSpacing: sp added between letters.</summary>
+    public static void Track(TextLabel label, TextStyle style)
+    {
+        if (style.Tracking != 0 && CharacterSpacing != null) CharacterSpacing.SetValue(label, Ui.Dp(style.Tracking));
+    }
+
+    /// <summary>Each style's line height in its font, in pixels, measured once.</summary>
+    static readonly System.Collections.Generic.Dictionary<(float, string, string), float> FontLines = new System.Collections.Generic.Dictionary<(float, string, string), float>();
+
+    /// <summary>
+    /// A line of <paramref name="style"/> in pixels: the design's line height, or the font's own on
+    /// the TV when that is taller. Text in a box too short for its font shows as "…" alone. Text is
+    /// centred in its box, so a pixel or two more doesn't move it.
+    /// </summary>
+    public static float LineHeight(TextStyle style)
+    {
+        var key = (style.Size, style.Weight, style.Family);
+        if (!FontLines.TryGetValue(key, out var fontLine))
+        {
+            using var probe = new TextLabel("Ágjy") { PixelSize = Ui.Dp(style.Size), FontFamily = style.Family, FontStyle = Weight(style.Weight) };
+            fontLine = (float)System.Math.Ceiling(probe.NaturalSize.Height);
+            FontLines[key] = fontLine;
+        }
+        return System.Math.Max(Ui.Dp(style.Line), fontLine);
     }
 
     public static PropertyMap Weight(string weight)

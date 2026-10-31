@@ -35,7 +35,8 @@ sealed class LinkScreen : Sheet
     LinkCode? shownCode;
     bool? neededNewCode;
 
-    public LinkScreen(LinkModel model, Action onBack) : base("link", Axis.Row)
+    /// <param name="intro">Under the title: why a code (approving a profile on a phone); null when signing in.</param>
+    public LinkScreen(LinkModel model, Action onBack, string title = "Sign in to Pley", string? intro = null, string backLabel = "Change server") : base("link", Axis.Row)
     {
         this.model = model;
         View.BackgroundColor = PleyColors.Bg;
@@ -44,10 +45,22 @@ sealed class LinkScreen : Sheet
         column = new View { Position = new Position(Ui.Dp(Left), Ui.Dp(56)), Size = new Size(Ui.Dp(ColumnWidth), Ui.Dp(400)) };
         View.Add(column);
         column.Add(Onboarding.Logo(40));
-        var title = Text.Label("Sign in to Pley", PleyType.PageTitle, PleyColors.Fg, width: ColumnWidth);
-        title.PositionY = Ui.Dp(40 + 28);
-        column.Add(title);
-        var y = 40 + 28 + PleyType.PageTitle.Line + 18;
+        var heading = Text.Label(title, PleyType.PageTitle, PleyColors.Fg, width: ColumnWidth);
+        heading.PositionY = Ui.Dp(40 + 28);
+        column.Add(heading);
+        float y = 40 + 28 + PleyType.PageTitle.Line;
+        if (intro != null)
+        {
+            var introLabel = Text.Label(intro, PleyType.Body, PleyColors.Muted, maxLines: 2, width: ColumnWidth);
+            introLabel.VerticalAlignment = VerticalAlignment.Top;
+            introLabel.PositionY = Ui.Dp(y + 6);
+            column.Add(introLabel);
+            y += 6 + PleyType.Body.Line * 2 + 10;
+        }
+        else
+        {
+            y += 18;
+        }
         column.Add(Step(1, y, out _, "Scan the code with your phone"));
         y += 28 + 12;
         var step2 = Step(2, y, out var stepText, "or go to");
@@ -85,7 +98,7 @@ sealed class LinkScreen : Sheet
         scan.HorizontalAlignment = HorizontalAlignment.Center;
         scan.PositionY = Ui.Dp(QrSize + 12);
         qrSide.Add(scan);
-        back = new ButtonView("Change server", ButtonKind.Text, onBack);
+        back = new ButtonView(backLabel, ButtonKind.Text, onBack);
         back.Position = new Position(Ui.Dp((QrSize - back.WidthDp) / 2), Ui.Dp(QrSize + 12 + 17 + 18));
         qrSide.Add(back);
         View.Add(qrSide);

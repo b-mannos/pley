@@ -11,7 +11,7 @@ namespace Pley.Tv.Tizen.Kit;
 /// the tiles, whose focused tile's left edge stays at the gutter (x = 96) while the row moves under
 /// it, unless every tile fits on screen unscrolled. It is one focus group that comes back to the
 /// tile focused last; Left from its first tile enters the rail, Right stops at its end. While a key
-/// repeats it jumps a tile at a time without animating.
+/// repeats it glides, faster the longer the key is held.
 /// </summary>
 sealed class RowView : View
 {
@@ -84,16 +84,9 @@ sealed class RowView : View
     {
         var x = Ui.Dp(PleyTv.Gutter) + OffsetFor(index);
         scroll?.Stop();
-        if (gate.Holding)
-        {
-            strip.PositionX = x;
-        }
-        else
-        {
-            scroll = new Animation(PleyMotion.FocusMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
-            scroll.AnimateTo(strip, "PositionX", x);
-            scroll.Play();
-        }
+        scroll = Scrolling.Glide(gate);
+        scroll.AnimateTo(strip, "PositionX", x);
+        scroll.Play();
         LoadPictures(index);
     }
 
@@ -110,22 +103,25 @@ sealed class RowView : View
 
 /// <summary>
 /// A page of rows (the Android app's TvRowColumn, design spec §2.4, §4.1): rows stacked with a 28 dp
-/// gap; the focused row's header comes to y = 172, and while a key repeats the page jumps a row at a
-/// time without animating. Rows scrolled above the focused one aren't drawn, leaving the page's own
+/// gap; the focused row's header comes to y = 172, and while a key repeats the page glides, faster
+/// the longer the key is held. Rows scrolled above the focused one aren't drawn, leaving the page's own
 /// header (or backdrop) clear.
 /// </summary>
 sealed class RowColumnView : View
 {
     readonly KeyRepeatGate gate;
     readonly float headerY;
+    readonly bool firstAtTop;
     readonly View content;
     readonly List<RowView> rows = new List<RowView>();
     Animation? scroll;
 
-    public RowColumnView(KeyRepeatGate gate, float top, float headerY = PleyTv.FocusedRowHeaderY)
+    /// <param name="firstAtTop">The first row stays where the page put it (a page with a header); false: it comes to the line too (Home, whose hero goes as the rows come up).</param>
+    public RowColumnView(KeyRepeatGate gate, float top, float headerY = PleyTv.FocusedRowHeaderY, bool firstAtTop = true)
     {
         this.gate = gate;
         this.headerY = headerY;
+        this.firstAtTop = firstAtTop;
         Size = new Size(Ui.Dp(PleyTv.CanvasWidth), Ui.Dp(PleyTv.CanvasHeight));
         content = new View { PositionY = Ui.Dp(top) };
         Top = Ui.Dp(top);
@@ -152,18 +148,11 @@ sealed class RowColumnView : View
     void ScrollTo(int index)
     {
         // The first row stays where the page put it; others bring their header to the line.
-        var target = index == 0 ? Top : Ui.Dp(headerY) - rows[index].PositionY;
+        var target = index == 0 && firstAtTop ? Top : Ui.Dp(headerY) - rows[index].PositionY;
         scroll?.Stop();
-        if (gate.Holding)
-        {
-            content.PositionY = target;
-        }
-        else
-        {
-            scroll = new Animation(PleyMotion.FocusMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
-            scroll.AnimateTo(content, "PositionY", target);
-            scroll.Play();
-        }
+        scroll = Scrolling.Glide(gate);
+        scroll.AnimateTo(content, "PositionY", target);
+        scroll.Play();
         // Once the page has scrolled, nothing is drawn above the focused row's header (less a
         // little room): the rows above it go, leaving the page's header or backdrop clear.
         for (var i = 0; i < rows.Count; i++)
@@ -172,4 +161,27 @@ sealed class RowColumnView : View
             else rows[i].Show();
         }
     }
+
+    /// <summary>Back to the page's top: the first row where the page put it, every row drawn.</summary>
+    public void ScrollToTop()
+    {
+        scroll?.Stop();
+        scroll = new Animation(PleyMotion.FocusMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
+        scroll.AnimateTo(content, "PositionY", Top);
+        scroll.Play();
+        foreach (var r in rows) r.Show();
+    }
+}
+
+/// <summary>How rows and pages move to their focused tile or row.</summary>
+static class Scrolling
+{
+    /// <summary>
+    /// A move's animation: eased over 150 ms for a press; for a held key, evenly over a little more
+    /// than the time to the next move (<see cref="KeyRepeatGate.GlideMs"/>), so each step runs into
+    /// the next without a pause and the row glides, faster the longer the key is held.
+    /// </summary>
+    public static Animation Glide(KeyRepeatGate gate) => gate.Holding
+        ? new Animation(gate.GlideMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.Linear) }
+        : new Animation(PleyMotion.FocusMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
 }

@@ -146,3 +146,61 @@ sealed class ButtonRow : View
         Size = new Size(Ui.Dp(width), Ui.Dp(PleyTv.ButtonHeight));
     }
 }
+
+/// <summary>
+/// An icon button (the Android app's TvRoundButton): From start, Info, Watched. A 40 dp square with a
+/// control's corners, a 20 dp icon and the pill's Control edge, on Bg at 80 % over a backdrop. Its
+/// label fades in 6 dp below while it has focus; the room for it is kept, so a row never jumps.
+/// </summary>
+sealed class RoundButton : View
+{
+    readonly View box;
+    readonly ImageView icon;
+    readonly TextLabel label;
+    Animation? focusAnimation;
+
+    public RoundButton(string text, string iconName, Action onClick)
+    {
+        Size = new Size(Ui.Dp(PleyTv.ButtonHeight), Ui.Dp(PleyTv.ButtonHeight));
+        Item = new FocusItem(text) { Selected = onClick };
+        box = new View
+        {
+            Size = new Size(Ui.Dp(PleyTv.ButtonHeight), Ui.Dp(PleyTv.ButtonHeight)),
+            CornerRadius = Ui.Dp(PleyShape.ControlRadius),
+            BorderlineWidth = Ui.Dp(1),
+            BorderlineOffset = -1,
+            PivotPoint = global::Tizen.NUI.PivotPoint.Center,
+        };
+        icon = Icons.Icon(iconName, PleyTv.IconSize, PleyColors.Fg);
+        icon.Position = new Position(Ui.Dp((PleyTv.ButtonHeight - PleyTv.IconSize) / 2), Ui.Dp((PleyTv.ButtonHeight - PleyTv.IconSize) / 2));
+        box.Add(icon);
+        Add(box);
+        label = Text.Label(text, PleyType.Caption, PleyColors.Fg, width: 160);
+        label.HorizontalAlignment = HorizontalAlignment.Center;
+        label.Position = new Position(Ui.Dp(PleyTv.ButtonHeight / 2 - 80), Ui.Dp(PleyTv.ButtonHeight + 6));
+        label.Opacity = 0;
+        Add(label);
+        Item.FocusChanged += Look;
+        Look(false);
+    }
+
+    public FocusItem Item { get; }
+
+    public void SetText(string text) => label.Text = text;
+
+    void Look(bool focused)
+    {
+        box.BackgroundColor = focused ? PleyColors.Accent : PleyColors.OnArt;
+        box.BorderlineColor = focused ? Color.Transparent : PleyColors.Control;
+        icon.Color = focused ? PleyColors.OnAccent : PleyColors.Fg;
+        focusAnimation?.Stop();
+        var scale = focused ? PleyShape.RoundScale : 1f;
+        focusAnimation = new Animation(focused ? PleyMotion.FocusMs : PleyMotion.UnfocusMs)
+        {
+            DefaultAlphaFunction = new AlphaFunction(focused ? AlphaFunction.BuiltinFunctions.EaseOut : AlphaFunction.BuiltinFunctions.EaseIn),
+        };
+        focusAnimation.AnimateTo(box, "Scale", new Vector3(scale, scale, 1));
+        focusAnimation.AnimateTo(label, "Opacity", focused ? 1f : 0f);
+        focusAnimation.Play();
+    }
+}

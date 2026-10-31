@@ -164,6 +164,9 @@ sealed class Keypad : View
     /// <summary>The key where focus starts: 5.</summary>
     public FocusItem Initial => keys.Find(k => k.Key == new PadKey.Digit(5))?.Item ?? keys[0].Item;
 
+    /// <summary>The OK key, where a pad has one.</summary>
+    public FocusItem? Ok => keys.Find(k => k.Key is PadKey.Ok)?.Item;
+
     /// <summary>Flashes <paramref name="key"/>, pressed on the remote rather than on screen.</summary>
     public void Flash(PadKey key) => keys.Find(k => k.Key == key)?.Flash();
 }

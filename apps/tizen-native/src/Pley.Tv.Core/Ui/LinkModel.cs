@@ -80,10 +80,13 @@ public sealed class AppLinkSource : ILinkSource
 {
     readonly AppState app;
     readonly DeviceSignIn signIn;
+    readonly long? profile;
 
-    public AppLinkSource(AppState app)
+    /// <param name="profile">The profile a phone approves this code for (one that needs its password); 0: any; null: signing in.</param>
+    public AppLinkSource(AppState app, long? profile = null)
     {
         this.app = app;
+        this.profile = profile;
         signIn = app.DeviceSignIn();
     }
 
@@ -96,7 +99,8 @@ public sealed class AppLinkSource : ILinkSource
         // The approver picked the profile on /link: Who's watching? isn't asked again.
         app.ProfileGatePassed = true;
         app.Use(server);
-        var account = app.LoadAccount();
+        // New tokens may replace others for this server (another profile): who the app is follows.
+        var account = profile != null ? app.Switched(profile > 0 ? profile : null) : app.LoadAccount();
         await Task.WhenAny(account, Task.Delay(LinkModel.NameWaitMs));
         return app.Me.Value?.Name;
     }
