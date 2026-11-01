@@ -751,7 +751,9 @@ available tone mapper:
   profile 5 picks it.
 - libplacebo tone maps by the stream's own metadata (`peak_detect=0`), so
   segments from different FFmpeg processes match at the seams. Thumbnails and
-  seek previews do the same. `tonemap_opencl`'s peak detection can't be
+  seek previews do the same. Its curve is BT.2390's (`tonemapping=bt.2390`):
+  libplacebo's default, a spline, made two HDR10 films about a fifth darker
+  in SDR, with nothing gained in colour. `tonemap_opencl`'s peak detection can't be
   turned off, so its brightness can jump between processes.
 - Dolby Vision profiles 7 and 8 have an HDR10- or HLG-compatible base layer
   and work with any tone mapper. Profile 5 without libplacebo plays with off
