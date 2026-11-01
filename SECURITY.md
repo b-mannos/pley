@@ -168,6 +168,12 @@ Apps sign in on Pley's own page with OAuth 2.1.
   with the account's sign-ins.
 - App sign-in works over plain HTTP at home, as passwords do. Beyond the home
   network it needs HTTPS, like the rest of Pley.
+- Each sign-in gets a key of its own, derived from `secret.key`, with which
+  the server proves it is the server an app signed in to before the app
+  sends its token to an address. Another device at that address can't, nor
+  can another app's key. It doesn't stop someone who relays the challenge to
+  the real server; HTTPS does. The addresses of the home network go only to
+  apps signed in.
 
 ### TVs signing in
 

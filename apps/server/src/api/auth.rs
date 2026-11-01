@@ -1,5 +1,5 @@
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
@@ -40,7 +40,22 @@ pub struct Credentials {
     setup_id: Option<String>,
 }
 
-pub async fn server_status(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
+/// An app asking the server to prove it is the one it signed in to (see
+/// [`crate::identity`]).
+#[derive(Deserialize)]
+pub struct ProofQuery {
+    challenge: Option<String>,
+    proof_id: Option<String>,
+}
+
+pub async fn server_status(State(state): State<AppState>, Query(query): Query<ProofQuery>) -> ApiResult<Response> {
+    let proof = match (query.challenge.as_deref(), query.proof_id.as_deref()) {
+        (None, None) => None,
+        (Some(challenge), Some(proof_id)) => {
+            Some(state.identity.prove(proof_id, challenge).map_err(AppError::bad_request)?)
+        }
+        _ => return Err(AppError::bad_request("a proof takes both challenge and proof_id")),
+    };
     let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&state.db.read).await?;
     if users > 0 {
         // Set up, by the setup page or elsewhere (`pley reset-password
@@ -49,7 +64,8 @@ pub async fn server_status(State(state): State<AppState>) -> ApiResult<Json<serd
         state.auth.setup.clear();
     }
     let settings = state.settings.get();
-    Ok(Json(serde_json::json!({
+    let mut body = serde_json::json!({
+        "id": state.identity.id,
         "name": settings.server_name,
         "version": crate::VERSION,
         "commit": crate::COMMIT,
@@ -59,7 +75,23 @@ pub async fn server_status(State(state): State<AppState>) -> ApiResult<Json<serd
         "setup_code_required": users == 0,
         // Signing in may take setting it up first (see second_step).
         "two_step_required": state.auth.two_step_required(),
-    })))
+    });
+    let Some(proof) = proof else { return Ok(Json(body).into_response()) };
+    body["proof"] = serde_json::json!(proof);
+    // An answer to one challenge only.
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response())
+}
+
+/// `GET /api/server/addresses`: where this server's apps can reach it, for
+/// an app signed in to keep beside the address it used.
+pub async fn server_addresses(State(state): State<AppState>, _user: AuthUser) -> Json<serde_json::Value> {
+    let mut addresses = crate::identity::network_addresses(&state.network.listeners(), &crate::network::adapters());
+    for proxy in &state.settings.get().proxy_addresses {
+        if !addresses.contains(proxy) {
+            addresses.push(proxy.clone());
+        }
+    }
+    Json(serde_json::json!({ "id": state.identity.id, "addresses": addresses }))
 }
 
 pub(crate) async fn login_response(

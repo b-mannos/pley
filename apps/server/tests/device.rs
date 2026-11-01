@@ -210,6 +210,59 @@ async fn a_tv_signs_in_with_a_code_shown_on_screen() {
 }
 
 #[tokio::test]
+async fn a_tv_tells_its_server_from_another_device_at_its_address() {
+    use base64::Engine;
+    let app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (device_code, user_code) = tv(&app).await;
+    allow(&app, &admin, &user_code).await;
+    let tokens = poll(&app, &device_code, &[]).await;
+    let (access, refresh_token) = pair(&tokens);
+
+    // The tokens come with the server's id and a key of this sign-in's own.
+    let server = app.call(Method::GET, "/api/server", None, None, &[]).await;
+    let id = server.body["id"].as_str().unwrap().to_owned();
+    assert_eq!(id.len(), 40, "discovery's id: {id}");
+    assert_eq!(tokens.body["server_id"], json!(id));
+    let proof_id = tokens.body["proof_id"].as_str().unwrap().to_owned();
+    let key = tokens.body["proof_key"].as_str().unwrap().to_owned();
+    assert!(server.body.get("proof").is_none(), "no proof without a challenge");
+
+    // Asked with a challenge, the server proves it holds that key.
+    let challenge = "AAECAwQFBgcICQoLDA0ODw";
+    let asked =
+        app.call(Method::GET, &format!("/api/server?challenge={challenge}&proof_id={proof_id}"), None, None, &[]).await;
+    assert_eq!(asked.status, StatusCode::OK, "{}", asked.text());
+    assert_eq!(asked.headers[header::CACHE_CONTROL], "no-store");
+    let key_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&key).unwrap();
+    assert_eq!(asked.body["proof"], json!(pley::identity::proof(&key_bytes, &id, challenge)));
+    for wrong in [
+        format!("/api/server?challenge={challenge}"),
+        format!("/api/server?proof_id={proof_id}"),
+        format!("/api/server?challenge=short&proof_id={proof_id}"),
+        format!("/api/server?challenge={challenge}&proof_id=nope"),
+    ] {
+        assert_eq!(app.call(Method::GET, &wrong, None, None, &[]).await.status, StatusCode::BAD_REQUEST, "{wrong}");
+    }
+
+    // A refresh keeps the key; another sign-in has its own.
+    let refreshed = refresh(&app, &refresh_token).await;
+    assert_eq!((&refreshed.body["proof_id"], &refreshed.body["proof_key"]), (&json!(proof_id), &json!(key)));
+    let (device_code, user_code) = tv(&app).await;
+    allow(&app, &admin, &user_code).await;
+    let other = poll(&app, &device_code, &[]).await;
+    assert_ne!(other.body["proof_key"], json!(key));
+
+    // Signed in, the app hears where else its server is.
+    let addresses = app.get("/api/server/addresses", &access).await;
+    assert_eq!(addresses.status, StatusCode::OK, "{}", addresses.text());
+    assert_eq!(addresses.body["id"], json!(id));
+    assert!(addresses.body["addresses"].is_array());
+    let anyone = app.call(Method::GET, "/api/server/addresses", None, None, &[]).await;
+    assert_eq!(anyone.status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn a_disabled_account_gets_no_tokens_for_its_tv() {
     let app = TestApp::new().await;
     let admin = app.setup_admin().await;

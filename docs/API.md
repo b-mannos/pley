@@ -23,6 +23,7 @@ details.
 - [Public endpoints](#public-endpoints), [Auth](#auth),
   [Two-step sign-in](#two-step-sign-in), [Your account](#your-account)
 - [Apps (OAuth 2.1)](#apps-oauth-21): [Discovery](#discovery),
+  [Telling servers apart](#telling-servers-apart),
   [Signing in](#signing-in), [Tokens](#tokens), [TVs](#tvs),
   [Lifetimes and limits](#lifetimes-and-limits), [Scopes](#scopes),
   [Signed-in apps](#signed-in-apps), [Profiles](#profiles),
@@ -486,13 +487,16 @@ lists carry (Kodi).
 | Method | Path | Who | What |
 |---|---|---|---|
 | GET | `/api/health` | `public` | `{ "status": "ok" }` |
-| GET | `/api/server` | `public` | `{ name, version, commit, source, setup_required, setup_code_required, two_step_required }` |
+| GET | `/api/server` | `public` | `{ id, name, version, commit, source, setup_required, setup_code_required, two_step_required, proof? }` |
 | GET | `/api/oauth/device/qr?code=` | `public` | where to type a TV's code, as a QR code (PNG): see [TVs](#tvs) |
 | POST | `/api/setup` | `public` | `{ username, password, setup_code }` → `{ user: User, token? }`: creates the first (admin) account and signs in |
 | POST | `/api/auth/login` | `public` | `{ username, password, code?, setup_id? }` → `{ user: User, token?, recovery_codes? }` |
 
-- `/api/server`: `commit` is the build's short hash, `"unknown"` when built
-  without the repository. `source` is where the server's source code is
+- `/api/server`: `id` is the one [discovery](#discovery) answers with.
+  With `?challenge=…&proof_id=…` it also answers `proof`, for an app
+  making sure this is its server ([Telling servers
+  apart](#telling-servers-apart)). `commit` is the build's short hash,
+  `"unknown"` when built without the repository. `source` is where the server's source code is
   offered; the web app's Account page links to it. The setup code is in
   the server's log. `two_step_required`: the server requires two-step
   sign-in of every account with a password
@@ -728,6 +732,51 @@ Every other `/.well-known/` path answers `404`.
 - `client_id_metadata_document_supported` is the
   [apps by other publishers](#apps-by-other-publishers) setting.
 
+### Telling servers apart
+
+An app keeps a server by its `id`, not by an address: the same server can
+be reached at a home address and a public one, and an address can later
+lead to another device (another network, another server given the same
+address). Tokens work at any address of the server that issued them.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | `/api/server?challenge=&proof_id=` | `public` | `/api/server`'s answer with `proof` |
+| GET | `/api/server/addresses` | `any app` | `{ id, addresses: string[] }` |
+
+**Proofs.** Every token answer carries `server_id`, `proof_id` and
+`proof_key` ([Tokens](#tokens)): a key of this sign-in's own, the same at
+every refresh, which the server derives from its `secret.key`, so another
+app's key can't pass for the server. Before sending a token to an address,
+the app asks it to prove it holds that key:
+
+1. The app makes a challenge of 16 to 64 random bytes, written in base64url
+   without padding (22 to 86 characters), and sends it with its `proof_id`.
+2. The server answers `proof`, HMAC-SHA256 under the key of this text, in
+   base64url without padding:
+
+   ```text
+   pley-server-proof\n<server id>\n<challenge as sent>
+   ```
+
+3. The app computes the same with its `proof_key` and compares. Another
+   answer, or no `proof`, means the address leads elsewhere: the app keeps
+   its token to itself.
+
+`400` for a challenge or `proof_id` that isn't written so, or one sent
+without the other. `proof` is `null` while the server can't use its
+`secret.key`. The answer isn't cached.
+
+A proof tells the server from another device at the same address. It
+doesn't stop someone who passes the challenge on to the real server and
+its answer back: only HTTPS does that, which Pley needs beyond the home
+network anyway ([SECURITY.md](../SECURITY.md)).
+
+**Addresses.** `addresses` are where this server's web app listens on its
+networks (`http://<IPv4>:<port>`, without loopback and link-local
+addresses), then its [`proxy_addresses`](#discovery). They are only for
+apps signed in, since they describe the home network.
+
 ### Signing in
 
 1. The app opens `/oauth/authorize` (a web app page) in the browser with
@@ -801,13 +850,19 @@ A token answer:
   "token_type": "Bearer",
   "expires_in": 3600,
   "scope": "library play",
-  "refresh_token": "pley_rt_…"
+  "refresh_token": "pley_rt_…",
+  "server_id": "3f2a…",
+  "proof_id": "17",
+  "proof_key": "q2Ez…"
 }
 ```
 
 `scope` is everything the app was allowed. `refresh_token` comes only for
 apps whose description lists the `refresh_token` grant type (Pley's own
-apps do).
+apps do). `server_id`, `proof_id` and `proof_key` let the app make sure
+later that an address still leads to this server ([Telling servers
+apart](#telling-servers-apart)); the last two are left out while the
+server can't use its `secret.key`.
 
 **`grant_type=authorization_code`**: `code`, `client_id` and
 `code_verifier` (43 to 128 of `A-Z a-z 0-9 . _ ~ -`). `redirect_uri`, when
