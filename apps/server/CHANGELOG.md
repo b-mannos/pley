@@ -32,6 +32,8 @@ describes how they are made.
   start).
 - 4:2:2 and 4:4:4 H.264 (some cameras, screen recordings) no longer fails on
   GPUs that can't decode it, such as Intel's.
+- HDR tone mapping quality is no longer chosen from a slow first startup
+  benchmark, which made Intel GPUs pick a quality too slow to keep up.
 
 ## [0.1.3] - 2026-11-02
 

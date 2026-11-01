@@ -465,6 +465,11 @@ async fn measure_tonemap_speed(ffmpeg: &Path) -> Option<TonemapSpeed> {
         ok.then(|| started.elapsed().as_secs_f64())
     };
     let started = Instant::now();
+    // The first libplacebo process starts slower than the rest (Vulkan's
+    // and the driver's first start, shaders compiled): timed, its 6 frames
+    // took as long as 42 after it, and `fast` read 720 frames a second on an
+    // Iris Xe that makes 150. It warms up untimed.
+    let _ = time(TonemapQuality::Fast, 6).await;
     let mut speed = TonemapSpeed::default();
     for quality in [TonemapQuality::Fast, TonemapQuality::Balanced, TonemapQuality::High] {
         // Twice where the time allows, the faster run counting: other work
@@ -476,8 +481,11 @@ async fn measure_tonemap_speed(ffmpeg: &Path) -> Option<TonemapSpeed> {
             if started.elapsed() > limit {
                 break;
             }
-            if let (Some(short), Some(long)) = (time(quality, 6).await, time(quality, 42).await) {
-                let fps = 36.0 / (long - short).max(0.05);
+            // A long run no slower than the short one measured nothing.
+            if let (Some(short), Some(long)) = (time(quality, 6).await, time(quality, 42).await)
+                && long > short + 0.05
+            {
+                let fps = 36.0 / (long - short);
                 let best = match quality {
                     TonemapQuality::Fast => &mut speed.fast,
                     TonemapQuality::Balanced => &mut speed.balanced,
@@ -486,6 +494,15 @@ async fn measure_tonemap_speed(ffmpeg: &Path) -> Option<TonemapSpeed> {
                 *best = best.max(fps);
             }
         }
+    }
+    // Each quality does less than the one above it: one that read slower was
+    // slowed by something else (`fast` read 51 frames a second where
+    // `balanced` read 97, the first runs of a start on an Iris Xe).
+    if speed.balanced > 0.0 {
+        speed.balanced = speed.balanced.max(speed.high);
+    }
+    if speed.fast > 0.0 {
+        speed.fast = speed.fast.max(speed.balanced);
     }
     (speed.fast > 0.0 || speed.balanced > 0.0 || speed.high > 0.0).then_some(speed)
 }

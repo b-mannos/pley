@@ -776,8 +776,10 @@ video plan):
 | `fast` | balanced's, plus `downscaler=bilinear:dithering=none:gamut_mode=clip`; `skip_aa=1` where the output is at least half the source's size; `force_low_bit_depth_fbos=yes` for SDR output |
 
 - At start, each quality is timed on synthetic 4K PQ frames made 4K SDR
-  (`tonemap_speed`), from `fast` to `high`, for 20 s at most. A quality not
-  reached in that time is never used.
+  (`tonemap_speed`), from `fast` to `high`, for 20 s at most, after one
+  untimed run (the first libplacebo process starts slower than the rest). A
+  quality not reached in that time is never used, and none reads slower than
+  a dearer one: each does less than the one above it.
 - A process takes the best quality that measured at least twice what the jobs
   tone mapping with libplacebo need together, itself included; when none
   did, the fastest. Each job needs its frame rate × (0.6 × the source's
