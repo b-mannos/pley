@@ -228,14 +228,49 @@ class RequestsRepositoryTest {
         testScheduler.runCurrent()
         assertEquals(2, (requests.notices.value.single() as RequestNotice.News).count)
 
-        // A rise an event explained: told by the event alone.
+        // A rise an event explained: told by the event alone. The list is read again only to keep what was told.
         data.events.send(LiveEvent.Reconnected)
         testScheduler.runCurrent()
         val asked = data.api.calls("requests").size
-        data.events.send(LiveEvent.Event(Fixtures.decode<ServerEvent>("events/request_available.json")))
+        val event = Fixtures.decode<ServerEvent>("events/request_available.json") as ServerEvent.RequestAvailable
+        val ready = list.requests.first { it.id == event.requestId }.copy(unseen = true, updatedAt = 1761700100)
+        data.api.answer("requests", list.copy(requests = news + ready))
+        data.events.send(LiveEvent.Event(event))
         data.api.answer("requestSummary", summary.copy(unseen = 3))
         time(1_100)
-        assertEquals(asked, data.api.calls("requests").size)
+        assertEquals(asked + 1, data.api.calls("requests").size)
+        assertEquals(listOf("Breaking Bad"), requests.notices.value.filterIsInstance<RequestNotice.Ready>().map { it.title })
+        assertEquals(2, requests.notices.value.size)
+    }
+
+    @Test
+    fun `news an event told isn't told again at the next start`() = runTest {
+        val dir = folder.newFolder()
+        val run = appRun()
+        val list: RequestList = Fixtures.decode("requests/list.json")
+        val ready = list.copy(requests = listOf(list.requests.first { it.id == 42L }.copy(unseen = true, updatedAt = 1761700000)))
+        val data = signedIn(dir, run) { api.answer("requestSummary", summary.copy(unseen = 0)) }
+        val requests = data.graph.requests
+        requests.start()
+        testScheduler.runCurrent()
+        assertTrue(data.events.send(LiveEvent.Reconnected))
+        testScheduler.runCurrent()
+
+        // Breaking Bad is ready: told by its event, and opened from the toast, so its news is never seen.
+        data.api.answer("requests", ready)
+        data.api.answer("requestSummary", summary.copy(unseen = 1, changedAt = 1761700000))
+        data.events.send(LiveEvent.Event(Fixtures.decode<ServerEvent>("events/request_available.json")))
+        time(1_100)
+        assertEquals(1, requests.notices.value.size)
+        run.coroutineContext[Job]!!.cancel()
+        testScheduler.runCurrent()
+
+        // The next start: unseen still, and announced already.
+        val again = signedIn(dir) { api.answer("requests", ready) }
+        again.graph.requests.start()
+        testScheduler.runCurrent()
+        assertEquals(1, again.api.calls("requests").size)
+        assertEquals(emptyList<RequestNotice>(), again.graph.requests.notices.value)
     }
 
     @Test

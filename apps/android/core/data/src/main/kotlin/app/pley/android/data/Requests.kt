@@ -264,7 +264,8 @@ interface RequestsRepository {
  * [RequestsRepository] over [cache] (the summary and Discover's first
  * pages kept as snapshots, title pages in memory), the server's events
  * from [live], and [store], which keeps per server and profile the newest
- * `updated_at` announced by catching up, so no request is announced twice.
+ * `updated_at` announced, by catching up or by an event, so no request is
+ * announced twice, across starts too.
  */
 internal class ServerRequests(
     private val cache: ResourceCache,
@@ -307,6 +308,13 @@ internal class ServerRequests(
 
     /** Requests announced in this process, for the profile in use. */
     private val announced: MutableSet<Long> = ConcurrentHashMap.newKeySet()
+
+    /**
+     * Events told news the saved mark doesn't cover yet: an event doesn't
+     * say when its request changed, so the next fresh summary catches up,
+     * which raises the mark past them.
+     */
+    private val unmarked = AtomicBoolean(false)
 
     private suspend fun readSummary(api: PleyApi): RequestSummary {
         val server = (cache.scopes.value as? ScopeState.Ready)?.profile?.server
@@ -369,6 +377,7 @@ internal class ServerRequests(
         last = null
         explained.set(0)
         announced.clear()
+        unmarked.set(false)
         _notices.value = emptyList()
     }
 
@@ -390,16 +399,23 @@ internal class ServerRequests(
         // Without events, changed_at says when what shows is to be read again.
         if (before != null && before.changedAt != summary.changedAt && !live.streaming.value) _changes.tryEmit(RequestChange.All)
         val rose = if (before == null) summary.unseen > 0 else summary.unseen > before.unseen && news == 0
-        if (rose && summary.enabled && summary.signInAgain != RequestScope.Requests) catchUp(profile)
+        if ((rose || unmarked.get()) && summary.enabled && summary.signInAgain != RequestScope.Requests) catchUp(profile)
     }
 
-    /** GET /api/requests?unseen=1: one notice for what wasn't announced yet. */
+    /**
+     * GET /api/requests?unseen=1: one notice for what wasn't announced yet.
+     * Then every request listed has been announced (now, by an event, or
+     * before), and the saved mark is raised past them all.
+     */
     private suspend fun catchUp(profile: ProfileScope) {
+        // Events heard from here on set it again: their requests may come after this list.
+        val pending = unmarked.getAndSet(false)
         val unseen = try {
             cache.api(profile).requests(RequestQuery(unseen = true, limit = CATCH_UP))
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
+            if (pending) unmarked.set(true)
             return
         }
         val key = longPreferencesKey("${profile.server}/${profile.userId}/announced")
@@ -408,16 +424,20 @@ internal class ServerRequests(
         } catch (_: IOException) {
             0L
         }
+        if (owner != profile) return
         val fresh = unseen.requests.filter { it.updatedAt > mark && it.id !in announced }
-        if (fresh.isEmpty() || owner != profile) return
-        val notice = if (fresh.size == 1) noticeOf(fresh.single()) else RequestNotice.News(keys.incrementAndGet(), fresh.size)
-        notice?.let(::post)
-        announced += fresh.map { it.id }
-        val newest = fresh.maxOf { it.updatedAt }
+        if (fresh.isNotEmpty()) {
+            val notice = if (fresh.size == 1) noticeOf(fresh.single()) else RequestNotice.News(keys.incrementAndGet(), fresh.size)
+            notice?.let(::post)
+            announced += fresh.map { it.id }
+        }
+        val newest = unseen.requests.maxOfOrNull { it.updatedAt } ?: return
+        if (newest <= mark) return
         try {
             store.edit { it[key] = maxOf(it[key] ?: 0L, newest) }
         } catch (_: IOException) {
-            // Not kept: at worst announced again at the next start.
+            // Raised at the next fresh summary instead.
+            unmarked.set(true)
         }
     }
 
@@ -434,8 +454,7 @@ internal class ServerRequests(
         when (event) {
             is ServerEvent.RequestsChanged -> changed(RequestChange(event.requestId, event.kind, event.tmdbId))
             is ServerEvent.RequestAvailable -> {
-                explained.incrementAndGet()
-                announced += event.requestId
+                told(event.requestId)
                 post(
                     RequestNotice.Ready(
                         keys.incrementAndGet(), event.requestId, event.title, event.kind, event.itemId, event.seasons, event.complete,
@@ -446,8 +465,7 @@ internal class ServerRequests(
             is ServerEvent.RequestDecided -> {
                 when (event.status) {
                     RequestStatus.Declined -> {
-                        explained.incrementAndGet()
-                        announced += event.requestId
+                        told(event.requestId)
                         post(RequestNotice.Declined(keys.incrementAndGet(), event.requestId, event.title, event.reason))
                     }
                     RequestStatus.Approved -> post(RequestNotice.Approved(keys.incrementAndGet(), event.requestId, event.title))
@@ -472,6 +490,13 @@ internal class ServerRequests(
             }
             else -> Unit
         }
+    }
+
+    /** An event told [requestId]'s news: it explains `unseen` rising, and the saved mark is to be raised past it. */
+    private fun told(requestId: Long) {
+        explained.incrementAndGet()
+        announced += requestId
+        unmarked.set(true)
     }
 
     /** The summary is read again soon, the title's page now if it shows, and the screens hear of it. */
