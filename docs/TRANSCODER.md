@@ -700,17 +700,31 @@ the VPS, SPS and PPS with every forced keyframe.
 - The decoder is paired with the encoder: `cuda` with NVENC, `d3d11va` with
   QSV or AMF on Windows, `vaapi` with VAAPI, `videotoolbox` with
   VideoToolbox. FFmpeg falls back to software decoding when the GPU doesn't
-  decode the codec.
+  decode the codec. Quick Sync's own decoders (`qsv`) decode for its
+  zero-copy pipeline, and on Windows for some frames that go to memory
+  (below); they have no software fallback, so they decode only what their
+  pipeline's start-up test passed.
 - A job whose hardware decoder failed to start shows `cpu` as its decoder,
   with a warning.
 - **Scaling on the GPU first.** Frames that go to system memory (for
   burned-in subtitles, zimg or OpenCL tone mapping, or x264/x265) are first
   scaled by the GPU that decoded them, so only the output's pixels are
-  copied: `scale_cuda` (10 bits for tone mapping and kept HDR) or
-  `scale_vaapi` (8 bits only). Only where the decoder's pipeline passed its
-  start-up test for the codec (`gpu_pipelines`); not for interlaced video or
-  libplacebo, which scales as it tone maps. Mesa's D3D12 VAAPI driver (WSL)
-  crashes in `scale_vaapi`, so it fails the test.
+  copied: `scale_cuda` (10 bits for tone mapping and kept HDR),
+  `scale_vaapi` (8 bits only) or `vpp_qsv` (10 bits too). Only where the
+  decoder's pipeline passed its start-up test for the codec
+  (`gpu_pipelines`); not for interlaced video, nor for libplacebo, which
+  scales as it tone maps, except after Quick Sync's decoder. Mesa's D3D12
+  VAAPI driver (WSL) crashes in `scale_vaapi`, so it fails the test.
+- **Quick Sync on Windows.** A Quick Sync job whose frames go to memory
+  decodes with `qsv` where its pipeline passed for the codec, and
+  `vpp_qsv` scales the frames on the way, libplacebo's too, which then
+  tone maps at the output's size. Direct3D 11's decoder copies them whole
+  (25 MB a frame of 4K HDR), and some Intel drivers give it no HEVC at
+  all. Direct3D 11 still decodes 8-bit video kept at its size (its copy to
+  memory costs the CPU less), interlaced and turned video, and Dolby Vision
+  and HDR10+ that libplacebo tone maps: Quick Sync's decoder reads neither's
+  metadata, and Dolby Vision profile 5's colours are in it. A software
+  encoder standing in for Quick Sync's gets its frames through `vpp_qsv`.
 - **Chroma and depth.** The start-up tests decode 8- and 10-bit 4:2:0
   video, and 10-bit 4:2:2 HEVC (what cameras record). Other video (4:2:2
   H.264, 4:4:4, 12 bits) stays off the GPU pipelines and Vulkan decoding,
@@ -765,7 +779,8 @@ video plan):
   tone mapping with libplacebo need together, itself included; when none
   did, the fastest. Each job needs its frame rate × (0.6 × the source's
   pixels + 0.4 × the output's) relative to 4K, so a 4K film made 1080p needs
-  less than one kept 4K. Renditions start at their job's quality.
+  less than one kept 4K; the output's pixels alone where Quick Sync scaled
+  the frames first. Renditions start at their job's quality.
 - Without a measurement (no libplacebo on a GPU), `high`.
 
 #### Sharing the GPU
@@ -775,7 +790,9 @@ Several jobs tone mapping with libplacebo share the GPU (`src/share.rs`):
 - **Decoding on the CPU.** A job decodes on the CPU (status `decoder: cpu`)
   when all of these hold:
   - its GPU would decode into memory for libplacebo and encode on the same
-    video engine (AMF, VAAPI, Quick Sync; not NVIDIA);
+    video engine (AMF, VAAPI, Quick Sync; not NVIDIA), and wouldn't scale
+    the frames first (Quick Sync on Windows does: those jobs stay on the
+    GPU);
   - the GPU falls behind: no quality measured fast enough for the jobs, or
     they fell behind even at `fast`;
   - the CPU keeps 2 cores free after its decoders (4 cores for 4K at 24 fps,

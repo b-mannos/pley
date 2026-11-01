@@ -9,8 +9,18 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- Intel graphics on Windows: HDR that Vulkan can't decode is decoded and
+  scaled by Quick Sync before tone mapping, instead of being copied to
+  memory at full size or decoded on the CPU. 4K HDR transcodes twice as fast
+  and uses much less CPU.
+
 ### Fixed
 
+- Intel graphics: transcodes no longer fail when the CPU encoder takes over
+  (all Quick Sync sessions busy, or the Quick Sync encoder failing to
+  start).
 - 4:2:2 and 4:4:4 H.264 (some cameras, screen recordings) no longer fails on
   GPUs that can't decode it, such as Intel's.
 
