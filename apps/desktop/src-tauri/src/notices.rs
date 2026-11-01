@@ -315,6 +315,28 @@ fn caught_up(news: &[&Listed]) -> Option<String> {
     }
 }
 
+/// A notice's words as the system's notifications take them. On Linux and
+/// the BSDs they go over D-Bus as they are, and notification servers read
+/// the body as markup (`body-markup`): a reason or a name with `<` or `&`
+/// in it is escaped there, to show as written. Windows' toasts escape it
+/// themselves, and macOS takes plain text.
+fn body_text(body: &str) -> String {
+    if cfg!(all(unix, not(target_os = "macos"))) { escape_markup(body) } else { body.to_owned() }
+}
+
+fn escape_markup(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            c => escaped.push(c),
+        }
+    }
+    escaped
+}
+
 /// What the notices need of the app: kept apart so that the tests run
 /// without a window.
 trait Shell: Send + Sync {
@@ -336,7 +358,7 @@ impl<R: Runtime> Shell for App<R> {
     }
 
     fn show(&self, title: &str, body: &str) {
-        if let Err(err) = self.0.notification().builder().title(title).body(body).show() {
+        if let Err(err) = self.0.notification().builder().title(title).body(body_text(body)).show() {
             eprintln!("cannot show a notification: {err}");
         }
     }
@@ -613,6 +635,17 @@ mod tests {
             "the server tries again by itself"
         );
         assert_eq!(say(r#"{"type":"requests_changed","request_id":3,"kind":"movie","tmdb_id":949}"#), None);
+    }
+
+    #[test]
+    fn words_show_as_written_where_notification_servers_read_markup() {
+        assert_eq!(escape_markup("“R&D” <b>now</b> > later"), "“R&amp;D” &lt;b&gt;now&lt;/b&gt; &gt; later");
+        let body = "“Heat” was declined: “<a href=\"x\">Ask Sam & Jo</a>”.";
+        if cfg!(all(unix, not(target_os = "macos"))) {
+            assert_eq!(body_text(body), "“Heat” was declined: “&lt;a href=\"x\"&gt;Ask Sam &amp; Jo&lt;/a&gt;”.");
+        } else {
+            assert_eq!(body_text(body), body, "Windows' toasts escape it themselves, macOS takes plain text");
+        }
     }
 
     #[test]
