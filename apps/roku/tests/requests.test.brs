@@ -193,6 +193,18 @@ sub test_requests_title_tiles()
     tkEqual(reqBadgeColor("library", invalid), "0x3FB27FFF")
 end sub
 
+sub test_requests_grids_load_five_pages_until_the_focus_moves()
+    tkTrue(reqWantsPage(0, -1, 0, 0, 14, 0), "the first page")
+    tkTrue(reqWantsPage(3, 500, 0, 2, 14, 3), "short of a screenful past the focus")
+    tkFalse(reqWantsPage(5, 500, 0, 2, 14, 5), "five pages since the focus moved")
+    tkFalse(reqWantsPage(2, 500, 0, 40, 14, 1), "a screenful past the focus")
+    tkTrue(reqWantsPage(2, 500, 30, 40, 14, 0), "the focus near the end")
+    tkFalse(reqWantsPage(4, 4, 30, 40, 14, 0), "the last page came")
+    further = reqFurtherTile()
+    tkEqual(further.kind, "further")
+    tkInvalid(navForTile(further), "the grid asks for more itself")
+end sub
+
 sub test_requests_badges_come_from_the_title()
     library = reqTestDetail({ status: "library", item_id: 12 })
     tkEqual(reqTitleNote("movie:27205", { ok: true, status: 200, data: library }), { key: "movie:27205", status: "library", libraryId: 12 })

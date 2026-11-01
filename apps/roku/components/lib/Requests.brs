@@ -465,6 +465,21 @@ function reqNoticeTile(text as string, kind as string) as object
     return { title: text, subtitle: "", image: "", wide: false, progress: 0.0, watched: false, itemId: 0, kind: kind, badge: "", badgeColor: "0x38BDF8FF", key: kind }
 end function
 
+' Whether a grid of TMDB's titles (See all, Discover's search) asks for
+' its next page: one is left and fewer than ahead titles lie past the
+' focus, five pages at most (asked) until the focus moves. An age limit
+' can leave hundreds of pages near empty.
+function reqWantsPage(page as integer, totalPages as integer, focused as integer, count as integer, ahead as integer, asked as integer) as boolean
+    if totalPages >= 0 and page >= totalPages then return false
+    return asked < 5 and focused >= count - ahead
+end function
+
+' The tile that ends such a grid once five pages came with more left: it
+' asks for the next ones.
+function reqFurtherTile() as object
+    return reqNoticeTile("More may follow. Select to look further.", "further")
+end function
+
 ' A title's badge as its page answered (GET /api/discover/{kind}/
 ' {tmdb_id}): { key, status, libraryId } for the screens showing its
 ' tile, or invalid when it didn't answer (the badge stays as it is).

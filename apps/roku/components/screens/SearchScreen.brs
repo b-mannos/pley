@@ -30,11 +30,13 @@ sub init()
     m.tmdbTiles = invalid
     m.libraryMessage = ""
     m.rowKeys = []
-    ' Discover's search: the pages asked for, and the titles shown.
+    ' Discover's search: the pages asked for (since the focus last moved,
+    ' asked), and the titles shown.
     m.page = 0
     m.totalPages = -1
     m.seen = {}
     m.loading = false
+    m.asked = 0
     m.content = invalid
     m.lastFocus = m.keyboard
     m.keyboard.observeField("text", "onText")
@@ -348,6 +350,7 @@ sub startPages()
     m.totalPages = -1
     m.seen = {}
     m.loading = false
+    m.asked = 0
     m.content = invalid
     m.message.visible = false
     m.grid.content = nodesContent(reqSkeletonTiles())
@@ -358,11 +361,13 @@ end sub
 sub loadPage()
     if m.loading or (m.totalPages >= 0 and m.page >= m.totalPages) then return
     m.loading = true
+    m.asked = m.asked + 1
     uiRequest({ method: "GET", path: m.tmdbPath, query: { page: m.page + 1 }, build: "discoverTiles", known: m.seen }, "onPage")
 end sub
 
 ' A page of titles, after those shown. A page short of a screenful isn't
-' the end: the next one comes, until the last.
+' the end: the next one comes, five at most until the focus moves, then
+' Look further asks for more.
 sub onPage(event as object)
     request = event.getRoSGNode()
     if request.spec.path <> m.tmdbPath then return
@@ -396,27 +401,40 @@ sub onPage(event as object)
             end if
         end for
     end if
-    if m.content = invalid and (tiles.Count() > 0 or m.page >= m.totalPages)
-        ' The first titles take the frames' place.
+    if m.content <> invalid then dropFurther()
+    if m.content = invalid and (tiles.Count() > 0 or m.page >= m.totalPages or m.asked >= 5)
+        ' The first titles (or Look further) take the frames' place.
         m.content = CreateObject("roSGNode", "ContentNode")
         m.content.appendChildren(tiles)
         m.grid.content = m.content
     else if m.content <> invalid and tiles.Count() > 0
         m.content.appendChildren(tiles)
     end if
-    if m.content <> invalid and m.content.getChildCount() = 0
+    if m.content <> invalid and m.content.getChildCount() = 0 and m.page >= m.totalPages
         hideResults()
         showMessage("Nothing found for “" + m.query + "”.")
         return
     end if
     count = 0
     if m.content <> invalid then count = m.content.getChildCount()
-    if m.grid.itemFocused >= count - 10 then loadPage()
+    if reqWantsPage(m.page, m.totalPages, m.grid.itemFocused, count, 10, m.asked)
+        loadPage()
+    else if m.content <> invalid and m.page < m.totalPages and m.asked >= 5
+        nodesAppend(m.content, [reqFurtherTile()])
+    end if
+end sub
+
+' Look further goes as the next page comes.
+sub dropFurther()
+    last = m.content.getChildCount() - 1
+    if last >= 0 and m.content.getChild(last).kind = "further" then m.content.removeChildIndex(last)
 end sub
 
 ' Two rows before the end, the next page comes.
 sub onFocused(event as object)
-    if m.discover and m.content <> invalid and event.getData() >= m.content.getChildCount() - 10 then loadPage()
+    if not m.discover or m.content = invalid then return
+    m.asked = 0
+    if event.getData() >= m.content.getChildCount() - 10 then loadPage()
 end sub
 
 ' --- Results ---
@@ -437,7 +455,13 @@ sub showMessage(text as string)
 end sub
 
 sub onSelected(event as object)
-    uiOpenTile(m.grid.content.getChild(event.getData()))
+    tile = m.grid.content.getChild(event.getData())
+    if tile <> invalid and tile.kind = "further"
+        m.asked = 0
+        loadPage()
+        return
+    end if
+    uiOpenTile(tile)
 end sub
 
 function onKeyEvent(key as string, press as boolean) as boolean

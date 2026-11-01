@@ -136,8 +136,10 @@ its number counts what waits: a manager's pending and failed requests
   their badges ("In library", "Partly in library", "Requested",
   "Declined"): Trending this week, Popular movies, Popular shows, Coming to
   cinemas, Popular anime, each loaded as it comes into view and ending with
-  See all (a grid, a page at a time); then Your requests, from the first
-  one asked for. Search at the top looks on TMDB.
+  See all (a grid, a page at a time; after five pages in a row that leave
+  it short of a screenful, as an age limit can, Look further asks for
+  more); then Your requests, from the first one asked for. Search at the
+  top looks on TMDB, a page at a time likewise.
 - **A TMDB title's page:** backdrop and poster, year, runtime or seasons,
   certification, genres, rating, tagline and overview; one main action
   (Open, Request, Request more seasons, Tell me too) or the line that says
