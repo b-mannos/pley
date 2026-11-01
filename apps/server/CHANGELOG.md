@@ -17,6 +17,8 @@ describes how they are made.
   (Dolby Vision base layer, as this screen doesn't show Dolby Vision)").
 - The web app's title page shows the quality badges (4K, DV P8.1,
   HDR10…) of the version picked, not always the first version's.
+- The web app's sidebar shows Live TV only once it has channels, for
+  administrators too; they set it up in Settings → Live TV.
 
 ## [0.1.0] - 2026-10-30
 

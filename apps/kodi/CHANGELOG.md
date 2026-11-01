@@ -13,6 +13,8 @@ describes how they are made.
 - Dolby Vision the server repackages (with HDR10+, or profile 7 outside
   CoreELEC) plays as its HDR10 or HDR10+ base layer, as the server says,
   instead of being sent as Dolby Vision that Kodi showed as HDR10.
+- The rail of Pley's window shows or drops Live TV as soon as it is set up
+  or its last source removed, without reopening the window.
 
 ## [0.1.0] - 2026-10-30
 

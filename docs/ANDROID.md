@@ -94,9 +94,12 @@ The menu, Original and Automatic work as in
 
 This is how every Pley app shows Live TV; the [Kodi](KODI.md#live-tv),
 [Roku](ROKU.md#live-tv) and [Samsung and LG](TV_PLATFORMS.md#live-tv) docs
-list only what differs. It appears where `GET /api/live` says `available`:
-in the phone's Libraries tab, after Home in the TV's rail. Sources, the
-lineup and connections are set up in the web app ([API.md](API.md#live-tv)).
+list only what differs. It appears only where `GET /api/live` says
+`available` (a source with channels this profile may watch),
+administrators included: in the web app's sidebar, the phone's Libraries
+tab, after Home in the TV's rail. It comes and goes as sources are added
+or removed (`live_channels_changed`). Sources, the lineup and connections
+are set up in the web app's Settings → Live TV ([API.md](API.md#live-tv)).
 
 - **Categories:** Favourites, Recently watched, All channels, then the
   regions in alphabetical order, each opening to its groups ("UK| Sport"),
