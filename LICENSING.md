@@ -75,12 +75,12 @@ ships FFmpeg beside it, FFmpeg keeps its own licence:
 
 ## What keeps it this way
 
-Pley's authors can license it on other terms besides the AGPL:
-contributions come under the Apache License 2.0
-([CONTRIBUTING.md](CONTRIBUTING.md)), which allows that. A dependency that
-is only available under a copyleft licence (GPL, LGPL, AGPL and the like),
-or FFmpeg linked in, would bind the programs that use it to that licence's
-terms too, which only its own authors could waive.
+Pley is under the AGPL alone, the Kodi add-on aside, and so are
+contributions to it ([CONTRIBUTING.md](CONTRIBUTING.md)). A dependency
+that is only available under a copyleft licence (GPL, LGPL, AGPL and the
+like), or FFmpeg linked in, would bind the programs that use it to that
+licence's terms too, and some of them, the GPL version 2 only for one,
+can't be combined with the AGPL at all.
 
 - **No copyleft code in Pley's own programs.** `scripts/check-licenses.ps1`
   walks the real dependency graphs of the server and the transcoder and fails
