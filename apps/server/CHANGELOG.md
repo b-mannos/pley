@@ -15,6 +15,11 @@ describes how they are made.
   version 3 (`AGPL-3.0-only`, `LICENSE`). The transcoder gives the address
   of its source (`GET /v1/info`, `--license`).
 
+### Fixed
+
+- The web app's sidebar shows Live TV only once it has channels, for
+  administrators too; they set it up in Settings → Live TV.
+
 ## [0.1.0] - 2026-10-30
 
 ### Security
