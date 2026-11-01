@@ -258,7 +258,9 @@ each sheet holds `columns × rows` of them, left to right, top to bottom.
 - A file FFprobe couldn't read answers `ffmpeg_failed`. A probe that timed
   out (a share whose disks sleep) or couldn't start answers `internal`: the
   file may be fine. A file that isn't there, or whose share doesn't answer
-  within a minute, answers `not_found`.
+  within a minute, answers `not_found`. Four files are looked at at once at
+  most, their wait for a turn counted in the minute: a share that never
+  answers holds no more than four threads, however often it is asked.
 - Sheets are JPEGs at FFmpeg's quality 7. `version` says how a set was
   made: it goes up whenever sets are made otherwise (1: quality 7 rather
   than 5), and a server makes the previews it keeps again when they are

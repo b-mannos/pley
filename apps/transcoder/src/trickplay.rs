@@ -22,6 +22,7 @@ use parking_lot::Mutex;
 use pley_transcoder_api::{Tonemapper, TrickplayInfo, TrickplayRequest};
 use tokio::process::Command;
 use tokio::sync::Semaphore;
+use tokio::task::JoinError;
 
 use crate::background::Background;
 use crate::cpuload::CpuMeter;
@@ -47,6 +48,10 @@ const TIMEOUT: Duration = Duration::from_secs(60 * 60);
 /// How long the file is waited for at first: a share whose disks spin up
 /// answers within it.
 const FILE_LOOK: Duration = Duration::from_secs(60);
+/// Files looked at at once at most: a share that doesn't answer holds a
+/// blocking thread for each, and no more than these, however often its
+/// files are asked for again.
+const LOOKS_AT_ONCE: usize = 4;
 /// Sets whose fetched sheets are tracked at once (sets fetched only in part
 /// are forgotten beyond that, and left to cache pruning).
 const MAX_TRACKED: usize = 1000;
@@ -60,6 +65,8 @@ pub struct Trickplay {
     /// for what it wants first. Further requests wait their turn.
     limiter: Semaphore,
     runs: usize,
+    /// First looks at files ([`LOOKS_AT_ONCE`]).
+    looks: Arc<Semaphore>,
     /// One generation per set, the lock forgotten however it ends.
     locks: Locks,
     /// Sheets fetched so far, per set.
@@ -110,6 +117,26 @@ fn probe_error(err: anyhow::Error) -> ApiError {
     }
 }
 
+/// `look`, which blocks, run off the async workers with one of `permits`,
+/// and its answer if that comes within `wait`, the wait for a permit
+/// included (`None` if not). It keeps its permit until it ends, answered
+/// in time or not, so that no more than the permits ever block at once.
+async fn bounded<T: Send + 'static>(
+    permits: Arc<Semaphore>,
+    wait: Duration,
+    look: impl FnOnce() -> Option<T> + Send + 'static,
+) -> Result<Option<T>, JoinError> {
+    let run = async move {
+        let Ok(permit) = permits.acquire_owned().await else { return Ok(None) };
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            look()
+        })
+        .await
+    };
+    tokio::time::timeout(wait, run).await.unwrap_or(Ok(None))
+}
+
 /// Marks a set's folder as being written, for the cache's pruning: a marker
 /// made and removed in it changes the folder's time on every system.
 fn freshen(part: &Path) {
@@ -137,6 +164,7 @@ impl Trickplay {
             dir,
             limiter: Semaphore::new(runs),
             runs,
+            looks: Arc::new(Semaphore::new(LOOKS_AT_ONCE)),
             locks: Mutex::default(),
             served: Mutex::default(),
             cpu,
@@ -187,13 +215,14 @@ impl Trickplay {
         let path = Path::new(&req.path);
         // One look at the file, off the async workers: a share whose disks
         // sleep takes seconds to answer, and one that doesn't answer in a
-        // minute is taken for one that isn't there (it may be later).
+        // minute, its turn included, is taken for one that isn't there (it
+        // may be later).
         let file = path.to_owned();
-        let look = tokio::task::spawn_blocking(move || {
+        let looked = bounded(self.looks.clone(), FILE_LOOK, move || {
             let meta = std::fs::metadata(&file).ok().filter(|meta| meta.is_file())?;
             Some(file_key(&file).map(|key| (key, meta.len())))
-        });
-        let looked = tokio::time::timeout(FILE_LOOK, look).await.unwrap_or(Ok(None));
+        })
+        .await;
         let (key, size) = match looked.map_err(|e| ApiError::Internal(e.into()))? {
             Some(found) => found?,
             None => return Err(ApiError::NotFound(format!("file not found: {}", req.path))),
@@ -336,6 +365,8 @@ fn count_sheets(dir: &Path) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use pley_transcoder_api::{MediaInfo, StreamKind};
 
     use super::*;
@@ -457,6 +488,47 @@ mod tests {
         prober.remember(&movie, MediaInfo { duration_ms: Some(60_000), streams: vec![video], ..Default::default() });
         let req = TrickplayRequest { path: movie.to_string_lossy().into_owned(), ..Default::default() };
         (Arc::new(trickplay), background, req)
+    }
+
+    #[tokio::test]
+    async fn files_that_do_not_answer_hold_a_few_threads_at_most() {
+        let permits = Arc::new(Semaphore::new(2));
+        let wait = Duration::from_millis(100);
+        // Files on a share that doesn't answer are taken for files that
+        // aren't there, but keep their threads and permits...
+        let mut releases = Vec::new();
+        for _ in 0..2 {
+            let (release, held) = std::sync::mpsc::channel::<()>();
+            assert_eq!(bounded(permits.clone(), wait, move || held.recv().ok()).await.unwrap(), None);
+            releases.push(release);
+        }
+        // ...so that no other file is looked at, however often it is asked for.
+        let looked = Arc::new(AtomicBool::new(false));
+        for _ in 0..3 {
+            let looked = looked.clone();
+            let look = move || {
+                looked.store(true, Ordering::SeqCst);
+                Some(())
+            };
+            assert_eq!(bounded(permits.clone(), wait, look).await.unwrap(), None);
+        }
+        assert!(!looked.load(Ordering::SeqCst));
+        // Once the share answers, files are looked at again.
+        for release in releases {
+            release.send(()).unwrap();
+        }
+        assert_eq!(bounded(permits, Duration::from_secs(10), || Some(3)).await.unwrap(), Some(3));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_file_is_waited_for_a_minute_at_most_its_turn_included() {
+        let dir = tempfile::tempdir().unwrap();
+        let (trickplay, _, req) = without_ffmpeg(dir.path());
+        // Every look is taken by files that don't answer.
+        let _taken = trickplay.looks.clone().acquire_many_owned(LOOKS_AT_ONCE as u32).await.unwrap();
+        let asked = tokio::time::Instant::now();
+        assert!(matches!(trickplay.generate(&req).await, Err(ApiError::NotFound(_))));
+        assert!(asked.elapsed() >= FILE_LOOK);
     }
 
     #[tokio::test]
