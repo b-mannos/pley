@@ -176,7 +176,8 @@ pub enum ServerEvent {
         status: RequestStatus,
     },
     /// A request couldn't be sent to Radarr or Sonarr and is left for a
-    /// manager (`retry_at` `None`): to managers.
+    /// manager: to managers. `retry_at` is always `None`: nothing is tried
+    /// again by itself.
     RequestFailed {
         #[serde(skip)]
         to: Audience,

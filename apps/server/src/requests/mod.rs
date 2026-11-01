@@ -147,9 +147,7 @@ pub enum RequestStage {
     /// Approved, not sent: no Radarr or Sonarr for its kind, sending, or
     /// added by hand.
     Approved,
-    /// Sent; not out yet (until `stage_at`, where known).
-    Waiting,
-    /// Sent and out; nothing downloading yet.
+    /// Sent; nothing downloading yet.
     Searching,
     Downloading,
     Importing,
@@ -158,21 +156,6 @@ pub enum RequestStage {
     Available,
     /// Was available; no library has it any more.
     Gone,
-}
-
-impl RequestStage {
-    /// An approved request's, as stored once Radarr or Sonarr said.
-    fn approved(text: &str) -> Option<RequestStage> {
-        match text {
-            "approved" => Some(RequestStage::Approved),
-            "waiting" => Some(RequestStage::Waiting),
-            "searching" => Some(RequestStage::Searching),
-            "downloading" => Some(RequestStage::Downloading),
-            "importing" => Some(RequestStage::Importing),
-            "partial" => Some(RequestStage::Partial),
-            _ => None,
-        }
-    }
 }
 
 /// What a request endpoint answers when it can't, as `{ code, message, … }`
@@ -317,7 +300,7 @@ pub struct Summary {
     pub manage: bool,
     /// Managers: requests waiting for a decision.
     pub pending: i64,
-    /// Managers: failed requests the server won't try again by itself.
+    /// Managers: failed requests, which wait for one.
     pub failed: i64,
     /// Requests the account made or follows that became available, partly
     /// available or declined since it last looked.
@@ -472,7 +455,7 @@ pub struct MediaRequest {
     pub anime: bool,
     pub status: RequestStatus,
     pub stage: RequestStage,
-    /// Waiting: when it comes out, where known.
+    /// Always `None`: no stage says when it ends.
     pub stage_at: Option<i64>,
     /// Declined: the administrator's, for its maker and managers. Failed:
     /// what went wrong, for managers.
@@ -498,7 +481,7 @@ pub struct MediaRequest {
     pub created_at: i64,
     pub updated_at: i64,
     pub available_at: Option<i64>,
-    /// Failed: when the server tries again by itself.
+    /// Always `None`: a failed request waits for a manager.
     pub retry_at: Option<i64>,
     /// Managers: where it was sent.
     pub sent_to: Option<SentTo>,
@@ -602,7 +585,7 @@ pub struct Approval {
 pub struct ListQuery {
     /// Any of these (none: every status).
     pub statuses: Vec<RequestStatus>,
-    /// Pending ones and those failed for a manager (the managers' badge).
+    /// Pending and failed ones (the managers' badge).
     pub attention: bool,
     pub kind: Option<TitleKind>,
     /// Managers: those this account made.
@@ -626,7 +609,7 @@ pub struct ListQuery {
 const COLUMNS: &str = "r.id, r.kind, r.tmdb_id, r.tvdb_id, r.imdb_id, r.title, r.year, r.poster_path,
     r.backdrop_path, r.seasons, r.available_seasons, r.anime, r.user_id, r.status, r.reason, r.decided_by,
     r.decided_at, r.item_id, r.arr_id, r.created_at, r.updated_at, r.available_at, r.sent_to, r.sent_profile,
-    r.sent_folder, r.retry_at, r.stage, r.stage_at, r.note, r.news_at,
+    r.sent_folder, r.news_at,
     COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS maker_name, u.avatar AS maker_avatar,
     u.avatar_color AS maker_color, COALESCE(NULLIF(TRIM(d.display_name), ''), d.username) AS decider_name,
     d.avatar AS decider_avatar, d.avatar_color AS decider_color";
@@ -660,11 +643,6 @@ struct RequestRow {
     sent_to: Option<String>,
     sent_profile: Option<String>,
     sent_folder: Option<String>,
-    retry_at: Option<i64>,
-    /// An approved request's, as Radarr or Sonarr last said.
-    stage: Option<String>,
-    stage_at: Option<i64>,
-    note: Option<String>,
     news_at: Option<i64>,
     maker_name: String,
     maker_avatar: Option<String>,
@@ -723,8 +701,8 @@ impl RequestRow {
         }
     }
 
-    /// Where it is: an approved one's from its download, else from what
-    /// Radarr or Sonarr said last.
+    /// Where it is: an approved one's from its download, the seasons ready
+    /// and where it went.
     fn stage(&self, download: Option<&Download>) -> RequestStage {
         match self.status() {
             RequestStatus::Pending => RequestStage::Pending,
@@ -736,13 +714,10 @@ impl RequestRow {
             RequestStatus::Approved => match download.map(|d| d.state) {
                 Some(DownloadState::Importing) => RequestStage::Importing,
                 Some(_) => RequestStage::Downloading,
-                None => match self.stage.as_deref().and_then(RequestStage::approved) {
-                    Some(stage) => stage,
-                    None if !seasons_of(&self.available_seasons).is_empty() => RequestStage::Partial,
-                    // Sent: Radarr or Sonarr looks for it.
-                    None if self.sent().is_some() => RequestStage::Searching,
-                    None => RequestStage::Approved,
-                },
+                None if !seasons_of(&self.available_seasons).is_empty() => RequestStage::Partial,
+                // Sent: Radarr or Sonarr looks for it.
+                None if self.sent().is_some() => RequestStage::Searching,
+                None => RequestStage::Approved,
             },
         }
     }
@@ -814,9 +789,9 @@ impl RequestRow {
             anime: self.anime,
             status,
             stage,
-            stage_at: self.stage_at.filter(|_| stage == RequestStage::Waiting),
+            stage_at: None,
             reason,
-            note: self.note.clone().or_else(|| self.hand().then(|| HAND_NOTE.to_owned())).filter(|_| viewer.manager),
+            note: self.hand().then(|| HAND_NOTE.to_owned()).filter(|_| viewer.manager),
             mine,
             watching,
             watchers: if viewer.manager { viewer.followers.get(&self.id).copied().unwrap_or(0) } else { 0 },
@@ -835,7 +810,7 @@ impl RequestRow {
             created_at: self.created_at,
             updated_at: self.updated_at,
             available_at: self.available_at,
-            retry_at: self.retry_at.filter(|_| status == RequestStatus::Failed),
+            retry_at: None,
             sent_to: self.sent().filter(|_| viewer.manager).map(|service| SentTo {
                 service,
                 quality_profile: self.sent_profile.clone(),
@@ -1491,10 +1466,10 @@ impl Requests {
         let quota = self.quota(&caller).await?;
         let (pending, failed, unseen, own, changed_at): (i64, i64, i64, i64, Option<i64>) =
             sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                "SELECT COALESCE(SUM(status = 'pending'), 0), COALESCE(SUM(status = 'failed' AND retry_at IS NULL), 0),
+                "SELECT COALESCE(SUM(status = 'pending'), 0), COALESCE(SUM(status = 'failed'), 0),
                         COALESCE(SUM(mine AND news_at > COALESCE((SELECT requests_seen_at FROM users WHERE id = ?), 0)), 0),
                         COALESCE(SUM(mine), 0), MAX(CASE WHEN mine OR ? THEN updated_at END)
-                 FROM (SELECT r.status, r.retry_at, r.news_at, r.updated_at, {MINE} AS mine FROM requests r)"
+                 FROM (SELECT r.status, r.news_at, r.updated_at, {MINE} AS mine FROM requests r)"
             )))
             .bind(user.id)
             .bind(caller.manager)
@@ -1526,9 +1501,9 @@ impl Requests {
     }
 
     /// What counts toward `caller`'s limits: its own requests of the last 7
-    /// days, but those declined, those failed that the server won't try
-    /// again and those it inherited as their earliest follower (following
-    /// one costs nothing). None where limits don't apply.
+    /// days, but those declined, those failed and those it inherited as
+    /// their earliest follower (following one costs nothing). None where
+    /// limits don't apply.
     async fn quota(&self, caller: &Caller<'_>) -> sqlx::Result<Quota> {
         if !caller.limited {
             return Ok(Quota::default());
@@ -1546,7 +1521,7 @@ impl Requests {
         let rows: Vec<(String, Option<String>, i64)> = sqlx::query_as(
             "SELECT kind, seasons, created_at FROM requests
              WHERE user_id = ? AND created_at > ? AND inherited_at IS NULL
-               AND (status IN ('pending', 'approved', 'available') OR (status = 'failed' AND retry_at IS NOT NULL))
+               AND status IN ('pending', 'approved', 'available')
              ORDER BY created_at, id",
         )
         .bind(caller.user.id)
@@ -2144,7 +2119,7 @@ impl Requests {
                 sql.push_str(&format!(" AND r.status IN ({})", vec!["?"; statuses.len()].join(",")));
             }
             if query.attention {
-                sql.push_str(" AND (r.status = 'pending' OR (r.status = 'failed' AND r.retry_at IS NULL))");
+                sql.push_str(" AND r.status IN ('pending', 'failed')");
             }
             if query.kind.is_some() {
                 sql.push_str(" AND r.kind = ?");
@@ -2549,7 +2524,7 @@ impl Requests {
                     decided_by = CASE WHEN status = 'approved' THEN decided_by ELSE ? END,
                     decided_at = CASE WHEN status = 'approved' THEN decided_at ELSE ? END,
                     seasons = ?, available_seasons = ?, sent_to = NULL, sent_profile = NULL, sent_folder = NULL,
-                    attempts = 0, retry_at = NULL, stage = NULL, stage_at = NULL, note = NULL, updated_at = ?
+                    updated_at = ?
              WHERE id = ? AND status = ? AND sent_to IS ?",
         )
         .bind(caller.user.id)
@@ -2652,8 +2627,7 @@ impl Requests {
                     None => None,
                 };
                 sqlx::query(
-                    "UPDATE requests SET arr_id = ?, sent_to = ?, sent_profile = ?, sent_folder = ?, attempts = 0,
-                                         retry_at = NULL, updated_at = ?
+                    "UPDATE requests SET arr_id = ?, sent_to = ?, sent_profile = ?, sent_folder = ?, updated_at = ?
                      WHERE id = ? AND status = 'approved' AND sent_to IS NULL",
                 )
                 .bind(added.id)
@@ -2669,8 +2643,7 @@ impl Requests {
                 tracing::warn!("request {id}: {} wasn't added to {}: {err}", row.title, service.name());
                 let reason = err.to_string();
                 let failed = sqlx::query(
-                    "UPDATE requests SET status = 'failed', reason = ?, attempts = attempts + 1, retry_at = NULL,
-                                         updated_at = ?
+                    "UPDATE requests SET status = 'failed', reason = ?, updated_at = ?
                      WHERE id = ? AND status = 'approved' AND sent_to IS NULL",
                 )
                 .bind(&reason)
@@ -2709,7 +2682,7 @@ impl Requests {
         let at = now();
         let declined = sqlx::query(
             "UPDATE requests SET status = 'declined', reason = ?, decided_by = ?, decided_at = ?, updated_at = ?,
-                                 news_at = ?, retry_at = NULL, stage = NULL, stage_at = NULL
+                                 news_at = ?
              WHERE id = ? AND status IN ('pending', 'failed', 'approved')",
         )
         .bind(reason)
@@ -2755,8 +2728,7 @@ impl Requests {
         let done = sqlx::query(
             "UPDATE requests SET status = 'approved', reason = NULL, sent_to = 'hand', sent_profile = NULL,
                     sent_folder = NULL, decided_by = CASE WHEN status = 'approved' THEN decided_by ELSE ? END,
-                    decided_at = CASE WHEN status = 'approved' THEN decided_at ELSE ? END, attempts = 0,
-                    retry_at = NULL, stage = NULL, stage_at = NULL, note = NULL, updated_at = ?
+                    decided_at = CASE WHEN status = 'approved' THEN decided_at ELSE ? END, updated_at = ?
              WHERE id = ? AND status = ? AND sent_to IS ?",
         )
         .bind(caller.user.id)

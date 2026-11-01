@@ -816,6 +816,7 @@ async fn failures_say_why_and_approving_again_retries() {
     assert_eq!(status(&failed), (StatusCode::OK, "failed".to_owned()));
     assert_eq!(failed.body["reason"], json!("Radarr refused: Root folder is not writable"));
     assert_eq!(failed.body["actions"], json!(["retry", "decline", "handled", "delete"]));
+    assert_eq!(failed.body["retry_at"], Value::Null, "nothing tries again by itself");
     let heard: Vec<ServerEvent> = std::iter::from_fn(|| events.try_recv().ok()).collect();
     assert!(
         heard.iter().any(|e| matches!(e,

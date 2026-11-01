@@ -2319,10 +2319,9 @@ An app's token without the route's scope is refused before all of it
   `sign_in_again: "approvals"`.
 - **Limits** (`request_limit_movies`, `request_limit_seasons`, 0 = none)
   count an account's own requests made in the last 7 days (a show its
-  seasons): pending, approved and available ones, and failed ones the
-  server will try again (`retry_at` set); declined ones, those failed for a
-  manager and those it has as their earliest follower (below) don't count,
-  and following costs nothing. They never apply to administrators. Asking
+  seasons): pending, approved and available ones; declined and failed ones
+  and those it has as their earliest follower (below) don't count, and
+  following costs nothing. They never apply to administrators. Asking
   for more than is left answers `429` with `retry_at`: when enough of what
   counts is older than 7 days for all that was asked; `null` when more was
   asked than the limit itself (pick fewer). `*_next_at` in the summary and
@@ -2505,9 +2504,9 @@ An app's token without the route's scope is refused before all of it
   narrows it:
   - `status`: one status, or several separated by commas
     (`pending,failed`);
-  - `attention=1`: pending requests, and failed ones the server won't try
-    again (`retry_at` `null`): what the summary's `pending` and `failed`
-    count for managers (*Needs attention* is `attention=1&order=oldest`);
+  - `attention=1`: pending and failed requests: what the summary's
+    `pending` and `failed` count for managers (*Needs attention* is
+    `attention=1&order=oldest`);
   - `kind`: `movie` or `show`;
   - `user_id`: managers: the requests that account made (ignored for
     others);
@@ -2560,7 +2559,7 @@ interface RequestSummary {
   seasons_next_at: Timestamp | null; // with no seasons left: likewise
   manage: boolean;                  // this session is a manager
   pending: number;                  // managers: requests waiting for a decision (others: 0)
-  failed: number;                   // managers: failed requests the server won't try again (others: 0)
+  failed: number;                   // managers: failed requests, which wait for one (others: 0)
   unseen: number;                   // the requests it made or follows with news since it last looked
   own: number;                      // the requests it made or follows, any status
   changed_at: Timestamp | null;     // the newest updated_at of the requests this session sees (managers:
@@ -2647,8 +2646,7 @@ type RequestStage =
   | "pending" | "declined" | "failed"
   | "approved"                      // approved, not sent: being sent, no Radarr or Sonarr connected for its
                                     // kind, or added by hand
-  | "waiting"                       // sent; not out yet (`stage_at`, where known)
-  | "searching"                     // sent and out; nothing downloading yet
+  | "searching"                     // sent; nothing downloading yet
   | "downloading"                   // see `download`
   | "importing"                     // downloaded; going into the library
   | "partial"                       // shows: some of the seasons asked for are ready
@@ -2668,7 +2666,7 @@ interface MediaRequest {
   anime: boolean;
   status: RequestStatus;            // the decision
   stage: RequestStage;              // where it is: draw a request from this
-  stage_at: Timestamp | null;       // waiting: when it comes out, where known
+  stage_at: null;                   // always null: no stage says when it ends
   reason: string | null;            // declined: the administrator's (or null), for its maker and managers;
                                     // failed: what went wrong, for managers; null for others
   note: string | null;              // managers: what to know of it ("Added by hand")
@@ -2685,7 +2683,7 @@ interface MediaRequest {
   created_at: Timestamp;
   updated_at: Timestamp;
   available_at: Timestamp | null;
-  retry_at: Timestamp | null;       // failed: when the server tries again by itself; null: it won't
+  retry_at: null;                   // always null: a failed request waits for a manager
   sent_to: { service: "radarr" | "sonarr"; quality_profile: string | null; root_folder: string | null } | null;
                                     // managers: where it was sent (the profile's name), where known
   item_id: Id | null;               // a library's title once there, where this account may open it
@@ -2851,7 +2849,7 @@ too. Whether a stream is a manager's is checked again as its session is
 - `request_created`: a new request, `pending` or approved as made: to
   managers but its maker.
 - `request_failed`: a request couldn't be sent to Radarr or Sonarr and
-  waits for a manager (`retry_at` `null`): to managers.
+  waits for a manager: to managers (`retry_at` is always `null`).
 - `requests_settings_changed` has no audience: see the union below.
 
 Clients fetch the request summary again on each, and what shows that
@@ -2943,7 +2941,7 @@ type ServerEvent =
   | { type: "request_created"; request_id: Id; title: string; kind: TitleKind; tmdb_id: number;
       seasons: number[] | null; requested_by: RequestUser; status: "pending" | "approved" } // to managers
   | { type: "request_failed"; request_id: Id; title: string; kind: TitleKind; reason: string;
-      retry_at: Timestamp | null }                   // to managers: it waits for one (retry_at null)
+      retry_at: null }                               // to managers: it waits for one
   | { type: "requests_settings_changed" };           // fetch the request summary again: requests were turned on or
                                                      // off, their limits or the TMDB key changed (every stream, apps'
                                                      // included), or one account's request_access, role, age limit
