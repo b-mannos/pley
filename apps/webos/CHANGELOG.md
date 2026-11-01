@@ -18,6 +18,11 @@ describes how they are made.
 - Pley for LG TV is free software under the GNU Affero General Public
   License, version 3 (`AGPL-3.0-only`, `LICENSE`).
 
+### Fixed
+
+- Dolby Vision details call a profile 8 with the Blu-ray's base layer
+  "Profile 8", as its label does, not "Profile 8.6".
+
 ## [0.1.0] - 2026-10-30
 
 ### Security
