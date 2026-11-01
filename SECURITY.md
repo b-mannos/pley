@@ -228,7 +228,8 @@ Apps sign in on Pley's own page with OAuth 2.1.
   Radarr and Sonarr anything; others see their own.
 - Discover shows TMDB's titles whatever their rating, so profiles without a
   password and accounts with an age limit may not ask until an administrator
-  allows it.
+  allows it. An account that may not ask gets none of TMDB's pictures
+  through the server but those of its own requests.
 
 ### The desktop app
 

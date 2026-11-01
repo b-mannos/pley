@@ -2260,7 +2260,8 @@ one of Pley's own apps on an administrator's account whose token has
 administrator's app without `approvals` included, sees only the requests it
 made or follows. Discover and asking need `request_access` `"ask"` or
 `"auto"`; an account whose `request_access` is `"off"` still lists, reads
-and withdraws its own requests, and stops following others'. An
+and withdraws its own requests, with their pictures, and stops following
+others'. An
 administrator's account asks without limits, and its requests are approved
 as made from the web, the desktop app and Pley's own apps; from other
 publishers' apps they wait for a manager (its `access` there is `"ask"`, in
@@ -2296,7 +2297,7 @@ An app's token without the route's scope is refused before all of it
 | GET | `/api/discover/search?q=&page=&missing=` | `requests` | `DiscoverPage`: movies and shows matching `q` (1-200 characters); `missing=1` leaves out those whose `status` is `library` |
 | GET | `/api/discover/movie/{tmdb_id}` | `requests` | `DiscoverDetail` |
 | GET | `/api/discover/show/{tmdb_id}` | `requests` | `DiscoverDetail`, with `seasons` |
-| GET | `/api/discover/images/{kind}/{file}?w=` | `requests` | one of TMDB's pictures (below), whatever the account's `request_access` |
+| GET | `/api/discover/images/{kind}/{file}?w=` | `requests` | one of TMDB's pictures (below); with `request_access` `"off"`, only the posters and backdrops of the requests the account made or follows (others: `403 no_access`) |
 | GET | `/api/items/{id}/request` | `requests` | `ItemRequest`: a library's movie or show as Discover sees it, whatever the account's `request_access` |
 | GET | `/api/requests?status=&attention=&kind=&user_id=&q=&order=&mine=&unseen=&changed_since=&offset=&limit=` | `requests` | `RequestList` (below) |
 | POST | `/api/requests` | `requests` | `{ kind, tmdb_id, seasons? }` → `201` with the new `MediaRequest`, or `200` with the one followed when nothing was left to ask for |

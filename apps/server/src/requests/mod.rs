@@ -2303,15 +2303,44 @@ impl Requests {
     }
 
     /// `GET /api/discover/images/{kind}/{file}`: one of TMDB's pictures, at
-    /// the size TMDB has for a client drawing it `width` pixels wide.
-    pub async fn picture(&self, kind: &str, file: &str, width: Option<u32>) -> RequestResult<Bytes> {
+    /// the size TMDB has for a client drawing it `width` pixels wide. An
+    /// account that may not ask, and so has no Discover, gets those of the
+    /// requests it made or follows only.
+    pub async fn picture(
+        &self,
+        caller: &Caller<'_>,
+        kind: &str,
+        file: &str,
+        width: Option<u32>,
+    ) -> RequestResult<Bytes> {
         let missing = || RequestError::from(AppError::not_found("no such picture"));
         let kind = Picture::parse(kind).filter(|_| pictures::valid_file(file)).ok_or_else(missing)?;
+        if caller.access == RequestAccess::Off && !self.pictured(caller.user.id, kind, file).await? {
+            return Err(RequestError::NoAccess);
+        }
         match self.pictures.get(kind.size(width), file).await {
             Ok(bytes) => Ok(bytes),
             Err(Unavailable::Missing) => Err(missing()),
             Err(Unavailable::Failed) => Err(RequestError::PictureDown),
         }
+    }
+
+    /// Whether TMDB's `file` is the poster or backdrop (`kind`) of a
+    /// request account `user_id` made or follows.
+    async fn pictured(&self, user_id: i64, kind: Picture, file: &str) -> sqlx::Result<bool> {
+        let column = match kind {
+            Picture::Poster => "poster_path",
+            Picture::Backdrop => "backdrop_path",
+            Picture::Profile | Picture::Still => return Ok(false),
+        };
+        sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT EXISTS (SELECT 1 FROM requests r WHERE r.{column} = ? AND {MINE})"
+        )))
+        .bind(format!("/{file}"))
+        .bind(user_id)
+        .bind(user_id)
+        .fetch_one(&self.db.read)
+        .await
     }
 
     // -------------------------------------------------------------- changing

@@ -118,18 +118,19 @@ pub async fn show(
 }
 
 /// `GET /api/discover/images/{kind}/{file}?w=`: one of TMDB's pictures,
-/// served as library artwork is (to any account, whatever it may ask).
+/// served as library artwork is: any, to an account that may ask; those
+/// of its own requests to one that may not.
 pub async fn image(
     State(state): State<AppState>,
-    _user: AuthUser,
+    user: AuthUser,
     path: Result<Path<(String, String)>, PathRejection>,
     query: Params,
 ) -> RequestResult<Response> {
-    state.requests.on()?;
+    let caller = state.requests.reader(&user).await?;
     // As for library artwork, a width that isn't one is left out.
     let width = params(query)?.get("w").and_then(|w| w.parse::<u32>().ok()).filter(|w| *w > 0);
     let Path((kind, file)) = path.map_err(|_| AppError::not_found("no such picture"))?;
-    let bytes = state.requests.picture(&kind, &file, width).await?;
+    let bytes = state.requests.picture(&caller, &kind, &file, width).await?;
     let headers = [
         (header::CONTENT_TYPE, HeaderValue::from_static(pictures::content_type(&bytes))),
         // A file name is one picture for good. Private: a proxy in front

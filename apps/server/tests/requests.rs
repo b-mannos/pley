@@ -1023,11 +1023,11 @@ async fn who_may_ask() {
     }
     let refused = w.ask(&teen, json!({"kind": "movie", "tmdb_id": 603})).await;
     assert_eq!((refused.status, &refused.body["code"]), (StatusCode::FORBIDDEN, &json!("no_access")));
-    // Pictures, and its own requests, it still has.
+    // Its own requests it still has (none), and their pictures only.
     let list = w.app.get("/api/requests", &teen).await;
     assert_eq!((list.status, &list.body["total"]), (StatusCode::OK, &json!(0)));
     let poster = w.app.get("/api/discover/images/poster/matrix.jpg", &teen).await;
-    assert_eq!(poster.status, StatusCode::OK);
+    assert_eq!((poster.status, &poster.body["code"]), (StatusCode::FORBIDDEN, &json!("no_access")));
 
     let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 604})).await;
     let id = asked.body["id"].as_i64().unwrap();
@@ -1039,10 +1039,18 @@ async fn who_may_ask() {
     assert!(heard.iter().any(|e| matches!(e,
         ServerEvent::RequestsSettingsChanged { user_id: Some(user_id) } if *user_id == w.ann_id)));
     assert_eq!(w.app.get("/api/discover/trending", &w.ann).await.status, StatusCode::FORBIDDEN);
-    // She keeps hers: she reads and withdraws it.
+    // She keeps hers: she reads it, with its pictures, and withdraws it.
     let summary = w.app.get("/api/requests/summary", &w.ann).await;
     assert_eq!((&summary.body["access"], &summary.body["own"]), (&json!("off"), &json!(1)));
     assert_eq!(w.app.get(&format!("/api/requests/{id}"), &w.ann).await.status, StatusCode::OK);
+    for (uri, status) in [
+        ("/api/discover/images/poster/matrix.jpg?w=200", StatusCode::OK),
+        ("/api/discover/images/backdrop/matrixwide.jpg", StatusCode::OK),
+        ("/api/discover/images/profile/keanu.jpg", StatusCode::FORBIDDEN),
+        ("/api/discover/images/poster/bb.jpg", StatusCode::FORBIDDEN),
+    ] {
+        assert_eq!(w.app.get(uri, &w.ann).await.status, status, "{uri}");
+    }
     assert_eq!(w.app.delete(&format!("/api/requests/{id}"), &w.ann).await.status, StatusCode::NO_CONTENT);
     let wrong = w.app.patch(&user, &w.admin, json!({"request_access": "always"})).await;
     assert!(wrong.status.is_client_error());
