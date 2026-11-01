@@ -6,6 +6,7 @@ import type {
   DiscoverTitle,
   MediaRequest,
   RequestAction,
+  RequestList,
   RequestStatus,
   RequestSummary,
   TitleKind,
@@ -547,6 +548,36 @@ export function seasonStage(r: MediaRequest, season: number, opts: { manage: boo
 /** Something on the list downloads or goes into the library: the list is asked for again every 10 s. */
 export function moving(list: MediaRequest[]): boolean {
   return list.some((r) => r.stage === "downloading" || r.stage === "importing" || (r.stage === "partial" && !!r.download));
+}
+
+/**
+ * `next`, a list asked for again, with each request that the server
+ * answered just as in `before` kept as the object it was, so its card
+ * isn't drawn again: of 200 cards, only those whose download moved are.
+ */
+export function keepUnchanged(before: RequestList | undefined, next: RequestList): RequestList {
+  if (!before) return next;
+  const was = new Map<number, MediaRequest>();
+  for (const r of before.requests) was.set(r.id, r);
+  return {
+    ...next,
+    requests: next.requests.map((r) => {
+      const old = was.get(r.id);
+      return old && sameJson(old, r) ? old : r;
+    }),
+  };
+}
+
+/** Two answers' values alike, field by field all the way down. */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object" || Array.isArray(a) !== Array.isArray(b)) return false;
+  const x = a as Record<string, unknown>;
+  const y = b as Record<string, unknown>;
+  const keys = Object.keys(x);
+  if (keys.length !== Object.keys(y).length) return false;
+  for (const k of keys) if (!sameJson(x[k], y[k])) return false;
+  return true;
 }
 
 /** Who asked and when: "Asked by you · 3 days ago", "Asked by Ann · yesterday", "Asked for by someone else · now". */

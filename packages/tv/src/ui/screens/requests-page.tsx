@@ -7,6 +7,7 @@ import {
   askRefusal,
   hasRequests,
   inRequestsTab,
+  keepUnchanged,
   mayAsk,
   moving,
   problemWords,
@@ -144,13 +145,17 @@ function RequestsPage(p: { entry: Entry }) {
   const changes = app.requestChanges.value.n;
   const load = useLoad((c) => ui.api.requests(query, c).then((list) => ({ key, list })), [key, limit, changes], { live: false });
   const fresh = load.data && load.data.key === key ? load.data.list : null;
-  if (fresh && lists[key] !== fresh) {
+  // A new answer keeps the requests answered as before as they were, so that only the cards that changed draw again.
+  const answered = useRef<RequestList | null>(null);
+  if (fresh && answered.current !== fresh) {
+    answered.current = fresh;
+    const kept = keepUnchanged(lists[key], fresh);
     delete lists[key];
-    lists[key] = fresh;
+    lists[key] = kept;
     const keys = Object.keys(lists);
     for (const k of keys.slice(0, Math.max(0, keys.length - LISTS_KEPT))) delete lists[k];
   }
-  const list = fresh ?? lists[key] ?? null;
+  const list = lists[key] ?? null;
 
   // What an action answered, until the list is asked again: the request as it is now, or `null` once it left the list.
   const [local, setLocal] = useState<{ base: RequestList | null; map: Record<number, MediaRequest | null> }>({ base: null, map: {} });

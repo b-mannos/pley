@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { ApiError } from "../src/api/client";
-import type { DiscoverDetail, DiscoverSeason, DiscoverTitle, MediaRequest, RequestSummary } from "../src/api/types";
+import type { DiscoverDetail, DiscoverSeason, DiscoverTitle, MediaRequest, RequestList, RequestSummary } from "../src/api/types";
 import { dayAndTime, relativeTime, shortDate, timeUntil } from "../src/format/format";
 import {
   actionRows,
@@ -11,6 +11,7 @@ import {
   declinedText,
   hasMoreSeasons,
   hasRequests,
+  keepUnchanged,
   mainAction,
   mayAsk,
   pickerButton,
@@ -368,6 +369,28 @@ describe("a request's stage", () => {
     expect(seasonStage(partial, 4, opts, NOW)).toEqual({ text: "Downloading 70% · in 2 hours", tone: "blue", progress: 0.7, note: null });
     expect(seasonStage({ ...partial, download: null }, 4, opts, NOW)).toBeNull();
     expect(seasonStage(request({ kind: "show", stage: "pending", seasons: [3, 4] }), 4, opts, NOW)).toMatchObject({ text: "Waiting for approval", tone: "amber" });
+  });
+});
+
+describe("a list of requests asked for again", () => {
+  it("keeps each request answered as before as the object it was, so only the cards that changed draw again", () => {
+    const download = { progress: 0.2, state: "downloading" as const, eta: null, episodes: 1 };
+    const before: RequestList = {
+      total: 2,
+      counts: { pending: 0, approved: 1, declined: 0, failed: 0, available: 1 },
+      requests: [request({ id: 1, status: "available", stage: "available", requested_by: { id: 2, name: "Ann", avatar_url: null, avatar_color: null } }), request({ id: 2, status: "approved", stage: "downloading", download })],
+      people: [],
+    };
+    // A new answer is new objects throughout, the same as before but for the download's progress, and one more.
+    const next: RequestList = JSON.parse(JSON.stringify(before)) as RequestList;
+    next.requests[1]!.download!.progress = 0.4;
+    next.requests.push(request({ id: 3 }));
+    const kept = keepUnchanged(before, next);
+    expect(kept.requests[0]).toBe(before.requests[0]);
+    expect(kept.requests[1]).toBe(next.requests[1]);
+    expect(kept.requests[2]).toBe(next.requests[2]);
+    expect(kept.total).toBe(next.total);
+    expect(keepUnchanged(undefined, next)).toBe(next);
   });
 });
 
