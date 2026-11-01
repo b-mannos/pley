@@ -47,6 +47,8 @@ let downloads: Download[] = [];
 let confirming: number | null = null;
 let confirmTimer = 0;
 let pollTimer = 0;
+/** What the picker says once it has looked for servers. */
+let note = "";
 
 function message(err: unknown): string {
   return typeof err === "string" ? err : err instanceof Error ? err.message : String(err);
@@ -57,7 +59,7 @@ function render(): void {
   list.replaceChildren(...entries.map(row));
   if (searching) status.textContent = "Looking for servers on this network…";
   else if (!entries.length) status.textContent = "No server answered. Check that Pley is running on it, or enter its address.";
-  else status.textContent = "";
+  else status.textContent = note;
   searchAgain.hidden = searching;
 }
 
@@ -368,7 +370,11 @@ async function start(): Promise<void> {
   saved = await invoke<SavedServer[]>("saved_servers");
   void refreshDownloads();
   // "Switch server" in the web app comes back here with ?pick: no opening by itself then.
-  const pick = new URLSearchParams(window.location.search).has("pick");
+  const params = new URLSearchParams(window.location.search);
+  const pick = params.has("pick");
+  // The app left a server whose address now leads to another device.
+  const notYours = params.get("not-yours");
+  if (notYours) note = `Another device answers at ${displayAddress(notYours)} now, so Pley came back here.`;
   const last = lastUsed(saved);
   if (last && !pick) void openLastUsed(last);
   else showChooser();

@@ -8,6 +8,17 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Security
+
+- Before the app opens a server, and before its notifications and
+  downloads use the window's session there, the server proves it is the
+  one the window signed in to. Another device at its address (on another
+  network, or after the router hands it out again) gets nothing: the app
+  says another device answers there, and a window showing that address
+  goes back to the list of servers. A sign-in from before starts checking
+  the next time the app opens the server. Needs a server from the same
+  release.
+
 ## [0.1.1] - 2026-11-01
 
 ### Added

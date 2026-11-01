@@ -9,11 +9,13 @@
 //! only the picker, bundled with the app, has it. The files a server's page
 //! downloads are fetched by the app, to play while the server is away
 //! (`downloads`), and the system's notifications tell of requests while the
-//! window isn't in front (`notices`).
+//! window isn't in front (`notices`). The app sends the window's session
+//! only to a server that proves it is the one it signed in to (`proofs`).
 
 mod discovery;
 mod downloads;
 mod notices;
+mod proofs;
 mod servers;
 
 use std::sync::Mutex;
@@ -94,16 +96,43 @@ fn navigation(url: &Url, places: &mut Places) -> Navigation {
 }
 
 fn show_picker<R: Runtime>(window: &WebviewWindow<R>) {
+    let picker = window.state::<Pages>().0.lock().unwrap().picker.clone();
+    leave_for(
+        window,
+        picker.map(|mut picker| {
+            picker.set_query(Some("pick"));
+            picker
+        }),
+    );
+}
+
+/// Takes the window from `server` back to the picker, which says that
+/// another device answers there now (see [`proofs`]).
+pub(crate) fn not_yours<R: Runtime>(app: &AppHandle<R>, server: &Url) {
+    let Some(window) = app.get_webview_window("main") else { return };
     let pages = window.state::<Pages>();
     let picker = {
-        let mut places = pages.0.lock().unwrap();
-        places.server = None;
+        let places = pages.0.lock().unwrap();
+        if !places.server.as_ref().is_some_and(|shown| same_origin(shown, server)) {
+            return;
+        }
         places.picker.clone()
     };
+    leave_for(
+        &window,
+        picker.map(|mut picker| {
+            picker.query_pairs_mut().append_key_only("pick").append_pair("not-yours", server.as_str());
+            picker
+        }),
+    );
+}
+
+fn leave_for<R: Runtime>(window: &WebviewWindow<R>, picker: Option<Url>) {
+    window.state::<Pages>().0.lock().unwrap().server = None;
     window.state::<notices::Notices>().follow(None);
-    let Some(mut picker) = picker else { return };
-    picker.set_query(Some("pick"));
-    let _ = window.navigate(picker);
+    if let Some(picker) = picker {
+        let _ = window.navigate(picker);
+    }
 }
 
 /// Opens a web or mail link in the browser; any other kind of address (a
@@ -159,6 +188,7 @@ pub fn run() {
             if cfg!(dev) {
                 app.state::<Pages>().0.lock().unwrap().picker = app.config().build.dev_url.clone();
             }
+            app.manage(proofs::Proofs::load(app.path().app_config_dir()?.join("proofs.json")));
             let list = app.path().app_data_dir()?.join("downloads.json");
             app.manage(downloads::Downloads::load(list, downloads::folder(app.handle())));
             let handle = app.handle().clone();

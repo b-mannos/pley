@@ -2,11 +2,12 @@
 //! folder) and the check that a server is there.
 
 use std::path::PathBuf;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use url::Url;
+
+use crate::proofs::Proofs;
 
 /// A server opened before.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -26,9 +27,6 @@ pub struct ServerInfo {
     pub version: String,
     pub setup_required: bool,
 }
-
-/// How long a server gets to answer.
-const CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The origin of a server's address, for http and https only.
 pub fn server_origin(url: &str) -> Result<Url, String> {
@@ -89,29 +87,31 @@ pub fn save_server(app: AppHandle, server: SavedServer) -> Result<(), String> {
 
 #[tauri::command]
 pub fn forget_server(app: AppHandle, url: String) -> Result<(), String> {
+    if let Ok(origin) = server_origin(&url) {
+        app.state::<Proofs>().forget(&origin);
+    }
     let servers: Vec<SavedServer> = load(&app).into_iter().filter(|s| s.url != url).collect();
     save(&app, &servers)
 }
 
 /// Whether a pley server answers at `url`, and what it says about itself.
+/// Where the window's session has a key, the server proves it holds it
+/// (see [`crate::proofs`]); where it has none yet, it asks for one.
 #[tauri::command]
-pub async fn check_server(url: String) -> Result<ServerInfo, String> {
+pub async fn check_server(app: AppHandle, url: String) -> Result<ServerInfo, String> {
     let origin = server_origin(&url)?;
-    let endpoint = origin.join("/api/server").map_err(|e| e.to_string())?;
-    let client = reqwest::Client::builder().timeout(CHECK_TIMEOUT).build().map_err(|e| e.to_string())?;
-    let response = client.get(endpoint).send().await.map_err(|err| {
-        if err.is_timeout() {
-            format!("no answer within {} seconds", CHECK_TIMEOUT.as_secs())
-        } else if err.is_connect() {
-            "nothing answers there".to_owned()
-        } else {
-            err.without_url().to_string()
-        }
-    })?;
-    if !response.status().is_success() {
-        return Err(format!("it answered HTTP {}, so it isn't a Pley server", response.status().as_u16()));
+    let client = reqwest::Client::new();
+    let proofs = app.state::<Proofs>();
+    let info = check(&client, &origin, &proofs).await?;
+    if let Some(session) = crate::downloads::cookies(&app, &origin) {
+        crate::proofs::ask_for_key(&client, &origin, &proofs, &session).await;
     }
-    response.json::<ServerInfo>().await.map_err(|_| "that isn't a Pley server".to_owned())
+    Ok(info)
+}
+
+async fn check(client: &reqwest::Client, origin: &Url, proofs: &Proofs) -> Result<ServerInfo, String> {
+    let body = crate::proofs::ask(client, origin, proofs).await.map_err(|refused| refused.to_string())?;
+    serde_json::from_value(body).map_err(|_| "that isn't a Pley server".to_owned())
 }
 
 #[cfg(test)]
@@ -164,6 +164,10 @@ mod tests {
             socket.write_all(body.as_bytes()).await.unwrap();
         });
         format!("http://{addr}")
+    }
+
+    async fn check_server(url: String) -> Result<ServerInfo, String> {
+        check(&reqwest::Client::new(), &server_origin(&url)?, &Proofs::in_memory()).await
     }
 
     #[tokio::test]
