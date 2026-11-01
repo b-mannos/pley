@@ -8,6 +8,8 @@ describes how they are made.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-01
+
 ### Added
 
 - Requests on phones and tablets, where the server takes them: Discover
@@ -131,6 +133,7 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/android-v0.1.0...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/android-v0.1.1...HEAD
+[0.1.1]: https://github.com/pley-media-server/pley/releases/tag/android-v0.1.1
 [0.1.0]: https://github.com/pley-media-server/pley/releases/tag/android-v0.1.0
 [0.0.1]: https://github.com/pley-media-server/pley/releases/tag/android-v0.0.1

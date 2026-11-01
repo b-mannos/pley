@@ -9,6 +9,8 @@ describes how they are made.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-01
+
 ### Security
 
 - Radarr's and Sonarr's addresses can't be link-local (`169.254.0.0/16`,
@@ -255,6 +257,7 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/server-v0.1.0...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/server-v0.1.1...HEAD
+[0.1.1]: https://github.com/pley-media-server/pley/releases/tag/server-v0.1.1
 [0.1.0]: https://github.com/pley-media-server/pley/releases/tag/server-v0.1.0
 [0.0.1]: https://github.com/pley-media-server/pley/releases/tag/server-v0.0.1
