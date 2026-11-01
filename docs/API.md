@@ -2547,7 +2547,8 @@ An app's token without the route's scope is refused before all of it
   Radarr or Sonarr connected for its kind, or added by hand.
 - **Who sees what**: a request's maker and the accounts following it read
   it; managers read everyone's. Followers don't see who asked or decided,
-  nor why it was declined; what went wrong, `note`, `sent_to` and
+  nor why it was declined, and one who became its maker still doesn't
+  for a decision made before then. What went wrong, `note`, `sent_to` and
   `watchers` are for managers. `item_id` is there only for an account that
   can open the library's title, and `actions` are this session's.
 
@@ -2613,7 +2614,8 @@ interface DiscoverDetail extends DiscoverTitle {
   seasons: DiscoverSeason[] | null; // shows, in order (specials, 0, first)
   declined: { reason: string | null; at: Timestamp; again_at: Timestamp } | null; // the newest request for
                                     // it that the account made or follows, declined in the last 30 days
-                                    // (shows: for some seasons); reason: null for a follower
+                                    // (shows: for some seasons); reason: null for a follower, then too
+                                    // once it became its maker
   restriction: string | null;       // why the account can't ask: "Rated R: above this account's age limit"
   watching: boolean;                // the account follows an active request for it
   requests: MediaRequest[];         // for it: this account's and those it follows (everyone's for managers),
@@ -2687,7 +2689,8 @@ interface MediaRequest {
   actions: RequestAction[];         // what this session may do to it now, in the order to list them
   requested_by: RequestUser | null; // its maker and managers; null for followers
   decided_by: RequestUser | null;   // who approved or declined it, for its maker and managers: the maker where
-                                    // approved as made; null for an account deleted since, and for followers
+                                    // approved as made; null for an account deleted since, for followers, and
+                                    // for a maker who inherited it after the decision
   decided_at: Timestamp | null;
   created_at: Timestamp;
   updated_at: Timestamp;

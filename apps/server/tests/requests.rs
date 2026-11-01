@@ -1763,6 +1763,40 @@ async fn a_withdrawn_request_goes_to_its_earliest_follower() {
             ServerEvent::RequestsChanged { to, request_id: Some(r), .. } if *r == id && to.users.contains(&dee_id))),
         "{heard:?}"
     );
+
+    // Declined while Fay followed it, then hers as Eve's account goes: why,
+    // and who said so, are still not hers to know.
+    let (eve, eve_id) = w.app.user(&w.admin, "eve", json!({})).await;
+    let (fay, _) = w.app.user(&w.admin, "fay", json!({})).await;
+    let asked = w.ask(&eve, json!({"kind": "movie", "tmdb_id": 606})).await;
+    let id = asked.body["id"].as_i64().unwrap();
+    assert_eq!(w.ask(&fay, json!({"kind": "movie", "tmdb_id": 606})).await.status, StatusCode::OK);
+    w.app.post(&format!("/api/requests/{id}/decline"), &w.admin, json!({"reason": "Not this one"})).await;
+    assert_eq!(w.app.delete(&format!("/api/users/{eve_id}"), &w.admin).await.status, StatusCode::NO_CONTENT);
+    let hers = w.app.get(&format!("/api/requests/{id}"), &fay).await;
+    assert_eq!(
+        (&hers.body["mine"], &hers.body["status"], &hers.body["reason"], &hers.body["decided_by"]),
+        (&json!(true), &json!("declined"), &Value::Null, &Value::Null),
+        "{}",
+        hers.text()
+    );
+    let detail = w.app.get("/api/discover/movie/606", &fay).await;
+    assert_eq!(
+        (&detail.body["status"], &detail.body["declined"]["reason"]),
+        (&json!("declined"), &Value::Null),
+        "{}",
+        detail.text()
+    );
+    // Decided again once hers: hers to know.
+    sqlx::query("UPDATE requests SET inherited_at = inherited_at - 60 WHERE id = ?")
+        .bind(id)
+        .execute(&w.app.state.db.write)
+        .await
+        .unwrap();
+    w.app.post(&format!("/api/requests/{id}/handled"), &w.admin, json!({})).await;
+    w.app.post(&format!("/api/requests/{id}/decline"), &w.admin, json!({"reason": "Still no"})).await;
+    let hers = w.app.get(&format!("/api/requests/{id}"), &fay).await;
+    assert_eq!((&hers.body["reason"], &hers.body["decided_by"]["name"]), (&json!("Still no"), &json!("admin")));
 }
 
 #[tokio::test]

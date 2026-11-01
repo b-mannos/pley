@@ -611,7 +611,7 @@ pub struct ListQuery {
 const COLUMNS: &str = "r.id, r.kind, r.tmdb_id, r.tvdb_id, r.imdb_id, r.title, r.year, r.poster_path,
     r.backdrop_path, r.seasons, r.available_seasons, r.anime, r.user_id, r.status, r.reason, r.decided_by,
     r.decided_at, r.item_id, r.arr_id, r.created_at, r.updated_at, r.available_at, r.sent_to, r.sent_profile,
-    r.sent_folder, r.sending_at, r.send_profile, r.send_folder, r.news_at,
+    r.sent_folder, r.sending_at, r.send_profile, r.send_folder, r.news_at, r.inherited_at,
     COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS maker_name, u.avatar AS maker_avatar,
     u.avatar_color AS maker_color, COALESCE(NULLIF(TRIM(d.display_name), ''), d.username) AS decider_name,
     d.avatar AS decider_avatar, d.avatar_color AS decider_color";
@@ -651,6 +651,8 @@ struct RequestRow {
     send_profile: Option<i64>,
     send_folder: Option<String>,
     news_at: Option<i64>,
+    /// When its maker, its earliest follower then, became its maker.
+    inherited_at: Option<i64>,
     maker_name: String,
     maker_avatar: Option<String>,
     maker_color: Option<String>,
@@ -697,6 +699,12 @@ impl RequestRow {
             TitleKind::Movie => Service::Radarr,
             TitleKind::Show => Service::Sonarr,
         }
+    }
+
+    /// Decided while its maker followed it, before inheriting it: why, and
+    /// by whom, were a follower's to know.
+    fn decided_before_inherited(&self) -> bool {
+        self.inherited_at.zip(self.decided_at).is_some_and(|(inherited, decided)| decided <= inherited)
     }
 
     /// Declined: when its maker may remove it, and ask again.
@@ -776,17 +784,19 @@ impl RequestRow {
     }
 
     /// As `viewer` sees it: who asked and who decided for its maker and
-    /// managers, why it was declined for its maker too; what went wrong,
-    /// where it went and what to know for managers; the library's title
-    /// where the viewer may open it.
+    /// managers, why it was declined for its maker too (but a decision made
+    /// before its maker inherited it); what went wrong, where it went and
+    /// what to know for managers; the library's title where the viewer may
+    /// open it.
     fn to_dto(&self, viewer: &Viewer, download: Option<Download>) -> MediaRequest {
         let status = self.status();
         let stage = self.stage(download.as_ref());
         let mine = self.user_id == viewer.id;
         let watching = viewer.following.contains(&self.id);
         let theirs = mine || viewer.manager;
+        let decision = viewer.manager || (mine && !self.decided_before_inherited());
         let reason = match status {
-            RequestStatus::Declined if theirs => self.reason.clone(),
+            RequestStatus::Declined if decision => self.reason.clone(),
             RequestStatus::Failed if viewer.manager => self.reason.clone(),
             _ => None,
         };
@@ -812,7 +822,7 @@ impl RequestRow {
             unseen: (mine || watching) && self.news_at.is_some_and(|at| at > viewer.seen_at),
             actions: self.actions(viewer, stage, mine, watching),
             requested_by: theirs.then(|| self.maker()),
-            decided_by: self.decided_by.filter(|_| theirs).zip(self.decider_name.clone()).map(|(id, name)| {
+            decided_by: self.decided_by.filter(|_| decision).zip(self.decider_name.clone()).map(|(id, name)| {
                 RequestUser {
                     id,
                     name,
@@ -1817,7 +1827,8 @@ impl Requests {
 
     /// `user_id`'s requests for any of these titles, made or followed,
     /// newest first: TMDB's id, the status, the seasons, the reason it was
-    /// declined (its own only), and when it was decided.
+    /// declined (its own only, but one decided before it inherited it), and
+    /// when it was decided.
     #[allow(clippy::type_complexity)]
     async fn own_requests(
         &self,
@@ -1826,7 +1837,10 @@ impl Requests {
         tmdb_ids: &[i64],
     ) -> sqlx::Result<Vec<(i64, String, Option<String>, Option<String>, Option<i64>)>> {
         let sql = format!(
-            "SELECT r.tmdb_id, r.status, r.seasons, CASE WHEN r.user_id = ? THEN r.reason END, r.decided_at
+            "SELECT r.tmdb_id, r.status, r.seasons,
+                    CASE WHEN r.user_id = ? AND (r.inherited_at IS NULL OR r.decided_at > r.inherited_at)
+                         THEN r.reason END,
+                    r.decided_at
              FROM requests r WHERE r.kind = ? AND r.tmdb_id IN ({}) AND {MINE}
              ORDER BY r.created_at DESC, r.id DESC",
             vec!["?"; tmdb_ids.len()].join(",")
@@ -2271,10 +2285,13 @@ impl Requests {
         if !self.enabled() || !user.allowed(Scope::Requests) {
             return Ok(false);
         }
-        // Managers read everyone's requests; others, who decided theirs.
+        // Managers read everyone's requests; others, who decided theirs
+        // (but before they inherited them).
         sqlx::query_scalar(
             "SELECT EXISTS (SELECT 1 FROM requests r
-                            WHERE (? AND (r.user_id = ? OR r.decided_by = ?)) OR (r.user_id = ? AND r.decided_by = ?))",
+                            WHERE (? AND (r.user_id = ? OR r.decided_by = ?))
+                               OR (r.user_id = ? AND r.decided_by = ?
+                                   AND (r.inherited_at IS NULL OR r.decided_at > r.inherited_at)))",
         )
         .bind(user.manages_requests())
         .bind(id)
