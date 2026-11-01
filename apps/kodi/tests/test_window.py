@@ -967,6 +967,29 @@ class WindowTest(unittest.TestCase):
         # Focused, the row moves up under the field.
         self.assertEqual(win.made[L.slot(L.SEARCH_ROWS, 1)].position, (0, 200))
 
+    def test_on_tmdb_has_a_row_whatever_the_libraries_found(self):
+        win = FakeWindow()
+        later = []
+        win.later = lambda work, then, failed=None: later.append((work, then, failed))
+        kinds = ("movie", "show", "episode", "album")
+        radio = {"id": 4, "source_id": 1, "name": "Radio Heat", "number": "104", "group": "Radio", "logo": None, "favorite": False,
+                 "has_guide": False, "now": None, "next": None}
+        answers = {
+            "/api/search": {"items": [{"id": n, "kind": kind, "title": "Heat", "user_state": {}} for n, kind in enumerate(kinds, 1)],
+                            "people": [{"id": 9, "name": "Heather"}], "channels": [radio]},
+            "/api/discover/search": {"results": [{"kind": "movie", "tmdb_id": 949, "title": "Heat 2", "status": "none"}]},
+        }
+        win.session.get = lambda path, **query: answers[path]
+        keep_summary(self, ASKS)
+        page = window.Search(win)
+        win.show(page)
+        page.search("heat")
+        self.assertEqual(len(page.rows.rows), 6, "a row of each kind the libraries have")
+        work, then, _ = later.pop()
+        then(work())
+        self.assertEqual([row["key"] for row in page.rows.rows][-1], "tmdb")
+        self.assertEqual(win.made[L.slot_list(L.SEARCH_ROWS, 6, "poster")].items[0].label, "Heat 2")
+
     def test_search_when_the_libraries_have_nothing(self):
         win = FakeWindow()
         later = []

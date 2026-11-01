@@ -2407,7 +2407,7 @@ class Search(Screen):
         win.setFocusId(self.last_focus if filled and self.last_focus else L.SEARCH_FIELD)
 
     def model(self) -> list:
-        """The libraries' rows, then On TMDB (where a slot is left)."""
+        """The libraries' rows, then On TMDB (in a slot of its own)."""
         return self.found + ([self.tmdb_row()] if self.tmdb else [])
 
     def tmdb_row(self) -> dict:
@@ -2538,9 +2538,12 @@ class Search(Screen):
                 listed.selectItem(min(position, len(self.tmdb)))
         elif at is not None:
             return self.draw()
-        elif not self.tmdb or not self.rows.append(self.tmdb_row()):
-            # Nothing found there, or every slot holds the libraries'.
+        elif not self.tmdb:
+            # Nothing found there.
             return self.say()
+        else:
+            # The last slot is kept for it: the libraries fill the others at most.
+            self.rows.append(self.tmdb_row())
         self.place(self.focused_row())
         self.say()
 
