@@ -33,6 +33,15 @@ keeps its saved servers and asks you to sign in again.
 
 ## Using it
 
+### Signing in
+
+Phones sign in on the server's own page in the browser; TVs, and phones
+without a browser, show a code and a QR code to approve at the server's
+`/link` page, on a phone or computer. When the server requires two-step
+sign-in, the sign-in screen says so, and whoever hasn't set it up yet does
+it on that page as they sign in (for a code, on the device that approves
+it).
+
 ### TVs and Fire TV
 
 - Select opens, holding Select or Menu (☰) opens a title's actions, Back

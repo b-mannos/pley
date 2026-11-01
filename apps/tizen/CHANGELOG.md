@@ -36,6 +36,8 @@ describes how they are made.
   instead" where one may be taken over; a connection taken from the TV
   says who took it. The app's search finds channels too, in a Live TV
   row. Needs a server that gives the TV's player keyed live addresses.
+- Signing in with a code says when the server requires two-step sign-in:
+  the phone that approves the code sets it up for whoever hasn't.
 
 ### Changed
 

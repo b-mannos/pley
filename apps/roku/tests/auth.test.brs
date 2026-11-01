@@ -179,3 +179,18 @@ sub test_auth_explains_device_refusals()
     tkEqual(authDeviceRefusal(429, "{""error"":""temporarily_unavailable""}"), "Too many sign-ins are waiting on this server: try again in a few minutes.")
     tkEqual(authDeviceRefusal(-7, ""), "The server can't be reached.")
 end sub
+
+sub test_auth_says_when_the_server_requires_two_step_sign_in()
+    note = "This server requires two-step sign-in: your phone sets it up if you haven't yet."
+    tkEqual(authTwoStepNote(httpAnswer(200, "{""name"":""Den"",""version"":""1.0.0"",""commit"":""abc1234"",""setup_required"":false,""setup_code_required"":false,""two_step_required"":true}")), note)
+    tkEqual(authTwoStepNote(httpAnswer(200, "{""name"":""Den"",""version"":""1.0.0"",""two_step_required"":false}")), "", "not required")
+    tkEqual(authTwoStepNote(httpAnswer(200, "{""name"":""Den"",""version"":""0.9.0""}")), "", "a server from before it")
+    tkEqual(authTwoStepNote(httpAnswer(200, "{""two_step_required"":""true""}")), "", "not a boolean")
+    tkEqual(authTwoStepNote(httpAnswer(200, "{""two_step_required"":1}")), "")
+    tkEqual(authTwoStepNote(httpAnswer(200, "{""two_step_required"":null}")), "")
+    tkEqual(authTwoStepNote(httpAnswer(200, "[true]")), "")
+    tkEqual(authTwoStepNote(httpAnswer(200, "<!doctype html>")), "", "not JSON")
+    tkEqual(authTwoStepNote(httpAnswer(200, "")), "")
+    tkEqual(authTwoStepNote(httpAnswer(503, "{""code"":""unavailable"",""two_step_required"":true}")), "", "a refusal")
+    tkEqual(authTwoStepNote(httpAnswer(-28, "")), "", "no answer in time")
+end sub
