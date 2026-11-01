@@ -161,7 +161,8 @@ class ServerEventsTest {
             assertEquals(LiveEvent.Dropped, awaitItem())
             assertEquals(LiveEvent.Reconnected, awaitItem())
             assertEquals(LiveEvent.Event(ServerEvent.LibraryChanged(2)), awaitItem())
-            // Ended as planned (an expired token): opened again at once, never lost.
+            // Ended as planned (an expired token): lost, should opening again fail, and opened again at once.
+            assertEquals(LiveEvent.Dropped, awaitItem())
             assertEquals(LiveEvent.Reconnected, awaitItem())
             assertEquals(LiveEvent.Dropped, awaitItem())
             assertTrue(awaitError() is SignedOutException)
