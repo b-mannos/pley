@@ -14,8 +14,7 @@ describes how they are made.
 - Apps can make sure an address still leads to the server they signed in
   to before sending it their token: each sign-in gets a key of its own,
   and the server proves it holds it. The desktop app gets a key for its
-  window's session. Signed-in apps also hear the server's other addresses
-  on the home network, so one sign-in can serve at home and away.
+  window's session.
 
 ## [0.1.2] - 2026-11-01
 

@@ -734,15 +734,13 @@ Every other `/.well-known/` path answers `404`.
 
 ### Telling servers apart
 
-An app keeps a server by its `id`, not by an address: the same server can
-be reached at a home address and a public one, and an address can later
-lead to another device (another network, another server given the same
-address). Tokens work at any address of the server that issued them.
+An address an app saved can later lead to another device: on another
+network, or after the router hands it out again. Before an app sends its
+token to the address, the server there proves it is the one signed in to.
 
 | Method | Path | Who | What |
 |---|---|---|---|
 | GET | `/api/server?challenge=&proof_id=` | `public` | `/api/server`'s answer with `proof` |
-| GET | `/api/server/addresses` | `any app` | `{ id, addresses: string[] }` |
 | GET | `/api/server/proof-key` | `user` (session only) | `{ server_id, proof_id, proof_key }` |
 
 **Proofs.** Every token answer carries `server_id`, `proof_id` and
@@ -760,9 +758,15 @@ the app asks it to prove it holds that key:
    pley-server-proof\n<server id>\n<challenge as sent>
    ```
 
-3. The app computes the same with its `proof_key` and compares. Another
-   answer, or no `proof`, means the address leads elsewhere: the app keeps
-   its token to itself.
+3. The app computes the same with its `proof_key` and compares. Any
+   answer without the right `id` and `proof`, a redirect included, means
+   another device answers at the address: the app keeps its token to
+   itself. A `5xx` is the server, or a proxy before it, out of reach for
+   now. The app follows no redirect for this: a proof counts only from the
+   address itself.
+
+A proof counts for half an hour, and until the device changes networks or
+a request to the server gets no answer.
 
 Pley's own sign-in has no token answer: the desktop app asks
 `/api/server/proof-key` with its window's session for a key, and checks
@@ -779,11 +783,6 @@ A proof tells the server from another device at the same address. It
 doesn't stop someone who passes the challenge on to the real server and
 its answer back: only HTTPS does that, which Pley needs beyond the home
 network anyway ([SECURITY.md](../SECURITY.md)).
-
-**Addresses.** `addresses` are where this server's web app listens on its
-networks (`http://<IPv4>:<port>`, without loopback and link-local
-addresses), then its [`proxy_addresses`](#discovery). They are only for
-apps signed in, since they describe the home network.
 
 ### Signing in
 

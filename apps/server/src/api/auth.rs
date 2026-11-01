@@ -82,18 +82,6 @@ pub async fn server_status(State(state): State<AppState>, Query(query): Query<Pr
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response())
 }
 
-/// `GET /api/server/addresses`: where this server's apps can reach it, for
-/// an app signed in to keep beside the address it used.
-pub async fn server_addresses(State(state): State<AppState>, _user: AuthUser) -> Json<serde_json::Value> {
-    let mut addresses = crate::identity::network_addresses(&state.network.listeners(), &crate::network::adapters());
-    for proxy in &state.settings.get().proxy_addresses {
-        if !addresses.contains(proxy) {
-            addresses.push(proxy.clone());
-        }
-    }
-    Json(serde_json::json!({ "id": state.identity.id, "addresses": addresses }))
-}
-
 /// `GET /api/server/proof-key`: a proof key for pley's own sign-in, which
 /// has no grant to carry one: the desktop app asks with its window's
 /// session, and checks the server with it before it opens it again. Apps

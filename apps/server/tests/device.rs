@@ -253,14 +253,6 @@ async fn a_tv_tells_its_server_from_another_device_at_its_address() {
     let other = poll(&app, &device_code, &[]).await;
     assert_ne!(other.body["proof_key"], json!(key));
 
-    // Signed in, the app hears where else its server is.
-    let addresses = app.get("/api/server/addresses", &access).await;
-    assert_eq!(addresses.status, StatusCode::OK, "{}", addresses.text());
-    assert_eq!(addresses.body["id"], json!(id));
-    assert!(addresses.body["addresses"].is_array());
-    let anyone = app.call(Method::GET, "/api/server/addresses", None, None, &[]).await;
-    assert_eq!(anyone.status, StatusCode::UNAUTHORIZED);
-
     // Pley's own sign-in (the desktop app's window) asks for a key of its
     // own; apps have theirs.
     let session = app.get("/api/server/proof-key", &admin).await;

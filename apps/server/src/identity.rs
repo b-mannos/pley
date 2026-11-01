@@ -1,6 +1,6 @@
 //! Who this server is, so an app can tell it from another device at an
-//! address it saved: its id (the one discovery answers), the addresses it
-//! can be reached at, and proofs that it holds the key an app was given.
+//! address it saved: its id (the one discovery answers), and proofs that
+//! it holds the key an app was given.
 //!
 //! Each sign-in of an app (a grant) gets its own proof key in the token
 //! answers, derived from the server's `secret.key` and the grant's id, so
@@ -14,13 +14,10 @@
 //! window's session ([`Identity::session_key`]). Its id is random, and the
 //! key derives from it, so nothing is stored for it either.
 
-use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 
 use base64::Engine;
 use ring::hmac;
-
-use crate::network::{Kind, Listener};
 
 /// The challenge an app sends: 16 to 64 random bytes, base64url without
 /// padding.
@@ -142,41 +139,9 @@ fn b64(bytes: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-/// The addresses of this server's web app on its networks: each web
-/// listener that listens, at each address of a connected adapter for one on
-/// every address. Loopback and link-local addresses, which no other device
-/// keeps, are left out, and so are IPv6 ones, which adapters don't list.
-pub fn network_addresses(listeners: &[Listener], adapters: &[crate::network::Adapter]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut add = |addr: SocketAddr| {
-        let url = format!("http://{addr}");
-        if !out.contains(&url) {
-            out.push(url);
-        }
-    };
-    for listener in listeners.iter().filter(|l| l.kind == Kind::Web && l.error.is_none()) {
-        let at = listener.address;
-        match at.ip() {
-            IpAddr::V4(ip) if ip.is_unspecified() => {
-                for adapter in adapters.iter().filter(|a| a.up) {
-                    for &ip in adapter.addresses.iter().filter(|ip| !ip.is_loopback() && !ip.is_link_local()) {
-                        add(SocketAddr::new(IpAddr::V4(ip), at.port()));
-                    }
-                }
-            }
-            IpAddr::V4(ip) if !ip.is_loopback() && !ip.is_link_local() => add(at),
-            _ => {}
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv4Addr;
-
     use super::*;
-    use crate::network::Adapter;
 
     const ID: &str = "0123456789abcdef0123456789abcdef01234567";
     const CHALLENGE: &str = "AAECAwQFBgcICQoLDA0ODw";
@@ -258,35 +223,5 @@ mod tests {
         assert_eq!(identity.proof_key(17), None);
         assert_eq!(identity.prove("17", CHALLENGE), Ok(None));
         assert!(identity.prove("x", CHALLENGE).is_err(), "a wrong request is still wrong");
-    }
-
-    #[test]
-    fn network_addresses_come_from_the_listeners_that_listen() {
-        let adapter = |up, addresses: &[[u8; 4]]| Adapter {
-            name: "eth0".into(),
-            description: None,
-            up,
-            addresses: addresses.iter().map(|&a| Ipv4Addr::from(a)).collect(),
-            network: None,
-        };
-        let adapters = [
-            adapter(true, &[[192, 168, 1, 20], [169, 254, 3, 3]]),
-            adapter(false, &[[10, 0, 0, 5]]),
-            adapter(true, &[[172, 16, 4, 1]]),
-        ];
-        let listener = |kind, address: &str, error: Option<&str>| Listener {
-            kind,
-            address: address.parse().unwrap(),
-            error: error.map(str::to_owned),
-        };
-        let listeners = [
-            listener(Kind::Web, "0.0.0.0:7539", None),
-            listener(Kind::Web, "127.0.0.1:8080", None),
-            listener(Kind::Web, "192.168.1.20:7539", None),
-            listener(Kind::Web, "192.168.1.30:7540", Some("in use")),
-            listener(Kind::Plex, "0.0.0.0:32400", None),
-            listener(Kind::Web, "[::]:7541", None),
-        ];
-        assert_eq!(network_addresses(&listeners, &adapters), ["http://192.168.1.20:7539", "http://172.16.4.1:7539"],);
     }
 }

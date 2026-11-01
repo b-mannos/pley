@@ -39,7 +39,6 @@ pub fn router(state: AppState) -> Router {
     let api = Router::new()
         .route("/health", get(|| async { axum::Json(serde_json::json!({ "status": "ok" })) }))
         .route("/server", get(auth::server_status))
-        .route("/server/addresses", get(auth::server_addresses))
         .route("/server/proof-key", get(auth::server_proof_key))
         .route("/setup", post(auth::setup))
         .route("/auth/login", post(auth::login))
