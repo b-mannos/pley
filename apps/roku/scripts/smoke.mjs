@@ -1,18 +1,19 @@
 // Runs the whole app, SceneGraph and Tasks included, in brs-node against
 // a fake pley server on 127.0.0.1 (scripts/fixture-server.mjs), and walks
-// it with the remote: sign in with the TV code and its QR code, Home, a
+// it with the remote: sign in with the TV code and its QR code on a server
+// that requires two-step sign-in, Home, a
 // title's details, the player, the Options key, a library's grid and its
 // next page, a show's page, its episodes and a person's page, Live TV (its
 // guide, a channel watched, the next one, the channel list, a favourite,
 // every connection in use, the Channels tab), Search, Discover (a movie
 // asked for, a show's seasons picked), the managers' Requests (Approve, a
 // ready-to-watch notice, then Yours), Settings, the server gone and Try
-// again, then signing out and in again on a server too old for QR codes or
-// requests. Then it starts the app again, signed in, and times how soon
-// Home is asked for. Fails on a BrightScript
-// error or on anything the fake server found wrong; saves what the screen
-// showed at each step in out/smoke/. brs-node is a simulator: layouts and
-// the player differ from a Roku, and so does its speed.
+// again, then signing out and in again on a server too old for QR codes,
+// requests and two-step sign-in. Then it starts the app again, signed in,
+// and times how soon Home is asked for. Fails on a BrightScript error or
+// on anything the fake server found wrong; saves what the screen showed
+// at each step in out/smoke/. brs-node is a simulator: layouts and the
+// player differ from a Roku, and so does its speed.
 //
 //   node scripts/smoke.mjs
 
@@ -101,6 +102,19 @@ function qrDrawn() {
   const at = (y * frame.width + x) * 4;
   return frame.data[at] > 200 && frame.data[at + 1] > 200 && frame.data[at + 2] > 200;
 }
+// Whether the sign-in screen says the server requires two-step sign-in:
+// muted text under the server's name (LinkScreen.xml, from 96, 306), where
+// the walk's sign-ins show nothing else (no reason to sign in again).
+function twoStepDrawn() {
+  if (!frame) return false;
+  for (let y = 310; y < 334; y += 2) {
+    for (let x = 100; x < 700; x += 2) {
+      const at = (Math.round(y * (frame.height / 1080)) * frame.width + Math.round(x * (frame.width / 1920))) * 4;
+      if (frame.data[at] > 130 && frame.data[at + 1] > 130 && frame.data[at + 2] > 140) return true;
+    }
+  }
+  return false;
+}
 // The subtitle sync panel's title, in the accent, at the top of the player
 // (from 608, 112).
 function syncDrawn() {
@@ -172,6 +186,8 @@ if (restarting > 0) {
 // first request for a title's details is refused (401 invalid_token): the
 // app refreshes and asks again.
 const fixture = await startFixture({ accessSeconds: 302, refuse: ["/api/items/103"] });
+// The first sign-in is on a server that requires two-step sign-in.
+fixture.twoStep = true;
 
 // Saved and chosen: the app opens at sign-in (no search of the network).
 const server = fixture.issuer;
@@ -253,6 +269,8 @@ async function signOut() {
 }
 
 const qr = { shown: false, hidden: false };
+// The line saying the server requires two-step sign-in.
+const twoStep = { shown: false, hidden: false };
 // The player's notice when every connection is in use.
 const live = { busy: false };
 const sync = { label: false };
@@ -268,6 +286,7 @@ async function walk() {
   await waitFor(/^POST \/api\/oauth\/device$/, 0, "a TV code", { ms: 60000, settles: false });
   await waitFor(/^GET \/api\/oauth\/device\/qr\?code=BCDFGHJK$/, 0, "the code's QR code", { settles: false });
   qr.shown = await drawnWithin(2500, qrDrawn);
+  twoStep.shown = seen(/^GET \/api\/server$/, 0) && (await drawnWithin(1000, twoStepDrawn));
   shoot("sign-in");
   await waitFor(/^GET \/api\/hubs\/home$/, 0, "Home");
   shoot("home");
@@ -673,12 +692,14 @@ async function walk() {
   await waitFor(/^GET \/api\/libraries\/1\/items\?.*offset=0/, since, "the library after Try again");
   shoot("retried");
   // Signed out, and in again with a server that has no QR codes yet, nor
-  // requests: the code shows on its own, and the sign-in asks for no
-  // scope the server doesn't know.
+  // requests, and doesn't say whether it requires two-step sign-in: the
+  // code shows on its own, the sign-in asks for no scope the server
+  // doesn't know, and nothing is said of two-step sign-in.
   await press("back");
   await openFromMenu(9, /^GET \/api\/auth\/me$/, "Settings");
   fixture.qr = false;
   fixture.requestScopes = false;
+  fixture.twoStep = false;
   since = mark();
   older.since = since;
   await signOut();
@@ -686,6 +707,7 @@ async function walk() {
   await waitFor(/^GET \/api\/oauth\/device\/qr\?code=LMNPQRST$/, since, "the new code's QR code", { settles: false });
   // The code stays up until the third poll, two seconds on.
   qr.hidden = !(await drawnWithin(1500, qrDrawn)) && seen(/^POST \/api\/oauth\/device$/, since) && !seen(/^GET \/api\/hubs\/home$/, since);
+  twoStep.hidden = seen(/^GET \/api\/server$/, since) && !twoStepDrawn() && !seen(/^GET \/api\/hubs\/home$/, since);
   shoot("sign-in-again");
   await waitFor(/^GET \/api\/hubs\/home$/, since, "Home after signing in again");
 }
@@ -749,6 +771,7 @@ const asked = (pattern) => fixture.requests.some((r) => pattern.test(`${r.method
 const checks = [
   ["asked for a TV code", asked(/^POST \/api\/oauth\/device$/)],
   ["showed the code's QR code", qr.shown],
+  ["said the server requires two-step sign-in", twoStep.shown],
   ["polled with the device code", asked(/^POST \/api\/oauth\/token$/)],
   ["refreshed its token", fixture.refreshes > 0],
   ["loaded Home", asked(/^GET \/api\/hubs\/home$/)],
@@ -821,6 +844,7 @@ const checks = [
     "asked for requests and approvals only where the server offers them",
     fixture.scopesAsked[0] === "library play playlists profiles requests approvals" && fixture.scopesAsked.at(-1) === "library play playlists profiles",
   ],
+  ["said nothing of two-step sign-in on a server that doesn't", twoStep.hidden],
   ["started again signed in", started !== null],
 ];
 for (const [what, ok] of checks) if (!ok) failures.push(`never ${what}`);

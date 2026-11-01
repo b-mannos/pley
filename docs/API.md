@@ -156,6 +156,7 @@ Non-2xx answers carry:
 | `bad_request` | `400` | |
 | `unauthorized` | `401` | |
 | `two_step` | `401` | the account has two-step sign-in, and the code is missing or wrong |
+| `two_step_setup` | `401` | the server requires two-step sign-in, and the account sets it up first: the body also has `setup`, the secret to add to an authenticator app ([Two-step sign-in](#two-step-sign-in)) |
 | `forbidden` | `403` | |
 | `insufficient_scope` | `403` | an app's token on a route its scopes don't open |
 | `not_found` | `404` | also anything the user [may not see](#access-rules) |
@@ -478,21 +479,34 @@ lists carry (Kodi).
 | Method | Path | Who | What |
 |---|---|---|---|
 | GET | `/api/health` | `public` | `{ "status": "ok" }` |
-| GET | `/api/server` | `public` | `{ name, version, commit, setup_required, setup_code_required }` |
+| GET | `/api/server` | `public` | `{ name, version, commit, source, setup_required, setup_code_required, two_step_required }` |
 | GET | `/api/oauth/device/qr?code=` | `public` | where to type a TV's code, as a QR code (PNG): see [TVs](#tvs) |
 | POST | `/api/setup` | `public` | `{ username, password, setup_code }` → `{ user: User, token? }`: creates the first (admin) account and signs in |
-| POST | `/api/auth/login` | `public` | `{ username, password, code? }` → `{ user: User, token? }` |
+| POST | `/api/auth/login` | `public` | `{ username, password, code?, setup_id? }` → `{ user: User, token?, recovery_codes? }` |
 
 - `/api/server`: `commit` is the build's short hash, `"unknown"` when built
-  without the repository. The setup code is in the server's log.
+  without the repository. `source` is where the server's source code is
+  offered; the web app's Account page links to it. The setup code is in
+  the server's log. `two_step_required`: the server requires two-step
+  sign-in of every account with a password
+  ([Two-step sign-in](#two-step-sign-in)), so signing in may set it up
+  first.
 - `/api/setup`: `409` once a user exists; `403` without the right
   `setup_code`. 5 tries per 15 minutes from each address and 1000 from all
   addresses, then `429`.
 - `/api/auth/login`: `401` for bad credentials. With two-step sign-in,
   `code` is a code from the authenticator app or a recovery code; without
-  it, or with a wrong one, `401` with `code: "two_step"`. Attempts are
-  limited as in [Errors](#errors). A disabled account gets `403`, and its
-  sessions stop working.
+  it, or with a wrong one, `401` with `code: "two_step"`. When the server
+  requires two-step sign-in and the account doesn't use it yet, the same
+  request sets it up: `401` with `code: "two_step_setup"` and `setup` (the
+  secret, as `POST /api/me/two-step/setup` answers it, and its `id`) until
+  `code` is the first code of that secret, sent with `setup_id`, its `id`;
+  then the answer signs in and has `recovery_codes`, shown once. Only a
+  request with `setup_id` gets the same secret again; any other gets a new
+  one, which replaces it, so two people with the password never share
+  one. Attempts are limited as in
+  [Errors](#errors). A disabled account gets `403`, and its sessions stop
+  working.
 
 ## Auth
 
@@ -502,7 +516,7 @@ lists carry (Kodi).
 | GET | `/api/auth/me` | `any app` | `User` |
 | PUT | `/api/auth/password` | `user` | `{ current_password, new_password }` → `204` |
 | GET | `/api/auth/profiles` | `user` | `User[]`: home profiles this user can switch to (empty for non-home users) |
-| POST | `/api/auth/switch` | `user` | `{ user_id, pin?, password?, code? }` → `{ user, token? }`: this device becomes that profile |
+| POST | `/api/auth/switch` | `user` | `{ user_id, pin?, password?, code?, setup_id? }` → `{ user, token?, recovery_codes? }`: this device becomes that profile |
 
 - `GET /api/auth/me` with an app's token: `User & { scope: string }`.
   `scope` is what the app was allowed (`"library play"`); `is_admin`,
@@ -517,31 +531,73 @@ lists carry (Kodi).
   - a profile without a PIN that can see more than yours (an administrator,
     a higher age limit, libraries yours can't open): its password, and its
     `code` with two-step sign-in, unless you are an administrator;
-  - a managed profile without a PIN can't be switched to.
+  - a managed profile without a PIN can't be switched to;
+  - while the server requires two-step sign-in, a profile with a password
+    that doesn't use it yet: its password, whatever else it has and
+    whoever switches (`403` without one). Then it sets two-step sign-in up
+    as a sign-in does (`two_step_setup` until `code` is the secret's first
+    code, with `setup_id`), and the answer has its `recovery_codes`.
 
   `429` after 5 wrong tries in 15 minutes.
 
 ### Two-step sign-in
 
-Optional for each account with a password. After the password comes a
-6-digit code from an authenticator app (TOTP: SHA-1, 30-second steps) or one
-of ten recovery codes. Each code works once. Wrong codes count like wrong
+Optional for each account with a password, unless an administrator
+requires it of every one (below). After the password comes a 6-digit code
+from an authenticator app (TOTP: SHA-1, 30-second steps) or one of ten
+recovery codes. Each code works once. Wrong codes count like wrong
 passwords; after 100 in a row only a recovery code signs in.
 `pley reset-password` turns it off.
 
 | Method | Path | Who | What |
 |---|---|---|---|
 | GET | `/api/me/two-step` | `user` | `{ enabled, since: Timestamp \| null, recovery_codes_left }` |
-| POST | `/api/me/two-step/setup` | `user` | `{ password }` → `{ secret, uri, qr: { size, path }, expires_at }`; `409` when it is on already |
-| POST | `/api/me/two-step` | `user` | `{ code }` → `{ recovery_codes: string[] }`: turns it on |
-| DELETE | `/api/me/two-step` | `user` | `{ password, code }` → `204`: turns it off |
+| POST | `/api/me/two-step/setup` | `user` | `{ password, code? }` → `{ secret, uri, qr: { size, path }, expires_at, id }` |
+| POST | `/api/me/two-step` | `user` | `{ code }` → `{ recovery_codes: string[] }`: turns it on, or moves it to the new secret |
+| DELETE | `/api/me/two-step` | `user` | `{ password, code }` → `204`: turns it off; `403` while the server requires it |
 | POST | `/api/me/two-step/recovery-codes` | `user` | `{ password }` → `{ recovery_codes }`: new codes; the old ones stop working |
 
 - `setup` makes a new secret: `secret` is base32, `uri` its `otpauth://`
-  URI, and `qr` a QR code of it (`path` draws its dark modules on a
-  `size`-wide grid).
+  URI (on a phone, a link to an authenticator app on it), and `qr` a QR
+  code of it (`path` draws its dark modules on a `size`-wide grid).
+- While it is on, `setup` moves it to another authenticator app, and takes
+  `code` too: a code from the current app or a recovery code, as turning
+  it off does (`401 two_step` without a right one). Until the new secret's
+  first code, the current app keeps working.
+- While the server can't use its `secret.key` (the log says why), `setup`
+  answers `503` before checking anything, so no recovery code is spent,
+  and codes from the authenticator app get `503` at sign-in: recovery
+  codes still sign in.
 - `POST /api/me/two-step` takes a code from the new secret within 30
-  minutes, 5 tries. Recovery codes are shown once.
+  minutes, 5 tries (then `setup` again). It answers new recovery codes,
+  shown once; after a move the old app's codes and the old recovery codes
+  stop working.
+
+**Requiring it.** An administrator who uses two-step sign-in can require
+it of every account with a password (`require_two_step` in the
+[settings](#system-admin), Settings → Server → Sign-in):
+
+- Turning it on signs out everyone without it, on every device and app
+  (sessions, apps acting as them or allowed by them, consent requests and
+  codes in progress). Their sessions and app tokens stop working, and
+  refreshes get `invalid_grant`, even ones that slip past the sign-out.
+- Each sets it up at their next sign-in, right after the password, in the
+  same request: `/api/auth/login` (above), an invitation's acceptance
+  ([Invitations](#invitations)) and a switch to their profile
+  ([Auth](#auth)) answer `two_step_setup` with the secret until its first
+  code comes. Apps sign in on Pley's own pages, which do the same: a TV's
+  person sets it up on the phone where they type the TV's code.
+- Turning it off is refused (`403`): it can move to another app instead.
+  An administrator turning it off for someone ([Users](#users-admin)) signs
+  them out everywhere, and they set it up again at their next sign-in, as
+  after `pley reset-password`.
+- Managed profiles and accounts without a password have nothing to set up.
+- While the server can't use its `secret.key` (the log says why, and
+  `secret_key_ok` in [`/api/system`](#system-admin) is `false`), it stays
+  required and nobody can set it up: a sign-in, invitation or switch that
+  would set it up answers `503` instead, and makes no session or account.
+  Accounts that use it sign in with a recovery code, and an administrator
+  signed in so can stop requiring it.
 
 ## Your account
 
@@ -772,8 +828,10 @@ optional (wider than allowed: `invalid_scope`; narrower: ignored).
   A refresh answer lost on the network means signing in again.
 - `invalid_grant` also for an unknown, expired or other app's refresh
   token; a disabled account (the profile's, or the one that allowed it);
-  apps by other publishers turned off; a grant with 10,000 refresh tokens on
-  record (which ends).
+  while the server [requires two-step sign-in](#two-step-sign-in), either
+  account signing in with a password alone ("this server requires
+  two-step sign-in: sign in again to set it up"); apps by other publishers
+  turned off; a grant with 10,000 refresh tokens on record (which ends).
 - Refreshes never read an app's description again.
 
 **`grant_type=urn:pley:params:oauth:grant-type:switch-profile`**: Pley's own
@@ -852,8 +910,10 @@ for Roku, and the Samsung and LG apps.
    `Cache-Control: no-store`). It looks nothing up, so anyone may ask; `400`
    for something that isn't a code.
 2. The person opens **`/link`** (a web app page) on a phone or computer,
-   signs in if needed, and types the code (any case, with or without the
-   dash and spaces; from the QR code it comes filled in). The page shows the
+   signs in if needed (setting up two-step sign-in first when the server
+   [requires it](#two-step-sign-in) and they don't use it yet), and types
+   the code (any case, with or without the dash and spaces; from the QR
+   code it comes filled in). The page shows the
    same consent as `/oauth/authorize`, with what the TV said it is and where
    it asked from. Nothing goes back through the browser.
 3. Meanwhile the TV asks the token endpoint every `interval` seconds with
@@ -894,7 +954,8 @@ everyone, in 10 minutes, no code is looked up (`429`).
   used is signed out.
 - Apps are signed out when they or the person sign them out
   ([Signed-in apps](#signed-in-apps)), and by a new password, "Sign out
-  everywhere", `pley reset-password` and deleting the account. That covers
+  everywhere", `pley reset-password`, deleting the account, and requiring
+  two-step sign-in of an account without it. That covers
   every app acting as the account or allowed by it, and the apps it was
   signing in (codes not exchanged yet, allowed TVs that haven't fetched
   their answer).
@@ -982,7 +1043,9 @@ profiles when the app's profile is in the household, else nothing:
 
 - `current`: the profile the app acts as.
 - `needs`: what switching to it takes, by the rules above: `none`, `pin`,
-  `password` (in the browser) or `locked`.
+  `password` (in the browser) or `locked`. A profile that has to set up
+  two-step sign-in, which the server requires, needs `password`: picked in
+  the browser, its password sets it up there.
 - Usernames, roles, libraries, age limits and sign-in settings are left
   out.
 
@@ -3146,7 +3209,7 @@ interface LiveTuner {                  // a connection in use
 | DELETE | `/api/users/{id}/devices` | `admin` | `204`: signs the user out everywhere, apps included |
 | GET | `/api/users/{id}/apps` | `admin` | `AppGrant[]` ([Signed-in apps](#signed-in-apps)) |
 | DELETE | `/api/users/{id}/apps/{grant}` | `admin` | `204`: signs that app out; `404` unless it acts as that user or they allowed it |
-| DELETE | `/api/users/{id}/two-step` | `admin` | `204`: turns two-step sign-in off (for someone who lost their phone and recovery codes) |
+| DELETE | `/api/users/{id}/two-step` | `admin` | `204`: turns two-step sign-in off (for someone who lost their phone and recovery codes). While the server requires it, they are signed out everywhere and set it up again at their next sign-in |
 
 `PATCH /api/users/{id}`:
 
@@ -3168,7 +3231,7 @@ interface LiveTuner {                  // a connection in use
 | POST | `/api/invites` | `admin` | `{ expires_in_days? (7; 0 = never), uses? (1, at most 1000), all_libraries? (true), library_ids?, max_age?, note? (200 characters kept) }` → `201` `Invite`; share `/invite/{code}` |
 | DELETE | `/api/invites/{code}` | `admin` | `204` |
 | GET | `/api/invites/{code}` | `public` | `{ server_name, expires_at }`; `404` when invalid, used up or expired |
-| POST | `/api/invites/{code}/accept` | `public` | `{ username, password, display_name? }` → `{ user, token? }` (as `/api/auth/login`): a new (non-home) account with the invitation's access, signed in; with an age limit, its `request_access` is `"off"`; `404` when the invitation is invalid, used up or expired, `409` for a username taken |
+| POST | `/api/invites/{code}/accept` | `public` | `{ username, password, display_name? }` → `{ user, token? }` (as `/api/auth/login`): a new (non-home) account with the invitation's access, signed in; with an age limit, its `request_access` is `"off"`; `404` when the invitation is invalid, used up or expired, `409` for a username taken. While the server requires two-step sign-in, the account is made but not signed in: `401 two_step_setup` with the secret, and the client goes on with `POST /api/auth/login` and its first code |
 
 ## System *(admin)*
 
@@ -3311,6 +3374,10 @@ interface Settings {
                                     // (%, 10-100, default 50; 100: never). Outside: 400
   third_party_apps: boolean;        // apps by other publishers may sign in (default false); turning it off
                                     // signs them out. Pley's own apps always may
+  require_two_step: boolean;        // every account with a password uses two-step sign-in (default false):
+                                    // turning it on signs out everyone without it, who sets it up at their
+                                    // next sign-in. Only an administrator who uses it may turn it on (else
+                                    // 400), and only while the server can use its secret.key (else 400)
   proxy_addresses: string[];        // addresses with a port Pley is reached at through a reverse proxy that
                                     // drops the port from `Host` ("https://media.example.com:9999"; see
                                     // Discovery). http or https with a port and no path, one per scheme and
@@ -3363,6 +3430,8 @@ interface SystemInfo {
   uptime_secs: number;
   data_dir: string;
   database: { ok: boolean | null; problem?: string; checked_at: Timestamp | null }; // integrity check at start
+  secret_key_ok: boolean;           // the server can use its secret.key: without it, authenticator apps can't
+                                    // be set up or checked (the log says why)
   transcode_dir: {                  // the transcoder's work folder
     in_use: string;
     next: string | null;            // the one the next start uses, when another

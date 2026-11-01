@@ -229,6 +229,7 @@ TEXT = {
     "someone_else": 30276,
     "people_watching": 30277,
     "watch_here": 30278,
+    "two_step_required": 30279,
     # Requests (requests.py, asking.py, news.py).
     "discover": 30447,
     "your_requests": 30448,

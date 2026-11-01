@@ -349,3 +349,15 @@ function authDeviceRefusal(status as integer, text as dynamic) as string
     end if
     return httpStatusSentence(status)
 end function
+
+' What the sign-in screen says of two-step sign-in, from the answer to
+' GET /api/server: a server that requires it of every account with a
+' password says so, and the phone that approves the code sets it up for
+' whoever hasn't. "" for any other answer, as from servers before it,
+' which don't say.
+function authTwoStepNote(answer as object) as string
+    data = invalid
+    if httpTrue(answer.ok) then data = httpObject(answer.data)
+    if data = invalid or not httpTrue(data.two_step_required) then return ""
+    return "This server requires two-step sign-in: your phone sets it up if you haven't yet."
+end function

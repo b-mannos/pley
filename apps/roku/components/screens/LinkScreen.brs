@@ -2,6 +2,7 @@ sub init()
     m.title = m.top.findNode("title")
     m.server = m.top.findNode("server")
     m.intro = m.top.findNode("intro")
+    m.twoStep = m.top.findNode("twoStep")
     m.steps = m.top.findNode("steps")
     m.url = m.top.findNode("url")
     m.code = m.top.findNode("code")
@@ -48,8 +49,29 @@ sub onActive()
             m.intro.visible = true
         end if
         ask()
+        ' Whether the server requires two-step sign-in, asked after the code,
+        ' which never waits for it. Anyone may ask, so it goes without the
+        ' token.
+        uiRequest({ method: "GET", path: "/api/server", auth: false }, "onServerInfo")
     end if
     m.actions.setFocus(true)
+end sub
+
+' A server that requires two-step sign-in says so under its name. Below
+' the reason to sign in again when there is one, the rest of the screen a
+' line lower, so that nothing crowds. Nothing when the server doesn't say
+' or didn't answer: the sign-in goes on all the same.
+sub onServerInfo(event as object)
+    note = authTwoStepNote(event.getData())
+    if note = "" or m.done then return
+    m.twoStep.text = note
+    if m.intro.visible
+        m.twoStep.translation = [96, m.intro.translation[1] + 36]
+        for each node in [m.steps, m.status, m.actions]
+            node.translation = [node.translation[0], node.translation[1] + 36]
+        end for
+    end if
+    m.twoStep.visible = true
 end sub
 
 ' Asks for a code, and goes on asking whether it was approved. renewed:
@@ -193,6 +215,7 @@ sub signedIn()
     m.request = invalid
     m.steps.visible = false
     m.intro.visible = false
+    m.twoStep.visible = false
     m.title.text = "Signed in"
     setStatus("", false)
     setButtons([])

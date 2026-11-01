@@ -127,7 +127,8 @@ internal fun TvLinkContent(
     backLabel: String,
     onBack: () -> Unit,
     title: String = stringResource(R.string.tv_onboarding_link_title),
-    intro: String? = null,
+    /** Under the title. Signing in, it says when the server requires two-step sign-in. */
+    intro: String? = if (state.twoStepRequired) stringResource(R.string.tv_onboarding_two_step_required) else null,
 ) {
     val status = state.status
     val code = state.code

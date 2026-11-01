@@ -44,6 +44,9 @@ python apps/kodi/package.py        # dist/plugin.video.pley-<version>.zip
   server lists them in `scopes_supported` (ask for movies and shows; decide
   on them, on an administrator's account). A sign-in from before is
   offered Sign in again where it would help ([Requests](#requests)).
+- When the server requires two-step sign-in, the screen with the code says
+  so under its notes. Someone who doesn't use it yet sets it up on the
+  phone or computer where they approve the code.
 - In a household of more than one profile, Kodi asks "Who's watching?" each
   time it starts. A PIN is typed in Kodi's number dialog and never kept.
 - The same server found at another address must be signed in to again,

@@ -31,6 +31,9 @@ describes how they are made.
 - News of requests (ready to watch, approved, declined; for administrators
   new requests and ones that couldn't be sent) shows in a toast with Open,
   never over the player. About credits TMDB.
+- Signing in says when the server requires two-step sign-in: on a phone,
+  you set it up on the server's page as you sign in; on a TV, the phone
+  that approves the code sets it up for whoever hasn't.
 
 ### Changed
 

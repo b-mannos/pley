@@ -86,6 +86,11 @@ pub struct Settings {
     /// are read from the internet: see [`crate::oauth`]). pley's own apps
     /// always may. Off by default; turning it off signs them out.
     pub third_party_apps: bool,
+    /// Every account with a password uses two-step sign-in (see
+    /// [`crate::two_step`]): one without it sets it up at its next sign-in,
+    /// and is signed out everywhere until then. Off by default; only an
+    /// administrator who uses it may turn it on.
+    pub require_two_step: bool,
     /// Addresses with a port that pley is reached at through a reverse
     /// proxy which leaves the port out of `Host` (nginx's `$host`, Nginx
     /// Proxy Manager's default): `https://media.example.com:9999`. A request
@@ -204,6 +209,7 @@ impl Default for Settings {
             library_work_to: 7,
             library_work_max_cpu: 50,
             third_party_apps: false,
+            require_two_step: false,
             proxy_addresses: Vec::new(),
             opensubtitles_api_key: String::new(),
             opensubtitles_username: String::new(),
@@ -561,6 +567,7 @@ pub struct SettingsPatch {
     pub library_work_to: Option<u8>,
     pub library_work_max_cpu: Option<u8>,
     pub third_party_apps: Option<bool>,
+    pub require_two_step: Option<bool>,
     pub proxy_addresses: Option<Vec<String>>,
     pub opensubtitles_api_key: Option<String>,
     pub opensubtitles_username: Option<String>,
@@ -709,6 +716,9 @@ impl SettingsStore {
         }
         if let Some(v) = patch.third_party_apps {
             next.third_party_apps = v;
+        }
+        if let Some(v) = patch.require_two_step {
+            next.require_two_step = v;
         }
         if let Some(v) = patch.proxy_addresses {
             let mut addresses: Vec<String> = Vec::new();
@@ -999,6 +1009,22 @@ mod tests {
         assert!(s.third_party_apps);
         let s = store.update(&db, patch(serde_json::json!({"third_party_apps": false}))).await.unwrap();
         assert!(!s.third_party_apps);
+    }
+
+    #[tokio::test]
+    async fn two_step_sign_in_is_required_only_once_asked_for() {
+        let (_dir, db, store) = store().await;
+        assert!(!store.get().require_two_step, "off on a new server");
+        sqlx::query("INSERT INTO settings (key, value) VALUES ('server', '{\"server_name\":\"Attic\"}')")
+            .execute(&db.write)
+            .await
+            .unwrap();
+        assert!(!SettingsStore::load(&db).await.unwrap().get().require_two_step, "off after an upgrade");
+        let s = store.update(&db, patch(serde_json::json!({"require_two_step": true}))).await.unwrap();
+        assert!(s.require_two_step);
+        assert!(SettingsStore::load(&db).await.unwrap().get().require_two_step, "kept");
+        let s = store.update(&db, patch(serde_json::json!({"server_name": "Den"}))).await.unwrap();
+        assert!(s.require_two_step, "other changes leave it alone");
     }
 
     fn encoder(name: &str, accel: HwAccel) -> pley_transcoder_api::EncoderInfo {

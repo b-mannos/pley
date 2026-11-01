@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import threading
 import time
 import urllib.parse
 
@@ -822,6 +823,10 @@ class Plugin(asking.Asking):
         window = signin.SignIn("pley-signin.xml", kodi.addon_dir(), "default", "1080i")
         window.fill(started["verification_uri"], started["user_code"], waiting_text(expires - time.time()), qr)
         window.show()
+        # Whether the server requires two-step sign-in, asked beside the
+        # sign-in: the screen says so once the server answers, and the code
+        # never waits for it.
+        threading.Thread(target=lambda: two_step_required(server) and window.show_two_step(), daemon=True).start()
         monitor = xbmc.Monitor()
         outcome = None
         state = None
@@ -946,6 +951,18 @@ def fetch_qr(server: str, user_code: str) -> str:
     with open(path, "wb") as f:
         f.write(answer.body)
     return path
+
+
+def two_step_required(server: str) -> bool:
+    """Whether `server` requires two-step sign-in of every account with a
+    password (GET /api/server). The phone that approves the code sets it up
+    for whoever hasn't, so the sign-in screen only says so: False when the
+    server doesn't say (it predates it) or doesn't answer."""
+    try:
+        found = api.Client(server, kodi.user_agent(), timeout=5).get("/api/server")
+    except api.ApiError:
+        return False
+    return isinstance(found, dict) and found.get("two_step_required") is True
 
 
 def waiting_text(seconds_left: float) -> str:

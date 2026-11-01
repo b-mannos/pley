@@ -161,6 +161,15 @@ impl AppState {
         let oauth = crate::oauth::AuthorizationServer::new(&config);
         let two_step = crate::two_step::TwoStep::new(db.clone(), &config.data_dir);
         two_step.check_key().await;
+        let require_two_step = settings.get().require_two_step;
+        if require_two_step && !two_step.can_set_up() {
+            tracing::error!(
+                "two-step sign-in is required, but the server can't use its {}: until it can, accounts that haven't \
+                 set it up can't sign in, and accounts that have sign in with a recovery code",
+                crate::two_step::KEY_FILE
+            );
+        }
+        auth.require_two_step(require_two_step);
         // After two-step sign-in, which makes the key it derives its own from.
         let bandwidth = crate::bandwidth::Bandwidth::new(db.clone(), &config.data_dir);
         let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&db.read).await?;

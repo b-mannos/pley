@@ -173,6 +173,8 @@ function detail(item, myList) {
 // `requestScopes` false makes it offer neither requests nor approvals,
 // and know nothing of requests, as an older one; `requestsOn` false
 // turns requests off (the summary says so, the rest answers 503);
+// `twoStep` makes GET /api/server say it requires two-step sign-in, which
+// it otherwise leaves out, as an older one does;
 // `playbackDelayMs` holds back the answers to POST /api/playback.
 // What the app asked for and did is kept: requestsAsked (POST
 // /api/requests bodies), requestsActed ({ id, action }), and
@@ -316,7 +318,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
 
     // Everything else needs the access token, in the header.
     if (!url.pathname.startsWith("/api/") || url.pathname === "/api/server") {
-      return json(200, { name: "Fixture", version: "0.1.0", setup_required: false, setup_code_required: false });
+      return json(200, { name: "Fixture", version: "0.1.0", setup_required: false, setup_code_required: false, ...(fixture.twoStep ? { two_step_required: true } : {}) });
     }
     const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     if (toRefuse.delete(url.pathname)) access.delete(bearer);
@@ -658,7 +660,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     return json(404, { code: "not_found", message: `nothing at ${path}` });
   });
 
-  const fixture = { issuer: "", down: false, qr: true, requestScopes: true, requestsOn: true, scopesAsked: [], playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [],
+  const fixture = { issuer: "", down: false, qr: true, requestScopes: true, requestsOn: true, twoStep: false, scopesAsked: [], playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [],
     household: [{ id: 1, name: "Anna", avatar_url: null, avatar_color: "#38bdf8", current: true, needs: "none" }, { id: 2, name: "Ben", avatar_url: null, avatar_color: "#f472b6", current: false, needs: "none" }],
     switched: [], subtitlesAdded: [], probed: false, networkTold: [], speedTests: [], requestsAsked: [], requestsActed: [], discoverPictures: [], problems, requests, progress, closed, close: () => server.close(),
     liveRecent: [2], liveBrowses: [], liveFavorites: [], liveFavoriteChanges: [], liveGuides: [], liveWatches: [], liveSessions: new Map(), livePlaylists: [], liveLeft: [] };

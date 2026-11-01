@@ -22,6 +22,8 @@ describes how they are made.
   attention or has news. Search lists what TMDB has under On TMDB, and a
   movie's or show's page in a library shows its request's stage, with
   Request more seasons for a show missing some.
+- Signing in with a code says when the server requires two-step sign-in:
+  the phone that approves the code sets it up for whoever hasn't.
 
 ### Changed
 

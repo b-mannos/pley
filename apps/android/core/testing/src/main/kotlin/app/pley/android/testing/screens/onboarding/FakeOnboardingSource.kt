@@ -99,9 +99,9 @@ class FakeOnboardingSource(
         answers[input] ?: ProbeResult.Unreachable("nothing answers there")
     }
 
-    /** Pley at [url], named [name]. */
-    fun answer(input: String, url: String = input, name: String = "Living room NAS") {
-        answers[input] = ProbeResult.Pley(url, ServerInfo(name, "1.0.0"))
+    /** Pley at [url], named [name], requiring two-step sign-in or not. */
+    fun answer(input: String, url: String = input, name: String = "Living room NAS", twoStepRequired: Boolean = false) {
+        answers[input] = ProbeResult.Pley(url, ServerInfo(name, "1.0.0", twoStepRequired = twoStepRequired))
     }
 
     /** Permissions not held yet (Android 17's local network access…). */

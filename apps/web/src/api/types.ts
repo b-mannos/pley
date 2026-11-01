@@ -90,9 +90,16 @@ export interface ServerStatus {
   version: string;
   /** The server build's short commit hash; "unknown" without the repository. */
   commit?: string;
+  /** Where the server's source code is offered. */
+  source?: string;
   setup_required: boolean;
   /** Setting up takes the code in the server's log. */
   setup_code_required?: boolean;
+  /**
+   * Every account with a password signs in with two-step sign-in: one
+   * without it sets it up as it signs in. Absent from servers before it.
+   */
+  two_step_required?: boolean;
 }
 
 /** `GET /api/me/two-step`: two-step sign-in for the signed-in user. */
@@ -113,6 +120,11 @@ export interface TwoStepSetup {
   qr: { size: number; path: string };
   /** The secret must be confirmed with a code before then. */
   expires_at: Timestamp;
+  /**
+   * Sent back as `setup_id` with the first code when signing in sets it up:
+   * only with it is this secret shown again, or turned on.
+   */
+  id: string;
 }
 
 /** Shown once: each signs in once instead of a code from the app. */
@@ -124,6 +136,8 @@ export interface LoginResponse {
   user: User;
   /** Only for clients that aren't browsers: browsers keep the session in a cookie. */
   token?: string;
+  /** Two-step sign-in was set up on the way in (the server requires it): its recovery codes, shown once. */
+  recovery_codes?: string[];
 }
 
 export type LibraryKind = "movies" | "shows" | "music";
@@ -770,6 +784,12 @@ export interface Settings {
   /** Apps by other publishers may sign in (pley's own apps always can); turning it off signs them out. */
   third_party_apps: boolean;
   /**
+   * Every account with a password signs in with two-step sign-in. Turning it
+   * on (only an administrator who uses it can) signs out everyone without it,
+   * who sets it up at their next sign-in. Absent from servers before it.
+   */
+  require_two_step?: boolean;
+  /**
    * Addresses with a port pley is reached at through a reverse proxy that
    * leaves the port out of `Host` (`https://media.example.com:9999`).
    * Absent from servers before it.
@@ -1003,6 +1023,11 @@ export interface SystemInfo {
   arch: string;
   uptime_secs: number;
   data_dir: string;
+  /**
+   * The server can use its secret.key: without it, authenticator apps can't
+   * be set up or checked. Absent from servers before it.
+   */
+  secret_key_ok?: boolean;
   transcode_dir: TranscodeDir;
   transcoder: TranscoderInfo;
   counts: {

@@ -85,6 +85,9 @@ class PlayList:
 
 
 class Monitor:
+    def abortRequested(self):
+        return False
+
     def waitForAbort(self, seconds=0):
         return True
 

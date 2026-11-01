@@ -444,6 +444,11 @@ class HttpPleyApiTest {
 
         server.enqueue(MockPley.fixture("libraries/list.json"))
         assertEquals(listOf(1L, 2L, 3L), api.libraries().map { it.id })
+
+        server.enqueue(MockPley.fixture("server/info.json"))
+        assertFalse(api.server().twoStepRequired)
+        server.enqueue(jsonAnswer("""{"name":"Living Room","version":"0.42.0","two_step_required":true}"""))
+        assertTrue(api.server().twoStepRequired)
     }
 
     @Test

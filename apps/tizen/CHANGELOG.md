@@ -8,11 +8,6 @@ describes how they are made.
 
 ## [Unreleased]
 
-### Changed
-
-- Pley for Samsung TV is free software under the GNU Affero General Public
-  License, version 3 (`AGPL-3.0-only`, `LICENSE`).
-
 ### Security
 
 - The token goes only to the server's own origin, never to an address
@@ -48,9 +43,13 @@ describes how they are made.
   attention or has news. Search lists what TMDB has under On TMDB, and a
   movie's or show's page in a library shows its request's stage, with
   Request more seasons for a show missing some.
+- Signing in with a code says when the server requires two-step sign-in:
+  the phone that approves the code sets it up for whoever hasn't.
 
 ### Changed
 
+- Pley for Samsung TV is free software under the GNU Affero General Public
+  License, version 3 (`AGPL-3.0-only`, `LICENSE`).
 - The sign-in page names this app by its address on
   `pley-media-server.github.io`. It needs a server from the same release,
   which keeps it signed in.

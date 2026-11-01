@@ -37,6 +37,8 @@ describes how they are made.
   seasons with Request more seasons.
 - Signing in asks for requests and approvals where the server offers them.
   Settings carries TMDB's notice.
+- Signing in with a code says when the server requires two-step sign-in:
+  the phone that approves the code sets it up for whoever hasn't.
 
 ### Changed
 

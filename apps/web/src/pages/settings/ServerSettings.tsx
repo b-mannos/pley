@@ -1,9 +1,11 @@
+import { Link as RouterLink } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { appKeys } from "@/api/apps";
-import { useSystemInfo, useWatchingHours } from "@/api/hooks";
+import { keys, useSettings, useSystemInfo, useUsers, useWatchingHours } from "@/api/hooks";
 import type { LibraryWork, Settings, TvMetadata } from "@/api/types";
+import { useAuth } from "@/auth";
 import { Select, TextInput, Toggle } from "@/components/ui";
-import { formatTimestamp } from "@/lib/format";
+import { formatTimestamp, pluralize } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
 import { Group, Link, Note, Row, SecretInput, SettingsForm, TestButton, useSettingsForm } from "./SettingsForm";
 import { knownTranscoder } from "./transcodeChoices";
@@ -28,6 +30,7 @@ const KEYS = [
   "library_work_to",
   "library_work_max_cpu",
   "third_party_apps",
+  "require_two_step",
   "opensubtitles_api_key",
   "opensubtitles_username",
   "opensubtitles_password",
@@ -89,6 +92,11 @@ export function ServerSettings() {
     // Turning apps by other publishers off signed them out.
     if (changes.third_party_apps === false) {
       void qc.invalidateQueries({ queryKey: appKeys.mine });
+      void qc.invalidateQueries({ queryKey: ["users"] });
+    }
+    // Requiring two-step sign-in signed out everyone without it.
+    if (changes.require_two_step !== undefined) {
+      void qc.invalidateQueries({ queryKey: keys.server });
       void qc.invalidateQueries({ queryKey: ["users"] });
     }
     // The hours library work may begin in follow its settings.
@@ -312,6 +320,14 @@ ${form.opensubtitles_password ?? ""}`}
               </Row>
             </Group>
 
+            <Group title="Sign-in">
+              <RequireTwoStepRow
+                checked={form.require_two_step ?? false}
+                onChange={(v) => set("require_two_step", v)}
+                known={form.require_two_step !== undefined}
+              />
+            </Group>
+
             <Group title="Apps">
               <Row
                 label="Apps by other publishers"
@@ -334,6 +350,50 @@ ${form.opensubtitles_password ?? ""}`}
 
 /** Shares of the processors other programs may keep busy before library work waits; 100: it never waits. */
 const MAX_CPU = [25, 50, 75, 100];
+
+/**
+ * Requiring two-step sign-in: only an administrator who uses it can turn it
+ * on, and turning it on signs out everyone without it, who sets it up at
+ * their next sign-in.
+ */
+function RequireTwoStepRow({ checked, onChange, known }: { checked: boolean; onChange: (v: boolean) => void; known: boolean }) {
+  const me = useAuth();
+  const saved = useSettings().data?.require_two_step ?? false;
+  const noKey = useSystemInfo().data?.secret_key_ok === false;
+  const users = useUsers();
+  const without = (users.data ?? []).filter((u) => u.has_password && !u.two_step && !u.disabled).length;
+  // Off, it turns on only for someone who uses it; on, it can always go off.
+  const blocked = !checked && !me.two_step;
+
+  return (
+    <Row
+      label="Require two-step sign-in"
+      hint="Everyone with a password signs in with a code from an authenticator app. Whoever hasn't set it up does so at their next sign-in, in the browser (for a TV, on the phone they sign in with)."
+    >
+      {/* Off until a server that knows the setting sends it. */}
+      <Toggle checked={checked} onChange={onChange} label="Require two-step sign-in" disabled={!known || blocked} />
+      {blocked ? (
+        <Note>
+          Turn on two-step sign-in for your own account first, in{" "}
+          <RouterLink to="/account" className="text-accent hover:underline">
+            Account
+          </RouterLink>
+          .
+        </Note>
+      ) : checked && !saved && users.data ? (
+        <Note notice>
+          {without === 0
+            ? "Everyone with a password uses it already."
+            : `Saving signs out ${pluralize(without, "person who hasn't", "people who haven't")} set it up, on every device and app, until they set it up.`}
+        </Note>
+      ) : checked && saved && noKey ? (
+        <Note notice>
+          The server can't use its secret.key, so authenticator apps can't be set up or checked. Until it can, people who haven't set up two-step sign-in can't sign in, and people who have sign in with a recovery code. Its log says why.
+        </Note>
+      ) : null}
+    </Row>
+  );
+}
 
 /** When intro and credits detection and previews for whole libraries run. */
 function LibraryWorkRows({ form, set }: { form: Settings; set: <K extends keyof Settings>(key: K, value: Settings[K]) => void }) {

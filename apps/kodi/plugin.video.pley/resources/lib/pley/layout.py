@@ -305,7 +305,8 @@ LIVE_PICTURE_HEIGHT = LIVE_PANEL_WIDTH * 9 // 16
 
 
 # Signing in (signin.py, TvLinkScreen): the code in two halves, the steps
-# (the first only with a QR code, which the server draws), the QR code.
+# (the first only with a QR code, which the server draws), the QR code, and
+# a third note when the server requires two-step sign-in.
 SIGNIN_WINDOW = "pley-signin.xml"
 SIGNIN_CHANGE = 3101  # Change server
 SIGNIN_ADDRESS, SIGNIN_STATUS, SIGNIN_SCAN, SIGNIN_QR = 3104, 3106, 3107, 3108
@@ -313,6 +314,7 @@ SIGNIN_CODE_A, SIGNIN_CODE_B = 3111, 3112
 SIGNIN_STEP_SCAN, SIGNIN_STEP_GO, SIGNIN_STEP_ENTER = 3113, 3118, 3119
 SIGNIN_NUMBER_GO, SIGNIN_NUMBER_ENTER = 3114, 3115
 SIGNIN_QR_CARD = 3120
+SIGNIN_TWO_STEP = 3121
 
 # A message at the foot of the page.
 TOAST, TOAST_LABEL = 900, 901

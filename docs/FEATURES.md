@@ -83,7 +83,9 @@ What Pley does, in full. The [README](../README.md) has the short version.
   own libraries and age limit.
 - A profile switcher with optional PINs, invitation links, and a list of
   signed-in devices that can be signed out remotely.
-- Optional two-step sign-in with an authenticator app, with recovery codes.
+- Two-step sign-in with an authenticator app, with recovery codes:
+  optional, or required of everyone by an administrator, in which case each
+  person sets it up at their next sign-in (for a TV, on their phone).
 - Apps sign in on Pley's own page and get only what you allow (browsing,
   playing, playlists), never administration: OAuth 2.1 with client metadata
   documents. Pley's own apps work without internet access; apps by other

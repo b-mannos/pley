@@ -7,6 +7,8 @@ export type ApiErrorCode =
   | "too_many_requests"
   /** The second step of a sign-in: a code from the authenticator app is missing or wrong. */
   | "two_step"
+  /** A sign-in that sets up two-step sign-in first, which the server requires: the answer has the secret (`setup`). */
+  | "two_step_setup"
   | "unavailable"
   | "internal"
   | "network";
@@ -97,8 +99,8 @@ export async function requestWithStatus<T>(path: string, opts: RequestOptions = 
     } catch {
       // not JSON
     }
-    // A second step asked for is not an expired session.
-    if (res.status === 401 && !noAuthRedirect && code !== "two_step") unauthorizedHandler?.();
+    // A second step asked for, or to set up, is not an expired session.
+    if (res.status === 401 && !noAuthRedirect && code !== "two_step" && code !== "two_step_setup") unauthorizedHandler?.();
     throw new ApiError(res.status, code, message, answer);
   }
 

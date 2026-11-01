@@ -33,6 +33,8 @@ describes how they are made.
   ("Season 2 of “X” is ready to watch." for a show), and as Kodi starts
   for news that came while it was off; never over a playing video, where
   the last three wait for it to stop.
+- Signing in with a code says when the server requires two-step sign-in:
+  the phone that approves the code sets it up for whoever hasn't.
 
 ### Fixed
 

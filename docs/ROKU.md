@@ -33,8 +33,10 @@ the app prints and its errors.
 
 The app finds Pley servers on the local network (or takes an address) and
 signs in with a code shown on the TV, approved on the server's `/link` page
-or by its QR code. It asks "Who's watching?" at start when the household
-has more than one profile.
+or by its QR code. When the server requires two-step sign-in, the sign-in
+screen says so: the phone that approves the code sets it up for whoever
+hasn't yet. It asks "Who's watching?" at start when the household has more
+than one profile.
 
 ### Remote keys
 

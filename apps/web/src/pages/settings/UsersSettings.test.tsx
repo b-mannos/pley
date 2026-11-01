@@ -115,6 +115,35 @@ describe("UsersSettings", () => {
     expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/users/3/two-step");
   });
 
+  it("shows who hasn't set up the two-step sign-in the server requires, and resets it for a new phone", async () => {
+    const user = userEvent.setup();
+    const bob: User = { ...testUser, id: 5, username: "bob", name: "Bob", is_admin: false };
+    const requests = mockApi({
+      "GET /api/server": () => ({ name: "Den", version: "1.0.0", setup_required: false, two_step_required: true }),
+      "GET /api/users": () => [admin, kid, ann, lee, bob],
+      "GET /api/libraries": () => libraries,
+      "GET /api/users/3/devices": () => [],
+      "GET /api/users/3/apps": () => [],
+      "DELETE /api/users/3/two-step": () => undefined,
+    });
+    renderWithProviders(<UsersSettings />, { user: admin });
+
+    const rows = await screen.findAllByRole("listitem");
+    const row = (name: string) => rows.find((r) => r.textContent?.includes(name))!;
+    await waitFor(() => expect(row("Bob")).toHaveTextContent("2FA not set up"));
+    // Managed profiles and accounts without a password have nothing to set up.
+    for (const name of ["Kiddo", "Lee", "Ann"]) expect(row(name)).not.toHaveTextContent("not set up");
+    expect(row("Ann")).toHaveTextContent("2FA");
+
+    await user.click(screen.getByRole("button", { name: /Ann/ }));
+    const dialog = screen.getByRole("dialog", { name: "Edit Ann" });
+    expect(within(dialog).getByText(/Turning it off signs Ann out everywhere/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Turn off" }));
+    await user.click(within(dialog).getByRole("button", { name: "Turn off" }));
+    expect(await screen.findByText("Ann is signed out, and sets up two-step sign-in again at the next sign-in")).toBeInTheDocument();
+    expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/users/3/two-step");
+  });
+
   it("says that an account without a password needs one to sign in", async () => {
     const user = userEvent.setup();
     renderUsers();
