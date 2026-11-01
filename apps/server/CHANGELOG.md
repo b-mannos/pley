@@ -13,6 +13,8 @@ describes how they are made.
 
 - On Unraid, searching Apps for Plex, Jellyfin, Emby or IPTV also finds
   Pley, and Apps offers it only on Unraid 6.12 or newer.
+- The Docker image has signed build provenance, as the release files do,
+  and its page on GitHub lists only `linux/amd64` and `linux/arm64`.
 
 ## [0.1.1] - 2026-11-01
 

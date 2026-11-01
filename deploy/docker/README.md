@@ -201,6 +201,8 @@ work.
 - **Bounded.** Processes are capped and Docker's log is rotated. On a machine
   that does other work, also cap memory and CPU in `compose.override.yaml`
   (`mem_limit: 8g`, `cpus: 6`; each transcode takes about 1 GB).
+- **Provenance.** Each release's image has build provenance:
+  `gh attestation verify oci://ghcr.io/pley-media-server/pley:<version> --repo pley-media-server/pley`.
 
 On Pley's side ([SECURITY.md](../../SECURITY.md)): set Pley up before it can
 be reached from the internet, turn on two-step sign-in for administrators,

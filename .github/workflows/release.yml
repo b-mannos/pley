@@ -109,6 +109,8 @@ jobs:
     permissions:
       contents: read
       packages: write # the Docker image
+      id-token: write # sign its provenance attestation (Sigstore)
+      attestations: write # store the attestation
 
   desktop:
     name: Desktop

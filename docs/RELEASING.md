@@ -38,8 +38,9 @@ provenance (`gh attestation verify <file> --repo pley-media-server/pley`).
 
 - **Keep the GitHub release a draft**, when run by hand, leaves the release
   for you to publish; the tag is made either way.
-- A release with the server also pushes the Docker image, and the
-  repository's "Latest" release is the newest with the server.
+- A release with the server also pushes the Docker image, attested like the
+  files (`oci://ghcr.io/pley-media-server/pley:<version>` for `<file>`), and
+  the repository's "Latest" release is the newest with the server.
 - If a run fails after tagging, **Re-run failed jobs** reuses its tag. If it
   fails before, fix master (move Unreleased entries left behind under the
   unit's new version, in a pull request) and run the workflow by hand.
