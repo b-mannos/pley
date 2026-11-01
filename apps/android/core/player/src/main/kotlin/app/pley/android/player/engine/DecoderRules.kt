@@ -18,7 +18,9 @@ import app.pley.android.caps.DecoderPolicy
  * software at any size. Dolby Vision decoders are left out when the video
  * doesn't come out as Dolby Vision, so Media3 falls back to the HEVC (or
  * AVC, AV1) decoder of the base layer, and come first when it does
- * ([dolbyVisionDecoders]). Audio decoders are never limited.
+ * ([dolbyVisionDecoders]). Profiles 5 and 7 have no base layer another
+ * decoder plays: their Dolby Vision decoders stay, as Media3 keeps them.
+ * Audio decoders are never limited.
  */
 @OptIn(markerClass = [UnstableApi::class])
 class DecoderRules(
@@ -34,6 +36,7 @@ class DecoderRules(
         MediaCodecSelector { mimeType, secure, tunneling ->
             val listed = base.getDecoderInfos(mimeType, secure, tunneling)
             if (!MimeTypes.isVideo(mimeType)) return@MediaCodecSelector listed
+            if (mimeType == MimeTypes.VIDEO_DOLBY_VISION && !dolbyVisionDecoded(format)) return@MediaCodecSelector emptyList()
             val picture = format?.let(Picture::of) ?: Picture.UNKNOWN
             val allowed = listed.filter { allows(mimeType, it.hardwareAccelerated, picture) }
             hardwareFirst(allowed) { it.hardwareAccelerated }
@@ -62,10 +65,18 @@ class DecoderRules(
         return MediaCodecUtil.getDecoderInfosSortedByFormatSupport(context, listed, format)
     }
 
+    /**
+     * Whether Dolby Vision decoders may play [format]: not when it doesn't
+     * come out as Dolby Vision and its base layer has a decoder of its own
+     * (Media3's alternative: HEVC for profiles 4 and 8, AVC for 9, AV1 for
+     * 10). Without one (5, 7) nothing else plays it.
+     */
+    private fun dolbyVisionDecoded(format: Format?): Boolean =
+        dolbyVisionShown() != false || format == null || MediaCodecUtil.getAlternativeCodecMimeType(format) == null
+
     /** Whether a [hardware] (or software) decoder of [mimeType] may play [picture] here. */
     fun allows(mimeType: String, hardware: Boolean, picture: Picture): Boolean {
         if (!MimeTypes.isVideo(mimeType)) return true
-        if (mimeType == MimeTypes.VIDEO_DOLBY_VISION && dolbyVisionShown() == false) return false
         return policy().allows(hardware, picture.width, picture.height, picture.fps, picture.bitDepth, picture.hdr)
     }
 

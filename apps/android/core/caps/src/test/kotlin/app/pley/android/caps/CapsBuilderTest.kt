@@ -248,6 +248,39 @@ class CapsBuilderTest {
     }
 
     @Test
+    fun hdrTypesTurnedOffAreRememberedFromTheModesThatListThem() {
+        val modes = listOf(
+            DisplayModeInfo(1, 3840, 2160, 60f, hdrTypes = listOf(2)),
+            DisplayModeInfo(2, 3840, 2160, 24f, hdrTypes = listOf(1, 2)),
+        )
+        val home = DisplayState(modes, activeModeId = 1, hdrCapabilities = listOf(2))
+        // The 60 Hz mode doesn't list Dolby Vision: what was seen at 24 Hz stays.
+        assertEquals(setOf(1), home.turnedOffHdrTypes(remembered = setOf(1)))
+        assertEquals(emptySet<Int>(), home.turnedOffHdrTypes(remembered = emptySet()))
+        // At 24 Hz the display tells: off, or on again.
+        val film = home.copy(activeModeId = 2)
+        assertEquals(setOf(1), film.turnedOffHdrTypes(remembered = emptySet()))
+        assertEquals(emptySet<Int>(), film.copy(hdrCapabilities = listOf(1, 2)).turnedOffHdrTypes(remembered = setOf(1)))
+        // Before Android 14 modes list nothing: as remembered.
+        val old = DisplayState(modes.map { it.copy(hdrTypes = null) }, activeModeId = 2, hdrCapabilities = listOf(2))
+        assertEquals(setOf(1), old.turnedOffHdrTypes(remembered = setOf(1)))
+    }
+
+    @Test
+    fun aVideoTheScreenDoesntShowAsDolbyVisionIsAskedForWithoutIt() {
+        val streamer = TestDevices.googleTvStreamer
+        val dvScreen = streamer.display!!.copy(modes = streamer.display!!.modes.map { it.copy(hdrTypes = listOf(1, 2, 3)) }, hdrCapabilities = listOf(1, 2, 3))
+        val snapshot = capsOf(streamer.copy(display = dvScreen))
+        assertTrue(DynamicRange.DolbyVision in snapshot.report.hdrTypes.orEmpty())
+        val without = snapshot.withoutDolbyVisionScreen()
+        assertFalse(DynamicRange.DolbyVision in without.report.hdrTypes.orEmpty())
+        assertFalse(DynamicRange.DolbyVision in without.details.screenHdrTypes)
+        assertFalse(without.report.dolbyVision)
+        assertEquals("the decoders' profiles stay", snapshot.report.dolbyVisionProfiles, without.report.dolbyVisionProfiles)
+        assertEquals(snapshot.report.hdrTypes.orEmpty() - DynamicRange.DolbyVision, without.report.hdrTypes)
+    }
+
+    @Test
     fun devicesFallIntoTiers() {
         val tiers = TestDevices.all.mapValues { capsOf(it.value).report.device!!.tier }
         assertEquals("low", tiers["fireTvStickLite"])

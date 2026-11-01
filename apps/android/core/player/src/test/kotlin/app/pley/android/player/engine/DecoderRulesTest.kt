@@ -83,6 +83,11 @@ class DecoderRulesTest {
         assertEquals(listOf("c2.vendor.dolby.decoder"), names(dvScreen, MimeTypes.VIDEO_DOLBY_VISION, format))
         val unknown = DecoderRules({ DecoderPolicy(tv = true) })
         assertEquals(listOf("c2.vendor.dolby.decoder"), names(unknown, MimeTypes.VIDEO_DOLBY_VISION, format))
+        // Profiles 5 and 7: no other decoder plays them, so theirs stays.
+        val p5 = video(MimeTypes.VIDEO_DOLBY_VISION, 3840, 2160, 23.976f, "dvhe.05.06")
+        assertEquals(listOf("c2.vendor.dolby.decoder"), names(hdr10Screen, MimeTypes.VIDEO_DOLBY_VISION, p5))
+        val p7 = video(MimeTypes.VIDEO_DOLBY_VISION, 3840, 2160, 23.976f, "dvhe.07.06")
+        assertEquals(listOf("c2.vendor.dolby.decoder"), names(hdr10Screen, MimeTypes.VIDEO_DOLBY_VISION, p7))
     }
 
     @Test

@@ -56,6 +56,26 @@ class ModeChoiceTest {
         val unlisted = display.copy(modes = modes.map { it.copy(hdrTypes = listOf(2)) })
         assertEquals(true, ModeChoice.dolbyVisionShown(caps(unlisted), null, sdk = 34))
         assertNull("no probe", ModeChoice.dolbyVisionShown(CapsDetails(), film, sdk = 34))
+        // Turned off in the system's settings, as seen in a mode that lists it: in no mode.
+        val off = setOf(ModeChoice.HDR_DOLBY_VISION)
+        assertEquals(false, ModeChoice.dolbyVisionShown(caps(display), film, sdk = 34, turnedOff = off))
+        assertEquals(false, ModeChoice.dolbyVisionShown(caps(unlisted), null, sdk = 34, turnedOff = off))
+        // The display as it is now, rather than the probe's.
+        val at24 = display.copy(activeModeId = 2, hdrCapabilities = listOf(1, 2))
+        assertEquals(true, ModeChoice.dolbyVisionShown(caps(display), null, sdk = 34, display = at24))
+    }
+
+    @Test
+    fun aDisplayMatchIsAskedForFilmsOnTvsOnly() {
+        val film = MediaStream(index = 0, kind = StreamKind.Video, codec = "hevc", frameRate = 23.976)
+        val hours = 2 * 60 * 60 * 1000L
+        assertEquals(23.976, ModeChoice.matchFor(true, film, hours, null, RefreshRateMatching.Auto)?.fps)
+        assertEquals(true, ModeChoice.matchFor(true, film, hours, null, RefreshRateMatching.Auto, gaveUp = true)?.gaveUp)
+        assertNull("a phone", ModeChoice.matchFor(false, film, hours, null, RefreshRateMatching.Auto))
+        assertNull("turned off", ModeChoice.matchFor(true, film, hours, null, RefreshRateMatching.Off))
+        assertNull("under 10 minutes", ModeChoice.matchFor(true, film, ModeChoice.MIN_DURATION_MS - 1, null, RefreshRateMatching.Auto))
+        assertNull("no frame rate", ModeChoice.matchFor(true, film.copy(frameRate = null), hours, null, RefreshRateMatching.Auto))
+        assertNull("no video", ModeChoice.matchFor(true, null, hours, null, RefreshRateMatching.Auto))
     }
 
     @Test

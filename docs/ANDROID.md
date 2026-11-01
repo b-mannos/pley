@@ -45,14 +45,19 @@ keeps its saved servers and asks you to sign in again.
   permission before the app searches the network.
 - **Watch Next** (Android TV and Google TV): the home screen's row shows
   the profile's Continue Watching, ten at most.
-- **Dolby Vision and HDR** go by the display modes a video plays in: the
-  one in use, and those of its size the TV switches to for the frame rate
-  (the device's match-content setting, or Settings → Playback). A format
-  turned off in the system's settings isn't used. Dolby Vision the screen
-  doesn't show there plays as its HDR10, HLG or SDR base layer, and the
-  player's details say why ("HDR10 (Dolby Vision base layer, as this
-  screen doesn't show Dolby Vision)"). Their Decoded line names what the
-  decoder makes: HEVC and HDR10 for a base layer.
+- **Dolby Vision and HDR** go by the display mode each video plays in: the
+  one in use, or the one of its size the TV switches to for the frame rate
+  (the device's match-content setting, or Settings → Playback; not for
+  items under 10 minutes, nor once switching has timed out twice on that
+  display). The app judges this before asking the server, so the server is
+  told Dolby Vision only for a video the screen will show it in. A format
+  turned off in the system's settings isn't used; Android says so only in
+  a mode that lists it, so the app remembers it for each display. Dolby
+  Vision the screen doesn't show plays as its HDR10, HLG or SDR base layer
+  (a download of profile 5, which has none, on its Dolby Vision decoder),
+  and the player's details say why ("HDR10 (Dolby Vision base layer, as
+  this screen doesn't show Dolby Vision)"). Their Decoded line names what
+  the decoder makes: HEVC and HDR10 for a base layer.
 
 ### Audio and subtitles
 

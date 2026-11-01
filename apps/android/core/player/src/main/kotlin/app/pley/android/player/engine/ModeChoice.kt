@@ -132,19 +132,45 @@ object ModeChoice {
     }
 
     /**
-     * Whether the display shows Dolby Vision in the mode a video plays in:
+     * Whether [display] shows Dolby Vision in the mode a video plays in:
      * the one [asked] switches to, else the one in use; `null` without a
-     * probe. Media3 asks about the mode in use when the decoder starts,
+     * display. Media3 asks about the mode in use when the decoder starts,
      * which on a TV comes before the switch to the video's mode. Dolby Vision
-     * a quirk adds, which no mode lists, is shown in every mode.
+     * a quirk adds, which no mode lists, is shown in every mode; turned off
+     * in the system's settings ([turnedOff], as the display told before), in
+     * none.
      */
-    fun dolbyVisionShown(caps: CapsDetails, asked: MatchRequest?, sdk: Int): Boolean? {
-        val display = caps.input?.display ?: return null
-        if (DynamicRange.DolbyVision !in caps.screenHdrTypes) return false
+    fun dolbyVisionShown(
+        caps: CapsDetails,
+        asked: MatchRequest?,
+        sdk: Int,
+        display: DisplayState? = caps.input?.display,
+        turnedOff: Set<Int> = emptySet(),
+    ): Boolean? {
+        if (display == null) return null
+        if (DynamicRange.DolbyVision !in caps.screenHdrTypes || HDR_DOLBY_VISION in turnedOff) return false
         val shownIn = { mode: DisplayModeInfo? -> DynamicRange.DolbyVision in CapsBuilder.hdrTypesShownIn(display, mode) }
         if (display.modes.none(shownIn)) return true
         val switchTo = (asked?.let { decide(display, it, sdk) } as? ModeDecision.Switch)?.modeId
         return shownIn(display.modes.firstOrNull { it.id == switchTo } ?: display.activeMode)
+    }
+
+    /**
+     * What [video] asks of a TV's display; `null` where the mode stays as it
+     * is: a phone, matching turned off, an unknown frame rate, an item under
+     * 10 minutes.
+     */
+    fun matchFor(
+        tv: Boolean,
+        video: MediaStream?,
+        durationMs: Long?,
+        caps: CapsDetails?,
+        setting: RefreshRateMatching,
+        gaveUp: Boolean = false,
+    ): MatchRequest? {
+        if (!tv || setting == RefreshRateMatching.Off || video == null) return null
+        if ((video.frameRate ?: 0.0) <= 1.0 || (durationMs ?: 0) < MIN_DURATION_MS) return null
+        return requestFor(video, durationMs, caps, setting, gaveUp)
     }
 
     /**

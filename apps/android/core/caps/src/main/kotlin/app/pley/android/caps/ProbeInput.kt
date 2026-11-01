@@ -117,6 +117,17 @@ data class DisplayState(
      */
     val turnedOffHdrTypes: Set<Int> get() = activeMode?.hdrTypes.orEmpty().toSet() - hdrCapabilities.toSet()
 
+    /**
+     * The HDR types turned off, as this display tells and as [remembered]
+     * from other modes: one the mode in use doesn't list stays as it was
+     * seen (the setting holds in every mode, but each mode shows only the
+     * types it lists). Before Android 14, [remembered].
+     */
+    fun turnedOffHdrTypes(remembered: Set<Int>): Set<Int> {
+        val listed = activeMode?.hdrTypes ?: return remembered
+        return remembered - listed.toSet() + turnedOffHdrTypes
+    }
+
     /** The HDR types shown in [mode]: its own on Android 14 and up, less those turned off; else getHdrCapabilities. */
     fun hdrTypesIn(mode: DisplayModeInfo?): List<Int> = mode?.hdrTypes?.let { it - turnedOffHdrTypes } ?: hdrCapabilities
 

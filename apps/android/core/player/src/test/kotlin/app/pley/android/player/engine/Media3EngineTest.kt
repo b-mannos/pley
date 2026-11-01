@@ -17,6 +17,7 @@ import androidx.test.core.app.ApplicationProvider
 import app.pley.android.caps.CapsDetails
 import app.pley.android.caps.CapsSnapshot
 import app.pley.android.caps.DecoderPolicy
+import app.pley.android.caps.DisplayModeInfo
 import app.pley.android.caps.DisplayState
 import app.pley.android.caps.MatchContent
 import app.pley.android.common.DeviceProfile
@@ -26,6 +27,7 @@ import app.pley.android.model.DynamicRange
 import app.pley.android.model.MediaStream
 import app.pley.android.model.StreamKind
 import app.pley.android.model.caps.ClientCaps
+import app.pley.android.model.caps.DolbyVisionCaps
 import app.pley.android.player.EngineSource
 import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
@@ -50,6 +52,7 @@ import org.robolectric.Shadows.shadowOf
 import java.io.File
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.runBlocking
 
 @RunWith(RobolectricTestRunner::class)
 class Media3EngineTest {
@@ -67,15 +70,24 @@ class Media3EngineTest {
         javaClass.classLoader!!.getResourceAsStream("app/pley/android/fixtures/media/sample-1080p.mp4")!!.use { it.readBytes() }
     }
 
-    private class MemoryFrameRate : FrameRateMemory {
-        override suspend fun timeouts(displayKey: String) = 0
+    private class MemoryFrameRate(var timeouts: Int = 0) : FrameRateMemory {
+        val turnedOff = mutableMapOf<String, Set<Int>>()
+
+        override suspend fun timeouts(displayKey: String) = timeouts
 
         override suspend fun setTimeouts(displayKey: String, count: Int) = Unit
+
+        override suspend fun turnedOffHdrTypes(displayKey: String) = turnedOff[displayKey].orEmpty()
+
+        override suspend fun setTurnedOffHdrTypes(displayKey: String, types: Set<Int>) {
+            turnedOff[displayKey] = types
+        }
 
         override suspend fun takeHint() = false
     }
 
-    private class FakeHost(var display: DisplayState) : DisplayModeHost {
+    /** A display that switches at once, then shows the mode's HDR types, less those [turnedOff] in the system's settings. */
+    private class FakeHost(var display: DisplayState, private val turnedOff: Set<Int> = emptySet()) : DisplayModeHost {
         val requested = mutableListOf<Int>()
 
         override val displayKey = "0:HDMI"
@@ -87,7 +99,8 @@ class Media3EngineTest {
         }
 
         override suspend fun awaitMode(modeId: Int, timeoutMs: Long): Boolean {
-            display = display.copy(activeModeId = modeId)
+            val shows = display.modes.firstOrNull { it.id == modeId }?.hdrTypes?.let { it - turnedOff }
+            display = display.copy(activeModeId = modeId, hdrCapabilities = shows ?: display.hdrCapabilities)
             return true
         }
     }
@@ -102,6 +115,7 @@ class Media3EngineTest {
         settings: EngineSettings = EngineSettings(),
         music: Boolean = false,
         now: () -> Long = SystemClock::elapsedRealtime,
+        memory: FrameRateMemory = MemoryFrameRate(),
     ): Media3Engine = Media3Engine(
         context = context,
         profile = profile,
@@ -109,7 +123,7 @@ class Media3EngineTest {
         caps = { caps },
         mediaClient = { client },
         settings = { settings },
-        frameRateMemory = MemoryFrameRate(),
+        frameRateMemory = memory,
         focusPort = if (music) null else AndroidFocusPort(context),
         sdk = 34,
         now = now,
@@ -350,6 +364,69 @@ class Media3EngineTest {
         onPhone.prepare(EngineSource(file(), hls = false, video = film, durationMs = 7_200_000), startMs = 0, playWhenReady = true)
         assertTrue(onPhone.player.playWhenReady)
         assertEquals(emptyList<Int>(), host.requested)
+    }
+
+    /** A TV that shows Dolby Vision at 23.976 Hz but not in its 60 Hz home screen mode. */
+    private val dolbyVisionAt24 = DisplayState(
+        modes = listOf(
+            DisplayModeInfo(1, 3840, 2160, 60f, hdrTypes = listOf(ModeChoice.HDR_HDR10)),
+            DisplayModeInfo(2, 3840, 2160, 23.976f, hdrTypes = listOf(ModeChoice.HDR_DOLBY_VISION, ModeChoice.HDR_HDR10)),
+        ),
+        activeModeId = 1,
+        hdrCapabilities = listOf(ModeChoice.HDR_HDR10),
+        matchContent = MatchContent.Always,
+    )
+    private val dolbyVisionTv = CapsSnapshot(
+        ClientCaps(),
+        emptyList(),
+        CapsDetails(
+            policy = DecoderPolicy(tv = true),
+            screenHdrTypes = listOf(DynamicRange.Hdr10, DynamicRange.DolbyVision),
+            dolbyVisionProfiles = listOf(DolbyVisionCaps(profile = 8)),
+        ),
+    )
+    private val dolbyVisionFilm = MediaStream(
+        index = 0,
+        kind = StreamKind.Video,
+        codec = "hevc",
+        frameRate = 23.976,
+        dynamicRange = DynamicRange.DolbyVision,
+        dvProfile = 8,
+        dvBlCompat = 1,
+    )
+    private val twoHours = 2 * 60 * 60 * 1000L
+
+    @Test
+    fun dolbyVisionIsJudgedForTheModeTheVideoPlaysIn() = runBlocking {
+        val memory = MemoryFrameRate()
+        val engine = engine(profile = tv, caps = dolbyVisionTv, host = FakeHost(dolbyVisionAt24), memory = memory)
+        engine.attachWindow(Robolectric.buildActivity(Activity::class.java).setup().get().window)
+        assertEquals("a film switches to 23.976 Hz, which shows it", true, engine.dolbyVisionShown(dolbyVisionFilm, twoHours))
+        assertEquals("a trailer stays in the 60 Hz mode", false, engine.dolbyVisionShown(dolbyVisionFilm, 150_000))
+        assertEquals("so does a frame rate unknown", false, engine.dolbyVisionShown(dolbyVisionFilm.copy(frameRate = null), twoHours))
+        memory.timeouts = FrameRateController.GIVE_UP_AFTER
+        assertEquals("and a film where Auto gave up", false, engine.dolbyVisionShown(dolbyVisionFilm, twoHours))
+        val off = engine(profile = tv, caps = dolbyVisionTv, host = FakeHost(dolbyVisionAt24), settings = EngineSettings(refreshRate = RefreshRateMatching.Off))
+        off.attachWindow(Robolectric.buildActivity(Activity::class.java).setup().get().window)
+        assertEquals("matching turned off", false, off.dolbyVisionShown(dolbyVisionFilm, twoHours))
+    }
+
+    @Test
+    fun dolbyVisionTurnedOffShowsInTheFilmsModeAndIsRemembered() {
+        codecs.addDecoders(ShadowMediaCodecConfig.CODEC_INFO_AVC, ShadowMediaCodecConfig.CODEC_INFO_AAC)
+        val memory = MemoryFrameRate()
+        val host = FakeHost(dolbyVisionAt24, turnedOff = setOf(ModeChoice.HDR_DOLBY_VISION))
+        val engine = engine(profile = tv, caps = dolbyVisionTv, host = host, memory = memory)
+        engine.attachWindow(Robolectric.buildActivity(Activity::class.java).setup().get().window)
+        // The home screen's mode doesn't list Dolby Vision, so it can't say it is turned off.
+        assertEquals(true, runBlocking { engine.dolbyVisionShown(dolbyVisionFilm, twoHours) })
+
+        val source = EngineSource(file(), hls = false, video = dolbyVisionFilm, durationMs = twoHours, dolbyVision = true)
+        engine.prepare(source, startMs = 0, playWhenReady = false)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(FrameRateController.SETTLE_MS))
+        assertEquals(listOf(2), host.requested)
+        assertEquals("seen in the film's mode", setOf(ModeChoice.HDR_DOLBY_VISION), memory.turnedOff[host.displayKey])
+        assertEquals(false, runBlocking { engine.dolbyVisionShown(dolbyVisionFilm, twoHours) })
     }
 
     /** Serves [body] with ranges, as the server's /stream does, to requests carrying [token] only. */

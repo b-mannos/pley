@@ -36,6 +36,14 @@ import app.pley.android.player.PlayRequest
  * In direct play both are switched here, by the engine.
  */
 object PlaybackPlan {
+    /**
+     * [caps] as the server is told of one video: without the screen's Dolby
+     * Vision when the engine says the display mode it plays in doesn't show
+     * it ([dolbyVisionShown] `false`).
+     */
+    fun capsFor(caps: CapsSnapshot?, dolbyVisionShown: Boolean?): CapsSnapshot? =
+        if (dolbyVisionShown == false) caps?.withoutDolbyVisionScreen() else caps
+
     /** The file to play: the one asked for, else the one that plays best here, else the first. */
     fun file(item: ItemDetail, requested: Long?, caps: CapsSnapshot?, policy: PlaybackCapsPolicy): MediaFile? {
         requested?.let { id -> item.files.firstOrNull { it.id == id }?.let { return it } }
