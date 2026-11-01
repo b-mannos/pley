@@ -113,8 +113,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   the playhead moved by the subtitle offset; a file's own text tracks
  *   move through the server's WebVTT too while an offset is set.
  * - **Speed and audio delay**, for this title only: the engine's
- *   ([EngineLink.setSpeed], [EngineLink.setAudioDelay]), said unavailable
- *   while the sound can't follow (passed through, or tunneled).
+ *   ([EngineLink.setSpeed], [EngineLink.setAudioDelay]), with the sound
+ *   decoded here and untunneled while they need it ([EngineLink.setSoundNeeds]).
+ *   A stream whose sound nothing here decodes has the server convert it;
+ *   a download's plays at 1×.
  * - **Find subtitles…**: the server's search online for the file playing;
  *   one picked is added on the server and shown as any subtitle file.
  * - **Sleep timer**, and a session the server stopped: it says so and
@@ -188,6 +190,9 @@ class SessionPlaybackController(
     /** A download the server made plays: its file holds the subtitle tracks a conversion keeps. */
     private var playingConverted = false
 
+    /** A download plays, with no session on the server. */
+    private var playingLocal = false
+
     // ---------------------------------------------------------------- the session
 
     private val sessionState = MutableStateFlow<ServerPlaybackSession?>(null)
@@ -255,6 +260,13 @@ class SessionPlaybackController(
     /** The speed and the audio delay of this title. */
     private var speed = 1f
     private var audioDelayMs = 0L
+
+    /**
+     * Another speed than 1× while the sound goes to a receiver as it is and
+     * nothing here decodes it: sessions are asked for with this device's
+     * decoders only, so the server converts the sound.
+     */
+    private var serverDecodes = false
     private var searchJob: Job? = null
     private var seekReport: Job? = null
 
@@ -445,7 +457,7 @@ class SessionPlaybackController(
         } catch (_: Exception) {
             null
         }
-        fileCaps = PlaybackPlan.capsFor(caps, dolbyVision)
+        fileCaps = PlaybackPlan.capsFor(caps, dolbyVision, decoded = serverDecodes)
     }
 
     /**
@@ -573,6 +585,7 @@ class SessionPlaybackController(
     private fun loadSession(detail: ItemDetail, chosen: MediaFile, started: ServerPlaybackSession, atMs: Long) {
         sessionState.value = started
         live = null
+        playingLocal = false
         val info = started.info
         // Automatic: the track the server chose plays, switched to by the engine in direct play.
         if (audio == null) audio = PlaybackPlan.playedAudio(chosen, info.audioIndex)
@@ -589,6 +602,8 @@ class SessionPlaybackController(
                 canPlayOriginal = canPlayOriginal(),
                 durationMs = info.durationMs.takeIf { d -> d > 0 } ?: it.durationMs,
                 canFindSubtitles = true,
+                // A download's sound kept the speed at 1×: the server can convert this one's.
+                speedNote = null,
             )
         }
         publishChoices()
@@ -646,6 +661,7 @@ class SessionPlaybackController(
         )
         sessionState.value = ServerPlaybackSession(LocalReportsApi(env.api, env.local), detail.id, info, env.reporter)
         live = null
+        playingLocal = true
         ui.update {
             it.copy(
                 method = texts.downloaded,
@@ -975,7 +991,7 @@ class SessionPlaybackController(
         val now = env.now()
         val reconnecting = engineLink.reconnecting
         if (reconnecting != ui.value.reconnecting) ui.update { it.copy(reconnecting = reconnecting) }
-        audioOutChanged(engineLink.audioOut)
+        if (engineLink.soundUndecodable) soundUndecodable()
         val moving = mediaShown && engineLink.status == EngineStatus.Ready && engineLink.playWhenReady && !ended
         if (mediaShown && !ended) {
             val pos = engineLink.positionMs
@@ -1322,14 +1338,23 @@ class SessionPlaybackController(
         this.speed = wanted
         link?.setSpeed(wanted)
         ui.update { it.copy(speed = wanted) }
+        if (wanted == 1f && serverDecodes) {
+            // Back at 1×: the sound as the file has it, from a session made ready beside this one.
+            serverDecodes = false
+            soundNeeds(reload = false)
+            restart(livePosition(), alongside = true)
+        } else {
+            soundNeeds(reload = true)
+        }
     }
 
     override fun setAudioDelay(delayMs: Long) {
-        if (closed || stopped || ui.value.audioDelayNote != null) return
+        if (closed || stopped) return
         val moved = AudioDelays.clamp(delayMs)
         if (moved == audioDelayMs) return
         audioDelayMs = moved
         link?.setAudioDelay(moved)
+        soundNeeds(reload = true)
         // The picture jumps to the sound's new place: that wait or those dropped frames are no play issue.
         struggle.reset()
         autoQuality.jumped()
@@ -1343,24 +1368,32 @@ class SessionPlaybackController(
     }
 
     /**
-     * The sound's way out, looked at every tick: passed through, it plays
-     * at its own speed (the speed goes back to 1×); tunneled, the TV keeps
-     * the picture with it, and neither the speed nor the delay applies.
+     * What the speed and the audio delay need of the sound, told to the
+     * engine: decoded here for another speed than 1×, untunneled for any
+     * speed or delay. [reload]: the media playing follows at once.
      */
-    private fun audioOutChanged(out: AudioOut) {
-        val speedNote = when (out) {
-            AudioOut.Passthrough -> texts.speedPassthrough
-            AudioOut.Tunneled -> texts.tunneled
-            AudioOut.Decoded -> null
-        }
-        val delayNote = if (out == AudioOut.Tunneled) texts.tunneled else null
-        val s = ui.value
-        if (speedNote == s.speedNote && delayNote == s.audioDelayNote) return
-        if (speedNote != null && speed != 1f) {
+    private fun soundNeeds(reload: Boolean) {
+        link?.setSoundNeeds(decoded = speed != 1f, untunneled = speed != 1f || audioDelayMs != 0L, reload = reload)
+    }
+
+    /**
+     * Another speed than 1×, while the sound goes to a receiver as it is
+     * and nothing here decodes it ([EngineLink.soundUndecodable]): a stream
+     * is asked for again with this device's decoders only, made ready
+     * beside the one playing, so the server converts the sound and the
+     * video stays as it is. A download has no server to ask: it plays at 1×.
+     */
+    private fun soundUndecodable() {
+        if (speed == 1f || serverDecodes) return
+        if (playingLocal) {
             speed = 1f
             link?.setSpeed(1f)
+            soundNeeds(reload = true)
+            ui.update { it.copy(speed = 1f, speedNote = texts.speedUndecodable) }
+            return
         }
-        ui.update { it.copy(speedNote = speedNote, audioDelayNote = delayNote, speed = speed) }
+        serverDecodes = true
+        restart(livePosition(), alongside = true)
     }
 
     override fun searchSubtitles() {
@@ -1703,8 +1736,11 @@ class SessionPlaybackController(
         // Speed and audio delay are this title's: the next one plays as it is.
         speed = 1f
         audioDelayMs = 0
+        serverDecodes = false
         link?.setSpeed(1f)
         link?.setAudioDelay(0)
+        // The media playing goes: the next one's sound goes out as it would.
+        soundNeeds(reload = false)
         searchJob?.cancel()
         credits.reset()
         guardMode = null
@@ -1728,8 +1764,6 @@ class SessionPlaybackController(
                 title = it.title,
                 positionMs = req.startMs ?: 0,
                 sleep = it.sleep,
-                speedNote = it.speedNote,
-                audioDelayNote = it.audioDelayNote,
             )
         }
         sessionJob?.cancel()

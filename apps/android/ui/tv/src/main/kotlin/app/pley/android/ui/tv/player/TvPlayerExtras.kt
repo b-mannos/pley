@@ -85,16 +85,15 @@ internal fun SyncRow(offsetMs: Long, onChange: (Long) -> Unit, modifier: Modifie
 
 /**
  * The audio panel's delay row: Left and Right play the sound 50 ms earlier
- * or later than the picture (held: on and on), OK puts it back; [note]
- * says why it can't move, and then it doesn't.
+ * or later than the picture (held: on and on), OK puts it back.
  */
 @Composable
-internal fun AudioDelayRow(delayMs: Long, note: String?, onChange: (Long) -> Unit, modifier: Modifier = Modifier) = StepRow(
+internal fun AudioDelayRow(delayMs: Long, onChange: (Long) -> Unit, modifier: Modifier = Modifier) = StepRow(
     title = stringResource(R.string.tv_player_audio_delay),
-    hint = note ?: stringResource(R.string.tv_player_sync_hint),
+    hint = stringResource(R.string.tv_player_sync_hint),
     value = AudioDelays.label(delayMs),
-    onStep = { if (note == null) onChange(delayMs + it * AudioDelays.STEP_MS) },
-    onReset = { if (note == null) onChange(0) },
+    onStep = { onChange(delayMs + it * AudioDelays.STEP_MS) },
+    onReset = { onChange(0) },
     tag = TAG_AUDIO_DELAY,
     modifier = modifier,
 )

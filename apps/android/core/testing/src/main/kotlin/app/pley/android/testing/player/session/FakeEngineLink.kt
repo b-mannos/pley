@@ -3,7 +3,6 @@ package app.pley.android.testing.player.session
 import app.pley.android.model.MediaStream
 import app.pley.android.player.EngineSource
 import app.pley.android.player.PlayerEngine
-import app.pley.android.player.session.AudioOut
 import app.pley.android.player.session.EngineError
 import app.pley.android.player.session.EngineLink
 import app.pley.android.player.session.EngineStatus
@@ -45,13 +44,19 @@ class FakeEngineLink(private val clock: () -> Long = { 0L }) : EngineLink {
     /** What [dolbyVisionShown] answers: `null`, the engine can't tell. */
     var dolbyVision: Boolean? = null
 
-    /** How the sound goes out: tests say when it passes through or is tunneled. */
-    override var audioOut: AudioOut = AudioOut.Decoded
+    /** Tests say when the sound was to be decoded here but passes through, nothing here decoding it. */
+    override var soundUndecodable: Boolean = false
 
     /** The speed and the audio delay asked for last. */
     var speed = 1f
         private set
     var audioDelayMs = 0L
+        private set
+
+    /** What the sound must be, as asked last: decoded here, untunneled, and whether the media playing followed. */
+    data class SoundNeeds(val decoded: Boolean, val untunneled: Boolean, val reload: Boolean)
+
+    var soundNeeds = SoundNeeds(decoded = false, untunneled = false, reload = false)
         private set
 
     private var listener: EngineLink.Listener? = null
@@ -92,6 +97,7 @@ class FakeEngineLink(private val clock: () -> Long = { 0L }) : EngineLink {
 
     override fun prepare(source: EngineSource, startMs: Long, playWhenReady: Boolean) {
         prepared += Prepared(source, startMs, playWhenReady)
+        soundUndecodable = false
         settle(startMs)
         frozen = false
         starving = false
@@ -189,6 +195,11 @@ class FakeEngineLink(private val clock: () -> Long = { 0L }) : EngineLink {
 
     override fun setAudioDelay(delayMs: Long) {
         audioDelayMs = delayMs
+    }
+
+    override fun setSoundNeeds(decoded: Boolean, untunneled: Boolean, reload: Boolean) {
+        soundNeeds = SoundNeeds(decoded, untunneled, reload)
+        if (!decoded) soundUndecodable = false
     }
 
     override fun stats(): List<String> = lines

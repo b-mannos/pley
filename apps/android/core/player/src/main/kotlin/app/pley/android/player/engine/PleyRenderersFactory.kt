@@ -21,7 +21,8 @@ import androidx.media3.exoplayer.video.VideoRendererEventListener
  * (a Dolby Vision decoder to the base layer's HEVC decoder); Fire TV queues
  * buffers asynchronously, as Amazon asks, unless its model's kill switch
  * says no; the sound can be moved against the picture ([audioDelay],
- * [DelayedAudioSink]). Music gets no video renderer.
+ * [DelayedAudioSink]) and decoded here rather than passed through
+ * ([audioDecoding], [DecodingAudioSink]). Music gets no video renderer.
  */
 @OptIn(markerClass = [UnstableApi::class])
 class PleyRenderersFactory(
@@ -30,6 +31,7 @@ class PleyRenderersFactory(
     asyncQueueing: Boolean,
     private val music: Boolean,
     private val audioDelay: AudioDelay? = null,
+    private val audioDecoding: AudioDecoding? = null,
     /** Each video decoder started, with the MIME type it decodes; before Media3's listeners hear of it. */
     private val onVideoCodec: (name: String, mimeType: String) -> Unit = { _, _ -> },
 ) : DefaultRenderersFactory(context) {
@@ -64,7 +66,8 @@ class PleyRenderersFactory(
 
     override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink? {
         val sink = super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams) ?: return null
-        return audioDelay?.let { DelayedAudioSink(sink, it) } ?: sink
+        val delayed = audioDelay?.let { DelayedAudioSink(sink, it) } ?: sink
+        return audioDecoding?.let { DecodingAudioSink(delayed, it) } ?: delayed
     }
 
     override fun buildCameraMotionRenderers(context: Context, extensionRendererMode: Int, out: ArrayList<Renderer>) = Unit

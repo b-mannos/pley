@@ -66,9 +66,8 @@
     <!-- "2.5× real time · 40 s ready". -->
     <string name="session_speed_ready">%1$s× real time · %2$d s ready</string>
 
-    <!-- Playback speed and audio delay, when they can't change. -->
-    <string name="session_speed_passthrough">Not while the sound goes to your receiver as it is: it plays at its own speed</string>
-    <string name="session_tunneled">Not with tunneled playback, where the TV keeps the picture with the sound itself</string>
+    <!-- Playback speed, when a download's sound keeps it at 1×. -->
+    <string name="session_speed_undecodable">Not for this download: its sound goes to your receiver as it is, and nothing here decodes it</string>
 
     <!-- Find subtitles… (subtitles found online, docs/API.md). -->
     <string name="session_search_not_set_up">Subtitle search isn\'t set up on this server</string>

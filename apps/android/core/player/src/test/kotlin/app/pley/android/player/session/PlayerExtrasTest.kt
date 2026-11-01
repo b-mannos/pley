@@ -1,8 +1,14 @@
 package app.pley.android.player.session
 
+import app.pley.android.data.LocalFile
+import app.pley.android.data.LocalMedia
 import app.pley.android.fixtures.FixtureIds
 import app.pley.android.player.PlayRequest
 import app.pley.android.player.SubtitleSearchUi
+import app.pley.android.testing.caps.TestDevices
+import app.pley.android.testing.caps.capsOf
+import app.pley.android.testing.player.session.FakeEngineLink.SoundNeeds
+import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -45,35 +51,76 @@ class PlayerExtrasTest {
     }
 
     @Test
-    fun `sound passed through to a receiver plays at its own speed, and says so`() {
+    fun `another speed has the sound decoded here and untunneled, and the delay untunneled, at once`() {
         val c = playing()
-        c.setSpeed(2f)
-        h.engine.audioOut = AudioOut.Passthrough
-        h.advance(1_000)
-        val state = c.state.value
-        assertNotNull(state.speedNote)
-        assertEquals(1f, state.speed)
-        assertEquals(1f, h.engine.speed)
-        c.setSpeed(2f)
-        assertEquals(1f, h.engine.speed)
-        // The delay still moves passed-through sound.
-        assertNull(state.audioDelayNote)
+        c.setSpeed(1.5f)
+        assertEquals(SoundNeeds(decoded = true, untunneled = true, reload = true), h.engine.soundNeeds)
+        c.setSpeed(1f)
+        assertEquals(SoundNeeds(decoded = false, untunneled = false, reload = true), h.engine.soundNeeds)
         c.setAudioDelay(200)
         assertEquals(200L, h.engine.audioDelayMs)
-        h.engine.audioOut = AudioOut.Decoded
-        h.advance(1_000)
-        assertNull(c.state.value.speedNote)
+        assertEquals(SoundNeeds(decoded = false, untunneled = true, reload = true), h.engine.soundNeeds)
+        assertEquals(1, h.playbackRequests().size)
+        // The next title goes out as it would, from its first load.
+        c.playNext()
+        h.settle()
+        assertEquals(SoundNeeds(decoded = false, untunneled = false, reload = false), h.engine.soundNeeds)
     }
 
     @Test
-    fun `tunneled, neither the speed nor the delay moves`() {
-        val c = playing()
-        h.engine.audioOut = AudioOut.Tunneled
+    fun `sound that nothing here decodes is converted by the server for another speed, and comes back at 1x`() {
+        SessionHarness(caps = capsOf(TestDevices.googleTvStreamer)).use { tv ->
+            val c = tv.play(PlayRequest(FixtureIds.SHOW_S1E1, startMs = 0))
+            tv.engine.ready()
+            tv.advance(2_000)
+            c.setSpeed(1.5f)
+            tv.engine.soundUndecodable = true
+            tv.advance(1_000)
+            tv.settle()
+            val asked = tv.playbackRequests()
+            assertEquals(2, asked.size)
+            assertTrue(asked[0].caps.audioPassthrough.orEmpty().isNotEmpty())
+            assertEquals("the device's decoders only", emptyList<String>(), asked[1].caps.audioPassthrough)
+            assertEquals(asked[1].caps.audioDecode, asked[1].caps.audioCodecs)
+            assertEquals(true, asked[1].keepPrevious)
+            assertEquals(1.5f, tv.engine.speed)
+            assertEquals(1.5f, c.state.value.speed)
+            assertNull(c.state.value.speedNote)
+            assertEquals(2, tv.engine.prepared.size)
+
+            tv.engine.ready()
+            tv.advance(1_000)
+            c.setSpeed(1f)
+            tv.settle()
+            val again = tv.playbackRequests()
+            assertEquals(3, again.size)
+            assertEquals(asked[0].caps.audioPassthrough, again[2].caps.audioPassthrough)
+            assertEquals(SoundNeeds(decoded = false, untunneled = false, reload = false), tv.engine.soundNeeds)
+        }
+    }
+
+    @Test
+    fun `a download whose sound nothing here decodes plays at 1x, and says why`() {
+        val movie = runBlocking { h.api.item(FixtureIds.SAMPLE_1080P) }
+        h.local = object : LocalMedia {
+            override fun file(fileId: Long) = LocalFile("file:///downloads/movie.mkv").takeIf { fileId == movie.files.first().id }
+        }
+        val c = h.play(PlayRequest(FixtureIds.SAMPLE_1080P))
+        h.engine.ready()
+        h.advance(2_000)
+        c.setSpeed(2f)
+        h.engine.soundUndecodable = true
         h.advance(1_000)
+        h.settle()
+        assertEquals("no server session", 0, h.playbackRequests().size)
+        assertEquals(1f, h.engine.speed)
+        assertEquals(1f, c.state.value.speed)
         assertNotNull(c.state.value.speedNote)
-        assertNotNull(c.state.value.audioDelayNote)
-        c.setAudioDelay(500)
-        assertEquals(0L, h.engine.audioDelayMs)
+        c.setSpeed(2f)
+        assertEquals(1f, h.engine.speed)
+        // The delay still moves it.
+        c.setAudioDelay(200)
+        assertEquals(200L, h.engine.audioDelayMs)
     }
 
     @Test

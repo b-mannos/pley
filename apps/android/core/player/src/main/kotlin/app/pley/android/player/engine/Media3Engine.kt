@@ -98,6 +98,8 @@ class Media3EngineFactory(
  * - tracks never beyond what the device plays (the session asks the server
  *   instead), selections redone when the audio output changes, Dolby Vision
  *   preferred on Dolby Vision screens, tunneling only where allowed;
+ * - the sound decoded here and tunneling off while the speed or the audio
+ *   delay needs it ([setSoundNeeds]);
  * - buffers by memory tier, starting sooner from a home server;
  * - on TVs, the display mode matched to the video's frame rate before it
  *   plays; on phones, Media3's seamless-only rate hints;
@@ -150,6 +152,7 @@ class Media3Engine(
 
     private val loadControl = PleyLoadControl(BufferPlan.of(profile))
     private val audioDelay = AudioDelay()
+    private val audioDecoding = AudioDecoding()
     private val trackSelector = DefaultTrackSelector(app, sizeSwitching())
     private val loading = MediaLoading(app, mediaClient, now)
 
@@ -161,6 +164,7 @@ class Media3Engine(
                 asyncQueueing = details?.forceAsyncQueueing ?: profile.fireTv,
                 music = music,
                 audioDelay = if (music) null else audioDelay,
+                audioDecoding = if (music) null else audioDecoding,
                 onVideoCodec = { name, mimeType -> videoCodec = name to mimeType },
             ),
         )
@@ -220,6 +224,12 @@ class Media3Engine(
     private var ownPauses = 0
     private var released = false
 
+    /** Tunneled playback is held off for the speed or the audio delay ([setSoundNeeds]). */
+    private var untunneled = false
+
+    /** The media playing was loaded again to decode a sound that passed through: back at 1×, again to pass it through. */
+    private var reloadedToDecode = false
+
     /** The player's playWhenReady as last reported: Media3 also reports a new reason alone, paused already. */
     private var reportedPlayWhenReady = false
 
@@ -266,6 +276,7 @@ class Media3Engine(
         check(!released) { "The engine was released" }
         matchJob?.cancel()
         wantPlay = playWhenReady
+        reloadedToDecode = false
         loadControl.home = BufferPlan.isHome(source.url)
         loadControl.live = source.live
         applyTrackParameters()
@@ -316,6 +327,41 @@ class Media3Engine(
 
     override fun setAudioDelay(delayMs: Long) {
         audioDelay.us = delayMs * 1_000
+    }
+
+    /**
+     * Tunneling is a track selection parameter: Media3 sets the renderers up
+     * again when it changes. Passthrough is the audio output's choice when
+     * the renderer starts, so the media is loaded again where it is, as for
+     * [recheckDolbyVision].
+     */
+    override fun setSoundNeeds(decoded: Boolean, untunneled: Boolean, reload: Boolean) {
+        if (music) return
+        val tunnelingChanged = untunneled != this.untunneled
+        val decodingChanged = decoded != audioDecoding.on
+        this.untunneled = untunneled
+        audioDecoding.on = decoded
+        if (!decoded) mutableState.update { it.copy(soundUndecodable = false) }
+        if (!reload) return
+        if (tunnelingChanged) applyTrackParameters()
+        val source = loaded?.takeIf { !it.live }
+        if (!decodingChanged || source == null) return
+        if (decoded) {
+            // No sound yet: the output takes it as asked when it starts (onAudioTrackInitialized).
+            val format = player.audioFormat ?: return
+            if (!state.value.stats.passthrough) return
+            if (!DecodingAudioSink.hasDecoder(format)) {
+                mutableState.update { it.copy(soundUndecodable = true) }
+                return
+            }
+            reloadedToDecode = true
+        } else {
+            if (!reloadedToDecode) return
+            reloadedToDecode = false
+        }
+        Log.i(TAG, "loads again where it is to ${if (decoded) "decode the sound" else "pass the sound through"}")
+        player.setMediaSource(loading.mediaSource(source), player.currentPosition)
+        player.prepare()
     }
 
     override fun attachWindow(window: Window) {
@@ -413,7 +459,7 @@ class Media3Engine(
         val builder = trackSelector.buildUponParameters()
             .setExceedRendererCapabilitiesIfNecessary(false)
             .setAllowInvalidateSelectionsOnRendererCapabilitiesChange(true)
-            .setTunnelingEnabled(!music && (caps?.tunnelingAllowed == true || settings().tunneling))
+            .setTunnelingEnabled(!music && !untunneled && (caps?.tunnelingAllowed == true || settings().tunneling))
             .setPreferredVideoMimeTypes(*if (dolbyVisionScreen) arrayOf(MimeTypes.VIDEO_DOLBY_VISION) else emptyArray())
         if (music) {
             builder.setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
@@ -545,10 +591,14 @@ class Media3Engine(
         }
     }
 
-    /** Tells the focus rules when encoded audio passes through. */
+    /** Tells the focus rules when encoded audio passes through, and the session when it does though it was to be decoded. */
     private inner class AudioOutput : AnalyticsListener {
         override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {
-            focus?.passthrough = PlaybackAnalytics.isPassthrough(audioTrackConfig.encoding)
+            val passthrough = PlaybackAnalytics.isPassthrough(audioTrackConfig.encoding)
+            focus?.passthrough = passthrough
+            // DecodingAudioSink lets it through only when no decoder here takes it.
+            val undecodable = passthrough && audioDecoding.on && player.audioFormat?.let { !DecodingAudioSink.hasDecoder(it) } == true
+            if (undecodable) mutableState.update { it.copy(soundUndecodable = true) }
         }
     }
 
