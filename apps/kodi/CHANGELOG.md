@@ -8,6 +8,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Fixed
+
+- The rail of Pley's window shows or drops Live TV as soon as it is set up
+  or its last source removed, without reopening the window.
+
 ## [0.1.0] - 2026-10-30
 
 ### Added

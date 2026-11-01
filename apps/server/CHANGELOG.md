@@ -9,6 +9,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Fixed
+
+- The web app's sidebar shows Live TV only once it has channels, for
+  administrators too; they set it up in Settings → Live TV.
+
 ## [0.1.0] - 2026-10-30
 
 ### Security
