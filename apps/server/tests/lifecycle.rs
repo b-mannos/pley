@@ -179,7 +179,14 @@ async fn one_server_per_data_directory() {
 
     ctx.send(Command::Quit);
     stopped(server, Duration::from_secs(5)).await.unwrap();
-    // The lock went with the server that held it.
+    // The lock went with the server that held it. On Linux and macOS a
+    // process another test starts meanwhile shares the lock's descriptor
+    // until it runs its program, so it may stay a moment longer.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while let Err(err) = pley::instance::InstanceLock::acquire(data.path()) {
+        assert!(Instant::now() < deadline, "the lock stayed after its server stopped: {err:#}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     let (_, ctx, server) = start(config(data.path())).await;
     ctx.send(Command::Quit);
     stopped(server, Duration::from_secs(5)).await.unwrap();
