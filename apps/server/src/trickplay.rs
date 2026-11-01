@@ -67,6 +67,9 @@ const LIBRARY_LOOKUP: Duration = Duration::from_secs(60);
 /// alone. One that has started is waited for: a title on a share that
 /// doesn't answer couldn't be made anyway.
 const OPENED_LOOKUP: Duration = Duration::from_secs(5);
+/// How long scans go without reading the versions of the previews kept
+/// while the transcoder's stays the same ([`versions_due`]).
+const VERSIONS_AGAIN: Duration = Duration::from_secs(24 * 60 * 60);
 /// The settings row saying the BIF indexes earlier versions kept beside the
 /// previews are gone.
 const OLD_BIFS_REMOVED: &str = "old_bifs_removed";
@@ -91,6 +94,10 @@ pub struct TrickplayService {
     queued: tokio::sync::Notify,
     /// File versions that could not be done (by fingerprint); retried after a restart.
     failed: Mutex<HashMap<i64, String>>,
+    /// The transcoder's version of previews when a scan last read those
+    /// kept, and when ([`versions_due`]): in memory, so that a start reads
+    /// them again.
+    versions_read: Mutex<Option<(u32, Instant)>>,
     /// Fingerprints being made (see [`Claim`]).
     making: Mutex<HashSet<Arc<str>>>,
     /// One chapter-image or BIF job per media folder at a time, by fingerprint.
@@ -361,6 +368,7 @@ impl TrickplayService {
             queues: Mutex::default(),
             queued: tokio::sync::Notify::new(),
             failed: Mutex::default(),
+            versions_read: Mutex::default(),
             making: Mutex::default(),
             cutting: Mutex::default(),
             cuts: tokio::sync::Semaphore::new(CUTS_AT_ONCE),
@@ -471,8 +479,9 @@ impl TrickplayService {
     }
 
     /// Queue every video file without previews, newest first, then those
-    /// whose previews an earlier version made (when previews are made for
-    /// whole libraries).
+    /// whose previews an earlier version made, when previews are made for
+    /// whole libraries. Those are looked for only when that may find others
+    /// ([`versions_due`]).
     pub async fn request_all(&self) {
         let settings = self.settings.get();
         if !settings.seek_previews || !settings.previews_in_background {
@@ -491,10 +500,18 @@ impl TrickplayService {
             self.transcoder.wait_ready(Duration::from_secs(60)).await;
         }
         let current = self.transcoder.trickplay_version();
+        let versions = {
+            let mut read = self.versions_read.lock();
+            let due = versions_due(*read, current, Instant::now());
+            if due {
+                *read = Some((current, Instant::now()));
+            }
+            due
+        };
         // Which ones have previews is a question for the disk (one look per
-        // file in the data folder, and a read of those an earlier version may
-        // have made): asked off the async workers. Those queued already stay
-        // as they are, also if they are done meanwhile.
+        // file in the data folder, and when versions are due a read of each
+        // one's index): asked off the async workers. Those queued already
+        // stay as they are, also if they are done meanwhile.
         let queued = self.queues.lock().pending.clone();
         let failed = self.failed.lock().clone();
         let store = self.store.clone();
@@ -508,7 +525,7 @@ impl TrickplayService {
                     fp.as_deref().and_then(|fp| store.media_dir(fp)).map(|d| d.join("trickplay").join("index.json"));
                 match (index.filter(|index| index.is_file()), fp) {
                     (Some(index), Some(fp)) => {
-                        if current > 0 && version_of(&index) < current {
+                        if versions && version_of(&index) < current {
                             older.push((id, Some(fp), path));
                         }
                     }
@@ -1130,6 +1147,17 @@ async fn remove_old_bifs(db: &Db, store: Arc<Store>) {
     }
 }
 
+/// Whether a scan reads the version of every file's previews at `now`, to
+/// find those an earlier version made, `read` being the last such read (the
+/// transcoder's version then, and when): only when that may find others
+/// than it did, as the transcoder makes another version, or a day later, so
+/// that those dropped from the queue meanwhile are found again. Never while
+/// the transcoder doesn't say which it makes (0).
+fn versions_due(read: Option<(u32, Instant)>, current: u32, now: Instant) -> bool {
+    current > 0
+        && read.is_none_or(|(version, at)| version != current || now.saturating_duration_since(at) >= VERSIONS_AGAIN)
+}
+
 /// The version of the previews whose index is at `index`; 0 when it
 /// doesn't say (made before versions), or can't be read (made again).
 fn version_of(index: &Path) -> u32 {
@@ -1298,6 +1326,16 @@ mod tests {
         assert_eq!(version_of(&index), 0);
         std::fs::write(&index, b"not json").unwrap();
         assert_eq!(version_of(&index), 0, "made again");
+    }
+
+    #[test]
+    fn versions_are_read_again_for_another_transcoder_or_a_day_later() {
+        let now = Instant::now();
+        assert!(versions_due(None, 1, now), "the first scan");
+        assert!(!versions_due(Some((1, now)), 1, now + Duration::from_secs(3600)), "the same transcoder, that day");
+        assert!(versions_due(Some((1, now)), 2, now + Duration::from_secs(60)), "a transcoder that makes others");
+        assert!(versions_due(Some((1, now)), 1, now + VERSIONS_AGAIN), "a day later");
+        assert!(!versions_due(None, 0, now), "a transcoder that doesn't say");
     }
 
     #[test]
