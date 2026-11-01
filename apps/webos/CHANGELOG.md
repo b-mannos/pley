@@ -13,6 +13,11 @@ describes how they are made.
 - Signing in with a code says when the server requires two-step sign-in:
   the phone that approves the code sets it up for whoever hasn't.
 
+### Changed
+
+- Pley for LG TV is free software under the GNU Affero General Public
+  License, version 3 (`AGPL-3.0-only`, `LICENSE`).
+
 ## [0.1.0] - 2026-10-30
 
 ### Security

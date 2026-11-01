@@ -14,6 +14,11 @@ describes how they are made.
   you set it up on the server's page as you sign in; on a TV, the phone
   that approves the code sets it up for whoever hasn't.
 
+### Changed
+
+- Pley for Android is free software under the GNU Affero General Public
+  License, version 3 (`AGPL-3.0-only`, `LICENSE`).
+
 ## [0.1.0] - 2026-10-30
 
 ### Added

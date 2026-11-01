@@ -13,6 +13,11 @@ describes how they are made.
 - Signing in with a code says when the server requires two-step sign-in:
   the phone that approves the code sets it up for whoever hasn't.
 
+### Fixed
+
+- The rail of Pley's window shows or drops Live TV as soon as it is set up
+  or its last source removed, without reopening the window.
+
 ## [0.1.0] - 2026-10-30
 
 ### Added

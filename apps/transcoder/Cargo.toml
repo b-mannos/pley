@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 description = "Pley transcoder: FFmpeg-based media engine (probing, HLS transcoding, HDR/Dolby Vision tone mapping) for the Pley media server"
-license = "LicenseRef-Restricted"
+license = "AGPL-3.0-only"
 publish = false
 
 # This crate is intentionally self-contained (no workspace inheritance): a

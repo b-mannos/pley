@@ -24,6 +24,17 @@ describes how they are made.
 - A code from the authenticator app pasted with a space in it ("123 456")
   signs in.
 
+### Changed
+
+- Pley is free software under the GNU Affero General Public License,
+  version 3 (`AGPL-3.0-only`, `LICENSE`). The transcoder gives the address
+  of its source (`GET /v1/info`, `--license`).
+
+### Fixed
+
+- The web app's sidebar shows Live TV only once it has channels, for
+  administrators too; they set it up in Settings → Live TV.
+
 ## [0.1.0] - 2026-10-30
 
 ### Security
