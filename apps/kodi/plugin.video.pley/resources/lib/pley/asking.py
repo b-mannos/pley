@@ -170,9 +170,13 @@ class Asking:
         if requests.lists(s):
             self.requests_entry(s)
 
-    def notify_service(self) -> None:
-        """The service reads the summary again (news.py)."""
-        kodi.clear_property(requests.SUMMARY)
+    def notify_service(self, forget: bool = False) -> None:
+        """The service reads the summary again (news.py). Until it has, the
+        listing shown again reads the one kept: with none, On TMDB and
+        Request more seasons would go. `forget`: that one is another
+        sign-in's or profile's, and goes now."""
+        if forget:
+            kodi.clear_property(requests.SUMMARY)
         xbmc.executebuiltin("NotifyAll(%s,%s)" % (kodi.ADDON_ID, requests.ASKING))
 
     # ------------------------------------------------------------ Discover

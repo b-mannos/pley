@@ -726,7 +726,7 @@ class Plugin(asking.Asking):
         if kodi.get_property(kodi.WINDOW_OPEN):
             xbmc.executebuiltin("NotifyAll(%s,%s)" % (kodi.ADDON_ID, profiles.SWITCHED))
         # Requests are the profile's own.
-        self.notify_service()
+        self.notify_service(forget=True)
         xbmc.executebuiltin("Container.Refresh")
 
     def password_profile(self, profile: dict) -> None:
@@ -857,7 +857,7 @@ class Plugin(asking.Asking):
                     # Whoever approved it chose the profile: "Who's watching?" is answered.
                     kodi.set_property(profiles.GATE, "1")
                     # What it may do with requests is the new sign-in's.
-                    self.notify_service()
+                    self.notify_service(forget=True)
                     if previous and previous.get("refresh_token") != record["refresh_token"]:
                         # The sign-in this one replaces ends on its server too.
                         auth.revoke(previous, kodi.user_agent())

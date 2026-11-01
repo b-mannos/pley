@@ -8,7 +8,7 @@ import xbmc
 import xbmcaddon
 import xbmcgui
 import xbmcplugin
-from pley import asking, kodi, plugin, requests, words
+from pley import asking, kodi, plugin, profiles, requests, words
 
 DAY = 86400
 BASE = "plugin://plugin.video.pley/"
@@ -269,7 +269,7 @@ class TitleTest(Case):
         self.assertEqual(self.sent("POST", "/api/requests"), [("POST", "/api/requests", {"kind": "movie", "tmdb_id": 949})])
         self.assertEqual(xbmcgui.notified, [("Pley", "Asked for “Heat”: an administrator decides.")])
         self.assertEqual(xbmc.builtins, ["NotifyAll(plugin.video.pley,pley.asking)", "Container.Refresh"])
-        self.assertEqual(kodi.get_property(requests.SUMMARY), "", "read again")
+        self.assertEqual(json.loads(kodi.get_property(requests.SUMMARY)), ON, "kept for the listing shown again; the service reads it anew")
         del self.server.requests[:]
         self.ask("route=title&kind=movie&tmdb=949", False)
         self.assertEqual(self.sent("POST"), [], "cancelled")
@@ -514,12 +514,37 @@ class SearchTest(Case):
         self.assertEqual(self.labels(self.run_plugin("route=search&q=heat"))[1:4], ["On TMDB", "Title 1", "Title 2"])
         self.assertEqual(len(self.sent("GET", "/api/discover/search")), 1, "kept")
 
+    def test_a_title_asked_for_from_search_leaves_tmdb_there(self):
+        # The listing is shown again at once, before the service has read
+        # the summary anew.
+        self.answers["GET /api/discover/movie/1"] = (200, detail(title(1)))
+        self.answers["POST /api/requests"] = (201, {"status": "pending", "title": "Title 1"})
+        with Dialogs(True):
+            self.run_plugin("route=title&kind=movie&tmdb=1", handle="-1")
+        self.assertEqual(xbmc.builtins[-1], "Container.Refresh")
+        del xbmcplugin.calls[:]
+        self.assertIn("On TMDB", self.labels(self.run_plugin("route=search&q=heat")))
+
     def test_no_tmdb_where_this_sign_in_cant_ask(self):
         self.summary(dict(ON, access="off"))
         self.answers["GET /api/search"] = (200, {"items": []})
         self.assertEqual(self.run_plugin("route=search&q=heat"), [])
         self.assertEqual(xbmcgui.notified, [("Pley", "Nothing found")])
         self.assertEqual(self.sent("GET", "/api/discover/search"), [])
+
+
+class ProfileTest(Case):
+    def test_another_profile_keeps_nothing_of_the_one_before(self):
+        self.summary(MANAGER)
+        self.addCleanup(kodi.clear_property, profiles.GATE)
+        self.answers["GET /api/oauth/profiles"] = (200, [{"id": 1, "name": "Ann", "current": True, "needs": "none"},
+                                                         {"id": 2, "name": "Bo", "current": False, "needs": "none"}])
+        self.answers["POST /switch-profile"] = (200, {})
+        with Dialogs(1):
+            self.run_plugin("route=profiles", handle="-1")
+        self.assertEqual(self.sent("POST", "/switch-profile")[0][2], {"profile": 2, "pin": None})
+        self.assertEqual(kodi.get_property(requests.SUMMARY), "", "Bo's is read")
+        self.assertEqual(xbmc.builtins, ["NotifyAll(plugin.video.pley,pley.asking)", "Container.Refresh"])
 
 
 class MoreSeasonsTest(Case):
