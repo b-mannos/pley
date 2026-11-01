@@ -39,9 +39,9 @@ describe("image sizes", () => {
     expect(sizedImage("", 300)).toBeNull();
   });
 
-  it("leaves another site's images as they are", () => {
-    const tmdb = "https://image.tmdb.org/t/p/w342/abc.jpg";
-    expect(sizedImage(tmdb, 150)).toBe(tmdb);
+  it("asks the server for TMDB's pictures at the width drawn, as for any other", () => {
+    vi.stubGlobal("devicePixelRatio", 1);
+    expect(sizedImage("/api/discover/images/poster/abc.jpg", 150)).toBe("/api/discover/images/poster/abc.jpg?w=160");
   });
 });
 
