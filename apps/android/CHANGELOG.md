@@ -13,8 +13,10 @@ describes how they are made.
 - Playback speed works with sound that goes to a receiver as it is: the
   device decodes it while the speed isn't Normal, or the server converts
   it when nothing on the device can, and it goes to the receiver as it is
-  again back at Normal. Speed and audio delay also work where tunneled
-  playback is on, which they turn off while they're used.
+  again back at Normal. Where the server can't convert it either, the
+  speed stays at Normal and says why, and the title plays on. Speed and
+  audio delay also work where tunneled playback is on, which they turn
+  off while they're used.
 
 ## [0.1.1] - 2026-11-01
 

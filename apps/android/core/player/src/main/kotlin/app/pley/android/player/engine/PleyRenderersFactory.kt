@@ -67,7 +67,7 @@ class PleyRenderersFactory(
     override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink? {
         val sink = super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams) ?: return null
         val delayed = audioDelay?.let { DelayedAudioSink(sink, it) } ?: sink
-        return audioDecoding?.let { DecodingAudioSink(delayed, it) } ?: delayed
+        return audioDecoding?.let { DecodingAudioSink(delayed, it) { format -> DecodingAudioSink.hasDecoder(context, format) } } ?: delayed
     }
 
     override fun buildCameraMotionRenderers(context: Context, extensionRendererMode: Int, out: ArrayList<Renderer>) = Unit

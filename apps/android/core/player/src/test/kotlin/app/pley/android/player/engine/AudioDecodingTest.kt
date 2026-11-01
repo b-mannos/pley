@@ -49,5 +49,20 @@ class AudioDecodingTest {
     fun `sound that nothing here decodes still passes through`() {
         decoding.on = true
         assertEquals(AudioSink.SINK_FORMAT_SUPPORTED_DIRECTLY, sink(decodes = false).getFormatSupport(ac3))
+        assertFalse(decoding.turnedDown(ac3))
+    }
+
+    @Test
+    fun `sound taken as PCM only for the speed is known, to pass it through again`() {
+        val sink = sink(decodes = true)
+        sink.getFormatSupport(ac3)
+        assertFalse("passed through", decoding.turnedDown(ac3))
+        decoding.on = true
+        sink.getFormatSupport(ac3)
+        assertTrue(decoding.turnedDown(ac3))
+        // Another layout of it wasn't asked for.
+        assertFalse(decoding.turnedDown(ac3.buildUpon().setChannelCount(2).build()))
+        decoding.forget()
+        assertFalse(decoding.turnedDown(ac3))
     }
 }

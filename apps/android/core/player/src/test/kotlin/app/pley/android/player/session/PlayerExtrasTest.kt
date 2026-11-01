@@ -3,7 +3,9 @@ package app.pley.android.player.session
 import app.pley.android.data.LocalFile
 import app.pley.android.data.LocalMedia
 import app.pley.android.fixtures.FixtureIds
+import app.pley.android.model.StreamKind
 import app.pley.android.player.PlayRequest
+import app.pley.android.player.PlayerPhase
 import app.pley.android.player.SubtitleSearchUi
 import app.pley.android.testing.caps.TestDevices
 import app.pley.android.testing.caps.capsOf
@@ -11,6 +13,7 @@ import app.pley.android.testing.player.session.FakeEngineLink.SoundNeeds
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -121,6 +124,77 @@ class PlayerExtrasTest {
         // The delay still moves it.
         c.setAudioDelay(200)
         assertEquals(200L, h.engine.audioDelayMs)
+    }
+
+    @Test
+    fun `a download's other audio track may be tried at another speed again`() {
+        val movie = Catalogue.movieWithTracks(h.api)
+        val audio = movie.files.first().streams.filter { it.kind == StreamKind.Audio }
+        h.local = object : LocalMedia {
+            override fun file(fileId: Long) = LocalFile("file:///downloads/movie.mkv").takeIf { fileId == movie.files.first().id }
+        }
+        val c = h.play(PlayRequest(movie.id))
+        h.engine.ready()
+        h.advance(2_000)
+        c.setSpeed(2f)
+        h.engine.soundUndecodable = true
+        h.advance(1_000)
+        assertNotNull(c.state.value.speedNote)
+        c.selectAudio(audio[1].index.toLong())
+        h.settle()
+        assertNull(c.state.value.speedNote)
+        c.setSpeed(2f)
+        assertEquals(2f, h.engine.speed)
+    }
+
+    @Test
+    fun `a stream the server can't convert for another speed plays on as it is, at 1x, and says why`() {
+        // The transcoder away, or every transcode taken: the file plays as it is, so ending it frees none.
+        for (status in listOf(500, 503)) {
+            SessionHarness(caps = capsOf(TestDevices.googleTvStreamer)).use { tv ->
+                val c = tv.play(PlayRequest(FixtureIds.SHOW_S1E1, startMs = 0))
+                tv.engine.ready()
+                tv.advance(2_000)
+                assertFalse("played as it is", tv.engine.source!!.hls)
+                tv.api.refusedWith = status
+                c.setSpeed(1.5f)
+                tv.engine.soundUndecodable = true
+                tv.advance(1_000)
+                tv.settle()
+                assertEquals("$status: asked beside it, once", 2, tv.api.count("startPlayback"))
+                assertEquals("$status: the one playing plays on", 1, tv.engine.prepared.size)
+                assertTrue("$status", tv.deletes().isEmpty())
+                assertEquals(PlayerPhase.Playing, c.state.value.phase)
+                assertEquals(1f, tv.engine.speed)
+                assertEquals(1f, c.state.value.speed)
+                assertNotNull(c.state.value.speedNote)
+                assertEquals(SoundNeeds(decoded = false, untunneled = false, reload = true), tv.engine.soundNeeds)
+            }
+        }
+    }
+
+    @Test
+    fun `a converted session whose sound still goes out as it is plays at 1x, and says why`() {
+        SessionHarness(caps = capsOf(TestDevices.googleTvStreamer)).use { tv ->
+            val c = tv.play(PlayRequest(FixtureIds.SHOW_S1E1, startMs = 0))
+            tv.engine.ready()
+            tv.advance(2_000)
+            c.setSpeed(1.5f)
+            tv.engine.soundUndecodable = true
+            tv.advance(1_000)
+            tv.settle()
+            assertEquals(2, tv.engine.prepared.size)
+            assertNull("the next session plays now", c.state.value.speedNote)
+            // Its file played as it is all the same: the sound can't follow.
+            tv.engine.ready()
+            tv.engine.soundUndecodable = true
+            tv.advance(1_000)
+            tv.settle()
+            assertEquals(2, tv.playbackRequests().size)
+            assertEquals(1f, tv.engine.speed)
+            assertEquals(1f, c.state.value.speed)
+            assertNotNull(c.state.value.speedNote)
+        }
     }
 
     @Test

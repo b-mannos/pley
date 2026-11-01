@@ -66,8 +66,9 @@
     <!-- "2.5× real time · 40 s ready". -->
     <string name="session_speed_ready">%1$s× real time · %2$d s ready</string>
 
-    <!-- Playback speed, when a download's sound keeps it at 1×. -->
+    <!-- Playback speed, when a download's sound keeps it at 1×, or a stream's the server couldn't convert. -->
     <string name="session_speed_undecodable">Not for this download: its sound goes to your receiver as it is, and nothing here decodes it</string>
+    <string name="session_speed_unconverted">Not now: its sound goes to your receiver as it is, nothing here decodes it, and the server couldn\'t convert it</string>
 
     <!-- Find subtitles… (subtitles found online, docs/API.md). -->
     <string name="session_search_not_set_up">Subtitle search isn\'t set up on this server</string>

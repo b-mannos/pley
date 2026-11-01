@@ -94,10 +94,13 @@ is decoded on the device instead, and tunneled playback stops; an audio
 delay stops tunneled playback too. Decoding the sound reloads the title
 where it is, a short pause, and so does going back to Normal, where the
 sound goes to the receiver as it is again; tunneled playback comes back
-with Normal and no delay. When nothing on the device decodes that sound,
-a stream asks the server again with the device's decoders only, made
-ready beside the one playing: the server converts the sound and copies
-the video. A download has no server to ask, and stays at Normal.
+with Normal and no delay. A decoder counts only where it takes the sound
+as it is (its channels and rate). When nothing on the device decodes that
+sound, a stream asks the server again with the device's decoders only,
+made ready beside the one playing: the server converts the sound and
+copies the video. A download has no server to ask, and stays at Normal,
+as does a stream the server can't convert (its transcoder away, or every
+transcode taken); the speed menu says why, and the title plays on.
 
 ### Quality
 

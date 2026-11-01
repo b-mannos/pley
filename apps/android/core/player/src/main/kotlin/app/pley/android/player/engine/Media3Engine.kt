@@ -227,9 +227,6 @@ class Media3Engine(
     /** Tunneled playback is held off for the speed or the audio delay ([setSoundNeeds]). */
     private var untunneled = false
 
-    /** The media playing was loaded again to decode a sound that passed through: back at 1×, again to pass it through. */
-    private var reloadedToDecode = false
-
     /** The player's playWhenReady as last reported: Media3 also reports a new reason alone, paused already. */
     private var reportedPlayWhenReady = false
 
@@ -276,7 +273,6 @@ class Media3Engine(
         check(!released) { "The engine was released" }
         matchJob?.cancel()
         wantPlay = playWhenReady
-        reloadedToDecode = false
         loadControl.home = BufferPlan.isHome(source.url)
         loadControl.live = source.live
         applyTrackParameters()
@@ -333,7 +329,9 @@ class Media3Engine(
      * Tunneling is a track selection parameter: Media3 sets the renderers up
      * again when it changes. Passthrough is the audio output's choice when
      * the renderer starts, so the media is loaded again where it is, as for
-     * [recheckDolbyVision].
+     * [recheckDolbyVision]: to decode a sound passed through, and back at
+     * 1× to pass through again one the output took as PCM only for the
+     * speed (whether it was loaded so, or loaded again).
      */
     override fun setSoundNeeds(decoded: Boolean, untunneled: Boolean, reload: Boolean) {
         if (music) return
@@ -341,7 +339,11 @@ class Media3Engine(
         val decodingChanged = decoded != audioDecoding.on
         this.untunneled = untunneled
         audioDecoding.on = decoded
-        if (!decoded) mutableState.update { it.copy(soundUndecodable = false) }
+        val passesAgain = !decoded && player.audioFormat?.let(audioDecoding::turnedDown) == true
+        if (!decoded) {
+            audioDecoding.forget()
+            mutableState.update { it.copy(soundUndecodable = false) }
+        }
         if (!reload) return
         if (tunnelingChanged) applyTrackParameters()
         val source = loaded?.takeIf { !it.live }
@@ -350,14 +352,12 @@ class Media3Engine(
             // No sound yet: the output takes it as asked when it starts (onAudioTrackInitialized).
             val format = player.audioFormat ?: return
             if (!state.value.stats.passthrough) return
-            if (!DecodingAudioSink.hasDecoder(format)) {
+            if (!DecodingAudioSink.hasDecoder(app, format)) {
                 mutableState.update { it.copy(soundUndecodable = true) }
                 return
             }
-            reloadedToDecode = true
-        } else {
-            if (!reloadedToDecode) return
-            reloadedToDecode = false
+        } else if (!passesAgain) {
+            return
         }
         Log.i(TAG, "loads again where it is to ${if (decoded) "decode the sound" else "pass the sound through"}")
         player.setMediaSource(loading.mediaSource(source), player.currentPosition)
@@ -597,7 +597,7 @@ class Media3Engine(
             val passthrough = PlaybackAnalytics.isPassthrough(audioTrackConfig.encoding)
             focus?.passthrough = passthrough
             // DecodingAudioSink lets it through only when no decoder here takes it.
-            val undecodable = passthrough && audioDecoding.on && player.audioFormat?.let { !DecodingAudioSink.hasDecoder(it) } == true
+            val undecodable = passthrough && audioDecoding.on && player.audioFormat?.let { !DecodingAudioSink.hasDecoder(app, it) } == true
             if (undecodable) mutableState.update { it.copy(soundUndecodable = true) }
         }
     }

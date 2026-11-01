@@ -72,6 +72,9 @@ interface PlayerTexts {
     /** The speed can't change: a download's sound goes to a receiver as it is, and nothing here decodes it. */
     val speedUndecodable: String get() = "Not for this download: its sound goes to your receiver as it is, and nothing here decodes it"
 
+    /** The speed can't change: a stream's sound goes to a receiver as it is, nothing here decodes it, and the server couldn't convert it. */
+    val speedUnconverted: String get() = "Not now: its sound goes to your receiver as it is, nothing here decodes it, and the server couldn't convert it"
+
     /** "Find subtitles…" when the server has no subtitle search set up. */
     val searchNotSetUp: String get() = "Subtitle search isn't set up on this server"
 
@@ -196,6 +199,7 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
         return if (message.isNullOrBlank()) who else res.getString(R.string.session_stopped_message, who, message.trim())
     }
     override val speedUndecodable: String get() = s(R.string.session_speed_undecodable)
+    override val speedUnconverted: String get() = s(R.string.session_speed_unconverted)
     override val searchNotSetUp: String get() = s(R.string.session_search_not_set_up)
     override val searchUnsupported: String get() = s(R.string.session_search_unsupported)
     override val searchNothing: String get() = s(R.string.session_search_nothing)
