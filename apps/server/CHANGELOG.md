@@ -46,7 +46,8 @@ describes how they are made.
 - Asking for a title someone has asked for already follows their request
   (*Tell me too*): its news comes to each follower, and following costs
   nothing against the limits. When its maker withdraws a request others
-  follow, or their account is deleted, the earliest follower keeps it.
+  follow, or their account is deleted, the earliest follower keeps it, and
+  it counts against their limits from then.
   What was declined for an account may be asked for again after 30 days,
   and the answer says from when.
 - Administrators' approvals answer at once while the request goes to

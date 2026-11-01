@@ -1714,8 +1714,13 @@ async fn a_withdrawn_request_goes_to_its_earliest_follower() {
     assert_eq!((&bobs.body["mine"], &bobs.body["watching"]), (&json!(false), &json!(true)));
     let theirs = w.app.get(&format!("/api/requests/{id}"), &w.admin).await;
     assert_eq!((&theirs.body["requested_by"]["name"], &theirs.body["watchers"]), (&json!("cid"), &json!(1)));
+    // His now, it counts toward his limit as his asking would have: asking
+    // for her, following and having her withdraw isn't a way around it.
     let summary = w.app.get("/api/requests/summary", &cid).await;
-    assert_eq!((&summary.body["movies_left"], &summary.body["own"]), (&json!(1), &json!(1)), "it costs him nothing");
+    assert_eq!((&summary.body["movies_left"], &summary.body["own"]), (&json!(0), &json!(1)), "{}", summary.text());
+    let more = w.ask(&cid, json!({"kind": "movie", "tmdb_id": 606})).await;
+    assert_eq!(more.status, StatusCode::TOO_MANY_REQUESTS, "{}", more.text());
+    assert_eq!(w.app.get("/api/requests/summary", &w.ann).await.body["movies_left"], json!(1), "no longer hers");
     let heard = said(&mut events);
     assert!(
         heard.iter().any(|e| matches!(e,

@@ -2318,14 +2318,15 @@ An app's token without the route's scope is refused before all of it
   of Pley's own apps whose token has `requests` but not `approvals` gets
   `sign_in_again: "approvals"`.
 - **Limits** (`request_limit_movies`, `request_limit_seasons`, 0 = none)
-  count an account's own requests made in the last 7 days (a show its
-  seasons): pending, approved and available ones; declined and failed ones
-  and those it has as their earliest follower (below) don't count, and
-  following costs nothing. They never apply to administrators. Asking
-  for more than is left answers `429` with `retry_at`: when enough of what
-  counts is older than 7 days for all that was asked; `null` when more was
-  asked than the limit itself (pick fewer). `*_next_at` in the summary and
-  `DiscoverDetail` is when one more may be asked for, once none is left.
+  count an account's own requests of the last 7 days (a show its seasons):
+  those it made in them, and those it took over in them as their earliest
+  follower (below); pending, approved and available ones count, declined
+  and failed ones don't, and following costs nothing. They never apply to
+  administrators. Asking for more than is left answers `429` with
+  `retry_at`: when enough of what counts is older than 7 days for all that
+  was asked; `null` when more was asked than the limit itself (pick
+  fewer). `*_next_at` in the summary and `DiscoverDetail` is when one more
+  may be asked for, once none is left.
 - **Lists** (`/api/discover/…`): up to 20 titles a page in TMDB's order,
   `page` from 1 (default) to 500. `trending`: this week's movies and shows;
   `movies` and `shows`: the most popular; `upcoming`: movies coming to
@@ -2418,10 +2419,10 @@ An app's token without the route's scope is refused before all of it
   are over, with `retry_at`: they hold for its followers as for its maker;
   `404` for one it can't read). Followers read a request as *Who sees
   what* says, and hear its news ([events](#request-events)). When its
-  maker withdraws a request others
-  follow, or the maker's account is deleted, the request stays: its
-  earliest follower becomes its maker (it doesn't count toward their
-  limits) and the others keep following.
+  maker withdraws a request others follow, or the maker's account is
+  deleted, the request stays: its earliest follower becomes its maker, and
+  it counts toward their limits from then as if they had asked for it; the
+  others keep following.
 - **Withdrawing and deleting** (`DELETE /api/requests/{id}`): its maker
   withdraws a pending or failed request, and removes a declined one once
   its 30 days are over (before then `409 conflict` with `retry_at`, when it

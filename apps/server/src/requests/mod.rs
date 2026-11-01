@@ -1527,9 +1527,11 @@ impl Requests {
     }
 
     /// What counts toward `caller`'s limits: its own requests of the last 7
-    /// days, but those declined, those failed and those it inherited as
-    /// their earliest follower (following one costs nothing). None where
-    /// limits don't apply.
+    /// days, but those declined and those failed (following one costs
+    /// nothing). One it inherited as its earliest follower counts from then,
+    /// as its own asking would have: otherwise one account could ask for
+    /// another without limit, following and having it withdrawn. None
+    /// where limits don't apply.
     async fn quota(&self, caller: &Caller<'_>) -> sqlx::Result<Quota> {
         if !caller.limited {
             return Ok(Quota::default());
@@ -1545,10 +1547,10 @@ impl Requests {
             return Ok(quota);
         }
         let rows: Vec<(String, Option<String>, i64)> = sqlx::query_as(
-            "SELECT kind, seasons, created_at FROM requests
-             WHERE user_id = ? AND created_at > ? AND inherited_at IS NULL
+            "SELECT kind, seasons, COALESCE(inherited_at, created_at) AS at FROM requests
+             WHERE user_id = ? AND COALESCE(inherited_at, created_at) > ?
                AND status IN ('pending', 'approved', 'available')
-             ORDER BY created_at, id",
+             ORDER BY at, id",
         )
         .bind(caller.user.id)
         .bind(now() - LIMIT_WINDOW)
@@ -3237,9 +3239,9 @@ async fn visible_items(db: &Db, user_id: i64, ids: &[i64]) -> sqlx::Result<HashS
     Ok(query.fetch_all(&db.read).await?.into_iter().collect())
 }
 
-/// Request `id`'s earliest follower becomes its maker (it doesn't count
-/// toward their limits) and follows it no more; the others keep following
-/// it. `None`: nobody follows it.
+/// Request `id`'s earliest follower becomes its maker (it counts toward
+/// their limits from `at`) and follows it no more; the others keep
+/// following it. `None`: nobody follows it.
 async fn inherit(tx: &mut SqliteConnection, id: i64, at: i64) -> sqlx::Result<Option<i64>> {
     let heir: Option<i64> = sqlx::query_scalar(
         "SELECT user_id FROM request_watchers WHERE request_id = ? ORDER BY created_at, user_id LIMIT 1",
