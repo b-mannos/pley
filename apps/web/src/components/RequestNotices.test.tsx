@@ -129,6 +129,27 @@ describe("RequestNotices", () => {
     expect(screen.queryByText("“One” is ready to watch.")).not.toBeInTheDocument();
   });
 
+  it("holds notices while a Live TV channel plays, and not on Live TV's page", async () => {
+    const user = userEvent.setup();
+    mockApi({ "GET /api/requests/summary": () => makeSummary() });
+    const channel = render(makeSummary(), { route: "/live/a1b2/7" });
+    emit(ready);
+    expect(screen.queryByText("“Heat” is ready to watch.")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+    expect(await screen.findByText("“Heat” is ready to watch.")).toBeInTheDocument();
+    channel.unmount();
+
+    // An older link to a channel.
+    const older = render(makeSummary(), { route: "/live/7" });
+    emit({ ...ready, request_id: 5, title: "Ran" });
+    expect(screen.queryByText("“Ran” is ready to watch.")).not.toBeInTheDocument();
+    older.unmount();
+
+    render(makeSummary(), { route: "/live" });
+    emit({ ...ready, request_id: 6, title: "Alien" });
+    expect(await screen.findByText("“Alien” is ready to watch.")).toBeInTheDocument();
+  });
+
   it("tells what came while away in one notice, once", async () => {
     const summary = makeSummary({ unseen: 2, own: 2 });
     const news = [

@@ -38,6 +38,9 @@ const HELD = 3;
 /** An event explains a rise in the unseen count for this long (the summary follows it a second later). */
 const EXPLAINS_MS = 10_000;
 
+/** A video plays: the player, or a Live TV channel (`/live/:channelId`, `/live/:sourceUid/:channelId`), not Live TV's page. */
+const PLAYING = /^\/(play|live)\/[^/]/;
+
 /** Where this profile's notices keep what they told, on this server (read each time: other tabs tell too). */
 const markKey = (userId: number) => `pley.requestNews.${userId}`;
 
@@ -65,7 +68,7 @@ export function RequestNotices() {
   const location = useLocation();
   const qc = useQueryClient();
   const summary = useRequestSummary();
-  const playing = location.pathname.startsWith("/play/");
+  const playing = PLAYING.test(location.pathname);
   const playingRef = useRef(playing);
   const held = useRef<Notice[]>([]);
   const explainedAt = useRef(0);
