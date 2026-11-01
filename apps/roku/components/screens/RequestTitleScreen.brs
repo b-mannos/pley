@@ -40,7 +40,7 @@ sub init()
     m.shown = invalid
     ' Loads asked for: answers to earlier ones are left out.
     m.loads = 0
-    ' params' ask or pick was done.
+    ' params' ask or pick was done, or given up.
     m.acted = false
     ' The title's status and library title as last loaded: when they
     ' change (asked for here or in the picker), its tiles elsewhere get
@@ -113,7 +113,8 @@ sub onDetail(event as object)
     schedule()
     if not m.acted
         m.acted = true
-        if httpTrue(m.top.params.ask) or httpTrue(m.top.params.pick) then actFirst()
+        ' A page left (Back) or covered before its title came asks nothing.
+        if m.top.active and (httpTrue(m.top.params.ask) or httpTrue(m.top.params.pick)) then actFirst()
     end if
 end sub
 
