@@ -86,7 +86,8 @@ pub(crate) async fn login_response(
 /// the error carries a secret to add to an authenticator app until `code`
 /// is its first code, sent with the secret's `setup_id`, and then the new
 /// recovery codes come back. The password comes with every try, so nothing
-/// is signed in until then.
+/// is signed in until then, nor while the server can't set it up
+/// ([`can_set_up_two_step`]).
 pub(crate) async fn second_step(
     state: &AppState,
     user_id: i64,
@@ -101,10 +102,25 @@ pub(crate) async fn second_step(
     if !state.auth.two_step_required() {
         return Ok(None);
     }
+    can_set_up_two_step(state)?;
     let server_name = state.settings.get().server_name.clone();
     let codes = state.two_step.set_up_signing_in(user_id, username, &server_name, setup_id, code).await?;
     tracing::info!("'{username}' set up two-step sign-in, which this server requires, as they signed in");
     Ok(Some(codes))
+}
+
+/// Refuses a way in for an account that has to set up two-step sign-in,
+/// which the server requires, while the server can't set it up (it can't
+/// use its key): requiring it holds, so the password alone lets nobody in.
+pub(crate) fn can_set_up_two_step(state: &AppState) -> ApiResult<()> {
+    if state.two_step.can_set_up() {
+        return Ok(());
+    }
+    Err(AppError::Unavailable(format!(
+        "this server requires two-step sign-in, but can't set it up until an administrator fixes its {} (its log \
+         says why)",
+        crate::two_step::KEY_FILE
+    )))
 }
 
 #[derive(Deserialize)]

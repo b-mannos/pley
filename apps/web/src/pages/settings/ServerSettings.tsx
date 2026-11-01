@@ -3,7 +3,7 @@ import { Link as RouterLink } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff } from "lucide-react";
 import { appKeys } from "@/api/apps";
-import { keys, useServer, useSettings, useSystemInfo, useUsers, useWatchingHours } from "@/api/hooks";
+import { keys, useSettings, useSystemInfo, useUsers, useWatchingHours } from "@/api/hooks";
 import type { LibraryWork, Settings, TvMetadata } from "@/api/types";
 import { useAuth } from "@/auth";
 import { IconButton, Select, TextInput, Toggle } from "@/components/ui";
@@ -397,7 +397,7 @@ const MAX_CPU = [25, 50, 75, 100];
 function RequireTwoStepRow({ checked, onChange, known }: { checked: boolean; onChange: (v: boolean) => void; known: boolean }) {
   const me = useAuth();
   const saved = useSettings().data?.require_two_step ?? false;
-  const server = useServer();
+  const noKey = useSystemInfo().data?.secret_key_ok === false;
   const users = useUsers();
   const without = (users.data ?? []).filter((u) => u.has_password && !u.two_step && !u.disabled).length;
   // Off, it turns on only for someone who uses it; on, it can always go off.
@@ -424,8 +424,10 @@ function RequireTwoStepRow({ checked, onChange, known }: { checked: boolean; onC
             ? "Everyone with a password uses it already."
             : `Saving signs out ${pluralize(without, "person who hasn't", "people who haven't")} set it up, on every device and app, until they set it up.`}
         </Note>
-      ) : checked && saved && server.data && !server.data.two_step_required ? (
-        <Note notice>The server can't set up authenticator apps right now (its secret.key can't be used), so nobody is asked to. Its log says why.</Note>
+      ) : checked && saved && noKey ? (
+        <Note notice>
+          The server can't use its secret.key, so authenticator apps can't be set up or checked. Until it can, people who haven't set up two-step sign-in can't sign in, and people who have sign in with a recovery code. Its log says why.
+        </Note>
       ) : null}
     </Row>
   );

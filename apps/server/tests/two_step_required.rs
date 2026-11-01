@@ -2,7 +2,8 @@
 //! `require_two_step` setting): who may require it, what happens to what
 //! people without it had signed in, setting it up as one signs in, joins with
 //! an invitation or is switched to, the apps' way through the browser and the
-//! TVs' through `/link`, and keeping it on while moving it to another app.
+//! TVs' through `/link`, keeping it on while moving it to another app, and
+//! what still holds while the server can't use its key.
 
 mod common;
 
@@ -587,7 +588,7 @@ async fn the_command_line_reset_leaves_it_to_be_set_up_at_the_next_sign_in() {
 }
 
 #[tokio::test]
-async fn it_stays_required_across_restarts_while_it_can_be_set_up() {
+async fn it_stays_required_across_restarts() {
     let (mut app, admin, _) = with_admin().await;
     let (bob, _) = app.user(&admin, "bob", json!({})).await;
     require(&app, &admin, true).await;
@@ -595,17 +596,59 @@ async fn it_stays_required_across_restarts_while_it_can_be_set_up() {
     assert_eq!(server_requires(&app).await, true);
     assert_eq!(app.get("/api/auth/me", &bob).await.status, StatusCode::UNAUTHORIZED);
     secret_of(&sign_in(&app, "bob", "test-pass-1", None).await);
+}
 
-    // Without its key, nobody could set it up: nobody is asked to.
+/// A way in refused while the server can't use its key: `503` saying so,
+/// and nothing signed in or set up.
+fn refused_for_the_key(reply: &Reply) {
+    assert_eq!(reply.status, StatusCode::SERVICE_UNAVAILABLE, "{}", reply.text());
+    assert!(reply.mentions("fixes its secret.key"), "{}", reply.text());
+    assert!(reply.headers.get(header::SET_COOKIE).is_none());
+    assert!(reply.body.get("token").is_none() && reply.body.get("setup").is_none(), "{}", reply.text());
+}
+
+#[tokio::test]
+async fn without_its_key_it_stays_required_and_recovery_codes_sign_in() {
+    let mut app = TestApp::new().await;
+    let admin = app.setup_admin().await;
+    let (admin_secret, admin_codes) = app.turn_on_two_step(&admin, "secret-one").await;
+    let (bob, bob_id) = app.user(&admin, "bob", json!({})).await;
+    let invite = app.post("/api/invites", &admin, json!({})).await;
+    let accept = format!("/api/invites/{}/accept", invite.body["code"].as_str().unwrap());
+    let dave = json!({"username": "dave", "password": "dave-pass-1"});
+    require(&app, &admin, true).await;
+    // Pley can't read it any more (its account changed, say).
     std::fs::write(app.state.config.data_dir.join("secret.key"), "not a key").unwrap();
     app.restart().await;
-    assert_eq!(server_requires(&app).await, false);
-    assert_eq!(app.get("/api/settings", &admin).await.body["require_two_step"], true, "still saved");
-    let signed_in = sign_in(&app, "bob", "test-pass-1", None).await;
+    assert_eq!(server_requires(&app).await, true);
+
+    // Nobody can set it up, and the password alone lets nobody in.
+    assert_eq!(app.get("/api/auth/me", &bob).await.status, StatusCode::UNAUTHORIZED);
+    refused_for_the_key(&sign_in(&app, "bob", "test-pass-1", None).await);
+    assert_eq!(sign_in(&app, "bob", "nope", None).await.status, StatusCode::UNAUTHORIZED);
+    refused_for_the_key(&app.call(Method::POST, &accept, None, Some(dave.clone()), &[]).await);
+
+    // An administrator's authenticator can't be checked: a recovery code
+    // signs in, and the settings say why.
+    let code = sign_in(&app, "admin", "secret-one", Some(&next_code(&admin_secret))).await;
+    assert_eq!(code.status, StatusCode::SERVICE_UNAVAILABLE, "{}", code.text());
+    assert!(code.mentions("recovery code"), "{}", code.text());
+    let signed_in = sign_in(&app, "admin", "secret-one", Some(&admin_codes[0])).await;
     assert_eq!(signed_in.status, StatusCode::OK, "{}", signed_in.text());
-    // Nor can it be required again until then.
-    require(&app, &admin, false).await;
+    let admin = signed_in.body["token"].as_str().unwrap().to_owned();
+    assert_eq!(app.get("/api/system", &admin).await.body["secret_key_ok"], false);
+    // Switching to bob's profile is no way in either.
+    let switch = app.post("/api/auth/switch", &admin, json!({"user_id": bob_id, "password": "test-pass-1"})).await;
+    refused_for_the_key(&switch);
+    assert_eq!(app.get("/api/auth/me", &admin).await.status, StatusCode::OK, "the refused switch ended nothing");
+
+    // It can stop being required, and can't be required again until the key
+    // is fixed.
+    assert_eq!(require(&app, &admin, false).await.status, StatusCode::OK);
+    assert_eq!(sign_in(&app, "bob", "test-pass-1", None).await.status, StatusCode::OK);
+    let joined = app.call(Method::POST, &accept, None, Some(dave), &[]).await;
+    assert_eq!(joined.status, StatusCode::OK, "no account was made, and the invitation stayed: {}", joined.text());
     let refused = require(&app, &admin, true).await;
     assert_eq!(refused.status, StatusCode::BAD_REQUEST);
-    assert!(refused.text().contains("secret.key"), "{}", refused.text());
+    assert!(refused.mentions("secret.key"), "{}", refused.text());
 }

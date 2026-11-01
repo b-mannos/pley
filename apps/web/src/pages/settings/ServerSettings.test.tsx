@@ -67,13 +67,12 @@ describe("ServerSettings", () => {
     expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute("href", "/account");
   });
 
-  it("says who gets signed out, requires two-step sign-in, and reads the server's status again", async () => {
+  it("says who gets signed out, requires two-step sign-in, and has the server's status read again", async () => {
     const user = userEvent.setup();
     let required = false;
     const requests = mockApi({
       "GET /api/settings": () => ({ ...SETTINGS, require_two_step: required }),
       "GET /api/system": () => ({}),
-      "GET /api/server": () => ({ name: "Den", version: "1.0.0", setup_required: false, two_step_required: required }),
       "GET /api/users": () => [
         { ...testUser, two_step: true },
         { ...testUser, id: 2, name: "Bob" },
@@ -86,7 +85,10 @@ describe("ServerSettings", () => {
         return { ...SETTINGS, ...(req.body as Partial<Settings>) };
       },
     });
-    renderWithProviders(<ServerSettings />, { user: { ...testUser, two_step: true } });
+    const client = testQueryClient();
+    // What the sign-in pages and the account page read before.
+    client.setQueryData(["server"], { name: "Den", version: "1.0.0", setup_required: false, two_step_required: false });
+    renderWithProviders(<ServerSettings />, { user: { ...testUser, two_step: true }, client });
 
     const toggle = await screen.findByRole("switch", { name: "Require two-step sign-in" });
     expect(toggle).toBeEnabled();
@@ -96,22 +98,22 @@ describe("ServerSettings", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByText("Settings saved")).toBeInTheDocument();
     await waitFor(() => expect(requests.find((r) => r.method === "PUT")?.body).toEqual({ require_two_step: true }));
-    await waitFor(() => expect(requests.filter((r) => r.path === "/api/server").length).toBeGreaterThan(0));
+    await waitFor(() => expect(client.getQueryState(["server"])?.isInvalidated).toBe(true));
     expect(screen.queryByText(/Saving signs out/)).not.toBeInTheDocument();
   });
 
-  it("says when the server can't hold a requirement that is saved", async () => {
+  it("says who can't sign in while the server can't use its key", async () => {
     mockApi({
       "GET /api/settings": () => ({ ...SETTINGS, require_two_step: true }),
-      "GET /api/system": () => ({}),
-      "GET /api/server": () => ({ name: "Den", version: "1.0.0", setup_required: false, two_step_required: false }),
+      "GET /api/system": () => ({ secret_key_ok: false }),
       "GET /api/users": () => [],
     });
     renderWithProviders(<ServerSettings />, { user: { ...testUser, two_step: false } });
     const toggle = await screen.findByRole("switch", { name: "Require two-step sign-in" });
     expect(toggle).toBeChecked();
     expect(toggle).toBeEnabled();
-    expect(await screen.findByText(/can't set up authenticator apps right now/)).toBeInTheDocument();
+    expect(await screen.findByText(/can't use its secret.key/)).toBeInTheDocument();
+    expect(screen.getByText(/haven't set up two-step sign-in can't sign in/)).toBeInTheDocument();
   });
 
   it("lists apps again once turning other publishers off signed them out", async () => {

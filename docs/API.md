@@ -584,9 +584,12 @@ it of every account with a password (`require_two_step` in the
   them out everywhere, and they set it up again at their next sign-in, as
   after `pley reset-password`.
 - Managed profiles and accounts without a password have nothing to set up.
-- While the server can't use its `secret.key` (the log says why), nobody
-  is asked to set it up, and `two_step_required` in `/api/server` is
-  `false`.
+- While the server can't use its `secret.key` (the log says why, and
+  `secret_key_ok` in [`/api/system`](#system-admin) is `false`), it stays
+  required and nobody can set it up: a sign-in, invitation or switch that
+  would set it up answers `503` instead, and makes no session or account.
+  Accounts that use it sign in with a recovery code, and an administrator
+  signed in so can stop requiring it.
 
 ## Your account
 
@@ -2777,6 +2780,8 @@ interface SystemInfo {
   uptime_secs: number;
   data_dir: string;
   database: { ok: boolean | null; problem?: string; checked_at: Timestamp | null }; // integrity check at start
+  secret_key_ok: boolean;           // the server can use its secret.key: without it, authenticator apps can't
+                                    // be set up or checked (the log says why)
   transcode_dir: {                  // the transcoder's work folder
     in_use: string;
     next: string | null;            // the one the next start uses, when another

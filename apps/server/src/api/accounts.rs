@@ -8,7 +8,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
 
-use super::auth::{Me, confirm_password, login_response, me, second_step};
+use super::auth::{Me, can_set_up_two_step, confirm_password, login_response, me, second_step};
 use super::nullable;
 use crate::accounts::{self, NO_PASSWORD, UserDto};
 use crate::auth::{
@@ -768,6 +768,10 @@ pub async fn accept_invite(
     validate_username(&username)?;
     validate_password(&body.password, &username)?;
     let invite = valid_invite(&state, &code).await?;
+    if state.auth.two_step_required() {
+        // No account that couldn't sign in: the invitation stays for later.
+        can_set_up_two_step(&state)?;
+    }
     let hash = hash_password(body.password).await?;
     let mut tx = state.db.write.begin().await?;
     // Claim a use first so concurrent sign-ups can't overdraw the invitation.

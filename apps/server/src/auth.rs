@@ -406,7 +406,9 @@ impl AuthService {
     }
 
     /// Whether every account with a password must use two-step sign-in: the
-    /// `require_two_step` setting, while authenticator apps can be set up.
+    /// `require_two_step` setting. It holds while the server can't set
+    /// authenticator apps up too: an account without it gets in nowhere
+    /// then, rather than in with its password alone.
     pub fn two_step_required(&self) -> bool {
         self.two_step_required.load(Ordering::SeqCst)
     }

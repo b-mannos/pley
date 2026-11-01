@@ -192,8 +192,8 @@ impl TwoStep {
         }
     }
 
-    /// Whether authenticator apps can be set up here: the server can use its
-    /// key. Requiring two-step sign-in holds only while they can.
+    /// Whether authenticator apps can be set up, and their codes checked,
+    /// here: the server can use its key.
     pub fn can_set_up(&self) -> bool {
         self.key.is_some()
     }

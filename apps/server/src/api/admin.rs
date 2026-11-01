@@ -91,7 +91,7 @@ pub async fn put_settings(
 /// sign-in; sessions and apps that slip past this (one signing in at that
 /// moment) stop working anyway ([`crate::auth::AuthService::require_two_step`]).
 async fn require_two_step(state: &AppState, on: bool) -> ApiResult<()> {
-    state.auth.require_two_step(on && state.two_step.can_set_up());
+    state.auth.require_two_step(on);
     if !on {
         tracing::info!("two-step sign-in is no longer required");
         return Ok(());
@@ -574,6 +574,8 @@ pub async fn system(State(state): State<AppState>, _admin: AdminUser) -> ApiResu
         "data_dir": state.config.data_dir.to_string_lossy(),
         "transcode_dir": transcode_dir(&state),
         "database": state.backups.health(),
+        // Without it, authenticator apps can't be set up or checked.
+        "secret_key_ok": state.two_step.can_set_up(),
         "transcoder": transcoder,
         "counts": counts,
     })))

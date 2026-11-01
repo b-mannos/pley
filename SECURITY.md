@@ -101,8 +101,19 @@ protect your server.
   rather than share it unknowingly. Once it is required, check
   **Settings → Users** for people who haven't set it up yet. An
   administrator who resets someone's two-step sign-in signs them out too.
-- While the server can't use `secret.key`, nobody can set it up, so nobody
-  is asked to: the log says so at start.
+- While the server can't use `secret.key` (the log says why at start),
+  authenticator apps can't be set up or their codes checked. Requiring it
+  holds all the same: accounts that haven't set it up can't sign in at
+  all, and accounts that have sign in with a recovery code. An
+  administrator who signs in so can stop requiring it (**Settings →
+  Server → Sign-in**).
+- An administrator with no recovery code left then, or whose two-step
+  sign-in `pley reset-password` turned off, can't sign in until
+  `secret.key` is fixed on the server and Pley restarted: give the file
+  back to Pley's account (after a change of PUID and PGID, say), restore
+  it from a backup of the data folder, or delete it for Pley to make a new
+  one (authenticator apps set up before then stop working; recovery codes
+  still sign in).
 
 ### Sessions
 

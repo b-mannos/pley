@@ -935,6 +935,11 @@ export interface SystemInfo {
   arch: string;
   uptime_secs: number;
   data_dir: string;
+  /**
+   * The server can use its secret.key: without it, authenticator apps can't
+   * be set up or checked. Absent from servers before it.
+   */
+  secret_key_ok?: boolean;
   transcode_dir: TranscodeDir;
   transcoder: TranscoderInfo;
   counts: {
