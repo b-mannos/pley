@@ -1,8 +1,8 @@
 import type { ReactElement } from "react";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
-import type { MediaRequest } from "@/api/requests";
+import { requestKeys, type MediaRequest } from "@/api/requests";
 import type { User } from "@/api/types";
 import { itemUrl } from "@/lib/urls";
 import { apiError, LocationDisplay, mockApi, renderWithProviders, testUser } from "@/test/render";
@@ -243,6 +243,31 @@ describe("RequestsPage for everyone else", () => {
 
     await user.click(within(third as HTMLElement).getByRole("button", { name: "Stop following" }));
     expect(await screen.findByText("You won't hear about “Heat” any more.")).toBeInTheDocument();
+  });
+
+  it("marks news seen only once it shows, and again as more comes while the page is open", async () => {
+    const user = userEvent.setup();
+    let list = [makeRequest({ id: 1, mine: true })];
+    const requests = mockApi({
+      "GET /api/requests/summary": () => makeSummary({ unseen: 1, own: 2 }),
+      "GET /api/requests": (req) => makeRequestList(req.path.includes("status=pending") ? list : [...list, makeRequest({ id: 2, title: "Old Film", mine: true, status: "declined", unseen: true, updated_at: 1_700_000_100 })]),
+      "POST /api/requests/seen": () => undefined,
+    });
+    const { client } = show(<RequestsPage />, "/requests?status=pending", ann);
+    const seen = () => requests.filter((r) => r.method === "POST" && r.path === "/api/requests/seen");
+
+    // The declined one, with news, isn't among the pending ones.
+    expect(await screen.findByText("The Matrix")).toBeInTheDocument();
+    expect(seen()).toHaveLength(0);
+
+    await user.click(within(screen.getByRole("group", { name: "Status" })).getByRole("button", { name: "All" }));
+    expect(await screen.findByText("Old Film")).toBeInTheDocument();
+    await waitFor(() => expect(seen()).toHaveLength(1));
+
+    // Ready while the page is open.
+    list = [makeRequest({ id: 1, mine: true, status: "available", stage: "available", unseen: true, updated_at: 1_700_000_200 })];
+    await act(() => client.invalidateQueries({ queryKey: requestKeys.lists }));
+    await waitFor(() => expect(seen()).toHaveLength(2));
   });
 
   it("asks before withdrawing", async () => {

@@ -276,19 +276,22 @@ function RequestsView({ summary }: { summary: RequestSummary }) {
   const first = requests.data?.pages[0];
   const people = first?.people ?? [];
   const [picked, setPicked] = useState<Set<number>>(new Set());
-  const seen = useMarkSeen();
+  const { mutate: markSeen } = useMarkSeen();
   const allowance = !manage ? allowanceText(summary) : null;
 
-  // Shown its first page, this account has seen its requests' news (managers: where it's among them).
-  const firstShown = !!first;
-  const news = shown.some((r) => r.unseen) || (!manage && summary.unseen > 0);
-  const { mutate: markSeen } = seen;
-  const marked = useRef(false);
+  // News is seen once the requests that have it show: marked for each piece of news as it shows (a request's
+  // `updated_at` moves with its news), so news that comes while the page is open is marked too, and news a
+  // filter hides isn't.
+  const news = shown
+    .filter((r) => r.unseen)
+    .map((r) => `${r.id}:${r.updated_at}`)
+    .join();
+  const marked = useRef("");
   useEffect(() => {
-    if (!firstShown || !news || marked.current) return;
-    marked.current = true;
+    if (!news || news === marked.current) return;
+    marked.current = news;
     markSeen();
-  }, [firstShown, news, markSeen]);
+  }, [news, markSeen]);
 
   // What was picked goes as the list changes to another.
   useOnChange(JSON.stringify(filter), () => setPicked(new Set()));
