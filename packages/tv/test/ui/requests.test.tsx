@@ -12,7 +12,7 @@ import { Input } from "../../src/ui/input";
 import { F } from "../../src/ui/kit/focusable";
 import type { Key } from "../../src/ui/keys";
 import { AppContext } from "../../src/ui/screens/common";
-import { DiscoverScreen } from "../../src/ui/screens/discover";
+import { DiscoverListScreen, DiscoverScreen } from "../../src/ui/screens/discover";
 import { ItemRequestLine, useItemRequest } from "../../src/ui/screens/request-kit";
 import { RequestsScreen } from "../../src/ui/screens/requests-page";
 import { SearchScreen } from "../../src/ui/screens/search";
@@ -139,8 +139,8 @@ function show(seasons: DiscoverSeason[], over: Partial<DiscoverDetail> = {}): Di
   return detail({ kind: "show", tmdb_id: 20, title: "Severance", runtime_minutes: null, seasons, ...over });
 }
 
-function page(results: DiscoverTitle[], n = 1): DiscoverPage {
-  return { page: n, total_pages: 1, results };
+function page(results: DiscoverTitle[], n = 1, total = 1): DiscoverPage {
+  return { page: n, total_pages: total, results };
 }
 
 function list(requests: MediaRequest[]): RequestList {
@@ -472,6 +472,89 @@ describe("Discover", () => {
     t.press("back");
     expect(t.el("hero/main")).not.toBeNull();
     expect(t.fid()).toBe("search");
+  });
+
+  it("reads at most 5 pages for a row, then shows what they had; a row they had nothing for goes", async () => {
+    const asked: string[] = [];
+    const t = mount(
+      (entry) => <DiscoverScreen entry={entry} />,
+      {
+        discover: (l: string, n: number) => {
+          asked.push(`${l} ${n}`);
+          // An age limit leaves out most of every list: TMDB has pages and pages, nearly all of them empty here.
+          return Promise.resolve(page(l === "trending" && n === 2 ? TITLES : [], n, 500));
+        },
+        discoverTitle: () => Promise.resolve(detail({ tmdb_id: 1 })),
+      },
+      summary(),
+    );
+    for (let i = 0; i < 4; i++) await t.settle();
+    const of = (list: string) => asked.filter((a) => a.split(" ")[0] === list);
+    expect(of("trending")).toEqual(["trending 1", "trending 2", "trending 3", "trending 4", "trending 5"]);
+    expect(of("movies")).toEqual(["movies 1", "movies 2", "movies 3", "movies 4", "movies 5"]);
+    expect(t.text(".discover-hero .t-hero")).toEqual(["Arrival"]);
+    expect(t.text(".row-header")).toContain("Trending this week");
+    expect(t.text(".row-header")).not.toContain("Popular movies");
+    t.advance(60_000);
+    await t.settle();
+    expect(asked.length).toBe(10);
+  });
+
+  it("ends a grid in Show more once 5 pages brought too few: it reads 5 more, focus staying on the way", async () => {
+    const asked: number[] = [];
+    const t = mount(
+      (entry) => <DiscoverListScreen entry={entry} list="movies" />,
+      {
+        discover: (_l: string, n: number) => {
+          asked.push(n);
+          return Promise.resolve(page(n === 1 ? TITLES.slice(0, 2) : n === 6 ? [TITLES[2]!] : [], n, 500));
+        },
+      },
+      summary(),
+      { name: "discoverList", list: "movies" },
+    );
+    for (let i = 0; i < 4; i++) await t.settle();
+    expect(asked).toEqual([1, 2, 3, 4, 5]);
+    expect(t.text(".grid-cells .tile-caption .title")).toEqual(["Arrival", "Dune"]);
+    expect(t.el("movies/more")!.getAttribute("aria-label")).toBe("Show more");
+    t.select("movies/more");
+    // The well in its place holds focus until the next title comes, which takes it.
+    expect(t.fid()).toBe("movies/more");
+    for (let i = 0; i < 4; i++) await t.settle();
+    expect(asked).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(t.text(".grid-cells .tile-caption .title")).toEqual(["Arrival", "Dune", "Heat"]);
+    expect(t.fid()).toBe("movies/movie:3");
+    expect(t.el("movies/more")!.getAttribute("aria-label")).toBe("Show more");
+  });
+
+  it("says why a search has nothing yet beside its Show more, which keeps focus while it reads on", async () => {
+    const asked: number[] = [];
+    const t = mount(
+      (entry) => <DiscoverScreen entry={entry} />,
+      {
+        discover: (_l: string, n: number) => Promise.resolve(page(TITLES, n)),
+        discoverTitle: () => Promise.resolve(detail({ tmdb_id: 1 })),
+        discoverSearch: (_q: string, n: number) => {
+          asked.push(n);
+          return Promise.resolve(page([], n, 500));
+        },
+      },
+      summary(),
+    );
+    await t.settle();
+    act(() => void t.focus.focus(t.el("search")));
+    t.type('[data-fid="search"] input', "saw");
+    t.advance(400);
+    for (let i = 0; i < 4; i++) await t.settle();
+    expect(asked).toEqual([1, 2, 3, 4, 5]);
+    expect(t.text(".discover-aside .t-title")).toEqual(["Nothing yet for “saw”"]);
+    t.select("result/more");
+    expect(document.querySelector(".discover-aside")).toBeNull();
+    expect(t.fid()).toBe("result/more");
+    for (let i = 0; i < 4; i++) await t.settle();
+    expect(asked.length).toBe(10);
+    expect(t.fid()).toBe("result/more");
+    expect(t.focus.current!.getAttribute("aria-label")).toBe("Show more");
   });
 
   it("says when requests are off, and leaves focus with the rail", () => {

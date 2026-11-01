@@ -35,6 +35,12 @@ import { keepTitle, RequestsMessage, RequestTile, StagePill, stageOf, summaryPro
 
 /** TMDB has at most 500 pages of anything. */
 const MAX_PAGES = 500;
+/**
+ * A list reads at most this many pages at a time, as the web's does: for a
+ * profile with an age limit, page after page can come empty, and each costs
+ * the server TMDB's details of its titles.
+ */
+const FILL_PAGES = 5;
 /** A row reads pages until it has this many titles: more than a screen of posters. */
 const ROW_WANT = 12;
 /** The first rows load at once; each other as focus comes within two rows of it. */
@@ -58,10 +64,12 @@ export interface Pages {
   /** When the first page came: badges marked since are newer than the list's. */
   at: number;
   error: unknown;
+  /** The last fill read its pages without finding the titles it wanted: more are read when asked for (Show more). */
+  stopped: boolean;
 }
 
 export function noPages(): Pages {
-  return { titles: [], page: 0, totalPages: 1, at: 0, error: null };
+  return { titles: [], page: 0, totalPages: 1, at: 0, error: null, stopped: false };
 }
 
 /** Every page read, or as many as TMDB gives: a short page, even an empty one, isn't the end. */
@@ -69,14 +77,21 @@ export function pagesDone(p: Pages): boolean {
   return p.page >= Math.min(p.totalPages, MAX_PAGES);
 }
 
+/** Nothing more is read unless asked for: every page read, or a fill stopped short or failed. */
+export function pagesSettled(p: Pages): boolean {
+  return pagesDone(p) || p.stopped || !!p.error;
+}
+
 /** `p` and its next page. */
 export function withPage(p: Pages, next: DiscoverPage, now = Date.now()): Pages {
-  return { titles: addTitles(p.titles, next.results), page: p.page + 1, totalPages: next.total_pages, at: p.at || now, error: null };
+  return { titles: addTitles(p.titles, next.results), page: p.page + 1, totalPages: next.total_pages, at: p.at || now, error: null, stopped: false };
 }
 
 /**
  * A list read page by page until it holds `want` titles or TMDB has no
- * more, kept in `holder` under `key` so that Back draws it at once.
+ * more, 5 pages at most at a time (`again` reads on), kept in `holder`
+ * under `key` so that Back draws it at once. It draws again as titles
+ * come and when a fill ends, not for a page that brought none.
  */
 export function usePages(
   holder: Record<string, unknown>,
@@ -84,25 +99,29 @@ export function usePages(
   fetch: (page: number, cancel: Cancel) => Promise<DiscoverPage>,
   want: number,
   enabled = true,
-): { pages: Pages; loading: boolean; retry: () => void } {
+): { pages: Pages; loading: boolean; again: () => void } {
   const [, redraw] = useState(0);
   const [tries, setTries] = useState(0);
   const pages = (holder[key] as Pages | undefined) ?? noPages();
-  const need = enabled && !pages.error && !pagesDone(pages) && pages.titles.length < want;
+  const need = enabled && !pagesSettled(pages) && pages.titles.length < want;
   const latest = useRef(fetch);
   latest.current = fetch;
   useEffect(() => {
     if (!need) return;
     const cancel = new Cancel();
     let read = (holder[key] as Pages | undefined) ?? noPages();
+    let left = FILL_PAGES;
     const step = (): Promise<void> =>
       latest.current(read.page + 1, cancel).then((page) => {
         if (cancel.cancelled) return;
+        const had = read.titles.length;
         read = withPage(read, page);
+        left--;
+        const short = !pagesDone(read) && read.titles.length < want;
+        if (short && !left) read = { ...read, stopped: true };
         holder[key] = read;
-        redraw((n) => n + 1);
-        if (!pagesDone(read) && read.titles.length < want) return step();
-        return undefined;
+        if (read.titles.length !== had || !short || !left) redraw((n) => n + 1);
+        return short && left ? step() : undefined;
       });
     step().catch((e: unknown) => {
       if (cancel.cancelled) return;
@@ -114,8 +133,9 @@ export function usePages(
   return {
     pages,
     loading: need,
-    retry: () => {
-      holder[key] = { ...pages, error: null };
+    again: () => {
+      const now = (holder[key] as Pages | undefined) ?? noPages();
+      holder[key] = { ...now, error: null, stopped: false };
       setTries((n) => n + 1);
     },
   };
@@ -276,7 +296,7 @@ function DiscoverRows(p: { entry: Entry; inRows: boolean; setInRows: (v: boolean
   const reach = Math.max(1, at + LOAD_AHEAD);
   // Trending with nothing for this profile: every row is asked at once, for a hero.
   const first = pagesOf(entry, DISCOVER_ROWS[0]!.list);
-  const all = pagesDone(first) && !first.titles.length;
+  const all = (pagesDone(first) || first.stopped) && !first.titles.length;
   // One list per row, in order: each loads once focus comes within two rows of it.
   const lists = DISCOVER_ROWS.map((r, i) => usePages(entry.state, `list:${r.list}`, (n, c) => ui.api.discover(r.list, n, c), ROW_WANT, all || i <= reach));
   const rows = DISCOVER_ROWS.map((r, i) => {
@@ -345,10 +365,9 @@ function DiscoverRows(p: { entry: Entry; inRows: boolean; setInRows: (v: boolean
     if (toHero) backToHero();
   }, [toHero]);
 
-  if (blocked) return <RequestsMessage problem={blocked} title="Couldn't load Discover" onRetry={trending.retry} />;
+  if (blocked) return <RequestsMessage problem={blocked} title="Couldn't load Discover" onRetry={trending.again} />;
   if (!hero) {
-    const settled = rows.every((r) => pagesDone(r.pages) || !!r.pages.error);
-    if (settled) return <Message icon="compass" title="Nothing here right now" body="TMDB's lists have nothing this profile can ask for. Search for a title instead." />;
+    if (rows.every((r) => pagesSettled(r.pages))) return <Message icon="compass" title="Nothing here right now" body="TMDB's lists have nothing this profile can ask for. Search for a title instead." />;
     return <DiscoverSkeleton />;
   }
 
@@ -384,7 +403,7 @@ function DiscoverRows(p: { entry: Entry; inRows: boolean; setInRows: (v: boolean
   ];
   for (const r of rows) {
     // A row TMDB gave nothing for (or couldn't give) goes; one still loading keeps its place.
-    if (!r.titles.length && (pagesDone(r.pages) || r.pages.error)) continue;
+    if (!r.titles.length && pagesSettled(r.pages)) continue;
     sections.push({
       key: r.list,
       height: rowHeight("poster"),
@@ -670,11 +689,14 @@ function gridProblem(e: unknown, title: string): { title: string; body: string; 
 
 /**
  * Titles as a grid of posters, read a page at a time as focus comes near
- * the end, with a row of grey wells while more come.
+ * the end, with a row of grey wells while more come; Show more at the end
+ * when 5 pages brought too few, which reads 5 more.
  */
 function TitleGrid(p: {
   pages: Pages;
   more: (want: number) => void;
+  /** Reads on after a fill that stopped short. */
+  again: () => void;
   top: number;
   clipTop: number;
   fidPrefix: string;
@@ -687,8 +709,9 @@ function TitleGrid(p: {
   const marked = useMarks();
   const cols = gridColumns("poster");
   const titles = p.pages.titles.map((t) => marked(t, p.pages.at));
-  const coming = !pagesDone(p.pages) && !p.pages.error;
-  const count = coming ? Math.ceil((titles.length + 1) / cols) * cols : titles.length;
+  const coming = !pagesSettled(p.pages);
+  const showMore = p.pages.stopped;
+  const count = coming ? Math.ceil((titles.length + 1) / cols) * cols : titles.length + (showMore ? 1 : 0);
   return (
     <PosterGrid
       kind="poster"
@@ -704,7 +727,11 @@ function TitleGrid(p: {
       }}
       cell={(i, place) => {
         const t = titles[i];
-        if (!t) return <SkeletonTile kind="poster" />;
+        if (!t && showMore) {
+          return <SeeAllTile kind="poster" icon="plus" label="Show more" fid={`${p.fidPrefix}/more`} initial={p.initial && i === 0} onFocus={place.onFocus} onSelect={p.again} />;
+        }
+        // The first well holds focus that was on Show more until the titles come.
+        if (!t) return i === titles.length ? <SkeletonTile kind="poster" fid={`${p.fidPrefix}/more`} focusable onFocus={place.onFocus} /> : <SkeletonTile kind="poster" />;
         return (
           <TitleTile
             name={t.title}
@@ -735,10 +762,11 @@ function DiscoverResults(p: { entry: Entry; query: string }) {
   const [want, setWant] = useState(3 * gridColumns("poster"));
   const read = usePages(holder, key, (n, c) => ui.api.discoverSearch(p.query, n, false, c), want);
   const grid = holder.grid as { key: string; index: number } | undefined;
-  if (!read.pages.titles.length) {
+  const none = !read.pages.titles.length;
+  if (none && !onlyShowMore(read.pages)) {
     if (read.pages.error) {
       const why = gridProblem(read.pages.error, "Couldn't search TMDB");
-      return <GridNote title={why.title} body={why.body} onRetry={why.retry ? read.retry : undefined} />;
+      return <GridNote title={why.title} body={why.body} onRetry={why.retry ? read.again : undefined} />;
     }
     if (read.loading) return <GridSkeleton top={RESULTS_TOP} />;
     return <GridNote title={`Nothing on TMDB for “${p.query}”`} body="Try another spelling, or the title in its own language." />;
@@ -748,13 +776,35 @@ function DiscoverResults(p: { entry: Entry; query: string }) {
       <TitleGrid
         pages={read.pages}
         more={(n) => setWant((w) => Math.max(w, n))}
+        again={read.again}
         top={RESULTS_TOP}
         clipTop={RESULTS_CLIP}
         fidPrefix="result"
         startIndex={grid && grid.key === key ? grid.index : undefined}
         onFocusIndex={(i) => (holder.grid = { key, index: i })}
       />
+      {none && read.pages.stopped && <NothingYet title={`Nothing yet for “${p.query}”`} />}
       <div class="rail-fade" />
+    </div>
+  );
+}
+
+/**
+ * No titles, but more pages to read since a fill stopped short: the grid
+ * is Show more, and its wells while it reads on, so focus stays in it.
+ */
+function onlyShowMore(p: Pages): boolean {
+  return !p.titles.length && p.page >= FILL_PAGES && !p.error && !pagesDone(p);
+}
+
+/** Beside Show more in a grid that has no titles yet. */
+function NothingYet(p: { title: string }) {
+  return (
+    <div class="discover-aside" role="status">
+      <div class="t-title c-fg">{p.title}</div>
+      <div class="t-body c-muted" style="margin-top:8px">
+        TMDB's pages read so far have nothing this profile can ask for.
+      </div>
     </div>
   );
 }
@@ -769,24 +819,29 @@ export function DiscoverListScreen(p: { entry: Entry; list: DiscoverList }) {
   const gate = summaryProblem(app);
   if (gate) return <RequestsMessage problem={gate} title="Couldn't load it" onRetry={() => void app.loadRequests()} />;
   let body;
-  if (!read.pages.titles.length) {
+  const none = !read.pages.titles.length;
+  if (none && !onlyShowMore(read.pages)) {
     if (read.pages.error) {
       const why = gridProblem(read.pages.error, "Couldn't load it");
-      body = <GridNote title={why.title} body={why.body} onRetry={why.retry ? read.retry : undefined} />;
+      body = <GridNote title={why.title} body={why.body} onRetry={why.retry ? read.again : undefined} />;
     } else if (read.loading) body = <GridSkeleton top={LIST_TOP} />;
     else body = <GridNote title="Nothing here right now" body="TMDB's list has nothing this profile can ask for." />;
   } else {
     body = (
-      <TitleGrid
-        pages={read.pages}
-        more={(n) => setWant((w) => Math.max(w, n))}
-        top={LIST_TOP}
-        clipTop={LIST_CLIP}
-        fidPrefix={p.list}
-        initial
-        startIndex={p.entry.state.gridIndex as number | undefined}
-        onFocusIndex={(i) => (p.entry.state.gridIndex = i)}
-      />
+      <>
+        <TitleGrid
+          pages={read.pages}
+          more={(n) => setWant((w) => Math.max(w, n))}
+          again={read.again}
+          top={LIST_TOP}
+          clipTop={LIST_CLIP}
+          fidPrefix={p.list}
+          initial
+          startIndex={p.entry.state.gridIndex as number | undefined}
+          onFocusIndex={(i) => (p.entry.state.gridIndex = i)}
+        />
+        {none && read.pages.stopped && <NothingYet title="Nothing here yet" />}
+      </>
     );
   }
   return (

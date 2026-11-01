@@ -884,6 +884,8 @@
 .discover-hero.hidden { opacity: 0; pointer-events: none; }
 .reduced .discover-hero { transition: none; }
 .discover-note { position: absolute; left: 96px; top: 108px; max-width: 560px; }
+/* Beside a grid's lone Show more, level with the middle of its well. */
+.discover-aside { position: absolute; left: 232px; top: 140px; max-width: 520px; }
 .discover-credit { padding: 0 48px 0 96px; }
 
 /* ---------------------------------------------------------------- a title from TMDB */

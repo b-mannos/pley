@@ -191,7 +191,10 @@ also what waits for them, in red while some failed.
   week, Popular movies, Popular shows, Coming to cinemas and Popular
   anime, each loaded as it comes near the screen, then Your requests.
   Search at the top asks TMDB 400 ms after typing stops. Posters say In
-  library, Partly in library, Requested or Declined.
+  library, Partly in library, Requested or Declined. A list reads TMDB's
+  pages until it has more than a screenful, 5 at most at a time, since an
+  age limit can leave page after page empty: a row shows what they had,
+  and a grid (See all, search) ends in Show more, which reads 5 more.
 - **A title's page:** backdrop, poster, facts, cast and seasons with their
   state, and one main action: Request, Request more seasons, Tell me too,
   Open (in a library), or why not (declined, with when it may be asked
