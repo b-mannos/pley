@@ -29,8 +29,8 @@ In short, the AGPL means:
 ## Source code
 
 Pley's source is at <https://github.com/pley-media-server/pley>, and each
-release is tagged there (`server-v<version>`, `android-v<version>` and so
-on, [docs/RELEASING.md](docs/RELEASING.md)). The web app's Account page
+release is tagged there (`release-<date>`,
+[docs/RELEASING.md](docs/RELEASING.md)). The web app's Account page
 links to it, from the server's `GET /api/server`, and the transcoder gives
 it in `GET /v1/info` and `--license`. A changed version that others use
 over a network points these at its own source.

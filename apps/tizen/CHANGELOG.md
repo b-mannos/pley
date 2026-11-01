@@ -3,7 +3,7 @@
 Notable changes to Pley for Samsung TV (Tizen), newest first.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Releases are tagged `samsung-v<version>`; [docs/RELEASING.md](../../docs/RELEASING.md)
+Releases are tagged `release-<date>`; [docs/RELEASING.md](../../docs/RELEASING.md)
 describes how they are made.
 
 ## [Unreleased]

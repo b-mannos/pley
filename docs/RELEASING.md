@@ -4,8 +4,9 @@ Each app (a "unit") has its own version and changelog. A release takes the
 units whose versions went up since the last release, each at its own
 version, under one tag named after the day it was prepared
 (`release-2026-11-02`, then `release-2026-11-02.2` for a second that day),
-and one GitHub release with each unit's notes. Releases up to 0.1.1 were
-tagged per unit (`kodi-v0.1.1`).
+and one GitHub release with each unit's notes. Versions up to 0.1.1 were
+also tagged per unit (`kodi-v0.1.1`); 0.1.1's release is
+`release-2026-11-01`, and 0.1.0 has its tags but no release.
 
 ## Releasing
 

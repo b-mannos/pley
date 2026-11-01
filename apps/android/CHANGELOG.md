@@ -3,7 +3,7 @@
 Notable changes to Pley for Android: phones, tablets, Android TV and Fire TV, newest first.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Releases are tagged `android-v<version>`; [docs/RELEASING.md](../../docs/RELEASING.md)
+Releases are tagged `release-<date>`; [docs/RELEASING.md](../../docs/RELEASING.md)
 describes how they are made.
 
 ## [Unreleased]
@@ -143,7 +143,7 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/android-v0.1.1...HEAD
-[0.1.1]: https://github.com/pley-media-server/pley/releases/tag/android-v0.1.1
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-01...HEAD
+[0.1.1]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01
 [0.1.0]: https://github.com/pley-media-server/pley/releases/tag/android-v0.1.0
 [0.0.1]: https://github.com/pley-media-server/pley/releases/tag/android-v0.0.1
