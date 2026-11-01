@@ -60,10 +60,11 @@ const library = (id: number, scanning = false): Library => ({
   scanning,
 });
 
-function setup(enabled = true) {
+/** The events of account 1 (`null`: signed out). */
+function setup(userId: number | null = 1) {
   const client = testQueryClient();
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-  const hook = renderHook(({ on }) => useServerEvents(on), { wrapper, initialProps: { on: enabled } });
+  const hook = renderHook(({ user }) => useServerEvents(user), { wrapper, initialProps: { user: userId } });
   return { client, ...hook, source: () => FakeEventSource.all.at(-1) as FakeEventSource };
 }
 
@@ -83,13 +84,25 @@ afterEach(() => {
 
 describe("useServerEvents", () => {
   it("connects only while signed in, and closes when done", () => {
-    const { rerender, unmount, source } = setup(false);
+    const { rerender, unmount, source } = setup(null);
     expect(FakeEventSource.all).toHaveLength(0);
 
-    rerender({ on: true });
+    rerender({ user: 1 });
     expect(source().url).toBe("/api/events");
     unmount();
     expect(source().readyState).toBe(FakeEventSource.CLOSED);
+  });
+
+  it("opens another stream for another profile, closing the last one's", () => {
+    const { rerender, source } = setup();
+    const first = source();
+    rerender({ user: 1 });
+    expect(FakeEventSource.all).toHaveLength(1);
+
+    rerender({ user: 2 });
+    expect(first.readyState).toBe(FakeEventSource.CLOSED);
+    expect(FakeEventSource.all).toHaveLength(2);
+    expect(source().readyState).toBe(FakeEventSource.CONNECTING);
   });
 
   it("follows scans", () => {

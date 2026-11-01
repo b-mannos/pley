@@ -112,14 +112,15 @@ function refreshRequests(qc: QueryClient, changes: RequestChange[]) {
 }
 
 /**
- * Keeps one `EventSource('/api/events')` open while logged in and turns server
- * events into React Query cache updates/invalidations.
+ * Keeps one `EventSource('/api/events')` open while logged in (`userId`)
+ * and turns server events into React Query cache updates/invalidations.
+ * Another profile gets a stream of its own: the events are the account's.
  */
-export function useServerEvents(enabled: boolean) {
+export function useServerEvents(userId: Id | null) {
   const qc = useQueryClient();
 
   useEffect(() => {
-    if (!enabled || typeof EventSource === "undefined") return;
+    if (userId === null || typeof EventSource === "undefined") return;
 
     let es: EventSource | null = null;
     let retryTimer: number | undefined;
@@ -408,5 +409,5 @@ export function useServerEvents(enabled: boolean) {
       setConnectionLost(false);
       setEventsLive(false);
     };
-  }, [enabled, qc]);
+  }, [userId, qc]);
 }

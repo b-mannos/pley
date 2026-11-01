@@ -59,7 +59,7 @@ export function RequireAuth() {
   // Asked for together with the server status (not after it): one round trip
   // less before the first page. Its answer is only used once setup is done.
   const me = useMe(!setupRequired);
-  useServerEvents(!!me.data);
+  useServerEvents(me.data?.id ?? null);
 
   if (server.isPending) return <Splash />;
   if (server.isError) {
@@ -85,8 +85,9 @@ export function RequireAuth() {
     <AuthContext.Provider value={me.data}>
       <AudioPlayerProvider>
         <Outlet />
-        {/* Out of the pages, so news heard during a video waits for it to stop. */}
-        <RequestNotices />
+        {/* Out of the pages, so news heard during a video waits for it to stop; each profile's own, so what one
+            heard or held back isn't told to the next. */}
+        <RequestNotices key={me.data.id} />
       </AudioPlayerProvider>
     </AuthContext.Provider>
   );
