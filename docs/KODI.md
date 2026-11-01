@@ -159,11 +159,14 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Kodi:
   Kodi's lists, and asks to play with what this Kodi plays
   (`resources/lib/pley/caps.py`): every container and codec, the formats
   its audio settings pass through, HDR10, HLG, and Dolby Vision where Kodi
-  says the screen shows it (profiles 5 and 8; 7 too on CoreELEC). It
-  doesn't ask for master playlists: Kodi's HLS player reads no `CODECS`,
-  and MPEG-TS segments carry no Dolby Vision configuration, so Dolby Vision
-  plays as it is only from the file. A remux plays its HDR10 (or HDR10+)
-  base layer; profile 5, which has none, is converted instead.
+  says the screen shows it (profiles 5 and 8; 7 too on CoreELEC). Kodi
+  doesn't tell its decoders apart from its screen, so a box on a screen
+  without Dolby Vision lists no profiles, and its details read "as Dolby
+  Vision isn't shown here". It doesn't ask for master playlists: Kodi's
+  HLS player reads no `CODECS`, and MPEG-TS segments carry no Dolby Vision
+  configuration, so Dolby Vision plays as it is only from the file. A
+  remux plays its HDR10 (or HDR10+) base layer; profile 5, which has
+  none, is converted instead.
 - **Progress** goes to the server every 10 seconds while playing, every 30
   while paused, and on stop.
 - **Events:** the service keeps `GET /api/events` open and refreshes what

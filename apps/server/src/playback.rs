@@ -874,29 +874,32 @@ pub fn video_range_shown(v: &MediaStream, caps: &Caps, delivery: Delivery) -> Op
 }
 
 /// Why a Dolby Vision stream the player gets as it is, or copied, shows as
-/// its base layer: the screen, the player, or a stream that doesn't say
-/// it's Dolby Vision. A player that lists profiles but no Dolby Vision
-/// screen decodes it: its screen is what's missing.
+/// its base layer: the screen, the player, or a remux that doesn't name its
+/// Dolby Vision (the player reads no master playlist, the transcoder writes
+/// none, or the stream isn't HEVC). A player that lists profiles but no
+/// Dolby Vision screen decodes it: its screen is what's missing. One that
+/// lists none is told neither: Kodi and Roku can't tell their screen from
+/// their decoders.
 fn base_layer_why(v: &MediaStream, caps: &Caps) -> String {
     let profile = v.dv_profile.unwrap_or(0);
     if decodes_dolby_vision(v, caps) {
         return if caps.is_v2() && v.hdr10plus == Some(true) {
             "Dolby Vision with HDR10+ doesn't play here".to_owned()
         } else {
-            "this player's remuxes can't name Dolby Vision".to_owned()
+            "its remux doesn't name Dolby Vision".to_owned()
         };
     }
     if !caps.is_v2() {
         return if caps.dolby_vision {
             format!("this player doesn't decode profile {profile}")
         } else {
-            "this player doesn't show Dolby Vision".to_owned()
+            "Dolby Vision isn't shown here".to_owned()
         };
     }
     let decoders = caps.dolby_vision_profiles.as_deref().unwrap_or_default();
     if !caps.shows("dolby_vision") {
         return if decoders.is_empty() {
-            "this player doesn't show Dolby Vision".to_owned()
+            "Dolby Vision isn't shown here".to_owned()
         } else {
             "this screen doesn't show Dolby Vision".to_owned()
         };

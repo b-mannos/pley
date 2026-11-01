@@ -19,8 +19,9 @@ describes how they are made.
 
 - The player's details say why Dolby Vision plays as its HDR10, HLG or
   SDR base layer: the screen doesn't show it, the player doesn't decode
-  its profile or level, or the player's remuxes can't name it ("HDR10
-  (Dolby Vision base layer, as this screen doesn't show Dolby Vision)").
+  its profile or level, its remux doesn't name it, or HDR10+ comes with
+  it on a player that doesn't show the two together ("HDR10 (Dolby Vision
+  base layer, as this screen doesn't show Dolby Vision)").
 - The web app's title page shows the quality badges (4K, DV P8.1,
   HDR10…) of the version picked, not always the first version's.
 - The web app's sidebar shows Live TV only once it has channels, for

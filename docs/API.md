@@ -441,8 +441,10 @@ interface PlaybackInfo {
                                     // "HDR10 (Dolby Vision base layer, as this screen doesn't show Dolby
                                     // Vision)", "HDR10+ (Dolby Vision base layer, as this player doesn't
                                     // decode profile 7)": the base layer plays for the screen, the
-                                    // player's profiles or level, a remux that can't name Dolby Vision,
-                                    // or HDR10+ in the stream;
+                                    // player's profiles or level, a remux that doesn't name Dolby Vision,
+                                    // or HDR10+ in the stream; "as Dolby Vision isn't shown here" for a
+                                    // player that lists no profiles (Kodi and Roku can't tell their
+                                    // screen from their decoders);
                                     // "HDR10 (Dolby Vision base layer)" when the video is converted from it,
                                     // "Dolby Vision P8.1 (converted from P7 FEL)",
                                     // "Dolby Vision P8.1 (HDR10+ left out)",
