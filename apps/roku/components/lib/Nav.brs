@@ -32,6 +32,20 @@ function navScreen(name as string) as string
     return screens[name]
 end function
 
+' Where a menu's focus goes as it is built again (keys: its entries'):
+' to the entry it was on (key; "" for none), wherever that moved, else
+' as far down as it was (at), within the menu.
+function navMenuFocus(keys as object, key as string, at as integer) as integer
+    if key <> ""
+        for i = 0 to keys.Count() - 1
+            if keys[i] = key then return i
+        end for
+    end if
+    if at >= keys.Count() then at = keys.Count() - 1
+    if at < 0 then at = 0
+    return at
+end function
+
 ' The screen a tile opens: { to, params }, or invalid for kinds this
 ' version doesn't open. A season opens its show on that season; a person
 ' and a collection, a grid of their titles, an artist of their albums; a

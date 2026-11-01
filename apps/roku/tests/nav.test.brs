@@ -11,6 +11,15 @@ sub test_nav_names_screens()
     tkEqual(navScreen("nowhere"), "")
 end sub
 
+sub test_nav_menu_focus_keeps_its_entry()
+    menu = ["home", "library:3", "playlists", "search", "discover", "requests", "settings"]
+    tkEqual(navMenuFocus(menu, "settings", 4), 6, "Discover and the requests came above it")
+    tkEqual(navMenuFocus(menu, "library:3", 2), 1, "Live TV went")
+    tkEqual(navMenuFocus(menu, "nowPlaying", 7), 6, "gone from the end: the last entry")
+    tkEqual(navMenuFocus(menu, "live", 1), 1, "gone: where it was")
+    tkEqual(navMenuFocus(menu, "", -1), 0, "nothing focused yet")
+end sub
+
 ' TMDB's titles aren't the libraries': they have no itemId.
 sub test_nav_tmdb_tiles_open_their_page_or_list()
     tkEqual(navForTile({ kind: "discover", tmdbKind: "movie", tmdbId: 603, title: "The Matrix", itemId: 0 }), { to: "requestTitle", params: { kind: "movie", tmdbId: 603, title: "The Matrix" } })

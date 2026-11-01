@@ -180,9 +180,20 @@ sub buildMenu()
         items.Push({ title: "Now playing" })
         m.menuActions.Push("nowPlaying")
     end if
+    ' The focus stays on its entry as entries come or go above it (the
+    ' requests' once the summary comes, Live TV, libraries).
+    focusedKey = ""
     focused = m.menu.itemFocused
+    if m.menuKeys <> invalid and focused >= 0 and focused < m.menuKeys.Count() then focusedKey = m.menuKeys[focused]
+    m.menuKeys = []
+    for i = 0 to m.menuActions.Count() - 1
+        key = m.menuActions[i]
+        if key = "library" then key = key + ":" + urlValue(m.menuLibraries[i].id)
+        m.menuKeys.Push(key)
+    end for
     m.menu.content = nodesContent(items)
-    if focused > 0 and focused < items.Count() then m.menu.jumpToItem = focused
+    at = navMenuFocus(m.menuKeys, focusedKey, focused)
+    if at > 0 then m.menu.jumpToItem = at
 end sub
 
 ' The menu's entries for requests, from the summary: Discover, and the
