@@ -234,6 +234,10 @@ It has no releases yet: it is built and installed by hand
 - Picture subtitles (PGS, VobSub, DVB) in the native app no longer close
   the app as a track still being made comes again: the same picture is
   kept, and an old one's texture goes a second after it leaves the screen.
+- Videos on a USB drive play in the native app: the rail's USB drive,
+  while one is plugged in, lists its folders and videos; a video plays in
+  Pley's player from where it stopped, with its audio tracks, chapters,
+  HDR, its own subtitles and the subtitle files beside it.
 
 ### Fixed
 

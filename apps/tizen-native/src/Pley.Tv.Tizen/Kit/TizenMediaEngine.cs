@@ -260,6 +260,9 @@ sealed class TizenMediaEngine : IVideoEngine
     /// </summary>
     static void Buffer(Media.Player p, EngineSource s)
     {
+        // A file on a drive isn't streamed, and has no buffering to set: once its buffering was
+        // only read, the TV's player said Playing and stood at 0 for good.
+        if (!s.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return;
         try
         {
             var before = p.BufferingTime;

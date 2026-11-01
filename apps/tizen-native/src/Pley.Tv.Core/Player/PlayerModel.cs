@@ -374,7 +374,8 @@ public sealed class PlayerModel : IDisposable
             Discard(started);
             return;
         }
-        if (!IsKeyed(started.Url))
+        // A file on a drive plays at its own path.
+        if (!source.Local && !IsKeyed(started.Url))
         {
             // The TV's player can't send the token: an address without its own key won't play.
             Discard(started);
@@ -482,7 +483,7 @@ public sealed class PlayerModel : IDisposable
         if (!s.Hls && audio != null)
         {
             // Another track than the one the file starts with: the switch may drop frames.
-            if (engine.SelectAudio(PlaybackPlan.AudioStreams(file).ToList().IndexOf(audio), audio.Language) && !audio.Default) QuietFrames();
+            if (engine.SelectAudio(PlaybackPlan.AudioStreams(file).ToList().IndexOf(audio), CheckedLanguage(audio)) && !audio.Default) QuietFrames();
         }
         var sub = subtitle;
         if (sub == null)
@@ -498,6 +499,14 @@ public sealed class PlayerModel : IDisposable
         else if (!s.BurnSubtitles && Sideload) presenter.ShowPictures(source.Url(PlaybackPlan.PictureSubtitlesPath(s.FileId, sub.Index)));
         else presenter.Hide();
     }
+
+    /// <summary>
+    /// The language the TV's track must have for <paramref name="track"/>: a server's file may list
+    /// its tracks in another order than the TV's player reads them. A file on a drive is read in the
+    /// player's own order, and its codes differ in form ("jpn", "ja"): none, or every switch failed
+    /// and started the player again.
+    /// </summary>
+    string? CheckedLanguage(MediaStream track) => source.Local ? null : track.Language;
 
     /// <summary>The server can't make the .mks (an older server or transcoder): picture subtitles are burned in from now on.</summary>
     void PicturesFailed()
@@ -788,6 +797,12 @@ public sealed class PlayerModel : IDisposable
     /// </summary>
     void OnStalled(PlaybackInfo s, bool starving)
     {
+        // A file on a drive waits for no server, and the same file again would stand still again.
+        if (source.Local)
+        {
+            Fail(SessionText.LocalStuck, canRetry: true);
+            return;
+        }
         Plays.When(scheduler, () => source.PlaybackStatus(s.SessionId, OutageAskMs), _ =>
         {
             if (info == s && outage == null && !closed) Act(recovery.OnStall(s.Method, starving), starving);
@@ -958,7 +973,7 @@ public sealed class PlayerModel : IDisposable
         var s = info;
         if (s == null) return;
         if (!s.Hls && engine != null && PlaybackPlan.AudioPlaysHere(chosen, caps)
-            && engine.SelectAudio(PlaybackPlan.AudioStreams(file).ToList().IndexOf(chosen), chosen.Language))
+            && engine.SelectAudio(PlaybackPlan.AudioStreams(file).ToList().IndexOf(chosen), CheckedLanguage(chosen)))
         {
             QuietFrames();
             return;
@@ -1427,7 +1442,8 @@ public sealed class PlayerModel : IDisposable
     {
         trickplayTimer?.Dispose();
         trickplayTimer = null;
-        if (chosen == null) return;
+        // Only a server makes them.
+        if (chosen == null || source.Local) return;
         var started = scheduler.Elapsed;
         void Ask()
         {
@@ -1481,7 +1497,8 @@ public sealed class PlayerModel : IDisposable
         var playing = Label(auto ?? quality);
         var automatic = picked.Automatic;
         var fileHint = Qualities.FileHint(chosenFile);
-        var qualities = Qualities.ForFile(chosenFile).Select(p => new QualityChoice(
+        // Nothing converts a file on a drive: it plays as it is.
+        var qualities = (source.Local ? new List<QualityPreset>() : Qualities.ForFile(chosenFile)).Select(p => new QualityChoice(
             p.Id,
             Label(p),
             p.Automatic ? (automatic && (auto != null || !quality.Original) ? SessionText.AutomaticNow(playing) : SessionText.AutomaticHint)
