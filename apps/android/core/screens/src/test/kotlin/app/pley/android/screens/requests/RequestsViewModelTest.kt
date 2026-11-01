@@ -114,6 +114,22 @@ class RequestsViewModelTest {
     }
 
     @Test
+    fun changesHeardWhileOneIsReadComeTogetherEachOnce() = runTest(dispatcher) {
+        val requests = FakeRequests(summary)
+        viewModel(requests)
+        settle()
+        requests.api.hold()
+        requests.change(RequestChange(44, TitleKind.Movie, 933260))
+        runCurrent()
+        // While 44 is read, it changes again and again: read once more after.
+        repeat(20) { requests.change(RequestChange(44, TitleKind.Movie, 933260)) }
+        runCurrent()
+        requests.api.release()
+        settle()
+        assertEquals(listOf(44L, 44L), requests.api.calls("request").map { it.args.single() })
+    }
+
+    @Test
     fun approvingTakesACardOutOfNeedsAttention() = runTest(dispatcher) {
         val requests = FakeRequests(manager)
         val vm = viewModel(requests)

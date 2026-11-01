@@ -192,7 +192,7 @@ class DiscoverViewModel(
                 .combine(retries) { q, _ -> q }
                 .collectLatest(::searchFor)
         }
-        viewModelScope.launch { requests.changes.collect(::patch) }
+        viewModelScope.launch { requests.changes.gathered().collect { batch -> batch.forEach { patch(it) } } }
         viewModelScope.launch {
             // "Your requests" for those who have any, read again as requests change.
             val any = gate.map { it.summary?.let { s -> s.own > 0 && s.yourRequests } == true }.distinctUntilChanged()

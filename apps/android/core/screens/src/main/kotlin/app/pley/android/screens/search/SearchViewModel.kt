@@ -21,6 +21,7 @@ import app.pley.android.screens.library.LibraryViewModel
 import app.pley.android.screens.library.TileFactory
 import app.pley.android.screens.library.TileLook
 import app.pley.android.screens.requests.Pages
+import app.pley.android.screens.requests.gathered
 import app.pley.android.screens.requests.patchFor
 import java.util.IdentityHashMap
 import kotlinx.coroutines.CancellationException
@@ -246,10 +247,13 @@ class SearchViewModel<T : Any>(
         }
         val origin = deps.origin.first().orEmpty()
         emit(TmdbSection.Ready(q, titles, origin))
-        deps.requests.changes.collect { change ->
-            val patch = deps.requests.patchFor(change, titles.asSequence()) ?: return@collect
-            titles = titles.map(patch)
-            emit(TmdbSection.Ready(q, titles, origin))
+        deps.requests.changes.gathered().collect { batch ->
+            val before = titles
+            for (change in batch) {
+                val patch = deps.requests.patchFor(change, titles.asSequence()) ?: continue
+                titles = titles.map(patch)
+            }
+            if (titles != before) emit(TmdbSection.Ready(q, titles, origin))
         }
     }
 

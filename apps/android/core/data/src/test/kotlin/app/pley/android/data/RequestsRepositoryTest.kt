@@ -12,8 +12,11 @@ import app.pley.android.model.TitleKind
 import app.pley.android.network.ApiException
 import app.pley.android.network.LiveEvent
 import app.pley.android.testing.Fixtures
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -175,6 +178,23 @@ class RequestsRepositoryTest {
         )
         assertTrue(changes.first().about(TitleKind.Movie, 1))
         assertTrue(RequestChange(42, TitleKind.Show, 1396).about(TitleKind.Show, 1396))
+    }
+
+    @Test
+    fun `a screen that falls behind holds up no other`() = runTest {
+        val data = signedIn(folder.newFolder())
+        val requests = data.graph.requests
+        // One screen waits on the server from its first change on.
+        val waiting = CompletableDeferred<Unit>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { requests.changes.collect { waiting.await() } }
+        val heard = collect(requests.changes)
+        requests.start()
+        testScheduler.runCurrent()
+        for (id in 1L..40L) {
+            data.events.send(LiveEvent.Event(ServerEvent.RequestsChanged(id, TitleKind.Movie, 1_000 + id)))
+            testScheduler.runCurrent()
+        }
+        assertEquals((1L..40L).toList(), heard.mapNotNull { it.requestId })
     }
 
     @Test

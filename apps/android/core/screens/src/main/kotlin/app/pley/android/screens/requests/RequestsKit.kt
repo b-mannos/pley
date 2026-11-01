@@ -16,8 +16,12 @@ import app.pley.android.screens.ScreensGraph
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.buffer
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.launch
 
 /** What the request screens read: the repository, the server's address for pictures, and whether events come. */
 class RequestsDeps(
@@ -163,6 +167,27 @@ suspend fun RequestsRepository.patchFor(change: RequestChange, shown: Sequence<D
         }
     }
 }
+
+/**
+ * Changes for a screen that reads the server for them: those heard while
+ * it reads come next, together and each once, so it neither holds up the
+ * other screens nor loses any.
+ */
+fun Flow<RequestChange>.gathered(): Flow<List<RequestChange>> = channelFlow {
+    val heard = LinkedHashSet<RequestChange>()
+    val ready = Channel<Unit>(Channel.CONFLATED)
+    launch {
+        collect { change ->
+            synchronized(heard) { heard += change }
+            ready.trySend(Unit)
+        }
+        ready.close()
+    }
+    for (signal in ready) {
+        val batch = synchronized(heard) { heard.toList().also { heard.clear() } }
+        if (batch.isNotEmpty()) send(batch)
+    }
+}.buffer(Channel.RENDEZVOUS)
 
 /** The key telling titles apart in lists: a movie and a show may share a TMDB id. */
 val DiscoverTitle.key: String get() = "${kind.wire}:$tmdbId"

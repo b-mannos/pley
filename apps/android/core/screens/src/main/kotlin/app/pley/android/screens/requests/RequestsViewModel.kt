@@ -236,7 +236,7 @@ class RequestsViewModel(
                 filter.update { it?.copy(q = q) }
             }
         }
-        viewModelScope.launch { requests.changes.collect(::changed) }
+        viewModelScope.launch { requests.changes.gathered().collect { batch -> batch.forEach { changed(it) } } }
         viewModelScope.launch { reloadSoon.debounce(CHANGES_MS).collect { reload(quiet = true) } }
     }
 

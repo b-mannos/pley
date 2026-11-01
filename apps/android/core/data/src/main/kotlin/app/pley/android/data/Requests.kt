@@ -34,6 +34,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -295,7 +296,8 @@ internal class ServerRequests(
         .distinctUntilChanged()
         .stateIn(app, SharingStarted.WhileSubscribed(), RequestsState.Unknown)
 
-    private val _changes = MutableSharedFlow<RequestChange>(extraBufferCapacity = HEARD_BUFFER)
+    // A screen that falls behind loses its oldest change rather than every screen the newest.
+    private val _changes = MutableSharedFlow<RequestChange>(extraBufferCapacity = HEARD_BUFFER, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val changes: Flow<RequestChange> get() = _changes.asSharedFlow()
 
     private val _notices = MutableStateFlow<List<RequestNotice>>(emptyList())
