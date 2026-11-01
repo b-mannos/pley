@@ -735,6 +735,30 @@ async fn a_show_is_asked_for_the_seasons_a_library_lacks() {
 }
 
 #[tokio::test]
+async fn a_request_is_available_once_a_library_its_maker_can_open_has_it() {
+    let w = world().await;
+    w.turn_on(json!({})).await;
+    // Bob opens the shows only: the movies aren't his to watch.
+    let (bob, bob_id) = w.app.user(&w.admin, "bob", json!({"all_libraries": false, "library_ids": [w.shows]})).await;
+    w.add(w.movies, &["movies/The Matrix (1999).mkv"]).await;
+    w.identify("The Matrix", "tmdb_id = 603").await;
+    let asked = w.ask(&bob, json!({"kind": "movie", "tmdb_id": 603})).await;
+    assert_eq!(asked.status, StatusCode::CREATED, "only a library he can't open has it: {}", asked.text());
+    let id = asked.body["id"].as_i64().unwrap();
+    w.app.state.requests.sync().await.unwrap();
+    let his = w.app.get(&format!("/api/requests/{id}"), &bob).await;
+    assert_eq!((&his.body["status"], &his.body["item_id"]), (&json!("pending"), &Value::Null), "{}", his.text());
+
+    // Let into the movies: it is.
+    let reply = w.app.patch(&format!("/api/users/{bob_id}"), &w.admin, json!({"all_libraries": true})).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.text());
+    w.app.state.requests.sync().await.unwrap();
+    let his = w.app.get(&format!("/api/requests/{id}"), &bob).await;
+    assert_eq!(status(&his), (StatusCode::OK, "available".to_owned()), "{}", his.text());
+    assert!(his.body["item_id"].is_i64());
+}
+
+#[tokio::test]
 async fn anime_goes_to_its_own_folder_and_limits_count_seasons() {
     let w = world().await;
     w.turn_on(json!({"request_limit_seasons": 2, "request_limit_movies": 1})).await;

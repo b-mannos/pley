@@ -3135,14 +3135,21 @@ impl Requests {
         .await?;
         let sonarr = Service::Sonarr.saved(&self.settings.get());
         for row in rows {
-            // As its maker sees the library: theirs to open, where they may.
-            let library = self.in_library(row.user_id, row.kind(), &[row.known()]).await?;
-            let Some(item) = library.iter().find(|l| l.2).or(library.first()).map(|l| (l.1, l.2)) else { continue };
+            // As its maker sees the libraries: only those they can open
+            // count, as they may ask for what only the others have.
+            let library: Vec<i64> = self
+                .in_library(row.user_id, row.kind(), &[row.known()])
+                .await?
+                .into_iter()
+                .filter(|l| l.2)
+                .map(|l| l.1)
+                .collect();
+            let Some(&item) = library.first() else { continue };
             if row.status() == RequestStatus::Available {
                 // Gone and back (replaced, or scanned again): no news, as
                 // it was told of once.
                 sqlx::query("UPDATE requests SET item_id = ?, updated_at = ? WHERE id = ? AND item_id IS NULL")
-                    .bind(item.0)
+                    .bind(item)
                     .bind(now())
                     .bind(row.id)
                     .execute(&self.db.write)
@@ -3162,8 +3169,7 @@ impl Requests {
                     continue;
                 }
             };
-            let shows: Vec<i64> = library.iter().map(|l| l.1).collect();
-            let counts = self.season_counts(&shows).await?;
+            let counts = self.season_counts(&library).await?;
             let mut have = Vec::new();
             for n in &asked {
                 let Some(season) = details.seasons.iter().find(|s| s.number == *n) else { continue };
@@ -3182,7 +3188,7 @@ impl Requests {
             let before = seasons_of(&row.available_seasons);
             if !asked.is_empty() && have.len() == asked.len() {
                 self.available(&row, item, &have).await?;
-            } else if have != before || row.item_id != Some(item.0) {
+            } else if have != before || row.item_id != Some(item) {
                 // Seasons newly there are news to those waiting.
                 let newly: Vec<i64> = have.iter().copied().filter(|n| !before.contains(n)).collect();
                 let at = now();
@@ -3192,7 +3198,7 @@ impl Requests {
                      WHERE id = ?",
                 )
                 .bind(seasons_json(&have))
-                .bind(item.0)
+                .bind(item)
                 .bind(at)
                 .bind(!newly.is_empty())
                 .bind(at)
@@ -3208,16 +3214,15 @@ impl Requests {
         Ok(())
     }
 
-    /// A request's title is in a library: `item`, and whether its maker may
-    /// open it.
-    async fn available(&self, row: &RequestRow, item: (i64, bool), seasons: &[i64]) -> sqlx::Result<()> {
+    /// A request's title is in a library its maker can open: `item`.
+    async fn available(&self, row: &RequestRow, item: i64, seasons: &[i64]) -> sqlx::Result<()> {
         let at = now();
         let done = sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE requests SET status = 'available', item_id = ?, available_seasons = ?, available_at = ?,
                  updated_at = ?, news_at = ?, sending_at = NULL, send_profile = NULL, send_folder = NULL
              WHERE id = ? AND status IN {ACTIVE}"
         )))
-        .bind(item.0)
+        .bind(item)
         .bind(seasons_json(seasons))
         .bind(at)
         .bind(at)

@@ -2499,11 +2499,13 @@ An app's token without the route's scope is refused before all of it
 
   A request being sent offers neither `approve` nor `handled`.
 - **Available**: looked at after every library scan and every 5 minutes,
-  for active requests: a library's title as in `status` above, with every
-  season asked for whole (as many episodes as TMDB says have aired; with
-  fewer, the last one there and Sonarr saying it has them all, as files of
-  several episodes are counted once). `available_seasons` lists those whole
-  so far. A pending request whose title arrives this way is available too.
+  for active requests: the title in a library its maker can open, matched
+  as in `status` above, with every season asked for whole there (as many
+  episodes as TMDB says have aired; with fewer, the last one there and
+  Sonarr saying it has them all, as files of several episodes are counted
+  once). Libraries its maker can't open don't count, as it may ask for
+  what only they have. `available_seasons` lists those whole so far. A
+  pending request whose title arrives this way is available too.
 - **Unseen**: a request has news for its maker and its followers when it
   becomes available, more of its seasons do, or it is declined; `unseen`
   counts those of the account's since it last called `POST
