@@ -1,11 +1,12 @@
 """Requests' news, in the service. The summary is read as
 Kodi starts, when the sign-in or its profile changes, when the event stream
 opens, when the plugin did something to requests (requests.ASKING), soon
-after request events, and every minute while the stream is down; it is
-kept for the plugin (requests.SUMMARY). The listings that show its number,
-or show requests, are shown again when they change (Your requests every 10
-seconds while something on it downloads). A TV pops up ready-to-watch
-notices only, never over playing video: they wait for it to stop."""
+after request events, and every minute while the stream is down or it
+can't be read; it is kept for the plugin (requests.SUMMARY). The listings
+that show its number, or show requests, are shown again when they change
+(Your requests every 10 seconds while something on it downloads). A TV
+pops up ready-to-watch notices only, never over playing video: they wait
+for it to stop."""
 
 from __future__ import annotations
 
@@ -71,6 +72,9 @@ class News:
         # A request event came since the summary was last read: its unseen
         # rising is explained.
         self.explained = False
+        # The catch-up couldn't read the news: the next summary read tries
+        # again.
+        self.behind = False
         # Listings to show again: those with the summary's number, those
         # with requests.
         self.counted = False
@@ -148,6 +152,7 @@ class News:
         self.account = None
         self.summary = None
         self.off = False
+        self.behind = False
         self.waiting = []
         self.due = self.clock() if who is not None else None
 
@@ -189,38 +194,48 @@ class News:
     # -------------------------------------------------------- on the worker
 
     def read(self) -> None:
-        """GET /api/requests/summary, kept; then what its change says."""
+        """GET /api/requests/summary, kept; then what its change says. What
+        couldn't be read is read again in a minute, the stream open or not:
+        its events may not come for long."""
+        with self.lock:
+            who = self.who
+        done = False
         try:
-            self._read()
+            done = self._read(who)
         finally:
             with self.lock:
                 self.reading = False
+                if not done and self.who == who:
+                    again = self.clock() + POLL
+                    if self.due is None or self.due > again:
+                        self.due = again
 
-    def _read(self) -> None:
-        with self.lock:
-            who = self.who
+    def _read(self, who) -> bool:
+        """Whether the summary and its news were read (as `who`)."""
         answer = self.call("GET", "/api/requests/summary", fine=(403, 404))
         if answer is None:
-            # Signed out or out of reach: as it was.
-            return
+            # Signed out or out of reach: kept as it was.
+            return False
         off = answer.status in (403, 404)
         if off:
             # An older server, or one from before apps could ask.
             found = {"enabled": False}
         elif answer.status >= 400:
-            return
+            return False
         else:
             try:
                 found = answer.json()
             except ValueError:
-                return
+                return False
             if not isinstance(found, dict):
-                return
+                return False
         with self.lock:
             if self.who != who:
-                return
+                # Another sign-in's now, whose own read is due already.
+                return True
             before, self.summary = self.summary, found
             explained, self.explained = self.explained, False
+            behind, self.behind = self.behind, False
             self.off = off
             if before is not None and without(before, "changed_at") != without(found, "changed_at"):
                 self.counted = True
@@ -228,23 +243,28 @@ class News:
                 self.listed = True
         kodi.set_property(requests.SUMMARY, json.dumps(found))
         unseen = (found.get("unseen") or 0) if found.get("enabled") else 0
-        if unseen and (before is None or (unseen > (before.get("unseen") or 0) and not explained)):
-            self.catch_up(who)
+        if unseen and (before is None or behind or (unseen > (before.get("unseen") or 0) and not explained)):
+            if not self.catch_up(who):
+                with self.lock:
+                    if self.who == who:
+                        self.behind = True
+                return False
+        return True
 
-    def catch_up(self, who) -> None:
+    def catch_up(self, who) -> bool:
         """News that came with no event (Kodi was off, the stream down): the
         unseen requests ready to watch that weren't announced, in one
-        notice."""
+        notice. Whether the news could be read."""
         answer = self.call("GET", "/api/requests?unseen=1&limit=%d" % CATCH_UP)
         if answer is None or answer.status != 200:
-            return
+            return False
         try:
             found = [r for r in (answer.json() or {}).get("requests") or [] if isinstance(r, dict)]
         except (ValueError, AttributeError):
-            return
+            return False
         key = self.announced_key(who)
         if key is None:
-            return
+            return True
         said = set(announced(key))
         ready = [r for r in found if requests.ready_now(r) and not set(news_of(r)) <= said]
         if len(ready) == 1:
@@ -256,6 +276,7 @@ class News:
         elif ready:
             self.notice(who, requests.news(len(ready), kodi.text))
         announce(key, [n for r in ready for n in news_of(r)])
+        return True
 
     def available(self, event: dict, who) -> None:
         """request_available, heard as `who`: ready to watch, said once."""

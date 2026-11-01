@@ -253,8 +253,9 @@ TMDB API but is not endorsed or certified by TMDB."
   as Kodi starts, on another sign-in or profile, when the event stream
   opens again, right after the add-on did something to a request, a second
   after request events (once for a burst), and every 60 seconds while the
-  stream is down; a server without requests (404, or 403 from a build
-  before apps could ask) is asked again only when the stream opens again.
+  stream is down or the summary, or the news it says there is, can't be
+  read; a server without requests (404, or 403 from a build before apps
+  could ask) is asked again only when the stream opens again.
   It keeps the summary in a window property for the plugin and Pley's
   window, so listings ask nothing more. TMDB's pictures
   (`/api/discover/images/…`) come through the proxy as library artwork

@@ -82,6 +82,34 @@ class NewsTest(unittest.TestCase):
         self.turn(120, stream_open=True)
         self.assertEqual(self.reads(), 2, "the stream's events say when")
 
+    def test_a_summary_that_cant_be_read_is_read_again_in_a_minute(self):
+        self.server.answers["/api/requests/summary"] = (500, {"code": "internal", "message": "database busy"})
+        self.turn(stream_open=True)
+        self.turn(30, stream_open=True)
+        self.assertEqual(self.reads(), 1)
+        self.server.answers["/api/requests/summary"] = (200, dict(ON, unseen=1))
+        self.server.answers[CATCH_UP] = (200, {"total": 1, "requests": [ready(42, "Heat", 2000)]})
+        self.turn(31, stream_open=True)
+        self.assertEqual(self.reads(), 2, "the stream open, though no event came")
+        self.assertEqual(json.loads(kodi.get_property(requests.SUMMARY)), dict(ON, unseen=1))
+        self.turn(stream_open=True)
+        self.assertEqual(xbmcgui.notified, [("Pley", "“Heat” is ready to watch.")], "the news from before Kodi started")
+        self.turn(120, stream_open=True)
+        self.assertEqual(self.reads(), 2)
+
+    def test_news_that_cant_be_read_is_looked_at_again_in_a_minute(self):
+        self.server.answers["/api/requests/summary"] = (200, dict(ON, unseen=1))
+        self.server.answers[CATCH_UP] = (503, {"code": "unavailable", "message": "starting"})
+        self.turn(stream_open=True)
+        self.turn(61, stream_open=True)
+        self.assertEqual((self.reads(), self.server.asked.count(("GET", CATCH_UP))), (2, 2))
+        self.server.answers[CATCH_UP] = (200, {"total": 1, "requests": [ready(42, "Heat", 2000)]})
+        self.turn(61, stream_open=True)
+        self.turn(stream_open=True)
+        self.assertEqual(xbmcgui.notified, [("Pley", "“Heat” is ready to watch.")])
+        self.turn(120, stream_open=True)
+        self.assertEqual(self.server.asked.count(("GET", CATCH_UP)), 3)
+
     def test_a_server_without_requests_for_apps_is_asked_again_when_the_stream_opens(self):
         self.server.answers["/api/requests/summary"] = (404, {"code": "not_found", "message": "no"})
         self.turn()
