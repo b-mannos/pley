@@ -2872,8 +2872,10 @@ too. Whether a stream is a manager's is checked again as its session is
 - `requests_settings_changed` has no audience: see the union below.
 
 Clients fetch the request summary again on each, and what shows that
-request (`GET /api/requests/{id}` when only it shows); nothing is replayed,
-so a stream that connects again fetches the summary too.
+request (`GET /api/requests/{id}` when only it shows). A title's badge
+comes from the title (`GET /api/discover/{kind}/{tmdb_id}`), never from
+one of its requests: it depends on all of them and on who asks. Nothing
+is replayed, so a stream that connects again fetches the summary too.
 
 ```ts
 interface AnalysisStatus {          // intro and credits detection of one season
