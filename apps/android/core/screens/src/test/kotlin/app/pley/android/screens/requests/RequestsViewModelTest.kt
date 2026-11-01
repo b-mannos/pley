@@ -1,6 +1,7 @@
 package app.pley.android.screens.requests
 
 import app.pley.android.data.RequestChange
+import app.pley.android.data.RequestsRepository
 import app.pley.android.model.ApiErrorBody
 import app.pley.android.model.MediaRequest
 import app.pley.android.model.RequestList
@@ -202,6 +203,32 @@ class RequestsViewModelTest {
         advanceTimeBy(2_000)
         runCurrent()
         assertEquals(before + 1, requests.api.calls("requests").size)
+    }
+
+    @Test
+    fun aLongListIsReadAgainInPagesTheServerAllows() = runTest(dispatcher) {
+        val fake = FakeRequests(manager)
+        val all = (1L..230L).map { attention.requests.first().copy(id = it) }
+        val asked = mutableListOf<RequestQuery>()
+        val requests = object : RequestsRepository by fake {
+            override suspend fun list(query: RequestQuery): RequestList {
+                asked += query
+                return RequestList(total = all.size, requests = all.drop(query.offset).take(minOf(query.limit ?: 50, 200)))
+            }
+        }
+        val vm = RequestsViewModel(RequestsDeps(requests, MutableStateFlow("http://pley"), MutableStateFlow(true), dispatcher))
+        backgroundScope.launch { vm.state.collect {} }
+        settle()
+        while (vm.shown().size < all.size) {
+            vm.more()
+            settle()
+        }
+        asked.clear()
+        fake.change(RequestChange.All)
+        settle()
+        // At most 200 at a time: all 230 still show.
+        assertEquals(listOf(0 to 200, 200 to 30), asked.map { it.offset to it.limit })
+        assertEquals(all.size, vm.shown().size)
     }
 
     @Test

@@ -271,7 +271,7 @@ class RequestsViewModel(
         val f = filter.value ?: return
         val shownCount = (list.value as? RequestListState.Ready)?.requests?.size ?: 0
         try {
-            val answer = requests.list(f.query(0, maxOf(PAGE, shownCount)))
+            val answer = first(f, maxOf(PAGE, shownCount))
             if (filter.value == f) list.value = shown(f, answer)
             markSeen()
         } catch (e: CancellationException) {
@@ -280,6 +280,18 @@ class RequestsViewModel(
             val problem = RequestProblem.of(e)
             list.update { now -> if (now is RequestListState.Ready) now.copy(problem = problem) else if (quiet) now else RequestListState.Failed(problem) }
         }
+    }
+
+    /** The first [count] requests [f] keeps, read [MAX_PAGE] at a time. */
+    private suspend fun first(f: RequestFilter, count: Int): RequestList {
+        var answer = requests.list(f.query(0, minOf(count, MAX_PAGE)))
+        while (answer.requests.size < minOf(count, answer.total)) {
+            val read = answer.requests.size
+            val next = requests.list(f.query(read, minOf(count - read, MAX_PAGE)))
+            if (next.requests.isEmpty()) break
+            answer = next.copy(requests = answer.requests + next.requests)
+        }
+        return answer
     }
 
     /** Pull to refresh, or Retry: the summary and the list read again (once, however often it's pulled meanwhile). */
@@ -428,6 +440,9 @@ class RequestsViewModel(
 
     companion object {
         const val PAGE = 30
+
+        /** The most requests the server lists at once. */
+        const val MAX_PAGE = 200
 
         /** While something downloads or goes into the library. */
         const val MOVING_MS = 10_000L
