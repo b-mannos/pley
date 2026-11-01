@@ -644,9 +644,17 @@ impl TrickplayService {
             self.narrowed(rounds, None);
             return false;
         }
-        // Transcodes come first, a playback's or a download's.
-        let look = self.look().await;
-        rounds.look = Some(look);
+        // Transcodes come first, a playback's or a download's. The last look
+        // serves while it is fresh (`work` takes one every so often while
+        // files are made); the transcoder is asked again otherwise.
+        let look = match rounds.look.filter(|look| look.at.elapsed() < self.pace.look) {
+            Some(look) => look,
+            None => {
+                let look = self.look().await;
+                rounds.look = Some(look);
+                look
+            }
+        };
         if look.transcoding {
             return true;
         }
