@@ -210,6 +210,23 @@ fn why_dolby_vision_is_repackaged() {
     assert_eq!(reasons(fire_tv_4k_max(), "P7+"), ["Dolby Vision P7 + HDR10+ converted to P8.1, HDR10+ dropped."]);
 }
 
+/// A player whose Dolby Vision decoding shows Dolby Vision + HDR10+
+/// (`dolby_vision_hdr10plus`, Kodi on CoreELEC) gets those as it gets the
+/// rest: as they are, and HDR10+ kept where they are repackaged.
+#[test]
+fn a_player_that_shows_dolby_vision_with_hdr10plus_keeps_it() {
+    let shows = |mut caps: Value| {
+        caps["dolby_vision_hdr10plus"] = json!(true);
+        caps
+    };
+    assert_eq!(outcome(&play_in(shows(fire_tv_4k_max()), "mkv", &source("P8.1+"))), "D");
+    assert_eq!(outcome(&play_in(shows(without_master(fire_tv_4k_max())), "mkv", &source("P8.1+"))), "D");
+    assert_eq!(outcome(&play_in(shows(fire_tv_4k_max()), "mkv", &source("P7+"))), "R+8.1");
+    assert_eq!(outcome(&play_in(shows(fire_tv_4k_max()), "m2ts", &source("P8.1+"))), "R+DV");
+    let shown = screen_gets(shows(without_master(fire_tv_4k_max())), "m2ts", &source("P8.1+"));
+    assert_eq!(shown, "HDR10+ (Dolby Vision base layer, as its remux doesn't name Dolby Vision)");
+}
+
 /// What profile 7's enhancement layer holds is said where it matters: a
 /// full one is left out when the stream is made profile 8.1.
 #[test]

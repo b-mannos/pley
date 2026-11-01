@@ -69,6 +69,12 @@ pub struct Caps {
     /// player decodes Dolby Vision and its screen is what doesn't show it.
     #[serde(default)]
     pub dolby_vision_profiles: Option<Vec<DolbyVisionDecoder>>,
+    /// Its Dolby Vision decoding shows a stream that also carries HDR10+ (a
+    /// hybrid) as Dolby Vision. Many Android TV devices' decoders show black
+    /// or freeze on one (androidx/media#1895): without this, hybrids come
+    /// without their HDR10+.
+    #[serde(default)]
+    pub dolby_vision_hdr10plus: bool,
     /// Audio codecs decoded on the device, by FFmpeg's names.
     #[serde(default)]
     pub audio_decode: Option<Vec<String>>,
@@ -614,9 +620,10 @@ const DV_BL_BLU_RAY: i64 = 6;
 /// get Dolby Vision kept in remuxes, named in the playlist's `CODECS`:
 /// profile 5 too when the player lists it; profile 7 converted to 8.1 for
 /// a player listing 8 but not 7; and Dolby Vision + HDR10+ streams
-/// repackaged without their HDR10+ for any player that would decode them
-/// as Dolby Vision, never played as they are (androidx/media#1895). Without
-/// a master playlist, those are repackaged as their base layer. A stream
+/// repackaged without their HDR10+ for a player that would decode them as
+/// Dolby Vision, never played as they are, unless it says it shows them
+/// ([`Caps::dolby_vision_hdr10plus`]; androidx/media#1895). Without a
+/// master playlist, those are repackaged as their base layer. A stream
 /// whose file says a higher level than its decoder takes, though its size
 /// and frame rate need one it takes (a re-encode's 10 for 4K at 24 fps), is
 /// repackaged to keep Dolby Vision, named at the level it needs; a
@@ -656,7 +663,8 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool
             let level_ok = decoder.is_none_or(takes_level);
             // Remuxes keep Dolby Vision only where a master playlist names it.
             let signal = caps.master_playlist() && v.codec == "hevc";
-            let hybrid = v.hdr10plus == Some(true);
+            // HDR10+ goes from Dolby Vision the player doesn't show with it.
+            let strip = v.hdr10plus == Some(true) && !caps.dolby_vision_hdr10plus;
             // What plays when Dolby Vision itself doesn't: the base layer.
             let compat = match v.dv_bl_compat {
                 Some(DV_BL_BLU_RAY) if profile == 8 => Some(DV_BL_HDR10),
@@ -690,9 +698,9 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool
                 _ => VideoVerdict::no(needs_dolby_vision()),
             };
             match decoder {
-                // Dolby Vision decoders show black, or freeze, when HDR10+
-                // comes with it (androidx/media#1895): never as it is.
-                Some(_) if level_ok && hybrid => {
+                // Many Dolby Vision decoders show black, or freeze, when
+                // HDR10+ comes with it (androidx/media#1895): never as it is.
+                Some(_) if level_ok && strip => {
                     if signal {
                         return VideoVerdict {
                             direct: false,
@@ -722,7 +730,7 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool
                     direct: false,
                     copy: true,
                     dolby_vision: DolbyVisionMode::Signal,
-                    strip_hdr10plus: hybrid,
+                    strip_hdr10plus: strip,
                     reasons: vec![format!(
                         "Dolby Vision level {} relabelled {}.",
                         v.dv_level.unwrap_or_default(),
@@ -738,8 +746,8 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool
                 // Profile 7 for a player that decodes 8.1: converted while
                 // repackaged (rather than its base layer alone).
                 _ if profile == 7 && signal && decoder_of(8).is_some_and(takes_named) => {
-                    // What profile 8.1 can't carry.
-                    let left_out = match (v.dv_el == Some(DolbyVisionLayer::Fel), hybrid) {
+                    // What profile 8.1 can't carry, and the HDR10+ the player doesn't take with it.
+                    let left_out = match (v.dv_el == Some(DolbyVisionLayer::Fel), strip) {
                         (true, true) => ", enhancement layer and HDR10+ dropped",
                         (true, false) => ", enhancement layer dropped",
                         (false, true) => ", HDR10+ dropped",
@@ -749,7 +757,7 @@ fn video_v2(v: &MediaStream, caps: &Caps, converted: OutputRange, download: bool
                         direct: false,
                         copy: true,
                         dolby_vision: DolbyVisionMode::To81,
-                        strip_hdr10plus: hybrid,
+                        strip_hdr10plus: strip,
                         reasons: vec![format!("{label} converted to P8.1{left_out}.")],
                     }
                 }
@@ -883,7 +891,7 @@ pub fn video_range_shown(v: &MediaStream, caps: &Caps, delivery: Delivery) -> Op
 fn base_layer_why(v: &MediaStream, caps: &Caps) -> String {
     let profile = v.dv_profile.unwrap_or(0);
     if decodes_dolby_vision(v, caps) {
-        return if caps.is_v2() && v.hdr10plus == Some(true) {
+        return if caps.is_v2() && v.hdr10plus == Some(true) && !caps.dolby_vision_hdr10plus {
             "Dolby Vision with HDR10+ doesn't play here".to_owned()
         } else {
             "its remux doesn't name Dolby Vision".to_owned()

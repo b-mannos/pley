@@ -1641,6 +1641,7 @@ removed or reordered (`400`).
     hdr_types?: ("hdr10" | "hdr10plus" | "hlg" | "dolby_vision")[]; // what the screen shows, a decoder feeding it
     dolby_vision_profiles?: { profile: number; max_level?: number }[]; // decoded; used only with
                                   // `dolby_vision` in hdr_types, else they say the screen is what lacks it
+    dolby_vision_hdr10plus?: boolean; // shows Dolby Vision + HDR10+ streams as Dolby Vision (below)
     audio_decode?: string[];      // decoded on the device
     audio_passthrough?: string[]; // sent as they are to a receiver: "ac3", "eac3", "truehd", "dts"
     audio_channels?: number;      // the most channels the output takes: 2, 6, 8
@@ -2041,14 +2042,16 @@ become:
   stream's level; otherwise the HDR10 base layer plays.
 - **Dolby Vision + HDR10+** (`hdr10plus: true` on the stream, found when the
   file is analyzed) never plays as it is for a player that would decode it
-  as Dolby Vision, on any model: Dolby Vision decoders show black or freeze
-  with HDR10+ in the stream (androidx/media#1895). It is repackaged with
-  the HDR10+ messages taken out and Dolby Vision kept ("…plays as Dolby
-  Vision without its HDR10+…"); without a master playlist, as its base
-  layer with HDR10+ ("…plays as its HDR10+ base layer, repackaged…").
-  Players without Dolby Vision play these files normally. Files analyzed by
-  an older server don't carry the flag until a forced scan of their library
-  analyzes them again.
+  as Dolby Vision, unless the player says its decoding shows these
+  (`dolby_vision_hdr10plus`, Kodi on CoreELEC): many Android TV devices'
+  Dolby Vision decoders show black or freeze with HDR10+ in the stream
+  (androidx/media#1895), whatever app plays it. It is repackaged with the
+  HDR10+ messages taken out and Dolby Vision kept ("…plays as Dolby Vision
+  without its HDR10+…"); without a master playlist, as its base layer with
+  HDR10+ ("…plays as its HDR10+ base layer, repackaged…"). Players without
+  Dolby Vision play these files normally. Files analyzed by an older server
+  don't carry the flag until a forced scan of their library analyzes them
+  again.
 - A server whose transcoder lacks `hls_master_playlist` in its capabilities
   decides as if no player read master playlists.
 
