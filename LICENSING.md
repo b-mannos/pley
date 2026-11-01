@@ -72,11 +72,12 @@ ships FFmpeg beside it, FFmpeg keeps its own licence:
 
 ## What keeps it this way
 
-Pley's own code is wholly its authors', so they can license it on other
-terms besides the AGPL. A dependency that is only available under a
-copyleft licence (GPL, LGPL, AGPL and the like), or FFmpeg linked in, would
-bind the programs that use it to that licence's terms too, which only its
-own authors could waive.
+Pley's authors can license it on other terms besides the AGPL:
+contributions come under the Apache License 2.0
+([CONTRIBUTING.md](CONTRIBUTING.md)), which allows that. A dependency that
+is only available under a copyleft licence (GPL, LGPL, AGPL and the like),
+or FFmpeg linked in, would bind the programs that use it to that licence's
+terms too, which only its own authors could waive.
 
 - **No copyleft code in Pley's own programs.** `scripts/check-licenses.ps1`
   walks the real dependency graphs of the server and the transcoder and fails

@@ -47,8 +47,9 @@ claimed as checked.
 
 **Licensing** ([LICENSING.md](LICENSING.md)). Pley is under the GNU
 AGPL, version 3 only (`AGPL-3.0-only`, the root [LICENSE](LICENSE)); only
-the Kodi add-on is GPL-2.0-or-later. Pley's own code stays wholly its
-authors', so it can be licensed on other terms too.
+the Kodi add-on is GPL-2.0-or-later. Contributions come under the Apache
+License 2.0 ([CONTRIBUTING.md](CONTRIBUTING.md)), so Pley can be licensed
+on other terms too.
 
 - Add no dependency that is only available under a copyleft licence (GPL,
   LGPL, AGPL and the like) to the server, the transcoder or any app other
