@@ -12,6 +12,7 @@ import type {
   RequestDownload,
   RequestProblem,
   RequestStage,
+  RequestStatus,
   RequestSummary,
   TitleKind,
 } from "@/api/requests";
@@ -444,12 +445,22 @@ export function failedText(title: string, kind: TitleKind, reason: string | null
   return reason ? `${to}: ${sentence(reason)}` : `${to}.`;
 }
 
-/** What an unseen request's news was, as a notice says it; `null` for none to tell. */
+/**
+ * What an unseen request's news was, as a notice says it: all of it ready
+ * to watch, some of a show's seasons (while others still download, too),
+ * or declined; `null` for none to tell.
+ */
 export function newsText(request: MediaRequest): string | null {
-  if (request.stage === "available") return readyText(request.title, null, true);
-  if (request.stage === "partial") return readyText(request.title, request.available_seasons, false);
-  if (request.status === "declined") return decidedText(request.title, "declined", request.reason);
-  return null;
+  switch (request.status) {
+    case "available":
+      return request.stage === "gone" ? null : readyText(request.title, null, true);
+    case "approved":
+      return request.available_seasons.length ? readyText(request.title, request.available_seasons, false) : null;
+    case "declined":
+      return decidedText(request.title, "declined", request.reason);
+    default:
+      return null;
+  }
 }
 
 /** "3 of your requests have news". */
@@ -457,37 +468,49 @@ export function newsCountText(count: number): string {
   return `${count} of your requests ${count === 1 ? "has" : "have"} news`;
 }
 
+/** How a request stood when a notice told of it: its status, and the seasons of a show ready then. */
+export interface ToldNews {
+  status: RequestStatus;
+  seasons: number[];
+}
+
 /** What this profile's notices have told already, so nothing is announced twice. */
 export interface NewsMark {
   /** The newest `updated_at` announced from a catch-up (the server's clock). */
   at: Timestamp;
-  /** Requests announced as their news came, each with the time past which news of it is new again. */
-  heard: Record<string, Timestamp>;
+  /** Requests told of, as their news came or by a catch-up: told again once they move on, or more of a show's seasons are ready. */
+  told: Record<string, ToldNews>;
 }
 
-export const NO_NEWS: NewsMark = { at: 0, heard: {} };
+export const NO_NEWS: NewsMark = { at: 0, told: {} };
 
-/** How long after a notice heard as it came its request's news counts as the same (this device's clock may differ from the server's). */
-const HEARD_SLACK = 10 * 60;
-const HEARD_KEPT = 100;
+const TOLD_KEPT = 100;
+
+/** `request`'s news was told: its status is the same and, while it is partly ready, no season of it is ready that wasn't then. */
+function toldAlready(told: ToldNews | undefined, request: MediaRequest): boolean {
+  if (told?.status !== request.status) return false;
+  return request.status !== "approved" || request.available_seasons.every((n) => told.seasons.includes(n));
+}
 
 /** Of the unseen requests, those whose news no notice has told. */
 export function freshNews(requests: MediaRequest[], mark: NewsMark): MediaRequest[] {
-  return requests.filter((r) => r.updated_at > mark.at && r.updated_at > (mark.heard[r.id] ?? 0) && newsText(r) !== null);
+  return requests.filter((r) => r.updated_at > mark.at && newsText(r) !== null && !toldAlready(mark.told[r.id], r));
 }
 
 /** The mark once `requests` were announced by a catch-up. */
 export function markAnnounced(mark: NewsMark, requests: MediaRequest[]): NewsMark {
-  return requests.reduce((m, r) => (r.updated_at > m.at ? { ...m, at: r.updated_at } : m), mark);
+  return requests.reduce((m, r) => markTold({ ...m, at: Math.max(m.at, r.updated_at) }, r.id, r.status, r.available_seasons), mark);
 }
 
-/** The mark once a notice told of a request as its event came. */
-export function markHeard(mark: NewsMark, id: Id, now = nowSeconds()): NewsMark {
-  const all: Record<string, Timestamp> = { ...mark.heard, [id]: now + HEARD_SLACK };
-  const heard = Object.entries(all)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, HEARD_KEPT);
-  return { ...mark, heard: Object.fromEntries(heard) };
+/** The mark once a notice told of a request: its status now, and the seasons of a show ready, with those told before. */
+export function markTold(mark: NewsMark, id: Id, status: RequestStatus, seasons: number[]): NewsMark {
+  const before = mark.told[id]?.seasons ?? [];
+  const all: Record<string, ToldNews> = { ...mark.told, [id]: { status, seasons: [...new Set([...before, ...seasons])].sort((a, b) => a - b) } };
+  // The newest requests' (the highest ids): older ones' news was told, and seen, long ago.
+  const kept = Object.entries(all)
+    .sort(([a], [b]) => Number(b) - Number(a))
+    .slice(0, TOLD_KEPT);
+  return { ...mark, told: Object.fromEntries(kept) };
 }
 
 /** The number on the entry that opens requests: managers' include what waits for them, in the danger colour while some failed. */

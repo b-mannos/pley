@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, qs } from "@/api/client";
 import { onServerEvent } from "@/api/events";
-import { requestKeys, useRequestSummary, type RequestList } from "@/api/requests";
+import { requestKeys, requestQueries, useRequestSummary, type RequestList, type RequestStatus } from "@/api/requests";
 import { useAuth } from "@/auth";
 import { eventsLive } from "@/lib/connection";
 import { getStored, writeStorage } from "@/lib/hooks";
@@ -13,7 +13,7 @@ import {
   failedText,
   freshNews,
   markAnnounced,
-  markHeard,
+  markTold,
   newsCountText,
   newsText,
   NO_NEWS,
@@ -48,7 +48,7 @@ function readMark(userId: number): NewsMark {
   const stored = getStored<Partial<NewsMark> | null>(markKey(userId), null);
   return {
     at: typeof stored?.at === "number" ? stored.at : NO_NEWS.at,
-    heard: stored?.heard && typeof stored.heard === "object" ? stored.heard : {},
+    told: stored?.told && typeof stored.told === "object" ? stored.told : {},
   };
 }
 
@@ -73,7 +73,10 @@ export function RequestNotices() {
   const held = useRef<Notice[]>([]);
   const explainedAt = useRef(0);
   const userId = me.id;
-  const heard = useCallback((requestId: Id) => writeStorage(markKey(userId), markHeard(readMark(userId), requestId)), [userId]);
+  const told = useCallback(
+    (requestId: Id, status: RequestStatus, seasons: number[]) => writeStorage(markKey(userId), markTold(readMark(userId), requestId, status, seasons)),
+    [userId],
+  );
 
   const toastNotice = useCallback(
     (notice: Notice) => {
@@ -117,7 +120,16 @@ export function RequestNotices() {
         switch (ev.type) {
           case "request_available":
             explainedAt.current = Date.now();
-            heard(ev.request_id);
+            if (ev.complete) told(ev.request_id, "available", ev.seasons ?? []);
+            else {
+              told(ev.request_id, "approved", ev.seasons ?? []);
+              // The event names the seasons newly ready: those ready before them come with the request, so
+              // that a catch-up tells only of seasons ready after these.
+              void qc.fetchQuery(requestQueries.one(ev.request_id)).then(
+                (request) => told(request.id, request.status, request.available_seasons),
+                () => {},
+              );
+            }
             show({
               text: readyText(ev.title, ev.seasons, ev.complete),
               tone: "success",
@@ -126,7 +138,7 @@ export function RequestNotices() {
             break;
           case "request_decided":
             explainedAt.current = Date.now();
-            if (ev.status === "declined") heard(ev.request_id);
+            told(ev.request_id, ev.status, []);
             show({ text: decidedText(ev.title, ev.status, ev.reason), tone: ev.status === "declined" ? "info" : "success", to: titleUrl(ev.kind, ev.tmdb_id) });
             break;
           case "request_created":
@@ -138,7 +150,7 @@ export function RequestNotices() {
             break;
         }
       }),
-    [show, heard, manage],
+    [show, told, manage, qc],
   );
 
   // Catching up: what came while this page wasn't listening, in one notice.

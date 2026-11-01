@@ -14,7 +14,7 @@ import {
   freshNews,
   mainAction,
   markAnnounced,
-  markHeard,
+  markTold,
   newsCountText,
   newsText,
   NO_NEWS,
@@ -319,10 +319,34 @@ describe("notices", () => {
     const announced = markAnnounced(NO_NEWS, [ready, declined]);
     expect(announced.at).toBe(200);
     expect(freshNews([ready, declined], announced)).toEqual([]);
-    // Heard as it came: its news isn't told again by a catch-up.
-    const later = makeRequest({ id: 4, status: "available", stage: "available", updated_at: NOW + 30 });
-    expect(freshNews([later], markHeard(announced, 4, NOW))).toEqual([]);
-    expect(freshNews([{ ...later, updated_at: NOW + DAY }], markHeard(announced, 4, NOW))).toHaveLength(1);
+    // Told as it came: its news isn't told again by a catch-up, though the request changed since.
+    const later = makeRequest({ id: 4, status: "available", stage: "available", updated_at: 400 });
+    expect(freshNews([later], markTold(announced, 4, "available", []))).toEqual([]);
+    expect(freshNews([later], markTold(announced, 4, "approved", [1]))).toEqual([later]);
+    // Gone from the libraries: nothing to tell.
+    expect(newsText({ ...ready, stage: "gone" })).toBeNull();
+  });
+
+  it("tells of a show's seasons as more are ready, while the rest downloads too, and never twice", () => {
+    const dark = makeRequest({
+      id: 5,
+      kind: "show",
+      title: "Dark",
+      seasons: [1, 2, 3, 4],
+      status: "approved",
+      stage: "downloading",
+      available_seasons: [1, 2],
+      updated_at: 500,
+    });
+    expect(newsText(dark)).toBe("Seasons 1–2 of “Dark” are ready to watch.");
+    expect(newsText({ ...dark, available_seasons: [] })).toBeNull();
+    // Season 2 told as it came, then the request read with Season 1, ready before it.
+    const heard = markTold(markTold(NO_NEWS, 5, "approved", [2]), 5, "approved", [1, 2]);
+    expect(heard.told[5]).toEqual({ status: "approved", seasons: [1, 2] });
+    expect(freshNews([dark], heard)).toEqual([]);
+    const more = { ...dark, available_seasons: [1, 2, 3], updated_at: 600 };
+    expect(freshNews([more], heard)).toEqual([more]);
+    expect(freshNews([more], markAnnounced(heard, [more]))).toEqual([]);
   });
 
   it("counts what waits on the entry to requests", () => {

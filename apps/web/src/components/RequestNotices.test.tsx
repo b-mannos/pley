@@ -171,6 +171,48 @@ describe("RequestNotices", () => {
     expect(screen.queryByText("2 of your requests have news")).not.toBeInTheDocument();
   });
 
+  it("tells what came while away of a show partly ready, and not the seasons told as they came", async () => {
+    let seasons = [1, 2];
+    const dark = () =>
+      makeRequest({
+        id: 7,
+        kind: "show",
+        tmdb_id: 1399,
+        title: "Dark",
+        seasons: [1, 2, 3, 4],
+        status: "approved",
+        stage: "downloading",
+        available_seasons: seasons,
+        unseen: true,
+        updated_at: 1_700_000_000 + seasons.length,
+      });
+    const requests = mockApi({
+      "GET /api/requests/summary": () => makeSummary({ unseen: 1, own: 1 }),
+      "GET /api/requests/7": () => dark(),
+      "GET /api/requests": () => makeRequestList([dark()]),
+    });
+    const listed = () => requests.filter((r) => r.path.startsWith("/api/requests?"));
+    const quiet = render(makeSummary());
+    emit({ ...ready, request_id: 7, kind: "show", tmdb_id: 1399, title: "Dark", seasons: [2], complete: false });
+    expect(await screen.findByText("Season 2 of “Dark” is ready to watch.")).toBeInTheDocument();
+    // Season 1, ready before it, comes with the request.
+    await waitFor(() => expect(requests.some((r) => r.path === "/api/requests/7")).toBe(true));
+    quiet.unmount();
+
+    // Back, with nothing more ready: nothing to tell.
+    const back = render(makeSummary({ unseen: 1, own: 1 }));
+    await waitFor(() => expect(listed()).toHaveLength(1));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.queryByText(/of “Dark”/)).not.toBeInTheDocument();
+    back.unmount();
+
+    // Season 3 came while away, while Season 4 downloads.
+    seasons = [1, 2, 3];
+    render(makeSummary({ unseen: 1, own: 1 }));
+    expect(await screen.findByText("Seasons 1–3 of “Dark” are ready to watch.")).toBeInTheDocument();
+    expect(listed()).toHaveLength(2);
+  });
+
   it("tells a single piece of news as it is", async () => {
     const summary = makeSummary({ unseen: 1, own: 1 });
     mockApi({
