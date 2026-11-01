@@ -291,6 +291,27 @@ describe("RequestsPage for everyone else", () => {
     expect(requests.find((r) => r.method === "DELETE")?.path).toBe("/api/requests/1");
   });
 
+  it("says when a declined request may be removed, from when the server says", async () => {
+    const user = userEvent.setup();
+    const declined = makeRequest({ id: 1, mine: true, status: "declined", actions: ["withdraw"] });
+    const early = {
+      code: "conflict",
+      message: "a declined request stays for 30 days: it may be removed from 2026-11-30",
+      request: declined,
+      retry_at: Math.floor(Date.now() / 1000) + 3 * 86_400 - 60,
+    };
+    mockApi({
+      "GET /api/requests/summary": () => makeSummary({ own: 1 }),
+      "GET /api/requests": () => makeRequestList([declined]),
+      "DELETE /api/requests/1": () => new Response(JSON.stringify(early), { status: 409, headers: { "content-type": "application/json" } }),
+    });
+    show(<RequestsPage />, "/requests", ann);
+    await user.click(await screen.findByRole("button", { name: "Remove" }));
+    await user.click(within(screen.getByRole("dialog", { name: "Remove “The Matrix” from your requests?" })).getByRole("button", { name: "Remove" }));
+    expect(await screen.findByText("You can remove it in 3 days.")).toBeInTheDocument();
+    expect(screen.queryByText(/2026-11-30/)).not.toBeInTheDocument();
+  });
+
   it("asks again for what was declined a while ago", async () => {
     const user = userEvent.setup();
     const old = makeRequest({ id: 4, mine: true, status: "declined", actions: ["ask_again", "withdraw"] });

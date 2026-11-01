@@ -542,8 +542,12 @@ export function problemWords(
           : "That's more than the limit allows: pick fewer.",
       );
     }
-    case "conflict":
-      return words(capitalize(problem.message));
+    case "conflict": {
+      if (problem.retry_at === null) return words(capitalize(problem.message));
+      // Its message says when as a date, in the server's words: said here from `retry_at` instead.
+      const when = untilText(problem.retry_at, now);
+      return words(problem.request?.status === "declined" ? `You can remove it ${when}.` : `You can try again ${when}.`);
+    }
   }
 }
 

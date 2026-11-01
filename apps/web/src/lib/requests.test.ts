@@ -344,7 +344,11 @@ describe("problems", () => {
     expect(problemText({ kind: "too_many", retry_at: null }, { manage: false, kind: "show", limits: makeSummary({ seasons_limit: 5 }) })).toBe(
       "You can ask for at most 5 seasons per 7 days: pick fewer.",
     );
-    expect(problemText({ kind: "conflict", message: "it's in a library already", request: null }, anyone)).toBe("It's in a library already");
+    expect(problemText({ kind: "conflict", message: "it's in a library already", request: null, retry_at: null }, anyone)).toBe("It's in a library already");
+    // When, from retry_at rather than the date in the message.
+    const early = { kind: "conflict", message: "a declined request stays for 30 days: it may be removed from Nov 30", retry_at: NOW + 3 * DAY } as const;
+    expect(problemText({ ...early, request: makeRequest({ status: "declined", mine: true }) }, anyone, NOW)).toBe("You can remove it in 3 days.");
+    expect(problemText({ ...early, request: null }, anyone, NOW)).toBe("You can try again in 3 days.");
     expect(problemText({ kind: "no_access" }, anyone)).toBe("Requests aren't open to this account. An administrator can let it ask for movies and shows.");
   });
 });

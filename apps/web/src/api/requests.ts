@@ -394,8 +394,11 @@ export type RequestProblem =
   | { kind: "declined"; retry_at: Timestamp | null }
   /** Past the limit (429): more at `retry_at`; `null`: more was asked for at once than the limit allows. */
   | { kind: "too_many"; retry_at: Timestamp | null }
-  /** In a library already, or the request changed meanwhile (409): `request` as it is now, where the answer has it. */
-  | { kind: "conflict"; message: string; request: MediaRequest | null };
+  /**
+   * In a library already, or the request changed meanwhile (409): `request` as it is now, where the answer has
+   * it; `retry_at`: when what was asked may be done (a declined request removed too early), else `null`.
+   */
+  | { kind: "conflict"; message: string; request: MediaRequest | null; retry_at: Timestamp | null };
 
 function isRequest(value: unknown): value is MediaRequest {
   return !!value && typeof value === "object" && typeof (value as { id?: unknown }).id === "number" && "stage" in value;
@@ -423,7 +426,7 @@ export function requestProblem(err: unknown): RequestProblem | null {
       return { kind: "no_access" };
     case 409:
       if (err.code === "declined") return { kind: "declined", retry_at: at };
-      return { kind: "conflict", message: err.message, request: isRequest(body.request) ? body.request : null };
+      return { kind: "conflict", message: err.message, request: isRequest(body.request) ? body.request : null, retry_at: at };
     case 429:
       return { kind: "too_many", retry_at: at };
     default:
