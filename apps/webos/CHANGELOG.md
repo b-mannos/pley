@@ -39,6 +39,8 @@ describes how they are made.
   does for the server, 90 s at most, then shows the server's message.
 - The search field no longer shows a small cross at its end while you
   type, one the remote's arrows can't reach.
+- Dolby Vision details call a profile 8 with the Blu-ray's base layer
+  "Profile 8", as its label does, not "Profile 8.6".
 
 ## [0.1.0] - 2026-10-30
 

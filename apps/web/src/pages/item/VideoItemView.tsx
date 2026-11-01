@@ -160,7 +160,8 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
                 formatDuration(item.duration_ms),
                 item.content_rating ? <ContentRating key="cr" value={item.content_rating} /> : null,
                 item.rating != null && item.rating > 0 ? <RatingBadge key="r" rating={item.rating} /> : null,
-                qualityBadgeLabels(item).length ? <QualityBadges key="q" item={item} /> : null,
+                // The quality of the version that plays.
+                qualityBadgeLabels(file).length ? <QualityBadges key="q" file={file} /> : null,
               ]}
             />
             <StarRating item={item} />

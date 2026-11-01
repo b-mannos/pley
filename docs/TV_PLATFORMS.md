@@ -375,10 +375,11 @@ app goes by the running version, never the model year.
 
 - **Containers:** MKV, MP4, TS, AVI and older ones. H.264 and HEVC Main 10
   at 4K; AV1 and VP9 at 4K from webOS 5; 8K HEVC and AV1 on 8K sets.
-- **HDR:** HDR10 and HLG where `webOS.deviceInfo()` says `hdr10`. Dolby
-  Vision profiles 5 and 8 where it says `dolbyVision` (profile 7 plays its
-  HDR10 base layer); before webOS 25 only from MP4 and TS, so a Dolby
-  Vision MKV is requested as a remux (`packages/tv/src/player/plan.ts`).
+- **HDR:** HDR10 and HLG where the TV's configuration says
+  `tv.model.supportHDR`. Dolby Vision profiles 5 and 8 where it says
+  `tv.config.supportDolbyHDRContents` (profile 7 is converted to 8.1 in a
+  remux); before webOS 25 only from MP4 and TS, so a Dolby Vision MKV is
+  requested as a remux (`packages/tv/src/player/plan.ts`).
   **No LG TV shows HDR10+.**
 - **Sound:** AAC, AC-3, E-AC-3, Opus, FLAC (2 channels), MP3, PCM. AC-3
   and E-AC-3 (Atmos included) pass through over ARC, eARC or optical when
@@ -403,9 +404,11 @@ app goes by the running version, never the model year.
   `network.query`.
 
 Pley's capability report (`apps/webos/src/caps.ts`) comes from the webOS
-version, `webOS.deviceInfo()` (panel, HDR, Dolby Vision, Atmos) and the
-sound settings (`com.webos.settingsservice`; the receiver's formats from
-`tv.model.edidType`).
+version, the TV's configuration (`com.webos.service.config`: panel, HDR,
+Dolby Vision, Atmos; `apps/webos/src/facts.ts`), the system's device info
+and the sound settings (`com.webos.settingsservice`; the receiver's
+formats from `tv.model.edidType`). A service that doesn't answer leaves
+what is safe: no HDR, no Dolby Vision, sound decoded by the TV.
 
 ## Releases
 

@@ -40,6 +40,23 @@ describes how they are made.
 - Pley for Android is free software under the GNU Affero General Public
   License, version 3 (`AGPL-3.0-only`, `LICENSE`).
 
+### Fixed
+
+- Each video is promised Dolby Vision only where the display mode it plays
+  in shows it: a trailer, or a film once frame rate matching has given up,
+  stays in the mode in use. Dolby Vision turned off in the system's
+  settings is remembered once a mode shows it off. Those videos played as
+  HDR10 while their details said Dolby Vision.
+- Dolby Vision the screen shows starts with its own decoder even before
+  the TV has switched to the video's mode, instead of as HDR10.
+- With a server from the same release, the player's details say why
+  Dolby Vision plays as its base layer, telling a screen that doesn't show
+  it from a device that doesn't decode it.
+- The player's Decoded line says HEVC and HDR10 for Dolby Vision played
+  as its base layer, not Dolby Vision.
+- Dolby Vision details call a profile 8 with the Blu-ray's base layer
+  "Profile 8", as its label does, not "Profile 8.6".
+
 ## [0.1.0] - 2026-10-30
 
 ### Added

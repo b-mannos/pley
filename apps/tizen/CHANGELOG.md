@@ -73,6 +73,8 @@ describes how they are made.
   within 5 minutes.
 - The search field no longer shows a small cross at its end while you
   type, one the remote's arrows can't reach.
+- Dolby Vision details call a profile 8 with the Blu-ray's base layer
+  "Profile 8", as its label does, not "Profile 8.6".
 
 ## [0.0.1] - 2026-10-29
 
