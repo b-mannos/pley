@@ -18,6 +18,9 @@ export interface NoticeApi {
   pointedAway(el: HTMLElement): boolean;
 }
 
+/** What had focus when a notice took it: its `data-fid`, by which focus finds its place again. */
+type Opener = { fid: string | null };
+
 /**
  * Ready-to-watch news over the pages, one at a time (TVs pop up nothing
  * else): a card at the bottom right with [Open] and [Close]. It shows once
@@ -51,6 +54,28 @@ export function RequestNotices(p: { state: AppState; free: () => boolean; onOpen
     if (gone) setShown(null);
   }, [gone]);
 
+  // The state keeps the notice on screen in the queue, whatever newer news comes.
+  const onScreen = shown && !gone ? shown.id : null;
+  useLayoutEffect(() => {
+    if (onScreen === null) return;
+    p.state.showingNotice(onScreen);
+    return () => p.state.showingNotice(null);
+  }, [onScreen]);
+
+  // Closed from the remote: once the card has gone, focus goes back to what had it, or to what took its
+  // place (its row was drawn again), else to the page's first, so it is never lost.
+  const back = useRef<Opener | null>(null);
+  useLayoutEffect(() => {
+    const to = back.current;
+    if (!to || onScreen !== null) return;
+    back.current = null;
+    const at = ui.focus.current;
+    if (at && at.isConnected) return;
+    const root = ui.focus.root;
+    const same = to.fid && root ? root.querySelector<HTMLElement>(`[data-fid="${to.fid}"]`) : null;
+    if (!ui.focus.focus(same)) ui.focus.move("down");
+  });
+
   if (!shown || gone) {
     p.noticeRef({ pointedAway: () => false });
     return null;
@@ -60,7 +85,8 @@ export function RequestNotices(p: { state: AppState; free: () => boolean; onOpen
       key={shown.id}
       notice={shown}
       noticeRef={p.noticeRef}
-      onDone={(open) => {
+      onDone={(open, opener) => {
+        back.current = opener;
         p.state.dropNotice(shown.id);
         setShown(null);
         if (open) p.onOpen(shown);
@@ -69,20 +95,20 @@ export function RequestNotices(p: { state: AppState; free: () => boolean; onOpen
   );
 }
 
-function NoticeCard(p: { notice: RequestNotice; onDone: (open: boolean) => void; noticeRef: (api: NoticeApi) => void }) {
+function NoticeCard(p: { notice: RequestNotice; onDone: (open: boolean, opener: Opener | null) => void; noticeRef: (api: NoticeApi) => void }) {
   const ui = useUi();
   const card = useRef<HTMLDivElement>(null);
+  const opener = useRef<Opener>({ fid: null });
   const shownAt = useRef(Date.now());
   const touchedAt = useRef(Date.now());
   const closed = useRef(false);
 
+  /** `restore`: focus goes back (Close, Back, Up, Down, its time up); not when it opens a page or the pointer moved away. */
   const close = (restore: boolean, open = false) => {
     if (closed.current) return;
     closed.current = true;
     if (card.current) ui.focus.release(card.current, restore);
-    // What had focus went meanwhile (its row was drawn again): the page's first takes it, so focus is never lost.
-    if (restore && !(ui.focus.current && ui.focus.current.isConnected)) ui.focus.move("down");
-    p.onDone(open);
+    p.onDone(open, restore ? opener.current : null);
   };
   p.noticeRef({
     pointedAway: (el) => {
@@ -96,6 +122,7 @@ function NoticeCard(p: { notice: RequestNotice; onDone: (open: boolean) => void;
   useLayoutEffect(() => {
     const el = card.current;
     if (!el) return;
+    opener.current = { fid: ui.focus.current?.getAttribute("data-fid") ?? null };
     ui.focus.trap(el);
     ui.focus.focus(el.querySelector<HTMLElement>("[data-f]"));
     shownAt.current = Date.now();

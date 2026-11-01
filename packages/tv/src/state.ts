@@ -221,6 +221,7 @@ export class AppState {
   /** Pages that draw titles' badges: request events fetch their request for its badge only meanwhile. */
   private markWatchers = 0;
   private noticeIds = 0;
+  private noticeOnScreen: number | null = null;
 
   constructor(platform: Platform, http: Transport = xhrTransport) {
     this.platform = platform;
@@ -464,6 +465,7 @@ export class AppState {
     this.requests.value = null;
     this.marks.value = {};
     this.notices.value = [];
+    this.noticeOnScreen = null;
     this.newsHeard = 0;
     this.caughtUp = false;
     this.catchUpWaiting = false;
@@ -979,13 +981,21 @@ export class AppState {
     );
   }
 
-  /** A pop-up that waits its turn (while a video plays, among the last three). */
+  /** A pop-up that waits its turn (while a video plays, among the last three); the one on screen stays until it closes. */
   private notify(n: Omit<RequestNotice, "id">): void {
-    this.notices.value = this.notices.value.concat([{ ...n, id: ++this.noticeIds }]).slice(-NOTICES_KEPT);
+    const all = this.notices.value.concat([{ ...n, id: ++this.noticeIds }]);
+    const waiting = all.filter((x) => x.id !== this.noticeOnScreen).slice(-NOTICES_KEPT);
+    this.notices.value = all.filter((x) => x.id === this.noticeOnScreen || waiting.indexOf(x) >= 0);
+  }
+
+  /** The shell shows this notice (`null`: none). */
+  showingNotice(id: number | null): void {
+    this.noticeOnScreen = id;
   }
 
   /** The notice was opened, closed or timed out. */
   dropNotice(id: number): void {
+    if (id === this.noticeOnScreen) this.noticeOnScreen = null;
     this.notices.value = this.notices.value.filter((n) => n.id !== id);
   }
 

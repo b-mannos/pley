@@ -1,15 +1,16 @@
+import { signal } from "@preact/signals";
 import { render, type ComponentChildren } from "preact";
 import { act } from "preact/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type RequestQuery } from "../../src/api/client";
-import type { DiscoverDetail, DiscoverPage, DiscoverSeason, DiscoverTitle, ItemRequest, MediaRequest, NewRequest, RequestList, RequestSummary, User } from "../../src/api/types";
+import type { DiscoverDetail, DiscoverPage, DiscoverSeason, DiscoverTitle, ItemRequest, MediaRequest, NewRequest, RequestList, RequestSummary, ServerEvent, User } from "../../src/api/types";
 import type { KeyValue } from "../../src/auth/tokens";
 import type { Platform } from "../../src/platform";
 import { AppState } from "../../src/state";
 import { UiContext, type Ui } from "../../src/ui/context";
 import { FocusManager } from "../../src/ui/focus";
 import { Input } from "../../src/ui/input";
-import { F } from "../../src/ui/kit/focusable";
+import { F, G } from "../../src/ui/kit/focusable";
 import type { Key } from "../../src/ui/keys";
 import { AppContext } from "../../src/ui/screens/common";
 import { DiscoverListScreen, DiscoverScreen } from "../../src/ui/screens/discover";
@@ -912,6 +913,69 @@ describe("ready-to-watch news", () => {
     t.press("ok");
     expect(opened).toEqual([1]);
     expect(document.querySelector(".request-notice")).toBeNull();
+  });
+
+  it("gives focus to what took the place of what had it, else to the page's first", () => {
+    const version = signal(0);
+    const there = signal(true);
+    function Page() {
+      return (
+        <G kind="row">
+          {there.value && <F key={version.value} fid="page" initial label="A page" />}
+          <F fid="other" label="Another" />
+        </G>
+      );
+    }
+    const t = mount(
+      (_entry, app) => (
+        <>
+          <Page />
+          <RequestNotices state={app} free={() => true} onOpen={() => undefined} noticeRef={() => undefined} />
+        </>
+      ),
+      {},
+      summary(),
+    );
+    act(() => void (t.app.notices.value = [NEWS, { ...NEWS, id: 2 }]));
+    t.advance(250);
+    expect(t.focus.current?.textContent).toBe("Open");
+    // The page draws what had focus again while the notice shows.
+    act(() => void version.value++);
+    t.press("back");
+    expect(document.querySelector(".request-notice")).toBeNull();
+    expect(t.fid()).toBe("page");
+    expect(t.focus.current!.isConnected).toBe(true);
+    t.advance(2000);
+    expect(t.focus.current?.textContent).toBe("Open");
+    // Now it goes for good.
+    act(() => void (there.value = false));
+    t.press("down");
+    expect(document.querySelector(".request-notice")).toBeNull();
+    expect(t.fid()).toBe("other");
+  });
+
+  it("stays while newer news pushes older out of the queue", () => {
+    const t = mount(
+      (_entry, app) => (
+        <>
+          <F fid="page" initial label="A page" />
+          <RequestNotices state={app} free={() => true} onOpen={() => undefined} noticeRef={() => undefined} />
+        </>
+      ),
+      {},
+      summary(),
+    );
+    const hear = (id: number) => (t.app as unknown as { handleEvent(e: ServerEvent): void }).handleEvent({ type: "request_available", request_id: id, title: `T${id}`, item_id: id, complete: true });
+    act(() => hear(1));
+    t.advance(250);
+    expect(t.text(".request-notice-text .t-label")).toEqual(["“T1” is ready to watch."]);
+    act(() => [2, 3, 4, 5].forEach(hear));
+    expect(t.text(".request-notice-text .t-label")).toEqual(["“T1” is ready to watch."]);
+    expect(t.focus.current?.textContent).toBe("Open");
+    expect(t.app.notices.value.map((n) => n.text)).toEqual(["“T1” is ready to watch.", "“T3” is ready to watch.", "“T4” is ready to watch.", "“T5” is ready to watch."]);
+    t.press("back");
+    expect(t.fid()).toBe("page");
+    expect(t.app.notices.value.length).toBe(3);
   });
 
   it("goes by itself after 10 s untouched, focus back where it was", () => {

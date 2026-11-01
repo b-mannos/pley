@@ -246,6 +246,19 @@ describe("request events", () => {
     app.dropNotice(app.notices.value[0]!.id);
     expect(app.notices.value.length).toBe(2);
   });
+
+  it("never push out the notice on screen", () => {
+    const { app, hear } = setup();
+    const ready = (id: number): ServerEvent => ({ type: "request_available", request_id: id, title: `T${id}`, item_id: id, complete: true });
+    hear(ready(1));
+    app.showingNotice(app.notices.value[0]!.id);
+    for (let id = 2; id <= 5; id++) hear(ready(id));
+    expect(app.notices.value.map((n) => n.text)).toEqual(["“T1” is ready to watch.", "“T3” is ready to watch.", "“T4” is ready to watch.", "“T5” is ready to watch."]);
+    // Closed, it is one like the others.
+    app.dropNotice(app.notices.value[0]!.id);
+    hear(ready(6));
+    expect(app.notices.value.map((n) => n.text)).toEqual(["“T4” is ready to watch.", "“T5” is ready to watch.", "“T6” is ready to watch."]);
+  });
 });
 
 describe("while the events are down", () => {
