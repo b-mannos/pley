@@ -743,6 +743,7 @@ address). Tokens work at any address of the server that issued them.
 |---|---|---|---|
 | GET | `/api/server?challenge=&proof_id=` | `public` | `/api/server`'s answer with `proof` |
 | GET | `/api/server/addresses` | `any app` | `{ id, addresses: string[] }` |
+| GET | `/api/server/proof-key` | `user` (session only) | `{ server_id, proof_id, proof_key }` |
 
 **Proofs.** Every token answer carries `server_id`, `proof_id` and
 `proof_key` ([Tokens](#tokens)): a key of this sign-in's own, the same at
@@ -762,6 +763,13 @@ the app asks it to prove it holds that key:
 3. The app computes the same with its `proof_key` and compares. Another
    answer, or no `proof`, means the address leads elsewhere: the app keeps
    its token to itself.
+
+Pley's own sign-in has no token answer: the desktop app asks
+`/api/server/proof-key` with its window's session for a key, and checks
+the server with it before it opens it and before its own requests (its
+notices and downloads). Each answer is a new key, whose `proof_id` is `s`
+and 22 random base64url characters; the server derives the key from it
+and stores nothing. Apps' tokens are refused there: they have their keys.
 
 `400` for a challenge or `proof_id` that isn't written so, or one sent
 without the other. `proof` is `null` while the server can't use its

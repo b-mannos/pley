@@ -94,6 +94,19 @@ pub async fn server_addresses(State(state): State<AppState>, _user: AuthUser) ->
     Json(serde_json::json!({ "id": state.identity.id, "addresses": addresses }))
 }
 
+/// `GET /api/server/proof-key`: a proof key for pley's own sign-in, which
+/// has no grant to carry one: the desktop app asks with its window's
+/// session, and checks the server with it before it opens it again. Apps
+/// have theirs in their token answers.
+pub async fn server_proof_key(State(state): State<AppState>, _user: AuthUser) -> Response {
+    let mut body = serde_json::json!({ "server_id": state.identity.id });
+    if let Some(proof) = state.identity.session_key() {
+        body["proof_id"] = serde_json::json!(proof.id);
+        body["proof_key"] = serde_json::json!(proof.key);
+    }
+    ([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
+}
+
 pub(crate) async fn login_response(
     state: &AppState,
     user_id: i64,

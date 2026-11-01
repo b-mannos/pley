@@ -260,6 +260,24 @@ async fn a_tv_tells_its_server_from_another_device_at_its_address() {
     assert!(addresses.body["addresses"].is_array());
     let anyone = app.call(Method::GET, "/api/server/addresses", None, None, &[]).await;
     assert_eq!(anyone.status, StatusCode::UNAUTHORIZED);
+
+    // Pley's own sign-in (the desktop app's window) asks for a key of its
+    // own; apps have theirs.
+    let session = app.get("/api/server/proof-key", &admin).await;
+    assert_eq!(session.status, StatusCode::OK, "{}", session.text());
+    assert_eq!(session.headers[header::CACHE_CONTROL], "no-store");
+    assert_eq!(session.body["server_id"], json!(id));
+    let session_id = session.body["proof_id"].as_str().unwrap();
+    assert!(session_id.starts_with('s'), "{session_id}");
+    let session_key =
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(session.body["proof_key"].as_str().unwrap()).unwrap();
+    let asked = app
+        .call(Method::GET, &format!("/api/server?challenge={challenge}&proof_id={session_id}"), None, None, &[])
+        .await;
+    assert_eq!(asked.body["proof"], json!(pley::identity::proof(&session_key, &id, challenge)));
+    assert_ne!(app.get("/api/server/proof-key", &access).await.status, StatusCode::OK, "not for apps");
+    let anyone = app.call(Method::GET, "/api/server/proof-key", None, None, &[]).await;
+    assert_eq!(anyone.status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

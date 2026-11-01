@@ -9,6 +9,10 @@
 //! own, and the server answers with an HMAC of it under that key. Every app
 //! can check an HMAC-SHA256 (Roku's BrightScript included), which a
 //! signature wouldn't allow.
+//!
+//! Pley's own sign-in has no grant: the desktop app asks for a key with the
+//! window's session ([`Identity::session_key`]). Its id is random, and the
+//! key derives from it, so nothing is stored for it either.
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
@@ -33,10 +37,14 @@ pub struct Identity {
     root: Option<hmac::Key>,
 }
 
+/// How many random bytes name a session's key.
+const SESSION_KEY_ID_BYTES: usize = 16;
+
 /// What an app keeps of a sign-in to tell its server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofKey {
-    /// The grant's id, which the app sends with its challenge.
+    /// The grant's id, or `s` and a session key's random id: what the app
+    /// sends with its challenge.
     pub id: String,
     /// The key, base64url without padding.
     pub key: String,
@@ -64,15 +72,38 @@ impl Identity {
         Some(ProofKey { id: grant_id.to_string(), key: b64(&key) })
     }
 
+    /// A new proof key for a session of pley's own sign-in, under a random id.
+    pub fn session_key(&self) -> Option<ProofKey> {
+        let mut bytes = [0u8; SESSION_KEY_ID_BYTES];
+        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut bytes).ok()?;
+        let id = b64(&bytes);
+        let key = self.derive(&format!("session {id}"))?;
+        Some(ProofKey { id: format!("s{id}"), key: b64(&key) })
+    }
+
     /// The proof of `challenge` for the sign-in `proof_id`: `Ok(None)` when
     /// the server can't make one (its key can't be used), `Err` when the
     /// request is wrong.
     pub fn prove(&self, proof_id: &str, challenge: &str) -> Result<Option<String>, &'static str> {
-        let grant_id = proof_id
-            .parse::<i64>()
-            .ok()
-            .filter(|&id| id > 0 && id.to_string() == proof_id)
-            .ok_or("proof_id isn't a sign-in's id")?;
+        let derived_from = match proof_id.strip_prefix('s') {
+            Some(id) => {
+                let canonical = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(id)
+                    .is_ok_and(|b| b.len() == SESSION_KEY_ID_BYTES && b64(&b) == id);
+                if !canonical {
+                    return Err("proof_id isn't a sign-in's id");
+                }
+                format!("session {id}")
+            }
+            None => {
+                let grant_id = proof_id
+                    .parse::<i64>()
+                    .ok()
+                    .filter(|&id| id > 0 && id.to_string() == proof_id)
+                    .ok_or("proof_id isn't a sign-in's id")?;
+                format!("grant {grant_id}")
+            }
+        };
         let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(challenge)
             .ok()
@@ -83,14 +114,17 @@ impl Identity {
         if b64(&bytes) != challenge {
             return Err("challenge must be 16 to 64 bytes in base64url without padding");
         }
-        let Some(key) = self.grant_key(grant_id) else { return Ok(None) };
+        let Some(key) = self.derive(&derived_from) else { return Ok(None) };
         Ok(Some(proof(&key, &self.id, challenge)))
     }
 
     fn grant_key(&self, grant_id: i64) -> Option<[u8; 32]> {
+        self.derive(&format!("grant {grant_id}"))
+    }
+
+    fn derive(&self, what: &str) -> Option<[u8; 32]> {
         let root = self.root.as_ref()?;
-        let tag = hmac::sign(root, format!("grant {grant_id}").as_bytes());
-        tag.as_ref().try_into().ok()
+        hmac::sign(root, what.as_bytes()).as_ref().try_into().ok()
     }
 }
 
@@ -184,6 +218,18 @@ mod tests {
     }
 
     #[test]
+    fn a_session_key_has_a_random_id_its_proofs_go_by() {
+        let identity = identity();
+        let given = identity.session_key().unwrap();
+        assert!(given.id.starts_with('s') && given.id.len() == 23, "{}", given.id);
+        assert_ne!(identity.session_key().unwrap(), given, "a new one each time");
+        let key = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&given.key).unwrap();
+        assert_eq!(identity.prove(&given.id, CHALLENGE).unwrap().unwrap(), proof(&key, ID, CHALLENGE));
+        assert_ne!(identity.prove(&given.id, CHALLENGE), identity.prove("17", CHALLENGE));
+        assert_eq!(Identity::with_secret(ID.into(), None).session_key(), None);
+    }
+
+    #[test]
     fn requests_are_checked() {
         let identity = identity();
         for (proof_id, challenge) in [
@@ -191,6 +237,10 @@ mod tests {
             ("-3", CHALLENGE),
             ("017", CHALLENGE),
             ("x", CHALLENGE),
+            ("s", CHALLENGE),
+            ("sAAECAwQFBgcICQoLDA0ODw=", CHALLENGE),
+            ("sAAECAwQFBgcICQoLDA0O", CHALLENGE),
+            ("sAAECAwQFBgcICQoLDA0ODx", CHALLENGE),
             ("17", "short"),
             ("17", "AAECAwQFBgcICQoLDA0ODw=="),
             ("17", "AAECAwQFBgcICQoLDA0ODw+"),
@@ -199,6 +249,7 @@ mod tests {
             assert!(identity.prove(proof_id, challenge).is_err(), "{proof_id} {challenge}");
         }
         assert!(identity.prove("17", &"A".repeat(86)).unwrap().is_some(), "64 bytes");
+        assert!(identity.prove("sAAECAwQFBgcICQoLDA0ODw", CHALLENGE).unwrap().is_some());
     }
 
     #[test]
