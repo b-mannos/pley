@@ -71,6 +71,9 @@ describes how they are made.
   only on a network the TV measured below 1.5 times the file's bitrate in
   the last 2 minutes, or, where it measured nothing, the second such wait
   within 5 minutes.
+- Live TV's guide says Today, Tomorrow and Yesterday on the days daylight
+  saving starts or ends too: a programme just after midnight tomorrow
+  showed its date, or the day after tomorrow showed as Tomorrow.
 - The search field no longer shows a small cross at its end while you
   type, one the remote's arrows can't reach.
 - Dolby Vision details call a profile 8 with the Blu-ray's base layer
