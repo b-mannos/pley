@@ -1,0 +1,242 @@
+package app.pley.android.auth
+
+import app.pley.android.common.describe
+import java.util.Base64
+import kotlinx.coroutines.runBlocking
+import okhttp3.Request
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
+import okhttp3.mockwebserver.SocketPolicy
+import org.json.JSONObject
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/** The server proves it is the one signed in to before a token goes to its address (docs/API.md, "Telling servers apart"). */
+class ServerProofTest {
+    private val server = MockWebServer()
+    private val shelf = MemoryShelf()
+    private val store = TokenStore(shelf, testVault())
+    private var now = 10_000_000L
+    private val issuer by lazy { issuerOf(server) }
+
+    private val key = ByteArray(32) { 1 }
+    private val keyText = Base64.getUrlEncoder().withoutPadding().encodeToString(key)
+    private val proof = ServerProof(SERVER_ID, "7", keyText)
+
+    /** The challenges `/api/server` was asked, and what it answers to each. */
+    private val challenges = mutableListOf<String>()
+    private var answer: (challenge: String) -> MockResponse = { challenge ->
+        MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("proof", ServerProofs.proof(key, SERVER_ID, challenge)).toString())
+    }
+    private val revokes = mutableListOf<String>()
+    private var refreshes = 0
+    private var refreshAnswer: () -> String = { tokenAnswer("pley_at_new${++refreshes}", "pley_rt_new$refreshes") }
+
+    init {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val url = request.requestUrl!!
+                return when (url.encodedPath) {
+                    "/api/server" -> {
+                        val challenge = url.queryParameter("challenge")!!
+                        assertEquals(proof.proofId, url.queryParameter("proof_id"))
+                        synchronized(challenges) { challenges += challenge }
+                        answer(challenge)
+                    }
+                    "/api/oauth/token" -> MockResponse().setBody(refreshAnswer())
+                    "/api/oauth/revoke" -> {
+                        synchronized(revokes) { revokes += formOf(request)["token"]!! }
+                        MockResponse()
+                    }
+                    else -> MockResponse().setBody("{}")
+                }
+            }
+        }
+    }
+
+    @After
+    fun stop() = server.shutdown()
+
+    private fun tokens() = Tokens(issuer, store, endpointsClient()) { now }
+
+    private fun signedIn(expiresAt: Long = Long.MAX_VALUE / 2) = store.save(savedTokens(issuer, expiresAt = expiresAt).copy(proof = proof))
+
+    @Test
+    fun theProofIsTheServersKnownAnswer() {
+        // The same as the server's and the TVs' tests.
+        assertEquals(
+            "-OpCw2gYEDYBr-d7wh4JEYd7CHzZ8nc7pTc_UlsqVas",
+            ServerProofs.proof(key, "0123456789abcdef0123456789abcdef01234567", "AAECAwQFBgcICQoLDA0ODw"),
+        )
+    }
+
+    @Test
+    fun tokenAnswersCarryTheProofWhenWrittenAsTheyShould() {
+        fun parse(extra: String) = TokenResponse.parse("""{"access_token":"a","token_type":"Bearer","expires_in":60$extra}""")
+        assertEquals(proof, parse(""","server_id":"$SERVER_ID","proof_id":"7","proof_key":"$keyText"""").proof)
+        // An older server: nothing to check.
+        assertNull(parse("").proof)
+        for (bad in listOf(
+            ""","server_id":"$SERVER_ID","proof_id":"07","proof_key":"$keyText"""",
+            ""","server_id":"$SERVER_ID","proof_id":"0","proof_key":"$keyText"""",
+            ""","server_id":"$SERVER_ID","proof_id":"12345678901234567890","proof_key":"$keyText"""",
+            ""","server_id":"$SERVER_ID","proof_id":7,"proof_key":"$keyText"""",
+            ""","server_id":"$SERVER_ID","proof_id":"7","proof_key":"$keyText="""",
+            ""","server_id":"$SERVER_ID","proof_id":"7","proof_key":"${keyText.dropLast(2)}"""",
+            ""","server_id":"$SERVER_ID","proof_id":"7","proof_key":"${keyText.replace('-', '+')}A"""",
+            ""","server_id":"","proof_id":"7","proof_key":"$keyText"""",
+            ""","proof_id":"7","proof_key":"$keyText"""",
+        )) {
+            assertNull(bad, parse(bad).proof)
+        }
+        // Kept with the tokens, never printed.
+        val kept = savedTokens(issuer).copy(proof = proof)
+        assertEquals(kept, StoredTokens.fromJson(kept.toJson()))
+        assertFalse(proof.toString().contains(keyText))
+    }
+
+    @Test
+    fun aRefreshWithoutAProofKeepsTheOneBefore() {
+        val before = savedTokens(issuer).copy(proof = proof)
+        val answer = TokenResponse("a", 60, "r", "library")
+        assertEquals(proof, answer.stored(issuer, "t", "r", now, before).proof)
+        val newer = ServerProof(SERVER_ID, "8", keyText)
+        assertEquals(newer, answer.copy(proof = newer).stored(issuer, "t", "r", now, before).proof)
+    }
+
+    @Test
+    fun theServerProvesItselfOnceInHalfAnHour() = runBlocking {
+        signedIn()
+        val tokens = tokens()
+        assertEquals("pley_at_one", tokens.accessToken())
+        assertEquals("pley_at_one", tokens.accessToken())
+        assertEquals(1, challenges.size)
+        // A fresh challenge each time: 16 random bytes.
+        assertEquals(16, Base64.getUrlDecoder().decode(challenges[0]).size)
+        now += ServerProofs.TTL_MS - 1
+        tokens.accessToken()
+        assertEquals(1, challenges.size)
+        now += 1
+        tokens.accessToken()
+        assertEquals(2, challenges.size)
+        assertTrue(challenges[0] != challenges[1])
+    }
+
+    @Test
+    fun aRequestWithoutAnAnswerHasItProveItselfAgain() = runBlocking {
+        signedIn()
+        val tokens = tokens()
+        tokens.accessToken()
+        tokens.doubtServer()
+        tokens.accessToken()
+        assertEquals(2, challenges.size)
+    }
+
+    @Test
+    fun anotherDeviceGetsNoToken() = runBlocking {
+        signedIn(expiresAt = now + 30_000)
+        val tokens = tokens()
+        val wrong = listOf(
+            // Another key.
+            { c: String -> MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("proof", ServerProofs.proof(ByteArray(32), SERVER_ID, c)).toString()) },
+            // Another server's id, with the proof made for it.
+            { c: String -> MockResponse().setBody(JSONObject().put("id", "other").put("proof", ServerProofs.proof(key, "other", c)).toString()) },
+            // No proof: a server that doesn't know the challenge, or something else entirely.
+            { _: String -> MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("name", "x").toString()) },
+            { _: String -> MockResponse().setBody("<html>router</html>") },
+            { _: String -> MockResponse().setResponseCode(404) },
+            { _: String -> MockResponse().setResponseCode(302).setHeader("Location", "http://127.0.0.1:1/api/server") },
+        )
+        for (each in wrong) {
+            answer = each
+            val refused = assertThrows(NotYourServerException::class.java) { runBlocking { tokens.accessToken() } }
+            // Out of reach, as the app says it.
+            assertEquals("another device answers there", describe(refused))
+            assertThrows(NotYourServerException::class.java) { runBlocking { tokens.refresh("pley_at_one") } }
+            assertThrows(NotYourServerException::class.java) { runBlocking { tokens.switchProfile(2, null) } }
+        }
+        // Nothing went to the token endpoint, and the sign-in is kept for when the server is back.
+        assertEquals(0, refreshes)
+        assertTrue(tokens.signedIn.value)
+        assertEquals("pley_rt_one", store.load(issuer)!!.refreshToken)
+    }
+
+    @Test
+    fun signingOutSendsNothingToAnotherDevice() = runBlocking {
+        signedIn()
+        answer = { MockResponse().setResponseCode(404) }
+        val tokens = tokens()
+        tokens.signOut()
+        assertEquals(emptyList<String>(), revokes)
+        assertNull(store.load(issuer))
+        assertFalse(tokens.signedIn.value)
+
+        // The server itself gets the revocation.
+        answer = { c -> MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("proof", ServerProofs.proof(key, SERVER_ID, c)).toString()) }
+        signedIn()
+        tokens.signOut()
+        assertEquals(listOf("pley_rt_one"), revokes)
+    }
+
+    @Test
+    fun aSignInFromAnOlderServerHasNothingToCheck() = runBlocking {
+        store.save(savedTokens(issuer))
+        assertEquals("pley_at_one", tokens().accessToken())
+        assertEquals(0, challenges.size)
+    }
+
+    @Test
+    fun aRefreshKeepsTheProofAndAProofCountsForTheRefresh() = runBlocking {
+        signedIn(expiresAt = now + 30_000)
+        val tokens = tokens()
+        assertEquals("pley_at_new1", tokens.accessToken())
+        assertEquals(1, challenges.size)
+        assertEquals(proof, store.load(issuer)!!.proof)
+        // A refresh that brings the key takes it.
+        val newer = ServerProof(SERVER_ID, "7", Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 9 }))
+        refreshAnswer = {
+            JSONObject(tokenAnswer("pley_at_new${++refreshes}", "pley_rt_new$refreshes"))
+                .put("server_id", newer.serverId).put("proof_id", newer.proofId).put("proof_key", newer.proofKey).toString()
+        }
+        tokens.refresh("pley_at_new1")
+        assertEquals(newer, store.load(issuer)!!.proof)
+    }
+
+    @Test
+    fun aRequestThatGetsNoAnswerHasTheServerProveItselfAgain() {
+        signedIn()
+        val tokens = tokens()
+        val client = AuthHttp.api(endpointsClient(), tokens)
+        fun get(path: String) = client.newCall(Request.Builder().url(server.url(path)).build())
+        get("/api/libraries").execute().close()
+        assertEquals(1, challenges.size)
+        get("/api/libraries").execute().close()
+        assertEquals(1, challenges.size)
+
+        // The connection drops: the next request waits for a new proof.
+        val dispatcher = server.dispatcher
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse =
+                if (request.path == "/api/dropped") MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST) else dispatcher.dispatch(request)
+        }
+        assertThrows(java.io.IOException::class.java) { get("/api/dropped").execute() }
+        get("/api/libraries").execute().close()
+        assertEquals(2, challenges.size)
+
+        // A request elsewhere that fails says nothing about the server.
+        assertThrows(java.io.IOException::class.java) { client.newCall(Request.Builder().url("http://127.0.0.1:1/x").build()).execute() }
+        get("/api/libraries").execute().close()
+        assertEquals(2, challenges.size)
+    }
+
+    companion object {
+        const val SERVER_ID = "0123456789abcdef0123456789abcdef01234567"
+    }
+}

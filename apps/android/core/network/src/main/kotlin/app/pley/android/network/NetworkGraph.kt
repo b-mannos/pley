@@ -133,6 +133,7 @@ internal class HttpNetworkGraph(
             .protocols(listOf(Protocol.HTTP_1_1))
             .followRedirects(true)
             .followSslRedirects(false)
+            .addInterceptor(auth.unanswered)
             .addNetworkInterceptor(auth)
             .authenticator(auth)
             .build()
