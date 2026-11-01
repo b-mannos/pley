@@ -507,12 +507,17 @@ pub struct EncoderInfo {
 }
 
 /// A hardware pipeline that keeps frames in GPU memory from decode to encode.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct GpuPipeline {
     pub accel: HwAccel,
     /// Input codec keys ([`decode_key`]): `h264`, `hevc`, `hevc10`,
     /// `hevc10-yuv422p10le`, `av1`, `vp9`, `mpeg2video`.
     pub codecs: Vec<String>,
+    /// Those whose frames stay on the GPU in 10 bits too, into its HEVC
+    /// Main 10 encoder: transcodes that keep HDR. Quick Sync's only; older
+    /// transcoders tried none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub main10: Vec<String>,
 }
 
 /// Codec key used for hardware decode capability checks: `hevc10` for
@@ -1679,6 +1684,10 @@ mod tests {
         assert_eq!(decode_key("h264", Some(8), Some("gray")), "h264-gray");
         assert_eq!(decode_key("hevc", Some(12), Some("yuv420p12le")), "hevc-12");
         assert_eq!(decode_key("av1", Some(12), Some("yuv444p12le")), "av1-12-yuv444p12le");
+        // Pipelines from older transcoders tried nothing in 10 bits.
+        let p: GpuPipeline = serde_json::from_str(r#"{"accel":"qsv","codecs":["hevc10"]}"#).unwrap();
+        assert!(p.main10.is_empty());
+        assert!(!serde_json::to_string(&p).unwrap().contains("main10"));
     }
 
     #[test]

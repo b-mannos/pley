@@ -15,6 +15,8 @@ describes how they are made.
   scaled by Quick Sync before tone mapping, instead of being copied to
   memory at full size or decoded on the CPU. 4K HDR transcodes twice as fast
   and uses much less CPU.
+- HDR passthrough in HEVC stays on Intel graphics from decode to encode,
+  when Quick Sync passes a 10-bit check at startup.
 
 ### Fixed
 

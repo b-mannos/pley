@@ -190,7 +190,7 @@ before using what it names:
 | `dolby_vision` | Dolby Vision profile 5 renders with correct colours (needs libplacebo) |
 | `vulkan_decode` | codecs the GPU decodes straight into Vulkan memory, for libplacebo |
 | `vulkan_encode` | `h264_vulkan` encodes libplacebo's output on the GPU |
-| `gpu_pipelines` | GPU-only decode → scale → encode pipelines, with the codecs each passed for |
+| `gpu_pipelines` | GPU-only decode → scale → encode pipelines, with the codecs each passed for, and `main10`: those Quick Sync's keeps in 10 bits into its HEVC Main 10 encoder (HDR kept) |
 | `vaapi_tonemappers` | tone mappers whose frames reach a VAAPI encoder ([VAAPI encoders](#vaapi-encoders)) |
 | `vaapi_vulkan_decode` | `vulkan_decode` on the Vulkan device made from the VAAPI one |
 | `tonemap_speed?` | `{high, balanced, fast}`: frames a second libplacebo tone maps 4K to 4K at each quality ([libplacebo quality](#libplacebo-quality)) |
@@ -848,7 +848,8 @@ video is encoded in HEVC Main 10 instead of being tone mapped.
 - Each HEVC encoder is also test-encoded in 10 bits and marked `main10`.
 - **Same range** (HDR10, HDR10+, Dolby Vision 7 and 8.1 as their HDR10 base
   layer for `hdr10`; HLG and Dolby Vision 8.4 for `hlg`): decoded, scaled to
-  P010 (on the GPU where the CUDA pipeline handles the codec) and encoded.
+  P010 (on the GPU where the CUDA pipeline handles the codec; with Quick
+  Sync, see below) and encoded.
 - **Other range** (HLG or Dolby Vision 8.4 to HDR10, PQ to HLG, Dolby Vision
   profile 5 to either): libplacebo with a 10-bit BT.2020 target.
 - **Metadata**: HDR10 mastering display and content light levels are written
@@ -863,7 +864,13 @@ video is encoded in HEVC Main 10 instead of being tone mapped.
 - The master playlist names the output `hvc1.2.4.LLL.B0` with
   `VIDEO-RANGE=PQ` or `HLG`. The plan's `dynamic_range_out` says `hdr10`,
   `hlg` or `sdr` for transcodes.
-- Other hardware encoders stay off the zero-copy GPU paths for HDR.
+- Quick Sync keeps HDR on the GPU where its start-up test passed in 10 bits
+  too (`gpu_pipelines[].main10`, 10-bit HEVC and AV1): decoded by Quick
+  Sync, scaled into P010 by `vpp_qsv`, encoded by `hevc_qsv` in Main 10,
+  the HDR10 metadata going with the frames. Where it didn't, Windows still
+  decodes and scales it with Quick Sync before the copy to memory
+  ([Hardware decoding](#hardware-decoding)). Hardware encoders other than
+  NVENC and Quick Sync stay off the zero-copy GPU paths for HDR.
 
 ### Frame grabs
 

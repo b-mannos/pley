@@ -1010,23 +1010,59 @@ async fn detect_gpu_pipelines(
         }));
         async move { (*accel, tests.await) }
     }));
-    let (vulkan_results, vaapi_vulkan_results, vulkan_encode, pipeline_results) =
-        tokio::join!(vulkan_tests, vaapi_vulkan_tests, vulkan_encode_test, pipeline_tests);
+    // HDR kept on Quick Sync: the 10-bit sources' frames stay in 10 bits
+    // from its decoder through its scaler into its HEVC Main 10 encoder.
+    let qsv_main10 = candidates.iter().any(|(accel, ..)| *accel == HwAccel::Qsv)
+        && caps.encoders.iter().any(|e| e.name == "hevc_qsv" && e.main10);
+    let main10_tests = futures::future::join_all(
+        clips.iter().filter(|(key, _)| qsv_main10 && MAIN10_KEYS.contains(key)).map(|(key, clip)| {
+            let mut args = base("error", &["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], clip);
+            args.extend(
+                [
+                    "-vf",
+                    "vpp_qsv=w=160:h=120:format=p010le",
+                    "-c:v",
+                    "hevc_qsv",
+                    "-profile:v",
+                    "main10",
+                    "-f",
+                    "null",
+                    "-",
+                ]
+                .map(String::from),
+            );
+            let test = run_test(args);
+            async move { (key.to_string(), test.await) }
+        }),
+    );
+    let (vulkan_results, vaapi_vulkan_results, vulkan_encode, pipeline_results, main10_results) =
+        tokio::join!(vulkan_tests, vaapi_vulkan_tests, vulkan_encode_test, pipeline_tests, main10_tests);
     let _ = std::fs::remove_dir_all(&dir);
 
     let ok_keys =
         |results: Vec<(String, bool)>| results.into_iter().filter(|(_, ok)| *ok).map(|(k, _)| k).collect::<Vec<_>>();
+    let main10 = ok_keys(main10_results);
     GpuDetection {
         vulkan_decode: ok_keys(vulkan_results),
         vaapi_vulkan_decode: ok_keys(vaapi_vulkan_results),
         vulkan_encode,
         pipelines: pipeline_results
             .into_iter()
-            .map(|(accel, results)| GpuPipeline { accel, codecs: ok_keys(results) })
+            .map(|(accel, results)| {
+                let codecs = ok_keys(results);
+                let main10 = match accel {
+                    HwAccel::Qsv => main10.iter().filter(|k| codecs.contains(k)).cloned().collect(),
+                    _ => Vec::new(),
+                };
+                GpuPipeline { accel, codecs, main10 }
+            })
             .filter(|p| !p.codecs.is_empty())
             .collect(),
     }
 }
+
+/// The test clips HDR comes in: 10-bit HEVC and AV1 (10 bits from SVT-AV1).
+const MAIN10_KEYS: [&str; 2] = ["hevc10", "av1"];
 
 /// Whether every frame came to the filters in `format`, by an FFmpeg log at
 /// `-loglevel verbose` (each filter graph input names its frames' format as

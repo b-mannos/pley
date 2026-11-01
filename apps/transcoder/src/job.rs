@@ -3030,7 +3030,11 @@ mod tests {
             caps: pley_transcoder_api::Capabilities {
                 encoders: vec![nvenc],
                 hwaccels: vec!["cuda".into()],
-                gpu_pipelines: vec![GpuPipeline { accel: HwAccel::Nvenc, codecs: vec!["h264".into()] }],
+                gpu_pipelines: vec![GpuPipeline {
+                    accel: HwAccel::Nvenc,
+                    codecs: vec!["h264".into()],
+                    ..Default::default()
+                }],
                 ..Default::default()
             },
             segment_times_relative: true,

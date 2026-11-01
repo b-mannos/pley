@@ -659,12 +659,13 @@ impl Plan {
                             && req.options.hwaccel == HwAccel::Vulkan;
                         Pipeline::Vulkan { encode_on_gpu }
                     } else if tonemap.is_none() && burn.is_none() {
-                        // HDR in 10 bits stays on the GPU with CUDA only
-                        // (the one tried); the others scale on the CPU.
+                        // HDR in 10 bits stays on the GPU with CUDA, and with
+                        // Quick Sync where its start-up test passed in 10
+                        // bits; the others scale on the CPU.
                         ff.caps
                             .gpu_pipelines
                             .iter()
-                            .filter(|p| hdr.is_none() || p.accel == HwAccel::Nvenc)
+                            .filter(|p| hdr.is_none() || p.accel == HwAccel::Nvenc || p.main10.contains(&key))
                             .find(|p| p.accel == encoder.accel && p.codecs.contains(&key))
                             .map_or(Pipeline::Software, |p| match p.accel {
                                 HwAccel::Amf => Pipeline::D3d11 { encode_on_gpu: true },
@@ -2438,8 +2439,11 @@ mod tests {
     #[test]
     fn sdr_uses_cuda_zero_copy_and_falls_back_with_software_encoder() {
         let mut ff = ffmpeg_with(vec![nvenc(), x264()], vec![]);
-        ff.caps.gpu_pipelines =
-            vec![pley_transcoder_api::GpuPipeline { accel: HwAccel::Nvenc, codecs: vec!["hevc".into()] }];
+        ff.caps.gpu_pipelines = vec![pley_transcoder_api::GpuPipeline {
+            accel: HwAccel::Nvenc,
+            codecs: vec!["hevc".into()],
+            ..Default::default()
+        }];
         let plan = Plan::build(&request(), &media(DynamicRange::Sdr, None), &ff, None).unwrap();
         assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Gpu(HwAccel::Nvenc));
         let args = args_string(&plan, 0, 2);
@@ -2519,8 +2523,11 @@ mod tests {
     #[test]
     fn hdr_tone_mapped_on_the_cpu_is_scaled_by_the_gpu_first() {
         let mut ff = ffmpeg_with(vec![nvenc(), x264()], vec![Tonemapper::Zscale]);
-        ff.caps.gpu_pipelines =
-            vec![pley_transcoder_api::GpuPipeline { accel: HwAccel::Nvenc, codecs: vec!["hevc10".into()] }];
+        ff.caps.gpu_pipelines = vec![pley_transcoder_api::GpuPipeline {
+            accel: HwAccel::Nvenc,
+            codecs: vec!["hevc10".into()],
+            ..Default::default()
+        }];
         let plan = Plan::build(&request(), &ten_bit(media(DynamicRange::Hdr10, None)), &ff, None).unwrap();
         let v = plan.video.as_ref().unwrap();
         assert_eq!(
@@ -2562,8 +2569,11 @@ mod tests {
 
         // libplacebo scales as it tone maps: its frames are left alone.
         let mut ff = ffmpeg_with(vec![nvenc(), x264()], vec![Tonemapper::Libplacebo]);
-        ff.caps.gpu_pipelines =
-            vec![pley_transcoder_api::GpuPipeline { accel: HwAccel::Nvenc, codecs: vec!["hevc10".into()] }];
+        ff.caps.gpu_pipelines = vec![pley_transcoder_api::GpuPipeline {
+            accel: HwAccel::Nvenc,
+            codecs: vec!["hevc10".into()],
+            ..Default::default()
+        }];
         let plan = Plan::build(&request(), &ten_bit(media(DynamicRange::Hdr10, None)), &ff, None).unwrap();
         let v = plan.video.as_ref().unwrap();
         assert_eq!((v.pipeline, v.hw_decode.as_deref(), v.gpu_scale), (Pipeline::Software, Some("cuda"), None));
@@ -2590,7 +2600,8 @@ mod tests {
             ffmpeg_with(vec![hw(VideoCodec::H264, false), hw(VideoCodec::Hevc, true), x264(), x265()], mappers);
         ff.caps.hwaccels = ["d3d11va", "qsv", "vaapi", "vulkan"].map(String::from).to_vec();
         let codecs: Vec<String> = ["h264", "hevc", "hevc10"].map(String::from).to_vec();
-        ff.caps.gpu_pipelines = vec![pley_transcoder_api::GpuPipeline { accel, codecs: codecs.clone() }];
+        ff.caps.gpu_pipelines =
+            vec![pley_transcoder_api::GpuPipeline { accel, codecs: codecs.clone(), ..Default::default() }];
         if vulkan {
             ff.caps.vulkan_decode = codecs.clone();
         }
@@ -2781,6 +2792,54 @@ mod tests {
         let v = plan.video.as_ref().unwrap();
         let decoder = if cfg!(windows) { "d3d11va" } else { "vaapi" };
         assert_eq!((v.pipeline, v.hw_decode.as_deref(), v.gpu_scale), (Pipeline::Software, Some(decoder), None));
+    }
+
+    /// HDR kept on Quick Sync stays on the GPU in 10 bits where its start-up
+    /// test passed for the codec; elsewhere it comes to memory.
+    #[test]
+    fn quick_sync_keeps_hdr_on_the_gpu_where_it_passed_in_10_bits() {
+        let mut ff = intel(HwAccel::Qsv, true);
+        let m = ten_bit(media(DynamicRange::Hdr10, None));
+        let plan = Plan::build(&hdr_request(pley_transcoder_api::OutputRange::Hdr10), &m, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!(v.pipeline, Pipeline::Software, "not tried in 10 bits");
+        if cfg!(windows) {
+            // Scaled in 10 bits by Quick Sync before it comes to memory.
+            assert_eq!((v.hw_decode.as_deref(), v.gpu_scale), (Some("qsv"), Some(HwAccel::Qsv)));
+            let args = args_string(&plan, 0, 2);
+            assert!(
+                args.contains("[0:0]vpp_qsv=w=1920:h=1080:format=p010le,hwdownload,format=p010le,format=p010le[vout]"),
+                "{args}"
+            );
+        }
+
+        ff.caps.gpu_pipelines[0].main10 = vec!["hevc10".into()];
+        let plan = Plan::build(&hdr_request(pley_transcoder_api::OutputRange::Hdr10), &m, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        assert_eq!((v.pipeline, v.hw_decode.as_deref()), (Pipeline::Gpu(HwAccel::Qsv), Some("qsv")));
+        let args = args_string(&plan, 0, 2);
+        assert!(args.contains("-hwaccel qsv -hwaccel_output_format qsv"), "{args}");
+        assert!(args.contains("[0:0]vpp_qsv=w=1920:h=1080:format=p010le[vout]"), "{args}");
+        assert!(args.contains("-c:v hevc_qsv") && args.contains("-profile:v main10"), "{args}");
+        assert!(args.contains("-color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc"), "{args}");
+
+        // x265 standing in: the frames come down in 10 bits.
+        let x265 = x265();
+        let ctx = ArgsContext {
+            input: Path::new("/media/movie.mkv"),
+            encoder: Some(&x265),
+            relative_split_times: true,
+            preset: None,
+            shader_cache: None,
+        };
+        let args: Vec<String> = plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let args = args.join(" ");
+        assert!(args.contains("-hwaccel qsv -hwaccel_output_format qsv"), "{args}");
+        assert!(
+            args.contains("[0:0]vpp_qsv=w=1920:h=1080:format=p010le,hwdownload,format=p010le,format=yuv420p10le[vout]"),
+            "{args}"
+        );
+        assert!(args.contains("-c:v libx265") && args.contains("-profile:v main10"), "{args}");
     }
 
     /// A software encoder standing in for Quick Sync's (its sessions all
@@ -3153,7 +3212,8 @@ mod tests {
     fn eight_bit_video_is_scaled_on_direct3d_11_into_amf() {
         let mut ff = ffmpeg_with(vec![amf(), x264()], vec![]);
         ff.caps.hwaccels = vec!["d3d11va".into()];
-        ff.caps.gpu_pipelines = vec![GpuPipeline { accel: HwAccel::Amf, codecs: vec!["h264".into()] }];
+        ff.caps.gpu_pipelines =
+            vec![GpuPipeline { accel: HwAccel::Amf, codecs: vec!["h264".into()], ..Default::default() }];
         let mut m = media(DynamicRange::Sdr, None);
         m.streams[0].codec = "h264".into();
         let plan = Plan::build(&request(), &m, &ff, None).unwrap();
@@ -3226,8 +3286,11 @@ mod tests {
     fn hdr_ffmpeg() -> Ffmpeg {
         let mut ff = ffmpeg_with(vec![nvenc(), hevc_nvenc(), x264(), x265()], vec![Tonemapper::Libplacebo]);
         ff.caps.vulkan_decode = vec!["hevc10".into()];
-        ff.caps.gpu_pipelines =
-            vec![pley_transcoder_api::GpuPipeline { accel: HwAccel::Nvenc, codecs: vec!["hevc10".into()] }];
+        ff.caps.gpu_pipelines = vec![pley_transcoder_api::GpuPipeline {
+            accel: HwAccel::Nvenc,
+            codecs: vec!["hevc10".into()],
+            ..Default::default()
+        }];
         ff
     }
 
@@ -3392,6 +3455,7 @@ mod tests {
         ff.caps.gpu_pipelines = vec![pley_transcoder_api::GpuPipeline {
             accel: HwAccel::Nvenc,
             codecs: vec!["hevc".into(), "hevc10".into()],
+            ..Default::default()
         }];
         ff.caps.vulkan_decode = vec!["hevc10".into()];
         let phone = |range: DynamicRange, rotation: i64| {
