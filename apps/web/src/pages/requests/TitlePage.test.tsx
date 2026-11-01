@@ -1,5 +1,5 @@
 import { Route, Routes } from "react-router";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { ArrChoices, MediaRequest } from "@/api/requests";
@@ -350,6 +350,31 @@ describe("TitlePage", () => {
     await user.click(within(dialog).getByRole("button", { name: "Decline" }));
     expect(await screen.findByText("“The Matrix” was declined.")).toBeInTheDocument();
     expect(requests.find((r) => r.path === "/api/requests/5/decline")?.body).toEqual({ reason: "We have it on disc" });
+  });
+
+  it("declines once when Enter is pressed again before the answer comes", async () => {
+    const user = userEvent.setup();
+    const pending = makeRequest({ id: 5, actions: ["approve", "decline"] });
+    let declined = false;
+    const requests = mockApi({
+      "GET /api/discover/movie/603": () => makeDetail({ status: "requested", requests: [pending] }),
+      "GET /api/requests/summary": () => makeSummary({ access: "auto", manage: true, pending: 1 }),
+      "POST /api/requests/5/decline": () => {
+        if (declined) return apiError(409, "conflict", "it was declined meanwhile");
+        declined = true;
+        return { ...pending, status: "declined", stage: "declined", actions: [] };
+      },
+    });
+    open("/discover/movie/603", testUser);
+
+    await user.click(within(await screen.findByRole("list")).getByRole("button", { name: "Decline" }));
+    const form = within(screen.getByRole("dialog", { name: "Decline “The Matrix”?" })).getByLabelText("Reason").closest("form");
+    expect(form).not.toBeNull();
+    fireEvent.submit(form as HTMLFormElement);
+    fireEvent.submit(form as HTMLFormElement);
+    expect(await screen.findByText("“The Matrix” was declined.")).toBeInTheDocument();
+    expect(requests.filter((r) => r.path === "/api/requests/5/decline")).toHaveLength(1);
+    expect(screen.queryByText("It was declined meanwhile")).not.toBeInTheDocument();
   });
 
   it("approves with a profile of the manager's choosing", async () => {

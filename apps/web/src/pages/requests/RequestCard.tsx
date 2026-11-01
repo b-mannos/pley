@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Ban, Check, Ellipsis, Hand, Play, Plug, RotateCw, Settings2, Trash2, TriangleAlert, Undo2, UserMinus } from "lucide-react";
 import { errorMessage } from "@/api/client";
@@ -298,12 +298,17 @@ export function DeclineDialog({ request, open, onClose }: { request: MediaReques
   const toast = useToast();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Set at once (`isPending` follows a moment later), so that Enter pressed twice declines once: a second
+  // decline is refused, and would say the request changed meanwhile.
+  const sending = useRef(false);
   useOnChange(open, (o) => {
     if (!o) return;
     setReason("");
     setError(null);
   });
-  const submit = () =>
+  const submit = () => {
+    if (sending.current) return;
+    sending.current = true;
     decline.mutate(
       { request, reason: reason.trim() || undefined },
       {
@@ -312,8 +317,12 @@ export function DeclineDialog({ request, open, onClose }: { request: MediaReques
           onClose();
         },
         onError: (e) => setError(failure(e, { manage: true }, request.kind)),
+        onSettled: () => {
+          sending.current = false;
+        },
       },
     );
+  };
   const who = request.requested_by?.name;
   return (
     <Modal
