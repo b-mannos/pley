@@ -42,10 +42,14 @@ fun badgeOf(status: TitleStatus, itemId: Long?): TitleBadge? = when (status) {
 /**
  * [title] as one of its requests now says it is (requests_changed, in rows
  * already shown): active → requested, declined → declined, available → in
- * the library; gone, or no longer there (`null`, a 404) → no badge.
+ * the library, gone → no badge. A request no longer there (`null`, a 404:
+ * no longer followed, withdrawn while others follow it, deleted) says
+ * nothing of the title, which others may still ask for or a library have:
+ * only the request is let go of.
  */
 fun patched(title: DiscoverTitle, request: MediaRequest?): DiscoverTitle = when {
-    request == null || request.stage == RequestStage.Gone -> title.copy(status = TitleStatus.None, requestId = null)
+    request == null -> title.copy(requestId = null)
+    request.stage == RequestStage.Gone -> title.copy(status = TitleStatus.None, requestId = null)
     request.status == RequestStatus.Available -> title.copy(status = TitleStatus.Library, itemId = request.itemId ?: title.itemId)
     request.status == RequestStatus.Declined -> title.copy(status = TitleStatus.Declined, requestId = null)
     request.active -> title.copy(status = TitleStatus.Requested, requestId = request.id)

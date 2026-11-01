@@ -189,6 +189,9 @@ interface RequestsRepository {
     /** Reads [kind] [tmdbId]'s page again: now if it shows, else when it next does. */
     fun refreshTitle(kind: TitleKind, tmdbId: Long)
 
+    /** [kind] [tmdbId]'s page from the server now; where the page shows, it shows this. */
+    suspend fun readTitle(kind: TitleKind, tmdbId: Long): DiscoverDetail
+
     /** A library title as Discover sees it; `null` when it has no TMDB match. */
     suspend fun itemRequest(itemId: Long): ItemRequest?
 
@@ -242,6 +245,7 @@ interface RequestsRepository {
             override suspend fun search(query: String, page: Int, missing: Boolean): DiscoverPage = throw off()
             override fun title(kind: TitleKind, tmdbId: Long): Flow<Loadable<DiscoverDetail>> = flowOf(Loadable.Failed(off()))
             override fun refreshTitle(kind: TitleKind, tmdbId: Long) = Unit
+            override suspend fun readTitle(kind: TitleKind, tmdbId: Long): DiscoverDetail = throw off()
             override suspend fun itemRequest(itemId: Long): ItemRequest? = null
             override suspend fun list(query: RequestQuery): RequestList = throw off()
             override suspend fun request(id: Long): MediaRequest? = null
@@ -537,6 +541,8 @@ internal class ServerRequests(
         val key = SnapshotKeys.discoverTitle(kind.wire, tmdbId)
         cache.revalidate { k, _ -> k == key }
     }
+
+    override suspend fun readTitle(kind: TitleKind, tmdbId: Long): DiscoverDetail = cache.fresh(titleResource(kind, tmdbId))
 
     override suspend fun itemRequest(itemId: Long): ItemRequest? = try {
         api().itemRequest(itemId)

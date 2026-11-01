@@ -67,9 +67,12 @@ class RequestRulesTest {
         assertEquals(TitleStatus.Library, ready.status)
         assertEquals(300L, ready.itemId)
         assertEquals(TitleBadge.InLibrary, badgeOf(ready))
-        // Gone, or a 404: no badge.
-        assertNull(badgeOf(patched(title(933260), null)))
+        // Gone: no badge.
         assertNull(badgeOf(patched(title(933260), asked.copy(status = RequestStatus.Available, stage = RequestStage.Gone))))
+        // A 404 says nothing of the title: others may still ask for it.
+        val unread = patched(title(933260).copy(requestId = 44), null)
+        assertEquals(TitleStatus.Requested, unread.status)
+        assertNull(unread.requestId)
     }
 
     @Test

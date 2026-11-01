@@ -127,6 +127,8 @@ class FakeRequests(
         revision(kind, tmdbId).update { it + 1 }
     }
 
+    override suspend fun readTitle(kind: TitleKind, tmdbId: Long): DiscoverDetail = api.discoverTitle(kind, tmdbId)
+
     override suspend fun itemRequest(itemId: Long): ItemRequest? = orNull { api.itemRequest(itemId) }
 
     override suspend fun list(query: RequestQuery): RequestList = api.requests(query)

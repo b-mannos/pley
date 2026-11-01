@@ -1,6 +1,7 @@
 package app.pley.android.screens.requests
 
 import app.pley.android.data.RequestChange
+import app.pley.android.model.DiscoverDetail
 import app.pley.android.model.DiscoverList
 import app.pley.android.model.DiscoverPage
 import app.pley.android.model.MediaRequest
@@ -124,6 +125,29 @@ class DiscoverViewModelTest {
         assertEquals(TitleBadge.Requested, badgeOf(robot))
         // One request read, the rows not read again.
         assertEquals(listOf("request"), requests.api.calls.drop(pagesBefore).map { it.method }.filter { it != "requests" })
+    }
+
+    @Test
+    fun aRequestNoLongerReadableLeavesTheTitlesStatusToItsPage() = runTest(dispatcher) {
+        val requests = FakeRequests()
+        val vm = viewModel(requests)
+        settle()
+        // The Substance (933260): Requested by someone this account stopped following.
+        requests.api.fail("request", ApiException(404, "not_found", "no such request"))
+        val page: DiscoverDetail = Fixtures.decode("discover/movie.json")
+        requests.api.answer("discoverTitle", page.copy(tmdbId = 933260, status = TitleStatus.Requested, requestId = null))
+        requests.change(RequestChange(44, TitleKind.Movie, 933260))
+        settle()
+        val substance = vm.row(DiscoverList.Trending).titles.first { it.tmdbId == 933260L }
+        assertEquals(TitleStatus.Requested, substance.status)
+        assertEquals(null, substance.requestId)
+        assertEquals(listOf<Any?>(TitleKind.Movie, 933260L), requests.api.calls("discoverTitle").last().args)
+
+        // Its page can't be read either: the status stays, the request let go of.
+        requests.api.fail("discoverTitle", ApiException(503, "tmdb_down", "TMDB isn't answering"))
+        requests.change(RequestChange(44, TitleKind.Movie, 933260))
+        settle()
+        assertEquals(TitleStatus.Requested, vm.row(DiscoverList.Trending).titles.first { it.tmdbId == 933260L }.status)
     }
 
     @Test

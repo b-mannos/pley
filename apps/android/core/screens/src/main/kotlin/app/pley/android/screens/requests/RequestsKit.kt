@@ -127,13 +127,16 @@ fun RequestChange.touches(title: DiscoverTitle): Boolean =
 
 /**
  * How titles already shown change with [change] (requests_changed): their
- * badges follow its request, read once (GET /api/requests/{id}). `null`
- * when none of [shown] is touched, many changed at once (rows are never
- * read again for that), or the request couldn't be read.
+ * badges follow its request, read once (GET /api/requests/{id}). One this
+ * account can no longer read says nothing of its title: the title's page
+ * is read instead, for its status (the request let go of, should that
+ * fail too). `null` when none of [shown] is touched, many changed at once
+ * (rows are never read again for that), or the request couldn't be read.
  */
 suspend fun RequestsRepository.patchFor(change: RequestChange, shown: Sequence<DiscoverTitle>): ((DiscoverTitle) -> DiscoverTitle)? {
     val id = change.requestId ?: return null
-    if (shown.none { change.touches(it) }) return null
+    val touched = shown.filter { change.touches(it) }.map { it.kind to it.tmdbId }.toSet()
+    if (touched.isEmpty()) return null
     val request = try {
         request(id)
     } catch (e: CancellationException) {
@@ -141,7 +144,24 @@ suspend fun RequestsRepository.patchFor(change: RequestChange, shown: Sequence<D
     } catch (_: Exception) {
         return null
     }
-    return { title -> if (change.touches(title)) patched(title, request) else title }
+    if (request != null) return { title -> if (change.touches(title)) patched(title, request) else title }
+    val pages = touched.associateWith { (kind, tmdbId) ->
+        try {
+            readTitle(kind, tmdbId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
+    return { title ->
+        val page = pages[title.kind to title.tmdbId]
+        when {
+            !change.touches(title) -> title
+            page != null -> title.copy(status = page.status, itemId = page.itemId, requestId = page.requestId)
+            else -> patched(title, null)
+        }
+    }
 }
 
 /** The key telling titles apart in lists: a movie and a show may share a TMDB id. */
