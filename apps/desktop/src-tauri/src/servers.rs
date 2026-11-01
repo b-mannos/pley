@@ -96,21 +96,14 @@ pub fn forget_server(app: AppHandle, url: String) -> Result<(), String> {
 
 /// Whether a pley server answers at `url`, and what it says about itself.
 /// Where the window's session has a key, the server proves it holds it
-/// (see [`crate::proofs`]); where it has none yet, it asks for one.
+/// (see [`crate::proofs`]). No session goes with it.
 #[tauri::command]
 pub async fn check_server(app: AppHandle, url: String) -> Result<ServerInfo, String> {
-    let origin = server_origin(&url)?;
-    let client = reqwest::Client::new();
-    let proofs = app.state::<Proofs>();
-    let info = check(&client, &origin, &proofs).await?;
-    if let Some(session) = crate::downloads::cookies(&app, &origin) {
-        crate::proofs::ask_for_key(&client, &origin, &proofs, &session).await;
-    }
-    Ok(info)
+    check(&server_origin(&url)?, &app.state::<Proofs>()).await
 }
 
-async fn check(client: &reqwest::Client, origin: &Url, proofs: &Proofs) -> Result<ServerInfo, String> {
-    let body = crate::proofs::ask(client, origin, proofs).await.map_err(|refused| refused.to_string())?;
+async fn check(origin: &Url, proofs: &Proofs) -> Result<ServerInfo, String> {
+    let body = crate::proofs::ask(origin, proofs).await.map_err(|refused| refused.to_string())?;
     serde_json::from_value(body).map_err(|_| "that isn't a Pley server".to_owned())
 }
 
@@ -167,7 +160,7 @@ mod tests {
     }
 
     async fn check_server(url: String) -> Result<ServerInfo, String> {
-        check(&reqwest::Client::new(), &server_origin(&url)?, &Proofs::in_memory()).await
+        check(&server_origin(&url)?, &Proofs::in_memory()).await
     }
 
     #[tokio::test]

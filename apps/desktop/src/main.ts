@@ -372,9 +372,10 @@ async function start(): Promise<void> {
   // "Switch server" in the web app comes back here with ?pick: no opening by itself then.
   const params = new URLSearchParams(window.location.search);
   const pick = params.has("pick");
-  // The app left a server whose address now leads to another device.
-  const notYours = params.get("not-yours");
-  if (notYours) note = `Another device answers at ${displayAddress(notYours)} now, so Pley came back here.`;
+  // The app left a server whose address now leads to another device (a
+  // saved one: a server's page could open the picker with any address).
+  const notYours = saved.find((s) => s.url === params.get("not-yours")?.replace(/\/$/, ""));
+  if (notYours) note = `Another device answers at ${displayAddress(notYours.url)} now, so Pley came back here.`;
   const last = lastUsed(saved);
   if (last && !pick) void openLastUsed(last);
   else showChooser();

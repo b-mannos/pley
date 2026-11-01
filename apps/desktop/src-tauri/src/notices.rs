@@ -474,7 +474,7 @@ async fn listed_news(client: &reqwest::Client, server: &Url, session: Option<&st
 /// Listens to `server`'s events once, telling of them, until the stream ends.
 async fn listen(client: &reqwest::Client, server: &Url, shell: &dyn Shell, name: &str, told: &mut Told) -> Ended {
     let Ok(url) = server.join("/api/events") else { return Ended::Refused };
-    let session = match crate::proofs::session(client, server, shell.proofs(), shell.session(server)).await {
+    let session = match crate::proofs::session(server, shell.proofs(), shell.session(server)).await {
         Ok(session) => session,
         Err(crate::proofs::Refused::Unreachable(_)) => return Ended::Dropped,
         Err(crate::proofs::Refused::NotYours) => {

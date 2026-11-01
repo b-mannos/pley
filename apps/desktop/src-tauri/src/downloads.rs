@@ -542,7 +542,7 @@ async fn download<R: Runtime>(
         return true;
     };
     let proofs = app.state::<crate::proofs::Proofs>();
-    let cookie = match crate::proofs::session(client, &server, &proofs, cookies(app, &server)).await {
+    let cookie = match crate::proofs::session(&server, &proofs, cookies(app, &server)).await {
         Ok(cookie) => cookie,
         Err(crate::proofs::Refused::Unreachable(_)) => {
             wait_for_server(app, downloads, d.id, "The server didn't answer.".to_owned());
@@ -1015,7 +1015,7 @@ pub fn remove_download(app: AppHandle, id: u64) {
             };
             let client = reqwest::Client::new();
             let proofs = app.state::<crate::proofs::Proofs>();
-            let Ok(cookie) = crate::proofs::session(&client, &url, &proofs, cookies(&app, &url)).await else { return };
+            let Ok(cookie) = crate::proofs::session(&url, &proofs, cookies(&app, &url)).await else { return };
             let mut request = client.delete(url.clone());
             if let Some(cookie) = cookie {
                 request = request.header(reqwest::header::COOKIE, cookie);

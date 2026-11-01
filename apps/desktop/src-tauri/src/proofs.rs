@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -171,6 +171,21 @@ fn proves(key: &Key, challenge: &str, server_id: Option<&str>, answered: Option<
         .is_ok()
 }
 
+/// The client proofs and keys are asked with: it follows no redirect, as a
+/// proof counts only from the address itself (a redirect could lead to the
+/// real server from anywhere), and the session goes nowhere else.
+fn client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(ANSWER_TIMEOUT)
+            .build()
+            // As reqwest::Client::new(): only a TLS backend that can't start fails.
+            .expect("an HTTP client")
+    })
+}
+
 fn challenge() -> Option<String> {
     let mut bytes = [0u8; 16];
     ring::rand::SystemRandom::new().fill(&mut bytes).ok()?;
@@ -186,7 +201,7 @@ struct Answer {
 
 /// `/api/server` of `server`, asked to prove it holds `key` when there is
 /// one, as JSON: what the app checks a server with before it opens it.
-pub async fn ask(client: &reqwest::Client, server: &Url, proofs: &Proofs) -> Result<serde_json::Value, Refused> {
+pub async fn ask(server: &Url, proofs: &Proofs) -> Result<serde_json::Value, Refused> {
     let key = proofs.key(server);
     let mut endpoint = server.join("/api/server").map_err(|e| Refused::Unreachable(e.to_string()))?;
     let challenge = match &key {
@@ -197,7 +212,7 @@ pub async fn ask(client: &reqwest::Client, server: &Url, proofs: &Proofs) -> Res
         }
         None => None,
     };
-    let response = client.get(endpoint).timeout(ANSWER_TIMEOUT).send().await.map_err(|err| {
+    let response = client().get(endpoint).send().await.map_err(|err| {
         let why = if err.is_timeout() {
             format!("no answer within {} seconds", ANSWER_TIMEOUT.as_secs())
         } else if err.is_connect() {
@@ -207,13 +222,17 @@ pub async fn ask(client: &reqwest::Client, server: &Url, proofs: &Proofs) -> Res
         };
         Refused::Unreachable(why)
     })?;
-    if !response.status().is_success() {
-        let status = response.status().as_u16();
-        // A server too old for proofs refuses the challenge: it is another
-        // device all the same, as the key came from a server that knew them.
+    let status = response.status();
+    if status.is_server_error() {
+        // The server, or a proxy before it, out of reach for now.
+        return Err(Refused::Unreachable(format!("it answered HTTP {}", status.as_u16())));
+    }
+    if !status.is_success() {
+        // A redirect or a refusal doesn't prove anything: another device,
+        // when a key came from the server that was there.
         return Err(match key {
             Some(_) => Refused::NotYours,
-            None => Refused::Unreachable(format!("it answered HTTP {status}, so it isn't a Pley server")),
+            None => Refused::Unreachable(format!("it answered HTTP {}, so it isn't a Pley server", status.as_u16())),
         });
     }
     let body: serde_json::Value = response.json().await.map_err(|_| match key {
@@ -231,12 +250,12 @@ pub async fn ask(client: &reqwest::Client, server: &Url, proofs: &Proofs) -> Res
 }
 
 /// Gets a key for `session` from `server` when the app has none for it.
-pub async fn ask_for_key(client: &reqwest::Client, server: &Url, proofs: &Proofs, session: &str) {
+async fn ask_for_key(server: &Url, proofs: &Proofs, session: &str) {
     if proofs.key(server).is_some() {
         return;
     }
     let Ok(url) = server.join("/api/server/proof-key") else { return };
-    let request = client.get(url).header(reqwest::header::COOKIE, session).timeout(ANSWER_TIMEOUT);
+    let request = client().get(url).header(reqwest::header::COOKIE, session);
     let Ok(response) = request.send().await else { return };
     if !response.status().is_success() {
         return;
@@ -252,18 +271,13 @@ pub async fn ask_for_key(client: &reqwest::Client, server: &Url, proofs: &Proofs
 
 /// `session` (the window's cookies for `server`), once the server proved
 /// itself: within the last half hour, or now. Without a key yet, it asks
-/// for one.
-pub async fn session(
-    client: &reqwest::Client,
-    server: &Url,
-    proofs: &Proofs,
-    session: Option<String>,
-) -> Result<Option<String>, Refused> {
+/// for one: the window uses the session there already.
+pub async fn session(server: &Url, proofs: &Proofs, session: Option<String>) -> Result<Option<String>, Refused> {
     let Some(session) = session else { return Ok(None) };
     if proofs.key(server).is_none() {
-        ask_for_key(client, server, proofs, &session).await;
+        ask_for_key(server, proofs, &session).await;
     } else if !proofs.proved_lately(server) {
-        ask(client, server, proofs).await?;
+        ask(server, proofs).await?;
     }
     Ok(Some(session))
 }
@@ -314,13 +328,7 @@ pub(crate) mod tests {
         tokio::spawn(async move {
             for (status, body) in answers {
                 let (mut socket, _) = listener.accept().await.unwrap();
-                let mut request = Vec::new();
-                let mut buf = [0u8; 1024];
-                while !request.windows(4).any(|w| w == b"\r\n\r\n") {
-                    let n = socket.read(&mut buf).await.unwrap();
-                    request.extend_from_slice(&buf[..n]);
-                }
-                let _ = tx.send(String::from_utf8_lossy(&request).into_owned());
+                let _ = tx.send(request_on(&mut socket).await);
                 let answer = format!(
                     "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
                     body.len()
@@ -338,27 +346,60 @@ pub(crate) mod tests {
         url.query_pairs().find(|(k, _)| k == "challenge").map(|(_, v)| v.into_owned()).unwrap()
     }
 
+    /// Reads a request up to its blank line.
+    async fn request_on(socket: &mut tokio::net::TcpStream) -> String {
+        let mut request = Vec::new();
+        let mut buf = [0u8; 1024];
+        while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+            let n = socket.read(&mut buf).await.unwrap();
+            request.extend_from_slice(&buf[..n]);
+        }
+        String::from_utf8_lossy(&request).into_owned()
+    }
+
+    /// The server itself, which proves it holds [`key`] `times` times (its
+    /// answer depends on the challenge), and then says how often it did.
+    async fn proving(times: usize) -> (Url, tokio::task::JoinHandle<usize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        let bytes = key().bytes().unwrap();
+        let answering = tokio::spawn(async move {
+            for _ in 0..times {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let request = request_on(&mut socket).await;
+                assert!(!request.contains("pley_token"), "{request}");
+                let proved = b64().encode(proof(&bytes, ID, &challenge_in(&request)).as_ref());
+                let body = serde_json::json!({"id": ID, "name": "Den", "proof": proved}).to_string();
+                let answer = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                socket.write_all(answer.as_bytes()).await.unwrap();
+            }
+            times
+        });
+        (server, answering)
+    }
+
     #[tokio::test]
     async fn the_session_goes_only_where_the_server_proves_itself() {
-        let client = reqwest::Client::new();
         let proofs = Proofs::in_memory();
         // No key yet: the session asks for one.
         let given = serde_json::json!({"server_id": ID, "proof_id": key().proof_id, "proof_key": key().proof_key});
         let (server, mut asked) = serve(vec![(200, given.to_string())]).await;
         let cookie = Some("pley_token=abc".to_owned());
-        assert_eq!(session(&client, &server, &proofs, cookie.clone()).await, Ok(cookie.clone()));
+        assert_eq!(session(&server, &proofs, cookie.clone()).await, Ok(cookie.clone()));
         let request = asked.recv().await.unwrap();
         assert!(request.starts_with("GET /api/server/proof-key "), "{request}");
         assert!(request.contains("cookie: pley_token=abc"), "{request}");
         assert_eq!(proofs.key(&server), Some(key()));
         // Proved lately: nothing to ask.
-        assert_eq!(session(&client, &server, &proofs, cookie.clone()).await, Ok(cookie.clone()));
+        assert_eq!(session(&server, &proofs, cookie.clone()).await, Ok(cookie.clone()));
         assert!(asked.try_recv().is_err());
     }
 
     #[tokio::test]
     async fn another_device_at_the_address_gets_nothing() {
-        let client = reqwest::Client::new();
         let cookie = Some("pley_token=abc".to_owned());
         let wrong =
             serde_json::json!({"id": ID, "name": "Den", "proof": "-OpCw2gYEDYBr-d7wh4JEYd7CHzZ8nc7pTc_UlsqVas"});
@@ -367,9 +408,8 @@ pub(crate) mod tests {
             [(200, wrong.to_string()), (200, another.to_string()), (400, "{}".to_owned()), (200, "<html>".to_owned())]
         {
             let (server, mut asked) = serve(vec![answer.clone()]).await;
-            let proofs = Proofs::in_memory();
-            proofs.keep(&server, key());
-            assert_eq!(session(&client, &server, &proofs, cookie.clone()).await, Err(Refused::NotYours), "{answer:?}");
+            let proofs = Proofs::for_tests(&server, false);
+            assert_eq!(session(&server, &proofs, cookie.clone()).await, Err(Refused::NotYours), "{answer:?}");
             let request = asked.recv().await.unwrap();
             assert!(request.contains("proof_id=sAAECAwQFBgcICQoLDA0ODw"), "{request}");
             assert!(!request.contains("pley_token"), "the session stays home: {request}");
@@ -377,47 +417,45 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn the_server_proves_itself_again_after_a_doubt() {
-        let client = reqwest::Client::new();
-        let cookie = Some("pley_token=abc".to_owned());
-        // The answer depends on the challenge, so this server answers
-        // after reading it.
+    async fn a_redirect_to_the_server_proves_nothing() {
+        let (real, _) = proving(1).await;
+        // Another device at the address sends the challenge on to the server.
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let server = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
-        let bytes = key().bytes().unwrap();
-        let answering = tokio::spawn(async move {
-            let mut asked = 0;
-            for _ in 0..2 {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                let mut request = Vec::new();
-                let mut buf = [0u8; 1024];
-                while !request.windows(4).any(|w| w == b"\r\n\r\n") {
-                    let n = socket.read(&mut buf).await.unwrap();
-                    request.extend_from_slice(&buf[..n]);
-                }
-                let request = String::from_utf8_lossy(&request).into_owned();
-                assert!(!request.contains("pley_token"), "{request}");
-                let challenge = challenge_in(&request);
-                let proved = b64().encode(proof(&bytes, ID, &challenge).as_ref());
-                let body = serde_json::json!({"id": ID, "name": "Den", "proof": proved}).to_string();
-                let answer = format!(
-                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-                socket.write_all(answer.as_bytes()).await.unwrap();
-                asked += 1;
-            }
-            asked
+        let impostor = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = request_on(&mut socket).await;
+            let path = request.split_whitespace().nth(1).unwrap();
+            let to = real.join(path).unwrap();
+            let answer =
+                format!("HTTP/1.1 302 Found\r\nlocation: {to}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+            socket.write_all(answer.as_bytes()).await.unwrap();
         });
-        let proofs = Proofs::in_memory();
-        proofs.keep(&server, key());
-        assert_eq!(session(&client, &server, &proofs, cookie.clone()).await, Ok(cookie.clone()));
-        assert_eq!(session(&client, &server, &proofs, cookie.clone()).await, Ok(cookie.clone()), "proved lately");
+        let proofs = Proofs::for_tests(&impostor, false);
+        let cookie = Some("pley_token=abc".to_owned());
+        assert_eq!(session(&impostor, &proofs, cookie).await, Err(Refused::NotYours));
+    }
+
+    #[tokio::test]
+    async fn a_server_error_is_out_of_reach_not_another_device() {
+        let (server, _asked) = serve(vec![(502, "Bad Gateway".to_owned())]).await;
+        let proofs = Proofs::for_tests(&server, false);
+        let refused = session(&server, &proofs, Some("pley_token=abc".to_owned())).await;
+        assert!(matches!(refused, Err(Refused::Unreachable(_))), "{refused:?}");
+    }
+
+    #[tokio::test]
+    async fn the_server_proves_itself_again_after_a_doubt() {
+        let cookie = Some("pley_token=abc".to_owned());
+        let (server, answering) = proving(2).await;
+        let proofs = Proofs::for_tests(&server, false);
+        assert_eq!(session(&server, &proofs, cookie.clone()).await, Ok(cookie.clone()));
+        assert_eq!(session(&server, &proofs, cookie.clone()).await, Ok(cookie.clone()), "proved lately");
         proofs.doubt(&server);
-        assert_eq!(session(&client, &server, &proofs, cookie.clone()).await, Ok(cookie.clone()));
+        assert_eq!(session(&server, &proofs, cookie.clone()).await, Ok(cookie.clone()));
         assert_eq!(answering.await.unwrap(), 2, "proved at first and after the doubt");
         // Without a session, nothing to prove.
-        assert_eq!(session(&client, &server, &proofs, None).await, Ok(None));
+        assert_eq!(session(&server, &proofs, None).await, Ok(None));
     }
 
     #[test]
