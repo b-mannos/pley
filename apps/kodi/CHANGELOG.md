@@ -16,8 +16,8 @@ describes how they are made.
   ("In library", "Requested", "Declined"); OK does its one main action
   (Request, Open, Tell me too…) and the rest is in its context menu. A
   show's seasons each say their state, and Which seasons? picks the ones
-  to ask for. Needs a server with requests turned on; a sign-in from before
-  is offered "Sign in again" once.
+  to ask for. Needs a server with requests turned on; for a sign-in from
+  before, Discover offers "Sign in again".
 - Your requests: each request's stage ("Waiting for approval",
   "Downloading 42% · in 20 min", "Ready to watch"…), what it says and when
   it was asked for, with Withdraw and Stop following. Administrators get
