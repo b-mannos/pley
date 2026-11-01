@@ -383,7 +383,14 @@ pub async fn reset_password(config: Config, username: &str, password: &str, admi
                 .execute(&db.write)
                 .await?
                 .rows_affected();
-            let off = if two_step > 0 { "; two-step sign-in is off" } else { "" };
+            let required = settings::SettingsStore::load(&db).await?.get().require_two_step;
+            let off = match (two_step > 0, required) {
+                (true, true) => {
+                    "; two-step sign-in is off, and set up again at the next sign-in (the server requires it)"
+                }
+                (true, false) => "; two-step sign-in is off",
+                (false, _) => "",
+            };
             let apps = if apps > 0 { "; apps signed out" } else { "" };
             println!("password updated for '{username}'{off}{apps}");
         }
