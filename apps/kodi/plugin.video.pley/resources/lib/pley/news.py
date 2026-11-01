@@ -30,8 +30,10 @@ LIVE_POLL = 10
 KEEP = 3
 # The catch-up's look at the news (GET /api/requests?unseen=1).
 CATCH_UP = 20
-# remembered.json's newest updated_at announced, per server and account.
+# What was announced, per server and account, in remembered.json: requests
+# wholly ready and seasons ready (news_of), the last ANNOUNCED_KEEP.
 ANNOUNCED = "requests.announced."
+ANNOUNCED_KEEP = 300
 # Events that may bring news (unseen rises) or change a request on screen.
 REQUEST_EVENTS = ("requests_changed", "request_available", "request_decided", "request_created", "request_failed")
 # What keeps a listing from being shown again under the person: a dialog.
@@ -243,31 +245,25 @@ class News:
         key = self.announced_key(who)
         if key is None:
             return
-        mark = announced(key)
-        fresh = [r for r in found if (r.get("updated_at") or 0) > mark]
-        if not fresh:
-            return
-        ready = [r for r in fresh if requests.ready_now(r)]
+        said = set(announced(key))
+        ready = [r for r in found if requests.ready_now(r) and not set(news_of(r)) <= said]
         if len(ready) == 1:
-            self.notice(who, requests.ready(requests.as_event(ready[0]), kodi.text), ready[0].get("poster_url"))
+            event = requests.as_event(ready[0])
+            if not event["complete"]:
+                # Its seasons not said yet.
+                event["seasons"] = [n for n in event["seasons"] or [] if season_news(ready[0].get("id"), n) not in said]
+            self.notice(who, requests.ready(event, kodi.text), ready[0].get("poster_url"))
         elif ready:
             self.notice(who, requests.news(len(ready), kodi.text))
-        announce(key, max(r.get("updated_at") or 0 for r in fresh))
+        announce(key, [n for r in ready for n in news_of(r)])
 
     def available(self, event: dict, who) -> None:
         """request_available, heard as `who`: ready to watch, said once."""
         self.notice(who, requests.ready(event, kodi.text), event.get("poster_url"))
-        # Never again at a catch-up: the request as it is now.
-        answer = self.call("GET", "/api/requests/%d" % int(event.get("request_id") or 0), fine=(404,))
+        # Never again at a catch-up.
         key = self.announced_key(who)
-        if answer is None or answer.status != 200 or key is None:
-            return
-        try:
-            updated = (answer.json() or {}).get("updated_at")
-        except (ValueError, AttributeError):
-            return
-        if isinstance(updated, (int, float)) and updated > announced(key):
-            announce(key, updated)
+        if key is not None:
+            announce(key, event_news(event))
 
     def announced_key(self, who):
         """remembered.json's key for what was announced to this account on
@@ -310,12 +306,38 @@ def without(found: dict, name: str) -> dict:
     return {k: v for k, v in found.items() if k != name}
 
 
-def announced(key: str) -> float:
+def season_news(request_id, season) -> str:
+    return "%s/%s" % (request_id, season)
+
+
+def news_of(request: dict) -> list:
+    """What a request ready to watch has to say, as announced() keeps it:
+    the request once wholly ready, until then each season ready. It moves
+    for more than these (followed, matched again), which say nothing new."""
+    if request.get("stage") == "available":
+        return [str(request.get("id"))]
+    return [season_news(request.get("id"), n) for n in request.get("available_seasons") or []]
+
+
+def event_news(event: dict) -> list:
+    """What a request_available said: the seasons newly ready, and the
+    request once wholly ready."""
+    said = [season_news(event.get("request_id"), n) for n in event.get("seasons") or []]
+    return said + [str(event.get("request_id"))] if event.get("complete", True) else said
+
+
+def announced(key: str) -> list:
+    """What was announced to an account (news_of), oldest first."""
     try:
-        return float(kodi.remembered(key, "0"))
+        found = json.loads(kodi.remembered(key, "[]"))
     except ValueError:
-        return 0.0
+        return []
+    return [n for n in found if isinstance(n, str)] if isinstance(found, list) else []
 
 
-def announce(key: str, updated_at) -> None:
-    kodi.remember(key, "%d" % updated_at)
+def announce(key: str, said: list) -> None:
+    """`said` announced too: the last ANNOUNCED_KEEP are kept."""
+    if not said:
+        return
+    kept = [n for n in announced(key) if n not in said] + list(dict.fromkeys(said))
+    kodi.remember(key, json.dumps(kept[-ANNOUNCED_KEEP:]))

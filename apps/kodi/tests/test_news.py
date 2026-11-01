@@ -103,7 +103,6 @@ class NewsTest(unittest.TestCase):
 
     def test_ready_to_watch_is_said_with_its_poster(self):
         self.turn(stream_open=True)
-        self.server.answers["/api/requests/42"] = (200, {"id": 42, "updated_at": 5000})
         self.news.heard({"type": "request_available", "request_id": 42, "title": "Heat", "kind": "movie", "tmdb_id": 949, "item_id": 7,
                          "poster_url": "/api/discover/images/poster/h.jpg", "seasons": None, "complete": True})
         while self.jobs:
@@ -111,7 +110,7 @@ class NewsTest(unittest.TestCase):
         self.assertEqual(self.news.waiting, [("“Heat” is ready to watch.", BASE + "/api/discover/images/poster/h.jpg?w=185")])
         self.turn(stream_open=True)
         self.assertEqual(xbmcgui.notified, [("Pley", "“Heat” is ready to watch.")])
-        self.assertEqual(kodi.remembered(news.ANNOUNCED + SERVER + "|1"), "5000", "never again as news from before")
+        self.assertEqual(news.announced(news.ANNOUNCED + SERVER + "|1"), ["42"], "never again as news from before")
         self.news.heard({"type": "request_available", "request_id": 43, "title": "Ronin", "kind": "movie", "item_id": None})
         self.assertEqual(self.jobs, [], "nothing for a library this account can't open")
 
@@ -138,6 +137,48 @@ class NewsTest(unittest.TestCase):
         self.turn()
         self.turn()
         self.assertEqual(len(xbmcgui.notified), 1, "never twice")
+
+    def test_a_show_ready_season_by_season_is_said_once_each(self):
+        self.server.answers["/api/requests/summary"] = (200, dict(ON, unseen=1))
+
+        def kodi_starts(request):
+            self.server.answers[CATCH_UP] = (200, {"total": 1, "requests": [request]})
+            self.news = self.started()
+            self.turn()
+            self.turn()
+
+        show = ready(42, "Dark", 2000, kind="show", stage="partial", seasons=[1, 2, 3], available_seasons=[1])
+        kodi_starts(show)
+        # Followed, unfollowed, matched again: it moves, and has nothing new.
+        kodi_starts(dict(show, updated_at=2500))
+        kodi_starts(dict(show, available_seasons=[1, 2], updated_at=3000))
+        kodi_starts(dict(show, stage="available", available_seasons=[1, 2, 3], updated_at=4000))
+        kodi_starts(dict(show, stage="available", available_seasons=[1, 2, 3], updated_at=4500))
+        self.assertEqual([message for _, message in xbmcgui.notified], [
+            "Season 1 of “Dark” is ready to watch.", "Season 2 of “Dark” is ready to watch.", "“Dark” is ready to watch."])
+
+    def test_what_an_event_said_isnt_said_again_as_kodi_starts(self):
+        self.turn(stream_open=True)
+        self.news.heard({"type": "request_available", "request_id": 42, "title": "Dark", "kind": "show", "item_id": 7, "seasons": [1],
+                         "complete": False})
+        self.turn(stream_open=True)
+        self.turn(stream_open=True)
+        self.server.answers["/api/requests/summary"] = (200, dict(ON, unseen=1))
+        self.server.answers[CATCH_UP] = (200, {"total": 1, "requests": [
+            ready(42, "Dark", 2500, kind="show", stage="partial", seasons=[1, 2], available_seasons=[1])]})
+        self.news = self.started()
+        self.turn()
+        self.turn()
+        self.assertEqual(xbmcgui.notified, [("Pley", "Season 1 of “Dark” is ready to watch.")])
+
+    def test_what_was_announced_is_kept_to_the_last_few_hundred(self):
+        key = news.ANNOUNCED + SERVER + "|1"
+        news.announce(key, [str(n) for n in range(250)])
+        news.announce(key, ["7", "300", "301/1"] + [str(n) for n in range(1000, 1100)])
+        kept = news.announced(key)
+        self.assertEqual(len(kept), news.ANNOUNCED_KEEP)
+        self.assertEqual(kept[-103:], ["7", "300", "301/1"] + [str(n) for n in range(1000, 1100)], "the newest last, each once")
+        self.assertNotIn("0", kept)
 
     def test_news_of_several_says_how_many(self):
         self.server.answers["/api/requests/summary"] = (200, dict(ON, unseen=2))

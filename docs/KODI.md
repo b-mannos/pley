@@ -206,8 +206,9 @@ their top goes back to Kodi, and the add-on opens Pley's look again).
   to watch." for a show partly there) pops up with the poster as soon as
   it is, from the event stream; news that came while Kodi was off or the
   stream was down shows once as Kodi starts ("3 of your requests have
-  news" for several). Each is said once per server and account
-  (`remembered.json`), and none shows over a playing video: the last three
+  news" for several). A request ready, or a season of it, is said once per
+  server and account (`remembered.json` keeps the last 300), whatever else
+  changes in the request; none shows over a playing video: the last three
   wait for it to stop. As on the other TV apps, decisions, new requests
   and failures show only in the lists and the entry's number.
 - **Off, or not open to the account**: no Discover, no Your requests
