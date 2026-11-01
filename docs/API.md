@@ -3243,7 +3243,8 @@ interface LiveTuner {                  // a connection in use
 - **`PUT /api/settings`** keeps `radarr_url` and `sonarr_url` as URLs are
   written (`HTTP://Box:7878/` is `http://box:7878`), less a trailing `/`
   (`""` = none): http or https, with a host and no password, not a
-  link-local address (`169.254.0.0/16`, `fe80::/10`), else `400`. A new address needs its `radarr_api_key` or `sonarr_api_key` too
+  link-local address (`169.254.0.0/16`, `fe80::/10`), else `400`; a name
+  is never connected to at a link-local address it resolves to either. A new address needs its `radarr_api_key` or `sonarr_api_key` too
   (`400`: the saved key goes to the saved address only), and `""` forgets
   the key with the address. `requests` on without a TMDB key (turning them
   on, or removing the key while they are), a limit above 1000, and a

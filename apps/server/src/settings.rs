@@ -278,13 +278,11 @@ pub(crate) fn arr_url(value: &str) -> Result<String, AppError> {
     if !plain {
         return Err(wrong());
     }
-    // Where clouds answer for the machine itself (169.254.169.254), never
-    // where Radarr or Sonarr is.
+    // An address typed in; those a name leads to are checked as they are
+    // resolved.
     let link_local = match url.host() {
-        Some(url::Host::Ipv4(ip)) => ip.is_link_local(),
-        Some(url::Host::Ipv6(ip)) => {
-            (ip.segments()[0] & 0xffc0) == 0xfe80 || ip.to_ipv4_mapped().is_some_and(|ip| ip.is_link_local())
-        }
+        Some(url::Host::Ipv4(ip)) => crate::requests::arr::link_local(ip.into()),
+        Some(url::Host::Ipv6(ip)) => crate::requests::arr::link_local(ip.into()),
         _ => false,
     };
     if link_local {

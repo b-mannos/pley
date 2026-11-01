@@ -3,12 +3,14 @@
 //! ([`Options`]), and their download queues say how far requests are.
 //!
 //! The API key goes in a header, only to the address saved with it, and
-//! never along a redirect.
+//! never along a redirect or to a link-local address.
 
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use reqwest::Method;
+use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -290,12 +292,44 @@ impl Default for Arr {
     }
 }
 
+/// Whether `ip` is link-local, where clouds answer for the machine itself
+/// (169.254.169.254): never where Radarr or Sonarr is.
+pub fn link_local(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => ip.is_link_local(),
+        IpAddr::V6(ip) => {
+            (ip.segments()[0] & 0xffc0) == 0xfe80 || ip.to_ipv4_mapped().is_some_and(|ip| ip.is_link_local())
+        }
+    }
+}
+
+/// Resolves Radarr's and Sonarr's names without the link-local addresses
+/// ([`link_local`]), failing when none is left: an address typed in is
+/// checked in the settings, and this checks the address a name leads to,
+/// the one connected to.
+struct NotLinkLocal;
+
+impl Resolve for NotLinkLocal {
+    fn resolve(&self, name: Name) -> Resolving {
+        let name = name.as_str().to_owned();
+        Box::pin(async move {
+            let addrs: Vec<SocketAddr> =
+                tokio::net::lookup_host((name.as_str(), 0)).await?.filter(|addr| !link_local(addr.ip())).collect();
+            if addrs.is_empty() {
+                return Err(format!("{name} has only link-local addresses, where Radarr and Sonarr aren't").into());
+            }
+            Ok(Box::new(addrs.into_iter()) as Addrs)
+        })
+    }
+}
+
 impl Arr {
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
             .user_agent(concat!("pley/", env!("CARGO_PKG_VERSION")))
             .timeout(TIMEOUT)
             .redirect(reqwest::redirect::Policy::none())
+            .dns_resolver(Arc::new(NotLinkLocal))
             .build()
             .expect("http client");
         Self { http, queues: Default::default() }
@@ -698,6 +732,20 @@ mod tests {
         assert_eq!(message_of(r#"{"title":"oops"}"#).as_deref(), None);
         let long = "é".repeat(QUOTE + 5);
         assert_eq!(quote(&long).chars().count(), QUOTE + 1);
+    }
+
+    #[tokio::test]
+    async fn names_never_lead_to_link_local_addresses() {
+        for ip in ["169.254.169.254", "fe80::1", "::ffff:169.254.1.1"] {
+            assert!(link_local(ip.parse().unwrap()), "{ip}");
+            let resolved = NotLinkLocal.resolve(ip.parse().unwrap()).await;
+            assert!(resolved.is_err(), "{ip}");
+        }
+        for ip in ["127.0.0.1", "192.168.1.5", "::1", "fd00::5"] {
+            assert!(!link_local(ip.parse().unwrap()), "{ip}");
+        }
+        let resolved: Vec<SocketAddr> = NotLinkLocal.resolve("localhost".parse().unwrap()).await.unwrap().collect();
+        assert!(!resolved.is_empty() && resolved.iter().all(|a| a.ip().is_loopback()), "{resolved:?}");
     }
 
     #[tokio::test]

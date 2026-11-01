@@ -12,8 +12,9 @@ describes how they are made.
 ### Security
 
 - Radarr's and Sonarr's addresses can't be link-local (`169.254.0.0/16`,
-  `fe80::/10`), and whatever answers there in their stead is never quoted
-  back: only its HTTP status. Their answers are read 32 MB at most.
+  `fe80::/10`), typed in or as their names resolve, and whatever answers
+  there in their stead is never quoted back: only its HTTP status. Their
+  answers are read 32 MB at most.
 
 ### Added
 
