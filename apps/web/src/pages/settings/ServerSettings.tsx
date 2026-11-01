@@ -388,7 +388,6 @@ ${form.opensubtitles_password ?? ""}`}
 /** Shares of the processors other programs may keep busy before library work waits; 100: it never waits. */
 const MAX_CPU = [25, 50, 75, 100];
 
-/** When intro and credits detection and previews for whole libraries run. */
 /**
  * Requiring two-step sign-in: only an administrator who uses it can turn it
  * on, and turning it on signs out everyone without it, who sets it up at
@@ -433,6 +432,7 @@ function RequireTwoStepRow({ checked, onChange, known }: { checked: boolean; onC
   );
 }
 
+/** When intro and credits detection and previews for whole libraries run. */
 function LibraryWorkRows({ form, set }: { form: Settings; set: <K extends keyof Settings>(key: K, value: Settings[K]) => void }) {
   const mode = form.library_work ?? "auto";
   const background = form.detect_markers || (form.seek_previews && form.previews_in_background);
