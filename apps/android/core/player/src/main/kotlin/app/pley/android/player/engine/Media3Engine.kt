@@ -139,6 +139,10 @@ class Media3Engine(
     @Volatile
     private var dolbyVisionShown: Boolean? = null
 
+    /** The video decoder started last, with the MIME type it was started for: a decoder can take more than one. */
+    @Volatile
+    private var videoCodec: Pair<String, String>? = null
+
     private val rules = DecoderRules(
         policy = { details?.policy ?: DecoderPolicy(tv = profile.isTv) },
         dolbyVisionShown = { dolbyVisionShown },
@@ -157,6 +161,7 @@ class Media3Engine(
                 asyncQueueing = details?.forceAsyncQueueing ?: profile.fireTv,
                 music = music,
                 audioDelay = if (music) null else audioDelay,
+                onVideoCodec = { name, mimeType -> videoCodec = name to mimeType },
             ),
         )
         .setTrackSelector(trackSelector)
@@ -453,7 +458,8 @@ class Media3Engine(
 
     private fun isHardware(name: String): Boolean? = details?.input?.decoders?.firstOrNull { it.name == name }?.hardware
 
-    private fun decoderMime(name: String): String? = details?.input?.decoders?.firstOrNull { it.name == name }?.mime
+    private fun decoderMime(name: String): String? =
+        videoCodec?.takeIf { it.first == name }?.second ?: details?.input?.decoders?.firstOrNull { it.name == name }?.mime
 
     /** [EngineState.reconnecting] as the watcher has it, looked at again while it lasts. */
     private fun publishReconnecting() {
