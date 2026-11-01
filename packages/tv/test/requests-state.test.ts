@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../src/api/client";
+import { EventStream } from "../src/api/events";
 import type { MediaRequest, RequestList, RequestSummary, ServerEvent, User } from "../src/api/types";
-import type { KeyValue } from "../src/auth/tokens";
+import type { KeyValue, Tokens } from "../src/auth/tokens";
 import { NetworkError } from "../src/net/transport";
 import type { Platform } from "../src/platform";
 import { AppState, SUMMARY_POLL_MS } from "../src/state";
@@ -395,5 +396,68 @@ describe("news that came while the app wasn't listening", () => {
     await app.switched();
     expect(app.notices.value).toEqual([]);
     expect(app.marks.value).toEqual({});
+  });
+});
+
+describe("a profile switch", () => {
+  it("starts the event stream over with the new profile's token, so the last one's news ends", async () => {
+    const opened: string[] = [];
+    const aborted: string[] = [];
+    class FakeXhr {
+      readyState = 0;
+      status = 0;
+      responseText = "";
+      onreadystatechange: (() => void) | null = null;
+      onprogress: (() => void) | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      private auth = "";
+      open(): void {}
+      setRequestHeader(name: string, value: string): void {
+        if (name === "Authorization") this.auth = value;
+      }
+      send(): void {
+        opened.push(this.auth);
+      }
+      abort(): void {
+        aborted.push(this.auth);
+        this.onabort?.();
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", FakeXhr);
+    let token = "first";
+    const stream = new EventStream("https://pley.example.com", { accessToken: () => Promise.resolve(token) } as unknown as Tokens, () => undefined, () => undefined);
+    // Not running (the app hidden): nothing starts.
+    stream.restart();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(opened).toEqual([]);
+    stream.start();
+    await vi.advanceTimersByTimeAsync(0);
+    token = "second";
+    stream.restart();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(opened).toEqual(["Bearer first", "Bearer second"]);
+    expect(aborted).toEqual(["Bearer first"]);
+    stream.stop();
+    vi.unstubAllGlobals();
+  });
+
+  it("asks for the new profile's summary, even with the last one's still on its way", async () => {
+    const { app, server, asked } = setup();
+    let answer: (s: RequestSummary) => void = () => undefined;
+    server.summary = () => new Promise((r) => (answer = r));
+    void app.loadRequests();
+    const restarted: number[] = [];
+    (app as unknown as { events: unknown }).events = { restart: () => restarted.push(1) };
+    server.summary = () => Promise.resolve(summary({ own: 4 }));
+    const switching = app.switched();
+    // The last profile's answer comes after the switch: it is dropped.
+    answer(summary({ own: 9 }));
+    await switching;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(restarted).toEqual([1]);
+    expect(summaries(asked)).toBe(2);
+    expect(app.requests.value?.own).toBe(4);
   });
 });

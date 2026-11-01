@@ -377,7 +377,12 @@ export class AppState {
     for (const fn of this.leavers.slice()) fn();
   }
 
-  /** The app acts as another profile now: what was shown for the one before goes. */
+  /**
+   * The app acts as another profile now: what was shown for the one before
+   * goes, and its event stream, which would bring its news here, starts
+   * over. Its summary still on the way is dropped, so this one's is asked
+   * for after it.
+   */
   async switched(): Promise<void> {
     this.endPlayback();
     this.forgetAccount();
@@ -387,6 +392,8 @@ export class AppState {
     this.me.value = null;
     this.live.value = null;
     this.forgetLive();
+    this.events?.restart();
+    void this.loadRequests(true);
     await this.loadAccount();
     void this.loadHome();
   }

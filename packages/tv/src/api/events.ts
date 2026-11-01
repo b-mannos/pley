@@ -48,6 +48,14 @@ export class EventStream {
     this.xhr = null;
   }
 
+  /** Another profile signed in: a stream that runs starts over with its token, so the last one's events end here. */
+  restart(): void {
+    if (this.stopped) return;
+    this.stop();
+    this.failures = 0;
+    this.start();
+  }
+
   /** The server answers again: a stream waiting out its back-off connects now. False when none was waiting. */
   retryNow(): boolean {
     if (this.stopped || this.xhr || this.timer === null) return false;

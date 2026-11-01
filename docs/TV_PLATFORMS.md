@@ -172,8 +172,10 @@ is what has news since the profile last looked, and for administrators
 also what waits for them, in red while some failed.
 
 - **What the profile may do:** `GET /api/requests/summary` at start, on
-  reconnecting and 1 s after a burst of request events, kept on the TV
-  (`pley.requests`) so the rail has its entry before the server answers.
+  reconnecting, after a profile switch (the event stream starts over with
+  the new profile's token then, so none of the last one's news comes) and
+  1 s after a burst of request events, kept on the TV (`pley.requests`)
+  so the rail has its entry before the server answers.
   A `404` (an older server) or `403` leaves requests out until the app
   reconnects. Sign-in asks for `requests approvals` only where the server
   lists them (`scopes_supported`); with a sign-in from before, Discover
