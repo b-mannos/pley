@@ -44,7 +44,8 @@ it).
 
 Before its token goes to the server's address, the app has the server
 prove it is the one signed in to ([API.md](API.md#telling-servers-apart)),
-at most every half hour and again after a request there got no answer.
+at most every half hour, and again when the device changes networks or a
+request there got no answer.
 Another device at that address gets no token: the app shows what it saved
 and says "Another device answers there."
 

@@ -140,6 +140,39 @@ class ServerProofTest {
     }
 
     @Test
+    fun anotherNetworkOrAClockSetBackHasItProveItselfAgain() = runBlocking {
+        signedIn()
+        val tokens = tokens()
+        tokens.accessToken()
+        ServerProofs.networkMayHaveChanged()
+        tokens.accessToken()
+        assertEquals(2, challenges.size)
+        now -= 60 * 60_000
+        tokens.accessToken()
+        assertEquals(3, challenges.size)
+    }
+
+    @Test
+    fun aServerErrorIsOutOfReachNotAnotherDevice() = runBlocking {
+        signedIn()
+        answer = { MockResponse().setResponseCode(502) }
+        val refused = assertThrows(java.io.IOException::class.java) { runBlocking { tokens().accessToken() } }
+        assertFalse(refused is NotYourServerException)
+    }
+
+    @Test
+    fun aNewSignInEndsTheOneBeforeOnlyWhereTheServerProvesItsKey() = runBlocking {
+        val fresh = savedTokens(issuer).copy(accessToken = "pley_at_new", refreshToken = "pley_rt_new")
+        val answerOf = TokenResponse("pley_at_new", 60, "pley_rt_new", fresh.scope)
+        for (proves in listOf(false, true)) {
+            answer = { c -> MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("proof", ServerProofs.proof(if (proves) key else ByteArray(32), SERVER_ID, c)).toString()) }
+            signedIn()
+            keepNewSignIn(endpointsClient(), tokens(), answerOf, fresh.scope, fresh)
+            assertEquals(if (proves) listOf("pley_rt_one") else emptyList<String>(), revokes)
+        }
+    }
+
+    @Test
     fun anotherDeviceGetsNoToken() = runBlocking {
         signedIn(expiresAt = now + 30_000)
         val tokens = tokens()

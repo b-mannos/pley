@@ -135,8 +135,9 @@ class Tokens(
     /** One proof at a time; when the server last proved it is the one signed in to. */
     private val proofMutex = Mutex()
 
+    /** When, and on which network ([ServerProofs.network]), the server last proved itself. */
     @Volatile
-    private var provedAt: Long? = null
+    private var provedAt: Pair<Long, Int>? = null
 
     /** The access token the last refresh or profile switch gave, and when (guarded by [mutex]). */
     private var lastIssued: Pair<String, Long>? = null
@@ -242,7 +243,7 @@ class Tokens(
         mutex.withLock {
             val tokens = store.load(issuer)
             try {
-                if (tokens != null && provedOrNot(tokens)) revoke(http, tokens)
+                if (tokens != null && proves(tokens)) revoke(http, tokens)
             } finally {
                 store.wipe(issuer)
                 provedAt = null
@@ -258,7 +259,8 @@ class Tokens(
 
     /**
      * Returns once the server at this address has proved it is the one
-     * signed in to, within the last half hour: no token leaves before. A
+     * signed in to, within the last half hour and on this network: no
+     * token leaves before. A
      * sign-in from a server without proofs has nothing to check.
      */
     private suspend fun proved(tokens: StoredTokens) {
@@ -267,18 +269,25 @@ class Tokens(
         proofMutex.withLock {
             // Proved by another caller meanwhile.
             if (recentlyProved()) return
+            val network = ServerProofs.network
             ServerProofs.prove(http, issuer, proof, random)
-            provedAt = clock()
+            provedAt = clock() to network
         }
     }
 
-    private fun recentlyProved(): Boolean = provedAt?.let { clock() - it < ServerProofs.TTL_MS } == true
+    // A clock set back makes an age below zero: proved again.
+    private fun recentlyProved(): Boolean =
+        provedAt?.let { (at, network) -> network == ServerProofs.network && clock() - at in 0 until ServerProofs.TTL_MS } == true
 
-    private suspend fun provedOrNot(tokens: StoredTokens): Boolean = try {
-        proved(tokens)
-        true
-    } catch (_: IOException) {
-        false
+    /** Whether the server proves it holds [tokens]' key (none: nothing to check). */
+    internal suspend fun proves(tokens: StoredTokens): Boolean {
+        val proof = tokens.proof ?: return true
+        return try {
+            ServerProofs.prove(http, issuer, proof, random)
+            true
+        } catch (_: IOException) {
+            false
+        }
     }
 
     /**

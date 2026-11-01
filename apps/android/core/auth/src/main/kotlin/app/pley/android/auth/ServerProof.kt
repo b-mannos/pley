@@ -1,10 +1,14 @@
 package app.pley.android.auth
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import app.pley.android.common.UserFacing
 import java.io.IOException
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicInteger
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
@@ -65,8 +69,30 @@ class NotYourServerException : IOException(NOT_YOUR_SERVER), UserFacing
 
 /** The server's proofs, as the app checks them. */
 object ServerProofs {
-    /** How long a server's proof counts, unless a request to it gets no answer meanwhile. */
+    /** How long a server's proof counts, unless a request to it gets no answer or the network changes meanwhile. */
     const val TTL_MS = 30 * 60_000L
+
+    private val networks = AtomicInteger()
+
+    /** Counts the networks the device joined or lost: a proof counts on the network it was made on. */
+    val network: Int get() = networks.get()
+
+    /** The device may be on another network: every server proves itself again before its next token. */
+    fun networkMayHaveChanged() {
+        networks.incrementAndGet()
+    }
+
+    /** Calls [networkMayHaveChanged] each time the device joins or loses its default network. */
+    fun followNetworks(context: Context) {
+        val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return
+        connectivity.registerDefaultNetworkCallback(
+            object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) = networkMayHaveChanged()
+
+                override fun onLost(network: Network) = networkMayHaveChanged()
+            },
+        )
+    }
 
     /** The longest answer read: `/api/server`'s is a few hundred bytes. */
     private const val MAX_ANSWER_BYTES = 64 * 1024L
@@ -86,8 +112,9 @@ object ServerProofs {
 
     /**
      * Asks the server at [issuer] to prove it holds [proof]'s key. Throws
-     * the network's IOException when nothing answers, or
-     * [NotYourServerException] when what answers can't.
+     * an IOException when nothing answers or the server (or a proxy before
+     * it) fails for now, or [NotYourServerException] when what answers
+     * can't prove it.
      */
     suspend fun prove(http: OkHttpClient, issuer: String, proof: ServerProof, random: (Int) -> ByteArray) {
         val key = ServerProof.keyBytes(proof.proofKey) ?: throw NotYourServerException()
@@ -98,6 +125,7 @@ object ServerProofs {
             .build()
         val text = withContext(Dispatchers.IO) {
             http.newCall(request).execute().use { response ->
+                if (response.code >= 500) throw IOException("the server couldn't answer (HTTP ${response.code})")
                 if (response.code != 200) throw NotYourServerException()
                 response.peekBody(MAX_ANSWER_BYTES).string()
             }
