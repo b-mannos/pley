@@ -623,7 +623,7 @@ impl Plan {
                     };
                     let vaapi = encoder.accel == HwAccel::Vaapi;
                     let deinterlace = src.interlaced == Some(true);
-                    let key = decode_key(&src.codec, src.bit_depth);
+                    let key = decode_key(&src.codec, src.bit_depth, src.pix_fmt.as_deref());
                     let tonemap_input = match tonemap {
                         Some(Tonemapper::Zscale | Tonemapper::Opencl) => untagged_hdr_fix(src),
                         _ => None,
@@ -2629,6 +2629,24 @@ mod tests {
                 assert!(args.contains("-init_hw_device opencl=ocl -filter_hw_device ocl"), "{args}");
             }
         }
+    }
+
+    /// Video the start-up tests never decoded (4:2:2 H.264, 4:4:4) stays off
+    /// the GPU pipelines and Quick Sync's decoder: for example, Intel's
+    /// decoders fail on 4:2:2 H.264, where Direct3D 11's leaves it to the CPU.
+    #[test]
+    fn video_that_isnt_4_2_0_stays_off_the_gpu_pipelines() {
+        let ff = intel(HwAccel::Qsv, true);
+        let mut m = media(DynamicRange::Sdr, None);
+        m.streams[0].codec = "h264".into(); // 4K made 1080p
+        m.streams[0].pix_fmt = Some("yuv420p".into());
+        let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Gpu(HwAccel::Qsv));
+        m.streams[0].pix_fmt = Some("yuv422p".into());
+        let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        let v = plan.video.as_ref().unwrap();
+        let decoder = if cfg!(windows) { "d3d11va" } else { "vaapi" };
+        assert_eq!((v.pipeline, v.hw_decode.as_deref(), v.gpu_scale), (Pipeline::Software, Some(decoder), None));
     }
 
     /// VAAPI's encoders where the start-up test found that no GPU tone

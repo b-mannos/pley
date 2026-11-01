@@ -711,6 +711,12 @@ the VPS, SPS and PPS with every forced keyframe.
   start-up test for the codec (`gpu_pipelines`); not for interlaced video or
   libplacebo, which scales as it tone maps. Mesa's D3D12 VAAPI driver (WSL)
   crashes in `scale_vaapi`, so it fails the test.
+- **Chroma and depth.** The start-up tests decode 8- and 10-bit 4:2:0
+  video, and 10-bit 4:2:2 HEVC (what cameras record). Other video (4:2:2
+  H.264, 4:4:4, 12 bits) stays off the GPU pipelines and Vulkan decoding,
+  decoded by `d3d11va`, `vaapi`, `cuda` or `videotoolbox`, which hand what
+  the GPU can't decode to the CPU. For example, Intel's decoders fail on
+  4:2:2 H.264.
 - **Vulkan decoding** (into libplacebo) counts for a codec only when the
   start-up test's frames reach the filters in Vulkan memory. GPUs whose
   driver lacks Vulkan video decoding (AMD's for Vega graphics on Windows,

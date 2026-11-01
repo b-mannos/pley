@@ -23,7 +23,7 @@ use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 13;
+const DETECTION_REVISION: u32 = 14;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -775,6 +775,8 @@ fn test_clip_specs(encoders: &HashSet<String>) -> Vec<(&'static str, Vec<&'stati
         let x265 = ["-c:v", "libx265", "-preset", "ultrafast", "-x265-params", "log-level=error"];
         specs.push(("hevc", [x265.as_slice(), &["-pix_fmt", "yuv420p"]].concat()));
         specs.push(("hevc10", [x265.as_slice(), &["-pix_fmt", "yuv420p10le"]].concat()));
+        // What cameras record: some GPUs decode it (Intel's), others don't.
+        specs.push(("hevc10-yuv422p10le", [x265.as_slice(), &["-pix_fmt", "yuv422p10le"]].concat()));
     }
     if encoders.contains("libsvtav1") {
         specs.push(("av1", vec!["-c:v", "libsvtav1", "-preset", "12", "-pix_fmt", "yuv420p10le"]));

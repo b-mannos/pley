@@ -9,6 +9,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Fixed
+
+- 4:2:2 and 4:4:4 H.264 (some cameras, screen recordings) no longer fails on
+  GPUs that can't decode it, such as Intel's.
+
 ## [0.1.3] - 2026-11-02
 
 ### Added
