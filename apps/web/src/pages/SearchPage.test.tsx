@@ -60,6 +60,19 @@ describe("SearchPage", () => {
     expect(requests.find((r) => r.path.startsWith("/api/discover/search"))?.path).toBe("/api/discover/search?q=dune&missing=1");
   });
 
+  it("asks TMDB for as much of a long query as the server takes", async () => {
+    const requests = mockApi({
+      "GET /api/search": () => ({ items: [makeItem({ id: 2, title: "Dune", year: 2021 })] }),
+      "GET /api/requests/summary": () => makeSummary(),
+      "GET /api/discover/search": () => ({ page: 1, total_pages: 1, results: [makeTitle()] }),
+    });
+    search("dune ".repeat(60));
+
+    expect(await screen.findByRole("heading", { name: "On TMDB" })).toBeInTheDocument();
+    const asked = new URL(requests.find((r) => r.path.startsWith("/api/discover/search"))?.path ?? "", "http://pley.test");
+    expect(asked.searchParams.get("q")).toBe("dune ".repeat(40).trim());
+  });
+
   it("shows TMDB's titles under a line when the libraries have nothing", async () => {
     mockApi({
       "GET /api/search": () => ({ items: [] }),

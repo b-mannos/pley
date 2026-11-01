@@ -6,6 +6,8 @@ import {
   hasRequests,
   requestFilter,
   requestProblem,
+  SEARCH_MAX,
+  searchText,
   uniqueTitles,
   useDiscoverList,
   useDiscoverSearch,
@@ -80,6 +82,7 @@ function SearchBox({ q }: { q: string }) {
         onKeyDown={(e) => {
           if (e.key === "Escape") setValue("");
         }}
+        maxLength={SEARCH_MAX}
         placeholder="Search TMDB for movies and shows"
         aria-label="Search for movies and shows to ask for"
         className="h-11 w-full rounded-full border border-border bg-surface-2 pl-9 pr-9 text-sm text-fg placeholder:text-subtle transition-colors focus:border-accent/70 focus:bg-surface-3 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
@@ -364,9 +367,11 @@ export function DiscoverPage() {
   const me = useAuth();
   const [params] = useSearchParams();
   const q = params.get("q") ?? "";
+  // What's searched for: a longer query (a link from the libraries' search) is cut to what the server takes.
+  const searched = searchText(q);
   const list = listOf(params.get("list"));
   const summary = useRequestSummary();
-  useDocumentTitle(q.trim() ? `Discover: ${q.trim()}` : "Discover");
+  useDocumentTitle(searched ? `Discover: ${searched}` : "Discover");
 
   if (summary.isPending) return <DiscoverSkeleton />;
   const data = summary.data;
@@ -415,9 +420,9 @@ export function DiscoverPage() {
         <SearchBox q={q} />
       </header>
 
-      {q.trim() ? (
+      {searched ? (
         <div className="px-4 sm:px-8">
-          <SearchResults q={q.trim()} manage={data.manage} />
+          <SearchResults q={searched} manage={data.manage} />
         </div>
       ) : list ? (
         <div className="px-4 sm:px-8">

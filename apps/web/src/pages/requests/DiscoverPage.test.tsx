@@ -146,6 +146,17 @@ describe("DiscoverPage", () => {
     expect(await screen.findByRole("region", { name: "Trending now" })).toBeInTheDocument();
   });
 
+  it("searches for as much of a long query as the server takes, whole characters", async () => {
+    const requests = mockApi({ "GET /api/requests/summary": () => makeSummary(), "GET /api/discover/search": () => page([]) });
+    // 199 letters, then a character of two UTF-16 units: the 200th.
+    const kept = `${"x".repeat(199)}🎬`;
+    renderWithProviders(<DiscoverPage />, { route: `/discover?q=${encodeURIComponent(`${kept}${"y".repeat(50)}`)}` });
+    expect(await screen.findByText(`Nothing on TMDB for “${kept}”`)).toBeInTheDocument();
+    const asked = new URL(requests.find((r) => r.path.startsWith("/api/discover/search"))?.path ?? "", "http://pley.test");
+    expect(asked.searchParams.get("q")).toBe(kept);
+    expect(screen.getByRole("searchbox")).toHaveAttribute("maxlength", "200");
+  });
+
   it("says when TMDB finds nothing", async () => {
     mockApi({ "GET /api/requests/summary": () => makeSummary(), "GET /api/discover/search": () => page([]) });
     renderWithProviders(<DiscoverPage />, { route: "/discover?q=zzz" });

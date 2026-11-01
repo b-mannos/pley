@@ -103,6 +103,17 @@ describe("RequestsPage for managers", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("/requests?view=all&kind=movie&user=3&q=heat");
   });
 
+  it("finds titles by as much of a long query as the server takes", async () => {
+    const requests = mockApi({
+      "GET /api/requests/summary": () => manager,
+      "GET /api/requests": () => makeRequestList([matrix], 1, people),
+    });
+    show(<RequestsPage />, `/requests?view=all&q=${"x".repeat(250)}`);
+    expect(await screen.findByText("The Matrix")).toBeInTheDocument();
+    expect(paths(requests)).toContain(`/api/requests?q=${"x".repeat(200)}&limit=50`);
+    expect(screen.getByRole("searchbox", { name: "Requests for titles containing" })).toHaveAttribute("maxlength", "200");
+  });
+
   it("approves several at once, saying how it went", async () => {
     const user = userEvent.setup();
     const requests = mockApi({

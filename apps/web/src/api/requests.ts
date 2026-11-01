@@ -446,6 +446,14 @@ export function progressing(request: Pick<MediaRequest, "stage">): boolean {
   return request.stage === "downloading" || request.stage === "importing";
 }
 
+/** The longest search the server takes, in characters (longer ones it refuses). */
+export const SEARCH_MAX = 200;
+
+/** What's typed as the server takes it: trimmed, and cut to {@link SEARCH_MAX} characters (not halfway through one). */
+export function searchText(q: string): string {
+  return Array.from(q.trim()).slice(0, SEARCH_MAX).join("").trim();
+}
+
 const PROGRESS_MS = 10_000;
 /** Without the event stream: how often what shows requests asks again. */
 const QUIET_MS = 30_000;
@@ -553,7 +561,7 @@ export function useDiscoverList(list: DiscoverList, enabled = true) {
  * the next one comes.
  */
 export function useDiscoverSearch(q: string, { enabled = true, missing = false }: { enabled?: boolean; missing?: boolean } = {}) {
-  const trimmed = q.trim();
+  const trimmed = searchText(q);
   return useInfiniteQuery({
     queryKey: requestKeys.search(trimmed, missing),
     queryFn: ({ pageParam, signal }) =>
@@ -580,7 +588,7 @@ function listPath(filter: RequestFilter, offset: number, limit: number): string 
     attention: filter.attention ? 1 : null,
     kind: filter.kind,
     user_id: filter.userId,
-    q: filter.q.trim() || null,
+    q: searchText(filter.q) || null,
     order: filter.order === "oldest" ? "oldest" : null,
     mine: filter.mine ? 1 : null,
     unseen: filter.unseen ? 1 : null,

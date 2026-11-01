@@ -6,6 +6,7 @@ import {
   hasRequests,
   mayRequest,
   requestFilter,
+  SEARCH_MAX,
   useDecideMany,
   useMarkSeen,
   useRequests,
@@ -91,6 +92,7 @@ function TitleSearch({ q, onChange }: { q: string; onChange: (q: string) => void
         ref={inputRef}
         type="search"
         value={value}
+        maxLength={SEARCH_MAX}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Escape") setValue("");
