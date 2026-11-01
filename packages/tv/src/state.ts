@@ -220,8 +220,12 @@ export class AppState {
   private catchingUp = false;
   /** Pages that draw titles' badges: request events fetch their request for its badge only meanwhile. */
   private markWatchers = 0;
-  /** The requests events named in the last 0.3 s, with their titles: asked for in one round. */
+  /**
+   * Asked for in one round: the requests events named in the last 0.3 s,
+   * with their titles, and the titles whose details say their badge.
+   */
   private readonly markNamed = new Map<number, { kind: TitleKind; tmdbId: number }>();
+  private readonly markAsked = new Map<string, { kind: TitleKind; tmdbId: number }>();
   private markTimer: ReturnType<typeof setTimeout> | null = null;
   private noticeIds = 0;
   private noticeOnScreen: number | null = null;
@@ -475,6 +479,7 @@ export class AppState {
     this.requests.value = null;
     this.marks.value = {};
     this.markNamed.clear();
+    this.markAsked.clear();
     if (this.markTimer !== null) clearTimeout(this.markTimer);
     this.markTimer = null;
     this.notices.value = [];
@@ -849,8 +854,10 @@ export class AppState {
         const complete = e.complete !== false;
         if (e.kind && typeof e.tmdb_id === "number") {
           this.requestsChanged(titleKey({ kind: e.kind, tmdb_id: e.tmdb_id }));
-          // A show's request whole is all it asked for: the show may still lack seasons, so Partly in library.
-          this.markTitle(e.kind, e.tmdb_id, complete && e.kind === "movie" ? "library" : "partial", e.item_id ?? null);
+          // A movie is in the library at once; a show wholly ready may still lack seasons nobody asked for: its details say.
+          if (!complete) this.markTitle(e.kind, e.tmdb_id, "partial", e.item_id ?? null);
+          else if (e.kind === "movie") this.markTitle(e.kind, e.tmdb_id, "library", e.item_id ?? null);
+          else this.markFromTitle(e.kind, e.tmdb_id);
         } else {
           this.requestsChanged(null);
         }
@@ -982,40 +989,68 @@ export class AppState {
 
   /**
    * A request changed: its title's badge follows it (`statusFromRequest`).
-   * The requests named within 0.3 s are asked for once each, and their
-   * badges change together, so the pages that draw them do once.
+   * The requests named within 0.3 s are asked for once each, then the
+   * details of the titles only they can tell, and the badges change
+   * together, so the pages that draw them do once.
    */
   private markFromRequest(id: number, kind: TitleKind, tmdbId: number): void {
     if (!this.api.value || this.markWatchers <= 0) return;
     this.markNamed.set(id, { kind, tmdbId });
+    this.markSoon();
+  }
+
+  /** A title's badge from its details (`GET /api/discover/{kind}/{tmdb_id}`), in the next round. */
+  private markFromTitle(kind: TitleKind, tmdbId: number): void {
+    if (!this.api.value || this.markWatchers <= 0) return;
+    this.markAsked.set(titleKey({ kind, tmdb_id: tmdbId }), { kind, tmdbId });
+    this.markSoon();
+  }
+
+  private markSoon(): void {
     if (this.markTimer === null) this.markTimer = setTimeout(() => this.markRound(), REQUEST_GATHER_MS);
   }
 
   private markRound(): void {
     this.markTimer = null;
     const named = Array.from(this.markNamed.entries());
+    const asked = new Map(this.markAsked);
     this.markNamed.clear();
+    this.markAsked.clear();
     const api = this.api.value;
     if (!api || this.markWatchers <= 0) return;
     const generation = this.generation;
-    const answers = named.map(([id, t]) =>
+    type Found = { key: string; status: TitleStatus; itemId: number | null };
+    const requests = named.map(([id, t]) =>
       api.request(id).then(
         (r) => ({ t, status: statusFromRequest(r), itemId: r.item_id }),
-        (e: unknown) => ({ t, status: isApiError(e, 404) ? ("none" as const) : null, itemId: null }),
+        (e: unknown) => ({ t, status: isApiError(e, 404) ? statusFromRequest(null) : null, itemId: null }),
       ),
     );
-    void Promise.all(answers).then((all) => {
-      if (this.generation !== generation) return;
-      const marks = { ...this.marks.value };
-      const at = Date.now();
-      let changed = false;
-      for (const a of all) {
-        if (a.status === null) continue;
-        marks[titleKey({ kind: a.t.kind, tmdb_id: a.t.tmdbId })] = { status: a.status, item_id: a.itemId, at };
-        changed = true;
-      }
-      if (changed) this.marks.value = marks;
-    });
+    void Promise.all(requests)
+      .then((answers) => {
+        if (this.generation !== generation) return [];
+        const found: Found[] = [];
+        for (const a of answers) {
+          const key = titleKey({ kind: a.t.kind, tmdb_id: a.t.tmdbId });
+          if (a.status === "ask") asked.set(key, a.t);
+          else if (a.status !== null) found.push({ key, status: a.status, itemId: a.itemId });
+        }
+        const titles = Array.from(asked.entries()).map(([key, t]) =>
+          api.discoverTitle(t.kind, t.tmdbId).then(
+            (d): Found | null => ({ key, status: d.status, itemId: d.item_id }),
+            () => null,
+          ),
+        );
+        // What the details say comes last, over what a request said of the same title.
+        return Promise.all(titles).then((told) => found.concat(told.filter((x): x is Found => x !== null)));
+      })
+      .then((all) => {
+        if (this.generation !== generation || !all.length) return;
+        const marks = { ...this.marks.value };
+        const at = Date.now();
+        for (const a of all) marks[a.key] = { status: a.status, item_id: a.itemId, at };
+        this.marks.value = marks;
+      });
   }
 
   /** A pop-up that waits its turn (while a video plays, among the last three); the one on screen stays until it closes. */

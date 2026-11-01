@@ -211,19 +211,21 @@ export function titleFacts(d: DiscoverDetail): string {
 /**
  * What a title's badge becomes from the news of a request this profile
  * made or follows: active → Requested, declined → Declined, a movie
- * available → In library, a show's seasons ready → Partly in library
- * (all it asked for too, as the show may lack seasons it didn't ask
- * for), gone or deleted → none. `null` for anyone else's request (a
- * manager hears of everyone's), which says nothing of the title as this
- * profile sees it.
+ * available → In library, some of a show's seasons ready → Partly in
+ * library, gone → none. `"ask"` where only the title's details can say:
+ * a show whose request is wholly ready (it may lack seasons nobody asked
+ * for, or have them all), and a request this profile no longer sees
+ * (`null`: withdrawn, deleted or no longer followed, while others may
+ * have asked). `null` for anyone else's request (a manager hears of
+ * everyone's), which says nothing of the title as this profile sees it.
  */
-export function statusFromRequest(r: MediaRequest | null): TitleStatus | null {
-  if (!r) return "none";
+export function statusFromRequest(r: MediaRequest | null): TitleStatus | "ask" | null {
+  if (!r) return "ask";
   if (!r.mine && !r.watching) return null;
   if (r.stage === "gone") return "none";
   if (r.status === "declined") return "declined";
-  if (r.kind === "show" && (r.status === "available" || r.stage === "partial")) return "partial";
-  if (r.status === "available") return "library";
+  if (r.status === "available") return r.kind === "show" ? "ask" : "library";
+  if (r.stage === "partial") return "partial";
   return "requested";
 }
 

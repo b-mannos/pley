@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../src/api/client";
 import { EventStream } from "../src/api/events";
-import type { MediaRequest, RequestList, RequestSummary, ServerEvent, User } from "../src/api/types";
+import type { DiscoverDetail, MediaRequest, RequestList, RequestSummary, ServerEvent, User } from "../src/api/types";
 import type { KeyValue, Tokens } from "../src/auth/tokens";
 import { NetworkError } from "../src/net/transport";
 import type { Platform } from "../src/platform";
@@ -86,6 +86,7 @@ function setup(store = memoryStore()) {
     summary: (): Promise<RequestSummary> => Promise.resolve(summary()),
     unseen: (): Promise<MediaRequest[]> => Promise.resolve([]),
     request: (id: number): Promise<MediaRequest> => Promise.resolve(request(id)),
+    title: (): Promise<DiscoverDetail> => Promise.resolve({ status: "none", item_id: null } as DiscoverDetail),
   };
   (app.api as { value: unknown }).value = {
     requestSummary: () => {
@@ -99,6 +100,10 @@ function setup(store = memoryStore()) {
     request: (id: number) => {
       asked.push(`request ${id}`);
       return server.request(id);
+    },
+    discoverTitle: (kind: string, tmdbId: number) => {
+      asked.push(`title ${kind}:${tmdbId}`);
+      return server.title();
     },
     home: () => Promise.resolve({ hubs: [] }),
     me: () => Promise.resolve({ id: 7, name: "Ann" }),
@@ -204,10 +209,39 @@ describe("request events", () => {
     hear({ type: "requests_changed", request_id: 3, kind: "movie", tmdb_id: 103 });
     await vi.advanceTimersByTimeAsync(300);
     expect(app.marks.value["movie:103"]).toMatchObject({ status: "declined", item_id: null });
+    // Withdrawn, or no longer followed: the title's details say what is left of it for this profile.
     server.request = () => Promise.reject(new ApiError(404, "not_found", "gone"));
     hear({ type: "requests_changed", request_id: 3, kind: "movie", tmdb_id: 103 });
     await vi.advanceTimersByTimeAsync(300);
+    expect(asked.slice(-2)).toEqual(["request 3", "title movie:103"]);
     expect(app.marks.value["movie:103"]?.status).toBe("none");
+    stop();
+  });
+
+  it("ask a show's details once its request is wholly ready, in the same round: it may have every season now, or not; a movie is In library at once", async () => {
+    const { app, server, asked, hear } = setup();
+    const stop = app.watchMarks();
+    server.request = (id) => Promise.resolve(request(id, { kind: "show", tmdb_id: 104, status: "available", stage: "available", item_id: 54 }));
+    // The request asked for every season the library lacked: the show is whole.
+    server.title = () => Promise.resolve({ status: "library", item_id: 54 } as DiscoverDetail);
+    let writes = 0;
+    const off = app.marks.subscribe(() => writes++);
+    hear({ type: "request_available", request_id: 1, title: "Arrival", kind: "movie", tmdb_id: 101, item_id: 51, seasons: null, complete: true });
+    expect(app.marks.value["movie:101"]).toMatchObject({ status: "library", item_id: 51 });
+    hear({ type: "request_available", request_id: 4, title: "Severance", kind: "show", tmdb_id: 104, item_id: 54, seasons: [3], complete: true });
+    hear({ type: "requests_changed", request_id: 4, kind: "show", tmdb_id: 104 });
+    expect(app.marks.value["show:104"]).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(300);
+    // The movie asked nothing; the show's request, then its details, once.
+    expect(asked.filter((a) => /^(request|title) /.test(a))).toEqual(["request 4", "title show:104"]);
+    expect(app.marks.value["show:104"]).toMatchObject({ status: "library", item_id: 54 });
+    expect(writes).toBe(3);
+    // One that asked for some seasons only: the show still lacks others.
+    server.title = () => Promise.resolve({ status: "partial", item_id: 54 } as DiscoverDetail);
+    hear({ type: "requests_changed", request_id: 4, kind: "show", tmdb_id: 104 });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(app.marks.value["show:104"]).toMatchObject({ status: "partial", item_id: 54 });
+    off();
     stop();
   });
 
@@ -243,8 +277,6 @@ describe("request events", () => {
     hear(more);
     hear(more);
     hear({ ...ready, complete: true, seasons: null });
-    // All it asked for: the show may lack seasons it didn't ask for.
-    expect(app.marks.value["show:104"]).toMatchObject({ status: "partial", item_id: 54 });
     expect(app.notices.value.map((n) => n.text)).toEqual([
       "Season 2 of “Severance” is ready to watch.",
       "Seasons 3–4 of “Severance” are ready to watch.",
