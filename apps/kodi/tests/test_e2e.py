@@ -262,8 +262,8 @@ class EndToEndTest(unittest.TestCase):
 
         # Listed with the account's apps, then signed out.
         apps = self.admin.get("/api/me/apps")
-        kodi = [a for a in apps if a["client_id"] == auth.CLIENT_ID]
-        self.assertEqual((kodi[0]["name"], kodi[0]["device"]), ("Pley for Kodi", "Kodi 21.3; Windows"))
+        ours = [a for a in apps if a["client_id"] == auth.CLIENT_ID]
+        self.assertEqual((ours[0]["name"], ours[0]["device"]), ("Pley for Kodi", "Kodi 21.3; Windows"))
         client.request("POST", "/sign-out")
         self.assertEqual([a for a in self.admin.get("/api/me/apps") if a["client_id"] == auth.CLIENT_ID], [])
         self.assertEqual(client.request("GET", "/api/libraries").status, 401)
