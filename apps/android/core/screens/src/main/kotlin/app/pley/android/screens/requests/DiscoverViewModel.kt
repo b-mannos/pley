@@ -67,6 +67,8 @@ data class DiscoverUiState(
     /** This sign-in manages: pills say so. */
     val manage: Boolean = false,
     val allowance: Allowance? = null,
+    /** The hero's ask is on its way: its button waits. */
+    val asking: Boolean = false,
 )
 
 /** Discover's search: what was typed, and TMDB's titles for it. */
@@ -107,6 +109,7 @@ class DiscoverViewModel(
     private val stale = MutableStateFlow(false)
     private val yours = MutableStateFlow<List<MediaRequest>>(emptyList())
     private val retries = MutableStateFlow(0)
+    private val asking = MutableStateFlow(false)
     private val gate: StateFlow<RequestsState> = requests.state
 
     /** The hero's page, read for its exact main action (and there at once when it opens). */
@@ -118,7 +121,7 @@ class DiscoverViewModel(
     private val rowStates: Flow<List<DiscoverRow>> =
         combine(rows.map { (list, flow) -> flow.map { DiscoverRow(list, it) } }) { it.toList() }
 
-    private data class Head(val gate: RequestsState, val origin: String, val stale: Boolean, val yours: List<MediaRequest>)
+    private data class Head(val gate: RequestsState, val origin: String, val stale: Boolean, val yours: List<MediaRequest>, val asking: Boolean)
 
     /** While Discover shows and one of "Your requests" downloads, they're read again every 10 s: download progress sends no events. */
     private val ticks: Flow<Unit> = yours.map { list -> list.any { it.moving } }.distinctUntilChanged().transformLatest { on ->
@@ -130,7 +133,7 @@ class DiscoverViewModel(
     }
 
     val state: StateFlow<DiscoverUiState> = combine(
-        combine(gate, deps.origin.map { it.orEmpty() }.distinctUntilChanged(), stale, yours, ::Head),
+        combine(gate, deps.origin.map { it.orEmpty() }.distinctUntilChanged(), stale, yours, asking, ::Head),
         rowStates,
         heroDetail,
         ticks,
@@ -164,6 +167,7 @@ class DiscoverViewModel(
             yours = head.yours,
             manage = summary?.manage == true,
             allowance = allowance,
+            asking = head.asking,
         )
     }
 
@@ -383,10 +387,16 @@ class DiscoverViewModel(
         }
     }
 
+    /** Asks for [request], once at a time: a second press while it's on its way does nothing. */
     private fun ask(request: NewRequest, title: String) {
+        if (!asking.compareAndSet(false, true)) return
         viewModelScope.launch {
-            val asked = attempt({ eventChannel.send(RequestEvent.Failed(it)) }) { requests.ask(request) } ?: return@launch
-            eventChannel.send(RequestEvent.Asked(asked, title))
+            try {
+                val asked = attempt({ eventChannel.send(RequestEvent.Failed(it)) }) { requests.ask(request) } ?: return@launch
+                eventChannel.send(RequestEvent.Asked(asked, title))
+            } finally {
+                asking.value = false
+            }
         }
     }
 

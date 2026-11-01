@@ -213,6 +213,25 @@ class DiscoverViewModelTest {
     }
 
     @Test
+    fun theHerosAskWaitsForTheOneOnItsWay() = runTest(dispatcher) {
+        val requests = FakeRequests()
+        val vm = viewModel(requests)
+        val events = mutableListOf<RequestEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.events.collect { events += it } }
+        settle()
+        requests.api.hold()
+        vm.heroAction()
+        vm.heroAction()
+        runCurrent()
+        assertTrue(vm.state.value.asking)
+        requests.api.release()
+        settle()
+        assertEquals(1, requests.api.calls("ask").size)
+        assertEquals(1, events.count { it is RequestEvent.Asked })
+        assertFalse(vm.state.value.asking)
+    }
+
+    @Test
     fun searchWaitsForTypingToPauseAndReadsOnUntilAScreenful() = runTest(dispatcher) {
         val requests = FakeRequests()
         val asked = mutableListOf<Pair<String, Int>>()

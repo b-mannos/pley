@@ -311,7 +311,7 @@ private fun Hero(hero: DiscoverHero, state: DiscoverUiState, texts: RequestTexts
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             heroLabel(hero.action)?.let { label ->
                 val limited = (hero.action as? MainAction.Request)?.ask == Ask.Limit
-                PrimaryButton(label, onClick = onAction, icon = heroIcon(hero.action), enabled = !limited)
+                PrimaryButton(label, onClick = onAction, icon = heroIcon(hero.action), enabled = !limited && !state.asking)
             }
             TonalButton(stringResource(R.string.requests_details), onClick = onDetails, icon = PleyIcons.Info)
         }
