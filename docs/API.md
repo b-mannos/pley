@@ -2285,7 +2285,7 @@ An app's token without the route's scope is refused before all of it
 | `403` | `restricted` | the title is above the account's age limit; `message` says why |
 | `409` | `in_library` | the libraries the account can open have all that was asked for |
 | `409` | `declined` (`retry_at`) | asking: what is left to ask for was declined for the account in the last 30 days; `retry_at` is when all of it may be asked for again |
-| `409` | `conflict` (`request`, `retry_at`) | what was asked can't be done to the request as it is now: `request` is the request as this session reads it, `retry_at` when it may be done (a declined request its maker may remove once its 30 days are over), else `null` |
+| `409` | `conflict` (`request`, `retry_at`) | what was asked can't be done to the request as it is now: `request` is the request as this session reads it, `retry_at` when it may be done (a declined request its maker may remove, or a follower stop following, once its 30 days are over), else `null` |
 | `429` | `too_many_requests` (`retry_at`) | past the account's limits (below), with `Retry-After` when `retry_at` is set |
 | `502` | `tmdb_down` | a picture: TMDB's picture server isn't answering (`Cache-Control: no-store`) |
 
@@ -2412,9 +2412,11 @@ An app's token without the route's scope is refused before all of it
   call (for a show, with the seasons whose `state` is `requested`).
 - **Following**: an account follows requests by asking (above), and
   `DELETE /api/requests/{id}/watch` stops it (`409` where it doesn't follow
-  the request, its own included; `404` for one it can't read). Followers
-  read a request as *Who sees what* says, and hear its news
-  ([events](#request-events)). When its maker withdraws a request others
+  the request, its own included, and for a declined one until its 30 days
+  are over, with `retry_at`: they hold for its followers as for its maker;
+  `404` for one it can't read). Followers read a request as *Who sees
+  what* says, and hear its news ([events](#request-events)). When its
+  maker withdraws a request others
   follow, or the maker's account is deleted, the request stays: its
   earliest follower becomes its maker (it doesn't count toward their
   limits) and the others keep following.
@@ -2477,7 +2479,8 @@ An app's token without the route's scope is refused before all of it
   - `withdraw`: its maker, unless a manager (who deletes), while pending or
     failed, or declined once its 30 days are over: `DELETE
     /api/requests/{id}` (*Remove*, on a declined one);
-  - `unwatch`: a follower: `DELETE /api/requests/{id}/watch`;
+  - `unwatch`: a follower, but of a declined request only once its 30
+    days are over: `DELETE /api/requests/{id}/watch`;
   - `approve`: managers, while pending or declined, or approved and not
     sent where Radarr or Sonarr is connected for its kind;
   - `retry`: managers, while failed: `POST /api/requests/{id}/approve`;

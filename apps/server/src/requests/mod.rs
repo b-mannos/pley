@@ -735,20 +735,22 @@ impl RequestRow {
     /// What `viewer` may do to it now, in [`RequestAction`]'s order: its
     /// maker withdraws it while pending or failed, or a declined one once
     /// its 30 days are over (managers delete instead); a follower stops
-    /// following; managers approve one pending, declined, or approved and
-    /// not sent (where its service is connected), try a failed one again,
-    /// decline one not available yet, mark one as added by hand; an account
-    /// that may ask asks again for one gone from the library, or its own
-    /// declined one after the 30 days.
+    /// following, a declined one too once its 30 days are over; managers
+    /// approve one pending, declined, or approved and not sent (where its
+    /// service is connected), try a failed one again, decline one not
+    /// available yet, mark one as added by hand; an account that may ask
+    /// asks again for one gone from the library, or its own declined one
+    /// after the 30 days.
     fn actions(&self, viewer: &Viewer, stage: RequestStage, mine: bool, watching: bool) -> Vec<RequestAction> {
         use RequestStatus::{Approved, Declined, Failed, Pending};
         let status = self.status();
         let manager = viewer.manager;
         let unsent = status == Approved && self.sent().is_none() && !self.sending();
         let over = status == Declined && self.declined_until().is_none_or(|at| at <= viewer.now);
+        let lately = status == Declined && !over;
         [
             (RequestAction::Withdraw, mine && !manager && (matches!(status, Pending | Failed) || over)),
-            (RequestAction::Unwatch, watching),
+            (RequestAction::Unwatch, watching && !lately),
             (
                 RequestAction::Approve,
                 manager
@@ -2877,28 +2879,42 @@ impl Requests {
         Ok(())
     }
 
-    /// `DELETE /api/requests/{id}/watch`: `caller` follows it no more.
+    /// `DELETE /api/requests/{id}/watch`: `caller` follows it no more, but a
+    /// declined one before its 30 days are over: they hold for its followers
+    /// as for its maker, and one no longer following it could ask again.
     pub async fn unwatch(&self, caller: &Caller<'_>, id: i64) -> RequestResult<()> {
         let row = self.row_for(caller, id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
         let to = self.audience(id).await?;
         let mut tx = self.db.write.begin().await?;
-        let stopped = sqlx::query("DELETE FROM request_watchers WHERE request_id = ? AND user_id = ?")
-            .bind(id)
-            .bind(caller.user.id)
-            .execute(&mut *tx)
-            .await?
-            .rows_affected();
+        let stopped = sqlx::query(
+            "DELETE FROM request_watchers WHERE request_id = ? AND user_id = ?
+               AND NOT EXISTS (SELECT 1 FROM requests WHERE id = ? AND status = 'declined' AND decided_at > ?)",
+        )
+        .bind(id)
+        .bind(caller.user.id)
+        .bind(id)
+        .bind(now() - DECLINED_FOR)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
         if stopped == 0 {
             drop(tx);
-            let message = |r: &MediaRequest| {
-                if r.mine {
-                    "this is this account's own request: withdraw it instead"
-                } else {
-                    "this account doesn't follow this request"
+            let request = self.one(caller, id).await?;
+            let until = request
+                .decided_at
+                .map(|at| at + DECLINED_FOR)
+                .filter(|at| request.watching && request.status == RequestStatus::Declined && *at > now());
+            let message = match until {
+                Some(until) => {
+                    format!(
+                        "a declined request stays for 30 days: this account may stop following it from {}",
+                        day(until)
+                    )
                 }
-                .to_owned()
+                None if request.mine => "this is this account's own request: withdraw it instead".to_owned(),
+                None => "this account doesn't follow this request".to_owned(),
             };
-            return Err(self.refused(caller, id, None, message).await);
+            return Err(RequestError::Conflict { message, request: Box::new(request), retry_at: until });
         }
         sqlx::query("UPDATE requests SET updated_at = ? WHERE id = ?").bind(now()).bind(id).execute(&mut *tx).await?;
         tx.commit().await?;

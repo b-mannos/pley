@@ -1634,6 +1634,23 @@ async fn asking_again_follows_the_requests_asking_already() {
     // follows then.
     let rest = w.ask(&dee, json!({"kind": "show", "tmdb_id": 9001})).await;
     assert_eq!((rest.status, &rest.body["id"], &rest.body["watching"]), (StatusCode::OK, &json!(id), &json!(true)));
+    // She keeps following the declined one for its 30 days: no longer a
+    // follower, she could ask for season 2 again at once.
+    let kept = w.app.delete(&format!("/api/requests/{his}/watch"), &dee).await;
+    assert_eq!(
+        (kept.status, &kept.body["code"], &kept.body["retry_at"]),
+        (StatusCode::CONFLICT, &json!("conflict"), &json!(at + 30 * 86_400)),
+        "{}",
+        kept.text()
+    );
+    assert_eq!((&kept.body["request"]["watching"], &kept.body["request"]["actions"]), (&json!(true), &json!([])));
+    sqlx::query("UPDATE requests SET decided_at = decided_at - 31 * 86400 WHERE id = ?")
+        .bind(his)
+        .execute(&w.app.state.db.write)
+        .await
+        .unwrap();
+    assert_eq!(w.app.get(&format!("/api/requests/{his}"), &dee).await.body["actions"], json!(["unwatch"]));
+    assert_eq!(w.app.delete(&format!("/api/requests/{his}/watch"), &dee).await.status, StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]
