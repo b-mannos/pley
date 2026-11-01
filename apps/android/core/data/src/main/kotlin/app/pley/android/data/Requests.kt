@@ -151,10 +151,11 @@ sealed interface RequestNotice {
 /**
  * Requests and Discover for the profile in use (docs/API.md "Requests").
  *
- * [state] says what shows; it follows the summary, which is read at
- * start, after a profile switch, when the event stream connects, after
- * request events (gathered for a second), and every minute in the
- * foreground while the stream is down. An older server (404, or a 403
+ * [state] says what shows; it follows the summary, which is read only
+ * while something follows [state] or [start] ran: when first followed,
+ * after a profile switch, when the event stream connects, after request
+ * events (gathered for a second), and every minute in the foreground
+ * while the stream is down. An older server (404, or a 403
  * `insufficient_scope` naming no scope) is taken as requests being off,
  * and asked again only when the stream connects or the app starts.
  */
@@ -281,13 +282,14 @@ internal class ServerRequests(
 
     private val summaryResource = Resource(SnapshotKeys.REQUESTS, RequestSummary.serializer()) { api, _ -> readSummary(api) }
 
+    // Read while something follows it: the phone's shell from the start; on a TV, which has no requests, nothing.
     private val summaries: StateFlow<Loadable<RequestSummary>> =
-        cache.observe(summaryResource).stateIn(app, SharingStarted.Eagerly, Loadable.Loading)
+        cache.observe(summaryResource).stateIn(app, SharingStarted.WhileSubscribed(), Loadable.Loading)
 
     override val state: StateFlow<RequestsState> = summaries
         .map { RequestsState.of(it.valueOrNull) }
         .distinctUntilChanged()
-        .stateIn(app, SharingStarted.Eagerly, RequestsState.Unknown)
+        .stateIn(app, SharingStarted.WhileSubscribed(), RequestsState.Unknown)
 
     private val _changes = MutableSharedFlow<RequestChange>(extraBufferCapacity = HEARD_BUFFER)
     override val changes: Flow<RequestChange> get() = _changes.asSharedFlow()

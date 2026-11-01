@@ -37,6 +37,8 @@ class RequestsRepositoryTest {
     fun `the summary says what shows`() = runTest {
         val data = signedIn(folder.newFolder())
         val requests = data.graph.requests
+        // Followed, as the phone's shell follows it.
+        collect(requests.state)
         testScheduler.runCurrent()
         assertEquals(RequestsState.Open(summary), requests.state.value)
         assertTrue(requests.state.value.mayAsk)
@@ -68,10 +70,31 @@ class RequestsRepositoryTest {
     }
 
     @Test
+    fun `the summary is read only while something follows it`() = runTest {
+        val data = signedIn(folder.newFolder())
+        val requests = data.graph.requests
+        data.graph.liveUpdates.start()
+        testScheduler.runCurrent()
+        // Made, as a TV's item and search pages make it: nothing is read, then or back in the foreground.
+        data.foreground.value = false
+        time(10 * 60_000)
+        data.foreground.value = true
+        testScheduler.runCurrent()
+        assertEquals(0, data.api.calls("requestSummary").size)
+        assertEquals(RequestsState.Unknown, requests.state.value)
+
+        collect(requests.state)
+        testScheduler.runCurrent()
+        assertEquals(1, data.api.calls("requestSummary").size)
+        assertEquals(RequestsState.Open(summary), requests.state.value)
+    }
+
+    @Test
     fun `an older server is taken as requests off, and asked again only when the stream connects`() = runTest {
         val data = signedIn(folder.newFolder())
         data.api.fail("requestSummary", ApiException(404, "not_found", "no route"))
         val requests = data.graph.requests
+        collect(requests.state)
         requests.start()
         testScheduler.runCurrent()
         assertEquals(RequestsState.Hidden, requests.state.value)
@@ -96,6 +119,7 @@ class RequestsRepositoryTest {
         val data = signedIn(folder.newFolder())
         data.api.fail("requestSummary", ApiException(403, "insufficient_scope", "apps can't", bearerError = "insufficient_scope", scope = null))
         val requests = data.graph.requests
+        collect(requests.state)
         testScheduler.runCurrent()
         assertEquals(RequestsState.Hidden, requests.state.value)
     }
@@ -277,6 +301,7 @@ class RequestsRepositoryTest {
     fun `seeing the requests clears the badge at once`() = runTest {
         val data = signedIn(folder.newFolder())
         val requests = data.graph.requests
+        collect(requests.state)
         testScheduler.runCurrent()
         assertEquals(1, requests.state.value.summary?.badge)
         data.api.answer("requestSummary", summary.copy(unseen = 0))
