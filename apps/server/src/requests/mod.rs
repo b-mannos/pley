@@ -2064,7 +2064,7 @@ impl Requests {
     /// Requests as `caller` sees them, with their downloads.
     async fn dtos(&self, caller: &Caller<'_>, rows: Vec<RequestRow>) -> sqlx::Result<Vec<MediaRequest>> {
         let viewer = self.viewer(caller, &rows).await?;
-        let downloads = self.downloads(&rows).await;
+        let downloads = self.downloads(&rows);
         Ok(rows.iter().map(|r| r.to_dto(&viewer, downloads.get(&r.id).cloned())).collect())
     }
 
@@ -2119,8 +2119,25 @@ impl Requests {
         })
     }
 
-    /// The downloads of approved requests that Radarr or Sonarr is busy with.
-    async fn downloads(&self, rows: &[RequestRow]) -> HashMap<i64, Download> {
+    /// Fetches Radarr's and Sonarr's queues now, both at once, where they
+    /// are saved: at the start, so that the first answers have them.
+    pub async fn refresh_queues(&self) {
+        let settings = self.settings.get();
+        let fetch = |service: Service| {
+            let to = service.saved(&settings);
+            async move {
+                if let Some(to) = to {
+                    self.arr.fetch_queue(service, &to).await;
+                }
+            }
+        };
+        tokio::join!(fetch(Service::Radarr), fetch(Service::Sonarr));
+    }
+
+    /// The downloads of approved requests that Radarr or Sonarr is busy
+    /// with, from their queues as last fetched: answers don't wait for them
+    /// ([`Arr::queue`]).
+    fn downloads(&self, rows: &[RequestRow]) -> HashMap<i64, Download> {
         let settings = self.settings.get();
         let mut downloads = HashMap::new();
         for (service, kind) in [(Service::Radarr, TitleKind::Movie), (Service::Sonarr, TitleKind::Show)] {
@@ -2130,7 +2147,7 @@ impl Requests {
                 .filter_map(|r| Some((r, r.arr_id?)))
                 .collect();
             let Some(to) = service.saved(&settings).filter(|_| !wanted.is_empty()) else { continue };
-            let Ok(queue) = self.arr.queue(service, &to).await else { continue };
+            let Some(queue) = self.arr.queue(service, &to) else { continue };
             for (row, arr_id) in wanted {
                 let seasons = row.seasons();
                 if let Some(download) = arr::download(&arr::records_of(&queue, arr_id, seasons.as_deref())) {
@@ -2274,7 +2291,7 @@ impl Requests {
         let row = self.row_for(caller, id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
         let rows = [row];
         let viewer = self.viewer(caller, &rows).await?;
-        let downloads = self.downloads(&rows).await;
+        let downloads = self.downloads(&rows);
         Ok(rows[0].to_dto(&viewer, downloads.get(&id).cloned()))
     }
 
@@ -3243,10 +3260,16 @@ impl Requests {
         Ok(())
     }
 
-    /// Sends what a restart cut short ([`Self::resume`]) and looks at the
-    /// libraries at the start, every 5 minutes and after each scan, until
-    /// the server stops.
+    /// Fetches Radarr's and Sonarr's queues once, and sends what a restart
+    /// cut short ([`Self::resume`]) and looks at the libraries at the start,
+    /// every 5 minutes and after each scan, until the server stops.
     pub fn start(self: &Arc<Self>, events: &EventBus, stopping: CancellationToken) {
+        let queues = self.clone();
+        tokio::spawn(async move {
+            if queues.enabled() {
+                queues.refresh_queues().await;
+            }
+        });
         let (requests, mut events) = (self.clone(), events.subscribe());
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(SYNC_EVERY);

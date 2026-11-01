@@ -2541,7 +2541,10 @@ An app's token without the route's scope is refused before all of it
 - **Events**: see [Request events](#request-events).
   `requests_settings_changed` says the summary may have changed.
 - **`download`**: an approved request's download in Radarr or Sonarr while
-  one is queued or running, looked up at most every 10 seconds.
+  one is queued or running, from their queues as last fetched: answers
+  never wait for Radarr or Sonarr. A queue is fetched again in the
+  background once 10 seconds old (a minute, after it couldn't be read), and
+  when the server starts.
 - **`stage`**: a pending, declined or failed request's is its `status`; an
   available one whose title no library has any more is `gone` (available
   again once a library has it, without news). An approved

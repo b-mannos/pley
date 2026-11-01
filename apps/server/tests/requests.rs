@@ -53,6 +53,8 @@ struct Services {
     series: Arc<Mutex<Vec<Value>>>,
     /// Radarr refuses this many movies added before it takes one.
     refusals: Arc<Mutex<u32>>,
+    /// How long Radarr's and Sonarr's queues take to answer.
+    queue_delay: Arc<Mutex<Option<Duration>>>,
 }
 
 impl Services {
@@ -291,6 +293,10 @@ async fn serve(
     calls.lock().push(call.clone());
     if call.key.as_deref() != Some(key) {
         return (StatusCode::UNAUTHORIZED, "Unauthorized").into_response();
+    }
+    let delay = *s.queue_delay.lock();
+    if let Some(delay) = delay.filter(|_| call.path == "/queue") {
+        tokio::time::sleep(delay).await;
     }
     let (status, body) = if service == "radarr" { radarr_answer(&s, &call) } else { sonarr_answer(&s, &call) };
     (status, axum::Json(body)).into_response()
@@ -572,6 +578,7 @@ async fn a_movie_is_asked_for_approved_sent_to_radarr_and_found() {
     assert_eq!(w.services.radarr_calls("POST", "/movie").len(), 1, "sent once");
 
     // Radarr's queue says how far it is.
+    w.app.state.requests.refresh_queues().await;
     let mine = w.app.get(&format!("/api/requests/{id}"), &w.ann).await;
     assert_eq!(
         mine.body["download"],
@@ -717,6 +724,7 @@ async fn a_show_is_asked_for_the_seasons_a_library_lacks() {
     assert_eq!(series["addOptions"]["searchForMissingEpisodes"], json!(true));
     assert!(series.get("languageProfileId").is_none(), "Sonarr 4 has none");
     // Its queue, for the seasons asked for.
+    w.app.state.requests.refresh_queues().await;
     let mine = w.app.get(&format!("/api/requests/{id}"), &w.ann).await;
     assert_eq!(mine.body["download"], json!({"progress": 0.0, "state": "queued", "eta": null, "episodes": 1}));
 
@@ -732,6 +740,36 @@ async fn a_show_is_asked_for_the_seasons_a_library_lacks() {
     assert_eq!(status(&mine), (StatusCode::OK, "available".to_owned()), "{}", mine.text());
     assert_eq!(mine.body["available_seasons"], json!([2]));
     assert!(mine.body["item_id"].is_i64());
+}
+
+#[tokio::test]
+async fn answers_never_wait_for_radarrs_and_sonarrs_queues() {
+    let w = world().await;
+    w.turn_on(json!({})).await;
+    // Their queues take 30 seconds to answer.
+    *w.services.queue_delay.lock() = Some(Duration::from_secs(30));
+    let movie = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 603})).await;
+    let show = w.ask(&w.ann, json!({"kind": "show", "tmdb_id": 1396})).await;
+    let at_once = Duration::from_secs(2);
+    for asked in [&movie, &show] {
+        let uri = format!("/api/requests/{}/approve", asked.body["id"]);
+        let approved = tokio::time::timeout(at_once, w.app.post(&uri, &w.admin, json!({}))).await.expect(&uri);
+        assert_eq!(status(&approved), (StatusCode::OK, "approved".to_owned()), "{}", approved.text());
+    }
+    w.app.state.requests.settled().await;
+    let id = movie.body["id"].as_i64().unwrap();
+    for uri in [format!("/api/requests/{id}"), "/api/requests".to_owned(), "/api/discover/movie/603".to_owned()] {
+        let answer = tokio::time::timeout(at_once, w.app.get(&uri, &w.ann)).await.expect(&uri);
+        assert_eq!(answer.status, StatusCode::OK, "{uri}: {}", answer.text());
+    }
+    let mine = w.app.get(&format!("/api/requests/{id}"), &w.ann).await;
+    assert_eq!((&mine.body["stage"], &mine.body["download"]), (&json!("searching"), &Value::Null), "not known yet");
+
+    // Once Radarr answers, its download shows.
+    *w.services.queue_delay.lock() = None;
+    w.app.state.requests.refresh_queues().await;
+    let mine = w.app.get(&format!("/api/requests/{id}"), &w.ann).await;
+    assert_eq!((&mine.body["stage"], &mine.body["download"]["progress"]), (&json!("downloading"), &json!(0.6)));
 }
 
 #[tokio::test]
@@ -867,6 +905,7 @@ async fn failures_say_why_and_approving_again_retries() {
     w.app.state.requests.settled().await;
     let movie = &w.services.radarr_calls("POST", "/movie")[1].body;
     assert_eq!((&movie["qualityProfileId"], &movie["rootFolderPath"]), (&json!(5), &json!("/4k")));
+    w.app.state.requests.refresh_queues().await;
     let sent = w.app.get(&format!("/api/requests/{id}"), &w.admin).await;
     assert_eq!(
         (&sent.body["stage"], &sent.body["sent_to"]),
@@ -1296,6 +1335,7 @@ async fn a_request_says_where_it_is_and_whose_it_is() {
     let approved = w.app.post(&format!("/api/requests/{matrix}/approve"), &w.admin, json!({})).await;
     assert_eq!((&approved.body["stage"], &approved.body["sent_to"]), (&json!("approved"), &Value::Null), "sending");
     w.app.state.requests.settled().await;
+    w.app.state.requests.refresh_queues().await;
     let sent = w.app.get(&format!("/api/requests/{matrix}"), &w.admin).await;
     assert_eq!(
         (&sent.body["stage"], &sent.body["sent_to"]["service"]),

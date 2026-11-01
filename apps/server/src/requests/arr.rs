@@ -18,9 +18,9 @@ use crate::util::utc_secs;
 
 /// How long an answer may take: adding a title has them look it up.
 const TIMEOUT: Duration = Duration::from_secs(30);
-/// How long a download queue is reused.
+/// How long a download queue is given before it is fetched again.
 const QUEUE_TTL: Duration = Duration::from_secs(10);
-/// How long a queue may take: listings wait for it.
+/// How long fetching a queue may take.
 const QUEUE_WAIT: Duration = Duration::from_secs(5);
 /// How long a queue that couldn't be read isn't asked for again.
 const QUEUE_RETRY: Duration = Duration::from_secs(60);
@@ -261,13 +261,22 @@ pub fn download(records: &[&QueueRecord]) -> Option<Download> {
     })
 }
 
-/// A queue, as last fetched: its records, or why there are none.
-pub type Queue = Result<Arc<Vec<QueueRecord>>, String>;
+/// A queue, as fetched: its records, or why there are none.
+type Queue = Result<Arc<Vec<QueueRecord>>, String>;
 
+/// Radarr's or Sonarr's queue: the last fetched, with when that fetch
+/// started and from where, and whether one runs in the background now.
+#[derive(Default)]
+struct Queued {
+    last: Option<(Instant, Connection, Queue)>,
+    fetching: bool,
+}
+
+#[derive(Clone)]
 pub struct Arr {
     http: reqwest::Client,
-    /// Radarr's queue, then Sonarr's, with when it was fetched and from where.
-    queues: [tokio::sync::Mutex<Option<(Instant, Connection, Queue)>>; 2],
+    /// Radarr's queue, then Sonarr's.
+    queues: Arc<[parking_lot::Mutex<Queued>; 2]>,
 }
 
 impl Default for Arr {
@@ -501,17 +510,33 @@ impl Arr {
         Ok(complete)
     }
 
-    /// What Radarr's or Sonarr's queue lists, fetched at most every 10
-    /// seconds (a minute after it couldn't be): by movie or show id, with
-    /// the season of each.
-    pub async fn queue(&self, service: Service, to: &Connection) -> Queue {
-        let mut cached = self.queues[service as usize].lock().await;
-        if let Some((at, from, queue)) = cached.as_ref()
-            && at.elapsed() < if queue.is_ok() { QUEUE_TTL } else { QUEUE_RETRY }
-            && from == to
-        {
-            return queue.clone();
+    /// What Radarr's or Sonarr's queue at `to` listed when last fetched, by
+    /// movie or show id with the season of each, without waiting for it:
+    /// once that is 10 seconds old (a minute, when it couldn't be read), it
+    /// is fetched again in the background, one fetch at a time. `None`
+    /// until it first is, and while it can't be read.
+    pub fn queue(&self, service: Service, to: &Connection) -> Option<Arc<Vec<QueueRecord>>> {
+        let mut queued = self.queues[service as usize].lock();
+        let last = queued.last.as_ref().filter(|(_, from, _)| from == to);
+        let fresh =
+            last.is_some_and(|(at, _, queue)| at.elapsed() < if queue.is_ok() { QUEUE_TTL } else { QUEUE_RETRY });
+        let records = last.and_then(|(_, _, queue)| queue.as_ref().ok().cloned());
+        if !fresh && !queued.fetching {
+            queued.fetching = true;
+            let (arr, to) = (self.clone(), to.clone());
+            tokio::spawn(async move {
+                arr.fetch_queue(service, &to).await;
+                arr.queues[service as usize].lock().fetching = false;
+            });
         }
+        records
+    }
+
+    /// Fetches Radarr's or Sonarr's queue at `to` now, for [`Self::queue`]
+    /// to give. Its answer is kept unless a fetch started after it has kept
+    /// one already.
+    pub async fn fetch_queue(&self, service: Service, to: &Connection) {
+        let started = Instant::now();
         let mut query = vec![("page", "1".to_owned()), ("pageSize", QUEUE_SIZE.to_string())];
         match service {
             Service::Radarr => query.push(("includeUnknownMovieItems", "false".into())),
@@ -529,8 +554,10 @@ impl Arr {
             }
             Err(_) => Err(format!("{} didn't answer in time", service.name())),
         };
-        *cached = Some((Instant::now(), to.clone(), queue.clone()));
-        queue
+        let mut queued = self.queues[service as usize].lock();
+        if queued.last.as_ref().is_none_or(|(at, ..)| *at <= started) {
+            queued.last = Some((started, to.clone(), queue));
+        }
     }
 }
 
