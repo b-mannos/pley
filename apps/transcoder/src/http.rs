@@ -120,6 +120,8 @@ impl AppState {
             work_dir_bytes,
             memory_bytes: self.jobs.memory_bytes(),
             background_paused: self.jobs.background.paused() as u32,
+            trickplay_running: self.trickplay.running() as u32,
+            load: Some(self.jobs.load()),
             counters: self.metrics.snapshot(),
             jobs: self.jobs.list().iter().map(|j| j.status()).collect(),
             live: self.live.list(),
@@ -577,7 +579,14 @@ mod tests {
         let keyframes = KeyframeStore::new(ff.clone(), metrics.clone(), background.clone(), dir.join("keyframes"));
         let extractor = Arc::new(Extractor::new(ff.clone(), prober.clone(), metrics.clone(), dir.join("subtitles"), 1));
         let fingerprinter = Arc::new(Fingerprinter::new(ff.clone(), background.clone(), 1));
-        let trickplay = Arc::new(Trickplay::new(ff.clone(), prober.clone(), background.clone(), dir.join("trickplay")));
+        let trickplay = Arc::new(Trickplay::new(
+            ff.clone(),
+            prober.clone(),
+            background.clone(),
+            dir.join("trickplay"),
+            1,
+            Arc::default(),
+        ));
         let limits = Limits { max_jobs: 3, max_hw_jobs: 1 };
         let jobs = JobManager::new(
             ff.clone(),
@@ -798,10 +807,15 @@ mod tests {
         let status: TranscoderStatus = serde_json::from_str(&status.body).unwrap();
         assert_eq!((status.max_jobs, status.max_hw_jobs, status.running_processes), (3, 1, 0));
         assert!(status.jobs.is_empty());
+        assert_eq!(status.trickplay_running, 0);
+        // The processors are known before the first look; how busy they are
+        // only after two.
+        assert!(status.load.is_some_and(|load| load.cores > 0.0), "{:?}", status.load);
         let metrics = request(addr, "GET", "/metrics", None, None).await;
         assert_eq!(metrics.status, 200);
         assert!(metrics.body.contains("# TYPE pley_transcoder_jobs_created_total counter\n"), "{}", metrics.body);
         assert!(metrics.body.contains("pley_transcoder_max_jobs 3\n"), "{}", metrics.body);
+        assert!(metrics.body.contains("# TYPE pley_transcoder_trickplay_running gauge\n"), "{}", metrics.body);
     }
 
     #[tokio::test]

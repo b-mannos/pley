@@ -20,6 +20,11 @@ describes how they are made.
   beside the previews, and made again when asked for. Those kept so far are
   removed at the first start.
 
+### Fixed
+
+- In a container limited to a few processors, making seek previews no
+  longer slows the server beside them.
+
 ## [0.1.0] - 2026-10-30
 
 ### Security
