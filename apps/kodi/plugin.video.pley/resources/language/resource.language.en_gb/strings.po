@@ -917,3 +917,7 @@ msgstr ""
 msgctxt "#30278"
 msgid "Watch here instead"
 msgstr ""
+
+msgctxt "#30279"
+msgid "This server requires two-step sign-in: your phone sets it up if you haven't yet."
+msgstr ""

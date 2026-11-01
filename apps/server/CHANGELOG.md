@@ -9,11 +9,27 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Administrators who use two-step sign-in can require it of everyone
+  (Settings → Server → Sign-in). Whoever hasn't set it up is signed out
+  everywhere, and sets it up at their next sign-in, right after the
+  password: a QR code, or on a phone a link to the authenticator app, then
+  the first code and the recovery codes. Joining with an invitation,
+  switching to their profile and signing in a TV at `/link` set it up the
+  same way. Settings → Users shows who hasn't set it up yet.
+- Two-step sign-in moves to another authenticator app (Account → Use
+  another app) with the password and a code of the current one, without
+  turning it off.
+- A code from the authenticator app pasted with a space in it ("123 456")
+  signs in.
+
 ### Changed
 
 - Pley is free software under the GNU Affero General Public License,
-  version 3 (`AGPL-3.0-only`, `LICENSE`). The transcoder gives the address
-  of its source (`GET /v1/info`, `--license`).
+  version 3 (`AGPL-3.0-only`, `LICENSE`). The server and the transcoder
+  give the address of their source (`GET /api/server`, which the web
+  app's Account page links to; `GET /v1/info` and `--license`).
 
 ### Fixed
 

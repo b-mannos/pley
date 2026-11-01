@@ -8,6 +8,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Signing in with a code says when the server requires two-step sign-in:
+  the phone that approves the code sets it up for whoever hasn't.
+
 ### Fixed
 
 - Dolby Vision the server repackages (with HDR10+, or profile 7 outside
