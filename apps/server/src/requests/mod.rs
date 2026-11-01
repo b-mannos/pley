@@ -609,7 +609,7 @@ pub struct ListQuery {
 const COLUMNS: &str = "r.id, r.kind, r.tmdb_id, r.tvdb_id, r.imdb_id, r.title, r.year, r.poster_path,
     r.backdrop_path, r.seasons, r.available_seasons, r.anime, r.user_id, r.status, r.reason, r.decided_by,
     r.decided_at, r.item_id, r.arr_id, r.created_at, r.updated_at, r.available_at, r.sent_to, r.sent_profile,
-    r.sent_folder, r.news_at,
+    r.sent_folder, r.sending_at, r.send_profile, r.send_folder, r.news_at,
     COALESCE(NULLIF(TRIM(u.display_name), ''), u.username) AS maker_name, u.avatar AS maker_avatar,
     u.avatar_color AS maker_color, COALESCE(NULLIF(TRIM(d.display_name), ''), d.username) AS decider_name,
     d.avatar AS decider_avatar, d.avatar_color AS decider_color";
@@ -643,6 +643,11 @@ struct RequestRow {
     sent_to: Option<String>,
     sent_profile: Option<String>,
     sent_folder: Option<String>,
+    /// Being sent since then, with what its approval chose: the quality
+    /// profile's id and the root folder.
+    sending_at: Option<i64>,
+    send_profile: Option<i64>,
+    send_folder: Option<String>,
     news_at: Option<i64>,
     maker_name: String,
     maker_avatar: Option<String>,
@@ -677,6 +682,11 @@ impl RequestRow {
     /// Added by hand: never sent.
     fn hand(&self) -> bool {
         self.sent_to.as_deref() == Some("hand")
+    }
+
+    /// Approved and being sent to Radarr or Sonarr.
+    fn sending(&self) -> bool {
+        self.status() == RequestStatus::Approved && self.sent_to.is_none() && self.sending_at.is_some()
     }
 
     /// Where its kind goes.
@@ -734,7 +744,7 @@ impl RequestRow {
         use RequestStatus::{Approved, Declined, Failed, Pending};
         let status = self.status();
         let manager = viewer.manager;
-        let unsent = status == Approved && self.sent().is_none() && !viewer.sending.contains(&self.id);
+        let unsent = status == Approved && self.sent().is_none() && !self.sending();
         let over = status == Declined && self.declined_until().is_none_or(|at| at <= viewer.now);
         [
             (RequestAction::Withdraw, mine && !manager && (matches!(status, Pending | Failed) || over)),
@@ -841,8 +851,6 @@ struct Viewer {
     following: HashSet<i64>,
     /// Radarr and Sonarr, where connected.
     connected: Vec<Service>,
-    /// The requests being sent now.
-    sending: HashSet<i64>,
 }
 
 fn seasons_of(json: &str) -> Vec<i64> {
@@ -1193,7 +1201,8 @@ pub struct Requests {
     making: tokio::sync::Mutex<()>,
     /// One look at the libraries at a time.
     syncing: tokio::sync::Mutex<()>,
-    /// The requests being sent to Radarr or Sonarr now ([`Self::send`]).
+    /// The requests whose send runs now ([`Self::send`]): one at a time
+    /// for each.
     sending: watch::Sender<HashSet<i64>>,
     /// What Radarr, then Sonarr, offers approvals ([`Self::offered`]).
     offers: [parking_lot::Mutex<Offer>; 2],
@@ -1211,8 +1220,8 @@ struct Offer {
     asking: Option<watch::Receiver<bool>>,
 }
 
-/// A request being sent: it is no longer once this is dropped, however
-/// the sending ends.
+/// A request's send running: it no longer is once this is dropped, however
+/// it ends.
 struct Sending(Arc<Requests>, i64);
 
 impl Drop for Sending {
@@ -2074,7 +2083,6 @@ impl Requests {
                 .into_iter()
                 .filter(|s| s.connected(&settings).is_some())
                 .collect(),
-            sending: self.sending.borrow().clone(),
         })
     }
 
@@ -2230,18 +2238,9 @@ impl Requests {
 
     /// A request `caller` may see.
     async fn one(&self, caller: &Caller<'_>, id: i64) -> RequestResult<MediaRequest> {
-        self.answer(caller, id, false).await
-    }
-
-    /// The same, answering what `caller` did to it: `sending`, it is about
-    /// to be sent (so nothing that sends it is offered).
-    async fn answer(&self, caller: &Caller<'_>, id: i64, sending: bool) -> RequestResult<MediaRequest> {
         let row = self.row_for(caller, id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
         let rows = [row];
-        let mut viewer = self.viewer(caller, &rows).await?;
-        if sending {
-            viewer.sending.insert(id);
-        }
+        let viewer = self.viewer(caller, &rows).await?;
         let downloads = self.downloads(&rows).await;
         Ok(rows[0].to_dto(&viewer, downloads.get(&id).cloned()))
     }
@@ -2359,6 +2358,12 @@ impl Requests {
         let auto = caller.access == RequestAccess::Auto;
         let follow: Vec<i64> = covering.iter().filter(|a| !a.mine && !a.follows).map(|a| a.id).collect();
         let pending: Vec<i64> = covering.iter().filter(|a| auto && !a.mine && a.pending).map(|a| a.id).collect();
+        let service = match new.kind {
+            TitleKind::Movie => Service::Radarr,
+            TitleKind::Show => Service::Sonarr,
+        };
+        // What it approves is sent where its service is connected.
+        let sends = auto && service.connected(&self.settings.get()).is_some();
         let at = now();
         let mut tx = self.db.write.begin().await?;
         for id in &follow {
@@ -2374,11 +2379,13 @@ impl Requests {
         let mut approved = Vec::new();
         for id in pending {
             let done = sqlx::query(
-                "UPDATE requests SET status = 'approved', reason = NULL, decided_by = ?, decided_at = ?, updated_at = ?
+                "UPDATE requests SET status = 'approved', reason = NULL, decided_by = ?, decided_at = ?, sending_at = ?,
+                                     updated_at = ?
                  WHERE id = ? AND status = 'pending'",
             )
             .bind(user.id)
             .bind(at)
+            .bind(sends.then_some(at))
             .bind(at)
             .bind(id)
             .execute(&mut *tx)
@@ -2392,8 +2399,9 @@ impl Requests {
             let seasons = (new.kind == TitleKind::Show).then(|| seasons_json(&left));
             let id = sqlx::query_scalar(
                 "INSERT INTO requests (kind, tmdb_id, tvdb_id, imdb_id, title, year, poster_path, backdrop_path,
-                                       seasons, anime, user_id, status, decided_by, decided_at, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+                                       seasons, anime, user_id, status, decided_by, decided_at, sending_at, created_at,
+                                       updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
             )
             .bind(new.kind.as_str())
             .bind(new.tmdb_id)
@@ -2409,6 +2417,7 @@ impl Requests {
             .bind(if auto { "approved" } else { "pending" })
             .bind(auto.then_some(user.id))
             .bind(auto.then_some(at))
+            .bind(sends.then_some(at))
             .bind(at)
             .bind(at)
             .fetch_one(&mut *tx)
@@ -2453,16 +2462,10 @@ impl Requests {
         let Some(answered) = answered else {
             return Err(AppError::conflict("this title is asked for already").into());
         };
-        let service = match new.kind {
-            TitleKind::Movie => Service::Radarr,
-            TitleKind::Show => Service::Sonarr,
-        };
-        let sends = service.connected(&self.settings.get()).is_some();
-        let sent: Vec<i64> = approved.iter().copied().chain(made.filter(|_| auto)).collect();
-        let answer = self.answer(caller, answered, sends && sent.contains(&answered)).await?;
+        let answer = self.one(caller, answered).await?;
         if sends {
-            for id in sent {
-                self.send(id, Approval::default());
+            for id in approved.iter().copied().chain(made) {
+                self.send(id);
             }
         }
         Ok((made.is_some(), answer))
@@ -2471,8 +2474,9 @@ impl Requests {
     /// `POST /api/requests/{id}/approve`: a pending, failed, declined, or
     /// approved and not sent request is approved, keeping `approval`'s
     /// seasons of those asked for, and sent to Radarr or Sonarr in the
-    /// background with what it chose. One sent already, or being sent, is
-    /// answered as it is, as is one approved meanwhile (a race).
+    /// background with what it chose, kept with it until then. One sent
+    /// already, or being sent, is answered as it is, as is one approved
+    /// meanwhile (a race).
     pub async fn approve(
         self: &Arc<Self>,
         caller: &Caller<'_>,
@@ -2491,7 +2495,7 @@ impl Requests {
         }
         let row = self.row(id).await?.ok_or_else(|| AppError::not_found("no such request"))?;
         let status = row.status();
-        if self.sent(&row) {
+        if status == RequestStatus::Approved && (row.sent().is_some() || row.sending()) {
             return self.one(caller, id).await;
         }
         if status == RequestStatus::Available {
@@ -2518,19 +2522,25 @@ impl Requests {
             .into_iter()
             .filter(|n| seasons.as_ref().is_some_and(|s| s.contains(n)))
             .collect();
+        let sends = row.service().connected(&self.settings.get()).is_some();
         let at = now();
+        // Being sent, with what it chose, from the moment it is approved: a
+        // restart doesn't lose the send ([`Self::resume`]).
         let approved = sqlx::query(
             "UPDATE requests SET status = 'approved', reason = NULL,
                     decided_by = CASE WHEN status = 'approved' THEN decided_by ELSE ? END,
                     decided_at = CASE WHEN status = 'approved' THEN decided_at ELSE ? END,
                     seasons = ?, available_seasons = ?, sent_to = NULL, sent_profile = NULL, sent_folder = NULL,
-                    updated_at = ?
-             WHERE id = ? AND status = ? AND sent_to IS ?",
+                    sending_at = ?, send_profile = ?, send_folder = ?, updated_at = ?
+             WHERE id = ? AND status = ? AND sent_to IS ? AND sending_at IS NULL",
         )
         .bind(caller.user.id)
         .bind(at)
         .bind(seasons.as_deref().map(seasons_json))
         .bind(seasons_json(&ready))
+        .bind(sends.then_some(at))
+        .bind(approval.quality_profile.filter(|_| sends))
+        .bind(approval.root_folder.filter(|_| sends))
         .bind(at)
         .bind(id)
         .bind(&row.status)
@@ -2554,62 +2564,91 @@ impl Requests {
             self.decided(&row, caller.user.id).await?;
         }
         self.changed(id, row.kind(), row.tmdb_id).await;
-        let sends = row.service().connected(&self.settings.get()).is_some();
-        let answer = self.answer(caller, id, sends).await?;
+        let answer = self.one(caller, id).await?;
         if sends {
-            self.send(id, approval);
+            self.send(id);
         }
         Ok(answer)
     }
 
-    /// Whether approved request `row` is sent, or being sent (approving it
-    /// again does nothing).
-    fn sent(&self, row: &RequestRow) -> bool {
-        row.status() == RequestStatus::Approved && (row.sent().is_some() || self.sending.borrow().contains(&row.id))
-    }
-
-    /// Sends approved request `id` to Radarr or Sonarr in the background,
-    /// with what `approval` chose instead of the settings: every send goes
-    /// through here. Till it is done the request is being sent (stage
-    /// `approved`), and nothing else sends it.
-    fn send(self: &Arc<Self>, id: i64, approval: Approval) {
+    /// Sends request `id`, recorded as being sent, to Radarr or Sonarr in
+    /// the background ([`Self::deliver`]): every send goes through here, and
+    /// one at a time for a request. Should how it went not be saved, the
+    /// request is `failed` for a manager where that can be saved; where not,
+    /// it is sent again by [`Self::resume`].
+    fn send(self: &Arc<Self>, id: i64) {
         if !self.sending.send_if_modified(|sending| sending.insert(id)) {
             return;
         }
         let requests = self.clone();
         tokio::spawn(async move {
             let _done = Sending(requests.clone(), id);
-            if let Err(err) = requests.deliver(id, &approval).await {
+            if let Err(err) = requests.deliver(id).await {
                 tracing::warn!("request {id}: sending it failed: {err:#}");
+                if let Err(err) = requests.unsaved(id, &err).await {
+                    tracing::warn!("request {id}: it is to be sent again: {err:#}");
+                }
             }
         });
     }
 
-    /// Waits until nothing is being sent.
+    /// Sends again the requests recorded as being sent whose send isn't
+    /// running (a restart cut it short, or how it went couldn't be saved),
+    /// with what their approvals chose; at the start and at every look at
+    /// the libraries, while requests are on.
+    pub async fn resume(self: &Arc<Self>) -> sqlx::Result<()> {
+        if !self.enabled() {
+            return Ok(());
+        }
+        let ids: Vec<i64> = sqlx::query_scalar(
+            "SELECT id FROM requests WHERE status = 'approved' AND sent_to IS NULL AND sending_at IS NOT NULL
+             ORDER BY sending_at, id",
+        )
+        .fetch_all(&self.db.read)
+        .await?;
+        for id in ids {
+            self.send(id);
+        }
+        Ok(())
+    }
+
+    /// Waits until no send runs.
     pub async fn settled(&self) {
         let mut sending = self.sending.subscribe();
         let _ = sending.wait_for(HashSet::is_empty).await;
     }
 
-    /// Adds approved request `id` to Radarr or Sonarr, where its kind's is
-    /// connected, unless it is sent already (or added by hand); should that
-    /// fail, the request is `failed` for a manager, saying why.
-    async fn deliver(self: &Arc<Self>, id: i64, approval: &Approval) -> sqlx::Result<()> {
+    /// Adds request `id`, being sent, to Radarr or Sonarr with what its
+    /// approval chose, unless it no longer is to be sent; should that fail,
+    /// the request is `failed` for a manager, saying why. With its kind's
+    /// service no longer connected, it stays approved, not sent.
+    async fn deliver(self: &Arc<Self>, id: i64) -> sqlx::Result<()> {
         let Some(row) = self.row(id).await? else { return Ok(()) };
-        if row.status() != RequestStatus::Approved || row.sent_to.is_some() {
+        if !row.sending() {
             return Ok(());
         }
         let settings = self.settings.get();
         let service = row.service();
-        let Some(to) = service.connected(&settings) else { return Ok(()) };
+        let Some(to) = service.connected(&settings) else {
+            sqlx::query(
+                "UPDATE requests SET sending_at = NULL, send_profile = NULL, send_folder = NULL, updated_at = ?
+                 WHERE id = ? AND status = 'approved' AND sent_to IS NULL",
+            )
+            .bind(now())
+            .bind(id)
+            .execute(&self.db.write)
+            .await?;
+            self.changed(id, row.kind(), row.tmdb_id).await;
+            return Ok(());
+        };
         let seasons = row.seasons().unwrap_or_default();
         let title = arr::Title {
             tmdb_id: row.tmdb_id,
             tvdb_id: row.tvdb_id,
             anime: row.anime,
             seasons: &seasons,
-            quality_profile: approval.quality_profile,
-            root_folder: approval.root_folder.as_deref(),
+            quality_profile: row.send_profile,
+            root_folder: row.send_folder.as_deref(),
         };
         let added = match service {
             Service::Radarr => self.arr.add_movie(&to, &settings, &title).await,
@@ -2627,7 +2666,8 @@ impl Requests {
                     None => None,
                 };
                 sqlx::query(
-                    "UPDATE requests SET arr_id = ?, sent_to = ?, sent_profile = ?, sent_folder = ?, updated_at = ?
+                    "UPDATE requests SET arr_id = ?, sent_to = ?, sent_profile = ?, sent_folder = ?, sending_at = NULL,
+                                         send_profile = NULL, send_folder = NULL, updated_at = ?
                      WHERE id = ? AND status = 'approved' AND sent_to IS NULL",
                 )
                 .bind(added.id)
@@ -2641,31 +2681,49 @@ impl Requests {
             }
             Err(err) => {
                 tracing::warn!("request {id}: {} wasn't added to {}: {err}", row.title, service.name());
-                let reason = err.to_string();
-                let failed = sqlx::query(
-                    "UPDATE requests SET status = 'failed', reason = ?, updated_at = ?
-                     WHERE id = ? AND status = 'approved' AND sent_to IS NULL",
-                )
-                .bind(&reason)
-                .bind(now())
-                .bind(id)
-                .execute(&self.db.write)
-                .await?
-                .rows_affected();
-                // Left for a manager.
-                if failed == 1 {
-                    self.events.send(ServerEvent::RequestFailed {
-                        to: Audience::of(Vec::new()),
-                        request_id: id,
-                        title: row.title.clone(),
-                        kind: row.kind(),
-                        reason,
-                        retry_at: None,
-                    });
-                }
+                self.fail(&row, err.to_string()).await?;
             }
         }
         self.changed(id, row.kind(), row.tmdb_id).await;
+        Ok(())
+    }
+
+    /// Request `row`, being sent, couldn't be: it is `failed` for a manager,
+    /// saying why (`reason`), and managers hear it. `false`: it no longer
+    /// was being sent.
+    async fn fail(&self, row: &RequestRow, reason: String) -> sqlx::Result<bool> {
+        let failed = sqlx::query(
+            "UPDATE requests SET status = 'failed', reason = ?, sending_at = NULL, send_profile = NULL,
+                                 send_folder = NULL, updated_at = ?
+             WHERE id = ? AND status = 'approved' AND sent_to IS NULL AND sending_at IS NOT NULL",
+        )
+        .bind(&reason)
+        .bind(now())
+        .bind(row.id)
+        .execute(&self.db.write)
+        .await?
+        .rows_affected();
+        if failed == 1 {
+            self.events.send(ServerEvent::RequestFailed {
+                to: Audience::of(Vec::new()),
+                request_id: row.id,
+                title: row.title.clone(),
+                kind: row.kind(),
+                reason,
+                retry_at: None,
+            });
+        }
+        Ok(failed == 1)
+    }
+
+    /// Request `id`'s send ended with how it went not saved (`err`): it is
+    /// `failed`, so that a manager sees it and approves it again (finding it
+    /// in Radarr or Sonarr, should it have got there).
+    async fn unsaved(&self, id: i64, err: &sqlx::Error) -> sqlx::Result<()> {
+        let Some(row) = self.row(id).await? else { return Ok(()) };
+        if self.fail(&row, format!("Pley couldn't save how sending it went: {err}")).await? {
+            self.changed(id, row.kind(), row.tmdb_id).await;
+        }
         Ok(())
     }
 
@@ -2682,7 +2740,7 @@ impl Requests {
         let at = now();
         let declined = sqlx::query(
             "UPDATE requests SET status = 'declined', reason = ?, decided_by = ?, decided_at = ?, updated_at = ?,
-                                 news_at = ?
+                                 news_at = ?, sending_at = NULL, send_profile = NULL, send_folder = NULL
              WHERE id = ? AND status IN ('pending', 'failed', 'approved')",
         )
         .bind(reason)
@@ -2717,7 +2775,7 @@ impl Requests {
         if status == RequestStatus::Approved && row.hand() {
             return self.one(caller, id).await;
         }
-        let unsent = status == RequestStatus::Approved && row.sent_to.is_none() && !self.sent(&row);
+        let unsent = status == RequestStatus::Approved && row.sent_to.is_none() && !row.sending();
         if !(unsent || matches!(status, RequestStatus::Pending | RequestStatus::Failed | RequestStatus::Declined)) {
             let message = |r: &MediaRequest| {
                 format!("this request is {}: only one not sent yet is marked as added by hand", r.status.as_str())
@@ -2729,7 +2787,7 @@ impl Requests {
             "UPDATE requests SET status = 'approved', reason = NULL, sent_to = 'hand', sent_profile = NULL,
                     sent_folder = NULL, decided_by = CASE WHEN status = 'approved' THEN decided_by ELSE ? END,
                     decided_at = CASE WHEN status = 'approved' THEN decided_at ELSE ? END, updated_at = ?
-             WHERE id = ? AND status = ? AND sent_to IS ?",
+             WHERE id = ? AND status = ? AND sent_to IS ? AND sending_at IS NULL",
         )
         .bind(caller.user.id)
         .bind(at)
@@ -2742,7 +2800,7 @@ impl Requests {
         .rows_affected();
         if done == 0 {
             // Changed meanwhile: marked by another session by now, or not
-            // to be marked.
+            // to be marked (being sent, say).
             if self.row(id).await?.is_some_and(|r| r.status() == RequestStatus::Approved && r.hand()) {
                 return self.one(caller, id).await;
             }
@@ -3037,7 +3095,7 @@ impl Requests {
         let at = now();
         let done = sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE requests SET status = 'available', item_id = ?, available_seasons = ?, available_at = ?,
-                 updated_at = ?, news_at = ?
+                 updated_at = ?, news_at = ?, sending_at = NULL, send_profile = NULL, send_folder = NULL
              WHERE id = ? AND status IN {ACTIVE}"
         )))
         .bind(item.0)
@@ -3061,7 +3119,8 @@ impl Requests {
         Ok(())
     }
 
-    /// Looks at the libraries every 5 minutes, and after each scan, until
+    /// Sends what a restart cut short ([`Self::resume`]) and looks at the
+    /// libraries at the start, every 5 minutes and after each scan, until
     /// the server stops.
     pub fn start(self: &Arc<Self>, events: &EventBus, stopping: CancellationToken) {
         let (requests, mut events) = (self.clone(), events.subscribe());
@@ -3077,6 +3136,9 @@ impl Requests {
                         _ => continue,
                     },
                     () = stopping.cancelled() => break,
+                }
+                if let Err(err) = requests.resume().await {
+                    tracing::warn!("requests: sending again what was being sent failed: {err:#}");
                 }
                 if let Err(err) = requests.sync().await {
                     tracing::warn!("requests: looking at the libraries failed: {err:#}");

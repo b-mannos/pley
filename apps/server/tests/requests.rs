@@ -868,6 +868,84 @@ async fn failures_say_why_and_approving_again_retries() {
 }
 
 #[tokio::test]
+async fn a_send_cut_short_is_made_again_as_it_was_approved() {
+    let w = world().await;
+    w.turn_on(json!({})).await;
+    let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 604})).await;
+    let id = asked.body["id"].as_i64().unwrap();
+    // Approved with another profile and folder, and the server stopped
+    // before Radarr had it.
+    sqlx::query(
+        "UPDATE requests SET status = 'approved', decided_by = 1, decided_at = updated_at, sending_at = updated_at,
+                             send_profile = 5, send_folder = '/4k'
+         WHERE id = ?",
+    )
+    .bind(id)
+    .execute(&w.app.state.db.write)
+    .await
+    .unwrap();
+    let sending = w.app.get(&format!("/api/requests/{id}"), &w.admin).await;
+    assert_eq!(
+        (&sending.body["stage"], &sending.body["actions"]),
+        (&json!("approved"), &json!(["decline", "delete"])),
+        "being sent: {}",
+        sending.text()
+    );
+    let again = w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    assert_eq!(status(&again), (StatusCode::OK, "approved".to_owned()), "as it is");
+    w.app.state.requests.settled().await;
+    assert!(w.services.radarr_calls("POST", "/movie").is_empty(), "approving it again sends nothing");
+
+    // At the start: sent with what was chosen.
+    w.app.state.requests.resume().await.unwrap();
+    w.app.state.requests.settled().await;
+    let added = w.services.radarr_calls("POST", "/movie");
+    assert_eq!(added.len(), 1);
+    assert_eq!((&added[0].body["qualityProfileId"], &added[0].body["rootFolderPath"]), (&json!(5), &json!("/4k")));
+    let sent = w.app.get(&format!("/api/requests/{id}"), &w.admin).await;
+    assert_eq!(
+        sent.body["sent_to"],
+        json!({"service": "radarr", "quality_profile": "Ultra-HD", "root_folder": "/4k"}),
+        "{}",
+        sent.text()
+    );
+    w.app.state.requests.resume().await.unwrap();
+    w.app.state.requests.settled().await;
+    assert_eq!(w.services.radarr_calls("POST", "/movie").len(), 1, "sent once");
+
+    // How it went can't be saved: failed, for a manager to see.
+    sqlx::query(
+        "CREATE TRIGGER unsaved BEFORE UPDATE OF sent_to ON requests WHEN NEW.sent_to IS NOT NULL
+         BEGIN SELECT RAISE(FAIL, 'database or disk is full'); END",
+    )
+    .execute(&w.app.state.db.write)
+    .await
+    .unwrap();
+    let asked = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": 605})).await;
+    let id = asked.body["id"].as_i64().unwrap();
+    let mut events = w.app.state.events.subscribe();
+    w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    w.app.state.requests.settled().await;
+    let failed = w.app.get(&format!("/api/requests/{id}"), &w.admin).await;
+    assert_eq!(status(&failed), (StatusCode::OK, "failed".to_owned()), "{}", failed.text());
+    let reason = failed.body["reason"].as_str().unwrap();
+    assert!(reason.starts_with("Pley couldn't save how sending it went"), "{reason}");
+    assert!(
+        said(&mut events)
+            .iter()
+            .any(|e| matches!(e, ServerEvent::RequestFailed { request_id, .. } if *request_id == id))
+    );
+    assert_eq!(w.app.get("/api/requests/summary", &w.admin).await.body["failed"], json!(1));
+    // Approved again, it is found in Radarr, where it got.
+    sqlx::query("DROP TRIGGER unsaved").execute(&w.app.state.db.write).await.unwrap();
+    w.app.post(&format!("/api/requests/{id}/approve"), &w.admin, json!({})).await;
+    w.app.state.requests.settled().await;
+    let sent = w.app.get(&format!("/api/requests/{id}"), &w.admin).await;
+    assert_eq!(sent.body["sent_to"]["service"], json!("radarr"), "{}", sent.text());
+    assert_eq!(w.services.radarr_calls("POST", "/movie").len(), 2, "added once");
+}
+
+#[tokio::test]
 async fn requests_are_declined_withdrawn_and_kept_to_their_makers() {
     let w = world().await;
     w.turn_on(json!({"request_limit_movies": 1})).await;

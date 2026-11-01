@@ -2435,17 +2435,20 @@ An app's token without the route's scope is refused before all of it
   `radarr_search` / `sonarr_search` is off. A title already there is
   monitored again, the seasons asked for too, and searched for. Should that
   fail, the request is `failed`, `reason` says why and managers hear it
-  (`request_failed`); approving it again (`retry`) tries again. Without
-  Radarr or Sonarr connected for its kind, it is simply approved, for an
-  administrator to add by hand. The body may choose `quality_profile` (a
-  profile's id, from the options below), `root_folder` (a path, 512
-  characters at most) and `seasons`, which keeps only those of the seasons
-  asked for: the others leave the request, stop counting toward its maker's
-  limits, and may be asked for again (`400` for an id below 1, an empty
-  path, a season it doesn't ask for, none, or seasons of a movie). A
-  request sent already, or being sent, is answered as it is (`200`: a
-  second approve), and so is one another session approved meanwhile (a
-  race); an available one answers `409`.
+  (`request_failed`); approving it again (`retry`) tries again. The request
+  keeps what its approval chose while it is being sent: a send a restart
+  cut short is made again when the server starts, and should how it went
+  not be saved, the request is `failed` too. Without Radarr or Sonarr
+  connected for its kind, it is simply approved, for an administrator to
+  add by hand. The body may choose `quality_profile` (a profile's id, from
+  the options below), `root_folder` (a path, 512 characters at most) and
+  `seasons`, which keeps only those of the seasons asked for: the others
+  leave the request, stop counting toward its maker's limits, and may be
+  asked for again (`400` for an id below 1, an empty path, a season it
+  doesn't ask for, none, or seasons of a movie). A request sent already,
+  or being sent, is answered as it is (`200`: a second approve), and so is
+  one another session approved meanwhile (a race); an available one
+  answers `409`.
 - **Declining** (managers) a pending or failed request, or an approved one
   not yet available (others: `409`), keeps `reason` (500 characters at
   most) for its maker to read. The title is declined for its maker and its
