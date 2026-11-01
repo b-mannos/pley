@@ -72,6 +72,15 @@ pub const PLACEBO_STATIC_PEAK: &str = "peak_detect=0";
 /// it, with hues and saturation as kept. Every libplacebo FFmpeg has.
 pub const PLACEBO_CURVE: &str = "tonemapping=bt.2390";
 
+/// What libplacebo adds to the brightness of HDR made SDR, before its
+/// curve: BT.2390 maps HDR's reference white (203 nits) to SDR's, which on
+/// two HDR10 films scored lower on TMQI than mapping a lower white for want
+/// of brightness (mean SDR luma 80 and 109 against 86 and 112). Lifted 0.03,
+/// both scored above it (0.621 and 0.493 against 0.617 and 0.490) with
+/// their saturation kept (1.02 of the source's against 0.95 and 1.0) and
+/// blacks as deep (the darkest 1 % at luma 23 and 2 against 22 and 1).
+pub const PLACEBO_SDR_LIFT: &str = "brightness=0.03";
+
 /// libplacebo's options at each [`TonemapQuality`], besides its defaults,
 /// for a picture made `out` (width, height) from `src`, SDR or not (`sdr`).
 /// On a Ryzen 5 5600G's Radeon (Vega 7), 4K HDR10 to 4K SDR into AMF ran
@@ -1520,8 +1529,9 @@ impl Plan {
                 // What libplacebo gets: the source, or frames the GPU scaled.
                 let size_in = if v.scales_on_gpu(pipeline).is_some() { (w, h) } else { (v.src_width, v.src_height) };
                 let quality = placebo_quality_options(v.tonemap_quality, size_in, (w, h), v.hdr.is_none());
+                let lift = if v.hdr.is_none() { format!(":{PLACEBO_SDR_LIFT}") } else { String::new() };
                 pre.push(format!(
-                    "libplacebo=w={w}:h={h}:format={format}:{target}:range=tv:{PLACEBO_CURVE}:{PLACEBO_STATIC_PEAK}{quality}{cache}"
+                    "libplacebo=w={w}:h={h}:format={format}:{target}:range=tv:{PLACEBO_CURVE}:{PLACEBO_STATIC_PEAK}{lift}{quality}{cache}"
                 ));
                 match pipeline {
                     // Frames stay in Vulkan memory all the way into h264_vulkan.
@@ -2404,8 +2414,9 @@ mod tests {
         };
         let args: Vec<String> = plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
         assert!(
-            args.join(" ")
-                .contains("tonemapping=bt.2390:peak_detect=0:shader_cache=/var/cache/pley-transcoder/libplacebo/,"),
+            args.join(" ").contains(
+                "tonemapping=bt.2390:peak_detect=0:brightness=0.03:shader_cache=/var/cache/pley-transcoder/libplacebo/,"
+            ),
             "{args:?}"
         );
         // Other tone mappers have no such cache.
@@ -2433,7 +2444,10 @@ mod tests {
         assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Vulkan { encode_on_gpu: false });
         let args = args_string(&plan, 0, 2);
         assert!(args.contains("-hwaccel vulkan -hwaccel_device vk -hwaccel_output_format vulkan"), "{args}");
-        assert!(args.contains("tonemapping=bt.2390:peak_detect=0,hwdownload,format=nv12[vout]"), "{args}");
+        assert!(
+            args.contains("tonemapping=bt.2390:peak_detect=0:brightness=0.03,hwdownload,format=nv12[vout]"),
+            "{args}"
+        );
         assert!(args.contains("-c:v h264_nvenc"), "{args}");
         assert_eq!(plan.video_plan(&m, None).unwrap().pipeline.as_deref(), Some("hybrid"));
 
@@ -2458,7 +2472,10 @@ mod tests {
         let plan = Plan::build(&req, &m, &ff, None).unwrap();
         assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Vulkan { encode_on_gpu: false });
         let args = args_string(&plan, 0, 2);
-        assert!(args.contains("tonemapping=bt.2390:peak_detect=0,hwdownload,format=nv12[vout]"), "{args}");
+        assert!(
+            args.contains("tonemapping=bt.2390:peak_detect=0:brightness=0.03,hwdownload,format=nv12[vout]"),
+            "{args}"
+        );
         assert!(args.contains("-c:v h264_nvenc"));
         assert_eq!(plan.video_plan(&m, None).unwrap().pipeline.as_deref(), Some("hybrid"));
 
@@ -3273,7 +3290,10 @@ mod tests {
         let mut plan = Plan::build(&req, &m, &ff, None).unwrap();
         assert_eq!(plan.video.as_ref().unwrap().tonemap_quality, TonemapQuality::Balanced);
         let args = args_string(&plan, 0, 2);
-        assert!(args.contains("tonemapping=bt.2390:peak_detect=0:upscaler=bilinear:contrast_recovery=0,"), "{args}");
+        assert!(
+            args.contains("tonemapping=bt.2390:peak_detect=0:brightness=0.03:upscaler=bilinear:contrast_recovery=0,"),
+            "{args}"
+        );
         assert_eq!(plan.video_plan(&m, None).unwrap().tonemap_quality, Some(TonemapQuality::Balanced));
         // Another 4K film on the GPU.
         let film = plan.tonemap_need(&m).unwrap();
@@ -3290,7 +3310,7 @@ mod tests {
         let plan = Plan::build(&req, &m, &ff, None).unwrap();
         assert_eq!(plan.video.as_ref().unwrap().tonemap_quality, TonemapQuality::High);
         let args = args_string(&plan, 0, 2);
-        assert!(args.contains("tonemapping=bt.2390:peak_detect=0,"), "{args}");
+        assert!(args.contains("tonemapping=bt.2390:peak_detect=0:brightness=0.03,"), "{args}");
     }
 
     #[test]

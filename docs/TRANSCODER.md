@@ -755,7 +755,11 @@ available tone mapper:
   segments from different FFmpeg processes match at the seams. Thumbnails and
   seek previews do the same. Its curve is BT.2390's (`tonemapping=bt.2390`):
   libplacebo's default, a spline, made two HDR10 films about a fifth darker
-  in SDR, with nothing gained in colour. `tonemap_opencl`'s peak detection can't be
+  in SDR, with nothing gained in colour. Made SDR, the picture is lifted
+  first (`brightness=0.03`): BT.2390 puts HDR's reference white at SDR's,
+  which looks dim on an SDR screen. Lifted, the two films scored higher on
+  TMQI (the tone mapping quality index) than mapping a lower white, with
+  more of their saturation and blacks as deep. `tonemap_opencl`'s peak detection can't be
   turned off, so its brightness can jump between processes.
 - Dolby Vision profiles 7 and 8 have an HDR10- or HLG-compatible base layer
   and work with any tone mapper. Profile 5 without libplacebo plays with off
