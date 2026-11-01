@@ -1,4 +1,5 @@
 import { form, NetworkError, type Transport } from "../net/transport";
+import { base64url, fromBase64url, hmacSha256, utf8 } from "./hmac";
 import { AuthError, SWITCH_PROFILE_GRANT } from "./metadata";
 
 /** Where small things are kept between launches: localStorage on both TVs. */
@@ -42,6 +43,10 @@ export interface StoredTokens {
   scope: string;
   tokenEndpoint: string;
   revocationEndpoint: string;
+  /** The server's id, and the key with which it proves it is the one signed in to; absent from servers before them. */
+  serverId?: string;
+  proofId?: string;
+  proofKey?: string;
 }
 
 /** A token endpoint's error (RFC 6749 §5.2), with pley's `reason` for profile switches. */
@@ -96,6 +101,22 @@ export interface TokenResponse {
   refreshToken: string | null;
   expiresIn: number;
   scope: string;
+  /** What tells the server from another device later (docs/API.md, Telling servers apart); absent from older servers. */
+  proof?: ServerProof;
+}
+
+export interface ServerProof {
+  serverId: string;
+  proofId: string;
+  proofKey: string;
+}
+
+/** The server's id and proof key in a token answer, when it has them and they are written as they should be. */
+function serverProof(r: Record<string, unknown>): ServerProof | null {
+  const { server_id: serverId, proof_id: proofId, proof_key: proofKey } = r;
+  if (typeof serverId !== "string" || !serverId || typeof proofId !== "string" || !/^[1-9][0-9]{0,18}$/.test(proofId)) return null;
+  if (typeof proofKey !== "string" || fromBase64url(proofKey)?.length !== 32) return null;
+  return { serverId, proofId, proofKey };
 }
 
 export function parseTokenResponse(body: unknown, askedScope: string): TokenResponse {
@@ -113,6 +134,7 @@ export function parseTokenResponse(body: unknown, askedScope: string): TokenResp
     expiresIn: typeof r.expires_in === "number" && r.expires_in > 0 ? r.expires_in : DEFAULT_EXPIRES_IN,
     // RFC 6749 §5.1: a scope left out is the one asked for.
     scope: typeof r.scope === "string" ? r.scope : askedScope,
+    proof: serverProof(r) ?? undefined,
   };
 }
 
@@ -156,8 +178,16 @@ export async function postForm(http: Transport, url: string, fields: [string, st
   return res.body;
 }
 
-export function stored(answer: TokenResponse, issuer: string, tokenEndpoint: string, revocationEndpoint: string, now: number): StoredTokens {
-  return {
+/** The tokens of `answer` as kept; `before`'s proof stays when the answer has none (a refresh is the same sign-in). */
+export function stored(
+  answer: TokenResponse,
+  issuer: string,
+  tokenEndpoint: string,
+  revocationEndpoint: string,
+  now: number,
+  before: StoredTokens | null = null,
+): StoredTokens {
+  const tokens: StoredTokens = {
     issuer,
     accessToken: answer.accessToken,
     refreshToken: answer.refreshToken,
@@ -166,6 +196,49 @@ export function stored(answer: TokenResponse, issuer: string, tokenEndpoint: str
     tokenEndpoint,
     revocationEndpoint,
   };
+  const proof = answer.proof ?? (before?.proofKey ? { serverId: before.serverId!, proofId: before.proofId!, proofKey: before.proofKey } : null);
+  if (proof) {
+    tokens.serverId = proof.serverId;
+    tokens.proofId = proof.proofId;
+    tokens.proofKey = proof.proofKey;
+  }
+  return tokens;
+}
+
+/** Why a request to a server's address isn't sent: what answers there can't prove it is the server signed in to. */
+export const NOT_YOUR_SERVER = "another device answers at this address";
+/** How long a server's proof counts, unless a request to it fails meanwhile. */
+const PROOF_TTL_MS = 30 * 60_000;
+
+/** `n` random bytes from the system. */
+function randomBytes(n: number): Uint8Array {
+  const bytes = new Uint8Array(n);
+  crypto.getRandomValues(bytes);
+  return bytes;
+}
+
+/**
+ * Asks the server at `issuer` to prove it holds `tokens`' proof key
+ * (docs/API.md, Telling servers apart). Throws a [NetworkError] when
+ * nothing answers, or [NOT_YOUR_SERVER] when what answers can't.
+ */
+export async function proveServer(http: Transport, issuer: string, tokens: StoredTokens, random: (n: number) => Uint8Array = randomBytes): Promise<void> {
+  const challenge = base64url(random(16));
+  const res = await http({
+    method: "GET",
+    url: `${issuer}/api/server?challenge=${challenge}&proof_id=${tokens.proofId}`,
+    headers: { Accept: "application/json" },
+    body: null,
+    responseType: "json",
+    timeoutMs: 10_000,
+  });
+  const body = (typeof res.body === "string" ? safeJson(res.body) : res.body) as { id?: unknown; proof?: unknown } | null;
+  const key = fromBase64url(tokens.proofKey ?? "");
+  if (res.status !== 200 || !body || body.id !== tokens.serverId || typeof body.proof !== "string" || !key) {
+    throw new NetworkError(NOT_YOUR_SERVER);
+  }
+  const expected = base64url(hmacSha256(key, utf8(`pley-server-proof\n${tokens.serverId}\n${challenge}`)));
+  if (body.proof !== expected) throw new NetworkError(NOT_YOUR_SERVER);
 }
 
 /** Why the TV is signed out. */
@@ -181,6 +254,9 @@ export class Tokens {
   private queue: Promise<unknown> = Promise.resolve();
   /** The access token the last refresh or profile switch gave, and when. */
   private lastIssued: { token: string; at: number } | null = null;
+  /** When the server last proved it is the one signed in to, and the proof under way. */
+  private provedAt: number | null = null;
+  private proving: Promise<void> | null = null;
 
   readonly issuer: string;
   readonly clientId: string;
@@ -189,6 +265,7 @@ export class Tokens {
   /** Told when the server ends the sign-in, or the scope guard does. */
   private readonly onSignedOut: (reason: SignOutReason) => void;
   private readonly clock: () => number;
+  private readonly random: ((n: number) => Uint8Array) | undefined;
 
   constructor(
     issuer: string,
@@ -197,6 +274,7 @@ export class Tokens {
     http: Transport,
     onSignedOut: (reason: SignOutReason) => void = () => {},
     clock: () => number = Date.now,
+    random?: (n: number) => Uint8Array,
   ) {
     this.issuer = issuer;
     this.clientId = clientId;
@@ -204,6 +282,35 @@ export class Tokens {
     this.http = http;
     this.onSignedOut = onSignedOut;
     this.clock = clock;
+    this.random = random;
+  }
+
+  /**
+   * Resolves once the server at this address has proved it is the one
+   * signed in to, within the last half hour: no token leaves before. A
+   * sign-in from a server without proofs has nothing to check.
+   */
+  private proved(tokens: StoredTokens): Promise<void> {
+    if (!tokens.proofKey) return Promise.resolve();
+    if (this.provedAt !== null && this.clock() - this.provedAt < PROOF_TTL_MS) return Promise.resolve();
+    if (!this.proving) {
+      this.proving = proveServer(this.http, this.issuer, tokens, this.random).then(
+        () => {
+          this.provedAt = this.clock();
+          this.proving = null;
+        },
+        (e: unknown) => {
+          this.proving = null;
+          throw e;
+        },
+      );
+    }
+    return this.proving;
+  }
+
+  /** A request to the server failed: the next token waits for a new proof (the TV may be on another network). */
+  doubtServer(): void {
+    this.provedAt = null;
   }
 
   private get key(): string {
@@ -247,6 +354,7 @@ export class Tokens {
   async accessToken(): Promise<string | null> {
     const tokens = this.load();
     if (!tokens) return null;
+    await this.proved(tokens);
     if (tokens.expiresAt - this.clock() > EARLY_MS) return tokens.accessToken;
     return this.refresh(tokens.accessToken);
   }
@@ -262,6 +370,7 @@ export class Tokens {
       if (!tokens) throw new SignedOutError();
       if (tokens.accessToken !== stale && tokens.expiresAt - this.clock() > EARLY_MS) return tokens.accessToken;
       if (!tokens.refreshToken) this.signedOut();
+      await this.proved(tokens);
       let answer: unknown;
       try {
         answer = await postForm(this.http, tokens.tokenEndpoint, [
@@ -274,7 +383,7 @@ export class Tokens {
         throw e;
       }
       const parsed = parseTokenResponse(answer, tokens.scope);
-      const fresh = stored(parsed, this.issuer, tokens.tokenEndpoint, tokens.revocationEndpoint, this.clock());
+      const fresh = stored(parsed, this.issuer, tokens.tokenEndpoint, tokens.revocationEndpoint, this.clock(), tokens);
       if (extraScopes(parsed.scope, tokens.scope).length) await this.widened(fresh);
       // A refresh token is good once: the new one is kept before anything else.
       this.save(fresh);
@@ -315,6 +424,7 @@ export class Tokens {
         ["profile", String(profile)],
       ];
       if (pin !== null) fields.push(["pin", pin]);
+      await this.proved(tokens);
       let answer: unknown;
       try {
         answer = await postForm(this.http, tokens.tokenEndpoint, fields);
@@ -324,19 +434,23 @@ export class Tokens {
         throw e;
       }
       const parsed = parseTokenResponse(answer, tokens.scope);
-      const fresh = stored(parsed, this.issuer, tokens.tokenEndpoint, tokens.revocationEndpoint, this.clock());
+      const fresh = stored(parsed, this.issuer, tokens.tokenEndpoint, tokens.revocationEndpoint, this.clock(), tokens);
       if (extraScopes(parsed.scope, tokens.scope).length) await this.widened(fresh);
       this.save(fresh);
       this.lastIssued = { token: fresh.accessToken, at: this.clock() };
     });
   }
 
-  /** Ends this app's sign-in on the server (RFC 7009), then forgets the tokens whatever it answered. */
+  /**
+   * Ends this app's sign-in on the server (RFC 7009), then forgets the
+   * tokens whatever it answered. A server that can't prove itself gets no
+   * token: the person can sign the TV out in Account → Apps.
+   */
   signOut(): Promise<void> {
     return this.serial(async () => {
       const tokens = this.load();
       try {
-        if (tokens) await revoke(this.http, this.clientId, tokens);
+        if (tokens && (await this.proved(tokens).then(() => true, () => false))) await revoke(this.http, this.clientId, tokens);
       } finally {
         this.wipe();
       }

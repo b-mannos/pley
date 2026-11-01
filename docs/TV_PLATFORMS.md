@@ -283,7 +283,7 @@ bun run --cwd apps/webos build       # only an app's dist/ (apps/tizen too); --d
 
 | Path | What |
 |---|---|
-| `api/`, `net/`, `auth/` | HTTP API, event stream, server discovery, sign-in with a code, profiles and PINs |
+| `api/`, `net/`, `auth/` | HTTP API, event stream, server discovery, sign-in with a code, profiles and PINs, the server's proof before a token goes ([Telling servers apart](API.md#telling-servers-apart)) |
 | `state.ts`, `platform.ts` | What the TV keeps (servers, sign-ins, settings, a per-install id, what requests are for the profile); what a shell provides |
 | `requests.ts` | Requests' words and rules: badges, a title's one main action, the season picker, stages, what may be done to a request, the server's answers |
 | `ui/focus.ts`, `ui/input.ts`, `ui/keys.ts` | Focus, remote keys, LG's Magic Remote pointer and wheel |

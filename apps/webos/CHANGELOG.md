@@ -8,6 +8,14 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Security
+
+- Before the token goes to the server's address, the server proves it is
+  the one the TV signed in to, so another device that takes its address
+  (on another network, or after the router hands it out again) gets
+  nothing; the TV says "Another device answers there." A sign-in from
+  before starts checking within the hour, as its token is renewed.
+
 ## [0.1.1] - 2026-11-01
 
 ### Added

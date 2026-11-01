@@ -3,7 +3,7 @@ import { Api, unreachable, unreachableReason } from "../src/api/client";
 import type { Tokens } from "../src/auth/tokens";
 import { NetworkError, TIMED_OUT, type HttpRequest, type HttpResponse } from "../src/net/transport";
 
-const tokens = { accessToken: () => Promise.resolve("token") } as unknown as Tokens;
+const tokens = { accessToken: () => Promise.resolve("token"), doubtServer: () => {} } as unknown as Tokens;
 
 /** A transport whose answers the test decides: `null` never answers, so the request times out (as XHR does) unless cancelled first. */
 function transport(answer: (req: HttpRequest) => Promise<HttpResponse> | null) {
