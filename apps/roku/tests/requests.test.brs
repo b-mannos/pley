@@ -636,6 +636,22 @@ sub test_requests_events_tell_news_once()
     tkEqual(reqToAnnounce([request], mark).Count(), 0)
 end sub
 
+sub test_requests_news_is_kept_as_told_once_its_notice_is_seen()
+    now = reqTestNow()
+    mark = { at: now - 600, ready: { "5": "all" } }
+    before = reqMarkCopy(mark)
+    movie = reqTestRequest({ id: 7, kind: "movie", title: "Dune", status: "available", stage: "available", item_id: 12, updated_at: now - 60 })
+    told = reqToAnnounce([movie], mark)
+    tkEqual(told.Count(), 1)
+    tkEqual(before, { at: now - 600, ready: { "5": "all" } }, "the copy stays as it was")
+    notice = reqNotice(told)
+    notice.before = before
+    kept = reqMarkToKeep(mark, [notice])
+    tkFalse(kept.ready.DoesExist("7"), "waiting: not kept as told")
+    tkEqual(reqToAnnounce([movie], reqMarkCopy(kept)).Count(), 1, "the app closed first: told again")
+    tkEqual(reqMarkToKeep(mark, []).ready["7"], "all", "seen: kept as told")
+end sub
+
 sub test_requests_notice_marks_are_kept_per_server_and_profile()
     section = tkRegistrySection()
     mark = { at: 1793534000, ready: {} }

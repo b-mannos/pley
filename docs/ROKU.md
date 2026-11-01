@@ -166,7 +166,8 @@ its number counts what waits: a manager's pending and failed requests
 - **Ready to watch:** a requested title that arrives is told of ("“The
   Last Lighthouse” is ready to watch." with Open and OK; "3 of your
   requests have news" for several), never over playing video, a sign-in or
-  another dialog: it waits for them.
+  another dialog: it waits for them, and shows again after a dialog that
+  takes its place.
 
 Not offered: Approve's choices of profile, folder and seasons (on the web
 and phones; Approve here approves what was asked), bulk approve and
@@ -227,8 +228,9 @@ Rules the code keeps:
   while something downloads, title pages (TMDB's and the libraries'), the
   requests and Discover's Your requests ask each 10 s.
 - **Notices** are kept per server and profile (registry section
-  `requests`, the newest 40): what was told of each request, so a title
-  is told of once, on this Roku.
+  `requests`, the newest 40): what was told of each request once its
+  notice was seen (Open, OK or Back), so a title is told of once, on this
+  Roku.
 - **Times** come as unix seconds, and the app writes them ("in 20 min",
   "3 days ago", "Nov 4", "9:05 PM") in the Roku's time zone; TMDB's days
   ("2026-11-04") are written as they are.

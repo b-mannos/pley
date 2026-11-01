@@ -53,10 +53,11 @@ sub init()
     ' meanwhile, so asked once more).
     m.badgeTitles = {}
     m.badgesAsked = {}
-    ' Ready-to-watch notices waiting to show, the one shown, and what was
-    ' told already (reqLoadAnnounced's) for the profile.
+    ' Ready-to-watch notices waiting to show, the one shown and its dialog,
+    ' and what was told already (reqLoadAnnounced's) for the profile.
     m.notices = []
     m.shownNotice = invalid
+    m.noticeDialog = invalid
     m.announced = invalid
     ' The dialog last closed (one may stay in the scene's field).
     m.closedDialog = invalid
@@ -150,7 +151,12 @@ sub onProfile()
     m.newsEvents = 0
     m.badgeTitles = {}
     m.badgesAsked = {}
+    ' The notices were the profile before's: one open closes.
     m.notices = []
+    dialog = m.noticeDialog
+    m.shownNotice = invalid
+    m.noticeDialog = invalid
+    if dialog <> invalid then dialog.close = true
     m.announced = invalid
     if session.profileId > 0
         m.announced = reqLoadAnnounced(requestsSection(), session.server, session.profileId)
@@ -239,9 +245,10 @@ sub onRequestEvent(data as object)
     kind = httpString(data.type)
     if kind = "request_available" or kind = "request_decided" then m.newsEvents = m.newsEvents + 1
     if kind = "request_available" and m.announced <> invalid
+        before = reqMarkCopy(m.announced)
         told = reqAnnounceEvent(data, m.announced)
+        if told.Count() > 0 and told[0].itemId > 0 then notify(reqNotice(told), before)
         keepAnnounced()
-        if told.Count() > 0 and told[0].itemId > 0 then notify(reqNotice(told))
     end if
     if kind <> "requests_settings_changed" then gatherRequestChange(data)
     m.requestGather.control = "stop"
@@ -338,19 +345,28 @@ sub onUnseen(event as object)
     if event.getRoSGNode().spec.asked <> m.requestsAsked or m.announced = invalid or not answer.ok then return
     data = httpObject(answer.data)
     if data = invalid then return
+    before = reqMarkCopy(m.announced)
     told = reqToAnnounce(data.requests, m.announced)
+    if told.Count() > 0 then notify(reqNotice(told), before)
     keepAnnounced()
-    if told.Count() > 0 then notify(reqNotice(told))
 end sub
 
+' What was told is kept, but for what notices not seen yet tell: should
+' the app close first, it is told again.
 sub keepAnnounced()
     session = m.global.session
-    if m.announced <> invalid and session.profileId > 0 then reqSaveAnnounced(requestsSection(), session.server, session.profileId, m.announced)
+    if m.announced = invalid or session.profileId <= 0 then return
+    waiting = []
+    if m.shownNotice <> invalid then waiting.Push(m.shownNotice)
+    waiting.Append(m.notices)
+    reqSaveAnnounced(requestsSection(), session.server, session.profileId, reqMarkToKeep(m.announced, waiting))
 end sub
 
 ' A notice of what is ready to watch, shown when it can be: never over
 ' playing video, signing in or another dialog. The last three wait.
-sub notify(notice as object)
+' before: the notices' mark before its news (reqMarkCopy's).
+sub notify(notice as object, before as object)
+    notice.before = before
     m.notices.Push(notice)
     while m.notices.Count() > 3
         m.notices.Shift()
@@ -370,14 +386,19 @@ sub showNotice()
     dialog.message = [m.shownNotice.text]
     dialog.buttons = ["Open", "OK"]
     dialog.observeField("buttonSelected", "onNoticeButton")
+    m.noticeDialog = dialog
     m.top.dialog = dialog
 end sub
 
 ' Open: the title, or the requests when several have news.
 sub onNoticeButton(event as object)
-    notice = m.shownNotice
-    m.shownNotice = invalid
-    if m.top.dialog <> invalid then m.top.dialog.close = true
+    dialog = event.getRoSGNode()
+    notice = invalid
+    if m.noticeDialog <> invalid and dialog.isSameNode(m.noticeDialog)
+        notice = m.shownNotice
+        noticeSeen()
+    end if
+    dialog.close = true
     if event.getData() = 0 and notice <> invalid
         if notice.itemId > 0
             show({ to: "details", params: { itemId: notice.itemId } })
@@ -389,20 +410,48 @@ sub onNoticeButton(event as object)
     showNotice()
 end sub
 
+' The notice shown was seen (Open, OK or Back): what it told is kept.
+sub noticeSeen()
+    m.shownNotice = invalid
+    m.noticeDialog = invalid
+    keepAnnounced()
+end sub
+
+' Another dialog took the notice's place before it was seen: it waits
+' first in line, to show again once that one closes.
+sub noticeCovered()
+    if m.shownNotice <> invalid then m.notices.Unshift(m.shownNotice)
+    m.shownNotice = invalid
+    m.noticeDialog = invalid
+end sub
+
 ' A dialog shows, from any screen, or the scene lets one go: a notice
-' waiting may show once none does. Each dialog's closing is watched, the
-' Back key's too, which sets no close field.
+' waiting may show once none does, and one shown that another replaced
+' waits again. Each dialog's closing is watched, the Back key's too, which
+' sets no close field.
 sub onDialog()
     dialog = m.top.dialog
     if dialog <> invalid
         if m.closedDialog <> invalid and dialog.isSameNode(m.closedDialog) then m.closedDialog = invalid
         if dialog.hasField("wasClosed") then dialog.observeField("wasClosed", "onDialogClosed")
+        if m.noticeDialog <> invalid and not dialog.isSameNode(m.noticeDialog) then noticeCovered()
     end if
     showNotice()
 end sub
 
+' The notice's own dialog, closing while another holds the scene's field,
+' was replaced by it; else Back closed it.
 sub onDialogClosed(event as object)
-    m.closedDialog = event.getRoSGNode()
+    closed = event.getRoSGNode()
+    m.closedDialog = closed
+    if m.noticeDialog <> invalid and closed.isSameNode(m.noticeDialog)
+        shown = m.top.dialog
+        if shown <> invalid and not shown.isSameNode(closed)
+            noticeCovered()
+        else
+            noticeSeen()
+        end if
+    end if
     showNotice()
 end sub
 

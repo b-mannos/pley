@@ -1455,3 +1455,21 @@ function reqAnnounceEvent(event as object, mark as object) as object
     mark.ready[key] = ready
     return [{ title: httpSentence(event.title), kind: httpString(event.kind), seasons: fresh, itemId: httpNumber(event.item_id, 0), requestId: httpNumber(event.request_id, 0) }]
 end function
+
+' mark (reqLoadAnnounced's) as it is now, which telling more leaves be.
+function reqMarkCopy(mark as object) as object
+    ready = {}
+    for each key in mark.ready
+        ready[key] = mark.ready[key]
+    end for
+    return { at: mark.at, ready: ready }
+end function
+
+' The mark to save while notices wait to be seen (waiting, oldest first:
+' each with before, reqMarkCopy's from before its news): the oldest's
+' before, so what they tell is told again should the app close first.
+' Those seen were all told before it. With none waiting, mark.
+function reqMarkToKeep(mark as object, waiting as object) as object
+    if waiting.Count() = 0 then return mark
+    return waiting[0].before
+end function
