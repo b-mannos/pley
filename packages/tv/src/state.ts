@@ -1,13 +1,13 @@
 import { signal } from "@preact/signals";
 import { Api, ApiError, isApiError, unreachable } from "./api/client";
 import { EventStream } from "./api/events";
-import type { Hub, HouseholdProfile, ItemDetail, Library, LiveChannel, LiveSummary, RequestSummary, ServerEvent, TitleKind, TitleStatus, User } from "./api/types";
+import type { Hub, HouseholdProfile, ItemDetail, Library, LiveChannel, LiveSummary, MediaRequest, RequestSummary, ServerEvent, TitleKind, TitleStatus, User } from "./api/types";
 import { origin } from "./auth/addresses";
 import { SignedOutError, Tokens, type KeyValue } from "./auth/tokens";
 import { xhrTransport, type Transport } from "./net/transport";
 import type { Platform, Probe } from "./platform";
 import { Reporter } from "./player/reporter";
-import { isSummary, newsKey, newsText, readyNews, readyText, statusFromRequest, titleKey } from "./requests";
+import { isSummary, newsKeys, newsText, readyNews, readyText, statusFromRequest, titleKey } from "./requests";
 import type { SubtitleFont, SubtitlePosition } from "./subs/style";
 import { OffsetStore } from "./subs/sync";
 
@@ -838,7 +838,7 @@ export class AppState {
         } else {
           this.requestsChanged(null);
         }
-        if (this.remember([newsKey(e.request_id, complete)])) {
+        if (this.remember(newsKeys(e.request_id, complete, e.seasons))) {
           this.notify({ text: readyText(e.title, e.seasons, complete), itemId: e.item_id ?? null, poster: e.poster_url ?? null });
         }
         break;
@@ -1033,10 +1033,11 @@ export class AppState {
       const list = await api.requests({ unseen: true, limit: 20 });
       if (this.generation !== generation) return;
       this.caughtUp = true;
-      const news = list.requests.filter((r) => readyNews(r) && r.updated_at > kept.at && kept.keys.indexOf(newsKey(r.id, r.stage === "available")) < 0);
+      const keys = (r: MediaRequest) => newsKeys(r.id, r.stage === "available", r.available_seasons);
+      const news = list.requests.filter((r) => readyNews(r) && r.updated_at > kept.at && keys(r).some((k) => kept.keys.indexOf(k) < 0));
       if (!news.length) return;
       this.remember(
-        news.map((r) => newsKey(r.id, r.stage === "available")),
+        news.reduce((all: string[], r) => all.concat(keys(r)), []),
         Math.max(...news.map((r) => r.updated_at)),
       );
       const one = news[0]!;

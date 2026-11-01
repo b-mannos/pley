@@ -181,8 +181,9 @@ also what waits for them, in red while some failed.
 - **Live:** pages showing a title hear of its events 300 ms after the
   last; while the event stream is down the summary is asked every minute,
   and the pages when it moved. What became ready to watch pops up once
-  (`pley.requestNews.<server>.<profile>`), with the title's poster, Open
-  and Close, for 10 s; it waits while a video plays (the last three).
+  (`pley.requestNews.<server>.<profile>`), each batch of a show's seasons
+  too, with the title's poster, Open and Close, for 10 s; it waits while
+  a video plays (the last three).
   What came while the app wasn't listening (before it started, while the
   event stream was down) is found among the 20 newest unseen requests.
   Other news shows only as the number and in the lists.

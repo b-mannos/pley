@@ -661,9 +661,15 @@ export function readyNews(r: MediaRequest): boolean {
   return r.stage === "available" || r.stage === "partial";
 }
 
-/** What ready-to-watch news is remembered by, so none is announced twice: its request, whole or in part. */
-export function newsKey(requestId: number, complete: boolean): string {
-  return `${requestId}:${complete ? "a" : "p"}`;
+/**
+ * What ready-to-watch news is remembered by, so none is announced twice:
+ * its request whole, or each of a show's seasons ready so far, since they
+ * come a batch at a time.
+ */
+export function newsKeys(requestId: number, complete: boolean, seasons: number[] | null | undefined): string[] {
+  if (complete) return [`${requestId}:a`];
+  if (!seasons || !seasons.length) return [`${requestId}:p`];
+  return seasons.map((n) => `${requestId}:s${n}`);
 }
 
 // ---- refusals

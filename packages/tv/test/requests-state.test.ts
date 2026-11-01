@@ -218,8 +218,16 @@ describe("request events", () => {
     expect(app.notices.value.map((n) => n.text)).toEqual(["Season 2 of “Severance” is ready to watch."]);
     expect(app.notices.value[0]?.itemId).toBe(54);
     expect(app.marks.value["show:104"]).toMatchObject({ status: "partial", item_id: 54 });
+    // The next batch of its seasons is news of its own, told once too.
+    const more: ServerEvent = { ...ready, seasons: [3, 4] };
+    hear(more);
+    hear(more);
     hear({ ...ready, complete: true, seasons: null });
-    expect(app.notices.value.map((n) => n.text)).toEqual(["Season 2 of “Severance” is ready to watch.", "“Severance” is ready to watch."]);
+    expect(app.notices.value.map((n) => n.text)).toEqual([
+      "Season 2 of “Severance” is ready to watch.",
+      "Seasons 3–4 of “Severance” are ready to watch.",
+      "“Severance” is ready to watch.",
+    ]);
   });
 
   it("pop up nothing for decisions, new requests or failures: TVs show those as the number and in the lists", async () => {
@@ -303,6 +311,27 @@ describe("news that came while the app wasn't listening", () => {
     await again.app.loadRequests();
     await vi.advanceTimersByTimeAsync(0);
     expect(again.app.notices.value).toEqual([]);
+  });
+
+  it("tells a show's seasons that came meanwhile, and none told as they came", async () => {
+    const { app, hear, store } = setup();
+    hear({ type: "request_available", request_id: 4, title: "Severance", kind: "show", tmdb_id: 104, item_id: 54, seasons: [1], complete: false });
+    expect(app.notices.value.length).toBe(1);
+    const severance = (seasons: number[]) => request(4, { kind: "show", title: "Severance", status: "approved", stage: "partial", available_seasons: seasons });
+    // The next start, with only what was told: nothing.
+    const again = setup(store);
+    again.server.summary = () => Promise.resolve(summary({ unseen: 1 }));
+    again.server.unseen = () => Promise.resolve([severance([1])]);
+    await again.app.loadRequests();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(again.app.notices.value).toEqual([]);
+    // Another batch came while the app wasn't listening: told.
+    const later = setup(store);
+    later.server.summary = again.server.summary;
+    later.server.unseen = () => Promise.resolve([severance([1, 2])]);
+    await later.app.loadRequests();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(later.app.notices.value.map((n) => n.text)).toEqual(["Seasons 1–2 of “Severance” are ready to watch."]);
   });
 
   it("is caught up with when unseen rises with no event to explain it, and not when one did", async () => {
