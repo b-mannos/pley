@@ -118,6 +118,13 @@ class RequestTextsTest {
     }
 
     @Test
+    fun theNumberOnTheWayInIsSaidInWords() {
+        assertEquals("1 of your requests has news", texts.count(RequestsEntry(requests = true, badge = 1)))
+        assertEquals("1 request needs you", texts.count(RequestsEntry(requests = true, manage = true, badge = 1)))
+        assertEquals("3 requests need you, 1 couldn't be sent", texts.count(RequestsEntry(requests = true, manage = true, badge = 3, failed = 1)))
+    }
+
+    @Test
     fun refusalsAreSaid() {
         val summary = RequestSummary(enabled = true, seasonsLimit = 5, manage = true)
         assertEquals("You can ask for at most 5 seasons per 7 days: pick fewer.", texts.problem(RequestProblem.Limit(null), summary))

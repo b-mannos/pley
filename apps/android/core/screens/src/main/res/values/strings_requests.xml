@@ -16,6 +16,16 @@
     <string name="requests_discover_hint">Find movies and shows to ask for</string>
     <!-- Under Requests' way in, for managers. -->
     <string name="requests_manage_hint">Approve, decline and follow what was asked for</string>
+    <!-- The number on the way into requests, said: "3 requests need you, 1 couldn't be sent". -->
+    <plurals name="requests_count_manage">
+        <item quantity="one">%1$d request needs you</item>
+        <item quantity="other">%1$d requests need you</item>
+    </plurals>
+    <plurals name="requests_count_failed">
+        <item quantity="one">%1$d couldn\'t be sent</item>
+        <item quantity="other">%1$d couldn\'t be sent</item>
+    </plurals>
+    <string name="requests_count_and">%1$s, %2$s</string>
 
     <!-- Discover's rows, in their order. -->
     <string name="requests_row_trending">Trending this week</string>

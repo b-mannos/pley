@@ -16,6 +16,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
 import app.pley.android.designsystem.PleyColors
 import app.pley.android.designsystem.icon.Icon
@@ -42,6 +44,7 @@ import app.pley.android.ui.phone.shell.LocalPhoneNavigator
 @Composable
 internal fun RequestsRows(entry: RequestsEntry) {
     val navigator = LocalPhoneNavigator.current
+    val texts = rememberRequestTexts()
     if (entry.discover) {
         SettingsRow(
             stringResource(R.string.requests_discover),
@@ -62,7 +65,7 @@ internal fun RequestsRows(entry: RequestsEntry) {
             trailing = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (entry.badge > 0) {
-                        CountBadge(entry.badge, entry.alarm)
+                        CountBadge(entry.badge, entry.alarm, texts.count(entry))
                         Spacer(Modifier.width(8.dp))
                     }
                     Icon(PleyIcons.ChevronRight, contentDescription = null, size = 20.dp, tint = PleyColors.Subtle)
@@ -72,13 +75,18 @@ internal fun RequestsRows(entry: RequestsEntry) {
     }
 }
 
-/** [icon] of Me's tab, with the number on the way into requests while there is one. */
+/**
+ * [icon] of Me's tab, with the number on the way into requests while there
+ * is one, which screen readers say in words.
+ */
 @Composable
 internal fun RequestsTabIcon(entry: RequestsEntry, icon: @Composable () -> Unit) {
     if (entry.badge <= 0) return icon()
+    val description = rememberRequestTexts().count(entry)
     BadgedBox(
         badge = {
             Badge(
+                modifier = Modifier.clearAndSetSemantics { contentDescription = description },
                 containerColor = if (entry.alarm) PleyColors.Danger else PleyColors.Accent,
                 contentColor = if (entry.alarm) PleyColors.Bg else PleyColors.OnAccent,
             ) {

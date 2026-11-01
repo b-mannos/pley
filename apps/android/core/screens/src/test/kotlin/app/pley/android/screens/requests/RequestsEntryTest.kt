@@ -17,12 +17,12 @@ class RequestsEntryTest {
 
     @Test
     fun anyoneWhoMayAskSeesDiscoverAndTheirRequestsWithWhatIsNew() {
-        assertEquals(RequestsEntry(discover = true, requests = true, manage = false, badge = 1, alarm = false), entry(summary))
+        assertEquals(RequestsEntry(discover = true, requests = true, manage = false, badge = 1), entry(summary))
     }
 
     @Test
     fun managersCountWhatWaitsForThemInTheDangerColourWhileSomethingFailed() {
-        assertEquals(RequestsEntry(discover = true, requests = true, manage = true, badge = 3, alarm = true), entry(manager))
+        assertEquals(RequestsEntry(discover = true, requests = true, manage = true, badge = 3, failed = 1), entry(manager))
         assertEquals(false, entry(manager.copy(failed = 0)).alarm)
         assertEquals(2, entry(manager.copy(failed = 0)).badge)
     }

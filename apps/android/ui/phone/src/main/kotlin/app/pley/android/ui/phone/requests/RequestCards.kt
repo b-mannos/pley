@@ -46,6 +46,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
@@ -457,12 +459,14 @@ internal fun CheckRow(label: String, hint: String?, checked: Boolean, enabled: B
 /**
  * The number on the way into requests: [accent][PleyColors.Accent], or
  * [danger][PleyColors.Danger] while failed requests wait for a manager
- * ([alarm]).
+ * ([alarm]). Screen readers say [description] instead: the colour and a
+ * capped number say too little.
  */
 @Composable
-internal fun CountBadge(count: Int, alarm: Boolean, modifier: Modifier = Modifier) {
+internal fun CountBadge(count: Int, alarm: Boolean, description: String, modifier: Modifier = Modifier) {
     Box(
         modifier
+            .clearAndSetSemantics { contentDescription = description }
             .heightIn(min = 20.dp)
             .widthIn(min = 20.dp)
             .background(if (alarm) PleyColors.Danger else PleyColors.Accent, PleyShape.Circle)

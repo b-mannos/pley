@@ -30,9 +30,12 @@ data class RequestsEntry(
     val manage: Boolean = false,
     /** The number on the way into requests; 0 for none. */
     val badge: Int = 0,
-    /** The number is in the danger colour. */
-    val alarm: Boolean = false,
+    /** Managers: of [badge], the failed requests waiting for one. */
+    val failed: Int = 0,
 ) {
+    /** The number is in the danger colour. */
+    val alarm: Boolean get() = failed > 0
+
     companion object {
         val None = RequestsEntry()
 
@@ -44,7 +47,7 @@ data class RequestsEntry(
                 requests = requests,
                 manage = requests && summary.manage,
                 badge = if (requests) summary.badge else 0,
-                alarm = requests && summary.badgeAlarm,
+                failed = if (requests && summary.manage) summary.failed else 0,
             )
         }
     }

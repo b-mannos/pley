@@ -250,6 +250,18 @@ class RequestTexts(
 
     // ---------------------------------------------------------------- notices
 
+    /**
+     * The number on the way into requests ([entry]'s badge), said for
+     * screen readers: "3 requests need you, 1 couldn't be sent" for
+     * managers, "2 of your requests have news" for others.
+     */
+    fun count(entry: RequestsEntry): String {
+        if (!entry.manage) return res.getQuantityString(R.plurals.requests_notice_news, entry.badge, entry.badge)
+        val need = res.getQuantityString(R.plurals.requests_count_manage, entry.badge, entry.badge)
+        if (entry.failed <= 0) return need
+        return res.getString(R.string.requests_count_and, need, res.getQuantityString(R.plurals.requests_count_failed, entry.failed, entry.failed))
+    }
+
     fun notice(notice: RequestNotice): String = when (notice) {
         is RequestNotice.Ready -> {
             val seasons = notice.seasons.orEmpty()

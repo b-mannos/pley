@@ -1,6 +1,7 @@
 package app.pley.android.ui.phone.requests
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
@@ -16,6 +17,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -218,12 +220,19 @@ class PhoneRequestsUiTest {
 
     @Test
     fun meLeadsToDiscoverAndToRequestsWithTheirNumber() {
-        show { Column { RequestsRows(RequestsEntry(discover = true, requests = true, manage = true, badge = 3, alarm = true)) } }
+        show { Column { RequestsRows(RequestsEntry(discover = true, requests = true, manage = true, badge = 3, failed = 1)) } }
         compose.onNodeWithText("Approve, decline and follow what was asked for").assertExists()
-        compose.onNodeWithTag(ME_REQUESTS).assert(hasText("3"))
+        // Its number in red says, in words, what waits.
+        compose.onNodeWithTag(ME_REQUESTS).assert(hasContentDescription("3 requests need you, 1 couldn't be sent"))
         compose.onNodeWithTag(ME_REQUESTS).performClick()
         compose.onNodeWithTag(ME_DISCOVER).performClick()
         assertEquals(listOf(PleyKey.Requests, PleyKey.Discover()), opened)
+    }
+
+    @Test
+    fun mesTabSaysItsNumberInWords() {
+        show { RequestsTabIcon(RequestsEntry(requests = true, badge = 2)) { Text("Me") } }
+        compose.onNodeWithContentDescription("2 of your requests have news").assertExists()
     }
 
     @Test
