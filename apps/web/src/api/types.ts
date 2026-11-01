@@ -85,6 +85,8 @@ export interface ServerStatus {
   version: string;
   /** The server build's short commit hash; "unknown" without the repository. */
   commit?: string;
+  /** Where the server's source code is offered. */
+  source?: string;
   setup_required: boolean;
   /** Setting up takes the code in the server's log. */
   setup_code_required?: boolean;

@@ -45,6 +45,7 @@ pub async fn server_status(State(state): State<AppState>) -> ApiResult<Json<serd
         "name": settings.server_name,
         "version": crate::VERSION,
         "commit": crate::COMMIT,
+        "source": crate::SOURCE,
         "setup_required": users == 0,
         // Setting up takes the code in the log (see crate::setup).
         "setup_code_required": users == 0,

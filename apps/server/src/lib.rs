@@ -69,6 +69,10 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const COMMIT: &str = env!("PLEY_COMMIT");
 /// What `pley --version` and the log say: "0.2.0 (1a2b3c4d5)".
 pub const VERSION_AND_COMMIT: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("PLEY_COMMIT"), ")");
+/// Where this server's source is offered (`GET /api/server`). A modified
+/// build that others use over a network points it at its own, as the AGPL
+/// asks.
+pub const SOURCE: &str = "https://github.com/pley-media-server/pley";
 
 /// Woken by [`request_shutdown`].
 static SHUTDOWN: tokio::sync::Notify = tokio::sync::Notify::const_new();

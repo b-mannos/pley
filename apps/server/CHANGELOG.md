@@ -12,8 +12,9 @@ describes how they are made.
 ### Changed
 
 - Pley is free software under the GNU Affero General Public License,
-  version 3 (`AGPL-3.0-only`, `LICENSE`). The transcoder gives the address
-  of its source (`GET /v1/info`, `--license`).
+  version 3 (`AGPL-3.0-only`, `LICENSE`). The server and the transcoder
+  give the address of their source (`GET /api/server`, which the web
+  app's Account page links to; `GET /v1/info` and `--license`).
 
 ### Fixed
 
