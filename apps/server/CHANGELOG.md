@@ -9,6 +9,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- On Unraid, searching Apps for Plex, Jellyfin, Emby or IPTV also finds
+  Pley, and Apps offers it only on Unraid 6.12 or newer.
+
 ## [0.1.1] - 2026-11-01
 
 ### Security
