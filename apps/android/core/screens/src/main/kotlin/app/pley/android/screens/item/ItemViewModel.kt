@@ -220,10 +220,12 @@ class ItemViewModel(
     /**
      * What requests say of this movie or show: asked for
      * once the page has drawn, never before, and only when the person may
-     * ask or has requests; read again when one of its requests changes, and
-     * every 10 s while its request downloads or goes into the library
-     * (download progress sends no events). `null`: nothing to show (not a
-     * movie or show, no TMDB match, or requests don't apply).
+     * ask or has requests; read again every 3 s, 4 times at most, while it
+     * fails or TMDB's details haven't come (Request more seasons waits for
+     * them), then when one of its requests changes, and every 10 s while
+     * its request downloads or goes into the library (download progress
+     * sends no events). `null`: nothing to show (not a movie or show, no
+     * TMDB match, or requests don't apply).
      */
     val request: StateFlow<ItemRequestState?> = combine(
         drawn,
@@ -240,8 +242,20 @@ class ItemViewModel(
     private data class RequestGate(val mayAsk: Boolean, val manage: Boolean)
 
     private fun itemRequests(gate: RequestGate): Flow<ItemRequestState?> = flow {
-        var shown = readItemRequest() ?: return@flow emit(null)
-        emit(ItemRequestState.of(shown, gate.mayAsk, gate.manage))
+        // The server waits for TMDB 2 s at most: a later read has what this one lacked.
+        var answer: ItemRequest? = null
+        for (attempt in 0..AGAIN_READS) {
+            if (attempt > 0) delay(AGAIN_MS)
+            val read = readItemRequest()
+            // No TMDB match: nothing to show, ever.
+            if (read.isSuccess && read.getOrNull() == null) return@flow emit(null)
+            read.getOrNull()?.let {
+                answer = it
+                emit(ItemRequestState.of(it, gate.mayAsk, gate.manage))
+            }
+            if (answer?.askable != null) break
+        }
+        var shown = answer ?: return@flow emit(null)
         val downloading = MutableStateFlow(shown.request?.moving == true)
         val changes = data.requests.changes
             .filter { it.about(shown.kind, shown.tmdbId) || (it.requestId != null && it.requestId == shown.request?.id) }
@@ -254,20 +268,21 @@ class ItemViewModel(
             }
         }
         merge(changes, ticks).collect {
-            val again = readItemRequest() ?: return@collect
+            // A failure keeps what shows: an extra, the page shows without it.
+            val again = readItemRequest().getOrNull() ?: return@collect
             shown = again
             downloading.value = again.request?.moving == true
             emit(ItemRequestState.of(again, gate.mayAsk, gate.manage))
         }
     }
 
-    private suspend fun readItemRequest(): ItemRequest? = try {
-        data.requests.itemRequest(itemId)
+    /** What requests say of this item: `null` without a TMDB match, or why it couldn't be read. */
+    private suspend fun readItemRequest(): Result<ItemRequest?> = try {
+        Result.success(data.requests.itemRequest(itemId))
     } catch (e: CancellationException) {
         throw e
-    } catch (_: Exception) {
-        // An extra: the page shows without it.
-        null
+    } catch (e: Exception) {
+        Result.failure(e)
     }
 
     /** Loads the page again after it failed. */
@@ -407,6 +422,12 @@ class ItemViewModel(
 
         /** Request events gathered before the item's request is read again. */
         const val REQUEST_CHANGES_MS = 500L
+
+        /** How long after a failed first read, or one without TMDB's details, the item's request is read again. */
+        const val AGAIN_MS = 3_000L
+
+        /** How many times it is: the server has the details once TMDB answers. */
+        const val AGAIN_READS = 4
 
         /** The page of [itemId], made with the app's graph. */
         fun factory(itemId: Long): ViewModelProvider.Factory = viewModelFactory {
