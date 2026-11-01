@@ -9,6 +9,12 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- Pley is free software under the GNU Affero General Public License,
+  version 3 (`AGPL-3.0-only`, `LICENSE`). The transcoder gives the address
+  of its source (`GET /v1/info`, `--license`).
+
 ### Fixed
 
 - The web app's sidebar shows Live TV only once it has channels, for

@@ -8,6 +8,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- Pley for Roku is free software under the GNU Affero General Public
+  License, version 3 (`AGPL-3.0-only`, `LICENSE`).
+
 ### Fixed
 
 - Home's menu shows or drops Live TV as soon as it is set up or its last
