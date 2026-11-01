@@ -24,6 +24,9 @@ describes how they are made.
   Quick Sync tone maps them instead of libplacebo, which is much lighter on
   the GPU. Two 4K HDR to 1080p transcodes at once went from about 1x to 2x
   realtime each. A single transcode still uses libplacebo.
+- Intel graphics on Windows: picture subtitles (PGS, VobSub, DVB) burned
+  into SDR video are overlaid by Quick Sync on the GPU. These transcodes use
+  a quarter to a sixth of the CPU they did, and run faster.
 
 ### Fixed
 

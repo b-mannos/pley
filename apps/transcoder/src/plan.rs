@@ -660,6 +660,17 @@ impl Plan {
                     };
                     // Before a VAAPI encoder, Vulkan's device is made from VAAPI's.
                     let vulkan_decode = if vaapi { &ff.caps.vaapi_vulkan_decode } else { &ff.caps.vulkan_decode };
+                    // Quick Sync on Windows lays picture subtitles over 8-bit
+                    // SDR without the frames leaving the GPU, where its
+                    // start-up test passed (`qsv_overlay`): at the source's
+                    // size, scaled after (laid over frames its scaler had
+                    // made smaller, FFmpeg 9.0 ran out of memory).
+                    let qsv_burns = cfg!(windows)
+                        && ff.caps.qsv_overlay
+                        && encoder.accel == HwAccel::Qsv
+                        && hdr.is_none()
+                        && src.bit_depth.unwrap_or(8) <= 8
+                        && burn.as_ref().is_some_and(|b| !matches!(b, Burn::Text { .. }));
                     // Turned frames stay in memory, where FFmpeg turns them.
                     let pipeline = if !req.options.hardware_decoding || deinterlace || turned {
                         Pipeline::Software
@@ -673,10 +684,11 @@ impl Plan {
                             && vreq.codec == VideoCodec::H264
                             && req.options.hwaccel == HwAccel::Vulkan;
                         Pipeline::Vulkan { encode_on_gpu }
-                    } else if tonemap.is_none() && burn.is_none() {
+                    } else if tonemap.is_none() && (burn.is_none() || qsv_burns) {
                         // HDR in 10 bits stays on the GPU with CUDA, and with
                         // Quick Sync where its start-up test passed in 10
-                        // bits; the others scale on the CPU.
+                        // bits; the others scale on the CPU. Quick Sync lays
+                        // picture subtitles on SDR itself.
                         ff.caps
                             .gpu_pipelines
                             .iter()
@@ -1243,6 +1255,10 @@ impl Plan {
                     "-extra_hw_frames",
                     "8",
                 ]),
+                // Subtitles uploaded to Quick Sync need its device made from
+                // Direct3D 11's: on the one FFmpeg makes itself, the upload
+                // fails to synchronise.
+                Pipeline::Gpu(HwAccel::Qsv) if self.burn.is_some() => a.push_all(QSV_D3D11_DEVICES),
                 Pipeline::Gpu(HwAccel::Qsv) => a.push_all(["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"]),
                 Pipeline::Gpu(HwAccel::Videotoolbox) => {
                     a.push_all(["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"])
@@ -1408,6 +1424,27 @@ impl Plan {
         let ten_bit = v.hdr.map(|_| ten_bit_format(encoder.map_or(HwAccel::None, |e| e.accel)));
         // Zero-copy: one GPU scaler converts to NV12 (P010 for HDR) for the encoder.
         if let Pipeline::Gpu(accel) = pipeline {
+            // Picture subtitles laid on by Quick Sync (see `qsv_burns`), over
+            // the frame at its own size, then scaled. The subtitles' last
+            // picture stays at their end (`repeat`): with `pass` Quick Sync
+            // drops the video's last frame.
+            let subs = match &self.burn {
+                Some(Burn::Image { stream_index, .. }) => Some(format!("[0:{stream_index}]")),
+                Some(Burn::ImageFile { .. }) => Some("[1:0]".to_owned()),
+                _ => None,
+            };
+            if let Some(subs) = subs.filter(|_| accel == HwAccel::Qsv) {
+                let scale = if (w, h) != (v.src_width, v.src_height) {
+                    format!(",vpp_qsv=w={w}:h={h}:format=nv12")
+                } else {
+                    String::new()
+                };
+                return format!(
+                    "{subs}scale={}:-1,format=bgra,hwupload=extra_hw_frames=16[subs];{input}[subs]overlay_qsv=\
+                     x=(main_w-overlay_w)/2:y=main_h-overlay_h:eof_action=repeat:repeatlast=1{scale}[vout]",
+                    v.src_width
+                );
+            }
             let format = if v.hdr.is_some() { "p010le" } else { "nv12" };
             let scaler = match accel {
                 HwAccel::Vaapi => format!("scale_vaapi=w={w}:h={h}:format={format}"),
@@ -1600,6 +1637,23 @@ impl Args {
         self.0.extend(items.into_iter().map(OsString::from));
     }
 }
+
+/// Quick Sync's devices where it lays subtitles on (see `Plan::filter_graph`):
+/// its device made from Direct3D 11's, on Intel's GPU.
+pub const QSV_D3D11_DEVICES: [&str; 12] = [
+    "-init_hw_device",
+    "d3d11va=dx:,vendor_id=0x8086",
+    "-init_hw_device",
+    "qsv=qs@dx",
+    "-filter_hw_device",
+    "qs",
+    "-hwaccel",
+    "qsv",
+    "-hwaccel_device",
+    "qs",
+    "-hwaccel_output_format",
+    "qsv",
+];
 
 /// Quick Sync's rate control besides the bitrates: bitrate control per
 /// macroblock, for the picture's sake.
@@ -2829,6 +2883,71 @@ mod tests {
         let v = plan.video.as_ref().unwrap();
         let decoder = if cfg!(windows) { "d3d11va" } else { "vaapi" };
         assert_eq!((v.pipeline, v.hw_decode.as_deref(), v.gpu_scale), (Pipeline::Software, Some(decoder), None));
+    }
+
+    /// Quick Sync lays picture subtitles on 8-bit SDR itself where its
+    /// start-up test passed, on its device made from Direct3D 11's: at the
+    /// source's size, then scaled; on the CPU for x264 standing in.
+    #[test]
+    fn quick_sync_lays_picture_subtitles_on_without_leaving_the_gpu() {
+        let mut ff = intel(HwAccel::Qsv, true);
+        ff.caps.qsv_overlay = true;
+        let mut m = media(DynamicRange::Sdr, None);
+        (m.streams[0].codec, m.streams[0].width, m.streams[0].height) = ("h264".into(), Some(1920), Some(1080));
+        let burn = |max_height| {
+            let mut req = request();
+            req.video.as_mut().unwrap().max_height = Some(max_height);
+            req.subtitle = Some(SubtitleBurnRequest { stream_index: Some(2), external_path: None });
+            Plan::build(&req, &m, &ff, None).unwrap()
+        };
+        let plan = burn(720);
+        let v = plan.video.as_ref().unwrap();
+        if !cfg!(windows) {
+            assert_eq!(v.pipeline, Pipeline::Software);
+            return;
+        }
+        assert_eq!(v.pipeline, Pipeline::Gpu(HwAccel::Qsv));
+        let args = args_string(&plan, 0, 2);
+        assert!(
+            args.contains(
+                "-init_hw_device d3d11va=dx:,vendor_id=0x8086 -init_hw_device qsv=qs@dx -filter_hw_device qs \
+                 -hwaccel qsv -hwaccel_device qs -hwaccel_output_format qsv"
+            ),
+            "{args}"
+        );
+        assert!(
+            args.contains(
+                "[0:2]scale=1920:-1,format=bgra,hwupload=extra_hw_frames=16[subs];[0:0][subs]overlay_qsv=\
+                 x=(main_w-overlay_w)/2:y=main_h-overlay_h:eof_action=repeat:repeatlast=1,\
+                 vpp_qsv=w=1280:h=720:format=nv12[vout]"
+            ),
+            "{args}"
+        );
+        // Kept at its size: no scaler after.
+        let args = args_string(&burn(1080), 0, 2);
+        assert!(args.contains("eof_action=repeat:repeatlast=1[vout]"), "{args}");
+
+        // x264 standing in: scaled by Quick Sync, laid on in memory.
+        let x264 = x264();
+        let ctx = ArgsContext {
+            input: Path::new("/media/movie.mkv"),
+            encoder: Some(&x264),
+            relative_split_times: true,
+            preset: None,
+            shader_cache: None,
+        };
+        let args: Vec<String> = plan.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let args = args.join(" ");
+        assert!(!args.contains("overlay_qsv"), "{args}");
+        assert!(args.contains("[0:0]vpp_qsv=w=1280:h=720:format=nv12,hwdownload,format=nv12[base]"), "{args}");
+
+        // Without the start-up test passed, as before.
+        ff.caps.qsv_overlay = false;
+        let mut req = request();
+        req.video.as_mut().unwrap().max_height = Some(720);
+        req.subtitle = Some(SubtitleBurnRequest { stream_index: Some(2), external_path: None });
+        let plan = Plan::build(&req, &m, &ff, None).unwrap();
+        assert_eq!(plan.video.as_ref().unwrap().pipeline, Pipeline::Software);
     }
 
     /// Where the GPU falls behind, Quick Sync's scaler tone maps HDR10 that

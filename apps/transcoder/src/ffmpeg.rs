@@ -23,7 +23,7 @@ use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 15;
+const DETECTION_REVISION: u32 = 16;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -768,6 +768,7 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
     caps.vulkan_encode = gpu.vulkan_encode;
     caps.gpu_pipelines = gpu.pipelines;
     caps.qsv_tonemap = gpu.qsv_tonemap;
+    caps.qsv_overlay = gpu.qsv_overlay;
     if libplacebo && libplacebo_on_gpu {
         caps.tonemap_speed = measure_tonemap_speed(ffmpeg).await;
     }
@@ -785,6 +786,7 @@ struct GpuDetection {
     vulkan_encode: bool,
     pipelines: Vec<GpuPipeline>,
     qsv_tonemap: bool,
+    qsv_overlay: bool,
 }
 
 /// Encoder arguments for the tiny clips used to probe hardware decoding,
@@ -1071,13 +1073,50 @@ async fn detect_gpu_pipelines(
         args.extend(["-c:v", "h264_qsv", "-f", "null", "-"].map(String::from));
         run_test(args).await
     };
-    let (vulkan_results, vaapi_vulkan_results, vulkan_encode, pipeline_results, main10_results, qsv_tonemap) = tokio::join!(
+    // Picture subtitles laid on by Quick Sync (Windows): a translucent
+    // picture uploaded to its device, made from Direct3D 11's.
+    let qsv_overlay_test = async {
+        let Some((_, clip)) = clips.iter().find(|(k, _)| *k == "h264") else { return false };
+        if !(cfg!(windows) && candidates.iter().any(|(accel, ..)| *accel == HwAccel::Qsv) && working("h264_qsv")) {
+            return false;
+        }
+        let mut args = base("error", &crate::plan::QSV_D3D11_DEVICES, clip);
+        args.extend(
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=white@0.5:s=160x40:r=25:d=0.4",
+                "-filter_complex",
+                "[1:0]format=bgra,hwupload=extra_hw_frames=16[subs];[0:0][subs]overlay_qsv=y=main_h-overlay_h[v]",
+                "-map",
+                "[v]",
+                "-c:v",
+                "h264_qsv",
+                "-f",
+                "null",
+                "-",
+            ]
+            .map(String::from),
+        );
+        run_test(args).await
+    };
+    let (
+        vulkan_results,
+        vaapi_vulkan_results,
+        vulkan_encode,
+        pipeline_results,
+        main10_results,
+        qsv_tonemap,
+        qsv_overlay,
+    ) = tokio::join!(
         vulkan_tests,
         vaapi_vulkan_tests,
         vulkan_encode_test,
         pipeline_tests,
         main10_tests,
-        qsv_tonemap_test
+        qsv_tonemap_test,
+        qsv_overlay_test
     );
     let _ = std::fs::remove_dir_all(&dir);
 
@@ -1101,6 +1140,7 @@ async fn detect_gpu_pipelines(
             .filter(|p| !p.codecs.is_empty())
             .collect(),
         qsv_tonemap,
+        qsv_overlay,
     }
 }
 

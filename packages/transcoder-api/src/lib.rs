@@ -583,6 +583,10 @@ pub struct Capabilities {
     /// ([`Tonemapper::QuickSync`]). A start-up test.
     #[serde(default)]
     pub qsv_tonemap: bool,
+    /// Quick Sync lays picture subtitles on frames its decoder decoded, on
+    /// Windows. A start-up test.
+    #[serde(default)]
+    pub qsv_overlay: bool,
     /// Tone mappers whose frames reach a VAAPI encoder (Linux): libplacebo
     /// on a Vulkan device and OpenCL on a device made from the VAAPI one,
     /// the frames uploaded back to it. A start-up test; zimg always does.

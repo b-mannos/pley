@@ -198,6 +198,7 @@ before using what it names:
 | `amf_upload` | FFmpeg uploads AMF's frames to the AMD GPU ([AMF on Windows](#amf-on-windows)) |
 | `h264_metadata` | FFmpeg has the `h264_metadata` bitstream filter, which writes the colour primaries `h264_amf` leaves out |
 | `subtitle_burn_image`, `subtitle_burn_text` | picture and text subtitles can be burned in |
+| `qsv_overlay` | Quick Sync lays picture subtitles on frames it decoded (Windows; [Subtitle burn-in](#subtitle-burn-in)) |
 | `readrate`, `readrate_catchup` | `-readrate` and `-readrate_catchup` work ([Throttling](#throttling)) |
 | `chromaprint` | `POST /v1/fingerprint` works |
 | `hls_master_playlist` | jobs have `master.m3u8`, and remuxes honour `dolby_vision` and `strip_hdr10plus` |
@@ -902,7 +903,14 @@ that went away, say), the frame is grabbed as it is.
 
 - **Picture subtitles** (PGS, VobSub, DVB, `.sup` files) are overlaid on the
   scaled, tone-mapped frame, their canvas fitted to its width, blended on the
-  CPU.
+  CPU. On Windows, Quick Sync lays them on 8-bit SDR itself (`overlay_qsv`),
+  where its start-up test passed (`qsv_overlay`): over the frame at the
+  source's size, then scaled, without the frames leaving the GPU. Its device
+  is made from Direct3D 11's (`d3d11va=dx:,vendor_id=0x8086`, `qsv=qs@dx`):
+  on the one FFmpeg makes itself, uploading the subtitles fails. A 1080p film
+  took a sixth of the CPU it took blended in memory, a 720p one a quarter.
+  The last subtitle picture is kept to the end (`eof_action=repeat`): with
+  `pass`, Quick Sync drops the video's last frame.
 - **Text subtitles** (SRT, ASS) are rendered by libass from an `.ass` file
   extracted into the job folder when the job is created. Extracting an
   embedded track reads the whole file and gives up after 20 minutes (the
