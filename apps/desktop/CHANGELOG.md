@@ -8,6 +8,15 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- The system's notifications tell of requests while the window isn't in
+  front: a movie or show asked for is ready to watch (or some of its
+  seasons are), or was approved or declined; administrators hear when
+  someone asks for one, and when one couldn't be sent to Radarr or Sonarr.
+  After the computer slept or the network went, what became ready to
+  watch or was declined meanwhile comes in one notification.
+
 ### Changed
 
 - Pley Desktop is free software under the GNU Affero General Public

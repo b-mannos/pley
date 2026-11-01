@@ -437,9 +437,11 @@ pub type PlexResult<T> = Result<T, PlexError>;
 impl From<AppError> for PlexError {
     fn from(err: AppError) -> Self {
         match err {
-            AppError::Unauthorized | AppError::TwoStep(_) | AppError::InvalidToken | AppError::TokenPlacement => {
-                PlexError::Unauthorized
-            }
+            AppError::Unauthorized
+            | AppError::TwoStep(_)
+            | AppError::TwoStepSetup(..)
+            | AppError::InvalidToken
+            | AppError::TokenPlacement => PlexError::Unauthorized,
             AppError::Forbidden(_) | AppError::InsufficientScope(_) => PlexError::Forbidden,
             AppError::NotFound(_) | AppError::SessionStopped(_) => PlexError::NotFound,
             AppError::BadRequest(m) | AppError::Conflict(m) | AppError::ConflictWith(m, _) => PlexError::BadRequest(m),
