@@ -4,7 +4,8 @@
 //! bitrate) and what a player needs to pick its decoders before it
 //! reads a segment, since MPEG-TS segments can't say that a stream is Dolby
 //! Vision: `CODECS` (RFC 6381), `SUPPLEMENTAL-CODECS` for Dolby Vision
-//! profile 8 (RFC 8216bis), `RESOLUTION`, `FRAME-RATE`, `VIDEO-RANGE` and
+//! profile 8 (RFC 8216bis), `RESOLUTION`, `FRAME-RATE`, `VIDEO-RANGE`,
+//! `CLOSED-CAPTIONS=NONE` for video without captions in its frames, and
 //! the bandwidth. Media3 then gives a stream named `dvh1…` (or `hvc1…` with
 //! a `dvh1…` supplemental codec and the matching range) to a Dolby Vision
 //! decoder, and with every codec named it prepares without downloading a
@@ -23,6 +24,13 @@ pub struct Variant {
     pub frame_rate: Option<f64>,
     /// `SDR`, `PQ` or `HLG`.
     pub video_range: Option<&'static str>,
+    /// The probe found no CEA-608/708 captions in the video:
+    /// `CLOSED-CAPTIONS=NONE`, as Apple's HLS authoring rules ask, so AVKit
+    /// offers no captions menu of its own beside the player's subtitles.
+    /// Captions in the frames (a TV recording's) survive copying and
+    /// encoding, so a video with them, or probed before probes said, says
+    /// nothing, and players look for them.
+    pub no_closed_captions: bool,
     /// Bits per second.
     pub average_bandwidth: u64,
     pub bandwidth: u64,
@@ -62,6 +70,7 @@ impl Variant {
             resolution: video.map(|(v, _)| (v.width, v.height)),
             frame_rate: video.and_then(|(_, src)| src?.frame_rate).filter(|f| *f > 0.0),
             video_range,
+            no_closed_captions: video.is_some_and(|(_, src)| src.and_then(|s| s.closed_captions) == Some(false)),
             average_bandwidth: average.round() as u64,
             bandwidth: peak.round() as u64,
         }
@@ -82,6 +91,9 @@ impl Variant {
         }
         if let Some(fps) = self.frame_rate {
             a.push(format!("FRAME-RATE={fps:.3}"));
+        }
+        if self.no_closed_captions {
+            a.push("CLOSED-CAPTIONS=NONE".into());
         }
         if let Some(range) = self.video_range {
             a.push(format!("VIDEO-RANGE={range}"));
@@ -352,6 +364,7 @@ mod tests {
                     dv_profile: dv.map(|d| d.0),
                     dv_level: dv.map(|d| d.1),
                     dv_bl_compat: dv.map(|d| d.2),
+                    closed_captions: Some(false),
                     ..Default::default()
                 },
                 MediaStream {
@@ -381,8 +394,24 @@ mod tests {
             text,
             "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-INDEPENDENT-SEGMENTS\n\
              #EXT-X-STREAM-INF:BANDWIDTH=85293600,AVERAGE-BANDWIDTH=43050000,CODECS=\"hvc1.2.4.L153.B0,ec-3\",\
-             RESOLUTION=3840x2160,FRAME-RATE=23.976,VIDEO-RANGE=PQ\nindex.m3u8\n"
+             RESOLUTION=3840x2160,FRAME-RATE=23.976,CLOSED-CAPTIONS=NONE,VIDEO-RANGE=PQ\nindex.m3u8\n"
         );
+    }
+
+    #[test]
+    fn video_with_captions_in_its_frames_leaves_them_to_be_found() {
+        let mut m = media(DynamicRange::Sdr, None);
+        // A probe from before probes said.
+        m.streams[0].closed_captions = None;
+        assert!(!stream_inf(video_out(true, None), &m).contains("CLOSED-CAPTIONS"));
+        m.streams[0].closed_captions = Some(false);
+        assert!(stream_inf(video_out(true, None), &m).contains(",CLOSED-CAPTIONS=NONE,"));
+        m.streams[0].closed_captions = Some(true);
+        assert!(!stream_inf(video_out(true, None), &m).contains("CLOSED-CAPTIONS"));
+        assert!(!stream_inf(video_out(false, None), &m).contains("CLOSED-CAPTIONS"));
+        // Audio alone has no video to carry them.
+        let text = master_playlist(&plan(None, Some(audio_out(false, AudioCodec::Aac))), &m);
+        assert!(!text.contains("CLOSED-CAPTIONS"), "{text}");
     }
 
     #[test]

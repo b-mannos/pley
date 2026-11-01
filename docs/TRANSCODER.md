@@ -428,7 +428,9 @@ Playlists and segments:
 - `GET /v1/jobs/{id}/master.m3u8` lists the job's own variant
   (`index.m3u8`), then its smaller renditions (`v1.m3u8`…), each with
   `CODECS`, `SUPPLEMENTAL-CODECS`, `RESOLUTION`, `FRAME-RATE`,
-  `VIDEO-RANGE` and its bandwidth. Capability `hls_master_playlist`.
+  `VIDEO-RANGE`, `CLOSED-CAPTIONS=NONE` when the probe found no captions
+  in the source video's frames (`MediaStream.closed_captions` false), and its
+  bandwidth. Capability `hls_master_playlist`.
 - `GET /v1/jobs/{id}/v{k}.m3u8` and `v{k}-{n}.ts`: rendition `k`'s playlist
   and segments. Capability `hls_variants`.
 
@@ -1034,6 +1036,13 @@ and records:
 
 Both are absent when the frames can't be read, and for other streams. The
 job's video plan repeats them (`dv_el`, `hdr10plus`).
+
+The probe of every video reads the same first frames' side data for closed
+captions (CEA-608/708, "ATSC A53 Part 4 Closed Captions") and records
+`MediaStream.closed_captions`, which master playlists turn into
+`CLOSED-CAPTIONS=NONE` when it is false. An ffprobe before 7.1 says it in
+the stream itself, and then the frames aren't read for it. It is absent
+when the frames can't be read.
 
 ### Subtitle extraction
 

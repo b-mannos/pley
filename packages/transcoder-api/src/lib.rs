@@ -188,6 +188,11 @@ pub struct MediaStream {
     /// presentation time (Matroska, MPEG-TS).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub has_b_frames: Option<bool>,
+    /// The video carries CEA-608/708 closed captions in its frames, as
+    /// ffprobe finds them (`closed_captions`). Absent in older probes,
+    /// which say nothing either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_captions: Option<bool>,
     /// The frames are stored out of display order (B-frames), but the file
     /// gives each one the time it is decoded at as the time it is shown (an
     /// MP4 muxed from a raw stream, without composition offsets). Players
