@@ -13,6 +13,12 @@ describes how they are made.
 - Pley for LG TV is free software under the GNU Affero General Public
   License, version 3 (`AGPL-3.0-only`, `LICENSE`).
 
+### Fixed
+
+- Live TV's guide says Today, Tomorrow and Yesterday on the days daylight
+  saving starts or ends too: a programme just after midnight tomorrow
+  showed its date, or the day after tomorrow showed as Tomorrow.
+
 ## [0.1.0] - 2026-10-30
 
 ### Security

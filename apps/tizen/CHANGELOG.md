@@ -55,6 +55,9 @@ describes how they are made.
   only on a network the TV measured below 1.5 times the file's bitrate in
   the last 2 minutes, or, where it measured nothing, the second such wait
   within 5 minutes.
+- Live TV's guide says Today, Tomorrow and Yesterday on the days daylight
+  saving starts or ends too: a programme just after midnight tomorrow
+  showed its date, or the day after tomorrow showed as Tomorrow.
 
 ## [0.0.1] - 2026-10-29
 
