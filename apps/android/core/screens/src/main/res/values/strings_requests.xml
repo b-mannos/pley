@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-        Requests and Discover, for the phone and the TV.
+        Requests and Discover, on phones and tablets.
         Buttons say Request; running text says "ask for". Limits are "per
         7 days" or "for now", never "this week".
     -->

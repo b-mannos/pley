@@ -83,7 +83,7 @@ sealed interface DiscoverSearch {
 }
 
 /**
- * Discover, for the phone and the TV: a hero for the
+ * Discover, on phones and tablets: a hero for the
  * first trending title, then rows (Trending this week, Popular movies,
  * Popular shows, Coming to cinemas, Popular anime) read as they come into
  * view ([showRow]), page by page until a screenful and then as they
@@ -404,7 +404,7 @@ class DiscoverViewModel(
         /** Keeps loading this long after the page stops showing. */
         const val STOP_MS = 5_000L
 
-        /** A row's screenful: what fills a phone's or a TV's width, and a little more. */
+        /** A row's screenful: what fills a phone's or a tablet's width, and a little more. */
         const val ROW_SCREENFUL = 12
 
         /** Search's screenful: a grid of posters. */

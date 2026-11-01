@@ -19,9 +19,8 @@ import app.pley.android.model.TitleKind
 import app.pley.android.model.TitleStatus
 
 /*
- * Requests' rules, as every client keeps them:
- * pure functions of what the server answered, shared by the phone and the
- * TV. Their words are RequestTexts'.
+ * Requests' rules, as every client keeps them: pure functions of what the
+ * server answered. Their words are RequestTexts'.
  */
 
 // ---------------------------------------------------------------- badges
@@ -393,10 +392,10 @@ private fun range(start: Int, end: Int): String = if (start == end) "$start" els
 
 /**
  * What a request card offers: exactly the server's actions, in its order,
- * those this app doesn't know left out. Where [dialogs] can be shown
- * (phones), Approve comes with Approve… (the dialog for profile, folder
- * and seasons) and Decline asks for an optional reason in its dialog;
- * elsewhere (TVs) Decline comes with "Decline with a reason…".
+ * those this app doesn't know left out. Where [dialogs] can be shown,
+ * Approve comes with Approve… (the dialog for profile, folder and seasons)
+ * and Decline asks for an optional reason in its dialog; elsewhere Decline
+ * comes with "Decline with a reason…".
  */
 enum class CardAction { Withdraw, Remove, StopFollowing, Approve, ApproveWith, TryAgain, Decline, DeclineWithReason, Handled, Delete, AskAgain }
 
