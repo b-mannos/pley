@@ -42,6 +42,9 @@ describes how they are made.
 
 ### Fixed
 
+- Live TV's guide says Today, Tomorrow and Yesterday on the days daylight
+  saving starts or ends too: a programme just after midnight tomorrow
+  showed its date, or the day after tomorrow showed as Tomorrow.
 - Each video is promised Dolby Vision only where the display mode it plays
   in shows it: a trailer, or a film once frame rate matching has given up,
   stays in the mode in use. Dolby Vision turned off in the system's

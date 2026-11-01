@@ -122,11 +122,28 @@ class WhatsOnTest(unittest.TestCase):
         self.assertEqual(livetv.name(dict(NEWS, number=None)), "Pley News HD")
 
     def test_days(self):
+        # Times on local dates, not NOW ± 24 hours, so the test holds in any
+        # zone on any day: a day is 23 or 25 hours when daylight saving
+        # starts or ends. Every day of a year covers the zone's changes.
+        today = time.localtime(NOW)
+
+        def at(days, hour, minute):
+            return time.mktime((today.tm_year, today.tm_mon, today.tm_mday + days, hour, minute, 0, 0, 0, -1))
+
         self.assertEqual(livetv.day(NOW, NOW), "Today")
-        self.assertEqual(livetv.day(NOW + 86_400, NOW), "Tomorrow")
-        self.assertEqual(livetv.day(NOW - 86_400, NOW), "Yesterday")
-        later = time.localtime(NOW + 3 * 86_400)
-        self.assertEqual(livetv.day(NOW + 3 * 86_400, NOW), "%s %d %s" % (livetv.ENGLISH_DAYS[later.tm_wday], later.tm_mday, livetv.ENGLISH_MONTHS[later.tm_mon - 1]))
+        for days in range(366):
+            for now in (at(days, 0, 30), at(days, 23, 30)):
+                with self.subTest(now=time.ctime(now)):
+                    self.assertEqual(livetv.day(at(days, 0, 1), now), "Today")
+                    self.assertEqual(livetv.day(at(days, 23, 59), now), "Today")
+                    self.assertEqual(livetv.day(at(days + 1, 0, 1), now), "Tomorrow")
+                    self.assertEqual(livetv.day(at(days + 1, 23, 59), now), "Tomorrow")
+                    self.assertEqual(livetv.day(at(days - 1, 0, 1), now), "Yesterday")
+                    self.assertEqual(livetv.day(at(days - 1, 23, 59), now), "Yesterday")
+                    self.assertNotIn(livetv.day(at(days + 2, 0, 1), now), ("Today", "Tomorrow"))
+                    self.assertNotIn(livetv.day(at(days - 2, 23, 59), now), ("Today", "Yesterday"))
+        later = time.localtime(at(3, 0, 1))
+        self.assertEqual(livetv.day(at(3, 0, 1), NOW), "%s %d %s" % (livetv.ENGLISH_DAYS[later.tm_wday], later.tm_mday, livetv.ENGLISH_MONTHS[later.tm_mon - 1]))
 
     def test_what_kodis_info_says(self):
         text = livetv.plot(NEWS, NOW)

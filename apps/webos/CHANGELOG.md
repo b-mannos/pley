@@ -32,6 +32,9 @@ describes how they are made.
 
 ### Fixed
 
+- Live TV's guide says Today, Tomorrow and Yesterday on the days daylight
+  saving starts or ends too: a programme just after midnight tomorrow
+  showed its date, or the day after tomorrow showed as Tomorrow.
 - A server answering that it can't do something right now (the
   transcoder isn't running, a file can't be read) has its own message
   shown, instead of "Can't reach your server", and the TV doesn't go

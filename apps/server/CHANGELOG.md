@@ -99,6 +99,9 @@ describes how they are made.
   HDR10…) of the version picked, not always the first version's.
 - The web app's sidebar shows Live TV only once it has channels, for
   administrators too; they set it up in Settings → Live TV.
+- Live TV's guide says Today, Tomorrow and Yesterday on the days daylight
+  saving starts or ends too: a programme just after midnight tomorrow
+  showed its date, or the day after tomorrow showed as Tomorrow.
 
 ## [0.1.0] - 2026-10-30
 
