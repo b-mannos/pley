@@ -187,7 +187,9 @@ sub onListRow(event as object)
     end if
     if not answer.ok
         list.state = "shown"
-        if uiFailed(answer) then return
+        ' The server away: the page in view gives way to the screen that
+        ' says so, a covered one's row offers Try again.
+        if uiFailed(answer) and (m.top.active or answer.error <> "network") then return
         problem = reqProblem(answer, reqSummaryOf(m.top.requestSummary).manage)
         if problem <> invalid and not m.answered
             showProblem(problem)
