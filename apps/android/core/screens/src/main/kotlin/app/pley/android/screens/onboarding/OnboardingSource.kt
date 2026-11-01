@@ -20,12 +20,14 @@ import app.pley.android.data.SessionRepository
 import app.pley.android.network.Discovery
 import app.pley.android.network.LocalNetworkAccess
 import app.pley.android.network.NetworkSweep
+import app.pley.android.network.ProbeResult
 import app.pley.android.network.ServerProbe
 import app.pley.android.screens.ScreensGraph
 import app.pley.android.screens.screensGraph
 import java.net.Inet4Address
 import java.util.ServiceLoader
 import java.util.concurrent.Callable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -103,6 +105,24 @@ fun CreationExtras.onboardingSource(): OnboardingSource {
     val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY]
         ?: error("ViewModels are made with the Application in their CreationExtras")
     return OnboardingSource.of(screensGraph(), app)
+}
+
+/**
+ * Whether [server] requires two-step sign-in (GET /api/server), for the
+ * sign-in screens to say so: false when it says nothing of it or can't be
+ * asked. A server at home isn't asked before the system allows the home
+ * network: nothing here asks the system for that.
+ */
+internal suspend fun OnboardingSource.twoStepRequired(server: String): Boolean {
+    if (localNetwork.missingFor(server).isNotEmpty()) return false
+    val answer = try {
+        probe.probe(server)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        return false
+    }
+    return answer is ProbeResult.Pley && answer.info.twoStepRequired
 }
 
 /**

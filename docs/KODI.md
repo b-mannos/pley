@@ -41,6 +41,9 @@ python apps/kodi/package.py        # dist/plugin.video.pley-<version>.zip
 
 - The add-on signs in only with a code, and gets a viewer's rights
   (`library play playlists profiles`).
+- When the server requires two-step sign-in, the screen with the code says
+  so under its notes. Someone who doesn't use it yet sets it up on the
+  phone or computer where they approve the code.
 - In a household of more than one profile, Kodi asks "Who's watching?" each
   time it starts. A PIN is typed in Kodi's number dialog and never kept.
 - The same server found at another address must be signed in to again,

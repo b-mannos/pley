@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AppWindow, ChevronRight, Laptop, Lock, LogOut, Plus, ShieldCheck, Smartphone, Trash2, UserPlus } from "lucide-react";
+import { AppWindow, ChevronRight, Laptop, Lock, LogOut, Plus, ShieldAlert, ShieldCheck, Smartphone, Trash2, UserPlus } from "lucide-react";
 import { appKeys, appLabel, scopesLabel, useSignOutUserApp, useUserApps } from "@/api/apps";
 import { errorMessage } from "@/api/client";
 import {
@@ -8,6 +8,7 @@ import {
   useDeleteUser,
   useLibraries,
   useResetUserTwoStep,
+  useServer,
   useSignOutEverywhere,
   useUpdateUser,
   useUserDevices,
@@ -26,6 +27,7 @@ import { cn } from "@/lib/cn";
 import { passwordProblem } from "@/lib/passwords";
 import { formatAgo } from "@/lib/format";
 import { useDocumentTitle, useOnChange } from "@/lib/hooks";
+import { mustSetUpTwoStep } from "@/lib/twoStep";
 
 const PIN_RE = /^\d{4,8}$/;
 
@@ -53,16 +55,26 @@ function SwitchRow({
   );
 }
 
-/** Two-step sign-in, which an administrator can turn off for someone who lost their phone and recovery codes. */
+/**
+ * Two-step sign-in, which an administrator can turn off for someone who lost
+ * their phone and recovery codes. When the server requires it, they are
+ * signed out everywhere, and set it up again at their next sign-in.
+ */
 function TwoStepReset({ user }: { user: User }) {
   const reset = useResetUserTwoStep();
+  const server = useServer();
   const toast = useToast();
   const [confirming, setConfirming] = useState(false);
+  const required = !!server.data?.two_step_required;
   return (
     <section className="flex items-center justify-between gap-3">
       <div>
         <h3 className="text-sm font-medium">Two-step sign-in</h3>
-        <p className="text-xs text-subtle">Signs in with a code from an authenticator app after the password.</p>
+        <p className="text-xs text-subtle">
+          {required
+            ? `Signs in with a code from an authenticator app after the password. Turning it off signs ${user.name} out everywhere, to set it up again at the next sign-in.`
+            : "Signs in with a code from an authenticator app after the password."}
+        </p>
       </div>
       {confirming ? (
         <div className="flex shrink-0 gap-1">
@@ -75,7 +87,12 @@ function TwoStepReset({ user }: { user: User }) {
             loading={reset.isPending}
             onClick={() =>
               reset.mutate(user.id, {
-                onSuccess: () => toast.success(`Two-step sign-in is off for ${user.name}`),
+                onSuccess: () =>
+                  toast.success(
+                    required
+                      ? `${user.name} is signed out, and sets up two-step sign-in again at the next sign-in`
+                      : `Two-step sign-in is off for ${user.name}`,
+                  ),
                 onError: (e) => toast.error(errorMessage(e)),
                 onSettled: () => setConfirming(false),
               })
@@ -543,6 +560,7 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
 
 function UserRow({ user, self, libraries, onOpen }: { user: User; self: boolean; libraries: ReturnType<typeof useLibraries>["data"]; onOpen: () => void }) {
   const age = ageBadge(user.max_age);
+  const server = useServer();
   return (
     <li>
       <button
@@ -572,6 +590,10 @@ function UserRow({ user, self, libraries, onOpen }: { user: User; self: boolean;
             {user.two_step ? (
               <Badge tone="success">
                 <ShieldCheck className="size-3" /> 2FA
+              </Badge>
+            ) : mustSetUpTwoStep(user, server.data) && !user.disabled ? (
+              <Badge tone="danger">
+                <ShieldAlert className="size-3" /> 2FA not set up
               </Badge>
             ) : null}
           </div>

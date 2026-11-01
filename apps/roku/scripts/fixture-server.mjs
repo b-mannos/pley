@@ -167,6 +167,8 @@ function detail(item, myList) {
 // for a token the server dropped.
 // The returned `down` makes the server stop answering, as when it's off;
 // `qr` false makes it answer 404 for QR codes, as an older one does;
+// `twoStep` makes GET /api/server say it requires two-step sign-in, which
+// it otherwise leaves out, as an older one does;
 // `playbackDelayMs` holds back the answers to POST /api/playback.
 export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
   const problems = [];
@@ -298,7 +300,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
 
     // Everything else needs the access token, in the header.
     if (!url.pathname.startsWith("/api/") || url.pathname === "/api/server") {
-      return json(200, { name: "Fixture", version: "0.1.0", setup_required: false, setup_code_required: false });
+      return json(200, { name: "Fixture", version: "0.1.0", setup_required: false, setup_code_required: false, ...(fixture.twoStep ? { two_step_required: true } : {}) });
     }
     const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     if (toRefuse.delete(url.pathname)) access.delete(bearer);
@@ -626,7 +628,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
     return json(404, { code: "not_found", message: `nothing at ${path}` });
   });
 
-  const fixture = { issuer: "", down: false, qr: true, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [],
+  const fixture = { issuer: "", down: false, qr: true, twoStep: false, playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [],
     household: [{ id: 1, name: "Anna", avatar_url: null, avatar_color: "#38bdf8", current: true, needs: "none" }, { id: 2, name: "Ben", avatar_url: null, avatar_color: "#f472b6", current: false, needs: "none" }],
     switched: [], subtitlesAdded: [], probed: false, networkTold: [], speedTests: [], problems, requests, progress, closed, close: () => server.close(),
     liveRecent: [2], liveBrowses: [], liveFavorites: [], liveFavoriteChanges: [], liveGuides: [], liveWatches: [], liveSessions: new Map(), livePlaylists: [], liveLeft: [] };

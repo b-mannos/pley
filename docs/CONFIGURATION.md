@@ -12,7 +12,8 @@ the code can claim a new server.
 
 `pley reset-password <user> [--admin]` resets a lost password. It asks for
 the new one (or reads it from standard input) and turns that account's
-two-step sign-in off.
+two-step sign-in off; on a server that requires it, it is set up again at
+the next sign-in.
 
 ## Options
 
