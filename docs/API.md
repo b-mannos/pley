@@ -2734,7 +2734,7 @@ interface SystemInfo {
     url: string | null;
     version: string | null;
     commit: string | null;
-    license: string | null;         // the transcoder's, as SPDX: "LicenseRef-Restricted"
+    license: string | null;         // the transcoder's, as SPDX: "AGPL-3.0-only"
     ffmpeg_version: string | null;
     encoders: string[];             // working video encoders: ["h264_nvenc", "libx264"]
     active_encoder: string | null;  // encoder new transcodes use with the current settings

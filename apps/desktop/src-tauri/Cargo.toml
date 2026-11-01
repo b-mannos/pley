@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Pley for Windows, macOS and Linux: a window on a Pley server's web app"
-license = "LicenseRef-Restricted"
+license = "AGPL-3.0-only"
 publish = false
 
 # A workspace of its own (see the root Cargo.toml): server builds and their
