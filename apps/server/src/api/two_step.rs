@@ -41,6 +41,9 @@ pub async fn status(State(state): State<AppState>, user: AuthUser) -> ApiResult<
 /// and takes a code from the current one (or a recovery code) as well, as
 /// turning it off does.
 pub async fn setup(State(state): State<AppState>, user: AuthUser, Json(body): Json<Confirm>) -> ApiResult<Json<Setup>> {
+    // Said before the code is checked: a recovery code would be spent on a
+    // secret the server can't make.
+    state.two_step.ready_to_set_up()?;
     confirm_password(&state, &user, body.password).await?;
     let replacing = state.two_step.is_on(user.id).await?;
     if replacing {

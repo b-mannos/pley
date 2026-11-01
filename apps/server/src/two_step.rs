@@ -198,6 +198,13 @@ impl TwoStep {
         self.key.is_some()
     }
 
+    /// Fails as [`TwoStep::begin`] would while authenticator apps can't be
+    /// set up here, for a caller to say so before it checks or spends
+    /// anything.
+    pub fn ready_to_set_up(&self) -> Result<(), AppError> {
+        self.key().map(|_| ())
+    }
+
     pub async fn is_on(&self, user_id: i64) -> sqlx::Result<bool> {
         sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM two_step WHERE user_id = ?)")
             .bind(user_id)
@@ -404,13 +411,20 @@ impl TwoStep {
             if failures >= MAX_FAILURES_IN_A_ROW {
                 return Err(AppError::TwoStep(LOCKED.into()));
             }
-            let secret = self.open(user_id, &sealed).ok_or_else(|| {
-                AppError::Unavailable(
+            let Some(secret) = self.open(user_id, &sealed) else {
+                // Without a key, no new app can be set up either: only fixing
+                // the key brings the codes back.
+                return Err(AppError::Unavailable(if self.key.is_none() {
+                    format!(
+                        "this server can't check authenticator codes until an administrator fixes its {KEY_FILE} \
+                         (its log says why): sign in with a recovery code meanwhile"
+                    )
+                } else {
                     "this server can't check your authenticator's codes any more (its key changed): sign in with a \
                      recovery code, then set up two-step sign-in again"
-                        .into(),
-                )
-            })?;
+                        .into()
+                }));
+            };
             match matching_step(&secret, entered, now()) {
                 Some(step) if step > last_step => {
                     // Once only, also against another sign-in with it right now.

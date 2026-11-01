@@ -556,6 +556,10 @@ passwords; after 100 in a row only a recovery code signs in.
   `code` too: a code from the current app or a recovery code, as turning
   it off does (`401 two_step` without a right one). Until the new secret's
   first code, the current app keeps working.
+- While the server can't use its `secret.key` (the log says why), `setup`
+  answers `503` before checking anything, so no recovery code is spent,
+  and codes from the authenticator app get `503` at sign-in: recovery
+  codes still sign in.
 - `POST /api/me/two-step` takes a code from the new secret within 30
   minutes, 5 tries (then `setup` again). It answers new recovery codes,
   shown once; after a move the old app's codes and the old recovery codes
