@@ -30,12 +30,13 @@ describes how they are made.
 - Requests in Pley's apps: they ask with the new `requests` scope, and an
   administrator's Pley apps approve and decline with `approvals`; an app
   signed in before is told to sign in again. Discover's pictures come
-  through the server at the size each screen draws them, kept for 30 days,
-  so no app contacts TMDB. Discover marks shows partly in a library, titles
-  declined lately, and each season's state; accounts with an age limit see
-  only titles within it. A library title's page can show its request
-  (`GET /api/items/{id}/request`). The request summary says what an account
-  may do and what is new for it, and apps hear when to fetch it again.
+  through the server at the size each screen draws them, kept for 30 days
+  and 256 MB at most, so no app contacts TMDB. Discover marks shows partly
+  in a library, titles declined lately, and each season's state; accounts
+  with an age limit see only titles within it. A library title's page can
+  show its request (`GET /api/items/{id}/request`). The request summary
+  says what an account may do and what is new for it, and apps hear when
+  to fetch it again.
 - Accounts made from an invitation with an age limit, or given one later,
   don't ask for titles until an administrator lets them; accounts that may
   not ask still see and withdraw their own requests.

@@ -230,6 +230,8 @@ Apps sign in on Pley's own page with OAuth 2.1.
   password and accounts with an age limit may not ask until an administrator
   allows it. An account that may not ask gets none of TMDB's pictures
   through the server but those of its own requests.
+- TMDB's pictures are fetched 8 at once, 10 MB each at most, and kept up
+  to 256 MB in all.
 
 ### The desktop app
 

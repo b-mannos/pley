@@ -2372,10 +2372,11 @@ An app's token without the route's scope is refused before all of it
   profiles w45 w185 h632, which counts as 421, stills w92 w185 w300), the
   largest above them, and TMDB's original from 2000; without `w` (or one
   that isn't a number), posters w342, backdrops w1280, profiles w185, stills
-  w300. Pley fetches each once however many ask at once, keeps it under
-  `cache/discover` (docs/STORAGE.md) and answers with `Cache-Control:
-  private, max-age=604800, immutable`. TMDB's "no such picture" is `404`,
-  believed for a day.
+  w300. Pley fetches each once however many ask at once, 8 pictures at a
+  time (past 256 being fetched or waiting, more answer `502` until some
+  are done), keeps them under `cache/discover` (docs/STORAGE.md), 256 MB
+  at most, and answers with `Cache-Control: private, max-age=604800,
+  immutable`. TMDB's "no such picture" is `404`, believed for a day.
 - **A library title's page** (`GET /api/items/{id}/request`): `404` for an
   item the account can't open, one that isn't a movie or show, or one TMDB
   doesn't know (Pley looks it up by TheTVDB's or IMDb's id where the item

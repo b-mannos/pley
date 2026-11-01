@@ -13,6 +13,8 @@ use bytes::Bytes;
 use dashmap::DashMap;
 use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
+use parking_lot::Mutex;
+use tokio::sync::Semaphore;
 
 /// From this width a client gets TMDB's original (none asks for that: their
 /// widths stop at 1920).
@@ -26,6 +28,14 @@ const MISSING_MAX: usize = 10_000;
 const MAX_BYTES: usize = 10 * 1024 * 1024;
 /// How long TMDB's picture server has to answer.
 const TIMEOUT: Duration = Duration::from_secs(20);
+/// Pictures fetched at once (each held whole until kept), and fetched or
+/// waiting to be at most: past that, more fail until some are done.
+const FETCHES_AT_ONCE: usize = 8;
+const FETCHES_MAX: usize = 256;
+/// What the pictures kept may take: past it, the oldest go, looked over
+/// once an hour at most, after a fetch.
+const CACHE_MAX_BYTES: u64 = 256 << 20;
+const PRUNED_EVERY: Duration = Duration::from_secs(3600);
 
 /// What a picture shows, each with the sizes TMDB makes of it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,9 +141,14 @@ struct Inner {
     dir: PathBuf,
     /// `<size>/<file>` TMDB said it doesn't have, and when.
     missing: DashMap<String, Instant>,
-    /// Fetches under way, by `<size>/<file>`, with their numbers.
+    /// Fetches under way or waiting for [`Self::fetches`], by
+    /// `<size>/<file>`, with their numbers.
     fetching: DashMap<String, (u64, Fetch)>,
     next: AtomicU64,
+    /// [`FETCHES_AT_ONCE`].
+    fetches: Semaphore,
+    /// When the pictures kept were last looked over.
+    pruned: Mutex<Option<Instant>>,
 }
 
 impl Pictures {
@@ -152,12 +167,15 @@ impl Pictures {
                 missing: DashMap::new(),
                 fetching: DashMap::new(),
                 next: AtomicU64::new(0),
+                fetches: Semaphore::new(FETCHES_AT_ONCE),
+                pruned: Mutex::new(None),
             }),
         }
     }
 
     /// `file` (a [`valid_file`]) at `size` (one of [`Picture::size`]'s):
-    /// from the cache, or from TMDB once however many ask for it at once.
+    /// from the cache, or from TMDB once however many ask for it at once,
+    /// [`FETCHES_AT_ONCE`] pictures at a time.
     pub async fn get(&self, size: &'static str, file: &str) -> Result<Bytes, Unavailable> {
         let inner = &self.inner;
         let path = inner.dir.join(size).join(file);
@@ -169,6 +187,10 @@ impl Pictures {
             return Err(Unavailable::Missing);
         }
         let Some(base) = &inner.base else { return Err(Unavailable::Failed) };
+        if inner.fetching.len() >= FETCHES_MAX && !inner.fetching.contains_key(&key) {
+            tracing::debug!("a TMDB picture: {FETCHES_MAX} are being fetched or waiting to be already");
+            return Err(Unavailable::Failed);
+        }
         let fetch = inner
             .fetching
             .entry(key.clone())
@@ -178,11 +200,17 @@ impl Pictures {
                 // On its own: it goes on to the cache when nobody waits any
                 // more (a client that scrolled on).
                 let task = tokio::spawn(async move {
-                    let fetched = download(&shared.http, &url, &path).await;
+                    let fetched = {
+                        let _turn = shared.fetches.acquire().await;
+                        download(&shared.http, &url, &path).await
+                    };
                     if fetched == Err(Unavailable::Missing) {
                         shared.remember_missing(&key);
                     }
                     shared.fetching.remove_if(&key, |_, (other, _)| *other == id);
+                    if fetched.is_ok() {
+                        shared.prune();
+                    }
                     fetched
                 });
                 let fetch = async move { task.await.unwrap_or(Err(Unavailable::Failed)) };
@@ -195,6 +223,27 @@ impl Pictures {
 }
 
 impl Inner {
+    /// Lets the oldest pictures kept go while they take more than
+    /// [`CACHE_MAX_BYTES`], in the background; once an hour at most.
+    fn prune(&self) {
+        {
+            let mut last = self.pruned.lock();
+            if last.is_some_and(|at| at.elapsed() < PRUNED_EVERY) {
+                return;
+            }
+            *last = Some(Instant::now());
+        }
+        let dir = self.dir.clone();
+        tokio::spawn(async move {
+            // However old: Store::clean removes those older than 30 days.
+            match crate::util::blocking(move || crate::util::prune(&dir, Duration::MAX, CACHE_MAX_BYTES)).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!("{n} of Discover's pictures let go"),
+                Err(err) => tracing::warn!("looking over Discover's pictures failed: {err:#}"),
+            }
+        });
+    }
+
     fn remember_missing(&self, key: &str) {
         if self.missing.len() >= MISSING_MAX {
             self.missing.retain(|_, at| at.elapsed() < MISSING_FOR);
@@ -293,5 +342,51 @@ mod tests {
         assert!(!valid_file(&format!("{}.jpg", "a".repeat(65))));
         assert_eq!(content_type(&[0x89, b'P', b'N', b'G', 13, 10]), "image/png");
         assert_eq!(content_type(&[0xFF, 0xD8, 0xFF]), "image/jpeg");
+    }
+
+    #[tokio::test]
+    async fn fetches_wait_their_turn_up_to_a_limit() {
+        use std::sync::atomic::AtomicUsize;
+        // A picture server that holds every answer until let go.
+        let (go, gate) = tokio::sync::watch::channel(false);
+        let asked = Arc::new(AtomicUsize::new(0));
+        let answer = {
+            let asked = asked.clone();
+            move || {
+                let (asked, mut gate) = (asked.clone(), gate.clone());
+                async move {
+                    asked.fetch_add(1, Ordering::SeqCst);
+                    let _ = gate.wait_for(|go| *go).await;
+                    let jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F', 0, 1];
+                    ([(axum::http::header::CONTENT_TYPE, "image/jpeg")], jpeg)
+                }
+            }
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, axum::Router::new().fallback(answer)).await.unwrap() });
+        let dir = tempfile::tempdir().unwrap();
+        let pictures = Arc::new(Pictures::new(dir.path().to_owned(), Some(base)));
+
+        let fetches: Vec<_> = (0..FETCHES_MAX)
+            .map(|n| {
+                let pictures = pictures.clone();
+                tokio::spawn(async move { pictures.get("w92", &format!("p{n}.jpg")).await })
+            })
+            .collect();
+        let started = async {
+            while pictures.inner.fetching.len() < FETCHES_MAX || asked.load(Ordering::SeqCst) < FETCHES_AT_ONCE {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(10), started).await.expect("every fetch under way");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(asked.load(Ordering::SeqCst), FETCHES_AT_ONCE, "the others wait their turn");
+        assert_eq!(pictures.get("w92", "more.jpg").await, Err(Unavailable::Failed), "too many waiting");
+        go.send(true).unwrap();
+        for fetch in fetches {
+            assert!(fetch.await.unwrap().is_ok());
+        }
+        assert_eq!(asked.load(Ordering::SeqCst), FETCHES_MAX);
     }
 }
