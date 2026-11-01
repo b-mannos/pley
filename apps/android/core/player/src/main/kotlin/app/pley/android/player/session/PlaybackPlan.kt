@@ -39,10 +39,13 @@ object PlaybackPlan {
     /**
      * [caps] as the server is told of one video: without the screen's Dolby
      * Vision when the engine says the display mode it plays in doesn't show
-     * it ([dolbyVisionShown] `false`).
+     * it ([dolbyVisionShown] `false`), and without passthrough when the
+     * sound must be [decoded] here: the server converts what isn't.
      */
-    fun capsFor(caps: CapsSnapshot?, dolbyVisionShown: Boolean?): CapsSnapshot? =
-        if (dolbyVisionShown == false) caps?.withoutDolbyVisionScreen() else caps
+    fun capsFor(caps: CapsSnapshot?, dolbyVisionShown: Boolean?, decoded: Boolean = false): CapsSnapshot? {
+        val shown = if (dolbyVisionShown == false) caps?.withoutDolbyVisionScreen() else caps
+        return if (decoded) shown?.withoutPassthrough() else shown
+    }
 
     /** The file to play: the one asked for, else the one that plays best here, else the first. */
     fun file(item: ItemDetail, requested: Long?, caps: CapsSnapshot?, policy: PlaybackCapsPolicy): MediaFile? {

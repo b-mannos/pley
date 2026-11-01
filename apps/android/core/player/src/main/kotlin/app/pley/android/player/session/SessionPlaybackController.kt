@@ -113,8 +113,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   the playhead moved by the subtitle offset; a file's own text tracks
  *   move through the server's WebVTT too while an offset is set.
  * - **Speed and audio delay**, for this title only: the engine's
- *   ([EngineLink.setSpeed], [EngineLink.setAudioDelay]), said unavailable
- *   while the sound can't follow (passed through, or tunneled).
+ *   ([EngineLink.setSpeed], [EngineLink.setAudioDelay]), with the sound
+ *   decoded here and untunneled while they need it ([EngineLink.setSoundNeeds]).
+ *   A stream whose sound nothing here decodes has the server convert it;
+ *   a download's plays at 1×, as does a stream the server can't convert.
  * - **Find subtitles…**: the server's search online for the file playing;
  *   one picked is added on the server and shown as any subtitle file.
  * - **Sleep timer**, and a session the server stopped: it says so and
@@ -188,6 +190,9 @@ class SessionPlaybackController(
     /** A download the server made plays: its file holds the subtitle tracks a conversion keeps. */
     private var playingConverted = false
 
+    /** A download plays, with no session on the server. */
+    private var playingLocal = false
+
     // ---------------------------------------------------------------- the session
 
     private val sessionState = MutableStateFlow<ServerPlaybackSession?>(null)
@@ -255,6 +260,16 @@ class SessionPlaybackController(
     /** The speed and the audio delay of this title. */
     private var speed = 1f
     private var audioDelayMs = 0L
+
+    /**
+     * Another speed than 1× while the sound goes to a receiver as it is and
+     * nothing here decodes it: sessions are asked for with this device's
+     * decoders only, so the server converts the sound.
+     */
+    private var serverDecodes = false
+
+    /** The session playing was asked for with this device's decoders only ([serverDecodes]). */
+    private var playingConvertedSound = false
     private var searchJob: Job? = null
     private var seekReport: Job? = null
 
@@ -397,15 +412,17 @@ class SessionPlaybackController(
      * The previous run of this is cancelled (a new choice wins). [alongside]:
      * a quality, track or Automatic change while it plays, made ready beside
      * the session playing ([beginBeside]). Recoveries from errors and stalls
-     * start at once: the stream playing is what failed.
+     * start at once: the stream playing is what failed. [refused], for a
+     * change the session playing can do without: the server can't make the
+     * next one beside it, and it plays on.
      */
-    private fun restart(atMs: Long, alongside: Boolean = false) {
+    private fun restart(atMs: Long, alongside: Boolean = false, refused: (() -> Unit)? = null) {
         if (stopped) return
         sessionJob?.cancel()
         startJob?.cancel()
         sessionJob = scope.launch {
             try {
-                begin(atMs, alongside)
+                begin(atMs, alongside, refused)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -414,13 +431,13 @@ class SessionPlaybackController(
         }
     }
 
-    private suspend fun begin(atMs: Long, alongside: Boolean = false) {
+    private suspend fun begin(atMs: Long, alongside: Boolean = false, refused: (() -> Unit)? = null) {
         val detail = item ?: return
         val chosen = file ?: return fail(texts.noFile, canRetry = false)
         val local = localFile(chosen.id)?.takeIf { recovery.fallbackMode == null && !streamingPicked }
         // A change while the media shows: the session playing plays on while the next one gets ready.
         val playing = session?.takeIf { alongside && local == null && link != null && mediaShown && !ended && ui.value.phase !is PlayerPhase.Error }
-        if (playing != null) return beginBeside(playing, detail, chosen, atMs)
+        if (playing != null) return beginBeside(playing, detail, chosen, atMs, refused)
 
         // The session before ends first ("stopped", then DELETE), unless the server is slow to say so.
         if (endSession(atMs)) withTimeoutOrNull(END_WAIT_MS) { env.reporter.flush() }
@@ -445,7 +462,7 @@ class SessionPlaybackController(
         } catch (_: Exception) {
             null
         }
-        fileCaps = PlaybackPlan.capsFor(caps, dolbyVision)
+        fileCaps = PlaybackPlan.capsFor(caps, dolbyVision, decoded = serverDecodes)
     }
 
     /**
@@ -455,9 +472,18 @@ class SessionPlaybackController(
      * ([StreamWarmer]), so the transcoder makes its first segment; then the
      * player moves over from where [playing] got to, its last picture kept
      * meanwhile ([PlayerUiState.handoff]). With no transcode free for two at
-     * once (503) it moves as before: [playing] ends first.
+     * once (503) it moves as before: [playing] ends first. A change [playing]
+     * can do without ([refused]) is dropped instead, and [playing] plays on,
+     * when the server can't make it, or has no transcode free that ending
+     * [playing] would give back (it plays the file as it is).
      */
-    private suspend fun beginBeside(playing: ServerPlaybackSession, detail: ItemDetail, chosen: MediaFile, atMs: Long) {
+    private suspend fun beginBeside(
+        playing: ServerPlaybackSession,
+        detail: ItemDetail,
+        chosen: MediaFile,
+        atMs: Long,
+        refused: (() -> Unit)? = null,
+    ) {
         val token = Any()
         preparing = token
         // The stall watch starts over: the next session is on its way.
@@ -466,8 +492,16 @@ class SessionPlaybackController(
             judgeDolbyVision(detail, chosen)
             val started = try {
                 startSession(detail, chosen, choicesAt(detail, chosen, atMs), keepPrevious = true)
-            } catch (e: ApiException) {
-                if (e.status != NO_TRANSCODE_FREE) {
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                val noneFree = e is ApiException && e.status == NO_TRANSCODE_FREE
+                if (refused != null && !(noneFree && playing.info.method != PlaybackMethod.Direct)) {
+                    refused()
+                    return
+                }
+                if (e !is ApiException) throw e
+                if (!noneFree) {
                     // As when the session before ended first: it ends, and the screen says what failed.
                     lastPositionMs = livePosition()
                     endSession(lastPositionMs)
@@ -573,6 +607,8 @@ class SessionPlaybackController(
     private fun loadSession(detail: ItemDetail, chosen: MediaFile, started: ServerPlaybackSession, atMs: Long) {
         sessionState.value = started
         live = null
+        playingLocal = false
+        playingConvertedSound = serverDecodes
         val info = started.info
         // Automatic: the track the server chose plays, switched to by the engine in direct play.
         if (audio == null) audio = PlaybackPlan.playedAudio(chosen, info.audioIndex)
@@ -589,6 +625,8 @@ class SessionPlaybackController(
                 canPlayOriginal = canPlayOriginal(),
                 durationMs = info.durationMs.takeIf { d -> d > 0 } ?: it.durationMs,
                 canFindSubtitles = true,
+                // A download's sound kept the speed at 1×: the server can convert this one's.
+                speedNote = null,
             )
         }
         publishChoices()
@@ -646,6 +684,8 @@ class SessionPlaybackController(
         )
         sessionState.value = ServerPlaybackSession(LocalReportsApi(env.api, env.local), detail.id, info, env.reporter)
         live = null
+        playingLocal = true
+        playingConvertedSound = false
         ui.update {
             it.copy(
                 method = texts.downloaded,
@@ -975,7 +1015,7 @@ class SessionPlaybackController(
         val now = env.now()
         val reconnecting = engineLink.reconnecting
         if (reconnecting != ui.value.reconnecting) ui.update { it.copy(reconnecting = reconnecting) }
-        audioOutChanged(engineLink.audioOut)
+        if (engineLink.soundUndecodable) soundUndecodable()
         val moving = mediaShown && engineLink.status == EngineStatus.Ready && engineLink.playWhenReady && !ended
         if (mediaShown && !ended) {
             val pos = engineLink.positionMs
@@ -1269,6 +1309,8 @@ class SessionPlaybackController(
         audioPicked = true
         saveStreams()
         publishChoices()
+        // A download's other track may be one this device decodes: its speed can be tried again.
+        if (playingLocal && ui.value.speedNote != null) ui.update { it.copy(speedNote = null) }
         val s = session ?: return
         val engineLink = link
         if (!s.info.hls && engineLink != null && PlaybackPlan.audioPlaysHere(chosen, caps)) {
@@ -1322,14 +1364,26 @@ class SessionPlaybackController(
         this.speed = wanted
         link?.setSpeed(wanted)
         ui.update { it.copy(speed = wanted) }
+        if (wanted == 1f && serverDecodes) {
+            // Back at 1×: the sound as the file has it, from a session made ready beside this one.
+            serverDecodes = false
+            soundNeeds(reload = false)
+            restart(livePosition(), alongside = true)
+        } else {
+            soundNeeds(reload = true)
+            // The media may load again where it is for its sound (decoded, or passed through again): that wait is no play issue.
+            struggle.reset()
+            autoQuality.jumped()
+        }
     }
 
     override fun setAudioDelay(delayMs: Long) {
-        if (closed || stopped || ui.value.audioDelayNote != null) return
+        if (closed || stopped) return
         val moved = AudioDelays.clamp(delayMs)
         if (moved == audioDelayMs) return
         audioDelayMs = moved
         link?.setAudioDelay(moved)
+        soundNeeds(reload = true)
         // The picture jumps to the sound's new place: that wait or those dropped frames are no play issue.
         struggle.reset()
         autoQuality.jumped()
@@ -1343,24 +1397,43 @@ class SessionPlaybackController(
     }
 
     /**
-     * The sound's way out, looked at every tick: passed through, it plays
-     * at its own speed (the speed goes back to 1×); tunneled, the TV keeps
-     * the picture with it, and neither the speed nor the delay applies.
+     * What the speed and the audio delay need of the sound, told to the
+     * engine: decoded here for another speed than 1×, untunneled for any
+     * speed or delay. [reload]: the media playing follows at once.
      */
-    private fun audioOutChanged(out: AudioOut) {
-        val speedNote = when (out) {
-            AudioOut.Passthrough -> texts.speedPassthrough
-            AudioOut.Tunneled -> texts.tunneled
-            AudioOut.Decoded -> null
+    private fun soundNeeds(reload: Boolean) {
+        link?.setSoundNeeds(decoded = speed != 1f, untunneled = speed != 1f || audioDelayMs != 0L, reload = reload)
+    }
+
+    /**
+     * Another speed than 1×, while the sound goes to a receiver as it is
+     * and nothing here decodes it ([EngineLink.soundUndecodable]): a stream
+     * is asked for again with this device's decoders only, made ready
+     * beside the one playing, so the server converts the sound and the
+     * video stays as it is. A download has no server to ask: it plays at 1×,
+     * as does a stream the server can't make, or whose sound it still sends
+     * as it is (its file played as it is), and the speed says why.
+     */
+    private fun soundUndecodable() {
+        if (speed == 1f) return
+        when {
+            playingLocal -> speedBack(texts.speedUndecodable)
+            // Until the session asked for so plays, the one before still passes its sound through.
+            serverDecodes -> if (playingConvertedSound) speedBack(texts.speedUnconverted)
+            else -> {
+                serverDecodes = true
+                restart(livePosition(), alongside = true, refused = { speedBack(texts.speedUnconverted) })
+            }
         }
-        val delayNote = if (out == AudioOut.Tunneled) texts.tunneled else null
-        val s = ui.value
-        if (speedNote == s.speedNote && delayNote == s.audioDelayNote) return
-        if (speedNote != null && speed != 1f) {
-            speed = 1f
-            link?.setSpeed(1f)
-        }
-        ui.update { it.copy(speedNote = speedNote, audioDelayNote = delayNote, speed = speed) }
+    }
+
+    /** The speed back at 1×, [note] saying why: the sound plays as it is, at its own speed. */
+    private fun speedBack(note: String) {
+        speed = 1f
+        serverDecodes = false
+        link?.setSpeed(1f)
+        soundNeeds(reload = true)
+        ui.update { it.copy(speed = 1f, speedNote = note) }
     }
 
     override fun searchSubtitles() {
@@ -1703,8 +1776,11 @@ class SessionPlaybackController(
         // Speed and audio delay are this title's: the next one plays as it is.
         speed = 1f
         audioDelayMs = 0
+        serverDecodes = false
         link?.setSpeed(1f)
         link?.setAudioDelay(0)
+        // The media playing goes: the next one's sound goes out as it would.
+        soundNeeds(reload = false)
         searchJob?.cancel()
         credits.reset()
         guardMode = null
@@ -1728,8 +1804,6 @@ class SessionPlaybackController(
                 title = it.title,
                 positionMs = req.startMs ?: 0,
                 sleep = it.sleep,
-                speedNote = it.speedNote,
-                audioDelayNote = it.audioDelayNote,
             )
         }
         sessionJob?.cancel()

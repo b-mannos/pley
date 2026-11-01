@@ -17,12 +17,14 @@
   <ReadMe>https://github.com/pley-media-server/pley/blob/master/deploy/unraid/README.md</ReadMe>
   <Overview>Pley: your movies, shows and music, and live TV, streamed to the web, phones, TVs, Kodi and Roku. It plays files as they are when a device can, and transcodes on the GPU when it can't (Intel Quick Sync, AMD, NVIDIA NVENC), HDR tone mapping included.[br][br]Once it has started, open the WebUI and create the administrator account with the setup code from Pley's log (the Pley icon, Logs).</Overview>
   <Category>MediaServer:Video MediaServer:Music</Category>
+  <ExtraSearchTerms>plex jellyfin emby iptv m3u xmltv</ExtraSearchTerms>
   <WebUI>http://[IP]:[PORT:7539]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/pley-media-server/pley/master/deploy/unraid/pley.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/pley-media-server/pley/master/apps/web/public/icon-512.png</Icon>
   <!-- /dev/shm for transcoding in memory (Settings, Transcoder). -->
   <ExtraParams>--shm-size=2g --security-opt=no-new-privileges</ExtraParams>
   <PostArgs/>
+  <MinVer>6.12</MinVer>
   <Requires>**Hardware transcoding** (optional). Intel or AMD: add a Device, `/dev/dri`. NVIDIA: the Nvidia Driver plugin, `--runtime=nvidia` in Extra Parameters, and the GPU's UUID in NVIDIA GPU.</Requires>
   <Config Name="Web UI" Target="7539" Default="7539" Mode="tcp" Description="The web app, and the address the apps connect to." Type="Port" Display="always" Required="true" Mask="false">7539</Config>
   <Config Name="Config" Target="/config" Default="/mnt/user/appdata/pley" Mode="rw" Description="Pley's database, artwork and caches: the only folder it writes. Back it up." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/pley</Config>

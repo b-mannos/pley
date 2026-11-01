@@ -35,6 +35,15 @@ data class CapsSnapshot(
             details = details.copy(screenHdrTypes = details.screenHdrTypes - DynamicRange.DolbyVision),
         )
     }
+
+    /**
+     * This snapshot with no sound sent to a receiver as it is: the server
+     * copies what the device decodes and converts the rest to that.
+     */
+    fun withoutPassthrough(): CapsSnapshot {
+        if (report.audioPassthrough.isNullOrEmpty()) return this
+        return copy(report = report.copy(audioCodecs = report.audioDecode ?: report.audioCodecs, audioPassthrough = emptyList()))
+    }
 }
 
 /** The parts of a probe the player and Diagnostics read, besides the report. */

@@ -73,11 +73,10 @@ internal fun SyncControl(offsetMs: Long, onChange: (Long) -> Unit) {
 
 /**
  * The audio page's delay: the sound later (→) or earlier (←) than the
- * picture in 50 ms steps, ±5 s, with Reset; [note] says why it can't move.
+ * picture in 50 ms steps, ±5 s, with Reset.
  */
 @Composable
-internal fun AudioDelayControl(delayMs: Long, note: String?, onChange: (Long) -> Unit) {
-    val enabled = note == null
+internal fun AudioDelayControl(delayMs: Long, onChange: (Long) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -87,16 +86,16 @@ internal fun AudioDelayControl(delayMs: Long, note: String?, onChange: (Long) ->
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(stringResource(R.string.player_audio_delay), style = MaterialTheme.typography.bodyLarge, color = if (enabled) PleyColors.Fg else PleyColors.Disabled)
+            Text(stringResource(R.string.player_audio_delay), style = MaterialTheme.typography.bodyLarge, color = PleyColors.Fg)
             Text(
-                note ?: AudioDelays.label(delayMs),
+                AudioDelays.label(delayMs),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (delayMs != 0L && enabled) PleyColors.AccentBright else PleyColors.Muted,
+                color = if (delayMs != 0L) PleyColors.AccentBright else PleyColors.Muted,
             )
         }
-        PleyTextButton(stringResource(R.string.player_sync_reset), onClick = { onChange(0) }, enabled = enabled && delayMs != 0L)
-        PleyIconButton(PleyIcons.ChevronLeft, stringResource(R.string.player_audio_earlier), onClick = { onChange(delayMs - AudioDelays.STEP_MS) }, enabled = enabled)
-        PleyIconButton(PleyIcons.ChevronRight, stringResource(R.string.player_audio_later), onClick = { onChange(delayMs + AudioDelays.STEP_MS) }, enabled = enabled)
+        PleyTextButton(stringResource(R.string.player_sync_reset), onClick = { onChange(0) }, enabled = delayMs != 0L)
+        PleyIconButton(PleyIcons.ChevronLeft, stringResource(R.string.player_audio_earlier), onClick = { onChange(delayMs - AudioDelays.STEP_MS) })
+        PleyIconButton(PleyIcons.ChevronRight, stringResource(R.string.player_audio_later), onClick = { onChange(delayMs + AudioDelays.STEP_MS) })
     }
 }
 

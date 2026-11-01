@@ -192,9 +192,8 @@ class FakePlaybackController(initial: PlayerUiState = PlayerUiState()) : Playbac
             sleep = SleepState(SleepChoice.Minutes(30), minutesLeft = 12),
             stoppedByServer = true,
             speed = 1.5f,
-            speedNote = "Not while the sound goes to your receiver as it is: it plays at its own speed",
+            speedNote = "Not for this download: its sound goes to your receiver as it is, and nothing here decodes it",
             audioDelayMs = 200,
-            audioDelayNote = "Not with tunneled playback, where the TV keeps the picture with the sound itself",
             canFindSubtitles = true,
             subtitleSearch = SubtitleSearchUi.Found(
                 listOf(FoundSubtitle("opensubtitles:1", "Fixture.Show.S01E01.1080p.WEB", "English · Made for this file · 1,234 downloads")),

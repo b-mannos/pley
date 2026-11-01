@@ -26,6 +26,11 @@ data class EngineState(
      * since. The engine keeps trying from where playback stood (MediaRetries).
      */
     val reconnecting: Boolean = false,
+    /**
+     * The sound was to be decoded here ([app.pley.android.player.PlayerEngine.setSoundNeeds]),
+     * but it goes to the receiver as it is: nothing here decodes it.
+     */
+    val soundUndecodable: Boolean = false,
     val stats: PlaybackStats = PlaybackStats(),
 )
 

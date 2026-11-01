@@ -195,7 +195,7 @@ private fun ColumnScope.SheetContent(page: SheetPage, state: PlayerScreenState, 
             SheetPage.Settings -> SettingsPage(state, style)
             SheetPage.Quality -> QualityPage(state)
             SheetPage.Audio -> {
-                AudioDelayControl(state.audioDelayMs, state.audioDelayNote, onChange = state.controller::setAudioDelay)
+                AudioDelayControl(state.audioDelayMs, onChange = state.controller::setAudioDelay)
                 state.audio.forEach { track ->
                     OptionRow(track.selected, track.label) {
                         track.index?.let(state.controller::selectAudio)
@@ -257,7 +257,7 @@ private fun SettingsPage(state: PlayerScreenState, style: SubtitleChoice) {
     NavRow(PleyIcons.Info, stringResource(R.string.player_details), state.method.orEmpty()) { state.open(SheetPage.Details) }
 }
 
-/** The speeds, 1× normal; said unavailable while the sound can't follow. */
+/** The speeds, 1× normal; said unavailable when a download's sound can't follow. */
 @Composable
 private fun SpeedPage(state: PlayerScreenState) {
     val note = state.speedNote

@@ -69,11 +69,11 @@ interface PlayerTexts {
     /** The server stopped the playback: who did, and their [message] when given. */
     fun stopped(message: String?, byAdmin: Boolean): String
 
-    /** The speed can't change: the sound goes to a receiver as it is. */
-    val speedPassthrough: String get() = "Not while the sound goes to your receiver as it is: it plays at its own speed"
+    /** The speed can't change: a download's sound goes to a receiver as it is, and nothing here decodes it. */
+    val speedUndecodable: String get() = "Not for this download: its sound goes to your receiver as it is, and nothing here decodes it"
 
-    /** The speed and the audio delay can't change: the video is tunneled. */
-    val tunneled: String get() = "Not with tunneled playback, where the TV keeps the picture with the sound itself"
+    /** The speed can't change: a stream's sound goes to a receiver as it is, nothing here decodes it, and the server couldn't convert it. */
+    val speedUnconverted: String get() = "Not now: its sound goes to your receiver as it is, nothing here decodes it, and the server couldn't convert it"
 
     /** "Find subtitles…" when the server has no subtitle search set up. */
     val searchNotSetUp: String get() = "Subtitle search isn't set up on this server"
@@ -198,8 +198,8 @@ class ResourcePlayerTexts(context: Context) : PlayerTexts {
         val who = s(if (byAdmin) R.string.session_stopped_by_admin else R.string.session_stopped_elsewhere)
         return if (message.isNullOrBlank()) who else res.getString(R.string.session_stopped_message, who, message.trim())
     }
-    override val speedPassthrough: String get() = s(R.string.session_speed_passthrough)
-    override val tunneled: String get() = s(R.string.session_tunneled)
+    override val speedUndecodable: String get() = s(R.string.session_speed_undecodable)
+    override val speedUnconverted: String get() = s(R.string.session_speed_unconverted)
     override val searchNotSetUp: String get() = s(R.string.session_search_not_set_up)
     override val searchUnsupported: String get() = s(R.string.session_search_unsupported)
     override val searchNothing: String get() = s(R.string.session_search_nothing)

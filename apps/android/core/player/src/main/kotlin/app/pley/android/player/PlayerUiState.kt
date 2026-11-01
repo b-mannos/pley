@@ -222,12 +222,10 @@ data class PlayerUiState(
     val sleep: SleepState = SleepState(),
     /** The playback speed, 1 normal ([PlaybackController.setSpeed]). */
     val speed: Float = 1f,
-    /** Why the speed can't change now (the sound passes through, or is tunneled); `null` when it can. */
+    /** Why the speed can't change now (a download's sound that nothing here decodes); `null` when it can. */
     val speedNote: String? = null,
     /** How much later than the picture the sound plays, ms ([PlaybackController.setAudioDelay]). */
     val audioDelayMs: Long = 0,
-    /** Why the sound can't be moved now (a tunneled output); `null` when it can. */
-    val audioDelayNote: String? = null,
     /** "Find subtitles…" is offered: the file streams from the server. */
     val canFindSubtitles: Boolean = false,
     /** The search for subtitles online, while its list is open. */

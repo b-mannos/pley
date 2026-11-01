@@ -81,6 +81,17 @@ interface PlayerEngine {
      */
     fun setAudioDelay(delayMs: Long) {}
 
+    /**
+     * What the speed and the audio delay need of the sound: [decoded] here,
+     * rather than passed through to a receiver as it is (a speed other than
+     * 1×), and [untunneled] (any speed or delay: a tunneled output keeps
+     * the picture with the sound itself). For every media loaded from now
+     * on; [reload] for the media playing too, loaded again where it is when
+     * its sound goes out another way. Sound that nothing here decodes stays
+     * as it is ([EngineState.soundUndecodable]).
+     */
+    fun setSoundNeeds(decoded: Boolean, untunneled: Boolean, reload: Boolean) {}
+
     /** Makes engines for this device. */
     fun interface Factory {
         /** An engine for video, or for music when [music] (no video decoders, offload with the screen off). */

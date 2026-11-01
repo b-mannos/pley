@@ -30,6 +30,8 @@ describes how they are made.
   four. With a transcoder from before this, on macOS, or with
   `PLEY_TRANSCODER_MAX_PREVIEWS=1`, previews are made one at a time, as
   before. The dashboard says how many are made at once.
+- On Unraid, searching Apps for Plex, Jellyfin, Emby or IPTV also finds
+  Pley, and Apps offers it only on Unraid 6.12 or newer.
 
 ### Fixed
 
