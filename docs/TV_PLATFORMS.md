@@ -211,10 +211,10 @@ also what waits for them, in red while some failed.
   may ask, asked beside them so they never wait for it, with See all on
   Discover. A movie's or show's page in a library shows its request's
   stage, and Request more seasons for a show missing some.
-- **Answers:** a `503` with pley's `{ code }` is an answer, never the
-  server being away: "TMDB isn't answering" with Retry, "TMDB refused this
-  server's key", "Requests are off". The app writes "in 3 days" and
-  "yesterday" itself, as the TVs' engines have no
+- **Answers:** a requests route's `503` with Pley's `{ code }` is an
+  answer, never the server being away: "TMDB isn't answering" with
+  Retry, "TMDB refused this server's key", "Requests are off". The app
+  writes "in 3 days" and "yesterday" itself, as the TVs' engines have no
   `Intl.RelativeTimeFormat`. Settings → About says the app uses the TMDB
   API.
 

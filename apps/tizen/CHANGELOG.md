@@ -59,8 +59,9 @@ describes how they are made.
 
 - A server answering that it can't do something right now (the
   transcoder isn't running, a file can't be read) has its own message
-  shown, instead of "Can't reach your server", and the TV neither goes
-  offline nor reconnects for it.
+  shown, instead of "Can't reach your server", and the TV doesn't go
+  offline for it. Mid-film, the player waits for the transcoder as it
+  does for the server, 90 s at most, then shows the server's message.
 - Picture subtitles the server is still copying out of a big file show
   as far as they are, without a picture cut in two.
 - Switching to another server no longer shows the last server's Home,

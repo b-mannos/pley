@@ -104,9 +104,10 @@ export function errorMessage(e: unknown): string {
 /**
  * The server answered nothing: no connection, no answer in time, or a
  * gateway in front of it saying it has none (502, 504, and a 503 that
- * isn't pley's). A 503 with pley's `{ code, … }` is the server's answer
+ * isn't Pley's). A 503 with Pley's `{ code, … }` is the server's answer
  * (requests are off, TMDB isn't answering), as Roku has it: nothing goes
- * offline or tries again for one.
+ * offline for one, though the player waits out a `503 unavailable`
+ * mid-film as it does the server.
  */
 export function unreachable(e: unknown): boolean {
   if (e instanceof NetworkError) return !e.cancelled;
