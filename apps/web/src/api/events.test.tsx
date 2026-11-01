@@ -4,7 +4,7 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectionLost, eventsLive } from "@/lib/connection";
 import { apiError, mockApi, testQueryClient } from "@/test/render";
-import { makeDetail, makeRequest, makeRequestList, makeSummary, makeTitle } from "@/test/requests";
+import { makeDetail, makeRequest, makeRequestList, makeShowDetail, makeSummary, makeTitle } from "@/test/requests";
 import { LOST_AFTER_MS, onServerEvent, useServerEvents } from "./events";
 import { keys } from "./hooks";
 import { EVERY_REQUEST, requestKeys, type DiscoverPage, type DiscoverTitle } from "./requests";
@@ -346,6 +346,7 @@ describe("useServerEvents", () => {
       const requests = mockApi({
         "GET /api/requests/7": () => makeRequest({ id: 7, status: "declined", mine: true }),
         "GET /api/requests/8": () => apiError(404, "not_found", "no such request"),
+        "GET /api/discover/movie/604": () => makeDetail({ tmdb_id: 604 }),
       });
       const { client, source } = setup();
       client.setQueryData(
@@ -363,8 +364,54 @@ describe("useServerEvents", () => {
         await vi.advanceTimersByTimeAsync(300);
       });
       await vi.waitFor(() => expect(rowTitle(client, 603)?.status).toBe("declined"));
+      // One it no longer sees: its title's details say how it stands.
       await vi.waitFor(() => expect(rowTitle(client, 604)).toMatchObject({ status: "none", request_id: null }));
-      expect(requests.map((r) => r.path)).toEqual(["/api/requests/7", "/api/requests/8"]);
+      expect(requests.map((r) => r.path)).toEqual(["/api/requests/7", "/api/requests/8", "/api/discover/movie/604"]);
+    });
+
+    it("keeps a title requested when a request it no longer follows stands for others", async () => {
+      mockApi({
+        "GET /api/requests/8": () => apiError(404, "not_found", "no such request"),
+        "GET /api/discover/movie/604": () => makeDetail({ tmdb_id: 604, status: "requested", request_id: null }),
+      });
+      const { client, source } = setup();
+      client.setQueryData(requestKeys.discover("trending"), row([makeTitle({ tmdb_id: 604, status: "requested", request_id: 8 })]));
+      act(() => source().send({ type: "requests_changed", request_id: 8, kind: "movie", tmdb_id: 604 }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      await vi.waitFor(() => expect(rowTitle(client, 604)).toMatchObject({ status: "requested", request_id: null }));
+    });
+
+    it("puts a show whose request is ready in the library only where all of it is", async () => {
+      const ready = makeRequest({ id: 7, kind: "show", tmdb_id: 1399, seasons: [1], status: "available", stage: "available", item_id: 12 });
+      const requests = mockApi({
+        "GET /api/requests/7": () => ready,
+        // Season 2 aired, and no one asked for it.
+        "GET /api/discover/show/1399": () => makeShowDetail({ status: "partial", item_id: 12 }),
+      });
+      const { client, source } = setup();
+      const show = makeTitle({ kind: "show", tmdb_id: 1399, status: "requested", request_id: 7 });
+      client.setQueryData(requestKeys.discover("trending"), row([show]));
+      act(() =>
+        source().send({
+          type: "request_available",
+          request_id: 7,
+          title: "Dark",
+          kind: "show",
+          tmdb_id: 1399,
+          item_id: 12,
+          poster_url: null,
+          seasons: [1],
+          complete: true,
+        }),
+      );
+      expect(rowTitle(client, 1399)?.status).toBe("requested");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      await vi.waitFor(() => expect(requests.map((r) => r.path)).toContain("/api/discover/show/1399"));
+      await vi.waitFor(() => expect(rowTitle(client, 1399)).toMatchObject({ status: "partial", item_id: 12, request_id: null }));
     });
 
     it("puts a title that became available in the library at once", () => {

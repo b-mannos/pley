@@ -110,8 +110,10 @@ export function isActive(request: Pick<MediaRequest, "status" | "stage">): boole
  * How a title already shown in a row stands after one of its requests
  * changed (`null`: that request is gone for this account): an active one
  * makes it Requested, a declined one Declined (for those who made or
- * follow it), an available one In library, and otherwise it has no badge.
- * What a library has of it, and another active request for it, stay.
+ * follow it), an available movie In library, and otherwise it has no
+ * badge. An available show is at least partly in a library: whether all
+ * of it is, only its details say. What a library has of it, and another
+ * active request for it, stay.
  */
 export function titleAfter(title: DiscoverTitle, requestId: Id, request: MediaRequest | null): DiscoverTitle {
   const settled = title.status === "library" || title.status === "restricted";
@@ -122,7 +124,8 @@ export function titleAfter(title: DiscoverTitle, requestId: Id, request: MediaRe
   const others = title.request_id !== null && title.request_id !== requestId;
   const request_id = others ? title.request_id : null;
   if (request?.status === "available" && request.stage !== "gone" && request.item_id !== null) {
-    return { ...title, status: "library", item_id: request.item_id, request_id };
+    const status = request.kind === "movie" ? "library" : settled ? title.status : "partial";
+    return { ...title, status, item_id: request.item_id, request_id };
   }
   if (others || settled) return { ...title, request_id };
   if (request?.status === "declined" && (request.mine || request.watching)) return { ...title, status: "declined", request_id };

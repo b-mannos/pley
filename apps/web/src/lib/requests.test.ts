@@ -92,6 +92,13 @@ describe("badges", () => {
       item_id: 9,
       request_id: null,
     });
+    // A show's may leave aired seasons it didn't ask for missing: partly there, until its details say more.
+    const show = makeTitle({ kind: "show", tmdb_id: 1399, status: "requested", request_id: 7 });
+    expect(titleAfter(show, 7, makeRequest({ id: 7, kind: "show", tmdb_id: 1399, status: "available", item_id: 9 }))).toMatchObject({
+      status: "partial",
+      item_id: 9,
+      request_id: null,
+    });
     // Gone, deleted or withdrawn: no badge, but what a library has of a show stays.
     expect(titleAfter(makeTitle({ status: "requested", request_id: 7 }), 7, null).status).toBe("none");
     expect(titleAfter(makeTitle({ status: "requested", request_id: 7 }), 7, makeRequest({ id: 7, status: "available", stage: "gone" })).status).toBe("none");

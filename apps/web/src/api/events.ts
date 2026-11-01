@@ -4,7 +4,7 @@ import { connectionLost, eventsLive, serverAnswers, setConnectionLost, setEvents
 import { isApiError } from "./client";
 import { keys } from "./hooks";
 import { liveKeys } from "./livetv";
-import { patchBadges, patchTitles, requestKeys, requestQueries, titleShown, type TitleKind } from "./requests";
+import { patchBadges, patchTitles, refetchBadges, requestKeys, requestQueries, titleShown, type TitleKind } from "./requests";
 import type { Activity, Id, Library, ServerEvent } from "./types";
 
 /** How long the stream may be down before the pages say the server is out of reach: a restart takes a moment. */
@@ -72,8 +72,9 @@ interface RequestChange {
  * What shows requests, after some changed: the lists and the titles'
  * pages on screen are asked again (those fetched before the change was
  * heard: what this page changed itself is fresh), and the badges of rows
- * already shown follow the request as it is now. Discover's rows and
- * search results are never fetched again for it.
+ * already shown follow the request as it is now (or the title's details,
+ * where the request can't say). Discover's rows and search results are
+ * never fetched again for it.
  */
 function refreshRequests(qc: QueryClient, changes: RequestChange[]) {
   const heardAt = Math.max(...changes.map((c) => c.heardAt));
@@ -101,11 +102,12 @@ function refreshRequests(qc: QueryClient, changes: RequestChange[]) {
       },
     });
     if (!titleShown(qc, kind, tmdbId)) continue;
-    // What the rows' badges follow: the request as this account sees it now; none (404) leaves none.
+    // What the rows' badges follow: the request as this account sees it now. One it no longer sees
+    // (404: withdrawn, deleted, no longer followed) may still stand for others: the title's details say.
     void qc.fetchQuery({ ...requestQueries.one(id), staleTime: 0 }).then(
       (request) => patchBadges(qc, kind, tmdbId, id, request),
       (err: unknown) => {
-        if (isApiError(err, 404)) patchBadges(qc, kind, tmdbId, id, null);
+        if (isApiError(err, 404)) refetchBadges(qc, kind, tmdbId);
       },
     );
   }
@@ -343,8 +345,9 @@ export function useServerEvents(userId: Id | null) {
           break;
         case "request_available": {
           const itemId = ev.item_id;
-          // In a library this account can open: the badge says so at once.
-          if (itemId !== null && ev.complete) {
+          // A movie in a library this account can open: the badge says so at once. A show may still lack
+          // aired seasons it didn't ask for: its badge follows its details.
+          if (itemId !== null && ev.complete && ev.kind === "movie") {
             patchTitles(qc, ev.kind, ev.tmdb_id, (t) => ({ ...t, status: "library", item_id: itemId, request_id: null }));
           }
           requestChanged(ev.request_id, ev.kind, ev.tmdb_id);

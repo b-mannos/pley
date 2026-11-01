@@ -653,9 +653,29 @@ export function patchTitles(qc: QueryClient, kind: TitleKind, tmdbId: number, up
   qc.setQueriesData<InfiniteData<DiscoverPage>>({ queryKey: requestKeys.searches }, patch);
 }
 
-/** The badges shown for a title, from one of its requests as it is now (`null`: there's no such request any more). */
+/**
+ * The badges shown for a title, from one of its requests as it is now
+ * (`null`: there's no such request any more). A show whose request is
+ * available may still lack aired seasons it didn't ask for: its details
+ * are asked for, which say.
+ */
 export function patchBadges(qc: QueryClient, kind: TitleKind, tmdbId: number, requestId: Id, request: MediaRequest | null) {
   patchTitles(qc, kind, tmdbId, (t) => titleAfter(t, requestId, request));
+  if (request?.kind === "show" && request.status === "available" && request.stage !== "gone") refetchBadges(qc, kind, tmdbId);
+}
+
+/**
+ * The badges shown for a title, from its details asked for again, where
+ * its requests can't say how it stands (whether a show is all there,
+ * whether someone else's request for it stands).
+ */
+export function refetchBadges(qc: QueryClient, kind: TitleKind, tmdbId: number) {
+  if (!titleShown(qc, kind, tmdbId)) return;
+  void qc.fetchQuery({ ...requestQueries.title(kind, tmdbId), staleTime: 0 }).then(
+    (detail) => patchTitles(qc, kind, tmdbId, (t) => ({ ...t, status: detail.status, item_id: detail.item_id, request_id: detail.request_id })),
+    // Unknown now (TMDB away, say): the badge stays as it was.
+    () => {},
+  );
 }
 
 /** Whether a title shows in the rows or search results already loaded. */
