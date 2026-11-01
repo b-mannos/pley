@@ -471,6 +471,45 @@ async fn a_session_or_app_that_slips_past_the_sign_out_doesnt_work() {
 }
 
 #[tokio::test]
+async fn compatibility_stream_addresses_stop_with_the_sign_out() {
+    use pley::playback::{Method as Play, Session, TranscodeSpec};
+
+    let (app, admin, _) = with_admin().await;
+    let admin_id = app.get("/api/auth/me", &admin).await.body["id"].as_i64().unwrap();
+    let (_, bob_id) = app.user(&admin, "bob", json!({})).await;
+    app.media_file("movies/Film (2020).mkv", 2048);
+    let movies = app.library(&admin, "Movies", "movies", "movies").await;
+    let film = app.ids(movies, &admin).await["Film"];
+    let file = app.file_of(film).await;
+    // Streams a compatibility client started, as the transcoder would have.
+    let stream = |user: i64| {
+        let spec = TranscodeSpec { request: Default::default(), segment_count: 1, duration_ms: 1000 };
+        let session =
+            Session::new(user, "u".into(), None, film, file, Play::Transcode, 1000, Some(spec), Some("job".into()), 0);
+        app.state.sessions.insert(session).id.clone()
+    };
+    let playlist = |session: &str| {
+        let req = axum::http::Request::builder()
+            .uri(format!("/video/:/transcode/universal/session/{session}/base/index.m3u8"))
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let plex = app.plex.clone();
+        async move { tower::ServiceExt::oneshot(plex, req).await.unwrap().status() }
+    };
+    let (bobs, admins) = (stream(bob_id), stream(admin_id));
+    // No transcoder runs here: they get as far as asking it.
+    assert_ne!(playlist(&bobs).await, StatusCode::NOT_FOUND);
+
+    assert_eq!(require(&app, &admin, true).await.status, StatusCode::OK);
+    // bob signed in with his password alone: his stream stops with the rest.
+    assert_eq!(playlist(&bobs).await, StatusCode::NOT_FOUND);
+    assert_ne!(playlist(&admins).await, StatusCode::NOT_FOUND, "whoever uses it goes on");
+    // Not required any more: it goes on too.
+    require(&app, &admin, false).await;
+    assert_ne!(playlist(&bobs).await, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn while_required_it_stays_on_and_moves_to_another_app() {
     let (app, admin, _) = with_admin().await;
     let (bob, _) = app.user(&admin, "bob", json!({})).await;

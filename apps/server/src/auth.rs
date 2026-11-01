@@ -425,8 +425,8 @@ impl AuthService {
 
     /// Whether `user_id` is kept out because the server requires two-step
     /// sign-in and they don't use it, for what doesn't come through
-    /// [`AuthService::validate`]: the keyed addresses of a playback started
-    /// before it was required.
+    /// [`AuthService::validate`]: the keyed addresses and the compatibility
+    /// API's session addresses of a playback started before it was required.
     pub async fn lacks_two_step(&self, user_id: i64) -> sqlx::Result<bool> {
         if !self.two_step_required() {
             return Ok(false);
