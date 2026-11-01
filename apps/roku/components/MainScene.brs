@@ -334,7 +334,7 @@ sub showNotice()
     ' Shown once that one closes (onDialog).
     if dialogShowing() then return
     route = m.stack.Peek().route
-    if route = "player" or route = "link" or route = "servers" or route = "profiles" or route = "unreachable" then return
+    if route = "player" or route = "livePlayer" or route = "link" or route = "servers" or route = "profiles" or route = "unreachable" then return
     m.shownNotice = m.notices.Shift()
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
     dialog.title = "Ready to watch"
