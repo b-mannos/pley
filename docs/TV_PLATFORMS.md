@@ -651,6 +651,16 @@ converting, seek previews, the next episode.
 - **The TV's player** opens the file at its path. Its buffering is left as
   the TV has it: read or set for a file, the player said Playing and stood
   at 0. A file whose picture never starts says so after 12 s.
+- **A DVD's disc image** (`.iso`) opens on its titles, the longest first
+  ("Main feature"), each with its length, chapters and audio languages;
+  titles under 30 s and those playing the same cells as one listed aren't
+  shown. There are no menus: the disc's own navigation isn't run. The
+  image's ISO 9660 directory gives VIDEO_TS (`DiscImage`), its IFOs the
+  titles (`DvdVideo`), and a title's cells, read out of the image, are
+  served to the TV's player as one MPEG program stream on the loopback
+  address, with ranges, so it seeks (`Net/SpanServer.cs`). DVD subtitles
+  aren't read out yet. An encrypted DVD or a Blu-ray image says it can't
+  be played.
 - **Thumbnails can't be made on the TV**: frames taken out of a file decode
   in software (15 to 20 s each, 4K not at all), and the player's frame
   capture isn't on Samsung TVs (`multimedia.raw_video`).

@@ -238,6 +238,10 @@ It has no releases yet: it is built and installed by hand
   while one is plugged in, lists its folders and videos; a video plays in
   Pley's player from where it stopped, with its audio tracks, chapters,
   HDR, its own subtitles and the subtitle files beside it.
+- A DVD's disc image (.iso) on a USB drive opens in the native app on its
+  titles, the main feature first, with their lengths, chapters and audio
+  languages; a title plays in Pley's player and seeks, from where it
+  stopped. There are no menus, and DVD subtitles don't show yet.
 
 ### Fixed
 

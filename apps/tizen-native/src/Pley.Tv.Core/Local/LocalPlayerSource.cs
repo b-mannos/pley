@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Pley.Tv.Core.Api;
+using Pley.Tv.Core.Net;
 using Pley.Tv.Core.Auth;
 using Pley.Tv.Core.Player;
 using Pley.Tv.Core.Ui;
@@ -41,7 +42,12 @@ public sealed class LocalPlayerSource : IPlayerSource
 
     readonly IPlayerSource app;
     readonly string path;
+    /// <summary>What resume points and subtitle offsets are kept by: the file, or a disc image's title in it.</summary>
+    readonly string key;
     readonly long fileId;
+    /// <summary>A DVD title in the disc image at <see cref="path"/>, served to the player by <see cref="server"/>; null for a plain file.</summary>
+    readonly DvdTitle? disc;
+    readonly SpanServer? server;
     ItemDetail? detail;
     IReadOnlyList<Sidecar> sidecars = new Sidecar[0];
     LocalFacts? facts;
@@ -66,8 +72,23 @@ public sealed class LocalPlayerSource : IPlayerSource
     {
         this.app = app;
         this.path = path;
+        key = path;
         fileId = FileIdOf(path);
     }
+
+    /// <summary>A DVD's title in the disc image at <paramref name="image"/>: its cells, read out of the image, served to the player by <paramref name="server"/>.</summary>
+    public LocalPlayerSource(IPlayerSource app, string image, DvdTitle title, SpanServer server)
+    {
+        this.app = app;
+        path = image;
+        key = DiscKey(image, title.Number);
+        fileId = FileIdOf(key);
+        disc = title;
+        this.server = server;
+    }
+
+    /// <summary>What a disc image's title is kept by: the image and the title's number.</summary>
+    public static string DiscKey(string image, int title) => $"{image}#title{title}";
 
     public bool Local => true;
 
@@ -108,6 +129,7 @@ public sealed class LocalPlayerSource : IPlayerSource
 
     ItemDetail Describe()
     {
+        if (disc != null) return DescribeDisc(disc);
         var info = new FileInfo(path);
         // Matroska's head, else MP4's movie box, whatever the file is called.
         try
@@ -175,6 +197,41 @@ public sealed class LocalPlayerSource : IPlayerSource
         };
     }
 
+    /// <summary>
+    /// A DVD title as an item: the disc's name and the title's number, its length, chapters and
+    /// audio. Its subtitles, pictures interleaved in the title's VOBs, aren't read out yet.
+    /// </summary>
+    ItemDetail DescribeDisc(DvdTitle t)
+    {
+        var streams = t.Streams.Where(s => s.Kind != "subtitle").ToList();
+        var video = streams.FirstOrDefault(s => s.Kind == "video");
+        return new ItemDetail
+        {
+            Id = ItemId,
+            Kind = "movie",
+            Title = $"{LocalFolder.Title(path)} · Title {t.Number}",
+            DurationMs = t.DurationMs,
+            UserState = new UserState { PositionMs = Resume() },
+            Files = new[]
+            {
+                new MediaFile
+                {
+                    Id = fileId,
+                    Path = path,
+                    Size = t.Bytes,
+                    Container = "mpeg",
+                    DurationMs = t.DurationMs,
+                    Width = video?.Width,
+                    Height = video?.Height,
+                    VideoCodec = video?.Codec,
+                    AudioCodec = streams.FirstOrDefault(s => s.Kind == "audio")?.Codec,
+                    Streams = streams,
+                    Chapters = t.Chapters,
+                },
+            },
+        };
+    }
+
     byte[] ReadAt(long offset, int count)
     {
         using var f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096);
@@ -207,7 +264,8 @@ public sealed class LocalPlayerSource : IPlayerSource
         {
             SessionId = "local",
             Method = "direct",
-            Url = path,
+            // A disc's title is served out of its image, at an address the player opens.
+            Url = disc != null && server != null ? server.Serve(path, disc.Spans) : path,
             FileId = fileId,
             DurationMs = file?.DurationMs ?? 0,
             AudioIndex = asked ?? AudioFor(file),
@@ -275,9 +333,9 @@ public sealed class LocalPlayerSource : IPlayerSource
         return (position, duration);
     }
 
-    long Resume() => ResumeOf(Storage, path);
+    long Resume() => ResumeOf(Storage, key);
 
-    string ResumeKey() => KeyOf(path);
+    string ResumeKey() => KeyOf(key);
 
     static string KeyOf(string path) => $"local.resume.{FileIdOf(path)}";
 

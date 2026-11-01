@@ -173,6 +173,7 @@ sealed class StorageScreen : ShellPage
         lines.AddRange(entries.Select(e =>
         {
             if (e.Folder) return new TrackLine(e.Path, e.Name, Icon: "folder");
+            if (e.Disc) return new TrackLine(e.Path, LocalFolder.Title(e.Path), Subtitle: "DVD", Duration: ItemFormat.Bytes(e.Size), Icon: "disc-3");
             var (resume, length) = LocalPlayerSource.Kept(storage, e.Path);
             var kind = System.IO.Path.GetExtension(e.Name).TrimStart('.').ToUpperInvariant();
             return new TrackLine(e.Path, LocalFolder.Title(e.Path),
@@ -194,6 +195,7 @@ sealed class StorageScreen : ShellPage
         var entry = entries.FirstOrDefault(e => e.Path == path);
         if (entry == null) return;
         if (entry.Folder) go(new PageKey.Storage(entry.Path));
+        else if (entry.Disc) go(new PageKey.Disc(entry.Path));
         else play(entry.Path, LocalPlayerSource.ResumeOf(storage, entry.Path));
     }
 }

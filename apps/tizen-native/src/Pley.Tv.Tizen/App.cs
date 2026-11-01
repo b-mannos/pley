@@ -28,6 +28,8 @@ class App : NUIApplication
     MediaKeys? musicKeys;
     /// <summary>The USB drive plugged into the TV, followed as it comes and goes.</summary>
     Drives drives = null!;
+    /// <summary>Hands a DVD title's cells, out of its disc image, to the TV's player.</summary>
+    readonly Pley.Tv.Core.Net.SpanServer discs = new Pley.Tv.Core.Net.SpanServer();
     /// <summary>The music was playing as the app went to the background: it plays again when the app is back.</summary>
     bool musicWasPlaying;
 
@@ -107,6 +109,7 @@ class App : NUIApplication
         Profile.End();
         musicKeys?.Dispose();
         drives.Dispose();
+        discs.Dispose();
         base.OnTerminate();
     }
 
@@ -245,6 +248,13 @@ class App : NUIApplication
                 music.YieldToVideo();
                 state.HoldRefresh(true);
                 new PlayerScreen(shell, state, new PlayRequest(LocalPlayerSource.ItemId, startMs, FromStart: false), reporter, images, gate, () => state.HoldRefresh(false), localFile: path).Show();
+            }),
+            PageKey.Disc disc => new DiscScreen(tv, disc.Path, state.Storage, gate, (image, title, startMs) =>
+            {
+                music.YieldToVideo();
+                state.HoldRefresh(true);
+                new PlayerScreen(shell, state, new PlayRequest(LocalPlayerSource.ItemId, startMs, FromStart: false), reporter, images, gate, () => state.HoldRefresh(false),
+                    disc: (image, title, discs)).Show();
             }),
             _ => null,
         };

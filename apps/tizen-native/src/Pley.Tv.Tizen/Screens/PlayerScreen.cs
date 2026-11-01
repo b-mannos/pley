@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using Pley.Tv.Core;
 using Pley.Tv.Core.Local;
+using Pley.Tv.Core.Net;
 using Pley.Tv.Core.Player;
 using Pley.Tv.Core.Ui;
 using Pley.Tv.Tizen.Kit;
@@ -151,7 +152,9 @@ sealed class PlayerScreen : Sheet
     /// <param name="reporter">The app's reports queue: the last "stopped" goes out after the screen closed.</param>
     /// <param name="closed">The screen went (Home asks again for the resume points).</param>
     /// <param name="localFile">A video on a drive to play, as it is (<see cref="LocalPlayerSource"/>); null: the request's item, from the server.</param>
-    public PlayerScreen(Shell shell, AppState state, PlayRequest request, IReporter reporter, Images images, KeyRepeatGate gate, Action closed, string? localFile = null) : base("player")
+    /// <param name="disc">A DVD title in a disc image on a drive, and the server that hands its cells to the player.</param>
+    public PlayerScreen(Shell shell, AppState state, PlayRequest request, IReporter reporter, Images images, KeyRepeatGate gate, Action closed, string? localFile = null,
+        (string Image, DvdTitle Title, SpanServer Server)? disc = null) : base("player")
     {
         Covers = true;
         this.shell = shell;
@@ -161,6 +164,7 @@ sealed class PlayerScreen : Sheet
         this.closed = closed;
         IPlayerSource source = new AppPlayerSource(state, () => Caps(state));
         if (localFile != null) source = new LocalPlayerSource(source, localFile);
+        else if (disc is { } d) source = new LocalPlayerSource(source, d.Image, d.Title, d.Server);
         model = new PlayerModel(request, source, Engine, new ContextScheduler(), reporter);
         seeker = new Seeker(model.LivePositionMs, () => model.Clock.Value.DurationMs, SeekTo);
         // Asked for before the screen is made, which holds the UI half a second: the server answers
