@@ -207,10 +207,21 @@ export function titleFacts(d: DiscoverDetail): string {
   return [d.year ? String(d.year) : "", length].filter(Boolean).join(" · ");
 }
 
-/** What a title's badge becomes from its request's news: active → Requested, declined → Declined, available → In library, gone or deleted → none. */
-export function statusFromRequest(r: MediaRequest | null): TitleStatus {
-  if (!r || r.stage === "gone") return "none";
+/**
+ * What a title's badge becomes from the news of a request this profile
+ * made or follows: active → Requested, declined → Declined, a movie
+ * available → In library, a show's seasons ready → Partly in library
+ * (all it asked for too, as the show may lack seasons it didn't ask
+ * for), gone or deleted → none. `null` for anyone else's request (a
+ * manager hears of everyone's), which says nothing of the title as this
+ * profile sees it.
+ */
+export function statusFromRequest(r: MediaRequest | null): TitleStatus | null {
+  if (!r) return "none";
+  if (!r.mine && !r.watching) return null;
+  if (r.stage === "gone") return "none";
   if (r.status === "declined") return "declined";
+  if (r.kind === "show" && (r.status === "available" || r.stage === "partial")) return "partial";
   if (r.status === "available") return "library";
   return "requested";
 }

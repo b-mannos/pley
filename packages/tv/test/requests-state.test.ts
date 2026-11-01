@@ -196,17 +196,36 @@ describe("request events", () => {
   it("move a title's badge in rows already drawn from its request, only while a page draws badges", async () => {
     const { app, server, asked, hear } = setup();
     hear({ type: "requests_changed", request_id: 3, kind: "movie", tmdb_id: 103 });
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(300);
     expect(asked.filter((a) => a.startsWith("request "))).toEqual([]);
     const stop = app.watchMarks();
     server.request = (id) => Promise.resolve(request(id, { status: "declined", stage: "declined", item_id: null }));
     hear({ type: "requests_changed", request_id: 3, kind: "movie", tmdb_id: 103 });
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(300);
     expect(app.marks.value["movie:103"]).toMatchObject({ status: "declined", item_id: null });
     server.request = () => Promise.reject(new ApiError(404, "not_found", "gone"));
     hear({ type: "requests_changed", request_id: 3, kind: "movie", tmdb_id: 103 });
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(300);
     expect(app.marks.value["movie:103"]?.status).toBe("none");
+    stop();
+  });
+
+  it("ask for the requests a burst names once each, 0.3 s after its first, and move their badges together", async () => {
+    const { app, server, asked, hear } = setup();
+    const stop = app.watchMarks();
+    // 5 is someone else's, as a manager hears of: it says nothing of the title as this profile sees it.
+    server.request = (id) => Promise.resolve(request(id, { status: "approved", stage: "searching", item_id: null, mine: id !== 5 }));
+    let writes = 0;
+    const off = app.marks.subscribe(() => writes++);
+    for (const id of [3, 4, 3, 5, 4]) hear({ type: "requests_changed", request_id: id, kind: "movie", tmdb_id: 100 + id });
+    await vi.advanceTimersByTimeAsync(299);
+    expect(asked.filter((a) => a.startsWith("request "))).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(asked.filter((a) => a.startsWith("request "))).toEqual(["request 3", "request 4", "request 5"]);
+    expect(writes).toBe(2);
+    expect(Object.keys(app.marks.value).sort()).toEqual(["movie:103", "movie:104"]);
+    expect(app.marks.value["movie:103"]?.status).toBe("requested");
+    off();
     stop();
   });
 
@@ -223,6 +242,8 @@ describe("request events", () => {
     hear(more);
     hear(more);
     hear({ ...ready, complete: true, seasons: null });
+    // All it asked for: the show may lack seasons it didn't ask for.
+    expect(app.marks.value["show:104"]).toMatchObject({ status: "partial", item_id: 54 });
     expect(app.notices.value.map((n) => n.text)).toEqual([
       "Season 2 of “Severance” is ready to watch.",
       "Seasons 3–4 of “Severance” are ready to watch.",

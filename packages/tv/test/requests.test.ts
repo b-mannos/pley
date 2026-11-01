@@ -175,7 +175,7 @@ describe("a title's badge", () => {
     expect(titleBadge({ status: "none", item_id: null })).toBeNull();
   });
 
-  it("follows a request's news: active Requested, declined, available In library, gone none", () => {
+  it("follows the news of a request the profile made or follows: active Requested, declined, available In library, gone none", () => {
     expect(statusFromRequest(request({ status: "pending" }))).toBe("requested");
     expect(statusFromRequest(request({ status: "failed", stage: "failed" }))).toBe("requested");
     expect(statusFromRequest(request({ status: "approved", stage: "downloading" }))).toBe("requested");
@@ -183,6 +183,12 @@ describe("a title's badge", () => {
     expect(statusFromRequest(request({ status: "available", stage: "available" }))).toBe("library");
     expect(statusFromRequest(request({ status: "available", stage: "gone" }))).toBe("none");
     expect(statusFromRequest(null)).toBe("none");
+    // A show's request ready, in part or whole: the show may still lack seasons it didn't ask for.
+    expect(statusFromRequest(request({ kind: "show", status: "approved", stage: "partial", available_seasons: [1] }))).toBe("partial");
+    expect(statusFromRequest(request({ kind: "show", status: "available", stage: "available" }))).toBe("partial");
+    // One it follows counts; someone else's, which a manager hears of too, says nothing of the title.
+    expect(statusFromRequest(request({ mine: false, watching: true, status: "declined", stage: "declined" }))).toBe("declined");
+    expect(statusFromRequest(request({ mine: false, watching: false, status: "declined", stage: "declined" }))).toBeNull();
   });
 
   it("keeps each title once as pages come", () => {

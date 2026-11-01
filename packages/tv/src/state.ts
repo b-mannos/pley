@@ -220,6 +220,9 @@ export class AppState {
   private catchingUp = false;
   /** Pages that draw titles' badges: request events fetch their request for its badge only meanwhile. */
   private markWatchers = 0;
+  /** The requests events named in the last 0.3 s, with their titles: asked for in one round. */
+  private readonly markNamed = new Map<number, { kind: TitleKind; tmdbId: number }>();
+  private markTimer: ReturnType<typeof setTimeout> | null = null;
   private noticeIds = 0;
   private noticeOnScreen: number | null = null;
 
@@ -464,6 +467,9 @@ export class AppState {
     this.generation++;
     this.requests.value = null;
     this.marks.value = {};
+    this.markNamed.clear();
+    if (this.markTimer !== null) clearTimeout(this.markTimer);
+    this.markTimer = null;
     this.notices.value = [];
     this.noticeOnScreen = null;
     this.newsHeard = 0;
@@ -836,7 +842,8 @@ export class AppState {
         const complete = e.complete !== false;
         if (e.kind && typeof e.tmdb_id === "number") {
           this.requestsChanged(titleKey({ kind: e.kind, tmdb_id: e.tmdb_id }));
-          this.markTitle(e.kind, e.tmdb_id, complete ? "library" : "partial", e.item_id ?? null);
+          // A show's request whole is all it asked for: the show may still lack seasons, so Partly in library.
+          this.markTitle(e.kind, e.tmdb_id, complete && e.kind === "movie" ? "library" : "partial", e.item_id ?? null);
         } else {
           this.requestsChanged(null);
         }
@@ -966,19 +973,42 @@ export class AppState {
     this.marks.value = { ...this.marks.value, [titleKey({ kind, tmdb_id: tmdbId })]: { status, item_id: itemId, at: Date.now() } };
   }
 
-  /** A request changed: its title's badge follows its status (active: Requested; declined; available: In library; gone: none). */
+  /**
+   * A request changed: its title's badge follows it (`statusFromRequest`).
+   * The requests named within 0.3 s are asked for once each, and their
+   * badges change together, so the pages that draw them do once.
+   */
   private markFromRequest(id: number, kind: TitleKind, tmdbId: number): void {
+    if (!this.api.value || this.markWatchers <= 0) return;
+    this.markNamed.set(id, { kind, tmdbId });
+    if (this.markTimer === null) this.markTimer = setTimeout(() => this.markRound(), REQUEST_GATHER_MS);
+  }
+
+  private markRound(): void {
+    this.markTimer = null;
+    const named = Array.from(this.markNamed.entries());
+    this.markNamed.clear();
     const api = this.api.value;
     if (!api || this.markWatchers <= 0) return;
     const generation = this.generation;
-    api.request(id).then(
-      (r) => {
-        if (this.generation === generation) this.markTitle(kind, tmdbId, statusFromRequest(r), r.item_id);
-      },
-      (e) => {
-        if (this.generation === generation && e instanceof ApiError && e.status === 404) this.markTitle(kind, tmdbId, "none", null);
-      },
+    const answers = named.map(([id, t]) =>
+      api.request(id).then(
+        (r) => ({ t, status: statusFromRequest(r), itemId: r.item_id }),
+        (e: unknown) => ({ t, status: isApiError(e, 404) ? ("none" as const) : null, itemId: null }),
+      ),
     );
+    void Promise.all(answers).then((all) => {
+      if (this.generation !== generation) return;
+      const marks = { ...this.marks.value };
+      const at = Date.now();
+      let changed = false;
+      for (const a of all) {
+        if (a.status === null) continue;
+        marks[titleKey({ kind: a.t.kind, tmdb_id: a.t.tmdbId })] = { status: a.status, item_id: a.itemId, at };
+        changed = true;
+      }
+      if (changed) this.marks.value = marks;
+    });
   }
 
   /** A pop-up that waits its turn (while a video plays, among the last three); the one on screen stays until it closes. */
