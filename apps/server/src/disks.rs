@@ -857,74 +857,96 @@ mod volumes {
             self.folders.clear();
             self.read = Some(now);
         }
-
-        /// Where the files of folder `real` (its links followed) are read from.
-        fn folder_disk(&mut self, real: &Path, sys: &impl Windows) -> Disk {
-            let text = real.to_string_lossy();
-            // Before any volume is asked for: Windows takes a share it can't
-            // reach for its own boot volume.
-            if let Some(server) = unc_server(&text) {
-                return Disk::new(format!("net:{server}"), 1);
-            }
-            let drive = drive_of(&text);
-            if let Some(drive) = drive.as_deref().filter(|drive| sys.is_remote(drive)) {
-                // A mapped drive whose share didn't answer: the server it is
-                // mapped to, else the drive.
-                let server = sys.dos_device(drive).and_then(|target| mapped_server(&target));
-                return Disk::new(format!("net:{}", server.as_deref().unwrap_or(drive)), 1);
-            }
-            let root = sys
-                .volume_root(real)
-                .or_else(|| drive.map(|drive| format!(r"{drive}\")))
-                .unwrap_or_else(|| real.ancestors().last().unwrap_or(real).to_string_lossy().into_owned());
-            if let Some(disk) = self.roots.get(&root) {
-                return disk.clone();
-            }
-            let disk = self.volume_disk(&root, sys);
-            tell(&mut self.told, root.clone(), &disk, "");
-            self.roots.insert(root, disk.clone());
-            disk
-        }
-
-        /// Where the files of the volume at `root` are read from: its disks,
-        /// with those of the volumes sharing one, solid-state where all are.
-        fn volume_disk(&mut self, root: &str, sys: &impl Windows) -> Disk {
-            let Some(volume) = sys.volume_name(root) else { return Disk::new(format!("volume:{root}"), 0) };
-            let disks = match self.volumes.get(&volume) {
-                Some(disks) => disks.clone(),
-                // A volume that came after they were listed, joined with none.
-                None => match sys.disks(&volume) {
-                    Some(disks) if !disks.is_empty() => Arc::new(disks),
-                    _ => return Disk::new(format!("volume:{}", guid(&volume)), 0),
-                },
-            };
-            let Some(&first) = disks.first() else { return Disk::new(format!("volume:{}", guid(&volume)), 0) };
-            // A disk that doesn't say counts as one that spins.
-            let solid = disks
-                .iter()
-                .all(|&disk| *self.penalties.entry(disk).or_insert_with(|| sys.seek_penalty(disk)) == Some(false));
-            Disk::new(format!("disk:{first}"), if solid { SOLID } else { 1 })
-        }
     }
 
-    /// Where `path` is read from, by Windows' volumes. They are listed
-    /// outside the lock and taken in, so that a disk slow to answer delays
-    /// only the lookup that asked.
+    /// Where `path` is read from, by Windows' volumes. Windows is asked
+    /// outside the lock, which is held only to read and keep its answers, so
+    /// that a disk slow to answer delays only the lookup that asked.
     pub(super) fn disk_of(table: &Mutex<Table>, path: &Path, sys: &impl Windows, now: Instant) -> Disk {
         let dir = folder(path);
-        if table.lock().read.is_none_or(|at| now.saturating_duration_since(at) >= VOLUMES_FOR) {
+        let mut listed = table.lock().read;
+        if listed.is_none_or(|at| now.saturating_duration_since(at) >= VOLUMES_FOR) {
             let volumes = read_volumes(sys);
             table.lock().take(volumes, now);
+            listed = Some(now);
         }
         if let Some(disk) = table.lock().folders.get(dir) {
             return disk.clone();
         }
         // Outside the lock: a share may be slow to answer.
         let real = sys.canonicalize(dir).unwrap_or_else(|| dir.to_path_buf());
+        let disk = folder_disk(table, listed, &real, sys);
         let mut table = table.lock();
-        let disk = table.folder_disk(&real, sys);
-        remember(&mut table.folders, dir, disk.clone());
+        if table.read == listed {
+            remember(&mut table.folders, dir, disk.clone());
+        }
         disk
+    }
+
+    /// Where the files of folder `real` (its links followed) are read from.
+    /// What it finds is kept only while the volumes are still those listed
+    /// at `listed`: another lookup may have listed them again meanwhile.
+    fn folder_disk(table: &Mutex<Table>, listed: Option<Instant>, real: &Path, sys: &impl Windows) -> Disk {
+        let text = real.to_string_lossy();
+        // Before any volume is asked for: Windows takes a share it can't
+        // reach for its own boot volume.
+        if let Some(server) = unc_server(&text) {
+            return Disk::new(format!("net:{server}"), 1);
+        }
+        let drive = drive_of(&text);
+        if let Some(drive) = drive.as_deref().filter(|drive| sys.is_remote(drive)) {
+            // A mapped drive whose share didn't answer: the server it is
+            // mapped to, else the drive.
+            let server = sys.dos_device(drive).and_then(|target| mapped_server(&target));
+            return Disk::new(format!("net:{}", server.as_deref().unwrap_or(drive)), 1);
+        }
+        let root = sys
+            .volume_root(real)
+            .or_else(|| drive.map(|drive| format!(r"{drive}\")))
+            .unwrap_or_else(|| real.ancestors().last().unwrap_or(real).to_string_lossy().into_owned());
+        if let Some(disk) = table.lock().roots.get(&root) {
+            return disk.clone();
+        }
+        let disk = volume_disk(table, listed, &root, sys);
+        let mut table = table.lock();
+        if table.read == listed {
+            tell(&mut table.told, root.clone(), &disk, "");
+            table.roots.insert(root, disk.clone());
+        }
+        disk
+    }
+
+    /// Where the files of the volume at `root` are read from: its disks,
+    /// with those of the volumes sharing one, solid-state where all are.
+    fn volume_disk(table: &Mutex<Table>, listed: Option<Instant>, root: &str, sys: &impl Windows) -> Disk {
+        let Some(volume) = sys.volume_name(root) else { return Disk::new(format!("volume:{root}"), 0) };
+        let joined = table.lock().volumes.get(&volume).cloned();
+        let disks = match joined {
+            Some(disks) => disks,
+            // A volume that came after they were listed, joined with none.
+            None => match sys.disks(&volume) {
+                Some(disks) if !disks.is_empty() => Arc::new(disks),
+                _ => return Disk::new(format!("volume:{}", guid(&volume)), 0),
+            },
+        };
+        let Some(&first) = disks.first() else { return Disk::new(format!("volume:{}", guid(&volume)), 0) };
+        // A disk that doesn't say counts as one that spins.
+        let solid = disks.iter().all(|&disk| penalty(table, listed, disk, sys) == Some(false));
+        Disk::new(format!("disk:{first}"), if solid { SOLID } else { 1 })
+    }
+
+    /// What disk `disk` says of its seek penalty, asked once while the
+    /// volumes are those listed at `listed`.
+    fn penalty(table: &Mutex<Table>, listed: Option<Instant>, disk: u32, sys: &impl Windows) -> Option<bool> {
+        if let Some(&penalty) = table.lock().penalties.get(&disk) {
+            return penalty;
+        }
+        let penalty = sys.seek_penalty(disk);
+        let mut table = table.lock();
+        if table.read == listed {
+            table.penalties.insert(disk, penalty);
+        }
+        penalty
     }
 }
 
@@ -1321,6 +1343,8 @@ mod os {
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::collections::HashSet;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc;
     use std::time::Duration;
 
     use super::mounts::{
@@ -1717,7 +1741,17 @@ not a mount line
         volumes: Vec<(String, Option<BTreeSet<u32>>)>,
         /// Disks, and whether they have a seek penalty.
         penalties: HashMap<u32, bool>,
-        asked: Cell<usize>,
+        /// A disk slow to answer.
+        slow: Option<Slow>,
+        asked: AtomicUsize,
+    }
+
+    /// A disk of [`FakeWindows`] that says when it is asked for its seek
+    /// penalty, and answers once told to.
+    struct Slow {
+        disk: u32,
+        asked: mpsc::Sender<()>,
+        answer: Mutex<mpsc::Receiver<()>>,
     }
 
     impl Windows for FakeWindows {
@@ -1741,7 +1775,7 @@ not a mount line
         }
 
         fn volume_name(&self, root: &str) -> Option<String> {
-            self.asked.set(self.asked.get() + 1);
+            self.asked.fetch_add(1, Ordering::Relaxed);
             self.roots.iter().find(|(r, _)| r == root).map(|(_, volume)| volume.clone())
         }
 
@@ -1754,6 +1788,10 @@ not a mount line
         }
 
         fn seek_penalty(&self, disk: u32) -> Option<bool> {
+            if let Some(slow) = self.slow.as_ref().filter(|slow| slow.disk == disk) {
+                let _ = slow.asked.send(());
+                let _ = slow.answer.lock().recv();
+            }
             self.penalties.get(&disk).copied()
         }
     }
@@ -1805,7 +1843,7 @@ not a mount line
                 (volume(6), Some([6].into())),
             ],
             penalties: [(0, false), (1, true), (2, false), (6, true)].into(),
-            asked: Cell::new(0),
+            ..FakeWindows::default()
         };
         let table = Mutex::default();
         let of = |path: &str| volumes::disk_of(&table, Path::new(path), &sys, Instant::now());
@@ -1816,12 +1854,46 @@ not a mount line
         assert_eq!(of(r"F:\a.mkv"), disk("volume:{00000004-0000-0000-0000-000000000000}", 0), "its disks unknown");
         assert_eq!(of(r"G:\a.mkv"), disk("disk:5", 1), "a disk that doesn't say spins");
         assert_eq!(of(r"Q:\a.mkv"), disk(r"volume:Q:\", 0), "no volume");
-        let asked = sys.asked.get();
+        let asked = sys.asked.load(Ordering::Relaxed);
         assert_eq!(of(r"\\NAS\Media\Movies\a.mkv"), disk("net:nas", 1));
         assert_eq!(of(r"\\?\UNC\nas\tv\a.mkv"), disk("net:nas", 1));
         assert_eq!(of(r"Z:\Movies\a.mkv"), disk("net:nas", 1), "a mapped drive whose share didn't answer");
         assert_eq!(of(r"Y:\a.mkv"), disk("net:Y:", 1));
-        assert_eq!(sys.asked.get(), asked, "no volume asked for shares");
+        assert_eq!(sys.asked.load(Ordering::Relaxed), asked, "no volume asked for shares");
+    }
+
+    #[test]
+    fn a_disk_slow_to_answer_holds_up_only_its_own_lookup() {
+        let volume = |n: u32| format!(r"\\?\Volume{{0000000{n}-0000-0000-0000-000000000000}}\");
+        let (asked, asking) = mpsc::channel();
+        let (answer, answering) = mpsc::channel();
+        let sys = FakeWindows {
+            roots: vec![(r"C:\".into(), volume(1)), (r"D:\".into(), volume(2)), (r"E:\".into(), volume(3))],
+            volumes: vec![(volume(1), Some([0].into())), (volume(2), Some([1].into())), (volume(3), Some([2].into()))],
+            penalties: [(0, false), (1, true), (2, false)].into(),
+            slow: Some(Slow { disk: 1, asked, answer: Mutex::new(answering) }),
+            ..FakeWindows::default()
+        };
+        let table = Mutex::default();
+        let of = |path: &str| volumes::disk_of(&table, Path::new(path), &sys, Instant::now());
+        assert_eq!(of(r"C:\Media\a.mkv"), disk("disk:0", SOLID));
+        let wait = Duration::from_secs(10);
+        std::thread::scope(|scope| {
+            let slow = scope.spawn(|| of(r"D:\Movies\a.mkv"));
+            asking.recv_timeout(wait).expect("disk 1 is asked");
+            // While disk 1 doesn't answer, a folder found before and one on
+            // another volume are found.
+            let (found, finding) = mpsc::channel();
+            scope.spawn(move || {
+                for path in [r"C:\Media\b.mkv", r"E:\Shows\a.mkv"] {
+                    let _ = found.send(of(path));
+                }
+            });
+            let quick: Vec<Disk> = (0..2).map_while(|_| finding.recv_timeout(wait).ok()).collect();
+            answer.send(()).unwrap();
+            assert_eq!(quick, [disk("disk:0", SOLID), disk("disk:2", SOLID)]);
+            assert_eq!(slow.join().unwrap(), disk("disk:1", 1));
+        });
     }
 
     #[test]
