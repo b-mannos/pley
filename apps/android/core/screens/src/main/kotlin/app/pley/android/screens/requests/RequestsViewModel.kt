@@ -67,6 +67,9 @@ data class RequestFilter(
     /** Some filter narrows the list beyond its view. */
     val narrowed: Boolean get() = kind != null || userId != null || q.isNotBlank() || mine
 
+    /** Less than all shows (or all that needs attention): with none, none match. */
+    val filtered: Boolean get() = narrowed || view.status != null
+
     fun query(offset: Int, limit: Int): RequestQuery = RequestQuery(
         statuses = view.status?.let(::listOf).orEmpty(),
         attention = view == RequestView.Attention,
@@ -254,7 +257,7 @@ class RequestsViewModel(
 
     private fun shown(f: RequestFilter, answer: RequestList): RequestListState =
         if (answer.requests.isEmpty() && answer.total == 0) {
-            RequestListState.Empty(filtered = f.narrowed || f.view != RequestView.All && f.view != RequestView.Attention)
+            RequestListState.Empty(filtered = f.filtered)
         } else {
             RequestListState.Ready(answer.requests.distinctBy { it.id }, answer.total, answer.counts, answer.people)
         }
@@ -380,7 +383,7 @@ class RequestsViewModel(
             val kept = request?.takeIf { f.matches(it) }
             val requests = if (kept != null) now.requests.map { if (it.id == id) kept else it } else now.requests.filterNot { it.id == id }
             val removed = now.requests.size - requests.size
-            if (requests.isEmpty() && now.total - removed <= 0) RequestListState.Empty(f.narrowed) else now.copy(requests = requests, total = now.total - removed)
+            if (requests.isEmpty() && now.total - removed <= 0) RequestListState.Empty(f.filtered) else now.copy(requests = requests, total = now.total - removed)
         }
     }
 

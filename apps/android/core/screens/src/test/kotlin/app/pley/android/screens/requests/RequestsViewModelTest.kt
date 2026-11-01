@@ -177,6 +177,21 @@ class RequestsViewModelTest {
     }
 
     @Test
+    fun withdrawingTheLastOfAViewSaysNoneMatch() = runTest(dispatcher) {
+        val requests = FakeRequests(summary)
+        val vm = viewModel(requests)
+        settle()
+        val pending = vm.shown().first { it.id == 44L }
+        requests.api.answer("requests", RequestList(total = 1, requests = listOf(pending)))
+        vm.view(RequestView.Pending)
+        settle()
+        vm.act(pending, CardAction.Withdraw)
+        settle()
+        // Others may be approved or ready: not "Nothing asked for yet".
+        assertEquals(RequestListState.Empty(filtered = true), vm.state.value.list)
+    }
+
+    @Test
     fun listsAreReadAgainWhileSomethingDownloads() = runTest(dispatcher) {
         val requests = FakeRequests(summary)
         val vm = viewModel(requests)
