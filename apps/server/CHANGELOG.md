@@ -11,6 +11,10 @@ describes how they are made.
 
 ### Added
 
+- Pley installs on a Synology NAS as a package (`.spk`) for DSM 7 on Intel
+  models, with FFmpeg from SynoCommunity's package and the NAS's GPU for
+  transcoding. A static Linux build, `linux-x86_64-static`, is published
+  with the other archives.
 - A playback with keyed addresses has its seek previews beside its media,
   as a BIF file (`previews.bif`), which Roku's own player fetches and shows
   as you fast forward and rewind.

@@ -1,0 +1,4 @@
+#!/bin/sh
+# After upgrading: nothing to restore. Pley migrates its database itself
+# when the new version starts.
+exit 0

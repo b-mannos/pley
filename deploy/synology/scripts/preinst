@@ -1,0 +1,14 @@
+#!/bin/sh
+# Before installing or upgrading: Pley runs FFmpeg from SynoCommunity's
+# package (deploy/synology/README.md), so refuse without one rather than
+# install something that can't start.
+
+for pkg in ffmpeg8 ffmpeg7; do
+    if [ -x "/var/packages/$pkg/target/bin/ffmpeg" ]; then
+        exit 0
+    fi
+done
+if [ -n "${SYNOPKG_TEMP_LOGFILE:-}" ]; then
+    echo "Pley needs FFmpeg. Add SynoCommunity's package source (https://packages.synocommunity.com) in Package Center, install ffmpeg7 (or ffmpeg8) from it, then install Pley again. For hardware transcoding on an Intel NAS, install SynoCli Video Driver too." > "$SYNOPKG_TEMP_LOGFILE"
+fi
+exit 1

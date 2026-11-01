@@ -1,0 +1,16 @@
+[{
+    "step_title": "Uninstall Pley",
+    "items": [{
+        "type": "singleselect",
+        "desc": "Pley's data: the library database, watch history, artwork and caches.",
+        "subitems": [{
+            "key": "wizard_keep_data",
+            "desc": "<b>Keep it</b>, for a later install of Pley.",
+            "defaultValue": true
+        }, {
+            "key": "wizard_delete_data",
+            "desc": "<b style=\"color: red\">Delete it.</b> Libraries and watch history are lost; the media files stay.",
+            "defaultValue": false
+        }]
+    }]
+}]

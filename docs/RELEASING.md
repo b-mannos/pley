@@ -92,7 +92,7 @@ the tags, so fetch them first (`git fetch --tags`).
 
 | Unit | What | Version in | Release files |
 |---|---|---|---|
-| `server` | The server, its transcoder and the web app it embeds | `apps/server/Cargo.toml`, `apps/transcoder/Cargo.toml`, `packages/transcoder-api/Cargo.toml`, `apps/web/package.json` | `pley-server-<version>-<os>-<arch>.zip`/`.tar.gz`, the Windows installers `…-setup.exe`, the Docker image `ghcr.io/pley-media-server/pley:<version>`, `:<major>.<minor>` and `:latest` |
+| `server` | The server, its transcoder and the web app it embeds | `apps/server/Cargo.toml`, `apps/transcoder/Cargo.toml`, `packages/transcoder-api/Cargo.toml`, `apps/web/package.json` | `pley-server-<version>-<os>-<arch>.zip`/`.tar.gz` (with `linux-x86_64-static`), the Windows installers `…-setup.exe`, the Synology package `…-synology-x86_64.spk`, the Docker image `ghcr.io/pley-media-server/pley:<version>`, `:<major>.<minor>` and `:latest` |
 | `desktop` | The desktop app (Tauri) | `apps/desktop/package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` | `pley-desktop-<version>-<os>-<arch>` `.msi`, `-setup.exe`, `.dmg`, `.deb`, `.rpm`, `.AppImage` |
 | `android` | Phones, tablets, Android TV, Fire TV | `apps/android/app/build.gradle.kts` (`appVersion`) | `pley-android-<version>.apk`, `pley-android-<version>-play.aab` |
 | `samsung` | Samsung TVs (`apps/tizen`) | `apps/tizen/package.json`, `config.xml` | None: the package is signed with a Samsung certificate, by hand (`bun run --cwd apps/tizen package`) |
