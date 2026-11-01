@@ -354,6 +354,18 @@ sub test_requests_asking_words()
     tkEqual(reqAskProblem({ status: 409, error: "in_library", message: "A library has this movie already.", data: {} }, limits, "movie", now), "A library has this movie already.")
 end sub
 
+sub test_requests_refused_actions_say_when_from_retry_at()
+    now = reqTestNow()
+    limits = reqTestSummary({ moviesLimit: 3, seasonsLimit: 5 })
+    early = { status: 409, error: "conflict", message: "a declined request stays for 30 days: it may be removed from Nov 13", data: { code: "conflict", request: reqTestRequest({ status: "declined", stage: "declined" }), retry_at: now + 12 * 86400 } }
+    tkEqual(reqActProblem(early, "withdraw", limits, "show", now), "A declined request stays for 30 days: you can remove it in 12 days.")
+    changed = { status: 409, error: "conflict", message: "this request changed meanwhile: it is approved now", data: { code: "conflict", request: reqTestRequest({}), retry_at: invalid } }
+    tkEqual(reqActProblem(changed, "withdraw", limits, "show", now), "this request changed meanwhile: it is approved now")
+    tkEqual(reqActProblem({ status: 404, error: "not_found", message: "no such request", data: {} }, "approve", limits, "show", now), "This request was deleted meanwhile.")
+    declined = { status: 409, error: "declined", message: "declined for this account lately", data: { code: "declined", retry_at: now + 3 * 86400 } }
+    tkEqual(reqActProblem(declined, "ask_again", limits, "movie", now), "You can ask again in 3 days.", "Request again: as asking says it")
+end sub
+
 sub test_requests_problems_say_what_to_do()
     tkEqual(reqProblem({ status: 503, error: "unavailable" }, false), { title: "Requests are off", text: "This server doesn't take requests for movies and shows.", retry: false, signIn: false })
     tkEqual(reqProblem({ status: 503, error: "tmdb_key" }, false).text, "An administrator needs to check it.")

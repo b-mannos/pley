@@ -349,6 +349,22 @@ function reqAskProblem(answer as object, allowance as object, kind as string, no
     return answer.message
 end function
 
+' Why an action on a request (reqActions') didn't work, in a sentence.
+' When it may be done comes from retry_at, never from the message.
+' allowance and kind: Request again's, as reqAskProblem takes them.
+function reqActProblem(answer as object, action as string, allowance as object, kind as string, now as integer) as string
+    if action = "ask_again" then return reqAskProblem(answer, allowance, kind, now)
+    if answer.status = 404 then return "This request was deleted meanwhile."
+    data = httpObject(answer.data)
+    retry = 0
+    if data <> invalid then retry = httpNumber(data.retry_at, 0)
+    if answer.error = "conflict" and retry > 0
+        if action = "withdraw" then return "A declined request stays for 30 days: you can remove it " + fmtUntil(retry, now) + "."
+        return "You can do this " + fmtUntil(retry, now) + "."
+    end if
+    return answer.message
+end function
+
 ' --- TMDB's titles (DiscoverTitle) ---
 
 ' Discover's rows: [{ key (GET /api/discover/{key}), title }].

@@ -2,8 +2,8 @@
 ' title's page, the requests). On the render thread, with Ui.brs and
 ' lib/Requests.brs. A screen that includes this file has
 ' onRequestActed(), called once the server did what an action asked, or
-' refused it as the request had changed (m.requestTarget is the request
-' it was for).
+' refused it as the request had changed or gone (m.requestTarget is the
+' request it was for).
 
 ' What can be done with a request, in a dialog titled with it: target is
 ' { requestId, title, status, stage, kind, tmdbId, seasons, libraryId,
@@ -95,18 +95,17 @@ sub uiRequestCall(action as string, reason as string)
     uiRequest(spec, "uiRequestActed")
 end sub
 
-' The server's answer to an action. One it refused as the request had
-' changed meanwhile (409, the request as it is now) says so; the screen
-' shows the request as it is either way.
+' The server's answer to an action. One it refused says why; the screen
+' shows the request as it is now when it changed meanwhile (409, deleted:
+' 404) or the limits moved (429).
 sub uiRequestActed(event as object)
     answer = event.getData()
     spec = event.getRoSGNode().spec
     if not answer.ok
         if uiFailed(answer) then return
-        text = answer.message
-        if spec.action = "ask_again" then text = reqAskProblem(answer, reqSummaryOf(m.top.getScene().requestSummary), httpString(m.requestTarget.kind), CreateObject("roDateTime").AsSeconds())
+        text = reqActProblem(answer, spec.action, reqSummaryOf(m.top.getScene().requestSummary), httpString(m.requestTarget.kind), CreateObject("roDateTime").AsSeconds())
         uiMessage("That didn't work", [text])
-        if answer.status = 409 or answer.status = 429 then onRequestActed()
+        if answer.status = 404 or answer.status = 409 or answer.status = 429 then onRequestActed()
         return
     end if
     if spec.action = "ask_again" then uiMessage(spec.requestTitle, [reqAsked(answer.status, answer.data, spec.requestTitle)])
