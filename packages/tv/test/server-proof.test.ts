@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { base64url, fromBase64url, hmacSha256, sha256, utf8 } from "../src/auth/hmac";
-import { NOT_YOUR_SERVER, parseTokenResponse, stored, Tokens, type KeyValue, type StoredTokens } from "../src/auth/tokens";
+import { networkMayHaveChanged, NOT_YOUR_SERVER, parseTokenResponse, stored, Tokens, type KeyValue, type StoredTokens } from "../src/auth/tokens";
 import { NetworkError, type HttpRequest, type HttpResponse } from "../src/net/transport";
 
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -152,6 +152,28 @@ describe("a server proves itself before a token goes to it", () => {
     expect(proofs()).toBe(3);
   });
 
+  it("asks again on another network, and after the clock went back", async () => {
+    const { t, advance, proofs } = setup();
+    await t.accessToken();
+    networkMayHaveChanged();
+    await t.accessToken();
+    expect(proofs()).toBe(2);
+    advance(-60 * 60_000);
+    await t.accessToken();
+    expect(proofs()).toBe(3);
+  });
+
+  it("takes no proof through a redirect, and calls a server error out of reach", async () => {
+    const elsewhere = (c: string) => ({ ...response(200, { id: ID, proof: proofOf(c) }), url: `https://pley.example.com/api/server?challenge=${c}&proof_id=17` });
+    expect(await refusal(setup(elsewhere).t.accessToken())).toBe(NOT_YOUR_SERVER);
+    const here = (c: string) => ({ ...response(200, { id: ID, proof: proofOf(c) }), url: `${SERVER}/api/server?challenge=${c}&proof_id=17` });
+    expect(await setup(here).t.accessToken()).toBe("pley_at_a");
+    const { t } = setup(() => response(502, "Bad Gateway"));
+    const e = await t.accessToken().catch((e: unknown) => e);
+    expect(e).toBeInstanceOf(NetworkError);
+    expect((e as Error).message).not.toBe(NOT_YOUR_SERVER);
+  });
+
   it("keeps the token from another device at the address", async () => {
     for (const answer of [
       () => response(200, { id: ID, proof: "AAAA" }),
@@ -188,6 +210,23 @@ describe("a server proves itself before a token goes to it", () => {
     await t.signOut();
     expect(asked.some((r) => r.url.indexOf("/revoke") >= 0)).toBe(false);
     expect(store.get(`pley.tokens.${SERVER}`)).toBeNull();
+  });
+
+  it("ends the sign-in before a new one only where the server proves its key", async () => {
+    for (const proves of [true, false]) {
+      const { t, asked } = setup((c) => response(200, { id: ID, proof: proves ? proofOf(c) : "AAAA" }));
+      const fresh: StoredTokens = {
+        issuer: SERVER,
+        accessToken: "pley_at_c",
+        refreshToken: "pley_rt_d",
+        expiresAt: 9e15,
+        scope: "library play",
+        tokenEndpoint: `${SERVER}/api/oauth/token`,
+        revocationEndpoint: `${SERVER}/api/oauth/revoke`,
+      };
+      await t.install(fresh, "library play");
+      expect(asked.some((r) => r.url.indexOf("/revoke") >= 0)).toBe(proves);
+    }
   });
 
   it("checks nothing for a sign-in from a server without proofs", async () => {

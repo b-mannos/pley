@@ -196,8 +196,8 @@ export function stored(
     tokenEndpoint,
     revocationEndpoint,
   };
-  const proof = answer.proof ?? (before?.proofKey ? { serverId: before.serverId!, proofId: before.proofId!, proofKey: before.proofKey } : null);
-  if (proof) {
+  const proof = answer.proof ?? before;
+  if (proof?.proofKey) {
     tokens.serverId = proof.serverId;
     tokens.proofId = proof.proofId;
     tokens.proofKey = proof.proofKey;
@@ -207,8 +207,16 @@ export function stored(
 
 /** Why a request to a server's address isn't sent: what answers there can't prove it is the server signed in to. */
 export const NOT_YOUR_SERVER = "another device answers at this address";
-/** How long a server's proof counts, unless a request to it fails meanwhile. */
+/** How long a server's proof counts, unless a request to it fails or the network changes meanwhile. */
 const PROOF_TTL_MS = 30 * 60_000;
+
+/** Counts the times the TV may have changed networks: a proof counts on the network it was made on. */
+let network = 0;
+
+/** The TV came back to the app, or back online: the next token waits for a new proof. */
+export function networkMayHaveChanged(): void {
+  network++;
+}
 
 /** `n` random bytes from the system. */
 function randomBytes(n: number): Uint8Array {
@@ -224,14 +232,19 @@ function randomBytes(n: number): Uint8Array {
  */
 export async function proveServer(http: Transport, issuer: string, tokens: StoredTokens, random: (n: number) => Uint8Array = randomBytes): Promise<void> {
   const challenge = base64url(random(16));
+  const url = `${issuer}/api/server?challenge=${challenge}&proof_id=${tokens.proofId}`;
   const res = await http({
     method: "GET",
-    url: `${issuer}/api/server?challenge=${challenge}&proof_id=${tokens.proofId}`,
+    url,
     headers: { Accept: "application/json" },
     body: null,
     responseType: "json",
     timeoutMs: 10_000,
   });
+  // The server, or a proxy before it, out of reach for now.
+  if (res.status >= 500) throw new NetworkError("Can't reach the server");
+  // Only the address itself proves: a redirect could lead to the real server from anywhere.
+  if (res.url && new URL(res.url).href !== new URL(url).href) throw new NetworkError(NOT_YOUR_SERVER);
   const body = (typeof res.body === "string" ? safeJson(res.body) : res.body) as { id?: unknown; proof?: unknown } | null;
   const key = fromBase64url(tokens.proofKey ?? "");
   if (res.status !== 200 || !body || body.id !== tokens.serverId || typeof body.proof !== "string" || !key) {
@@ -254,8 +267,8 @@ export class Tokens {
   private queue: Promise<unknown> = Promise.resolve();
   /** The access token the last refresh or profile switch gave, and when. */
   private lastIssued: { token: string; at: number } | null = null;
-  /** When the server last proved it is the one signed in to, and the proof under way. */
-  private provedAt: number | null = null;
+  /** When, and on which network, the server last proved it is the one signed in to; the proof under way. */
+  private provedAt: { at: number; network: number } | null = null;
   private proving: Promise<void> | null = null;
 
   readonly issuer: string;
@@ -292,11 +305,14 @@ export class Tokens {
    */
   private proved(tokens: StoredTokens): Promise<void> {
     if (!tokens.proofKey) return Promise.resolve();
-    if (this.provedAt !== null && this.clock() - this.provedAt < PROOF_TTL_MS) return Promise.resolve();
+    // A clock set back makes an age below zero: proved again.
+    const age = this.provedAt && this.provedAt.network === network ? this.clock() - this.provedAt.at : -1;
+    if (age >= 0 && age < PROOF_TTL_MS) return Promise.resolve();
     if (!this.proving) {
+      const on = network;
       this.proving = proveServer(this.http, this.issuer, tokens, this.random).then(
         () => {
-          this.provedAt = this.clock();
+          this.provedAt = { at: this.clock(), network: on };
           this.proving = null;
         },
         (e: unknown) => {
@@ -470,7 +486,12 @@ export class Tokens {
       }
       const previous = this.load();
       this.save(fresh);
-      if (previous && previous.refreshToken !== fresh.refreshToken) await revoke(this.http, this.clientId, previous);
+      // A new key: the next token waits for its proof.
+      this.provedAt = null;
+      if (!previous || previous.refreshToken === fresh.refreshToken) return;
+      // The sign-in before goes only to the server that proves it holds its key.
+      const proven = !previous.proofKey || (await proveServer(this.http, this.issuer, previous, this.random).then(() => true, () => false));
+      if (proven) await revoke(this.http, this.clientId, previous);
     });
   }
 
