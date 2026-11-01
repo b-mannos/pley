@@ -224,6 +224,7 @@ Apps sign in on Pley's own page with OAuth 2.1.
 - A key goes only to the address it was saved with: a new address takes its
   key again, and checking another address in Settings takes that address's
   key. Their redirects aren't followed, so a key isn't sent on elsewhere.
+  Their answers are read 32 MB at most.
 - Only administrators approve and decline, see everyone's requests, and ask
   Radarr and Sonarr anything; others see their own.
 - Discover shows TMDB's titles whatever their rating, so profiles without a

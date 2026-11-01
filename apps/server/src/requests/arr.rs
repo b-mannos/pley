@@ -28,6 +28,11 @@ const QUEUE_RETRY: Duration = Duration::from_secs(60);
 const QUEUE_SIZE: u32 = 1000;
 /// What an error quotes of an answer at most.
 const QUOTE: usize = 300;
+/// What is read of an answer at most, whatever it says its length is: a
+/// queue of 1,000 downloads with their episodes takes a few MB.
+const ANSWER_MAX: usize = 32 << 20;
+/// What is read of an error answer at most: only its message is quoted.
+const ERROR_MAX: usize = 64 << 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -323,11 +328,13 @@ impl Arr {
             return Err(ArrError::Unexpected(name, message.to_owned()));
         }
         if !status.is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            let message = message_of(&text).unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
+            let text = read_answer(resp, ERROR_MAX).await.unwrap_or_default();
+            let message =
+                message_of(&String::from_utf8_lossy(&text)).unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
             return Err(ArrError::Refused(name, message));
         }
-        resp.json::<T>().await.map_err(|e| ArrError::Unexpected(name, reason(&e.without_url())))
+        let bytes = read_answer(resp, ANSWER_MAX).await.map_err(|why| ArrError::Unexpected(name, why))?;
+        serde_json::from_slice(&bytes).map_err(|e| ArrError::Unexpected(name, quote(&e.to_string())))
     }
 
     async fn get<T: DeserializeOwned>(
@@ -602,6 +609,23 @@ fn id_of(service: Service, value: &Value) -> Result<i64, ArrError> {
     value["id"].as_i64().ok_or_else(|| ArrError::Unexpected(service.name(), "no id in its answer".to_owned()))
 }
 
+/// An answer's body, `max` bytes at most whatever its length says; why
+/// not, when it is larger or breaks off.
+async fn read_answer(mut resp: reqwest::Response, max: usize) -> Result<Vec<u8>, String> {
+    let too_large = || format!("its answer is larger than {} MB", max.div_ceil(1 << 20));
+    if resp.content_length().is_some_and(|n| n > max as u64) {
+        return Err(too_large());
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| reason(&e.without_url()))? {
+        if body.len() + chunk.len() > max {
+            return Err(too_large());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
 /// What went wrong with a request, without the address (reqwest's own
 /// words, then their causes).
 fn reason(err: &reqwest::Error) -> String {
@@ -674,6 +698,17 @@ mod tests {
         assert_eq!(message_of(r#"{"title":"oops"}"#).as_deref(), None);
         let long = "é".repeat(QUOTE + 5);
         assert_eq!(quote(&long).chars().count(), QUOTE + 1);
+    }
+
+    #[tokio::test]
+    async fn answers_are_read_up_to_a_limit() {
+        let answer = |len: usize| reqwest::Response::from(axum::http::Response::new(vec![b'x'; len]));
+        assert_eq!(read_answer(answer(10), 10).await.unwrap().len(), 10);
+        assert!(read_answer(answer(11), 10).await.is_err());
+        assert_eq!(
+            read_answer(answer(ANSWER_MAX + 1), ANSWER_MAX).await.unwrap_err(),
+            "its answer is larger than 32 MB"
+        );
     }
 
     #[test]
