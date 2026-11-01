@@ -448,6 +448,19 @@ class RequestsTest(Case):
         self.assertEqual(self.sent("GET", "/api/requests")[0][1], "/api/requests?limit=1&attention=1&order=oldest")
         self.assertEqual(xbmc.builtins[-1], "Container.Update(%s?route=requests&user_id=1,replace)" % BASE)
 
+    def test_the_search_filter(self):
+        self.summary(MANAGER)
+        self.addCleanup(lambda: (xbmc.Keyboard.typed.clear(), xbmc.Keyboard.shown.clear()))
+        xbmc.Keyboard.typed[:] = [" heat ", None, ""]
+        filtered = "Container.Update(%s?route=requests&view=pending&q=heat,replace)" % BASE
+        self.run_plugin("route=request_filter&pick=q&view=pending", handle="-1")
+        self.assertEqual(xbmc.builtins, [filtered])
+        self.run_plugin("route=request_filter&pick=q&view=pending&q=heat", handle="-1")
+        self.assertEqual(xbmc.builtins, [filtered], "cancelled: the list stays as it is")
+        self.run_plugin("route=request_filter&pick=q&view=pending&q=heat", handle="-1")
+        self.assertEqual(xbmc.builtins[-1], "Container.Update(%s?route=requests&view=pending,replace)" % BASE, "emptied: none")
+        self.assertEqual(xbmc.Keyboard.shown, [("Search", ""), ("Search", "heat"), ("Search", "heat")])
+
 
 class ActTest(Case):
     def act(self, do, *answers, found=None):

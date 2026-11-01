@@ -669,10 +669,13 @@ class Asking:
         pick = self.params.get("pick")
         dialog = xbmcgui.Dialog()
         if pick == "q":
-            typed = dialog.input(T("search"), defaultt=chosen.get("q", ""))
-            if typed is None:
+            # Kodi's keyboard, which tells cancelling from an empty entry
+            # (that clears the filter); Dialog.input says "" for both.
+            keyboard = xbmc.Keyboard(chosen.get("q", ""), T("search"))
+            keyboard.doModal()
+            if not keyboard.isConfirmed():
                 return
-            chosen["q"] = typed.strip()
+            chosen["q"] = keyboard.getText().strip()
         elif pick in ("view", "kind", "user_id"):
             if pick == "view":
                 options = views_of(T)
