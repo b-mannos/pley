@@ -63,6 +63,8 @@ const REASON_MAX: usize = 500;
 const FOLDER_MAX: usize = 512;
 /// Titles whose details (or other ids) are looked up at once.
 const LOOKUPS: usize = 8;
+/// How many times asking looks at a title whose requests change meanwhile.
+const ASK_LOOKS: usize = 3;
 /// How long what Radarr and Sonarr offer approvals is reused, and how long
 /// an answer waits for them after that.
 const OFFER_TTL: Duration = Duration::from_secs(300);
@@ -904,6 +906,19 @@ struct Active {
     follows: bool,
     /// It waits for a manager.
     pending: bool,
+}
+
+/// What asking did ([`Requests::ask`]): the seasons it wanted, the active
+/// requests asking for some of them already, those it followed and
+/// approved, the request it made, and whether those approved or made are
+/// sent.
+struct Asked {
+    wanted: Vec<i64>,
+    covering: Vec<Active>,
+    follow: Vec<i64>,
+    approved: Vec<i64>,
+    made: Option<i64>,
+    sends: bool,
 }
 
 /// What the libraries and requests have of a title, for one account.
@@ -2288,7 +2303,9 @@ impl Requests {
     /// approved as it asks, it approves those of them still pending. What
     /// is left is a new request: `true` with it, `false` with the request
     /// asking for the lowest season asked for when nothing is left. All of
-    /// it or nothing: refused, nothing is followed or approved.
+    /// it or nothing: refused, nothing is followed or approved. A request
+    /// that stopped asking for the title meanwhile is left out, as if it
+    /// weren't there.
     pub async fn create(self: &Arc<Self>, caller: &Caller<'_>, new: NewRequest) -> RequestResult<(bool, MediaRequest)> {
         let user = caller.user;
         match (new.kind, new.seasons.as_deref()) {
@@ -2304,7 +2321,70 @@ impl Requests {
             return Err(AppError::bad_request(format!("TMDB lists no season {n} of {}", details.title)).into());
         }
         let making = self.making.lock().await;
-        let mark = self.marks(caller, new.kind, &[Known::of(&details)]).await?.remove(&new.tmdb_id).unwrap_or_default();
+        // Looked at again while a request it found changes meanwhile.
+        let mut asked = None;
+        for _ in 0..ASK_LOOKS {
+            asked = self.ask(caller, &new, &details).await?;
+            if asked.is_some() {
+                break;
+            }
+        }
+        let Some(Asked { wanted, covering, follow, approved, made, sends }) = asked else {
+            return Err(AppError::conflict("this title's requests are changing: ask again in a moment").into());
+        };
+        drop(making);
+        for id in &follow {
+            tracing::info!("{} follows request {id} ({})", user.username, details.title);
+        }
+        let mut touched: Vec<i64> = follow.iter().chain(&approved).copied().collect();
+        touched.sort_unstable();
+        touched.dedup();
+        for id in touched {
+            if approved.contains(&id)
+                && let Some(row) = self.row(id).await?
+            {
+                self.decided(&row, user.id).await?;
+            }
+            self.changed(id, new.kind, new.tmdb_id).await;
+        }
+        if let Some(id) = made {
+            tracing::info!("{} asked for {} (request {id})", user.username, details.title);
+            if let Some(row) = self.row(id).await? {
+                self.created(&row);
+            }
+            self.changed(id, new.kind, new.tmdb_id).await;
+        }
+        // The new request, or the one asking for the lowest season asked
+        // for (its own first, then the newest).
+        let lowest = wanted.first().copied();
+        let answered = made.or_else(|| {
+            covering
+                .iter()
+                .filter(|a| lowest.is_none_or(|n| a.seasons.contains(&n)))
+                .max_by_key(|a| (a.mine, a.id))
+                .map(|a| a.id)
+        });
+        let Some(answered) = answered else {
+            return Err(AppError::conflict("this title is asked for already").into());
+        };
+        let answer = self.one(caller, answered).await?;
+        if sends {
+            for id in approved.iter().copied().chain(made) {
+                self.send(id);
+            }
+        }
+        Ok((made.is_some(), answer))
+    }
+
+    /// What [`Self::create`] does under `making`: looks at what the
+    /// libraries and requests have of the title, and follows, approves and
+    /// makes requests as it says, in one write. `None`, with nothing
+    /// written, when an active request it found no longer asks for the
+    /// title: approving, declining and deleting don't wait for asking, and
+    /// it was declined, deleted or became available meanwhile.
+    async fn ask(&self, caller: &Caller<'_>, new: &NewRequest, details: &Details) -> RequestResult<Option<Asked>> {
+        let user = caller.user;
+        let mark = self.marks(caller, new.kind, &[Known::of(details)]).await?.remove(&new.tmdb_id).unwrap_or_default();
         // The seasons asked for that no library it can open has whole (none
         // for a movie), and the active requests asking for any of them.
         let wanted = match new.kind {
@@ -2314,9 +2394,9 @@ impl Requests {
             TitleKind::Movie => Vec::new(),
             TitleKind::Show => {
                 let counts = self.season_counts(&mark.shows).await?;
-                let mut wanted = match new.seasons {
-                    Some(asked) => asked,
-                    None => default_seasons(&details, &counts, &mark.declined_seasons),
+                let mut wanted = match &new.seasons {
+                    Some(asked) => asked.clone(),
+                    None => default_seasons(details, &counts, &mark.declined_seasons),
                 };
                 wanted.sort_unstable();
                 wanted.dedup();
@@ -2332,10 +2412,11 @@ impl Requests {
                 wanted
             }
         };
-        let covering: Vec<&Active> = mark
+        let covering: Vec<Active> = mark
             .active
             .iter()
             .filter(|a| new.kind == TitleKind::Movie || a.seasons.iter().any(|n| wanted.contains(n)))
+            .cloned()
             .collect();
         let asked = mark.asked();
         let left: Vec<i64> = wanted.iter().copied().filter(|n| !asked.contains(n)).collect();
@@ -2368,6 +2449,21 @@ impl Requests {
         let sends = auto && service.connected(&self.settings.get()).is_some();
         let at = now();
         let mut tx = self.db.write.begin().await?;
+        // The requests it counts on still ask for the title, as this write
+        // (the only one at a time) sees them; else it looks again.
+        if !covering.is_empty() {
+            let sql = format!(
+                "SELECT COUNT(*) FROM requests WHERE id IN ({}) AND status IN {ACTIVE}",
+                vec!["?"; covering.len()].join(",")
+            );
+            let mut query = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql.as_str()));
+            for active in &covering {
+                query = query.bind(active.id);
+            }
+            if query.fetch_one(&mut *tx).await? != covering.len() as i64 {
+                return Ok(None);
+            }
+        }
         for id in &follow {
             sqlx::query("INSERT OR IGNORE INTO request_watchers (request_id, user_id, created_at) VALUES (?, ?, ?)")
                 .bind(id)
@@ -2429,48 +2525,7 @@ impl Requests {
             None
         };
         tx.commit().await?;
-        drop(making);
-        for id in &follow {
-            tracing::info!("{} follows request {id} ({})", user.username, details.title);
-        }
-        let mut touched: Vec<i64> = follow.iter().chain(&approved).copied().collect();
-        touched.sort_unstable();
-        touched.dedup();
-        for id in touched {
-            if approved.contains(&id)
-                && let Some(row) = self.row(id).await?
-            {
-                self.decided(&row, user.id).await?;
-            }
-            self.changed(id, new.kind, new.tmdb_id).await;
-        }
-        if let Some(id) = made {
-            tracing::info!("{} asked for {} (request {id})", user.username, details.title);
-            if let Some(row) = self.row(id).await? {
-                self.created(&row);
-            }
-            self.changed(id, new.kind, new.tmdb_id).await;
-        }
-        // The new request, or the one asking for the lowest season asked
-        // for (its own first, then the newest).
-        let lowest = wanted.first().copied();
-        let answered = made.or_else(|| {
-            covering
-                .iter()
-                .filter(|a| lowest.is_none_or(|n| a.seasons.contains(&n)))
-                .max_by_key(|a| (a.mine, a.id))
-                .map(|a| a.id)
-        });
-        let Some(answered) = answered else {
-            return Err(AppError::conflict("this title is asked for already").into());
-        };
-        let answer = self.one(caller, answered).await?;
-        if sends {
-            for id in approved.iter().copied().chain(made) {
-                self.send(id);
-            }
-        }
-        Ok((made.is_some(), answer))
+        Ok(Some(Asked { wanted, covering, follow, approved, made, sends }))
     }
 
     /// `POST /api/requests/{id}/approve`: a pending, failed, declined, or

@@ -2395,7 +2395,9 @@ An app's token without the route's scope is refused before all of it
   lists none). Seasons a library it can open has whole are dropped. Then:
   - the account follows each active request (pending, approved or failed),
     whoever made it, that asks for the movie or for any of the seasons
-    asked for; its own change nothing;
+    asked for; its own change nothing; one that stops being active
+    meanwhile (declined, deleted or available) is left out, as if it
+    weren't there;
   - approved as it asks (`access` `"auto"`), it approves those of them
     still pending, as if it had just asked for them (`decided_by`: the
     account), and they are sent;

@@ -1654,6 +1654,33 @@ async fn asking_again_follows_the_requests_asking_already() {
 }
 
 #[tokio::test]
+async fn asking_follows_only_requests_still_asking() {
+    let w = world().await;
+    w.turn_on(json!({})).await;
+    let (bob, _) = w.app.user(&w.admin, "bob", json!({})).await;
+    for (tmdb_id, change) in [
+        (604, "UPDATE requests SET status = 'declined', decided_by = 1, decided_at = updated_at WHERE id = ?"),
+        (605, "DELETE FROM requests WHERE id = ?"),
+    ] {
+        let hers = w.ask(&w.ann, json!({"kind": "movie", "tmdb_id": tmdb_id})).await;
+        let id = hers.body["id"].as_i64().unwrap();
+        // Hers changes while Bob asks, once he has looked at the title: the
+        // write waits for it.
+        let mut tx = w.app.state.db.write.begin().await.unwrap();
+        let (his, ()) = tokio::join!(w.ask(&bob, json!({"kind": "movie", "tmdb_id": tmdb_id})), async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            sqlx::query(change).bind(id).execute(&mut *tx).await.unwrap();
+            tx.commit().await.unwrap();
+        });
+        assert_eq!(status(&his), (StatusCode::CREATED, "pending".to_owned()), "{change}: {}", his.text());
+        assert_eq!((&his.body["mine"], &his.body["watching"]), (&json!(true), &json!(false)), "{change}");
+        let followed: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM request_watchers").fetch_one(&w.app.state.db.read).await.unwrap();
+        assert_eq!(followed, 0, "{change}");
+    }
+}
+
+#[tokio::test]
 async fn a_withdrawn_request_goes_to_its_earliest_follower() {
     let w = world().await;
     w.turn_on(json!({"request_limit_movies": 1})).await;
