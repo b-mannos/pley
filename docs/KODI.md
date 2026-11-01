@@ -191,11 +191,12 @@ their top goes back to Kodi, and the add-on opens Pley's look again).
   downloads.
 - **Requests**, for an administrator's account (signed in with
   `approvals`), opens on Needs attention, oldest first, with filters atop
-  (which requests, movies or shows, whose, a title's words). Each request
-  offers Approve, Try again, Decline, Decline with a reason… (typed on
-  Kodi's keyboard), Mark as added by hand and Delete (asked first). The
-  entry carries what waits, new requests and news, red while one couldn't
-  be sent.
+  (which requests, movies or shows, whose, a title's words). Yours, the
+  last choice of which requests, lists the account's own and marks their
+  news seen; the others leave it unseen. Each request offers Approve, Try
+  again, Decline, Decline with a reason… (typed on Kodi's keyboard), Mark
+  as added by hand and Delete (asked first). The entry carries what
+  waits, new requests and news, red while one couldn't be sent.
 - **Search** lists On TMDB after the libraries' results: TMDB's first
   titles the libraries don't have, then See all on Discover. It is looked
   for beside the libraries' search and shows once it comes, without

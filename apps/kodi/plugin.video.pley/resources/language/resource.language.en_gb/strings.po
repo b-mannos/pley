@@ -1321,3 +1321,7 @@ msgstr ""
 msgctxt "#30547"
 msgid "Show"
 msgstr ""
+
+msgctxt "#30548"
+msgid "Yours"
+msgstr ""

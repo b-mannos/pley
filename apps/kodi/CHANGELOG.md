@@ -21,9 +21,10 @@ describes how they are made.
 - Your requests: each request's stage ("Waiting for approval",
   "Downloading 42% · in 20 min", "Ready to watch"…), what it says and when
   it was asked for, with Withdraw and Stop following. Administrators get
-  Requests, opening on Needs attention, with filters, Approve, Decline,
-  Decline with a reason… (typed on Kodi's keyboard), Mark as added by hand
-  and Delete. The entry carries the number of what is new or waits.
+  Requests, opening on Needs attention, with filters (Yours for their
+  own), Approve, Decline, Decline with a reason… (typed on Kodi's
+  keyboard), Mark as added by hand and Delete. The entry carries the
+  number of what is new or waits.
 - Search shows On TMDB after the libraries' results, and a library show's
   menu has Request more seasons. In Pley's look, the profile's menu opens
   Discover and Your requests in Kodi's lists, search has an On TMDB row,

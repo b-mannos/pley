@@ -558,8 +558,9 @@ class Asking:
 
     def route_requests(self) -> None:
         """Your requests, newest first; for managers Requests, opening on
-        Needs attention (oldest first), with filters atop. Once its first
-        page shows, its news is seen."""
+        Needs attention (oldest first), with filters atop. Once the first
+        page of the account's own shows (a manager's Yours), their news is
+        seen."""
         T = kodi.text
         client = self.client()
         s = self.requests_summary()
@@ -589,7 +590,8 @@ class Asking:
         # Downloads move with no event: the service asks for this list
         # again every 10 seconds while it is on screen (news.py).
         kodi.set_property(requests.LIVE, self.path if requests.moving(listed) else "")
-        if offset == 0 and ((s or {}).get("unseen") or any(r.get("unseen") for r in listed)):
+        own = not manage or view == "mine"
+        if own and offset == 0 and ((s or {}).get("unseen") or any(r.get("unseen") for r in listed)):
             try:
                 client.post("/api/requests/seen")
             except api.ApiError as e:
@@ -600,7 +602,7 @@ class Asking:
     def nothing(self, chosen: dict, view: str, manage: bool, s) -> None:
         """What an empty list of requests says."""
         T = kodi.text
-        if set(chosen) - {"view"} or view not in ("attention", "all"):
+        if set(chosen) - {"view"} or view not in ("attention", "all", "mine"):
             return self.entry(T("no_matches"), {"route": "retry"}, "DefaultIconInfo.png", folder=False)
         if view == "attention":
             return self.entry(T("nothing_needs_attention"), {"route": "retry"}, "DefaultIconInfo.png", folder=False)
@@ -830,13 +832,16 @@ def query_of(chosen: dict, view: str) -> dict:
     query = {k: chosen[k] for k in ("kind", "user_id", "q") if chosen.get(k)}
     if view == "attention":
         query.update(attention=1, order="oldest")
+    elif view == "mine":
+        query["mine"] = 1
     elif view != "all":
         query["status"] = view
     return query
 
 
 def views_of(T) -> list:
-    """Requests' views for managers: Needs attention, by status, all."""
+    """Requests' views for managers: Needs attention, by status, all, and
+    Yours (those the account made or follows)."""
     return [
         ("attention", T("needs_attention")),
         ("pending", T("pending")),
@@ -845,6 +850,7 @@ def views_of(T) -> list:
         ("declined", T("declined")),
         ("failed", T("failed")),
         ("all", T("all")),
+        ("mine", T("yours")),
     ]
 
 

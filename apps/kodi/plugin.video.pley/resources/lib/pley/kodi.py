@@ -331,6 +331,7 @@ TEXT = {
     "nothing_more": 30545,
     "movie": 30546,
     "show": 30547,
+    "yours": 30548,
 }
 
 

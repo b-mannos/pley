@@ -406,11 +406,29 @@ class RequestsTest(Case):
         self.assertEqual(self.sent("POST"), [])
         self.assertEqual(kodi.get_property(requests.LIVE), "")
 
+    def test_a_managers_news_is_seen_in_yours_alone(self):
+        self.summary(dict(MANAGER, unseen=1))
+        ready = request(stage="available", status="available", unseen=True, actions=["delete"])
+        self.answers[ACTIVE] = (200, {"total": 1, "requests": [ready], "people": [{"id": 1, "name": "Ann"}]})
+        self.answers["POST /api/requests/seen"] = (200, {})
+        for view in ("", "&view=available", "&view=all"):
+            self.run_plugin("route=requests" + view)
+        self.assertEqual(self.sent("POST"), [], "everyone's requests, the account's among them")
+        del xbmcplugin.calls[:], self.server.requests[:]
+        entries = self.run_plugin("route=requests&view=mine")
+        self.assertEqual(self.labels(entries)[0], "Yours")
+        self.assertEqual(self.sent("GET", "/api/requests")[0][1], "/api/requests?offset=0&limit=50&mine=1")
+        self.assertEqual(self.sent("POST"), [("POST", "/api/requests/seen", {})])
+        with Dialogs(-1) as dialogs:
+            self.run_plugin("route=request_filter&pick=view&view=mine", handle="-1")
+        self.assertEqual((dialogs.shown[0][2][-1], dialogs.shown[0][3]), ("Yours", 7), "last, and preselected while shown")
+
     def test_empty_lists(self):
         self.assertEqual(self.labels(self.run_plugin("route=requests")), ["You haven't asked for anything yet."])
         self.summary(MANAGER)
         for query, said in [("route=requests", "Nothing needs attention."), ("route=requests&view=pending", "Nothing matches these filters."),
-                            ("route=requests&kind=show", "Nothing matches these filters.")]:
+                            ("route=requests&kind=show", "Nothing matches these filters."),
+                            ("route=requests&view=mine", "You haven't asked for anything yet.")]:
             del xbmcplugin.calls[:]
             self.assertEqual(self.labels(self.run_plugin(query))[-1], said, query)
 
