@@ -527,6 +527,54 @@ describe("Discover", () => {
     expect(t.el("movies/more")!.getAttribute("aria-label")).toBe("Show more");
   });
 
+  it("ends a grid in Retry when a later page fails, which reads on; back on the page, what failed is asked again", async () => {
+    let fail = true;
+    const asked: number[] = [];
+    const down = new ApiError(503, "tmdb_down", "TMDB isn't answering", { code: "tmdb_down", message: "TMDB isn't answering", setup: true });
+    const api = {
+      discover: (_l: string, n: number) => {
+        asked.push(n);
+        if (n === 2 && fail) return Promise.reject(down);
+        return Promise.resolve(page(n === 1 ? TITLES.slice(0, 2) : [TITLES[2]!], n, 2));
+      },
+    };
+    let kept: Record<string, unknown> = {};
+    const t = mount(
+      (entry) => {
+        kept = entry.state;
+        return <DiscoverListScreen entry={entry} list="movies" />;
+      },
+      api,
+      summary(),
+      { name: "discoverList", list: "movies" },
+    );
+    for (let i = 0; i < 3; i++) await t.settle();
+    expect(asked).toEqual([1, 2]);
+    expect(t.text(".grid-cells .tile-caption .title")).toEqual(["Arrival", "Dune"]);
+    expect(t.el("movies/more")!.getAttribute("aria-label")).toBe("Retry");
+    // Left as it is, then shown again (Back to it): asked again by itself.
+    const again = mount(
+      (entry) => {
+        entry.state = kept;
+        return <DiscoverListScreen entry={entry} list="movies" />;
+      },
+      api,
+      summary(),
+      { name: "discoverList", list: "movies" },
+    );
+    for (let i = 0; i < 3; i++) await again.settle();
+    expect(asked).toEqual([1, 2, 2]);
+    expect(again.el("movies/more")!.getAttribute("aria-label")).toBe("Retry");
+    // Retry reads on, focus going to what came in its place.
+    fail = false;
+    again.select("movies/more");
+    for (let i = 0; i < 3; i++) await again.settle();
+    expect(asked).toEqual([1, 2, 2, 2]);
+    expect(again.text(".grid-cells .tile-caption .title")).toEqual(["Arrival", "Dune", "Heat"]);
+    expect(again.fid()).toBe("movies/movie:3");
+    expect(again.el("movies/more")).toBeNull();
+  });
+
   it("says why a search has nothing yet beside its Show more, which keeps focus while it reads on", async () => {
     const asked: number[] = [];
     const t = mount(

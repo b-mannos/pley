@@ -194,7 +194,9 @@ also what waits for them, in red while some failed.
   library, Partly in library, Requested or Declined. A list reads TMDB's
   pages until it has more than a screenful, 5 at most at a time, since an
   age limit can leave page after page empty: a row shows what they had,
-  and a grid (See all, search) ends in Show more, which reads 5 more.
+  and a grid (See all, search) ends in Show more, which reads 5 more, or
+  in Retry after a page failed. Back on the page, what failed is asked
+  again.
 - **A title's page:** backdrop, poster, facts, cast and seasons with their
   state, and one main action: Request, Request more seasons, Tell me too,
   Open (in a library), or why not (declined, with when it may be asked

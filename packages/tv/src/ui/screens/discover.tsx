@@ -89,9 +89,10 @@ export function withPage(p: Pages, next: DiscoverPage, now = Date.now()): Pages 
 
 /**
  * A list read page by page until it holds `want` titles or TMDB has no
- * more, 5 pages at most at a time (`again` reads on), kept in `holder`
- * under `key` so that Back draws it at once. It draws again as titles
- * come and when a fill ends, not for a page that brought none.
+ * more, 5 pages at most at a time (`again` reads on, after a failure
+ * too), kept in `holder` under `key` so that Back draws it at once; a
+ * failure kept there is tried again then. It draws again as titles come
+ * and when a fill ends, not for a page that brought none.
  */
 export function usePages(
   holder: Record<string, unknown>,
@@ -102,6 +103,12 @@ export function usePages(
 ): { pages: Pages; loading: boolean; again: () => void } {
   const [, redraw] = useState(0);
   const [tries, setTries] = useState(0);
+  const first = useRef(true);
+  if (first.current) {
+    first.current = false;
+    const kept = holder[key] as Pages | undefined;
+    if (kept && kept.error) holder[key] = { ...kept, error: null };
+  }
   const pages = (holder[key] as Pages | undefined) ?? noPages();
   const need = enabled && !pagesSettled(pages) && pages.titles.length < want;
   const latest = useRef(fetch);
@@ -689,13 +696,14 @@ function gridProblem(e: unknown, title: string): { title: string; body: string; 
 
 /**
  * Titles as a grid of posters, read a page at a time as focus comes near
- * the end, with a row of grey wells while more come; Show more at the end
- * when 5 pages brought too few, which reads 5 more.
+ * the end, with a row of grey wells while more come; at the end, Show
+ * more when 5 pages brought too few, which reads 5 more, or Retry when a
+ * page failed.
  */
 function TitleGrid(p: {
   pages: Pages;
   more: (want: number) => void;
-  /** Reads on after a fill that stopped short. */
+  /** Reads on after a fill that stopped short or failed. */
   again: () => void;
   top: number;
   clipTop: number;
@@ -710,8 +718,9 @@ function TitleGrid(p: {
   const cols = gridColumns("poster");
   const titles = p.pages.titles.map((t) => marked(t, p.pages.at));
   const coming = !pagesSettled(p.pages);
-  const showMore = p.pages.stopped;
-  const count = coming ? Math.ceil((titles.length + 1) / cols) * cols : titles.length + (showMore ? 1 : 0);
+  const failed = !!p.pages.error;
+  const endTile = p.pages.stopped || failed;
+  const count = coming ? Math.ceil((titles.length + 1) / cols) * cols : titles.length + (endTile ? 1 : 0);
   return (
     <PosterGrid
       kind="poster"
@@ -727,10 +736,20 @@ function TitleGrid(p: {
       }}
       cell={(i, place) => {
         const t = titles[i];
-        if (!t && showMore) {
-          return <SeeAllTile kind="poster" icon="plus" label="Show more" fid={`${p.fidPrefix}/more`} initial={p.initial && i === 0} onFocus={place.onFocus} onSelect={p.again} />;
+        if (!t && endTile) {
+          return (
+            <SeeAllTile
+              kind="poster"
+              icon={failed ? "refresh-cw" : "plus"}
+              label={failed ? "Retry" : "Show more"}
+              fid={`${p.fidPrefix}/more`}
+              initial={p.initial && i === 0}
+              onFocus={place.onFocus}
+              onSelect={p.again}
+            />
+          );
         }
-        // The first well holds focus that was on Show more until the titles come.
+        // The first well holds focus that was on Show more or Retry until the titles come.
         if (!t) return i === titles.length ? <SkeletonTile kind="poster" fid={`${p.fidPrefix}/more`} focusable onFocus={place.onFocus} /> : <SkeletonTile kind="poster" />;
         return (
           <TitleTile
@@ -762,8 +781,7 @@ function DiscoverResults(p: { entry: Entry; query: string }) {
   const [want, setWant] = useState(3 * gridColumns("poster"));
   const read = usePages(holder, key, (n, c) => ui.api.discoverSearch(p.query, n, false, c), want);
   const grid = holder.grid as { key: string; index: number } | undefined;
-  const none = !read.pages.titles.length;
-  if (none && !onlyShowMore(read.pages)) {
+  if (!read.pages.titles.length && !gridGoesOn(read.pages)) {
     if (read.pages.error) {
       const why = gridProblem(read.pages.error, "Couldn't search TMDB");
       return <GridNote title={why.title} body={why.body} onRetry={why.retry ? read.again : undefined} />;
@@ -783,7 +801,7 @@ function DiscoverResults(p: { entry: Entry; query: string }) {
         startIndex={grid && grid.key === key ? grid.index : undefined}
         onFocusIndex={(i) => (holder.grid = { key, index: i })}
       />
-      {none && read.pages.stopped && <NothingYet title={`Nothing yet for “${p.query}”`} />}
+      <GridAside pages={read.pages} nothing={`Nothing yet for “${p.query}”`} failed="Couldn't search TMDB" />
       <div class="rail-fade" />
     </div>
   );
@@ -791,19 +809,22 @@ function DiscoverResults(p: { entry: Entry; query: string }) {
 
 /**
  * No titles, but more pages to read since a fill stopped short: the grid
- * is Show more, and its wells while it reads on, so focus stays in it.
+ * stays, its one tile Show more (Retry after a failure) and its wells
+ * while it reads on, so focus stays in it.
  */
-function onlyShowMore(p: Pages): boolean {
-  return !p.titles.length && p.page >= FILL_PAGES && !p.error && !pagesDone(p);
+function gridGoesOn(p: Pages): boolean {
+  return !p.titles.length && p.page >= FILL_PAGES && !pagesDone(p);
 }
 
-/** Beside Show more in a grid that has no titles yet. */
-function NothingYet(p: { title: string }) {
+/** Beside a grid's lone Show more or Retry: why it has no titles yet. */
+function GridAside(p: { pages: Pages; nothing: string; failed: string }) {
+  if (p.pages.titles.length || !(p.pages.stopped || p.pages.error)) return null;
+  const why = p.pages.error ? gridProblem(p.pages.error, p.failed) : { title: p.nothing, body: "TMDB's pages read so far have nothing this profile can ask for." };
   return (
     <div class="discover-aside" role="status">
-      <div class="t-title c-fg">{p.title}</div>
+      <div class="t-title c-fg">{why.title}</div>
       <div class="t-body c-muted" style="margin-top:8px">
-        TMDB's pages read so far have nothing this profile can ask for.
+        {why.body}
       </div>
     </div>
   );
@@ -819,8 +840,7 @@ export function DiscoverListScreen(p: { entry: Entry; list: DiscoverList }) {
   const gate = summaryProblem(app);
   if (gate) return <RequestsMessage problem={gate} title="Couldn't load it" onRetry={() => void app.loadRequests()} />;
   let body;
-  const none = !read.pages.titles.length;
-  if (none && !onlyShowMore(read.pages)) {
+  if (!read.pages.titles.length && !gridGoesOn(read.pages)) {
     if (read.pages.error) {
       const why = gridProblem(read.pages.error, "Couldn't load it");
       body = <GridNote title={why.title} body={why.body} onRetry={why.retry ? read.again : undefined} />;
@@ -840,7 +860,7 @@ export function DiscoverListScreen(p: { entry: Entry; list: DiscoverList }) {
           startIndex={p.entry.state.gridIndex as number | undefined}
           onFocusIndex={(i) => (p.entry.state.gridIndex = i)}
         />
-        {none && read.pages.stopped && <NothingYet title="Nothing here yet" />}
+        <GridAside pages={read.pages} nothing="Nothing here yet" failed="Couldn't load it" />
       </>
     );
   }
