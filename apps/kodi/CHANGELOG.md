@@ -33,6 +33,11 @@ describes how they are made.
   for news that came while it was off; never over a playing video, where
   the last three wait for it to stop.
 
+### Fixed
+
+- The rail of Pley's window shows or drops Live TV as soon as it is set up
+  or its last source removed, without reopening the window.
+
 ## [0.1.0] - 2026-10-30
 
 ### Added

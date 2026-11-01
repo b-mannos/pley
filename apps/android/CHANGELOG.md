@@ -32,6 +32,11 @@ describes how they are made.
   new requests and ones that couldn't be sent) shows in a toast with Open,
   never over the player. About credits TMDB.
 
+### Changed
+
+- Pley for Android is free software under the GNU Affero General Public
+  License, version 3 (`AGPL-3.0-only`, `LICENSE`).
+
 ## [0.1.0] - 2026-10-30
 
 ### Added

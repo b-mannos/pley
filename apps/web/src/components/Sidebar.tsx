@@ -51,8 +51,8 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
   const libs = useLibraries();
   const live = useLiveSummary();
   const [sorting, setSorting] = useState(false);
-  // Shown where it has channels, and to administrators to set it up.
-  const showLive = live.data ? live.data.available || (user.is_admin && live.data.allowed) : false;
+  // Shown once it has channels; administrators set it up in Settings.
+  const showLive = live.data?.available ?? false;
 
   return (
     <nav className="flex h-full flex-col overflow-y-auto px-3 pb-4 pt-4" aria-label="Main">

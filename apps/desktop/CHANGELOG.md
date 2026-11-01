@@ -17,6 +17,11 @@ describes how they are made.
   After the computer slept or the network went, what changed meanwhile
   comes in one notification.
 
+### Changed
+
+- Pley Desktop is free software under the GNU Affero General Public
+  License, version 3 (`AGPL-3.0-only`, `LICENSE`).
+
 ## [0.1.0] - 2026-10-30
 
 ### Changed

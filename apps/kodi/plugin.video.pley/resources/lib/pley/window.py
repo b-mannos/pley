@@ -365,15 +365,20 @@ class Window(xbmcgui.WindowXML):
 
     def changed(self) -> None:
         """The server said something changed (the watch state, My List, a
-        library): the screen shows it."""
+        library, Live TV's channels): the screen shows it."""
         with self.lock:
             if self.closing or self.screen is None:
                 return
             self.session.forget()
             rail = self.getFocusId() if self.focus_in_rail() else None
             try:
-                # A library added, renamed, moved (on any of the profile's devices) or scanned.
-                self.take_libraries(self.session.get("/api/libraries"))
+                # A library added, renamed, moved (on any of the profile's devices) or scanned,
+                # or Live TV set up or emptied.
+                libraries, live = api.together(
+                    lambda: self.session.get("/api/libraries"),
+                    lambda: livetv.summary(self.session.client),
+                )
+                self.take_libraries(libraries, live)
                 self.screen.refresh()
             except api.ApiError as e:
                 kodi.log("refreshing %s: %s" % (self.screen.name, e.message), xbmc.LOGWARNING)
@@ -669,10 +674,15 @@ class Window(xbmcgui.WindowXML):
             self.screen.refresh()
         return True
 
-    def take_libraries(self, libraries: list) -> None:
-        """The libraries as the server lists them now: the rail redrawn if
-        what it shows of them changed (the rest is the Libraries page's)."""
-        if [rail_view(lib) for lib in libraries] != [rail_view(lib) for lib in self.libraries]:
+    def take_libraries(self, libraries: list, live: dict = None) -> None:
+        """The libraries as the server lists them now, and Live TV's summary
+        when it was asked for too: the rail redrawn if what it shows of them
+        changed (the rest is the Libraries page's)."""
+        was_live = livetv.available(self.live)
+        if live is not None:
+            self.live = live
+        redraw = [rail_view(lib) for lib in libraries] != [rail_view(lib) for lib in self.libraries]
+        if redraw or livetv.available(self.live) != was_live:
             self.place_libraries(libraries)
         else:
             self.libraries = libraries

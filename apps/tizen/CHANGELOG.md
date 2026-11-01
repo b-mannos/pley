@@ -8,6 +8,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- Pley for Samsung TV is free software under the GNU Affero General Public
+  License, version 3 (`AGPL-3.0-only`, `LICENSE`).
+
 ### Security
 
 - The token goes only to the server's own origin, never to an address

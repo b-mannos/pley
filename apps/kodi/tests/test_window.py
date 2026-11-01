@@ -591,6 +591,9 @@ class WindowTest(unittest.TestCase):
             def __init__(self, missing=False):
                 self.missing, self.calls = missing, []
 
+            def get(self, path, **query):
+                return {}
+
             def put(self, path, body=None):
                 self.calls.append(("PUT", path, body))
                 if self.missing:

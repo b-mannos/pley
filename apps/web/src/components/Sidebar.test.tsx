@@ -2,6 +2,7 @@ import { useState } from "react";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
+import { liveKeys } from "@/api/livetv";
 import { mockApi, renderWithProviders } from "@/test/render";
 import { makeSummary } from "@/test/requests";
 import { Sidebar } from "./Sidebar";
@@ -86,5 +87,25 @@ describe("Sidebar requests", () => {
     renderWithProviders(<Sidebar open={false} onClose={() => {}} />);
     expect(await screen.findByRole("link", { name: "Your requests" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Discover" })).not.toBeInTheDocument();
+  });
+});
+
+describe("Sidebar Live TV", () => {
+  it("shows Live TV once it has channels, not to an administrator before", async () => {
+    let channels = 0;
+    mockApi({
+      "GET /api/libraries": () => [],
+      "GET /api/playlists": () => ({ playlists: [] }),
+      "GET /api/live": () => ({ available: channels > 0, allowed: true, channels, sources: channels ? 1 : 0, recent: [] }),
+    });
+    const { client } = renderWithProviders(<Sidebar open={false} onClose={() => {}} />);
+
+    await waitFor(() => expect(client.getQueryState(liveKeys.summary)?.status).toBe("success"));
+    expect(screen.queryByRole("link", { name: "Live TV" })).not.toBeInTheDocument();
+
+    // A source added: the server says live_channels_changed, and the summary is asked for again.
+    channels = 5;
+    await client.invalidateQueries({ queryKey: liveKeys.all });
+    expect(await screen.findByRole("link", { name: "Live TV" })).toHaveAttribute("href", "/live");
   });
 });

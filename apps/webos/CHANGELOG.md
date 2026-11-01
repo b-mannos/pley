@@ -23,6 +23,11 @@ describes how they are made.
   movie's or show's page in a library shows its request's stage, with
   Request more seasons for a show missing some.
 
+### Changed
+
+- Pley for LG TV is free software under the GNU Affero General Public
+  License, version 3 (`AGPL-3.0-only`, `LICENSE`).
+
 ### Fixed
 
 - A server answering that it can't do something right now (the

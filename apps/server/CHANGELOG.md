@@ -62,6 +62,17 @@ describes how they are made.
   administrators, a decision to its maker and followers, a request ready
   to each account that can open it, a failure to administrators.
 
+### Changed
+
+- Pley is free software under the GNU Affero General Public License,
+  version 3 (`AGPL-3.0-only`, `LICENSE`). The transcoder gives the address
+  of its source (`GET /v1/info`, `--license`).
+
+### Fixed
+
+- The web app's sidebar shows Live TV only once it has channels, for
+  administrators too; they set it up in Settings → Live TV.
+
 ## [0.1.0] - 2026-10-30
 
 ### Security
