@@ -187,7 +187,7 @@ public static class DvdSubtitles
     /// The PES packets of the pack sector at <paramref name="at"/>: each one's stream, PTS (90 kHz)
     /// when it has one, and its payload's bounds in <paramref name="b"/>.
     /// </summary>
-    static IEnumerable<(int StreamId, long? Pts, int From, int To)> Packets(byte[] b, int at)
+    internal static IEnumerable<(int StreamId, long? Pts, int From, int To)> Packets(byte[] b, int at)
     {
         var end = at + Sector;
         // The MPEG-2 pack header: 14 bytes and its stuffing.

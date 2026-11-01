@@ -15,9 +15,9 @@ using Tizen.NUI.BaseComponents;
 namespace Pley.Tv.Tizen.Screens;
 
 /// <summary>
-/// A DVD's disc image on the drive: its titles, the longest (the main feature) first, each with
-/// its length, chapters and audio languages, and where it resumes. No menus: OK plays a title in
-/// Pley's player. Titles under half a minute (logos, warnings) and a title playing the same cells
+/// A DVD's disc image on the drive without menus to play it from (<see cref="DvdMenuScreen"/>
+/// plays those that have them): its titles, the longest (the main feature) first, each with its
+/// length, chapters and audio languages, and where it resumes; OK plays a title in Pley's player. Titles under half a minute (logos, warnings) and a title playing the same cells
 /// as one listed aren't shown.
 /// </summary>
 sealed class DiscScreen : ShellPage
@@ -72,13 +72,15 @@ sealed class DiscScreen : ShellPage
 
     public override void Gone() => gone = true;
 
-    async void Load()
+    /// <summary>
+    /// The image's titles, and its navigation (null when it has none, or it can't be read: its
+    /// titles play without its menus). Its IFOs are read off the drive, which may sleep: off the UI thread.
+    /// </summary>
+    public static async Task<(IReadOnlyList<DvdTitle> Titles, DvdDisc? Disc)> Read(string image)
     {
-        IReadOnlyList<DvdTitle> found;
         try
         {
-            // Its IFOs are read off the drive, which may sleep: off the UI thread.
-            found = await Task.Run(() =>
+            return await Task.Run(() =>
             {
                 using var f = new FileStream(image, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096);
                 byte[] Read(long offset, int count)
@@ -96,13 +98,31 @@ sealed class DiscScreen : ShellPage
                     if (read < bytes.Length) Array.Resize(ref bytes, read);
                     return bytes;
                 }
-                return DvdVideo.Titles(Read);
+                DvdDisc? disc = null;
+                try
+                {
+                    disc = DvdDisc.Read(Read);
+                }
+                catch (Exception e)
+                {
+                    Profile.Mark($"disc: its navigation failed: {e.GetType().Name}");
+                }
+                return ((IReadOnlyList<DvdTitle>)DvdVideo.Titles(Read), disc);
             });
         }
         catch (Exception)
         {
-            found = Array.Empty<DvdTitle>();
+            return (Array.Empty<DvdTitle>(), null);
         }
+    }
+
+    /// <summary>Whether the disc has menus to play it from, and titles for them to play.</summary>
+    public static bool HasMenus(DvdDisc? disc, IReadOnlyList<DvdTitle> titles) =>
+        disc != null && titles.Count > 0 && (disc.VmgMenus.Count > 0 || disc.Sets.Values.Any(s => s.Menus.Count > 0));
+
+    async void Load()
+    {
+        var (found, _) = await Read(image);
         if (gone) return;
         // Logos and warnings out; a title playing the same cells as a longer one listed out too.
         var seen = new HashSet<string>();

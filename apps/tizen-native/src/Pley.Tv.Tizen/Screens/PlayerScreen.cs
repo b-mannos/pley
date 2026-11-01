@@ -417,6 +417,9 @@ sealed class PlayerScreen : Sheet
     /// <summary>Shows the player, started as it was made: the item's details, a session, its stream.</summary>
     public void Show() => shell.Push(this);
 
+    /// <summary>It played to the end, with nothing next: a DVD's menus go on as the disc says after a title.</summary>
+    public bool Finished { get; private set; }
+
     // ---- what the playback says
 
     void Render(PlayerState s)
@@ -480,7 +483,11 @@ sealed class PlayerScreen : Sheet
             sleepToken++;
         }
         // The end, with nothing next: back to where playing started.
-        if (s.Phase.Kind == PhaseKind.Ended) OnUi(Close);
+        if (s.Phase.Kind == PhaseKind.Ended)
+        {
+            Finished = true;
+            OnUi(Close);
+        }
         if (shown) Layout();
     }
 

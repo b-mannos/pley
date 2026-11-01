@@ -25,6 +25,33 @@ public sealed record DvdTitle(int Number, long DurationMs, IReadOnlyList<Chapter
     public IReadOnlyList<DvdCell> Cells { get; init; } = new DvdCell[0];
     public IReadOnlyList<int> SubpictureIds { get; init; } = new int[0];
     public string Idx { get; init; } = "";
+    /// <summary>Its picture is 16:9, stored anamorphic in 720 pixels; else 4:3.</summary>
+    public bool Wide { get; init; }
+    /// <summary>Each audio stream's number on the disc (0-7, what its navigation chooses by), in the order of the audio streams.</summary>
+    public IReadOnlyList<int> AudioNumbers { get; init; } = new int[0];
+    /// <summary>Each subtitle stream's number on the disc (0-31), in the order of the subtitle streams.</summary>
+    public IReadOnlyList<int> SubtitleNumbers { get; init; } = new int[0];
+
+    /// <summary>
+    /// The audio and subtitle streams (their indexes in <see cref="Streams"/>) the disc's
+    /// navigation has chosen: SPRM 1's audio stream, SPRM 2's subpicture stream when it's shown
+    /// (its 0x40). Null for one the title doesn't have, or subtitles off.
+    /// </summary>
+    public (int? Audio, int? Subtitle) Chosen(int audio, int subpicture)
+    {
+        int? Find(string kind, IReadOnlyList<int> numbers, int number)
+        {
+            var i = 0;
+            foreach (var s in Streams)
+            {
+                if (s.Kind != kind) continue;
+                if (i < numbers.Count && numbers[i] == number) return s.Index;
+                i++;
+            }
+            return null;
+        }
+        return (Find("audio", AudioNumbers, audio), (subpicture & 0x40) != 0 ? Find("subtitle", SubtitleNumbers, subpicture & 0x3f) : null);
+    }
 }
 
 /// <summary>
@@ -137,18 +164,21 @@ public static class DvdVideo
                 else spans.Add(span);
         if (spans.Count == 0) return null;
 
-        var (streams, ids) = Streams(v, pgc);
+        var (streams, ids, audioNumbers, subtitleNumbers) = Streams(v, pgc);
         var (width, height) = (streams[0].Width ?? 720, streams[0].Height ?? 480);
         return new DvdTitle(number, durationMs, chapters, streams, spans)
         {
             Cells = dvdCells,
             SubpictureIds = ids,
+            Wide = ((v[0x200] >> 2) & 3) == 3,
+            AudioNumbers = audioNumbers,
+            SubtitleNumbers = subtitleNumbers,
             Idx = $"size: {width}x{height}\npalette: {string.Join(", ", Palette(v, pgc))}\n",
         };
     }
 
     /// <summary>Sectors <paramref name="first"/> to <paramref name="last"/> of the VOBs, as stretches of the image (a VOB ends at 1 GB, and the next goes on).</summary>
-    static IEnumerable<DiscSpan> Spans(List<DiscFile> vobs, long first, long last)
+    public static IEnumerable<DiscSpan> Spans(IReadOnlyList<DiscFile> vobs, long first, long last)
     {
         long start = 0;
         foreach (var vob in vobs)
@@ -175,10 +205,18 @@ public static class DvdVideo
                 yield return "000000";
                 continue;
             }
-            double y = v[at + 1], cr = v[at + 2] - 128, cb = v[at + 3] - 128;
-            int Clamp(double x) => (int)Math.Max(0, Math.Min(255, Math.Round(x)));
-            yield return $"{Clamp(y + 1.402 * cr):x2}{Clamp(y - 0.344136 * cb - 0.714136 * cr):x2}{Clamp(y + 1.772 * cb):x2}";
+            var (r, g, b) = Rgb(v[at + 1], v[at + 2], v[at + 3]);
+            yield return $"{r:x2}{g:x2}{b:x2}";
         }
+    }
+
+    /// <summary>A palette entry's colour: DVDs keep theirs as Y, Cr, Cb.</summary>
+    internal static (byte R, byte G, byte B) Rgb(int y, int cr, int cb)
+    {
+        cr -= 128;
+        cb -= 128;
+        byte Clamp(double x) => (byte)Math.Max(0, Math.Min(255, Math.Round(x)));
+        return (Clamp(y + 1.402 * cr), Clamp(y - 0.344136 * cb - 0.714136 * cr), Clamp(y + 1.772 * cb));
     }
 
     /// <summary>
@@ -186,9 +224,11 @@ public static class DvdVideo
     /// the player numbers them; with each subtitle's subpicture stream in the VOBs (the widescreen
     /// one for a 16:9 title, else the 4:3 one).
     /// </summary>
-    static (List<MediaStream> Streams, List<int> Ids) Streams(byte[] v, int pgc)
+    static (List<MediaStream> Streams, List<int> Ids, List<int> AudioNumbers, List<int> SubtitleNumbers) Streams(byte[] v, int pgc)
     {
         var ids = new List<int>();
+        var audioNumbers = new List<int>();
+        var subtitleNumbers = new List<int>();
         var wide = ((v[0x200] >> 2) & 3) == 3;
         var streams = new List<MediaStream>();
         // The title set's video attributes: coding, TV system, then the resolution.
@@ -203,6 +243,7 @@ public static class DvdVideo
         {
             // Only the streams the chain marks available play in it.
             if ((v[pgc + 0x0c + a * 2] & 0x80) == 0) continue;
+            audioNumbers.Add(a);
             var at = 0x204 + a * 8;
             var coding = v[at] >> 5;
             var language = (v[at] >> 2 & 3) == 1 ? Lang(v, at + 2) : null;
@@ -222,6 +263,7 @@ public static class DvdVideo
             var control = pgc + 0x1c + s * 4;
             if ((v[control] & 0x80) == 0) continue;
             ids.Add((wide ? v[control + 1] : v[control]) & 0x1f);
+            subtitleNumbers.Add(s);
             var at = 0x256 + s * 6;
             streams.Add(new MediaStream
             {
@@ -232,7 +274,7 @@ public static class DvdVideo
                 TextBased = false,
             });
         }
-        return (streams, ids);
+        return (streams, ids, audioNumbers, subtitleNumbers);
     }
 
     static string? Lang(byte[] b, int at)

@@ -30,6 +30,7 @@ sealed class StorageScreen : ShellPage
     readonly IKeyValue storage;
     readonly Action<PageKey> go;
     readonly Action<string, long> play;
+    readonly Action<string> openDisc;
     readonly TrackListView list;
     readonly View message = new View();
     readonly TextLabel where;
@@ -40,7 +41,9 @@ sealed class StorageScreen : ShellPage
 
     /// <param name="folder">The folder shown; null: the drive's top.</param>
     /// <param name="play">Plays a video, from a position.</param>
-    public StorageScreen(TvShell shell, string? folder, Signal<string?> drive, IKeyValue storage, KeyRepeatGate gate, Action<PageKey> go, Action<string, long> play)
+    /// <param name="openDisc">Opens a DVD's disc image: at its menus, else its titles.</param>
+    public StorageScreen(TvShell shell, string? folder, Signal<string?> drive, IKeyValue storage, KeyRepeatGate gate, Action<PageKey> go, Action<string, long> play,
+        Action<string> openDisc)
         : base(shell, new PageKey.Storage(folder), "storage")
     {
         this.folder = folder;
@@ -48,6 +51,7 @@ sealed class StorageScreen : ShellPage
         this.storage = storage;
         this.go = go;
         this.play = play;
+        this.openDisc = openDisc;
         var title = Text.Label(Pley.Tv.Core.Ui.Rail.StorageItem.Label, PleyType.PageTitle, PleyColors.Fg);
         title.Position = new Position(Ui.Dp(PleyTv.Gutter), Ui.Dp(PleyTv.SafeVertical));
         View.Add(title);
@@ -195,7 +199,7 @@ sealed class StorageScreen : ShellPage
         var entry = entries.FirstOrDefault(e => e.Path == path);
         if (entry == null) return;
         if (entry.Folder) go(new PageKey.Storage(entry.Path));
-        else if (entry.Disc) go(new PageKey.Disc(entry.Path));
+        else if (entry.Disc) openDisc(entry.Path);
         else play(entry.Path, LocalPlayerSource.ResumeOf(storage, entry.Path));
     }
 }
