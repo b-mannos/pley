@@ -5,13 +5,15 @@
 //! the server the window shows (`/api/events`), with the window's session,
 //! and decides itself what to show: the server's pages get nothing from it.
 //! While the window is in front, the page tells of them itself. After a
-//! dropped stream (the computer slept, the network went), what changed for
-//! the account meanwhile is told of in one notice.
+//! dropped stream (the computer slept, the network went), the news of the
+//! account's requests that came meanwhile (ready to watch, all of it or
+//! more of a show's seasons, or declined) is told of in one notice.
 
 use std::collections::HashMap;
 use std::time::Duration;
 
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::watch;
@@ -248,12 +250,14 @@ impl EventStream {
     }
 }
 
-/// A request with news for the account (ready to watch, partly, or
-/// declined since it last looked), as the server lists it.
+/// A request as the server lists it: with news for the account (ready to
+/// watch, partly, or declined since it last looked), or not.
 #[derive(Debug, Deserialize)]
 struct Listed {
     id: i64,
     title: String,
+    /// The decision: "pending", "approved", "declined", "failed" or "available".
+    status: String,
     stage: String,
     #[serde(default)]
     available_seasons: Vec<i64>,
@@ -265,9 +269,45 @@ struct Listed {
     unseen: bool,
 }
 
+impl Listed {
+    /// Its news, as a notice tells it: all of it ready to watch, some of a
+    /// show's seasons (while others still download, too), or declined.
+    fn news(&self) -> Option<String> {
+        match self.status.as_str() {
+            "available" if self.stage != "gone" => Some(ready_words(&self.title, None)),
+            "approved" if !self.available_seasons.is_empty() => {
+                Some(ready_words(&self.title, Some(&self.available_seasons)))
+            }
+            "declined" => Some(declined_words(&self.title, self.reason.as_deref())),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct Requests {
     requests: Vec<Listed>,
+}
+
+/// How a request stood when last told of, or listed: its status, and the
+/// seasons of a show ready then.
+#[derive(Debug, Default, PartialEq)]
+struct Known {
+    status: String,
+    seasons: Vec<i64>,
+}
+
+impl Known {
+    fn of(request: &Listed) -> Self {
+        Self { status: request.status.clone(), seasons: request.available_seasons.clone() }
+    }
+
+    /// `request`'s news is told already: its status is the same, and, while
+    /// it is partly ready, no season of it is ready that wasn't then.
+    fn covers(&self, request: &Listed) -> bool {
+        self.status == request.status
+            && (request.status != "approved" || request.available_seasons.iter().all(|n| self.seasons.contains(n)))
+    }
 }
 
 /// What the notices of one server have told of.
@@ -277,26 +317,43 @@ struct Told {
     /// stream opened; `None` until it first opens, which tells of nothing
     /// old (the page does, as it opens).
     newest: Option<i64>,
-    /// The requests heard of as they changed, with the stage they reached
-    /// then: not told of twice, but told of again once they move on.
-    heard: HashMap<i64, String>,
+    /// The requests told of as they changed, or listed when a stream
+    /// opened, as they stood then: not told of twice, but told of again
+    /// once they move on, or more of a show's seasons are ready.
+    known: HashMap<i64, Known>,
 }
 
 impl Told {
     /// What `listed` (the account's requests with news, as listed when a
-    /// stream opens) has that wasn't heard of: nothing the first time.
+    /// stream opens) has that wasn't told of: nothing the first time.
     fn catch_up<'a>(&mut self, listed: &'a [Listed]) -> Vec<&'a Listed> {
         let listed: Vec<&Listed> = listed.iter().filter(|r| r.unseen).collect();
         let latest = listed.iter().map(|r| r.updated_at).max();
-        let Some(newest) = self.newest else {
-            self.newest = Some(latest.unwrap_or(0));
-            return Vec::new();
+        let news: Vec<&Listed> = match self.newest {
+            None => Vec::new(),
+            Some(newest) => listed
+                .iter()
+                .copied()
+                .filter(|r| r.updated_at > newest && r.news().is_some())
+                .filter(|r| !self.known.get(&r.id).is_some_and(|known| known.covers(r)))
+                .collect(),
         };
+        let newest = self.newest.unwrap_or(0);
         self.newest = Some(latest.map_or(newest, |latest| latest.max(newest)));
-        let news: Vec<&Listed> =
-            listed.into_iter().filter(|r| r.updated_at > newest && self.heard.get(&r.id) != Some(&r.stage)).collect();
-        self.heard.extend(news.iter().map(|r| (r.id, r.stage.clone())));
+        self.known.extend(listed.iter().map(|r| (r.id, Known::of(r))));
         news
+    }
+
+    /// A request heard of as it changed: ready (all of it, or the seasons
+    /// of a show in `seasons`), or decided (`status`).
+    fn heard(&mut self, id: i64, status: &str, seasons: &[i64]) {
+        let known = self.known.entry(id).or_default();
+        status.clone_into(&mut known.status);
+        for &n in seasons {
+            if !known.seasons.contains(&n) {
+                known.seasons.push(n);
+            }
+        }
     }
 }
 
@@ -305,12 +362,7 @@ impl Told {
 fn caught_up(news: &[&Listed]) -> Option<String> {
     match news {
         [] => None,
-        [one] => match one.stage.as_str() {
-            "available" => Some(ready_words(&one.title, None)),
-            "partial" => Some(ready_words(&one.title, Some(&one.available_seasons))),
-            "declined" => Some(declined_words(&one.title, one.reason.as_deref())),
-            _ => None,
-        },
+        [one] => one.news(),
         several => Some(format!("{} of your requests have news.", several.len())),
     }
 }
@@ -386,15 +438,25 @@ fn get(client: &reqwest::Client, url: Url, session: Option<&str>) -> reqwest::Re
     }
 }
 
-/// The account's requests with news, latest first (`None`: the server
-/// doesn't list them for it, requests being off for instance).
-async fn listed_news(client: &reqwest::Client, server: &Url, session: Option<&str>) -> Option<Vec<Listed>> {
-    let url = server.join("/api/requests?unseen=1&limit=20").ok()?;
+/// `path` on `server`, read as JSON (`None`: no answer, or a refusal).
+async fn get_json<T: DeserializeOwned>(
+    client: &reqwest::Client,
+    server: &Url,
+    path: &str,
+    session: Option<&str>,
+) -> Option<T> {
+    let url = server.join(path).ok()?;
     let response = tokio::time::timeout(ANSWER_TIMEOUT, get(client, url, session).send()).await.ok()?.ok()?;
     if !response.status().is_success() {
         return None;
     }
-    let list: Requests = tokio::time::timeout(ANSWER_TIMEOUT, response.json()).await.ok()?.ok()?;
+    tokio::time::timeout(ANSWER_TIMEOUT, response.json()).await.ok()?.ok()
+}
+
+/// The account's requests with news, latest first (`None`: the server
+/// doesn't list them for it, requests being off for instance).
+async fn listed_news(client: &reqwest::Client, server: &Url, session: Option<&str>) -> Option<Vec<Listed>> {
+    let list: Requests = get_json(client, server, "/api/requests?unseen=1&limit=20", session).await?;
     Some(list.requests)
 }
 
@@ -428,17 +490,22 @@ async fn listen(client: &reqwest::Client, server: &Url, shell: &dyn Shell, name:
         };
         for data in stream.read(&chunk) {
             let heard = heard(&data);
-            match &heard {
-                Heard::RequestAvailable { request_id, complete, .. } => {
-                    told.heard.insert(*request_id, if *complete { "available" } else { "partial" }.to_string());
-                }
-                Heard::RequestDecided { request_id, status, .. } => {
-                    told.heard.insert(*request_id, status.clone());
-                }
-                _ => {}
-            }
             match notice(&heard) {
                 Some(body) if !shell.in_front() => shell.show(name, &body),
+                _ => {}
+            }
+            match &heard {
+                Heard::RequestAvailable { request_id, complete: true, .. } => told.heard(*request_id, "available", &[]),
+                Heard::RequestAvailable { request_id, seasons, complete: false, .. } => {
+                    told.heard(*request_id, "approved", seasons.as_deref().unwrap_or_default());
+                    // The event names the seasons newly ready: those ready before them come with the
+                    // request, so that a catch-up tells only of seasons ready after these.
+                    let path = format!("/api/requests/{request_id}");
+                    if let Some(now) = get_json::<Listed>(client, server, &path, session.as_deref()).await {
+                        told.known.insert(*request_id, Known::of(&now));
+                    }
+                }
+                Heard::RequestDecided { request_id, status, .. } => told.heard(*request_id, status, &[]),
                 _ => {}
             }
         }
@@ -660,15 +727,26 @@ mod tests {
         assert_eq!(seasons_label(None), None);
     }
 
-    fn news(id: i64, title: &str, stage: &str, updated_at: i64) -> Listed {
+    /// A request with news, as listed: its status, and its stage the same.
+    fn news(id: i64, title: &str, status: &str, updated_at: i64) -> Listed {
         Listed {
             id,
             title: title.into(),
-            stage: stage.into(),
+            status: status.into(),
+            stage: status.into(),
             available_seasons: Vec::new(),
             reason: None,
             updated_at,
             unseen: true,
+        }
+    }
+
+    /// A show with `seasons` ready, as listed.
+    fn partly(id: i64, title: &str, seasons: &[i64], updated_at: i64) -> Listed {
+        Listed {
+            stage: "partial".into(),
+            available_seasons: seasons.to_vec(),
+            ..news(id, title, "approved", updated_at)
         }
     }
 
@@ -683,9 +761,9 @@ mod tests {
         assert!(told.catch_up(&[news(1, "Heat", "available", 100), news(2, "Ran", "declined", 50)]).is_empty());
         assert!(told.catch_up(&[news(1, "Heat", "available", 100)]).is_empty());
         // One heard of as it changed isn't told of again; one seen isn't news.
-        told.heard.insert(4, "available".to_string());
-        // One heard of at an earlier stage (approved) is told of once it's ready.
-        told.heard.insert(5, "approved".to_string());
+        told.heard(4, "available", &[]);
+        // One heard of before it was ready (approved) is told of once it is.
+        told.heard(5, "approved", &[]);
         let seen = Listed { unseen: false, ..news(6, "Big", "available", 180) };
         let listed = [
             news(5, "Up", "available", 170),
@@ -698,20 +776,43 @@ mod tests {
         assert!(told.catch_up(&listed).is_empty());
         let mut empty = Told::default();
         assert!(empty.catch_up(&[]).is_empty());
-        assert_eq!(titles(&empty.catch_up(&[news(9, "Big", "partial", 1)])), ["Big"]);
+        assert_eq!(titles(&empty.catch_up(&[partly(9, "Big", &[1], 1)])), ["Big"]);
+    }
+
+    #[test]
+    fn a_show_still_partly_ready_is_told_of_again_as_more_of_it_is() {
+        let mut told = Told::default();
+        assert!(told.catch_up(&[]).is_empty());
+        // Season 2 heard of as it came, read with season 1, ready before it.
+        told.heard(7, "approved", &[2]);
+        told.known.insert(7, Known { status: "approved".into(), seasons: vec![1, 2] });
+        assert!(told.catch_up(&[partly(7, "Dark", &[1, 2], 200)]).is_empty());
+        // Season 3 came while the stream was down.
+        assert_eq!(titles(&told.catch_up(&[partly(7, "Dark", &[1, 2, 3], 300)])), ["Dark"]);
+        assert!(told.catch_up(&[partly(7, "Dark", &[1, 2, 3], 300)]).is_empty());
+        // And season 4, while season 5 downloads.
+        let downloading = Listed { stage: "downloading".into(), ..partly(7, "Dark", &[1, 2, 3, 4], 400) };
+        assert_eq!(titles(&told.catch_up(&[downloading])), ["Dark"]);
+        // Then all of it.
+        assert_eq!(titles(&told.catch_up(&[news(7, "Dark", "available", 500)])), ["Dark"]);
     }
 
     #[test]
     fn what_came_meanwhile_is_one_notice() {
         let heat = news(1, "Heat", "available", 100);
         assert_eq!(caught_up(&[&heat]).as_deref(), Some("“Heat” is ready to watch."));
-        let expanse = Listed { available_seasons: vec![1, 2], ..news(2, "The Expanse", "partial", 100) };
+        let expanse = partly(2, "The Expanse", &[1, 2], 100);
         assert_eq!(caught_up(&[&expanse]).as_deref(), Some("Seasons 1–2 of “The Expanse” are ready to watch."));
+        let downloading = Listed { stage: "downloading".into(), ..partly(2, "The Expanse", &[1], 100) };
+        assert_eq!(caught_up(&[&downloading]).as_deref(), Some("Season 1 of “The Expanse” is ready to watch."));
         let ran = Listed { reason: Some("Not in English".into()), ..news(3, "Ran", "declined", 100) };
         assert_eq!(caught_up(&[&ran]).as_deref(), Some("“Ran” was declined: “Not in English”."));
         assert_eq!(caught_up(&[&heat, &expanse, &ran]).as_deref(), Some("3 of your requests have news."));
         assert_eq!(caught_up(&[]), None);
-        assert_eq!(caught_up(&[&news(4, "Up", "searching", 100)]), None);
+        let searching = Listed { stage: "searching".into(), ..news(4, "Up", "approved", 100) };
+        assert_eq!(caught_up(&[&searching]), None);
+        let gone = Listed { stage: "gone".into(), ..news(5, "Big", "available", 100) };
+        assert_eq!(caught_up(&[&gone]), None);
     }
 
     #[test]
@@ -798,17 +899,18 @@ mod tests {
     async fn the_stream_is_heard_with_the_windows_session_and_heard_again_after_it_drops() {
         let list =
             |items: &str| whole("200 OK", &format!(r#"{{"total":0,"counts":{{}},"requests":[{items}],"people":[]}}"#));
-        let ran = r#"{"id":1,"title":"Ran","stage":"available","available_seasons":[],"updated_at":100,"unseen":true}"#;
-        let heat =
-            r#"{"id":2,"title":"Heat","stage":"available","available_seasons":[],"updated_at":140,"unseen":true}"#;
-        let alien =
-            r#"{"id":3,"title":"Alien","stage":"available","available_seasons":[],"updated_at":150,"unseen":true}"#;
+        let ready = |id: i64, title: &str, updated_at: i64| {
+            format!(
+                r#"{{"id":{id},"title":"{title}","status":"available","stage":"available","available_seasons":[],"updated_at":{updated_at},"unseen":true}}"#
+            )
+        };
+        let (ran, heat, alien) = (ready(1, "Ran", 100), ready(2, "Heat", 140), ready(3, "Alien", 150));
         let (server, mut asked) = serve(vec![
             events(&[
                 ": hello\n\n",
                 "data: {\"type\":\"request_available\",\"request_id\":2,\"title\":\"Heat\",\"item_id\":9}\n\n",
             ]),
-            list(ran),
+            list(&ran),
             // Dropped: the second stream catches up.
             events(&["data: {\"type\":\"request_created\",\"request_id\":5,\"title\":\"Up\",\"seasons\":null,\
                  \"requested_by\":{\"id\":4,\"name\":\"Sam\"},\"status\":\"pending\"}\n\n"]),
@@ -839,6 +941,43 @@ mod tests {
                 "Den: Sam asked for “Up”.",
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn a_shows_seasons_ready_while_the_stream_was_down_are_told_of_and_those_heard_are_not() {
+        let list =
+            |items: &str| whole("200 OK", &format!(r#"{{"total":0,"counts":{{}},"requests":[{items}],"people":[]}}"#));
+        let dark = |seasons: &str, updated_at: i64| {
+            format!(
+                r#"{{"id":7,"title":"Dark","status":"approved","stage":"partial","available_seasons":[{seasons}],"updated_at":{updated_at},"unseen":true}}"#
+            )
+        };
+        let (server, mut asked) = serve(vec![
+            events(&["data: {\"type\":\"request_available\",\"request_id\":7,\"title\":\"Dark\",\"kind\":\"show\",\
+                 \"tmdb_id\":70523,\"item_id\":9,\"poster_url\":null,\"seasons\":[2],\"complete\":false}\n\n"]),
+            list(""),
+            // Season 1 was ready before: the request as it is now says so.
+            whole("200 OK", &dark("1,2", 200)),
+            // Dropped, with nothing new meanwhile: Season 2 was told of.
+            events(&[]),
+            list(&dark("1,2", 200)),
+            // Dropped again, and Season 3 came meanwhile.
+            events(&[]),
+            list(&dark("1,2,3", 300)),
+        ])
+        .await;
+        let window = Window::default();
+        let client = reqwest::Client::new();
+        let mut told = Told::default();
+        for _ in 0..3 {
+            assert_eq!(listen(&client, &server, &window, "Den", &mut told).await, Ended::Dropped);
+        }
+        let paths: Vec<String> = std::iter::from_fn(|| asked.try_recv().ok())
+            .map(|request| request.split(' ').nth(1).unwrap_or_default().to_owned())
+            .collect();
+        assert_eq!(paths[2], "/api/requests/7");
+        let shown: Vec<String> = window.shown.lock().unwrap().iter().map(|(_, body)| body.clone()).collect();
+        assert_eq!(shown, ["Season 2 of “Dark” is ready to watch.", "Seasons 1–3 of “Dark” are ready to watch."]);
     }
 
     #[tokio::test]

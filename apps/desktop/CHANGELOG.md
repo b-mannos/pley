@@ -14,8 +14,8 @@ describes how they are made.
   front: a movie or show asked for is ready to watch (or some of its
   seasons are), or was approved or declined; administrators hear when
   someone asks for one, and when one couldn't be sent to Radarr or Sonarr.
-  After the computer slept or the network went, what changed meanwhile
-  comes in one notification.
+  After the computer slept or the network went, what became ready to
+  watch or was declined meanwhile comes in one notification.
 
 ### Changed
 
