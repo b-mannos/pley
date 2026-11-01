@@ -93,7 +93,9 @@ class News:
                 self.listed = True
             self.read_soon()
             if kind == "request_available" and event.get("item_id"):
-                self.work(lambda: self.available(event))
+                with self.lock:
+                    who = self.who
+                self.work(lambda: self.available(event, who))
 
     def opened(self) -> None:
         """The event stream opened (again): nothing it missed is replayed."""
@@ -247,16 +249,14 @@ class News:
             return
         ready = [r for r in fresh if requests.ready_now(r)]
         if len(ready) == 1:
-            self.notice(requests.ready(requests.as_event(ready[0]), kodi.text), ready[0].get("poster_url"))
+            self.notice(who, requests.ready(requests.as_event(ready[0]), kodi.text), ready[0].get("poster_url"))
         elif ready:
-            self.notice(requests.news(len(ready), kodi.text))
+            self.notice(who, requests.news(len(ready), kodi.text))
         announce(key, max(r.get("updated_at") or 0 for r in fresh))
 
-    def available(self, event: dict) -> None:
-        """request_available: ready to watch, said once."""
-        with self.lock:
-            who = self.who
-        self.notice(requests.ready(event, kodi.text), event.get("poster_url"))
+    def available(self, event: dict, who) -> None:
+        """request_available, heard as `who`: ready to watch, said once."""
+        self.notice(who, requests.ready(event, kodi.text), event.get("poster_url"))
         # Never again at a catch-up: the request as it is now.
         answer = self.call("GET", "/api/requests/%d" % int(event.get("request_id") or 0), fine=(404,))
         key = self.announced_key(who)
@@ -294,11 +294,14 @@ class News:
             account = said or str(who[1] or "")
         return ANNOUNCED + who[0] + "|" + account
 
-    def notice(self, message: str, poster=None) -> None:
-        """A notice, now or once no video plays (the last few kept)."""
+    def notice(self, who, message: str, poster=None) -> None:
+        """A notice for `who`, now or once no video plays (the last few
+        kept); none once another sign-in or profile took over."""
         base = self.proxy_base()
         icon = listing.image(base, poster, POSTER) if base else None
         with self.lock:
+            if self.who != who:
+                return
             self.waiting.append((message, icon))
             del self.waiting[:-KEEP]
 

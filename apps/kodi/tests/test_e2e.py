@@ -257,7 +257,7 @@ class EndToEndTest(unittest.TestCase):
         self.assertEqual(refused.exception.code, "wrong_pin")
         profiles.switch(client, kid["id"], "2468")
         self.assertEqual(client.get("/api/auth/me")["id"], kid["id"])
-        self.assertEqual(holder.identity(), (self.server, kid["id"]))
+        self.assertEqual(holder.identity(), (self.server, kid["id"], saved["sign_in"]))
         self.assertEqual(client.get("/api/libraries/%d/items" % self.library)["total"], 1)
 
         # Listed with the account's apps, then signed out.

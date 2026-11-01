@@ -118,8 +118,17 @@ class TokensTest(unittest.TestCase):
         with self.assertRaises(auth.SignedOut):
             self.tokens.access()
 
+    def test_another_sign_in_is_another_identity(self):
+        # Someone else may have approved it, on the same server, with no
+        # profile switched to.
+        self.store.save(self.record(sign_in="a"))
+        first = self.tokens.identity()
+        self.assertEqual(first, (self.server.url, None, "a"))
+        self.store.save(self.record(sign_in="bb", access_token="at-9", refresh_token="rt-9"))
+        self.assertNotEqual(self.tokens.identity(), first)
+
     def test_switching_profiles(self):
-        self.assertEqual(self.tokens.identity(), (self.server.url, None))
+        self.assertEqual(self.tokens.identity(), (self.server.url, None, None))
         # A wrong PIN spends nothing.
         with self.assertRaises(api.ApiError) as refused:
             self.tokens.switch_profile(3, "9999")
@@ -133,7 +142,7 @@ class TokensTest(unittest.TestCase):
         saved = self.store.load()
         self.assertEqual((saved["access_token"], saved["refresh_token"], saved["profile"]), ("at-2", "rt-2", 3))
         self.assertEqual(self.tokens.access(), "at-2")
-        self.assertEqual(self.tokens.identity(), (self.server.url, 3))
+        self.assertEqual(self.tokens.identity(), (self.server.url, 3, None))
         # A refresh keeps the profile.
         self.assertEqual(self.tokens.refreshed("at-2"), "at-3")
         self.assertEqual(self.store.load()["profile"], 3)
@@ -227,6 +236,9 @@ class DeviceSignInTest(unittest.TestCase):
         self.assertEqual(record["expires_at"], 3700)
         self.assertEqual(record["token_endpoint"], self.server.url + "/api/oauth/token")
         self.assertEqual(record["server"], self.server.url)
+        # Each sign-in is named anew: whoever approves the code picks the account.
+        self.assertRegex(record["sign_in"], "^[0-9a-f]{16}$")
+        self.assertNotEqual(flow.record(tokens, "Living room", "abc")["sign_in"], record["sign_in"])
 
     def test_requests_are_asked_for_where_the_server_offers_them(self):
         # A server that lists them, one that lists only `requests`, and one

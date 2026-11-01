@@ -102,7 +102,9 @@ class Events:
 
     def listen(self, server: str) -> None:
         """One connection, until the stream ends (the token expired, the
-        server stopped) or the sign-in moves to another server or profile."""
+        server stopped) or another sign-in, server or profile takes over:
+        then its next line (the server's comment every 15 seconds at the
+        latest) ends it, unread."""
         who = self.tokens.identity()
         token = self.tokens.access()
         for attempt in range(2):

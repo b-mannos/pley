@@ -51,7 +51,7 @@ class NewsTest(unittest.TestCase):
         self.addCleanup(xbmc.conditions.clear)
         self.addCleanup(xbmc.info_labels.clear)
         self.server = Server()
-        self.who = (SERVER, None)
+        self.who = (SERVER, None, "a")
         self.playing = False
         self.now = 1000.0
         self.jobs = []
@@ -119,7 +119,7 @@ class NewsTest(unittest.TestCase):
         self.turn()
         self.playing = True
         for n in range(4):
-            self.news.notice("Notice %d" % n)
+            self.news.notice(self.who, "Notice %d" % n)
         self.turn()
         self.assertEqual(xbmcgui.notified, [])
         self.playing = False
@@ -214,7 +214,7 @@ class NewsTest(unittest.TestCase):
     def test_another_sign_in_starts_afresh(self):
         self.turn()
         self.assertTrue(kodi.get_property(requests.SUMMARY))
-        self.who = (SERVER, 3)
+        self.who = (SERVER, 3, "a")
         self.news.tick(False)
         self.assertEqual(kodi.get_property(requests.SUMMARY), "", "the profile's own")
         self.turn()
@@ -222,6 +222,24 @@ class NewsTest(unittest.TestCase):
         self.who = None
         self.turn(120)
         self.assertEqual((kodi.get_property(requests.SUMMARY), self.reads()), ("", 2), "signed out")
+
+    def test_someone_elses_sign_in_has_their_own_news(self):
+        self.server.answers["/api/requests/summary"] = (200, dict(ON, unseen=1))
+        self.server.answers[CATCH_UP] = (200, {"total": 1, "requests": [ready(42, "Heat", 2000)]})
+        self.turn(stream_open=True)
+        self.turn(stream_open=True)
+        self.assertEqual(xbmcgui.notified, [("Pley", "“Heat” is ready to watch.")])
+        # Ann's ready-to-watch, heard just before Bo signed in with a code on
+        # the same server, isn't said to him.
+        self.news.heard({"type": "request_available", "request_id": 43, "title": "Ronin", "kind": "movie", "item_id": 8})
+        self.server.answers["/api/auth/me"] = (200, {"id": 2, "name": "Bo"})
+        self.server.answers[CATCH_UP] = (200, {"total": 1, "requests": [ready(50, "Up", 1000)]})
+        self.who = (SERVER, None, "b")
+        self.turn(stream_open=True)
+        self.turn(stream_open=True)
+        self.assertEqual([message for _, message in xbmcgui.notified], ["“Heat” is ready to watch.", "“Up” is ready to watch."],
+                         "his news from before, under his own account")
+        self.assertTrue(kodi.remembered(news.ANNOUNCED + SERVER + "|2"))
 
     def test_the_plugin_is_heard(self):
         asked = []

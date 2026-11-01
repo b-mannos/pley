@@ -101,7 +101,8 @@ class DeviceSignIn:
         raise ApiError(response.status, error or "http_%d" % response.status, "the server refused the code")
 
     def record(self, tokens: dict, server_name: str, server_id: str, now: float | None = None) -> dict:
-        """What the token file keeps of a sign-in."""
+        """What the token file keeps of a sign-in, named anew each time
+        (Tokens.identity)."""
         return {
             "server": self.server,
             "server_name": server_name,
@@ -112,6 +113,7 @@ class DeviceSignIn:
             "expires_at": (now if now is not None else time.time()) + int(tokens.get("expires_in") or 3600),
             "refresh_token": tokens["refresh_token"],
             "scope": tokens.get("scope", self.scope),
+            "sign_in": binascii.hexlify(os.urandom(8)).decode("ascii"),
         }
 
 
@@ -191,11 +193,13 @@ class Tokens:
         return data["server"] if data else None
 
     def identity(self):
-        """Who the sign-in acts as: the server, and the profile switched to
-        (None: the one that signed in). The event stream is opened again
-        when it changes."""
+        """Who the sign-in acts as: the server, the profile switched to
+        (None: the one picked as it signed in), and which sign-in it is,
+        since whoever approves a code picks the account and the file doesn't
+        say whom. The event stream is opened again, and requests' news
+        starts afresh, when it changes."""
         data = self.current()
-        return (data["server"], data.get("profile")) if data else None
+        return (data["server"], data.get("profile"), data.get("sign_in")) if data else None
 
     def access(self) -> str:
         """An access token good for a while yet."""
