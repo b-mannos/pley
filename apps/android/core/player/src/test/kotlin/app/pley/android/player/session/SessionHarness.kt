@@ -74,6 +74,10 @@ class CountingApi(private val delegate: PleyApi) : PleyApi by delegate {
     @Volatile
     var noTranscodeFreeBeside = false
 
+    /** Sessions asked for from now on are refused with this status (503: the server runs its most transcodes); `null`: none. */
+    @Volatile
+    var refusedWith: Int? = null
+
     /** Counts a call that isn't the API's (a warm-up's requests) until [block] returns. */
     suspend fun <T> along(block: suspend () -> T): T {
         inFlight.incrementAndGet()
@@ -108,6 +112,7 @@ class CountingApi(private val delegate: PleyApi) : PleyApi by delegate {
 
     override suspend fun startPlayback(request: PlaybackRequest): PlaybackInfo = counted("startPlayback") {
         if (request.keepPrevious == true && noTranscodeFreeBeside) throw ApiException(503, "transcode_limit", "No transcode is free")
+        refusedWith?.let { throw ApiException(it, if (it == 503) "transcode_limit" else "internal", "Refused") }
         delegate.startPlayback(request)
     }
 

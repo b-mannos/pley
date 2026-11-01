@@ -64,7 +64,6 @@ class PlayerScreenState(
     val speed: Float by derivedStateOf { ui.value.speed }
     val speedNote: String? by derivedStateOf { ui.value.speedNote }
     val audioDelayMs: Long by derivedStateOf { ui.value.audioDelayMs }
-    val audioDelayNote: String? by derivedStateOf { ui.value.audioDelayNote }
     val canFindSubtitles: Boolean by derivedStateOf { ui.value.canFindSubtitles }
     val subtitleSearch: SubtitleSearchUi? by derivedStateOf { ui.value.subtitleSearch }
 

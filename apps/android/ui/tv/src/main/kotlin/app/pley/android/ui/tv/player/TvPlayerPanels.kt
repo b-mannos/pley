@@ -249,7 +249,7 @@ private fun ChoicePanel(
                 ui.closePanel()
             }
             PlayerPanel.Audio -> {
-                item(key = "delay") { AudioDelayRow(s.audioDelayMs, s.audioDelayNote, onChange = { controller.setAudioDelay(it) }) }
+                item(key = "delay") { AudioDelayRow(s.audioDelayMs, onChange = { controller.setAudioDelay(it) }) }
                 choices(s.audio.map { Row(it.label, it.selected, null) }, focus) { i ->
                     s.audio[i].index?.let(controller::selectAudio)
                     ui.closePanel()
@@ -363,7 +363,6 @@ private data class PanelData(
     val speed: Float,
     val speedNote: String?,
     val audioDelayMs: Long,
-    val audioDelayNote: String?,
     val canFindSubtitles: Boolean,
     val subtitleSearch: SubtitleSearchUi?,
 ) {
@@ -382,7 +381,6 @@ private data class PanelData(
             speed = s.speed,
             speedNote = s.speedNote,
             audioDelayMs = s.audioDelayMs,
-            audioDelayNote = s.audioDelayNote,
             canFindSubtitles = s.canFindSubtitles,
             subtitleSearch = s.subtitleSearch,
         )

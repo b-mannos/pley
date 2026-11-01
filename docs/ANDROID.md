@@ -85,8 +85,22 @@ leaves the audio unpinned.
 | Audio delay | Above the audio tracks (Left and Right on TVs) | Up to 5 s either way in 50 ms steps, this title only |
 
 A chosen font overrides the system's caption style; position applies to
-text subtitles only. Speed can't change while audio is passed through to a
-receiver, and neither speed nor delay can with tunneled playback.
+text subtitles only.
+
+Media3 changes the speed of decoded sound only, and a tunneled output
+times the picture against the sound itself. So while the speed isn't
+Normal, sound that goes to a receiver as it is (AC3, E-AC3, TrueHD, DTS)
+is decoded on the device instead, and tunneled playback stops; an audio
+delay stops tunneled playback too. Decoding the sound reloads the title
+where it is, a short pause, and so does going back to Normal, where the
+sound goes to the receiver as it is again; tunneled playback comes back
+with Normal and no delay. A decoder counts only where it takes the sound
+as it is (its channels and rate). When nothing on the device decodes that
+sound, a stream asks the server again with the device's decoders only,
+made ready beside the one playing: the server converts the sound and
+copies the video. A download has no server to ask, and stays at Normal,
+as does a stream the server can't convert (its transcoder away, or every
+transcode taken); the speed menu says why, and the title plays on.
 
 ### Quality
 
