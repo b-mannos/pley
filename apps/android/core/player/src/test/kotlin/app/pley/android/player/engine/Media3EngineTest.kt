@@ -114,6 +114,8 @@ class Media3EngineTest {
         sdk = 34,
         now = now,
         hostFor = { host ?: WindowModeHost(it) },
+        // Moves on by itself whenever the player's threads wait, even while a file is really being read, so a
+        // test that waits for READY prepares paused: Media3's stuck-buffering check could reach 10 minutes first.
         playerClock = FakeClock(true),
     ).also { engines += it }
 
@@ -131,9 +133,10 @@ class Media3EngineTest {
         codecs.addDecoders(ShadowMediaCodecConfig.CODEC_INFO_AVC, ShadowMediaCodecConfig.CODEC_INFO_AAC)
         val engine = engine()
         engine.player.setVideoSurface(Surface(SurfaceTexture(1)))
-        engine.prepare(EngineSource(file(), hls = false, mimeType = "video/mp4"), startMs = 0, playWhenReady = true)
+        engine.prepare(EngineSource(file(), hls = false, mimeType = "video/mp4"), startMs = 0, playWhenReady = false)
 
         TestPlayerRunHelper.run(engine.player).untilState(Player.STATE_READY)
+        engine.player.play()
         assertTrue("audio focus granted", engine.player.playWhenReady)
         TestPlayerRunHelper.run(engine.player).untilPositionAtLeast(2_000)
 
@@ -149,8 +152,9 @@ class Media3EngineTest {
     fun musicPlaysTheAudioAloneAndMissesNothing() {
         codecs.addDecoders(ShadowMediaCodecConfig.CODEC_INFO_AVC, ShadowMediaCodecConfig.CODEC_INFO_AAC)
         val engine = engine(music = true)
-        engine.prepare(EngineSource(file(), hls = false), startMs = 0, playWhenReady = true)
+        engine.prepare(EngineSource(file(), hls = false), startMs = 0, playWhenReady = false)
         TestPlayerRunHelper.run(engine.player).untilState(Player.STATE_READY)
+        engine.player.play()
         TestPlayerRunHelper.run(engine.player).untilPositionAtLeast(1_000)
         assertNull(engine.state.value.needsServerHelp)
         assertNull("no video decoder for music", engine.state.value.stats.videoDecoder)
@@ -200,10 +204,11 @@ class Media3EngineTest {
         codecs.addDecoders(ShadowMediaCodecConfig.CODEC_INFO_AVC, ShadowMediaCodecConfig.CODEC_INFO_AAC)
         val engine = engine()
         engine.player.setVideoSurface(Surface(SurfaceTexture(1)))
-        engine.prepare(EngineSource(file(), hls = false, mimeType = "video/mp4"), startMs = 5_000, playWhenReady = true)
+        engine.prepare(EngineSource(file(), hls = false, mimeType = "video/mp4"), startMs = 5_000, playWhenReady = false)
         TestPlayerRunHelper.run(engine.player).untilState(Player.STATE_READY)
         assertEquals(4_000L, engine.player.currentPosition)
 
+        engine.player.play()
         TestPlayerRunHelper.run(engine.player).untilPositionAtLeast(4_500)
         engine.player.pause()
         engine.player.seekTo(7_000)
