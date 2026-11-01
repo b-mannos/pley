@@ -374,6 +374,50 @@ describe("TitlePage", () => {
     expect(requests.find((r) => r.path === "/api/requests/5/approve")?.body).toEqual({ quality_profile: 4 });
   });
 
+  it("tries a failed request again with choices of its own", async () => {
+    const user = userEvent.setup();
+    const failed = makeRequest({ id: 5, status: "failed", stage: "failed", reason: "Radarr refused the folder", actions: ["retry", "decline", "handled", "delete"] });
+    const requests = mockApi({
+      "GET /api/discover/movie/603": () => makeDetail({ status: "requested", requests: [failed] }),
+      "GET /api/requests/summary": () => makeSummary({ access: "auto", manage: true, failed: 1 }),
+      "GET /api/requests/options": () => ({ radarr: choices({ root_folders: [{ path: "/movies", free_bytes: null }, { path: "/films", free_bytes: null }] }), sonarr: null }),
+      "POST /api/requests/5/approve": () => ({ ...failed, status: "approved", stage: "searching", actions: [] }),
+    });
+    open("/discover/movie/603", testUser);
+
+    await user.click(await screen.findByRole("button", { name: "More for The Matrix" }));
+    await user.click(screen.getByRole("menuitem", { name: "Try again…" }));
+    const dialog = screen.getByRole("dialog", { name: "Try “The Matrix” again" });
+    await user.selectOptions(await within(dialog).findByLabelText("Folder"), "/films");
+    await user.click(within(dialog).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("“The Matrix” was approved.")).toBeInTheDocument();
+    expect(requests.find((r) => r.path === "/api/requests/5/approve")?.body).toEqual({ root_folder: "/films" });
+  });
+
+  it("shows the settings' profile and folder as gone where Radarr no longer has them, as approving sends them", async () => {
+    const user = userEvent.setup();
+    const pending = makeRequest({ id: 5, actions: ["approve", "decline"] });
+    const requests = mockApi({
+      "GET /api/discover/movie/603": () => makeDetail({ status: "requested", requests: [pending] }),
+      "GET /api/requests/summary": () => makeSummary({ access: "auto", manage: true, pending: 1 }),
+      "GET /api/requests/options": () => ({ radarr: choices({ quality_profile: 9, root_folder: "/old" }), sonarr: null }),
+      "POST /api/requests/5/approve": () => ({ ...pending, status: "approved", stage: "searching", actions: [] }),
+    });
+    open("/discover/movie/603", testUser);
+
+    await user.click(await screen.findByRole("button", { name: "More for The Matrix" }));
+    await user.click(screen.getByRole("menuitem", { name: "Approve…" }));
+    const dialog = screen.getByRole("dialog", { name: "Approve “The Matrix”" });
+    const profile = await within(dialog).findByLabelText("Quality profile");
+    expect(profile).toHaveValue("9");
+    expect(within(profile).getByRole("option", { selected: true })).toHaveTextContent("Profile 9 (gone)");
+    expect(within(dialog).getByLabelText("Folder")).toHaveValue("/old");
+    expect(within(within(dialog).getByLabelText("Folder")).getByRole("option", { selected: true })).toHaveTextContent("/old (gone)");
+    await user.click(within(dialog).getByRole("button", { name: "Approve" }));
+    expect(await screen.findByText("“The Matrix” was approved.")).toBeInTheDocument();
+    expect(requests.find((r) => r.path === "/api/requests/5/approve")?.body).toEqual({});
+  });
+
   it("approves with the settings' choices when Radarr didn't answer", async () => {
     const user = userEvent.setup();
     const pending = makeRequest({ id: 5, actions: ["approve", "decline"] });

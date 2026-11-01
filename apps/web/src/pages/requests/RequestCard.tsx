@@ -121,12 +121,23 @@ function preselected(choices: ArrChoices, anime: boolean): { profile: number | n
 }
 
 /**
- * Approving with choices of its own: Radarr's or Sonarr's profile and
- * folder (the settings' ones preselected, anime's for anime), and for a
- * show which of the seasons asked for to keep. A service that didn't
- * answer, with nothing known of it, leaves only the settings' choices.
+ * Approving, or trying a failed request again (`action`), with choices of
+ * its own: Radarr's or Sonarr's profile and folder (the settings' ones
+ * preselected, anime's for anime), and for a show which of the seasons
+ * asked for to keep. A service that didn't answer, with nothing known of
+ * it, leaves only the settings' choices.
  */
-export function ApproveDialog({ request, open, onClose }: { request: MediaRequest; open: boolean; onClose: () => void }) {
+export function ApproveDialog({
+  request,
+  action = "approve",
+  open,
+  onClose,
+}: {
+  request: MediaRequest;
+  action?: "approve" | "retry";
+  open: boolean;
+  onClose: () => void;
+}) {
   const options = useApprovalOptions(open);
   const approve = useApproveRequest();
   const toast = useToast();
@@ -140,6 +151,10 @@ export function ApproveDialog({ request, open, onClose }: { request: MediaReques
   const [chosen, setChosen] = useState<{ profile: number | null; folder: string | null }>({ profile: null, folder: null });
   const profile = chosen.profile ?? pick.profile;
   const folder = chosen.folder ?? pick.folder;
+  // The settings' choice where Radarr or Sonarr no longer lists it: it stays selected, as gone, since it is
+  // what approving sends unless another is picked.
+  const goneProfile = profile !== null && !choices?.quality_profiles.some((p) => p.id === profile) ? profile : null;
+  const goneFolder = folder !== null && !choices?.root_folders.some((f) => f.path === folder) ? folder : null;
   const [seasons, setSeasons] = useState<number[]>(asked);
   const [error, setError] = useState<string | null>(null);
 
@@ -177,14 +192,14 @@ export function ApproveDialog({ request, open, onClose }: { request: MediaReques
       onClose={onClose}
       locked={approve.isPending}
       size="sm"
-      title={`Approve ${quoted(request.title)}`}
+      title={action === "retry" ? `Try ${quoted(request.title)} again` : `Approve ${quoted(request.title)}`}
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={approve.isPending}>
             Cancel
           </Button>
           <Button variant="primary" onClick={submit} loading={approve.isPending} data-autofocus>
-            {settingsOnly ? "Approve with the settings' choices" : "Approve"}
+            {settingsOnly ? `${actionLabel(action, request)} with the settings' choices` : actionLabel(action, request)}
           </Button>
         </>
       }
@@ -216,6 +231,7 @@ export function ApproveDialog({ request, open, onClose }: { request: MediaReques
                     onChange={(e) => setChosen((c) => ({ ...c, profile: Number(e.target.value) }))}
                   >
                     {profile === null ? <option value="">The settings' choice</option> : null}
+                    {goneProfile !== null ? <option value={goneProfile}>{`Profile ${goneProfile} (gone)`}</option> : null}
                     {choices.quality_profiles.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
@@ -231,6 +247,7 @@ export function ApproveDialog({ request, open, onClose }: { request: MediaReques
                     onChange={(e) => setChosen((c) => ({ ...c, folder: e.target.value }))}
                   >
                     {folder === null ? <option value="">The settings' choice</option> : null}
+                    {goneFolder !== null ? <option value={goneFolder}>{`${goneFolder} (gone)`}</option> : null}
                     {choices.root_folders.map((f) => (
                       <option key={f.path} value={f.path}>
                         {f.free_bytes !== null ? `${f.path} (${formatBytes(f.free_bytes)} free)` : f.path}
@@ -366,8 +383,9 @@ const IN_MENU: RequestAction[] = ["handled", "delete"];
 /**
  * What this session may do to a request, as the server lists them, in its
  * order (but those in `skip`, which the page offers otherwise): approving
- * with the settings' choices, or with choices of its own from the menu,
- * declining with a reason, withdrawing and deleting after asking.
+ * or trying again with the settings' choices, or with choices of its own
+ * from the menu, declining with a reason, withdrawing and deleting after
+ * asking.
  */
 export function RequestActions({ request, summary, skip = [] }: { request: MediaRequest; summary: RequestSummary; skip?: RequestAction[] }) {
   const toast = useToast();
@@ -406,7 +424,8 @@ export function RequestActions({ request, summary, skip = [] }: { request: Media
   const actions = request.actions.filter((a) => !skip.includes(a));
   const buttons = actions.filter((a) => !IN_MENU.includes(a));
   const menu = actions.filter((a) => IN_MENU.includes(a));
-  const choosing = actions.includes("approve");
+  // Approving, or trying a failed one again, with choices of its own: from the menu.
+  const choosing = actions.find((a): a is "approve" | "retry" => a === "approve" || a === "retry") ?? null;
   const question = dialog === "withdraw" || dialog === "delete" ? actionQuestion(dialog, request) : null;
 
   if (!actions.length) return null;
@@ -446,7 +465,7 @@ export function RequestActions({ request, summary, skip = [] }: { request: Media
                     setDialog("approve");
                   }}
                 >
-                  Approve…
+                  {actionLabel(choosing, request)}…
                 </MenuItem>
               ) : null}
               {menu.map((action) => (
@@ -467,7 +486,7 @@ export function RequestActions({ request, summary, skip = [] }: { request: Media
         </Menu>
       ) : null}
 
-      {choosing ? <ApproveDialog request={request} open={dialog === "approve"} onClose={() => setDialog(null)} /> : null}
+      {choosing ? <ApproveDialog request={request} action={choosing} open={dialog === "approve"} onClose={() => setDialog(null)} /> : null}
       {actions.includes("decline") ? <DeclineDialog request={request} open={dialog === "decline"} onClose={() => setDialog(null)} /> : null}
       <ConfirmModal
         open={question !== null}
