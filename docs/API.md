@@ -473,16 +473,18 @@ lists carry (Kodi).
 | Method | Path | Who | What |
 |---|---|---|---|
 | GET | `/api/health` | `public` | `{ "status": "ok" }` |
-| GET | `/api/server` | `public` | `{ name, version, commit, setup_required, setup_code_required, two_step_required }` |
+| GET | `/api/server` | `public` | `{ name, version, commit, source, setup_required, setup_code_required, two_step_required }` |
 | GET | `/api/oauth/device/qr?code=` | `public` | where to type a TV's code, as a QR code (PNG): see [TVs](#tvs) |
 | POST | `/api/setup` | `public` | `{ username, password, setup_code }` → `{ user: User, token? }`: creates the first (admin) account and signs in |
 | POST | `/api/auth/login` | `public` | `{ username, password, code?, setup_id? }` → `{ user: User, token?, recovery_codes? }` |
 
 - `/api/server`: `commit` is the build's short hash, `"unknown"` when built
-  without the repository. The setup code is in the server's log.
-  `two_step_required`: the server requires two-step sign-in of every
-  account with a password ([Two-step sign-in](#two-step-sign-in)), so
-  signing in may set it up first.
+  without the repository. `source` is where the server's source code is
+  offered; the web app's Account page links to it. The setup code is in
+  the server's log. `two_step_required`: the server requires two-step
+  sign-in of every account with a password
+  ([Two-step sign-in](#two-step-sign-in)), so signing in may set it up
+  first.
 - `/api/setup`: `409` once a user exists; `403` without the right
   `setup_code`. 5 tries per 15 minutes from each address and 1000 from all
   addresses, then `429`.
