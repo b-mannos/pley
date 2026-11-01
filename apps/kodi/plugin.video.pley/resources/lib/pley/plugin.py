@@ -49,10 +49,10 @@ class Plugin(asking.Asking):
             xbmc.sleep(100)
         raise api.ApiError(0, "service_off", kodi.text("service_off"))
 
-    def client(self) -> api.Client:
+    def client(self, timeout: float = 60) -> api.Client:
         if not self.proxy_base:
             self.proxy_base = self.proxy()
-        return api.Client(self.proxy_base, kodi.user_agent(), timeout=60, local=True)
+        return api.Client(self.proxy_base, kodi.user_agent(), timeout=timeout, local=True)
 
     def status(self) -> dict:
         client = self.client()
@@ -371,7 +371,8 @@ class Plugin(asking.Asking):
         # TMDB's titles the libraries lack, asked at the same time, never
         # waited for (asking.Searching): where this sign-in may ask, as the
         # service last read the summary (search asks nothing more first).
-        tmdb = asking.Searching(client, query, self.path) if requests.may_ask(self.requests_summary(ask=False)) else None
+        may_ask = requests.may_ask(self.requests_summary(ask=False))
+        tmdb = asking.Searching(self.client(asking.FOUND_WAIT), query, self.path) if may_ask else None
         found = client.get("/api/search", q=query, limit=100, summaries=1)
         items = found.get("items", [])
         channels = found.get("channels") or []
@@ -394,7 +395,7 @@ class Plugin(asking.Asking):
             self.on_tmdb(query, shown)
         self.end()
         if shown is None:
-            # Shown again once they come.
+            # Shown again if they come in time.
             tmdb.later()
 
     def route_play(self) -> None:

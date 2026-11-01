@@ -545,6 +545,19 @@ class SearchTest(Case):
         self.assertEqual(self.labels(self.run_plugin("route=search&q=heat"))[1:4], ["On TMDB", "Title 1", "Title 2"])
         self.assertEqual(len(self.sent("GET", "/api/discover/search")), 1, "kept")
 
+    def test_tmdb_slower_than_the_wait_is_left_to_on_tmdb(self):
+        self.addCleanup(setattr, asking, "FOUND_WAIT", asking.FOUND_WAIT)
+        asking.FOUND_WAIT = 0.3
+        self.waits["GET /api/discover/search"] = 1.5
+        self.answers["GET /api/search"] = (200, {"items": []})
+        xbmc.info_labels["Container.FolderPath"] = BASE + "?route=search&q=heat"
+        started = time.monotonic()
+        entries = self.run_plugin("route=search&q=heat")
+        self.assertLess(time.monotonic() - started, 1.2, "Kodi's Python isn't held until TMDB answers")
+        self.assertEqual((entries[1][0], entries[1][1].label2), (BASE + "?route=discover_search&q=heat", "Searching…"))
+        self.assertEqual(xbmc.builtins, [])
+        self.assertEqual(kodi.get_property(asking.FOUND), "", "nothing kept: the next search asks again")
+
     def test_a_title_asked_for_from_search_leaves_tmdb_there(self):
         # The listing is shown again at once, before the service has read
         # the summary anew.

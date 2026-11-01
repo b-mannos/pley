@@ -200,7 +200,9 @@ their top goes back to Kodi, and the add-on opens Pley's look again).
 - **Search** lists On TMDB after the libraries' results: TMDB's first
   titles the libraries don't have, then See all on Discover. It is looked
   for beside the libraries' search and shows once it comes, without
-  holding them up.
+  holding them up. Kodi's lists wait 3 seconds for it at most, as Kodi
+  keeps the add-on's Python busy meanwhile; slower, On TMDB opens it on
+  Discover.
 - **Library shows** have Request more seasons in their context menu while
   the profile may ask: the show's picker, or what stops it.
 - **Notices**: "“Heat” is ready to watch." (with "Season 2 of “X” is ready

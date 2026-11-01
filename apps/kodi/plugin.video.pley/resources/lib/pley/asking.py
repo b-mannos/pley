@@ -32,6 +32,10 @@ SEASON_POSTER = 342
 FOUND = "pley.tmdb"
 FOUND_KEEP = 300
 FOUND_SHOWN = 8
+# Seconds they may take: the plugin's Python stays busy until they come,
+# and a call meanwhile starts a Python of its own (slow on a small box).
+# Slower, they are left to On TMDB, which opens them on Discover.
+FOUND_WAIT = 3
 ICONS = {
     "trending": "DefaultMusicTop100.png",
     "movies": "DefaultMovies.png",
@@ -887,13 +891,16 @@ class Searching:
     """Global search's look at TMDB (GET /api/discover/search with
     missing=1), asked beside the libraries' search and never waited for:
     what came by the time those answered shows with them; else, once it
-    comes, the listing is shown again with it (FOUND)."""
+    comes, the listing is shown again with it (FOUND). `client` waits
+    FOUND_WAIT at most."""
 
     def __init__(self, client, query: str, path: str):
         self.client = client
         self.query = query
         self.path = path
         self.found = kept_titles(query)
+        # Whether the server answered (a refusal or a timeout keeps nothing).
+        self.answered = False
         self.done = threading.Event()
         if self.found is not None:
             self.done.set()
@@ -905,6 +912,7 @@ class Searching:
         try:
             answer = self.client.get("/api/discover/search", q=self.query, missing=1)
             found = [t for t in answer.get("results") or [] if isinstance(t, dict)]
+            self.answered = True
         except api.ApiError as e:
             kodi.log("TMDB in global search: %s %s" % (e.code, e.message), xbmc.LOGWARNING)
         self.found = found
@@ -914,11 +922,11 @@ class Searching:
         """The titles, once they came; None while on their way."""
         return self.found if self.done.is_set() else None
 
-    def later(self, seconds: float = 20) -> None:
+    def later(self) -> None:
         """Once the titles came (after the listing showed without them):
         kept for the listing's next showing, which is asked for while it is
-        still on screen."""
-        if not self.done.wait(seconds):
+        still on screen. FOUND_WAIT, the request's timeout, bounds the wait."""
+        if not self.done.wait(FOUND_WAIT + api.CONNECT_TIMEOUT) or not self.answered:
             return
         kodi.set_property(FOUND, json.dumps({"q": self.query, "titles": self.found, "at": time.time()}))
         if self.found and xbmc.getInfoLabel("Container.FolderPath") == self.path:
