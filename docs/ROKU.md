@@ -218,9 +218,11 @@ Rules the code keeps:
   the event stream. An older server's `404`, or a `403` from one built
   before apps could ask, turns requests off until the stream connects
   again or the app starts.
-- **Request changes:** a request event gives every tile of its title, on
-  covered screens too, its new badge (`GET /api/requests/{id}`), and the
-  screen on top that shows requests asks again; nothing reloads whole.
+- **Request changes:** request events give every tile of their titles, on
+  covered screens too, its new badge: the title's status for the profile
+  (`GET /api/discover/{kind}/{tmdb_id}`, once a title for events that come
+  together), never one request's. The screen on top that shows requests
+  asks again; nothing reloads whole.
   Without the stream a TMDB title's page showing a request asks each 30 s;
   while something downloads, title pages (TMDB's and the libraries'), the
   requests and Discover's Your requests ask each 10 s.

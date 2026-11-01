@@ -193,12 +193,15 @@ sub test_requests_title_tiles()
     tkEqual(reqBadgeColor("library", invalid), "0x3FB27FFF")
 end sub
 
-sub test_requests_badges_from_a_request()
-    tkEqual(reqStatusOfRequest(200, reqTestRequest({ status: "approved", stage: "downloading" })), "requested")
-    tkEqual(reqStatusOfRequest(200, reqTestRequest({ status: "declined", stage: "declined" })), "declined")
-    tkEqual(reqStatusOfRequest(200, reqTestRequest({ status: "available", stage: "available" })), "library")
-    tkEqual(reqStatusOfRequest(200, reqTestRequest({ status: "available", stage: "gone" })), "none")
-    tkEqual(reqStatusOfRequest(404, invalid), "none")
+sub test_requests_badges_come_from_the_title()
+    library = reqTestDetail({ status: "library", item_id: 12 })
+    tkEqual(reqTitleNote("movie:27205", { ok: true, status: 200, data: library }), { key: "movie:27205", status: "library", libraryId: 12 })
+    ' A manager's title someone else's request was declined for: the
+    ' title's status, not that request's.
+    others = reqTestDetail({ status: "none", requests: [reqTestRequest({ kind: "movie", tmdb_id: 27205, status: "declined", stage: "declined", mine: false })] })
+    tkEqual(reqTitleNote("movie:27205", { ok: true, status: 200, data: others }), { key: "movie:27205", status: "none", libraryId: 0 })
+    tkInvalid(reqTitleNote("movie:27205", { ok: false, status: 503, error: "tmdb_down", data: { code: "tmdb_down" } }), "TMDB away: the badge stays")
+    tkInvalid(reqTitleNote("movie:27205", { ok: true, status: 200, data: invalid }))
 end sub
 
 sub test_requests_stage_words()

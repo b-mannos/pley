@@ -48,6 +48,11 @@ sub init()
     ' told (the summary's unseen rising without any is asked about).
     m.requestChange = invalid
     m.newsEvents = 0
+    ' Titles whose badge the gathered events changed ({ "movie:603":
+    ' { kind, tmdbId } }), and those being asked for (true: changed again
+    ' meanwhile, so asked once more).
+    m.badgeTitles = {}
+    m.badgesAsked = {}
     ' Ready-to-watch notices waiting to show, the one shown, and what was
     ' told already (reqLoadAnnounced's) for the profile.
     m.notices = []
@@ -143,6 +148,8 @@ sub onProfile()
     setRequestSummary(reqNoSummary(false))
     m.requestChange = invalid
     m.newsEvents = 0
+    m.badgeTitles = {}
+    m.badgesAsked = {}
     m.notices = []
     m.announced = invalid
     if session.profileId > 0
@@ -215,14 +222,14 @@ end sub
 
 ' A screen did something to a request: what the profile may do now (its
 ' allowance, the managers' count). The stream tells of the request's
-' title; without it, its badge is asked for here.
+' title; without it, its badge is asked for here, unless the screen names
+' no request (a title's page, which gives its own).
 sub onRequestTouched()
     touched = m.top.requestTouched
     askRequestSummary("asked")
     requestId = httpNumber(touched.requestId, 0)
-    tmdbId = httpNumber(touched.tmdbId, 0)
-    if m.events.live or requestId = 0 or tmdbId = 0 or not showsTiles() then return
-    uiRequest({ method: "GET", path: "/api/requests/" + urlValue(requestId), key: reqKey(httpString(touched.kind), tmdbId), asked: m.requestsAsked }, "onRequestStatus")
+    if m.events.live or requestId = 0 or not showsTiles() then return
+    askBadge(httpString(touched.kind), httpNumber(touched.tmdbId, 0))
 end sub
 
 ' A request event: the summary is asked a second on, once for those that
@@ -242,7 +249,7 @@ sub onRequestEvent(data as object)
 end sub
 
 ' What the events changed: one request ({ requestId, kind, tmdbId }), or
-' many (requestId 0). A title shown as a tile gets its request's badge.
+' many (requestId 0); and the titles whose badge they changed.
 sub gatherRequestChange(data as object)
     change = { requestId: httpNumber(data.request_id, 0), kind: httpString(data.kind), tmdbId: httpNumber(data.tmdb_id, 0) }
     if change.requestId = 0 then change = { requestId: 0, kind: "", tmdbId: 0 }
@@ -251,9 +258,7 @@ sub gatherRequestChange(data as object)
     else if m.requestChange.requestId <> change.requestId
         m.requestChange = { requestId: 0, kind: "", tmdbId: 0 }
     end if
-    if change.requestId > 0 and change.tmdbId > 0 and showsTiles()
-        uiRequest({ method: "GET", path: "/api/requests/" + urlValue(change.requestId), key: reqKey(change.kind, change.tmdbId), asked: m.requestsAsked }, "onRequestStatus")
-    end if
+    if change.tmdbId > 0 then m.badgeTitles[reqKey(change.kind, change.tmdbId)] = { kind: change.kind, tmdbId: change.tmdbId }
 end sub
 
 ' Whether a screen in the stack shows TMDB's titles as tiles.
@@ -264,15 +269,33 @@ function showsTiles() as boolean
     return false
 end function
 
-' A request's status as its title's badge says it; gone (404), no badge.
-sub onRequestStatus(event as object)
+' A title's badge, as its page says it for this profile (GET
+' /api/discover/{kind}/{tmdbId}): its status depends on who asks and on
+' all of its requests, never on one. One question per title at a time.
+sub askBadge(kind as string, tmdbId as dynamic)
+    if (kind <> "movie" and kind <> "show") or httpNumber(tmdbId, 0) <= 0 then return
+    key = reqKey(kind, tmdbId)
+    if m.badgesAsked.DoesExist(key)
+        m.badgesAsked[key] = true
+        return
+    end if
+    m.badgesAsked[key] = false
+    uiRequest({ method: "GET", path: "/api/discover/" + kind + "/" + urlValue(tmdbId), key: key, kind: kind, tmdbId: tmdbId, asked: m.requestsAsked }, "onBadge")
+end sub
+
+' A title's badge for the screens showing it; a title changed again
+' meanwhile is asked once more, this answer left out.
+sub onBadge(event as object)
     spec = event.getRoSGNode().spec
-    answer = event.getData()
-    if spec.asked <> m.requestsAsked or (not answer.ok and answer.status <> 404) then return
-    request = httpObject(answer.data)
-    libraryId = 0
-    if request <> invalid then libraryId = httpNumber(request.item_id, 0)
-    m.top.requestNote = { key: spec.key, status: reqStatusOfRequest(answer.status, answer.data), libraryId: libraryId }
+    if spec.asked <> m.requestsAsked then return
+    again = httpTrue(m.badgesAsked[spec.key])
+    m.badgesAsked.Delete(spec.key)
+    if again
+        askBadge(spec.kind, spec.tmdbId)
+        return
+    end if
+    note = reqTitleNote(spec.key, event.getData())
+    if note <> invalid then m.top.requestNote = note
 end sub
 
 sub onRequestsGathered()
@@ -280,6 +303,12 @@ sub onRequestsGathered()
     change = m.requestChange
     m.requestChange = invalid
     if change <> invalid then pokeRequests(change)
+    titles = m.badgeTitles
+    m.badgeTitles = {}
+    if not showsTiles() then return
+    for each key in titles
+        askBadge(titles[key].kind, titles[key].tmdbId)
+    end for
 end sub
 
 ' The screen on top shows requests: it asks again for what changed.

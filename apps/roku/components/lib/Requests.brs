@@ -465,18 +465,14 @@ function reqNoticeTile(text as string, kind as string) as object
     return { title: text, subtitle: "", image: "", wide: false, progress: 0.0, watched: false, itemId: 0, kind: kind, badge: "", badgeColor: "0x38BDF8FF", key: kind }
 end function
 
-' A title's status as a request answered says it (GET /api/requests/{id},
-' for a row's badge): active, Requested; declined; available, in a
-' library; gone, nothing. status 404: the request is gone, nothing.
-function reqStatusOfRequest(status as integer, data as dynamic) as string
-    request = httpObject(data)
-    if status <> 200 or request = invalid then return "none"
-    if httpString(request.stage) = "gone" then return "none"
-    state = httpString(request.status)
-    if state = "available" then return "library"
-    if state = "declined" then return "declined"
-    if reqActive(request) then return "requested"
-    return "none"
+' A title's badge as its page answered (GET /api/discover/{kind}/
+' {tmdb_id}): { key, status, libraryId } for the screens showing its
+' tile, or invalid when it didn't answer (the badge stays as it is).
+function reqTitleNote(key as string, answer as object) as dynamic
+    detail = invalid
+    if answer.ok then detail = httpObject(answer.data)
+    if detail = invalid then return invalid
+    return { key: key, status: httpString(detail.status), libraryId: httpNumber(detail.item_id, 0) }
 end function
 
 ' Discover's hero, the first trending title left: { title, line,
