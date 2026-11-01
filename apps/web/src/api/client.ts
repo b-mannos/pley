@@ -60,6 +60,11 @@ export interface RequestOptions {
 }
 
 export async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+  return (await requestWithStatus<T>(path, opts)).data;
+}
+
+/** As {@link request}, with the answer's status, where 200 and 201 say different things. */
+export async function requestWithStatus<T>(path: string, opts: RequestOptions = {}): Promise<{ status: number; data: T }> {
   const { method = "GET", body, rawBody, form, signal, keepalive, noAuthRedirect } = opts;
   const headers: Record<string, string> = { Accept: "application/json" };
   if (rawBody) headers["Content-Type"] = rawBody.type || "application/octet-stream";
@@ -102,12 +107,12 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   if (res.status === 204 || res.status === 202) {
     // Body may be empty (or ignored).
     const text = await res.text().catch(() => "");
-    return (text ? safeJson(text) : undefined) as T;
+    return { status: res.status, data: (text ? safeJson(text) : undefined) as T };
   }
   const contentType = res.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) return (await res.json()) as T;
+  if (contentType.includes("application/json")) return { status: res.status, data: (await res.json()) as T };
   const text = await res.text();
-  return (text ? safeJson(text) : undefined) as T;
+  return { status: res.status, data: (text ? safeJson(text) : undefined) as T };
 }
 
 function safeJson(text: string): unknown {

@@ -18,17 +18,19 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 
-from . import api, kodi, listing, livetv, playback
+from . import api, asking, kodi, listing, livetv, playback, requests
 
 PAGE = 300
 
 
-class Plugin:
+class Plugin(asking.Asking):
     def __init__(self, argv):
         kodi.begin()
         self.base_url = argv[0]
         self.handle = int(argv[1]) if len(argv) > 1 and argv[1].lstrip("-").isdigit() else -1
         query = argv[2][1:] if len(argv) > 2 and argv[2].startswith("?") else ""
+        # This listing's address, as Container.FolderPath says it.
+        self.path = self.base_url + ("?" + query if query else "")
         self.params = dict(urllib.parse.parse_qsl(query))
         self.resume = len(argv) > 3 and argv[3] == "resume:true"
         self.proxy_base = None
@@ -48,10 +50,10 @@ class Plugin:
             xbmc.sleep(100)
         raise api.ApiError(0, "service_off", kodi.text("service_off"))
 
-    def client(self) -> api.Client:
+    def client(self, timeout: float = 60) -> api.Client:
         if not self.proxy_base:
             self.proxy_base = self.proxy()
-        return api.Client(self.proxy_base, kodi.user_agent(), timeout=60, local=True)
+        return api.Client(self.proxy_base, kodi.user_agent(), timeout=timeout, local=True)
 
     def status(self) -> dict:
         client = self.client()
@@ -112,7 +114,7 @@ class Plugin:
                 entries.append((kodi.text("remove_from_list"), "RunPlugin(%s)" % self.url(route="my_list", id=item["id"], value="0")))
             else:
                 entries.append((kodi.text("add_to_list"), "RunPlugin(%s)" % self.url(route="my_list", id=item["id"], value="1")))
-        return entries
+        return entries + self.more_seasons_menu(item)
 
     def end(self, ok: bool = True, cache: bool = False) -> None:
         xbmcplugin.endOfDirectory(self.handle, succeeded=ok, cacheToDisc=cache)
@@ -222,8 +224,13 @@ class Plugin:
             self.action(kodi.text("choose_server"), {"route": "choose_server"}, "DefaultNetwork.png")
             return self.end()
         client = self.client()
-        home, libraries, live = api.together(
-            lambda: client.get("/api/hubs/home"), lambda: client.get("/api/libraries"), lambda: livetv.summary(client)
+        # The summary as the service keeps it (read again on its events):
+        # asked here only when it has none yet.
+        home, libraries, live, summary = api.together(
+            lambda: client.get("/api/hubs/home"),
+            lambda: client.get("/api/libraries"),
+            lambda: livetv.summary(client),
+            self.requests_summary,
         )
         for hub in home.get("hubs", []):
             self.folder(hub["title"], {"route": "hub", "key": hub["key"]}, "DefaultRecentlyAddedMovies.png")
@@ -236,6 +243,8 @@ class Plugin:
             self.folder(library["name"], params, icons.get(library["kind"], "DefaultFolder.png"))
         self.folder(kodi.text("playlists"), {"route": "playlists"}, "DefaultPlaylist.png")
         self.folder(kodi.text("search"), {"route": "search"}, "DefaultAddonsSearch.png")
+        # Discover and the requests, where the server takes them.
+        self.asking_entries(summary)
         self.action(kodi.text("settings"), {"route": "settings"})
         self.end()
 
@@ -359,10 +368,16 @@ class Plugin:
                 # watched mark) shows them again rather than the keyboard.
                 xbmc.executebuiltin("Container.Update(%s)" % self.url(route="search", q=query))
             return
-        found = self.client().get("/api/search", q=query, limit=100, summaries=1)
+        client = self.client()
+        # TMDB's titles the libraries lack, asked at the same time, never
+        # waited for (asking.Searching): where this sign-in may ask, as the
+        # service last read the summary (search asks nothing more first).
+        may_ask = requests.may_ask(self.requests_summary(ask=False))
+        tmdb = asking.Searching(self.client(asking.FOUND_WAIT), query, self.path) if may_ask else None
+        found = client.get("/api/search", q=query, limit=100, summaries=1)
         items = found.get("items", [])
         channels = found.get("channels") or []
-        if not items and not channels:
+        if not items and not channels and tmdb is None:
             kodi.notify(kodi.text("nothing_found"))
         self.items(items, content="videos")
         # Live TV's channels found by name, number or what's on: each plays.
@@ -373,7 +388,16 @@ class Plugin:
             li.addContextMenuItems(self.channel_menu(channel))
             entries.append((livetv.play_url(channel["id"]), li, False))
         xbmcplugin.addDirectoryItems(self.handle, entries, len(entries))
+        shown = tmdb.ready() if tmdb is not None else []
+        if tmdb is not None:
+            if not items and not channels:
+                # OK searches again.
+                self.entry(kodi.text("nothing_in_libraries"), {"route": "search"}, "DefaultIconInfo.png")
+            self.on_tmdb(query, shown)
         self.end()
+        if shown is None:
+            # Shown again if they come in time.
+            tmdb.later()
 
     def route_play(self) -> None:
         client = self.client()
@@ -557,7 +581,7 @@ class Plugin:
                 kodi.log("live channel %s: %s" % (self.params["id"], e.message), xbmc.LOGWARNING)
                 # What holds each connection; Watch here instead, where this
                 # account may take one over.
-                take_over = livetv.busy(e.message, e.details.get("connections"))
+                take_over = livetv.busy(e.message, e.body.get("connections"))
                 if take_over is None:
                     livetv.forget_queue()
                     return xbmcplugin.setResolvedUrl(self.handle, False, xbmcgui.ListItem())
@@ -703,6 +727,8 @@ class Plugin:
         kodi.notify(kodi.text("watching_as") % name)
         if kodi.get_property(kodi.WINDOW_OPEN):
             xbmc.executebuiltin("NotifyAll(%s,%s)" % (kodi.ADDON_ID, profiles.SWITCHED))
+        # Requests are the profile's own.
+        self.notify_service(forget=True)
         xbmc.executebuiltin("Container.Refresh")
 
     def password_profile(self, profile: dict) -> None:
@@ -836,6 +862,8 @@ class Plugin:
                     choose(server, name, server_id)
                     # Whoever approved it chose the profile: "Who's watching?" is answered.
                     kodi.set_property(profiles.GATE, "1")
+                    # What it may do with requests is the new sign-in's.
+                    self.notify_service(forget=True)
                     if previous and previous.get("refresh_token") != record["refresh_token"]:
                         # The sign-in this one replaces ends on its server too.
                         auth.revoke(previous, kodi.user_agent())
@@ -882,7 +910,7 @@ ACTIONS = (
     "sign_in",
     "sign_out",
     "retry",
-)
+) + asking.ACTIONS
 RESOLVING = ("play", "live_play")
 
 

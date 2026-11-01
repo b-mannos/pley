@@ -10,6 +10,29 @@ describes how they are made.
 
 ### Added
 
+- Requests: ask for movies and shows the server doesn't have yet. Discover
+  searches TMDB and lists Trending this week, Popular movies, Popular
+  shows, Coming to cinemas and Popular anime, each title with its badge
+  ("In library", "Requested", "Declined"); OK does its one main action
+  (Request, Open, Tell me too…) and the rest is in its context menu. A
+  show's seasons each say their state, and Which seasons? picks the ones
+  to ask for. Needs a server with requests turned on; for a sign-in from
+  before, Discover offers "Sign in again".
+- Your requests: each request's stage ("Waiting for approval",
+  "Downloading 42% · in 20 min", "Ready to watch"…), what it says and when
+  it was asked for, with Withdraw and Stop following. Administrators get
+  Requests, opening on Needs attention, with filters (Yours for their
+  own), Approve, Decline, Decline with a reason… (typed on Kodi's
+  keyboard), Mark as added by hand and Delete. The entry carries the
+  number of what is new or waits.
+- Search shows On TMDB after the libraries' results, and a library show's
+  menu has Request more seasons. In Pley's look, the profile's menu opens
+  Discover and Your requests in Kodi's lists, search has an On TMDB row,
+  and a show's More has Request more seasons.
+- "“Heat” is ready to watch." pops up with the poster as soon as it is
+  ("Season 2 of “X” is ready to watch." for a show), and as Kodi starts
+  for news that came while it was off; never over a playing video, where
+  the last three wait for it to stop.
 - Signing in with a code says when the server requires two-step sign-in:
   the phone that approves the code sets it up for whoever hasn't.
 

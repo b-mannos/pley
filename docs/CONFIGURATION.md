@@ -44,6 +44,8 @@ Everything else is set in the web app:
   `PLEY_*` variables) set it.
 - **Settings → Live TV**: IPTV sources, which channels show, and who may
   watch.
+- **Settings → Requests**: Discover and requests, their limits, and Radarr and
+  Sonarr ([API.md](API.md#requests)); who may ask is in **Settings → Users**.
 
 Pley stops cleanly, giving playback a few seconds to finish, on Ctrl+C,
 `SIGTERM`, the tray's Quit and, on Windows, `taskkill` without `/F`, closing

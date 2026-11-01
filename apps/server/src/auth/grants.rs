@@ -471,6 +471,7 @@ pub async fn holder(db: &Db, token: &str, client_id: &str, two_step_required: bo
         id: user_id,
         username,
         is_admin: false,
+        account_admin: role_admin,
         all_libraries: all_libraries || role_admin,
         max_age: if role_admin { None } else { max_age },
         app: Some(std::sync::Arc::new(super::AppAccess {

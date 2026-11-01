@@ -12,6 +12,7 @@ use crate::error::{ApiResult, AppError};
 use crate::network::{self, Adapter, Fixed, Listen, Listener};
 use crate::playback::{TranscodeInfo, transcode_info};
 use crate::providers::{Check, ProviderError};
+use crate::requests::arr;
 use crate::settings::{AdminSettings, SettingsPatch};
 use crate::state::AppState;
 
@@ -81,6 +82,15 @@ pub async fn put_settings(
     // (shows are fetched again from a new TV source).
     if crate::providers::settings_changed(&state.db, &before, &after).await? {
         state.scanner.enqueue_all(false).await?;
+    }
+    // Requests turned on or off, other limits, another TMDB key: every app
+    // fetches its summary again.
+    if before.requests != after.requests
+        || before.request_limit_movies != after.request_limit_movies
+        || before.request_limit_seasons != after.request_limit_seasons
+        || before.tmdb_api_key != after.tmdb_api_key
+    {
+        state.events.send(crate::events::ServerEvent::RequestsSettingsChanged { user_id: None });
     }
     Ok(Json(after.for_admin()))
 }
@@ -277,6 +287,53 @@ fn object(name: &str) -> String {
         Some(rest) => format!("the {rest}"),
         None => name.to_owned(),
     }
+}
+
+#[derive(Deserialize)]
+pub struct ArrRequest {
+    service: arr::Service,
+    /// An address typed in the form, maybe not saved yet; the saved one otherwise.
+    #[serde(default)]
+    url: Option<String>,
+    /// Likewise its key: the saved one goes to the saved address only.
+    #[serde(default)]
+    api_key: Option<String>,
+}
+
+/// `POST /api/settings/arr`: what Radarr or Sonarr offers requests (its
+/// quality profiles, root folders and language profiles), asked at the
+/// address and with the key typed in, before they are saved.
+pub async fn arr_options(
+    State(state): State<AppState>,
+    _admin: AdminUser,
+    Json(req): Json<ArrRequest>,
+) -> ApiResult<Json<arr::Options>> {
+    let settings = state.settings.get();
+    let name = req.service.name();
+    let (saved_url, saved_key) = match req.service {
+        arr::Service::Radarr => (&settings.radarr_url, &settings.radarr_api_key),
+        arr::Service::Sonarr => (&settings.sonarr_url, &settings.sonarr_api_key),
+    };
+    let url = match req.url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+        Some(url) => crate::settings::arr_url(url)?,
+        None => saved_url.clone(),
+    };
+    if url.is_empty() {
+        return Err(AppError::bad_request(format!("give {name}'s address")));
+    }
+    let key = match req.api_key.map(|k| k.trim().to_owned()).filter(|k| !k.is_empty()) {
+        Some(key) => key,
+        None if url == *saved_url && !saved_key.is_empty() => saved_key.clone(),
+        None if url == *saved_url => return Err(AppError::bad_request(format!("give {name}'s API key"))),
+        None => {
+            let message =
+                format!("type {name}'s API key for this address: the saved one goes to the saved address only");
+            return Err(AppError::bad_request(message));
+        }
+    };
+    let to = arr::Connection { url, key };
+    let options = state.requests.arr().options(req.service, &to).await;
+    options.map(Json).map_err(|err| AppError::bad_request(err.to_string()))
 }
 
 // ------------------------------------------------------------------ network

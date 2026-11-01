@@ -63,6 +63,20 @@ What Pley does, in full. The [README](../README.md) has the short version.
   search.
 - Collections (from TMDB, curated, or smart) and playlists (ordered or smart).
 
+## Requests
+
+- Discover finds movies and shows on TMDB (trending, popular, upcoming,
+  anime, or a search) and marks what the libraries have.
+- People ask for a movie, or for the seasons of a show the libraries lack;
+  administrators approve or decline, with a reason. Accounts may be allowed
+  to have theirs approved as asked, and limited to so many movies and
+  seasons a week. Profiles without a password and accounts with an age
+  limit don't ask until an administrator allows it.
+- Approved requests go to Radarr and Sonarr (with a quality profile and
+  root folder of their own for anime), and their downloads' progress shows.
+  A request is available, and its maker told, once a library has the movie
+  or every season asked for.
+
 ## Accounts
 
 - Administrators, users and managed profiles for children, each with their

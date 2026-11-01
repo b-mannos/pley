@@ -247,6 +247,25 @@ Apps sign in on Pley's own page with OAuth 2.1.
 - A converted download several people asked for stops only when the last of
   them, or an administrator, cancels it.
 
+### Requests
+
+- Radarr's and Sonarr's API keys are never shown again once saved, only
+  whether one is.
+- A key goes only to the address it was saved with: a new address takes its
+  key again, and checking another address in Settings takes that address's
+  key. Their redirects aren't followed, so a key isn't sent on elsewhere,
+  nor to a link-local address, where clouds answer for the machine
+  itself: neither one typed in nor one a name resolves to, checked on the
+  connection itself. Their answers are read 32 MB at most.
+- Only administrators approve and decline, see everyone's requests, and ask
+  Radarr and Sonarr anything; others see their own.
+- Discover shows TMDB's titles whatever their rating, so profiles without a
+  password and accounts with an age limit may not ask until an administrator
+  allows it. An account that may not ask gets none of TMDB's pictures
+  through the server but those of its own requests.
+- TMDB's pictures are fetched 8 at once, 10 MB each at most, and kept up
+  to 256 MB in all.
+
 ### The desktop app
 
 - Its window shows the server's own pages only; other sites open in the
@@ -255,6 +274,10 @@ Apps sign in on Pley's own page with OAuth 2.1.
   downloads in the system's player or file manager.
 - Server pages get none of its commands; only the pages bundled with the
   app do.
+- While the window isn't in front, it follows that server's event stream
+  with the window's own session, sent to that server's origin only, and
+  tells of requests in the system's notifications: titles, seasons and
+  names, never pictures or links.
 
 ### The Android app
 

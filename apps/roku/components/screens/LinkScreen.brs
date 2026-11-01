@@ -40,6 +40,13 @@ sub onActive()
         else if reason = "wider_scope"
             m.intro.text = "The server allowed more than Pley for Roku asks for, so it was signed out."
             m.intro.visible = true
+        else if reason = "requests"
+            ' Discover's Sign in again: this sign-in goes on until the new one.
+            m.intro.text = "Sign in again to let this TV ask for movies and shows."
+            m.intro.visible = true
+        else if reason = "approvals"
+            m.intro.text = "Sign in again to approve and decline requests here."
+            m.intro.visible = true
         end if
         ask()
         ' Whether the server requires two-step sign-in, asked after the code,

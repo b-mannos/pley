@@ -1,16 +1,13 @@
-import { useState } from "react";
 import { Link as RouterLink } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Eye, EyeOff } from "lucide-react";
 import { appKeys } from "@/api/apps";
 import { keys, useSettings, useSystemInfo, useUsers, useWatchingHours } from "@/api/hooks";
 import type { LibraryWork, Settings, TvMetadata } from "@/api/types";
 import { useAuth } from "@/auth";
-import { IconButton, Select, TextInput, Toggle } from "@/components/ui";
-import { cn } from "@/lib/cn";
+import { Select, TextInput, Toggle } from "@/components/ui";
 import { formatTimestamp, pluralize } from "@/lib/format";
 import { useDocumentTitle } from "@/lib/hooks";
-import { Group, Link, Note, Row, SettingsForm, TestButton, useSettingsForm } from "./SettingsForm";
+import { Group, Link, Note, Row, SecretInput, SettingsForm, TestButton, useSettingsForm } from "./SettingsForm";
 import { knownTranscoder } from "./transcodeChoices";
 import { hourOfDay, WatchingHoursChart } from "./WatchingHoursChart";
 
@@ -75,40 +72,6 @@ function automaticTvSource(form: Settings): Exclude<TvMetadata, "auto"> {
   if (form.tmdb_api_key.trim()) return "tmdb";
   if (form.tvdb_api_key.trim()) return "tvdb";
   return "tvmaze";
-}
-
-/** A key or PIN: hidden unless asked for. */
-function SecretInput({
-  id,
-  value,
-  onChange,
-  what,
-  className,
-}: {
-  id: string;
-  value: string;
-  onChange: (value: string) => void;
-  what: string;
-  className?: string;
-}) {
-  const [visible, setVisible] = useState(false);
-  return (
-    <div className="flex gap-2">
-      <TextInput
-        id={id}
-        type={visible ? "text" : "password"}
-        autoComplete="off"
-        spellCheck={false}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="Not set"
-        className={cn("font-mono text-xs", className)}
-      />
-      <IconButton label={`${visible ? "Hide" : "Show"} ${what}`} onClick={() => setVisible((s) => !s)} className="rounded-md bg-surface-2">
-        {visible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-      </IconButton>
-    </div>
-  );
 }
 
 export function ServerSettings() {

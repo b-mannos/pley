@@ -9,7 +9,61 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Security
+
+- Radarr's and Sonarr's addresses can't be link-local (`169.254.0.0/16`,
+  `fe80::/10`), typed in or as their names resolve, and whatever answers
+  there in their stead is never quoted back: only its HTTP status. Their
+  answers are read 32 MB at most.
+
 ### Added
+
+- Requests. Discover finds movies and shows on TMDB (trending, popular,
+  upcoming, anime, or a search) and marks what the libraries have. People
+  ask for a movie or a show's missing seasons; administrators approve or
+  decline them, and accounts may be allowed to have theirs approved as
+  asked, within limits per 7 days. Approved requests go to Radarr and
+  Sonarr, whose downloads' progress shows, and a request's maker is told
+  once a library has it. Turned on in Settings → Requests; who may ask is
+  in Settings → Users, where profiles without a password and accounts with
+  an age limit start without. `/api/discover`, `/api/requests` and
+  `POST /api/settings/arr` ([docs/API.md](../../docs/API.md#requests)).
+- Requests in Pley's apps: they ask with the new `requests` scope, and an
+  administrator's Pley apps approve and decline with `approvals`; an app
+  signed in before is told to sign in again. Discover's pictures come
+  through the server at the size each screen draws them, kept for 30 days
+  and 256 MB at most, so no app contacts TMDB. Discover marks shows partly
+  in a library, titles declined lately, and each season's state; accounts
+  with an age limit see only titles within it. A library title's page can
+  show its request (`GET /api/items/{id}/request`). The request summary
+  says what an account may do and what is new for it, and apps hear when
+  to fetch it again.
+- Accounts made from an invitation with an age limit, or given one later,
+  don't ask for titles until an administrator lets them; accounts that may
+  not ask still see and withdraw their own requests.
+- A request says where it is (waiting for an administrator, sent to Radarr
+  or Sonarr, downloading, importing, partly or wholly ready, or gone from
+  the library since) and whether it has news its maker hasn't seen. Why a
+  request failed, and where it was sent, are for administrators.
+- Asking for a title someone has asked for already follows their request
+  (*Tell me too*): its news comes to each follower, and following costs
+  nothing against the limits. When its maker withdraws a request others
+  follow, or their account is deleted, the earliest follower keeps it, and
+  it counts against their limits from then.
+  What was declined for an account may be asked for again after 30 days,
+  and the answer says from when.
+- Administrators' approvals answer at once while the request goes to
+  Radarr or Sonarr in the background. An approval may keep only some of
+  the seasons asked for and choose among Radarr's and Sonarr's quality
+  profiles and root folders (`GET /api/requests/options`); an approved
+  request not yet available may still be declined, and one may be marked
+  as added by hand, so it is never sent.
+- Requests are listed by several statuses at once, by what needs an
+  administrator, by kind, person, title or news, and oldest first. Each
+  request says what may be done to it, and request events say which
+  request changed and go only to whom it concerns: a new request to
+  administrators, a decision to its maker and followers, a request ready
+  to each account that can open it, a failure to administrators.
 
 - Administrators who use two-step sign-in can require it of everyone
   (Settings → Server → Sign-in). Whoever hasn't set it up is signed out

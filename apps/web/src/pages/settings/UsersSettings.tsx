@@ -15,13 +15,13 @@ import {
   useUsers,
   type UserPatch,
 } from "@/api/hooks";
-import type { Device, User } from "@/api/types";
+import type { Device, RequestAccess, User } from "@/api/types";
 import { useAuth } from "@/auth";
 import { AccessFields, type AccessValue } from "@/components/AccessFields";
 import { Avatar } from "@/components/Avatar";
 import { ConfirmModal, Modal } from "@/components/Modal";
 import { useToast } from "@/components/Toast";
-import { Badge, Button, EmptyState, Field, PageSpinner, TextInput, Toggle } from "@/components/ui";
+import { Badge, Button, EmptyState, Field, PageSpinner, Select, TextInput, Toggle } from "@/components/ui";
 import { ageBadge, librariesLabel } from "@/lib/access";
 import { cn } from "@/lib/cn";
 import { passwordProblem } from "@/lib/passwords";
@@ -279,6 +279,10 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
   const [access, setAccess] = useState<AccessValue>({ all_libraries: true, library_ids: [], max_age: null });
   const [pin, setPin] = useState("");
   const [clearPin, setClearPin] = useState(false);
+  // What the Requests select was set to; `null` until then (a new account, or an administrator).
+  const [requestChoice, setRequestChoice] = useState<RequestAccess | null>(null);
+  // Whether it was set in this dialog, not kept from the account.
+  const [requestPicked, setRequestPicked] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Reset the form whenever the dialog opens (for someone else); background
@@ -286,6 +290,9 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
   useOnChange(open ? (user?.id ?? "new") : null, (key) => {
     if (key === null) return;
     setKind(user?.managed ? "managed" : "regular");
+    // Administrators report "auto" whatever is kept for them: no choice to keep.
+    setRequestChoice(user && !user.is_admin ? (user.request_access ?? null) : null);
+    setRequestPicked(false);
     setUsername(user?.username ?? "");
     setDisplayName(user?.display_name ?? "");
     setPassword("");
@@ -306,6 +313,18 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
   const otherAdmins = (users.data ?? []).filter((u) => u.is_admin && !u.disabled && u.id !== user?.id).length;
   const lastAdmin = !!user?.is_admin && otherAdmins === 0;
   const busy = create.isPending || update.isPending;
+  // Servers before requests have no `request_access`.
+  const requestsKnown = (users.data ?? []).some((u) => u.request_access !== undefined);
+  // Administrators' requests are always approved as they make them.
+  const asAdmin = isAdmin && !managed;
+  // As the server has it: an account made without one doesn't ask if it's
+  // a managed profile or has an age limit, and adding an age limit to one
+  // that asks for approval stops it asking, unless picked here too.
+  const ageAdded = !!user && user.max_age === null && access.max_age !== null;
+  const requestAccess: RequestAccess =
+    ageAdded && !requestPicked && requestChoice === "ask"
+      ? "off"
+      : (requestChoice ?? (managed || access.max_age !== null ? "off" : "ask"));
 
   const validate = (): string | null => {
     if (isNew && !username.trim()) return "Enter a username.";
@@ -338,6 +357,7 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
           home,
           ...access,
           pin: pin || undefined,
+          request_access: requestsKnown && !asAdmin ? requestAccess : undefined,
         },
         {
           onSuccess: (u) => {
@@ -363,6 +383,9 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
     if (access.max_age !== user.max_age) patch.max_age = access.max_age;
     if (pin) patch.pin = pin;
     else if (clearPin) patch.pin = null;
+    // One no longer an administrator keeps what the dialog shows, not what was kept from before.
+    // An age limit added says along with it whether the account still asks.
+    if (requestsKnown && !asAdmin && (user.is_admin || ageAdded || requestAccess !== user.request_access)) patch.request_access = requestAccess;
     if (Object.keys(patch).length === 0) return onClose();
     update.mutate(
       { id: user.id, ...patch },
@@ -418,7 +441,10 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
                 key={o.id}
                 type="button"
                 aria-pressed={kind === o.id}
-                onClick={() => setKind(o.id)}
+                onClick={() => {
+                  setKind(o.id);
+                  setRequestChoice(null);
+                }}
                 className={cn(
                   "rounded-lg border p-3 text-left transition-colors",
                   kind === o.id ? "border-accent bg-accent/10" : "border-border hover:border-border-strong",
@@ -505,6 +531,35 @@ function UserDialog({ user, open, onClose, onDelete }: { user: User | null; open
             />
           ) : null}
         </div>
+
+        {requestsKnown ? (
+          <Field
+            label="Requests"
+            htmlFor="user-requests"
+            hint={
+              asAdmin
+                ? "Administrators' requests are approved as they make them."
+                : access.max_age !== null
+                  ? "Asking for movies and shows in Discover, which leaves out titles above the age limit."
+                  : "Asking for movies and shows the libraries don't have, in Discover."
+            }
+          >
+            <Select
+              id="user-requests"
+              className="h-10 w-full"
+              value={asAdmin ? "auto" : requestAccess}
+              disabled={asAdmin}
+              onChange={(e) => {
+                setRequestChoice(e.target.value as RequestAccess);
+                setRequestPicked(true);
+              }}
+            >
+              <option value="ask">May ask, for an administrator to approve</option>
+              <option value="auto">May ask, approved as asked</option>
+              <option value="off">May not ask</option>
+            </Select>
+          </Field>
+        ) : null}
 
         <AccessFields value={access} onChange={setAccess} idPrefix="user" />
 

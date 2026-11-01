@@ -23,6 +23,21 @@ sub test_auth_reads_the_servers_own_metadata()
     tkEqual(meta.tokenEndpoint, "http://pley.local:7539/api/oauth/token")
     tkEqual(meta.revocationEndpoint, "http://pley.local:7539/api/oauth/revoke")
     tkEqual(meta.deviceEndpoint, "http://pley.local:7539/api/oauth/device")
+    tkEqual(meta.scopes, ["library", "play", "playlists", "profiles"])
+end sub
+
+' An older server doesn't know requests or approvals, and would refuse the
+' whole sign-in for them.
+sub test_auth_asks_for_requests_where_the_server_has_them()
+    tkEqual(authScopeFor(["library", "play", "playlists", "profiles"]), "library play playlists profiles")
+    tkEqual(authScopeFor(["library", "play", "playlists", "profiles", "requests", "approvals", "admin"]), "library play playlists profiles requests approvals")
+    tkEqual(authScopeFor(["approvals", "requests"]), "library play playlists profiles requests approvals", "in the app's order")
+    tkEqual(authScopeFor(["requests"]), "library play playlists profiles requests")
+    tkEqual(authScopeFor([]), "library play playlists profiles")
+    newer = authTestMetadata().Replace("""profiles""]", """profiles"",""requests"",""approvals""]")
+    tkEqual(authScopeFor(authParseMetadata(newer, "http://pley.local:7539").scopes), "library play playlists profiles requests approvals")
+    odd = authTestMetadata().Replace("""scopes_supported"":[""library"",""play"",""playlists"",""profiles""]", """scopes_supported"":[1,""requests"",null]")
+    tkEqual(authParseMetadata(odd, "http://pley.local:7539").scopes, ["requests"])
 end sub
 
 sub test_auth_refuses_metadata_of_another_address()
