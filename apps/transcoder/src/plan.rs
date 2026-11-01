@@ -146,35 +146,43 @@ pub fn tonemap_falls_behind(speed: &TonemapSpeed, need: f64) -> bool {
     fastest > 0.0 && fastest < need
 }
 
-/// [`tonemap_need`] of `src` made `w×h`; `scaled` when libplacebo gets the
-/// frames at the output's size already (Quick Sync's scaler brought them).
-fn need_of(src: &MediaStream, w: i64, h: i64, scaled: bool) -> f64 {
+/// [`tonemap_need`] of `src` made `w×h`. The source's pixels count where
+/// Quick Sync's scaler brings libplacebo the frames at the output's size
+/// too: Intel's decoder and scaler work on the GPU libplacebo does, and
+/// with them a 4K60 HDR10 film made 1080p went at 0.45 of what libplacebo
+/// alone measured at its size on an Iris Xe (99 frames a second at `high`).
+fn need_of(src: &MediaStream, w: i64, h: i64) -> f64 {
     let output = w.max(1) as u64 * h.max(1) as u64;
-    let source = if scaled {
-        output
-    } else {
-        src.width.unwrap_or(1920).max(1) as u64 * src.height.unwrap_or(1080).max(1) as u64
-    };
+    let source = src.width.unwrap_or(1920).max(1) as u64 * src.height.unwrap_or(1080).max(1) as u64;
     let fps = src.frame_rate.filter(|f| f.is_finite() && *f > 0.0).unwrap_or(24.0).min(120.0);
     tonemap_need(source, output, fps)
 }
 
 /// [`tonemap_quality`] for `src` made `w×h` ([`need_of`]), beside
 /// transcodes needing `others`; `High` where nothing was measured.
-fn quality_for(
-    speed: Option<&TonemapSpeed>,
-    src: &MediaStream,
-    (w, h): (i64, i64),
-    scaled: bool,
-    others: f64,
-) -> TonemapQuality {
+fn quality_for(speed: Option<&TonemapSpeed>, src: &MediaStream, (w, h): (i64, i64), others: f64) -> TonemapQuality {
     let Some(speed) = speed else { return TonemapQuality::High };
-    tonemap_quality(speed, need_of(src, w, h, scaled) + others)
+    tonemap_quality(speed, need_of(src, w, h) + others)
 }
 
 /// The Direct3D 11 device AMF encodes on: the AMD GPU, whichever adapter
 /// it is.
 pub const AMF_D3D11_DEVICE: &str = "d3d11va=dx:,vendor_id=0x1002";
+/// Quick Sync's tone mapping of HDR10 at `w×h` ([`Tonemapper::QuickSync`]).
+/// Each step at the output's size, its scaler's first: a pass that tone
+/// maps, or lifts the brightness, does it at the size it is given (a 4K60
+/// film made 1080p went at 131 frames a second tone mapped at 4K, 218 at
+/// 1080p on an Iris Xe; 166 lifted at 4K, 223 at 1080p). Brightness 16 up
+/// before the curve: Intel's alone made two HDR10 films a third darker
+/// than libplacebo's (mean SDR luma 53 and 78 against 80 and 109); lifted,
+/// as bright, with shadows no lighter.
+pub fn qsv_tonemap(w: i64, h: i64) -> String {
+    format!(
+        "vpp_qsv=w={w}:h={h}:format=p010le,vpp_qsv=procamp=1:brightness=16,vpp_qsv=tonemap=1:format=nv12,\
+         setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709"
+    )
+}
+
 const OPENCL_TONEMAP: &str = "format=p010,hwupload,tonemap_opencl=tonemap=hable:desat=0:t=bt709:m=bt709:p=bt709:format=nv12,hwdownload,format=nv12";
 
 /// The last filter before a VAAPI encoder, which takes frames in VAAPI's
@@ -754,13 +762,7 @@ impl Plan {
                         tonemap,
                         // Alone on the GPU: a job counts the others (see
                         // `Plan::share_tonemapping`).
-                        tonemap_quality: quality_for(
-                            ff.caps.tonemap_speed.as_ref(),
-                            src,
-                            (width, height),
-                            gpu_scale == Some(HwAccel::Qsv),
-                            0.0,
-                        ),
+                        tonemap_quality: quality_for(ff.caps.tonemap_speed.as_ref(), src, (width, height), 0.0),
                         tonemap_input,
                         amf_upload,
                         // BT.709 out of every tone mapper; the source's otherwise.
@@ -952,14 +954,14 @@ impl Plan {
         others: f64,
     ) -> Option<TonemapQuality> {
         let (v, src) = self.placebo_source(media)?;
-        Some(quality_for(speed, src, (v.width, v.height), v.gpu_scale == Some(HwAccel::Qsv), others))
+        Some(quality_for(speed, src, (v.width, v.height), others))
     }
 
     /// What libplacebo's tone mapping of this video asks of the GPU (see
     /// [`tonemap_need`]); `None` when libplacebo doesn't tone map it.
     pub fn tonemap_need(&self, media: &MediaInfo) -> Option<f64> {
         let (v, src) = self.placebo_source(media)?;
-        Some(need_of(src, v.width, v.height, v.gpu_scale == Some(HwAccel::Qsv)))
+        Some(need_of(src, v.width, v.height))
     }
 
     /// Whether the GPU falls behind with this and libplacebo transcodes
@@ -992,6 +994,16 @@ impl Plan {
         })
     }
 
+    /// Whether Quick Sync's scaler could tone map this video in libplacebo's
+    /// place ([`Tonemapper::QuickSync`]), where its start-up test passed
+    /// (`qsv_tonemap`): HDR10 made SDR, decoded and scaled by Quick Sync.
+    pub fn quick_sync_could_tonemap(&self, media: &MediaInfo, qsv_tonemap: bool) -> bool {
+        qsv_tonemap
+            && self.placebo_source(media).is_some_and(|(v, src)| {
+                v.hdr.is_none() && v.gpu_scale == Some(HwAccel::Qsv) && src.dynamic_range() == DynamicRange::Hdr10
+            })
+    }
+
     /// The pixels a frame of the source has and its frame rate: what
     /// decoding it takes (see [`crate::share::decode_cores`]).
     pub fn source_rate(&self, media: &MediaInfo) -> Option<(u64, f64)> {
@@ -1004,10 +1016,18 @@ impl Plan {
     /// quality, and its video decoded by the CPU where the share says so.
     pub fn with_share(&self, share: Share) -> Plan {
         let mut plan = self.clone();
+        let burn = plan.burn.is_some();
         if let Some(v) = plan.video.as_mut() {
             v.tonemap_quality = share.quality;
             if share.cpu_decode {
                 v.hw_decode = None;
+            }
+            if share.quick_sync {
+                v.tonemap = Some(Tonemapper::QuickSync);
+                // Into Quick Sync's encoder without leaving the GPU.
+                if !burn && v.encoder.as_ref().is_some_and(|e| e.accel == HwAccel::Qsv && e.hardware) {
+                    v.pipeline = Pipeline::Gpu(HwAccel::Qsv);
+                }
             }
         }
         plan
@@ -1391,6 +1411,7 @@ impl Plan {
             let format = if v.hdr.is_some() { "p010le" } else { "nv12" };
             let scaler = match accel {
                 HwAccel::Vaapi => format!("scale_vaapi=w={w}:h={h}:format={format}"),
+                HwAccel::Qsv if v.tonemap == Some(Tonemapper::QuickSync) => qsv_tonemap(w, h),
                 HwAccel::Qsv => format!("vpp_qsv=w={w}:h={h}:format={format}"),
                 HwAccel::Videotoolbox => format!("scale_vt=w={w}:h={h}"),
                 _ => format!("scale_cuda=w={w}:h={h}:format={format}"),
@@ -1421,6 +1442,12 @@ impl Plan {
         // Scaled by the GPU that decoded the frames, then copied to memory:
         // in 10 bits for tone mapping and HDR kept.
         let scale_needed = match v.scales_on_gpu(pipeline) {
+            // Tone mapped as it scales, for a software encoder standing in
+            // for Quick Sync's.
+            Some(HwAccel::Qsv) if v.tonemap == Some(Tonemapper::QuickSync) => {
+                pre.push(format!("{},hwdownload,format=nv12", qsv_tonemap(w, h)));
+                false
+            }
             Some(accel) => {
                 let format = if v.tonemap.is_some() || v.hdr.is_some() { "p010le" } else { "nv12" };
                 let scaler = match accel {
@@ -1478,6 +1505,8 @@ impl Plan {
                 pre.extend(v.tonemap_input.clone());
                 pre.push(if scale_needed { zscale_tonemap(v.width, v.height) } else { ZSCALE_TONEMAP.into() });
             }
+            // Done as Quick Sync scaled (only it decodes for it).
+            Some(Tonemapper::QuickSync) => {}
             None => {
                 if scale_needed {
                     pre.push(format!("scale={}:{}:flags=bicubic", v.width, v.height));
@@ -1573,7 +1602,7 @@ impl Args {
 }
 
 /// Quick Sync's rate control besides the bitrates: bitrate control per
-/// macroblock, for the picture's sake (as Jellyfin has it).
+/// macroblock, for the picture's sake.
 pub const QSV_VBR: [&str; 2] = ["-mbbrc", "1"];
 /// VAAPI's rate control: variable, capped by `-maxrate`.
 pub const VAAPI_VBR: [&str; 2] = ["-rc_mode", "VBR"];
@@ -2736,9 +2765,10 @@ mod tests {
                 ),
                 "{args}"
             );
-            // libplacebo reads 1080p rather than 4K: a quarter of the pixels.
+            // libplacebo reads 1080p, but Quick Sync decodes and scales the
+            // 4K on the same GPU: the source's pixels count.
             let need = plan.tonemap_need(&m).unwrap();
-            assert!((need - tonemap_need(1920 * 1080, 1920 * 1080, 24.0)).abs() < 1e-9, "{need}");
+            assert!((need - tonemap_need(3840 * 2160, 1920 * 1080, 24.0)).abs() < 1e-9, "{need}");
         } else {
             assert_eq!((v.hw_decode.as_deref(), v.gpu_scale), (Some("vaapi"), None));
             assert!(!args.contains("vpp_qsv"), "{args}");
@@ -2799,6 +2829,75 @@ mod tests {
         let v = plan.video.as_ref().unwrap();
         let decoder = if cfg!(windows) { "d3d11va" } else { "vaapi" };
         assert_eq!((v.pipeline, v.hw_decode.as_deref(), v.gpu_scale), (Pipeline::Software, Some(decoder), None));
+    }
+
+    /// Where the GPU falls behind, Quick Sync's scaler tone maps HDR10 that
+    /// it decodes and scales, in libplacebo's place: on the GPU into its own
+    /// encoder, to memory for x264 standing in or for burned-in subtitles.
+    #[test]
+    fn quick_sync_tone_maps_hdr10_in_libplacebos_place() {
+        let mut ff = intel(HwAccel::Qsv, true);
+        // Vulkan doesn't decode 10-bit HEVC (Iris Xe's driver doesn't).
+        ff.caps.vulkan_decode = vec!["h264".into(), "hevc".into()];
+        let m = ten_bit(media(DynamicRange::Hdr10, None));
+        let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        assert!(!plan.quick_sync_could_tonemap(&m, false));
+        ff.caps.qsv_tonemap = true;
+        let plan = Plan::build(&request(), &m, &ff, None).unwrap();
+        assert_eq!(plan.quick_sync_could_tonemap(&m, true), cfg!(windows));
+        if !cfg!(windows) {
+            return;
+        }
+        let share = Share { quality: TonemapQuality::Fast, cpu_decode: false, quick_sync: true };
+        let intel = plan.with_share(share);
+        let v = intel.video.as_ref().unwrap();
+        assert_eq!((v.pipeline, v.tonemap), (Pipeline::Gpu(HwAccel::Qsv), Some(Tonemapper::QuickSync)));
+        let args = args_string(&intel, 0, 2);
+        assert!(args.contains("-hwaccel qsv -hwaccel_output_format qsv"), "{args}");
+        assert!(!args.contains("vulkan") && !args.contains("libplacebo"), "{args}");
+        assert!(
+            args.contains(
+                "[0:0]vpp_qsv=w=1920:h=1080:format=p010le,vpp_qsv=procamp=1:brightness=16,vpp_qsv=tonemap=1:format=nv12,\
+                 setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout]"
+            ),
+            "{args}"
+        );
+        let shown = intel.video_plan(&m, None).unwrap();
+        assert_eq!((shown.tonemap, shown.tonemap_quality), (Some(Tonemapper::QuickSync), None));
+        assert_eq!(shown.pipeline.as_deref(), Some("gpu"));
+
+        // x264 standing in: the tone mapped frames come to memory.
+        let x264 = x264();
+        let ctx = ArgsContext {
+            input: Path::new("/media/movie.mkv"),
+            encoder: Some(&x264),
+            relative_split_times: true,
+            preset: None,
+            shader_cache: None,
+        };
+        let args: Vec<String> =
+            intel.ffmpeg_args(&ctx, 0, 2).iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let args = args.join(" ");
+        assert!(args.contains("-hwaccel qsv -hwaccel_output_format qsv"), "{args}");
+        assert!(args.contains("vpp_qsv=tonemap=1:format=nv12,"), "{args}");
+        assert!(args.contains("colorspace=bt709,hwdownload,format=nv12,format=yuv420p[vout]"), "{args}");
+
+        // Subtitles burned in over the tone mapped frame, in memory.
+        let mut req = request();
+        req.subtitle = Some(SubtitleBurnRequest { stream_index: Some(2), external_path: None });
+        let burned = Plan::build(&req, &m, &ff, None).unwrap();
+        assert!(burned.quick_sync_could_tonemap(&m, true));
+        let burned = burned.with_share(share);
+        assert_eq!(burned.video.as_ref().unwrap().pipeline, Pipeline::Software);
+        let args = args_string(&burned, 0, 2);
+        assert!(args.contains("colorspace=bt709,hwdownload,format=nv12[base]"), "{args}");
+
+        // Not HDR kept, nor HLG: libplacebo's, as planned.
+        let kept = Plan::build(&hdr_request(pley_transcoder_api::OutputRange::Hdr10), &m, &ff, None).unwrap();
+        assert!(!kept.quick_sync_could_tonemap(&m, true));
+        let hlg = ten_bit(media(DynamicRange::Hlg, None));
+        let plan = Plan::build(&request(), &hlg, &ff, None).unwrap();
+        assert!(!plan.quick_sync_could_tonemap(&hlg, true));
     }
 
     /// HDR kept on Quick Sync stays on the GPU in 10 bits where its start-up
@@ -3117,14 +3216,14 @@ mod tests {
         assert!(plan.tonemapping_falls_behind(Some(&vega), &m, 2.0 * film));
         assert!(!plan.tonemapping_falls_behind(None, &m, 2.0 * film));
 
-        let shared = plan.with_share(Share { quality: TonemapQuality::Fast, cpu_decode: true });
+        let shared = plan.with_share(Share { quality: TonemapQuality::Fast, cpu_decode: true, quick_sync: false });
         let args = args_string(&shared, 0, 2);
         assert!(!args.contains("-hwaccel "), "{args}");
         assert!(args.contains("contrast_recovery=0:skip_aa=1:extra_opts=force_low_bit_depth_fbos=yes"), "{args}");
         assert!(args.contains("-init_hw_device vulkan=vk@va -filter_hw_device vk"), "{args}");
         assert!(args.contains("hwupload=derive_device=vaapi[vout]"), "{args}");
         // The GPU keeps decoding where the share leaves it the decoding.
-        let kept = plan.with_share(Share { quality: TonemapQuality::Balanced, cpu_decode: false });
+        let kept = plan.with_share(Share { quality: TonemapQuality::Balanced, cpu_decode: false, quick_sync: false });
         assert!(args_string(&kept, 0, 2).contains("-hwaccel vaapi "));
 
         // NVIDIA's decoder works apart from its encoder.

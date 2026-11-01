@@ -414,6 +414,11 @@ pub enum Tonemapper {
     Opencl,
     /// CPU via zimg (`zscale` + `tonemap`).
     Zscale,
+    /// Intel's GPU via Quick Sync's scaler (`vpp_qsv`), in place of
+    /// libplacebo where the GPU falls behind: the transcoder's choice, never
+    /// one to ask for. Older transcoders lack it.
+    #[serde(rename = "vpp_qsv")]
+    QuickSync,
 }
 
 impl Tonemapper {
@@ -422,6 +427,7 @@ impl Tonemapper {
             Tonemapper::Libplacebo => "libplacebo",
             Tonemapper::Opencl => "opencl",
             Tonemapper::Zscale => "zscale",
+            Tonemapper::QuickSync => "vpp_qsv",
         }
     }
 }
@@ -573,6 +579,10 @@ pub struct Capabilities {
     /// with the input codecs each one handles.
     #[serde(default)]
     pub gpu_pipelines: Vec<GpuPipeline>,
+    /// Quick Sync's scaler tone maps HDR10 that its decoder decoded to SDR
+    /// ([`Tonemapper::QuickSync`]). A start-up test.
+    #[serde(default)]
+    pub qsv_tonemap: bool,
     /// Tone mappers whose frames reach a VAAPI encoder (Linux): libplacebo
     /// on a Vulkan device and OpenCL on a device made from the VAAPI one,
     /// the frames uploaded back to it. A start-up test; zimg always does.

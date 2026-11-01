@@ -191,6 +191,7 @@ before using what it names:
 | `vulkan_decode` | codecs the GPU decodes straight into Vulkan memory, for libplacebo |
 | `vulkan_encode` | `h264_vulkan` encodes libplacebo's output on the GPU |
 | `gpu_pipelines` | GPU-only decode → scale → encode pipelines, with the codecs each passed for, and `main10`: those Quick Sync's keeps in 10 bits into its HEVC Main 10 encoder (HDR kept) |
+| `qsv_tonemap` | Quick Sync's scaler tone maps HDR10 its decoder decoded into `h264_qsv` ([Sharing the GPU](#sharing-the-gpu)) |
 | `vaapi_tonemappers` | tone mappers whose frames reach a VAAPI encoder ([VAAPI encoders](#vaapi-encoders)) |
 | `vaapi_vulkan_decode` | `vulkan_decode` on the Vulkan device made from the VAAPI one |
 | `tonemap_speed?` | `{high, balanced, fast}`: frames a second libplacebo tone maps 4K to 4K at each quality ([libplacebo quality](#libplacebo-quality)) |
@@ -781,8 +782,10 @@ video plan):
   tone mapping with libplacebo need together, itself included; when none
   did, the fastest. Each job needs its frame rate × (0.6 × the source's
   pixels + 0.4 × the output's) relative to 4K, so a 4K film made 1080p needs
-  less than one kept 4K; the output's pixels alone where Quick Sync scaled
-  the frames first. Renditions start at their job's quality.
+  less than one kept 4K. The source's pixels count where Quick Sync scaled
+  the frames first too: its decoder and scaler work on the GPU libplacebo
+  does (a 4K60 HDR10 film made 1080p went at 0.45 of what libplacebo alone
+  measured at 1080p on an Iris Xe). Renditions start at their job's quality.
 - Without a measurement (no libplacebo on a GPU), `high`.
 
 #### Sharing the GPU
@@ -809,14 +812,27 @@ Several jobs tone mapping with libplacebo share the GPU (`src/share.rs`):
     waits on something of its own (its disk), and nothing is learned;
   - if the CPU is at least 90 % busy, the jobs decode on the GPU;
   - else the GPU fell behind at its quality: a cheaper one, and at `fast` the
-    CPU decodes where it has the cores.
+    CPU decodes where it has the cores, or Quick Sync tone maps (below).
 
   A lesson holds for 10 minutes after it was last confirmed, while the load
   stays at least 0.9 of what it was; then the start-up measurement is tried
   again. Each is logged once, at `info`.
+- **Tone mapping on Quick Sync.** Where the GPU falls behind (as for decoding
+  on the CPU), HDR10 made SDR that Quick Sync decodes and scales (Windows) is
+  tone mapped by its scaler instead (status `tonemap: vpp_qsv`), where that
+  passed a start-up test (`qsv_tonemap`): scaled in 10 bits, then brightness
+  16 up and tone mapped to NV12 at the output's size, each in a pass of its
+  own (Quick Sync does each at the size it is given), into `h264_qsv`
+  without leaving the GPU (to memory for x264 standing in, or for burned-in
+  subtitles). It costs the GPU a fraction of libplacebo's work: a 4K60 film
+  made 1080p went at about 225 frames a second rather than 99 to 127 on an
+  Iris Xe, and two at once at 120 each. The picture is as bright, with
+  highlights clipped sooner and skin a little pinker than libplacebo's, so
+  it is only for when libplacebo can't keep up.
 - **Moving running jobs.** A running job moves to the quality and decoding
   the load calls for: at once when another job starts using the GPU
-  (checked every 5 s), when a lesson calls for less GPU work, or back to GPU
+  (checked every 5 s), when a lesson calls for less GPU work (a cheaper
+  quality, the CPU decoding, Quick Sync tone mapping), or back to GPU
   decoding when the CPU has no time to spare. It moves back to more GPU work
   only after its process has run 60 s and is 30 s of video ahead of the
   player. Each move restarts FFmpeg at the next segment.

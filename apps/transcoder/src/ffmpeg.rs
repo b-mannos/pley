@@ -23,7 +23,7 @@ use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 14;
+const DETECTION_REVISION: u32 = 15;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -211,7 +211,8 @@ fn gpu_summary(caps: &Capabilities) -> String {
 }
 
 fn tonemapper_names(caps: &Capabilities) -> String {
-    caps.tonemappers.iter().map(|t| t.as_str()).collect::<Vec<_>>().join(", ")
+    let quick_sync = caps.qsv_tonemap.then_some(Tonemapper::QuickSync);
+    caps.tonemappers.iter().copied().chain(quick_sync).map(|t| t.as_str()).collect::<Vec<_>>().join(", ")
 }
 
 fn cache_key(ffmpeg: &Path, ffprobe: &Path) -> String {
@@ -739,6 +740,7 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
                 Tonemapper::Libplacebo => placebo,
                 Tonemapper::Opencl => ocl,
                 Tonemapper::Zscale => true,
+                Tonemapper::QuickSync => false,
             })
             .collect();
     }
@@ -748,6 +750,7 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
     caps.vaapi_vulkan_decode = gpu.vaapi_vulkan_decode;
     caps.vulkan_encode = gpu.vulkan_encode;
     caps.gpu_pipelines = gpu.pipelines;
+    caps.qsv_tonemap = gpu.qsv_tonemap;
     if libplacebo && libplacebo_on_gpu {
         caps.tonemap_speed = measure_tonemap_speed(ffmpeg).await;
     }
@@ -764,6 +767,7 @@ struct GpuDetection {
     vaapi_vulkan_decode: Vec<String>,
     vulkan_encode: bool,
     pipelines: Vec<GpuPipeline>,
+    qsv_tonemap: bool,
 }
 
 /// Encoder arguments for the tiny clips used to probe hardware decoding,
@@ -1037,8 +1041,27 @@ async fn detect_gpu_pipelines(
             async move { (key.to_string(), test.await) }
         }),
     );
-    let (vulkan_results, vaapi_vulkan_results, vulkan_encode, pipeline_results, main10_results) =
-        tokio::join!(vulkan_tests, vaapi_vulkan_tests, vulkan_encode_test, pipeline_tests, main10_tests);
+    // HDR10 tone mapped by Quick Sync's scaler, from its decoder into its
+    // H.264 encoder (see `Tonemapper::QuickSync`).
+    let qsv_tonemap_test = async {
+        let Some((_, clip)) = clips.iter().find(|(k, _)| *k == "hevc10") else { return false };
+        if !(candidates.iter().any(|(accel, ..)| *accel == HwAccel::Qsv) && working("h264_qsv")) {
+            return false;
+        }
+        let mut args = base("error", &["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], clip);
+        let vf = format!("{HDR_TAGS},{}", crate::plan::qsv_tonemap(160, 120));
+        args.extend(["-vf".to_string(), vf]);
+        args.extend(["-c:v", "h264_qsv", "-f", "null", "-"].map(String::from));
+        run_test(args).await
+    };
+    let (vulkan_results, vaapi_vulkan_results, vulkan_encode, pipeline_results, main10_results, qsv_tonemap) = tokio::join!(
+        vulkan_tests,
+        vaapi_vulkan_tests,
+        vulkan_encode_test,
+        pipeline_tests,
+        main10_tests,
+        qsv_tonemap_test
+    );
     let _ = std::fs::remove_dir_all(&dir);
 
     let ok_keys =
@@ -1060,6 +1083,7 @@ async fn detect_gpu_pipelines(
             })
             .filter(|p| !p.codecs.is_empty())
             .collect(),
+        qsv_tonemap,
     }
 }
 
