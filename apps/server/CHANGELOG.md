@@ -93,6 +93,10 @@ describes how they are made.
 - While the transcoder isn't running, people and apps are told just that,
   no longer its last words as it went, which named files and accounts:
   administrators still find them in Settings → Transcoder and the log.
+- A guide saved as a file on this computer is read only as one, and only
+  up to a guide's size: no longer one on another computer
+  (`//host/share/…`, which a playlist could have saved before), a device
+  or a pipe. A source with a guide file it couldn't read isn't saved.
 
 ## [0.1.3] - 2026-11-02
 

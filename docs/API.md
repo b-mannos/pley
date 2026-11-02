@@ -3354,7 +3354,7 @@ interface LiveSourceInput {
   name: string; kind: "m3u" | "xtream";
   url: string;                         // the playlist (m3u) or the Xtream server
   username?: string; password?: string; // Xtream
-  guide_url?: string;                  // XMLTV; empty: the playlist's own (an http(s) address), or Xtream's
+  guide_url?: string;                  // XMLTV: a web address, or a file on this computer (/…, file://…), not a share; empty: the playlist's own (an http(s) address), or Xtream's
   user_agent?: string; max_connections?: number /* 1 */; enabled?: boolean /* true */;
 }
 interface LiveSource extends Omit<LiveSourceInput, "password"> {
