@@ -26,9 +26,12 @@ sealed interface PleyKey : NavKey {
     @Serializable
     data class Link(val server: String) : PleyKey
 
-    /** "Who's watching?": the household's profiles, and a PIN pad. */
+    /**
+     * "Who's watching?": the household's profiles, and a PIN pad. [pin]: a
+     * TV's start as the profile it was left on, whose pad opens first.
+     */
     @Serializable
-    data object Profiles : PleyKey
+    data class Profiles(val pin: Boolean = false) : PleyKey
 
     // Browsing.
 

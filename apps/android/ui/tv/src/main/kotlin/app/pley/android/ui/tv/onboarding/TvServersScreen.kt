@@ -94,7 +94,7 @@ internal fun TvServersScreen() {
             navigator.restart(
                 when {
                     !chosen.signedIn -> PleyKey.Link(chosen.url)
-                    chosen.profiles > 1 -> PleyKey.Profiles
+                    chosen.profiles > 1 -> PleyKey.Profiles()
                     else -> PleyKey.Home
                 },
             )

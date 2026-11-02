@@ -9,8 +9,6 @@ describes how they are made.
 
 ## [Unreleased]
 
-## [0.1.3] - 2026-11-02
-
 ### Added
 
 - A playback with keyed addresses has its seek previews beside its media,
@@ -316,8 +314,7 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-02...HEAD
-[0.1.3]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-01.2...HEAD
 [0.1.2]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01.2
 [0.1.1]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01
 [0.1.0]: https://github.com/pley-media-server/pley/tree/14792b986c3f69d55bd07b39e84716da0e8e1645

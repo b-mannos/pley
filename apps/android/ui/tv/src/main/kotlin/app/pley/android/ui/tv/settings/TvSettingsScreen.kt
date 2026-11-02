@@ -333,7 +333,7 @@ private fun LazyListScope.pane(
             val profile = me.profile
             if (profile?.canSwitch == true) {
                 item(key = "row-switch") {
-                    TvSettingRow(stringResource(R.string.tv_account_switch_profile), onClick = { onRestart(PleyKey.Profiles) }, icon = PleyIcons.Users, chevron = true, modifier = keyed("row-switch"))
+                    TvSettingRow(stringResource(R.string.tv_account_switch_profile), onClick = { onRestart(PleyKey.Profiles()) }, icon = PleyIcons.Users, chevron = true, modifier = keyed("row-switch"))
                 }
             }
             val defaults = me.trackDefaults
