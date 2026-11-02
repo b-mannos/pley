@@ -1664,10 +1664,13 @@ removed or reordered (`400`).
     of it once it is whole: what came before may not be its start.
   - A Matroska file whose Cues list the track's blocks is read through
     them. Those around where the player is come first, within a few
-    seconds: from half a minute before `at` (ms of the file's time; the
-    playback's start for the copy a playback start begins) to two minutes
-    after it. The whole track follows within seconds. `at` counts for the
-    request that starts the copy.
+    seconds: from half a minute before `at` (ms of the file's time, taken
+    to the second; the playback's start for the copy a playback start
+    begins) to two minutes after it. The whole track follows within
+    seconds. A request whose `at` is away from where the copy started (a
+    seek) has the pictures there read at once, from 10 s before it to 40 s
+    after it, and is answered with those; the player asks again as it
+    plays on.
   - Otherwise the transcoder reads the whole file (minutes for a big one on
     a network share), and the answer is what it has copied so far, up to
     its last whole cluster. A copy through the Cues that fails past the
@@ -1682,7 +1685,9 @@ removed or reordered (`400`).
   an empty display set at 0 first (a reader that takes a file's first time
   for its start starts it where the video does). The answer waits up to
   8 s for the whole track, then has what is copied so far
-  (`X-Pley-Complete: 0`). `404` for anything but PGS.
+  (`X-Pley-Complete: 0`): through the Cues, everything read from around
+  where the playback started on, as Kodi reads the file once. `404` for
+  anything but PGS.
 - **`trickplay`**: `404` while previews are being made (asking, or opening
   the item, queues them). None start during a playback's first 30 s nor
   while anything is transcoded: a playback that starts puts off every file

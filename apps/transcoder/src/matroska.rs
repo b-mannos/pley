@@ -925,16 +925,26 @@ fn ticks_from(ms: i64, media: &MediaInfo, tick_ns: u64) -> u64 {
     u64::try_from(ms * 1_000_000 / u128::from(tick_ns.max(1))).unwrap_or(u64::MAX)
 }
 
+/// How many clusters a stretch after or before the blocks around the
+/// player has at most: each is handed over once read, so a player that
+/// reads a track once is given what is read by then.
+const STRETCH_CLUSTERS: usize = 256;
+
 /// The stretches of `clusters` (in the order of the file) a read hands over
 /// one after the other: those with blocks from `from` to `until` (ticks),
-/// even when there are none, then those after, then those before.
+/// even when there are none, then those after, then those before, a few
+/// hundred clusters at a time.
 fn stretches(clusters: &[Cluster], (from, until): (u64, u64)) -> Vec<Range<usize>> {
     let first_from = |time: u64| {
         clusters.iter().position(|(_, entries)| entries.iter().any(|e| e.time >= time)).unwrap_or(clusters.len())
     };
     let start = first_from(from);
     let end = first_from(until).max(start);
-    let after = [end..clusters.len(), 0..start].into_iter().filter(|stretch| !stretch.is_empty());
+    let pieces = |stretch: Range<usize>| {
+        let last = stretch.end;
+        stretch.step_by(STRETCH_CLUSTERS).map(move |at| at..(at + STRETCH_CLUSTERS).min(last))
+    };
+    let after = [end..clusters.len(), 0..start].into_iter().flat_map(pieces);
     std::iter::once(start..end).chain(after).collect()
 }
 
@@ -2190,6 +2200,16 @@ pub(crate) mod tests {
         // All at once, as text is read; and an empty track is handed over too.
         let (all, none) = (stretches(&clusters, (0, u64::MAX)), stretches(&[], (0, 1)));
         assert_eq!((all.len(), all[0].clone(), none.len(), none[0].clone()), (1, 0..100, 1, 0..0));
+        // A long track's after and before, a few hundred clusters at a time.
+        let entries: Vec<CueEntry> = (0..1_000)
+            .map(|n| CueEntry { time: n * 1_000, track: 5, cluster: n * 10, relative: Some(0), duration: None })
+            .collect();
+        let clusters = clusters_of(0, &entries).unwrap();
+        assert_eq!(
+            stretches(&clusters, (300_000, 310_000)),
+            [300..310, 310..566, 566..822, 822..1000, 0..256, 256..300]
+        );
+        assert_eq!(stretches(&clusters, (0, u64::MAX)), vec![0..1000]);
         // The file's start time is the track's 0.
         let media = MediaInfo { start_ms: Some(1_000), ..Default::default() };
         assert_eq!((ticks_from(500, &media, 1_000_000), ticks_from(0, &media, 1_000_000)), (1_500, 0));

@@ -37,6 +37,19 @@ pub struct Block {
 /// of time) as a Matroska file at `path`. Blocking.
 pub fn write(path: &Path, codec_id: &str, private: &[u8], blocks: &[Block]) -> std::io::Result<()> {
     let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
+    write_to(&mut out, codec_id, private, blocks)?;
+    out.into_inner().map_err(|e| e.into_error())?.sync_all()
+}
+
+/// The Matroska file [`write`] writes, in memory.
+pub fn to_bytes(codec_id: &str, private: &[u8], blocks: &[Block]) -> Vec<u8> {
+    let mut out = std::io::Cursor::new(Vec::new());
+    // Writing to memory doesn't fail.
+    let _ = write_to(&mut out, codec_id, private, blocks);
+    out.into_inner()
+}
+
+fn write_to(out: &mut (impl Write + Seek), codec_id: &str, private: &[u8], blocks: &[Block]) -> std::io::Result<()> {
     out.write_all(&element(EBML, &ebml_header()))?;
     out.write_all(&id_bytes(SEGMENT))?;
     // The segment's size, once known.
@@ -113,7 +126,8 @@ pub fn write(path: &Path, codec_id: &str, private: &[u8], blocks: &[Block]) -> s
     out.write_all(&size8(end - segment))?;
     out.seek(SeekFrom::Start(seek_head_at))?;
     out.write_all(&element(SEEK_HEAD, &[seek(INFO, info_at), seek(TRACKS, tracks_at), seek(CUES, cues_at)].concat()))?;
-    out.into_inner().map_err(|e| e.into_error())?.sync_all()
+    out.seek(SeekFrom::Start(end))?;
+    Ok(())
 }
 
 /// A Matroska file of the track with no block yet: what players are given
@@ -336,6 +350,14 @@ mod tests {
         assert_eq!(readable(&bytes[..clusters[1]]), Some(clusters[1]));
         assert_eq!(readable(&bytes[..clusters[1] + 3]), Some(clusters[1]));
         assert_eq!(readable(b"not matroska"), None);
+    }
+
+    #[test]
+    fn files_in_memory_are_those_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("track.mks");
+        write(&path, "S_VOBSUB", b"palette: 000000", &blocks()).unwrap();
+        assert_eq!(to_bytes("S_VOBSUB", b"palette: 000000", &blocks()), std::fs::read(&path).unwrap());
     }
 
     #[test]

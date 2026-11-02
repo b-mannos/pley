@@ -298,7 +298,7 @@ async fn subtitles_matroska(State(state): Shared, Json(req): Json<SubtitleReques
         let start = PictureStart::new(req.from_ms, req.media);
         let (bytes, complete) = state
             .extractor
-            .subtitle_matroska_so_far(&req.path, req.stream_index, Duration::from_secs(2), start)
+            .subtitle_matroska_so_far(&req.path, req.stream_index, Duration::from_secs(2), start, req.rest)
             .await?;
         let complete = if complete { "1" } else { "0" };
         return Ok((

@@ -1095,6 +1095,18 @@ pub struct SubtitleQuery {
     at: Option<i64>,
 }
 
+/// The furthest into a file a player is taken to be: two days, past any
+/// film or recording.
+const MAX_AT_MS: i64 = 48 * 3_600_000;
+
+impl SubtitleQuery {
+    /// Where the player is, within a file's times, to the second: a player
+    /// asking again a moment later asks for the same pictures.
+    fn at(&self) -> Option<i64> {
+        self.at.map(|at| at.clamp(0, MAX_AT_MS) / 1000 * 1000)
+    }
+}
+
 /// `/api/files/{id}/subtitles/{index}.vtt`: a text track (or subtitle file)
 /// as WebVTT, moved by `offset_ms` when asked; `{index}.mks`: a picture
 /// track in a Matroska file of its own; `{index}.sup`: a PGS track as a
@@ -1106,7 +1118,7 @@ pub async fn subtitles(
     Query(query): Query<SubtitleQuery>,
     request: Request,
 ) -> ApiResult<Response> {
-    let at = query.at.map(|at| at.max(0));
+    let at = query.at();
     if let Some(index) = name.strip_suffix(".mks") {
         let index: i64 = index.parse().map_err(|_| AppError::not_found("unknown subtitle file"))?;
         let file = visible_file(&state, &user, id).await?;
@@ -1230,7 +1242,7 @@ async fn picture_track(
         let made = if state.transcoder.copies_subtitles_partially() {
             let (bytes, complete) = state
                 .transcoder
-                .subtitle_matroska_so_far(&path, stream_index, at, file_media(&file, stream_index))
+                .subtitle_matroska_so_far(&path, stream_index, at, file_media(&file, stream_index), false)
                 .await
                 .map_err(|err| for_viewer(user, err))?;
             if !complete {
@@ -1273,8 +1285,10 @@ const SUP_WAIT: Duration = Duration::from_secs(8);
 /// `.sup` as it is, an embedded track made of its `.mks`
 /// ([`picture_track`]), with an empty display set at 0 first. Kodi reads
 /// it once, as the playback opens: an answer waits up to [`SUP_WAIT`] for
-/// the whole track, then has what is copied so far (`X-Pley-Complete: 0`),
-/// and the player asks again later. `404` for anything but PGS.
+/// the whole track, then has what is copied so far (`X-Pley-Complete: 0`):
+/// read through the Cues, everything from around where the playback
+/// started on, not only the pictures there. The player asks again later.
+/// `404` for anything but PGS.
 async fn pgs_track(
     state: &AppState,
     user: &AuthUser,
@@ -1308,7 +1322,7 @@ async fn pgs_track(
             loop {
                 let (bytes, complete) = state
                     .transcoder
-                    .subtitle_matroska_so_far(&path, stream_index, None, file_media(&file, stream_index))
+                    .subtitle_matroska_so_far(&path, stream_index, None, file_media(&file, stream_index), true)
                     .await
                     .map_err(|err| for_viewer(user, err))?;
                 if complete {
@@ -1373,7 +1387,7 @@ pub(crate) fn prepare_picture_track(state: &AppState, file: &catalog::FileRow, i
             return;
         }
         let media = file_media(&file, stream_index);
-        match state.transcoder.subtitle_matroska_so_far(&path, stream_index, Some(start_ms), media).await {
+        match state.transcoder.subtitle_matroska_so_far(&path, stream_index, Some(start_ms), media, false).await {
             Ok((bytes, true)) => cache_subtitles(&cache, &bytes).await,
             Ok(_) => tracing::debug!("picture subtitles {index} of file {} are being copied", file.id),
             Err(err) => tracing::debug!("picture subtitles {index} of file {} not copied: {err}", file.id),
@@ -1550,6 +1564,15 @@ mod tests {
         assert_eq!(range("bytes=0-1,5-9", 100), Ok(None), "several: all of it");
         assert_eq!(range("items=0-1", 100), Ok(None));
         assert_eq!(range("bytes=9-0", 100), Ok(None));
+    }
+
+    #[test]
+    fn players_are_where_a_file_can_be_to_the_second() {
+        let at = |at: Option<i64>| SubtitleQuery { at, ..Default::default() }.at();
+        assert_eq!(at(None), None);
+        assert_eq!(at(Some(754_999)), Some(754_000));
+        assert_eq!(at(Some(-5)), Some(0));
+        assert_eq!(at(Some(i64::MAX)), Some(MAX_AT_MS));
     }
 
     #[tokio::test]

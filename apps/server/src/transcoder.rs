@@ -307,8 +307,9 @@ impl Transcoder {
         stream_index: Option<i64>,
         from_ms: Option<i64>,
         media: Option<MediaInfo>,
+        rest: bool,
     ) -> TranscoderResult<(Bytes, bool)> {
-        let req = SubtitleRequest { path: path.to_owned(), stream_index, partial: true, from_ms, media };
+        let req = SubtitleRequest { path: path.to_owned(), stream_index, partial: true, from_ms, media, rest };
         let resp = self.post("/v1/subtitles/mks", &req, Duration::from_secs(90)).await?;
         let complete = resp.headers().get(SUBTITLES_COMPLETE_HEADER).is_none_or(|v| v.as_bytes() != b"0");
         Ok((resp.bytes().await?, complete))

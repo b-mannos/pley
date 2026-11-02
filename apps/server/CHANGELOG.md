@@ -24,7 +24,9 @@ describes how they are made.
   the transcoder reads those around where the playback is out of a
   Matroska file first, at once, and the rest of the track after the
   playback's start. A `.mks` asked for with `at` (where the player is)
-  starts there.
+  starts there, and a seek while the rest is read has the pictures where
+  the player went read at once. Kodi's `.sup` has everything read by the
+  time it opens, not only the pictures around the start.
 - The web app's PIN pad stops once a profile's PIN is locked after too
   many wrong tries, as the other apps' pads do; a profile that got a PIN
   after the list was loaded asks it; and the profile in use shows its lock.

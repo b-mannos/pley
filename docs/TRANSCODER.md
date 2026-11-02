@@ -299,8 +299,14 @@ its palette, DVB) next to an HLS stream.
   The blocks around where the player is come first, at once: from half a
   minute before `from_ms` to two minutes after it, written whole to a file
   of their own. The rest waits for playbacks starting, as other background
-  work does, then the whole track is written, in order of time. `from_ms`
-  counts for the request that starts the copy.
+  work does, then comes a few hundred clusters at a time, and the whole
+  track is written, in order of time. A later request whose `from_ms` is
+  away from where the copy started (a seek) has the blocks there, from
+  10 s before it to 40 s after it, read through the Cues at once, beside
+  the copy, whose rest waits for that read; it is answered with them.
+- `rest` (with `partial`) is for a player that reads the track once
+  (Kodi's `.sup`): the answer is everything read through the Cues so far,
+  not only the blocks around where the copy started.
 - Otherwise FFmpeg copies the track out (`-vn -an -dn`), once no playback is
   starting, reading the whole file as one of the
   [passes over whole files](#ffmpeg-fallback).
