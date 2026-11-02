@@ -1678,7 +1678,9 @@ removed or reordered (`400`).
   - The copy starts as a playback starts whose player draws the track
     (`picture_subtitles_sideload`, the track picked or the profile's
     choice), rather than when it asks. What isn't around `at` waits for the
-    playback's own start to be over.
+    playback's own start to be over. Only a track in the file, and only
+    for a stream: a file next to the media is copied when the player asks,
+    since its copy reads only that file.
 - **`.sup`**: a PGS track (in the file or next to it) as a `.sup` file, for
   players that read those beside a stream but no Matroska (Kodi): a `.sup`
   next to the media as it is, an embedded track made from its `.mks`, with
@@ -1760,6 +1762,7 @@ removed or reordered (`400`).
     audio_channels?: number;      // the most channels the output takes: 2, 6, 8
     subtitle_codecs?: string[];   // shown by the player itself, pictures included ("hdmv_pgs_subtitle")
     picture_subtitles_sideload?: boolean; // shows picture subtitles from their `.mks` next to HLS too
+    picture_subtitles_sideload_codecs?: string[]; // the picture codecs it shows so; left out: those in subtitle_codecs
     audio_track_switching?: boolean; // switches a file's audio tracks itself
     hls?: { master_playlist?: boolean; segments?: string[]; // "ts", "fmp4"
             variants?: boolean }; // moves between a stream's sizes itself: transcodes come in several

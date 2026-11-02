@@ -9,6 +9,17 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- A stream for Kodi with VobSub or DVB subtitles no longer starts a copy
+  of them that Kodi never reads, which, in a Matroska file whose index
+  doesn't list them, could read the whole film from a network share.
+  Players can name the picture subtitles they show beside a stream
+  (`picture_subtitles_sideload_codecs`).
+- A picture subtitle file next to the media (`.sup`, `.idx`/`.sub`, or
+  one added) is no longer copied as a playback starts, only when a player
+  asks for it: Kodi reads a `.sup` as it is.
+
 ## [0.1.3] - 2026-11-02
 
 ### Added

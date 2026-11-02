@@ -1271,6 +1271,16 @@ async fn pgs_subtitles_come_as_sup_files_for_kodi() {
         let reply = app.get(&format!("/api/files/{file}/subtitles/{missing}"), admin).await;
         assert_eq!(reply.status, StatusCode::NOT_FOUND, "{missing}");
     }
+    // Chosen for the title, it isn't copied as a stream of it starts for a
+    // player that draws it: the copy reads only this file, when asked.
+    let chosen = app
+        .put(&format!("/api/items/{feature}/streams"), admin, json!({"file_id": file, "subtitle_index": index}))
+        .await;
+    assert!(chosen.status.is_success(), "{:?}", chosen.body);
+    let started = play(app, admin, json!({"item_id": feature, "caps": web_drawing_pictures(), "client_id": "a"})).await;
+    assert_eq!(started.body["method"], json!("remux"), "{:?}", started.body);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(w.fake.tracks.lock().is_empty());
 }
 
 #[tokio::test]
