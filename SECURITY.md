@@ -240,6 +240,11 @@ Apps sign in on Pley's own page with OAuth 2.1.
   picture, a subtitle file) is opened first, checked as the file opened,
   and sent from that file, so a link swapped in after the check is never
   read.
+- A file the transcoder reads (a transcode, a download, a frame grab, a
+  cover, subtitles, seek previews) is checked just before it is asked to.
+  The transcoder opens it by its name, so a link swapped in at that moment
+  could still be read, but only as video, audio or subtitles, the only
+  formats its FFmpeg opens: never a database or a key.
 - The data folder (database, backups, log, settings) is kept to Pley's
   account: mode 0700 on Unix. On Windows, a folder every account could use
   (one on `D:\`, say) is limited to Pley's account, SYSTEM and the

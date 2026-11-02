@@ -79,6 +79,10 @@ describes how they are made.
   The file was checked and then opened again by its name, so someone who
   could write in a library folder could swap a link in between and have
   the server hand out its database or `secret.key`.
+- Transcodes, downloads, frame grabs, album covers, subtitle copies and
+  seek previews check that a file hasn't become a link to another kind of
+  file since the scan, as playing it as it is does: the transcoder was
+  handed whatever the link led to.
 
 ## [0.1.3] - 2026-11-02
 
