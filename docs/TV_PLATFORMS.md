@@ -638,6 +638,8 @@ converting, seek previews, the next episode.
   configuration, MP4's `colr` and `dvcC`) and from the first HEVC frames
   (`HevcFrames`): HDR10's mastering display, HLG's transfer, HDR10+'s
   metadata and Dolby Vision's RPU, which many files' heads leave out.
+  Dolby Vision plays as its HDR10 base layer, profile 7 too: there is no
+  server to convert it.
 - **Subtitles**: the `.srt` and `.vtt` files beside the video
   (`Film.en.forced.srt`), and an MKV's own tracks, read block by block
   through its Cues (`MatroskaSubtitles`): text as WebVTT, pictures as the

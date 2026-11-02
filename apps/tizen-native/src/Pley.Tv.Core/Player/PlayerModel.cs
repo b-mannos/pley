@@ -354,7 +354,9 @@ public sealed class PlayerModel : IDisposable
             Discard(started);
             return;
         }
-        if (DvGuards.RetryMode(started, chosen, caps) is string guarded)
+        // A file on a drive has no server to convert it: played as it is, the TV shows Dolby Vision
+        // profile 7's HDR10 base layer, where asking again only refused it.
+        if (!source.Local && DvGuards.RetryMode(started, chosen, caps) is string guarded)
         {
             Discard(started);
             guardMode = guarded;

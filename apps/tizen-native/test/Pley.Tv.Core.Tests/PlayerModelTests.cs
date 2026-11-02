@@ -740,4 +740,17 @@ public class PlayerPanelTests
         Assert.False(h.Model.Choose(sleep.Rows[0]));
         Assert.Equal(new SleepChoice.Off(), h.State.Sleep.Set);
     }
+
+    [Fact]
+    public void A_dolby_vision_profile_7_file_on_a_drive_plays_as_it_is()
+    {
+        var video = PlayerHarness.Video with { DynamicRange = "dolby_vision", DvProfile = 7, ColorTransfer = "smpte2084" };
+        h.Source.Local = true;
+        h.Add(PlayerHarness.Movie() with { Files = new[] { PlayerHarness.FileOf(10) with { Streams = new[] { video, PlayerHarness.English } } } });
+        h.Start(new PlayRequest(1, 0, true));
+        // A server would be asked again for a remux; a drive has none, and refused it.
+        Assert.Single(h.Source.Bodies);
+        Assert.Single(h.Engine.Prepared);
+        Assert.Equal(PhaseKind.Playing, h.State.Phase.Kind);
+    }
 }
