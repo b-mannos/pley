@@ -71,6 +71,7 @@ bun scripts/release.mjs kodi patch --dry-run
 bun scripts/release.mjs kodi patch --commit
 bun scripts/release.mjs kodi notes 0.0.2 # a version's notes
 bun scripts/release.mjs pending          # the release HEAD waits for: its tag, units, and what stops it
+bun scripts/release.mjs check            # no unit below the version it had at the last release (CI runs it)
 bun test ./scripts                       # the scripts' tests
 ```
 
@@ -133,8 +134,15 @@ workflow's `on.paths` has the exact list.
 | Samsung TV (native) | `apps/tizen-native`, `packages/tv/test/fixtures`, `scripts/check-nuget-licenses.mjs`, `scripts/commit.mjs`; it has no release unit yet |
 | Kodi | `apps/kodi`, and the server's Rust code: its end-to-end test runs against a server built from the same commit |
 | Roku | `apps/roku`, the root `package.json` (Bun's version) |
-| Repository | `.github/workflows/`, the version and release scripts, any `CHANGELOG.md` |
+| Repository | `.github/workflows/`, the version and release scripts, any `CHANGELOG.md`, a unit's version (the first file in its "Version in") |
 | Release | A unit's version on master (the first file in its "Version in") |
+
+Repository also fails a pull request whose merge would leave a unit's
+version below the one it had at the last release tag (`release.mjs check`).
+A branch carrying a unit's manifests and CHANGELOG from before that release
+passes `version.mjs check`, since they agree with each other, yet would take
+the release back. What waits for the next release, a higher version or
+entries under Unreleased, passes.
 
 A CHANGELOG change alone runs only Repository. Prepare release and Audit
 (known vulnerabilities in the lock files) run only by hand.

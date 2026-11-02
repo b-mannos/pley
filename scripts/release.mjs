@@ -11,6 +11,7 @@
 //   bun scripts/release.mjs <unit> draft                      add its commits since its version was set to Unreleased
 //   bun scripts/release.mjs <unit> notes [X.Y.Z]              print a version's notes (default: the current one)
 //   bun scripts/release.mjs pending                           the release HEAD waits for: its tag, units and notes
+//   bun scripts/release.mjs check                             fails when a unit's version is below its last release's
 //
 //   --dry-run      show what would change and write nothing
 //   --draft        with a bump: add the commits since its version was set to Unreleased first
@@ -108,6 +109,23 @@ function linkedTag(changelog, version) {
   return new RegExp(`^\\[${escaped(version)}\\]:\\s*\\S*/releases/tag/(\\S+)[ \\t]*$`, "m").exec(changelog)?.[1] ?? null;
 }
 
+/** Why the unit's version `to` can't follow `from`, the one it had at the last release, or null. */
+function wentDown(unit, from, to) {
+  return isVersion(from) && isVersion(to) && compare(to, from) < 0 ? `${unit} went down, from ${from} to ${to}` : null;
+}
+
+/**
+ * The units whose version is below the one they had at the last release tag:
+ * { since, problems }. pending() finds these too, beside what is normal
+ * between releases; a pull request is checked for these alone, since merging
+ * one would take a release back.
+ */
+export function lowered(root = ROOT) {
+  const since = lastRelease(root);
+  const wrong = (since ? UNIT_NAMES : []).map((unit) => wentDown(unit, versionAt(unit, since, root), versionOf(unit, root)));
+  return { since, problems: wrong.filter(Boolean) };
+}
+
 /**
  * The release HEAD waits for: every unit whose version isn't the one it had
  * at the last release tag. { since, tag, title, units: [{ unit, title, from,
@@ -125,7 +143,8 @@ export function pending(root = ROOT) {
     const { title, changelog } = UNITS[unit];
     const text = read(root, changelog);
     wrong.push(...problems(unit, root).map((p) => `${unit}: ${p}`));
-    if (isVersion(from) && isVersion(to) && compare(to, from) < 0) wrong.push(`${unit} went down, from ${from} to ${to}`);
+    const down = wentDown(unit, from, to);
+    if (down) wrong.push(down);
     if (findSection(text, "Unreleased")?.body) {
       wrong.push(`${changelog} has entries under Unreleased, which would ship in ${unit} ${to} without being in its notes: move them under ${to}`);
     }
@@ -337,6 +356,14 @@ function pendingCommand(opts) {
   }
 }
 
+function checkCommand() {
+  const { since, problems: wrong } = lowered();
+  if (!since) return console.log(yellow("No release tag here yet: git fetch --tags brings GitHub's."));
+  if (!wrong.length) return console.log(`No unit is below the version it had at ${since}.`);
+  console.error(`${wrong.join("\n")}\nA unit's version never goes below the one it had at ${since}: put back its manifests and CHANGELOG from master.`);
+  process.exitCode = 1;
+}
+
 /** Each unit's version, the tag it waits for, its commits since its version was set and its Unreleased entries. */
 export function status(root = ROOT) {
   const waiting = pending(root);
@@ -396,6 +423,7 @@ const USAGE = `usage:
   bun scripts/release.mjs <unit> draft [--since <ref>] [--dry-run]
   bun scripts/release.mjs <unit> notes [X.Y.Z]
   bun scripts/release.mjs pending [--json]                  the release HEAD waits for
+  bun scripts/release.mjs check                             fails when a unit's version is below its last release's
 units: ${UNIT_NAMES.join(", ")}`;
 
 function main(argv) {
@@ -406,6 +434,10 @@ function main(argv) {
   if (unit === "pending") {
     if (action) throw new UsageError(`unexpected ${action}\n${USAGE}`);
     return pendingCommand(opts);
+  }
+  if (unit === "check") {
+    if (action) throw new UsageError(`unexpected ${action}\n${USAGE}`);
+    return checkCommand();
   }
   unitOf(unit);
   if (!action) throw new UsageError(`${USAGE}\n\nWhat for ${unit}? A bump (patch, minor, major or X.Y.Z), draft or notes.`);
