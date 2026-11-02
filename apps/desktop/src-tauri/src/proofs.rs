@@ -100,9 +100,18 @@ fn address(server: &Url) -> String {
 }
 
 impl Proofs {
-    /// The keys kept in `path` (none when it can't be read).
+    /// The keys kept in `path`. None when it can't be read, which is said:
+    /// each server is then trusted as it was before it gave a key.
     pub fn load(path: PathBuf) -> Self {
-        let keys = std::fs::read(&path).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+        let keys = match std::fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|err| err.to_string()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(err) => Err(err.to_string()),
+        }
+        .unwrap_or_else(|err| {
+            eprintln!("cannot read the servers' keys in {}: {err}", path.display());
+            HashMap::new()
+        });
         Self { path: Some(path), kept: Mutex::new(Kept { keys, proved: HashMap::new() }) }
     }
 
