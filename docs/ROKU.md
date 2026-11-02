@@ -228,8 +228,9 @@ next.
   fewer is taken to show as 16:9. A picture shows while the video plays,
   under the skip button and the player's panels; paused or seeking, Roku's
   bar has the bottom of the screen. The next picture loads in a second
-  frame while one shows. The Video node tells its position every 0.2 s
-  while pictures are drawn, else every second.
+  frame while one shows, and one that fails to load loads again 3 s later.
+  The Video node tells its position every 0.2 s while pictures are drawn,
+  else every second.
 - Roku's options list only text tracks: PGS is picked on a title's page.
   A text track picked in the options takes the place of the pictures, and
   captions turned off there turn them off; captions turned on without a

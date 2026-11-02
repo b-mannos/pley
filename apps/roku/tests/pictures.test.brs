@@ -140,6 +140,12 @@ sub test_pictures_tell_a_seek_from_playing()
     tkTrue(picSeeked(600000, 1000, 60000, 2000), "back")
 end sub
 
+sub test_pictures_that_failed_to_load_load_again_a_few_seconds_on()
+    tkTrue(picLoadAgain(invalid, 1000), "never failed")
+    tkFalse(picLoadAgain(1000, 2000), "a moment ago")
+    tkTrue(picLoadAgain(1000, 1000 + picAgainMs()))
+end sub
+
 ' A file whose video is width × height.
 function picTestVideo(width as integer, height as integer) as object
     return { streams: [{ index: 0, kind: "video", codec: "hevc", width: width, height: height }] }

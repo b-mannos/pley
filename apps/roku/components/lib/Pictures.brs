@@ -204,6 +204,13 @@ function picSeeked(lastMs as integer, lastAt as integer, positionMs as integer, 
     return moved - (now - lastAt) > 3000 or moved < -1000
 end function
 
+' Whether a picture whose load failed at failedAt (ms, invalid for never)
+' is loaded again now: a few seconds after, as a list is asked again.
+function picLoadAgain(failedAt as dynamic, now as integer) as boolean
+    if failedAt = invalid then return true
+    return now - failedAt >= picAgainMs()
+end function
+
 ' What the overlay does with pictures (picRead's, or invalid) at
 ' positionMs, the Video node's, with the subtitle sync syncMs (later when
 ' positive): { show, preload }, the cue it shows and the next to come,

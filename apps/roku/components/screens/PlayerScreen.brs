@@ -138,9 +138,10 @@ sub init()
     ' file doesn't say its size), the folder of their files after the
     ' server, the cue showing (-1 none), the frames (the one at front shows,
     ' the other loads the next), which answer is awaited and whether a seek
-    ' since wants another at once, and the last position seen (and when) to
-    ' tell a seek by. Once the server turns out not to make them, they are
-    ' burned in for as long as the player shows.
+    ' since wants another at once, the last position seen (and when) to
+    ' tell a seek by, and the pictures that failed to load (and when). Once
+    ' the server turns out not to make them, they are burned in for as long
+    ' as the player shows.
     m.picturesOff = false
     m.pictureIndex = -1
     m.pictures = invalid
@@ -151,7 +152,9 @@ sub init()
     m.pictureFront = 0
     for each frame in m.pictureFrames
         frame.setHttpAgent(uiHttpAgent(false))
+        frame.observeField("loadStatus", "onPictureLoad")
     end for
+    m.pictureFailed = {}
     ' Captions as last seen: the person turning them off turns off pictures
     ' drawn here.
     m.captionModeSeen = httpString(m.video.globalCaptionMode)
@@ -1537,6 +1540,7 @@ sub stopPictures()
         frame.opacity = 0
         frame.uri = ""
     end for
+    m.pictureFailed = {}
     m.video.notificationInterval = 1
 end sub
 
@@ -1624,7 +1628,9 @@ sub drawPictures()
             uri = base + cue.image
             if m.pictureFrames[m.pictureFront].uri <> uri and m.pictureFrames[1 - m.pictureFront].uri = uri then m.pictureFront = 1 - m.pictureFront
             front = m.pictureFrames[m.pictureFront]
-            if front.uri <> uri then front.uri = uri
+            loadPicture(front, uri)
+            ' Not loading, as it failed a moment ago: looked at again next time.
+            if front.uri <> uri then m.pictureShown = -2
             place = picBox(cue, m.pictures, picPlane(m.pictures, m.picturePicture, 1920, 1080))
             front.translation = [place.x, place.y]
             front.width = place.width
@@ -1635,11 +1641,26 @@ sub drawPictures()
         end if
         m.pictureFrames[1 - m.pictureFront].opacity = 0
     end if
-    if plan.preload >= 0
-        back = m.pictureFrames[1 - m.pictureFront]
-        uri = base + m.pictures.cues[plan.preload].image
-        if back.uri <> uri then back.uri = uri
-    end if
+    if plan.preload >= 0 then loadPicture(m.pictureFrames[1 - m.pictureFront], base + m.pictures.cues[plan.preload].image)
+end sub
+
+' Has frame load uri, unless its load failed a moment ago (picLoadAgain).
+sub loadPicture(frame as object, uri as string)
+    if frame.uri = uri then return
+    if not picLoadAgain(m.pictureFailed[uri], m.clock.TotalMilliseconds()) then return
+    frame.uri = uri
+end sub
+
+' A picture that didn't load (a timeout, the server busy) loads again a few
+' seconds later, when it shows or comes next.
+sub onPictureLoad(event as object)
+    if event.getData() <> "failed" then return
+    frame = event.getRoSGNode()
+    uri = httpString(frame.uri)
+    if uri = "" then return
+    m.pictureFailed[uri] = m.clock.TotalMilliseconds()
+    frame.uri = ""
+    if frame.opacity > 0 then m.pictureShown = -2
 end sub
 
 ' --- Find subtitles… (SubtitleSearch.brs) ---
