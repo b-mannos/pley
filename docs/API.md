@@ -1655,7 +1655,7 @@ removed or reordered (`400`).
   stream started at a seek point; see `pts_offset_ms`). Made once per file
   version by the transcoder, cached, served with `Range`. `404` for a text
   track or anything but subtitles; `503` with a transcoder too old to make
-  it.
+  it, or none running at the moment.
   - While the track is copied out of its file, the answer is what is
     copied so far, with `X-Pley-Complete: 0` and `Cache-Control: no-store`;
     a `Range` of it says `*` for the length. Every answer is a Matroska file
@@ -1906,7 +1906,8 @@ URLs.
     as for it: while the track is copied, the cues so far (those around
     `at` first) with `X-Pley-Complete: 0`; ask again for the rest.
   - `404` for anything but PGS (VobSub and DVB are burned in); `503` with a
-    transcoder too old to copy the track.
+    transcoder too old to copy the track ("update it"), or none running at
+    the moment ("try again in a moment").
 - It ends with the session (closed by its player, or forgotten after 15
   quiet minutes: `404` "playback session expired"), the account (disabled)
   and the app's sign-in (signed out, a new password): `404`. A session

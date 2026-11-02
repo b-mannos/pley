@@ -1095,6 +1095,18 @@ static WHOLE_PICTURE_TRACKS: LazyLock<std::sync::Mutex<std::collections::VecDequ
 /// How many whole tracks are kept: one for each of a few players.
 const WHOLE_PICTURE_TRACKS_KEPT: usize = 2;
 
+/// Why the transcoder can't copy a picture track now: one that isn't
+/// running (starting, restarting) is a moment's trouble, which players ask
+/// again for; one too old to copy it is for good, and a player that can't
+/// draw the track any other way has it burned in.
+fn subtitle_copies_refused(running: bool) -> AppError {
+    AppError::Unavailable(if running {
+        "the transcoder can't copy subtitle tracks yet: update it".into()
+    } else {
+        "the transcoder isn't running: try again in a moment".into()
+    })
+}
+
 /// Picture track `index` of `file` as far as it is copied, and whether that
 /// is all of it: the cache's, else what the transcoder has copied so far
 /// (from around `at` first), cached once whole.
@@ -1125,7 +1137,7 @@ async fn picture_track_so_far(
         return Ok((bytes, true));
     }
     if !state.transcoder.copies_subtitles_partially() {
-        return Err(AppError::Unavailable("the transcoder can't copy subtitle tracks yet: update it".into()));
+        return Err(subtitle_copies_refused(state.transcoder.is_available()));
     }
     let media = file_media(file, stream_index);
     let (bytes, complete) = state
@@ -1396,7 +1408,7 @@ async fn picture_track(
     let (cache, path, stream_index) = picture_source(state, &file, index).await?;
     if !is_matroska(&cache).await {
         if !state.transcoder.copies_subtitles() {
-            return Err(AppError::Unavailable("the transcoder can't copy subtitle tracks yet: update it".into()));
+            return Err(subtitle_copies_refused(state.transcoder.is_available()));
         }
         let made = if state.transcoder.copies_subtitles_partially() {
             let (bytes, complete) = state
@@ -1475,7 +1487,7 @@ async fn pgs_track(
         Ok(bytes) if bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) => (Bytes::from(bytes), true),
         _ => {
             if !state.transcoder.copies_subtitles_partially() {
-                return Err(AppError::Unavailable("the transcoder can't copy subtitle tracks yet: update it".into()));
+                return Err(subtitle_copies_refused(state.transcoder.is_available()));
             }
             let started = std::time::Instant::now();
             loop {
@@ -1734,6 +1746,17 @@ mod tests {
         assert_eq!(at(Some(754_999)), Some(754_000));
         assert_eq!(at(Some(-5)), Some(0));
         assert_eq!(at(Some(i64::MAX)), Some(MAX_AT_MS));
+    }
+
+    #[test]
+    fn a_transcoder_not_running_is_told_apart_from_one_too_old() {
+        // Roku has picture subtitles burned in for good on the second only.
+        let message = |running| match subtitle_copies_refused(running) {
+            AppError::Unavailable(message) => message,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(message(false), "the transcoder isn't running: try again in a moment");
+        assert_eq!(message(true), "the transcoder can't copy subtitle tracks yet: update it");
     }
 
     #[tokio::test]
