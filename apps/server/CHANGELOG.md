@@ -97,6 +97,9 @@ describes how they are made.
   up to a guide's size: no longer one on another computer
   (`//host/share/…`, which a playlist could have saved before), a device
   or a pipe. A source with a guide file it couldn't read isn't saved.
+- A channel's stream asked for with `take_over` takes another channel's
+  connection only with a token: over plain HTTP, another site's link signed
+  in by an administrator's cookie could end what others watched.
 
 ## [0.1.3] - 2026-11-02
 

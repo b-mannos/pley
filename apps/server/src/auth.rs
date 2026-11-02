@@ -1044,8 +1044,7 @@ async fn authenticate(parts: &Parts, state: &AppState) -> Result<AuthUser, AppEr
     // browser opening a share of the attacker's, say) is a POST, whose
     // `Origin` says. Typed addresses and bookmarks are no site's. The cookie
     // is what signs the request in, `?token=` or not; a header is no cookie.
-    let by_cookie = header_token(parts).is_none() && cookie_token(parts).is_some();
-    if by_cookie {
+    if signed_in_by_cookie(parts) {
         let elsewhere = match parts.method {
             Method::GET | Method::HEAD | Method::OPTIONS => from_another_sites_page(parts),
             _ => from_another_site(parts),
@@ -1055,6 +1054,13 @@ async fn authenticate(parts: &Parts, state: &AppState) -> Result<AuthUser, AppEr
         }
     }
     state.auth.validate(&token).await.ok_or(AppError::Unauthorized)
+}
+
+/// Whether the browser's cookie signs this request in (no token in a
+/// header, which wins): one that, over plain HTTP, may be another site's
+/// link or picture ([`from_another_sites_page`] can't tell).
+pub(crate) fn signed_in_by_cookie(parts: &Parts) -> bool {
+    header_token(parts).is_none() && cookie_token(parts).is_some()
 }
 
 /// Whether the browser says another site's page asked for this (a link, an
