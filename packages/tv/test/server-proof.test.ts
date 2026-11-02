@@ -167,6 +167,14 @@ describe("a server proves itself before a token goes to it", () => {
     expect(proofs()).toBe(3);
   });
 
+  it("proves the server again when the network changed while a proof was under way", async () => {
+    const { t, proofs } = setup();
+    const first = t.accessToken();
+    networkMayHaveChanged();
+    expect(await first).toBe("pley_at_a");
+    expect(proofs()).toBe(2);
+  });
+
   it("takes no proof through a redirect, and calls a server error out of reach", async () => {
     const elsewhere = (c: string) => ({ ...response(200, { id: ID, proof: proofOf(c) }), url: `https://pley.example.com/api/server?challenge=${c}&proof_id=17` });
     expect(await refusal(setup(elsewhere).t.accessToken())).toBe(NOT_YOUR_SERVER);
@@ -230,6 +238,17 @@ describe("a server proves itself before a token goes to it", () => {
     expect(asked.map((r) => new URL(r.url).pathname)).toEqual(["/api/server"]);
   });
 
+  it("switches profiles only after a proof made then", async () => {
+    const { t, asked, proofs } = setup();
+    await t.accessToken();
+    await t.switchProfile(2, "1234");
+    expect(proofs()).toBe(2);
+    expect(asked.map((r) => new URL(r.url).pathname)).toEqual(["/api/server", "/api/server", "/api/oauth/token"]);
+    const impostor = setup(() => response(200, { id: ID, proof: "AAAA" }));
+    expect(await refusal(impostor.t.switchProfile(2, "1234"))).toBe(NOT_YOUR_SERVER);
+    expect(impostor.asked.some((r) => r.url.indexOf("/api/oauth/token") >= 0)).toBe(false);
+  });
+
   it("signs out without sending the token to another device", async () => {
     const { t, asked, store } = setup(() => response(200, { id: ID, proof: "AAAA" }));
     await t.signOut();
@@ -261,6 +280,16 @@ describe("a server proves itself before a token goes to it", () => {
     delete kept.proofId;
     delete kept.proofKey;
     store.set(`pley.tokens.${SERVER}`, JSON.stringify(kept));
+    expect(await t.accessToken()).toBe("pley_at_a");
+    expect(asked).toEqual([]);
+  });
+
+  it("counts a proof kept wrong as none, as the other apps do", async () => {
+    const { t, asked, store } = setup();
+    const kept = JSON.parse(store.get(`pley.tokens.${SERVER}`)!) as StoredTokens;
+    delete kept.serverId;
+    store.set(`pley.tokens.${SERVER}`, JSON.stringify(kept));
+    expect(t.load()?.proofKey).toBeUndefined();
     expect(await t.accessToken()).toBe("pley_at_a");
     expect(asked).toEqual([]);
   });

@@ -313,27 +313,34 @@ export class Tokens {
    * signed in to, within the last half hour: no token leaves before. A
    * sign-in from a server without proofs has nothing to check.
    */
-  private proved(tokens: StoredTokens, now = false): Promise<void> {
-    if (!tokens.proofKey) return Promise.resolve();
+  private async proved(tokens: StoredTokens, now = false): Promise<void> {
+    if (!tokens.proofKey) return;
     // A refresh token, a PIN or a sign-out waits for a proof of its own.
     if (now) this.provedAt = null;
+    // A proof under way counts once it ends, unless the TV changed networks
+    // meanwhile: looked at again then, as Android does.
+    while (!this.recentlyProved()) {
+      if (!this.proving) {
+        const on = network;
+        this.proving = proveServer(this.http, this.issuer, tokens, this.random).then(
+          () => {
+            this.provedAt = { at: this.clock(), network: on };
+            this.proving = null;
+          },
+          (e: unknown) => {
+            this.proving = null;
+            throw e;
+          },
+        );
+      }
+      await this.proving;
+    }
+  }
+
+  private recentlyProved(): boolean {
     // A clock set back makes an age below zero: proved again.
     const age = this.provedAt && this.provedAt.network === network ? this.clock() - this.provedAt.at : -1;
-    if (age >= 0 && age < PROOF_TTL_MS) return Promise.resolve();
-    if (!this.proving) {
-      const on = network;
-      this.proving = proveServer(this.http, this.issuer, tokens, this.random).then(
-        () => {
-          this.provedAt = { at: this.clock(), network: on };
-          this.proving = null;
-        },
-        (e: unknown) => {
-          this.proving = null;
-          throw e;
-        },
-      );
-    }
-    return this.proving;
+    return age >= 0 && age < PROOF_TTL_MS;
   }
 
   /** A request to the server failed: the next token waits for a new proof (the TV may be on another network). */
@@ -349,7 +356,15 @@ export class Tokens {
     const text = this.store.get(this.key);
     if (!text) return null;
     const o = safeJson(text) as StoredTokens | null;
-    return o && typeof o.accessToken === "string" && o.issuer === this.issuer ? o : null;
+    if (!o || typeof o.accessToken !== "string" || o.issuer !== this.issuer) return null;
+    // A proof kept wrong counts as none, as in the other apps: the next
+    // refresh takes the server's.
+    if (o.proofKey !== undefined && !serverProof({ server_id: o.serverId, proof_id: o.proofId, proof_key: o.proofKey })) {
+      delete o.serverId;
+      delete o.proofId;
+      delete o.proofKey;
+    }
+    return o;
   }
 
   private save(tokens: StoredTokens): void {

@@ -150,6 +150,22 @@ public class ServerProofTests
         Assert.Equal(3, rig.Proofs);
     }
 
+    [Fact]
+    public async Task It_proves_itself_again_when_the_network_changed_while_a_proof_was_under_way()
+    {
+        var rig = new Rig();
+        var changed = false;
+        rig.Answer = c =>
+        {
+            // The TV joins another network as the first proof is answered.
+            if (!changed) ServerProofs.NetworkMayHaveChanged();
+            changed = true;
+            return Json(200, new { id = Id, name = "Den", proof = ProofOf(c) });
+        };
+        Assert.Equal("pley_at_a", await rig.Tokens.AccessToken());
+        Assert.Equal(2, rig.Proofs);
+    }
+
     public static IEnumerable<object[]> OtherDevices => new[]
     {
         new object[] { 200, $@"{{""id"":""{Id}"",""proof"":""AAAA""}}" },

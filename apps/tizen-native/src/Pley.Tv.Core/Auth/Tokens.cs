@@ -411,15 +411,25 @@ public sealed class Tokens
     /// last half hour and on this network, or now when <paramref name="now"/>: no token leaves
     /// before. A sign-in from a server without proofs has nothing to check.
     /// </summary>
-    Task Proved(StoredTokens tokens, bool now = false)
+    async Task Proved(StoredTokens tokens, bool now = false)
     {
-        if (tokens.Proof is not { } proof) return Task.CompletedTask;
+        if (tokens.Proof is not { } proof) return;
         lock (proofs)
         {
             // A refresh token, a PIN or a sign-out waits for a proof of its own.
             if (now) provedAt = null;
-            if (RecentlyProved()) return Task.CompletedTask;
-            return proving ??= Prove(proof, ServerProofs.Network);
+        }
+        // A proof under way counts once it ends, unless the TV changed networks meanwhile: looked
+        // at again then, as Android does.
+        while (true)
+        {
+            Task under;
+            lock (proofs)
+            {
+                if (RecentlyProved()) return;
+                under = proving ??= Prove(proof, ServerProofs.Network);
+            }
+            await under.ConfigureAwait(false);
         }
     }
 

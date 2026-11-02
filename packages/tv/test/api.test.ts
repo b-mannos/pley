@@ -32,6 +32,19 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("a request nothing answers", () => {
+  it("has the next token wait for the server to prove itself again, unless it was cancelled", async () => {
+    const doubtServer = vi.fn();
+    const watched = { accessToken: () => Promise.resolve("token"), doubtServer } as unknown as Tokens;
+    const unanswered = new Api("http://192.168.1.20:7539", watched, () => Promise.reject(new NetworkError("nothing answers")));
+    await expect(unanswered.send("/api/home")).rejects.toThrow("nothing answers");
+    expect(doubtServer).toHaveBeenCalledTimes(1);
+    const cancelled = new Api("http://192.168.1.20:7539", watched, () => Promise.reject(new NetworkError("cancelled", true)));
+    await expect(cancelled.send("/api/home")).rejects.toThrow("cancelled");
+    expect(doubtServer).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("a server on the home network", () => {
   it("gives up after 3 s plus a quick question nobody answers, saying there was no answer in time", async () => {
     const t = transport(() => null);
