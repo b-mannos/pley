@@ -794,7 +794,8 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       if (!/^\d+$/.test(at ?? "")) problems.push(`picture subtitles asked for at ${JSON.stringify(at)}`);
       if (auth) problems.push("picture subtitles asked for with the token: the key opens them");
       if (!playback?.keyed || closed.includes(session)) return json(404, { code: "not_found", message: "playback session expired" });
-      if (fixture.picturesMissing) return json(404, { code: "not_found", message: `nothing at ${path}` });
+      // As keyed media of a server from before them: a name it doesn't know.
+      if (fixture.picturesMissing) return json(404, { code: "not_found", message: playback.subtitle_index === null ? "unknown file" : "unknown playlist file" });
       const asked = fixture.picturesAsked.filter((p) => p.session === session && p.index === Number(index)).length;
       fixture.picturesAsked.push({ session, index: Number(index), at: Number(at) });
       const duration = items.get(playback.item)?.duration_ms ?? 1800000;

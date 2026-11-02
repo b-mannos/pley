@@ -224,20 +224,29 @@ function picBox(cue as object, pictures as object, screenWidth as integer, scree
 end function
 
 ' What an answer for a list means, its data read by picRead already (the
-' API task's build "pictures"): "ok"; "unavailable" when this server
-' doesn't make pictures (an older one's 404, a transcoder too old's 503, a
-' refusal, or a list that isn't one), so they are burned in from then on;
-' "stopped" for a session ended (410), which the player hears of itself;
-' "again" for the network or a busy server, asked again later.
+' API task's build "pictures"): "ok"; "unavailable" when this server can't
+' make pictures of the track, so they are burned in from then on: an older
+' server, which knows no such file (404 "unknown file", or "unknown
+' playlist file" in a stream), a transcoder too old to copy the track
+' (503), a track that isn't PGS (404), or a request it refuses; "stopped"
+' for a session ended (410), which the player hears of itself, or a
+' refusal (403); "again" for anything else, asked again later: the network,
+' a disk asleep, a transcoder out of reach, a session gone for a moment.
+' Burning them in would need what is missing there too.
 function picAnswerKind(answer as object) as string
     if answer.ok
         data = httpObject(answer.data)
-        if data = invalid or GetInterface(data.cues, "ifArray") = invalid then return "unavailable"
+        if data = invalid or GetInterface(data.cues, "ifArray") = invalid then return "again"
         return "ok"
     end if
     status = answer.status
-    if status = 410 then return "stopped"
-    if status = 400 or status = 403 or status = 404 or status = 405 or status = 501 then return "unavailable"
-    if status = 503 and answer.error <> "network" then return "unavailable"
+    if status = 410 or status = 403 then return "stopped"
+    if status = 400 or status = 405 or status = 501 then return "unavailable"
+    ' Told apart by what the server says: the codes are every 404's and 503's.
+    message = ""
+    body = httpObject(answer.data)
+    if body <> invalid then message = LCase(httpString(body.message))
+    if status = 404 and (message = "unknown file" or message = "unknown playlist file" or message = "no pgs subtitle track has this index") then return "unavailable"
+    if status = 503 and Instr(1, message, "can't copy subtitle tracks") > 0 then return "unavailable"
     return "again"
 end function

@@ -136,13 +136,29 @@ sub test_pictures_are_placed_on_the_screen_as_the_video_is()
     tkEqual(picBox({ x: 0, y: 500, width: 720, height: 40 }, square, 1920, 1080), { x: 240, y: 1000, width: 1440, height: 80 })
 end sub
 
+' A refusal as the server sends it (apps/server/src/error.rs).
+function picTestRefusal(status as integer, code as string, message as string) as object
+    return { ok: false, status: status, data: { code: code, message: message }, error: code, message: message }
+end function
+
 sub test_pictures_answers_say_whether_to_burn_them_in()
     tkEqual(picAnswerKind({ ok: true, status: 200, data: picRead(picTestList(false)), error: "" }), "ok")
-    tkEqual(picAnswerKind({ ok: true, status: 200, data: invalid, error: "" }), "unavailable", "not a list")
-    tkEqual(picAnswerKind({ ok: false, status: 404, data: invalid, error: "not_found" }), "unavailable", "an older server")
-    tkEqual(picAnswerKind({ ok: false, status: 503, data: invalid, error: "transcoder_outdated" }), "unavailable", "a transcoder too old")
-    tkEqual(picAnswerKind({ ok: false, status: 503, data: invalid, error: "network" }), "again", "not Pley's answer")
-    tkEqual(picAnswerKind({ ok: false, status: -28, data: invalid, error: "network" }), "again")
-    tkEqual(picAnswerKind({ ok: false, status: 500, data: invalid, error: "internal" }), "again")
-    tkEqual(picAnswerKind({ ok: false, status: 410, data: invalid, error: "session_stopped" }), "stopped")
+    tkEqual(picAnswerKind(picTestRefusal(404, "not_found", "unknown file")), "unavailable", "an older server, playing the file as it is")
+    tkEqual(picAnswerKind(picTestRefusal(404, "not_found", "unknown playlist file")), "unavailable", "an older server, streaming")
+    tkEqual(picAnswerKind(picTestRefusal(404, "not_found", "no PGS subtitle track has this index")), "unavailable", "not PGS")
+    tkEqual(picAnswerKind(picTestRefusal(503, "unavailable", "the transcoder can't copy subtitle tracks yet: update it")), "unavailable", "a transcoder too old")
+    tkEqual(picAnswerKind(picTestRefusal(400, "bad_request", "no")), "unavailable")
+end sub
+
+sub test_pictures_answers_that_pass_are_asked_again()
+    tkEqual(picAnswerKind(picTestRefusal(404, "not_found", "this title's file can't be read right now")), "again", "a disk asleep")
+    tkEqual(picAnswerKind(picTestRefusal(404, "not_found", "playback session expired")), "again")
+    tkEqual(picAnswerKind(picTestRefusal(503, "unavailable", "the transcoder is not reachable")), "again", "a transcoder out of reach")
+    tkEqual(picAnswerKind({ ok: false, status: 503, data: invalid, error: "network", message: "" }), "again", "not Pley's answer")
+    tkEqual(picAnswerKind({ ok: false, status: 404, data: invalid, error: "", message: "" }), "again", "nothing said")
+    tkEqual(picAnswerKind({ ok: false, status: -28, data: invalid, error: "network", message: "" }), "again")
+    tkEqual(picAnswerKind({ ok: false, status: 500, data: invalid, error: "internal", message: "" }), "again")
+    tkEqual(picAnswerKind({ ok: true, status: 200, data: invalid, error: "" }), "again", "not a list: a proxy's page")
+    tkEqual(picAnswerKind(picTestRefusal(410, "session_stopped", "stopped")), "stopped")
+    tkEqual(picAnswerKind(picTestRefusal(403, "forbidden", "no")), "stopped")
 end sub
