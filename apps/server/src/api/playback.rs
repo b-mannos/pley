@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::Json;
 use axum::body::{Body, Bytes};
@@ -1095,13 +1095,79 @@ impl PictureCueJson {
 }
 
 /// The whole picture tracks read last for [`picture_track_so_far`], by cache
-/// file: a player asks for a picture every few seconds, each made of the
-/// whole track (tens of megabytes). A cache file never changes: a new
-/// version of the media file has a name of its own.
-static WHOLE_PICTURE_TRACKS: LazyLock<std::sync::Mutex<std::collections::VecDeque<(PathBuf, Bytes)>>> =
-    LazyLock::new(Default::default);
+/// file, with when each was asked for last: a player asks for a picture
+/// every few seconds, each made of the whole track (tens of megabytes). A
+/// cache file never changes: a new version of the media file has a name of
+/// its own.
+static WHOLE_PICTURE_TRACKS: LazyLock<std::sync::Mutex<WholeTracks>> = LazyLock::new(Default::default);
 /// How many whole tracks are kept: one for each of a few players.
 const WHOLE_PICTURE_TRACKS_KEPT: usize = 2;
+/// How long a whole track no player asks for is kept.
+const WHOLE_PICTURE_TRACK_IDLE: Duration = Duration::from_secs(5 * 60);
+
+/// The whole picture tracks kept ([`WHOLE_PICTURE_TRACKS`]), by cache file,
+/// with when each was asked for last.
+#[derive(Default)]
+struct WholeTracks {
+    kept: Vec<(PathBuf, Bytes, Instant)>,
+    /// Whether a task lets go of the tracks no player asked for lately.
+    pruning: bool,
+}
+
+impl WholeTracks {
+    /// The track cached at `cache`, when it is kept, asked for `now`.
+    fn get(&mut self, cache: &std::path::Path, now: Instant) -> Option<Bytes> {
+        let (_, bytes, asked) = self.kept.iter_mut().find(|(path, ..)| path == cache)?;
+        *asked = now;
+        Some(bytes.clone())
+    }
+
+    /// Keeps the track cached at `cache`, in place of the one asked for
+    /// least lately. Two players reading the same file at once keep it once.
+    fn keep(&mut self, cache: PathBuf, bytes: Bytes, now: Instant) {
+        if self.kept.iter().any(|(path, ..)| *path == cache) {
+            return;
+        }
+        if self.kept.len() >= WHOLE_PICTURE_TRACKS_KEPT
+            && let Some(oldest) = (0..self.kept.len()).min_by_key(|&i| self.kept[i].2)
+        {
+            self.kept.remove(oldest);
+        }
+        self.kept.push((cache, bytes, now));
+    }
+
+    /// Lets go of the tracks no player asked for in
+    /// [`WHOLE_PICTURE_TRACK_IDLE`]; whether any are left.
+    fn prune(&mut self, now: Instant) -> bool {
+        self.kept.retain(|(.., asked)| now.saturating_duration_since(*asked) < WHOLE_PICTURE_TRACK_IDLE);
+        !self.kept.is_empty()
+    }
+}
+
+/// The whole track cached at `cache`, when it is kept.
+fn kept_whole_track(cache: &std::path::Path) -> Option<Bytes> {
+    WHOLE_PICTURE_TRACKS.lock().unwrap_or_else(|e| e.into_inner()).get(cache, Instant::now())
+}
+
+/// Keeps the whole track cached at `cache` until no player has asked for it
+/// for [`WHOLE_PICTURE_TRACK_IDLE`].
+fn keep_whole_track(cache: PathBuf, bytes: Bytes) {
+    let mut tracks = WHOLE_PICTURE_TRACKS.lock().unwrap_or_else(|e| e.into_inner());
+    tracks.keep(cache, bytes, Instant::now());
+    if std::mem::replace(&mut tracks.pruning, true) {
+        return;
+    }
+    tokio::spawn(async {
+        loop {
+            tokio::time::sleep(WHOLE_PICTURE_TRACK_IDLE).await;
+            let mut tracks = WHOLE_PICTURE_TRACKS.lock().unwrap_or_else(|e| e.into_inner());
+            if !tracks.prune(Instant::now()) {
+                tracks.pruning = false;
+                return;
+            }
+        }
+    });
+}
 
 /// Why the transcoder can't copy a picture track now: one that isn't
 /// running (starting, restarting) is a moment's trouble, which players ask
@@ -1126,22 +1192,14 @@ async fn picture_track_so_far(
     at: Option<i64>,
 ) -> ApiResult<(Bytes, bool)> {
     let (cache, path, stream_index) = picture_source(state, file, index).await?;
-    let kept = |cache: &PathBuf| {
-        let tracks = WHOLE_PICTURE_TRACKS.lock().unwrap_or_else(|e| e.into_inner());
-        tracks.iter().find(|(path, _)| path == cache).map(|(_, bytes)| bytes.clone())
-    };
-    if let Some(bytes) = kept(&cache) {
+    if let Some(bytes) = kept_whole_track(&cache) {
         return Ok((bytes, true));
     }
     if let Ok(bytes) = tokio::fs::read(&cache).await
         && bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3])
     {
         let bytes = Bytes::from(bytes);
-        let mut tracks = WHOLE_PICTURE_TRACKS.lock().unwrap_or_else(|e| e.into_inner());
-        if tracks.len() == WHOLE_PICTURE_TRACKS_KEPT {
-            tracks.pop_front();
-        }
-        tracks.push_back((cache, bytes.clone()));
+        keep_whole_track(cache, bytes.clone());
         return Ok((bytes, true));
     }
     if !state.transcoder.copies_subtitles_partially() {
@@ -1765,6 +1823,25 @@ mod tests {
         };
         assert_eq!(message(false), "the transcoder isn't running: try again in a moment");
         assert_eq!(message(true), "the transcoder can't copy subtitle tracks yet: update it");
+    }
+
+    #[test]
+    fn whole_picture_tracks_are_let_go_once_no_player_asks_for_them() {
+        let (a, b, c) = (PathBuf::from("a.mks"), PathBuf::from("b.mks"), PathBuf::from("c.mks"));
+        let start = Instant::now();
+        let at = |secs| start + Duration::from_secs(secs);
+        let mut tracks = WholeTracks::default();
+        tracks.keep(a.clone(), Bytes::from_static(b"a"), at(0));
+        // Two players reading it at once: kept once.
+        tracks.keep(a.clone(), Bytes::from_static(b"a"), at(0));
+        tracks.keep(b.clone(), Bytes::from_static(b"b"), at(0));
+        assert_eq!(tracks.get(&a, at(60)), Some(Bytes::from_static(b"a")));
+        // A third takes the place of the one asked for least lately.
+        tracks.keep(c.clone(), Bytes::from_static(b"c"), at(60));
+        assert_eq!(tracks.get(&b, at(60)), None);
+        assert!(tracks.prune(at(300)), "asked for 4 minutes ago");
+        assert!(!tracks.prune(at(360)));
+        assert_eq!(tracks.get(&a, at(360)), None);
     }
 
     #[tokio::test]
