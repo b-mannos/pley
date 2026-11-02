@@ -446,6 +446,9 @@ pub struct SubtitleTracks<C> {
     /// Whether more stretches of blocks come after these (see
     /// [`picture_tracks`]).
     pub more: bool,
+    /// The span of the file's time (ticks, from and until) whose blocks
+    /// these are all of.
+    pub span: (u64, u64),
 }
 
 #[derive(Debug)]
@@ -852,7 +855,7 @@ fn subtitle_tracks<C: Copy>(
     let last = stretches.len() - 1;
     for (n, stretch) in stretches.into_iter().enumerate() {
         budget.check()?;
-        let read = read_blocks(path, &clusters, stretch, &mut guess, budget)?;
+        let read = read_blocks(path, &clusters, stretch.clone(), &mut guess, budget)?;
         let mut blocks: Vec<Vec<TextBlock>> = text.iter().map(|_| Vec::new()).collect();
         for ReadBlock { cue_track, cluster_time, block, .. } in in_file_order(read.by_reader) {
             budget.check()?;
@@ -898,7 +901,9 @@ fn subtitle_tracks<C: Copy>(
                 blocks,
             })
             .collect();
-        got(SubtitleTracks { tick_ns, whole_ms, tracks, reads: read.reads, bytes_read: read.bytes, more: n < last })?;
+        let span = span(&clusters, &stretch);
+        let (reads, bytes_read, more) = (read.reads, read.bytes, n < last);
+        got(SubtitleTracks { tick_ns, whole_ms, tracks, reads, bytes_read, more, span })?;
     }
     Ok(())
 }
@@ -923,6 +928,15 @@ fn ticks_from(ms: i64, media: &MediaInfo, tick_ns: u64) -> u64 {
     }
     let ms = ms.saturating_add(media.start_ms.unwrap_or(0)).max(0) as u128;
     u64::try_from(ms * 1_000_000 / u128::from(tick_ns.max(1))).unwrap_or(u64::MAX)
+}
+
+/// The span of the file's time (ticks) whose blocks the clusters `stretch`
+/// hold all of: from past the last block before them to the first after
+/// them (blocks come in order of time).
+fn span(clusters: &[Cluster], stretch: &Range<usize>) -> (u64, u64) {
+    let last_before = stretch.start.checked_sub(1).and_then(|c| clusters[c].1.iter().map(|e| e.time).max());
+    let first_after = clusters.get(stretch.end).and_then(|(_, entries)| entries.iter().map(|e| e.time).min());
+    (last_before.map_or(0, |time| time.saturating_add(1)), first_after.unwrap_or(u64::MAX))
 }
 
 /// How many clusters a stretch after or before the blocks around the
@@ -2210,6 +2224,10 @@ pub(crate) mod tests {
             [300..310, 310..566, 566..822, 822..1000, 0..256, 256..300]
         );
         assert_eq!(stretches(&clusters, (0, u64::MAX)), vec![0..1000]);
+        // What each holds all of: an empty one too.
+        assert_eq!(span(&clusters, &(300..310)), (299_001, 310_000));
+        assert_eq!((span(&clusters, &(0..256)), span(&clusters, &(822..1000))), ((0, 256_000), (821_001, u64::MAX)));
+        assert_eq!(span(&clusters, &(5..5)), (4_001, 5_000));
         // The file's start time is the track's 0.
         let media = MediaInfo { start_ms: Some(1_000), ..Default::default() };
         assert_eq!((ticks_from(500, &media, 1_000_000), ticks_from(0, &media, 1_000_000)), (1_500, 0));

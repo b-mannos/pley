@@ -1395,12 +1395,14 @@ pub(crate) fn prepare_picture_track(state: &AppState, file: &catalog::FileRow, i
 
 /// A picture track's file held in memory (copied so far, or whole but not
 /// cached) as `content_type`, with what `X-Pley-Complete` says, and the
-/// range asked for in `headers` (one, as `ServeFile` serves them). Of a
-/// partial Matroska file, the bytes are what it will start with once
-/// whole, but for the sizes its header doesn't know yet (its segment's,
-/// its duration) and the seek head FFmpeg fills in last: a player may fetch
-/// only what follows what it has. Its length isn't known yet:
-/// `Content-Range` says `*` for it.
+/// range asked for in `headers` (one, as `ServeFile` serves them). A
+/// partial answer's length isn't known yet: `Content-Range` says `*` for
+/// it. Of FFmpeg's copy being made, the bytes are what the file will start
+/// with once whole, but for the sizes its header doesn't know yet (its
+/// segment's, its duration) and the seek head FFmpeg fills in last, so a
+/// player may fetch only what follows what it has; the pictures around a
+/// player read through the Cues are a file of their own, which it takes in
+/// place of what it has.
 fn held_bytes(headers: &axum::http::HeaderMap, bytes: Bytes, complete: bool, content_type: &'static str) -> Response {
     let cache = if complete { "private, max-age=3600" } else { "no-store" };
     let mut response = match byte_range(headers.get(header::RANGE), bytes.len() as u64) {

@@ -1674,7 +1674,8 @@ removed or reordered (`400`).
   - Otherwise the transcoder reads the whole file (minutes for a big one on
     a network share), and the answer is what it has copied so far, up to
     its last whole cluster. A copy through the Cues that fails past the
-    pictures around `at` keeps answering with those until it is whole.
+    pictures around `at` keeps answering with what it read until it is
+    whole.
   - The copy starts as a playback starts whose player draws the track
     (`picture_subtitles_sideload`, the track picked or the profile's
     choice), rather than when it asks. What isn't around `at` waits for the
