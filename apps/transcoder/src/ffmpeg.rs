@@ -23,7 +23,7 @@ use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 16;
+const DETECTION_REVISION: u32 = 17;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -769,6 +769,7 @@ async fn detect_capabilities(ffmpeg: &Path, ffprobe: &Path) -> (Capabilities, bo
     caps.gpu_pipelines = gpu.pipelines;
     caps.qsv_tonemap = gpu.qsv_tonemap;
     caps.qsv_overlay = gpu.qsv_overlay;
+    caps.qsv_opencl_tonemap = gpu.qsv_opencl_tonemap;
     if libplacebo && libplacebo_on_gpu {
         caps.tonemap_speed = measure_tonemap_speed(ffmpeg).await;
     }
@@ -787,6 +788,7 @@ struct GpuDetection {
     pipelines: Vec<GpuPipeline>,
     qsv_tonemap: bool,
     qsv_overlay: bool,
+    qsv_opencl_tonemap: bool,
 }
 
 /// Encoder arguments for the tiny clips used to probe hardware decoding,
@@ -1101,6 +1103,25 @@ async fn detect_gpu_pipelines(
         );
         run_test(args).await
     };
+    // HDR10 tone mapped by OpenCL between Quick Sync's decoder and its
+    // H.264 encoder, the frames mapped both ways (Windows; see
+    // `plan::qsv_opencl_tonemap`). FFmpeg's own builds fail it: they map no
+    // 10-bit Quick Sync frames to OpenCL and have no BT.2390 there.
+    let qsv_opencl_test = async {
+        let Some((_, clip)) = clips.iter().find(|(k, _)| *k == "hevc10") else { return false };
+        if !(cfg!(windows)
+            && filters.contains("tonemap_opencl")
+            && candidates.iter().any(|(accel, ..)| *accel == HwAccel::Qsv)
+            && working("h264_qsv"))
+        {
+            return false;
+        }
+        let mut args = base("error", &crate::plan::QSV_OPENCL_DEVICES, clip);
+        let vf = format!("{HDR_TAGS},{}", crate::plan::qsv_opencl_tonemap(160, 120));
+        args.extend(["-vf".to_string(), vf]);
+        args.extend(["-c:v", "h264_qsv", "-f", "null", "-"].map(String::from));
+        run_test(args).await
+    };
     let (
         vulkan_results,
         vaapi_vulkan_results,
@@ -1109,6 +1130,7 @@ async fn detect_gpu_pipelines(
         main10_results,
         qsv_tonemap,
         qsv_overlay,
+        qsv_opencl_tonemap,
     ) = tokio::join!(
         vulkan_tests,
         vaapi_vulkan_tests,
@@ -1116,7 +1138,8 @@ async fn detect_gpu_pipelines(
         pipeline_tests,
         main10_tests,
         qsv_tonemap_test,
-        qsv_overlay_test
+        qsv_overlay_test,
+        qsv_opencl_test
     );
     let _ = std::fs::remove_dir_all(&dir);
 
@@ -1141,6 +1164,7 @@ async fn detect_gpu_pipelines(
             .collect(),
         qsv_tonemap,
         qsv_overlay,
+        qsv_opencl_tonemap,
     }
 }
 

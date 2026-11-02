@@ -192,6 +192,7 @@ before using what it names:
 | `vulkan_encode` | `h264_vulkan` encodes libplacebo's output on the GPU |
 | `gpu_pipelines` | GPU-only decode → scale → encode pipelines, with the codecs each passed for, and `main10`: those Quick Sync's keeps in 10 bits into its HEVC Main 10 encoder (HDR kept) |
 | `qsv_tonemap` | Quick Sync's scaler tone maps HDR10 its decoder decoded into `h264_qsv` ([Sharing the GPU](#sharing-the-gpu)) |
+| `qsv_opencl_tonemap` | OpenCL tone maps HDR10 between Quick Sync's decoder and `h264_qsv` with BT.2390's curve, the frames mapped rather than copied (Windows; [Tone mapping](#tone-mapping)) |
 | `vaapi_tonemappers` | tone mappers whose frames reach a VAAPI encoder ([VAAPI encoders](#vaapi-encoders)) |
 | `vaapi_vulkan_decode` | `vulkan_decode` on the Vulkan device made from the VAAPI one |
 | `tonemap_speed?` | `{high, balanced, fast}`: frames a second libplacebo tone maps 4K to 4K at each quality ([libplacebo quality](#libplacebo-quality)) |
@@ -759,8 +760,20 @@ available tone mapper:
   first (`brightness=0.03`): BT.2390 puts HDR's reference white at SDR's,
   which looks dim on an SDR screen. Lifted, the two films scored higher on
   TMQI (the tone mapping quality index) than mapping a lower white, with
-  more of their saturation and blacks as deep. `tonemap_opencl`'s peak detection can't be
-  turned off, so its brightness can jump between processes.
+  more of their saturation and blacks as deep. FFmpeg's own `tonemap_opencl`
+  detects each frame's peak and can't be told not to, so its brightness can
+  jump between processes.
+- On Windows with Intel graphics, HDR10 made SDR goes from Quick Sync's
+  decoder to OpenCL's tone mapper and back to its H.264 encoder without
+  leaving the GPU, where the FFmpeg build can map Quick Sync's 10-bit frames
+  to OpenCL and has BT.2390's curve there (`qsv_opencl_tonemap`, a start-up
+  test; FFmpeg's own builds can't). It takes libplacebo's place, and that of
+  OpenCL's copies when `tonemap=opencl` is asked for: on an Iris Xe a 4K60
+  film made 1080p went at 4.6 times real time rather than 2.2, two at once
+  at 2.4 each, and it scores about as high on TMQI with fewer highlights
+  clipped. It tone maps by the stream's metadata, so a frame comes out the
+  same whichever process makes it. libplacebo keeps HDR10+, Dolby Vision,
+  HLG, burned-in subtitles and `tonemap=libplacebo`.
 - Dolby Vision profiles 7 and 8 have an HDR10- or HLG-compatible base layer
   and work with any tone mapper. Profile 5 without libplacebo plays with off
   colours, with a warning.
