@@ -277,6 +277,11 @@ class Follower:
         # player stopping or between files, also where the layout lists no
         # audio (a converted stream's).
         self.had_audio = False
+        # The account's subtitles when show() left Kodi's off (drawn onto the
+        # video, or a track Kodi doesn't list, as a `.sup` file it couldn't
+        # add): still the choice until the person picks subtitles in Kodi's
+        # player.
+        self.hidden = None
         # Off once Kodi lists a track the layout doesn't know (subtitles
         # added while it plays): its places no longer say pley's tracks.
         self.following = True
@@ -308,7 +313,10 @@ class Follower:
             return
         self.had_audio = self.had_audio or state[0] is not None
         if now < self.quiet_until or self.baseline is None:
-            # Where it starts, the account's choice shown.
+            # Where it starts, the account's choice shown. Subtitles turned
+            # on once Kodi took show()'s off are the person's pick.
+            if state[1] is not None and self.baseline is not None and self.baseline[1] is None:
+                self.hidden = None
             self.baseline = state
             return
         if state == self.baseline:
@@ -344,6 +352,9 @@ class Follower:
             return
         state, body = self.pending
         self.pending = None
+        if state[1] is not None:
+            # Subtitles the person picked: theirs from now on, off too.
+            self.hidden = None
         self.baseline = state
         if body is not None:
             self.save(body)
@@ -377,6 +388,7 @@ class Follower:
             # doesn't list: none rather than Kodi's own.
             at = to_kodi(lay["subtitles"], lay["subtitle_index"], subtitles)
         if at is None:
+            self.hidden = lay["subtitle_index"]
             if props.get("subtitleenabled"):
                 self.rpc("Player.SetSubtitle", {"playerid": VIDEO_PLAYER, "subtitle": "off"})
         elif at != playing_subtitle:
@@ -384,14 +396,18 @@ class Follower:
         return True
 
     def body(self, state: tuple, props: dict):
-        """PUT /api/items/{id}/streams's body for what Kodi plays (None for a
+        """PUT /api/items/{id}/streams's body for what Kodi plays, the
+        account's subtitles while show() keeps Kodi's off (None for a
         subtitle pley doesn't know, which isn't saved). The audio goes only
         when it was changed: the track playing was the server's choice for
         this Kodi, and another device may play another of that language
         better, so subtitles changed alone keep the audio picked before."""
         lay = self.layout
         audio_at, subtitle_at = state
-        subtitle = None
+        # Off as show() left them: the account's choice, sent as it was.
+        # Leaving it out would save them off too (the server reads none as
+        # off), and the audio changed must still be saved.
+        subtitle = self.hidden
         if subtitle_at is not None:
             subtitle = from_kodi(lay["subtitles"], subtitle_at, props.get("subtitles") or [])
             if subtitle is None:
