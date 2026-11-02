@@ -65,6 +65,10 @@ sub test_pictures_lists_are_read_and_checked()
     tkInvalid(picRead({ width: 1920, height: 1080 }), "no cues")
     tkInvalid(picRead("not a list"))
     tkEqual(picRead({ complete: true, width: 1920, height: 1080, cues: [] }).cues, [], "a track without a picture")
+    ' The server names each picture with the list's at, which it is made of.
+    list = picTestList(false)
+    list.cues[0].image = "subtitles-4-1000.png?at=60000"
+    tkEqual(picRead(list).cues[0].image, "subtitles-4-1000.png?at=60000")
 end sub
 
 sub test_pictures_lists_leave_out_what_isnt_a_picture_here()
@@ -73,6 +77,7 @@ sub test_pictures_lists_leave_out_what_isnt_a_picture_here()
         { start_ms: 1000, end_ms: 3000, x: 0, y: 0, width: 10, height: 10, image: "../secret.png" },
         { start_ms: 1000, end_ms: 3000, x: 0, y: 0, width: 10, height: 10, image: "http://elsewhere/a.png" },
         { start_ms: 1000, end_ms: 3000, x: 0, y: 0, width: 10, height: 10, image: "subtitles-4-1000.svg" },
+        { start_ms: 1000, end_ms: 3000, x: 0, y: 0, width: 10, height: 10, image: "subtitles-4-1000.png?at=1&x=../a" },
         { start_ms: 1000, end_ms: 3000, x: 1900, y: 0, width: 40, height: 10, image: "wide.png" },
         { start_ms: 3000, end_ms: 3000, x: 0, y: 0, width: 10, height: 10, image: "no-time.png" },
         { start_ms: 4000, end_ms: 6000, x: 0, y: 0, width: 10, height: 10, image: "kept.png" },

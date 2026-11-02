@@ -96,11 +96,12 @@ function picListPath(folder as string, index as integer, atMs as dynamic) as str
 end function
 
 ' A list (its JSON, parsed) as { complete, width, height, cues }, each cue
-' { startMs, endMs, x, y, width, height, image }, image the name of its
-' PNG beside the list; invalid for an answer that isn't one. Cues stay in
-' order of time without overlap: one that would overlap the one before,
-' has no time, lies outside the plane or names anything but a PNG in the
-' same folder is left out, and so is any past picMaxCues().
+' { startMs, endMs, x, y, width, height, image }, image the address of its
+' PNG beside the list (with the list's at); invalid for an answer that
+' isn't one. Cues stay in order of time without overlap: one that would
+' overlap the one before, has no time, lies outside the plane or names
+' anything but a PNG in the same folder is left out, and so is any past
+' picMaxCues().
 function picRead(data as dynamic) as dynamic
     list = httpObject(data)
     if list = invalid then return invalid
@@ -108,7 +109,7 @@ function picRead(data as dynamic) as dynamic
     planeHeight = httpNumber(list.height, 0)
     if planeWidth < 1 or planeHeight < 1 or planeWidth > 8192 or planeHeight > 8192 then return invalid
     if GetInterface(list.cues, "ifArray") = invalid then return invalid
-    name = CreateObject("roRegex", "^[A-Za-z0-9_-]+\.png$", "")
+    name = CreateObject("roRegex", "^[A-Za-z0-9_-]+\.png(\?at=[0-9]+)?$", "")
     cues = []
     lastEnd = 0
     for each entry in list.cues

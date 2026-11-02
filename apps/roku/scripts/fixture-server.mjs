@@ -804,14 +804,16 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       fixture.picturesAsked.push({ session, index: Number(index), at: Number(at) });
       const duration = items.get(playback.item)?.duration_ms ?? 1800000;
       const cues = [];
+      // Each picture named with the list's `at`, as the server names them.
       for (let start = 5000; start + 2500 <= duration; start += 10000) {
-        cues.push({ start_ms: start, end_ms: start + 2500, x: 560, y: 900, width: 800, height: 100, image: `subtitles-${index}-${start}.png` });
+        cues.push({ start_ms: start, end_ms: start + 2500, x: 560, y: 900, width: 800, height: 100, image: `subtitles-${index}-${start}.png?at=${at}` });
       }
       const around = cues.filter((c) => c.end_ms >= Number(at) - 60000 && c.start_ms <= Number(at) + 120000);
       return json(200, { complete: asked > 0, width: 1920, height: 1080, cues: asked > 0 ? cues : around });
     }
     if ((match = path.match(/^\/api\/media\/pley_mk_(\w+)\/(subtitles-\d+-\d+\.png)$/)) && req.method === "GET") {
       if (auth) problems.push("a picture subtitle fetched with the token: the key opens it");
+      if (!/^\d+$/.test(url.searchParams.get("at") ?? "")) problems.push(`${match[2]} fetched without its list's at`);
       fixture.picturesFetched.push(match[2]);
       res.writeHead(200, { "Content-Type": "image/png", "Cache-Control": "private, max-age=3600" });
       return res.end(png(800, 100, (x, y) => (y > 30 && y < 70 && x > 40 && x < 760 ? [235, 235, 235] : [0, 0, 0])));

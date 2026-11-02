@@ -217,19 +217,19 @@ next.
   `picture_subtitles_sideload`, and asks for no `subtitle_index` for them.
   The session's key opens the track's pictures:
   `/api/media/{key}/subtitles-{index}.json?at={ms}` lists each one's time,
-  its place on the subtitle plane and its PNG beside it. The server reads
-  the pictures around `at` first: while the list isn't whole, the app asks
-  again every 3 s from where the video is (at once after a seek), and keeps
-  what it has. The subtitle plane goes over the picture as the web player
-  puts it: a DVD-sized plane (576 lines or fewer) stretches over it, and
-  an HD plane of another shape than the video (a film cropped to 1920×800)
-  keeps its own, fitted to the screen. The file says only how its video is
-  stored, so a video of 576 lines or fewer is taken to show as 16:9. A
-  picture shows while the video plays, under the skip button and the
-  player's panels; paused or seeking, Roku's bar has the bottom of the
-  screen. The next picture loads in a second frame while one shows. The
-  Video node tells its position every 0.2 s while pictures are drawn, else
-  every second.
+  its place on the subtitle plane and its PNG beside it (named with the
+  list's `at`). The server reads the pictures around `at` first: while the
+  list isn't whole, the app asks again every 3 s from where the video is
+  (at once after a seek), and keeps what it has. The subtitle plane goes
+  over the picture as the web player puts it: a DVD-sized plane (576 lines
+  or fewer) stretches over it, and an HD plane of another shape than the
+  video (a film cropped to 1920×800) keeps its own, fitted to the screen.
+  The file says only how its video is stored, so a video of 576 lines or
+  fewer is taken to show as 16:9. A picture shows while the video plays,
+  under the skip button and the player's panels; paused or seeking, Roku's
+  bar has the bottom of the screen. The next picture loads in a second
+  frame while one shows. The Video node tells its position every 0.2 s
+  while pictures are drawn, else every second.
 - Roku's options list only text tracks: PGS is picked on a title's page.
   A text track picked in the options takes the place of the pictures;
   captions turned on or off alone leave them be.
