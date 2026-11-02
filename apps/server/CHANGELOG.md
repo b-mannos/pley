@@ -45,6 +45,13 @@ describes how they are made.
 - A PGS subtitle file next to the media (`.sup`) is no longer copied as
   each playback starts, only when a player asks for it: Kodi reads it as
   it is.
+- PGS subtitles of a Blu-ray remux come whole about twice as fast from a NAS
+  or a slow disk: each picture is one read of the file, where it was two or
+  three.
+- A remux's picture subtitles aren't left to a read of the whole file (a
+  quarter of an hour or more from a NAS) when a busy NAS makes reading
+  them take over a minute, and a seek while the whole file is read for
+  them still has the pictures where the player went, rather than none.
 
 ## [0.1.3] - 2026-11-02
 
