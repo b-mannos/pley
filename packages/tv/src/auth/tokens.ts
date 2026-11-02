@@ -178,7 +178,11 @@ export async function postForm(http: Transport, url: string, fields: [string, st
   return res.body;
 }
 
-/** The tokens of `answer` as kept; `before`'s proof stays when the answer has none (a refresh is the same sign-in). */
+/**
+ * The tokens of `answer` as kept. A refresh or a profile switch is the same
+ * sign-in, whose key never changes: `before`'s proof stays, whatever the
+ * answer says, and an answer brings one only to a sign-in without.
+ */
 export function stored(
   answer: TokenResponse,
   issuer: string,
@@ -196,7 +200,7 @@ export function stored(
     tokenEndpoint,
     revocationEndpoint,
   };
-  const proof = answer.proof ?? before;
+  const proof = before?.proofKey ? before : answer.proof;
   if (proof?.proofKey) {
     tokens.serverId = proof.serverId;
     tokens.proofId = proof.proofId;
@@ -232,7 +236,9 @@ function randomBytes(n: number): Uint8Array {
  */
 export async function proveServer(http: Transport, issuer: string, tokens: StoredTokens, random: (n: number) => Uint8Array = randomBytes): Promise<void> {
   const challenge = base64url(random(16));
-  const url = `${issuer}/api/server?challenge=${challenge}&proof_id=${tokens.proofId}`;
+  // The address as the server reads it from the request: lower-case host, no default port.
+  const address = new URL(issuer).origin;
+  const url = `${address}/api/server?challenge=${challenge}&proof_id=${tokens.proofId}`;
   const res = await http({
     method: "GET",
     url,
@@ -250,7 +256,7 @@ export async function proveServer(http: Transport, issuer: string, tokens: Store
   if (res.status !== 200 || !body || body.id !== tokens.serverId || typeof body.proof !== "string" || !key) {
     throw new NetworkError(NOT_YOUR_SERVER);
   }
-  const expected = base64url(hmacSha256(key, utf8(`pley-server-proof\n${tokens.serverId}\n${challenge}`)));
+  const expected = base64url(hmacSha256(key, utf8(`pley-server-proof\n${tokens.serverId}\n${address}\n${challenge}`)));
   if (body.proof !== expected) throw new NetworkError(NOT_YOUR_SERVER);
 }
 
@@ -303,8 +309,10 @@ export class Tokens {
    * signed in to, within the last half hour: no token leaves before. A
    * sign-in from a server without proofs has nothing to check.
    */
-  private proved(tokens: StoredTokens): Promise<void> {
+  private proved(tokens: StoredTokens, now = false): Promise<void> {
     if (!tokens.proofKey) return Promise.resolve();
+    // A refresh token, a PIN or a sign-out waits for a proof of its own.
+    if (now) this.provedAt = null;
     // A clock set back makes an age below zero: proved again.
     const age = this.provedAt && this.provedAt.network === network ? this.clock() - this.provedAt.at : -1;
     if (age >= 0 && age < PROOF_TTL_MS) return Promise.resolve();
@@ -386,7 +394,8 @@ export class Tokens {
       if (!tokens) throw new SignedOutError();
       if (tokens.accessToken !== stale && tokens.expiresAt - this.clock() > EARLY_MS) return tokens.accessToken;
       if (!tokens.refreshToken) this.signedOut();
-      await this.proved(tokens);
+      // The refresh token goes only to a server that proves itself now.
+      await this.proved(tokens, true);
       let answer: unknown;
       try {
         answer = await postForm(this.http, tokens.tokenEndpoint, [
@@ -440,7 +449,7 @@ export class Tokens {
         ["profile", String(profile)],
       ];
       if (pin !== null) fields.push(["pin", pin]);
-      await this.proved(tokens);
+      await this.proved(tokens, true);
       let answer: unknown;
       try {
         answer = await postForm(this.http, tokens.tokenEndpoint, fields);
@@ -466,7 +475,7 @@ export class Tokens {
     return this.serial(async () => {
       const tokens = this.load();
       try {
-        if (tokens && (await this.proved(tokens).then(() => true, () => false))) await revoke(this.http, this.clientId, tokens);
+        if (tokens && (await this.proved(tokens, true).then(() => true, () => false))) await revoke(this.http, this.clientId, tokens);
       } finally {
         this.wipe();
       }

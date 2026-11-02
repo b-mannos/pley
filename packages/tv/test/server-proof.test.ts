@@ -44,8 +44,8 @@ describe("SHA-256 and HMAC-SHA256", () => {
 
   it("make the proof the server makes", () => {
     const key = fromBase64url(KEY)!;
-    const proof = base64url(hmacSha256(key, utf8(`pley-server-proof\n${ID}\n${base64url(CHALLENGE)}`)));
-    expect(proof).toBe("-OpCw2gYEDYBr-d7wh4JEYd7CHzZ8nc7pTc_UlsqVas");
+    const proof = base64url(hmacSha256(key, utf8(`pley-server-proof\n${ID}\n${SERVER}\n${base64url(CHALLENGE)}`)));
+    expect(proof).toBe("YwkvaCQfaIQCZkoOP5yOE3yR4xRKU5T5wYWz4b85SCM");
   });
 });
 
@@ -73,6 +73,10 @@ describe("token answers", () => {
     const first = stored(parseTokenResponse({ ...answer, server_id: ID, proof_id: "17", proof_key: KEY }, "library play"), SERVER, `${SERVER}/t`, `${SERVER}/r`, 0);
     const refreshed = stored(parseTokenResponse(answer, "library play"), SERVER, `${SERVER}/t`, `${SERVER}/r`, 1, first);
     expect([refreshed.serverId, refreshed.proofId, refreshed.proofKey]).toEqual([ID, "17", KEY]);
+    // A sign-in's key never changes: an answer bringing another one doesn't replace it.
+    const other = base64url(new Uint8Array(32).fill(2));
+    const swapped = stored(parseTokenResponse({ ...answer, server_id: "another", proof_id: "18", proof_key: other }, "library play"), SERVER, `${SERVER}/t`, `${SERVER}/r`, 2, first);
+    expect([swapped.serverId, swapped.proofId, swapped.proofKey]).toEqual([ID, "17", KEY]);
   });
 });
 
@@ -116,7 +120,7 @@ function setup(answer: (challenge: string, proofId: string) => HttpResponse | nu
 }
 
 function proofOf(challenge: string): string {
-  return base64url(hmacSha256(fromBase64url(KEY)!, utf8(`pley-server-proof\n${ID}\n${challenge}`)));
+  return base64url(hmacSha256(fromBase64url(KEY)!, utf8(`pley-server-proof\n${ID}\n${SERVER}\n${challenge}`)));
 }
 
 async function refusal(p: Promise<unknown>): Promise<string> {
@@ -203,6 +207,14 @@ describe("a server proves itself before a token goes to it", () => {
     expect(await t.refresh("pley_at_a")).toBe("pley_at_new");
     expect(asked.map((r) => new URL(r.url).pathname)).toEqual(["/api/server", "/api/oauth/token"]);
     expect(JSON.parse(store.get(`pley.tokens.${SERVER}`)!).proofKey).toBe(KEY);
+  });
+
+  it("proves the server anew for a refresh, even just after a proof", async () => {
+    const { t, proofs } = setup();
+    await t.accessToken();
+    expect(proofs()).toBe(1);
+    await t.refresh("pley_at_a");
+    expect(proofs()).toBe(2);
   });
 
   it("signs out without sending the token to another device", async () => {
