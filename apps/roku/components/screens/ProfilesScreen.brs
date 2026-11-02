@@ -4,6 +4,8 @@
 ' its PIN asked first at a start. A profile that needs its password is
 ' signed in to with a code, chosen in the browser. Shown as the app
 ' starts when the household has more than one profile, and from Settings.
+' params.pin: a start as the profile signed in ("Always start as"), whose
+' PIN pad opens first; Cancel shows the profiles.
 
 sub init()
     m.profiles = m.top.findNode("profiles")
@@ -20,6 +22,8 @@ sub init()
     m.busy = false
     ' A PIN went with the switch under way.
     m.sentPin = false
+    ' The PIN pad of the profile signed in opens once the profiles show it.
+    m.padFirst = false
     m.profiles.observeField("itemSelected", "onPicked")
     m.buttons.observeField("buttonSelected", "onButton")
     m.top.observeField("active", "onActive")
@@ -29,6 +33,7 @@ sub onActive()
     if not m.top.active then return
     if not m.started
         m.started = true
+        m.padFirst = m.top.params <> invalid and httpTrue(m.top.params.pin) and not m.top.getScene().profileChosen
         load()
     end if
     if m.list.Count() > 0
@@ -94,6 +99,9 @@ sub showProfiles()
     end for
     showMessage("", [])
     if m.top.isInFocusChain() then m.profiles.setFocus(true)
+    pad = profFirstPad(m.list, m.padFirst)
+    m.padFirst = false
+    if pad <> invalid then askPin(pad, "")
 end sub
 
 sub showMessage(text as string, buttons as object)

@@ -86,7 +86,10 @@ sub onBoot(event as object)
     screen = "servers"
     if answer.ok then screen = answer.data.screen
     if screen = "link" then m.top.signalBeacon("AppDialogInitiate")
-    show({ to: screen, reset: true })
+    ' "Who's watching?" may open on the PIN pad of the profile signed in.
+    params = {}
+    if answer.ok and httpTrue(answer.data.pin) then params.pin = true
+    show({ to: screen, reset: true, params: params })
     if screen = "link" then m.launchDialog = m.stack.Peek()
     if screen <> "home" then uiLaunched()
 end sub

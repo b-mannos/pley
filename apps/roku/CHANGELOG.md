@@ -89,6 +89,11 @@ describes how they are made.
 
 ### Fixed
 
+- Settings' Always start as no longer starts the Roku as a profile with a
+  PIN without it: the start opens on that profile's PIN pad, and Cancel
+  shows the other profiles. While the Roku doesn't know whether the
+  profile it was left on has a PIN, as at the first start after this
+  update, the start asks "Who's watching?".
 - Too many wrong PINs keep the PIN pad, saying how long to wait, and a
   profile that got a PIN after "Who's watching?" was loaded asks it
   without calling it wrong.
