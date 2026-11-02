@@ -14,7 +14,8 @@ use common::{Reply, TestApp, jf_names};
 const FINDROID: &str = r#"MediaBrowser Client="Findroid", Device="Phone", DeviceId="phone-1", Version="0.16.1""#;
 
 async fn sign_in(app: &TestApp, body: Value) -> Reply {
-    app.jf_raw(Method::POST, "/Users/AuthenticateByName", &[("authorization", FINDROID)], Some(body)).await
+    let headers = [("authorization", FINDROID), ("user-agent", "Findroid/1.2.0")];
+    app.jf_raw(Method::POST, "/Users/AuthenticateByName", &headers, Some(body)).await
 }
 
 async fn sessions_of(app: &TestApp, user_id: i64) -> i64 {
@@ -53,7 +54,9 @@ async fn signing_in_gives_a_token_for_this_api_and_no_session() {
     assert_eq!((me.status, &me.body["Name"]), (StatusCode::OK, &json!("admin")));
     assert_eq!(app.get("/api/auth/me", &token).await.status, StatusCode::UNAUTHORIZED);
     let listed = app.get("/api/me/compatibility-tokens", &admin).await.body;
-    assert!(listed.as_array().unwrap().iter().any(|t| t["name"] == "Findroid on Phone"), "{listed}");
+    let findroid = listed.as_array().unwrap().iter().find(|t| t["name"] == "Findroid on Phone").expect("listed");
+    assert_eq!(findroid["device"], "Findroid/1.2.0", "from where it signed in, at once");
+    assert!(findroid["last_used_at"].is_i64());
 
     // Older apps send `Password`; names are trimmed as Pley's sign-in trims them.
     let older = sign_in(&app, json!({"username": " admin ", "Password": "secret-one"})).await;
@@ -121,8 +124,26 @@ async fn the_server_says_what_it_is_and_paths_go_in_any_case() {
         assert_eq!(app.jf_json(path, "").await, info, "{path}");
     }
     assert_eq!(app.jf(Method::GET, "/System/Info", "", None).await.status, StatusCode::UNAUTHORIZED);
-    assert_eq!(app.jf_json("/System/Info", &admin).await["Id"], info["Id"]);
+    let full = app.jf_json("/System/Info", &admin).await;
+    assert_eq!(full["Id"], info["Id"]);
+    // Jellyfin's apps read these as they must be there.
+    for field in ["HasPendingRestart", "IsShuttingDown", "SupportsLibraryMonitor", "WebSocketPortNumber"] {
+        assert!(full.get(field).is_some(), "{field}: {full}");
+    }
+    let behind = app
+        .jf_raw(
+            Method::GET,
+            "/System/Info",
+            &[("x-emby-token", &app.jellyfin_token(&admin).await), ("host", "media.example.com:8920")],
+            None,
+        )
+        .await;
+    assert_eq!(behind.body["WebSocketPortNumber"], json!(8920), "the port the app used");
     assert_eq!(app.jf(Method::GET, "/System/Ping", "", None).await.status, StatusCode::OK);
+    // Apps time their connection by it, signed in.
+    let test = app.jf(Method::GET, "/Playback/BitrateTest?size=300000", &admin, None).await;
+    assert_eq!((test.status, test.headers[header::CONTENT_LENGTH].to_str().unwrap()), (StatusCode::OK, "300000"));
+    assert_eq!(app.jf(Method::GET, "/Playback/BitrateTest?size=10", "", None).await.status, StatusCode::UNAUTHORIZED);
     assert_eq!(app.jf(Method::GET, "/Nothing/Here", &admin, None).await.status, StatusCode::NOT_FOUND);
     // Nothing it answers is a page.
     let reply = app.jf(Method::GET, "/Nothing/Here", "", None).await;
@@ -184,6 +205,9 @@ async fn libraries_list_with_filters_sorts_and_pages() {
     let lower =
         format!("/items?parentid={movies}&includeitemtypes=Movie&recursive=true&sortby=ProductionYear,SortName");
     assert_eq!(jf_names(&app.jf_json(&lower, admin).await), ["Charlie", "Alpha", "Bravo"]);
+    let listed_years = app.jf_json(&format!("/Years?ParentId={movies}"), admin).await;
+    assert_eq!(jf_names(&listed_years), ["1985", "1979", "1942"]);
+    assert_eq!(listed_years["Items"][0]["Type"], json!("Year"));
     let years = format!("/Items?ParentId={movies}&IncludeItemTypes=Movie&Recursive=true&Years=1979,1985");
     assert_eq!(jf_names(&app.jf_json(&years, admin).await), ["Alpha", "Bravo"]);
     let latest = app.jf_json(&format!("/Items/Latest?ParentId={movies}&Limit=2"), admin).await;
@@ -537,6 +561,9 @@ async fn every_part_of_the_api_is_reached_on_pleys_port() {
         "/Plugins".to_owned(),
         "/Localization/Cultures".to_owned(),
         "/DisplayPreferences/usersettings".to_owned(),
+        "/Years".to_owned(),
+        "/Tags".to_owned(),
+        "/Playback/BitrateTest".to_owned(),
     ] {
         let reply = app.call(Method::GET, &path, None, None, &[]).await;
         assert!(theirs(&reply), "{path}: {} {}", reply.status, reply.text());

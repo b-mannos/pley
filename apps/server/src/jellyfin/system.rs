@@ -4,12 +4,13 @@
 use std::sync::Arc;
 
 use axum::extract::State;
+use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Extension, Json, Router};
 use serde::Serialize;
 
-use super::{Jellyfin, JfResult, JfUser, PRODUCT, VERSION};
+use super::{Jellyfin, JfError, JfResult, JfUser, PRODUCT, VERSION};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -22,6 +23,8 @@ pub fn routes() -> Router<AppState> {
         .route("/branding/css", get(css))
         .route("/branding/css.css", get(css))
         .route("/quickconnect/enabled", get(quick_connect_enabled))
+        .route("/quickconnect/initiate", get(quick_connect_off).post(quick_connect_off))
+        .route("/quickconnect/connect", get(quick_connect_off))
         .route("/plugins", get(none))
         .route("/localization/cultures", get(none))
 }
@@ -63,6 +66,7 @@ struct SystemInfo {
     has_pending_restart: bool,
     is_shutting_down: bool,
     supports_library_monitor: bool,
+    web_socket_port_number: u16,
     can_self_restart: bool,
     can_launch_web_browser: bool,
     has_update_available: bool,
@@ -75,6 +79,7 @@ async fn info(
     State(state): State<AppState>,
     Extension(jellyfin): Extension<Arc<Jellyfin>>,
     _user: JfUser,
+    headers: HeaderMap,
 ) -> JfResult<Response> {
     Ok(Json(SystemInfo {
         public: public(&state, &jellyfin),
@@ -82,6 +87,7 @@ async fn info(
         has_pending_restart: false,
         is_shutting_down: false,
         supports_library_monitor: true,
+        web_socket_port_number: request_port(&headers),
         can_self_restart: false,
         can_launch_web_browser: false,
         has_update_available: false,
@@ -89,6 +95,18 @@ async fn info(
         cast_receiver_applications: [],
     })
     .into_response())
+}
+
+/// The port the client reached the API on, where its socket goes too: the
+/// `Host` header's, else HTTPS's or HTTP's default.
+fn request_port(headers: &HeaderMap) -> u16 {
+    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or_default();
+    let port = host.rsplit_once(':').filter(|(name, _)| !name.ends_with(']') || host.starts_with('['));
+    if let Some(port) = port.and_then(|(_, p)| p.parse().ok()) {
+        return port;
+    }
+    let https = headers.get("x-forwarded-proto").and_then(|v| v.to_str().ok()) == Some("https");
+    if https { 443 } else { 80 }
 }
 
 async fn ping() -> &'static str {
@@ -127,6 +145,12 @@ async fn css() -> Response {
 /// Quick Connect: signing in by approving a code in Pley isn't offered.
 async fn quick_connect_enabled() -> Json<bool> {
     Json(false)
+}
+
+/// Quick Connect's other calls, answered as Jellyfin answers them while it
+/// is off: apps that try it anyway are told so, and offer the password.
+async fn quick_connect_off() -> JfError {
+    JfError::Unauthorized
 }
 
 /// Lists Pley has nothing in (plugins, cultures), answered empty so clients

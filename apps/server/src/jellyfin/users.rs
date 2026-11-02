@@ -14,7 +14,7 @@ use serde::Serialize;
 
 use super::ids::Kind;
 use super::{Body, Client, ClientOf, Jellyfin, JfError, JfResult, JfUser};
-use crate::auth::{AuthUser, SourceIp, compatibility};
+use crate::auth::{AuthUser, ClientIp, SourceIp, UsedFrom, compatibility};
 use crate::state::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -25,6 +25,7 @@ pub fn routes() -> Router<AppState> {
         .route("/users/public", get(public_users))
         .route("/users/{id}", get(user))
         .route("/users/{id}/images/primary", get(avatar).head(avatar))
+        .route("/userimage", get(user_image).head(user_image))
         .route("/sessions/logout", post(logout))
         .route("/sessions/capabilities", post(accepted))
         .route("/sessions/capabilities/full", post(accepted))
@@ -256,7 +257,9 @@ async fn authenticate(
     State(state): State<AppState>,
     Extension(jellyfin): Extension<Arc<Jellyfin>>,
     SourceIp(source): SourceIp,
+    ClientIp(ip): ClientIp,
     ClientOf(client): ClientOf,
+    headers: HeaderMap,
     body: Body,
 ) -> JfResult<Response> {
     // `Pw`; older clients sent `Password`.
@@ -267,7 +270,10 @@ async fn authenticate(
     crate::api::auth::second_step(&state, account.id, &account.username, None, None).await?;
     let (token, _) = state.auth.create_compatibility_token(account.id, &asked).await?;
     tracing::info!("'{}' signed in to the Jellyfin-compatible API from {}", account.username, asked.name);
-    let user = state.auth.validate_compatibility(&token, None).await.ok_or(JfError::Unauthorized)?;
+    // Its first use, from where it signed in: the account page shows it.
+    let user_agent = headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).map(str::to_owned);
+    let used = UsedFrom { ip, user_agent };
+    let user = state.auth.validate_compatibility(&token, Some(&used)).await.ok_or(JfError::Unauthorized)?;
     Ok(Json(signed_in(&state, &jellyfin, &user, &client, token).await?).into_response())
 }
 
@@ -344,7 +350,20 @@ async fn avatar(
     Extension(jellyfin): Extension<Arc<Jellyfin>>,
     Path(id): Path<String>,
 ) -> JfResult<Response> {
-    let id = jellyfin.ids.number(Kind::User, &id).ok_or(JfError::NotFound)?;
+    avatar_of(&state, &jellyfin, &id).await
+}
+
+/// `/UserImage?userId=`, newer clients' way to the same picture.
+async fn user_image(
+    State(state): State<AppState>,
+    Extension(jellyfin): Extension<Arc<Jellyfin>>,
+    q: super::Q,
+) -> JfResult<Response> {
+    avatar_of(&state, &jellyfin, q.get("userId").ok_or(JfError::NotFound)?).await
+}
+
+async fn avatar_of(state: &AppState, jellyfin: &Jellyfin, id: &str) -> JfResult<Response> {
+    let id = jellyfin.ids.number(Kind::User, id).ok_or(JfError::NotFound)?;
     let file: Option<Option<String>> = sqlx::query_scalar("SELECT avatar FROM users WHERE id = ? AND NOT disabled")
         .bind(id)
         .fetch_optional(&state.db.read)

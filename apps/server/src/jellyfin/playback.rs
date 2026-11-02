@@ -51,6 +51,7 @@ pub fn routes() -> Router<AppState> {
         .route("/sessions/playing/ping", post(ping))
         .route("/sessions", get(sessions))
         .route("/mediasegments/{id}", get(media_segments))
+        .route("/playback/bitratetest", get(bitrate_test))
 }
 
 // ------------------------------------------------------------------ device profiles
@@ -802,6 +803,37 @@ async fn ping(_user: JfUser) -> StatusCode {
 /// are listed here.
 async fn sessions(_user: JfUser) -> Json<[(); 0]> {
     Json([])
+}
+
+// ------------------------------------------------------------------ bitrate test
+
+/// The most `/Playback/BitrateTest` sends, as Jellyfin allows.
+const MAX_BITRATE_TEST: i64 = 100_000_000;
+
+/// `/Playback/BitrateTest?size=`: that many bytes, for an app to time its
+/// connection by and pick a quality. Random, so that nothing on the way
+/// compresses them, and sent a piece at a time.
+async fn bitrate_test(_user: JfUser, q: Q) -> Response {
+    const PIECE: usize = 64 * 1024;
+    let size = q.number("size").unwrap_or(102_400).clamp(1, MAX_BITRATE_TEST) as usize;
+    let pieces = futures::stream::unfold(size, |left| async move {
+        if left == 0 {
+            return None;
+        }
+        let mut piece = vec![0u8; left.min(PIECE)];
+        getrandom::fill(&mut piece).expect("the system's random numbers");
+        let next = left - piece.len();
+        Some((Ok::<_, std::convert::Infallible>(bytes::Bytes::from(piece)), next))
+    });
+    (
+        [
+            (header::CONTENT_TYPE, "application/octet-stream".to_owned()),
+            (header::CONTENT_LENGTH, size.to_string()),
+            (header::CACHE_CONTROL, "no-store".to_owned()),
+        ],
+        axum::body::Body::from_stream(pieces),
+    )
+        .into_response()
 }
 
 // ------------------------------------------------------------------ media segments

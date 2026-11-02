@@ -54,6 +54,7 @@ pub fn routes() -> Router<AppState> {
         .route("/items/{id}/images/{kind}", get(image).head(image))
         .route("/items/{id}/images/{kind}/{index}", get(image_at).head(image_at))
         .route("/shows/nextup", get(next_up))
+        .route("/shows/upcoming", get(nothing))
         .route("/shows/{id}/seasons", get(seasons))
         .route("/shows/{id}/episodes", get(episodes))
         .route("/genres", get(genres))
@@ -61,6 +62,8 @@ pub fn routes() -> Router<AppState> {
         .route("/artists", get(artists))
         .route("/artists/albumartists", get(artists))
         .route("/studios", get(studios))
+        .route("/years", get(years))
+        .route("/tags", get(nothing))
         .route("/persons", get(persons))
         .route("/search/hints", get(search_hints))
         .route("/playlists/{id}/items", get(playlist_items))
@@ -691,7 +694,7 @@ async fn suggestions(
 }
 
 /// Lists Pley has nothing in: an item's intros, additional parts, theme
-/// media, the collections it is in.
+/// media, the collections it is in, episodes yet to air, tags.
 async fn nothing(_user: JfUser) -> Response {
     answer(Vec::new(), 0, 0)
 }
@@ -1022,6 +1025,34 @@ async fn artists(
         rows = rows.into_iter().skip(page.start).take(page.size.unwrap_or(usize::MAX)).collect();
     }
     let items = dtos(&state, &jellyfin, &user, &rows, Fields::parse(q.get("fields"))).await?;
+    Ok(answer(items, total, page.start))
+}
+
+/// `/Years`: the years of the titles the user may see, newest first, as
+/// items clients list and filter by (`/Items?Years=`).
+async fn years(
+    State(state): State<AppState>,
+    Extension(jellyfin): Extension<Arc<Jellyfin>>,
+    JfUser { user, .. }: JfUser,
+    q: Q,
+) -> JfResult<Response> {
+    let (_, years) = genres_and_years(&state, &jellyfin, &user, &q).await?;
+    let items: Vec<Item> = years
+        .into_iter()
+        .map(|year| Item {
+            id: jellyfin.ids.of(Kind::Year, year),
+            name: year.to_string(),
+            sort_name: Some(year.to_string()),
+            production_year: Some(year),
+            server_id: jellyfin.server_id.clone(),
+            is_folder: true,
+            kind: "Year",
+            media_type: "Unknown",
+            ..Default::default()
+        })
+        .collect();
+    let page = page(&q);
+    let (items, total) = page.apply(items);
     Ok(answer(items, total, page.start))
 }
 

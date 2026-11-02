@@ -451,7 +451,13 @@ fn normalize(mut req: Request) -> Request {
 
 /// Answers are data and media, never pages.
 async fn headers(request: Request, next: Next) -> Response {
+    let (method, uri) = (request.method().clone(), request.uri().clone());
     let mut response = next.run(request).await;
+    // What apps ask for that isn't here, or isn't theirs: what to look at
+    // when one misbehaves. Tokens and media source ids are left out.
+    if response.status().is_client_error() {
+        tracing::debug!("Jellyfin API {method} {}: {}", crate::api::loggable_uri(&uri), response.status());
+    }
     let headers = response.headers_mut();
     headers.insert(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
@@ -495,39 +501,63 @@ impl OnWebPort {
     }
 }
 
-/// The first segments of paths only this API has, lowercase: its clients'
-/// requests for them come to it on Pley's port whatever they carry (a
-/// player fetching a stream or a picture sends no header). The web app's
-/// pages are lowercase words of their own (`/item/1`, `/live`, `/settings`)
-/// that Jellyfin has none of.
+/// The first segments of Jellyfin's paths (every family of its API, those
+/// Pley answers and those it doesn't), lowercase: its clients' requests for
+/// them come to it on Pley's port whatever they carry (a player fetching a
+/// stream or a picture sends no header), and get its answers, never a page
+/// of the web app's. The web app's pages are words of their own (`/item/1`,
+/// `/live`, `/settings`) that Jellyfin has none of.
 const ONLY_JELLYFIN: &[&str] = &[
     "albums",
     "artists",
     "audio",
     "auth",
+    "backup",
     "branding",
+    "channels",
+    "clientlog",
+    "collections",
+    "devices",
     "displaypreferences",
+    "environment",
+    "fallbackfont",
     "genres",
+    "getutctime",
     "items",
+    "libraries",
+    "livestreams",
     "livetv",
     "localization",
     "mediasegments",
+    "movies",
     "musicgenres",
+    "packages",
     "persons",
     "playback",
     "plugins",
+    "providers",
     "quickconnect",
+    "repositories",
+    "scheduledtasks",
     "sessions",
     "shows",
     "socket",
+    "songs",
+    "startup",
     "studios",
+    "syncplay",
     "system",
+    "tags",
+    "trailers",
+    "userfavoriteitems",
+    "userimage",
     "useritems",
     "userplayeditems",
-    "userfavoriteitems",
     "users",
     "userviews",
     "videos",
+    "web",
+    "years",
 ];
 
 /// Paths both answer, this API (`/Search/Hints`, `/Playlists/{id}/Items`,

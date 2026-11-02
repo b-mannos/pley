@@ -25,6 +25,8 @@ pub enum Kind {
     Playlist = 8,
     /// A studio, by its name, as genres are.
     Studio = 9,
+    /// A year, by its number.
+    Year = 10,
 }
 
 impl Kind {
@@ -39,6 +41,7 @@ impl Kind {
             7 => Kind::Collection,
             8 => Kind::Playlist,
             9 => Kind::Studio,
+            10 => Kind::Year,
             _ => return None,
         })
     }
