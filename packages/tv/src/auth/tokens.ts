@@ -256,8 +256,12 @@ export async function proveServer(http: Transport, issuer: string, tokens: Store
   if (res.status !== 200 || !body || body.id !== tokens.serverId || typeof body.proof !== "string" || !key) {
     throw new NetworkError(NOT_YOUR_SERVER);
   }
-  const expected = base64url(hmacSha256(key, utf8(`pley-server-proof\n${tokens.serverId}\n${address}\n${challenge}`)));
-  if (body.proof !== expected) throw new NetworkError(NOT_YOUR_SERVER);
+  if (body.proof !== proofOf(key, tokens.serverId!, address, challenge)) throw new NetworkError(NOT_YOUR_SERVER);
+}
+
+/** The proof of `serverId`, asked at `address`, for `challenge` under `key`, in base64url without padding. */
+export function proofOf(key: Uint8Array, serverId: string, address: string, challenge: string): string {
+  return base64url(hmacSha256(key, utf8(`pley-server-proof\n${serverId}\n${address}\n${challenge}`)));
 }
 
 /** Why the TV is signed out. */

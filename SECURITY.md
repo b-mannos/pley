@@ -172,8 +172,8 @@ Apps sign in on Pley's own page with OAuth 2.1.
   network it needs HTTPS, like the rest of Pley.
 - Each sign-in gets a key of its own, derived from `secret.key`, with which
   the server proves it is the server an app signed in to before the app
-  sends its token to an address (the Samsung web and LG apps, Android and
-  the desktop app; not yet the native Samsung app, Kodi or Roku). Another
+  sends its token to an address (the Samsung and LG apps, Android and the
+  desktop app; not yet Kodi or Roku). Another
   device at that address can't, nor can another app's key. The proof covers
   the address it was asked at; the server makes none for a plain-http
   address to a client on the internet, nor for a page other than Pley's
