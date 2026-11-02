@@ -28,12 +28,18 @@ public class StateTests
 
     static string Hubs(string title) => $@"{{""hubs"":[{{""key"":""k"",""title"":""{title}"",""items"":[]}}]}}";
 
+    const string TwoProfiles = @"[{""id"":1,""name"":""A""},{""id"":2,""name"":""B""}]";
+
     [Fact]
-    public void Starts_on_the_first_screen_the_TV_kept_for()
+    public async Task Starts_on_the_first_screen_the_TV_kept_for()
     {
         var store = new MemoryKeyValue();
         var scheduler = new FakeScheduler();
-        var state = State(store, new FakeServer(), scheduler);
+        var server = new FakeServer();
+        server.On("GET", Home + "/api/auth/me", 200, MeJson);
+        server.On("GET", Home + "/api/libraries", 200, "[]");
+        server.On("GET", Home + "/api/oauth/profiles", 200, TwoProfiles);
+        var state = State(store, server, scheduler);
         Assert.Equal(StartPage.Servers, state.Start());
         state.Use(Home + "/");
         Assert.Equal(Home, state.Server.Value);
@@ -43,12 +49,35 @@ public class StateTests
         state.KeepHousehold(new[] { new HouseholdProfile { Id = 1, Name = "A" }, new HouseholdProfile { Id = 2, Name = "B" } });
         Assert.Equal(StartPage.Profiles, state.Start());
         state.SetAlwaysStartAs(2);
+        // Going on as the profile it was left on takes knowing whether that one has a PIN.
+        Assert.Equal(StartPage.Profiles, state.Start());
+        await state.LoadAccount();
         Assert.Equal(StartPage.Home, state.Start());
         // A new launch reads the same from the store.
         Assert.Equal(StartPage.Home, State(store, new FakeServer(), scheduler).Start());
         // "Always start as" is the TV's, whichever server it uses.
         Assert.Equal(2, State(store, new FakeServer(), scheduler).AlwaysStartAs());
         Assert.Equal("2", store.Get("pley.alwaysStartAs"));
+    }
+
+    [Fact]
+    public async Task Starts_as_the_profile_it_was_left_on_its_PIN_first()
+    {
+        var store = new MemoryKeyValue();
+        var scheduler = new FakeScheduler();
+        var server = new FakeServer();
+        server.On("GET", Home + "/api/auth/me", 200, @"{""id"":2,""username"":""s"",""name"":""Sam"",""has_pin"":true}");
+        server.On("GET", Home + "/api/libraries", 200, "[]");
+        server.On("GET", Home + "/api/oauth/profiles", 200, TwoProfiles);
+        server.On("GET", Home + "/api/hubs/home", 200, @"{""hubs"":[]}");
+        var state = State(store, server, scheduler);
+        SignIn(state, store, scheduler);
+        state.KeepHousehold(new[] { new HouseholdProfile { Id = 1, Name = "A" }, new HouseholdProfile { Id = 2, Name = "Sam" } });
+        state.SetAlwaysStartAs(1);
+        // Who it was left on was never heard: whether that profile has a PIN isn't known.
+        Assert.Equal(StartPage.Profiles, state.Start());
+        await state.Switched(2);
+        Assert.Equal(StartPage.Pin, State(store, new FakeServer(), scheduler).Start());
     }
 
     [Fact]

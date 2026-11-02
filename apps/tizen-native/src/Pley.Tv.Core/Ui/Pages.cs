@@ -9,7 +9,8 @@ public abstract record PageKey
 {
     public sealed record Servers : PageKey;
     public sealed record Link(string Server) : PageKey;
-    public sealed record Profiles : PageKey;
+    /// <summary>"Who's watching?"; <paramref name="Pin"/>: a start as the profile the TV was left on, its PIN pad first.</summary>
+    public sealed record Profiles(bool Pin = false) : PageKey;
     public sealed record Home : PageKey;
     public sealed record Libraries : PageKey;
     /// <summary>A library's page: on <paramref name="Tab"/> (null: the one it was left on), in <paramref name="View"/> (a row's See all, "sort=added&amp;order=desc").</summary>

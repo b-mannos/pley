@@ -68,11 +68,11 @@ public class ProfilesModelTests
     static TokenException Refusal(string reason, string description) =>
         new TokenException(400, new OAuthError("invalid_grant", description, reason));
 
-    static async Task<(ProfilesModel Model, FakeSource Source)> Profiles(bool gate = false, Action<FakeSource>? setUp = null)
+    static async Task<(ProfilesModel Model, FakeSource Source)> Profiles(bool gate = false, Action<FakeSource>? setUp = null, bool pin = false)
     {
         var source = new FakeSource();
         setUp?.Invoke(source);
-        var model = new ProfilesModel(source, gate);
+        var model = new ProfilesModel(source, gate, pin);
         await model.Load();
         return (model, source);
     }
@@ -269,6 +269,43 @@ public class ProfilesModelTests
     }
 
     [Fact]
+    public async Task A_TV_starting_as_a_PIN_profile_with_Always_start_as_opens_on_its_pad()
+    {
+        var shown = new List<ProfilesStep>();
+        var source = new FakeSource { Me = new User { Id = 1, Name = "Anna", HasPin = true } };
+        source.SavedList.AddRange(HouseholdOf(currentId: 1));
+        var model = new ProfilesModel(source, gate: true, pin: true);
+        model.State.Changed += s => shown.Add(s.Step);
+        var done = false;
+        model.Done += () => done = true;
+        await model.Load();
+        // From what was saved, before the server answers; once.
+        var pad = Pad(model);
+        Assert.Equal((1L, true), (pad.Profile.Id, pad.Confirm));
+        Assert.Single(shown.OfType<ProfilesStep.Pin>().Select(p => p.Profile.Id).Distinct());
+        // Back shows the profiles, and the list loading again leaves them.
+        model.BackToPick();
+        await model.Reload();
+        Assert.IsType<ProfilesStep.Pick>(model.State.Value.Step);
+        await model.Pick(1);
+        await Type(model, "1234");
+        await model.Submit();
+        Assert.Equal(new[] { (1L, "1234") }, source.PinChecks);
+        Assert.True(done);
+    }
+
+    [Fact]
+    public async Task Its_pad_comes_first_only_at_a_start_and_for_a_profile_with_a_PIN()
+    {
+        var (noPin, _) = await Profiles(gate: true, pin: true, setUp: s => s.Me = new User { Id = 1, Name = "Anna" });
+        Assert.IsType<ProfilesStep.Pick>(noPin.State.Value.Step);
+        var (answered, _) = await Profiles(gate: false, pin: true, setUp: s => s.Me = new User { Id = 1, Name = "Anna", HasPin = true });
+        Assert.IsType<ProfilesStep.Pick>(answered.State.Value.Step);
+        var (asked, _) = await Profiles(gate: true, setUp: s => s.Me = new User { Id = 1, Name = "Anna", HasPin = true });
+        Assert.IsType<ProfilesStep.Pick>(asked.State.Value.Step);
+    }
+
+    [Fact]
     public async Task The_profile_in_use_continues_without_a_PIN_outside_the_cold_start()
     {
         var (model, source) = await Profiles(gate: false, setUp: s => s.Me = new User { Id = 1, Name = "Anna", HasPin = true });
@@ -333,6 +370,23 @@ public class ProfilesModelTests
             _ => "nothing",
         };
         Assert.Equal(Expected("choice", i), Fixtures.Json(choice));
+    }
+
+    public static IEnumerable<object[]> StartCases => Indexes("start");
+
+    [Theory, MemberData(nameof(StartCases))]
+    public void The_first_screen_is_the_web_TV_apps(int i)
+    {
+        var input = Fixtures.Load("profiles").GetProperty("start")[i].GetProperty("in");
+        var me = input.GetProperty("me");
+        var always = input.GetProperty("alwaysStartAs");
+        var page = AppState.StartOf(
+            input.GetProperty("server").ValueKind != JsonValueKind.Null,
+            input.GetProperty("signedIn").GetBoolean(),
+            input.GetProperty("household").GetInt32(),
+            always.ValueKind == JsonValueKind.Null ? null : always.GetInt64(),
+            me.ValueKind == JsonValueKind.Null ? null : new User { Id = me.GetProperty("id").GetInt64(), HasPin = me.GetProperty("has_pin").GetBoolean() });
+        Assert.Equal(Expected("start", i), Fixtures.Json(page.ToString().ToLowerInvariant()));
     }
 
     public static IEnumerable<object[]> RefusalCases => Indexes("refusal");

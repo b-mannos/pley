@@ -245,7 +245,8 @@ public sealed class AppProfilesSource : IProfilesSource
 /// password is approved on a phone.
 ///
 /// <c>gate</c>: a cold start, where continuing as a PIN profile asks its PIN (servers that can't
-/// check it let it through).
+/// check it let it through). <c>pin</c>: a start as the profile in use ("Always start as"), whose
+/// pad opens first; Back shows the profiles.
 /// </summary>
 public sealed class ProfilesModel
 {
@@ -257,11 +258,14 @@ public sealed class ProfilesModel
     readonly bool gate;
     readonly PinEntry pin = new PinEntry();
     IReadOnlyList<HouseholdProfile> list = Array.Empty<HouseholdProfile>();
+    /// <summary>The pad of the profile in use opens as soon as the profiles show it with a PIN.</summary>
+    bool padFirst;
 
-    public ProfilesModel(IProfilesSource source, bool gate)
+    public ProfilesModel(IProfilesSource source, bool gate, bool pin = false)
     {
         this.source = source;
         this.gate = gate;
+        padFirst = gate && pin;
     }
 
     public Signal<ProfilesState> State { get; } = new Signal<ProfilesState>(new ProfilesState());
@@ -339,12 +343,23 @@ public sealed class ProfilesModel
             if (me == null) return tile;
             return p.Id == me.Id ? tile with { Current = true, Needs = me.HasPin ? "pin" : "none" } : tile with { Current = false };
         }).ToList();
+        var pad = FirstPad(tiles);
         Update(s => s with
         {
             Loading = false,
             Profiles = tiles,
             Focus = s.Focus != null && tiles.Any(t => t.Id == s.Focus) ? s.Focus : tiles.FirstOrDefault(t => t.Current)?.Id ?? tiles.FirstOrDefault()?.Id,
+            Step = pad != null && s.Step is ProfilesStep.Pick ? new ProfilesStep.Pin(pad, Confirm: true) : s.Step,
         });
+    }
+
+    /// <summary>The profile in use, the first time <paramref name="tiles"/> show it with a PIN, when its pad comes first.</summary>
+    ProfileTile? FirstPad(IReadOnlyList<ProfileTile> tiles)
+    {
+        if (!padFirst) return null;
+        var current = tiles.FirstOrDefault(t => t.Current && t.Locked);
+        if (current != null) padFirst = false;
+        return current;
     }
 
     /// <summary>The profile <paramref name="id"/> was chosen.</summary>
