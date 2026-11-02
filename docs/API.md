@@ -832,7 +832,9 @@ network that gives the computer the same addresses, joined in less than a
 second, or another device taking the server's address on the same
 network, goes unseen until the next proof. Forgetting a server deletes the
 window's session there, which would otherwise go to whatever answers at
-the address next, with no key left to check it.
+the address next, with no key left to check it. The window's cookies go
+to every port of a host, so opening a server without a key on the host of
+one with a key deletes them first.
 
 Every app checks proofs: the Samsung (web and native), LG, Android,
 Kodi, Roku and desktop apps.

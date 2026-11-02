@@ -173,6 +173,18 @@ impl Proofs {
         self.key(server).is_none() || self.proved_lately(server)
     }
 
+    /// Whether `server` has no key while another address on its host has
+    /// one: the window's cookies go to every port of a host, so that
+    /// server's session would go to `server` too.
+    pub fn host_keyed_elsewhere(&self, server: &Url) -> bool {
+        let kept = self.kept.lock().unwrap();
+        let address = address(server);
+        !kept.keys.contains_key(&address)
+            && kept.keys.keys().any(|other| {
+                Url::parse(other).is_ok_and(|other| other.host_str().is_some() && other.host_str() == server.host_str())
+            })
+    }
+
     fn proved_lately(&self, server: &Url) -> bool {
         // A clock set back gives an error: proved again.
         let kept = self.kept.lock().unwrap();
@@ -421,6 +433,18 @@ pub(crate) mod tests {
         assert!(!proves(&key(), at, CHALLENGE, None, Some(known)));
         let short = Key { proof_key: b64().encode([1u8; 16]), ..key() };
         assert!(!proves(&short, at, CHALLENGE, Some(ID), Some(known)));
+    }
+
+    #[test]
+    fn a_host_keyed_at_another_port_keeps_its_session() {
+        let server = Url::parse("http://192.168.1.20:7539").unwrap();
+        let proofs = Proofs::for_tests(&server, false);
+        assert!(!proofs.host_keyed_elsewhere(&server), "its own key");
+        // The window's cookies would go to these too.
+        for same_host in ["http://192.168.1.20:7540", "https://192.168.1.20"] {
+            assert!(proofs.host_keyed_elsewhere(&Url::parse(same_host).unwrap()), "{same_host}");
+        }
+        assert!(!proofs.host_keyed_elsewhere(&Url::parse("http://192.168.1.21:7539").unwrap()));
     }
 
     /// A server that answers each connection with the next of `answers`

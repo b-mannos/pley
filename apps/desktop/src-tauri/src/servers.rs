@@ -94,16 +94,23 @@ pub async fn forget_server(app: AppHandle, url: String) -> Result<(), String> {
     if let Ok(origin) = server_origin(&url) {
         // The session goes first, so that nothing finds it without the key.
         if let Some(window) = app.get_webview_window("main") {
-            for cookie in window.cookies_for_url(origin.clone()).unwrap_or_default() {
-                if let Err(err) = window.delete_cookie(cookie) {
-                    eprintln!("cannot sign out of {origin}: {err}");
-                }
-            }
+            sign_out(&window, &origin);
         }
         app.state::<Proofs>().forget(&origin);
     }
     let servers: Vec<SavedServer> = load(&app).into_iter().filter(|s| s.url != url).collect();
     save(&app, &servers)
+}
+
+/// Deletes the window's cookies for `server`'s host, which go to each of
+/// its ports (not on the main thread: on Windows, cookies read there
+/// deadlock).
+pub(crate) fn sign_out<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>, server: &Url) {
+    for cookie in window.cookies_for_url(server.clone()).unwrap_or_default() {
+        if let Err(err) = window.delete_cookie(cookie) {
+            eprintln!("cannot sign out of {server}: {err}");
+        }
+    }
 }
 
 /// Whether a pley server answers at `url`, and what it says about itself.

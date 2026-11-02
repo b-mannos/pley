@@ -21,7 +21,9 @@ describes how they are made.
   that second. A sign-in from before starts checking the next time the app
   opens the server. Needs a server from the same release.
 - Forgetting a server signs the window out of it, so a device answering at
-  its address later gets nothing.
+  its address later gets nothing. Opening a new server at another port of
+  a server's address signs out first too, as the window's sign-in goes to
+  every port of an address.
 - A plain-http address beyond the home network is no longer opened, even
   after a warning: open the server by its https address.
 

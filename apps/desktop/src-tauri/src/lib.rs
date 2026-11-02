@@ -203,8 +203,14 @@ async fn open_server(window: WebviewWindow, url: String) -> Result<(), String> {
     let origin = servers::server_origin(&url)?;
     let route = route_to(origin.clone()).await;
     // The network may have changed since the picker checked it.
-    if !window.state::<proofs::Proofs>().may_open(&origin) {
+    let proofs = window.state::<proofs::Proofs>();
+    if !proofs.may_open(&origin) {
         return Err("the network changed: open it again".to_owned());
+    }
+    // The window's cookies go to every port of the host: a server proven at
+    // another port keeps its session, which one without a key doesn't get.
+    if proofs.host_keyed_elsewhere(&origin) {
+        servers::sign_out(&window, &origin);
     }
     {
         let pages = window.state::<Pages>();
