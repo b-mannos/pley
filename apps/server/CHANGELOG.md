@@ -26,6 +26,14 @@ describes how they are made.
   starts there, and a seek while the rest is read has the pictures where
   the player went read at once. Kodi's `.sup` has everything read by the
   time it opens, not only the pictures around the start.
+- A stream for Kodi with VobSub or DVB subtitles no longer starts a copy
+  of them that Kodi never reads, which, in a Matroska file whose index
+  doesn't list them, could read the whole film from a network share.
+  Needs Pley for Kodi from the same release, which names the picture
+  subtitles it shows beside a stream (`picture_subtitles_sideload_codecs`).
+- A picture subtitle file next to the media (`.sup`, `.idx`/`.sub`, or
+  one added) is no longer copied as a playback starts, only when a player
+  asks for it: Kodi reads a `.sup` as it is.
 
 ## [0.1.3] - 2026-11-02
 

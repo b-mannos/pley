@@ -1681,9 +1681,12 @@ removed or reordered (`400`).
     pictures around `at` keeps answering with those until the transcoder's
     copy of the whole file comes past them, then with that copy.
   - The copy starts as a playback starts whose player draws the track
-    (`picture_subtitles_sideload`, the track picked or the profile's
-    choice), rather than when it asks. What isn't around `at` waits for the
-    playback's own start to be over.
+    (`picture_subtitles_sideload`, and `picture_subtitles_sideload_codecs`
+    when sent; the track picked or the profile's choice), rather than when
+    it asks. What isn't around `at` waits for the
+    playback's own start to be over. Only a track in the file, and only
+    for a stream: a file next to the media is copied when the player asks,
+    since its copy reads only that file.
 - **`.sup`**: a PGS track (in the file or next to it) as a `.sup` file, for
   players that read those beside a stream but no Matroska (Kodi): a `.sup`
   next to the media as it is, an embedded track made from its `.mks`, with
@@ -1765,6 +1768,7 @@ removed or reordered (`400`).
     audio_channels?: number;      // the most channels the output takes: 2, 6, 8
     subtitle_codecs?: string[];   // shown by the player itself, pictures included ("hdmv_pgs_subtitle")
     picture_subtitles_sideload?: boolean; // shows picture subtitles from their `.mks` next to HLS too
+    picture_subtitles_sideload_codecs?: string[]; // the picture codecs it shows so; left out: those in subtitle_codecs
     audio_track_switching?: boolean; // switches a file's audio tracks itself
     hls?: { master_playlist?: boolean; segments?: string[]; // "ts", "fmp4"
             variants?: boolean }; // moves between a stream's sizes itself: transcodes come in several
@@ -2054,6 +2058,9 @@ reports still send the version 1 fields: `containers` always counts;
   decode, as pictures from its keyed `subtitles-{index}.json`: Roku): it
   asks for no `subtitle_index`, so nothing is burned in (and HDR can stay
   HDR). A `subtitle_index` it does send is burned in as for any player.
+  `picture_subtitles_sideload_codecs` names the codecs it shows so, when
+  not all of `subtitle_codecs`' pictures (Kodi: PGS alone); the server
+  copies only those out of the file as the stream starts.
 - **Converting.** Video is converted to H.264, no bigger than the player's
   largest H.264 entry (a 4K file is made in 1080p for a 1080p stick, even
   when a higher quality is picked). HDR video the player can show stays
