@@ -277,7 +277,11 @@ Apps sign in on Pley's own page with OAuth 2.1.
   a token of at least 16 characters, since it reads whatever files it can
   open.
 - It keeps its work folder private, on Windows too, including the folders it
-  makes in one chosen elsewhere (segments, converted downloads, its caches).
+  makes in one chosen elsewhere (segments, live channels' too, converted
+  downloads, its caches). In a work folder other accounts may write in, a
+  link or a junction in place of one of those is taken away at start rather
+  than followed, segments' folders are checked again before each use, and
+  the caches' clean-up never prunes one that becomes a link later.
 - Segments kept in memory go in a folder of `/dev/shm` that it makes itself,
   private to its account. If another account took that name first, it
   refuses it and the segments go to disk.

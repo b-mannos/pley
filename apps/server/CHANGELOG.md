@@ -83,6 +83,13 @@ describes how they are made.
   seek previews check that a file hasn't become a link to another kind of
   file since the scan, as playing it as it is does: the transcoder was
   handed whatever the link led to.
+- Live TV's segments are kept to the transcoder's account in a transcode
+  folder chosen elsewhere (`/tmp`, `/dev/shm`, a folder on a second Windows
+  drive), as a playback's are: other accounts on the computer could read
+  what played, or swap a segment. A link or a junction another account put
+  in place of one of the transcoder's folders there is taken away rather
+  than followed: the hourly clean-up of its caches could delete whatever
+  it led to.
 
 ## [0.1.3] - 2026-11-02
 

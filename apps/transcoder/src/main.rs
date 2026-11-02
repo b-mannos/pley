@@ -218,14 +218,72 @@ fn keep_private(dir: &Path) -> anyhow::Result<()> {
             anyhow::anyhow!("{} isn't this account's to use ({err}): choose a folder with --work-dir", dir.display())
         })?;
     }
-    // A drive that keeps no permissions (FAT, some shares) goes without.
+    // A drive that keeps no permissions (FAT, some shares) goes without:
+    // said once for each folder, though segments' are kept so for each job.
     #[cfg(windows)]
     if let Err(err) = windows_private::keep(dir) {
-        tracing::warn!("other accounts on this computer may reach {}: {err}", dir.display());
+        static TOLD: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+        let mut told = TOLD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !told.iter().any(|told| told == dir) {
+            told.push(dir.to_path_buf());
+            tracing::warn!("other accounts on this computer may reach {}: {err}", dir.display());
+        }
     }
     #[cfg(not(any(unix, windows)))]
     let _ = dir;
     Ok(())
+}
+
+/// Makes `dir`, a folder of segments, the transcoder's own and keeps it
+/// private ([`keep_private`]). A link or a junction there (put by another
+/// account, in a work folder others can write) is removed rather than
+/// followed, so no segment is written or read wherever it leads.
+fn own_folder(dir: &Path) -> anyhow::Result<()> {
+    unlink(dir)?;
+    std::fs::create_dir_all(dir)?;
+    keep_private(dir)?;
+    // One put back meanwhile is refused rather than used.
+    anyhow::ensure!(!is_link(dir), "{} is a link someone else put there: choose another folder", dir.display());
+    Ok(())
+}
+
+/// Whether `path` is a symbolic link, or a junction on Windows.
+fn is_link(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
+}
+
+/// Removes `path` when it is a link or a junction: the link itself, never
+/// what it leads to.
+fn unlink(path: &Path) -> std::io::Result<()> {
+    if is_link(path) { std::fs::remove_dir_all(path) } else { Ok(()) }
+}
+
+/// Whether other accounts may write in `work_dir`, so that a link in place
+/// of one of its folders may be theirs: on Unix, when it isn't this
+/// account's (`own`, a folder the transcoder made there, is) or its group or
+/// others may write in it; on Windows, unless its permissions are its own,
+/// as [`keep_private`] leaves them, rather than the drive's.
+fn shared_work_dir(work_dir: &Path, own: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::metadata(work_dir), std::fs::metadata(own)) {
+            (Ok(dir), Ok(own)) => dir.uid() != own.uid() || dir.mode() & 0o022 != 0,
+            _ => true,
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let _ = own;
+        let path: Vec<u16> = work_dir.as_os_str().encode_wide().chain(Some(0)).collect();
+        !windows_private::is_protected(&path).unwrap_or(false)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (work_dir, own);
+        true
+    }
 }
 
 /// [`keep_private`] on Windows: this account, SYSTEM and the administrators
@@ -362,11 +420,12 @@ mod windows_private {
 }
 
 /// Makes the work folder ready, and says where the jobs go: the folders
-/// the transcoder keeps in it (`jobs`, emptied of an earlier run's
-/// segments, and the caches) are made and kept to this account. The work
-/// folder itself is made private only when the transcoder makes it or it
-/// is the default one, named for it: one given that is there already may
-/// be shared (`/tmp` on LibreELEC) and keeps its permissions.
+/// the transcoder keeps in it (`jobs` and `live`, emptied of an earlier
+/// run's segments, and the caches) are made, its own ([`own_folder`]), and
+/// kept to this account. The work folder itself is made private only when
+/// the transcoder makes it or it is the default one, named for it: one
+/// given that is there already may be shared (`/tmp` on LibreELEC) and
+/// keeps its permissions.
 fn prepare_work_dir(work_dir: &Path, default: bool) -> anyhow::Result<PathBuf> {
     let made = !work_dir.exists();
     std::fs::create_dir_all(work_dir)?;
@@ -375,9 +434,24 @@ fn prepare_work_dir(work_dir: &Path, default: bool) -> anyhow::Result<PathBuf> {
     }
     let jobs_dir = work_dir.join("jobs");
     let _ = std::fs::remove_dir_all(&jobs_dir);
-    std::fs::create_dir_all(&jobs_dir)?;
-    keep_private(&jobs_dir)?;
+    own_folder(&jobs_dir)?;
+    // Live TV's segments too: in a folder others can write, one of theirs
+    // could read what plays, or swap a segment for a link. The folder is
+    // made again for each channel, so one that can't be now (a file in the
+    // way) fails Live TV only.
+    let live = work_dir.join("live");
+    let _ = std::fs::remove_dir_all(&live);
+    if let Err(err) = own_folder(&live) {
+        tracing::warn!("Live TV has no folder for its segments: {err}");
+    }
+    let shared = shared_work_dir(work_dir, &jobs_dir);
     for (folder, _) in cache::policies(work_dir) {
+        // A cache that is a link, where another account could have put it,
+        // would be written to and pruned wherever it leads. Elsewhere it is
+        // this account's, keeping the cache on another disk say, and stays.
+        if shared {
+            unlink(&folder)?;
+        }
         // One that can't be made (a file in the way) goes without, as each
         // cache does by itself.
         if std::fs::create_dir_all(&folder).is_ok() {
@@ -476,7 +550,7 @@ async fn run(args: Args) -> anyhow::Result<()> {
         shader_cache(&work_dir),
         work_dir.join("conversions"),
     );
-    cache::spawn_janitor(work_dir.clone());
+    cache::spawn_janitor(work_dir.clone(), shared_work_dir(&work_dir, &jobs_dir));
 
     let info = TranscoderInfo {
         name: "pley-transcoder".into(),
@@ -639,14 +713,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let work = dir.path().join("work");
         std::fs::create_dir_all(work.join("jobs").join("0123")).unwrap();
+        std::fs::create_dir_all(work.join("live").join("4567")).unwrap();
         std::fs::create_dir_all(work.join("subtitles")).unwrap();
         std::fs::write(work.join("subtitles").join("k_2.vtt"), "WEBVTT\n").unwrap();
         let jobs = prepare_work_dir(&work, false).unwrap();
         assert!(jobs.is_dir() && !jobs.join("0123").exists(), "an earlier run's segments go");
+        assert!(work.join("live").is_dir() && !work.join("live").join("4567").exists(), "a live channel's too");
         assert!(work.join("subtitles").join("k_2.vtt").exists(), "caches stay");
         for folder in ["keyframes", "trickplay", "libplacebo", "conversions"] {
             assert!(work.join(folder).is_dir(), "{folder}");
         }
+    }
+
+    #[test]
+    fn a_file_in_place_of_live_tvs_folder_stops_live_tv_only() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("live"), b"").unwrap();
+        assert!(prepare_work_dir(dir.path(), false).unwrap().is_dir());
     }
 
     #[cfg(unix)]
@@ -662,10 +745,33 @@ mod tests {
         let jobs = prepare_work_dir(&shared, false).unwrap();
         assert_eq!(mode(&shared), 0o1777);
         assert_eq!((mode(&jobs), mode(&shared.join("subtitles"))), (0o700, 0o700), "what it keeps there is its own");
+        assert_eq!(mode(&shared.join("live")), 0o700, "live channels' segments too");
+        // A link in place of one of its folders is taken away, not followed:
+        // what it led to isn't pruned, nor written to.
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::set_permissions(&elsewhere, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(elsewhere.join("keep.txt"), b"x").unwrap();
+        for folder in ["trickplay", "live"] {
+            std::fs::remove_dir_all(shared.join(folder)).unwrap();
+            std::os::unix::fs::symlink(&elsewhere, shared.join(folder)).unwrap();
+        }
+        prepare_work_dir(&shared, false).unwrap();
+        for folder in ["trickplay", "live"] {
+            let meta = std::fs::symlink_metadata(shared.join(folder)).unwrap();
+            assert!(meta.is_dir() && !meta.file_type().is_symlink(), "{folder}");
+        }
+        assert!(elsewhere.join("keep.txt").exists() && mode(&elsewhere) == 0o755);
         // One it makes is its own, as is the default one.
         let made = dir.path().join("made");
         prepare_work_dir(&made, false).unwrap();
         assert_eq!(mode(&made), 0o700);
+        // There a cache that is a link is this account's, kept on another
+        // disk say: it stays.
+        std::fs::remove_dir_all(made.join("trickplay")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, made.join("trickplay")).unwrap();
+        prepare_work_dir(&made, false).unwrap();
+        assert!(std::fs::symlink_metadata(made.join("trickplay")).unwrap().file_type().is_symlink());
         prepare_work_dir(&shared, true).unwrap();
         assert_eq!(mode(&shared), 0o700);
     }
@@ -687,12 +793,53 @@ mod tests {
         let own = |path: &Path| windows_private::is_protected(&wide(path)).unwrap();
         assert!(!own(&shared));
         assert!(own(&jobs) && own(&shared.join("conversions")), "what it keeps there is its own");
+        assert!(own(&shared.join("live")), "live channels' segments too");
         let made = dir.path().join("made");
         prepare_work_dir(&made, false).unwrap();
         assert!(own(&made));
         // Still the transcoder's to use.
         std::fs::write(jobs.join("segment.ts"), b"").unwrap();
         prepare_work_dir(&shared, false).unwrap();
+        // A junction in place of one of its folders (any account may make
+        // one where it may write) is taken away, not followed: what it led
+        // to isn't pruned, nor written to, nor given other permissions.
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("keep.txt"), b"x").unwrap();
+        for folder in ["trickplay", "live"] {
+            std::fs::remove_dir_all(shared.join(folder)).unwrap();
+            let status = std::process::Command::new("cmd")
+                .arg("/C")
+                .arg("mklink")
+                .arg("/J")
+                .arg(shared.join(folder))
+                .arg(&elsewhere)
+                .stdout(std::process::Stdio::null())
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+        prepare_work_dir(&shared, false).unwrap();
+        for folder in ["trickplay", "live"] {
+            let meta = std::fs::symlink_metadata(shared.join(folder)).unwrap();
+            assert!(meta.is_dir() && !meta.file_type().is_symlink(), "{folder}");
+        }
+        assert!(elsewhere.join("keep.txt").exists() && !own(&elsewhere));
+        // In one it made, a cache that is a junction is this account's, kept
+        // on another disk say: it stays.
+        std::fs::remove_dir_all(made.join("trickplay")).unwrap();
+        let status = std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(made.join("trickplay"))
+            .arg(&elsewhere)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        prepare_work_dir(&made, false).unwrap();
+        assert!(std::fs::symlink_metadata(made.join("trickplay")).unwrap().file_type().is_symlink());
     }
 
     #[cfg(windows)]
