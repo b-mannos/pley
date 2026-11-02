@@ -335,13 +335,18 @@ sub requestPlayback(choice as string, ceilingKbps as float)
     ' Keyed addresses: Roku fetches the seek previews itself, without the
     ' Authorization header.
     spec = { op: "play", itemId: m.itemId, startMs: m.startMs, mode: m.mode, attempt: m.attempt, keyed: true }
+    ' PGS the app can't draw (no pictures from this server) is burned in:
+    ' the caps say the app doesn't show it, or the server would leave it out.
+    drawn = picCodecs()
+    if m.picturesOff
+        drawn = []
+        spec.picturesOff = true
+    end if
     ' The version chosen on the title's page; a title played next has none
     ' of its files, so it plays its first (the server's default too).
     file = contentFile(m.item, m.top.params.fileId)
     if file <> invalid
         spec.fileId = httpNumber(file.id, 0)
-        drawn = picCodecs()
-        if m.picturesOff then drawn = []
         burn = playerBurnIndex(file, drawn)
         if burn >= 0 then spec.subtitleIndex = burn
     end if

@@ -18,7 +18,10 @@ function capsContainers(webm as boolean) as object
     return containers
 end function
 
-function capsBuild(device as object) as object
+' What this Roku plays (POST /api/playback's caps). drawsPictures: whether
+' the app draws PGS itself; once the server turned out not to make the
+' pictures, it doesn't, and the server burns PGS in again.
+function capsBuild(device as object, drawsPictures = true as boolean) as object
     video = []
     h264 = capsH264(device)
     video.Push(h264)
@@ -79,12 +82,16 @@ function capsBuild(device as object) as object
         audio_channels: channels,
         ' The Video node moves between a transcode's sizes by itself (adaptive bitrate).
         hls: { master_playlist: true, segments: ["ts"], variants: true },
-        ' PGS is drawn by the app over whatever plays (Pictures.brs), so
-        ' the server doesn't burn it in; VobSub and DVB, not listed, are.
-        subtitle_codecs: ["hdmv_pgs_subtitle"],
-        picture_subtitles_sideload: true,
         device: { form: "tv", model: capsModel(device) }
     }
+    ' PGS is drawn by the app over whatever plays (Pictures.brs), so the
+    ' server doesn't burn it in; VobSub and DVB, not listed, are. To the
+    ' server, a listed codec is the player's to show: unlisted, PGS asked
+    ' for is burned in.
+    if drawsPictures
+        report.subtitle_codecs = ["hdmv_pgs_subtitle"]
+        report.picture_subtitles_sideload = true
+    end if
     ' Roku's Dolby Vision decoders take profiles 5 and 8; their levels go
     ' unsaid, so unchecked.
     if dolbyVision then report.dolby_vision_profiles = [{ profile: 5 }, { profile: 8 }]

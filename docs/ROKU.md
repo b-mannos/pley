@@ -234,13 +234,16 @@ next.
   A text track picked in the options takes the place of the pictures;
   captions turned on or off alone leave them be.
 - A server that can't make the pictures has them burned in: the stream
-  reopens where it was with `subtitle_index`, as for VobSub and DVB, which
-  are always burned in, and the app keeps burning them in until the player
-  closes. That is an older server (`404` "unknown file", or "unknown
-  playlist file" for a stream, as its keyed media knows no such name), a
-  transcoder too old to copy the track (`503`), or a track that isn't PGS.
-  Anything else (a disk asleep, the transcoder out of reach, the network)
-  is asked again 3 s later: burning them in would need the same server.
+  reopens where it was with `subtitle_index`, and caps without PGS in
+  `subtitle_codecs` or `picture_subtitles_sideload` (to the server, a
+  listed codec is the player's to show, never burned in), as for VobSub
+  and DVB, which are always burned in. The app keeps burning them in until
+  the player closes. That is an older server (`404` "unknown file", or
+  "unknown playlist file" for a stream, as its keyed media knows no such
+  name), a transcoder too old to copy the track (`503` "update it"), or a
+  track that isn't PGS. Anything else (a disk asleep, the transcoder
+  restarting or out of reach, the network) is asked again 3 s later:
+  burning them in would need the same server.
 - **Subtitle sync:** Left and Right move subtitles 0.1 s, up to 10 s either
   way. The server shifts text cues (`offset_ms`) and the stream reopens
   where it was; pictures drawn by the app move as the offset changes, and

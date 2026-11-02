@@ -21,6 +21,12 @@ sub test_caps_of_a_4k_hdr_roku_with_a_receiver()
     tkTrue(caps.picture_subtitles_sideload, "next to a stream too")
     tkEqual(caps.display, { width: 3840, height: 2160, refresh_rates: [60] })
     tkEqual(caps.device, { form: "tv", model: "Roku Ultra" })
+    ' Once the server turned out not to make PGS's pictures: none listed,
+    ' so PGS asked for is burned in even where the file plays as it is.
+    plain = capsBuild(fakeUltra(), false)
+    tkFalse(plain.DoesExist("subtitle_codecs"))
+    tkFalse(plain.DoesExist("picture_subtitles_sideload"))
+    tkEqual(plain.video_codecs, caps.video_codecs, "the rest as it was")
 end sub
 
 sub test_caps_lines_say_what_diagnostics_shows()

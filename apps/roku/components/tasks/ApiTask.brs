@@ -1105,7 +1105,8 @@ end sub
 ' POST /api/playback with what this Roku plays, asked of it now. mode is
 ' "auto", or "transcode" for a quality (maxBitrate, maxHeight: the Quality
 ' setting's or Automatic's, AutoQuality.brs) or once the original didn't
-' play here; subtitleIndex, picture subtitles for the server to draw.
+' play here; subtitleIndex, picture subtitles for the server to draw;
+' picturesOff, once the server turned out not to make PGS's pictures.
 sub apiPlay(request as object, spec as object)
     mode = httpString(spec.mode)
     if mode = "" then mode = "auto"
@@ -1114,7 +1115,7 @@ sub apiPlay(request as object, spec as object)
         start_ms: Int(httpNumber(spec.startMs, 0)),
         mode: mode,
         client_id: m.playerId,
-        caps: capsBuild(CreateObject("roDeviceInfo"))
+        caps: capsBuild(CreateObject("roDeviceInfo"), not httpTrue(spec.picturesOff))
     }
     if httpNumber(spec.fileId, 0) > 0 then body.file_id = spec.fileId
     if httpNumber(spec.subtitleIndex, -1) >= 0 then body.subtitle_index = Int(spec.subtitleIndex)

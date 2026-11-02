@@ -628,9 +628,13 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       const files = item?.kind === "movie" ? [7000 + ask.item_id, 9000 + ask.item_id] : [7000 + ask.item_id];
       if (ask.file_id != null && !files.includes(ask.file_id)) problems.push(`playback of file ${ask.file_id} for item ${ask.item_id}`);
       const fileId = ask.file_id ?? files[0];
-      const burn = ask.subtitle_index ?? null;
+      // As the server decides: PGS the caps list is the player's to show,
+      // on a file it plays as it is, and isn't burned in.
+      const drawsPgs = (ask.caps?.subtitle_codecs ?? []).includes("hdmv_pgs_subtitle");
+      if (ask.subtitle_index === PICTURE_SUBTITLES && drawsPgs) problems.push("PGS to burn in, with caps saying the app shows it: the server would burn nothing in");
+      const burn = drawsPgs && ask.subtitle_index === PICTURE_SUBTITLES ? null : (ask.subtitle_index ?? null);
       if (burn !== null && burn !== PICTURE_SUBTITLES) problems.push(`subtitles ${burn} to draw, which aren't pictures`);
-      fixture.playbacks.push({ item: ask.item_id, kind: item?.kind, file_id: fileId, start_ms: ask.start_ms ?? 0, subtitle_index: burn, mode: ask.mode, max_bitrate: ask.max_bitrate ?? null, keyed: ask.keyed_urls === true });
+      fixture.playbacks.push({ item: ask.item_id, kind: item?.kind, file_id: fileId, start_ms: ask.start_ms ?? 0, subtitle_index: burn, mode: ask.mode, max_bitrate: ask.max_bitrate ?? null, keyed: ask.keyed_urls === true, draws_pgs: drawsPgs });
       sessions += 1;
       const session = `s${sessions}`;
       // Keyed addresses carry the session's key, beside which are its seek
