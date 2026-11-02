@@ -377,12 +377,15 @@ public sealed class SubtitlePresenter
     /// <summary>
     /// The server's partial picture track is asked for again after <see cref="PartialRetryMs"/>, then
     /// twice as long each time up to this, from where the player is at each ask. A partial answer is
-    /// mostly the pictures around there, which are small; after a seek they reach 40 s past it, and
-    /// the wait stays below that. Deviation from Android, which asks every 3 s: a file whose Cues
-    /// don't list the track is copied whole, and each answer is all of it so far, tens of MB for a
-    /// film; read every 3 s, those kept the app from answering in the collections that followed.
+    /// mostly the pictures around there, which are small. The server reads those up to 40 s past
+    /// where a player elsewhere asked from, and answers from that read for 20 s on: an ask this
+    /// long after the last answer, which took a moment and was asked for to the second, is
+    /// answered from the read the last one started, not a read of its own. Deviation from
+    /// Android, which asks every 3 s: a file whose Cues don't list the track is copied whole, and
+    /// each answer is all of it so far, tens of MB for a film; read every 3 s, those kept the app
+    /// from answering in the collections that followed.
     /// </summary>
-    public const long PicturesRetryMostMs = 24_000;
+    public const long PicturesRetryMostMs = 15_000;
     const long MinWaitMs = 20, MaxWaitMs = 250, IdleWaitMs = 500;
 
     /// <summary>A file on a drive's partial picture track is asked for again after 1 s, then twice as long, this long at most.</summary>

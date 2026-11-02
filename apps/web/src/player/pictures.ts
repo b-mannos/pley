@@ -137,7 +137,8 @@ export type PictureLoad =
  * around where the player is come first, and a file being made has its
  * sizes written as it is finished. Nor is it when a file that came whole
  * (its size written: the pictures around the player, a file of their own)
- * has more: that is another file.
+ * has more, or a length of its own: that is another file (the pictures
+ * around where the player is now, maybe fewer).
  */
 export async function fetchPictures(url: string, signal: AbortSignal, have: Uint8Array | null = null, again = false): Promise<PictureLoad> {
   const headers: Record<string, string> = { Accept: "video/x-matroska" };
@@ -163,8 +164,13 @@ export async function fetchPictures(url: string, signal: AbortSignal, have: Uint
     void res.body?.cancel();
     return { kind: "anew" };
   }
-  // Nothing past what came before.
-  if (res.status === 416 && have) return { kind: "early", bytes: have };
+  // Nothing past what came before: the same file, or another one shorter
+  // than it, which the length the server gives tells apart (one just as
+  // long is taken for the same; the next place's comes soon after).
+  if (res.status === 416 && have) {
+    const total = /\/(\d+)$/.exec(res.headers.get("Content-Range") ?? "");
+    return total && Number(total[1]) !== have.length ? { kind: "anew" } : { kind: "early", bytes: have };
+  }
   if (!res.ok) return { kind: "failed" };
   // More past a file that came whole: another file, not the rest of it.
   const end = have && matroskaEnd(have);

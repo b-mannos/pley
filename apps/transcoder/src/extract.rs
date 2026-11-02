@@ -75,6 +75,9 @@ pub struct Extractor {
     /// How long a first answer for a picture track waits for FFmpeg to have
     /// written its header.
     header_wait: Duration,
+    /// How long an answer for a player elsewhere waits for the read there
+    /// ([`SEEK_WAIT`]).
+    seek_wait: Duration,
     /// Playbacks starting, which picture tracks wait for: they read the same
     /// disk or share.
     background: Option<Arc<Background>>,
@@ -93,6 +96,13 @@ const FAILED_PASSES_KEPT: usize = 1_000;
 /// written its header (the extraction may wait for a playback starting,
 /// FFmpeg for a sleeping disk), before it is a Matroska file with no block.
 const HEADER_WAIT: Duration = Duration::from_secs(30);
+/// How long an answer for a player elsewhere waits for the read there
+/// ([`Extractor::seek`]): as long as such a read may take
+/// ([`SEEK_READ_TIME`]), and a moment for the one before it. The pictures
+/// the track's read has meanwhile are those around where it started, not
+/// where this player is, and players that replace what they have with each
+/// answer would lose the pictures they had there.
+const SEEK_WAIT: Duration = Duration::from_secs(12);
 /// How often an answer for a picture track looks at how far it has come.
 const PICTURE_LOOK_EVERY: Duration = Duration::from_millis(100);
 
@@ -129,6 +139,7 @@ impl Extractor {
             keep_fresh: KEEP_FRESH,
             pass_time: whole_file_timeout,
             header_wait: HEADER_WAIT,
+            seek_wait: SEEK_WAIT,
             background: None,
         }
     }
@@ -275,7 +286,8 @@ impl Extractor {
     /// A player that says where it is (`start`), away from where the read
     /// through the Cues started, is answered with the blocks around there:
     /// those the read has, when it has them all, else a read of them at once
-    /// beside it, waited for as long as `wait`. With `rest` (a player that
+    /// beside it, waited for as long as such a read takes ([`SEEK_WAIT`]),
+    /// or until the track's read has them. With `rest` (a player that
     /// reads the track once), the answer waits `wait` for the whole track,
     /// then is everything read through the Cues so far rather than the
     /// blocks around where the read started.
@@ -294,6 +306,7 @@ impl Extractor {
             return Ok((bytes, true));
         }
         let extraction = self.picture_extraction(&path, &track, stream, start.clone());
+        let at_ms = start.from_ms;
         let mut seek = None;
         if let Some(index) = stream
             && start.asked
@@ -326,9 +339,14 @@ impl Extractor {
                 Some(Some(Some(bytes))) => return Ok((bytes.to_vec(), false)),
                 // Not to be read there: what the track's read has.
                 Some(Some(None)) => seek = None,
-                // Read there as long as an answer waits; meanwhile, what the
-                // track's read has, and the player asks again.
-                Some(None) if started.elapsed() < wait.min(self.header_wait) => continue,
+                // Read there as long as such a read takes ([`SEEK_WAIT`]),
+                // unless the track's read comes past there meanwhile.
+                Some(None) if started.elapsed() < self.seek_wait.min(self.header_wait) => {
+                    if let Some(bytes) = extraction.so_far.lock().around(at_ms) {
+                        return Ok((bytes, false));
+                    }
+                    continue;
+                }
                 _ => {}
             }
             let ready = started.elapsed() >= wait || (!rest && first.load(Ordering::Acquire));
@@ -2517,11 +2535,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reads_at_seeks_wait_for_no_track_read_and_hold_an_answer_no_longer_than_it_waits() {
+    async fn reads_at_seeks_wait_for_no_track_read_and_hold_an_answer_while_they_may_take() {
         let dir = tempfile::tempdir().unwrap();
         let background = Background::new();
         let mut extractor = extractor_with(dir.path(), dir.path().join("no-ffmpeg"));
         extractor.background = Some(background.clone());
+        let seek_wait = Duration::from_millis(500);
+        extractor.seek_wait = seek_wait;
         let extractor = Arc::new(extractor);
         let (name, _) = movie_in(&extractor, dir.path(), &matroska::tests::pictures_every_second(250));
         let at = |from_ms: i64| PictureStart { from_ms, media: None, asked: true };
@@ -2535,14 +2555,14 @@ mod tests {
         let (there, _) = extractor.subtitle_matroska_so_far(&name, Some(3), wait, at(200_000), false).await.unwrap();
         assert_eq!(picture_seconds(&there), (190..240).collect::<Vec<u8>>());
         // A read at a seek that can't start yet holds an answer up for as long
-        // as it waits: what the track's read has meanwhile, and what is there
-        // when the player asks again.
+        // as such a read may take, as what the track's read has is elsewhere:
+        // then that, and what is there when the player asks again.
         let seeks = extractor.seek_reads.available_permits() as u32;
         let held = extractor.seek_reads.clone().acquire_many_owned(seeks).await.unwrap();
-        let short = Duration::from_millis(300);
+        let short = Duration::from_millis(100);
         let asked = Instant::now();
         let meanwhile = extractor.subtitle_matroska_so_far(&name, Some(3), short, at(100_000), false).await.unwrap();
-        assert!(asked.elapsed() < Duration::from_secs(5));
+        assert!(asked.elapsed() >= seek_wait && asked.elapsed() < Duration::from_secs(5), "{:?}", asked.elapsed());
         assert_eq!(meanwhile, (window, false));
         drop(held);
         let (later, _) = extractor.subtitle_matroska_so_far(&name, Some(3), wait, at(100_000), false).await.unwrap();
