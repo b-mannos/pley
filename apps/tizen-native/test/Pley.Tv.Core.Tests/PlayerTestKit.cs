@@ -65,7 +65,15 @@ sealed class FakeVideoEngine : IVideoEngine
 
     public void Release() => Released = true;
 
-    public IReadOnlyList<EngineTrack> AudioTracks() => new EngineTrack[0];
+    /// <summary>The audio tracks the player lists; none, as an engine that doesn't say, unless a test gives them.</summary>
+    public List<EngineTrack> Tracks { get; } = new List<EngineTrack>();
+
+    /// <summary>The listed track playing, as the TV's player says.</summary>
+    public int? PlayingTrack { get; set; }
+
+    public IReadOnlyList<EngineTrack> AudioTracks() => Tracks;
+
+    public int? PlayingAudio() => PlayingTrack;
 
     public bool SelectAudio(int ordinal, string? language)
     {

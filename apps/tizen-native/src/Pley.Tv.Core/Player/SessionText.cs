@@ -11,6 +11,9 @@ namespace Pley.Tv.Core.Player;
 public static class SessionText
 {
     public const string QualityOriginal = "Original";
+
+    /// <summary>The audio chosen isn't a track the TV's player offers (TrueHD): what plays instead.</summary>
+    public static string AudioNotOffered(string chosen, string playing) => $"This TV's player doesn't offer {chosen}: {playing} plays";
     public const string QualityAutomatic = "Automatic";
     public const string AutomaticHint = "Dynamically adjust to conditions";
     public const string LoweredNetwork = "Lowered for your connection";

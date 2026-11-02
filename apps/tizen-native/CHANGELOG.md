@@ -180,6 +180,9 @@ It has no releases yet: it is built and installed by hand
   only the chapter pictures near the one shown, lets them go as the player
   goes, and reads a film's subtitle pictures once rather than every few
   seconds while the server makes them.
+- Picture subtitles chosen in the native app wait up to a minute, as
+  Android's do, for a server that hasn't made them yet, rather than saying
+  after 10 s that they couldn't be loaded.
 - Films start about half a second sooner in the native app: the player
   starts once it has as much as Android's does, and asks for the film
   while its screen is being made.
@@ -241,6 +244,10 @@ It has no releases yet: it is built and installed by hand
 
 ### Fixed
 
+- A film's audio track, chosen or saved, plays from the start: it was asked
+  for before the TV's player was ready, and the first track played. Beside a
+  TrueHD track the TV leaves out, the right track is chosen, and Info shows
+  the track playing.
 - Live TV no longer pauses for a quarter of a second as it opens and as a
   channel is left, with a provider's hundreds of categories, and moving
   through the guide is smoother: a row's programmes are painted again

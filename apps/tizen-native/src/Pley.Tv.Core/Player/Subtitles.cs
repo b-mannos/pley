@@ -575,6 +575,7 @@ public sealed class SubtitlePresenter
             if (!answer.Complete) retry = scheduler.After(waitMs, () => FetchPictures(url, at, Math.Min(waitMs * 2, picturesRetryMostMs)));
         }, e =>
         {
+            if (Marks.On) Marks.Note($"subtitles: the pictures failed: {e.GetType().Name} {e.Message}{(at != generation ? ", for a track no longer shown" : "")}");
             if (at != generation) return;
             Showing = null;
             if (e is ApiException { Status: 404 or 503 }) onPicturesUnavailable?.Invoke();
