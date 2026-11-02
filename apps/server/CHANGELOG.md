@@ -95,8 +95,8 @@ describes how they are made.
   administrators still find them in Settings → Transcoder and the log.
 - A guide saved as a file on this computer is read only as one, and only
   up to a guide's size: no longer one on another computer
-  (`//host/share/…`, which a playlist could have saved before), a device
-  or a pipe. A source with a guide file it couldn't read isn't saved.
+  (`//host/share/…`, `\??\UNC\host\share\…`, which a playlist could have
+  saved before), a device or a pipe. A source with a guide file it couldn't read isn't saved.
 - A channel's stream asked for with `take_over` takes another channel's
   connection only with a token: over plain HTTP, another site's link signed
   in by an administrator's cookie could end what others watched.

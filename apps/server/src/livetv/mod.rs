@@ -2233,11 +2233,18 @@ fn local_guide(local: &str) -> anyhow::Result<PathBuf> {
     let path = PathBuf::from(local);
     // On Windows, `/…` is on the drive Pley runs from.
     anyhow::ensure!(path.has_root(), "the guide's file is named from the top of its drive (/…)");
-    let here = !local.starts_with("//")
-        && !local.starts_with(r"\\")
-        && match path.components().next() {
+    // Windows takes any two separators at the start as a share's, `/\host`
+    // too, though Rust sees no prefix there.
+    let separator = |c: char| c == '/' || c == '\\';
+    let mut start = local.chars();
+    let share = start.next().is_some_and(separator) && start.next().is_some_and(separator);
+    let mut components = path.components();
+    let here = !share
+        && match components.next() {
             Some(Component::Prefix(prefix)) => matches!(prefix.kind(), Prefix::Disk(_)),
-            _ => true,
+            // `\??\…` is a path Windows passes on as it is, a share's
+            // (`\??\UNC\host\share\…`) too.
+            _ => components.next() != Some(Component::Normal("??".as_ref())),
         };
     anyhow::ensure!(here, "a guide on another computer is read from its web address (http:// or https://)");
     Ok(path)
@@ -2270,7 +2277,14 @@ mod tests {
 
     #[test]
     fn a_local_guide_is_a_file_on_this_computer() {
-        for elsewhere in ["//host/share/guide.xml", r"\\host\share\guide.xml", r"\\?\UNC\host\share\guide.xml"] {
+        for elsewhere in [
+            "//host/share/guide.xml",
+            r"\\host\share\guide.xml",
+            r"\\?\UNC\host\share\guide.xml",
+            r"\??\UNC\host\share\guide.xml",
+            r"/\host\share\guide.xml",
+            r"/??/UNC/host/share/guide.xml",
+        ] {
             assert!(local_guide(elsewhere).is_err(), "{elsewhere}");
         }
         assert!(local_guide("guide.xml").is_err(), "nowhere in particular");
