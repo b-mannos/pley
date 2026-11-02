@@ -99,14 +99,20 @@ object ServerProofs {
 
             override fun onLost(network: Network) = networkMayHaveChanged()
         }
-        connectivity.registerDefaultNetworkCallback(changes())
         val homes = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
             .addTransportType(NetworkCapabilities.TRANSPORT_ETHERNET)
             // A Wi-Fi without internet counts too.
             .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .build()
-        connectivity.registerNetworkCallback(homes, changes())
+        try {
+            connectivity.registerDefaultNetworkCallback(changes())
+            connectivity.registerNetworkCallback(homes, changes())
+        } catch (_: RuntimeException) {
+            // Too many callbacks registered app-wide: sign-in still works, and
+            // a proof still lasts half an hour at most, or until a request
+            // gets no answer.
+        }
     }
 
     /** The longest answer read: `/api/server`'s is a few hundred bytes. */
