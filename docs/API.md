@@ -807,9 +807,10 @@ and stores nothing. Apps' tokens are refused there: they have their keys.
 
 `400` for a challenge or `proof_id` that isn't written so, or one sent
 without the other. `proof` is `null` while the server can't use its
-`secret.key`; a new `secret.key` changes every key, and apps then refuse
-the server until they sign in again (the desktop app until it forgets the
-server and connects again). The answer isn't cached.
+`secret.key`; a new `secret.key` changes every key, as a new
+`plex-machine-id` changes the server's id ([STORAGE.md](STORAGE.md)):
+apps then refuse the server until they sign in again (the desktop app
+until it forgets the server and connects again). The answer isn't cached.
 
 The desktop app checks the requests it makes itself, and opens no plain
 http address beyond the home network. The server's pages in its window
