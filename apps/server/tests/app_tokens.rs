@@ -114,7 +114,7 @@ const ADMIN: &[(&str, &str)] = &[
     ("POST", "/api/settings/arr"),
     ("GET", "/api/network"),
     ("PUT", "/api/network"),
-    ("GET", "/api/fs"),
+    ("POST", "/api/fs"),
     ("GET", "/api/live/settings"),
     ("PUT", "/api/live/settings"),
     ("GET", "/api/live/sources"),

@@ -2,7 +2,6 @@
 //! directory. No transcoder is started, so scanned files stay unprobed (the
 //! server must still list, browse, search and direct-play them).
 
-use std::path::Path;
 use std::time::Duration;
 
 use axum::Router;
@@ -191,20 +190,37 @@ async fn setup_login_and_permissions() {
     let headers = [("cookie", cookie_pair.as_str()), ("sec-fetch-site", "same-site")];
     let with_query = app.call(Method::POST, "/api/system/storage/clean?token=x", None, None, &headers).await;
     assert_eq!(with_query.status, StatusCode::FORBIDDEN);
-    // Nor do its links and images fetch anything with it (an administrator's
-    // folder browser opening the attacker's share); the address bar does.
-    let browse = |site: &'static str| {
+    // Nor do its links and images fetch anything with it where the browser
+    // says which page asked; the address bar does.
+    let read = |site: &'static str| {
         let headers = [("cookie", cookie_pair.as_str()), ("sec-fetch-site", site)];
         let app = &app;
-        async move { app.call(Method::GET, "/api/fs", None, None, &headers).await.status }
+        async move { app.call(Method::GET, "/api/libraries", None, None, &headers).await.status }
     };
-    assert_eq!(browse("cross-site").await, StatusCode::FORBIDDEN);
-    assert_eq!(browse("same-site").await, StatusCode::FORBIDDEN);
-    assert_eq!(browse("same-origin").await, StatusCode::OK);
-    assert_eq!(browse("none").await, StatusCode::OK);
+    assert_eq!(read("cross-site").await, StatusCode::FORBIDDEN);
+    assert_eq!(read("same-site").await, StatusCode::FORBIDDEN);
+    assert_eq!(read("same-origin").await, StatusCode::OK);
+    assert_eq!(read("none").await, StatusCode::OK);
+    // Over plain HTTP the browser says nothing for a GET, so the folder
+    // browser, which opens what it's given (a share of the attacker's,
+    // say), is a POST: another site's page is told by its `Origin`, and a
+    // link or a picture can't ask for it at all.
+    let browse = |extra: &'static [(&'static str, &'static str)]| {
+        let mut headers = vec![("cookie", cookie_pair.as_str())];
+        headers.extend_from_slice(extra);
+        let app = &app;
+        async move { app.call(Method::POST, "/api/fs", None, Some(json!({})), &headers).await.status }
+    };
+    assert_eq!(browse(&[("origin", "http://nas:8080"), ("host", "nas:7539")]).await, StatusCode::FORBIDDEN);
+    assert_eq!(browse(&[("origin", "null"), ("host", "nas:7539")]).await, StatusCode::FORBIDDEN, "a sandboxed page's");
+    assert_eq!(browse(&[("sec-fetch-site", "cross-site")]).await, StatusCode::FORBIDDEN);
+    assert_eq!(browse(&[("origin", "http://nas:7539"), ("host", "nas:7539")]).await, StatusCode::OK);
+    assert_eq!(browse(&[("sec-fetch-site", "same-origin")]).await, StatusCode::OK);
+    let link = [("cookie", cookie_pair.as_str())];
+    assert_eq!(app.call(Method::GET, "/api/fs?path=/", None, None, &link).await.status, StatusCode::METHOD_NOT_ALLOWED);
     // A token sent on purpose is no cookie.
     let headers = [("sec-fetch-site", "cross-site")];
-    assert_eq!(app.call(Method::GET, "/api/fs", Some(&admin), None, &headers).await.status, StatusCode::OK);
+    assert_eq!(app.call(Method::POST, "/api/fs", Some(&admin), Some(json!({})), &headers).await.status, StatusCode::OK);
 
     // A regular user cannot use admin endpoints.
     let created =
@@ -515,12 +531,12 @@ async fn settings_validation_and_folder_browser() {
     let bad = app.call(Method::PUT, "/api/settings", Some(&token), Some(json!({"hwaccel": "magic"})), &[]).await;
     assert_eq!(bad.status, StatusCode::UNPROCESSABLE_ENTITY);
 
-    let roots = app.get("/api/fs", &token).await;
+    let roots = app.post("/api/fs", &token, json!({})).await;
     assert!(!roots.body["entries"].as_array().unwrap().is_empty());
     std::fs::create_dir_all(app.media.path().join("Alpha")).unwrap();
     std::fs::create_dir_all(app.media.path().join("beta")).unwrap();
     std::fs::write(app.media.path().join("file.txt"), b"x").unwrap();
-    let listing = app.get(&format!("/api/fs?path={}", urlencode(app.media.path())), &token).await;
+    let listing = app.post("/api/fs", &token, json!({ "path": app.media.path() })).await;
     let names: Vec<_> =
         listing.body["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap().to_owned()).collect();
     assert_eq!(names, vec!["Alpha", "beta"]);
@@ -528,16 +544,6 @@ async fn settings_validation_and_folder_browser() {
     let bad_lib =
         app.post("/api/libraries", &token, json!({"name": "X", "kind": "movies", "paths": ["relative/path"]})).await;
     assert_eq!(bad_lib.status, StatusCode::BAD_REQUEST);
-}
-
-fn urlencode(path: &Path) -> String {
-    path.to_string_lossy()
-        .bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
 }
 
 #[tokio::test]

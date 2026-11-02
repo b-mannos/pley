@@ -126,8 +126,13 @@ protect your server.
   page (`Sec-Fetch-Site`, or `Origin`), since a page on another port of the
   same host is the same site to the browser.
 - Other sites' pages can't make the API fetch anything with the cookie
-  (links, pictures); only the address bar and bookmarks can. A `?token=` in
-  their address changes nothing, since the cookie is what would sign them in.
+  (links, pictures) where the browser says which page asked
+  (`Sec-Fetch-Site`: over HTTPS, and to `localhost`); only the address bar
+  and bookmarks can. Over plain HTTP to another address browsers don't say
+  it, so a GET there does no more than read and play: the folder browser,
+  which opens whatever folder it is given, is a POST, whose `Origin` says.
+  A `?token=` in their address changes nothing, since the cookie is what
+  would sign them in.
 - The devices and apps lists show the address a request came from as the
   rate limits count it, which nobody on the internet can choose.
 - Administrators change their own password, PIN and two-step sign-in in

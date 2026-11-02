@@ -802,8 +802,20 @@ fn roots() -> Vec<DirEntry> {
     out
 }
 
-pub async fn browse_fs(_admin: AdminUser, Query(query): Query<HashMap<String, String>>) -> ApiResult<Json<Listing>> {
-    let Some(raw) = query.get("path").map(|p| p.trim()).filter(|p| !p.is_empty()) else {
+#[derive(Deserialize)]
+pub struct FsQuery {
+    #[serde(default)]
+    path: Option<String>,
+}
+
+/// `POST /api/fs`: the folders in `path`, or the roots and drives without
+/// it, to pick a library's or the transcoder's from. A POST, though it
+/// changes nothing: over plain HTTP browsers don't say which page asked for
+/// a GET, so another site's link or picture could have the server open a
+/// folder of its choosing (on Windows, a share of its own, signing in to
+/// it). A POST's `Origin` says.
+pub async fn browse_fs(_admin: AdminUser, Json(query): Json<FsQuery>) -> ApiResult<Json<Listing>> {
+    let Some(raw) = query.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) else {
         return Ok(Json(Listing { path: None, parent: None, entries: roots() }));
     };
     let path = PathBuf::from(raw);

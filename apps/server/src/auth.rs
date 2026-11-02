@@ -1037,11 +1037,13 @@ async fn authenticate(parts: &Parts, state: &AppState) -> Result<AuthUser, AppEr
     // make too (a page on another port of this host is the same site to
     // the browser), and SameSite=Lax lets their POSTs through when there is
     // no body to ask about first, and their links: what changes anything
-    // with it comes from pley's own page, and no other site's page has it
-    // fetch anything (an administrator's folder browser opening a share of
-    // the attacker's, say). Typed addresses and bookmarks are no site's. The
-    // cookie is what signs the request in, `?token=` or not; a header is no
-    // cookie.
+    // with it comes from pley's own page. Browsers say which page asked
+    // (`Sec-Fetch-Site`) only over HTTPS and to localhost: over plain HTTP
+    // another site's link or picture is a GET like pley's own pages', so
+    // what could have the server reach out where it's told (the folder
+    // browser opening a share of the attacker's, say) is a POST, whose
+    // `Origin` says. Typed addresses and bookmarks are no site's. The cookie
+    // is what signs the request in, `?token=` or not; a header is no cookie.
     let by_cookie = header_token(parts).is_none() && cookie_token(parts).is_some();
     if by_cookie {
         let elsewhere = match parts.method {
@@ -1056,14 +1058,16 @@ async fn authenticate(parts: &Parts, state: &AppState) -> Result<AuthUser, AppEr
 }
 
 /// Whether the browser says another site's page asked for this (a link, an
-/// image, a fetch), not the user's own address bar or bookmarks.
+/// image, a fetch), not the user's own address bar or bookmarks. Over plain
+/// HTTP to an address other than localhost, browsers say nothing either way.
 fn from_another_sites_page(parts: &Parts) -> bool {
     parts.headers.get("sec-fetch-site").is_some_and(|site| matches!(site.as_bytes(), b"cross-site" | b"same-site"))
 }
 
 /// Whether a browser says another site's page made this request: by
-/// `Sec-Fetch-Site`, or, without it (older browsers), by an `Origin` other
-/// than the server it went to. A request saying neither isn't a page's.
+/// `Sec-Fetch-Site`, or, without it (older browsers, and plain HTTP to an
+/// address other than localhost), by an `Origin` other than the server it
+/// went to. A request saying neither isn't a page's.
 fn from_another_site(parts: &Parts) -> bool {
     if let Some(site) = parts.headers.get("sec-fetch-site") {
         return site.as_bytes() != b"same-origin";

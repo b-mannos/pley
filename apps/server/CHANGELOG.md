@@ -67,6 +67,12 @@ describes how they are made.
 - People who aren't administrators no longer see FFmpeg's words, which
   name the server's files, in the activity's sessions or a download that
   failed, as apps already didn't.
+- The folder browser (Settings, picking a library's or the transcoder's
+  folder) is asked with `POST /api/fs`, no longer `GET`. Over plain HTTP
+  browsers don't say which page asked for a GET, so another site's link
+  or picture could have the server open a folder of its choosing while an
+  administrator was signed in, and on Windows a share named so had the
+  server sign in to it.
 
 ## [0.1.3] - 2026-11-02
 

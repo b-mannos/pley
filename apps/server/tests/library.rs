@@ -941,7 +941,7 @@ async fn administration_endpoints() {
         (Method::GET, "/api/transcoder"),
         (Method::GET, "/api/settings"),
         (Method::PUT, "/api/settings"),
-        (Method::GET, "/api/fs"),
+        (Method::POST, "/api/fs"),
     ] {
         let reply = app.call(method.clone(), uri, Some(&bob), Some(json!({})), &[]).await;
         assert_eq!(reply.status, StatusCode::FORBIDDEN, "{method} {uri}");
@@ -980,14 +980,14 @@ async fn administration_endpoints() {
     }
     std::fs::write(root.join("notes.txt"), b"x").unwrap();
     let path = root.to_string_lossy().into_owned();
-    let listing = app.get(&format!("/api/fs?path={}", common::encode(&path)), &admin).await;
+    let listing = app.post("/api/fs", &admin, json!({ "path": path })).await;
     let names: Vec<&str> =
         listing.body["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["Films", "series"]);
     assert_eq!(listing.body["parent"], json!(root.parent().unwrap().to_string_lossy()));
-    let missing = app.get(&format!("/api/fs?path={}", common::encode(&format!("{path}/nope"))), &admin).await;
+    let missing = app.post("/api/fs", &admin, json!({ "path": format!("{path}/nope") })).await;
     assert_eq!(missing.status, StatusCode::BAD_REQUEST);
-    assert_eq!(app.get("/api/fs?path=relative", &admin).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(app.post("/api/fs", &admin, json!({ "path": "relative" })).await.status, StatusCode::BAD_REQUEST);
 }
 
 /// A conditional GET of `uri` with the tag of an earlier answer.
