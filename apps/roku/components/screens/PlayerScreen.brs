@@ -152,6 +152,9 @@ sub init()
     for each frame in m.pictureFrames
         frame.setHttpAgent(uiHttpAgent(false))
     end for
+    ' Captions as last seen: the person turning them off turns off pictures
+    ' drawn here.
+    m.captionModeSeen = httpString(m.video.globalCaptionMode)
     m.pictureAsk = 0
     m.pictureWaiting = false
     m.pictureAgain = false
@@ -713,10 +716,14 @@ end sub
 sub onTracks()
     if m.info = invalid or m.item = invalid then return
     file = contentFile(m.item, m.info.file_id)
-    subtitle = tracksSubtitleShown(httpString(m.video.globalCaptionMode), httpString(m.video.currentSubtitleTrack), m.info.subtitles, m.global.session.server)
-    ' Roku's options can't name pictures drawn here: captions turned on or
-    ' off without a text track leave them be.
-    if m.pictureIndex >= 0 and subtitle = -1 then subtitle = -2
+    mode = httpString(m.video.globalCaptionMode)
+    subtitle = tracksSubtitleShown(mode, httpString(m.video.currentSubtitleTrack), m.info.subtitles, m.global.session.server)
+    settled = m.tracksFrom >= 0 and m.clock.TotalMilliseconds() >= m.tracksFrom
+    ' Roku's options can't name pictures drawn here: captions on without a
+    ' text track leave them be; turned off by the person, they go.
+    turnedOff = settled and LCase(mode) = "off" and LCase(m.captionModeSeen) <> "off"
+    m.captionModeSeen = mode
+    if m.pictureIndex >= 0 and subtitle = -1 and not turnedOff then subtitle = -2
     ' A converted stream has one audio track; a file played as it is, all.
     audio = -2
     if not httpTrue(m.info.hls) then audio = tracksAudioShown(m.video.availableAudioTracks, tracksTrackId(m.video.currentAudioTrack), file)
@@ -729,7 +736,7 @@ sub onTracks()
         m.audioPlaying = audio
     end if
     if not subtitlePicked and not audioPicked then return
-    if m.tracksFrom < 0 or m.clock.TotalMilliseconds() < m.tracksFrom then return
+    if not settled then return
     saveTracks(file, subtitlePicked, audioPicked)
 end sub
 

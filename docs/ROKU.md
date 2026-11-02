@@ -231,8 +231,9 @@ next.
   frame while one shows. The Video node tells its position every 0.2 s
   while pictures are drawn, else every second.
 - Roku's options list only text tracks: PGS is picked on a title's page.
-  A text track picked in the options takes the place of the pictures;
-  captions turned on or off alone leave them be.
+  A text track picked in the options takes the place of the pictures, and
+  captions turned off there turn them off; captions turned on without a
+  text track leave them be.
 - A server that can't make the pictures has them burned in: the stream
   reopens where it was with `subtitle_index`, and caps without PGS in
   `subtitle_codecs` or `picture_subtitles_sideload` (to the server, a
