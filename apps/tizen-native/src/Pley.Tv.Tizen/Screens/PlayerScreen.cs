@@ -124,6 +124,8 @@ sealed class PlayerScreen : Sheet
     IReadOnlyList<ChapterMark>? segmentsOf;
     long segmentsFor = -1;
     long? previewAt;
+    /// <summary>The source when a drive's file plays: let go as the player goes.</summary>
+    LocalPlayerSource? local;
     /// <summary>The seek previews <see cref="previewAt"/> was shown with: ones that come mid-seek show at once.</summary>
     TrickplaySet? previewsOf;
     string? clockText;
@@ -163,9 +165,10 @@ sealed class PlayerScreen : Sheet
         this.gate = gate;
         this.closed = closed;
         IPlayerSource source = new AppPlayerSource(state, () => Caps(state));
-        if (localFile != null) source = new LocalPlayerSource(source, localFile);
-        else if (disc is { } d) source = new LocalPlayerSource(source, d.Image, d.Title, d.Server);
+        if (localFile != null) source = local = new LocalPlayerSource(source, localFile);
+        else if (disc is { } d) source = local = new LocalPlayerSource(source, d.Image, d.Title, d.Server);
         model = new PlayerModel(request, source, Engine, new ContextScheduler(), reporter);
+        if (local != null) local.Position = model.LivePositionMs;
         seeker = new Seeker(model.LivePositionMs, () => model.Clock.Value.DurationMs, SeekTo);
         // Asked for before the screen is made, which holds the UI half a second: the server answers
         // meanwhile. Its answer comes after (the UI thread's), and the watches below take the state as it is.
@@ -1225,6 +1228,8 @@ sealed class PlayerScreen : Sheet
         foreach (var w in watches) w.Dispose();
         watches.Clear();
         model.Close();
+        // What a drive's file was having read out of it (its subtitles) stops with it.
+        local?.Close();
         // The pictures' textures go now, not when the view is collected.
         pictures.Show(null);
         chapterStrip.Forget();

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Pley.Tv.Core.Api;
 using Pley.Tv.Core.Net;
@@ -60,6 +61,22 @@ public sealed class LocalPlayerSource : IPlayerSource
         public readonly List<SubtitleBlock> Blocks = new List<SubtitleBlock>();
         public Task Done = Task.CompletedTask;
         public MatroskaTrack Track = null!;
+        /// <summary>Done when the first block is read: an answer goes then, not after a wait.</summary>
+        public TaskCompletionSource<bool> First = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        /// <summary>The whole track is read: its answers say so.</summary>
+        public bool Whole;
+        /// <summary>The stretches of the film read so far, in ms: where the film is outside them, reading goes there.</summary>
+        public readonly List<(long From, long To)> Read = new List<(long, long)>();
+        /// <summary>The blocks' starts read, so one read twice is kept once.</summary>
+        public readonly HashSet<long> Starts = new HashSet<long>();
+        /// <summary>The reading under way, ended when the film jumps away from it.</summary>
+        public CancellationTokenSource? Pass;
+
+        /// <summary>Whether the reading has <paramref name="ms"/>: read already, or just ahead of where it is.</summary>
+        public bool Covers(long ms)
+        {
+            lock (Blocks) return Read.Any(r => ms >= r.From - 2_000 && ms <= r.To + 8_000);
+        }
 
         public IReadOnlyList<SubtitleBlock> Now()
         {
@@ -198,12 +215,13 @@ public sealed class LocalPlayerSource : IPlayerSource
     }
 
     /// <summary>
-    /// A DVD title as an item: the disc's name and the title's number, its length, chapters and
-    /// audio. Its subtitles, pictures interleaved in the title's VOBs, aren't read out yet.
+    /// A DVD title as an item: the disc's name and the title's number, its length, chapters,
+    /// audio and subtitles.
     /// </summary>
     ItemDetail DescribeDisc(DvdTitle t)
     {
-        var streams = t.Streams.Where(s => s.Kind != "subtitle").ToList();
+        // Its subtitles are read out of the VOBs as they're asked for (DvdSubtitles).
+        var streams = t.Streams.ToList();
         var video = streams.FirstOrDefault(s => s.Kind == "video");
         return new ItemDetail
         {
@@ -347,7 +365,7 @@ public sealed class LocalPlayerSource : IPlayerSource
     /// <summary>The address of a text track of the file's own: "embedded:3".</summary>
     const string EmbeddedPrefix = "embedded:";
 
-    /// <summary>How long an answer waits for a track being read out of the file before it gives what it has.</summary>
+    /// <summary>How long an answer waits for a track being read out of the file before it gives what it has: less once a block is read.</summary>
     const int ExtractWaitMs = 1_000;
 
     /// <summary>
@@ -361,7 +379,7 @@ public sealed class LocalPlayerSource : IPlayerSource
         return Task.Run(async () =>
         {
             var x = Extract(int.Parse(url.Substring(EmbeddedPrefix.Length), System.Globalization.CultureInfo.InvariantCulture));
-            await Task.WhenAny(x.Done, Task.Delay(ExtractWaitMs)).ConfigureAwait(false);
+            await Task.WhenAny(x.Done, x.First.Task, Task.Delay(ExtractWaitMs)).ConfigureAwait(false);
             return new SubtitleText(MatroskaSubtitles.WebVtt(x.Now(), x.Track.CodecId), x.Done.IsCompleted);
         });
     }
@@ -375,13 +393,94 @@ public sealed class LocalPlayerSource : IPlayerSource
         return Task.Run(async () =>
         {
             var x = Extract(index);
-            await Task.WhenAny(x.Done, Task.Delay(ExtractWaitMs)).ConfigureAwait(false);
+            // The film is somewhere the reading isn't (a seek): it starts again there.
+            if (disc != null && !x.Whole && Position?.Invoke() is long at && !x.Covers(at))
+            {
+                var nth = disc.Streams.Where(s => s.Kind == "subtitle").ToList().FindIndex(s => s.Index == index);
+                if (nth >= 0 && nth < disc.SubpictureIds.Count) ReadDisc(x, disc, disc.SubpictureIds[nth], at);
+            }
+            await Task.WhenAny(x.Done, x.First.Task, Task.Delay(ExtractWaitMs)).ConfigureAwait(false);
             // The pictures as they are, no .mks made of them.
             var samples = x.Now().Select(b => new Subtitles.Pictures.PictureSample(b.StartMs, b.DurationMs, b.Data)).ToList();
-            return new SubtitlePictures(new byte[0], x.Done.IsCompleted)
+            return new SubtitlePictures(new byte[0], disc != null ? x.Whole : x.Done.IsCompleted)
             {
                 Track = new Subtitles.Pictures.PictureTrack(x.Track.CodecId, x.Track.Private, samples),
             };
+        });
+    }
+
+    /// <summary>Where the film is, for reading what's near it first (a DVD's subtitles); set by the player.</summary>
+    public Func<long>? Position { get; set; }
+
+    /// <summary>Ends what is being read out of the file: the player let it go.</summary>
+    public void Close() => closing.Cancel();
+
+    readonly CancellationTokenSource closing = new CancellationTokenSource();
+
+    /// <summary>
+    /// A DVD title's subtitle stream <paramref name="index"/> read out of its VOBs, as the .mks of a
+    /// VobSub track: the subpicture units, the disc's palette and the picture's size.
+    /// </summary>
+    Extraction ExtractDisc(DvdTitle t, int index)
+    {
+        var subtitles = t.Streams.Where(s => s.Kind == "subtitle").ToList();
+        var nth = subtitles.FindIndex(s => s.Index == index);
+        if (nth < 0 || nth >= t.SubpictureIds.Count) throw new LocalPlaybackException("No such subtitle track");
+        var x = new Extraction { Track = new MatroskaTrack(index, 1, "S_VOBSUB", System.Text.Encoding.ASCII.GetBytes(t.Idx), null, null) };
+        ReadDisc(x, t, t.SubpictureIds[nth], Position?.Invoke() ?? 0);
+        return x;
+    }
+
+    /// <summary>
+    /// Reads stream <paramref name="id"/> of the title from <paramref name="from"/> (the film's
+    /// place), ending the reading before: a seek away from what's read starts it again there,
+    /// keeping what was read.
+    /// </summary>
+    void ReadDisc(Extraction x, DvdTitle t, int id, long from)
+    {
+        x.Pass?.Cancel();
+        var pass = CancellationTokenSource.CreateLinkedTokenSource(closing.Token);
+        x.Pass = pass;
+        x.First = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = x.First;
+        var range = -1;
+        long last = -1;
+        x.Done = Task.Run(() =>
+        {
+            var took = Marks.On ? DateTime.UtcNow : default;
+            using var f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 4096);
+            try
+            {
+                DvdSubtitles.Read(f, t, id, b =>
+                {
+                    lock (x.Blocks)
+                    {
+                        if (!x.Starts.Add(b.StartMs)) return;
+                        x.Blocks.Add(b);
+                    }
+                    if (first.TrySetResult(true) && Marks.On) Marks.Note($"subtitles: the first DVD unit read is at {b.StartMs / 1000} s, the film at {(Position?.Invoke() ?? 0) / 1000} s");
+                }, pass.Token, from, ms =>
+                {
+                    // A stretch read; a new one where the reading jumped back (a cell's start, the title's).
+                    lock (x.Blocks)
+                    {
+                        if (range < 0 || ms < last - 1_000)
+                        {
+                            x.Read.Add((ms, ms));
+                            range = x.Read.Count - 1;
+                        }
+                        else x.Read[range] = (x.Read[range].From, Math.Max(x.Read[range].To, ms));
+                        last = ms;
+                    }
+                });
+                x.Whole = true;
+            }
+            catch (OperationCanceledException)
+            {
+                // The film jumped away, or the player let go.
+            }
+            first.TrySetResult(false);
+            if (Marks.On) Marks.Note($"subtitles: DVD stream {id} of title {t.Number} {(x.Whole ? "read" : "left")}, {x.Blocks.Count} units in {(DateTime.UtcNow - took).TotalMilliseconds:0} ms");
         });
     }
 
@@ -391,6 +490,7 @@ public sealed class LocalPlayerSource : IPlayerSource
         lock (extractions)
         {
             if (extractions.TryGetValue(index, out var running)) return running;
+            if (disc != null) return extractions[index] = ExtractDisc(disc, index);
             var track = facts?.Tracks.FirstOrDefault(t => t.Index == index) ?? throw new LocalPlaybackException("No such subtitle track");
             var x = new Extraction { Track = track };
             x.Done = Task.Run(() =>
@@ -415,7 +515,8 @@ public sealed class LocalPlayerSource : IPlayerSource
                 MatroskaSubtitles.Read(Read, facts!, track, b =>
                 {
                     lock (x.Blocks) x.Blocks.Add(b);
-                });
+                    x.First.TrySetResult(true);
+                }, closing.Token);
                 if (Marks.On) Marks.Note($"subtitles: track {index} read out of the file, {x.Blocks.Count} blocks in {(DateTime.UtcNow - took).TotalMilliseconds:0} ms");
             });
             extractions[index] = x;

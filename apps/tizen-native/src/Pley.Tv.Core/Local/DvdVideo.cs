@@ -9,13 +9,22 @@ namespace Pley.Tv.Core.Local;
 /// <summary>A stretch of a disc image: <paramref name="Offset"/> bytes in, <paramref name="Length"/> long.</summary>
 public sealed record DiscSpan(long Offset, long Length);
 
+/// <summary>A cell of a title: when it starts in the title, and the stretches of the image it is.</summary>
+public sealed record DvdCell(long StartMs, IReadOnlyList<DiscSpan> Spans);
+
 /// <summary>
 /// A DVD title: its number on the disc, its length and chapters, its audio and subtitle streams
 /// as the player lists them, and the stretches of the image its video cells are, in play order.
 /// </summary>
+/// <param name="Cells">Its cells in play order: a subtitle's time counts from its cell's start.</param>
+/// <param name="SubpictureIds">Each subtitle stream's subpicture stream in the VOBs (0-31), in the order of the subtitle streams.</param>
+/// <param name="Idx">The subtitles' plane and palette as a VobSub .idx header says them ("size: 720x480", "palette: …").</param>
 public sealed record DvdTitle(int Number, long DurationMs, IReadOnlyList<Chapter> Chapters, IReadOnlyList<MediaStream> Streams, IReadOnlyList<DiscSpan> Spans)
 {
     public long Bytes => Spans.Sum(s => s.Length);
+    public IReadOnlyList<DvdCell> Cells { get; init; } = new DvdCell[0];
+    public IReadOnlyList<int> SubpictureIds { get; init; } = new int[0];
+    public string Idx { get; init; } = "";
 }
 
 /// <summary>
@@ -120,14 +129,22 @@ public static class DvdVideo
 
         // The cells' sectors, counted from the first VOB, as stretches of the image.
         var spans = new List<DiscSpan>();
-        foreach (var cell in cells)
-            foreach (var span in Spans(vobs, cell.First, cell.Last))
+        var dvdCells = cells.Select(c => new DvdCell(c.StartMs, Spans(vobs, c.First, c.Last).ToList())).ToList();
+        foreach (var cell in dvdCells)
+            foreach (var span in cell.Spans)
                 if (spans.Count > 0 && spans[spans.Count - 1].Offset + spans[spans.Count - 1].Length == span.Offset)
                     spans[spans.Count - 1] = spans[spans.Count - 1] with { Length = spans[spans.Count - 1].Length + span.Length };
                 else spans.Add(span);
         if (spans.Count == 0) return null;
 
-        return new DvdTitle(number, durationMs, chapters, Streams(v, pgc), spans);
+        var (streams, ids) = Streams(v, pgc);
+        var (width, height) = (streams[0].Width ?? 720, streams[0].Height ?? 480);
+        return new DvdTitle(number, durationMs, chapters, streams, spans)
+        {
+            Cells = dvdCells,
+            SubpictureIds = ids,
+            Idx = $"size: {width}x{height}\npalette: {string.Join(", ", Palette(v, pgc))}\n",
+        };
     }
 
     /// <summary>Sectors <paramref name="first"/> to <paramref name="last"/> of the VOBs, as stretches of the image (a VOB ends at 1 GB, and the next goes on).</summary>
@@ -144,9 +161,35 @@ public static class DvdVideo
         }
     }
 
-    /// <summary>The video, then the audio streams the program chain plays, then its subtitles, numbered as the player numbers them.</summary>
-    static List<MediaStream> Streams(byte[] v, int pgc)
+    /// <summary>
+    /// The program chain's 16 colours (0, Y, Cr, Cb each) as RGB hex, as an .idx's palette line has
+    /// them: the subtitles' pixels name four of them.
+    /// </summary>
+    static IEnumerable<string> Palette(byte[] v, int pgc)
     {
+        for (var i = 0; i < 16; i++)
+        {
+            var at = pgc + 0xa4 + i * 4;
+            if (at + 4 > v.Length)
+            {
+                yield return "000000";
+                continue;
+            }
+            double y = v[at + 1], cr = v[at + 2] - 128, cb = v[at + 3] - 128;
+            int Clamp(double x) => (int)Math.Max(0, Math.Min(255, Math.Round(x)));
+            yield return $"{Clamp(y + 1.402 * cr):x2}{Clamp(y - 0.344136 * cb - 0.714136 * cr):x2}{Clamp(y + 1.772 * cb):x2}";
+        }
+    }
+
+    /// <summary>
+    /// The video, then the audio streams the program chain plays, then its subtitles, numbered as
+    /// the player numbers them; with each subtitle's subpicture stream in the VOBs (the widescreen
+    /// one for a 16:9 title, else the 4:3 one).
+    /// </summary>
+    static (List<MediaStream> Streams, List<int> Ids) Streams(byte[] v, int pgc)
+    {
+        var ids = new List<int>();
+        var wide = ((v[0x200] >> 2) & 3) == 3;
         var streams = new List<MediaStream>();
         // The title set's video attributes: coding, TV system, then the resolution.
         var video = v[0x200];
@@ -176,7 +219,9 @@ public static class DvdVideo
         var spuCount = Math.Min(32, U16(v, 0x254));
         for (var s = 0; s < spuCount; s++)
         {
-            if ((v[pgc + 0x1c + s * 4] & 0x80) == 0) continue;
+            var control = pgc + 0x1c + s * 4;
+            if ((v[control] & 0x80) == 0) continue;
+            ids.Add((wide ? v[control + 1] : v[control]) & 0x1f);
             var at = 0x256 + s * 6;
             streams.Add(new MediaStream
             {
@@ -187,7 +232,7 @@ public static class DvdVideo
                 TextBased = false,
             });
         }
-        return streams;
+        return (streams, ids);
     }
 
     static string? Lang(byte[] b, int at)

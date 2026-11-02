@@ -658,9 +658,20 @@ converting, seek previews, the next episode.
   image's ISO 9660 directory gives VIDEO_TS (`DiscImage`), its IFOs the
   titles (`DvdVideo`), and a title's cells, read out of the image, are
   served to the TV's player as one MPEG program stream on the loopback
-  address, with ranges, so it seeks (`Net/SpanServer.cs`). DVD subtitles
-  aren't read out yet. An encrypted DVD or a Blu-ray image says it can't
-  be played.
+  address, with ranges, so it seeks (`Net/SpanServer.cs`). An encrypted
+  DVD or a Blu-ray image says it can't be played.
+- **A DVD's subtitles** are read out of the title's packs as they're
+  chosen (`DvdSubtitles`): one subpicture stream's units, in private
+  stream 1, each timed from its cell's first picture, drawn by the VobSub
+  decoder with the disc's palette. A DVD has no index of them, so reading
+  starts where the film is: the time's place in the bytes is found as the
+  player seeks, bracketing it by the pictures' times, and reading goes on
+  from 2 s before it; a seek away from what's read starts it there again.
+  A partial track is asked for again after 1 s, then 2, then every 4 s,
+  and at once after a seek. The pictures read are handed to the decoder as
+  they are: built into an .mks each time, a DVD's grew to megabytes copied
+  every few seconds, and the TV's collector stopped the app long enough
+  for the TV to close it.
 - **Thumbnails can't be made on the TV**: frames taken out of a file decode
   in software (15 to 20 s each, 4K not at all), and the player's frame
   capture isn't on Samsung TVs (`multimedia.raw_video`).

@@ -241,7 +241,10 @@ It has no releases yet: it is built and installed by hand
 - A DVD's disc image (.iso) on a USB drive opens in the native app on its
   titles, the main feature first, with their lengths, chapters and audio
   languages; a title plays in Pley's player and seeks, from where it
-  stopped. There are no menus, and DVD subtitles don't show yet.
+  stopped. There are no menus.
+- A DVD's subtitles show in the native app: chosen, they come within a
+  second or two, where the film is and after each seek, in the disc's own
+  colours.
 
 ### Fixed
 

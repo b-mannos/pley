@@ -151,6 +151,49 @@ public class DiscTests
         Assert.Empty(DvdVideo.Titles(Reader(new byte[40 * Sector])));
     }
 
+    /// <summary>A pack sector: the MPEG-2 pack header, then PES packets (stream, PTS in 90 kHz or none, payload), padded to 2048.</summary>
+    static byte[] Pack(params (int Stream, long? Pts, byte[] Payload)[] packets)
+    {
+        var b = new byte[Sector];
+        new byte[] { 0, 0, 1, 0xba, 0x44, 0, 4, 0, 4, 1, 1, 0x89, 0xc3, 0xf8 }.CopyTo(b, 0);
+        var at = 14;
+        foreach (var (stream, pts, payload) in packets)
+        {
+            var header = pts == null ? new byte[] { 0x81, 0x00, 0 } : new byte[] { 0x81, 0x80, 5, (byte)(0x21 | ((pts.Value >> 29) & 0x0e)), (byte)(pts.Value >> 22), (byte)(((pts.Value >> 14) & 0xfe) | 1), (byte)(pts.Value >> 7), (byte)(((pts.Value << 1) & 0xfe) | 1) };
+            var length = header.Length + payload.Length;
+            new byte[] { 0, 0, 1, (byte)stream, (byte)(length >> 8), (byte)length }.CopyTo(b, at);
+            header.CopyTo(b, at + 6);
+            payload.CopyTo(b, at + 6 + header.Length);
+            at += 6 + length;
+        }
+        return b;
+    }
+
+    [Fact]
+    public void A_DVD_titles_subtitles_are_read_out_of_its_packs_timed_from_their_cell()
+    {
+        // Cell 2 starts 15 s into the title; its first picture's PTS is 900000 (10 s).
+        // A subtitle unit of 8 bytes, its size first, in two packets: the first with the PTS 1080000 (12 s).
+        var unit = new byte[] { 0, 8, 0, 4, 0xaa, 0xbb, 0xcc, 0xdd };
+        var image = Pack((0xe0, 900_000, new byte[] { 0, 0, 1, 0xb3 }))
+            .Concat(Pack((0xbd, 1_080_000, new byte[] { 0x21 }.Concat(unit.Take(5)).ToArray()), (0xbd, 900_000, new byte[] { 0x20, 9, 9 })))
+            .Concat(Pack((0xbd, null, new byte[] { 0x21 }.Concat(unit.Skip(5)).ToArray()))).ToArray();
+        var title = new DvdTitle(1, 60_000, new Pley.Tv.Core.Api.Chapter[0], new Pley.Tv.Core.Api.MediaStream[0], new[] { new DiscSpan(0, image.Length) })
+        {
+            Cells = new[] { new DvdCell(0, new DiscSpan[0]), new DvdCell(15_000, new[] { new DiscSpan(0, image.Length) }) },
+        };
+        var found = new System.Collections.Generic.List<SubtitleBlock>();
+        DvdSubtitles.Read(new MemoryStream(image), title, 1, found.Add);
+        // Stream 1 (0x21) only: stream 0's packet isn't its.
+        var block = Assert.Single(found);
+        Assert.Equal(15_000 + 2_000, block.StartMs);
+        Assert.Equal(unit, block.Data);
+        // Read from the cell the film is in: the same unit, whichever cell comes first.
+        found.Clear();
+        DvdSubtitles.Read(new MemoryStream(image), title, 1, found.Add, fromMs: 20_000);
+        Assert.Equal(17_000, Assert.Single(found).StartMs);
+    }
+
     [Fact]
     public async Task Stretches_of_a_file_are_served_as_one_with_ranges()
     {
