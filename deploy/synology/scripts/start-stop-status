@@ -1,0 +1,151 @@
+#!/bin/sh
+# Pley on DSM: what Package Center runs to start, stop and check Pley
+# (deploy/synology/README.md). Runs as the package user, pley (conf/privilege).
+# The data folder is the package's var folder, which DSM keeps across
+# upgrades and, unless the uninstall wizard says otherwise, uninstalls.
+
+pkg_dest="${SYNOPKG_PKGDEST:-/var/packages/pley/target}"
+pkg_var="${SYNOPKG_PKGVAR:-/var/packages/pley/var}"
+pid_file="$pkg_var/pley.pid"
+log_file="$pkg_var/logs/pley.log"
+config_file="$pkg_var/pley.toml"
+
+# A message Package Center shows after the action.
+say() {
+    [ -n "${SYNOPKG_TEMP_LOGFILE:-}" ] && echo "$1" > "$SYNOPKG_TEMP_LOGFILE"
+    echo "$1" >&2
+}
+
+# SynoCommunity's FFmpeg, the newest package installed: the package carries
+# none of its own (deploy/synology/README.md says why).
+ffmpeg_dir() {
+    for pkg in ffmpeg8 ffmpeg7; do
+        dir="/var/packages/$pkg/target/bin"
+        if [ -x "$dir/ffmpeg" ] && [ -x "$dir/ffprobe" ]; then
+            echo "$dir"
+            return 0
+        fi
+    done
+    return 1
+}
+
+running() {
+    [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null
+}
+
+start() {
+    if running; then
+        return 0
+    fi
+    rm -f "$pid_file"
+    mkdir -p "$pkg_var/logs"
+    export HOME="$pkg_var"
+    export PLEY_DATA_DIR="$pkg_var"
+    # pley.toml in the data folder may name an FFmpeg; an option on the
+    # command line or in the environment would override it.
+    if ! grep -q '^[[:space:]]*ffmpeg[[:space:]]*=' "$config_file" 2>/dev/null; then
+        if dir=$(ffmpeg_dir); then
+            export PLEY_FFMPEG="$dir/ffmpeg"
+            export PLEY_FFPROBE="$dir/ffprobe"
+        else
+            say "Pley needs FFmpeg. Install ffmpeg7 (or ffmpeg8) from SynoCommunity's package source, then start Pley again."
+            return 1
+        fi
+    fi
+
+    # Lines the log had before this start, so only this start's are read.
+    before=0
+    [ -f "$log_file" ] && before=$(wc -l < "$log_file")
+    "$pkg_dest/bin/pley" --no-tray < /dev/null > /dev/null 2>&1 &
+    echo $! > "$pid_file"
+
+    # Wait for Pley to listen, and show the setup link the first time: the
+    # log line says "open http://…/setup?code=…".
+    i=0
+    while [ $i -lt 15 ]; do
+        sleep 1
+        i=$((i + 1))
+        if ! running; then
+            rm -f "$pid_file"
+            say "Pley stopped right after starting. The log says why: $log_file"
+            return 1
+        fi
+        started=$(tail -n "+$((before + 1))" "$log_file" 2>/dev/null)
+        case "$started" in
+            *"listening on"*) break ;;
+        esac
+    done
+    link=$(printf '%s\n' "$started" | sed -n 's/.*open \(http[^ ]*setup?code=[^ ]*\).*/\1/p' | head -n 1)
+    if [ -n "$link" ]; then
+        say "Pley isn't set up yet. Open $(reachable "$link") to create the administrator account; the setup code is also in $log_file."
+    fi
+    return 0
+}
+
+# The NAS's address on the local network, for a link someone opens from
+# another computer: the source address of its default route, else its name.
+nas_address() {
+    addr=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -n 1)
+    [ -n "$addr" ] || addr=$(hostname 2>/dev/null)
+    echo "$addr"
+}
+
+# A link Pley logged, with the NAS's address in place of "localhost": when
+# Pley listens on every address it names this computer, which the person
+# reading Package Center isn't on. A link to one address is kept.
+reachable() {
+    case "$1" in
+        http://localhost:*)
+            addr=$(nas_address)
+            if [ -n "$addr" ]; then
+                echo "http://$addr:${1#http://localhost:}"
+                return
+            fi
+            ;;
+    esac
+    echo "$1"
+}
+
+stop() {
+    if ! running; then
+        rm -f "$pid_file"
+        return 0
+    fi
+    pid=$(cat "$pid_file")
+    # Pley stops its transcoder (which stops FFmpeg) before exiting; give it
+    # the time the Docker image does (--stop-timeout 30).
+    kill "$pid"
+    i=0
+    while kill -0 "$pid" 2>/dev/null && [ $i -lt 30 ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid"
+    fi
+    rm -f "$pid_file"
+    return 0
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    status)
+        # 0: running; 3: not running (DSM's codes).
+        if running; then
+            exit 0
+        fi
+        exit 3
+        ;;
+    log)
+        echo "$log_file"
+        ;;
+    *)
+        # prestart, prestop and killall: nothing to check or do.
+        exit 0
+        ;;
+esac

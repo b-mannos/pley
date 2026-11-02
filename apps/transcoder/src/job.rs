@@ -2038,11 +2038,18 @@ async fn read_progress(
     }
 }
 
-/// `"12.ts,48.000000,52.000000"` → `Some(12)`.
-fn parse_list_line(line: &str) -> Option<u32> {
+/// The segment a line of FFmpeg's segment list names:
+/// `"12.ts,48.000000,52.000000"` → `Some(12)`. Most builds list the file
+/// (some with its path); SynoCommunity's for Synology DSM lists the number
+/// alone, zero-padded (`"012,48.000000,52.000000"`).
+pub(crate) fn parse_list_line(line: &str) -> Option<u32> {
     let name = line.split(',').next()?.trim();
     let name = name.rsplit(['/', '\\']).next()?;
-    name.strip_suffix(".ts")?.parse().ok()
+    let number = name.strip_suffix(".ts").unwrap_or(name);
+    if number.is_empty() || !number.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    number.parse().ok()
 }
 
 fn describe(created: &JobCreated) -> String {
@@ -2153,7 +2160,12 @@ mod tests {
     fn parses_segment_list_lines() {
         assert_eq!(parse_list_line("12.ts,48.000000,52.000000"), Some(12));
         assert_eq!(parse_list_line("C:\\tmp\\job\\3.ts,1,2"), Some(3));
+        // SynoCommunity's FFmpeg for DSM: the number alone, zero-padded.
+        assert_eq!(parse_list_line("000,0.167000,2.919000"), Some(0));
+        assert_eq!(parse_list_line("1284,2862.541000,2864.043000"), Some(1284));
         assert_eq!(parse_list_line("index.m3u8"), None);
+        assert_eq!(parse_list_line("frame=12,1,2"), None);
+        assert_eq!(parse_list_line(""), None);
     }
 
     #[test]
