@@ -447,8 +447,9 @@ pub struct SubtitleTracks<C> {
     /// [`picture_tracks`]).
     pub more: bool,
     /// The span of the file's time (ticks, from and until) whose blocks
-    /// these are all of.
-    pub span: (u64, u64),
+    /// these are all of, when the Cues tell it: their times are the blocks'
+    /// own.
+    pub span: Option<(u64, u64)>,
 }
 
 #[derive(Debug)]
@@ -851,13 +852,17 @@ fn subtitle_tracks<C: Copy>(
     let clusters = clusters_of(layout.segment, &entries)?;
     let window = (ticks_from(order.from_ms, media, tick_ns), ticks_from(order.until_ms, media, tick_ns));
     let mut guess = true;
+    // Whether the cues' times have been the blocks' own so far: the spans
+    // stretches hold all the blocks of are told by them.
+    let mut timed = true;
     let stretches = stretches(&clusters, window);
     let last = stretches.len() - 1;
     for (n, stretch) in stretches.into_iter().enumerate() {
         budget.check()?;
         let read = read_blocks(path, &clusters, stretch.clone(), &mut guess, budget)?;
         let mut blocks: Vec<Vec<TextBlock>> = text.iter().map(|_| Vec::new()).collect();
-        for ReadBlock { cue_track, cluster_time, block, .. } in in_file_order(read.by_reader) {
+        let cues = clusters[stretch.clone()].iter().flat_map(|(_, entries)| entries.iter());
+        for (ReadBlock { cue_track, cluster_time, block, .. }, cue) in in_file_order(read.by_reader).zip(cues) {
             budget.check()?;
             if block.track != cue_track {
                 return Err("a cue points at another track's block".into());
@@ -869,6 +874,7 @@ fn subtitle_tracks<C: Copy>(
             }
             let cluster_time = i64::try_from(cluster_time).map_err(|_| "a cluster's timestamp is out of range")?;
             let time = cluster_time.checked_add(block.timecode as i64).ok_or("a block's timestamp is out of range")?;
+            timed &= u64::try_from(time).ok() == Some(cue.time);
             // FFmpeg gives a block before the start of time no timestamp, and
             // drops it.
             if time < 0 {
@@ -901,7 +907,7 @@ fn subtitle_tracks<C: Copy>(
                 blocks,
             })
             .collect();
-        let span = span(&clusters, &stretch);
+        let span = timed.then(|| span(&clusters, &stretch));
         let (reads, bytes_read, more) = (read.reads, read.bytes, n < last);
         got(SubtitleTracks { tick_ns, whole_ms, tracks, reads, bytes_read, more, span })?;
     }
@@ -2169,6 +2175,21 @@ pub(crate) mod tests {
             Ok(())
         })?;
         Ok(stretches)
+    }
+
+    #[test]
+    fn stretches_tell_what_they_hold_all_of_when_the_cues_tell_the_blocks_times() {
+        let dir = tempfile::tempdir().unwrap();
+        let spans = |file: &TestFile| -> Vec<Option<(u64, u64)>> {
+            let path = file.write(dir.path());
+            picture_stretches(&path, &movie_media(), &[3], (40_000, 50_000)).unwrap().iter().map(|s| s.span).collect()
+        };
+        let mut file = pictures_every_second(80);
+        assert_eq!(spans(&file), [Some((39_001, 50_000)), Some((49_001, u64::MAX)), Some((0, 40_000))]);
+        // Cues whose times aren't the blocks' own (read at their cluster's
+        // head) tell none.
+        file.cue_time_offset = 3;
+        assert_eq!(spans(&file), [None, None, None]);
     }
 
     /// The synthetic film with a PGS picture every second for `seconds`,

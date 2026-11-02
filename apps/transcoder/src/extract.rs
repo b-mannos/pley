@@ -293,10 +293,16 @@ impl Extractor {
             && start.asked
             && !near(extraction.from_ms, AROUND_START, start.from_ms)
         {
-            if let Some(bytes) = extraction.so_far.lock().around(start.from_ms) {
+            // The same answer for the same place: a read there first (once
+            // it is over), else what the track's read has, else a read.
+            let latest = extraction.seek.lock().clone().filter(|seek| near(seek.at_ms, AROUND_SEEK, start.from_ms));
+            if latest.is_some() {
+                seek = latest;
+            } else if let Some(bytes) = extraction.so_far.lock().around(start.from_ms) {
                 return Ok((bytes, false));
+            } else {
+                seek = self.seek(&extraction, &path, &track, index, start);
             }
-            seek = self.seek(&extraction, &path, &track, index, start);
         }
         let (done, first) = (extraction.result.clone(), extraction.first.clone());
         tokio::pin!(done);
@@ -381,10 +387,9 @@ impl Extractor {
 
     /// The blocks of picture track `index` around where a player is
     /// (`start`), read through the Cues beside the track's read
-    /// (`extraction`), unless the latest such read is near enough: `None`
-    /// when the track isn't read through its Cues. One is read at a time: a
-    /// later one waits for it, and one a later one replaces meanwhile isn't
-    /// read.
+    /// (`extraction`): `None` when the track isn't read through its Cues.
+    /// One is read at a time: a later one waits for it, and one a later one
+    /// replaces meanwhile isn't read.
     fn seek(
         &self,
         extraction: &PictureExtraction,
@@ -397,9 +402,6 @@ impl Extractor {
             return None;
         }
         let mut latest = extraction.seek.lock();
-        if let Some(seek) = latest.as_ref().filter(|seek| near(seek.at_ms, AROUND_SEEK, start.from_ms)) {
-            return Some(seek.clone());
-        }
         let (prober, cue_reads, path) = (self.prober.clone(), self.cue_reads.clone(), path.to_owned());
         let (seeking, seeks) = (self.seeking.clone(), extraction.seeks.clone());
         let before = latest.as_ref().map(|seek| seek.read.clone());
@@ -420,6 +422,9 @@ impl Extractor {
                 return None;
             }
             let permit = cue_reads.acquire_owned().await.ok()?;
+            if seeks.load(Ordering::Relaxed) != this_one {
+                return None;
+            }
             let _seeking = Seeking::new(seeking);
             let read = tokio::task::spawn_blocking(move || {
                 let _permit = permit;
@@ -1098,7 +1103,7 @@ impl SoFar {
         self.track.get_or_insert((stretch.codec, stretch.header));
         self.blocks.extend(stretch.blocks);
         // Stretches read one after the other make one span.
-        let (mut from, mut until) = stretch.span;
+        let Some((mut from, mut until)) = stretch.span else { return };
         self.spans.retain(|&(a, b)| {
             let apart = b < from || a > until;
             if !apart {
@@ -1120,6 +1125,13 @@ impl SoFar {
         blocks.sort_by_key(|b| b.time_ms);
         Some(mks::to_bytes(codec, header, &blocks))
     }
+
+    /// A copy of what is read so far: the track's codec and header, and
+    /// the blocks.
+    fn copy(&self) -> Option<(&'static str, Vec<u8>, Vec<mks::Block>)> {
+        let (codec, header) = self.track.clone()?;
+        Some((codec, header, self.blocks.clone()))
+    }
 }
 
 /// What a read through the Cues has read so far ([`SoFar`]), in order of
@@ -1127,11 +1139,7 @@ impl SoFar {
 /// under the lock, made off the async workers: it is tens of megabytes for
 /// a Blu-ray's track.
 async fn so_far_bytes(so_far: &Mutex<SoFar>) -> Option<Vec<u8>> {
-    let (codec, header, mut blocks) = {
-        let so_far = so_far.lock();
-        let (codec, header) = so_far.track.clone()?;
-        (codec, header, so_far.blocks.clone())
-    };
+    let (codec, header, mut blocks) = so_far.lock().copy()?;
     tokio::task::spawn_blocking(move || {
         blocks.sort_by_key(|b| b.time_ms);
         mks::to_bytes(codec, &header, &blocks)
@@ -1295,9 +1303,10 @@ fn write_through_cues(
         so_far.add(stretch);
         if more && let Some(first_written) = first_written.take() {
             first_ms = Some(started.elapsed().as_millis());
-            let (codec, header) = so_far.track.as_ref().ok_or("no track read")?;
-            write_mks(window, codec, header, &so_far.blocks)?;
+            // Written outside the lock, which answers take.
+            let (codec, header, blocks) = so_far.copy().ok_or("no track read")?;
             drop(so_far);
+            write_mks(window, codec, &header, &blocks)?;
             // Time spent waiting isn't time spent reading.
             budget.extend(first_written());
         } else if more {
@@ -1306,22 +1315,23 @@ fn write_through_cues(
         }
         Ok(())
     });
-    let mut so_far = so_far.lock();
-    let SoFar { track, blocks, .. } = &mut *so_far;
+    // Taken out of the lock (answers meanwhile wait for the file), and let
+    // go of once written.
+    let SoFar { track, mut blocks, .. } = std::mem::take(&mut *so_far.lock());
+    // Around the player first, then after, then before.
+    blocks.sort_by_key(|b| b.time_ms);
     let written = read.and_then(|()| {
         let (codec, header) = track.as_ref().ok_or("no track read")?;
-        // Around the player first, then after, then before.
-        blocks.sort_by_key(|b| b.time_ms);
-        write_mks(target, codec, header, blocks)
+        write_mks(target, codec, header, &blocks)
     });
     if let Err(reason) = written {
-        // What was read stands in as the window until FFmpeg's copy is
-        // whole (players keep what they have), rather than in memory.
-        if let Some((codec, header)) = track.as_ref() {
-            blocks.sort_by_key(|b| b.time_ms);
-            let _ = write_mks(window, codec, header, blocks);
+        // A window players were given stays theirs until FFmpeg's copy is
+        // whole; what was read stands in only where there was none.
+        if first_ms.is_none()
+            && let Some((codec, header)) = &track
+        {
+            let _ = write_mks(window, codec, header, &blocks);
         }
-        *so_far = SoFar::default();
         return Err(reason);
     }
     let _ = std::fs::remove_file(window);
@@ -1346,7 +1356,8 @@ struct Stretch {
     codec: &'static str,
     header: Vec<u8>,
     blocks: Vec<mks::Block>,
-    span: (i64, i64),
+    /// `None` when it can't be told.
+    span: Option<(i64, i64)>,
 }
 
 /// The stretch of picture track `index` (the one asked for) read through
@@ -1358,7 +1369,12 @@ fn stretch_of(found: matroska::PictureTracks, media: &MediaInfo, index: i64) -> 
         Ok(ticks) => ffmpeg_times(tick_ns, whole_ms, media, ticks, 0).map(|(ms, _)| ms),
         Err(_) => Some(i64::MAX),
     };
-    let span = (ms(found.span.0).ok_or_else(out_of_range)?, ms(found.span.1).ok_or_else(out_of_range)?);
+    // From the start of the file: from the start of the track, whenever the
+    // file starts.
+    let span = found.span.and_then(|(from, until)| {
+        let from = if from == 0 { Some(i64::MIN) } else { ms(from) };
+        Some((from?, ms(until)?))
+    });
     let stretch = found.tracks.into_iter().next().ok_or("no track read")?;
     let mut blocks: Vec<mks::Block> = Vec::with_capacity(stretch.blocks.len());
     for block in stretch.blocks {
@@ -2404,7 +2420,7 @@ mod tests {
             blocks: seconds
                 .map(|n| mks::Block { time_ms: i64::from(n) * 1_000, duration_ms: 0, data: vec![0x16, 0, n] })
                 .collect(),
-            span,
+            span: Some(span),
         };
         let so_far = Mutex::new(SoFar::default());
         assert_eq!(so_far_bytes(&so_far).await, None, "nothing read yet");
@@ -2446,18 +2462,19 @@ mod tests {
     async fn the_pictures_around_the_player_stay_while_ffmpeg_copies_a_track_whose_cues_fail_past_them() {
         let dir = tempfile::tempdir().unwrap();
         let extractor = Arc::new(extractor_with(dir.path(), stand_in_ffmpeg(dir.path(), true)));
-        let mut file = matroska::tests::pictures_every_second(80);
-        // A cue before them points at the video's block: the read fails there.
-        file.extra_cues.push((5, 5, 0, 0));
+        let mut file = matroska::tests::pictures_every_second(600);
+        // A cue well after them points at the video's block: the read fails
+        // there, after a stretch past them.
+        file.extra_cues.push((5, 500, 0, 0));
         let (name, key) = movie_in(&extractor, dir.path(), &file);
         let start = PictureStart { from_ms: 50_000, media: None, asked: true };
         let wait = Duration::from_secs(20);
         let (around, complete) =
             extractor.subtitle_matroska_so_far(&name, Some(3), wait, start.clone(), false).await.unwrap();
         assert!(!complete);
-        assert_eq!(picture_seconds(&around), (20..80).collect::<Vec<u8>>());
-        // What FFmpeg writes meanwhile isn't what the player was given: they
-        // stay until the track is whole.
+        assert_eq!(picture_seconds(&around), (20..170).collect::<Vec<u8>>());
+        // Neither what FFmpeg writes meanwhile nor more of what was read: the
+        // pictures the player was given stay until the track is whole.
         eventually(|| !ffmpeg_runs(dir.path()).is_empty()).await;
         let (written, _) = mks_being_written(dir.path(), 5);
         std::fs::write(dir.path().join("subtitles").join(format!("{key}_3.mks.part")), &written).unwrap();
@@ -2466,6 +2483,68 @@ mod tests {
         // What was read is in that file, not in memory any more.
         let so_far = extractor.pictures.lock().get(&format!("{key}_3")).map(|e| e.so_far.clone()).unwrap();
         assert!(so_far.lock().track.is_none() && so_far.lock().blocks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn reads_at_seeks_go_one_at_a_time_and_a_replaced_one_is_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let background = Background::new();
+        let mut extractor = extractor_with(dir.path(), dir.path().join("no-ffmpeg"));
+        extractor.background = Some(background.clone());
+        let extractor = Arc::new(extractor);
+        let (name, _) = movie_in(&extractor, dir.path(), &matroska::tests::pictures_every_second(250));
+        let wait = Duration::from_secs(20);
+        let at = |from_ms: i64| PictureStart { from_ms, media: None, asked: true };
+        let _starting = background.start();
+        let (window, _) = extractor.subtitle_matroska_so_far(&name, Some(3), wait, at(10_000), false).await.unwrap();
+        // Reads through the Cues wait for their turn: seeks to 3:20, 2:40 and
+        // 2:00 meanwhile, the last of which replaces the others.
+        let turn = extractor.cue_reads.clone().acquire_owned().await.unwrap();
+        let mut seeks = Vec::new();
+        for seconds in [200, 160, 120] {
+            let (extractor, name) = (extractor.clone(), name.clone());
+            seeks.push(tokio::spawn(async move {
+                extractor.subtitle_matroska_so_far(&name, Some(3), wait, at(seconds * 1_000), false).await.unwrap()
+            }));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        drop(turn);
+        let mut answers = Vec::new();
+        for seek in seeks {
+            answers.push(seek.await.unwrap().0);
+        }
+        // Those replaced have what the track's read has; the last, what is
+        // there.
+        assert_eq!((&answers[0], &answers[1]), (&window, &window));
+        assert_eq!(picture_seconds(&answers[2]), (110..160).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn spans_start_with_the_track_and_are_none_when_they_cant_be_told() {
+        let stretch = |span, whole_ms| {
+            let found = matroska::PictureTracks {
+                tick_ns: 1_000_000,
+                whole_ms,
+                tracks: vec![matroska::SubtitleTrack {
+                    stream_index: 3,
+                    codec: "S_HDMV/PGS",
+                    header: Vec::new(),
+                    blocks: Vec::new(),
+                }],
+                reads: 0,
+                bytes_read: 0,
+                more: true,
+                span,
+            };
+            let media = MediaInfo { start_ms: Some(1_000), ..Default::default() };
+            stretch_of(found, &media, 3).unwrap().span
+        };
+        // From the file's start: from the track's, whenever the file starts.
+        assert_eq!(stretch(Some((0, 5_000)), true), Some((i64::MIN, 4_000)));
+        assert_eq!(stretch(Some((2_001, u64::MAX)), true), Some((1_001, i64::MAX)));
+        assert_eq!(stretch(None, true), None);
+        // Times FFmpeg's can't be told from: no span, and no error.
+        assert_eq!(stretch(Some((2_001, 5_000)), false), None);
     }
 
     #[tokio::test]
@@ -2673,7 +2752,7 @@ mod tests {
             reads: 0,
             bytes_read: 0,
             more: false,
-            span: (0, u64::MAX),
+            span: None,
         }
     }
 
