@@ -177,7 +177,8 @@ public class PlayerModelTests
         h.Model.SelectSubtitle(null);
         Assert.Null(h.Model.Picture.Value);
         Assert.Single(h.Source.Bodies);
-        Assert.Equal(new[] { PgsMks }, h.Source.MksAsked);
+        // Asked for once, whole, from where the player was as they were chosen: the start, which is said too.
+        Assert.Equal(new[] { PgsMks + "?at=0" }, h.Source.MksAsked);
     }
 
     /// <summary>
@@ -739,5 +740,18 @@ public class PlayerPanelTests
         Assert.Equal((2, "30 min left"), (sleep.Focus, sleep.Rows[2].Supporting));
         Assert.False(h.Model.Choose(sleep.Rows[0]));
         Assert.Equal(new SleepChoice.Off(), h.State.Sleep.Set);
+    }
+
+    [Fact]
+    public void A_dolby_vision_profile_7_file_on_a_drive_plays_as_it_is()
+    {
+        var video = PlayerHarness.Video with { DynamicRange = "dolby_vision", DvProfile = 7, ColorTransfer = "smpte2084" };
+        h.Source.Local = true;
+        h.Add(PlayerHarness.Movie() with { Files = new[] { PlayerHarness.FileOf(10) with { Streams = new[] { video, PlayerHarness.English } } } });
+        h.Start(new PlayRequest(1, 0, true));
+        // A server would be asked again for a remux; a drive has none, and refused it.
+        Assert.Single(h.Source.Bodies);
+        Assert.Single(h.Engine.Prepared);
+        Assert.Equal(PhaseKind.Playing, h.State.Phase.Kind);
     }
 }

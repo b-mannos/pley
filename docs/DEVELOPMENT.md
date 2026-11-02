@@ -70,6 +70,7 @@ Then follow [First start](CONFIGURATION.md#first-start).
 | `bun install && bun run check` in `apps/roku` | Compiles, lints and tests the Roku app ([ROKU.md](ROKU.md)) |
 | `python -m unittest discover -s tests` in `apps/kodi` | Tests the Kodi add-on ([KODI.md](KODI.md)) |
 | `scripts/build.ps1` (or `build.sh`) | Builds the server's release archive locally |
+| `scripts/build-spk.sh` | Builds the Synology package from the static Linux archive ([deploy/synology](../deploy/synology/README.md)) |
 
 The Android app builds with the Android SDK and JDK 17 or newer (on Windows,
 Android Studio's: `JAVA_HOME=C:\Program Files\Android\Android Studio\jbr`).

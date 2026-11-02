@@ -80,6 +80,7 @@ sealed class TvShell : Sheet
     IReadOnlyList<RailItem> railItems = Array.Empty<RailItem>();
     LiveTvEntry? liveTv;
     bool nowPlaying;
+    bool storage;
 
     public TvShell(AppState state, Action<RailItem> onRail, Action onProfile) : base("shell", Axis.Row)
     {
@@ -219,7 +220,7 @@ sealed class TvShell : Sheet
     /// <summary>The rail's entries for the libraries, with Live TV while it has channels and Now Playing while music has a queue.</summary>
     void RailItems()
     {
-        railItems = Pley.Tv.Core.Ui.Rail.Items(state.Libraries.Value ?? Array.Empty<Library>(), nowPlaying: nowPlaying, liveTv: liveTv?.Channels.Value > 0);
+        railItems = Pley.Tv.Core.Ui.Rail.Items(state.Libraries.Value ?? Array.Empty<Library>(), nowPlaying: nowPlaying, liveTv: liveTv?.Channels.Value > 0, storage: storage);
         Rail.SetItems(railItems);
         MarkCurrent();
     }
@@ -238,6 +239,17 @@ sealed class TvShell : Sheet
         {
             if ((n != null) == nowPlaying) return;
             nowPlaying = n != null;
+            RailItems();
+        }));
+    }
+
+    /// <summary>The USB drive shows in the rail while one is plugged in.</summary>
+    public void Follow(Signal<string?> drive)
+    {
+        watches.Add(drive.Watch(root =>
+        {
+            if ((root != null) == storage) return;
+            storage = root != null;
             RailItems();
         }));
     }

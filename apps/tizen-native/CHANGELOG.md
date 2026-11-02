@@ -180,6 +180,9 @@ It has no releases yet: it is built and installed by hand
   only the chapter pictures near the one shown, lets them go as the player
   goes, and reads a film's subtitle pictures once rather than every few
   seconds while the server makes them.
+- Picture subtitles chosen in the native app wait up to a minute, as
+  Android's do, for a server that hasn't made them yet, rather than saying
+  after 10 s that they couldn't be loaded.
 - Films start about half a second sooner in the native app: the player
   starts once it has as much as Android's does, and asks for the film
   while its screen is being made.
@@ -234,6 +237,10 @@ It has no releases yet: it is built and installed by hand
 - Picture subtitles (PGS, VobSub, DVB) in the native app no longer close
   the app as a track still being made comes again: the same picture is
   kept, and an old one's texture goes a second after it leaves the screen.
+- Videos on a USB drive play in the native app: the rail's USB drive,
+  while one is plugged in, lists its folders and videos; a video plays in
+  Pley's player from where it stopped, with its audio tracks, chapters,
+  HDR, its own subtitles and the subtitle files beside it.
 
 ### Changed
 
@@ -243,6 +250,15 @@ It has no releases yet: it is built and installed by hand
 
 ### Fixed
 
+- A film's audio track, chosen or saved, plays from the start: it was asked
+  for before the TV's player was ready, and the first track played. Beside a
+  TrueHD track the TV leaves out, the right track is chosen, and Info shows
+  the track playing.
+- Live TV no longer pauses for a quarter of a second as it opens and as a
+  channel is left, with a provider's hundreds of categories, and moving
+  through the guide is smoother: a row's programmes are painted again
+  rather than made again as focus moves, and a long description is cut to
+  what the panel shows.
 - Settings' Always start as no longer starts the TV as a profile with a
   PIN without it: the start opens on that profile's PIN pad, and Back shows
   the other profiles. While the TV doesn't know whether the profile it was

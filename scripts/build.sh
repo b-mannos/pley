@@ -25,7 +25,11 @@ fi
 touch "$root/apps/server/src/web.rs"   # re-embed the fresh UI build
 
 if [ -n "$target" ]; then
-    (cd "$root" && cargo build --release --locked --target "$target" -p pley-server -p pley-transcoder)
+    # PLEY_ZIGBUILD=1 cross-compiles with cargo-zigbuild (a Mac building the
+    # static Linux binaries for the Synology package, say).
+    build=build
+    [ -n "${PLEY_ZIGBUILD:-}" ] && build=zigbuild
+    (cd "$root" && cargo $build --release --locked --target "$target" -p pley-server -p pley-transcoder)
     bin="$root/target/$target/release"
     case "$target" in
         *-apple-darwin) os=macos ;;
@@ -33,6 +37,11 @@ if [ -n "$target" ]; then
         *) os=$(echo "$target" | cut -d- -f3) ;;
     esac
     arch=$(echo "$target" | cut -d- -f1)
+    # A musl build is static: it runs on a Linux whose glibc is too old for
+    # the other archive, such as a Synology NAS (deploy/synology).
+    case "$target" in
+        *-linux-musl) static=-static ;;
+    esac
 else
     (cd "$root" && cargo build --release --locked -p pley-server -p pley-transcoder)
     bin="$root/target/release"
@@ -45,7 +54,7 @@ case "$arch" in
     amd64) arch=x86_64 ;;
 esac
 
-name="pley-server-$version-$os-$arch"
+name="pley-server-$version-$os-$arch${static:-}"
 out="$root/dist/$name"
 rm -rf "$out" && mkdir -p "$out"
 cp "$bin/pley" "$bin/pley-transcoder" "$out/"

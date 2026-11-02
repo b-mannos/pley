@@ -9,17 +9,12 @@ describes how they are made.
 
 ## [Unreleased]
 
-## [0.1.3] - 2026-11-02
-
 ### Added
 
 - A playback with keyed addresses has its file's PGS subtitles beside its
   media as pictures, each placed and timed (`subtitles-{index}.json` and its
   PNGs), for a player that can't decode PGS: Roku draws them over the video
   rather than have them burned in.
-- A playback with keyed addresses has its seek previews beside its media,
-  as a BIF file (`previews.bif`), which Roku's own player fetches and shows
-  as you fast forward and rewind.
 
 ### Changed
 
@@ -31,6 +26,21 @@ describes how they are made.
   starts there, and a seek while the rest is read has the pictures where
   the player went read at once. Kodi's `.sup` has everything read by the
   time it opens, not only the pictures around the start.
+
+## [0.1.3] - 2026-11-02
+
+### Added
+
+- Pley installs on a Synology NAS as a package (`.spk`) for DSM 7 on Intel
+  models, with FFmpeg from SynoCommunity's package and the NAS's GPU for
+  transcoding. A static Linux build, `linux-x86_64-static`, is published
+  with the other archives.
+- A playback with keyed addresses has its seek previews beside its media,
+  as a BIF file (`previews.bif`), which Roku's own player fetches and shows
+  as you fast forward and rewind.
+
+### Changed
+
 - The web app's PIN pad stops once a profile's PIN is locked after too
   many wrong tries, as the other apps' pads do; a profile that got a PIN
   after the list was loaded asks it; and the profile in use shows its lock.
@@ -72,6 +82,10 @@ describes how they are made.
 
 ### Fixed
 
+- Streams play with an FFmpeg build whose segment list names segments by
+  number alone, such as SynoCommunity's for Synology DSM. Before, the
+  transcoder never saw a segment finish with such a build, so every stream
+  that wasn't direct play waited forever.
 - Seek previews of a file the transcoder couldn't reach for a moment (a
   share whose disks slept, a share not mounted yet) are made when the file
   is next opened or scanned, instead of being given up until a restart.

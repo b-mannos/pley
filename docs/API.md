@@ -1672,12 +1672,14 @@ removed or reordered (`400`).
     begins) to two minutes after it. The whole track follows within
     seconds. A request whose `at` is away from where the copy started (a
     seek) has the pictures there read at once, from 10 s before it to 40 s
-    after it, and is answered with those; the player asks again as it
-    plays on.
+    after it, and is answered with those. So each request says where the
+    player is then (`at=0` at the start too), a seek asks again at once,
+    and the player asks again within half a minute as it plays on.
   - Otherwise the transcoder reads the whole file (minutes for a big one on
     a network share), and the answer is what it has copied so far, up to
     its last whole cluster. A copy through the Cues that fails past the
-    pictures around `at` keeps answering with those until it is whole.
+    pictures around `at` keeps answering with those until the transcoder's
+    copy of the whole file comes past them, then with that copy.
   - The copy starts as a playback starts whose player draws the track
     (`picture_subtitles_sideload`, the track picked or the profile's
     choice), rather than when it asks. What isn't around `at` waits for the
