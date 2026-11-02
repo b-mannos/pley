@@ -140,7 +140,7 @@ protect your server.
   list.
 - A session that is signed out, or whose account is disabled or changed,
   stops working at once, even one being checked at that moment. Its event
-  streams end too.
+  streams end within 30 seconds, when they check it again.
 - Switching from a restricted profile to one that can see more (an
   administrator, a higher age limit, other libraries) takes that profile's
   PIN, or its password (and code).
@@ -264,6 +264,10 @@ Apps sign in on Pley's own page with OAuth 2.1.
   and MP4 sample tables can't take more memory than a real one's.
 - Pictures come only from the metadata services' hosts over HTTPS,
   redirects included, and are read up to 25 MB whatever their headers say.
+  Live TV's channel logos and programme pictures are the exception: they
+  come from wherever the provider's lists say, plain HTTP included, as its
+  streams do, up to 1 MB for a logo and 4 MB for a picture, and are kept
+  only when they are JPEG, PNG, WebP or GIF.
 - A profile picture is decoded only up to 4096 pixels.
 - Subtitles from OpenSubtitles come over HTTPS only, never redirected to
   plain HTTP.
