@@ -214,6 +214,24 @@ function authRecentlyProved(proved as dynamic, network as integer, now as intege
     return age >= 0 and age < authProofTtlMs()
 end function
 
+' Whether the access token may go to the server, for the keys kept (invalid:
+' a server without proofs, nothing to check): it proved itself lately, and
+' no request to it went unanswered since (doubted: the Roku may be on
+' another network).
+function authTokenMayGo(keys as dynamic, proved as dynamic, network as integer, doubted as boolean, now as integer) as boolean
+    if keys = invalid then return true
+    return not doubted and authRecentlyProved(proved, network, now)
+end function
+
+' Whether the API task asks for the next proof now: none is held, a request
+' went unanswered since, the network changed, or the one held is about to
+' lapse. One that failed is asked again at retryAt, not before.
+function authProofDue(proved as dynamic, network as integer, doubted as boolean, now as integer, retryAt as integer) as boolean
+    if now < retryAt then return false
+    if proved = invalid or doubted then return true
+    return proved.network <> network or now - proved.at >= authProofRenewMs()
+end function
+
 ' The scope names in answer that asked doesn't hold. pley never widens a
 ' grant, so an answer with more is ended at once and never used.
 function authExtraScopes(answer as string, asked as string) as object

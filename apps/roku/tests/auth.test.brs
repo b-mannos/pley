@@ -274,3 +274,25 @@ sub test_auth_a_proof_counts_half_an_hour_on_its_network()
     tkFalse(authRecentlyProved(invalid, 2, 1000))
     tkTrue(authProofRenewMs() < authProofTtlMs(), "renewed before it lapses")
 end sub
+
+sub test_auth_no_token_goes_after_a_request_went_unanswered()
+    keys = { serverId: "abc", proofId: "17", proofKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE" }
+    proved = { at: 1000, network: 2 }
+    tkTrue(authTokenMayGo(keys, proved, 2, false, 1000))
+    tkFalse(authTokenMayGo(keys, proved, 2, true, 1000), "doubted: the players' token waits for a proof")
+    tkFalse(authTokenMayGo(keys, proved, 3, false, 1000), "another network")
+    tkTrue(authTokenMayGo(invalid, invalid, 2, true, 1000), "a server without proofs: nothing to check")
+end sub
+
+sub test_auth_the_next_proof_is_asked_when_due_and_not_before_a_retry()
+    proved = { at: 1000, network: 2 }
+    tkFalse(authProofDue(proved, 2, false, 1000 + authProofRenewMs() - 1, 0))
+    tkTrue(authProofDue(proved, 2, false, 1000 + authProofRenewMs(), 0), "before it lapses")
+    tkTrue(authProofDue(proved, 3, false, 1000, 0), "another network")
+    tkTrue(authProofDue(proved, 2, true, 1000, 0), "a request went unanswered")
+    tkTrue(authProofDue(invalid, 2, false, 1000, 0), "none held")
+    ' A proof refused or unanswered isn't asked again at once, so another
+    ' device at the address isn't asked over and over.
+    tkFalse(authProofDue(invalid, 2, false, 1000, 31000))
+    tkTrue(authProofDue(invalid, 2, false, 31000, 31000))
+end sub

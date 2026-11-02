@@ -31,12 +31,14 @@ sub apiRun()
     ' (m.network counts the changes seen): { at, network } of m.clock, or
     ' invalid. doubted: a request got no answer, so the next token waits for
     ' a new proof; proving: that proof is under way; proofRetryAt: when one
-    ' that got no answer is asked again.
+    ' that failed is asked again; proofSeq: which proof under way counts (an
+    ' answer to an earlier one is for another server or network).
     m.proved = invalid
     m.network = 0
     m.doubted = false
     m.proving = false
     m.proofRetryAt = 0
+    m.proofSeq = 0
     ' Joining or leaving a network: the server proves itself again.
     m.device = CreateObject("roDeviceInfo")
     m.device.SetMessagePort(m.port)
@@ -229,7 +231,7 @@ sub apiSend(job as object)
             if decision = "refresh" then apiRefresh()
             return
         end if
-        if not apiProvedLately() or (m.doubted and m.tokens.proof <> invalid)
+        if not apiTokenMayGo()
             m.waiting.Push(job)
             apiProve(m.tokens)
             return
@@ -336,6 +338,7 @@ sub apiCallAnswered(job as object, status as integer, body as string, headers as
     if status <= 0 and job.auth and job.server = m.server and m.tokens <> invalid and m.tokens.proof <> invalid
         ' The Roku may be on another network now.
         m.doubted = true
+        apiPublish()
         apiProve(m.tokens)
     end if
     ' A switch stops the tokens it replaces at once: what they were sent
@@ -675,6 +678,7 @@ sub apiEnd(reason as string)
     m.tokens = invalid
     m.lastIssued = invalid
     m.proved = invalid
+    apiForgetProof()
     m.networkKept = {}
     apiFailWaiting(apiSignedOut())
     apiPublish()
@@ -712,6 +716,7 @@ sub apiSignOut(request as object)
     m.tokens = invalid
     m.lastIssued = invalid
     m.proved = invalid
+    apiForgetProof()
     m.networkKept = {}
     apiFailWaiting(apiSignedOut())
     apiPublish()
@@ -759,6 +764,8 @@ sub apiSelect(url as string, name as string)
     if url <> "" then m.tokens = tokensLoad(m.tokensSection, url)
     m.lastIssued = invalid
     m.proved = invalid
+    m.doubted = false
+    apiForgetProof()
     m.session.server = url
     m.session.serverName = name
     m.session.signOutReason = ""
@@ -1145,20 +1152,27 @@ end sub
 
 ' --- Telling servers apart (docs/API.md) ---
 
-' Whether the server in use proved lately, on this network, that it holds
-' the sign-in's key. A sign-in from a server without proofs has nothing to
-' check.
-function apiProvedLately() as boolean
-    if m.tokens = invalid or m.tokens.proof = invalid then return true
-    return authRecentlyProved(m.proved, m.network, m.clock.TotalMilliseconds())
+' Whether the access token may go to the server in use (authTokenMayGo): it
+' proved lately, on this network, that it holds the sign-in's key.
+function apiTokenMayGo() as boolean
+    if m.tokens = invalid then return true
+    return authTokenMayGo(m.tokens.proof, m.proved, m.network, m.doubted, m.clock.TotalMilliseconds())
 end function
 
 ' The access token the scene's players, pictures and event stream use:
-' only while the server proved itself lately, "" meanwhile.
+' only while it may go to the server, "" meanwhile.
 sub apiPublish()
     token = ""
-    if m.tokens <> invalid and apiProvedLately() then token = m.tokens.access
+    if m.tokens <> invalid and apiTokenMayGo() then token = m.tokens.access
     if m.session.accessToken <> token then m.session.accessToken = token
+end sub
+
+' The proof under way, if any, no longer counts: the server, the sign-in or
+' the network changed. Its answer is let go when it comes.
+sub apiForgetProof()
+    m.proofSeq = m.proofSeq + 1
+    m.proving = false
+    m.proofRetryAt = 0
 end sub
 
 ' Asks the server at tokens' address to prove it holds their key; then
@@ -1178,6 +1192,7 @@ sub apiProve(tokens as object, after = invalid as dynamic)
     job.challenge = challenge
     job.after = after
     job.network = m.network
+    job.seq = m.proofSeq
     job.timeoutMs = 10000
     apiSend(job)
 end sub
@@ -1194,6 +1209,9 @@ end sub
 
 sub apiProofAnswered(job as object, status as integer, body as string)
     tokens = job.tokens
+    ' For a server, sign-in or network since left: the proof asked since
+    ' answers for what waits.
+    if job.after = invalid and job.seq <> m.proofSeq then return
     if job.after = invalid then m.proving = false
     current = m.tokens <> invalid and m.tokens.issuer = tokens.issuer and m.tokens.refresh = tokens.refresh
     verdict = authProofVerdict(status, body, tokens.proof, tokens.issuer, job.challenge)
@@ -1210,13 +1228,13 @@ sub apiProofAnswered(job as object, status as integer, body as string)
         end if
         return
     end if
+    ' Asked again in a while, or by the next request.
+    if job.after = invalid or current then m.proofRetryAt = m.clock.TotalMilliseconds() + 30000
     if verdict = "another"
         ' Another device answers at the address: it gets no token.
         if current then m.proved = invalid
         failure = apiFail("network", authAnotherDevice())
     else
-        ' Nothing answered: asked again in a while, or by the next request.
-        m.proofRetryAt = m.clock.TotalMilliseconds() + 30000
         failure = httpAnswer(status, body)
     end if
     apiPublish()
@@ -1237,19 +1255,19 @@ end sub
 sub apiNetworkChanged()
     m.network = m.network + 1
     m.proved = invalid
+    ' A proof under way was asked on the network before.
+    apiForgetProof()
     apiPublish()
     if m.tokens <> invalid and m.tokens.proof <> invalid then apiProve(m.tokens)
 end sub
 
 ' Asks for the next proof before the one held lapses, so the players'
-' token never does while the server answers; one that got no answer is
-' asked again every 30 seconds. A lapsed proof takes the players' token.
+' token never does while the server answers; one that failed is asked
+' again every 30 seconds. A lapsed proof takes the players' token.
 sub apiRenewProof(now as integer)
     apiPublish()
-    if m.tokens = invalid or m.tokens.proof = invalid or m.proving or now < m.proofRetryAt then return
-    due = (m.proved = invalid) or m.doubted
-    if not due then due = (m.proved.network <> m.network) or (now - m.proved.at >= authProofRenewMs())
-    if due then apiProve(m.tokens)
+    if m.tokens = invalid or m.tokens.proof = invalid or m.proving then return
+    if authProofDue(m.proved, m.network, m.doubted, now, m.proofRetryAt) then apiProve(m.tokens)
 end sub
 
 ' --- Playback ---

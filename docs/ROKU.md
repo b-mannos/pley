@@ -421,8 +421,10 @@ Rules the code keeps:
   players, pictures and event stream) has the token only while one holds:
   `ApiTask` asks for the next proof before it lapses, and joining or
   leaving a network (Roku's link status) takes the token away until the
-  server proves itself again. A request that gets no answer has the next
-  token wait for a new proof. A refresh, a profile switch with its PIN and
+  server proves itself again. A request that gets no answer, or an event
+  stream that fails when the server doesn't answer a request after it,
+  takes the token away too until a new proof. A proof that fails is asked
+  again every 30 seconds. A refresh, a profile switch with its PIN and
   a sign-out wait for a proof made then. What can't prove itself gets no
   token, and the app says "Another device answers there." Roku's
   transfers follow redirects, but a proof made at any other address than

@@ -773,9 +773,11 @@ that key:
    included, means another device answers at the address: the app keeps
    its token to itself. A `5xx` is the server, or a proxy before it, out of
    reach for now. The app follows no redirect for this: a proof counts only
-   from the address itself. The answer's `address` says which address the
-   server proved itself for: the desktop app names a proxy that passes
-   another `Host` or scheme on when it differs.
+   from the address itself. Roku's transfers follow redirects whatever the
+   app asks, but a proof made at another address doesn't verify there.
+   The answer's `address` says which address the server proved itself
+   for: the desktop app names a proxy that passes another `Host` or scheme
+   on when it differs.
 
 For an access token, a proof counts for half an hour, until the device
 changes networks or a request to the server gets no answer. A refresh
