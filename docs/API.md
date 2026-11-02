@@ -1906,7 +1906,8 @@ URLs.
     (around `start_ms` without `at`).
   - It is made of the track's `.mks`, so `at` and the partial answers are
     as for it: while the track is copied, the cues so far (those around
-    `at` first) with `X-Pley-Complete: 0`; ask again for the rest.
+    `at` first) with `X-Pley-Complete: 0`, less a last one whose end isn't
+    copied yet; ask again for the rest.
   - `404` for anything but PGS (VobSub and DVB are burned in); `503` with a
     transcoder too old to copy the track ("update it"), or none running at
     the moment ("try again in a moment").

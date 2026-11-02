@@ -1028,7 +1028,8 @@ async fn keyed_pictures(
     let made = tokio::task::spawn_blocking(move || {
         let pictures = crate::pgs::PgsPictures::read(&mks).ok_or_else(|| anyhow::anyhow!("not a PGS track"))?;
         let Some(start_ms) = start_ms else {
-            let cues = pictures.cues().into_iter().map(|c| PictureCueJson::of(c, index, at)).collect();
+            let cues = if complete { pictures.cues() } else { pictures.cues_so_far() };
+            let cues = cues.into_iter().map(|c| PictureCueJson::of(c, index, at)).collect();
             let body = PictureCues { complete, width: pictures.width, height: pictures.height, cues };
             return Ok(Some((serde_json::to_vec(&body)?, "application/json")));
         };

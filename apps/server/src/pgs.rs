@@ -127,8 +127,7 @@ const CROPPED: u8 = 0x80;
 const MAX_SIDE: u32 = 4096;
 /// The most objects a composition places.
 const MAX_PLACED: u8 = 2;
-/// How long a picture shows that nothing follows (ms): the last of a track,
-/// or the last of the stretch copied so far.
+/// How long a picture shows that nothing follows (ms): the last of a track.
 const LAST_PICTURE_MS: i64 = 10_000;
 
 /// A PGS track's pictures, for a player that shows them without decoding
@@ -328,6 +327,20 @@ impl<'a> PgsPictures<'a> {
             if end_ms > set.time_ms {
                 cues.push(PictureCue { start_ms: set.time_ms, end_ms, x, y, width, height });
             }
+        }
+        cues
+    }
+
+    /// [`PgsPictures::cues`] of a track copied only so far: a last picture
+    /// that nothing after it ends is left out, as what ends it may not be
+    /// copied yet. A player asks again, and has it with its end.
+    pub fn cues_so_far(&self) -> Vec<PictureCue> {
+        let mut cues = self.cues();
+        let unended = self.sets.last().filter(|last| !last.duration_ms.is_some_and(|own| own > 0));
+        if let Some(last) = unended
+            && cues.last().is_some_and(|cue| cue.start_ms == last.time_ms)
+        {
+            cues.pop();
         }
         cues
     }
@@ -867,6 +880,19 @@ mod tests {
         let picture = pictures.picture(1_000).unwrap();
         assert_eq!((picture.width, picture.height, picture.rgba.len()), (100, 2, 100 * 2 * 4));
         assert!(picture.rgba.chunks(4).all(|p| p == [255, 255, 255, 255]));
+    }
+
+    #[test]
+    fn a_track_copied_so_far_leaves_out_a_last_picture_nothing_ends() {
+        let shown = || set(&[pcs(0x80, &[(0, 0, 100, 900, None)]), pds(&[WHITE]), ods(0, 4, 2, 1)]);
+        let file =
+            mks(&[(1_000, &[(0, shown())]), (3_000, &[(0, set(&[pcs(0, &[])]))]), (5_000, &[(0, shown())])], false);
+        let pictures = PgsPictures::read(&file).unwrap();
+        let times = |cues: Vec<PictureCue>| cues.iter().map(|c| (c.start_ms, c.end_ms)).collect::<Vec<_>>();
+        // Whole, the last picture shows 10 s; copied so far, what ends it may
+        // be copied later.
+        assert_eq!(times(pictures.cues()), [(1_000, 3_000), (5_000, 15_000)]);
+        assert_eq!(times(pictures.cues_so_far()), [(1_000, 3_000)]);
     }
 
     #[test]
