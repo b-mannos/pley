@@ -63,10 +63,7 @@ impl Identity {
     }
 
     fn with_secret(id: String, secret: Option<&[u8]>) -> Self {
-        let root = secret.map(|secret| {
-            let derived = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, secret), b"pley server proofs");
-            hmac::Key::new(hmac::HMAC_SHA256, derived.as_ref())
-        });
+        let root = secret.map(|secret| crate::two_step::derived_key(secret, b"pley server proofs"));
         Self { id, root }
     }
 
@@ -144,8 +141,8 @@ pub fn at_home(ip: IpAddr) -> bool {
         v4 => v4,
     };
     match ip {
-        IpAddr::V4(v4) if v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]) => {
-            matches!(own_address_towards(ip), Some(IpAddr::V4(own)) if own.octets()[0] == 100 && (64..128).contains(&own.octets()[1]))
+        IpAddr::V4(v4) if crate::setup::is_shared_address(v4) => {
+            matches!(own_address_towards(ip), Some(IpAddr::V4(own)) if crate::setup::is_shared_address(own))
         }
         IpAddr::V6(v6) if !crate::setup::is_local_address(ip) => {
             matches!(own_address_towards(ip), Some(IpAddr::V6(own)) if same_64(own, v6))
