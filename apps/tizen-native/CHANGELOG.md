@@ -191,6 +191,10 @@ It has no releases yet: it is built and installed by hand
 - Back in the native app's Live TV guide goes to the categories, then the
   rail, rather than straight to the rail.
 - The native app's "Exit Pley?" is a narrower dialog.
+- The native player's Info says "Server speed" for how fast the server
+  makes the video, and beside it "TV network speed", how fast it reaches
+  the TV: a video that stalls with the server keeping up has a network
+  that can't carry it.
 - The native app's rail opens and closes as Android TV's does: it widens
   with its labels fading in, the page behind it dims, and its entries grow
   and shrink as focus moves; with Reduce motion, it opens in place.

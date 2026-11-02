@@ -504,7 +504,10 @@ for a few seconds as each item begins, text subtitles in Settings' look
 DVB) decoded from the server's `.mks` and drawn as the web app draws them,
 burned in by the server only when it can't make that file, the side
 panels (Subtitles with Sync and the subtitles' look, Audio, Quality, the
-sleep timer, Speed where the TV's player has other speeds, and Info),
+sleep timer, Speed where the TV's player has other speeds, and Info,
+where the server's speed sits beside the TV's network speed: the fastest
+second of the last ten, from the bytes the TV's network received, since
+Tizen's player doesn't say how fast it downloads),
 Chapters opening the chapters' cards, Skip Intro and Skip Credits (over the scrubber, where Up
 reaches them, as on Android TV), Up
 Next (the next episode, or the next in a playlist or collection),
