@@ -1,0 +1,16 @@
+{
+    ".url": {
+        "SYNO.SDS.Pley": {
+            "type": "url",
+            "title": "Pley",
+            "desc": "Your movies, shows, music and Live TV, on every screen",
+            "icon": "images/pley-{0}.png",
+            "protocol": "http",
+            "port": "7539",
+            "url": "/",
+            "allUsers": true,
+            "grantPrivilege": "all",
+            "advanceGrantPrivilege": true
+        }
+    }
+}

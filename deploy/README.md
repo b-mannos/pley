@@ -7,6 +7,7 @@ Pick the guide for where Pley will run:
 | A Linux server or NAS, with Docker | `./setup.sh`, then a reverse proxy | [docker/README.md](docker/README.md) |
 | Unraid | A template from Docker → Add Container | [unraid/README.md](unraid/README.md) |
 | Windows | The installer: a service, or in the notification area | [windows/README.md](windows/README.md) |
+| Synology | A package, from Package Center's Manual Install | [synology/README.md](synology/README.md) |
 | Linux without Docker | The release archive and a systemd unit | [below](#linux-systemd) |
 | macOS | The release archive and a launch agent | [below](#macos-launchd) |
 
@@ -30,12 +31,15 @@ libraries. Until then, anyone with the code can claim the server.
   | Docker | `/config` in the container |
 
 - **FFmpeg and ffprobe.** The Docker image and the Windows installer bring
-  their own; elsewhere Pley takes them from `PATH`, or `--ffmpeg` and
-  `--ffprobe`. The FFmpeg build decides what Pley can do with a GPU.
+  their own, and the Synology package uses SynoCommunity's; elsewhere Pley
+  takes them from `PATH`, or `--ffmpeg` and `--ffprobe`. The FFmpeg build
+  decides what Pley can do with a GPU.
 
 Release archives (Linux, macOS, Windows; x86_64 and arm64) hold `pley` and
 `pley-transcoder`, which must stay in the same folder. `pley --help` and
-[`pley.example.toml`](../pley.example.toml) list every option.
+[`pley.example.toml`](../pley.example.toml) list every option. The
+`linux-x86_64-static` archive is built against musl: it runs on a Linux
+whose glibc is too old for the other one, such as DSM.
 
 ## Docker
 
@@ -112,6 +116,14 @@ and a firewall rule, as a locked-down service or in the notification area:
 [windows/README.md](windows/README.md). Or extract the archive, install
 FFmpeg (`winget install Gyan.FFmpeg`, whose "full" build has NVENC, QSV, AMF
 and Vulkan tone mapping) and run `pley.exe`.
+
+## Synology
+
+`pley-server-<version>-synology-x86_64.spk` installs Pley on a Synology NAS
+with an Intel processor (DSM 7.0 or newer) from Package Center's
+**Manual Install**, running as a user of its own, with FFmpeg from
+SynoCommunity's package and Quick Sync on models that have it:
+[synology/README.md](synology/README.md).
 
 ## Checking hardware transcoding
 

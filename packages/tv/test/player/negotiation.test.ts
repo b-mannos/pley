@@ -1297,8 +1297,8 @@ describe("picture subtitles", () => {
     c.close();
   });
 
-  it("say nothing of a start at the beginning", () => {
-    expect(pictureUrlAt("/api/files/7/subtitles/3.mks", 0)).toBe("/api/files/7/subtitles/3.mks");
+  it("say where the player is at the beginning too", () => {
+    expect(pictureUrlAt("/api/files/7/subtitles/3.mks", 0)).toBe("/api/files/7/subtitles/3.mks?at=0");
     expect(pictureUrlAt("/api/files/7/subtitles/3.mks", 1234.4)).toBe("/api/files/7/subtitles/3.mks?at=1234");
     expect(pictureUrlAt("/s.mks?k=1", 5000)).toBe("/s.mks?k=1&at=5000");
   });

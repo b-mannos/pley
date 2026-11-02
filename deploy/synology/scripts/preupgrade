@@ -1,0 +1,4 @@
+#!/bin/sh
+# Before upgrading: nothing to move. The data folder (var) survives an
+# upgrade; only the programs (target) are replaced.
+exit 0

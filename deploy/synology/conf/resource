@@ -1,0 +1,6 @@
+{
+    "port-config": {
+        "protocol-file": "app/pley.sc"
+    },
+    "video-driver": {}
+}

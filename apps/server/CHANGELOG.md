@@ -9,8 +9,23 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- A playback with keyed addresses has its file's PGS subtitles beside its
+  media as pictures, each placed and timed (`subtitles-{index}.json` and its
+  PNGs), for a player that can't decode PGS: Roku draws them over the video
+  rather than have them burned in.
+
 ### Changed
 
+- Picture subtitles (PGS, VobSub, DVB) that the apps draw show within a few
+  seconds of a playback starting, where they could take up to a minute:
+  the transcoder reads those around where the playback is out of a
+  Matroska file first, at once, and the rest of the track after the
+  playback's start. A `.mks` asked for with `at` (where the player is)
+  starts there, and a seek while the rest is read has the pictures where
+  the player went read at once. Kodi's `.sup` has everything read by the
+  time it opens, not only the pictures around the start.
 - A stream for Kodi with VobSub or DVB subtitles no longer starts a copy
   of them that Kodi never reads, which, in a Matroska file whose index
   doesn't list them, could read the whole film from a network share.
@@ -24,20 +39,16 @@ describes how they are made.
 
 ### Added
 
+- Pley installs on a Synology NAS as a package (`.spk`) for DSM 7 on Intel
+  models, with FFmpeg from SynoCommunity's package and the NAS's GPU for
+  transcoding. A static Linux build, `linux-x86_64-static`, is published
+  with the other archives.
 - A playback with keyed addresses has its seek previews beside its media,
   as a BIF file (`previews.bif`), which Roku's own player fetches and shows
   as you fast forward and rewind.
 
 ### Changed
 
-- Picture subtitles (PGS, VobSub, DVB) that the apps draw show within a few
-  seconds of a playback starting, where they could take up to a minute:
-  the transcoder reads those around where the playback is out of a
-  Matroska file first, at once, and the rest of the track after the
-  playback's start. A `.mks` asked for with `at` (where the player is)
-  starts there, and a seek while the rest is read has the pictures where
-  the player went read at once. Kodi's `.sup` has everything read by the
-  time it opens, not only the pictures around the start.
 - The web app's PIN pad stops once a profile's PIN is locked after too
   many wrong tries, as the other apps' pads do; a profile that got a PIN
   after the list was loaded asks it; and the profile in use shows its lock.
@@ -79,6 +90,10 @@ describes how they are made.
 
 ### Fixed
 
+- Streams play with an FFmpeg build whose segment list names segments by
+  number alone, such as SynoCommunity's for Synology DSM. Before, the
+  transcoder never saw a segment finish with such a build, so every stream
+  that wasn't direct play waited forever.
 - Seek previews of a file the transcoder couldn't reach for a moment (a
   share whose disks slept, a share not mounted yet) are made when the file
   is next opened or scanned, instead of being given up until a restart.

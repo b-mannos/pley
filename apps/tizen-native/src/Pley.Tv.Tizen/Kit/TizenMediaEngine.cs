@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Pley.Tv.Core;
@@ -209,6 +210,27 @@ sealed class TizenMediaEngine : IVideoEngine
                 var v = p.StreamInfo.GetVideoProperties();
                 var a = p.StreamInfo.GetAudioProperties();
                 Profile.Mark($"engine: the player reads video {p.StreamInfo.GetVideoCodec()} {v.Size.Width}x{v.Size.Height} {v.Fps} fps, audio {p.StreamInfo.GetAudioCodec()} {a.Channels} ch, picture {hasVideo}");
+                var tracks = p.AudioTrackInfo;
+                var languages = string.Join(" ", Enumerable.Range(0, tracks.GetCount()).Select(i =>
+                {
+                    try
+                    {
+                        return tracks.GetLanguageCode(i) is { Length: > 0 } code ? code : "?";
+                    }
+                    catch (Exception)
+                    {
+                        return "?";
+                    }
+                }));
+                Profile.Mark($"engine: the player lists {tracks.GetCount()} audio tracks ({languages}), plays {tracks.Selected}");
+                try
+                {
+                    Profile.Mark($"engine: the sound is decoded by {p.AudioCodecType}; offload takes {string.Join(" ", p.AudioOffload.SupportedFormats)}");
+                }
+                catch (Exception e)
+                {
+                    Profile.Mark($"engine: the sound is decoded by {p.AudioCodecType}; offload: {e.GetType().Name} {e.Message}");
+                }
             }
             catch (Exception e)
             {
@@ -260,6 +282,9 @@ sealed class TizenMediaEngine : IVideoEngine
     /// </summary>
     static void Buffer(Media.Player p, EngineSource s)
     {
+        // A file on a drive isn't streamed, and has no buffering to set: once its buffering was
+        // only read, the TV's player said Playing and stood at 0 for good.
+        if (!s.Url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return;
         try
         {
             var before = p.BufferingTime;
@@ -378,26 +403,53 @@ sealed class TizenMediaEngine : IVideoEngine
         return tracks;
     }
 
+    public int? PlayingAudio()
+    {
+        var p = player;
+        if (p == null || !prepared) return null;
+        try
+        {
+            return p.AudioTrackInfo.Selected;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     public bool SelectAudio(int ordinal, string? language)
     {
         var p = player;
-        if (p == null || !prepared) return false;
+        if (p == null || !prepared)
+        {
+            Profile.Mark($"engine: audio track {ordinal} not chosen: the player isn't ready");
+            return false;
+        }
         try
         {
             Profile.Enter("player: audio track");
             var info = p.AudioTrackInfo;
-            if (ordinal < 0 || ordinal >= info.GetCount()) return false;
+            if (ordinal < 0 || ordinal >= info.GetCount())
+            {
+                Profile.Mark($"engine: audio track {ordinal} not chosen: the player lists {info.GetCount()}");
+                return false;
+            }
             if (language != null)
             {
                 var code = info.GetLanguageCode(ordinal);
-                if (!string.IsNullOrEmpty(code) && !Same(code, language)) return false;
+                if (!string.IsNullOrEmpty(code) && !Same(code, language))
+                {
+                    Profile.Mark($"engine: audio track {ordinal} not chosen: the player says {code}, not {language}");
+                    return false;
+                }
             }
             Profile.Mark($"engine: audio track {ordinal} of {info.GetCount()} chosen (was {info.Selected})");
             if (info.Selected != ordinal) info.Selected = ordinal;
             return true;
         }
-        catch (Exception)
+        catch (Exception e)
         {
+            Profile.Mark($"engine: audio track {ordinal} not chosen: {e.GetType().Name} {e.Message}");
             return false;
         }
         finally
@@ -785,6 +837,7 @@ sealed class TizenMediaEngine : IVideoEngine
         }
         // On the UI thread, though it holds it 100 to 300 ms: let go from another, the player, bound
         // to the window, held the UI 8 s as a film was left, and the app died moments later.
+        var releasing = Profile.Start();
         try
         {
             Profile.Enter("player: stop and unprepare (release)");
@@ -806,6 +859,7 @@ sealed class TizenMediaEngine : IVideoEngine
         {
             // Gone already.
         }
+        Profile.Took("engine: the player let go of", releasing);
         // No player waiting to take the display (it would turn the alpha back on itself): as it was,
         // with its alpha while a player still covers the screen; the shell made it opaque if not.
         if (cover && opening == 0 && opaque)

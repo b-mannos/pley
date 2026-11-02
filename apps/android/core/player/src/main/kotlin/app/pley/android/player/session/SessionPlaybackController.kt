@@ -813,14 +813,14 @@ class SessionPlaybackController(
 
     /**
      * Pictures beside a stream: the server's .mks of the track, at the stream's own positions (the file's), asked for
-     * from where the player is.
+     * from where the player is each time, until the track is whole.
      */
     private fun showPictures(sub: MediaStream) {
         val info = session?.info ?: return
         val pictures = pictureSubtitles ?: return
         serverSubtitles.hide()
         val url = env.api.url(PlaybackPlan.pictureSubtitlesPath(info.fileId, sub.index))
-        pictures.show(info.fileId, sub.index, PlaybackPlan.pictureUrlAt(url, livePosition()))
+        pictures.show(info.fileId, sub.index) { PlaybackPlan.pictureUrlAt(url, livePosition()) }
     }
 
     private fun hideServerSubtitles() {
@@ -1287,12 +1287,15 @@ class SessionPlaybackController(
         if (ended || session == null) {
             lastPositionMs = target
             ui.update { it.copy(positionMs = target) }
+            pictureSubtitles?.jumped()
             restart(target)
             return
         }
         engineLink.seekTo(target)
         lastPositionMs = target
         startedAtMs = target
+        // Pictures the server is still copying out of the file are asked for from here at once.
+        pictureSubtitles?.jumped()
         recovery.onJump()
         autoQuality.jumped()
         struggle.reset()

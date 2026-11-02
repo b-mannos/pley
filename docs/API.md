@@ -1655,7 +1655,7 @@ removed or reordered (`400`).
   stream started at a seek point; see `pts_offset_ms`). Made once per file
   version by the transcoder, cached, served with `Range`. `404` for a text
   track or anything but subtitles; `503` with a transcoder too old to make
-  it.
+  it, or none running at the moment.
   - While the track is copied out of its file, the answer is what is
     copied so far, with `X-Pley-Complete: 0` and `Cache-Control: no-store`;
     a `Range` of it says `*` for the length. Every answer is a Matroska file
@@ -1672,12 +1672,14 @@ removed or reordered (`400`).
     begins) to two minutes after it. The whole track follows within
     seconds. A request whose `at` is away from where the copy started (a
     seek) has the pictures there read at once, from 10 s before it to 40 s
-    after it, and is answered with those; the player asks again as it
-    plays on.
+    after it, and is answered with those. So each request says where the
+    player is then (`at=0` at the start too), a seek asks again at once,
+    and the player asks again within half a minute as it plays on.
   - Otherwise the transcoder reads the whole file (minutes for a big one on
     a network share), and the answer is what it has copied so far, up to
     its last whole cluster. A copy through the Cues that fails past the
-    pictures around `at` keeps answering with those until it is whole.
+    pictures around `at` keeps answering with those until the transcoder's
+    copy of the whole file comes past them, then with that copy.
   - The copy starts as a playback starts whose player draws the track
     (`picture_subtitles_sideload`, and `picture_subtitles_sideload_codecs`
     when sent; the track picked or the profile's choice), rather than when
@@ -1889,11 +1891,32 @@ URLs.
   for the file's container, with `Range` and
   `Cache-Control: private, no-store`.
 - The key is `pley_mk_` and 256 random bits, kept in memory only. It opens
-  that session's playlists and segments, or its file, and its seek previews,
-  and nothing else: no API route takes it as a token.
+  that session's playlists and segments, or its file, its seek previews and
+  its file's PGS pictures, and nothing else: no API route takes it as a
+  token.
 - `/api/media/{key}/previews.bif` is the file's seek previews as a BIF file,
   for a player that fetches them itself (Roku's); `404` while they are being
   made, as for `trickplay`.
+- `/api/media/{key}/subtitles-{index}.json?at=` is the file's PGS track
+  `index` as pictures, for a player that draws them without decoding PGS
+  (Roku's): `{ complete, width, height, cues: [{ start_ms, end_ms, x, y,
+  width, height, image }] }`.
+  - `width`×`height` is the plane the pictures are placed on (a Blu-ray's
+    1920×1080). Each cue shows its picture from `start_ms` until `end_ms`
+    (the file's time, before the person's subtitle sync), `width`×`height`
+    at `x`, `y` of the plane and within it, in order of time, never two at
+    once.
+  - `image` is the picture's address beside this one,
+    `subtitles-{index}-{start_ms}.png?at=` with the list's `at`: a PNG with
+    transparency, made of the track as the list was while it isn't whole
+    (around `start_ms` without `at`).
+  - It is made of the track's `.mks`, so `at` and the partial answers are
+    as for it: while the track is copied, the cues so far (those around
+    `at` first) with `X-Pley-Complete: 0`, less a last one whose end isn't
+    copied yet; ask again for the rest.
+  - `404` for anything but PGS (VobSub and DVB are burned in); `503` with a
+    transcoder too old to copy the track ("update it"), or none running at
+    the moment ("try again in a moment").
 - It ends with the session (closed by its player, or forgotten after 15
   quiet minutes: `404` "playback session expired"), the account (disabled)
   and the app's sign-in (signed out, a new password): `404`. A session
@@ -2031,9 +2054,10 @@ reports still send the version 1 fields: `containers` always counts;
   version 1 (HLS segments carry no subtitles). Subtitle
   files next to the media are always burned in. A player with
   `picture_subtitles_sideload` shows them next to the HLS stream from
-  `/api/files/{id}/subtitles/{index}.mks` instead: it asks for no
-  `subtitle_index`, so nothing is burned in (and HDR can stay HDR). A
-  `subtitle_index` it does send is burned in as for any player.
+  `/api/files/{id}/subtitles/{index}.mks` instead (or, for PGS it can't
+  decode, as pictures from its keyed `subtitles-{index}.json`: Roku): it
+  asks for no `subtitle_index`, so nothing is burned in (and HDR can stay
+  HDR). A `subtitle_index` it does send is burned in as for any player.
   `picture_subtitles_sideload_codecs` names the codecs it shows so, when
   not all of `subtitle_codecs`' pictures (Kodi: PGS alone); the server
   copies only those out of the file as the stream starts.

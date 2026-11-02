@@ -10,6 +10,9 @@ namespace Pley.Tv.Core.Player;
 /// <summary>What the player needs from the app around it: the app's state and its API, or a fake in tests.</summary>
 public interface IPlayerSource
 {
+    /// <summary>A file on a drive (<see cref="Local.LocalPlayerSource"/>): it plays as it is, at its own path, with no server.</summary>
+    bool Local { get; }
+
     /// <summary>The server's origin: addresses are made whole against it, and subtitle offsets kept under it.</summary>
     string Server { get; }
 
@@ -97,6 +100,8 @@ public sealed class AppPlayerSource : IPlayerSource
     }
 
     Api.Api Api => app.Api.Value ?? throw new SignedOutException();
+
+    public bool Local => false;
 
     public string Server => app.Server.Value ?? "";
 
