@@ -54,6 +54,13 @@ profile that can see more and has no PIN takes its password: a phone signs
 in again in the browser, and a TV shows a code to approve on a phone,
 where its owner picks it.
 
+Always start as only skips the question: the TV starts as the profile it
+was left on, but never past its PIN. When that profile has one, the start
+opens "Who's watching?" on its PIN pad, and Back shows the other profiles.
+Whether it has one is the profile's `has_pin` from `GET /api/auth/me`, saved
+with the session, so the start reads it from the device; until the TV has
+heard it for that profile, the start asks "Who's watching?".
+
 ### TVs and Fire TV
 
 - Select opens, holding Select or Menu (☰) opens a title's actions, Back

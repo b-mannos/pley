@@ -61,7 +61,7 @@ export function App(p: ShellProps) {
   // The first page, from what the TV kept: no network before the first frame.
   if (!nav.stack.value.length) {
     const start = state.start();
-    nav.restart(start.page === "link" ? { name: "link", server: start.server } : { name: start.page });
+    nav.restart(start.page === "link" ? { name: "link", server: start.server } : start.page === "pin" ? { name: "profiles", pin: true } : { name: start.page });
   }
 
   // A sign-in the server ended: back to signing in.

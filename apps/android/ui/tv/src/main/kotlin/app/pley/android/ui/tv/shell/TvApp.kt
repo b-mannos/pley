@@ -155,7 +155,7 @@ private fun TvShell(
     val root = navigator.root ?: start
     rail.current = railCurrent(root, items + SettingsItem)
     // Signing in and choosing a profile are full screen.
-    rail.shown = root !is PleyKey.Servers && root !is PleyKey.Link && root !is PleyKey.SignIn && root != PleyKey.Profiles
+    rail.shown = root !is PleyKey.Servers && root !is PleyKey.Link && root !is PleyKey.SignIn && root !is PleyKey.Profiles
     val curtain = rememberCurtain(backStack.lastOrNull())
     ReturnFocus(rail, content)
     // The app is fully drawn (Android's time to full display) once Home has its
@@ -198,7 +198,7 @@ private fun TvShell(
                     profile = profile,
                     rail = rail,
                     onSelect = { select(it.key) },
-                    onProfile = { select(PleyKey.Profiles) },
+                    onProfile = { select(PleyKey.Profiles()) },
                     offline = offline.offline,
                 )
             }

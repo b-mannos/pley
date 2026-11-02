@@ -6,7 +6,8 @@ import type { PlayRequest } from "../../player/plan";
 export type PageKey =
   | { name: "servers" }
   | { name: "link"; server: string }
-  | { name: "profiles" }
+  /** "Who's watching?"; `pin`: a start as the profile the TV was left on, its PIN pad first. */
+  | { name: "profiles"; pin?: boolean }
   | { name: "home" }
   /** Every library; `sort`: sorting them (Settings), and back when that ends. */
   | { name: "libraries"; sort?: boolean }

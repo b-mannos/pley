@@ -120,15 +120,26 @@ export function profileChoice(p: HouseholdProfile, me: Me | null, gate: boolean)
  * "Who's watching?" (TvProfilesScreen): the household's profiles, a PIN
  * pad for those with one, and approval on a phone for those that need a
  * password. At a cold start the current profile's PIN is asked too.
+ * `pin`: a start as the profile the TV was left on ("Always start as"),
+ * whose pad opens first; Back shows the profiles.
  */
-export function ProfilesScreen() {
+export function ProfilesScreen(p: { pin?: boolean }) {
   const app = useApp();
   const ui = useUi();
   const [household, setHousehold] = useState<HouseholdProfile[]>(() => app.savedHousehold());
   const profiles = profileTiles(household, app.me.value);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [step, setStep] = useState<Step>({ kind: "pick" });
+  const padFirst = useRef(!!p.pin && !app.profileGatePassed);
+  /** The current profile's pad, the first time `list` shows it with a PIN when its pad comes first. */
+  const firstPad = (list: HouseholdProfile[]): Step | null => {
+    if (!padFirst.current) return null;
+    const current = profileTiles(list, app.me.value).filter((x) => x.current && x.needs === "pin")[0];
+    if (!current) return null;
+    padFirst.current = false;
+    return { kind: "pin", profile: current, confirm: true, locked: false, error: null };
+  };
+  const [step, setStep] = useState<Step>(() => firstPad(household) ?? { kind: "pick" });
   const [busy, setBusy] = useState<number | null>(null);
   const lastFocused = useRef<number | null>(null);
   const canSwitch = (app.tokenStore?.scopes() ?? []).indexOf("profiles") >= 0;
@@ -147,6 +158,8 @@ export function ProfilesScreen() {
         app.keepHousehold(list);
         setHousehold(list);
         setLoading(false);
+        const pad = firstPad(list);
+        if (pad) setStep((shown) => (shown.kind === "pick" ? pad : shown));
       },
       (e) => {
         if (!alive.current || e instanceof SignedOutError) return;

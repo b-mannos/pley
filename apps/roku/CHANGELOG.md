@@ -8,8 +8,6 @@ describes how they are made.
 
 ## [Unreleased]
 
-## [0.1.2] - 2026-11-02
-
 ### Added
 
 - Seek previews: fast forward and rewind show pictures of where they go, in
@@ -91,6 +89,11 @@ describes how they are made.
 
 ### Fixed
 
+- Settings' Always start as no longer starts the Roku as a profile with a
+  PIN without it: the start opens on that profile's PIN pad, and Cancel
+  shows the other profiles. While the Roku doesn't know whether the
+  profile it was left on has a PIN, as at the first start after this
+  update, the start asks "Who's watching?".
 - Too many wrong PINs keep the PIN pad, saying how long to wait, and a
   profile that got a PIN after "Who's watching?" was loaded asks it
   without calling it wrong.
@@ -190,8 +193,7 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-02...HEAD
-[0.1.2]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-01...HEAD
 [0.1.1]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01
 [0.1.0]: https://github.com/pley-media-server/pley/tree/94985f768f39f4a230060cb47af9498ee8779ddf
 [0.0.1]: https://github.com/pley-media-server/pley/tree/7e14bb9d498d054a73b2176cd8949b6864ffacd9

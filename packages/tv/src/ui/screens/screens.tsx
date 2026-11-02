@@ -33,7 +33,7 @@ export function Screen(p: { entry: Entry; state: AppState }) {
       page = <LinkScreen server={key.server} />;
       break;
     case "profiles":
-      page = <ProfilesScreen />;
+      page = <ProfilesScreen pin={key.pin} />;
       break;
     case "home":
       page = <HomeScreen entry={p.entry} />;

@@ -671,5 +671,131 @@
         "shake": false
       }
     }
+  ],
+  "start": [
+    {
+      "in": {
+        "server": null,
+        "signedIn": false,
+        "household": 1,
+        "alwaysStartAs": null,
+        "me": null
+      },
+      "out": "servers"
+    },
+    {
+      "in": {
+        "server": "http://192.168.1.20:7539",
+        "signedIn": false,
+        "household": 3,
+        "alwaysStartAs": 2,
+        "me": {
+          "id": 1,
+          "has_pin": true
+        }
+      },
+      "out": "link"
+    },
+    {
+      "in": {
+        "server": "http://192.168.1.20:7539",
+        "signedIn": true,
+        "household": 1,
+        "alwaysStartAs": null,
+        "me": {
+          "id": 1,
+          "has_pin": true
+        }
+      },
+      "out": "home"
+    },
+    {
+      "in": {
+        "server": "http://192.168.1.20:7539",
+        "signedIn": true,
+        "household": 1,
+        "alwaysStartAs": 1,
+        "me": {
+          "id": 1,
+          "has_pin": true
+        }
+      },
+      "out": "home"
+    },
+    {
+      "in": {
+        "server": "http://192.168.1.20:7539",
+        "signedIn": true,
+        "household": 3,
+        "alwaysStartAs": null,
+        "me": {
+          "id": 1,
+          "has_pin": false
+        }
+      },
+      "out": "profiles"
+    },
+    {
+      "in": {
+        "server": "http://192.168.1.20:7539",
+        "signedIn": true,
+        "household": 3,
+        "alwaysStartAs": null,
+        "me": {
+          "id": 1,
+          "has_pin": true
+        }
+      },
+      "out": "profiles"
+    },
+    {
+      "in": {
+        "server": "http://192.168.1.20:7539",
+        "signedIn": true,
+        "household": 3,
+        "alwaysStartAs": 2,
+        "me": {
+          "id": 1,
+          "has_pin": false
+        }
+      },
+      "out": "home"
+    },
+    {
+      "in": {
+        "server": "http://192.168.1.20:7539",
+        "signedIn": true,
+        "household": 3,
+        "alwaysStartAs": 1,
+        "me": {
+          "id": 1,
+          "has_pin": true
+        }
+      },
+      "out": "pin"
+    },
+    {
+      "in": {
+        "server": "http://192.168.1.20:7539",
+        "signedIn": true,
+        "household": 3,
+        "alwaysStartAs": 2,
+        "me": {
+          "id": 1,
+          "has_pin": true
+        }
+      },
+      "out": "pin"
+    },
+    {
+      "in": {
+        "server": "http://192.168.1.20:7539",
+        "signedIn": true,
+        "household": 3,
+        "alwaysStartAs": 2,
+        "me": null
+      },
+      "out": "profiles"
+    }
   ]
 }

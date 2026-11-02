@@ -89,9 +89,10 @@ What Pley does, in full. The [README](../README.md) has the short version.
   minutes say how long to wait, and after 100 wrong ones in a row the PIN
   stops working until its owner or an administrator sets it again. A TV
   that asks "Who's watching?" as it starts also asks the PIN of the profile
-  it was left on. A profile that can see more than yours and has no PIN
-  takes its password, in the browser; a TV signs in to it again with a
-  code.
+  it was left on, and one set to always start as a profile asks that PIN
+  first, so a TV never starts as a profile with a PIN without it. A
+  profile that can see more than yours and has no PIN takes its password,
+  in the browser; a TV signs in to it again with a code.
 - Two-step sign-in with an authenticator app, with recovery codes:
   optional, or required of everyone by an administrator, in which case each
   person sets it up at their next sign-in (for a TV, on their phone).

@@ -695,14 +695,17 @@ sub apiBoot(request as object)
         apiSelect(current, name)
     end if
     ' "Who's watching?" first when the household had more than one profile,
-    ' unless Settings' "Always start as" names one of them.
-    askWho = false
+    ' unless Settings' "Always start as" names one of them, which still
+    ' opens it on the PIN pad of the profile signed in when that one has a
+    ' PIN (pin).
+    atStart = ""
     if m.tokens <> invalid
         household = profKeptHousehold(CreateObject("roRegistrySection", "household"), m.server)
         startAs = profStartAs(CreateObject("roRegistrySection", "startAs"), m.server)
-        askWho = profAskWho(m.tokens.scope, household, startAs)
+        atStart = profAtStart(m.tokens.scope, household, startAs)
     end if
-    apiAnswer(request, apiOk({ screen: serversStartScreen(m.server, m.tokens <> invalid, askWho), servers: servers }))
+    screen = serversStartScreen(m.server, m.tokens <> invalid, atStart <> "")
+    apiAnswer(request, apiOk({ screen: screen, pin: atStart = "pin", servers: servers }))
 end sub
 
 ' Makes url the server the screens talk to, signed in when it has tokens.
@@ -743,13 +746,15 @@ sub apiAskProfile()
     apiSend(job)
 end sub
 
-' The profile, unless another sign-in came meanwhile.
+' The profile, unless another sign-in came meanwhile; whether it has a PIN
+' is kept for the next start.
 sub apiKnowProfile(job as object, answer as object)
     if not answer.ok or job.asked <> m.profileAsked then return
     data = httpObject(answer.data)
     if data = invalid then return
     m.session.profileId = httpNumber(data.id, 0)
     m.session.profileName = httpSentence(data.name)
+    profKeepPin(CreateObject("roRegistrySection", "household"), m.server, data)
 end sub
 
 sub apiUseServer(request as object, spec as object)
@@ -992,6 +997,8 @@ sub apiSignedIn(signIn as object, body as string)
     previous = tokensLoad(m.tokensSection, fresh.issuer)
     tokensSave(m.tokensSection, fresh)
     if previous <> invalid and previous.refresh <> fresh.refresh then apiRevoke(previous)
+    ' Another profile, maybe: whether it has a PIN isn't known until it says.
+    profKeepPin(CreateObject("roRegistrySection", "household"), fresh.issuer, invalid)
     if fresh.issuer = m.server
         m.tokens = fresh
         m.lastIssued = invalid
@@ -1062,6 +1069,8 @@ sub apiSwitchAnswered(job as object, status as integer, body as string)
         else
             ' Saved before they are used: the old refresh token is spent.
             tokensSave(m.tokensSection, fresh)
+            ' Another profile, maybe: whether it has a PIN isn't known until it says.
+            profKeepPin(CreateObject("roRegistrySection", "household"), old.issuer, invalid)
             m.tokens = fresh
             m.lastIssued = { token: fresh.access, at: apiNow() }
             m.session.scope = fresh.scope

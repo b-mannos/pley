@@ -65,15 +65,41 @@ end sub
 
 sub test_profiles_asked_at_a_start()
     scope = "library play playlists profiles"
-    household = { count: 2, ids: [7, 9] }
-    tkTrue(profAskWho(scope, household, 0))
-    tkFalse(profAskWho(scope, { count: 1, ids: [7] }, 0), "a household of one")
-    tkFalse(profAskWho("library play", { count: 3, ids: [7, 9, 11] }, 0), "a sign-in that can't switch")
-    tkFalse(profAskWho(scope, household, 9), "Always start as names a profile")
-    tkTrue(profAskWho(scope, household, 12), "a profile gone from the household: asked again")
-    tkTrue(profAskWho(scope, { count: 2, ids: [] }, 9), "the household's profiles not known yet: asked")
+    household = { count: 2, ids: [7, 9], pin: 0 }
+    tkEqual(profAtStart(scope, household, 0), "ask")
+    tkEqual(profAtStart(scope, { count: 1, ids: [7], pin: 1 }, 0), "", "a household of one")
+    tkEqual(profAtStart("library play", { count: 3, ids: [7, 9, 11], pin: 0 }, 0), "", "a sign-in that can't switch")
+    tkEqual(profAtStart(scope, household, 9), "", "Always start as names a profile")
+    tkEqual(profAtStart(scope, household, 12), "ask", "a profile gone from the household: asked again")
+    tkEqual(profAtStart(scope, { count: 2, ids: [], pin: 0 }, 9), "ask", "the household's profiles not known yet: asked")
     tkTrue(authAllows("library play", "play"))
     tkFalse(authAllows("library playlists", "play"))
+end sub
+
+' Always start as goes on as the profile signed in, but never past its PIN.
+sub test_profiles_always_start_as_never_past_a_pin()
+    scope = "library play playlists profiles"
+    tkEqual(profAtStart(scope, { count: 2, ids: [7, 9], pin: 1 }, 9), "pin", "its pad first")
+    tkEqual(profAtStart(scope, { count: 2, ids: [7, 9], pin: -1 }, 9), "ask", "not known whether it has one")
+    tkEqual(profAtStart(scope, { count: 2, ids: [7, 9], pin: 1 }, 0), "ask", "without Always start as, the profiles as before")
+
+    kept = CreateObject("roRegistrySection", "householdPinTest")
+    profKeepHousehold(kept, "http://nas:7539", ParseJson("[{""id"":7},{""id"":9}]"))
+    tkEqual(profKeptHousehold(kept, "http://nas:7539").pin, -1, "never heard")
+    profKeepPin(kept, "http://nas:7539", ParseJson("{""id"":9,""has_pin"":true}"))
+    tkEqual(profKeptHousehold(kept, "http://nas:7539").pin, 1)
+    tkEqual(profKeptHousehold(kept, "http://other:7539").pin, -1, "for each server")
+    profKeepPin(kept, "http://nas:7539", ParseJson("{""id"":9}"))
+    tkEqual(profKeptHousehold(kept, "http://nas:7539").pin, 0)
+    profKeepPin(kept, "http://nas:7539", invalid)
+    tkEqual(profKeptHousehold(kept, "http://nas:7539").pin, -1, "another profile signed in")
+    tkEqual(profKeptHousehold(kept, "http://nas:7539").count, 2, "the household stays")
+
+    tiles = profTiles(ParseJson("[{""id"":7,""name"":""Anna"",""current"":true,""needs"":""none""},{""id"":9,""name"":""Sam"",""needs"":""pin""}]"), "", { id: 7, hasPin: true })
+    tkEqual(profFirstPad(tiles, true).itemId, 7, "the profile signed in")
+    tkInvalid(profFirstPad(tiles, false), "not a start as it")
+    tiles = profTiles(ParseJson("[{""id"":7,""name"":""Anna"",""current"":true,""needs"":""none""},{""id"":9,""name"":""Sam"",""needs"":""pin""}]"), "", { id: 7, hasPin: false })
+    tkInvalid(profFirstPad(tiles, true), "no PIN since")
 end sub
 
 sub test_profiles_always_start_as()
@@ -87,10 +113,10 @@ sub test_profiles_always_start_as()
 
     kept = CreateObject("roRegistrySection", "householdTest")
     profKeepHousehold(kept, "http://nas:7539", ParseJson("[{""id"":7,""current"":false},{""id"":9,""current"":true}]"))
-    tkEqual(profKeptHousehold(kept, "http://nas:7539"), { count: 2, ids: [7, 9] }, "how many, and which")
-    tkEqual(profKeptHousehold(kept, "http://other:7539"), { count: 0, ids: [] }, "for each server")
+    tkEqual(profKeptHousehold(kept, "http://nas:7539"), { count: 2, ids: [7, 9], pin: -1 }, "how many, and which")
+    tkEqual(profKeptHousehold(kept, "http://other:7539"), { count: 0, ids: [], pin: -1 }, "for each server")
     profKeepHousehold(kept, "http://nas:7539", [])
-    tkEqual(profKeptHousehold(kept, "http://nas:7539"), { count: 0, ids: [] })
+    tkEqual(profKeptHousehold(kept, "http://nas:7539"), { count: 0, ids: [], pin: -1 })
 
     household = profHousehold(ParseJson("[{""id"":7,""name"":""Anna""},{""id"":9,""name"":""Kids""},{""id"":0,""name"":""?""}]"))
     tkEqual(household, [{ id: 7, name: "Anna" }, { id: 9, name: "Kids" }])

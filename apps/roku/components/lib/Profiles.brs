@@ -67,6 +67,16 @@ function profChoice(tile as object, me as dynamic, atStart as boolean) as string
     return "locked"
 end function
 
+' The tile whose PIN pad opens first, at a start as the profile signed in
+' (padFirst): that profile, when it has a PIN; invalid otherwise.
+function profFirstPad(tiles as object, padFirst as boolean) as dynamic
+    if not padFirst then return invalid
+    for each tile in tiles
+        if tile.current and tile.needs = "pin" then return tile
+    end for
+    return invalid
+end function
+
 ' What a profile asks for under its name.
 function profNeedsLabel(needs as string) as string
     if needs = "pin" then return "PIN"
@@ -84,31 +94,56 @@ function profColor(hex as dynamic) as string
     return "0x" + UCase(Mid(text, 2)) + "FF"
 end function
 
-' Whether the app asks "Who's watching?" as it starts: a sign-in allowed to
-' switch profiles, on a server whose household had more than one when last
-' asked (household, profKeptHousehold's), unless Settings' "Always start
-' as" names one of them (startAs, its id; 0 for none). As on the other TVs,
-' that only skips the question: the app starts as the profile it was left
-' on. A setting naming a profile gone from the household (deleted, or
-' another account's, signed in since) asks again, as Settings then says.
-function profAskWho(scope as string, household as object, startAs as integer) as boolean
-    if not authAllows(scope, "profiles") or household.count < 2 then return false
-    if startAs = 0 then return true
+' What "Who's watching?" the app shows as it starts: "ask" (the profiles)
+' for a sign-in allowed to switch profiles, on a server whose household had
+' more than one when last asked (household, profKeptHousehold's), unless
+' Settings' "Always start as" names one of them (startAs, its id; 0 for
+' none). As on the other TVs, that only skips the question: the app goes on
+' as the profile it was left on ("", Home), but never past its PIN: its pad
+' comes first ("pin") when it has one (household.pin 1), and the profiles
+' when the Roku doesn't know whether it has one (-1). A setting naming a
+' profile gone from the household (deleted, or another account's, signed
+' in since) asks again, as Settings then says.
+function profAtStart(scope as string, household as object, startAs as integer) as string
+    if not authAllows(scope, "profiles") or household.count < 2 then return ""
+    named = false
     for each id in household.ids
-        if id = startAs then return false
+        if id = startAs then named = true
     end for
-    return true
+    if not named or household.pin < 0 then return "ask"
+    if household.pin = 1 then return "pin"
+    return ""
 end function
 
 ' The household as last asked for on server, kept on this Roku (registry
-' section household): { count, ids (its profiles') }.
+' section household): { count, ids (its profiles'), pin (whether the
+' profile signed in has a PIN: 1, 0, or -1 when not known) }.
 function profKeptHousehold(section as object, server as string) as object
     ids = []
     for each id in section.Read(server + "#ids").Tokenize(",")
         if Val(id) > 0 then ids.Push(Int(Val(id)))
     end for
-    return { count: Int(Val(section.Read(server))), ids: ids }
+    pin = -1
+    if section.Exists(server + "#pin") then pin = Int(Val(section.Read(server + "#pin")))
+    return { count: Int(Val(section.Read(server))), ids: ids, pin: pin }
 end function
+
+' Keeps whether the profile signed in on server has a PIN (GET
+' /api/auth/me's has_pin) for the next start; me invalid forgets it, as
+' another profile is signed in. Written only when it changes.
+sub profKeepPin(section as object, server as string, me as dynamic)
+    key = server + "#pin"
+    if me = invalid
+        if not section.Exists(key) then return
+        section.Delete(key)
+    else
+        value = "0"
+        if httpTrue(me.has_pin) then value = "1"
+        if section.Exists(key) and section.Read(key) = value then return
+        section.Write(key, value)
+    end if
+    section.Flush()
+end sub
 
 ' Keeps the household's profiles (GET /api/oauth/profiles) for the next
 ' start: how many, and their ids.

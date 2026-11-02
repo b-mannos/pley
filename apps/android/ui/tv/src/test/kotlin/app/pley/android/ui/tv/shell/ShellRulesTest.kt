@@ -23,9 +23,18 @@ class ShellRulesTest {
 
     @Test
     fun startAsksWhoIsWatchingInAHouseholdWithoutAlwaysStartAs() {
-        assertEquals(PleyKey.Profiles, startKey(StartFacts("http://s", signedIn = true, profiles = 3)))
-        assertEquals(PleyKey.Home, startKey(StartFacts("http://s", signedIn = true, profiles = 3, alwaysStartAs = 2)))
+        assertEquals(PleyKey.Profiles(), startKey(StartFacts("http://s", signedIn = true, profiles = 3)))
+        assertEquals(PleyKey.Profiles(), startKey(StartFacts("http://s", signedIn = true, profiles = 3, hasPin = true)))
         assertEquals(PleyKey.Home, startKey(StartFacts("http://s", signedIn = true, profiles = 1)))
+        assertEquals(PleyKey.Home, startKey(StartFacts("http://s", signedIn = true, profiles = 1, alwaysStartAs = 1, hasPin = true)))
+    }
+
+    @Test
+    fun alwaysStartAsGoesOnAsTheProfileLeftOnButNeverPastItsPin() {
+        assertEquals(PleyKey.Home, startKey(StartFacts("http://s", signedIn = true, profiles = 3, alwaysStartAs = 2, hasPin = false)))
+        assertEquals(PleyKey.Profiles(pin = true), startKey(StartFacts("http://s", signedIn = true, profiles = 3, alwaysStartAs = 2, hasPin = true)))
+        // Who the app was left on was never heard: whether it has a PIN isn't known.
+        assertEquals(PleyKey.Profiles(), startKey(StartFacts("http://s", signedIn = true, profiles = 3, alwaysStartAs = 2)))
     }
 
     private fun libraries(n: Int) = (1..n).map { Library(it.toLong(), "Library $it", if (it % 2 == 0) LibraryKind.Shows else LibraryKind.Movies) }
@@ -114,7 +123,7 @@ class ShellRulesTest {
         assertEquals("libraries", railCurrent(PleyKey.Library(5), items))
         assertEquals("libraries", railCurrent(PleyKey.Libraries, items))
         assertEquals("settings", railCurrent(PleyKey.Settings, items))
-        assertEquals(PROFILE_ITEM, railCurrent(PleyKey.Profiles, items))
+        assertEquals(PROFILE_ITEM, railCurrent(PleyKey.Profiles(), items))
         assertNull(railCurrent(PleyKey.Servers, items))
     }
 

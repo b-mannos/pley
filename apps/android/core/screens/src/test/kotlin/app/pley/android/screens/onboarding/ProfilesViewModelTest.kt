@@ -46,9 +46,9 @@ class ProfilesViewModelTest {
         ProfileGate.passed = false
     }
 
-    private fun TestScope.profiles(tv: Boolean = true, gate: Boolean = false): ProfilesViewModel {
+    private fun TestScope.profiles(tv: Boolean = true, gate: Boolean = false, pin: Boolean = false): ProfilesViewModel {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        return ProfilesViewModel(source, tv, gate).also { vm = it }
+        return ProfilesViewModel(source, tv, gate, pin).also { vm = it }
     }
 
     private fun wrong(reason: String, description: String) = TokenException(400, OAuthError("invalid_grant", description, reason))
@@ -246,6 +246,46 @@ class ProfilesViewModelTest {
         vm.submit()
         advanceUntilIdle()
         assertEquals(OnboardingMove.Restart(PleyKey.Home), vm.navigation.first())
+    }
+
+    @Test
+    fun aTvStartingAsAPinProfileWithAlwaysStartAsOpensOnItsPad() = runTest {
+        source.signIn(server, Me(1, "anna", "Anna", hasPin = true))
+        source.saveHousehold(server, FakeOnboardingSource.household())
+        source.profilesError = java.net.SocketTimeoutException("timeout")
+        val vm = profiles(tv = true, gate = true, pin = true)
+        advanceUntilIdle()
+        // From what was saved, without the server.
+        val pad = vm.state.value.step as ProfilesStep.Pin
+        assertEquals(1L to true, pad.profile.id to pad.confirm)
+        // Back shows the profiles, and the list loading again leaves them.
+        vm.backToPick()
+        source.profilesError = null
+        vm.reload()
+        advanceUntilIdle()
+        assertEquals(ProfilesStep.Pick, vm.state.value.step)
+        vm.pick(1)
+        vm.type("1234")
+        vm.submit()
+        advanceUntilIdle()
+        assertEquals(listOf(1L to "1234"), source.pinChecks)
+        assertEquals(OnboardingMove.Restart(PleyKey.Home), vm.navigation.first())
+    }
+
+    @Test
+    fun itsPadComesFirstOnlyAtAStartAndForAProfileWithAPin() = runTest {
+        val noPin = profiles(tv = true, gate = true, pin = true)
+        advanceUntilIdle()
+        assertEquals(ProfilesStep.Pick, noPin.state.value.step)
+        noPin.viewModelScope.cancel()
+        source.signIn(server, Me(1, "anna", "Anna", hasPin = true))
+        val answered = profiles(tv = true, gate = false, pin = true)
+        advanceUntilIdle()
+        assertEquals(ProfilesStep.Pick, answered.state.value.step)
+        answered.viewModelScope.cancel()
+        val asked = profiles(tv = true, gate = true)
+        advanceUntilIdle()
+        assertEquals(ProfilesStep.Pick, asked.state.value.step)
     }
 
     @Test

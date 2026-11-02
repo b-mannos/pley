@@ -74,6 +74,7 @@ class App : NUIApplication
             StartPage.Servers => new PageKey.Servers(),
             StartPage.Link => new PageKey.Link(state.Server.Value ?? ""),
             StartPage.Profiles => new PageKey.Profiles(),
+            StartPage.Pin => new PageKey.Profiles(Pin: true),
             _ => new PageKey.Home(),
         });
         Profile.Took("app: the first page", first);
@@ -173,8 +174,8 @@ class App : NUIApplication
                 shell.Show(screen);
                 screen.Started();
                 break;
-            case PageKey.Profiles:
-                var profiles = new ProfilesModel(new AppProfilesSource(state), gate: !state.ProfileGatePassed);
+            case PageKey.Profiles who:
+                var profiles = new ProfilesModel(new AppProfilesSource(state), gate: !state.ProfileGatePassed, pin: who.Pin);
                 profiles.Done += () =>
                 {
                     state.ProfileGatePassed = true;

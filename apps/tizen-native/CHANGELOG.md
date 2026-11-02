@@ -237,5 +237,9 @@ It has no releases yet: it is built and installed by hand
 
 ### Fixed
 
+- Settings' Always start as no longer starts the TV as a profile with a
+  PIN without it: the start opens on that profile's PIN pad, and Back shows
+  the other profiles. While the TV doesn't know whether the profile it was
+  left on has a PIN, the start asks "Who's watching?".
 - Too many wrong PINs for the profile the TV starts as say how long to
   wait, as a switch does, rather than "a few minutes".
