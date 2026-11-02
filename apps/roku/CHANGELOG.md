@@ -36,6 +36,9 @@ describes how they are made.
   the address on the Roku's own network may get an access token (an
   hour's) within the half hour, never the refresh token. A sign-in from
   before starts checking within the hour, as its token is renewed.
+- Changing servers no longer lets the event stream connect to the server
+  chosen with the token of the one before, before either proved anything:
+  that token is withdrawn before the address changes.
 
 ## [0.1.2] - 2026-11-02
 

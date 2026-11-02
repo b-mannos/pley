@@ -757,7 +757,14 @@ end sub
 
 ' Makes url the server the screens talk to, signed in when it has tokens.
 sub apiSelect(url as string, name as string)
-    if url <> m.server then apiFailWaiting(apiFail("server_changed", "The server changed."))
+    if url <> m.server
+        apiFailWaiting(apiFail("server_changed", "The server changed."))
+        ' The token in use goes before the address changes: the event
+        ' stream follows the two apart (MainScene's onStream), so the server
+        ' before's token never goes to the one chosen, proved or not.
+        m.tokens = invalid
+        apiPublish()
+    end if
     m.signIn = invalid
     m.server = url
     m.tokens = invalid
