@@ -477,7 +477,7 @@ async fn listen(client: &reqwest::Client, server: &Url, shell: &dyn Shell, name:
     let session = match crate::proofs::session(server, shell.proofs(), shell.session(server)).await {
         Ok(session) => session,
         Err(crate::proofs::Refused::Unreachable(_)) => return Ended::Dropped,
-        Err(crate::proofs::Refused::NotYours) => {
+        Err(crate::proofs::Refused::NotYours | crate::proofs::Refused::Misnamed(_)) => {
             shell.not_yours(server);
             return Ended::Refused;
         }

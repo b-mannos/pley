@@ -41,6 +41,9 @@ struct Places {
     picker: Option<Url>,
     /// The server shown now.
     server: Option<Url>,
+    /// The address of this computer the server was reached from when it
+    /// opened (see [`network_changed`]).
+    route: Option<std::net::IpAddr>,
 }
 
 #[derive(Default)]
@@ -130,22 +133,33 @@ pub(crate) fn not_yours<R: Runtime>(app: &AppHandle<R>, server: &Url) {
     );
 }
 
-/// The computer is on another network: every server proves itself again,
-/// and a plain-http server shown leaves the window for the picker, which
-/// opens it again once it proves itself there (an https one is safe where
-/// it is: its address is checked by its certificate).
-fn network_changed<R: Runtime>(app: &AppHandle<R>) {
+/// The computer's addresses changed, or it slept: every server proves
+/// itself again. A plain-http server shown leaves the window for the
+/// picker, which opens it again once it proves itself there, when the way
+/// to it changed (another network) or the computer slept (it may have woken
+/// on another). An https server is safe where it is, its address checked by
+/// its certificate, and so is one on this computer.
+fn network_changed<R: Runtime>(app: &AppHandle<R>, slept: bool) {
     app.state::<proofs::Proofs>().doubt_all();
     let Some(window) = app.get_webview_window("main") else { return };
     let pages = window.state::<Pages>();
-    let picker = {
+    let (shown, route, picker) = {
         let places = pages.0.lock().unwrap();
-        if !places.server.as_ref().is_some_and(|shown| shown.scheme() == "http") {
-            return;
-        }
-        places.picker.clone()
+        let Some(shown) = places.server.clone() else { return };
+        (shown, places.route, places.picker.clone())
     };
-    leave_for(&window, picker);
+    let on_this_computer = match shown.host() {
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    };
+    if shown.scheme() != "http" || on_this_computer {
+        return;
+    }
+    if slept || proofs::route_to(&shown) != route {
+        leave_for(&window, picker);
+    }
 }
 
 fn leave_for<R: Runtime>(window: &WebviewWindow<R>, picker: Option<Url>) {
@@ -172,7 +186,17 @@ fn open_in_browser<R: Runtime>(app: &AppHandle<R>, url: &Url) {
 #[tauri::command]
 fn open_server(window: WebviewWindow, url: String) -> Result<(), String> {
     let origin = servers::server_origin(&url)?;
-    window.state::<Pages>().0.lock().unwrap().server = Some(origin.clone());
+    // The network may have changed since the picker checked it.
+    if !window.state::<proofs::Proofs>().may_open(&origin) {
+        return Err("the network changed: open it again".to_owned());
+    }
+    let route = proofs::route_to(&origin);
+    {
+        let pages = window.state::<Pages>();
+        let mut places = pages.0.lock().unwrap();
+        places.server = Some(origin.clone());
+        places.route = route;
+    }
     window.state::<notices::Notices>().follow(Some(origin.clone()));
     window.navigate(origin).map_err(|e| e.to_string())
 }
@@ -264,7 +288,7 @@ pub fn run() {
             tauri::async_runtime::spawn(downloads::run(app.handle().clone()));
             tauri::async_runtime::spawn(notices::run(app.handle().clone()));
             let watching = app.handle().clone();
-            tauri::async_runtime::spawn(proofs::watch_network(move || network_changed(&watching)));
+            tauri::async_runtime::spawn(proofs::watch_network(move |slept| network_changed(&watching, slept)));
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -280,7 +304,7 @@ mod tests {
     }
 
     fn at_server(picker: &str, server: &str) -> Places {
-        Places { picker: Some(url(picker)), server: Some(url(server)) }
+        Places { picker: Some(url(picker)), server: Some(url(server)), route: None }
     }
 
     #[test]

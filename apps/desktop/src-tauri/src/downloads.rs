@@ -548,8 +548,14 @@ async fn download<R: Runtime>(
             wait_for_server(app, downloads, d.id, "The server didn't answer.".to_owned());
             return false;
         }
-        Err(crate::proofs::Refused::NotYours) => {
-            wait_for_server(app, downloads, d.id, "Another device answers at this server's address.".to_owned());
+        Err(refused @ (crate::proofs::Refused::NotYours | crate::proofs::Refused::Misnamed(_))) => {
+            let why = match refused {
+                crate::proofs::Refused::Misnamed(_) => {
+                    "The server names itself otherwise here: check the proxy in front of it."
+                }
+                _ => "Another device answers at this server's address.",
+            };
+            wait_for_server(app, downloads, d.id, why.to_owned());
             return false;
         }
     };

@@ -58,6 +58,10 @@ pub enum Refused {
     Unreachable(String),
     /// Something answered without the proof.
     NotYours,
+    /// The server proved itself for another address than the one asked: a
+    /// proxy in front of it passes another Host (or scheme) on. It gets no
+    /// session either, as another device could say the same.
+    Misnamed(String),
 }
 
 impl std::fmt::Display for Refused {
@@ -65,6 +69,10 @@ impl std::fmt::Display for Refused {
         match self {
             Self::Unreachable(why) => f.write_str(why),
             Self::NotYours => f.write_str(NOT_YOURS),
+            Self::Misnamed(address) => write!(
+                f,
+                "it proves itself as {address} here: the proxy in front of it must pass on the Host and X-Forwarded-Proto it was asked with"
+            ),
         }
     }
 }
@@ -149,6 +157,13 @@ impl Proofs {
         self.kept.lock().unwrap().proved.insert(address(server), SystemTime::now());
     }
 
+    /// Whether the window may open `server`: it has no key yet (the window
+    /// asks for one with its session there), or it proved itself lately on
+    /// this network.
+    pub fn may_open(&self, server: &Url) -> bool {
+        self.key(server).is_none() || self.proved_lately(server)
+    }
+
     fn proved_lately(&self, server: &Url) -> bool {
         // A clock set back gives an error: proved again.
         let kept = self.kept.lock().unwrap();
@@ -216,6 +231,8 @@ fn challenge() -> Option<String> {
 struct Answer {
     id: Option<String>,
     proof: Option<String>,
+    /// The address the server proved itself for.
+    address: Option<String>,
 }
 
 /// `/api/server` of `server`, asked to prove it holds `key` when there is
@@ -259,9 +276,15 @@ pub async fn ask(server: &Url, proofs: &Proofs) -> Result<serde_json::Value, Ref
         None => Refused::Unreachable("that isn't a Pley server".into()),
     })?;
     if let (Some(key), Some(challenge)) = (key, challenge) {
-        let answer: Answer = serde_json::from_value(body.clone()).unwrap_or(Answer { id: None, proof: None });
+        let answer: Answer =
+            serde_json::from_value(body.clone()).unwrap_or(Answer { id: None, proof: None, address: None });
         if !proves(&key, &address(server), &challenge, answer.id.as_deref(), answer.proof.as_deref()) {
-            return Err(Refused::NotYours);
+            return Err(match answer.address {
+                Some(other) if answer.id.as_deref() == Some(key.server_id.as_str()) && other != address(server) => {
+                    Refused::Misnamed(other)
+                }
+                _ => Refused::NotYours,
+            });
         }
         proofs.proved(server);
     }
@@ -315,18 +338,39 @@ pub fn local_addresses() -> Vec<IpAddr> {
     addresses
 }
 
+/// The address of this computer that a connection to `server` would leave
+/// from (a UDP socket "connected" there, which sends nothing): it changes
+/// with the network that leads there.
+pub fn route_to(server: &Url) -> Option<IpAddr> {
+    let target = server.socket_addrs(|| None).ok()?.into_iter().next()?;
+    let any: IpAddr =
+        if target.is_ipv4() { std::net::Ipv4Addr::UNSPECIFIED.into() } else { std::net::Ipv6Addr::UNSPECIFIED.into() };
+    let socket = std::net::UdpSocket::bind((any, 0)).ok()?;
+    socket.connect(target).ok()?;
+    Some(socket.local_addr().ok()?.ip())
+}
+
+/// How long one look at the addresses may take before the computer counts
+/// as having slept in between (it may wake on another network).
+const SLEPT: Duration = Duration::from_secs(5);
+
 /// Looks at the computer's addresses every second, for as long as the app
-/// runs, and calls `on_change` when they change: every server proves itself
-/// again then, and the window leaves a server whose pages could otherwise
-/// send the session to whatever answers at its address now.
-pub async fn watch_network(on_change: impl Fn()) {
+/// runs, and calls `on_change` when they change, or after the computer
+/// slept (`true`): every server proves itself again then, and the window
+/// leaves a server whose pages could otherwise send the session to whatever
+/// answers at its address now. A network that gives the computer the same
+/// addresses, joined in less than a second, goes unseen.
+pub async fn watch_network(on_change: impl Fn(bool)) {
     let mut seen = local_addresses();
+    let mut looked = SystemTime::now();
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
         let now = local_addresses();
-        if now != seen {
+        let slept = looked.elapsed().map_or(true, |gap| gap > SLEPT);
+        looked = SystemTime::now();
+        if now != seen || slept {
             seen = now;
-            on_change();
+            on_change(slept);
         }
     }
 }
@@ -519,6 +563,38 @@ pub(crate) mod tests {
         proofs.doubt_all();
         assert_eq!(session(&server, &proofs, cookie.clone()).await, Ok(cookie.clone()));
         assert_eq!(answering.await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_proof_for_another_address_names_the_proxy() {
+        // The real server behind a proxy that passes another Host on: its
+        // proof is for that address, which doesn't count here either.
+        let bytes = key().bytes().unwrap();
+        let other = "https://pley.example.com";
+        let elsewhere = b64().encode(proof(&bytes, ID, other, CHALLENGE).as_ref());
+        let body = serde_json::json!({"id": ID, "proof": elsewhere, "address": other}).to_string();
+        let (server, _asked) = serve(vec![(200, body)]).await;
+        let proofs = Proofs::for_tests(&server, false);
+        let refused = session(&server, &proofs, Some("pley_token=abc".to_owned())).await;
+        assert_eq!(refused, Err(Refused::Misnamed(other.to_owned())));
+        assert!(Refused::Misnamed(other.to_owned()).to_string().contains("X-Forwarded-Proto"));
+    }
+
+    #[test]
+    fn a_server_opens_once_it_proved_itself_on_this_network() {
+        let server = Url::parse("http://192.168.1.20:7539").unwrap();
+        assert!(Proofs::in_memory().may_open(&server), "no key yet: the window asks for one");
+        assert!(!Proofs::for_tests(&server, false).may_open(&server));
+        let proofs = Proofs::for_tests(&server, true);
+        assert!(proofs.may_open(&server));
+        proofs.doubt_all();
+        assert!(!proofs.may_open(&server), "another network since");
+    }
+
+    #[test]
+    fn the_way_to_a_server_is_the_address_it_leaves_from() {
+        let local = Url::parse("http://127.0.0.1:7539").unwrap();
+        assert_eq!(route_to(&local), Some("127.0.0.1".parse().unwrap()));
     }
 
     #[test]

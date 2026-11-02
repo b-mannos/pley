@@ -40,8 +40,6 @@ let searching = false;
 const reachable = new Map<string, boolean>();
 let busy: string | null = null;
 let autoOpen: AbortController | null = null;
-/** An unencrypted address someone was warned about: connecting again goes ahead. */
-let warnedAbout: string | null = null;
 let downloads: Download[] = [];
 /** The download whose Delete was pressed once: pressed again, it goes. */
 let confirming: number | null = null;
@@ -241,8 +239,16 @@ async function refreshDownloads(): Promise<void> {
   if (downloads.some(coming)) pollTimer = window.setTimeout(() => void refreshDownloads(), 1000);
 }
 
+function notEncrypted(url: string): string {
+  return `${displayAddress(url)} isn't encrypted: your password and what you watch could be read on the way. Open it by its https address.`;
+}
+
 /** Checks the server, remembers it and shows its web app in this window. */
 async function openServer(url: string, id: string | null): Promise<void> {
+  if (unencrypted(url)) {
+    status.textContent = notEncrypted(url);
+    return;
+  }
   busy = url;
   render();
   try {
@@ -343,12 +349,11 @@ async function addServer(input: string): Promise<void> {
     addError.hidden = false;
     return;
   }
-  // Plain http across the internet: say so once, then go ahead if asked again.
-  if (unencrypted(url) && warnedAbout !== url) {
-    warnedAbout = url;
-    addError.textContent =
-      `${displayAddress(url)} isn't encrypted: your password and what you watch could be read on the way. ` +
-      "Use its https address if it has one, or press Connect again to go ahead anyway.";
+  // Plain http across the internet: refused, as Pley's other apps do. The
+  // session would travel readable, and the server proves itself to plain
+  // http on its own networks only.
+  if (unencrypted(url)) {
+    addError.textContent = notEncrypted(url);
     addError.hidden = false;
     return;
   }
@@ -377,7 +382,8 @@ async function start(): Promise<void> {
   const notYours = saved.find((s) => s.url === params.get("not-yours")?.replace(/\/$/, ""));
   if (notYours) note = `Another device answers at ${displayAddress(notYours.url)} now, so Pley came back here.`;
   const last = lastUsed(saved);
-  if (last && !pick) void openLastUsed(last);
+  // A plain-http address across the internet isn't opened (see addServer).
+  if (last && !pick && !unencrypted(last.url)) void openLastUsed(last);
   else showChooser();
 }
 
