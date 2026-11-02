@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<addon id="plugin.video.pley" name="Pley" version="0.1.1" provider-name="the Pley authors">
+<addon id="plugin.video.pley" name="Pley" version="0.1.2" provider-name="the Pley authors">
   <requires>
     <import addon="xbmc.python" version="3.0.1"/>
   </requires>
@@ -24,12 +24,9 @@
       <fanart>resources/fanart.jpg</fanart>
     </assets>
     <!-- The version's CHANGELOG entries (scripts/release.mjs writes them). -->
-    <news>0.1.1 (2026-11-01)
-Added:
+    <news>0.1.2 (2026-11-02)
+Fixed:
 
-- Requests: ask for movies and shows the server doesn't have yet. Discover searches TMDB and lists Trending this week, Popular movies, Popular shows, Coming to cinemas and Popular anime, each title with its badge ("In library", "Requested", "Declined"); OK does its one main action (Request, Open, Tell me too…) and the rest is in its context menu. A show's seasons each say their state, and Which seasons? picks the ones to ask for. Needs a server with requests turned on; for a sign-in from before, Discover offers "Sign in again".
-- Your requests: each request's stage ("Waiting for approval", "Downloading 42% · in 20 min", "Ready to watch"…), what it says and when it was asked for, with Withdraw and Stop following. Administrators get Requests, opening on Needs attention, with filters (Yours for their own), Approve, Decline, Decline with a reason… (typed on Kodi's keyboard), Mark as added by hand and Delete. The entry carries the number of what is new or waits.
-- Search shows On TMDB after the libraries' results, and a library show's menu has Request more seasons. In Pley's look, the profile's menu opens Discover and Your requests in Kodi's lists, search has an On TMDB row, and a show's More has Request more seasons.
-- "“Heat” is ready to watch." pops up with the poster as soon as it is ("Season 2 of “X” is ready to watch." for a show), and as Kodi starts for news that came while it was off; never over a playing video, where the last three wait for...</news>
+- A wrong PIN, or too many, asks again with the reason in the dialog's heading, and the profile in use shows its lock on "Who's watching?". Switch profile in the settings asks the PIN of a profile that got one after the list was loaded.</news>
   </extension>
 </addon>
