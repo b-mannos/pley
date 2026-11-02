@@ -43,11 +43,13 @@ it on that page as they sign in (for a code, on the device that approves
 it).
 
 Before its token goes to the server's address, the app has the server
-prove it is the one signed in to ([API.md](API.md#telling-servers-apart)),
-at most every half hour, and again when the device changes networks or a
-request there got no answer.
-Another device at that address gets no token: the app shows what it saved
-and says "Another device answers there."
+prove it is the one signed in to, at that address
+([API.md](API.md#telling-servers-apart)): for the access token, a proof
+made within the half hour on the same networks (joining or leaving the
+default network, or any Wi-Fi or Ethernet, asks for a new one, and so does
+a request there that got no answer); for the refresh token and a profile's
+PIN, one made then. What can't prove itself gets no token: the app shows
+what it saved and says "Another device answers there."
 
 ### TVs and Fire TV
 

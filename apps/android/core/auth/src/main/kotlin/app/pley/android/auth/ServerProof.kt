@@ -3,6 +3,8 @@ package app.pley.android.auth
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import app.pley.android.common.Addresses
 import app.pley.android.common.UserFacing
 import java.io.IOException
@@ -83,16 +85,28 @@ object ServerProofs {
         networks.incrementAndGet()
     }
 
-    /** Calls [networkMayHaveChanged] each time the device joins or loses its default network. */
+    /**
+     * Calls [networkMayHaveChanged] each time the device joins or loses its
+     * default network, or any Wi-Fi or Ethernet network: the home network
+     * is reached through the Wi-Fi even when mobile data is the default (a
+     * Wi-Fi without internet), and moving to another such Wi-Fi doesn't
+     * change the default.
+     */
     fun followNetworks(context: Context) {
         val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return
-        connectivity.registerDefaultNetworkCallback(
-            object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) = networkMayHaveChanged()
+        fun changes() = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) = networkMayHaveChanged()
 
-                override fun onLost(network: Network) = networkMayHaveChanged()
-            },
-        )
+            override fun onLost(network: Network) = networkMayHaveChanged()
+        }
+        connectivity.registerDefaultNetworkCallback(changes())
+        val homes = NetworkRequest.Builder()
+            .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+            .addTransportType(NetworkCapabilities.TRANSPORT_ETHERNET)
+            // A Wi-Fi without internet counts too.
+            .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        connectivity.registerNetworkCallback(homes, changes())
     }
 
     /** The longest answer read: `/api/server`'s is a few hundred bytes. */
