@@ -310,8 +310,10 @@ its palette, DVB) next to an HLS stream.
   waits isn't run. An answer waits for it as long as such a read may take
   (12 s), or until the copy has those blocks: what the copy has meanwhile
   is around where it started, and players that replace what they have
-  with each answer would lose the pictures where they are. Past that, the
-  answer is what the copy has, and the player asks again.
+  with each answer would lose the pictures where they are. Past that, or
+  when the read gets nothing (over its budget, or left out for a later
+  one), the answer is the blocks there if the copy has all of them, else
+  what the copy has, and the player asks again.
 - `rest` (with `partial`) is for a player that reads the track once
   (Kodi's `.sup`): the answer waits up to 8 s for the whole track, then is
   everything read through the Cues so far, not only the blocks around

@@ -375,17 +375,26 @@ public sealed class SubtitlePresenter
     public const long PartialRetryMs = 3_000;
 
     /// <summary>
-    /// The server's partial picture track is asked for again after <see cref="PartialRetryMs"/>, then
-    /// twice as long each time up to this, from where the player is at each ask. A partial answer is
-    /// mostly the pictures around there, which are small. The server reads those up to 40 s past
-    /// where a player elsewhere asked from, and answers from that read for 20 s on: an ask this
-    /// long after the last answer, which took a moment and was asked for to the second, is
-    /// answered from the read the last one started, not a read of its own. Deviation from
-    /// Android, which asks every 3 s: a file whose Cues don't list the track is copied whole, and
-    /// each answer is all of it so far, tens of MB for a film; read every 3 s, those kept the app
-    /// from answering in the collections that followed.
+    /// The server's partial picture track is asked for again <see cref="PartialRetryMs"/> after the
+    /// ask, then twice as long each time up to this, from where the player is at each ask. A partial
+    /// answer is mostly the pictures around there, which are small. The server reads those up to
+    /// 40 s past where a player elsewhere asked from, and answers from that read for 20 s on: an ask
+    /// this long after the last one, which was asked for to the second, is answered from the read
+    /// the last one started, not a read of its own, however long the last answer waited for that
+    /// read. Deviation from Android, which asks every 3 s: see <see cref="CopyRetryMostMs"/>.
     /// </summary>
     public const long PicturesRetryMostMs = 15_000;
+
+    /// <summary>
+    /// A file whose Cues don't list the track is copied whole, and each answer is all of it so far,
+    /// tens of MB for a film; read every 3 s, those kept the app from answering in the collections
+    /// that followed. An answer past <see cref="CopyMinBytes"/> is asked for again this long after
+    /// it at most, as no read at a seek is to be spared for it.
+    /// </summary>
+    public const long CopyRetryMostMs = 24_000;
+
+    /// <summary>More than the pictures around where a player is come to (two and a half minutes of a Blu-ray's).</summary>
+    public const int CopyMinBytes = 4 << 20;
     const long MinWaitMs = 20, MaxWaitMs = 250, IdleWaitMs = 500;
 
     /// <summary>A file on a drive's partial picture track is asked for again after 1 s, then twice as long, this long at most.</summary>
@@ -585,6 +594,7 @@ public sealed class SubtitlePresenter
         // The server's copy is asked for from where the player is now (atMs after a seek), at every ask: while it isn't
         // whole, it answers with the pictures around there. A file on a drive is read where the film goes.
         var ask = local ? url : PlaybackPlan.PictureUrlAt(url, atMs ?? position());
+        var asked = scheduler.Elapsed;
         Ui.Plays.When(scheduler, () => ReadPictures(fetchPictures, ask), answer =>
         {
             if (at != generation) return;
@@ -601,7 +611,15 @@ public sealed class SubtitlePresenter
             pictures = subs;
             Refresh();
             if (answer.Complete) picturesWhole = true;
-            else retry = scheduler.After(waitMs, () => FetchPictures(url, at, Math.Min(waitMs * 2, local ? LocalPicturesRetryMs : PicturesRetryMostMs)));
+            else
+            {
+                // The pictures around the player: asked for again counting from the ask, whose answer may have waited
+                // for a read at a seek. A copy of the whole track so far: from its answer, and less often.
+                var copy = !local && answer.Bytes > CopyMinBytes;
+                var after = local || copy ? waitMs : Math.Max(PartialRetryMs, waitMs - (scheduler.Elapsed - asked));
+                var most = local ? LocalPicturesRetryMs : copy ? CopyRetryMostMs : PicturesRetryMostMs;
+                retry = scheduler.After(after, () => FetchPictures(url, at, Math.Min(waitMs * 2, most)));
+            }
         }, e =>
         {
             if (Marks.On) Marks.Note($"subtitles: the pictures failed: {e.GetType().Name} {e.Message}{(at != generation ? ", for an ask no longer wanted" : "")}");
@@ -612,17 +630,17 @@ public sealed class SubtitlePresenter
         });
     }
 
-    /// <summary>The .mks fetched and read, off the UI thread: a film's track can be megabytes.</summary>
-    static async Task<(PictureTrack Track, bool Complete)> ReadPictures(Func<string, Task<SubtitlePictures>> fetch, string url)
+    /// <summary>The .mks fetched and read, off the UI thread: a film's track can be megabytes. With its size (none for one read on the TV).</summary>
+    static async Task<(PictureTrack Track, bool Complete, long Bytes)> ReadPictures(Func<string, Task<SubtitlePictures>> fetch, string url)
     {
         var answer = await fetch(url).ConfigureAwait(false);
         if (answer.Track is { } read)
         {
             if (Marks.On) Marks.Note($"subtitles: {read.Samples.Count} pictures read on the TV{(answer.Complete ? "" : ", more to come")}");
-            return (read, answer.Complete);
+            return (read, answer.Complete, 0);
         }
         if (Marks.On) Marks.Note($"subtitles: the pictures' .mks, {answer.Bytes.Length / 1024} KB{(answer.Complete ? "" : ", not whole yet")}");
-        return (Mks.ReadPictureTrack(answer.Bytes), answer.Complete);
+        return (Mks.ReadPictureTrack(answer.Bytes), answer.Complete, answer.Bytes.Length);
     }
 
     void Update()

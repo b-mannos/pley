@@ -164,17 +164,23 @@ export async function fetchPictures(url: string, signal: AbortSignal, have: Uint
     void res.body?.cancel();
     return { kind: "anew" };
   }
+  // A file that came whole (its size written): the pictures around where
+  // the player was, a file of their own.
+  const end = have && matroskaEnd(have);
+  const cameWhole = have !== null && end !== null && end <= have.length;
   // Nothing past what came before: the same file, or another one shorter
   // than it, which the length the server gives tells apart (one just as
-  // long is taken for the same; the next place's comes soon after).
+  // long is taken for the same; the next place's comes soon after). With
+  // no length (a proxy that drops it), a file that came whole may be
+  // another place's, and one still being written only grows.
   if (res.status === 416 && have) {
     const total = /\/(\d+)$/.exec(res.headers.get("Content-Range") ?? "");
-    return total && Number(total[1]) !== have.length ? { kind: "anew" } : { kind: "early", bytes: have };
+    const same = total ? Number(total[1]) === have.length : !cameWhole;
+    return same ? { kind: "early", bytes: have } : { kind: "anew" };
   }
   if (!res.ok) return { kind: "failed" };
   // More past a file that came whole: another file, not the rest of it.
-  const end = have && matroskaEnd(have);
-  if (res.status === 206 && have && end !== null && end <= have.length) {
+  if (res.status === 206 && cameWhole) {
     void res.body?.cancel();
     return { kind: "anew" };
   }
@@ -238,17 +244,23 @@ export interface PictureLoader {
  * pictures around there while it reads the rest.
  */
 export function loadPictures(url: string, hooks: PictureHooks, position: () => number = () => 0): PictureLoader {
-  const abort = new AbortController();
+  // The ask under way, dropped by the next one (a seek's), as the TVs drop
+  // theirs: an answer for where the player was can wait seconds for the
+  // read there, holding one of the few connections a browser opens to the
+  // server, which the video's segments need.
+  let asking: AbortController | null = null;
+  let stopped = false;
   let timer: number | undefined;
-  let asking = 0;
   let whole = false;
   const load = (have: Uint8Array | null, again: boolean) => {
-    const ask = ++asking;
+    asking?.abort();
+    const abort = new AbortController();
+    asking = abort;
     const asked = wholeTracks.has(url) ? url : pictureUrlAt(url, position());
     fetchPictures(asked, abort.signal, have, again).then(
       (got) => {
         // Stopped, or asked for again from elsewhere since.
-        if (abort.signal.aborted || ask !== asking) return;
+        if (abort.signal.aborted) return;
         if (got.kind === "unavailable") hooks.onUnavailable();
         else if (got.kind === "failed") hooks.onFailed();
         else if (got.kind === "anew") load(null, true);
@@ -267,12 +279,13 @@ export function loadPictures(url: string, hooks: PictureHooks, position: () => n
   load(null, false);
   return {
     sought: () => {
-      if (whole || abort.signal.aborted) return;
+      if (whole || stopped) return;
       window.clearTimeout(timer);
       load(null, true);
     },
     stop: () => {
-      abort.abort();
+      stopped = true;
+      asking?.abort();
       window.clearTimeout(timer);
     },
   };
