@@ -618,8 +618,21 @@ node apps/tizen-native/scripts/metrics.mjs     # writes apps/tizen-native/out/me
 PLEY_TIZEN_METRICS=http://<computer>:7531 bun run tizen-native
 ```
 
+While the listener runs, the same script drives the app from the computer.
+The app asks it every second for something to do: a screenshot of its
+window, saved in `apps/tizen-native/out` (the video's plane comes out
+black), or the remote's keys, pressed 300 ms apart. `--tv` picks the TV
+whose model name holds the text given.
+
+```sh
+node apps/tizen-native/scripts/metrics.mjs shot                 # prints the screenshot's path
+node apps/tizen-native/scripts/metrics.mjs keys Left Down OK    # Up, Down, Left, Right, OK, Back, Menu
+node apps/tizen-native/scripts/metrics.mjs --tv S89C shot
+```
+
 A build without `PLEY_TIZEN_METRICS` has none of this: the calls of
-`Kit/Profile.cs` are left out when it is compiled.
+`Kit/Profile.cs`, the code behind them (the listener, screenshots, keys,
+the watchdog and sampler) and Core's marks are left out when it is compiled.
 
 ### Videos on a USB drive
 
@@ -627,8 +640,14 @@ While a drive is plugged into the TV, the rail ends with **USB drive**. It
 lists the drive's folders, then the videos the TV's player opens (MKV, MP4,
 M4V, MOV, TS, M2TS, WebM, AVI, MPEG), sorted as a person sorts names;
 hidden files and what Windows and macOS leave on a drive aren't shown. A
-folder opens over the one before, with ".." first to go back up. At the
-drive's top, the page says how full the drive is.
+folder opens over the one before, with ".." first to go back up. The
+page's title is the drive's make and model as it reports them ("Kingston
+DataTraveler 3.0"), or USB drive when it says nothing; the name given to
+the drive isn't to be read, since an app may not open the device. At the
+drive's top, the line under the title says "/" and how full the drive is;
+in a folder, its path ("/Films/2019"). An empty folder says so in the
+middle of the page, under a folder icon, and keeps focus there, so the
+rail stays closed; Left opens it.
 
 A video plays in Pley's player as it is, with no server
 (`Local/LocalPlayerSource.cs`), so seeking, the panels, the sleep timer and

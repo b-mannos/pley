@@ -12,7 +12,9 @@ It has no releases yet: it is built and installed by hand
 
 - A profiling build of the native app is an app of its own, "Pley (debug)",
   with a DEBUG icon on a yellow band, so it installs beside the app rather
-  than in its place; the app's own icon is the plain logo.
+  than in its place; the app's own icon is the plain logo. The metrics
+  listener takes its screenshots and presses the remote's keys for it, so
+  the app can be driven from the computer.
 - A native app for Samsung TVs with Tizen 9, beside the web app: so far the
   Android TV app's "Choose your server" screen, with servers found on the
   network, an address typed on the TV's keyboard and forgetting a server; its
@@ -251,6 +253,17 @@ It has no releases yet: it is built and installed by hand
 
 ### Fixed
 
+- An empty USB drive's page keeps focus, so the rail closes rather than
+  covering its message, which shows under a folder icon; at the drive's top,
+  the line under the title is the folder's path ("/Films/2019"), and "/"
+  at the drive's top beside how full it is. The page's title is the drive's
+  make and model ("Kingston DataTraveler 3.0").
+- The rail marks the page a rail entry opened, not Home, when the page has
+  nothing to focus yet, as the first page opened after Who's watching?.
+- Diagnostics, Remove from My List and Settings' audio and subtitle rows
+  show their icons.
+- The native app carries none of the profiling build's code: its marks, the
+  listener, screenshots and remote keys were compiled into it, unused.
 - A film's audio track, chosen or saved, plays from the start: it was asked
   for before the TV's player was ready, and the first track played. Beside a
   TrueHD track the TV leaves out, the right track is chosen, and Info shows
