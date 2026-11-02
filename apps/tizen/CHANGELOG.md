@@ -101,5 +101,5 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/samsung-v0.0.1...HEAD
-[0.0.1]: https://github.com/pley-media-server/pley/releases/tag/samsung-v0.0.1
+[Unreleased]: https://github.com/pley-media-server/pley/compare/7e14bb9d498d054a73b2176cd8949b6864ffacd9...HEAD
+[0.0.1]: https://github.com/pley-media-server/pley/tree/7e14bb9d498d054a73b2176cd8949b6864ffacd9

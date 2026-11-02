@@ -50,8 +50,6 @@ const yellow = paint(33);
 
 /** A release's tag: the day it was prepared, with .2, .3 for that day's next ones. */
 export const RELEASE_TAG = /^release-\d{4}-\d{2}-\d{2}(?:\.\d+)?$/;
-// Releases up to 0.1.1 were tagged per unit, <unit>-v<version>.
-const TAG_PATTERNS = ["release-*", ...UNIT_NAMES.map((u) => `${u}-v*`)];
 
 function git(args, root = ROOT) {
   return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -60,7 +58,7 @@ function git(args, root = ROOT) {
 /** The newest release tag HEAD has, or null. */
 export function lastRelease(root = ROOT) {
   try {
-    return git(["describe", "--tags", "--abbrev=0", ...TAG_PATTERNS.flatMap((t) => ["--match", t]), "HEAD"], root) || null;
+    return git(["describe", "--tags", "--abbrev=0", "--match", "release-*", "HEAD"], root) || null;
   } catch {
     return null;
   }
