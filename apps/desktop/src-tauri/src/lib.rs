@@ -9,8 +9,11 @@
 //! only the picker, bundled with the app, has it. The files a server's page
 //! downloads are fetched by the app, to play while the server is away
 //! (`downloads`), and the system's notifications tell of requests while the
-//! window isn't in front (`notices`). The app sends the window's session
-//! only to a server that proves it is the one it signed in to (`proofs`).
+//! window isn't in front (`notices`). Before the app opens a server, and
+//! before its own requests with the window's session, the server proves it
+//! is the one the window signed in to (`proofs`); the server's pages in the
+//! window send the session themselves, so on another network the window
+//! leaves a plain-http server at once and opens it again through a proof.
 
 mod discovery;
 mod downloads;
@@ -127,6 +130,24 @@ pub(crate) fn not_yours<R: Runtime>(app: &AppHandle<R>, server: &Url) {
     );
 }
 
+/// The computer is on another network: every server proves itself again,
+/// and a plain-http server shown leaves the window for the picker, which
+/// opens it again once it proves itself there (an https one is safe where
+/// it is: its address is checked by its certificate).
+fn network_changed<R: Runtime>(app: &AppHandle<R>) {
+    app.state::<proofs::Proofs>().doubt_all();
+    let Some(window) = app.get_webview_window("main") else { return };
+    let pages = window.state::<Pages>();
+    let picker = {
+        let places = pages.0.lock().unwrap();
+        if !places.server.as_ref().is_some_and(|shown| shown.scheme() == "http") {
+            return;
+        }
+        places.picker.clone()
+    };
+    leave_for(&window, picker);
+}
+
 fn leave_for<R: Runtime>(window: &WebviewWindow<R>, picker: Option<Url>) {
     window.state::<Pages>().0.lock().unwrap().server = None;
     window.state::<notices::Notices>().follow(None);
@@ -188,7 +209,8 @@ pub fn run() {
             if cfg!(dev) {
                 app.state::<Pages>().0.lock().unwrap().picker = app.config().build.dev_url.clone();
             }
-            app.manage(proofs::Proofs::load(app.path().app_config_dir()?.join("proofs.json")));
+            // On this computer only (not a roaming profile's folder).
+            app.manage(proofs::Proofs::load(app.path().app_local_data_dir()?.join("proofs.json")));
             let list = app.path().app_data_dir()?.join("downloads.json");
             app.manage(downloads::Downloads::load(list, downloads::folder(app.handle())));
             let handle = app.handle().clone();
@@ -241,6 +263,8 @@ pub fn run() {
             // servers' sessions).
             tauri::async_runtime::spawn(downloads::run(app.handle().clone()));
             tauri::async_runtime::spawn(notices::run(app.handle().clone()));
+            let watching = app.handle().clone();
+            tauri::async_runtime::spawn(proofs::watch_network(move || network_changed(&watching)));
             Ok(())
         })
         .run(tauri::generate_context!())

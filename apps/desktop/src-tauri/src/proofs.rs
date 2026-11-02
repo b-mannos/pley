@@ -5,14 +5,19 @@
 //! from its server (`/api/server/proof-key`), kept by address in
 //! `proofs.json`; before the app opens a server, and before its own
 //! requests with the session (notices, downloads), the server at that
-//! address proves it holds the key. The pages the window shows can't be
-//! held back this way, but they open only after a proof, and the notices
-//! take the window back to the picker once one fails.
+//! address proves it holds the key, for that address.
+//!
+//! The pages the window shows send the session themselves, which the app
+//! can't hold back. They open only after a proof, and when the computer's
+//! own addresses change (another network) the app takes the window off a
+//! plain-http server within a second and opens it again through a proof
+//! ([`watch_network`]); a page may still send a request in that second.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use base64::Engine;
 use ring::hmac;
@@ -23,7 +28,8 @@ use url::Url;
 /// What the app says of a server that can't prove itself.
 pub const NOT_YOURS: &str =
     "another device answers there (if your server was set up anew, forget it and connect again)";
-/// A proof counts this long; a dropped connection asks for a new one sooner.
+/// A proof counts this long; a dropped connection or another network asks
+/// for a new one sooner.
 const PROVED_FOR: Duration = Duration::from_secs(30 * 60);
 /// How long a server gets to answer.
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(5);
@@ -66,8 +72,9 @@ impl std::fmt::Display for Refused {
 #[derive(Default)]
 struct Kept {
     keys: HashMap<String, Key>,
-    /// When the server at each address last proved itself.
-    proved: HashMap<String, Instant>,
+    /// When the server at each address last proved itself: by the clock,
+    /// which also runs while the computer sleeps.
+    proved: HashMap<String, SystemTime>,
 }
 
 /// The keys, by address (an origin, as `http://nas:7539`).
@@ -133,12 +140,19 @@ impl Proofs {
         self.kept.lock().unwrap().proved.remove(&address(server));
     }
 
+    /// The computer is on another network: every server proves itself again.
+    pub fn doubt_all(&self) {
+        self.kept.lock().unwrap().proved.clear();
+    }
+
     fn proved(&self, server: &Url) {
-        self.kept.lock().unwrap().proved.insert(address(server), Instant::now());
+        self.kept.lock().unwrap().proved.insert(address(server), SystemTime::now());
     }
 
     fn proved_lately(&self, server: &Url) -> bool {
-        self.kept.lock().unwrap().proved.get(&address(server)).is_some_and(|at| at.elapsed() < PROVED_FOR)
+        // A clock set back gives an error: proved again.
+        let kept = self.kept.lock().unwrap();
+        kept.proved.get(&address(server)).and_then(|at| at.elapsed().ok()).is_some_and(|age| age < PROVED_FOR)
     }
 
     fn save(&self, keys: &HashMap<String, Key>) {
@@ -148,7 +162,12 @@ impl Proofs {
                 std::fs::create_dir_all(dir)?;
             }
             let partial = path.with_extension("json.part");
-            std::fs::write(&partial, serde_json::to_vec_pretty(keys)?)?;
+            let mut file = std::fs::OpenOptions::new();
+            file.write(true).create(true).truncate(true);
+            // The keys are for this account only.
+            #[cfg(unix)]
+            std::os::unix::fs::OpenOptionsExt::mode(&mut file, 0o600);
+            std::io::Write::write_all(&mut file.open(&partial)?, &serde_json::to_vec_pretty(keys)?)?;
             std::fs::rename(&partial, path)
         })();
         if let Err(err) = written {
@@ -157,15 +176,15 @@ impl Proofs {
     }
 }
 
-/// Whether `answered` proves `challenge` for `key`.
-fn proves(key: &Key, challenge: &str, server_id: Option<&str>, answered: Option<&str>) -> bool {
+/// Whether `answered` proves `challenge` for `key`, asked at `address`.
+fn proves(key: &Key, address: &str, challenge: &str, server_id: Option<&str>, answered: Option<&str>) -> bool {
     let (Some(bytes), Some(answered)) = (key.bytes(), answered.and_then(|a| b64().decode(a).ok())) else {
         return false;
     };
     server_id == Some(key.server_id.as_str())
         && hmac::verify(
             &hmac::Key::new(hmac::HMAC_SHA256, &bytes),
-            format!("{PROOF_CONTEXT}\n{}\n{challenge}", key.server_id).as_bytes(),
+            format!("{PROOF_CONTEXT}\n{}\n{address}\n{challenge}", key.server_id).as_bytes(),
             &answered,
         )
         .is_ok()
@@ -241,7 +260,7 @@ pub async fn ask(server: &Url, proofs: &Proofs) -> Result<serde_json::Value, Ref
     })?;
     if let (Some(key), Some(challenge)) = (key, challenge) {
         let answer: Answer = serde_json::from_value(body.clone()).unwrap_or(Answer { id: None, proof: None });
-        if !proves(&key, &challenge, answer.id.as_deref(), answer.proof.as_deref()) {
+        if !proves(&key, &address(server), &challenge, answer.id.as_deref(), answer.proof.as_deref()) {
             return Err(Refused::NotYours);
         }
         proofs.proved(server);
@@ -282,6 +301,36 @@ pub async fn session(server: &Url, proofs: &Proofs, session: Option<String>) -> 
     Ok(Some(session))
 }
 
+/// The computer's own IPv4 addresses, which change with the network it is
+/// on (loopback left out).
+pub fn local_addresses() -> Vec<IpAddr> {
+    let mut addresses: Vec<IpAddr> = if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|i| i.ip())
+        .filter(|ip| ip.is_ipv4() && !ip.is_loopback())
+        .collect();
+    addresses.sort();
+    addresses.dedup();
+    addresses
+}
+
+/// Looks at the computer's addresses every second, for as long as the app
+/// runs, and calls `on_change` when they change: every server proves itself
+/// again then, and the window leaves a server whose pages could otherwise
+/// send the session to whatever answers at its address now.
+pub async fn watch_network(on_change: impl Fn()) {
+    let mut seen = local_addresses();
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let now = local_addresses();
+        if now != seen {
+            seen = now;
+            on_change();
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -290,10 +339,10 @@ pub(crate) mod tests {
     use super::*;
 
     /// The proof of `challenge` under `key` from server `server_id`.
-    fn proof(key: &[u8], server_id: &str, challenge: &str) -> hmac::Tag {
+    fn proof(key: &[u8], server_id: &str, address: &str, challenge: &str) -> hmac::Tag {
         hmac::sign(
             &hmac::Key::new(hmac::HMAC_SHA256, key),
-            format!("{PROOF_CONTEXT}\n{server_id}\n{challenge}").as_bytes(),
+            format!("{PROOF_CONTEXT}\n{server_id}\n{address}\n{challenge}").as_bytes(),
         )
     }
 
@@ -308,15 +357,17 @@ pub(crate) mod tests {
     #[test]
     fn a_proof_is_the_servers_hmac() {
         // The server's known answer (apps/server/src/identity.rs).
-        let known = "-OpCw2gYEDYBr-d7wh4JEYd7CHzZ8nc7pTc_UlsqVas";
-        assert_eq!(b64().encode(proof(&key().bytes().unwrap(), ID, CHALLENGE).as_ref()), known);
-        assert!(proves(&key(), CHALLENGE, Some(ID), Some(known)));
-        assert!(!proves(&key(), "AAECAwQFBgcICQoLDA0OEA", Some(ID), Some(known)), "another challenge");
-        assert!(!proves(&key(), CHALLENGE, Some("another"), Some(known)), "another server");
-        assert!(!proves(&key(), CHALLENGE, Some(ID), None));
-        assert!(!proves(&key(), CHALLENGE, None, Some(known)));
+        let at = "http://192.168.1.20:7539";
+        let known = "YwkvaCQfaIQCZkoOP5yOE3yR4xRKU5T5wYWz4b85SCM";
+        assert_eq!(b64().encode(proof(&key().bytes().unwrap(), ID, at, CHALLENGE).as_ref()), known);
+        assert!(proves(&key(), at, CHALLENGE, Some(ID), Some(known)));
+        assert!(!proves(&key(), at, "AAECAwQFBgcICQoLDA0OEA", Some(ID), Some(known)), "another challenge");
+        assert!(!proves(&key(), at, CHALLENGE, Some("another"), Some(known)), "another server");
+        assert!(!proves(&key(), "https://pley.example.com", CHALLENGE, Some(ID), Some(known)), "another address");
+        assert!(!proves(&key(), at, CHALLENGE, Some(ID), None));
+        assert!(!proves(&key(), at, CHALLENGE, None, Some(known)));
         let short = Key { proof_key: b64().encode([1u8; 16]), ..key() };
-        assert!(!proves(&short, CHALLENGE, Some(ID), Some(known)));
+        assert!(!proves(&short, at, CHALLENGE, Some(ID), Some(known)));
     }
 
     /// A server that answers each connection with the next of `answers`
@@ -363,12 +414,13 @@ pub(crate) mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let server = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
         let bytes = key().bytes().unwrap();
+        let at = address(&server);
         let answering = tokio::spawn(async move {
             for _ in 0..times {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let request = request_on(&mut socket).await;
                 assert!(!request.contains("pley_token"), "{request}");
-                let proved = b64().encode(proof(&bytes, ID, &challenge_in(&request)).as_ref());
+                let proved = b64().encode(proof(&bytes, ID, &at, &challenge_in(&request)).as_ref());
                 let body = serde_json::json!({"id": ID, "name": "Den", "proof": proved}).to_string();
                 let answer = format!(
                     "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
@@ -456,6 +508,17 @@ pub(crate) mod tests {
         assert_eq!(answering.await.unwrap(), 2, "proved at first and after the doubt");
         // Without a session, nothing to prove.
         assert_eq!(session(&server, &proofs, None).await, Ok(None));
+    }
+
+    #[tokio::test]
+    async fn another_network_has_every_server_prove_itself_again() {
+        let cookie = Some("pley_token=abc".to_owned());
+        let (server, answering) = proving(2).await;
+        let proofs = Proofs::for_tests(&server, false);
+        assert_eq!(session(&server, &proofs, cookie.clone()).await, Ok(cookie.clone()));
+        proofs.doubt_all();
+        assert_eq!(session(&server, &proofs, cookie.clone()).await, Ok(cookie.clone()));
+        assert_eq!(answering.await.unwrap(), 2);
     }
 
     #[test]

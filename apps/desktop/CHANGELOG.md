@@ -12,12 +12,14 @@ describes how they are made.
 
 - Before the app opens a server, and before its notifications and
   downloads use the window's session there, the server proves it is the
-  one the window signed in to. Another device at its address (on another
-  network, or after the router hands it out again) gets nothing: the app
-  says another device answers there, and a window showing that address
-  goes back to the list of servers. A sign-in from before starts checking
-  the next time the app opens the server. Needs a server from the same
-  release.
+  one the window signed in to, at that address. Another device at the
+  address (on another network, or after the router hands it out again)
+  can't open, and the app says another device answers there. When the
+  computer changes networks, a window showing a plain-http server leaves
+  it within a second and opens it again only once the server proves
+  itself; a page may still send a request in that second. A sign-in from
+  before starts checking the next time the app opens the server. Needs a
+  server from the same release.
 
 ## [0.1.1] - 2026-11-01
 
