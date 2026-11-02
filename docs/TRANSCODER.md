@@ -246,8 +246,8 @@ each sheet holds `columns × rows` of them, left to right, top to bottom.
   mapped with libplacebo when available.
 - Up to `trickplay_runs` sets are made at once (`--max-previews`); further
   requests wait their turn. Like other background work, sets wait for and
-  pause through playback starts and transcodes
-  ([Background work and playback](#background-work-and-playback)).
+  pause through playback starts, transcodes and reads of a player's
+  subtitles ([Background work and playback](#background-work-and-playback)).
 - A set may run for an hour, or 1 s per 10 MB of its file when that is
   longer; paused time doesn't count. Its folder is made only once it may
   start, and is marked as being written every 10 minutes while it runs or
@@ -318,7 +318,8 @@ its palette, DVB) next to an HLS stream.
   with each answer would lose the pictures where they are. Past that, or
   when the read gets nothing (over its budget, or left out for a later
   one), the answer is the blocks there if the copy has all of them, else
-  what the copy has, and the player asks again.
+  what the copy has, and the player asks again: a read that went over its
+  time (a busy disk) is tried again then.
 - `rest` (with `partial`) is for a player that reads the track once
   (Kodi's `.sup`): the answer waits up to 8 s for the whole track, then is
   everything read through the Cues so far, not only the blocks around
@@ -1084,7 +1085,7 @@ episodes' fingerprints to find shared intros and credits.
   audio downmixed to mono 11025 Hz. Each value covers 1365 samples (0.124 s,
   `item_seconds`).
 - Two requests run at a time, at below-normal priority, paused while a
-  playback starts or a transcode runs
+  playback starts, a transcode runs or a player's subtitles are read
   ([Background work and playback](#background-work-and-playback)).
 
 ### Key frames
@@ -1145,13 +1146,14 @@ A playback is starting:
 
 While any transcode slot is in use (a job's FFmpeg, even paused far ahead, or
 a conversion), the same runs also wait and pause, until 5 s after the last one
-ends. So they do while picture subtitles a player waits for are read through
-a file's Cues (those around where it is, those at a seek, or the rest of the
-track), until 2 s after the last read ends, and 90 s at most from the start
-of each: on a share's disks each block is a seek, and a seek preview's FFmpeg
-reading a remux beside them makes every one of them wait, while the rest of a
-big file's track can take minutes, which the runs needn't wait out. Probes
-and reading ahead wait for playback starts only.
+ends. So they do while subtitles a player waits for are read through a file's
+Cues (a text track, or a picture track's pictures: those around where the
+player is, those at a seek, or the rest of the track), until 2 s after the
+last read ends, and 90 s at most from the start of each: on a share's disks
+each block is a seek, and a seek preview's FFmpeg reading a remux beside them
+makes every one of them wait, while the rest of a big file's track can take
+minutes, which the runs needn't wait out. Probes and reading ahead wait for
+playback starts only.
 
 Background runs and conversions start at below-normal process priority
 (`nice` 10 on Linux), a job's FFmpeg at normal priority. `/v1/status` counts
