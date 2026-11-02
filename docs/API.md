@@ -1664,7 +1664,10 @@ removed or reordered (`400`).
     of it once it is whole: what came before may not be its start. A
     `Range` continues only a file still being written (its Segment's size
     unknown): one whose size is written came whole (the pictures around
-    `at`), and more past it is another file, to ask for all of.
+    `at`), and more past it is another file, to ask for all of. A `Range`
+    past the end of the file there now is answered `416` with
+    `Content-Range: bytes */N`, N its length: a length other than that of
+    the file you have is another file, to ask for all of too.
   - A Matroska file whose Cues list the track's blocks is read through
     them. Those around where the player is come first, within a few
     seconds: from half a minute before `at` (ms of the file's time, taken
@@ -1672,9 +1675,12 @@ removed or reordered (`400`).
     begins) to two minutes after it. The whole track follows within
     seconds. A request whose `at` is away from where the copy started (a
     seek) has the pictures there read at once, from 10 s before it to 40 s
-    after it, and is answered with those. So each request says where the
+    after it, and is answered with those: the answer waits up to 12 s for
+    that read (a first answer, up to 30 s for the track's header), so a
+    player's timeout allows for that. So each request says where the
     player is then (`at=0` at the start too), a seek asks again at once,
-    and the player asks again within half a minute as it plays on.
+    dropping the request it had under way, and the player asks again
+    within half a minute as it plays on.
   - Otherwise the transcoder reads the whole file (minutes for a big one on
     a network share), and the answer is what it has copied so far, up to
     its last whole cluster. A copy through the Cues that fails past the
