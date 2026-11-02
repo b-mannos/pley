@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using Pley.Tv.Core;
+using Pley.Tv.Core.Local;
 using Pley.Tv.Core.Player;
 using Pley.Tv.Core.Live;
 using Pley.Tv.Core.Ui;
@@ -25,6 +26,8 @@ class App : NUIApplication
     /// <summary>The app's one music player: it plays on behind every page, and ends with the profile, the sign-in or the server.</summary>
     MusicPlayer music = null!;
     MediaKeys? musicKeys;
+    /// <summary>The USB drive plugged into the TV, followed as it comes and goes.</summary>
+    Drives drives = null!;
     /// <summary>The music was playing as the app went to the background: it plays again when the app is back.</summary>
     bool musicWasPlaying;
 
@@ -56,6 +59,7 @@ class App : NUIApplication
         live = new AppLiveSource(state);
         // The lineup changed (the server's events, a reconnection): whether Live TV has channels may have too.
         live.OnChange(() => liveEntry?.Refresh());
+        drives = new Drives();
         music = AppMusicServer.Player(state, () => new TizenMediaEngine(video: false), () => Platform.Facts(), new ContextScheduler());
         // The remote's media keys drive the music wherever the app is, as Android's media session has
         // them, except under a player, which has its own: its panels and lists over it included, as the
@@ -102,6 +106,7 @@ class App : NUIApplication
         state.EndPlayback();
         Profile.End();
         musicKeys?.Dispose();
+        drives.Dispose();
         base.OnTerminate();
     }
 
@@ -235,6 +240,12 @@ class App : NUIApplication
             ArtistPage artist => new ArtistScreen(tv, new ArtistModel(new AppItemSource(state), music, new ContextScheduler(), artist.ArtistId), images, gate, k => Go(tv, k)),
             AlbumPage album => new AlbumScreen(tv, new AlbumModel(new AppItemSource(state), music, new ContextScheduler(), album.AlbumId, album.TrackId), images, gate, k => Go(tv, k)),
             PageKey.NowPlaying => new NowPlayingScreen(tv, shell, new NowPlayingModel(music, state.Server.Value ?? ""), images, gate),
+            PageKey.Storage storage => new StorageScreen(tv, storage.Path, drives.Root, state.Storage, gate, k => Go(tv, k), (path, startMs) =>
+            {
+                music.YieldToVideo();
+                state.HoldRefresh(true);
+                new PlayerScreen(shell, state, new PlayRequest(LocalPlayerSource.ItemId, startMs, FromStart: false), reporter, images, gate, () => state.HoldRefresh(false), localFile: path).Show();
+            }),
             _ => null,
         };
         // Live TV in the rail while this profile has channels: asked again for each sign-in and profile.
@@ -243,6 +254,8 @@ class App : NUIApplication
         tv.Follow(liveEntry);
         // Now Playing in the rail while music has a queue.
         tv.Follow(music.Now);
+        // The USB drive in the rail while one is plugged in.
+        tv.Follow(drives.Root);
         // While the player is on top, Home and the pages wait; back from it, they ask again (its reports
         // moved resume points and watched marks), and the item details kept go.
         tv.Play = request =>

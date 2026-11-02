@@ -238,7 +238,7 @@ public class SubtitlePresenterTests
     static readonly byte[] Shown = PictureKit.PgsDisplaySet(0x80, true, rle: new[] { 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0 });
     static readonly byte[] Cleared = PictureKit.PgsDisplaySet(0x00, false);
 
-    SubtitlePresenter WithPictures(Queue<Func<SubtitlePictures>> mks, List<string> unavailable) => new SubtitlePresenter(clock, url =>
+    SubtitlePresenter WithPictures(Queue<Func<SubtitlePictures>> mks, List<string> unavailable, long picturesRetryMostMs = SubtitlePresenter.PicturesRetryMostMs) => new SubtitlePresenter(clock, url =>
     {
         asked.Add(url);
         return Task.FromResult(answers.Dequeue()());
@@ -246,7 +246,7 @@ public class SubtitlePresenterTests
     {
         asked.Add(url);
         return Task.FromResult(mks.Dequeue()());
-    }, () => unavailable.Add("unavailable"));
+    }, () => unavailable.Add("unavailable"), picturesRetryMostMs);
 
     [Fact]
     public void A_partial_picture_track_is_asked_for_every_3_s_until_whole()
@@ -304,6 +304,22 @@ public class SubtitlePresenterTests
         }
         // 3, 6, 12, 24, 48 s apart, then a minute.
         Assert.Equal(new long[] { 3_000, 9_000, 21_000, 45_000, 93_000, 153_000 }, times.Take(6));
+    }
+
+    [Fact]
+    public void A_drives_picture_track_is_asked_for_at_its_own_address()
+    {
+        // Only the server's copy takes a place to start from: a file on a drive is read where the film goes.
+        var part = PictureKit.Mks("S_HDMV/PGS", new[] { new PictureKit.MksBlock(1000, Shown) });
+        var mks = new Queue<Func<SubtitlePictures>>();
+        for (var i = 0; i < 3; i++) mks.Enqueue(() => new SubtitlePictures(part, Complete: false));
+        var p = WithPictures(mks, new List<string>(), SubtitlePresenter.LocalPicturesRetryMs);
+        position = 4_000;
+        p.ShowPictures("/api/files/7/subtitles/4.mks");
+        clock.Advance(1_000);
+        p.Sought();
+        Assert.Equal(3, asked.Count);
+        Assert.All(asked, url => Assert.Equal("/api/files/7/subtitles/4.mks", url));
     }
 
     [Fact]

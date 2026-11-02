@@ -111,7 +111,15 @@ public sealed record BitrateAnswer(long Bitrate);
 public sealed record SubtitleText(string Text, bool Complete);
 
 /// <summary>The server's .mks of a picture subtitle track, and whether it is whole (<c>X-Pley-Complete</c>: 0 while still being read out of its file).</summary>
-public sealed record SubtitlePictures(byte[] Bytes, bool Complete);
+public sealed record SubtitlePictures(byte[] Bytes, bool Complete)
+{
+    /// <summary>
+    /// A track read on the TV (a file on a drive), handed over as it is in place of an .mks: built
+    /// again as a file each time it came, a DVD's grew to megabytes copied every few seconds, and
+    /// the TV's collector stopped the app long enough for the TV to close it.
+    /// </summary>
+    public Subtitles.Pictures.PictureTrack? Track { get; init; }
+}
 
 /// <summary>
 /// GET /api/files/{id}/trickplay: the seek-bar previews of a file, tiled into JPEG sheets.

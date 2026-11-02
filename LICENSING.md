@@ -72,6 +72,10 @@ ships FFmpeg beside it, FFmpeg keeps its own licence:
   configuration (GPLv3 §6; <https://ffmpeg.org/legal.html>). Alternatively,
   ship without FFmpeg and let users install it: the transcoder finds it on
   `PATH` or via `--ffmpeg`/`--ffprobe`.
+- **The Synology package** carries no FFmpeg: it runs the one in
+  SynoCommunity's `ffmpeg7` or `ffmpeg8` package, which the user installs
+  from SynoCommunity's package source under that package's own licence
+  ([deploy/synology/README.md](deploy/synology/README.md)).
 - **The other server archives** don't contain FFmpeg.
 
 ## What keeps it this way

@@ -1,0 +1,15 @@
+#!/bin/sh
+# After uninstalling: DSM keeps the package's data folder (var, on the
+# volume's @appdata) for a later install. Delete it only when the uninstall
+# wizard (WIZARD_UIFILES/uninstall_uifile) was told to. An upgrade runs this
+# script too, without the wizard, and keeps the data.
+
+if [ "${wizard_delete_data:-false}" = "true" ] && [ "${SYNOPKG_PKG_STATUS:-}" = "UNINSTALL" ]; then
+    data="${SYNOPKG_PKGDEST_VOL:-}/@appdata/${SYNOPKG_PKGNAME:-pley}"
+    case "$data" in
+        /volume*/@appdata/pley)
+            rm -rf "$data"
+            ;;
+    esac
+fi
+exit 0

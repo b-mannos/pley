@@ -29,9 +29,11 @@ on:
       - deploy/windows/**
       - deploy/systemd/**
       - deploy/launchd/**
+      - deploy/synology/**
       - scripts/build.sh
       - scripts/build.ps1
       - scripts/build-installer.ps1
+      - scripts/build-spk.sh
       - scripts/check-licenses.ps1
       - scripts/commit.mjs
       - scripts/commit.d.mts
@@ -61,9 +63,11 @@ on:
       - deploy/windows/**
       - deploy/systemd/**
       - deploy/launchd/**
+      - deploy/synology/**
       - scripts/build.sh
       - scripts/build.ps1
       - scripts/build-installer.ps1
+      - scripts/build-spk.sh
       - scripts/check-licenses.ps1
       - scripts/commit.mjs
       - scripts/commit.d.mts
@@ -200,6 +204,43 @@ jobs:
           $ffmpeg = New-Item -ItemType Directory dist/ffmpeg/bin
           Set-Content -Path "$release/pley.exe", "$release/pley-transcoder.exe", "$ffmpeg/ffmpeg.exe", "$ffmpeg/ffprobe.exe" -Value "stand-in"
           ./scripts/build-installer.ps1 -Release $release -Ffmpeg $ffmpeg
+
+  synology-package:
+    name: Synology package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The package assembles and is well formed; releases build it around
+      # the real programs (deploy/synology).
+      - name: Build the package
+        run: |
+          release=dist/pley-server-0.0.0-linux-x86_64-static
+          mkdir -p "$release"
+          for f in pley pley-transcoder; do echo stand-in > "$release/$f"; done
+          cp LICENSE "$release/LICENSE.txt"
+          cp LICENSING.md README.md pley.example.toml "$release/"
+          ./scripts/build-spk.sh "$release"
+      - name: Check the package
+        run: |
+          spk=dist/pley-server-0.0.0-synology-x86_64.spk
+          tar -tf "$spk"
+          for f in INFO PACKAGE_ICON.PNG PACKAGE_ICON_256.PNG package.tgz scripts/start-stop-status scripts/preinst scripts/postinst scripts/preuninst scripts/postuninst scripts/preupgrade scripts/postupgrade conf/privilege conf/resource WIZARD_UIFILES/uninstall_uifile; do
+            tar -tf "$spk" | grep -qx "$f" || { echo "::error::$spk lacks $f"; exit 1; }
+          done
+          for f in bin/pley bin/pley-transcoder app/config app/pley.sc app/images/pley-256.png; do
+            tar -xOf "$spk" package.tgz | tar -tzf - | grep -q "/$f\$" || { echo "::error::package.tgz lacks $f"; exit 1; }
+          done
+          for f in conf/privilege conf/resource WIZARD_UIFILES/uninstall_uifile; do
+            tar -xOf "$spk" "$f" | python3 -m json.tool > /dev/null
+          done
+          tar -xOf "$spk" package.tgz | tar -xzOf - ./app/config | python3 -m json.tool > /dev/null
+          tar -xOf "$spk" INFO
+          grep -q '^version="0.0.0"$' <(tar -xOf "$spk" INFO)
+      - name: Check the scripts
+        run: shellcheck --shell=sh deploy/synology/scripts/* scripts/build-spk.sh
 
   licenses:
     name: License boundary
@@ -343,6 +384,8 @@ jobs:
           # Linux builds run on the oldest supported Ubuntu for broad glibc compatibility.
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
+          # Static, for a glibc older still: the Synology package's programs.
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-22.04 }
           - { target: x86_64-pc-windows-msvc, os: windows-latest }
           - { target: aarch64-pc-windows-msvc, os: windows-11-arm }
           - { target: aarch64-apple-darwin, os: macos-latest }
@@ -362,6 +405,9 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
+      - name: musl toolchain
+        if: endsWith(matrix.target, '-linux-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
       # No build cache: release binaries are built from scratch.
       - name: Build (Windows)
         if: runner.os == 'Windows'
@@ -424,6 +470,32 @@ jobs:
         with:
           name: release-windows-installers
           path: dist/*-setup.exe
+          if-no-files-found: error
+
+  # The Synology package, around the static Linux archive (deploy/synology).
+  synology:
+    name: Synology package (release)
+    if: inputs.release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-x86_64-unknown-linux-musl
+          path: archives
+      - name: Build the package
+        run: |
+          mkdir -p dist
+          tar -C dist -xzf archives/pley-server-*-linux-x86_64-static.tar.gz
+          ./scripts/build-spk.sh dist/pley-server-*-linux-x86_64-static
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-synology
+          path: dist/*.spk
           if-no-files-found: error
 
   # The Docker image, for amd64 and arm64, on GitHub Container Registry. It
