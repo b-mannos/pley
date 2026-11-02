@@ -10,7 +10,6 @@
 
 mod edit;
 mod library;
-pub(crate) use library::{smart_count, smart_items, valid_smart_filter};
 mod lists;
 pub(crate) mod meta;
 mod notifications;
@@ -190,22 +189,8 @@ pub struct PlexInfo {
 }
 
 impl PlexInfo {
-    /// Reads `<data-dir>/plex-machine-id`, creating it on first use.
     pub(crate) fn load(data_dir: &Path) -> Self {
-        let file = data_dir.join("plex-machine-id");
-        let existing = std::fs::read_to_string(&file).ok().map(|s| s.trim().to_owned());
-        let machine_id = match existing.filter(|id| id.len() == 40 && id.chars().all(|c| c.is_ascii_hexdigit())) {
-            Some(id) => id,
-            None => {
-                let id =
-                    format!("{}{}", uuid::Uuid::new_v4().simple(), &uuid::Uuid::new_v4().simple().to_string()[..8]);
-                if let Err(err) = std::fs::write(&file, &id) {
-                    tracing::warn!("cannot save {}: {err}", file.display());
-                }
-                id
-            }
-        };
-        Self { machine_id }
+        Self { machine_id: crate::identity::load_id(data_dir) }
     }
 
     /// Deterministic UUID for a library section.
@@ -578,26 +563,12 @@ fn plex_token(parts: &Parts) -> Option<String> {
 
 // ------------------------------------------------------------------ request helpers
 
-/// Decoded query parameters in request order (repeated keys kept).
-#[derive(Debug, Clone, Default)]
-pub struct Params(pub Vec<(String, String)>);
+pub use crate::listing::{Page, Params};
 
 impl Params {
-    pub fn get(&self, key: &str) -> Option<&str> {
-        self.0.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
-    }
-
     /// Case-insensitive lookup (`X-Plex-…` parameters).
     pub fn get_ci(&self, key: &str) -> Option<&str> {
         self.0.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.as_str())
-    }
-
-    pub fn parse<T: std::str::FromStr>(&self, key: &str) -> Option<T> {
-        self.get(key).and_then(|v| v.trim().parse().ok())
-    }
-
-    pub fn flag(&self, key: &str) -> bool {
-        self.get(key).is_some_and(|v| matches!(v, "1" | "true" | "yes"))
     }
 }
 
@@ -613,21 +584,6 @@ impl<S: Send + Sync> FromRequestParts<S> for Params {
 }
 
 /// `X-Plex-Container-Start` / `-Size` paging, from headers or the query.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Page {
-    pub start: usize,
-    pub size: Option<usize>,
-}
-
-impl Page {
-    /// The requested slice of `items` and the total count.
-    pub fn apply<T>(&self, items: Vec<T>) -> (Vec<T>, usize) {
-        let total = items.len();
-        let items = items.into_iter().skip(self.start).take(self.size.unwrap_or(usize::MAX)).collect();
-        (items, total)
-    }
-}
-
 impl<S: Send + Sync> FromRequestParts<S> for Page {
     type Rejection = PlexError;
 

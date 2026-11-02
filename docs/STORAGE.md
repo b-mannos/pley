@@ -13,7 +13,8 @@ are only read, never moved or changed.
   pley.db               the database (SQLite, WAL: also pley.db-wal, -shm)
   pley.lock             held while Pley runs: one server per data folder
   secret.key            encrypts authenticator secrets, keys hashes and proofs
-  plex-machine-id       the server's id (discovery, apps, compatibility API)
+  server-id             the server's id (discovery, apps); older versions'
+                        plex-machine-id is renamed to it
   metadata/blobs/       pictures that are metadata, named by their SHA-256
   media/ab/<fingerprint>/
     thumb.jpg           frame grab (movies and episodes without a still)
@@ -64,7 +65,7 @@ so the copy would be stale or inconsistent. Use a backup.
 folder. Without `secret.key`, people with two-step sign-in must use a
 recovery code and set it up again (or an administrator turns it off for
 them), and Automatic quality forgets the networks it measured. Without
-`secret.key` or `plex-machine-id`, apps no longer recognise the server
+`secret.key` or `server-id`, apps no longer recognise the server
 ([API.md](API.md#telling-servers-apart)): they say another device answers
 at its address until they sign in again, and the desktop app until the
 server is forgotten and connected again.

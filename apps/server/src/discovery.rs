@@ -22,7 +22,7 @@ const MAX_ANSWERS: u32 = 100;
 pub struct Announcement<'a> {
     /// The protocol's version.
     pub pley: u32,
-    /// Stable across restarts and renames (the Plex machine id).
+    /// Stable across restarts and renames (the server's id).
     pub id: &'a str,
     pub name: &'a str,
     pub version: &'a str,

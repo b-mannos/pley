@@ -743,7 +743,8 @@ begin
   N := Lowercase(Name);
   Result := (N = 'logs') or (N = 'tmp');
   if All and not Result then
-    Result := (Copy(N, 1, 5) = 'pley.') or (N = 'secret.key') or (N = 'plex-machine-id') or (N = 'transcode') or
+    Result := (Copy(N, 1, 5) = 'pley.') or (N = 'secret.key') or (N = 'server-id') or
+      (N = 'plex-machine-id') or (N = 'transcode') or
       (N = 'cache') or (N = 'metadata') or (N = 'media') or (N = 'avatars') or (N = 'backups');
 end;
 

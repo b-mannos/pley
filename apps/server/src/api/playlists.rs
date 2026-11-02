@@ -83,7 +83,7 @@ async fn smart_filter_of(
         .find(|l| l.id == library_id)
         .ok_or_else(|| AppError::not_found(format!("library {library_id} not found")))?;
     let filter = filter.trim().trim_start_matches('?');
-    if filter.len() > 2000 || !crate::plex::valid_smart_filter(&lib, filter) {
+    if filter.len() > 2000 || !crate::listing::valid_smart_filter(&lib, filter) {
         return Err(AppError::bad_request("smart_filter must be a library filter such as genre=Comedy&unwatched=1"));
     }
     Ok((lib, filter.to_owned()))

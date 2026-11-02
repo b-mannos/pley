@@ -80,9 +80,9 @@ impl Deref for AppState {
 }
 
 impl AppState {
-    /// This server's stable id (Plex's `machineIdentifier`).
-    pub fn plex_machine_id(&self) -> String {
-        crate::plex::PlexInfo::load(&self.config.data_dir).machine_id
+    /// This server's stable id ([`crate::identity::load_id`]).
+    pub fn server_id(&self) -> String {
+        crate::identity::load_id(&self.config.data_dir)
     }
 
     pub async fn init(mut config: Config) -> anyhow::Result<Self> {

@@ -242,7 +242,7 @@ pub async fn create_collection(
     let uri = params.get("uri").unwrap_or_default();
     let id = if params.flag("smart") {
         let filter = uri_filter(uri)
-            .filter(|(s, f)| *s == section && crate::plex::valid_smart_filter(&lib, f))
+            .filter(|(s, f)| *s == section && crate::listing::valid_smart_filter(&lib, f))
             .ok_or_else(|| PlexError::BadRequest("a smart collection needs a listing of its section as uri".into()))?
             .1;
         collections::create_smart(&state.db, section, &title, &filter).await?
@@ -270,7 +270,7 @@ pub async fn collection_add(
     if collections::is_smart(&state.db, id).await? {
         let lib = crate::library::get_library(&state.db, library_id).await?.ok_or(PlexError::NotFound)?;
         let filter = uri_filter(uri)
-            .filter(|(s, f)| *s == library_id && crate::plex::valid_smart_filter(&lib, f))
+            .filter(|(s, f)| *s == library_id && crate::listing::valid_smart_filter(&lib, f))
             .ok_or_else(|| PlexError::BadRequest("a smart collection's filter is a listing of its section".into()))?
             .1;
         collections::set_smart_filter(&state.db, id, &filter).await?;
@@ -334,7 +334,7 @@ pub async fn create(State(state): State<AppState>, PlexUser(user): PlexUser, par
             .ok_or_else(|| PlexError::BadRequest("a smart playlist needs a section listing as uri".into()))?;
         let lib =
             visible_libraries(&state, &user).await?.into_iter().find(|l| l.id == section).ok_or(PlexError::NotFound)?;
-        if !crate::plex::valid_smart_filter(&lib, &filter) {
+        if !crate::listing::valid_smart_filter(&lib, &filter) {
             return Err(PlexError::BadRequest("that listing finds nothing to play".into()));
         }
         let kind = if lib.kind() == LibraryKind::Music { Kind::Audio } else { Kind::Video };
@@ -438,7 +438,7 @@ pub async fn add(
         let filter = params
             .get("uri")
             .and_then(uri_filter)
-            .filter(|(s, f)| *s == lib.id && crate::plex::valid_smart_filter(&lib, f))
+            .filter(|(s, f)| *s == lib.id && crate::listing::valid_smart_filter(&lib, f))
             .ok_or_else(|| PlexError::BadRequest("a smart playlist's filter is a listing of its section".into()))?
             .1;
         playlists::set_smart_filter(&state.db, &user, id, &filter).await?;

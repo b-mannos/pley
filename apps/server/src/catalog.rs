@@ -815,7 +815,7 @@ pub enum SqlArg {
 }
 
 /// Items of one kind in a library, chosen and ordered by SQL that the caller
-/// builds (the Plex API's filters and sorts, see `plex::library`). [`VISIBLE`]
+/// builds (a listing's filters and sorts, see `crate::listing`). [`VISIBLE`]
 /// applies as everywhere else.
 pub struct ItemsQuery<'a> {
     pub library_id: i64,

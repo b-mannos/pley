@@ -25,6 +25,9 @@ describes how they are made.
 
 ### Changed
 
+- The server's id is kept in `server-id` in the data folder. An older
+  version's `plex-machine-id` is renamed to it on start, so apps keep
+  recognising the server.
 - The compatibility API no longer takes Pley's session tokens, which opened
   all of Pley's own API too, administration included: Tautulli, Kometa,
   players and scripts that use one get `401` until they have a token for

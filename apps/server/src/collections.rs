@@ -139,7 +139,7 @@ pub async fn list(db: &Db, user: &AuthUser, library_id: i64) -> sqlx::Result<Vec
     {
         for row in &rows {
             if let Some(filter) = &row.smart_filter {
-                let count = crate::plex::smart_count(db, user.id, &lib, filter).await?;
+                let count = crate::listing::smart_count(db, user.id, &lib, filter).await?;
                 counts.insert(row.id, i64::try_from(count).unwrap_or(i64::MAX));
             }
         }
@@ -188,7 +188,7 @@ pub async fn get(db: &Db, user: &AuthUser, id: i64) -> sqlx::Result<Option<(Coll
     let items = match &row.smart_filter {
         // What the filter finds, in the filter's order.
         Some(filter) => match crate::library::get_library(db, row.library_id).await? {
-            Some(lib) => crate::plex::smart_items(db, user.id, &lib, filter).await?,
+            Some(lib) => crate::listing::smart_items(db, user.id, &lib, filter).await?,
             None => Vec::new(),
         },
         None => catalog::items_by_ids(db, user.id, &ordered_ids(db, id, &row.sort).await?).await?,
