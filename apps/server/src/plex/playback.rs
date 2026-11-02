@@ -12,8 +12,6 @@ use axum::http::{HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use parking_lot::Mutex;
 use pley_transcoder_api::{JobStatus, VideoMode};
-use tower::ServiceExt;
-use tower_http::services::ServeFile;
 
 use super::meta::{self, Detail, Sections};
 use super::{ClientInfo, Node, Params, PlexError, PlexResult, PlexUser};
@@ -133,15 +131,9 @@ pub async fn part_file(
 ) -> PlexResult<Response> {
     let file = catalog::file(&state.db, id).await?.ok_or(PlexError::NotFound)?;
     catalog::item(&state.db, user.id, file.item_id).await?.ok_or(PlexError::NotFound)?;
-    if !crate::library::walk::leads_to_its_kind(std::path::Path::new(&file.path)) {
-        return Err(PlexError::NotFound);
-    }
-    let response = ServeFile::new(&file.path)
-        .oneshot(request)
+    let mut response = crate::api::playback::serve_library_file(&file.path, request.method(), request.headers())
         .await
-        .map_err(|e| PlexError::Internal(anyhow::anyhow!("{e}")))?
-        .map(axum::body::Body::new);
-    let mut response = response;
+        .map_err(PlexError::from)?;
     if params.flag("download") {
         let name = std::path::Path::new(&file.path)
             .file_name()
@@ -177,18 +169,23 @@ pub async fn stream_file(
     }
     if index >= EXTERNAL_INDEX_BASE {
         // Only a subtitle file (not a link swapped in since the scan, to
-        // pley's database or /dev/zero), and only one of subtitle size.
-        let sub = file
-            .external_subs()
-            .into_iter()
-            .find(|s| s.index == index)
-            .filter(|s| crate::library::walk::leads_to_its_kind(std::path::Path::new(&s.path)))
-            .ok_or(PlexError::NotFound)?;
-        let meta = tokio::fs::metadata(&sub.path).await.map_err(|_| PlexError::NotFound)?;
-        if !meta.is_file() || meta.len() > MAX_SIDECAR_BYTES {
-            return Err(PlexError::NotFound);
-        }
-        let bytes = tokio::fs::read(&sub.path).await.map_err(|_| PlexError::NotFound)?;
+        // pley's database or /dev/zero), read from the file checked, and
+        // only one of subtitle size.
+        let sub = file.external_subs().into_iter().find(|s| s.index == index).ok_or(PlexError::NotFound)?;
+        let path = std::path::PathBuf::from(sub.path);
+        let bytes = tokio::task::spawn_blocking(move || {
+            let (file, meta) = crate::library::walk::open_of_its_kind(&path)?;
+            if meta.len() > MAX_SIDECAR_BYTES {
+                return None;
+            }
+            let mut bytes = Vec::new();
+            std::io::Read::read_to_end(&mut std::io::Read::take(file, MAX_SIDECAR_BYTES), &mut bytes).ok()?;
+            Some(bytes)
+        })
+        .await
+        .ok()
+        .flatten()
+        .ok_or(PlexError::NotFound)?;
         return Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], bytes).into_response());
     }
     let text = state

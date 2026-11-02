@@ -462,6 +462,39 @@ async fn direct_play_supports_ranges_and_transcode_needs_the_transcoder() {
     let ranged = app.call(Method::GET, &url, Some(&token), None, &[("range", "bytes=100-199")]).await;
     assert_eq!(ranged.status, StatusCode::PARTIAL_CONTENT);
     assert_eq!(ranged.bytes.len(), 100);
+    assert_eq!(ranged.headers[header::CONTENT_RANGE], "bytes 100-199/10000");
+    // The rest of it, its end, nothing past it; several ranges get all of it.
+    let get = |headers: &'static [(&'static str, &'static str)]| {
+        let (app, url, token) = (&app, url.clone(), token.clone());
+        async move { app.call(Method::GET, &url, Some(&token), None, headers).await }
+    };
+    let rest = get(&[("range", "bytes=9900-")]).await;
+    assert_eq!((rest.status, rest.bytes.len()), (StatusCode::PARTIAL_CONTENT, 100));
+    let end = get(&[("range", "bytes=-10")]).await;
+    assert_eq!(
+        (end.status, end.headers[header::CONTENT_RANGE].to_str().unwrap()),
+        (StatusCode::PARTIAL_CONTENT, "bytes 9990-9999/10000")
+    );
+    let past = get(&[("range", "bytes=10000-")]).await;
+    assert_eq!(
+        (past.status, past.headers[header::CONTENT_RANGE].to_str().unwrap()),
+        (StatusCode::RANGE_NOT_SATISFIABLE, "bytes */10000")
+    );
+    let several = get(&[("range", "bytes=0-1,5-9")]).await;
+    assert_eq!((several.status, several.bytes.len()), (StatusCode::OK, 10_000));
+    // A download carries on from where it stopped while the file is the
+    // same one, and a copy kept is told it still is.
+    let etag = ranged.headers[header::ETAG].to_str().unwrap().to_owned();
+    let resumed =
+        app.call(Method::GET, &url, Some(&token), None, &[("range", "bytes=5000-"), ("if-range", &etag)]).await;
+    assert_eq!((resumed.status, resumed.bytes.len()), (StatusCode::PARTIAL_CONTENT, 5000));
+    let changed = get(&[("range", "bytes=5000-"), ("if-range", "\"another\"")]).await;
+    assert_eq!((changed.status, changed.bytes.len()), (StatusCode::OK, 10_000));
+    let kept = app.call(Method::GET, &url, Some(&token), None, &[("if-none-match", &etag)]).await;
+    assert_eq!((kept.status, kept.bytes.len()), (StatusCode::NOT_MODIFIED, 0));
+    let head = app.call(Method::HEAD, &url, Some(&token), None, &[]).await;
+    assert_eq!((head.status, head.bytes.len()), (StatusCode::OK, 0));
+    assert_eq!(head.headers[header::CONTENT_LENGTH], "10000");
 
     let activity = app.get("/api/activity", &token).await;
     assert_eq!(activity.body["sessions"].as_array().unwrap().len(), 1);

@@ -73,6 +73,12 @@ describes how they are made.
   or picture could have the server open a folder of its choosing while an
   administrator was signed in, and on Windows a share named so had the
   server sign in to it.
+- A library's files are sent from the file checked: a file played as it is,
+  pictures, a `.sup` beside the media and the compatibility API's files and
+  subtitle files are opened once, checked, and read from what was opened.
+  The file was checked and then opened again by its name, so someone who
+  could write in a library folder could swap a link in between and have
+  the server hand out its database or `secret.key`.
 
 ## [0.1.3] - 2026-11-02
 

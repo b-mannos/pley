@@ -236,6 +236,10 @@ Apps sign in on Pley's own page with OAuth 2.1.
   library is scanned and again whenever the file is used: played,
   transcoded, downloaded, or its pictures or subtitles served. A link named
   like a film can't hand out other files.
+- What Pley sends of a library's files itself (a file played as it is, a
+  picture, a subtitle file) is opened first, checked as the file opened,
+  and sent from that file, so a link swapped in after the check is never
+  read.
 - The data folder (database, backups, log, settings) is kept to Pley's
   account: mode 0700 on Unix. On Windows, a folder every account could use
   (one on `D:\`, say) is limited to Pley's account, SYSTEM and the
