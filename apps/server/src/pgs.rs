@@ -254,9 +254,14 @@ impl<'a> Epoch<'a> {
         }
     }
 
-    /// The objects `composition` places that are defined, as it shows them,
-    /// within bounds.
+    /// The objects `composition` places that are defined, as it shows them:
+    /// within bounds, and cut to its plane, as players draw them.
     fn shown(&self, composition: &Composition) -> Vec<Shown<'_, 'a>> {
+        // A plane of no size cuts nothing but what is past the largest.
+        let (plane_width, plane_height) = match (composition.width, composition.height) {
+            (w, h) if w > 0 && h > 0 => (w.min(MAX_SIDE), h.min(MAX_SIDE)),
+            _ => (MAX_SIDE, MAX_SIDE),
+        };
         let mut shown = Vec::new();
         for placed in &composition.placed {
             let Some(object) = self.objects.get(&placed.id) else { continue };
@@ -264,9 +269,9 @@ impl<'a> Epoch<'a> {
                 continue;
             }
             let (cx, cy, cw, ch) = placed.crop.unwrap_or((0, 0, object.width, object.height));
-            let w = cw.min(object.width.saturating_sub(cx));
-            let h = ch.min(object.height.saturating_sub(cy));
-            if w > 0 && h > 0 && placed.x + w <= MAX_SIDE && placed.y + h <= MAX_SIDE {
+            let w = cw.min(object.width.saturating_sub(cx)).min(plane_width.saturating_sub(placed.x));
+            let h = ch.min(object.height.saturating_sub(cy)).min(plane_height.saturating_sub(placed.y));
+            if w > 0 && h > 0 {
                 shown.push(Shown { area: (placed.x, placed.y, w, h), from: (cx, cy), object });
             }
         }
@@ -823,7 +828,7 @@ mod tests {
     fn objects_out_of_bounds_or_undefined_show_nothing() {
         let file = mks(
             &[
-                // An object placed past the largest plane, and one never defined.
+                // An object placed off its plane, and one never defined.
                 (
                     1_000,
                     &[(
@@ -846,6 +851,22 @@ mod tests {
         let file = mks(&[(1_000, &[(0, set(&[pcs(0x80, &[(0, 0, 0, 0, None)]), ods(0, 2, 2, 1)]))])], false);
         let pictures = PgsPictures::read(&file).unwrap();
         assert_eq!((pictures.cues(), pictures.picture(1_000)), (Vec::new(), None));
+    }
+
+    #[test]
+    fn pictures_are_cut_to_their_plane() {
+        // A 200×4 object placed 100 px from the plane's right edge and 2 from
+        // its bottom: the part on the plane shows.
+        let file = mks(
+            &[(1_000, &[(0, set(&[pcs(0x80, &[(0, 0, 1820, 1078, None)]), pds(&[WHITE]), ods(0, 200, 4, 1)]))])],
+            false,
+        );
+        let pictures = PgsPictures::read(&file).unwrap();
+        let cue = PictureCue { start_ms: 1_000, end_ms: 11_000, x: 1820, y: 1078, width: 100, height: 2 };
+        assert_eq!(pictures.cues(), [cue]);
+        let picture = pictures.picture(1_000).unwrap();
+        assert_eq!((picture.width, picture.height, picture.rgba.len()), (100, 2, 100 * 2 * 4));
+        assert!(picture.rgba.chunks(4).all(|p| p == [255, 255, 255, 255]));
     }
 
     #[test]

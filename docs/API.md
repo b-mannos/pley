@@ -1898,7 +1898,8 @@ URLs.
   - `width`×`height` is the plane the pictures are placed on (a Blu-ray's
     1920×1080). Each cue shows its picture from `start_ms` until `end_ms`
     (the file's time, before the person's subtitle sync), `width`×`height`
-    at `x`, `y` of the plane, in order of time, never two at once.
+    at `x`, `y` of the plane and within it, in order of time, never two at
+    once.
   - `image` is the picture's address beside this one,
     `subtitles-{index}-{start_ms}.png?at=` with the list's `at`: a PNG with
     transparency, made of the track as the list was while it isn't whole
