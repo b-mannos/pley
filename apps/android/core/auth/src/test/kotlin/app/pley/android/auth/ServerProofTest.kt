@@ -146,6 +146,14 @@ class ServerProofTest {
     }
 
     @Test
+    fun aTokenAnotherRefreshGaveGoesOutOnlyAfterAProof() = runBlocking {
+        signedIn()
+        assertEquals("pley_at_one", tokens().refresh("pley_at_old"))
+        assertEquals(1, challenges.size)
+        assertEquals(0, refreshes)
+    }
+
+    @Test
     fun aRequestWithoutAnAnswerHasItProveItselfAgain() = runBlocking {
         signedIn()
         val tokens = tokens()
@@ -245,10 +253,9 @@ class ServerProofTest {
     fun aRefreshKeepsItsKeyAndHasTheServerProveItselfAnew() = runBlocking {
         signedIn(expiresAt = now + 30_000)
         val tokens = tokens()
-        // The access token is about to end: a proof for it, and one of its
-        // own for the refresh token.
+        // The access token is about to end: one proof, the refresh token's.
         assertEquals("pley_at_new1", tokens.accessToken())
-        assertEquals(2, challenges.size)
+        assertEquals(1, challenges.size)
         assertEquals(proof, store.load(issuer)!!.proof)
         // A refresh that brings another key doesn't replace the sign-in's.
         val newer = ServerProof(SERVER_ID, "7", Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 9 }))

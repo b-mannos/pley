@@ -159,9 +159,10 @@ class Tokens(
     /** The access token to send, refreshed when it ends within a minute; `null` when signed out. */
     suspend fun accessToken(): String? {
         val tokens = load() ?: return null
+        // A refresh waits for a proof of its own: one before it would be wasted.
+        if (!tokens.accessUsable(clock())) return refresh(tokens.accessToken)
         proved(tokens)
-        if (tokens.accessUsable(clock())) return tokens.accessToken
-        return refresh(tokens.accessToken)
+        return tokens.accessToken
     }
 
     /**
@@ -171,7 +172,11 @@ class Tokens(
      */
     suspend fun refresh(stale: String?): String = mutex.withLock {
         val tokens = load() ?: throw SignedOutException()
-        if (tokens.accessToken != stale && tokens.accessUsable(clock())) return@withLock tokens.accessToken
+        if (tokens.accessToken != stale && tokens.accessUsable(clock())) {
+            // Refreshed by another caller meanwhile, maybe on another network since.
+            proved(tokens)
+            return@withLock tokens.accessToken
+        }
         val refresh = tokens.refreshToken ?: run { signedOut() }
         // The refresh token goes only to a server that proves itself now.
         proved(tokens, now = true)

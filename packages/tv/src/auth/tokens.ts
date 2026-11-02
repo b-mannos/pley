@@ -378,9 +378,10 @@ export class Tokens {
   async accessToken(): Promise<string | null> {
     const tokens = this.load();
     if (!tokens) return null;
+    // A refresh waits for a proof of its own: one before it would be wasted.
+    if (tokens.expiresAt - this.clock() <= EARLY_MS) return this.refresh(tokens.accessToken);
     await this.proved(tokens);
-    if (tokens.expiresAt - this.clock() > EARLY_MS) return tokens.accessToken;
-    return this.refresh(tokens.accessToken);
+    return tokens.accessToken;
   }
 
   /**
@@ -392,7 +393,11 @@ export class Tokens {
     return this.serial(async () => {
       const tokens = this.load();
       if (!tokens) throw new SignedOutError();
-      if (tokens.accessToken !== stale && tokens.expiresAt - this.clock() > EARLY_MS) return tokens.accessToken;
+      if (tokens.accessToken !== stale && tokens.expiresAt - this.clock() > EARLY_MS) {
+        // Refreshed by another caller meanwhile, maybe on another network since.
+        await this.proved(tokens);
+        return tokens.accessToken;
+      }
       if (!tokens.refreshToken) this.signedOut();
       // The refresh token goes only to a server that proves itself now.
       await this.proved(tokens, true);

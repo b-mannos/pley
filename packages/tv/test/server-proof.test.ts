@@ -217,6 +217,19 @@ describe("a server proves itself before a token goes to it", () => {
     expect(proofs()).toBe(2);
   });
 
+  it("proves the server once for a token about to end, as it is refreshed", async () => {
+    const { t, asked, advance } = setup();
+    advance(60 * 60_000);
+    expect(await t.accessToken()).toBe("pley_at_new");
+    expect(asked.map((r) => new URL(r.url).pathname)).toEqual(["/api/server", "/api/oauth/token"]);
+  });
+
+  it("proves the server before a token another refresh gave goes out", async () => {
+    const { t, asked } = setup();
+    expect(await t.refresh("pley_at_old")).toBe("pley_at_a");
+    expect(asked.map((r) => new URL(r.url).pathname)).toEqual(["/api/server"]);
+  });
+
   it("signs out without sending the token to another device", async () => {
     const { t, asked, store } = setup(() => response(200, { id: ID, proof: "AAAA" }));
     await t.signOut();
