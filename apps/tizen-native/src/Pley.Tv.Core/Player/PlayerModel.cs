@@ -155,7 +155,7 @@ public sealed class PlayerModel : IDisposable
         pressedAt = scheduler.Elapsed;
         offsets = new SubtitleOffsets(source.Storage, () => source.ProfileId);
         presenter = new SubtitlePresenter(scheduler, source.Subtitles, LivePositionMs, () => offset, () => State.Value.Speed, () => Notice(SessionText.SubtitlesFailed),
-            source.PictureSubtitles, PicturesFailed);
+            source.PictureSubtitles, PicturesFailed, source.Local ? SubtitlePresenter.LocalPicturesRetryMs : SubtitlePresenter.PicturesRetryMostMs);
         sleep = new SleepTimer(scheduler, ItemLeftMs, () => item?.Id, OnSleep);
         sleep.State.Changed += s => Update(st => st with { Sleep = s });
         lastPositionMs = request.StartMs;
@@ -954,7 +954,7 @@ public sealed class PlayerModel : IDisposable
         struggle.Reset();
         lastAdvanceAt = scheduler.Elapsed;
         SetClock(positionMs: target);
-        presenter.Refresh();
+        presenter.Sought();
         seekReportTimer?.Dispose();
         seekReportTimer = scheduler.After(SeekReportMs, () =>
         {

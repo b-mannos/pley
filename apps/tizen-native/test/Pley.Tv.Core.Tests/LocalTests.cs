@@ -174,15 +174,14 @@ public class LocalTests
     }
 
     [Fact]
-    public void A_picture_track_becomes_the_mks_the_app_draws_from()
+    public void A_picture_tracks_blocks_are_read_out_as_they_are()
     {
         var film = Subtitled("S_HDMV/PGS", new byte[] { 0x16, 0x00, 0x00 });
         var facts = Read(film, int.MaxValue);
+        Assert.Equal("hdmv_pgs_subtitle", facts.Streams.Single().Codec);
         var blocks = MatroskaSubtitles.Read((o, n) => film.Skip((int)o).Take(n).ToArray(), facts, facts.Tracks.Single());
-        var mks = MatroskaSubtitles.Mks(blocks, facts.Tracks.Single());
-        var head = MatroskaHead.Read(mks, (_, _) => new byte[0])!;
-        Assert.Equal("hdmv_pgs_subtitle", head.Streams.Single().Codec);
-        Assert.Equal(2, blocks.Count);
+        Assert.Equal(new byte[] { 0x16, 0x00, 0x00 }, blocks[0].Data);
+        Assert.Equal(new[] { 1_500L, 10_000L }, blocks.Select(b => b.StartMs));
     }
 
     [Fact]

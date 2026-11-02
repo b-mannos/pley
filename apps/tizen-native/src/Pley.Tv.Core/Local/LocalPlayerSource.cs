@@ -290,7 +290,7 @@ public sealed class LocalPlayerSource : IPlayerSource
     const string EmbeddedPrefix = "embedded:";
 
     /// <summary>How long an answer waits for a track being read out of the file before it gives what it has.</summary>
-    const int ExtractWaitMs = 3_000;
+    const int ExtractWaitMs = 1_000;
 
     /// <summary>
     /// A subtitle file beside the video, as WebVTT, whole; or a text track of the file's own, as
@@ -308,7 +308,7 @@ public sealed class LocalPlayerSource : IPlayerSource
         });
     }
 
-    /// <summary>A picture track of the file's own (".../subtitles/4.mks"), as the server's .mks: as much as is read out yet.</summary>
+    /// <summary>A picture track of the file's own (".../subtitles/4.mks"): as much as is read out yet, handed over as it is.</summary>
     public Task<SubtitlePictures> PictureSubtitles(string url)
     {
         var name = Path.GetFileNameWithoutExtension(url);
@@ -318,7 +318,12 @@ public sealed class LocalPlayerSource : IPlayerSource
         {
             var x = Extract(index);
             await Task.WhenAny(x.Done, Task.Delay(ExtractWaitMs)).ConfigureAwait(false);
-            return new SubtitlePictures(MatroskaSubtitles.Mks(x.Now(), x.Track), x.Done.IsCompleted);
+            // The pictures as they are, no .mks made of them.
+            var samples = x.Now().Select(b => new Subtitles.Pictures.PictureSample(b.StartMs, b.DurationMs, b.Data)).ToList();
+            return new SubtitlePictures(new byte[0], x.Done.IsCompleted)
+            {
+                Track = new Subtitles.Pictures.PictureTrack(x.Track.CodecId, x.Track.Private, samples),
+            };
         });
     }
 

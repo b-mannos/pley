@@ -16,7 +16,7 @@ public sealed record SubtitleBlock(long StartMs, long? DurationMs, byte[] Data);
 /// A subtitle track read out of a Matroska file on a drive, as the server's transcoder reads one
 /// (docs/TRANSCODER.md, "Subtitle extraction"): the Cues list each subtitle block with its cluster
 /// and its place there, so the track is read block by block, a seek each, not the whole film.
-/// Text becomes WebVTT; pictures a small Matroska file of the track alone, as the server's .mks.
+/// Text becomes WebVTT; pictures are handed to the app's decoders as they are.
 /// </summary>
 public static class MatroskaSubtitles
 {
@@ -216,43 +216,4 @@ public static class MatroskaSubtitles
 
     static string Time(long ms) =>
         $"{ms / 3_600_000:00}:{ms / 60_000 % 60:00}:{ms / 1000 % 60:00}.{ms % 1000:000}";
-
-    /// <summary>
-    /// A picture track's blocks as a Matroska file of the track alone, as the server's .mks is:
-    /// what the app's picture subtitles read.
-    /// </summary>
-    public static byte[] Mks(IReadOnlyList<SubtitleBlock> blocks, MatroskaTrack track)
-    {
-        var ebml = El(0x1a45dfa3, El(0x4282, Encoding.ASCII.GetBytes("matroska")));
-        var info = El(0x1549a966, El(0x2ad7b1, U(1_000_000)));
-        var entry = new List<byte[]> { El(0xd7, U(1)), El(0x83, U(0x11)), El(0x86, Encoding.ASCII.GetBytes(track.CodecId)) };
-        if (track.Private != null) entry.Add(El(0x63a2, track.Private));
-        var tracks = El(0x1654ae6b, El(0xae, entry.SelectMany(x => x).ToArray()));
-        var body = new List<byte[]> { info, tracks };
-        foreach (var b in blocks)
-        {
-            var block = new byte[] { 0x81, 0, 0, 0 }.Concat(b.Data).ToArray();
-            var group = b.DurationMs is long d ? El(0xa0, El(0xa1, block).Concat(El(0x9b, U(d))).ToArray()) : El(0xa0, El(0xa1, block));
-            body.Add(El(Cluster, El(Timecode, U(b.StartMs)).Concat(group).ToArray()));
-        }
-        return ebml.Concat(El(0x18538067, body.SelectMany(x => x).ToArray())).ToArray();
-    }
-
-    static byte[] El(long id, byte[] data)
-    {
-        var idBytes = new List<byte>();
-        for (var v = id; v > 0; v >>= 8) idBytes.Insert(0, (byte)(v & 0xff));
-        var size = new byte[8];
-        size[0] = 0x01;
-        var n = (long)data.Length;
-        for (var i = 7; i >= 1; i--, n >>= 8) size[i] = (byte)(n & 0xff);
-        return idBytes.Concat(size).Concat(data).ToArray();
-    }
-
-    static byte[] U(long v)
-    {
-        var bytes = BitConverter.GetBytes(v);
-        if (BitConverter.IsLittleEndian) Array.Reverse(bytes);
-        return bytes;
-    }
 }

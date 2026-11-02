@@ -642,9 +642,11 @@ converting, seek previews, the next episode.
   server to convert it.
 - **Subtitles**: the `.srt` and `.vtt` files beside the video
   (`Film.en.forced.srt`), and an MKV's own tracks, read block by block
-  through its Cues (`MatroskaSubtitles`): text as WebVTT, pictures as the
-  server's `.mks`. An MKV without Cues for them (FFmpeg writes them for
-  video alone) shows only the files beside it.
+  through its Cues (`MatroskaSubtitles`): text as WebVTT, pictures handed
+  to the decoder as they are. A track still being read is asked for again
+  after 1 s, then 2, then every 4 s, and at once after a seek. An MKV
+  without Cues for them (FFmpeg writes them for video alone) shows only the
+  files beside it.
 - **Where it stopped** is kept on the TV; past 95 % it was watched.
 - **The TV's player** opens the file at its path. Its buffering is left as
   the TV has it: read or set for a file, the player said Playing and stood
