@@ -2360,7 +2360,7 @@ interface DownloadInfo {
   state: "direct" | "queued" | "running" | "done" | "failed";
   progress: number;          // 0 to 1 (1 for the original)
   size: number | null;       // bytes: the original's, or the converted file's once done
-  error: string | null;      // why it failed (null for apps: see below)
+  error: string | null;      // why it failed (for administrators only: see below)
   url: string;               // the original, or the converted file
 }
 ```
@@ -2387,8 +2387,9 @@ interface DownloadInfo {
   (else `404`: ask again), and to those who may see its title.
 - `503` while the transcoder isn't running or the file can't be read (ask
   again later); `501` with a transcoder too old to convert, or to make MP4.
-- Apps aren't told why a conversion failed (`error` is `null`): the reason
-  names the server's files, and the server's log keeps it.
+- Only administrators are told why a conversion failed (`error` is `null`
+  for everyone else, apps included): the reason names the server's files,
+  and the server's log keeps it.
 - `DELETE` before the file is made stops the conversion; a file already
   made stays for whoever asks next. A conversion nobody asks about for an
   hour while it waits its turn is dropped (the device that wanted it went):
@@ -3085,7 +3086,8 @@ credits detection, `previews_pending` files waiting for seek previews
 (those being made included), `previews_running` those being made now, and
 `library_work` says why they wait while some do ([Library work](#library-work)).
 Non-administrators see only their own sessions and the scans of libraries
-they may open, with no `analysis` or `library_work`, and the counts 0.
+they may open, with no `analysis` or `library_work`, and the counts 0; a
+session's `transcode.last_error` is "the conversion failed" for them.
 
 `/api/events`: each stream gets the events of the libraries its user may
 open, and the user's own events. A comment line keeps it alive every 15 s.
@@ -3242,7 +3244,7 @@ interface TranscodeInfo {
   segments_total: number;
   bitrate_out: number | null;   // what a conversion aims for, video and audio together (bits per second);
                                 // null for copied video
-  last_error: string | null;
+  last_error: string | null;    // FFmpeg's words (they name the file): "the conversion failed" but for administrators
   rendition: number;            // a stream in several sizes: the one the player takes now (0 = the largest)
   variants: number;             // how many smaller sizes it has (0: one size)
 }

@@ -237,6 +237,16 @@ fn job_status(id: &str, req: &JobRequest, segments: u32) -> JobStatus {
     }
 }
 
+/// A job's status as the stand-in tells it: with FFmpeg's words, which name
+/// the file, while the media can't be read.
+fn told_status(fake: &Fake, id: &str, req: &JobRequest, segments: u32) -> JobStatus {
+    let mut status = job_status(id, req, segments);
+    if fake.unreadable.load(Ordering::SeqCst) {
+        status.last_error = Some(format!("Error opening input file file:{}.", req.input));
+    }
+    status
+}
+
 /// Counts requests dropped before they were answered (pley gave up on them,
 /// and the connection closed).
 struct Answered(Arc<AtomicUsize>, bool);
@@ -322,7 +332,7 @@ async fn start_fake() -> (Fake, String) {
         .route(
             "/v1/status",
             get(|State(fake): State<Fake>| async move {
-                let jobs = fake.jobs.lock().iter().map(|(id, (req, n))| job_status(id, req, *n)).collect();
+                let jobs = fake.jobs.lock().iter().map(|(id, (req, n))| told_status(&fake, id, req, *n)).collect();
                 Json(TranscoderStatus {
                     version: "9.9.9".into(),
                     max_jobs: 8,
@@ -380,13 +390,7 @@ async fn start_fake() -> (Fake, String) {
             "/v1/jobs/{id}",
             get(|State(fake): State<Fake>, Path(id): Path<String>| async move {
                 match fake.jobs.lock().get(&id) {
-                    Some((req, n)) => {
-                        let mut status = job_status(&id, req, *n);
-                        if fake.unreadable.load(Ordering::SeqCst) {
-                            status.last_error = Some(format!("Error opening input file file:{}.", req.input));
-                        }
-                        Json(status).into_response()
-                    }
+                    Some((req, n)) => Json(told_status(&fake, &id, req, *n)).into_response(),
                     None => error(StatusCode::NOT_FOUND, "job_not_found"),
                 }
             })
@@ -530,6 +534,17 @@ async fn start_fake() -> (Fake, String) {
             get(|State(fake): State<Fake>, Path(id): Path<String>| async move {
                 if id != CONVERSION {
                     return error(StatusCode::NOT_FOUND, "not_found");
+                }
+                if fake.unreadable.load(Ordering::SeqCst) {
+                    let input = fake.conversions.lock().last().map(|req| req.input.clone()).unwrap_or_default();
+                    return Json(ConversionStatus {
+                        id,
+                        state: ConversionState::Failed,
+                        duration_ms: 60_000,
+                        error: Some(format!("ffmpeg exited with exit code: 1: Error opening input file file:{input}.")),
+                        ..Default::default()
+                    })
+                    .into_response();
                 }
                 if fake.conversion_running.load(Ordering::SeqCst) {
                     return Json(ConversionStatus {
@@ -1142,6 +1157,42 @@ async fn apps_never_see_media_paths_in_the_transcoders_words() {
     // pley's own sign-in gets the transcoder's own words.
     let own = play(app, admin, start).await;
     assert!(own.mentions(&folder), "{}", own.text());
+}
+
+#[tokio::test]
+async fn only_administrators_see_media_paths_in_the_transcoders_words() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let (bob, _) = app.user(admin, "bob", json!({})).await;
+    let movies = app.media_path("movies");
+    let folder = std::path::Path::new(&movies).parent().unwrap().file_name().unwrap().to_string_lossy().into_owned();
+    let feature = w.movies["Feature"];
+    let started = play(app, &bob, json!({"item_id": feature, "caps": browser()})).await;
+    assert_eq!(started.status, StatusCode::OK, "{}", started.text());
+    let session = started.body["session_id"].as_str().unwrap().to_owned();
+    let asked = app.post("/api/conversions", &bob, json!({"item_id": feature, "caps": phone()})).await;
+    assert_eq!(asked.status, StatusCode::OK, "{}", asked.text());
+
+    // The share holding the files goes to sleep, for a playback and a
+    // download of someone signed in on pley's own page.
+    w.fake.unreadable.store(true, Ordering::SeqCst);
+    let download = format!("/api/conversions/{CONVERSION}");
+    let replies = [
+        ("the player's details", app.get(&format!("/api/playback/{session}"), &bob).await),
+        ("the activity", app.get("/api/activity", &bob).await),
+        ("the download", app.get(&download, &bob).await),
+    ];
+    for (case, reply) in &replies {
+        assert_eq!(reply.status, StatusCode::OK, "{case}: {}", reply.text());
+        assert!(!reply.mentions(&folder), "{case}: {}", reply.text());
+    }
+    assert_eq!(replies[1].1.body["sessions"][0]["transcode"]["last_error"], "the conversion failed");
+    assert_eq!(replies[2].1.body["state"], "failed");
+    // An administrator gets them.
+    for path in ["/api/activity", download.as_str()] {
+        let reply = app.get(path, admin).await;
+        assert!(reply.mentions(&folder), "{path}: {}", reply.text());
+    }
 }
 
 #[tokio::test]

@@ -13,7 +13,7 @@ use dashmap::DashMap;
 use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use pley_transcoder_api::{
-    AudioMode, ConversionState, ConversionStatus, FileContainer, JobRequest, MediaInfo, MediaStream,
+    AudioMode, ConversionState, ConversionStatus, FileContainer, JobRequest, JobStatus, MediaInfo, MediaStream,
     SUBTITLES_COMPLETE_HEADER, StreamKind, VideoMode,
 };
 use serde::{Deserialize, Serialize};
@@ -29,8 +29,8 @@ use crate::events::ServerEvent;
 use crate::library::sidecar::EXTERNAL_INDEX_BASE;
 use crate::playback::{
     Decision, Delivery, HLS_PTS_OFFSET_MS, Method, PlaybackInfo, PlaybackRequest, Session, SessionStatus,
-    TranscodeSpec, decide, decide_with_audio, may_draw_pictures, new_media_key, picture_to_prepare, sentence,
-    subtitle_tracks, transcode_info, video_range_shown,
+    TranscodeInfo, TranscodeSpec, decide, decide_with_audio, may_draw_pictures, new_media_key, picture_to_prepare,
+    sentence, subtitle_tracks, transcode_info, video_range_shown,
 };
 use crate::state::AppState;
 use crate::streams;
@@ -365,18 +365,20 @@ pub async fn status(
 ) -> ApiResult<Json<SessionStatus>> {
     let session = owned_session(&state, &user, &id)?;
     let transcode = match session.job_id() {
-        Some(job) => state.transcoder.job_status(&job).await.ok().map(|status| transcode_info(&status)),
+        Some(job) => state.transcoder.job_status(&job).await.ok().map(|status| transcode_seen_by(&user, &status)),
         None => None,
     };
-    let transcode = transcode.map(|mut info| {
-        // FFmpeg's last words name the media file: an administrator's (as
-        // in `for_viewer`).
-        if !user.is_admin && info.last_error.is_some() {
-            info.last_error = Some("the conversion failed".to_owned());
-        }
-        info
-    });
     Ok(Json(SessionStatus { session_id: session.id.clone(), method: session.method, transcode }))
+}
+
+/// `job`'s transcode as `user` sees it, here and in the activity: FFmpeg's
+/// last words name the media file, an administrator's (as in `for_viewer`).
+pub(super) fn transcode_seen_by(user: &AuthUser, job: &JobStatus) -> TranscodeInfo {
+    let mut info = transcode_info(job);
+    if !user.is_admin && info.last_error.is_some() {
+        info.last_error = Some("the conversion failed".to_owned());
+    }
+    info
 }
 
 #[derive(Deserialize)]
@@ -670,11 +672,11 @@ pub struct DownloadInfo {
 }
 
 impl DownloadInfo {
-    /// `status` as `user` sees it: an app doesn't get FFmpeg's words, which
-    /// name the server's files (the log keeps them).
+    /// `status` as `user` sees it: FFmpeg's words, which name the server's
+    /// files, are an administrator's (the log keeps them); apps never get them.
     fn for_viewer(status: &ConversionStatus, user: &AuthUser) -> Self {
         let mut info = Self::of(status);
-        if user.app.is_some() {
+        if !user.is_admin {
             info.error = None;
         }
         info

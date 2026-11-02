@@ -64,6 +64,9 @@ describes how they are made.
   (http or https). One naming a file or a network share
   (`url-tvg="//host/share/guide.xml"`) had the server open it, on Windows
   signing in to that share.
+- People who aren't administrators no longer see FFmpeg's words, which
+  name the server's files, in the activity's sessions or a download that
+  failed, as apps already didn't.
 
 ## [0.1.3] - 2026-11-02
 
