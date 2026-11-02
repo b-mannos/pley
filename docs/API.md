@@ -796,10 +796,15 @@ in the server's own /64, and Tailscale's only when the server is on
 Tailscale. An https address is a proxy's, as Pley has no TLS of its own,
 and the server believes `X-Forwarded-Proto` for a proof only from a proxy
 on the home network, as it does `X-Forwarded-For`: a client elsewhere
-could name any https address in it. Nor does a website's page in a browser
-at home get a proof to pass on from inside ([CORS for TV
-apps](#cors-for-tv-apps)), except in LG TVs' own browser, which says
-webOS in its User-Agent as LG's TV app does. A device that reaches the
+could name any https address in it. The address is the `Host` the proxy
+passes on, so a proxy that passes on any name lets a client elsewhere
+have a proof made for a name the server no longer has; the proxy must
+pass on only the server's own names
+([deploy/README.md](../deploy/README.md#apps-and-reverse-proxies)). Nor
+does a website's page in a browser at home get a proof to pass on from
+inside ([CORS for TV apps](#cors-for-tv-apps)), except in LG TVs' own
+browser, which says webOS in its User-Agent as LG's TV app does. A
+device that reaches the
 server from the home network itself, or through a proxy that hides where
 clients come from (Docker's userland proxy without `X-Forwarded-For`),
 could still pass a challenge on; an https address is checked by its

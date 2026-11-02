@@ -182,7 +182,9 @@ Apps sign in on Pley's own page with OAuth 2.1.
   the home network itself, or through a proxy that hides where clients
   come from, could, as could a page in an LG TV's own browser, and a
   network that gives a plain-http name another device's address; an https
-  address is checked by its certificate too.
+  address is checked by its certificate too, and its proxy must pass on
+  only the server's own names, or the server proves itself under a name
+  someone else may hold now.
   Refresh tokens and PINs wait for a proof made then; an access token may
   use one made within the half hour on the same network. The desktop app,
   which uses the web app's session, asks for a key of its own with that
