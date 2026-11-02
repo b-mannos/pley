@@ -15,6 +15,7 @@
 //! server's other address gets a proof for that address, which the app
 //! refuses. The server makes no proof for a plain-http address to a client
 //! on the internet: only something passing challenges on asks for one there.
+//! An https address is a proxy's, and counts only from a proxy at home.
 //!
 //! Pley's own sign-in has no grant: the desktop app asks for a key with the
 //! window's session ([`Identity::session_key`]). Its id is random, and the

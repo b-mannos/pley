@@ -288,9 +288,12 @@ async fn a_tv_tells_its_server_from_another_device_at_its_address() {
     assert_ne!(public.body["proof"], json!(at_home));
     // A plain-http address asked from the internet (a device elsewhere
     // passing the challenge on, saying it is the home address): no proof.
+    // Nor an https one said by a client on the internet rather than a proxy
+    // at home: it could name an address the server no longer has.
     for (peer, extra) in [
         ("203.0.113.9:50000", vec![("host", "192.168.1.20:7539")]),
         ("127.0.0.1:50000", vec![("host", "192.168.1.20:7539"), ("x-forwarded-for", "203.0.113.9")]),
+        ("203.0.113.9:50000", vec![("host", "old.example.com"), ("x-forwarded-proto", "https")]),
     ] {
         let relayed = app.get_from(peer, &ask, &extra).await;
         assert_eq!(relayed.status, StatusCode::FORBIDDEN, "{peer} {extra:?}: {}", relayed.text());

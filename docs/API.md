@@ -791,12 +791,20 @@ which is how such a request looks. Both the connection and the client a
 proxy on it forwards for must be on the home network, which is the
 server's own: private, loopback and link-local addresses, global IPv6 ones
 in the server's own /64, and Tailscale's only when the server is on
-Tailscale. Nor does a website's page in a browser at home get a proof to
-pass on from inside ([CORS for TV apps](#cors-for-tv-apps)). A device
-that reaches the server from the home network itself, or through a proxy
-that hides where clients come from (Docker's userland proxy without
-`X-Forwarded-For`), could still pass a challenge on; an https address is
-checked by its certificate as well.
+Tailscale. An https address is a proxy's, as Pley has no TLS of its own,
+and the server believes `X-Forwarded-Proto` for a proof only from a proxy
+on the home network, as it does `X-Forwarded-For`: a client elsewhere
+could name any https address in it. Nor does a website's page in a browser
+at home get a proof to pass on from inside ([CORS for TV
+apps](#cors-for-tv-apps)), except in LG TVs' own browser, which says
+webOS in its User-Agent as LG's TV app does. A device that reaches the
+server from the home network itself, or through a proxy that hides where
+clients come from (Docker's userland proxy without `X-Forwarded-For`),
+could still pass a challenge on; an https address is checked by its
+certificate as well. A plain-http address that is a name (`nas.lan`) is
+only as safe as the names the device's network gives: a network that
+answers the proof's lookup with the server, through a VPN home, and the
+token's with another device could pass it.
 
 Pley's own sign-in has no token answer: the desktop app asks
 `/api/server/proof-key` with its window's session for a key, and checks

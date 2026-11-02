@@ -62,13 +62,19 @@ pub async fn server_status(
                 return Err(AppError::forbidden("a proof is made for Pley's apps, not for a page"));
             }
             let address = crate::api::oauth::issuer(&headers)?;
+            let home = |ip: Option<std::net::IpAddr>| ip.is_some_and(crate::identity::at_home);
+            // Pley has no TLS of its own: an https address is a proxy's, which
+            // says so in X-Forwarded-Proto. Only a proxy on the home network
+            // is believed, as with X-Forwarded-For; from anywhere else the
+            // header could name any https address.
+            if !home(peer) {
+                return Err(AppError::forbidden("a proof is made through a proxy on the home network only"));
+            }
             // An app reaches a plain-http address on its own network only:
             // asked for one from the internet, the server is being asked on
-            // behalf of a device at that address elsewhere. The connection
-            // counts as well as the client it forwards for, as a peer at an
-            // internet provider's shared address can name any client.
-            let home = |ip: Option<std::net::IpAddr>| ip.is_some_and(crate::identity::at_home);
-            if address.starts_with("http://") && !(home(peer) && home(source)) {
+            // behalf of a device at that address elsewhere. The client the
+            // proxy forwards for counts too.
+            if address.starts_with("http://") && !home(source) {
                 return Err(AppError::forbidden("a proof for a plain-http address is made for the home network only"));
             }
             let proof = state.identity.prove(proof_id, &address, challenge).map_err(AppError::bad_request)?;

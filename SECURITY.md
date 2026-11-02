@@ -175,11 +175,14 @@ Apps sign in on Pley's own page with OAuth 2.1.
   sends its token to an address (every app). Another device at that
   address can't, nor can another app's key. The proof covers
   the address it was asked at; the server makes none for a plain-http
-  address to a client on the internet, nor for a page other than Pley's
-  TV apps, so neither a device elsewhere nor a website's page open at home
-  can pass a challenge on for it. One that reaches the server from
+  address to a client on the internet, none for an https address but
+  through a proxy on the home network, and none for a page other than
+  Pley's TV apps, so neither a device elsewhere nor a website's page open
+  at home can pass a challenge on for it. One that reaches the server from
   the home network itself, or through a proxy that hides where clients
-  come from, could; an https address is checked by its certificate too.
+  come from, could, as could a page in an LG TV's own browser, and a
+  network that gives a plain-http name another device's address; an https
+  address is checked by its certificate too.
   Refresh tokens and PINs wait for a proof made then; an access token may
   use one made within the half hour on the same network. The desktop app,
   which uses the web app's session, asks for a key of its own with that

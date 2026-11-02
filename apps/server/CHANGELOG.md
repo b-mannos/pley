@@ -15,8 +15,9 @@ describes how they are made.
   to before sending it their token: each sign-in gets a key of its own,
   and the server proves it holds it, for the address it was asked at. The
   desktop app gets a key for its window's session. A proof for a plain-http
-  address goes only to the home network (403 from the internet), and none
-  goes to a website's page, so a device elsewhere can't get one passed on.
+  address goes only to the home network (403 from the internet), one for an
+  https address only through a proxy on it, and none goes to a website's
+  page, so a device elsewhere can't get one passed on.
 - A playback with keyed addresses has its file's PGS subtitles beside its
   media as pictures, each placed and timed (`subtitles-{index}.json` and its
   PNGs), for a player that can't decode PGS: Roku draws them over the video
