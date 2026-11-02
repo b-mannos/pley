@@ -62,6 +62,10 @@ describes how they are made.
 
 ### Fixed
 
+- Streams play with an FFmpeg build whose segment list names segments by
+  number alone, such as SynoCommunity's for Synology DSM. Before, the
+  transcoder never saw a segment finish with such a build, so every stream
+  that wasn't direct play waited forever.
 - Seek previews of a file the transcoder couldn't reach for a moment (a
   share whose disks slept, a share not mounted yet) are made when the file
   is next opened or scanned, instead of being given up until a restart.
