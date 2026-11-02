@@ -167,6 +167,24 @@ describe("who is watching and the libraries", () => {
     expect(app.libraries.value).toEqual(libraries);
   });
 
+  it("start as the profile the TV was left on with Always start as, its PIN first when it has one", () => {
+    const store = memoryStore();
+    const server = "http://a.local:7539";
+    store.set("pley.server", server);
+    store.set(`pley.tokens.${server}`, JSON.stringify({ issuer: server, accessToken: "pley_at_0", refreshToken: "pley_rt_0" }));
+    store.set(`pley.household.${server}`, "2");
+    const start = () => signedIn(store, () => Promise.resolve()).start();
+    // Who the TV was left on was never heard: whether it has a PIN isn't known.
+    store.set(`pley.alwaysStartAs.${server}`, "2");
+    expect(start()).toEqual({ page: "profiles" });
+    store.set("pley.me", JSON.stringify({ ...me, has_pin: true }));
+    expect(start()).toEqual({ page: "pin" });
+    store.set("pley.me", JSON.stringify({ ...me, has_pin: false }));
+    expect(start()).toEqual({ page: "home" });
+    store.remove(`pley.alwaysStartAs.${server}`);
+    expect(start()).toEqual({ page: "profiles" });
+  });
+
   it("go with the profile", async () => {
     const store = memoryStore();
     const app = signedIn(store, () => Promise.resolve());

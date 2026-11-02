@@ -68,9 +68,12 @@ LG's CLI (`@webos-tools/cli`) is a dev dependency, installed by
 
 ## Using it
 
-Sign-in, server discovery (a sweep of the TV's subnet), the screens, the
-player's keys and panels, and offline behaviour follow the Android TV app.
-What differs:
+Sign-in, server discovery (a sweep of the TV's subnet), "Who's watching?"
+and its PINs, the screens, the player's keys and panels, and offline
+behaviour follow the Android TV app. With Always start as too, a start
+never goes on as a profile with a PIN without it: the TV keeps the profile
+it was left on (`GET /api/auth/me`, with `has_pin`), and until it has,
+asks "Who's watching?". What differs:
 
 ### Remote and pointer
 

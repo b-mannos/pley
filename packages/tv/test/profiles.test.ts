@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { HouseholdProfile } from "../src/api/types";
 import { TokenError } from "../src/auth/tokens";
+import { startPage } from "../src/state";
 import { profileChoice, profileTiles, refusal } from "../src/ui/screens/onboarding/profiles";
 // Shared with the native Samsung app's tests, which must answer the same.
 import fixture from "./fixtures/profiles.json";
@@ -20,6 +21,12 @@ describe("Who's watching?, as the shared fixture has it", () => {
       const [picked] = profileTiles(household(c.in.household), c.in.me).filter((p) => p.id === c.in.picked);
       if (!picked) throw new Error(`no profile ${c.in.picked} in the household`);
       expect([c.in, profileChoice(picked, c.in.me, c.in.gate)]).toEqual([c.in, c.out]);
+    }
+  });
+
+  it("start", () => {
+    for (const c of fixture.start) {
+      expect([c.in, startPage(c.in)]).toEqual([c.in, c.out]);
     }
   });
 
