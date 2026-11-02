@@ -185,22 +185,28 @@ describe("fetchPictures", () => {
     expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "anew" });
   });
 
-  it("asks for all of what follows a file that came whole, and the rest of one still being written", async () => {
-    // The pictures around where the player was, then a smaller file of those
-    // around where it is now.
+  it("asks for all of another file after one that came whole, keeps the same one, and takes the rest of one still being written", async () => {
     const have = new Uint8Array(mks([[1000, 2000], [5000, 6000]]));
-    const other = new Uint8Array(mks([[20_000, 21_000]]));
-    answer(new Response(other, { status: 200, headers: { "X-Pley-Complete": "0" } }));
-    const next = await fetchPictures("/t.mks", new AbortController().signal, have, true);
-    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.headers).not.toHaveProperty("Range");
-    expect(next.kind === "track" && [next.bytes.length, next.subs.sampleAt(20_500)]).toEqual([other.length, 0]);
+    const fewer = new Uint8Array(mks([[20_000, 21_000]]));
+    const none = (length: number) => new Response(null, { status: 416, headers: { "Content-Range": `bytes */${length}`, "X-Pley-Complete": "0" } });
+    // The pictures around where the player is now, fewer than those it has:
+    // nothing past them, and a length of their own.
+    answer(none(fewer.length));
+    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "anew" });
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.headers).toMatchObject({ Range: `bytes=${have.length}-` });
+    // The same file again: kept, not asked for again.
+    answer(none(have.length));
+    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "early", bytes: have });
+
+    // More past a file that came whole: another file.
+    const one = new Uint8Array(mks([[1000, 2000]]));
+    const partial = { status: 206, headers: { "Content-Range": `bytes ${one.length}-${have.length - 1}/*`, "X-Pley-Complete": "0" } };
+    answer(new Response(have.slice(one.length), partial));
+    expect(await fetchPictures("/t.mks", new AbortController().signal, one, true)).toEqual({ kind: "anew" });
 
     const file = growing(have);
-    const cut = mks([[1000, 2000]]).byteLength;
-    const partial = { status: 206, headers: { "Content-Range": `bytes ${cut}-${file.length - 1}/*`, "X-Pley-Complete": "0" } };
-    answer(new Response(file.slice(cut), partial));
-    const more = await fetchPictures("/t.mks", new AbortController().signal, file.slice(0, cut), true);
-    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.headers).toMatchObject({ Range: `bytes=${cut}-` });
+    answer(new Response(file.slice(one.length), partial));
+    const more = await fetchPictures("/t.mks", new AbortController().signal, file.slice(0, one.length), true);
     expect(more.kind === "track" && more.subs.sampleAt(5500)).toBe(2);
   });
 
@@ -251,15 +257,30 @@ describe("loadPictures", () => {
     expect(h.onFailed).not.toHaveBeenCalled();
   });
 
-  it("asks for all of what follows pictures that came whole, which may be fewer, for where the player is now", async () => {
-    const fetchFn = server([partial([[1000, 2000], [5000, 6000]]), partial([[20_000, 21_000]])]);
+  it("takes fewer pictures for where the player is now in place of those it has, and downloads the same ones once", async () => {
+    const files = [new Uint8Array(mks([[1000, 2000], [5000, 6000]])), new Uint8Array(mks([[20_000, 21_000]]))];
+    let n = 0;
+    // As the server answers a Range: nothing past a file no longer than it, and its length.
+    const fetchFn = vi.fn((_url: string, init?: RequestInit) => {
+      const body = files[Math.min(n++, files.length - 1)]!;
+      const from = /^bytes=(\d+)-$/.exec((init?.headers as Record<string, string>).Range ?? "");
+      const headers = { "X-Pley-Complete": "0" };
+      if (from && Number(from[1]) >= body.length) {
+        return Promise.resolve(new Response(null, { status: 416, headers: { ...headers, "Content-Range": `bytes */${body.length}` } }));
+      }
+      return Promise.resolve(new Response(body, { status: 200, headers }));
+    });
+    vi.stubGlobal("fetch", fetchFn);
     const h = hooks();
     loadPictures("/w.mks", h);
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS);
-    expect(ranges(fetchFn).slice(0, 2)).toEqual([null, null]);
     expect(h.onTrack).toHaveBeenCalledTimes(2);
     expect(h.onTrack.mock.calls[1]?.[0].sampleAt(20_500)).toBe(0);
+    // The same pictures again: nothing past them, and their length.
+    await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS);
+    expect(fetchFn).toHaveBeenCalledTimes(4);
+    expect(h.onTrack).toHaveBeenCalledTimes(2);
   });
 
   it("tells once when the server can't make it, and asks no more", async () => {
@@ -279,8 +300,8 @@ describe("loadPictures", () => {
     await vi.advanceTimersByTimeAsync(0);
     at = 603_000;
     await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS * 3);
-    // Each answer came whole, so each ask is for all of it: the last, once the track is.
-    expect(urls()).toEqual(["/at.mks?at=600000", "/at.mks?at=603000", "/at.mks?at=603000"]);
+    // The last, all of it once it is whole.
+    expect(urls()).toEqual(["/at.mks?at=600000", "/at.mks?at=603000", "/at.mks?at=603000", "/at.mks?at=603000"]);
     // Had whole: asked for as it was, which the browser's cache keeps.
     fetchFn.mockClear();
     loadPictures("/at.mks", hooks(), () => 900_000);
