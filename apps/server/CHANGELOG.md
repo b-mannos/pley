@@ -90,6 +90,9 @@ describes how they are made.
   in place of one of the transcoder's folders there is taken away rather
   than followed: the hourly clean-up of its caches could delete whatever
   it led to.
+- While the transcoder isn't running, people and apps are told just that,
+  no longer its last words as it went, which named files and accounts:
+  administrators still find them in Settings → Transcoder and the log.
 
 ## [0.1.3] - 2026-11-02
 

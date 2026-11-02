@@ -86,7 +86,12 @@ async fn job_of_its_kind(req: &JobRequest) -> TranscoderResult<()> {
 impl From<TranscoderError> for AppError {
     fn from(err: TranscoderError) -> Self {
         match err {
-            TranscoderError::Unavailable(_) => AppError::Unavailable(err.to_string()),
+            // Why it isn't (its binary's path, the last words it said as it
+            // went, which name files and accounts) is for the log and the
+            // administrators' `/api/transcoder`, not for every client.
+            TranscoderError::Unavailable(_) => {
+                AppError::Unavailable("the transcoder isn't running: try again in a moment".into())
+            }
             TranscoderError::Api { status: 404, message, .. } => AppError::NotFound(message),
             TranscoderError::Api { status: 400, message, .. } => AppError::BadRequest(message),
             TranscoderError::Api { status: 503, message, .. } => AppError::Unavailable(message),
@@ -1076,5 +1081,14 @@ mod tests {
             assert!(transcoder.note_prefetch(&format!("{n}.mkv"), now));
         }
         assert!(transcoder.prefetched.lock().len() <= PREFETCHES_KEPT);
+    }
+
+    #[test]
+    fn a_transcoder_that_isnt_running_says_nothing_of_why() {
+        let gone = "transcoder exited (exit code: 1): ffmpeg failed at segment 12: /mnt/media/Film (2020).mkv";
+        match AppError::from(TranscoderError::Unavailable(Some(gone.into()))) {
+            AppError::Unavailable(message) => assert!(!message.contains("/mnt"), "{message}"),
+            other => panic!("{other:?}"),
+        }
     }
 }
