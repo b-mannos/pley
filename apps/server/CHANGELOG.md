@@ -53,6 +53,10 @@ describes how they are made.
   quarter of an hour or more from a NAS) when a busy NAS makes reading
   them take over a minute, and a seek while the whole file is read for
   them still has the pictures where the player went, rather than none.
+- The rest of a film's picture subtitles, read after those around where it
+  plays, pauses while a playback starts or the pictures where a player
+  seeks are read, so on a NAS a seek soon after a film starts has its
+  subtitles in about a second, where it could take four.
 
 ## [0.1.3] - 2026-11-02
 
