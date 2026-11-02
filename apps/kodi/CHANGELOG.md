@@ -37,6 +37,8 @@ describes how they are made.
 - After Change server, a request still waiting on the server left behind
   is never sent there again with the new server's token: when that server
   refuses its token, it gets nothing more and the request ends signed out.
+- The server left behind can't sign the add-on out of the new one either,
+  by refusing late a token renewal it held.
 
 ## [0.1.2] - 2026-11-02
 

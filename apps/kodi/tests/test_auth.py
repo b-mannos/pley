@@ -198,6 +198,19 @@ class TokensTest(unittest.TestCase):
             self.tokens.refreshed("at-1", self.server.url)
         self.assertEqual(self.tokens.session(), (other, "at-other"))
 
+    def test_a_server_left_behind_cant_sign_the_add_on_out_of_the_new_one(self):
+        # The old server ends the refresh it held once the plugin signed in
+        # elsewhere (it learns when: the add-on revokes its grant there).
+        other = "http://other.example:7539"
+        self.store.save(self.record(refresh_token="rt-0"))
+        self.server.during_refresh = lambda: self.store.save(
+            self.record(server=other, access_token="at-other", refresh_token="rt-other")
+        )
+        with self.assertRaises(auth.SignedOut):
+            self.tokens.refreshed("at-1", self.server.url)
+        self.assertEqual(self.store.load()["server"], other, "the new sign-in stays")
+        self.assertEqual(self.tokens.session(), (other, "at-other"))
+
     @unittest.skipIf(os.name == "nt", "file modes are POSIX")
     def test_tokens_are_readable_by_this_user_only(self):
         self.assertEqual(os.stat(self.store.path).st_mode & 0o777, 0o600)

@@ -409,7 +409,7 @@ class Tokens:
             return self._take(data, response)
         if response.status in (400, 401) and response.body.startswith(b"{"):
             if (response.json() or {}).get("error") in ("invalid_grant", "invalid_client", "unauthorized_client"):
-                self.forget()
+                self._forget_ended(data)
                 raise SignedOut()
         raise ApiError(response.status, "refresh", "the server didn't renew the sign-in (%d)" % response.status)
 
@@ -476,7 +476,7 @@ class Tokens:
             error, reason = body.get("error"), body.get("reason")
             if error == "invalid_grant" and not reason:
                 # The refresh token doesn't work, as for a refresh.
-                self.forget()
+                self._forget_ended(data)
                 raise SignedOut()
             message = body.get("error_description") or "the server refused (%d)" % response.status
             raise ApiError(response.status, reason or error or "http_%d" % response.status, message)
@@ -485,6 +485,17 @@ class Tokens:
         self.store.clear()
         self.data, self.stamp = None, None
         self.proved_at = None
+
+    def _forget_ended(self, data: dict) -> None:
+        """Forgets `data`'s sign-in, which its server ended, unless the
+        plugin signed in again meanwhile: a server left behind that answers
+        late (or on purpose, once told of the change) can't sign the add-on
+        out of the one chosen since."""
+        on_disk = self.store.load()
+        if on_disk and on_disk.get("refresh_token") == data["refresh_token"]:
+            self.forget()
+        else:
+            self.data, self.stamp = None, None
 
     def sign_out(self) -> None:
         """Ends the sign-in on the server (best effort), then here. A server
