@@ -616,6 +616,45 @@ PLEY_TIZEN_METRICS=http://<computer>:7531 bun run tizen-native
 A build without `PLEY_TIZEN_METRICS` has none of this: the calls of
 `Kit/Profile.cs` are left out when it is compiled.
 
+### Videos on a USB drive
+
+While a drive is plugged into the TV, the rail ends with **USB drive**. It
+lists the drive's folders, then the videos the TV's player opens (MKV, MP4,
+M4V, MOV, TS, M2TS, WebM, AVI, MPEG), sorted as a person sorts names;
+hidden files and what Windows and macOS leave on a drive aren't shown. A
+folder opens over the one before, with ".." first to go back up. At the
+drive's top, the page says how full the drive is.
+
+A video plays in Pley's player as it is, with no server
+(`Local/LocalPlayerSource.cs`), so seeking, the panels, the sleep timer and
+the subtitles' look are the same; what only a server does isn't there:
+converting, seek previews, the next episode.
+
+- **Tracks and chapters** come from the file's head: an MKV's Info, Tracks
+  and Chapters (`MatroskaHead`), an MP4's movie box (`Mp4Head`). The audio
+  it starts with is the default track the TV decodes, else the first it
+  decodes (TrueHD and DTS don't play).
+- **HDR** is read from the head (Matroska's Colour and Dolby Vision
+  configuration, MP4's `colr` and `dvcC`) and from the first HEVC frames
+  (`HevcFrames`): HDR10's mastering display, HLG's transfer, HDR10+'s
+  metadata and Dolby Vision's RPU, which many files' heads leave out.
+  Dolby Vision plays as its HDR10 base layer, profile 7 too: there is no
+  server to convert it.
+- **Subtitles**: the `.srt` and `.vtt` files beside the video
+  (`Film.en.forced.srt`), and an MKV's own tracks, read block by block
+  through its Cues (`MatroskaSubtitles`): text as WebVTT, pictures handed
+  to the decoder as they are. A track still being read is asked for again
+  after 1 s, then 2, then every 4 s, and at once after a seek. An MKV
+  without Cues for them (FFmpeg writes them for video alone) shows only the
+  files beside it.
+- **Where it stopped** is kept on the TV; past 95 % it was watched.
+- **The TV's player** opens the file at its path. Its buffering is left as
+  the TV has it: read or set for a file, the player said Playing and stood
+  at 0. A file whose picture never starts says so after 12 s.
+- **Thumbnails can't be made on the TV**: frames taken out of a file decode
+  in software (15 to 20 s each, 4K not at all), and the player's frame
+  capture isn't on Samsung TVs (`multimedia.raw_video`).
+
 ### On the TV
 
 - **60 frames a second** is the most an app's screens get, also on panels
