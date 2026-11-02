@@ -194,6 +194,15 @@ function picNext(cues as object, positionMs as integer) as integer
     return -1
 end function
 
+' Whether the Video node's position moved to positionMs from lastMs (-1 for
+' none yet) as a seek does, rather than by playing: further than the clock
+' went from lastAt to now (ms), or back.
+function picSeeked(lastMs as integer, lastAt as integer, positionMs as integer, now as integer) as boolean
+    if lastMs < 0 then return false
+    moved = positionMs - lastMs
+    return moved - (now - lastAt) > 3000 or moved < -1000
+end function
+
 ' What the overlay does with pictures (picRead's, or invalid) at
 ' positionMs, the Video node's, with the subtitle sync syncMs (later when
 ' positive): { show, preload }, the cue it shows and the next to come,

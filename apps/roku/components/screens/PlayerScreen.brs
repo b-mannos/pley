@@ -136,8 +136,10 @@ sub init()
     ' Picture subtitles drawn here: the track (-1 none), its pictures known
     ' (Pictures.brs), the folder of their files after the server, the cue
     ' showing (-1 none), the frames (the one at front shows, the other loads
-    ' the next), and which answer is awaited. Once the server turns out not
-    ' to make them, they are burned in for as long as the player shows.
+    ' the next), which answer is awaited and whether a seek since wants
+    ' another at once, and the last position seen (and when) to tell a seek
+    ' by. Once the server turns out not to make them, they are burned in for
+    ' as long as the player shows.
     m.picturesOff = false
     m.pictureIndex = -1
     m.pictures = invalid
@@ -150,6 +152,9 @@ sub init()
     end for
     m.pictureAsk = 0
     m.pictureWaiting = false
+    m.pictureAgain = false
+    m.pictureLastMs = -1
+    m.pictureLastAt = 0
     m.picturesTimer = m.top.findNode("picturesTimer")
     m.picturesTimer.duration = picAgainMs() / 1000
     m.picturesTimer.observeField("fire", "askPictures")
@@ -805,6 +810,7 @@ sub onPosition(event as object)
     if playerShouldReport(m.video.state, m.clock.TotalMilliseconds() - m.lastReportAt) then report("playing")
     if m.next <> invalid and not m.upNextShown and m.upNextAt > 0 and m.positionMs >= m.upNextAt and not sleepEndsWith(m.sleep, urlValue(m.itemId)) then showUpNext()
     updateSkip()
+    followPictures()
     drawPictures()
 end sub
 
@@ -1508,6 +1514,8 @@ sub stopPictures()
     ' An answer on its way is for pictures no longer drawn.
     m.pictureAsk = m.pictureAsk + 1
     m.pictureWaiting = false
+    m.pictureAgain = false
+    m.pictureLastMs = -1
     m.picturesTimer.control = "stop"
     for each frame in m.pictureFrames
         frame.opacity = 0
@@ -1545,7 +1553,29 @@ sub onPictures(event as object)
         drawPictures()
         if m.pictures.complete then return
     end if
+    ' A seek while it was asked for: the pictures where the video is now.
+    if m.pictureAgain
+        m.pictureAgain = false
+        askPictures()
+        return
+    end if
     m.picturesTimer.control = "start"
+end sub
+
+' A seek while the track isn't whole: the pictures where the video is now
+' are asked for at once, rather than at the next look.
+sub followPictures()
+    if m.pictureIndex < 0 then return
+    now = m.clock.TotalMilliseconds()
+    seeked = picSeeked(m.pictureLastMs, m.pictureLastAt, m.positionMs, now)
+    m.pictureLastMs = m.positionMs
+    m.pictureLastAt = now
+    if not seeked or (m.pictures <> invalid and m.pictures.complete) then return
+    if m.pictureWaiting
+        m.pictureAgain = true
+    else
+        askPictures()
+    end if
 end sub
 
 ' The server doesn't make pictures (an older server or transcoder): they

@@ -126,6 +126,15 @@ sub test_pictures_move_with_the_subtitle_sync()
     tkEqual(picPlan(pictures, 500, -500).show, 0, "earlier")
 end sub
 
+sub test_pictures_tell_a_seek_from_playing()
+    tkFalse(picSeeked(-1, 0, 600000, 1000), "the first position")
+    tkFalse(picSeeked(60000, 1000, 61000, 2000), "a second played in a second")
+    tkFalse(picSeeked(60000, 1000, 60000, 9000), "paused")
+    tkFalse(picSeeked(60000, 1000, 63500, 2000), "notified late")
+    tkTrue(picSeeked(60000, 1000, 600000, 2000), "forward")
+    tkTrue(picSeeked(600000, 1000, 60000, 2000), "back")
+end sub
+
 sub test_pictures_are_placed_on_the_screen_as_the_video_is()
     pictures = picRead(picTestList(true))
     cue = pictures.cues[0]

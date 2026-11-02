@@ -219,12 +219,13 @@ next.
   `/api/media/{key}/subtitles-{index}.json?at={ms}` lists each one's time,
   its place on the subtitle plane and its PNG beside it. The server reads
   the pictures around `at` first: while the list isn't whole, the app asks
-  again every 3 s from where the video is, and keeps what it has. The
-  plane is fitted to the screen as the video is. A picture shows while
-  the video plays, under the skip button and the player's panels; paused
-  or seeking, Roku's bar has the bottom of the screen. The next picture
-  loads in a second frame while one shows. The Video node tells its
-  position every 0.2 s while pictures are drawn, else every second.
+  again every 3 s from where the video is (at once after a seek), and keeps
+  what it has. The plane is fitted to the screen as the video is. A
+  picture shows while the video plays, under the skip button and the
+  player's panels; paused or seeking, Roku's bar has the bottom of the
+  screen. The next picture loads in a second frame while one shows. The
+  Video node tells its position every 0.2 s while pictures are drawn, else
+  every second.
 - Roku's options list only text tracks: PGS is picked on a title's page.
   A text track picked in the options takes the place of the pictures;
   captions turned on or off alone leave them be.
