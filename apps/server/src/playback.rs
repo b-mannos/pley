@@ -1437,22 +1437,26 @@ pub fn decide_with_audio(
 
 /// The picture subtitle track whose `.mks` the player of `req` will ask for
 /// (it draws them itself, [`Caps::sideloads_pictures`]), so the server has
-/// it copied out of its file at once: the track named in the request, else
-/// the one the user's choices pick (`chosen`, `streams::resolve`), when it
-/// is pictures the player draws and nothing burns them in. Only for a
-/// track in a stream: a player that reads it from a file played as it is
-/// (the Android app, Kodi) needs no `.mks`, and one that doesn't asks for
-/// it at once anyway. Never for a file next to the media (a `.sup`,
-/// VobSub's `.idx` and `.sub`, an added track): its copy reads only that
-/// file, and Kodi's `.sup` is the file itself. Players change the track as
-/// they play: the `.mks` request starts the copy then.
+/// it copied out of its file at once: the one the user's choices pick
+/// (`chosen`, `streams::resolve`), when it is pictures the player draws and
+/// nothing burns them in. A track the request names needs none: it is
+/// text, pictures burned into a stream ([`decide`]), or read from a file
+/// played as it is. Only for a track in a stream: a player that reads it
+/// from a file played as it is (the Android app, Kodi) needs no `.mks`, and
+/// one that doesn't asks for it at once anyway. Never for a `.sup` next to
+/// the media (the only picture subtitle file Pley lists there): its copy
+/// reads only that file, and Kodi's `.sup` is the file itself. Players
+/// change the track as they play: the `.mks` request starts the copy then.
 pub fn picture_to_prepare(
     streams: &[MediaStream],
     req: &PlaybackRequest,
     decision: &Decision,
     chosen: Option<i64>,
 ) -> Option<i64> {
-    let index = req.subtitle_index.or(chosen)?;
+    if req.subtitle_index.is_some() {
+        return None;
+    }
+    let index = chosen?;
     let track = streams.iter().find(|s| s.index == index && s.kind == StreamKind::Subtitle)?;
     let drawn = !track.text_based.unwrap_or(true) && req.caps.sideloads_pictures(&track.codec);
     let streamed = decision.method != Method::Direct && !track.external;
@@ -2981,10 +2985,15 @@ mod tests {
         assert_eq!(prepared(&req, Some(1000)), (Method::Remux, None));
         let next_to_it: Vec<_> = streams.iter().filter(|s| s.index != 9).cloned().collect();
         assert!(!may_draw_pictures(&next_to_it, &req.caps));
-        // Named by the player: burned in, nothing to prepare.
+        // Named by the player: burned in, or text it shows; nothing to
+        // prepare, whatever the user's choices pick.
         let mut burn = req.clone();
         burn.subtitle_index = Some(9);
         assert_eq!(prepared(&burn, None).1, None);
+        assert_eq!(prepared(&burn, Some(9)).1, None);
+        let mut text = req.clone();
+        text.subtitle_index = Some(10);
+        assert_eq!(prepared(&text, Some(9)).1, None);
         // A player that doesn't draw them, or not these.
         let mut android = req.clone();
         android.caps.picture_subtitles_sideload = None;

@@ -31,9 +31,9 @@ describes how they are made.
   doesn't list them, could read the whole film from a network share.
   Needs Pley for Kodi from the same release, which names the picture
   subtitles it shows beside a stream (`picture_subtitles_sideload_codecs`).
-- A picture subtitle file next to the media (`.sup`, `.idx`/`.sub`, or
-  one added) is no longer copied as a playback starts, only when a player
-  asks for it: Kodi reads a `.sup` as it is.
+- A PGS subtitle file next to the media (`.sup`) is no longer copied as
+  each playback starts, only when a player asks for it: Kodi reads it as
+  it is.
 
 ## [0.1.3] - 2026-11-02
 
