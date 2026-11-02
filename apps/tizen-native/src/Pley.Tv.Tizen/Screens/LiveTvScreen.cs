@@ -168,6 +168,7 @@ sealed class LiveTvScreen : ShellPage
     {
         Profile.Mark("live page: state");
         if (gone) return;
+        var started = Profile.Start();
         if (page.Allowed != allowedShown)
         {
             allowedShown = page.Allowed;
@@ -208,6 +209,7 @@ sealed class LiveTvScreen : ShellPage
             categories.Show(page.Groups, page.Category, page.Found);
         }
         ShowContent();
+        Profile.Took("live page: state shown", started);
     }
 
     static void Tab(ButtonView tab, bool on)

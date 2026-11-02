@@ -241,6 +241,11 @@ It has no releases yet: it is built and installed by hand
 
 ### Fixed
 
+- Live TV no longer pauses for a quarter of a second as it opens and as a
+  channel is left, with a provider's hundreds of categories, and moving
+  through the guide is smoother: a row's programmes are painted again
+  rather than made again as focus moves, and a long description is cut to
+  what the panel shows.
 - Settings' Always start as no longer starts the TV as a profile with a
   PIN without it: the start opens on that profile's PIN pad, and Back shows
   the other profiles. While the TV doesn't know whether the profile it was

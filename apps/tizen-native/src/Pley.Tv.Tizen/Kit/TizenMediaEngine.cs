@@ -788,6 +788,7 @@ sealed class TizenMediaEngine : IVideoEngine
         }
         // On the UI thread, though it holds it 100 to 300 ms: let go from another, the player, bound
         // to the window, held the UI 8 s as a film was left, and the app died moments later.
+        var releasing = Profile.Start();
         try
         {
             Profile.Enter("player: stop and unprepare (release)");
@@ -809,6 +810,7 @@ sealed class TizenMediaEngine : IVideoEngine
         {
             // Gone already.
         }
+        Profile.Took("engine: the player let go of", releasing);
         // No player waiting to take the display (it would turn the alpha back on itself): as it was,
         // with its alpha while a player still covers the screen; the shell made it opaque if not.
         if (cover && opening == 0 && opaque)
