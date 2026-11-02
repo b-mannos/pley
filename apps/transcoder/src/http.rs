@@ -296,10 +296,11 @@ async fn subtitles(State(state): Shared, Json(req): Json<SubtitleRequest>) -> Ap
 async fn subtitles_matroska(State(state): Shared, Json(req): Json<SubtitleRequest>) -> ApiResult<Response> {
     if req.partial {
         let start = PictureStart::new(req.from_ms, req.media);
-        let (bytes, complete) = state
-            .extractor
-            .subtitle_matroska_so_far(&req.path, req.stream_index, Duration::from_secs(2), start, req.rest)
-            .await?;
+        // A player that reads the track once waits as long for the whole of
+        // it as the server waits for Kodi's `.sup`.
+        let wait = Duration::from_secs(if req.rest { 8 } else { 2 });
+        let (bytes, complete) =
+            state.extractor.subtitle_matroska_so_far(&req.path, req.stream_index, wait, start, req.rest).await?;
         let complete = if complete { "1" } else { "0" };
         return Ok((
             [
