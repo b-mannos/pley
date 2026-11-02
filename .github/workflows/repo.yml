@@ -2,10 +2,12 @@ name: Repository
 
 # What belongs to no single app: the workflows themselves, and the scripts
 # that version and release the apps (docs/RELEASING.md), with every unit's
-# manifests and CHANGELOG checked against each other.
+# manifests and CHANGELOG checked against each other, and its version against
+# the last release's.
 on:
   push:
     branches: [master]
+    # The units' first manifests have their versions (scripts/version.mjs).
     paths:
       - .github/workflows/**
       - scripts/version.mjs
@@ -13,6 +15,13 @@ on:
       - scripts/release.mjs
       - scripts/release.test.mjs
       - "**/CHANGELOG.md"
+      - apps/server/Cargo.toml
+      - apps/desktop/package.json
+      - apps/android/app/build.gradle.kts
+      - apps/tizen/package.json
+      - apps/webos/package.json
+      - apps/kodi/plugin.video.pley/addon.xml
+      - apps/roku/manifest
   pull_request:
     paths:
       - .github/workflows/**
@@ -21,6 +30,13 @@ on:
       - scripts/release.mjs
       - scripts/release.test.mjs
       - "**/CHANGELOG.md"
+      - apps/server/Cargo.toml
+      - apps/desktop/package.json
+      - apps/android/app/build.gradle.kts
+      - apps/tizen/package.json
+      - apps/webos/package.json
+      - apps/kodi/plugin.video.pley/addon.xml
+      - apps/roku/manifest
   workflow_dispatch:
 
 permissions:
@@ -51,12 +67,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # The whole history and the tags: the last release, which a pull
+      # request's merge is checked against.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: package.json
       - run: bun test ./scripts
       - run: bun scripts/version.mjs check
+      # No unit below the version it had at the last release tag. What else
+      # waits for the next release is normal here, so pending isn't run.
+      - run: bun scripts/release.mjs check
       - run: bun scripts/release.mjs

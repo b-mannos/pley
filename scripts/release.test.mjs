@@ -6,7 +6,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { addEntries, entryOf, findSection, notes, plainText, release, sections } from "./changelog.mjs";
-import { RELEASE_TAG, parseArgs, pending, plan, status } from "./release.mjs";
+import { RELEASE_TAG, lowered, parseArgs, pending, plan, status } from "./release.mjs";
 import {
   ROOT,
   UNITS,
@@ -354,6 +354,50 @@ describe("releases", () => {
       expect(workflow).toContain(`\n      - ${UNITS[unit].manifests[0].path}\n`);
       expect(workflow).toContain(`contains(fromJSON(needs.prepare.outputs.units || '[]'), '${unit}')`);
     }
+  });
+
+  test("never take a unit below its last release, while what waits for the next passes", () => {
+    const f = fixture();
+    const { dir, git } = f;
+    // The command as CI runs it, with the fixture as its repository.
+    mkdirSync(join(dir, "scripts"));
+    for (const s of ["release.mjs", "version.mjs", "changelog.mjs"]) cpSync(join(ROOT, "scripts", s), join(dir, "scripts", s));
+    const check = () => spawnSync("bun", [join(dir, "scripts/release.mjs"), "check"], { encoding: "utf8" });
+    expect(lowered(dir)).toEqual({ since: null, problems: [] });
+    addEntry(dir, "kodi");
+    bumped(f, "kodi", "patch");
+    git("tag", "release-2026-11-01");
+
+    // Between releases: a unit above its release's version, entries under Unreleased.
+    addEntry(dir, "roku");
+    bumped(f, "roku", "patch");
+    addEntry(dir, "roku", "Later");
+    addEntry(dir, "kodi", "Next");
+    expect(pending(dir).problems).not.toEqual([]);
+    expect(lowered(dir)).toEqual({ since: "release-2026-11-01", problems: [] });
+    expect(check().status).toBe(0);
+
+    // A branch carrying Kodi's manifest and CHANGELOG from before the release,
+    // which agree with each other.
+    git("checkout", "-q", "release-2026-11-01~1", "--", UNITS.kodi.manifests[0].path, UNITS.kodi.changelog);
+    expect(problems("kodi", dir)).toEqual([]);
+    const down = "kodi went down, from 0.0.2 to 0.0.1";
+    expect(lowered(dir).problems).toEqual([down]);
+    expect(pending(dir).problems).toContain(down);
+    const out = check();
+    expect(out.status).toBe(1);
+    expect(out.stderr).toContain(down);
+  }, SLOW);
+
+  test("the Repository workflow checks every change to a unit's version against the last release", () => {
+    const workflow = readFileSync(join(ROOT, ".github/workflows/repo.yml"), "utf8");
+    // On pushes to master and on pull requests.
+    for (const unit of UNIT_NAMES) {
+      const on = workflow.split(`\n      - ${UNITS[unit].manifests[0].path}\n`).length - 1;
+      expect({ unit, on }).toEqual({ unit, on: 2 });
+    }
+    expect(workflow).toContain("fetch-depth: 0");
+    expect(workflow).toContain("\n      - run: bun scripts/release.mjs check\n");
   });
 
   test("count only release-<date> tags as releases", () => {
