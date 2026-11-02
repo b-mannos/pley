@@ -828,7 +828,9 @@ server with them, or the computer wakes from sleep, the window leaves a
 plain-http server within a second and opens it again through a proof. A
 network that gives the computer the same addresses, joined in less than a
 second, or another device taking the server's address on the same
-network, goes unseen until the next proof.
+network, goes unseen until the next proof. Forgetting a server deletes the
+window's session there, which would otherwise go to whatever answers at
+the address next, with no key left to check it.
 
 Every app checks proofs: the Samsung (web and native), LG, Android,
 Kodi, Roku and desktop apps.

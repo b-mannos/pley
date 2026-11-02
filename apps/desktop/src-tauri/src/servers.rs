@@ -85,9 +85,21 @@ pub fn save_server(app: AppHandle, server: SavedServer) -> Result<(), String> {
     save(&app, &with_server(load(&app), server))
 }
 
+/// Forgets a server, and the window's session there: a server is forgotten
+/// when another device answers at its address, and that device would get
+/// the session next, with no key left to check it (async: on Windows,
+/// cookies read on the main thread deadlock).
 #[tauri::command]
-pub fn forget_server(app: AppHandle, url: String) -> Result<(), String> {
+pub async fn forget_server(app: AppHandle, url: String) -> Result<(), String> {
     if let Ok(origin) = server_origin(&url) {
+        // The session goes first, so that nothing finds it without the key.
+        if let Some(window) = app.get_webview_window("main") {
+            for cookie in window.cookies_for_url(origin.clone()).unwrap_or_default() {
+                if let Err(err) = window.delete_cookie(cookie) {
+                    eprintln!("cannot sign out of {origin}: {err}");
+                }
+            }
+        }
         app.state::<Proofs>().forget(&origin);
     }
     let servers: Vec<SavedServer> = load(&app).into_iter().filter(|s| s.url != url).collect();

@@ -20,6 +20,8 @@ describes how they are made.
   only once the server proves itself; a page may still send a request in
   that second. A sign-in from before starts checking the next time the app
   opens the server. Needs a server from the same release.
+- Forgetting a server signs the window out of it, so a device answering at
+  its address later gets nothing.
 - A plain-http address beyond the home network is no longer opened, even
   after a warning: open the server by its https address.
 
