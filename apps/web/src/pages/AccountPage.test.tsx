@@ -99,11 +99,11 @@ function renderAccount(user: User, apps: AppGrant[] = [], tokens: CompatibilityT
     },
     "GET /api/me/compatibility-tokens": () => tokenList,
     "POST /api/me/compatibility-tokens": (req) => {
-      const { name, scope } = req.body as { name: string; scope: string };
+      const { name } = req.body as { name: string };
       const made: CompatibilityToken = {
         id: 9,
         name,
-        scopes: scope.split(" "),
+        scopes: ["play"],
         created_at: NOW,
         last_used_at: null,
         expires_at: NOW + 90 * 86400,
@@ -159,21 +159,21 @@ const other: AppGrant = {
   last_used_at: NOW - 60,
 };
 
-/** Tautulli's token, used a moment ago. */
-const tautulli: CompatibilityToken = {
+/** A Jellyfin app's sign-in, used a moment ago. */
+const findroid: CompatibilityToken = {
   id: 3,
-  name: "Tautulli",
-  scopes: ["play", "activity"],
+  name: "Findroid on Phone",
+  scopes: ["play"],
   created_at: NOW - 86400 * 2,
   last_used_at: NOW - 120,
   expires_at: NOW + 86400 * 90,
-  device: "Tautulli/2.15",
+  device: "Findroid/0.16",
   ip: "192.0.2.9",
 };
-/** A player's token, never used yet. */
-const plezy: CompatibilityToken = {
+/** A token made for a script, never used yet. */
+const script: CompatibilityToken = {
   id: 4,
-  name: "Plezy",
+  name: "Backup script",
   scopes: ["play"],
   created_at: NOW - 3600,
   last_used_at: null,
@@ -275,79 +275,60 @@ describe("AccountPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("lists the tokens for other apps and what each may do", async () => {
-    renderAccount(testUser, [], [tautulli, plezy]);
-    const used = (await screen.findByText("Tautulli")).closest("li");
-    expect(used).toHaveTextContent("Watch · See everyone's activity");
-    expect(used).toHaveTextContent(/Tautulli\/2\.15 · 192\.0\.2\.9 · last used 2 minutes ago · made 2 days ago/);
-    const unused = screen.getByText("Plezy").closest("li");
-    expect(unused).toHaveTextContent("Watch");
-    expect(unused).not.toHaveTextContent("activity");
+  it("lists the apps signed in and the tokens made, with their last use", async () => {
+    renderAccount(testUser, [], [findroid, script]);
+    const used = (await screen.findByText("Findroid on Phone")).closest("li");
+    expect(used).toHaveTextContent(/Findroid\/0\.16 · 192\.0\.2\.9 · last used 2 minutes ago · made 2 days ago/);
+    const unused = screen.getByText("Backup script").closest("li");
     expect(unused).toHaveTextContent(/not used yet · made 1 hour ago/);
   });
 
-  it("makes a token that may see everyone's activity, and shows it once", async () => {
+  it("makes a token and shows it once", async () => {
     const user = userEvent.setup();
     const requests = renderAccount(testUser);
     await user.click(await screen.findByRole("button", { name: "New token" }));
-    // Every token may watch.
-    expect(screen.getByLabelText(/^Watch/)).toBeChecked();
-    expect(screen.getByLabelText(/^Watch/)).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Make token" }));
     expect(screen.getByText("Name the token after the app that will use it.")).toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("Name"), " Tautulli ");
-    await user.click(screen.getByLabelText(/^See everyone's activity/));
+    await user.type(screen.getByLabelText("Name"), " Backup script ");
     await user.click(screen.getByRole("button", { name: "Make token" }));
     const shown = await screen.findByLabelText("New token");
     expect(shown).toHaveValue(NEW_TOKEN);
     const made = requests.find((r) => r.method === "POST" && r.path === "/api/me/compatibility-tokens");
-    expect(made?.body).toEqual({ name: "Tautulli", scope: "play activity" });
+    expect(made?.body).toEqual({ name: "Backup script" });
     expect(screen.getByText(/Pley shows it only once/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Copy" }));
     expect(await screen.findByText("Token copied")).toBeInTheDocument();
     expect(await navigator.clipboard.readText()).toBe(NEW_TOKEN);
     // Listed, and once done, never shown again.
-    expect((await screen.findByText("Not used yet", { exact: false })).closest("li")).toHaveTextContent("Tautulli");
+    expect((await screen.findByText("Not used yet", { exact: false })).closest("li")).toHaveTextContent("Backup script");
     await user.click(screen.getByRole("button", { name: "Done" }));
     expect(screen.queryByLabelText("New token")).not.toBeInTheDocument();
     expect(screen.queryByText(NEW_TOKEN)).not.toBeInTheDocument();
   });
 
-  it("lets an account that isn't an administrator make tokens that only watch", async () => {
+  it("revokes an app's sign-in", async () => {
     const user = userEvent.setup();
-    const requests = renderAccount({ ...testUser, is_admin: false });
-    await user.click(await screen.findByRole("button", { name: "New token" }));
-    expect(screen.getByLabelText(/^Watch/)).toBeChecked();
-    expect(screen.queryByLabelText(/^See everyone's activity/)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/^Manage libraries/)).not.toBeInTheDocument();
-    await user.type(screen.getByLabelText("Name"), "Infuse");
-    await user.click(screen.getByRole("button", { name: "Make token" }));
-    await screen.findByLabelText("New token");
-    const made = requests.find((r) => r.method === "POST" && r.path === "/api/me/compatibility-tokens");
-    expect(made?.body).toEqual({ name: "Infuse", scope: "play" });
-  });
-
-  it("revokes a token", async () => {
-    const user = userEvent.setup();
-    const requests = renderAccount(testUser, [], [tautulli, plezy]);
-    await user.click(await screen.findByRole("button", { name: "Revoke Tautulli" }));
-    expect(await screen.findByText("Revoked Tautulli")).toBeInTheDocument();
+    const requests = renderAccount(testUser, [], [findroid, script]);
+    await user.click(await screen.findByRole("button", { name: "Revoke Findroid on Phone" }));
+    expect(await screen.findByText("Revoked Findroid on Phone")).toBeInTheDocument();
     expect(requests.some((r) => r.method === "DELETE" && r.path === "/api/me/compatibility-tokens/3")).toBe(true);
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Revoke Tautulli" })).not.toBeInTheDocument());
-    expect(screen.getByText("Plezy")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Revoke Findroid on Phone" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Backup script")).toBeInTheDocument();
   });
 
   it("lists the tokens again once a new password ended them", async () => {
     const user = userEvent.setup();
-    renderAccount(testUser, [], [tautulli]);
-    await screen.findByText("Tautulli");
+    renderAccount(testUser, [], [findroid]);
+    await screen.findByText("Findroid on Phone");
     await user.type(screen.getByLabelText("Current password"), "old-password-1");
     await user.type(screen.getByLabelText("New password"), "new-password-2");
     await user.type(screen.getByLabelText("Confirm new password"), "new-password-2");
     await user.click(screen.getByRole("button", { name: "Update password" }));
-    expect(await screen.findByText(/No tokens yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/No apps are signed in/)).toBeInTheDocument();
   });
 
   it("links to the source code where the server says it is offered", async () => {

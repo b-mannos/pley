@@ -29,7 +29,7 @@ use pley_transcoder_api::{
 };
 use serde_json::{Value, json};
 
-use common::{TestApp, encode};
+use common::TestApp;
 
 const TOKEN: &str = "shared-secret";
 
@@ -1779,54 +1779,59 @@ async fn frame_grabs_are_made_once_per_file() {
 }
 
 #[tokio::test]
-async fn plex_clients_stream_through_the_universal_transcoder() {
+async fn jellyfin_clients_stream_hls_from_the_transcoder() {
     let w = world().await;
     let (app, admin) = (&w.app, w.admin.as_str());
-    let feature = w.movies["Feature"];
-    let file = app.file_of(feature).await;
-    let path = encode(&format!("/library/metadata/{feature}"));
-    let client = [("x-plex-client-identifier", "living-room"), ("x-plex-product", "Plex for TV")];
+    let feature = app.jf_item(w.movies["Feature"]);
 
-    let start = format!(
-        "/video/:/transcode/universal/start.m3u8?path={path}&offset=30&maxVideoBitrate=2000&videoResolution=1280x720&audioStreamID={}",
-        file * 10_000 + 2
-    );
-    let master = app.plex(Method::GET, &start, admin, &client).await;
+    // A device that plays MP4 only is given an HLS address, with what it asked.
+    let profile = json!({"DirectPlayProfiles": [{"Container": "mp4", "VideoCodec": "h264", "AudioCodec": "aac", "Type": "Video"}]});
+    let asked = json!({
+        "DeviceProfile": profile,
+        "MaxStreamingBitrate": 2_000_000,
+        "StartTimeTicks": 300_000_000_i64,
+        "AudioStreamIndex": 2,
+    });
+    let info = app.jf(Method::POST, &format!("/Items/{feature}/PlaybackInfo"), admin, Some(asked)).await;
+    assert_eq!(info.status, StatusCode::OK, "{}", info.text());
+    let source = &info.body["MediaSources"][0];
+    assert_eq!((&source["SupportsDirectPlay"], &source["TranscodingSubProtocol"]), (&json!(false), &json!("hls")));
+    assert!(info.body["PlaySessionId"].as_str().is_some_and(|id| id.len() == 32));
+    let url = format!("{}&MaxHeight=720", source["TranscodingUrl"].as_str().unwrap());
+    assert!(url.starts_with(&format!("/videos/{feature}/master.m3u8?")), "{url}");
+
+    let master = app.jf(Method::GET, &url, admin, None).await;
     assert_eq!(master.status, StatusCode::OK, "{}", master.text());
     let text = master.text();
-    assert!(text.contains("BANDWIDTH=2000000,RESOLUTION=1280x720"), "{text}");
-    let variant = text.lines().find(|l| l.starts_with("session/")).unwrap().to_owned();
+    let variant = text.lines().find(|l| l.starts_with("hls1/")).unwrap().to_owned();
     let job = w.fake.last_request();
     assert_eq!(job.start_ms, Some(30_000));
     let video = job.video.unwrap();
     assert_eq!((video.mode, video.max_height, video.max_bitrate_kbps), (VideoMode::Transcode, Some(720), Some(1_808)));
-    assert_eq!(job.audio.unwrap().stream_index, Some(2), "Plex stream ids map to file streams");
+    assert_eq!(job.audio.unwrap().stream_index, Some(2), "Jellyfin's stream indexes are the file's");
+    // Opened again, as players do to probe it: the same stream.
+    let jobs = w.fake.created();
+    assert_eq!(app.jf(Method::GET, &url, admin, None).await.text(), text);
+    assert_eq!(w.fake.created(), jobs);
 
-    // The session URLs need no token.
-    let base = format!("/video/:/transcode/universal/{}", variant.trim_end_matches("index.m3u8"));
-    let playlist = app.plex(Method::GET, &format!("{base}index.m3u8"), "", &[]).await;
+    // The session's addresses need no token.
+    let base = format!("/Videos/{feature}/{}", variant.trim_end_matches("index.m3u8"));
+    let playlist = app.jf(Method::GET, &format!("{base}index.m3u8"), "", None).await;
     assert_eq!(playlist.status, StatusCode::OK);
-    let segment = app.plex(Method::GET, &format!("{base}0.ts"), "", &[]).await;
+    let segment = app.jf(Method::GET, &format!("{base}0.ts"), "", None).await;
     assert_eq!((segment.status, segment.text()), (StatusCode::OK, "job1:0".to_owned()));
 
-    // It shows up as a transcode session.
-    let sessions = app.plex_json("/transcode/sessions", admin).await;
-    assert_eq!(sessions["size"], json!(1));
-    assert_eq!(sessions["TranscodeSession"]["videoDecision"], json!("transcode"));
-
-    // directStream=0 forces transcoding where a remux would do.
-    let plain = format!("/video/:/transcode/universal/start.m3u8?path={path}&directStream=0");
-    app.plex(Method::GET, &plain, admin, &[("x-plex-client-identifier", "phone")]).await;
-    assert_eq!(w.fake.last_request().video.unwrap().mode, VideoMode::Transcode);
-    let plain = format!("/video/:/transcode/universal/start.m3u8?path={path}");
-    app.plex(Method::GET, &plain, admin, &[("x-plex-client-identifier", "tablet")]).await;
+    // Without limits, H.264 is copied.
+    let source = source["Id"].as_str().unwrap();
+    let plain = format!("/Videos/{feature}/master.m3u8?MediaSourceId={source}&VideoCodec=h264&AudioCodec=aac");
+    assert_eq!(app.jf(Method::GET, &plain, admin, None).await.status, StatusCode::OK);
     assert_eq!(w.fake.last_request().video.unwrap().mode, VideoMode::Copy);
 
-    // Stopping by client ends that client's session and its job.
-    let stop = app.plex(Method::GET, "/video/:/transcode/universal/stop?session=living-room", admin, &[]).await;
-    assert_eq!(stop.status, StatusCode::OK);
+    // The device's streams end, and their jobs.
+    let stop = app.jf(Method::DELETE, "/Videos/ActiveEncodings?DeviceId=bench-1", admin, None).await;
+    assert_eq!(stop.status, StatusCode::NO_CONTENT);
     eventually(|| w.fake.deleted.lock().contains(&"job1".to_owned())).await;
-    assert_eq!(app.plex(Method::GET, &format!("{base}index.m3u8"), "", &[]).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(app.jf(Method::GET, &format!("{base}index.m3u8"), "", None).await.status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

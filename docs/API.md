@@ -1,9 +1,9 @@
 # Pley HTTP API (v1)
 
 The API the web app and Pley's own apps (Android, desktop, Kodi, Roku,
-Samsung and LG) use, for anyone writing a client or a script. Tools written
-for the widely used media-server API that Pley also speaks go through the
-compatibility API instead, with tokens of their own that this API refuses:
+Samsung and LG) use, for anyone writing a client or a script. Jellyfin's
+apps, and others built on Jellyfin's API, go through the Jellyfin-compatible
+API instead, with tokens of their own that this API refuses:
 [COMPATIBILITY.md](COMPATIBILITY.md).
 
 The base URL is the server's address with `/api`:
@@ -71,9 +71,10 @@ details.
 - Text answers over 1 KiB are compressed when the request accepts it; media,
   images and the event stream never are.
 - A request still running after 30 minutes answers `408`.
-- The compatibility API answers on the same port by default, but only to
-  requests that are its own (its headers, its token in the query, or a path
-  only it has). `/api/…` and `/.well-known/…` always belong to this API.
+- The Jellyfin-compatible API, when it is on and answers on the same port,
+  answers only requests that are its own (a path only it has, or its
+  headers or token on a path both have). `/api/…` and `/.well-known/…`
+  always belong to this API.
 
 ## Authentication
 
@@ -96,8 +97,8 @@ A missing or invalid token answers `401`; a non-administrator on an `admin`
 route, `403`.
 
 Apps sign in through OAuth ([Apps](#apps-oauth-21)). Their access tokens
-(`pley_at_…`) go in `Authorization: Bearer` only, and the compatibility API
-refuses them. Refusals of an app's token carry `WWW-Authenticate`
+(`pley_at_…`) go in `Authorization: Bearer` only, and the Jellyfin-compatible
+API refuses them. Refusals of an app's token carry `WWW-Authenticate`
 (RFC 6750 §3):
 
 | Status | `code` | `WWW-Authenticate` | When |
@@ -106,11 +107,11 @@ refuses them. Refusals of an app's token carry `WWW-Authenticate`
 | `401` | `unauthorized` | `Bearer error="invalid_token"` | expired, signed out or unknown token; a refresh token sent as a bearer token; a disabled account |
 | `403` | `insufficient_scope` | `Bearer error="insufficient_scope", scope="play"` | the token's scopes don't open the route. `scope` names the one that would; it is left out when none does ("apps can't do that: use Pley's web app") |
 
-Compatibility tokens (`pley_ct_…`), which apps and tools that use the
-compatibility API hold, open nothing here: wherever one is sent, the answer
-is `401` with `code` `unauthorized`, `WWW-Authenticate: Bearer
+Tokens for other apps (`pley_ct_…`), which apps that use the
+Jellyfin-compatible API hold, open nothing here: wherever one is sent, the
+answer is `401` with `code` `unauthorized`, `WWW-Authenticate: Bearer
 error="invalid_token"` and the message "tokens for other apps work on the
-compatibility API only" ([Compatibility tokens](#compatibility-tokens)).
+Jellyfin-compatible API only" ([Compatibility tokens](#compatibility-tokens)).
 
 ### Who
 
@@ -502,7 +503,7 @@ lists carry (Kodi).
 | GET | `/api/server` | `public` | `{ id, name, version, commit, source, setup_required, setup_code_required, two_step_required, proof? }` |
 | GET | `/api/oauth/device/qr?code=` | `public` | where to type a TV's code, as a QR code (PNG): see [TVs](#tvs) |
 | POST | `/api/setup` | `public` | `{ username, password, setup_code }` → `{ user: User, token? }`: creates the first (admin) account and signs in |
-| POST | `/api/auth/login` | `public` | `{ username, password, code?, setup_id?, client?, scope? }` → `{ user: User, token?, recovery_codes? }` |
+| POST | `/api/auth/login` | `public` | `{ username, password, code?, setup_id? }` → `{ user: User, token?, recovery_codes? }` |
 
 - `/api/server`: `id` is the one [discovery](#discovery) answers with.
   With `?challenge=…&proof_id=…` it also answers `proof`, for an app
@@ -529,16 +530,8 @@ lists carry (Kodi).
   one, which replaces it, so two people with the password never share
   one. Attempts are limited as in
   [Errors](#errors). A disabled account gets `403`, and its sessions stop
-  working.
-- `/api/auth/login` with `client` signs a tool in for a
-  [compatibility token](#compatibility-tokens) instead of a session:
-  `client` is the token's name, and `scope` what it may do (space-separated,
-  `play` without it). The answer's `token` is that token, also for a
-  browser, and no session is made and no cookie is set. Every check above
-  applies, and the second step, or its setup, comes in the same way. A name
-  or scope that [`POST /api/me/compatibility-tokens`](#compatibility-tokens)
-  refuses is refused here too: `400`, or `403` for `activity` or `manage` on
-  an account that isn't an administrator's.
+  working. It always makes a session: other apps sign in through the
+  Jellyfin-compatible API ([COMPATIBILITY.md](COMPATIBILITY.md#signing-in)).
 
 ## Auth
 
@@ -673,12 +666,12 @@ as forced when flagged so, or when their title says so ("forced", or
 
 ## Compatibility tokens
 
-Tokens for other apps and tools that use the
-[compatibility API](COMPATIBILITY.md#authentication): Tautulli, Kometa,
-players such as Plezy and Infuse, scripts. They work there only, never on
-this API, and only for what their scopes allow. The web app's Account page
-lists and makes them ("Tokens for other apps"); a tool can also sign in for
-one ([`/api/auth/login` with `client`](#public-endpoints)).
+Tokens for other apps that use the
+[Jellyfin-compatible API](COMPATIBILITY.md#signing-in): one for each app
+signed in there, named after it and its device, and those made here for an
+app or script. They work there only, never on this API, to browse and play.
+The web app's Account page lists, makes and revokes them ("Tokens for other
+apps").
 
 | Method | Path | Who | What |
 |---|---|---|---|
@@ -690,22 +683,17 @@ one ([`/api/auth/login` with `client`](#public-endpoints)).
 interface CompatibilityToken {
   id: Id;
   name: string;                     // what it was called: 1 to 80 characters, no control characters
-  scopes: string[];                 // "play", and "activity" or "manage"
+  scopes: string[];                 // "play"
   created_at: Timestamp;
   last_used_at: Timestamp | null;   // null until it is first used
   expires_at: Timestamp;            // 90 days after it was made or last used
-  device: string | null;            // of its last use, from the User-Agent: "Tautulli/2.15"
+  device: string | null;            // of its last use, from the User-Agent: "Infuse/8.1"
   ip: string | null;
 }
 ```
 
-- `scope` is space-separated; `play` is always there, named or not.
-  `activity` (every account's sessions and history) and `manage` (refreshes,
-  edits, collections, stopping anyone's playback) are for administrators
-  only: `403` for anyone else. Both are checked against the account at every
-  use, so an account that stops being an administrator loses them at once.
-  [COMPATIBILITY.md](COMPATIBILITY.md#scopes) says what each allows. An
-  unknown scope or a name out of bounds is `400`.
+- `scope` may name `play`, which every token has; any other scope, or a
+  name out of bounds, is `400`.
 - The token starts `pley_ct_` and is stored only as its SHA-256: no answer
   but the one that makes it has it.
 - An account keeps 100 tokens at most; making another ends the least
@@ -1386,7 +1374,7 @@ content rating allows that age:
 - music is exempt.
 
 Hidden libraries and items answer `404` everywhere: lists, hubs, search,
-artwork, streams and the compatibility API.
+artwork, streams and the Jellyfin-compatible API.
 
 ## Libraries
 
@@ -1408,7 +1396,7 @@ artwork, streams and the compatibility API.
 
 **Order.** Libraries have one shared order, chosen by administrators (new
 libraries go last). A user may choose their own (Settings → Libraries).
-Lists of libraries, Home's rows and the compatibility API's sections follow
+Lists of libraries, Home's rows and the Jellyfin-compatible API's views follow
 the user's order when there is one (libraries it doesn't name, and new
 ones, after it in the shared order), else the shared order. Users who may
 open only some libraries see those, in that order.
@@ -1529,8 +1517,8 @@ files: a file uploaded from the web app, or one found on OpenSubtitles.
   track (`external: true`, `text_based: true`, `added: true`) in
   `PlaybackInfo.subtitles` and the file's `MediaStream`s, with a WebVTT
   `url`. They are chosen by `subtitle_index` in `POST /api/playback` and
-  `PUT /api/items/{id}/streams`, listed by the compatibility API
-  (`/library/streams/{id}` serves them as they are), and shown like any text
+  `PUT /api/items/{id}/streams`, listed by the Jellyfin-compatible API
+  (as WebVTT or SubRip at their `DeliveryUrl`), and shown like any text
   track (a transcode that burns one in is given its file).
 - Track indexes: a file's own tracks are below 1000, subtitle files next to
   the video 1000 to 8999 (in path order; more aren't listed), added ones
@@ -1635,14 +1623,12 @@ play a seen episode from its start), and can still be next up.
 Watching. A show's or season's id does the same; other kinds answer `400`.
 
 - It stays out of every Continue Watching (Home's, the libraries' hubs, the
-  compatibility API's On Deck and `continueWatching` hubs) until the user
-  plays that movie or any episode of that show again: a progress report or
-  watched mark newer than the hide.
+  Jellyfin-compatible API's Resume and Next Up) until the user plays that
+  movie or any episode of that show again: a progress report or watched
+  mark newer than the hide.
 - Progress and watched marks are kept.
-- The compatibility API's `PUT /actions/removeFromContinueWatching?ratingKey=`
-  does the same.
-- Either sends `user_state_changed` for the movie or show to the user's
-  event streams, so their other devices fetch Home again.
+- It sends `user_state_changed` for the movie or show to the user's event
+  streams, so their other devices fetch Home again.
 
 ### My List
 
@@ -1655,7 +1641,7 @@ Watching. A show's or season's id does the same; other kinds answer `400`.
 - Each user has their own list. Titles the user can't see (library access,
   age limit) are left out, and come back when they can again.
 - A movie leaves the list once watched (played to the end, or marked
-  watched here or through the compatibility API). A show stays until
+  watched here or through the Jellyfin-compatible API). A show stays until
   removed.
 - `ItemDetail.in_watchlist` says whether a title is on it.
 - Every change, a movie leaving by itself included, sends
@@ -1722,9 +1708,8 @@ interface Collection {
 | GET | `/api/items/{id}/collections` | `library` | `{ collections: { id, title }[] }` the movie or show is in ("Part of …") |
 
 **Smart collections** hold no items. `smart_filter` is a library listing in
-the compatibility API's syntax: the query string of
-`/library/sections/{id}/all`, such as `genre=Comedy&unwatched=1&sort=year:desc`
-(see [COMPATIBILITY.md](COMPATIBILITY.md)). The collection shows what it
+Plex's filter syntax, which tools have long written: a query string such as
+`genre=Comedy&unwatched=1&sort=year:desc`. The collection shows what it
 finds, in its order, as each user may see it. Its items can't be added,
 removed or reordered (`400`); change the filter instead.
 
@@ -2198,7 +2183,7 @@ pseudo-random data, made as it is sent, with `Content-Length`,
 ### Version 2
 
 `caps_version: 2` turns on these rules. A report without it (the web app,
-the Android app's web view, compatibility API clients) decides as version 1,
+the Android app's web view, Jellyfin's apps) decides as version 1,
 whatever else it sends: the web app's `subtitle_codecs` and
 `picture_subtitles_sideload` only tell the server it draws picture
 subtitles from their `.mks` (it asks for no `subtitle_index` of a track it
@@ -2349,7 +2334,7 @@ index.m3u8
   `BANDWIDTH` is twice the copied video's average (discs peak about there),
   or the encoder's rate. TS segments are the same as `index.m3u8`'s.
 - Without `master_playlist` (and for every version 1 player, the web player
-  and compatibility API clients) the session starts at `index.m3u8`, and
+  and Jellyfin's apps) the session starts at `index.m3u8`, and
   remuxes name nothing.
 
 For players with master playlists, the Dolby Vision rules of version 2
@@ -2607,7 +2592,7 @@ left out.
 interface HistoryEntry {
   id: Id;
   viewed_at: Timestamp;
-  device?: string;                  // "Chrome on Windows", or a compatibility API client's name
+  device?: string;                  // "Chrome on Windows", or a Jellyfin app's device
   user: { id: Id; name: string; avatar_url?: string; avatar_color?: string };
   item: ItemSummary;
 }
@@ -3177,10 +3162,8 @@ transcode and HLS end at once. Then:
 - the player stops, leaves, and says "Playback was stopped by the server's
   administrator", with the message if any.
 
-The compatibility API's `GET /status/sessions/terminate?sessionId=&reason=`
-(Tautulli's) does the same with an administrator's compatibility token that
-may `manage`, with `reason` as the message. A player's progress reports through the compatibility API don't
-restart its stopped session.
+A Jellyfin app playing it hears of it on its socket (`Playstate` `Stop`),
+and its progress reports don't restart the stopped session.
 
 ### Watch state on other devices
 
@@ -3189,10 +3172,10 @@ event streams (the device that made the change included) when their watch
 state changes in a way their screens show:
 
 - something marked watched or unwatched (`POST /api/items/{id}/watched`,
-  `…/unwatched`, the compatibility API's `/:/scrobble` and `/:/unscrobble`),
+  `…/unwatched`, the Jellyfin-compatible API's `/UserPlayedItems/{id}`),
   unless nothing changed (marked watched again);
-- a progress report (Pley's, or a compatibility API player's `/:/timeline`
-  and `/:/progress`) that crosses 90 %, starts a resume point (15 s in) or
+- a progress report (Pley's, or a Jellyfin app's `/Sessions/Playing…`) that
+  crosses 90 %, starts a resume point (15 s in) or
   clears one, or pauses or stops the player somewhere new (where *Play* on
   another device starts). Not the reports that only keep the place every
   ~10 s, nor late ones that change nothing (`age_ms`);
@@ -3527,7 +3510,7 @@ interface LiveTuner {                  // a connection in use
 - Pley always keeps one enabled administrator.
 - A new `password` signs the user out on every device (an administrator's
   own device stays) and in every app using the account or allowed by it,
-  and ends their compatibility tokens.
+  and ends their tokens for other apps.
 - A change to `is_admin`, `all_libraries`, `library_ids` or `max_age` sends
   `libraries_changed` to the user's streams, so their devices fetch what
   they may see again; a change to those or to `request_access`,
@@ -3564,7 +3547,7 @@ interface LiveTuner {                  // a connection in use
 | POST | `/api/settings/arr` | `admin` | `{ service: "radarr" \| "sonarr", url?, api_key? }` → `ArrOptions`: what Radarr or Sonarr offers requests |
 | POST | `/api/fs` | `admin` | `{ path? }` → `{ path: string \| null, parent: string \| null, entries: { name, path }[] }`: directories only (`path` left out: roots and drives). A POST, as a GET over plain HTTP could be another site's link ([SECURITY.md](../SECURITY.md#sessions)) |
 | GET | `/api/network` | `admin` | `Network`: where Pley listens, and could |
-| PUT | `/api/network` | `admin` | `{ web, plex, plex_on_web?, discovery }` → `Network` |
+| PUT | `/api/network` | `admin` | `{ web, jellyfin, jellyfin_on_web?, discovery }` → `Network` |
 
 - **`transcode-dir`** is saved in the config file for the next start
   (`null`, or the default folder, removes `transcode_dir`). `400` for a
@@ -3630,23 +3613,24 @@ interface LiveTuner {                  // a connection in use
   `tmdb_api_key` sends `requests_settings_changed` to every event stream.
 - **`PUT /api/network`** answers once the new listeners listen or have
   tried for a moment (3 s at most). Saved in the config file for the next
-  start (`plex_bind`: `"web"`, `"off"` or the addresses). `400` for
-  addresses Pley can't listen on together, `plex_on_web` with `plex`
-  addresses too, more than 32 addresses of a kind, and a change to what the
+  start (`jellyfin_bind`: `"web"`, `"off"` or the addresses). `400` for
+  addresses Pley can't listen on together, `jellyfin_on_web` with
+  `jellyfin` addresses too, more than 32 addresses of a kind, and a change
+  to what the
   command line or the environment sets; `503` when the change can't be
   made.
 
 ```ts
 interface Network {
   web: string[];          // the web app and API: "127.0.0.1:7539", "192.168.1.10:7539", "0.0.0.0:7539"
-  plex: string[];         // the compatibility API on addresses of its own ("0.0.0.0:32400");
-                          // [] = on Pley's port (plex_on_web) or off
-  plex_on_web: boolean;   // the compatibility API answers its clients on Pley's port (the default);
-                          // never with addresses in `plex`
+  jellyfin: string[];     // the Jellyfin-compatible API on addresses of its own ("0.0.0.0:8096");
+                          // [] = on Pley's port (jellyfin_on_web) or off (the default)
+  jellyfin_on_web: boolean; // the Jellyfin-compatible API answers its apps on Pley's port;
+                          // never with addresses in `jellyfin`
   discovery: boolean;     // answer Pley's apps on the networks (never on loopback addresses)
-  fixed: { web: boolean; plex: boolean; discovery: boolean }; // set by --bind/PLEY_BIND,
-                          // --plex-bind/PLEY_PLEX_BIND, --no-discovery
-  listeners: { kind: "web" | "plex" | "discovery"; address: string; error: string | null }[];
+  fixed: { web: boolean; jellyfin: boolean; discovery: boolean }; // set by --bind/PLEY_BIND,
+                          // --jellyfin-bind/PLEY_JELLYFIN_BIND, --no-discovery
+  listeners: { kind: "web" | "jellyfin" | "discovery"; address: string; error: string | null }[];
                           // error: why not (yet); tried again every 30 s
   adapters: { name: string; description: string | null; up: boolean; addresses: string[]; // IPv4, no loopback
               network: { name: string; kind: "public" | "private" | "domain" } | null }[]; // as Windows knows it

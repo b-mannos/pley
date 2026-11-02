@@ -752,6 +752,26 @@ pub async fn files_for_item(db: &Db, item_id: i64) -> sqlx::Result<Vec<FileRow>>
     .await
 }
 
+/// The files of each of `ids`, in [`files_for_item`]'s order. The caller
+/// checks access.
+pub async fn files_for_items(db: &Db, ids: &[i64]) -> sqlx::Result<HashMap<i64, Vec<FileRow>>> {
+    let mut out: HashMap<i64, Vec<FileRow>> = HashMap::new();
+    for chunk in ids.chunks(500) {
+        let sql = format!(
+            "{FILE_SELECT} WHERE item_id IN ({}) ORDER BY item_id, COALESCE(height, 0) DESC, id",
+            vec!["?"; chunk.len()].join(",")
+        );
+        let mut query = sqlx::query_as::<_, FileRow>(sqlx::AssertSqlSafe(sql.as_str()));
+        for id in chunk {
+            query = query.bind(id);
+        }
+        for file in query.fetch_all(&db.read).await? {
+            out.entry(file.item_id).or_default().push(file);
+        }
+    }
+    Ok(out)
+}
+
 pub async fn file(db: &Db, file_id: i64) -> sqlx::Result<Option<FileRow>> {
     sqlx::query_as(sqlx::AssertSqlSafe(format!("{FILE_SELECT} WHERE id = ?")))
         .bind(file_id)
@@ -1028,7 +1048,7 @@ pub async fn set_rating(db: &Db, user_id: i64, item_id: i64, rating: Option<f64>
     Ok(())
 }
 
-/// A rating in Plex's 0-10 range, rounded to half stars; `None` for anything else.
+/// A rating from 0 to 10, rounded to half stars; `None` for anything else.
 pub fn valid_rating(value: f64) -> Option<f64> {
     (value.is_finite() && (0.0..=10.0).contains(&value)).then(|| value.round())
 }

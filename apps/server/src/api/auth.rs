@@ -39,13 +39,6 @@ pub struct Credentials {
     /// the secret the code comes from (see [`second_step`]).
     #[serde(default)]
     setup_id: Option<String>,
-    /// A tool signing in for a compatibility token instead of a session
-    /// (see [`compatibility`]): the token's name.
-    #[serde(default)]
-    client: Option<String>,
-    /// What that token may do, space-separated (`play` without it).
-    #[serde(default)]
-    scope: Option<String>,
 }
 
 /// An app asking the server to prove it is the one it signed in to (see
@@ -264,8 +257,9 @@ pub async fn setup(
     login_response(&state, id, &headers, ip.as_deref(), None).await
 }
 
-/// Signs in with a password (and its second step): a session, or with
-/// `client` a compatibility token for a tool, after the same checks.
+/// Signs in with a password (and its second step) for a session. Other
+/// apps sign in through the Jellyfin-compatible API for a token of their
+/// own ([`crate::jellyfin`]).
 pub async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -273,21 +267,36 @@ pub async fn login(
     SourceIp(source): SourceIp,
     Json(body): Json<Credentials>,
 ) -> ApiResult<Response> {
-    // What a tool asks for is checked first: a request that can't get it
-    // isn't counted as an attempt.
-    let token = match &body.client {
-        Some(name) => Some(compatibility::asked(name, body.scope.as_deref())?),
-        None => None,
-    };
-    let username = body.username.trim().to_owned();
+    let account = check_password(&state, &body.username, body.password, source).await?;
+    let recovery_codes =
+        second_step(&state, account.id, &account.username, body.code.as_deref(), body.setup_id.as_deref()).await?;
+    login_response(&state, account.id, &headers, ip.as_deref(), recovery_codes).await
+}
+
+/// An account whose password was right.
+pub(crate) struct PasswordChecked {
+    pub id: i64,
+    pub username: String,
+}
+
+/// The first step of every sign-in with a password: attempts are limited
+/// per name and address, and a disabled account is refused once its
+/// password is right. The second step ([`second_step`]) is the caller's.
+pub(crate) async fn check_password(
+    state: &AppState,
+    username: &str,
+    password: String,
+    source: Option<std::net::IpAddr>,
+) -> ApiResult<PasswordChecked> {
+    let username = username.trim().to_owned();
     // No account has a longer name (`validate_username`): nothing to check,
     // and nothing to count and keep.
     if username.chars().count() > 64 {
         return Err(AppError::Unauthorized);
     }
     let attempt = state.auth.throttle.begin_password(&username, source)?;
-    let row: Option<(i64, String, bool, bool)> =
-        sqlx::query_as("SELECT id, password_hash, disabled, is_admin FROM users WHERE username = ?")
+    let row: Option<(i64, String, bool)> =
+        sqlx::query_as("SELECT id, password_hash, disabled FROM users WHERE username = ?")
             .bind(&username)
             .fetch_optional(&state.db.read)
             .await?;
@@ -295,12 +304,12 @@ pub async fn login(
     // hash) never signs in with one, like a username that doesn't exist. A
     // real check against a stand-in hash takes as long as one against a
     // user's, so neither can be told apart by timing.
-    let Some((id, hash, disabled, is_admin)) = row.filter(|(_, hash, ..)| !hash.starts_with('!')) else {
-        verify_password(body.password, dummy_password_hash().await).await?;
+    let Some((id, hash, disabled)) = row.filter(|(_, hash, _)| !hash.starts_with('!')) else {
+        verify_password(password, dummy_password_hash().await).await?;
         attempt.failed();
         return Err(AppError::Unauthorized);
     };
-    if !verify_password(body.password, hash).await? {
+    if !verify_password(password, hash).await? {
         attempt.failed();
         return Err(AppError::Unauthorized);
     }
@@ -308,30 +317,7 @@ pub async fn login(
     if disabled {
         return Err(AppError::forbidden("this account is disabled"));
     }
-    // Before the second step, which may set two-step sign-in up: its
-    // recovery codes come back only with a token.
-    if let Some(token) = &token {
-        compatibility::may_have(token.scopes, is_admin)?;
-    }
-    let recovery_codes = second_step(&state, id, &username, body.code.as_deref(), body.setup_id.as_deref()).await?;
-    match token {
-        Some(token) => compatibility_response(&state, id, &token, recovery_codes).await,
-        None => login_response(&state, id, &headers, ip.as_deref(), recovery_codes).await,
-    }
-}
-
-/// A sign-in's answer with a compatibility token for a tool: the token in
-/// the body, whatever asked, and no session or cookie.
-async fn compatibility_response(
-    state: &AppState,
-    user_id: i64,
-    asked: &compatibility::Asked,
-    recovery_codes: Option<Vec<String>>,
-) -> ApiResult<Response> {
-    let user = accounts::user(&state.db, user_id).await?.ok_or(AppError::Unauthorized)?;
-    let (token, _) = state.auth.create_compatibility_token(user_id, asked).await?;
-    tracing::info!("'{}' signed in for a token for other apps named '{}'", user.username, asked.name);
-    Ok(Json(LoginResponse { user, token: Some(token), recovery_codes }).into_response())
+    Ok(PasswordChecked { id, username })
 }
 
 /// Checks that the signed-in user may change how their account signs in:

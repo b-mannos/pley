@@ -25,12 +25,12 @@ protect your server.
   one-time code Pley prints in its log (the tray icon's "Open Pley" fills it
   in).
 - **Keep what doesn't need to be public off the internet:** a transcoder on
-  another computer, and the compatibility API's own port (such as 32400) if
-  you gave it one.
-- **Limit the compatibility API.** By default it answers on Pley's port, to
-  its clients only, with a token for other apps. Give each tool a token of
-  its own (**Account → Tokens for other apps**), allowed only what it needs,
-  and turn the API off (`plex_bind = "off"`) if no tool needs it.
+  another computer, and the Jellyfin-compatible API's own port (such as
+  8096) if you gave it one: on Pley's port it is behind your reverse proxy's
+  HTTPS like the rest.
+- **Leave the Jellyfin-compatible API off unless an app needs it.** It is
+  off by default; **Account → Tokens for other apps** shows each app signed
+  in through it, and revokes it.
 - **Mount media read-only**, run Pley as an unprivileged user, and don't let
   untrusted people write to library folders. The Docker setup does the first
   two and more: a read-only image, no capabilities, the port on 127.0.0.1
@@ -159,8 +159,8 @@ Apps sign in on Pley's own page with OAuth 2.1.
 - People are asked every time, Pley's own apps included, on a page that
   shows the app's address first and can't be framed.
 - Apps never get administrator rights. Every route they may use is listed
-  with the scope it needs, anything else is refused, and the compatibility
-  API refuses their tokens.
+  with the scope it needs, anything else is refused, and the
+  Jellyfin-compatible API refuses their tokens.
 - Apps, and people who aren't administrators, don't see library folders or
   file paths on either API (only a file's name), the transcoder's error
   messages included.
@@ -198,26 +198,37 @@ Apps sign in on Pley's own page with OAuth 2.1.
   and leave a plain-http server within a second of the computer's way to
   it changing, or of its waking from sleep.
 
-### Tools using the compatibility API
+### Apps using the Jellyfin-compatible API
 
-Tautulli, Kometa, players such as Plezy and Infuse, and scripts use the
-compatibility API with tokens for other apps (compatibility tokens), never
-with a session's.
+Jellyfin's apps, and other apps and scripts built on its API, use tokens for
+other apps (`pley_ct_…`), never a session's
+([COMPATIBILITY.md](docs/COMPATIBILITY.md)).
 
-- Tokens are random 256-bit values that start `pley_ct_`, stored hashed. Pley
-  shows one once, when it is made: on the account page, or to a tool that
-  signs in for one with its password (and code), which goes through every
-  check of a sign-in and makes no session or cookie.
-- They work on the compatibility API only, from its token header or query
-  parameter, `Authorization: Bearer`, `X-Pley-Token` or `?token=`, never
+- The API is off until an administrator turns it on. On Pley's port, only
+  paths it alone has, or requests carrying a Jellyfin app's header or token,
+  reach it; `/api/…` never does. Its answers are never pages (a sandboxing
+  `Content-Security-Policy`, `nosniff`, no framing).
+- An app gets a token by signing in with an account's password, which goes
+  through the checks of Pley's own sign-in (attempt limits, disabled
+  accounts) and makes no session. An account with two-step sign-in can't
+  sign in this way, nor one without it while the server requires it: the
+  API has no second step. People can also make one on the account page,
+  which shows it once. Tokens are random 256-bit values, stored hashed.
+- Tokens work on this API only, from Jellyfin's headers or `api_key`, never
   from the cookie. Pley's own API refuses them wherever they are sent, and
-  the compatibility API refuses sessions' and apps' tokens.
-- A token does what its scopes allow: `play` (browsing, playing, its own
-  account's watch state, sessions and playlists) always; `activity` (every
-  account's sessions and history, and where files are) and `manage`
-  (refreshes, edits, collections, stopping anyone's playback) only for an
-  administrator, checked at every request, so a role taken away takes them
-  at once.
+  this API refuses sessions' and apps' tokens.
+- A token sees what its account may see, for that account alone, and never
+  acts as an administrator: nothing administers through this API. It lists
+  no one but its user (`/Users/Public` is empty), and a user id in a path
+  must be its own.
+- Ids are keyed with the server's `secret.key` (an HMAC), so they can't be
+  guessed and another server's mean nothing. Players open streams,
+  subtitles and pictures without a token: a media source's id stands for
+  the sign-in it was listed to and works only while that sign-in does, for
+  what its user may see; HLS sessions are reached by their 128-bit id, as
+  Pley's own are; a picture answers for an id someone was given, and with a
+  token only for what its user may see. Files are shown by their names,
+  never where the server keeps them.
 - A token ends when it is revoked, after 90 days unused, and with the
   account's other sign-ins: a new password, **Sign out everywhere**,
   `pley reset-password` and deleting the account. It doesn't work while the

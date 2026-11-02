@@ -61,7 +61,7 @@ pub struct NewPlaylist {
     kind: Option<String>,
     #[serde(default)]
     item_ids: Vec<i64>,
-    /// A smart playlist: a listing of `library_id` in the Plex API's filter
+    /// A smart playlist: a listing of `library_id` in Plex's filter
     /// syntax (`genre=Comedy&unwatched=1&sort=year:desc`) whose items it plays.
     #[serde(default)]
     smart_filter: Option<String>,

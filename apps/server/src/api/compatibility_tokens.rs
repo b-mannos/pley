@@ -1,7 +1,8 @@
 //! `/api/me/compatibility-tokens`: the account page's tokens for other apps
-//! and tools that use the compatibility API (see
-//! [`crate::auth::compatibility`]). A session's routes only: apps' tokens
-//! get none of them, and compatibility tokens open no route of this API.
+//! that use the Jellyfin-compatible API, those they signed in for and those
+//! made here (see [`crate::auth::compatibility`]). A session's routes only:
+//! apps' tokens get none of them, and compatibility tokens open no route of
+//! this API.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -18,7 +19,7 @@ use crate::state::AppState;
 pub struct CompatibilityToken {
     id: i64,
     name: String,
-    /// What it may do: `play`, and `activity` or `manage`.
+    /// What it may do: `play`.
     scopes: Vec<&'static str>,
     created_at: i64,
     /// `None` until it is first used.
@@ -26,7 +27,7 @@ pub struct CompatibilityToken {
     /// When it ends unless it is used before.
     expires_at: i64,
     /// Of its last use, from the User-Agent: "Firefox on Windows", or the
-    /// agent itself ("Tautulli/2.15").
+    /// agent itself ("Infuse/8.1").
     device: Option<String>,
     ip: Option<String>,
 }
@@ -57,7 +58,7 @@ pub struct Created {
 #[derive(Deserialize)]
 pub struct NewToken {
     name: String,
-    /// Space-separated; `play` without it.
+    /// `play`, which it is without one.
     #[serde(default)]
     scope: Option<String>,
 }
@@ -69,15 +70,13 @@ pub async fn list(State(state): State<AppState>, user: AuthUser) -> ApiResult<Js
     Ok(Json(rows.into_iter().map(CompatibilityToken::from).collect()))
 }
 
-/// `POST /api/me/compatibility-tokens`: a new token. `activity` and
-/// `manage` only for an administrator.
+/// `POST /api/me/compatibility-tokens`: a new token.
 pub async fn create(
     State(state): State<AppState>,
     user: AuthUser,
     Json(body): Json<NewToken>,
 ) -> ApiResult<(StatusCode, Json<Created>)> {
     let asked = compatibility::asked(&body.name, body.scope.as_deref())?;
-    compatibility::may_have(asked.scopes, user.is_admin)?;
     let (token, row) = state.auth.create_compatibility_token(user.id, &asked).await?;
     tracing::info!("'{}' made a token for other apps named '{}'", user.username, asked.name);
     Ok((StatusCode::CREATED, Json(Created { token, listed: row.into() })))

@@ -11,30 +11,36 @@ describes how they are made.
 
 ### Added
 
-- Tokens for other apps: tools and players that use the compatibility API
-  (Tautulli, Kometa, Plezy, Infuse, `python-plexapi` scripts) get tokens of
-  their own, which work on that API only, never on Pley's own, and do only
-  what they were allowed: watching and, with an administrator's token,
-  seeing everyone's activity or managing libraries. A tool signs in for one
-  with `client` in `POST /api/auth/login`, which makes no session. A token
-  ends when it is revoked, after 90 days unused, and with a new password or
-  signing out everywhere.
-- Account has Tokens for other apps: a token for each tool or player, with
-  what it may do, shown once to copy, then listed with when it was last
-  used, to revoke.
+- A Jellyfin-compatible API, for Jellyfin's apps and others built on its
+  API: they sign in with Pley's accounts, browse the libraries, play files
+  as they are or as HLS from Pley's transcoder, with subtitles and Skip
+  Intro, and keep watch state, favorites (My List) and ratings with Pley's.
+  It is off until turned on in Settings → Network, on Pley's port or one of
+  its own (Jellyfin's is 8096; `--jellyfin-bind`, and `compose.jellyfin.yaml`
+  for Docker). Each sign-in gets a token of its own, which works on that API
+  only, never on Pley's own, and never as an administrator; accounts with
+  two-step sign-in can't sign in from these apps yet
+  ([COMPATIBILITY.md](../../docs/COMPATIBILITY.md)).
+- Account has Tokens for other apps: each app signed in through the
+  Jellyfin-compatible API, with its device and last use, to revoke, and
+  tokens made by hand for apps or scripts that take one, shown once to
+  copy.
 
 ### Changed
 
 - The server's id is kept in `server-id` in the data folder. An older
   version's `plex-machine-id` is renamed to it on start, so apps keep
   recognising the server.
-- The compatibility API no longer takes Pley's session tokens, which opened
-  all of Pley's own API too, administration included: Tautulli, Kometa,
-  players and scripts that use one get `401` until they have a token for
-  other apps. Make one for each in Account → Tokens for other apps (Tautulli
-  needs "See everyone's activity", Kometa that and "Manage libraries") and put it
-  where the tool had the old one, or have a script add `client` to its
-  sign-in ([COMPATIBILITY.md](../../docs/COMPATIBILITY.md#moving-from-session-tokens)).
+
+### Removed
+
+- The Plex-compatible API, and with it Tautulli, Kometa, `python-plexapi`
+  scripts and Plex players on Pley. `--plex-bind`, `PLEY_PLEX_BIND` and
+  `plex_bind` are read and ignored, with a warning in the log; Settings →
+  Network's next change takes `plex_bind` out of `pley.toml`. The Windows
+  installer no longer asks about it, and Docker's `compose.plex.yaml` is
+  `compose.jellyfin.yaml`. Smart collections' `guid` filter no longer takes
+  `plex://` guids.
 
 ## [0.1.4] - 2026-11-02
 

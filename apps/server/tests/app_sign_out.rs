@@ -241,7 +241,7 @@ async fn reset_password_ends_the_accounts_apps() {
 
     pley::reset_password(app.state.config.clone(), "bob", "another-pass-2", false).await.unwrap();
     assert_ended(&app, &tokens).await;
-    assert_eq!(app.plex(Method::GET, "/library/sections", &tool, &[]).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.jf(Method::GET, "/UserViews", &tool, None).await.status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

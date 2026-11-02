@@ -5,7 +5,7 @@
 //! Apps signed in through pley's own page hold app tokens instead
 //! ([`grants`]): they act without administrator rights, and only on the
 //! routes their [`scopes`] open. Other apps and tools hold
-//! [`compatibility`] tokens, which work on the compatibility API only.
+//! [`compatibility`] tokens, which work on the Jellyfin-compatible API only.
 
 pub mod compatibility;
 pub mod grants;
@@ -122,15 +122,6 @@ impl AuthUser {
     /// always, an app when its token has it.
     pub fn allowed(&self, scope: Scope) -> bool {
         self.app.as_ref().is_none_or(|app| app.scopes.contains(scope))
-    }
-
-    /// Whether this request's compatibility token may use what `scope`
-    /// allows: the token has it, and for a scope only administrators' tokens
-    /// may have, the account is one now (a role taken away takes it at
-    /// once). Never for a session or an app.
-    pub fn compatibility_allows(&self, scope: compatibility::Scope) -> bool {
-        self.compatibility
-            .is_some_and(|token| token.scopes.contains(scope) && (!scope.administrators_only() || self.account_admin))
     }
 }
 
@@ -784,10 +775,8 @@ impl AuthService {
         }
     }
 
-    /// The user of a compatibility token, with what its scopes allow:
-    /// administrator rights for viewing (everyone's sessions and history,
-    /// file paths) only with `activity`, on an administrator's account;
-    /// changes go by [`AuthUser::compatibility_allows`]. Every library and no
+    /// The user of a compatibility token, never as an administrator: it
+    /// sees and changes its own account's things only. Every library and no
     /// age limit for an administrator's role, the account's limits
     /// otherwise. Not for an expired token, a disabled account, or one with
     /// a password alone while the server requires two-step sign-in. A token
@@ -821,7 +810,7 @@ impl AuthService {
         let user = AuthUser {
             id: row.user_id,
             username: row.username,
-            is_admin: row.role_admin && scopes.contains(compatibility::Scope::Activity),
+            is_admin: false,
             account_admin: row.role_admin,
             all_libraries: row.all_libraries || row.role_admin,
             max_age: if row.role_admin { None } else { row.max_age },
@@ -847,6 +836,38 @@ impl AuthService {
         let entry = CachedCompatibility { user: user.clone(), expires_at: row.expires_at, cached_at: Instant::now() };
         self.remember_compatibility(key, entry, epoch);
         Some(user)
+    }
+
+    /// The user of the compatibility token `token_id`, while it is valid, as
+    /// [`AuthService::validate_compatibility`] would take it: for an address
+    /// a client was given in its stead (a stream a player opens without
+    /// the token), which names the token rather than carrying it.
+    pub async fn compatibility_user(&self, token_id: i64) -> Option<AuthUser> {
+        let row: CompatibilityRow = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT t.id, t.scope, t.expires_at, t.last_used_at, u.id AS user_id, u.username, u.is_admin AS role_admin,
+                    u.all_libraries, u.max_age, u.disabled, {} AS without_two_step
+             FROM compatibility_tokens t JOIN users u ON u.id = t.user_id
+             WHERE t.id = ?",
+            without_two_step("u")
+        )))
+        .bind(token_id)
+        .fetch_optional(&self.db.read)
+        .await
+        .ok()??;
+        if row.expires_at <= now() || row.disabled || (row.without_two_step && self.two_step_required()) {
+            return None;
+        }
+        let scopes = compatibility::Scopes::from_stored(&row.scope);
+        Some(AuthUser {
+            id: row.user_id,
+            username: row.username,
+            is_admin: false,
+            account_admin: row.role_admin,
+            all_libraries: row.all_libraries || row.role_admin,
+            max_age: if row.role_admin { None } else { row.max_age },
+            app: None,
+            compatibility: Some(CompatibilityAccess { token_id: row.id, scopes }),
+        })
     }
 
     /// What the database says about the compatibility token whose SHA-256
@@ -1838,48 +1859,38 @@ mod tests {
         assert!(auth.validate(&token).await.is_some());
     }
 
-    /// A compatibility token of `user_id` with `scope`.
-    async fn compatibility_token(auth: &AuthService, user_id: i64, scope: &str) -> String {
-        let asked = compatibility::asked("Tautulli", Some(scope)).unwrap();
+    /// A compatibility token of `user_id`.
+    async fn compatibility_token(auth: &AuthService, user_id: i64) -> String {
+        let asked = compatibility::asked("Infuse", None).unwrap();
         auth.create_compatibility_token(user_id, &asked).await.unwrap().0
     }
 
     #[tokio::test]
-    async fn compatibility_tokens_act_as_administrators_only_to_see_with_activity() {
+    async fn compatibility_tokens_act_for_their_account_never_as_administrators() {
         let dir = tempfile::tempdir().unwrap();
-        let (_db, auth) = service_with_user(dir.path()).await;
-        use compatibility::Scope::{Activity, Manage, Play};
+        let (db, auth) = service_with_user(dir.path()).await;
 
-        let play = auth.validate_compatibility(&compatibility_token(&auth, 2, "play").await, None).await.unwrap();
-        assert_eq!((play.id, play.is_admin, play.account_admin), (2, false, true));
-        assert!(play.all_libraries && play.max_age.is_none(), "an administrator's role sees everything");
-        assert!(play.app.is_none());
-        assert!(play.compatibility_allows(Play));
-        assert!(!play.compatibility_allows(Activity) && !play.compatibility_allows(Manage));
-
-        let activity = auth.validate_compatibility(&compatibility_token(&auth, 2, "activity").await, None).await;
-        let activity = activity.unwrap();
-        assert!(activity.is_admin && activity.compatibility_allows(Activity));
-        assert!(!activity.compatibility_allows(Manage), "seeing isn't changing");
-
-        let manage = auth.validate_compatibility(&compatibility_token(&auth, 2, "manage").await, None).await.unwrap();
-        assert!(!manage.is_admin, "changing isn't seeing everyone's");
-        assert!(manage.compatibility_allows(Manage));
+        let admins = auth.validate_compatibility(&compatibility_token(&auth, 2).await, None).await.unwrap();
+        assert_eq!((admins.id, admins.is_admin, admins.account_admin), (2, false, true));
+        assert!(admins.all_libraries && admins.max_age.is_none(), "an administrator's role sees everything");
+        assert!(admins.app.is_none());
+        assert!(admins.compatibility.unwrap().scopes.contains(compatibility::Scope::Play));
 
         // Someone else's limits stay theirs.
-        let kid = auth.validate_compatibility(&compatibility_token(&auth, 1, "play").await, None).await.unwrap();
+        let kid = auth.validate_compatibility(&compatibility_token(&auth, 1).await, None).await.unwrap();
         assert_eq!((kid.id, kid.is_admin, kid.all_libraries, kid.max_age), (1, false, false, Some(12)));
-        // Rights stored with a token are checked against the role at use.
-        let stored = compatibility_token(&auth, 1, "activity manage").await;
-        let kid = auth.validate_compatibility(&stored, None).await.unwrap();
-        assert!(!kid.is_admin && !kid.compatibility_allows(Activity) && !kid.compatibility_allows(Manage));
+        // Scopes older versions stored give nothing more.
+        let stored = compatibility_token(&auth, 2).await;
+        sqlx::query("UPDATE compatibility_tokens SET scope = 'play activity manage'").execute(&db.write).await.unwrap();
+        let older = auth.validate_compatibility(&stored, None).await.unwrap();
+        assert!(!older.is_admin);
 
         assert!(auth.validate_compatibility("pley_ct_unknown", None).await.is_none());
         let session = auth.create_session(2, None, None).await.unwrap();
         assert!(auth.validate_compatibility(&session, None).await.is_none(), "never a session");
         let app = app_of(&auth, 2, 2).await;
         assert!(auth.validate_compatibility(&app.access_token, None).await.is_none(), "nor an app's token");
-        let token = compatibility_token(&auth, 2, "play").await;
+        let token = compatibility_token(&auth, 2).await;
         assert!(auth.validate(&token).await.is_none(), "and the other way round");
         assert!(auth.validate_app(&token).await.is_none());
         assert!(auth.validate_any(&token).await.is_none());
@@ -1889,8 +1900,8 @@ mod tests {
     async fn compatibility_tokens_end_and_stop_working() {
         let dir = tempfile::tempdir().unwrap();
         let (db, auth) = service_with_user(dir.path()).await;
-        let token = compatibility_token(&auth, 1, "play").await;
-        let other = compatibility_token(&auth, 2, "play").await;
+        let token = compatibility_token(&auth, 1).await;
+        let other = compatibility_token(&auth, 2).await;
         assert!(auth.validate_compatibility(&token, None).await.is_some());
 
         // A disabled account's: served from the cache until it is forgotten,
@@ -1915,14 +1926,14 @@ mod tests {
         assert!(auth.validate_compatibility(&other, None).await.is_some());
 
         // Signed out everywhere, by its value, and expired.
-        let token = compatibility_token(&auth, 1, "play").await;
+        let token = compatibility_token(&auth, 1).await;
         assert!(auth.validate_compatibility(&token, None).await.is_some());
         auth.sign_out_everywhere(1, None).await.unwrap();
         assert!(auth.validate_compatibility(&token, None).await.is_none());
         assert!(auth.end_compatibility_token_of(&other).await.unwrap());
         assert!(auth.validate_compatibility(&other, None).await.is_none());
         assert!(!auth.end_compatibility_token_of(&other).await.unwrap());
-        let token = compatibility_token(&auth, 1, "play").await;
+        let token = compatibility_token(&auth, 1).await;
         sqlx::query("UPDATE compatibility_tokens SET expires_at = ?").bind(now() - 1).execute(&db.write).await.unwrap();
         auth.forget_user(1);
         assert!(auth.validate_compatibility(&token, None).await.is_none(), "90 days unused");
@@ -1932,7 +1943,7 @@ mod tests {
         assert_eq!(left, 0);
 
         // Required two-step sign-in, of an account with a password alone.
-        let token = compatibility_token(&auth, 1, "play").await;
+        let token = compatibility_token(&auth, 1).await;
         assert!(auth.validate_compatibility(&token, None).await.is_some());
         auth.require_two_step(true);
         assert!(auth.validate_compatibility(&token, None).await.is_none());
@@ -1944,7 +1955,7 @@ mod tests {
     async fn compatibility_tokens_in_use_are_extended_and_say_where_from() {
         let dir = tempfile::tempdir().unwrap();
         let (db, auth) = service_with_user(dir.path()).await;
-        let token = compatibility_token(&auth, 1, "play").await;
+        let token = compatibility_token(&auth, 1).await;
         let row = || {
             let db = db.clone();
             let key = hash_token(&token);
@@ -1959,12 +1970,12 @@ mod tests {
             }
         };
         assert_eq!(row().await.0, None, "not used yet");
-        let used = UsedFrom { ip: Some("10.0.0.7".into()), user_agent: Some("Tautulli/2.15".into()) };
+        let used = UsedFrom { ip: Some("10.0.0.7".into()), user_agent: Some("Infuse/8.1".into()) };
         assert!(auth.validate_compatibility(&token, Some(&used)).await.is_some());
         let (last_used, expires, ip, agent) = row().await;
         assert!(last_used.is_some_and(|at| at >= now() - 5));
         assert!(expires >= now() + compatibility::IDLE_SECS - 5);
-        assert_eq!((ip.as_deref(), agent.as_deref()), (Some("10.0.0.7"), Some("Tautulli/2.15")));
+        assert_eq!((ip.as_deref(), agent.as_deref()), (Some("10.0.0.7"), Some("Infuse/8.1")));
 
         // Written again only every few minutes; a check without a request
         // (the notification socket's) keeps where it was last used from.
@@ -1991,7 +2002,7 @@ mod tests {
     async fn a_revocation_during_a_compatibility_tokens_lookup_keeps_it_out_of_the_cache() {
         let dir = tempfile::tempdir().unwrap();
         let (_db, auth) = service_with_user(dir.path()).await;
-        let token = compatibility_token(&auth, 1, "play").await;
+        let token = compatibility_token(&auth, 1).await;
         let gate = Arc::new(Gate::default());
         *auth.pauses.after_query.lock() = Some(gate.clone());
         let revoking = async {

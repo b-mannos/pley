@@ -189,7 +189,7 @@ async fn requiring_it_signs_out_whatever_signed_in_with_a_password_alone() {
     }
     assert_eq!(refresh(&app, &bob_refresh).await.body["error"], "invalid_grant");
     assert_eq!(signed_in(&app, bob_id).await, (0, 0));
-    assert_eq!(app.plex(Method::GET, "/library/sections", &bob_tool, &[]).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.jf(Method::GET, "/UserViews", &bob_tool, None).await.status, StatusCode::UNAUTHORIZED);
     let tokens: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM compatibility_tokens WHERE user_id = ?")
         .bind(bob_id)
         .fetch_one(&app.state.db.read)
@@ -201,7 +201,7 @@ async fn requiring_it_signs_out_whatever_signed_in_with_a_password_alone() {
         assert_eq!(app.get("/api/auth/me", token).await.status, StatusCode::OK);
     }
     assert_eq!(refresh(&app, &carol_refresh).await.status, StatusCode::OK);
-    assert_eq!(app.plex(Method::GET, "/library/sections", &carol_tool, &[]).await.status, StatusCode::OK);
+    assert_eq!(app.jf(Method::GET, "/UserViews", &carol_tool, None).await.status, StatusCode::OK);
 
     // Required no more: a password alone signs in again.
     assert_eq!(require(&app, &admin, false).await.status, StatusCode::OK);
@@ -472,7 +472,7 @@ async fn a_session_or_app_that_slips_past_the_sign_out_doesnt_work() {
     app.state.auth.require_two_step(true);
     assert_eq!(app.get("/api/auth/me", &bob).await.status, StatusCode::UNAUTHORIZED);
     assert_eq!(app.get("/api/auth/me", &bob_app).await.status, StatusCode::UNAUTHORIZED);
-    assert_eq!(app.plex(Method::GET, "/library/sections", &bob_tool, &[]).await.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(app.jf(Method::GET, "/UserViews", &bob_tool, None).await.status, StatusCode::UNAUTHORIZED);
     let refused = refresh(&app, &bob_refresh).await;
     assert_eq!(refused.body["error"], "invalid_grant");
     assert!(refused.text().contains("two-step"), "{}", refused.text());
@@ -480,7 +480,7 @@ async fn a_session_or_app_that_slips_past_the_sign_out_doesnt_work() {
     app.state.auth.require_two_step(false);
     assert_eq!(app.get("/api/auth/me", &bob).await.status, StatusCode::OK);
     assert_eq!(app.get("/api/auth/me", &bob_app).await.status, StatusCode::OK);
-    assert_eq!(app.plex(Method::GET, "/library/sections", &bob_tool, &[]).await.status, StatusCode::OK);
+    assert_eq!(app.jf(Method::GET, "/UserViews", &bob_tool, None).await.status, StatusCode::OK);
     assert_eq!(refresh(&app, &bob_refresh).await.status, StatusCode::OK);
 }
 
@@ -502,13 +502,14 @@ async fn compatibility_stream_addresses_stop_with_the_sign_out() {
             Session::new(user, "u".into(), None, film, file, Play::Transcode, 1000, Some(spec), Some("job".into()), 0);
         app.state.sessions.insert(session).id.clone()
     };
+    let item = app.jf_item(film);
     let playlist = |session: &str| {
         let req = axum::http::Request::builder()
-            .uri(format!("/video/:/transcode/universal/session/{session}/base/index.m3u8"))
+            .uri(format!("/Videos/{item}/hls1/{session}/index.m3u8"))
             .body(axum::body::Body::empty())
             .unwrap();
-        let plex = app.plex.clone();
-        async move { tower::ServiceExt::oneshot(plex, req).await.unwrap().status() }
+        let jellyfin = app.jellyfin.clone();
+        async move { tower::ServiceExt::oneshot(jellyfin, req).await.unwrap().status() }
     };
     let (bobs, admins) = (stream(bob_id), stream(admin_id));
     // No transcoder runs here: they get as far as asking it.

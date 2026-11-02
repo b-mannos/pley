@@ -337,7 +337,7 @@ server, start a disposable one:
 ```powershell
 $data = Join-Path $env:TEMP "pley-android-test"
 pley --data-dir $data reset-password admin <password> --admin
-pley --data-dir $data --bind 127.0.0.1:7712 --plex-bind off --no-discovery --no-tray
+pley --data-dir $data --bind 127.0.0.1:7712 --no-discovery --no-tray
 adb reverse tcp:7712 tcp:7712
 ```
 

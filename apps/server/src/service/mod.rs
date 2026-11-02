@@ -35,7 +35,7 @@ const SERVICE_TIMEOUT: Duration = Duration::from_secs(60);
 #[derive(Debug, Subcommand)]
 pub enum ServiceCommand {
     /// Install the service, or update it, and start it. The options given
-    /// before `service` (--data-dir, --bind, --plex-bind, --ffmpeg, --ffprobe)
+    /// before `service` (--data-dir, --bind, --jellyfin-bind, --ffmpeg, --ffprobe)
     /// are saved in pley.toml in its data folder (default: %ProgramData%\pley)
     Install(InstallArgs),
     /// Stop and remove the service. Its data folder stays

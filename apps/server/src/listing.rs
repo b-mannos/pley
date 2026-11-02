@@ -65,12 +65,6 @@ pub fn kinds_of(lib: &LibraryRow) -> &'static [&'static str] {
     }
 }
 
-/// The guid the Plex-compatible API gives an item, which the `guid` filter
-/// takes too.
-pub fn own_guid(kind: &str, id: i64) -> String {
-    format!("plex://{}/{id:024x}", type_name(kind))
-}
-
 /// Plays of a watched item, 0 once it is marked unplayed: Pley keeps the
 /// lifetime count, and `viewCount` counts what is watched now.
 pub fn view_count(row: &ItemRow) -> i64 {
@@ -246,7 +240,7 @@ struct Filter {
     values: Vec<String>,
 }
 
-/// The credit role a Plex tag filter (`actor=`, `director=`, …) selects.
+/// The credit role a tag filter (`actor=`, `director=`, …) selects.
 pub(crate) fn people_role(field: &str) -> Option<people::Role> {
     Some(match field {
         "actor" => people::Role::Actor,
@@ -296,9 +290,6 @@ impl Filter {
             .0
             .iter()
             .filter_map(|(raw_key, raw_value)| {
-                if raw_key.len() > 7 && raw_key.get(..7).is_some_and(|p| p.eq_ignore_ascii_case("x-plex-")) {
-                    return None;
-                }
                 if NOT_FILTERS.contains(&raw_key.as_str()) {
                     return None;
                 }
@@ -406,7 +397,6 @@ impl Filter {
             "lastViewedAt" => Some(self.date(row.last_played_at, now)),
             "originallyAvailableAt" => Some(self.date(row.release_date.as_deref().and_then(date_secs), now)),
             "guid" => {
-                let own = own_guid(&row.kind, row.id);
                 let imdb = extras.and_then(|e| e.imdb_id.clone()).map(|i| format!("imdb://{i}"));
                 let tmdb = extras.and_then(|e| e.tmdb_id).map(|t| format!("tmdb://{t}"));
                 // Only where the details list them.
@@ -416,7 +406,7 @@ impl Filter {
                     .filter(|_| matches!(row.kind.as_str(), "artist" | "album"))
                     .map(|m| format!("mbid://{m}"));
                 let known = [imdb, tmdb, tvdb, mbid];
-                Some(self.values.iter().any(|v| *v == own || known.iter().any(|g| g.as_ref() == Some(v))))
+                Some(self.values.iter().any(|v| known.iter().any(|g| g.as_ref() == Some(v))))
             }
             _ => None,
         };
@@ -626,7 +616,7 @@ pub(crate) fn sort_rows(rows: &mut [ItemRow], spec: &[(SortField, bool)], bitrat
 
 // ------------------------------------------------------------------ the same filters and sorts in SQL
 
-/// Plex's `viewCount` of an item (see [`view_count`]).
+/// The `viewCount` of an item (see [`view_count`]).
 const VIEW_COUNT_SQL: &str = "(CASE WHEN COALESCE(s.watched, 0) THEN MAX(COALESCE(s.play_count, 0), 1) ELSE 0 END)";
 
 /// Whether the user watched an item of `kind` as [`Filter::matches`] sees
@@ -868,21 +858,12 @@ impl Filter {
         }
     }
 
-    /// `plex://`, `imdb://`, `tmdb://`, `tvdb://` (shows) and `mbid://`
-    /// (artists, albums) guids, whatever the operator, like [`Filter::matches`].
+    /// `imdb://`, `tmdb://`, `tvdb://` (shows) and `mbid://` (artists,
+    /// albums) guids, whatever the operator, like [`Filter::matches`].
     fn guid_sql(&self, kind: &str) -> Condition {
         let mut tests = Vec::new();
         let mut args = Vec::new();
         for value in &self.values {
-            let own = value
-                .rsplit_once('/')
-                .and_then(|(_, hex)| u64::from_str_radix(hex, 16).ok())
-                .map(|id| id as i64)
-                .filter(|id| own_guid(kind, *id) == *value);
-            if let Some(id) = own {
-                tests.push("i.id = ?".to_owned());
-                args.push(SqlArg::Int(id));
-            }
             if let Some(imdb) = value.strip_prefix("imdb://") {
                 tests.push("i.imdb_id = ?".to_owned());
                 args.push(SqlArg::Text(imdb.to_owned()));
@@ -960,14 +941,14 @@ struct SqlFilters {
     uses_state: bool,
 }
 
-/// A section listing: the items of one kind in a library that pass Plex
-/// filters, in a Plex sort order, at most `limit` of them.
+/// A section listing: the items of one kind in a library that pass the
+/// filters, in the sort order asked for, at most `limit` of them.
 pub(crate) struct SectionQuery<'a> {
     library_id: i64,
     kind: &'a str,
     filters: Vec<Filter>,
     sort: Vec<(SortField, bool)>,
-    /// Plex's `limit`: how many items there are at most.
+    /// `limit`: how many items there are at most.
     cap: Option<usize>,
     now: i64,
 }
@@ -1123,7 +1104,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_plex_filters() {
+    fn parses_filters() {
         let filters = Filter::parse(
             &params(&[
                 ("type", "1"),
@@ -1131,7 +1112,6 @@ mod tests {
                 ("year>>", "2000"),
                 ("genre!", "Horror,Comedy"),
                 ("show.title<", "The"),
-                ("X-Plex-Token", "secret"),
                 ("includeGuids", "1"),
             ]),
             "movie",
@@ -1145,7 +1125,7 @@ mod tests {
         let filters = Filter::parse(&params(&[("show.unwatched", "1")]), "show");
         assert_eq!((filters[0].field.as_str(), filters[0].op), ("unwatched", Op::Is));
 
-        // Ancestor filters (python-plexapi's `artist.albums()`), descendants ignored.
+        // Ancestor filters (an artist's albums), descendants ignored.
         let filters = Filter::parse(&params(&[("artist.id", "16"), ("track.title", "x")]), "album");
         assert_eq!(filters.len(), 1);
         assert_eq!((filters[0].level, filters[0].field.as_str()), (Level::Parent, "id"));
@@ -1171,7 +1151,7 @@ mod tests {
     }
 
     /// Titles of `rows` that pass every filter in `pairs` (query keys as
-    /// Plex clients send them: `year>>=2000` arrives as `("year>>", "2000")`).
+    /// a filter is read: `year>>=2000` arrives as `("year>>", "2000")`).
     fn matching(
         rows: &[ItemRow],
         kind: &str,
@@ -1284,8 +1264,6 @@ mod tests {
         assert_eq!(titles(&[("studio!", "brandywine")]), ["Airplane"], "no studio does not contain it");
         assert_eq!(titles(&[("guid", "imdb://tt0078748")]), ["Alien"]);
         assert_eq!(titles(&[("guid", "tmdb://348")]), ["Alien"]);
-        let own = own_guid("movie", 2);
-        assert_eq!(titles(&[("guid", own.as_str())]), ["Airplane"]);
 
         // TheTVDB ids are shows', MusicBrainz ids artists' and albums'.
         let others = vec![row(3, "show", "Lost"), row(4, "album", "Kid A"), row(5, "movie", "Heat")];
@@ -1306,7 +1284,6 @@ mod tests {
             role,
             character: None,
             photo_url: None,
-            photo_source: None,
         };
         let rows = vec![row(1, "movie", "Alpha"), row(2, "movie", "Beta")];
         let mut extras = HashMap::new();
@@ -1389,11 +1366,9 @@ mod tests {
         let none = HashMap::new();
         let pairs = [
             ("resolution", "4k"),
-            ("X-Plex-Product", "Plex Web"),
-            ("x-plex-container-start", "0"),
             ("includeGuids", "1"),
             ("sort", "titleSort"),
-            // Keys whose 7th byte falls inside a character.
+            // Keys that aren't ASCII.
             ("abcdefé", "1"),
             ("ééééé", "x"),
         ];
@@ -1877,8 +1852,6 @@ mod tests {
     async fn filters_and_sorts_in_sql_list_what_the_in_memory_path_lists() {
         let dir = tempfile::tempdir().unwrap();
         let db = listing_fixture(dir.path()).await;
-        let guid = own_guid("movie", 3);
-        let show_guid = own_guid("show", 3);
         let mut movie_filters: Vec<Vec<(&str, &str)>> = vec![
             vec![],
             vec![("title", "alpha")],
@@ -1990,8 +1963,6 @@ mod tests {
             vec![("guid", "imdb://tt0001")],
             vec![("guid", "tmdb://348")],
             vec![("guid", "tmdb://0348")],
-            vec![("guid", guid.as_str())],
-            vec![("guid", show_guid.as_str())],
             vec![("guid!", "imdb://tt0003,tmdb://3")],
             vec![("guid", "imdb://")],
             vec![("guid", "tvdb://73739")],

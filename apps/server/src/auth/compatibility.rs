@@ -1,10 +1,9 @@
-//! Tokens for other apps and tools that use the compatibility API
-//! (docs/COMPATIBILITY.md): Tautulli, Kometa, Plezy, Infuse, scripts. A
-//! person makes one on the account page, or a tool signs in for one
-//! (`POST /api/auth/login` with `client`). They work on the compatibility
-//! API only, never on Pley's own, and do only what their [`Scopes`] allow;
-//! nothing about them belongs to one compatibility API, so another one can
-//! take the same tokens.
+//! Tokens for other apps that use the Jellyfin-compatible API
+//! (docs/COMPATIBILITY.md): Jellyfin's apps, Infuse, scripts. An app gets
+//! one by signing in there (`/Users/AuthenticateByName`), or a person makes
+//! one on the account page. They work on the compatibility API only, never
+//! on Pley's own, and do only what their [`Scopes`] allow: play, for their
+//! own account.
 //!
 //! Tokens carry a prefix (`pley_ct_`), so that leaked ones are recognisable
 //! and never pass for a session's, and are stored as SHA-256, like session
@@ -29,41 +28,28 @@ pub const MAX_PER_USER: i64 = 100;
 /// The longest name a token may have.
 pub const MAX_NAME_CHARS: usize = 80;
 
-/// One thing a compatibility token may be allowed to do.
+/// One thing a compatibility token may be allowed to do. Scopes are stored
+/// and answered by name, so that a later one is another name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Scope {
-    /// Browse what the account may open, play, and keep its own watch state,
-    /// sessions and playlists. Every token has it.
+    /// Browse what the account may open, play, and keep its own watch state.
+    /// Every token has it.
     Play,
-    /// See every account's sessions and history, as Tautulli does
-    /// (administrators only).
-    Activity,
-    /// Refresh libraries and items, stop sessions, edit metadata, and make
-    /// and change collections, as Kometa does (administrators only).
-    Manage,
 }
 
 impl Scope {
     /// Every scope, in the order they are written and shown.
-    pub const ALL: [Scope; 3] = [Scope::Play, Scope::Activity, Scope::Manage];
+    pub const ALL: [Scope; 1] = [Scope::Play];
 
     /// The name in `scope` fields and answers.
     pub fn name(self) -> &'static str {
         match self {
             Scope::Play => "play",
-            Scope::Activity => "activity",
-            Scope::Manage => "manage",
         }
     }
 
     pub fn from_name(name: &str) -> Option<Scope> {
         Scope::ALL.into_iter().find(|scope| scope.name() == name)
-    }
-
-    /// Only an administrator's tokens may have it, and it does nothing once
-    /// the account is no longer one.
-    pub fn administrators_only(self) -> bool {
-        self != Scope::Play
     }
 
     fn bit(self) -> u8 {
@@ -106,11 +92,6 @@ impl Scopes {
         self.0 & scope.bit() != 0
     }
 
-    /// Whether it has a scope only administrators' tokens may have.
-    pub fn administrators_only(self) -> bool {
-        Scope::ALL.into_iter().any(|scope| scope.administrators_only() && self.contains(scope))
-    }
-
     /// The names, in the fixed order of [`Scope::ALL`].
     pub fn names(self) -> Vec<&'static str> {
         Scope::ALL.into_iter().filter(|scope| self.contains(*scope)).map(Scope::name).collect()
@@ -141,19 +122,8 @@ pub fn asked(name: &str, scope: Option<&str>) -> Result<Asked, AppError> {
         )));
     }
     let scopes = Scopes::parse(scope.unwrap_or_default())
-        .map_err(|unknown| AppError::bad_request(format!("unknown scope '{unknown}': use play, activity or manage")))?;
+        .map_err(|unknown| AppError::bad_request(format!("unknown scope '{unknown}': tokens may play")))?;
     Ok(Asked { name: name.to_owned(), scopes })
-}
-
-/// Refuses scopes only administrators' tokens may have to an account that
-/// isn't one (`administrator`: the account's role).
-pub fn may_have(scopes: Scopes, administrator: bool) -> Result<(), AppError> {
-    if scopes.administrators_only() && !administrator {
-        return Err(AppError::forbidden(
-            "only administrators can make tokens that see everyone's activity or manage libraries",
-        ));
-    }
-    Ok(())
 }
 
 /// A token, for the account page's list.
@@ -276,24 +246,20 @@ mod tests {
         db
     }
 
-    fn tautulli(scope: &str) -> Asked {
-        asked("Tautulli", Some(scope)).unwrap()
+    fn tool() -> Asked {
+        asked("Infuse", None).unwrap()
     }
 
     #[test]
-    fn scopes_always_play_and_print_in_order() {
+    fn scopes_always_play() {
         assert_eq!(Scopes::parse("").unwrap(), Scopes::play());
-        assert_eq!(Scopes::parse("manage activity").unwrap().to_string(), "play activity manage");
         assert_eq!(Scopes::parse("play  play").unwrap().to_string(), "play");
-        assert_eq!(Scopes::parse("activity admin"), Err("admin".to_owned()));
+        assert_eq!(Scopes::parse("play admin"), Err("admin".to_owned()));
         assert_eq!(Scopes::parse("Play"), Err("Play".to_owned()), "names are lower case");
         assert_eq!(Scopes::parse("library"), Err("library".to_owned()), "apps' scopes aren't these");
-        assert_eq!(Scopes::from_stored("activity future"), Scopes::parse("activity").unwrap());
+        // Tokens made with scopes older versions had keep playing.
+        assert_eq!(Scopes::from_stored("play activity manage"), Scopes::play());
         assert_eq!(Scopes::from_stored(""), Scopes::play());
-        assert!(!Scopes::play().administrators_only());
-        assert!(Scopes::parse("activity").unwrap().administrators_only());
-        assert!(Scopes::parse("manage").unwrap().administrators_only());
-        assert_eq!(Scopes::parse("manage").unwrap().names(), ["play", "manage"]);
         for scope in Scope::ALL {
             assert_eq!(Scope::from_name(scope.name()), Some(scope));
         }
@@ -301,28 +267,26 @@ mod tests {
 
     #[test]
     fn names_and_scopes_are_checked() {
-        assert_eq!(asked("  Kometa ", None).unwrap(), Asked { name: "Kometa".into(), scopes: Scopes::play() });
+        assert_eq!(asked("  Infuse ", None).unwrap(), Asked { name: "Infuse".into(), scopes: Scopes::play() });
         assert_eq!(asked(&"é".repeat(MAX_NAME_CHARS), None).unwrap().name.chars().count(), MAX_NAME_CHARS);
         for bad in ["", "   ", "tab\there", "new\nline"] {
             assert!(matches!(asked(bad, None), Err(AppError::BadRequest(_))), "{bad:?}");
         }
         assert!(matches!(asked(&"a".repeat(MAX_NAME_CHARS + 1), None), Err(AppError::BadRequest(_))));
-        let Err(AppError::BadRequest(message)) = asked("x", Some("play everything")) else { panic!() };
-        assert!(message.contains("'everything'"), "{message}");
-        assert!(may_have(Scopes::play(), false).is_ok());
-        assert!(may_have(Scopes::parse("activity manage").unwrap(), true).is_ok());
-        assert!(matches!(may_have(Scopes::parse("activity").unwrap(), false), Err(AppError::Forbidden(_))));
-        assert!(matches!(may_have(Scopes::parse("manage").unwrap(), false), Err(AppError::Forbidden(_))));
+        for scope in ["play everything", "activity", "manage"] {
+            let Err(AppError::BadRequest(message)) = asked("x", Some(scope)) else { panic!("{scope}") };
+            assert!(message.contains("unknown scope"), "{message}");
+        }
     }
 
     #[tokio::test]
     async fn tokens_are_prefixed_and_stored_hashed() {
         let dir = tempfile::tempdir().unwrap();
         let db = database(dir.path()).await;
-        let (token, row, dropped) = create(&db, 1, &tautulli("activity")).await.unwrap();
+        let (token, row, dropped) = create(&db, 1, &tool()).await.unwrap();
         assert!(dropped.is_empty());
         assert!(token.starts_with(PREFIX) && token.len() == PREFIX.len() + 43, "{token}");
-        assert_eq!((row.name.as_str(), row.scope.as_str(), row.last_used_at), ("Tautulli", "play activity", None));
+        assert_eq!((row.name.as_str(), row.scope.as_str(), row.last_used_at), ("Infuse", "play", None));
         assert_eq!(row.expires_at - row.created_at, IDLE_SECS);
         let dump: Vec<String> = sqlx::query_scalar("SELECT token_hash || name || scope FROM compatibility_tokens")
             .fetch_all(&db.read)
@@ -339,20 +303,20 @@ mod tests {
     async fn tokens_are_listed_ended_and_capped() {
         let dir = tempfile::tempdir().unwrap();
         let db = database(dir.path()).await;
-        let (_, oldest, _) = create(&db, 1, &tautulli("play")).await.unwrap();
-        let (used, used_row, _) = create(&db, 1, &tautulli("play")).await.unwrap();
+        let (_, oldest, _) = create(&db, 1, &tool()).await.unwrap();
+        let (used, used_row, _) = create(&db, 1, &tool()).await.unwrap();
         // The second is used later than every other: it stays, and comes first.
         sqlx::query("UPDATE compatibility_tokens SET last_used_at = created_at + 1000 WHERE id = ?")
             .bind(used_row.id)
             .execute(&db.write)
             .await
             .unwrap();
-        let (_, bobs, _) = create(&db, 2, &tautulli("play")).await.unwrap();
+        let (_, bobs, _) = create(&db, 2, &tool()).await.unwrap();
         for _ in 2..MAX_PER_USER {
-            let (_, _, dropped) = create(&db, 1, &tautulli("play")).await.unwrap();
+            let (_, _, dropped) = create(&db, 1, &tool()).await.unwrap();
             assert!(dropped.is_empty());
         }
-        let (_, _, dropped) = create(&db, 1, &tautulli("play")).await.unwrap();
+        let (_, _, dropped) = create(&db, 1, &tool()).await.unwrap();
         assert_eq!(dropped, [oldest.id], "the least recently used one ends");
         let anns = list(&db, 1).await.unwrap();
         assert_eq!(anns.len() as i64, MAX_PER_USER);
@@ -366,7 +330,7 @@ mod tests {
         assert_eq!(delete_for(&db, 1).await.unwrap().len() as i64, MAX_PER_USER - 1);
 
         // 90 days unused: no longer listed, then purged.
-        let (token, row, _) = create(&db, 2, &tautulli("play")).await.unwrap();
+        let (token, row, _) = create(&db, 2, &tool()).await.unwrap();
         sqlx::query("UPDATE compatibility_tokens SET expires_at = ? WHERE id = ?")
             .bind(now() - 1)
             .bind(row.id)
@@ -380,7 +344,7 @@ mod tests {
             sqlx::query_scalar("SELECT COUNT(*) FROM compatibility_tokens").fetch_one(&db.read).await.unwrap();
         assert_eq!(left, 0);
 
-        let (token, row, _) = create(&db, 2, &tautulli("play")).await.unwrap();
+        let (token, row, _) = create(&db, 2, &tool()).await.unwrap();
         assert_eq!(delete_token(&db, "pley_at_x").await.unwrap(), None);
         assert_eq!(delete_token(&db, &token).await.unwrap(), Some(row.id));
     }

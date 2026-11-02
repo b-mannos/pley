@@ -3,7 +3,7 @@
 mod accounts;
 mod activity;
 mod admin;
-mod auth;
+pub(crate) mod auth;
 mod browse;
 pub(crate) mod collections;
 mod compatibility_tokens;
@@ -13,7 +13,7 @@ pub(crate) mod items;
 mod libraries;
 mod livetv;
 mod oauth;
-mod people;
+pub(crate) mod people;
 pub(crate) mod playback;
 mod playlists;
 mod requests;
@@ -252,8 +252,11 @@ pub fn router(state: AppState) -> Router {
             axum::http::StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(60 * 30),
         ))
-        // The Plex-compatible API's clients, before anything of pley's.
-        .layer(axum::middleware::from_fn_with_state(crate::plex::OnWebPort::new(&state), crate::plex::on_web_port))
+        // The Jellyfin-compatible API's clients, before anything of pley's.
+        .layer(axum::middleware::from_fn_with_state(
+            crate::jellyfin::OnWebPort::new(&state),
+            crate::jellyfin::on_web_port,
+        ))
         .with_state(state)
 }
 
@@ -387,7 +390,7 @@ pub(crate) fn wants_summaries(query: &HashMap<String, String>) -> bool {
 }
 
 /// The request URI for logs, with credentials in the query left out:
-/// `token`, `X-Plex-Token` and `api_key`, and what apps and TVs send while
+/// `token` and `api_key`, and what apps and TVs send while
 /// signing in (`code`, `state`, `code_verifier`, `access_token`,
 /// `refresh_token`, `device_code`, `user_code`). Bodies and the
 /// Authorization header are never logged.
@@ -398,7 +401,16 @@ pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
         .find_map(|prefix| uri.path().strip_prefix(prefix).map(|rest| (prefix, rest)));
     let path = match keyed {
         Some((prefix, rest)) => format!("{prefix}…{}", rest.find('/').map_or("", |at| &rest[at..])),
-        None => uri.path().to_owned(),
+        // A Jellyfin media source's id stands for its token.
+        None => {
+            uri.path()
+                .split('/')
+                .map(|segment| {
+                    if segment.len() == 64 && segment.bytes().all(|b| b.is_ascii_hexdigit()) { "…" } else { segment }
+                })
+                .collect::<Vec<_>>()
+                .join("/")
+        }
     };
     let Some(query) = uri.query() else { return path };
     let query: Vec<String> = query
@@ -408,8 +420,9 @@ pub(crate) fn loggable_uri(uri: &axum::http::Uri) -> String {
                 if matches!(
                     key.to_ascii_lowercase().as_str(),
                     "token"
-                        | "x-plex-token"
                         | "api_key"
+                        | "apikey"
+                        | "mediasourceid"
                         | "code"
                         | "state"
                         | "code_verifier"
@@ -461,8 +474,8 @@ mod tests {
 
     #[test]
     fn logs_leave_codes_and_tokens_out() {
-        let uri: axum::http::Uri = "/api/files/3/stream?token=secret&t=10&X-Plex-Token=abc&api_key=k".parse().unwrap();
-        assert_eq!(loggable_uri(&uri), "/api/files/3/stream?token=…&t=10&X-Plex-Token=…&api_key=…");
+        let uri: axum::http::Uri = "/api/files/3/stream?token=secret&t=10&ApiKey=abc&api_key=k".parse().unwrap();
+        assert_eq!(loggable_uri(&uri), "/api/files/3/stream?token=…&t=10&ApiKey=…&api_key=…");
         let uri: axum::http::Uri = "/api/x?code=c0de&state=st4te".parse().unwrap();
         assert_eq!(loggable_uri(&uri), "/api/x?code=…&state=…");
         let uri =
