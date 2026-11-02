@@ -908,7 +908,8 @@ sealed class PlaylistScreen : ShellPage
         {
             if (Disposed) return;
             item.FocusChanged -= Look;
-            focusAnimation?.Stop();
+            // Only when disposed by the app: collected, the animation may have gone first (Kit/Held.cs).
+            if (type == DisposeTypes.Explicit) focusAnimation?.Stop();
             base.Dispose(type);
         }
     }

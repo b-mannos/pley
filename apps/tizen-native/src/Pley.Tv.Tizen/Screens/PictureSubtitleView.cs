@@ -120,8 +120,9 @@ sealed class PictureSubtitleView : View
     protected override void Dispose(DisposeTypes type)
     {
         if (Disposed) return;
-        // Off the screen with the view; their textures a second later, as any.
-        Clear();
+        // Off the screen with the view; their textures a second later, as any. Only when disposed
+        // by the app: collected, its images may have gone first (Kit/Held.cs).
+        if (type == DisposeTypes.Explicit) Clear();
         base.Dispose(type);
     }
 }

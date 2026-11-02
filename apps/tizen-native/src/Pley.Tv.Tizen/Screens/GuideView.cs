@@ -676,8 +676,12 @@ sealed class GuideView : View
     protected override void Dispose(DisposeTypes type)
     {
         if (Disposed) return;
-        slide?.Stop();
-        catchUp.Stop();
+        // Only when disposed by the app: collected, the animation and the timer may have gone first (Kit/Held.cs).
+        if (type == DisposeTypes.Explicit)
+        {
+            slide?.Stop();
+            catchUp.Stop();
+        }
         base.Dispose(type);
     }
 }
