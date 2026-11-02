@@ -357,30 +357,47 @@ class Tokens:
         data = self.current()
         return (data["server"], data.get("profile"), data.get("sign_in")) if data else None
 
-    def access(self) -> str:
-        """An access token good for a while yet."""
+    def session(self):
+        """The server and an access token good for a while yet, of the same
+        sign-in: a request goes to the server its token is for, never to
+        the server of another read apart."""
         with self.lock:
             data = self.current()
             if not data:
                 raise SignedOut()
             if data["expires_at"] - self.clock() > REFRESH_MARGIN:
                 self._proved(data)
-                return data["access_token"]
+                return data["server"], data["access_token"]
             # The refresh's own proof does for the new token.
-            return self._refresh(data)["access_token"]
+            renewed = self._refresh(data)
+            self._proved_if_another(data, renewed)
+            return renewed["server"], renewed["access_token"]
 
-    def refreshed(self, stale: str) -> str:
-        """A new access token after `stale` was refused, unless it was
-        refreshed meanwhile."""
+    def refreshed(self, stale: str, server: str) -> str:
+        """A new access token for `server` after `stale` was refused, unless
+        it was refreshed meanwhile. SignedOut when the sign-in is now
+        another server's, which may have been chosen while `server` held
+        its answer: that one's token never goes to `server`."""
         with self.lock:
             data = self.current()
-            if not data:
+            if not data or data["server"] != server:
                 raise SignedOut()
             if data["access_token"] != stale:
                 # Refreshed meanwhile, maybe on another network since.
                 self._proved(data)
                 return data["access_token"]
-            return self._refresh(data)["access_token"]
+            renewed = self._refresh(data)
+            if renewed["server"] != server:
+                raise SignedOut()
+            self._proved_if_another(data, renewed)
+            return renewed["access_token"]
+
+    def _proved_if_another(self, data: dict, renewed: dict) -> None:
+        """A refresh of `data` brought `renewed`: another sign-in's tokens
+        when the plugin signed in again meanwhile, whose server proves
+        itself before they go, the refresh's proof being `data`'s."""
+        if renewed.get("sign_in") != data.get("sign_in"):
+            self._proved(renewed)
 
     def _refresh(self, data: dict) -> dict:
         # The refresh token goes only to a server that proves itself now.

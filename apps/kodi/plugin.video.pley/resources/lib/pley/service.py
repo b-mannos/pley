@@ -168,17 +168,16 @@ class Player(xbmc.Player):
         answer, or None when signed out or out of reach. Refusals but `fine`
         ones are logged."""
         try:
-            server = self.tokens.server()
-            if not server:
+            if not self.tokens.server():
                 return None
-            token = self.tokens.access()
+            server, token = self.tokens.session()
             for attempt in range(2):
                 response = api.Client(server, self.user_agent, token, timeout=timeout).request(method, path, json_body=body)
                 if response.status != 401 or attempt:
                     if response.status >= 400 and response.status not in fine:
                         kodi.log("%s %s: %d" % (method, path, response.status), xbmc.LOGWARNING)
                     return response
-                token = self.tokens.refreshed(token)
+                token = self.tokens.refreshed(token, server)
         except (api.ApiError, auth.SignedOut) as e:
             if isinstance(e, api.ApiError) and e.status == 0:
                 # Nothing answered: the server proves itself again before the next token.

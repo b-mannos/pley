@@ -88,21 +88,21 @@ class TokensTest(unittest.TestCase):
         return data
 
     def test_a_fresh_token_is_used_as_it_is(self):
-        self.assertEqual(self.tokens.access(), "at-1")
+        self.assertEqual(self.tokens.session()[1], "at-1")
         self.assertEqual(self.server.refreshes, 0)
 
     def test_a_token_about_to_expire_is_renewed_and_saved_first(self):
         self.now += 3600 - auth.REFRESH_MARGIN + 1
-        self.assertEqual(self.tokens.access(), "at-2")
+        self.assertEqual(self.tokens.session()[1], "at-2")
         saved = self.store.load()
         self.assertEqual((saved["access_token"], saved["refresh_token"]), ("at-2", "rt-2"))
         self.assertEqual(saved["expires_at"], self.now + 3600)
-        self.assertEqual(self.tokens.access(), "at-2")
+        self.assertEqual(self.tokens.session()[1], "at-2")
         self.assertEqual(self.server.refreshes, 1)
 
     def test_refused_tokens_are_renewed_once_however_many_ask(self):
         got = []
-        threads = [threading.Thread(target=lambda: got.append(self.tokens.refreshed("at-1"))) for _ in range(6)]
+        threads = [threading.Thread(target=lambda: got.append(self.tokens.refreshed("at-1", self.server.url))) for _ in range(6)]
         for thread in threads:
             thread.start()
         for thread in threads:
@@ -111,16 +111,16 @@ class TokensTest(unittest.TestCase):
         self.assertEqual(self.server.refreshes, 1, "two refreshes with one token would end the sign-in")
         # A token refused after it was renewed already is answered with the
         # new one.
-        self.assertEqual(self.tokens.refreshed("at-1"), "at-2")
+        self.assertEqual(self.tokens.refreshed("at-1", self.server.url), "at-2")
         self.assertEqual(self.server.refreshes, 1)
 
     def test_a_sign_in_the_server_ended_is_forgotten(self):
         self.store.save(self.record(refresh_token="rt-0"))
         with self.assertRaises(auth.SignedOut):
-            self.tokens.refreshed("at-1")
+            self.tokens.refreshed("at-1", self.server.url)
         self.assertIsNone(self.store.load())
         with self.assertRaises(auth.SignedOut):
-            self.tokens.access()
+            self.tokens.session()
 
     def test_another_sign_in_is_another_identity(self):
         # Someone else may have approved it, on the same server, with no
@@ -145,10 +145,10 @@ class TokensTest(unittest.TestCase):
         self.tokens.switch_profile(3, "1234")
         saved = self.store.load()
         self.assertEqual((saved["access_token"], saved["refresh_token"], saved["profile"]), ("at-2", "rt-2", 3))
-        self.assertEqual(self.tokens.access(), "at-2")
+        self.assertEqual(self.tokens.session()[1], "at-2")
         self.assertEqual(self.tokens.identity(), (self.server.url, 3, None))
         # A refresh keeps the profile.
-        self.assertEqual(self.tokens.refreshed("at-2"), "at-3")
+        self.assertEqual(self.tokens.refreshed("at-2", self.server.url), "at-3")
         self.assertEqual(self.store.load()["profile"], 3)
         # A refresh token that doesn't work any more ends the sign-in.
         self.store.save(self.record(refresh_token="rt-0"))
@@ -159,13 +159,13 @@ class TokensTest(unittest.TestCase):
     def test_a_server_that_doesnt_answer_keeps_the_tokens(self):
         self.server.down = True
         with self.assertRaises(api.ApiError):
-            self.tokens.refreshed("at-1")
+            self.tokens.refreshed("at-1", self.server.url)
         self.assertEqual(self.store.load()["refresh_token"], "rt-1")
 
     def test_a_sign_in_the_plugin_wrote_since_is_read_again(self):
-        self.assertEqual(self.tokens.access(), "at-1")
+        self.assertEqual(self.tokens.session()[1], "at-1")
         self.store.save(self.record(access_token="at-from-the-plugin", server_name="Another name"))
-        self.assertEqual(self.tokens.access(), "at-from-the-plugin")
+        self.assertEqual(self.tokens.session()[1], "at-from-the-plugin")
         self.store.clear()
         self.assertIsNone(self.tokens.server())
 
@@ -173,10 +173,30 @@ class TokensTest(unittest.TestCase):
         # The plugin signs in again while the service refreshes: the new
         # sign-in stays, and what the refresh got is ended.
         self.server.during_refresh = lambda: self.store.save(self.record(access_token="at-new", refresh_token="rt-new"))
-        self.assertEqual(self.tokens.refreshed("at-1"), "at-new")
+        self.assertEqual(self.tokens.refreshed("at-1", self.server.url), "at-new")
         self.assertEqual(self.store.load()["refresh_token"], "rt-new")
         revoked = [r.form()["token"] for r in self.server.server.requests if r.path == "/api/oauth/revoke"]
         self.assertEqual(revoked, ["rt-2"])
+
+    def test_a_token_never_goes_to_another_server(self):
+        # Signed in to another server while this one held its answer (a
+        # server that isn't to be trusted): its 401 gets nothing, not the
+        # other server's token.
+        other = "http://other.example:7539"
+
+        def sign_in_there():
+            self.store.save(self.record(server=other, access_token="at-other", refresh_token="rt-other"))
+
+        sign_in_there()
+        with self.assertRaises(auth.SignedOut):
+            self.tokens.refreshed("at-1", self.server.url)
+        self.assertEqual(self.tokens.session(), (other, "at-other"))
+        # Nor when the other sign-in comes while the refresh is asked.
+        self.store.save(self.record())
+        self.server.during_refresh = sign_in_there
+        with self.assertRaises(auth.SignedOut):
+            self.tokens.refreshed("at-1", self.server.url)
+        self.assertEqual(self.tokens.session(), (other, "at-other"))
 
     @unittest.skipIf(os.name == "nt", "file modes are POSIX")
     def test_tokens_are_readable_by_this_user_only(self):
@@ -258,30 +278,30 @@ class ProofTest(unittest.TestCase):
         return [urllib.parse.urlsplit(r.path).path for r in self.server.server.requests]
 
     def test_the_server_proves_itself_once_before_the_token_goes(self):
-        self.assertEqual(self.tokens.access(), "at-1")
+        self.assertEqual(self.tokens.session()[1], "at-1")
         first = self.server.server.requests[0]
         self.assertEqual(first.path, "/api/server?challenge=%s&proof_id=17" % CHALLENGE)
         self.assertNotIn("authorization", first.headers)
-        self.assertEqual(self.tokens.access(), "at-1")
+        self.assertEqual(self.tokens.session()[1], "at-1")
         self.assertEqual(self.asked(), ["/api/server"])
 
     def test_it_proves_itself_again_after_half_an_hour_a_request_without_an_answer_or_a_wake(self):
-        self.tokens.access()
+        self.tokens.session()
         self.now += auth.PROOF_TTL - 1
-        self.tokens.access()
+        self.tokens.session()
         self.assertEqual(self.asked().count("/api/server"), 1)
         self.now += 1
-        self.tokens.access()
+        self.tokens.session()
         self.assertEqual(self.asked().count("/api/server"), 2)
         self.tokens.doubt()
-        self.tokens.access()
+        self.tokens.session()
         self.assertEqual(self.asked().count("/api/server"), 3)
         auth.network_may_have_changed()
-        self.tokens.access()
+        self.tokens.session()
         self.assertEqual(self.asked().count("/api/server"), 4)
         # A clock set back.
         self.now -= 60
-        self.tokens.access()
+        self.tokens.session()
         self.assertEqual(self.asked().count("/api/server"), 5)
 
     def test_another_device_at_the_address_gets_no_token(self):
@@ -297,51 +317,70 @@ class ProofTest(unittest.TestCase):
             with self.subTest(status=status, body=body):
                 self.server.answer = lambda query, status=status, body=body: support.answer(status, body)
                 with self.assertRaises(auth.NotYourServer) as refused:
-                    self.tokens.access()
+                    self.tokens.session()
                 self.assertEqual((refused.exception.status, refused.exception.code), (0, "another_device"))
                 with self.assertRaises(auth.NotYourServer):
-                    self.tokens.refreshed("at-1")
+                    self.tokens.refreshed("at-1", self.server.url)
         # A redirect, which could lead to the real server from anywhere, and a router's page prove nothing.
         for answer in ((302, {"Location": self.server.url + "/api/server"}, b""), (200, {"Content-Type": "text/html"}, b"<html>a router</html>")):
             with self.subTest(answer=answer):
                 self.server.answer = lambda query, answer=answer: answer
                 with self.assertRaises(auth.NotYourServer):
-                    self.tokens.access()
+                    self.tokens.session()
         self.assertEqual(set(self.asked()), {"/api/server"})
 
     def test_a_server_error_is_out_of_reach_not_another_device(self):
         self.server.answer = lambda query: support.answer(502, {"code": "bad_gateway"})
         with self.assertRaises(api.ApiError) as refused:
-            self.tokens.access()
+            self.tokens.session()
         self.assertNotIsInstance(refused.exception, auth.NotYourServer)
         self.assertEqual((refused.exception.status, refused.exception.code), (0, "unreachable"))
 
     def test_a_refresh_waits_for_a_proof_made_then_and_keeps_the_key(self):
-        self.tokens.access()
+        self.tokens.session()
         # An answer bringing another key doesn't replace the sign-in's.
         self.server.extra = {"server_id": ID, "proof_id": "18", "proof_key": OTHER_KEY}
-        self.assertEqual(self.tokens.refreshed("at-1"), "at-2")
+        self.assertEqual(self.tokens.refreshed("at-1", self.server.url), "at-2")
         self.assertEqual(self.asked(), ["/api/server", "/api/server", "/api/oauth/token"])
         self.assertEqual(auth.proof_of(self.store.load())["proof_key"], KEY)
 
     def test_a_token_about_to_expire_waits_for_one_proof_its_refreshs(self):
         self.now += 3600 - auth.REFRESH_MARGIN + 1
-        self.assertEqual(self.tokens.access(), "at-2")
+        self.assertEqual(self.tokens.session()[1], "at-2")
         self.assertEqual(self.asked(), ["/api/server", "/api/oauth/token"])
 
     def test_a_token_another_refresh_gave_goes_out_only_after_a_proof(self):
-        self.assertEqual(self.tokens.refreshed("at-0"), "at-1")
+        self.assertEqual(self.tokens.refreshed("at-0", self.server.url), "at-1")
         self.assertEqual(self.asked(), ["/api/server"])
+
+    def test_a_sign_in_made_during_a_refresh_waits_for_its_own_proof(self):
+        # The plugin signs in again while the service refreshes, and the
+        # device at the address can't prove the new sign-in's server: its
+        # token goes nowhere, whether it was about to expire or refused.
+        def sign_in_again():
+            self.store.save(self.record(sign_in="bb", access_token="at-new", refresh_token="rt-new"))
+            self.refuse()
+
+        self.server.during_refresh = sign_in_again
+        self.now += 3600 - auth.REFRESH_MARGIN + 1
+        with self.assertRaises(auth.NotYourServer):
+            self.tokens.session()
+        self.assertEqual(self.asked(), ["/api/server", "/api/oauth/token", "/api/oauth/revoke", "/api/server"])
+        self.server.answer = None
+        self.store.save(self.record(sign_in="c", access_token="at-3", refresh_token="rt-%d" % self.server.issued))
+        with self.assertRaises(auth.NotYourServer):
+            self.tokens.refreshed("at-3", self.server.url)
+        self.assertEqual(self.asked()[4:], ["/api/server", "/api/oauth/token", "/api/oauth/revoke", "/api/server"])
 
     def test_a_sign_in_from_before_gets_its_key_at_its_next_refresh(self):
         self.store.save(self.record(proof=None))
         self.server.extra = {"server_id": ID, "proof_id": "17", "proof_key": KEY}
-        self.assertEqual(self.tokens.refreshed("at-1"), "at-2")
+        self.assertEqual(self.tokens.refreshed("at-1", self.server.url), "at-2")
         self.assertEqual(self.asked(), ["/api/oauth/token"])
         self.assertEqual(auth.proof_of(self.store.load())["proof_key"], KEY)
 
     def test_a_profile_switch_and_its_pin_wait_for_a_proof_made_then(self):
-        self.tokens.access()
+        self.tokens.session()
         self.tokens.switch_profile(3, "1234")
         self.assertEqual(self.asked(), ["/api/server", "/api/server", "/api/oauth/token"])
         self.refuse()
@@ -362,9 +401,9 @@ class ProofTest(unittest.TestCase):
         self.assertTrue(auth.proves(self.record(proof=None), "pleyKodi/test"), "nothing to check")
 
     def test_another_sign_in_has_its_server_prove_itself_anew(self):
-        self.tokens.access()
+        self.tokens.session()
         self.store.save(self.record(sign_in="bb", access_token="at-99", refresh_token="rt-99"))
-        self.assertEqual(self.tokens.access(), "at-99")
+        self.assertEqual(self.tokens.session()[1], "at-99")
         self.assertEqual(self.asked().count("/api/server"), 2)
 
     def test_a_sign_in_keeps_the_key_its_tokens_came_with(self):
