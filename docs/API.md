@@ -1900,8 +1900,9 @@ URLs.
     (the file's time, before the person's subtitle sync), `width`×`height`
     at `x`, `y` of the plane, in order of time, never two at once.
   - `image` is the picture's address beside this one,
-    `subtitles-{index}-{start_ms}.png`: a PNG with transparency, made of
-    the track copied from around `start_ms` while it isn't whole.
+    `subtitles-{index}-{start_ms}.png?at=` with the list's `at`: a PNG with
+    transparency, made of the track as the list was while it isn't whole
+    (around `start_ms` without `at`).
   - It is made of the track's `.mks`, so `at` and the partial answers are
     as for it: while the track is copied, the cues so far (those around
     `at` first) with `X-Pley-Complete: 0`; ask again for the rest.

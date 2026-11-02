@@ -992,7 +992,8 @@ pub async fn keyed_media(
 /// as far as it is copied, from around `at` first (docs/API.md, "Keyed
 /// URLs"): `subtitles-{index}.json` its pictures as cues (when, where), with
 /// `X-Pley-Complete` as for the `.mks`; `subtitles-{index}-{start_ms}.png`
-/// the picture that shows from `start_ms`. `404` for anything else.
+/// the picture that shows from `start_ms`, with the `at` of the list that
+/// named it. `404` for anything else.
 async fn keyed_pictures(
     state: &AppState,
     user: &AuthUser,
@@ -1005,7 +1006,8 @@ async fn keyed_pictures(
         Some(index) => (index, None),
         None => {
             let (index, start) = name.strip_suffix(".png").and_then(|n| n.split_once('-')).ok_or_else(unknown)?;
-            (index, Some(start.parse::<i64>().map_err(|_| unknown())?))
+            let start = start.parse::<i64>().ok().filter(|start| (0..=MAX_AT_MS).contains(start));
+            (index, Some(start.ok_or_else(unknown)?))
         }
     };
     let index: i64 = index.parse().map_err(|_| unknown())?;
@@ -1016,16 +1018,17 @@ async fn keyed_pictures(
     if !pgs {
         return Err(AppError::not_found("no PGS subtitle track has this index"));
     }
-    // A picture is looked for around its own time: while the track is
-    // copied, the pictures copied so far are those around where it was
-    // asked for, which a list a player took them from was.
-    let at = start_ms.or(at);
+    // A picture is made of the track as its list was: while the track is
+    // copied, the transcoder answers the same place with the same pictures,
+    // where one asked around the picture's own time could start a read of
+    // its own. Without its list's `at`, around its own time.
+    let at = at.or(start_ms);
     let (mks, complete) = picture_track_so_far(state, user, &file, index, at).await?;
     // A film's track is tens of megabytes: read off the async threads.
     let made = tokio::task::spawn_blocking(move || {
         let pictures = crate::pgs::PgsPictures::read(&mks).ok_or_else(|| anyhow::anyhow!("not a PGS track"))?;
         let Some(start_ms) = start_ms else {
-            let cues = pictures.cues().into_iter().map(|c| PictureCueJson::of(c, index)).collect();
+            let cues = pictures.cues().into_iter().map(|c| PictureCueJson::of(c, index, at)).collect();
             let body = PictureCues { complete, width: pictures.width, height: pictures.height, cues };
             return Ok(Some((serde_json::to_vec(&body)?, "application/json")));
         };
@@ -1075,14 +1078,19 @@ struct PictureCueJson {
     y: u32,
     width: u32,
     height: u32,
-    /// The picture's name, beside this file's.
+    /// The picture's address, beside this file's: with the `at` this list
+    /// was asked for with, which it is made of the track around.
     image: String,
 }
 
 impl PictureCueJson {
-    fn of(cue: crate::pgs::PictureCue, index: i64) -> Self {
+    fn of(cue: crate::pgs::PictureCue, index: i64, at: Option<i64>) -> Self {
         let crate::pgs::PictureCue { start_ms, end_ms, x, y, width, height } = cue;
-        Self { start_ms, end_ms, x, y, width, height, image: format!("subtitles-{index}-{start_ms}.png") }
+        let image = match at {
+            Some(at) => format!("subtitles-{index}-{start_ms}.png?at={at}"),
+            None => format!("subtitles-{index}-{start_ms}.png"),
+        };
+        Self { start_ms, end_ms, x, y, width, height, image }
     }
 }
 

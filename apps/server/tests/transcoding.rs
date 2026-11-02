@@ -1367,7 +1367,8 @@ async fn pgs_subtitles_come_as_pictures_for_a_keyed_player() {
     };
 
     // Asked for with no token, as Roku's player asks: when and where each
-    // picture shows, and each picture beside it.
+    // picture shows, and each picture beside it, from where the list was
+    // asked for (to the second).
     let cues = bare("subtitles-3.json?at=500").await;
     assert_eq!(cues.status, StatusCode::OK, "{}", cues.text());
     assert_eq!(cues.headers[header::CONTENT_TYPE], "application/json");
@@ -1376,10 +1377,10 @@ async fn pgs_subtitles_come_as_pictures_for_a_keyed_player() {
     assert_eq!(
         cues.body,
         json!({"complete": true, "width": 1920, "height": 1080, "cues": [
-            {"start_ms": 1000, "end_ms": 3000, "x": 100, "y": 900, "width": 4, "height": 2, "image": "subtitles-3-1000.png"}
+            {"start_ms": 1000, "end_ms": 3000, "x": 100, "y": 900, "width": 4, "height": 2, "image": "subtitles-3-1000.png?at=0"}
         ]})
     );
-    let picture = bare("subtitles-3-1000.png").await;
+    let picture = bare("subtitles-3-1000.png?at=0").await;
     assert_eq!(picture.status, StatusCode::OK, "{}", picture.text());
     assert_eq!(picture.headers[header::CONTENT_TYPE], "image/png");
     let png = image::load_from_memory_with_format(&picture.bytes, image::ImageFormat::Png).unwrap().into_rgba8();
@@ -1387,10 +1388,16 @@ async fn pgs_subtitles_come_as_pictures_for_a_keyed_player() {
     assert!(png.pixels().all(|p| p.0 == [255, 255, 255, 255]));
     assert!(w.fake.tracks.lock().is_empty(), "from the cache");
 
-    // Text, a time no picture starts at, other names: none.
-    for missing in
-        ["subtitles-4.json", "subtitles-3-2000.png", "subtitles-x.json", "subtitles-3.txt", "subtitles-3-a.png"]
-    {
+    // Text, a time no picture starts at, times no file has, other names: none.
+    for missing in [
+        "subtitles-4.json",
+        "subtitles-3-2000.png",
+        "subtitles-3--5.png",
+        "subtitles-3-9223372036854775807.png",
+        "subtitles-x.json",
+        "subtitles-3.txt",
+        "subtitles-3-a.png",
+    ] {
         assert_eq!(bare(missing).await.status, StatusCode::NOT_FOUND, "{missing}");
     }
     // The key opens this session's file's only.
@@ -1409,12 +1416,15 @@ async fn pictures_for_a_keyed_player_are_copied_from_around_where_it_asks() {
     let folder = &url[..url.rfind('/').unwrap() + 1];
     let asked = |uri: String| async move { app.call(Method::GET, &uri, None, None, &[]).await };
     let from = || w.fake.tracks.lock().last().map(|r| (r.stream_index, r.from_ms));
-    // The list from where the player is; a picture from its own time, which
-    // is where the list it came from was copied around.
+    // The list from where the player is; a picture from where its list was,
+    // which the transcoder answers with the same pictures (one around its
+    // own time could start a read of its own).
     asked(format!("{folder}subtitles-3.json?at=5000")).await;
     assert_eq!(from(), Some((Some(3), Some(5_000))));
-    asked(format!("{folder}subtitles-3-61000.png")).await;
-    assert_eq!(from(), Some((Some(3), Some(61_000))));
+    let before = w.fake.tracks.lock().len();
+    asked(format!("{folder}subtitles-3-61000.png?at=5000")).await;
+    assert_eq!(w.fake.tracks.lock().len(), before + 1);
+    assert_eq!(from(), Some((Some(3), Some(5_000))));
 }
 
 /// The web app's report: version 1, with the picture subtitles it draws.
