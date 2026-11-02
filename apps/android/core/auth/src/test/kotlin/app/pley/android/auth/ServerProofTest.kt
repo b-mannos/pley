@@ -26,6 +26,9 @@ class ServerProofTest {
     private var now = 10_000_000L
     private val issuer by lazy { issuerOf(server) }
 
+    /** The address the proofs cover: the issuer, as the server reads it. */
+    private val address by lazy { app.pley.android.common.Addresses.origin(issuer)!! }
+
     private val key = ByteArray(32) { 1 }
     private val keyText = Base64.getUrlEncoder().withoutPadding().encodeToString(key)
     private val proof = ServerProof(SERVER_ID, "7", keyText)
@@ -33,7 +36,7 @@ class ServerProofTest {
     /** The challenges `/api/server` was asked, and what it answers to each. */
     private val challenges = mutableListOf<String>()
     private var answer: (challenge: String) -> MockResponse = { challenge ->
-        MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("proof", ServerProofs.proof(key, SERVER_ID, challenge)).toString())
+        MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("proof", ServerProofs.proof(key, SERVER_ID, address, challenge)).toString())
     }
     private val revokes = mutableListOf<String>()
     private var refreshes = 0
@@ -72,8 +75,8 @@ class ServerProofTest {
     fun theProofIsTheServersKnownAnswer() {
         // The same as the server's and the TVs' tests.
         assertEquals(
-            "-OpCw2gYEDYBr-d7wh4JEYd7CHzZ8nc7pTc_UlsqVas",
-            ServerProofs.proof(key, "0123456789abcdef0123456789abcdef01234567", "AAECAwQFBgcICQoLDA0ODw"),
+            "YwkvaCQfaIQCZkoOP5yOE3yR4xRKU5T5wYWz4b85SCM",
+            ServerProofs.proof(key, "0123456789abcdef0123456789abcdef01234567", "http://192.168.1.20:7539", "AAECAwQFBgcICQoLDA0ODw"),
         )
     }
 
@@ -107,8 +110,11 @@ class ServerProofTest {
         val before = savedTokens(issuer).copy(proof = proof)
         val answer = TokenResponse("a", 60, "r", "library")
         assertEquals(proof, answer.stored(issuer, "t", "r", now, before).proof)
+        // A sign-in's key never changes: an answer bringing another one doesn't replace it.
         val newer = ServerProof(SERVER_ID, "8", keyText)
-        assertEquals(newer, answer.copy(proof = newer).stored(issuer, "t", "r", now, before).proof)
+        assertEquals(proof, answer.copy(proof = newer).stored(issuer, "t", "r", now, before).proof)
+        // A sign-in without one gets it.
+        assertEquals(newer, answer.copy(proof = newer).stored(issuer, "t", "r", now, null).proof)
     }
 
     @Test
@@ -127,6 +133,16 @@ class ServerProofTest {
         tokens.accessToken()
         assertEquals(2, challenges.size)
         assertTrue(challenges[0] != challenges[1])
+    }
+
+    @Test
+    fun aRefreshHasTheServerProveItselfAnew() = runBlocking {
+        signedIn()
+        val tokens = tokens()
+        tokens.accessToken()
+        assertEquals(1, challenges.size)
+        tokens.refresh("pley_at_one")
+        assertEquals(2, challenges.size)
     }
 
     @Test
@@ -165,7 +181,7 @@ class ServerProofTest {
         val fresh = savedTokens(issuer).copy(accessToken = "pley_at_new", refreshToken = "pley_rt_new")
         val answerOf = TokenResponse("pley_at_new", 60, "pley_rt_new", fresh.scope)
         for (proves in listOf(false, true)) {
-            answer = { c -> MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("proof", ServerProofs.proof(if (proves) key else ByteArray(32), SERVER_ID, c)).toString()) }
+            answer = { c -> MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("proof", ServerProofs.proof(if (proves) key else ByteArray(32), SERVER_ID, address, c)).toString()) }
             signedIn()
             keepNewSignIn(endpointsClient(), tokens(), answerOf, fresh.scope, fresh)
             assertEquals(if (proves) listOf("pley_rt_one") else emptyList<String>(), revokes)
@@ -178,9 +194,9 @@ class ServerProofTest {
         val tokens = tokens()
         val wrong = listOf(
             // Another key.
-            { c: String -> MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("proof", ServerProofs.proof(ByteArray(32), SERVER_ID, c)).toString()) },
+            { c: String -> MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("proof", ServerProofs.proof(ByteArray(32), SERVER_ID, address, c)).toString()) },
             // Another server's id, with the proof made for it.
-            { c: String -> MockResponse().setBody(JSONObject().put("id", "other").put("proof", ServerProofs.proof(key, "other", c)).toString()) },
+            { c: String -> MockResponse().setBody(JSONObject().put("id", "other").put("proof", ServerProofs.proof(key, "other", address, c)).toString()) },
             // No proof: a server that doesn't know the challenge, or something else entirely.
             { _: String -> MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("name", "x").toString()) },
             { _: String -> MockResponse().setBody("<html>router</html>") },
@@ -212,7 +228,7 @@ class ServerProofTest {
         assertFalse(tokens.signedIn.value)
 
         // The server itself gets the revocation.
-        answer = { c -> MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("proof", ServerProofs.proof(key, SERVER_ID, c)).toString()) }
+        answer = { c -> MockResponse().setBody(JSONObject().put("id", SERVER_ID).put("proof", ServerProofs.proof(key, SERVER_ID, address, c)).toString()) }
         signedIn()
         tokens.signOut()
         assertEquals(listOf("pley_rt_one"), revokes)
@@ -226,20 +242,22 @@ class ServerProofTest {
     }
 
     @Test
-    fun aRefreshKeepsTheProofAndAProofCountsForTheRefresh() = runBlocking {
+    fun aRefreshKeepsItsKeyAndHasTheServerProveItselfAnew() = runBlocking {
         signedIn(expiresAt = now + 30_000)
         val tokens = tokens()
+        // The access token is about to end: a proof for it, and one of its
+        // own for the refresh token.
         assertEquals("pley_at_new1", tokens.accessToken())
-        assertEquals(1, challenges.size)
+        assertEquals(2, challenges.size)
         assertEquals(proof, store.load(issuer)!!.proof)
-        // A refresh that brings the key takes it.
+        // A refresh that brings another key doesn't replace the sign-in's.
         val newer = ServerProof(SERVER_ID, "7", Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32) { 9 }))
         refreshAnswer = {
             JSONObject(tokenAnswer("pley_at_new${++refreshes}", "pley_rt_new$refreshes"))
                 .put("server_id", newer.serverId).put("proof_id", newer.proofId).put("proof_key", newer.proofKey).toString()
         }
         tokens.refresh("pley_at_new1")
-        assertEquals(newer, store.load(issuer)!!.proof)
+        assertEquals(proof, store.load(issuer)!!.proof)
     }
 
     @Test

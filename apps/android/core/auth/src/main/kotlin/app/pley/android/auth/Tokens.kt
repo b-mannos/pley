@@ -25,7 +25,11 @@ data class TokenResponse(
 ) {
     override fun toString(): String = "TokenResponse(expiresIn=$expiresIn, scope=$scope)"
 
-    /** The tokens as kept; [before]'s proof stays when the answer has none (a refresh is the same sign-in). */
+    /**
+     * The tokens as kept. A refresh or a profile switch is the same sign-in,
+     * whose key never changes: [before]'s proof stays, whatever the answer
+     * says, and an answer brings one only to a sign-in without.
+     */
     fun stored(
         issuer: String,
         tokenEndpoint: String,
@@ -41,7 +45,7 @@ data class TokenResponse(
             accessExpiresAt = now + expiresIn * 1000,
             refreshToken = refreshToken,
             scope = scope,
-            proof = proof ?: before?.proof,
+            proof = before?.proof ?: proof,
         )
 
     companion object {
@@ -169,7 +173,8 @@ class Tokens(
         val tokens = load() ?: throw SignedOutException()
         if (tokens.accessToken != stale && tokens.accessUsable(clock())) return@withLock tokens.accessToken
         val refresh = tokens.refreshToken ?: run { signedOut() }
-        proved(tokens)
+        // The refresh token goes only to a server that proves itself now.
+        proved(tokens, now = true)
         val answer = try {
             TokenEndpoint.post(
                 http,
@@ -219,7 +224,7 @@ class Tokens(
             "profile" to profile.toString(),
         )
         if (pin != null) form += "pin" to pin
-        proved(tokens)
+        proved(tokens, now = true)
         val answer = try {
             TokenEndpoint.post(http, tokens.tokenEndpoint, form)
         } catch (e: TokenException) {
@@ -263,8 +268,10 @@ class Tokens(
      * token leaves before. A
      * sign-in from a server without proofs has nothing to check.
      */
-    private suspend fun proved(tokens: StoredTokens) {
+    private suspend fun proved(tokens: StoredTokens, now: Boolean = false) {
         val proof = tokens.proof ?: return
+        // A refresh token or a PIN waits for a proof of its own.
+        if (now) provedAt = null
         if (recentlyProved()) return
         proofMutex.withLock {
             // Proved by another caller meanwhile.

@@ -460,13 +460,15 @@ internal class OAuth(private val state: State) {
     private fun proofKey(grantId: Long): ByteArray = hmac(proofRoot, "grant $grantId")
 
     /**
-     * `/api/server`'s `proof` of [challenge] under grant [proofId]'s key;
-     * `null` for one that isn't written as it should be (a 400).
+     * `/api/server`'s `proof` of [challenge] under grant [proofId]'s key, for
+     * the address [call] came to; `null` for one that isn't written as it
+     * should be (a 400).
      */
-    fun proof(challenge: String, proofId: String): String? {
+    fun proof(call: Call, challenge: String, proofId: String): String? {
         if (!CHALLENGE.matches(challenge)) return null
         val grantId = proofId.takeIf { PROOF_ID.matches(it) }?.toLongOrNull() ?: return null
-        return base64url(hmac(proofKey(grantId), "pley-server-proof\n$serverId\n$challenge"))
+        val address = issuer(call) ?: return null
+        return base64url(hmac(proofKey(grantId), "pley-server-proof\n$serverId\n$address\n$challenge"))
     }
 
     private fun hmac(key: ByteArray, text: String): ByteArray =

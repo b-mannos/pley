@@ -83,7 +83,9 @@ class OAuthTest {
         val answer = app.get("/api/server?challenge=$asked&proof_id=$proofId")
         assertEquals("no-store", answer.header("Cache-Control"))
         val mac = javax.crypto.Mac.getInstance("HmacSHA256").apply { init(javax.crypto.spec.SecretKeySpec(key, "HmacSHA256")) }
-        val expected = Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal("pley-server-proof\n$serverId\n$asked".toByteArray()))
+        // The proof covers the address it was asked at, the issuer.
+        val address = app.get("/.well-known/oauth-authorization-server").field("issuer")
+        val expected = Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal("pley-server-proof\n$serverId\n$address\n$asked".toByteArray()))
         assertEquals(expected, answer.field("proof"))
         // The same key at every refresh.
         val refreshed = app.form("/api/oauth/token", "grant_type" to "refresh_token", "refresh_token" to tokens.field("refresh_token")!!, "client_id" to clientId)

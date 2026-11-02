@@ -366,7 +366,7 @@ internal class BrowseRoutes(private val s: State) {
         val challenge = call.query("challenge")
         val proofId = call.query("proof_id")
         if (challenge == null && proofId == null) return Reply.json(JsonObject(info + ("id" to JsonPrimitive(s.oauth.serverId))).toString())
-        val proof = if (challenge != null && proofId != null) s.oauth.proof(challenge, proofId) else null
+        val proof = if (challenge != null && proofId != null) s.oauth.proof(call, challenge, proofId) else null
         proof ?: return Reply.error(400, "bad_request", "challenge and proof_id go together, each written as docs/API.md says")
         val answer = info + ("id" to JsonPrimitive(s.oauth.serverId)) + ("proof" to JsonPrimitive(proof))
         return Reply.json(JsonObject(answer).toString(), headers = mapOf("Cache-Control" to "no-store"))

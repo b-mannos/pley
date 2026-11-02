@@ -3,6 +3,7 @@ package app.pley.android.auth
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
+import app.pley.android.common.Addresses
 import app.pley.android.common.UserFacing
 import java.io.IOException
 import java.security.MessageDigest
@@ -102,11 +103,11 @@ object ServerProofs {
     /** [n] random bytes from the system. */
     fun randomBytes(n: Int): ByteArray = ByteArray(n).also(secureRandom::nextBytes)
 
-    /** The proof of [serverId] for [challenge] under [key], in base64url without padding. */
-    fun proof(key: ByteArray, serverId: String, challenge: String): String {
+    /** The proof of [serverId], asked at [address], for [challenge] under [key], in base64url without padding. */
+    fun proof(key: ByteArray, serverId: String, address: String, challenge: String): String {
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(key, "HmacSHA256"))
-        val digest = mac.doFinal("pley-server-proof\n$serverId\n$challenge".toByteArray(Charsets.UTF_8))
+        val digest = mac.doFinal("pley-server-proof\n$serverId\n$address\n$challenge".toByteArray(Charsets.UTF_8))
         return Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
     }
 
@@ -119,8 +120,10 @@ object ServerProofs {
     suspend fun prove(http: OkHttpClient, issuer: String, proof: ServerProof, random: (Int) -> ByteArray) {
         val key = ServerProof.keyBytes(proof.proofKey) ?: throw NotYourServerException()
         val challenge = Base64.getUrlEncoder().withoutPadding().encodeToString(random(CHALLENGE_BYTES))
+        // The address as the server reads it from the request: the proof covers it.
+        val address = Addresses.origin(issuer) ?: issuer.trimEnd('/')
         val request = Request.Builder()
-            .url("$issuer/api/server?challenge=$challenge&proof_id=${proof.proofId}")
+            .url("$address/api/server?challenge=$challenge&proof_id=${proof.proofId}")
             .header("Accept", "application/json")
             .build()
         val text = withContext(Dispatchers.IO) {
@@ -138,7 +141,7 @@ object ServerProofs {
         val id = answer.opt("id") as? String
         val given = answer.opt("proof") as? String
         if (id != proof.serverId || given == null) throw NotYourServerException()
-        val expected = proof(key, proof.serverId, challenge)
+        val expected = proof(key, proof.serverId, address, challenge)
         if (!MessageDigest.isEqual(given.toByteArray(Charsets.UTF_8), expected.toByteArray(Charsets.UTF_8))) {
             throw NotYourServerException()
         }
