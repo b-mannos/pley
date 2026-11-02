@@ -173,9 +173,28 @@ describe("fetchPictures", () => {
     const file = new Uint8Array(mks([[1000, 2000], [5000, 6000]]));
     const have = file.slice(0, 50);
     answer(new Response(file.slice(50), { status: 206, headers: { "Content-Range": `bytes 50-${file.length - 1}/${file.length}`, "X-Pley-Complete": "1" } }));
-    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "whole" });
+    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "anew" });
     answer(new Response(null, { status: 416, headers: { "X-Pley-Complete": "1" } }));
-    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "whole" });
+    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "anew" });
+  });
+
+  it("asks for all of another file when one that came whole has more, and takes the rest of one still being written", async () => {
+    const have = new Uint8Array(mks([[1000, 2000]]));
+    const other = new Uint8Array(mks([[1000, 2000], [5000, 6000]]));
+    const partial = { status: 206, headers: { "Content-Range": `bytes ${have.length}-${other.length - 1}/*`, "X-Pley-Complete": "0" } };
+    answer(new Response(other.slice(have.length), partial));
+    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "anew" });
+
+    // FFmpeg's copy as it is made: its Segment's size isn't written yet.
+    const growing = (file: Uint8Array) => {
+      const out = file.slice();
+      out.set([0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], 12 + out[11]! + 4);
+      return out;
+    };
+    const file = growing(other);
+    answer(new Response(file.slice(have.length), partial));
+    const more = await fetchPictures("/t.mks", new AbortController().signal, file.slice(0, have.length), true);
+    expect(more.kind === "track" && more.subs.sampleAt(5500)).toBe(2);
   });
 
   it("keeps nothing of a partial answer without a picture: the next may be another file", async () => {

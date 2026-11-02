@@ -320,7 +320,7 @@ its palette, DVB) next to an HLS stream.
   FFmpeg has written within about 2 s, up to its last whole cluster. Every
   answer is a file players read (the track's header at least). A read
   through the Cues that fails past the blocks around the player answers
-  with what it read while FFmpeg copies the track.
+  with those while FFmpeg copies the track.
 - Whole tracks are cached in `subtitles/`.
 
 ### Background work

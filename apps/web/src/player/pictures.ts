@@ -6,7 +6,7 @@
  * frame on screen. Direct play, repackaged streams, Dolby Vision and HDR
  * all stay as they are.
  */
-import { readPictureTrack } from "pley-picture-subtitles/mks";
+import { matroskaEnd, readPictureTrack } from "pley-picture-subtitles/mks";
 import { PictureSubtitles } from "pley-picture-subtitles/picture-track";
 import type { PictureFrame } from "pley-picture-subtitles/pictures";
 
@@ -123,8 +123,8 @@ export type PictureLoad =
   | { kind: "failed" }
   /** Too little of a file still being made to read yet, or nothing new. */
   | { kind: "early"; bytes: Uint8Array | null }
-  /** Whole now, but what came before may not be its start: to ask for all of it. */
-  | { kind: "whole" };
+  /** What came before may not be the start of the file now (whole now, or another file): to ask for all of it. */
+  | { kind: "anew" };
 
 /**
  * One request for the track at `url`. A partial answer (`X-Pley-Complete:
@@ -133,7 +133,9 @@ export type PictureLoad =
  * and a server that answers with the whole file again is fine too. Once
  * the track is whole, what came before may not be its start: the pictures
  * around where the player is come first, and a file being made has its
- * sizes written as it is finished.
+ * sizes written as it is finished. Nor is it when a file that came whole
+ * (its size written: the pictures around the player, a file of their own)
+ * has more: that is another file.
  */
 export async function fetchPictures(url: string, signal: AbortSignal, have: Uint8Array | null = null, again = false): Promise<PictureLoad> {
   const headers: Record<string, string> = { Accept: "video/x-matroska" };
@@ -157,11 +159,17 @@ export async function fetchPictures(url: string, signal: AbortSignal, have: Uint
   // Nothing past what came before, of a track that is whole now (in so many words).
   if (have && (res.ok ? complete : res.status === 416 && said === "1")) {
     void res.body?.cancel();
-    return { kind: "whole" };
+    return { kind: "anew" };
   }
   // Nothing past what came before.
   if (res.status === 416 && have) return { kind: "early", bytes: have };
   if (!res.ok) return { kind: "failed" };
+  // More past a file that came whole: another file, not the rest of it.
+  const end = have && matroskaEnd(have);
+  if (res.status === 206 && have && end !== null && end <= have.length) {
+    void res.body?.cancel();
+    return { kind: "anew" };
+  }
   let bytes: Uint8Array;
   try {
     const body = new Uint8Array(await res.arrayBuffer());
@@ -223,7 +231,7 @@ export function loadPictures(url: string, hooks: PictureHooks, atMs = 0): () => 
         if (abort.signal.aborted) return;
         if (got.kind === "unavailable") hooks.onUnavailable();
         else if (got.kind === "failed") hooks.onFailed();
-        else if (got.kind === "whole") load(null, true);
+        else if (got.kind === "anew") load(null, true);
         else {
           if (got.kind === "track") hooks.onTrack(got.subs);
           if (got.kind === "track" && got.complete) wholeTracks.add(url);
