@@ -1679,8 +1679,9 @@ removed or reordered (`400`).
     its last whole cluster. A copy through the Cues that fails past the
     pictures around `at` keeps answering with those until it is whole.
   - The copy starts as a playback starts whose player draws the track
-    (`picture_subtitles_sideload`, the track picked or the profile's
-    choice), rather than when it asks. What isn't around `at` waits for the
+    (`picture_subtitles_sideload`, and `picture_subtitles_sideload_codecs`
+    when sent; the track picked or the profile's choice), rather than when
+    it asks. What isn't around `at` waits for the
     playback's own start to be over. Only a track in the file, and only
     for a stream: a file next to the media is copied when the player asks,
     since its copy reads only that file.
@@ -2033,6 +2034,9 @@ reports still send the version 1 fields: `containers` always counts;
   `/api/files/{id}/subtitles/{index}.mks` instead: it asks for no
   `subtitle_index`, so nothing is burned in (and HDR can stay HDR). A
   `subtitle_index` it does send is burned in as for any player.
+  `picture_subtitles_sideload_codecs` names the codecs it shows so, when
+  not all of `subtitle_codecs`' pictures (Kodi: PGS alone); the server
+  copies only those out of the file as the stream starts.
 - **Converting.** Video is converted to H.264, no bigger than the player's
   largest H.264 entry (a 4K file is made in 1080p for a 1080p stick, even
   when a higher quality is picked). HDR video the player can show stays

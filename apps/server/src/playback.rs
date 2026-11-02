@@ -1459,12 +1459,16 @@ pub fn picture_to_prepare(
     (drawn && streamed && decision.burn_index != Some(index)).then_some(index)
 }
 
-/// Whether a player that draws picture subtitles itself may want one of
-/// these streams' (see [`picture_to_prepare`]).
+/// Whether [`picture_to_prepare`] may pick one of these streams for a
+/// player that draws picture subtitles itself: one in the file, in a codec
+/// it draws.
 pub fn may_draw_pictures(streams: &[MediaStream], caps: &Caps) -> bool {
-    streams
-        .iter()
-        .any(|s| s.kind == StreamKind::Subtitle && !s.text_based.unwrap_or(true) && caps.sideloads_pictures(&s.codec))
+    streams.iter().any(|s| {
+        s.kind == StreamKind::Subtitle
+            && !s.external
+            && !s.text_based.unwrap_or(true)
+            && caps.sideloads_pictures(&s.codec)
+    })
 }
 
 pub fn subtitle_tracks(file_id: i64, streams: &[MediaStream]) -> Vec<SubtitleTrack> {
@@ -2975,6 +2979,8 @@ mod tests {
         // reads only that file.
         assert_eq!(prepared(&direct, Some(1000)), (Method::Direct, None));
         assert_eq!(prepared(&req, Some(1000)), (Method::Remux, None));
+        let next_to_it: Vec<_> = streams.iter().filter(|s| s.index != 9).cloned().collect();
+        assert!(!may_draw_pictures(&next_to_it, &req.caps));
         // Named by the player: burned in, nothing to prepare.
         let mut burn = req.clone();
         burn.subtitle_index = Some(9);
