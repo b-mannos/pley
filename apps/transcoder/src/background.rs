@@ -49,11 +49,12 @@ pub const AFTER_TRANSCODE: Duration = Duration::from_secs(5);
 /// Background work waits this long after the last read of picture subtitles
 /// ends: a player's next ask comes soon.
 pub const AFTER_PICTURES: Duration = Duration::from_secs(2);
-/// The longest a read of picture subtitles holds background work: the
-/// pictures a player waits for come in seconds, and the rest of a big
-/// file's track on a slow share can take minutes, which seek previews
-/// needn't wait out.
-pub const MAX_PICTURES: Duration = Duration::from_secs(60);
+/// The longest a read of picture subtitles holds background work, its tail
+/// included: a minute of reading, and the playback start it may wait for
+/// ([`MAX_START`]). The pictures a player waits for come in seconds; the rest
+/// of a big file's track on a slow share can take minutes, which seek
+/// previews needn't wait out.
+pub const MAX_PICTURES: Duration = Duration::from_secs(90);
 
 #[derive(Default)]
 struct State {
@@ -291,9 +292,11 @@ impl Drop for ReadingPictures {
     fn drop(&mut self) {
         let mut state = self.background.state.lock();
         let now = Instant::now();
-        // One that held all it may has nothing more to hold as it ends.
-        if state.picture_reads.remove(&self.id).is_some_and(|until| until > now) {
-            state.pictures_read_until = Some(now + AFTER_PICTURES);
+        // Its tail stays within what it may hold: one that held all it may
+        // has nothing more to hold as it ends.
+        if let Some(until) = state.picture_reads.remove(&self.id).filter(|until| *until > now) {
+            let tail = (now + AFTER_PICTURES).min(until);
+            state.pictures_read_until = Some(state.pictures_read_until.map_or(tail, |held| held.max(tail)));
         }
         drop(state);
         self.background.changed.send_replace(());
@@ -493,7 +496,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn picture_reads_hold_background_work_until_a_moment_after_they_end_a_minute_at_most() {
+    async fn picture_reads_hold_background_work_until_a_moment_after_they_end_for_a_while_at_most() {
         let bg = Background::new();
         let around_one_player = bg.pictures();
         assert!(bg.held());
@@ -514,14 +517,33 @@ mod tests {
         waiting.await.unwrap();
         assert_eq!(ended.elapsed().as_secs(), AFTER_PICTURES.as_secs(), "the next read comes soon");
         assert!(!bg.held());
-        // A read that goes on, on a slow share: a minute at most, and nothing
-        // more as it ends.
+        // A read that goes on, on a slow share: for a while at most, and
+        // nothing more as it ends.
         let slow = bg.pictures();
         let started = Instant::now();
-        bg.wait().await;
+        tokio::time::timeout(MAX_PICTURES * 2, bg.wait()).await.expect("not held for ever");
         assert_eq!(started.elapsed().as_secs(), MAX_PICTURES.as_secs());
         drop(slow);
         assert!(!bg.held());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_picture_read_that_ends_near_its_limit_holds_background_work_up_to_it() {
+        let bg = Background::new();
+        let late = bg.pictures();
+        tokio::time::sleep(MAX_PICTURES - Duration::from_secs(1)).await;
+        drop(late);
+        let ended = Instant::now();
+        bg.wait().await;
+        assert_eq!(ended.elapsed().as_secs(), 1, "not past it");
+        // Nor does it cut another read's moment short.
+        let late = bg.pictures();
+        tokio::time::sleep(MAX_PICTURES - Duration::from_secs(1)).await;
+        drop(bg.pictures());
+        drop(late);
+        let ended = Instant::now();
+        bg.wait().await;
+        assert_eq!(ended.elapsed().as_secs(), AFTER_PICTURES.as_secs());
     }
 
     #[cfg(any(windows, target_os = "linux"))]

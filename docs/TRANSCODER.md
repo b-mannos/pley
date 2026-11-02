@@ -1139,8 +1139,8 @@ While any transcode slot is in use (a job's FFmpeg, even paused far ahead, or
 a conversion), the same runs also wait and pause, until 5 s after the last one
 ends. So they do while picture subtitles a player waits for are read through
 a file's Cues (those around where it is, those at a seek, or the rest of the
-track), until 2 s after the last read ends, and for a minute at most of each
-read: on a share's disks each block is a seek, and a seek preview's FFmpeg
+track), until 2 s after the last read ends, and 90 s at most from the start
+of each: on a share's disks each block is a seek, and a seek preview's FFmpeg
 reading a remux beside them makes every one of them wait, while the rest of a
 big file's track can take minutes, which the runs needn't wait out. Probes
 and reading ahead wait for playback starts only.
