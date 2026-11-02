@@ -355,7 +355,10 @@ and field reports:
   Vorbis, PCM. **No DTS**, decoded or passed through. E-AC-3 with Atmos
   reaches a receiver when the TV's digital output passes Dolby; apps can
   read that setting (`tizen.tvaudiocontrol.getOutputMode()`) but not change
-  it. Apps reportedly can't pass TrueHD over eARC.
+  it. TrueHD doesn't leave an app: on a 2025 S95F the native player lists
+  a file's audio tracks without its TrueHD, and the E-AC-3 (Atmos) beside it
+  plays instead. The native app switches to a track by its place in the
+  player's list, once the player is ready, and Info shows the one playing.
 - **`<video>` and MSE** stop H.264 at 1080p; 4K and 8K need AVPlay.
 - **AVPlay sends no request headers** but a cookie and a User-Agent, so
   the app plays from [keyed addresses](API.md#keyed-urls).

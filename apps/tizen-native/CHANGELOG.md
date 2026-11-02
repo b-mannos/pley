@@ -240,6 +240,10 @@ It has no releases yet: it is built and installed by hand
 
 ### Fixed
 
+- A film's audio track, chosen or saved, plays from the start: it was asked
+  for before the TV's player was ready, and the first track played. Beside a
+  TrueHD track the TV leaves out, the right track is chosen, and Info shows
+  the track playing.
 - Settings' Always start as no longer starts the TV as a profile with a
   PIN without it: the start opens on that profile's PIN pad, and Back shows
   the other profiles. While the TV doesn't know whether the profile it was
