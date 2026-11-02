@@ -210,18 +210,33 @@ fn default_work_dir() -> PathBuf {
 /// downloads) to this account: on Unix, a folder another user made first
 /// can't be taken over; on Windows, a folder on another drive doesn't let
 /// every account in, as a drive's own permissions do.
-fn keep_private(dir: &Path) -> anyhow::Result<()> {
+///
+/// Unless `through_link`, a link or a junction at `dir` is refused, never
+/// followed: the permissions are set on the folder opened, once it is
+/// known to be the one there, so one put back meanwhile changes nothing
+/// it leads to.
+fn keep_private(dir: &Path, through_link: bool) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(|err| {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let refused = |err: std::io::Error| {
             anyhow::anyhow!("{} isn't this account's to use ({err}): choose a folder with --work-dir", dir.display())
-        })?;
+        };
+        let folder = std::fs::File::open(dir).map_err(refused)?;
+        if !through_link {
+            let (opened, there) = (folder.metadata()?, std::fs::symlink_metadata(dir)?);
+            anyhow::ensure!(
+                !there.file_type().is_symlink() && (opened.dev(), opened.ino()) == (there.dev(), there.ino()),
+                "{} is a link someone else put there: choose another folder",
+                dir.display()
+            );
+        }
+        folder.set_permissions(std::fs::Permissions::from_mode(0o700)).map_err(refused)?;
     }
     // A drive that keeps no permissions (FAT, some shares) goes without:
     // said once for each folder, though segments' are kept so for each job.
     #[cfg(windows)]
-    if let Err(err) = windows_private::keep(dir) {
+    if let Err(err) = windows_private::keep(dir, through_link) {
         static TOLD: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
         let mut told = TOLD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !told.iter().any(|told| told == dir) {
@@ -230,7 +245,7 @@ fn keep_private(dir: &Path) -> anyhow::Result<()> {
         }
     }
     #[cfg(not(any(unix, windows)))]
-    let _ = dir;
+    let _ = (dir, through_link);
     Ok(())
 }
 
@@ -241,8 +256,9 @@ fn keep_private(dir: &Path) -> anyhow::Result<()> {
 fn own_folder(dir: &Path) -> anyhow::Result<()> {
     unlink(dir)?;
     std::fs::create_dir_all(dir)?;
-    keep_private(dir)?;
-    // One put back meanwhile is refused rather than used.
+    keep_private(dir, false)?;
+    // One put back meanwhile is refused rather than used (on Windows
+    // keep_private only warns of it).
     anyhow::ensure!(!is_link(dir), "{} is a link someone else put there: choose another folder", dir.display());
     Ok(())
 }
@@ -274,10 +290,8 @@ fn shared_work_dir(work_dir: &Path, own: &Path) -> bool {
     }
     #[cfg(windows)]
     {
-        use std::os::windows::ffi::OsStrExt;
         let _ = own;
-        let path: Vec<u16> = work_dir.as_os_str().encode_wide().chain(Some(0)).collect();
-        !windows_private::is_protected(&path).unwrap_or(false)
+        !windows_private::is_protected(work_dir).unwrap_or(false)
     }
     #[cfg(not(any(unix, windows)))]
     {
@@ -292,28 +306,35 @@ fn shared_work_dir(work_dir: &Path, own: &Path) -> bool {
 /// left as it is.
 #[cfg(windows)]
 mod windows_private {
+    use std::fs::File;
     use std::io;
-    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    use std::os::windows::io::AsRawHandle;
     use std::path::Path;
     use std::ptr::null_mut;
 
     use windows_sys::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE, LocalFree};
     use windows_sys::Win32::Security::Authorization::{
-        ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW,
-        SDDL_REVISION_1, SE_FILE_OBJECT, SetNamedSecurityInfoW,
+        ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1,
+        SE_FILE_OBJECT, SetSecurityInfo,
     };
     use windows_sys::Win32::Security::{
         ACL, DACL_SECURITY_INFORMATION, GetSecurityDescriptorControl, GetSecurityDescriptorDacl, GetTokenInformation,
         PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
         TokenUser,
     };
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, READ_CONTROL, WRITE_DAC,
+    };
     use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
-    pub fn keep(dir: &Path) -> io::Result<()> {
-        let path: Vec<u16> = dir.as_os_str().encode_wide().chain(Some(0)).collect();
-        if is_protected(&path)? {
+    pub fn keep(dir: &Path, through_link: bool) -> io::Result<()> {
+        if is_protected_folder(&open(dir, READ_CONTROL, through_link)?)? {
             return Ok(());
         }
+        // Opened again to change it, and checked again: the folder whose
+        // permissions are set is the one there, never where a link leads.
+        let folder = open(dir, READ_CONTROL | WRITE_DAC, through_link)?;
         let sddl = format!("D:P(A;OICI;FA;;;{})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", own_sid()?);
         let sddl: Vec<u16> = sddl.encode_utf16().chain(Some(0)).collect();
         let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
@@ -335,8 +356,8 @@ mod windows_private {
             if GetSecurityDescriptorDacl(descriptor, &mut present, &mut dacl, &mut defaulted) == 0 {
                 Err(io::Error::last_os_error())
             } else {
-                Ok(SetNamedSecurityInfoW(
-                    path.as_ptr(),
+                Ok(SetSecurityInfo(
+                    folder.as_raw_handle(),
                     SE_FILE_OBJECT,
                     DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
                     null_mut(),
@@ -354,14 +375,29 @@ mod windows_private {
         }
     }
 
-    /// Whether the folder `path` (NUL-terminated) has permissions of its
-    /// own, not those of the folder it is in.
-    pub(super) fn is_protected(path: &[u16]) -> io::Result<bool> {
+    /// The folder `dir`, opened for `access`. Unless `through_link`, a link
+    /// or a junction there is opened itself, and refused.
+    fn open(dir: &Path, access: u32, through_link: bool) -> io::Result<File> {
+        let flags = if through_link { 0 } else { FILE_FLAG_OPEN_REPARSE_POINT };
+        let folder = File::options().access_mode(access).custom_flags(FILE_FLAG_BACKUP_SEMANTICS | flags).open(dir)?;
+        if !through_link && folder.metadata()?.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(io::Error::other("it is a link someone else put there"));
+        }
+        Ok(folder)
+    }
+
+    /// Whether the folder `dir` has permissions of its own, not those of
+    /// the folder it is in.
+    pub(super) fn is_protected(dir: &Path) -> io::Result<bool> {
+        is_protected_folder(&open(dir, READ_CONTROL, true)?)
+    }
+
+    fn is_protected_folder(folder: &File) -> io::Result<bool> {
         let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
-        // SAFETY: a NUL-terminated path; Windows allocates the descriptor, freed below.
+        // SAFETY: an open handle; Windows allocates the descriptor, freed below.
         let status = unsafe {
-            GetNamedSecurityInfoW(
-                path.as_ptr(),
+            GetSecurityInfo(
+                folder.as_raw_handle(),
                 SE_FILE_OBJECT,
                 DACL_SECURITY_INFORMATION,
                 null_mut(),
@@ -430,7 +466,7 @@ fn prepare_work_dir(work_dir: &Path, default: bool) -> anyhow::Result<PathBuf> {
     let made = !work_dir.exists();
     std::fs::create_dir_all(work_dir)?;
     if made || default {
-        keep_private(work_dir)?;
+        keep_private(work_dir, true)?;
     }
     let jobs_dir = work_dir.join("jobs");
     let _ = std::fs::remove_dir_all(&jobs_dir);
@@ -453,9 +489,15 @@ fn prepare_work_dir(work_dir: &Path, default: bool) -> anyhow::Result<PathBuf> {
             unlink(&folder)?;
         }
         // One that can't be made (a file in the way) goes without, as each
-        // cache does by itself.
+        // cache does by itself. One put back meanwhile is refused, as in
+        // own_folder.
         if std::fs::create_dir_all(&folder).is_ok() {
-            keep_private(&folder)?;
+            keep_private(&folder, !shared)?;
+            anyhow::ensure!(
+                !shared || !is_link(&folder),
+                "{} is a link someone else put there: choose another folder",
+                folder.display()
+            );
         }
     }
     Ok(jobs_dir)
@@ -762,6 +804,12 @@ mod tests {
             assert!(meta.is_dir() && !meta.file_type().is_symlink(), "{folder}");
         }
         assert!(elsewhere.join("keep.txt").exists() && mode(&elsewhere) == 0o755);
+        // One put back between making a folder and keeping it private is
+        // refused, and what it leads to keeps its permissions.
+        let link = shared.join("put-back");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        assert!(keep_private(&link, false).is_err());
+        assert_eq!(mode(&elsewhere), 0o755);
         // One it makes is its own, as is the default one.
         let made = dir.path().join("made");
         prepare_work_dir(&made, false).unwrap();
@@ -790,7 +838,7 @@ mod tests {
             .unwrap();
         assert!(status.success());
         let jobs = prepare_work_dir(&shared, false).unwrap();
-        let own = |path: &Path| windows_private::is_protected(&wide(path)).unwrap();
+        let own = |path: &Path| windows_private::is_protected(path).unwrap();
         assert!(!own(&shared));
         assert!(own(&jobs) && own(&shared.join("conversions")), "what it keeps there is its own");
         assert!(own(&shared.join("live")), "live channels' segments too");
@@ -825,6 +873,21 @@ mod tests {
             assert!(meta.is_dir() && !meta.file_type().is_symlink(), "{folder}");
         }
         assert!(elsewhere.join("keep.txt").exists() && !own(&elsewhere));
+        // One put back between making a folder and keeping it private is
+        // refused, and what it leads to keeps its permissions.
+        let link = shared.join("put-back");
+        let status = std::process::Command::new("cmd")
+            .arg("/C")
+            .arg("mklink")
+            .arg("/J")
+            .arg(&link)
+            .arg(&elsewhere)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert!(windows_private::keep(&link, false).is_err());
+        assert!(!own(&elsewhere));
         // In one it made, a cache that is a junction is this account's, kept
         // on another disk say: it stays.
         std::fs::remove_dir_all(made.join("trickplay")).unwrap();
@@ -840,12 +903,6 @@ mod tests {
         assert!(status.success());
         prepare_work_dir(&made, false).unwrap();
         assert!(std::fs::symlink_metadata(made.join("trickplay")).unwrap().file_type().is_symlink());
-    }
-
-    #[cfg(windows)]
-    fn wide(path: &Path) -> Vec<u16> {
-        use std::os::windows::ffi::OsStrExt;
-        path.as_os_str().encode_wide().chain(Some(0)).collect()
     }
 
     #[test]

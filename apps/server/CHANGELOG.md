@@ -89,7 +89,8 @@ describes how they are made.
   what played, or swap a segment. A link or a junction another account put
   in place of one of the transcoder's folders there is taken away rather
   than followed: the hourly clean-up of its caches could delete whatever
-  it led to.
+  it led to. One put back while the transcoder makes the folder is
+  refused, and what it leads to keeps its permissions.
 - While the transcoder isn't running, people and apps are told just that,
   no longer its last words as it went, which named files and accounts:
   administrators still find them in Settings → Transcoder and the log.

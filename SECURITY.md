@@ -285,7 +285,10 @@ Apps sign in on Pley's own page with OAuth 2.1.
   downloads, its caches). In a work folder other accounts may write in, a
   link or a junction in place of one of those is taken away at start rather
   than followed, segments' folders are checked again before each use, and
-  the caches' clean-up never prunes one that becomes a link later.
+  the caches' clean-up never prunes one that becomes a link later. A
+  folder's permissions are set on the folder opened, once it is known to be
+  the one there, so a link put back meanwhile is refused and what it leads
+  to keeps its own.
 - Segments kept in memory go in a folder of `/dev/shm` that it makes itself,
   private to its account. If another account took that name first, it
   refuses it and the segments go to disk.
