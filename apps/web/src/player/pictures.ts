@@ -238,17 +238,23 @@ export interface PictureLoader {
  * pictures around there while it reads the rest.
  */
 export function loadPictures(url: string, hooks: PictureHooks, position: () => number = () => 0): PictureLoader {
-  const abort = new AbortController();
+  // The ask under way, dropped by the next one (a seek's), as the TVs drop
+  // theirs: an answer for where the player was can wait seconds for the
+  // read there, holding one of the few connections a browser opens to the
+  // server, which the video's segments need.
+  let asking: AbortController | null = null;
+  let stopped = false;
   let timer: number | undefined;
-  let asking = 0;
   let whole = false;
   const load = (have: Uint8Array | null, again: boolean) => {
-    const ask = ++asking;
+    asking?.abort();
+    const abort = new AbortController();
+    asking = abort;
     const asked = wholeTracks.has(url) ? url : pictureUrlAt(url, position());
     fetchPictures(asked, abort.signal, have, again).then(
       (got) => {
         // Stopped, or asked for again from elsewhere since.
-        if (abort.signal.aborted || ask !== asking) return;
+        if (abort.signal.aborted) return;
         if (got.kind === "unavailable") hooks.onUnavailable();
         else if (got.kind === "failed") hooks.onFailed();
         else if (got.kind === "anew") load(null, true);
@@ -267,12 +273,13 @@ export function loadPictures(url: string, hooks: PictureHooks, position: () => n
   load(null, false);
   return {
     sought: () => {
-      if (whole || abort.signal.aborted) return;
+      if (whole || stopped) return;
       window.clearTimeout(timer);
       load(null, true);
     },
     stop: () => {
-      abort.abort();
+      stopped = true;
+      asking?.abort();
       window.clearTimeout(timer);
     },
   };

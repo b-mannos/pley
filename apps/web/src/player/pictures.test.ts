@@ -327,6 +327,10 @@ describe("loadPictures", () => {
     loading.sought();
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(["/s.mks?at=0", "/s.mks?at=200000"]);
+    // The ask from the start, still under way, is dropped: it would hold a
+    // connection the video needs while the server reads there.
+    const signals = () => fetchFn.mock.calls.map((c) => ((c as unknown[])[1] as RequestInit).signal?.aborted);
+    expect(signals()).toEqual([true, false]);
     expect(h.onTrack).toHaveBeenCalledTimes(1);
     expect(h.onTrack.mock.calls[0]?.[0].sampleAt(20_500)).toBe(0);
     // The answer from the start comes late: not what shows.
@@ -350,7 +354,7 @@ describe("loadPictures", () => {
     await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS * 3);
     expect(h.onTrack).not.toHaveBeenCalled();
     expect(fetchFn).toHaveBeenCalledTimes(1);
-    expect((vi.mocked(fetchFn).mock.calls[0] as unknown[] | undefined)?.length).toBeGreaterThan(0);
+    expect(((vi.mocked(fetchFn).mock.calls[0] as unknown[] | undefined)?.[1] as RequestInit).signal?.aborted).toBe(true);
   });
 });
 
