@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::accounts::{self, UserDto};
 use crate::auth::grants::APP_TOKEN_PREFIX;
 use crate::auth::{
-    AuthUser, ClientIp, CurrentToken, SourceIp, clear_cookie, dummy_password_hash, forwarded_https, hash_password,
-    hash_token, session_cookie, token_from_parts, validate_password, validate_username, verify_password,
+    AuthUser, ClientIp, CurrentToken, PeerIp, SourceIp, clear_cookie, dummy_password_hash, forwarded_https,
+    hash_password, hash_token, session_cookie, token_from_parts, validate_password, validate_username, verify_password,
 };
 use crate::error::{ApiResult, AppError};
 use crate::state::AppState;
@@ -51,17 +51,24 @@ pub struct ProofQuery {
 pub async fn server_status(
     State(state): State<AppState>,
     headers: HeaderMap,
+    PeerIp(peer): PeerIp,
     SourceIp(source): SourceIp,
     Query(query): Query<ProofQuery>,
 ) -> ApiResult<Response> {
     let proof = match (query.challenge.as_deref(), query.proof_id.as_deref()) {
         (None, None) => None,
         (Some(challenge), Some(proof_id)) => {
+            if asked_by_a_page(&headers) {
+                return Err(AppError::forbidden("a proof is made for Pley's apps, not for a page"));
+            }
             let address = crate::api::oauth::issuer(&headers)?;
             // An app reaches a plain-http address on its own network only:
             // asked for one from the internet, the server is being asked on
-            // behalf of a device at that address elsewhere.
-            if address.starts_with("http://") && !source.is_some_and(crate::identity::at_home) {
+            // behalf of a device at that address elsewhere. The connection
+            // counts as well as the client it forwards for, as a peer at an
+            // internet provider's shared address can name any client.
+            let home = |ip: Option<std::net::IpAddr>| ip.is_some_and(crate::identity::at_home);
+            if address.starts_with("http://") && !(home(peer) && home(source)) {
                 return Err(AppError::forbidden("a proof for a plain-http address is made for the home network only"));
             }
             let proof = state.identity.prove(proof_id, &address, challenge).map_err(AppError::bad_request)?;
@@ -96,6 +103,22 @@ pub async fn server_status(
     body["address"] = serde_json::json!(address);
     // An answer to one challenge only.
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response())
+}
+
+/// Whether a proof is asked from a website's page rather than one of Pley's
+/// apps: an `Origin` other than the TV apps' (docs/API.md, "CORS for TV
+/// apps"), or `null` from something other than LG's TV app. A page in a
+/// sandboxed frame sends `null` too, and in a browser at home it could read
+/// a proof for the home address and hand it to a device elsewhere. LG's web
+/// runtime says webOS in its User-Agent, which a page can't set without a
+/// preflight that the TV apps' CORS refuses; Samsung's sends no Origin.
+fn asked_by_a_page(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN).map(|o| o.as_bytes()) else { return false };
+    let webos = headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|agent| agent.contains("Web0S") || agent.contains("webOS"));
+    !crate::api::tv_app_origin(origin) || (origin == b"null" && !webos)
 }
 
 /// `GET /api/server/proof-key`: a proof key for pley's own sign-in, which

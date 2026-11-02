@@ -142,10 +142,11 @@ their web engines apply CORS. Their requests come with `Origin: file://`,
 A wildcard origin never lets a page read an answer made with cookies, so
 these answers only carry what a token in `Authorization` opens. The consent
 page's endpoints (`/api/oauth/requests…`, `/api/oauth/device/verify`) never
-answer CORS. Nor does a server's proof (`/api/server` with a `challenge`,
-[Telling servers apart](#telling-servers-apart)) to `Origin: null` unless
-the User-Agent says webOS, as LG's runtime does: a website's page in a
-sandboxed frame sends `null` too, and can't set that header.
+answer CORS. A server's proof (`/api/server` with a `challenge`,
+[Telling servers apart](#telling-servers-apart)) isn't made for any other
+`Origin`, nor for `Origin: null` unless the User-Agent says webOS, as LG's
+runtime does (`403`): a website's page in a sandboxed frame sends `null`
+too, and can't set that header.
 
 ### Errors
 
@@ -785,16 +786,17 @@ The proof covers the address, so a device elsewhere that passes the
 challenge on to the server's public address gets a proof for that address,
 which an app at the home address refuses. Passed on to the server's
 plain-http port, it would name the home address itself: the server makes
-no proof for a plain-http address to a client on the internet (`403`,
-before any other check), which is how such a request looks. The home
-network is the server's own: private, loopback and link-local addresses,
-global IPv6 ones in the server's own /64, and Tailscale's only when the
-server is on Tailscale. Nor may a website's page in a browser at home read
-a proof (CORS answers a proof request only to Pley's TV apps), which would
-pass it on from inside. A device that reaches the server from the home
-network itself, or through a proxy that hides where clients come from
-(Docker's userland proxy without `X-Forwarded-For`), could still pass a
-challenge on; an https address is checked by its certificate as well.
+no proof for a plain-http address to a client on the internet (`403`),
+which is how such a request looks. Both the connection and the client a
+proxy on it forwards for must be on the home network, which is the
+server's own: private, loopback and link-local addresses, global IPv6 ones
+in the server's own /64, and Tailscale's only when the server is on
+Tailscale. Nor does a website's page in a browser at home get a proof to
+pass on from inside ([CORS for TV apps](#cors-for-tv-apps)). A device
+that reaches the server from the home network itself, or through a proxy
+that hides where clients come from (Docker's userland proxy without
+`X-Forwarded-For`), could still pass a challenge on; an https address is
+checked by its certificate as well.
 
 Pley's own sign-in has no token answer: the desktop app asks
 `/api/server/proof-key` with its window's session for a key, and checks

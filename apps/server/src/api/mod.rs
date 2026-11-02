@@ -304,8 +304,9 @@ fn with_proxy_port(headers: &axum::http::HeaderMap, addresses: &[String]) -> Opt
 /// A website's page in a sandboxed frame sends `null` too: what it gets is
 /// only what a token it holds opens (no cookie is let through, see
 /// [`tv_app_cors`]), and starting a TV sign-in still takes someone signed
-/// in to type its code and allow it.
-fn tv_app_origin(origin: &[u8]) -> bool {
+/// in to type its code and allow it. Nor does it get a server's proof
+/// (`auth::server_status`).
+pub(crate) fn tv_app_origin(origin: &[u8]) -> bool {
     matches!(origin, b"null" | b"file://") || origin.starts_with(b"app://")
 }
 
@@ -318,25 +319,6 @@ fn cors_path(path: &str) -> bool {
     path.starts_with("/api/") && !path.starts_with("/api/oauth/requests") && path != "/api/oauth/device/verify"
 }
 
-/// Whether `request` asks for a server's proof (`/api/server` with a
-/// challenge) with `Origin: null` from something other than LG's TVs: a
-/// website's page in a sandboxed frame, in a browser at home, could
-/// otherwise read a proof for the home address and hand it to a device
-/// elsewhere (docs/API.md, "Telling servers apart"). LG's web runtime sends
-/// `null` and says webOS in its User-Agent, which a page can't set without
-/// a preflight that this CORS refuses; Samsung's sends no Origin at all.
-fn page_asking_for_a_proof(request: &axum::extract::Request) -> bool {
-    let proof = request.uri().path() == "/api/server"
-        && request.uri().query().is_some_and(|q| q.split('&').any(|pair| pair.starts_with("challenge=")));
-    let null = request.headers().get(header::ORIGIN).is_some_and(|o| o.as_bytes() == b"null");
-    let webos = request
-        .headers()
-        .get(header::USER_AGENT)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|agent| agent.contains("Web0S") || agent.contains("webOS"));
-    proof && null && !webos
-}
-
 /// CORS for pley's packaged TV apps (docs/API.md, "CORS for TV apps"). Their web
 /// runtimes enforce it, so their API calls, which carry the app's token in
 /// `Authorization` and never a cookie, are answered with
@@ -346,8 +328,7 @@ fn page_asking_for_a_proof(request: &axum::extract::Request) -> bool {
 async fn tv_app_cors(request: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
     use axum::response::IntoResponse;
     let allowed = request.headers().get(header::ORIGIN).is_some_and(|o| tv_app_origin(o.as_bytes()))
-        && cors_path(request.uri().path())
-        && !page_asking_for_a_proof(&request);
+        && cors_path(request.uri().path());
     if !allowed {
         return next.run(request).await;
     }

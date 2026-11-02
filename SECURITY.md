@@ -176,9 +176,9 @@ Apps sign in on Pley's own page with OAuth 2.1.
   the desktop app; not yet the native Samsung app, Kodi or Roku). Another
   device at that address can't, nor can another app's key. The proof covers
   the address it was asked at; the server makes none for a plain-http
-  address to a client on the internet, and only Pley's TV apps may read
-  one from a page, so neither a device elsewhere nor a website's page open
-  at home can pass a challenge on for it. One that reaches the server from
+  address to a client on the internet, nor for a page other than Pley's
+  TV apps, so neither a device elsewhere nor a website's page open at home
+  can pass a challenge on for it. One that reaches the server from
   the home network itself, or through a proxy that hides where clients
   come from, could; an https address is checked by its certificate too.
   Refresh tokens and PINs wait for a proof made then; an access token may

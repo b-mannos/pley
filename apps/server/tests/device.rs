@@ -240,25 +240,36 @@ async fn a_tv_tells_its_server_from_another_device_at_its_address() {
     let at_home = pley::identity::proof(&key_bytes, &id, "http://192.168.1.20:7539", challenge);
     assert_eq!(asked.body["proof"], json!(at_home));
     assert_eq!(asked.body["address"], json!("http://192.168.1.20:7539"), "what the proof covers");
-    // A page in a sandboxed frame (Origin: null) in a browser at home can't
-    // read a proof; LG's TV app (null, and webOS in its User-Agent) and the
-    // apps that send file:// or app:// can.
-    let cors = |origin: &'static str, agent: &'static str| {
-        let (app, ask) = (&app, &ask);
+    // A page in a sandboxed frame (Origin: null) in a browser at home gets
+    // no proof, however it writes the challenge's name, nor does a
+    // website's page; LG's TV app (null, and webOS in its User-Agent) and
+    // the apps that send file:// or app:// get one they can read.
+    let from = |uri: String, origin: &'static str, agent: &'static str| {
+        let app = &app;
         async move {
-            let asked = app
-                .get_from(
-                    "192.168.1.30:50000",
-                    ask,
-                    &[("host", "192.168.1.20:7539"), ("origin", origin), ("user-agent", agent)],
-                )
-                .await;
-            asked.headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_some()
+            app.get_from(
+                "192.168.1.30:50000",
+                &uri,
+                &[("host", "192.168.1.20:7539"), ("origin", origin), ("user-agent", agent)],
+            )
+            .await
         }
     };
-    assert!(!cors("null", "Mozilla/5.0 (Macintosh) Safari/605.1.15").await, "a page");
-    assert!(cors("null", "Mozilla/5.0 (Web0S; Linux/SmartTV) Chrome/87").await, "LG's app");
-    assert!(cors("file://", "Mozilla/5.0 (SMART-TV; Linux; Tizen 9.0)").await);
+    let safari = "Mozilla/5.0 (Macintosh) Safari/605.1.15";
+    let spelled = format!("/api/server?%63hallenge={challenge}&proof_id={proof_id}");
+    for (uri, origin) in [(&ask, "null"), (&spelled, "null"), (&ask, "https://example.com")] {
+        let page = from(uri.clone(), origin, safari).await;
+        assert_eq!(page.status, StatusCode::FORBIDDEN, "{uri} from {origin}: {}", page.text());
+        assert!(page.body.get("proof").is_none());
+    }
+    for (origin, agent) in [
+        ("null", "Mozilla/5.0 (Web0S; Linux/SmartTV) Chrome/87"),
+        ("file://", "Mozilla/5.0 (SMART-TV; Linux; Tizen 9.0)"),
+    ] {
+        let tv = from(ask.clone(), origin, agent).await;
+        assert_eq!(tv.body["proof"], json!(at_home), "{origin}");
+        assert!(tv.headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_some(), "{origin}");
+    }
     let other =
         app.get_from("192.168.1.30:50000", "/api/server", &[("host", "192.168.1.20:7539"), ("origin", "null")]).await;
     assert!(
@@ -285,6 +296,14 @@ async fn a_tv_tells_its_server_from_another_device_at_its_address() {
         assert_eq!(relayed.status, StatusCode::FORBIDDEN, "{peer} {extra:?}: {}", relayed.text());
         assert!(relayed.body.get("proof").is_none());
     }
+    // Nor from an internet provider's shared address naming a home client
+    // as a proxy would; a computer on Tailscale reaches it from its own.
+    let shared = "100.72.3.4";
+    let relayed = app
+        .get_from(&format!("{shared}:50000"), &ask, &[("host", "192.168.1.20:7539"), ("x-forwarded-for", "127.0.0.1")])
+        .await;
+    let tailscale = pley::identity::at_home(shared.parse().unwrap());
+    assert_eq!(relayed.status == StatusCode::OK, tailscale, "{}", relayed.text());
     for wrong in [
         format!("/api/server?challenge={challenge}"),
         format!("/api/server?proof_id={proof_id}"),

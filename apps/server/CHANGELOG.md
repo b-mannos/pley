@@ -15,9 +15,8 @@ describes how they are made.
   to before sending it their token: each sign-in gets a key of its own,
   and the server proves it holds it, for the address it was asked at. The
   desktop app gets a key for its window's session. A proof for a plain-http
-  address goes only to the home network (403 from the internet), and only
-  Pley's TV apps may read one from another page (CORS), so a device
-  elsewhere can't get one passed on.
+  address goes only to the home network (403 from the internet), and none
+  goes to a website's page, so a device elsewhere can't get one passed on.
 
 ## [0.1.3] - 2026-11-02
 
