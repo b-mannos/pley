@@ -13,6 +13,10 @@ describes how they are made.
 
 ### Added
 
+- A playback with keyed addresses has its file's PGS subtitles beside its
+  media as pictures, each placed and timed (`subtitles-{index}.json` and its
+  PNGs), for a player that can't decode PGS: Roku draws them over the video
+  rather than have them burned in.
 - A playback with keyed addresses has its seek previews beside its media,
   as a BIF file (`previews.bif`), which Roku's own player fetches and shows
   as you fast forward and rewind.

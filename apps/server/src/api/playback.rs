@@ -915,13 +915,14 @@ fn hls_file_kind(name: &str) -> Option<bool> {
 /// `GET /api/media/{key}/{file}`: a session's media for a player that can't
 /// send the Authorization header, a TV's own player (docs/API.md, "Keyed
 /// URLs"). The key its play request asked for (`keyed_urls`) stands in for
-/// the token, for this session's playlists and segments or its file, and its
-/// seek previews, and nothing else; it ends with the session, the account,
-/// or the app's sign-in. A session stopped from elsewhere answers `410` here
-/// too.
+/// the token, for this session's playlists and segments or its file, its
+/// seek previews and its file's PGS pictures, and nothing else; it ends with
+/// the session, the account, or the app's sign-in. A session stopped from
+/// elsewhere answers `410` here too.
 pub async fn keyed_media(
     State(state): State<AppState>,
     Path((key, file)): Path<(String, String)>,
+    Query(query): Query<SubtitleQuery>,
     request: Request,
 ) -> ApiResult<Response> {
     let Some(session) = state.sessions.by_media_key(&key) else {
@@ -958,6 +959,12 @@ pub async fn keyed_media(
         )
             .into_response());
     }
+    // PGS subtitles as pictures, for a player that can't decode them
+    // (Roku's), which fetches them itself too.
+    if let Some(name) = file.strip_prefix("subtitles-") {
+        let row = visible_file(&state, &user, session.file_id).await?;
+        return keyed_pictures(&state, &user, row, name, query.at()).await;
+    }
     if session.transcode.is_some() {
         return session_hls(&state, &user, &session, &file).await;
     }
@@ -978,6 +985,158 @@ pub async fn keyed_media(
     // Never cached anywhere: the address carries a key.
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
     Ok(response)
+}
+
+/// What a keyed session's file's PGS track `index` shows, for a player that
+/// can't decode PGS (Roku's), made of the track's `.mks` ([`picture_track`])
+/// as far as it is copied, from around `at` first (docs/API.md, "Keyed
+/// URLs"): `subtitles-{index}.json` its pictures as cues (when, where), with
+/// `X-Pley-Complete` as for the `.mks`; `subtitles-{index}-{start_ms}.png`
+/// the picture that shows from `start_ms`. `404` for anything else.
+async fn keyed_pictures(
+    state: &AppState,
+    user: &AuthUser,
+    file: catalog::FileRow,
+    name: &str,
+    at: Option<i64>,
+) -> ApiResult<Response> {
+    let unknown = || AppError::not_found("unknown file");
+    let (index, start_ms) = match name.strip_suffix(".json") {
+        Some(index) => (index, None),
+        None => {
+            let (index, start) = name.strip_suffix(".png").and_then(|n| n.split_once('-')).ok_or_else(unknown)?;
+            (index, Some(start.parse::<i64>().map_err(|_| unknown())?))
+        }
+    };
+    let index: i64 = index.parse().map_err(|_| unknown())?;
+    let pgs = file
+        .streams()
+        .iter()
+        .any(|s| s.index == index && s.kind == StreamKind::Subtitle && s.codec == "hdmv_pgs_subtitle");
+    if !pgs {
+        return Err(AppError::not_found("no PGS subtitle track has this index"));
+    }
+    // A picture is looked for around its own time: while the track is
+    // copied, the pictures copied so far are those around where it was
+    // asked for, which a list a player took them from was.
+    let at = start_ms.or(at);
+    let (mks, complete) = picture_track_so_far(state, user, &file, index, at).await?;
+    // A film's track is tens of megabytes: read off the async threads.
+    let made = tokio::task::spawn_blocking(move || {
+        let pictures = crate::pgs::PgsPictures::read(&mks).ok_or_else(|| anyhow::anyhow!("not a PGS track"))?;
+        let Some(start_ms) = start_ms else {
+            let cues = pictures.cues().into_iter().map(|c| PictureCueJson::of(c, index)).collect();
+            let body = PictureCues { complete, width: pictures.width, height: pictures.height, cues };
+            return Ok(Some((serde_json::to_vec(&body)?, "application/json")));
+        };
+        let Some(picture) = pictures.picture(start_ms) else { return Ok(None) };
+        let image = image::RgbaImage::from_raw(picture.width, picture.height, picture.rgba)
+            .ok_or_else(|| anyhow::anyhow!("a picture's pixels don't fit its size"))?;
+        let mut png = Vec::new();
+        image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
+        anyhow::Ok(Some((png, "image/png")))
+    })
+    .await
+    .map_err(|e| AppError::Internal(e.into()))?
+    .map_err(AppError::Internal)?;
+    let (body, content_type) = made.ok_or_else(|| AppError::not_found("no picture starts then"))?;
+    let mut response = (
+        [
+            (header::CONTENT_TYPE, HeaderValue::from_static(content_type)),
+            // The address carries a key.
+            (header::CACHE_CONTROL, HeaderValue::from_static("private, no-store")),
+        ],
+        body,
+    )
+        .into_response();
+    if start_ms.is_none() {
+        let complete = HeaderValue::from_static(if complete { "1" } else { "0" });
+        response.headers_mut().insert(SUBTITLES_COMPLETE_HEADER, complete);
+    }
+    Ok(response)
+}
+
+/// `subtitles-{index}.json` of a keyed session (see [`keyed_pictures`]).
+#[derive(Serialize)]
+struct PictureCues {
+    /// Whether these are all of the track's pictures (else ask again).
+    complete: bool,
+    /// The plane the pictures are placed on.
+    width: u32,
+    height: u32,
+    cues: Vec<PictureCueJson>,
+}
+
+#[derive(Serialize)]
+struct PictureCueJson {
+    start_ms: i64,
+    end_ms: i64,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    /// The picture's name, beside this file's.
+    image: String,
+}
+
+impl PictureCueJson {
+    fn of(cue: crate::pgs::PictureCue, index: i64) -> Self {
+        let crate::pgs::PictureCue { start_ms, end_ms, x, y, width, height } = cue;
+        Self { start_ms, end_ms, x, y, width, height, image: format!("subtitles-{index}-{start_ms}.png") }
+    }
+}
+
+/// The whole picture tracks read last for [`picture_track_so_far`], by cache
+/// file: a player asks for a picture every few seconds, each made of the
+/// whole track (tens of megabytes). A cache file never changes: a new
+/// version of the media file has a name of its own.
+static WHOLE_PICTURE_TRACKS: LazyLock<std::sync::Mutex<std::collections::VecDeque<(PathBuf, Bytes)>>> =
+    LazyLock::new(Default::default);
+/// How many whole tracks are kept: one for each of a few players.
+const WHOLE_PICTURE_TRACKS_KEPT: usize = 2;
+
+/// Picture track `index` of `file` as far as it is copied, and whether that
+/// is all of it: the cache's, else what the transcoder has copied so far
+/// (from around `at` first), cached once whole.
+async fn picture_track_so_far(
+    state: &AppState,
+    user: &AuthUser,
+    file: &catalog::FileRow,
+    index: i64,
+    at: Option<i64>,
+) -> ApiResult<(Bytes, bool)> {
+    let (cache, path, stream_index) = picture_source(state, file, index).await?;
+    let kept = |cache: &PathBuf| {
+        let tracks = WHOLE_PICTURE_TRACKS.lock().unwrap_or_else(|e| e.into_inner());
+        tracks.iter().find(|(path, _)| path == cache).map(|(_, bytes)| bytes.clone())
+    };
+    if let Some(bytes) = kept(&cache) {
+        return Ok((bytes, true));
+    }
+    if let Ok(bytes) = tokio::fs::read(&cache).await
+        && bytes.starts_with(&[0x1A, 0x45, 0xDF, 0xA3])
+    {
+        let bytes = Bytes::from(bytes);
+        let mut tracks = WHOLE_PICTURE_TRACKS.lock().unwrap_or_else(|e| e.into_inner());
+        if tracks.len() == WHOLE_PICTURE_TRACKS_KEPT {
+            tracks.pop_front();
+        }
+        tracks.push_back((cache, bytes.clone()));
+        return Ok((bytes, true));
+    }
+    if !state.transcoder.copies_subtitles_partially() {
+        return Err(AppError::Unavailable("the transcoder can't copy subtitle tracks yet: update it".into()));
+    }
+    let media = file_media(file, stream_index);
+    let (bytes, complete) = state
+        .transcoder
+        .subtitle_matroska_so_far(&path, stream_index, at, media, false)
+        .await
+        .map_err(|err| for_viewer(user, err))?;
+    if complete {
+        cache_subtitles(&cache, &bytes).await;
+    }
+    Ok((bytes, complete))
 }
 
 /// The extension a keyed file's address ends with: its container's, when

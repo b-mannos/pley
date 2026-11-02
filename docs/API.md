@@ -1882,11 +1882,28 @@ URLs.
   for the file's container, with `Range` and
   `Cache-Control: private, no-store`.
 - The key is `pley_mk_` and 256 random bits, kept in memory only. It opens
-  that session's playlists and segments, or its file, and its seek previews,
-  and nothing else: no API route takes it as a token.
+  that session's playlists and segments, or its file, its seek previews and
+  its file's PGS pictures, and nothing else: no API route takes it as a
+  token.
 - `/api/media/{key}/previews.bif` is the file's seek previews as a BIF file,
   for a player that fetches them itself (Roku's); `404` while they are being
   made, as for `trickplay`.
+- `/api/media/{key}/subtitles-{index}.json?at=` is the file's PGS track
+  `index` as pictures, for a player that draws them without decoding PGS
+  (Roku's): `{ complete, width, height, cues: [{ start_ms, end_ms, x, y,
+  width, height, image }] }`.
+  - `width`×`height` is the plane the pictures are placed on (a Blu-ray's
+    1920×1080). Each cue shows its picture from `start_ms` until `end_ms`
+    (the file's time, before the person's subtitle sync), `width`×`height`
+    at `x`, `y` of the plane, in order of time, never two at once.
+  - `image` is the picture's address beside this one,
+    `subtitles-{index}-{start_ms}.png`: a PNG with transparency, made of
+    the track copied from around `start_ms` while it isn't whole.
+  - It is made of the track's `.mks`, so `at` and the partial answers are
+    as for it: while the track is copied, the cues so far (those around
+    `at` first) with `X-Pley-Complete: 0`; ask again for the rest.
+  - `404` for anything but PGS (VobSub and DVB are burned in); `503` with a
+    transcoder too old to copy the track.
 - It ends with the session (closed by its player, or forgotten after 15
   quiet minutes: `404` "playback session expired"), the account (disabled)
   and the app's sign-in (signed out, a new password): `404`. A session
@@ -2024,9 +2041,10 @@ reports still send the version 1 fields: `containers` always counts;
   version 1 (HLS segments carry no subtitles). Subtitle
   files next to the media are always burned in. A player with
   `picture_subtitles_sideload` shows them next to the HLS stream from
-  `/api/files/{id}/subtitles/{index}.mks` instead: it asks for no
-  `subtitle_index`, so nothing is burned in (and HDR can stay HDR). A
-  `subtitle_index` it does send is burned in as for any player.
+  `/api/files/{id}/subtitles/{index}.mks` instead (or, for PGS it can't
+  decode, as pictures from its keyed `subtitles-{index}.json`: Roku): it
+  asks for no `subtitle_index`, so nothing is burned in (and HDR can stay
+  HDR). A `subtitle_index` it does send is burned in as for any player.
 - **Converting.** Video is converted to H.264, no bigger than the player's
   largest H.264 entry (a 4K file is made in 1080p for a 1080p stick, even
   when a higher quality is picked). HDR video the player can show stays

@@ -1305,6 +1305,118 @@ async fn picture_subtitles_are_asked_for_where_the_player_is() {
     assert!(w.fake.tracks.lock().iter().skip(1).all(|r| r.rest && r.from_ms.is_none()));
 }
 
+/// A Matroska file of a PGS track as the transcoder writes them: a 4×2
+/// white picture at 100, 900 of a 1920×1080 plane from 1 s, cleared at 3 s.
+fn pgs_track() -> Vec<u8> {
+    fn el(id: &[u8], data: &[u8]) -> Vec<u8> {
+        [id, &[0x40 | (data.len() >> 8) as u8, data.len() as u8], data].concat()
+    }
+    fn segment(kind: u8, body: &[u8]) -> Vec<u8> {
+        [&[kind][..], &(body.len() as u16).to_be_bytes(), body].concat()
+    }
+    // A composition of 1920×1080, an epoch start, with palette 0, then its
+    // objects: one, at 100, 900; or none.
+    let composition =
+        |objects: &[u8]| segment(0x16, &[&[0x07, 0x80, 0x04, 0x38, 0x10, 0, 1, 0x80, 0, 0][..], objects].concat());
+    let shown = [
+        composition(&[1, 0, 0, 0, 0, 0, 100, 0x03, 0x84]),
+        // Palette entry 1: white, opaque (Y, Cr, Cb, alpha).
+        segment(0x14, &[0, 0, 1, 235, 128, 128, 255]),
+        // Object 0, 4×2, two lines of four of entry 1.
+        segment(0x15, &[0, 0, 0, 0xC0, 0, 0, 14, 0, 4, 0, 2, 0, 0x84, 1, 0, 0, 0, 0x84, 1, 0, 0]),
+        segment(0x80, &[]),
+    ]
+    .concat();
+    let cleared = [composition(&[0]), segment(0x80, &[])].concat();
+    let cluster = |time: u16, set: &[u8]| {
+        el(
+            &[0x1F, 0x43, 0xB6, 0x75],
+            &[el(&[0xE7], &time.to_be_bytes()), el(&[0xA3], &[&[0x81, 0, 0, 0x80][..], set].concat())].concat(),
+        )
+    };
+    let info = el(&[0x15, 0x49, 0xA9, 0x66], &el(&[0x2A, 0xD7, 0xB1], &[0x0F, 0x42, 0x40]));
+    let tracks = el(&[0x16, 0x54, 0xAE, 0x6B], &el(&[0xAE], &el(&[0x86], b"S_HDMV/PGS")));
+    let segment = [info, tracks, cluster(1_000, &shown), cluster(3_000, &cleared)].concat();
+    [el(&[0x1A, 0x45, 0xDF, 0xA3], &el(&[0x42, 0x82], b"matroska")), el(&[0x18, 0x53, 0x80, 0x67], &segment)].concat()
+}
+
+#[tokio::test]
+async fn pgs_subtitles_come_as_pictures_for_a_keyed_player() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let feature = w.movies["Feature"];
+    let file = app.file_of(feature).await;
+    // The English PGS track copied already.
+    let mtime: i64 = sqlx::query_scalar("SELECT mtime FROM media_files WHERE id = ?")
+        .bind(file)
+        .fetch_one(&app.state.db.read)
+        .await
+        .unwrap();
+    let cache = app.state.config.cache_dir().join("subtitles");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join(format!("{file}_3_{mtime}.mks")), pgs_track()).unwrap();
+    let started =
+        play(app, admin, json!({"item_id": feature, "caps": web_drawing_pictures(), "keyed_urls": true})).await;
+    assert_eq!(started.status, StatusCode::OK, "{:?}", started.body);
+    let url = started.body["url"].as_str().unwrap();
+    let folder = &url[..url.rfind('/').unwrap() + 1];
+    assert!(folder.starts_with("/api/media/pley_mk_"), "{url}");
+    let bare = |name: &str| {
+        let uri = format!("{folder}{name}");
+        async move { app.call(Method::GET, &uri, None, None, &[]).await }
+    };
+
+    // Asked for with no token, as Roku's player asks: when and where each
+    // picture shows, and each picture beside it.
+    let cues = bare("subtitles-3.json?at=500").await;
+    assert_eq!(cues.status, StatusCode::OK, "{}", cues.text());
+    assert_eq!(cues.headers[header::CONTENT_TYPE], "application/json");
+    assert_eq!(cues.headers[header::CACHE_CONTROL], "private, no-store");
+    assert_eq!(cues.headers[SUBTITLES_COMPLETE_HEADER], "1");
+    assert_eq!(
+        cues.body,
+        json!({"complete": true, "width": 1920, "height": 1080, "cues": [
+            {"start_ms": 1000, "end_ms": 3000, "x": 100, "y": 900, "width": 4, "height": 2, "image": "subtitles-3-1000.png"}
+        ]})
+    );
+    let picture = bare("subtitles-3-1000.png").await;
+    assert_eq!(picture.status, StatusCode::OK, "{}", picture.text());
+    assert_eq!(picture.headers[header::CONTENT_TYPE], "image/png");
+    let png = image::load_from_memory_with_format(&picture.bytes, image::ImageFormat::Png).unwrap().into_rgba8();
+    assert_eq!(png.dimensions(), (4, 2));
+    assert!(png.pixels().all(|p| p.0 == [255, 255, 255, 255]));
+    assert!(w.fake.tracks.lock().is_empty(), "from the cache");
+
+    // Text, a time no picture starts at, other names: none.
+    for missing in
+        ["subtitles-4.json", "subtitles-3-2000.png", "subtitles-x.json", "subtitles-3.txt", "subtitles-3-a.png"]
+    {
+        assert_eq!(bare(missing).await.status, StatusCode::NOT_FOUND, "{missing}");
+    }
+    // The key opens this session's file's only.
+    let wrong = format!("/api/media/pley_mk_{}/subtitles-3.json", "A".repeat(43));
+    assert_eq!(app.call(Method::GET, &wrong, None, None, &[]).await.status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn pictures_for_a_keyed_player_are_copied_from_around_where_it_asks() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let started =
+        play(app, admin, json!({"item_id": w.movies["Feature"], "caps": web_drawing_pictures(), "keyed_urls": true}))
+            .await;
+    let url = started.body["url"].as_str().unwrap();
+    let folder = &url[..url.rfind('/').unwrap() + 1];
+    let asked = |uri: String| async move { app.call(Method::GET, &uri, None, None, &[]).await };
+    let from = || w.fake.tracks.lock().last().map(|r| (r.stream_index, r.from_ms));
+    // The list from where the player is; a picture from its own time, which
+    // is where the list it came from was copied around.
+    asked(format!("{folder}subtitles-3.json?at=5000")).await;
+    assert_eq!(from(), Some((Some(3), Some(5_000))));
+    asked(format!("{folder}subtitles-3-61000.png")).await;
+    assert_eq!(from(), Some((Some(3), Some(61_000))));
+}
+
 /// The web app's report: version 1, with the picture subtitles it draws.
 fn web_drawing_pictures() -> Value {
     json!({
