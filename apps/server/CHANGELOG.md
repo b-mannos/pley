@@ -58,6 +58,13 @@ describes how they are made.
   seeks are read, so on a NAS a seek soon after a film starts has its
   subtitles in about a second, where it could take four.
 
+### Security
+
+- A Live TV playlist's own guide is used only when it is a web address
+  (http or https). One naming a file or a network share
+  (`url-tvg="//host/share/guide.xml"`) had the server open it, on Windows
+  signing in to that share.
+
 ## [0.1.3] - 2026-11-02
 
 ### Added
