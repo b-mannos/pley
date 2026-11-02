@@ -164,17 +164,23 @@ export async function fetchPictures(url: string, signal: AbortSignal, have: Uint
     void res.body?.cancel();
     return { kind: "anew" };
   }
+  // A file that came whole (its size written): the pictures around where
+  // the player was, a file of their own.
+  const end = have && matroskaEnd(have);
+  const cameWhole = have !== null && end !== null && end <= have.length;
   // Nothing past what came before: the same file, or another one shorter
   // than it, which the length the server gives tells apart (one just as
-  // long is taken for the same; the next place's comes soon after).
+  // long is taken for the same; the next place's comes soon after). With
+  // no length (a proxy that drops it), a file that came whole may be
+  // another place's, and one still being written only grows.
   if (res.status === 416 && have) {
     const total = /\/(\d+)$/.exec(res.headers.get("Content-Range") ?? "");
-    return total && Number(total[1]) !== have.length ? { kind: "anew" } : { kind: "early", bytes: have };
+    const same = total ? Number(total[1]) === have.length : !cameWhole;
+    return same ? { kind: "early", bytes: have } : { kind: "anew" };
   }
   if (!res.ok) return { kind: "failed" };
   // More past a file that came whole: another file, not the rest of it.
-  const end = have && matroskaEnd(have);
-  if (res.status === 206 && have && end !== null && end <= have.length) {
+  if (res.status === 206 && cameWhole) {
     void res.body?.cancel();
     return { kind: "anew" };
   }

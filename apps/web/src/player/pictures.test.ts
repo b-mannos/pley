@@ -197,6 +197,10 @@ describe("fetchPictures", () => {
     // The same file again: kept, not asked for again.
     answer(none(have.length));
     expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "early", bytes: have });
+    // No length (a proxy that drops it): maybe another place's, asked for
+    // whole. Of a file still being written, nothing new (above).
+    answer(new Response(null, { status: 416, headers: { "X-Pley-Complete": "0" } }));
+    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "anew" });
 
     // More past a file that came whole: another file.
     const one = new Uint8Array(mks([[1000, 2000]]));
