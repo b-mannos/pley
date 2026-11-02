@@ -337,8 +337,15 @@ impl Extractor {
             }
             match seek.as_ref().map(|seek| seek.read.peek().cloned()) {
                 Some(Some(Some(bytes))) => return Ok((bytes.to_vec(), false)),
-                // Not to be read there: what the track's read has.
-                Some(Some(None)) => seek = None,
+                // Nothing read there (it can't be, it went over its budget,
+                // or a later one left it out): what the track's read has
+                // there, else what it has.
+                Some(Some(None)) => {
+                    seek = None;
+                    if let Some(bytes) = extraction.so_far.lock().around(at_ms) {
+                        return Ok((bytes, false));
+                    }
+                }
                 // Read there as long as such a read takes ([`SEEK_WAIT`]),
                 // unless the track's read comes past there meanwhile.
                 Some(None) if started.elapsed() < self.seek_wait.min(self.header_wait) => {
@@ -2636,6 +2643,78 @@ mod tests {
         // there.
         assert_eq!((&answers[0], &answers[1]), (&window, &window));
         assert_eq!(picture_seconds(&answers[2]), (110..160).collect::<Vec<u8>>());
+    }
+
+    /// A stand-in for the copy of picture track 3 of `key`, read through the
+    /// Cues from 10 s in: what it has read goes in what this gives back, and
+    /// it isn't over while the sender is kept.
+    fn copy_under_way(extractor: &Extractor, key: &str) -> (Arc<Mutex<SoFar>>, tokio::sync::oneshot::Sender<()>) {
+        let (unfinished, never) = tokio::sync::oneshot::channel::<()>();
+        let result = async move { never.await.map_err(|e| Arc::new(ApiError::Internal(e.into()))) };
+        let read = PictureRead::default();
+        let so_far = read.so_far.clone();
+        extractor
+            .pictures
+            .lock()
+            .insert(format!("{key}_3"), PictureExtraction::new(7, 10_000, result.boxed().shared(), read));
+        (so_far, unfinished)
+    }
+
+    /// The pictures of [`matroska::tests::pictures_every_second`]'s track at
+    /// `seconds`, read through the Cues from `from_ms` to the end.
+    fn read_through(seconds: std::ops::Range<u8>, from_ms: i64) -> Stretch {
+        let blocks =
+            seconds.map(|n| mks::Block { time_ms: i64::from(n) * 1_000, duration_ms: 0, data: vec![0x16, 0, n] });
+        Stretch { codec: "S_HDMV/PGS", header: Vec::new(), blocks: blocks.collect(), span: Some((from_ms, i64::MAX)) }
+    }
+
+    #[tokio::test]
+    async fn an_answer_held_for_a_read_at_a_seek_comes_once_the_copy_has_the_pictures_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let extractor = Arc::new(extractor_with(dir.path(), dir.path().join("no-ffmpeg")));
+        let (name, key) = movie_in(&extractor, dir.path(), &matroska::tests::pictures_every_second(250));
+        let (so_far, _unfinished) = copy_under_way(&extractor, &key);
+        // A read at 3:20 that can't start yet holds the answer...
+        let seeks = extractor.seek_reads.available_permits() as u32;
+        let _held = extractor.seek_reads.clone().acquire_many_owned(seeks).await.unwrap();
+        let asking = {
+            let (extractor, name) = (extractor.clone(), name.clone());
+            let at = PictureStart { from_ms: 200_000, media: None, asked: true };
+            let wait = Duration::from_millis(100);
+            tokio::spawn(async move { extractor.subtitle_matroska_so_far(&name, Some(3), wait, at, false).await })
+        };
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(!asking.is_finished());
+        // ...until the copy comes past there: what it has there, at once.
+        let came = Instant::now();
+        so_far.lock().add(read_through(130..250, 129_001));
+        let (bytes, complete) = asking.await.unwrap().unwrap();
+        assert!(!complete && came.elapsed() < Duration::from_secs(2), "{:?}", came.elapsed());
+        assert_eq!(picture_seconds(&bytes), (190..240).collect::<Vec<u8>>());
+    }
+
+    #[tokio::test]
+    async fn a_read_at_a_seek_that_gets_nothing_leaves_the_answer_to_what_the_copy_has_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut extractor = extractor_with(dir.path(), dir.path().join("no-ffmpeg"));
+        extractor.header_wait = Duration::from_millis(300);
+        let extractor = Arc::new(extractor);
+        let (name, key) = movie_in(&extractor, dir.path(), &matroska::tests::pictures_every_second(250));
+        let (so_far, _unfinished) = copy_under_way(&extractor, &key);
+        // Taken for another kind of file than Matroska, nothing is read at
+        // 3:20, and the copy has nothing there yet: a header alone.
+        let mp4 = Arc::new(MediaInfo { format_name: Some("mov,mp4,m4a,3gp,3g2,mj2".into()), ..Default::default() });
+        let at = |from_ms: i64| PictureStart { from_ms, media: Some(mp4.clone()), asked: true };
+        let wait = Duration::from_millis(100);
+        let (first, _) = extractor.subtitle_matroska_so_far(&name, Some(3), wait, at(200_000), false).await.unwrap();
+        assert!(picture_seconds(&first).is_empty());
+        // Once the copy has the pictures there, an ask near that read has
+        // them, though the read is still the one there.
+        so_far.lock().add(read_through(130..250, 129_001));
+        let (bytes, complete) =
+            extractor.subtitle_matroska_so_far(&name, Some(3), wait, at(205_000), false).await.unwrap();
+        assert!(!complete);
+        assert_eq!(picture_seconds(&bytes), (195..245).collect::<Vec<u8>>());
     }
 
     #[test]
