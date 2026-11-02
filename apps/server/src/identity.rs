@@ -10,6 +10,12 @@
 //! can check an HMAC-SHA256 (Roku's BrightScript included), which a
 //! signature wouldn't allow.
 //!
+//! A proof covers the address the server was asked at, as it names itself
+//! there (its issuer), so a device that passes the challenge on to the
+//! server's other address gets a proof for that address, which the app
+//! refuses. The server makes no proof for a plain-http address to a client
+//! on the internet: only something passing challenges on asks for one there.
+//!
 //! Pley's own sign-in has no grant: the desktop app asks for a key with the
 //! window's session ([`Identity::session_key`]). Its id is random, and the
 //! key derives from it, so nothing is stored for it either.
@@ -78,10 +84,10 @@ impl Identity {
         Some(ProofKey { id: format!("s{id}"), key: b64(&key) })
     }
 
-    /// The proof of `challenge` for the sign-in `proof_id`: `Ok(None)` when
-    /// the server can't make one (its key can't be used), `Err` when the
-    /// request is wrong.
-    pub fn prove(&self, proof_id: &str, challenge: &str) -> Result<Option<String>, &'static str> {
+    /// The proof of `challenge` for the sign-in `proof_id`, asked at
+    /// `address` (the issuer): `Ok(None)` when the server can't make one (its
+    /// key can't be used), `Err` when the request is wrong.
+    pub fn prove(&self, proof_id: &str, address: &str, challenge: &str) -> Result<Option<String>, &'static str> {
         let derived_from = match proof_id.strip_prefix('s') {
             Some(id) => {
                 let canonical = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -112,7 +118,7 @@ impl Identity {
             return Err("challenge must be 16 to 64 bytes in base64url without padding");
         }
         let Some(key) = self.derive(&derived_from) else { return Ok(None) };
-        Ok(Some(proof(&key, &self.id, challenge)))
+        Ok(Some(proof(&key, &self.id, address, challenge)))
     }
 
     fn grant_key(&self, grant_id: i64) -> Option<[u8; 32]> {
@@ -125,12 +131,13 @@ impl Identity {
     }
 }
 
-/// HMAC-SHA256 under `key` of `pley-server-proof`, the server's id and the
-/// challenge, each on a line of its own, in base64url without padding.
-pub fn proof(key: &[u8], server_id: &str, challenge: &str) -> String {
+/// HMAC-SHA256 under `key` of `pley-server-proof`, the server's id, the
+/// address it was asked at and the challenge, each on a line of its own, in
+/// base64url without padding.
+pub fn proof(key: &[u8], server_id: &str, address: &str, challenge: &str) -> String {
     let tag = hmac::sign(
         &hmac::Key::new(hmac::HMAC_SHA256, key),
-        format!("{PROOF_CONTEXT}\n{server_id}\n{challenge}").as_bytes(),
+        format!("{PROOF_CONTEXT}\n{server_id}\n{address}\n{challenge}").as_bytes(),
     );
     b64(tag.as_ref())
 }
@@ -145,6 +152,7 @@ mod tests {
 
     const ID: &str = "0123456789abcdef0123456789abcdef01234567";
     const CHALLENGE: &str = "AAECAwQFBgcICQoLDA0ODw";
+    const AT: &str = "http://192.168.1.20:7539";
 
     fn identity() -> Identity {
         Identity::with_secret(ID.into(), Some(&[7; 32]))
@@ -157,8 +165,8 @@ mod tests {
         assert_eq!(given.id, "17");
         let key = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&given.key).unwrap();
         assert_eq!(key.len(), 32);
-        let answered = identity.prove("17", CHALLENGE).unwrap().unwrap();
-        assert_eq!(answered, proof(&key, ID, CHALLENGE));
+        let answered = identity.prove("17", AT, CHALLENGE).unwrap().unwrap();
+        assert_eq!(answered, proof(&key, ID, AT, CHALLENGE));
         assert_eq!(answered.len(), 43, "32 bytes in base64url");
     }
 
@@ -167,7 +175,7 @@ mod tests {
         let identity = identity();
         assert_eq!(identity.proof_key(17), identity.proof_key(17), "the same at every refresh");
         assert_ne!(identity.proof_key(17).unwrap().key, identity.proof_key(18).unwrap().key);
-        assert_ne!(identity.prove("17", CHALLENGE), identity.prove("18", CHALLENGE));
+        assert_ne!(identity.prove("17", AT, CHALLENGE), identity.prove("18", AT, CHALLENGE));
         let another = Identity::with_secret(ID.into(), Some(&[8; 32]));
         assert_ne!(identity.proof_key(17), another.proof_key(17), "another server's secret, another key");
     }
@@ -176,10 +184,11 @@ mod tests {
     fn a_proof_covers_the_server_and_the_challenge() {
         let key = [1u8; 32];
         let challenge2 = "AAECAwQFBgcICQoLDA0OEA";
-        assert_ne!(proof(&key, ID, CHALLENGE), proof(&key, ID, challenge2));
-        assert_ne!(proof(&key, ID, CHALLENGE), proof(&key, "another", CHALLENGE));
+        assert_ne!(proof(&key, ID, AT, CHALLENGE), proof(&key, ID, AT, challenge2));
+        assert_ne!(proof(&key, ID, AT, CHALLENGE), proof(&key, "another", AT, CHALLENGE));
+        assert_ne!(proof(&key, ID, AT, CHALLENGE), proof(&key, ID, "https://pley.example.com", CHALLENGE));
         // A known answer, for the apps' tests.
-        assert_eq!(proof(&key, ID, CHALLENGE), "-OpCw2gYEDYBr-d7wh4JEYd7CHzZ8nc7pTc_UlsqVas");
+        assert_eq!(proof(&key, ID, AT, CHALLENGE), "YwkvaCQfaIQCZkoOP5yOE3yR4xRKU5T5wYWz4b85SCM");
     }
 
     #[test]
@@ -189,8 +198,8 @@ mod tests {
         assert!(given.id.starts_with('s') && given.id.len() == 23, "{}", given.id);
         assert_ne!(identity.session_key().unwrap(), given, "a new one each time");
         let key = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&given.key).unwrap();
-        assert_eq!(identity.prove(&given.id, CHALLENGE).unwrap().unwrap(), proof(&key, ID, CHALLENGE));
-        assert_ne!(identity.prove(&given.id, CHALLENGE), identity.prove("17", CHALLENGE));
+        assert_eq!(identity.prove(&given.id, AT, CHALLENGE).unwrap().unwrap(), proof(&key, ID, AT, CHALLENGE));
+        assert_ne!(identity.prove(&given.id, AT, CHALLENGE), identity.prove("17", AT, CHALLENGE));
         assert_eq!(Identity::with_secret(ID.into(), None).session_key(), None);
     }
 
@@ -211,17 +220,17 @@ mod tests {
             ("17", "AAECAwQFBgcICQoLDA0ODw+"),
             ("17", &"A".repeat(87)),
         ] {
-            assert!(identity.prove(proof_id, challenge).is_err(), "{proof_id} {challenge}");
+            assert!(identity.prove(proof_id, AT, challenge).is_err(), "{proof_id} {challenge}");
         }
-        assert!(identity.prove("17", &"A".repeat(86)).unwrap().is_some(), "64 bytes");
-        assert!(identity.prove("sAAECAwQFBgcICQoLDA0ODw", CHALLENGE).unwrap().is_some());
+        assert!(identity.prove("17", AT, &"A".repeat(86)).unwrap().is_some(), "64 bytes");
+        assert!(identity.prove("sAAECAwQFBgcICQoLDA0ODw", AT, CHALLENGE).unwrap().is_some());
     }
 
     #[test]
     fn without_its_key_the_server_proves_nothing() {
         let identity = Identity::with_secret(ID.into(), None);
         assert_eq!(identity.proof_key(17), None);
-        assert_eq!(identity.prove("17", CHALLENGE), Ok(None));
-        assert!(identity.prove("x", CHALLENGE).is_err(), "a wrong request is still wrong");
+        assert_eq!(identity.prove("17", AT, CHALLENGE), Ok(None));
+        assert!(identity.prove("x", AT, CHALLENGE).is_err(), "a wrong request is still wrong");
     }
 }

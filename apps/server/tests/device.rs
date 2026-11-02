@@ -228,21 +228,44 @@ async fn a_tv_tells_its_server_from_another_device_at_its_address() {
     let key = tokens.body["proof_key"].as_str().unwrap().to_owned();
     assert!(server.body.get("proof").is_none(), "no proof without a challenge");
 
-    // Asked with a challenge, the server proves it holds that key.
+    // Asked with a challenge at its home address, the server proves it
+    // holds that key, for that address.
     let challenge = "AAECAwQFBgcICQoLDA0ODw";
-    let asked =
-        app.call(Method::GET, &format!("/api/server?challenge={challenge}&proof_id={proof_id}"), None, None, &[]).await;
+    let ask = format!("/api/server?challenge={challenge}&proof_id={proof_id}");
+    let home = [("host", "192.168.1.20:7539")];
+    let asked = app.get_from("192.168.1.30:50000", &ask, &home).await;
     assert_eq!(asked.status, StatusCode::OK, "{}", asked.text());
     assert_eq!(asked.headers[header::CACHE_CONTROL], "no-store");
     let key_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&key).unwrap();
-    assert_eq!(asked.body["proof"], json!(pley::identity::proof(&key_bytes, &id, challenge)));
+    let at_home = pley::identity::proof(&key_bytes, &id, "http://192.168.1.20:7539", challenge);
+    assert_eq!(asked.body["proof"], json!(at_home));
+    // Through the HTTPS proxy, for the public address: not a proof for the
+    // home one, which an app at that address refuses.
+    let proxy = [("host", "pley.example.com"), ("x-forwarded-proto", "https"), ("x-forwarded-for", "203.0.113.9")];
+    let public = app.get_from("127.0.0.1:50000", &ask, &proxy).await;
+    assert_eq!(public.status, StatusCode::OK, "{}", public.text());
+    assert_eq!(
+        public.body["proof"],
+        json!(pley::identity::proof(&key_bytes, &id, "https://pley.example.com", challenge))
+    );
+    assert_ne!(public.body["proof"], json!(at_home));
+    // A plain-http address asked from the internet (a device elsewhere
+    // passing the challenge on, saying it is the home address): no proof.
+    for (peer, extra) in [
+        ("203.0.113.9:50000", vec![("host", "192.168.1.20:7539")]),
+        ("127.0.0.1:50000", vec![("host", "192.168.1.20:7539"), ("x-forwarded-for", "203.0.113.9")]),
+    ] {
+        let relayed = app.get_from(peer, &ask, &extra).await;
+        assert_eq!(relayed.status, StatusCode::FORBIDDEN, "{peer} {extra:?}: {}", relayed.text());
+        assert!(relayed.body.get("proof").is_none());
+    }
     for wrong in [
         format!("/api/server?challenge={challenge}"),
         format!("/api/server?proof_id={proof_id}"),
         format!("/api/server?challenge=short&proof_id={proof_id}"),
         format!("/api/server?challenge={challenge}&proof_id=nope"),
     ] {
-        assert_eq!(app.call(Method::GET, &wrong, None, None, &[]).await.status, StatusCode::BAD_REQUEST, "{wrong}");
+        assert_eq!(app.get_from("192.168.1.30:50000", &wrong, &home).await.status, StatusCode::BAD_REQUEST, "{wrong}");
     }
 
     // A refresh keeps the key; another sign-in has its own.
@@ -264,9 +287,12 @@ async fn a_tv_tells_its_server_from_another_device_at_its_address() {
     let session_key =
         base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(session.body["proof_key"].as_str().unwrap()).unwrap();
     let asked = app
-        .call(Method::GET, &format!("/api/server?challenge={challenge}&proof_id={session_id}"), None, None, &[])
+        .get_from("192.168.1.30:50000", &format!("/api/server?challenge={challenge}&proof_id={session_id}"), &home)
         .await;
-    assert_eq!(asked.body["proof"], json!(pley::identity::proof(&session_key, &id, challenge)));
+    assert_eq!(
+        asked.body["proof"],
+        json!(pley::identity::proof(&session_key, &id, "http://192.168.1.20:7539", challenge))
+    );
     assert_ne!(app.get("/api/server/proof-key", &access).await.status, StatusCode::OK, "not for apps");
     let anyone = app.call(Method::GET, "/api/server/proof-key", None, None, &[]).await;
     assert_eq!(anyone.status, StatusCode::UNAUTHORIZED);

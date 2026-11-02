@@ -113,7 +113,8 @@ protect your server.
   back to Pley's account (after a change of PUID and PGID, say), restore
   it from a backup of the data folder, or delete it for Pley to make a new
   one (authenticator apps set up before then stop working; recovery codes
-  still sign in).
+  still sign in; apps say another device answers at the server's address
+  until they sign in again, as its proofs change).
 
 ### Sessions
 
@@ -170,10 +171,17 @@ Apps sign in on Pley's own page with OAuth 2.1.
   network it needs HTTPS, like the rest of Pley.
 - Each sign-in gets a key of its own, derived from `secret.key`, with which
   the server proves it is the server an app signed in to before the app
-  sends its token to an address. Another device at that address can't, nor
-  can another app's key. The desktop app, which uses the web app's session,
-  asks for a key of its own with that session. It doesn't stop someone who
-  relays the challenge to the real server; HTTPS does.
+  sends its token to an address (the Samsung web and LG apps, Android and
+  the desktop app; not yet the native Samsung app, Kodi or Roku). Another
+  device at that address can't, nor can another app's key. The proof covers
+  the address it was asked at, and the server makes none for a plain-http
+  address to a client on the internet, so a device elsewhere can't pass the
+  challenge on to the server for it. One that reaches the server from the
+  home network could; an https address is checked by its certificate too.
+  The desktop app, which uses the web app's session, asks for a key of its
+  own with that session; the server's pages in its window send the session
+  themselves, and leave a plain-http server as soon as the computer changes
+  networks.
 
 ### TVs signing in
 

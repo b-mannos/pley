@@ -48,11 +48,23 @@ pub struct ProofQuery {
     proof_id: Option<String>,
 }
 
-pub async fn server_status(State(state): State<AppState>, Query(query): Query<ProofQuery>) -> ApiResult<Response> {
+pub async fn server_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    SourceIp(source): SourceIp,
+    Query(query): Query<ProofQuery>,
+) -> ApiResult<Response> {
     let proof = match (query.challenge.as_deref(), query.proof_id.as_deref()) {
         (None, None) => None,
         (Some(challenge), Some(proof_id)) => {
-            Some(state.identity.prove(proof_id, challenge).map_err(AppError::bad_request)?)
+            let address = crate::api::oauth::issuer(&headers)?;
+            // An app reaches a plain-http address on its own network only:
+            // asked for one from the internet, the server is being asked on
+            // behalf of a device at that address elsewhere.
+            if address.starts_with("http://") && !source.is_some_and(crate::setup::is_local_address) {
+                return Err(AppError::forbidden("a proof for a plain-http address is made for the home network only"));
+            }
+            Some(state.identity.prove(proof_id, &address, challenge).map_err(AppError::bad_request)?)
         }
         _ => return Err(AppError::bad_request("a proof takes both challenge and proof_id")),
     };

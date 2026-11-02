@@ -745,17 +745,21 @@ token to the address, the server there proves it is the one signed in to.
 
 **Proofs.** Every token answer carries `server_id`, `proof_id` and
 `proof_key` ([Tokens](#tokens)): a key of this sign-in's own, the same at
-every refresh, which the server derives from its `secret.key`, so another
-app's key can't pass for the server. Before sending a token to an address,
-the app asks it to prove it holds that key:
+every refresh and profile switch, which the server derives from its
+`secret.key`, so another app's key can't pass for the server. The app
+keeps the first it gets and never takes another for the same sign-in.
+Before sending a token to an address, the app asks it to prove it holds
+that key:
 
 1. The app makes a challenge of 16 to 64 random bytes, written in base64url
    without padding (22 to 86 characters), and sends it with its `proof_id`.
 2. The server answers `proof`, HMAC-SHA256 under the key of this text, in
-   base64url without padding:
+   base64url without padding, where the address is the one it was asked
+   at, written as its [issuer](#discovery) (`http://192.168.1.20:7539`,
+   `https://pley.example.com`):
 
    ```text
-   pley-server-proof\n<server id>\n<challenge as sent>
+   pley-server-proof\n<server id>\n<address>\n<challenge as sent>
    ```
 
 3. The app computes the same with its `proof_key` and compares. Any
@@ -766,7 +770,18 @@ the app asks it to prove it holds that key:
    address itself.
 
 A proof counts for half an hour, and until the device changes networks or
-a request to the server gets no answer.
+a request to the server gets no answer. A refresh token, a profile switch's
+PIN and a sign-out wait for a proof of their own, made then.
+
+The proof covers the address, so a device elsewhere that passes the
+challenge on to the server's public address gets a proof for that address,
+which an app at the home address refuses. Passed on to the server's
+plain-http port, it would name the home address itself: the server makes
+no proof for a plain-http address to a client on the internet (`403`),
+which is how such a request looks. A device that reaches the server from
+its own network, or through a proxy that hides where clients come from
+(Docker's userland proxy without `X-Forwarded-For`), could still pass a
+challenge on; an https address is checked by its certificate as well.
 
 Pley's own sign-in has no token answer: the desktop app asks
 `/api/server/proof-key` with its window's session for a key, and checks
@@ -777,12 +792,17 @@ and stores nothing. Apps' tokens are refused there: they have their keys.
 
 `400` for a challenge or `proof_id` that isn't written so, or one sent
 without the other. `proof` is `null` while the server can't use its
-`secret.key`. The answer isn't cached.
+`secret.key`; a new `secret.key` changes every key, and apps then refuse
+the server until they sign in again. The answer isn't cached.
 
-A proof tells the server from another device at the same address. It
-doesn't stop someone who passes the challenge on to the real server and
-its answer back: only HTTPS does that, which Pley needs beyond the home
-network anyway ([SECURITY.md](../SECURITY.md)).
+The desktop app checks the requests it makes itself. The server's pages
+in its window send the session on their own: they open only after a proof,
+and when the computer changes networks the window leaves a plain-http
+server within a second and opens it again through a proof.
+
+The Samsung (web) and LG apps, Android and the desktop app check proofs.
+The native Samsung app, Kodi and Roku don't yet: they send their tokens
+as before.
 
 ### Signing in
 
