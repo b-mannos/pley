@@ -628,6 +628,21 @@ A build without `PLEY_TIZEN_METRICS` has none of this: the calls of
   are loaded from the TV, whatever version the app carries, so the app must
   ask for one no newer than the TV's: a newer one fails to load
   (`FileLoadException`).
+- **NUI objects the app doesn't dispose are freed on the UI thread.** A
+  view, animation, timer or picture that .NET collects goes into NUI's
+  dispose queue, and the UI thread frees all those collected together just
+  after, in no set order. A mistake there closes the app natively, with no
+  .NET exception to catch, so the app keeps to three rules:
+  - An animation or timer that runs is held until it ends
+    (`Kit/Held.cs`, the player's timers): collected while it ran, the TV
+    called into it later.
+  - A callback NUI calls from native code (a frame callback) is held in a
+    field for as long as NUI has it.
+  - A view's `Dispose(DisposeTypes)` calls into another NUI object (stops
+    an animation or a timer, hides or removes a child) only when the app
+    disposes it, `type == DisposeTypes.Explicit`: from the queue, that
+    object may have been freed first. `DisposeRulesTests` holds every
+    override to this.
 
 ## References
 

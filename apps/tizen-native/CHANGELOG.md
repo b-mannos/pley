@@ -241,5 +241,8 @@ It has no releases yet: it is built and installed by hand
   PIN without it: the start opens on that profile's PIN pad, and Back shows
   the other profiles. While the TV doesn't know whether the profile it was
   left on has a PIN, the start asks "Who's watching?".
+- The app no longer closes now and then as a screen is left (a disc's
+  titles, the Live TV guide, a film): a view tidied up after it had gone
+  stopped an animation that had gone with it.
 - Too many wrong PINs for the profile the TV starts as say how long to
   wait, as a switch does, rather than "a few minutes".

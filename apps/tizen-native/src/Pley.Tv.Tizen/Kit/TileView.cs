@@ -261,7 +261,8 @@ sealed class TileView : View
     {
         if (Disposed) return;
         Focus.FocusChanged -= OnFocus;
-        focusAnimation?.Stop();
+        // Only when disposed by the app: collected, the animation may have gone first (Kit/Held.cs).
+        if (type == DisposeTypes.Explicit) focusAnimation?.Stop();
         base.Dispose(type);
     }
 

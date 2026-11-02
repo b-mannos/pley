@@ -218,7 +218,8 @@ sealed class TrackListView : View
     protected override void Dispose(DisposeTypes type)
     {
         if (Disposed) return;
-        scrolling?.Stop();
+        // Only when disposed by the app: collected, the animation may have gone first (Kit/Held.cs).
+        if (type == DisposeTypes.Explicit) scrolling?.Stop();
         base.Dispose(type);
     }
 }
