@@ -330,7 +330,7 @@ public class SubtitlePresenterTests
     }
 
     [Fact]
-    public void A_partial_picture_track_is_asked_for_less_often_each_time_up_to_20_s_from_where_the_player_is_then()
+    public void A_partial_picture_track_is_asked_for_less_often_each_time_up_to_15_s_from_where_the_player_is_then()
     {
         // Deviation from Android, which asks every 3 s: a file whose Cues don't list the track is copied whole, and
         // each answer is all of it so far, tens of MB for a film.
@@ -345,10 +345,10 @@ public class SubtitlePresenterTests
             position = t;
             clock.Advance(1_000);
         }
-        // 3, 6, 12 s apart, then 20 s each time: the server answers from a read at a player elsewhere for 20 s past
-        // where it asked from, so each ask finds the read the last one started. Each ask says where the player is
-        // then, the start too.
-        Assert.Equal(new long[] { 0, 3_000, 9_000, 21_000, 41_000, 61_000, 81_000, 101_000 }.Select(AskedAt), asked);
+        // 3, 6, 12 s apart, then 15 s each time: the server answers from a read at a player elsewhere for 20 s past
+        // where it asked from, so each ask finds the read the last one started, the answer's own time and the
+        // server's second included. Each ask says where the player is then, the start too.
+        Assert.Equal(new long[] { 0, 3_000, 9_000, 21_000, 36_000, 51_000, 66_000, 81_000, 96_000, 111_000 }.Select(AskedAt), asked);
     }
 
     [Fact]
