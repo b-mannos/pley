@@ -378,6 +378,19 @@ Rules the code keeps:
 - All HTTP goes through `ApiTask`; the render thread never makes a request.
 - The access token goes only in `Authorization: Bearer`, never in an
   address, including the Video node's and the pictures' HTTP agents.
+- No token goes to the server's address before the server there proves it
+  is the one signed in to, at that address
+  ([API.md](API.md#telling-servers-apart)). The access token waits for a
+  proof made on this network within the half hour, and the scene (its
+  players, pictures and event stream) has the token only while one holds:
+  `ApiTask` asks for the next proof before it lapses, and joining or
+  leaving a network (Roku's link status) takes the token away until the
+  server proves itself again. A request that gets no answer has the next
+  token wait for a new proof. A refresh, a profile switch with its PIN and
+  a sign-out wait for a proof made then. What can't prove itself gets no
+  token, and the app says "Another device answers there." Roku's
+  transfers follow redirects, but a proof made at any other address than
+  the one asked doesn't verify.
 - Videos play from [keyed addresses](API.md#keyed-urls): Roku fetches a
   BIF file of seek previews without its HTTP agent's headers, so the
   previews come from the session's key, beside its media.
@@ -449,7 +462,8 @@ bun run images    # the nine-patch focus and watched-mark images
   requests and TMDB titles, all made up, in `scripts/fixture-requests.mjs`)
   and walks every screen, saving each in `out/smoke/`. It fails on a
   BrightScript error, a request without the User-Agent, a token in an
-  address, or a refresh token used twice. On the way it jumps down a
+  address, a token before the server proved itself (a refresh token
+  without a proof made then), or a refresh token used twice. On the way it jumps down a
   library with its A to Z, saves a library's filters as a smart playlist,
   plays a collection of movies and a smart one of shows, and an artist's
   tracks, makes a playlist, plays a track from Now Playing's Up next,

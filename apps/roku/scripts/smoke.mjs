@@ -1228,6 +1228,8 @@ const checks = [
   ["said the server requires two-step sign-in", twoStep.shown],
   ["polled with the device code", asked(/^POST \/api\/oauth\/token$/)],
   ["refreshed its token", fixture.refreshes > 0],
+  // The fake server says so when a token goes before a proof.
+  ["had the server prove itself before its token went", fixture.proofs > 0],
   ["loaded Home", asked(/^GET \/api\/hubs\/home$/)],
   ["asked to play with its capabilities", asked(/^POST \/api\/playback$/)],
   ["asked for the picture subtitles to be drawn", fixture.playbacks.some((p) => p.item === 103 && p.subtitle_index === 4)],

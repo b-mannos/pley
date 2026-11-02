@@ -8,6 +8,19 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Security
+
+- Before the token goes to the server's address, the server proves it is
+  the one the Roku signed in to, at that address: the access token, which
+  the player and the pictures use too, waits for a proof made on this
+  network within the half hour, the refresh token and a profile's PIN for
+  one made then. Another device at the address on another network gets
+  nothing, nor does one passing the challenge on to the server from
+  elsewhere; the Roku says "Another device answers there." One that takes
+  the address on the Roku's own network may get an access token (an
+  hour's) within the half hour, never the refresh token. A sign-in from
+  before starts checking within the hour, as its token is renewed.
+
 ### Fixed
 
 - Settings' Always start as no longer starts the Roku as a profile with a
