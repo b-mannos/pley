@@ -267,7 +267,7 @@ interface ItemSummary {
   release_date?: string;            // "YYYY-MM-DD"
   extra_type?: string;              // kind "extra": trailer | featurette | behind_the_scenes | deleted_scene |
                                     // interview | scene | short | other
-  media?: MediaSummary;             // only in library listings sorted by bitrate
+  media?: MediaSummary;             // only in library listings
 }
 
 interface MediaSummary {            // a movie's best file, or a show's episodes together
@@ -552,7 +552,9 @@ lists carry (Kodi).
     as a sign-in does (`two_step_setup` until `code` is the secret's first
     code, with `setup_id`), and the answer has its `recovery_codes`.
 
-  `429` after 5 wrong tries in 15 minutes.
+  `429` after 5 wrong tries in 15 minutes. A PIN refused is `403` with
+  `code` `wrong_pin` (missing or wrong) or `pin_locked`, as the apps'
+  [switch-profile grant](#tokens) says by its `reason`.
 
 ### Two-step sign-in
 
@@ -1152,6 +1154,10 @@ profiles when the app's profile is in the household, else nothing:
   `password` (in the browser) or `locked`. A profile that has to set up
   two-step sign-in, which the server requires, needs `password`: picked in
   the browser, its password sets it up there.
+- The current profile's `needs` is `none`: the app acts as it already.
+  Pley's TV apps asking "Who's watching?" as they start ask its PIN when
+  [`GET /api/auth/me`](#auth) says `has_pin`, and check it with the
+  [switch-profile grant](#tokens).
 - Usernames, roles, libraries, age limits and sign-in settings are left
   out.
 
@@ -1726,9 +1732,9 @@ removed or reordered (`400`).
   A job the transcoder loses comes back at it. `400` for a direct play, a
   remux, or a transcoder too old.
 - **`/api/media/{key}/{file}`**: `master.m3u8`, `index.m3u8` and `{n}.ts`
-  of a stream, `file.{ext}` of a direct play. `HEAD` answers as `GET`
-  without the body: for a segment, once it is made (the TV apps get a stream
-  ready that way).
+  of a stream, `file.{ext}` of a direct play, `previews.bif` of either.
+  `HEAD` answers as `GET` without the body: for a segment, once it is made
+  (the TV apps get a stream ready that way).
 - **`.vtt`**: extracted or converted on demand, and cached.
   - `offset_ms` moves every cue that much later (earlier when negative,
     never before 0; at most ±600000), for players that can't move a track
@@ -1951,7 +1957,8 @@ Some players can't send headers with their media requests (Samsung's AVPlay
 sets only a cookie and a User-Agent; LG's media pipeline only what the web
 engine gives it), and an app's token goes only in the Authorization header.
 A play request with `keyed_urls: true` gets a session whose addresses carry
-a key of their own instead. Pley's Samsung and LG apps ask for keyed URLs.
+a key of their own instead. Pley's Samsung, LG and Roku apps ask for keyed
+URLs.
 
 - `PlaybackInfo.url` is `/api/media/{key}/master.m3u8` (or `index.m3u8`)
   for a stream, whose playlists name their segments relatively, so they
@@ -1959,15 +1966,18 @@ a key of their own instead. Pley's Samsung and LG apps ask for keyed URLs.
   for the file's container, with `Range` and
   `Cache-Control: private, no-store`.
 - The key is `pley_mk_` and 256 random bits, kept in memory only. It opens
-  that session's playlists and segments, or its file, and nothing else: no
-  API route takes it as a token.
+  that session's playlists and segments, or its file, and its seek previews,
+  and nothing else: no API route takes it as a token.
+- `/api/media/{key}/previews.bif` is the file's seek previews as a BIF file,
+  for a player that fetches them itself (Roku's); `404` while they are being
+  made, as for `trickplay`.
 - It ends with the session (closed by its player, or forgotten after 15
   quiet minutes: `404` "playback session expired"), the account (disabled)
   and the app's sign-in (signed out, a new password): `404`. A session
   stopped from elsewhere answers `410 session_stopped` here too, with its
   message.
 - Logs leave the key out (`/api/media/…/12.ts`).
-- Everything else the player asks for (subtitles, seek previews, its
+- Everything else the player asks for (subtitles, sprite sheets, its
   reports) goes with the token as usual.
 - **Live TV** works the same way: `POST /api/live/channels/{id}/watch`
   with `keyed_urls: true` answers `url` as

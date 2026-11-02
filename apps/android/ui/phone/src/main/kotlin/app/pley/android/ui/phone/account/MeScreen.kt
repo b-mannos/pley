@@ -124,7 +124,7 @@ internal fun MeScreen() {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             item(key = "profile", contentType = "profile") {
-                ProfileHeader(state.profile, onSwitch = { navigator.open(PleyKey.Profiles) })
+                ProfileHeader(state.profile, onSwitch = { navigator.open(PleyKey.Profiles()) })
             }
             if (requests.discover || requests.requests) {
                 item(key = "requests", contentType = "group") {

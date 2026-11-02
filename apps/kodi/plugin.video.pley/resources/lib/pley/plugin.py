@@ -371,13 +371,16 @@ class Plugin(asking.Asking):
         client = self.client()
         # TMDB's titles the libraries lack, asked at the same time, never
         # waited for (asking.Searching): where this sign-in may ask, as the
-        # service last read the summary (search asks nothing more first).
-        may_ask = requests.may_ask(self.requests_summary(ask=False))
-        tmdb = asking.Searching(self.client(asking.FOUND_WAIT), query, self.path) if may_ask else None
+        # service last read the summary (search asks nothing more first),
+        # for the words as the server takes them.
+        tmdb_query = requests.search_text(query)
+        may_ask = bool(tmdb_query) and requests.may_ask(self.requests_summary(ask=False))
+        tmdb = asking.Searching(self.client(asking.FOUND_WAIT), tmdb_query, self.path) if may_ask else None
         found = client.get("/api/search", q=query, limit=100, summaries=1)
         items = found.get("items", [])
         channels = found.get("channels") or []
-        if not items and not channels and tmdb is None:
+        alone = not items and not channels
+        if alone and tmdb is None:
             kodi.notify(kodi.text("nothing_found"))
         self.items(items, content="videos")
         # Live TV's channels found by name, number or what's on: each plays.
@@ -390,14 +393,15 @@ class Plugin(asking.Asking):
         xbmcplugin.addDirectoryItems(self.handle, entries, len(entries))
         shown = tmdb.ready() if tmdb is not None else []
         if tmdb is not None:
-            if not items and not channels:
+            if alone:
                 # OK searches again.
                 self.entry(kodi.text("nothing_in_libraries"), {"route": "search"}, "DefaultIconInfo.png")
-            self.on_tmdb(query, shown)
+            # Why TMDB refused, once it answered.
+            self.on_tmdb(tmdb_query, shown, tmdb.refused if shown is not None else None, alone)
         self.end()
         if shown is None:
             # Shown again if they come in time.
-            tmdb.later()
+            tmdb.later(alone)
 
     def route_play(self) -> None:
         client = self.client()
@@ -697,9 +701,14 @@ class Plugin(asking.Asking):
             return
         if len(household) < 2:
             return kodi.notify(kodi.text("no_other_profile"))
+        try:
+            # Who the add-on is: the one in use says "PIN" when it has one.
+            me = client.get("/api/auth/me") or {}
+        except api.ApiError:
+            me = {}
         entries = []
         for profile in household:
-            li = xbmcgui.ListItem(profile.get("name") or "", kodi.text("pin") if profile.get("needs") == "pin" else "", offscreen=True)
+            li = xbmcgui.ListItem(profile.get("name") or "", kodi.text("pin") if profiles.needs_pin(profile, me) else "", offscreen=True)
             picture = listing.image(self.proxy_base, profile.get("avatar_url"), 256)
             li.setArt({"icon": picture or "DefaultUser.png", "thumb": picture or "DefaultUser.png"})
             entries.append(li)
@@ -710,19 +719,30 @@ class Plugin(asking.Asking):
         profile = household[chosen]
         name = profile.get("name") or ""
         needs = profile.get("needs")
-        pin = None
-        if needs == "pin":
-            pin = dialog.numeric(0, kodi.text("pin_of") % name, "", True)
-            if not pin:
-                return
-        elif needs != "none":
+        if needs not in ("none", "pin"):
             return self.password_profile(profile) if needs == "password" else kodi.notify(kodi.text("profile_locked"), error=True)
-        try:
-            profiles.switch(client, profile["id"], pin)
-        except api.ApiError as e:
-            if e.code == "browser":
-                return self.password_profile(profile)
-            return kodi.notify(profiles.refusal(e, kodi.text, self.server_name()), error=True)
+        pin, problem = None, ""
+        while True:
+            if needs == "pin":
+                # After a wrong PIN, or too many, the heading says why.
+                heading = kodi.text("pin_of") % name
+                pin = dialog.numeric(0, "%s %s" % (problem, heading) if problem else heading, "", True)
+                if not pin:
+                    return
+            try:
+                profiles.switch(client, profile["id"], pin)
+                break
+            except api.ApiError as e:
+                if e.code == "browser":
+                    return self.password_profile(profile)
+                if e.code == "wrong_pin" and not pin:
+                    # The list was older than the profile's new PIN.
+                    needs = "pin"
+                    continue
+                if e.code in ("wrong_pin", "throttled"):
+                    needs, problem = "pin", profiles.refusal(e, kodi.text, self.server_name())
+                    continue
+                return kodi.notify(profiles.refusal(e, kodi.text, self.server_name()), error=True)
         kodi.set_property(profiles.GATE, "1")
         kodi.notify(kodi.text("watching_as") % name)
         if kodi.get_property(kodi.WINDOW_OPEN):

@@ -95,12 +95,13 @@ import kotlinx.coroutines.launch
  * "Who's watching?" (design spec §2.9): one row of large avatars, focus
  * on the last profile used so one OK continues; the PIN pad for a
  * profile with a PIN; a new code for a profile that needs its password.
+ * [pin]: a start as the profile in use, whose pad opens first.
  */
 @Composable
-internal fun TvProfilesScreen() {
+internal fun TvProfilesScreen(pin: Boolean = false) {
     val navigator = LocalTvNavigator.current
     val given = LocalOnboardingSource.current
-    val vm = viewModel { ProfilesViewModel(given ?: onboardingSource(), tv = true, gate = !ProfileGate.passed) }
+    val vm = viewModel { ProfilesViewModel(given ?: onboardingSource(), tv = true, gate = !ProfileGate.passed, pin = pin) }
     LaunchedEffect(vm) { vm.navigation.collect { navigator.go(it) } }
     val state by vm.state.collectAsStateWithLifecycle()
     TvProfilesContent(
@@ -416,7 +417,6 @@ internal fun TvPinPad(
                         is PadKey.Digit -> onDigit(key.value)
                         PadKey.Delete -> onDelete()
                         PadKey.Ok -> onSubmit()
-                        is PadKey.Symbol -> Unit
                     }
                 },
             )

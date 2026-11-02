@@ -20,4 +20,9 @@
     <None Include="..\..\..\..\packages\tv\test\fixtures\*.json" Link="fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- The app's own sources, for DisposeRulesTests: a rule of NUI's the compiler can't hold them to. -->
+  <ItemGroup>
+    <None Include="..\..\src\Pley.Tv.Tizen\**\*.cs" Exclude="..\..\src\Pley.Tv.Tizen\bin\**;..\..\src\Pley.Tv.Tizen\obj\**" Link="app\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

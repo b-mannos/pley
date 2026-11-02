@@ -118,8 +118,39 @@ function readJson<T>(store: KeyValue, key: string): T | null {
   }
 }
 
-/** What the first screen is, from what the TV kept (no network): the Android app's StartGate. */
-export type Start = { page: "servers" } | { page: "link"; server: string } | { page: "profiles" } | { page: "home" };
+/**
+ * What the first screen is, from what the TV kept (no network): the Android
+ * app's StartGate. `pin`: "Who's watching?" opened on the PIN pad of the
+ * profile the TV was left on.
+ */
+export type Start = { page: "servers" } | { page: "link"; server: string } | { page: "profiles" } | { page: "pin" } | { page: "home" };
+
+/** What the first screen is chosen by, all kept on the TV. */
+export interface StartFacts {
+  server: string | null;
+  signedIn: boolean;
+  /** How many profiles the household had when last heard (1 while unknown). */
+  household: number;
+  /** Settings' "Always start as"; `null` when not set. */
+  alwaysStartAs: number | null;
+  /** The profile the TV was left on, as last heard; `null` when it never heard. */
+  me: Pick<User, "has_pin"> | null;
+}
+
+/**
+ * The first screen (the Android app's startKey): no server, Servers; no
+ * sign-in, Link; a household of several profiles, "Who's watching?".
+ * "Always start as" skips that question and goes on as the profile the TV
+ * was left on, but never past its PIN: its pad comes first when it has one,
+ * and "Who's watching?" when the TV doesn't know whether it has one.
+ */
+export function startPage(f: StartFacts): Start["page"] {
+  if (!f.server) return "servers";
+  if (!f.signedIn) return "link";
+  if (f.household <= 1) return "home";
+  if (f.alwaysStartAs === null || !f.me) return "profiles";
+  return f.me.has_pin ? "pin" : "home";
+}
 
 /**
  * The app's state: the server signed in to, its API and tokens, who is
@@ -267,9 +298,14 @@ export class AppState {
   /** The first screen, from what the TV kept. */
   start(): Start {
     const server = this.server.value;
-    if (!server) return { page: "servers" };
-    if (!this.tokens?.signedIn) return { page: "link", server };
-    return this.householdSize() > 1 && this.alwaysStartAs() === null ? { page: "profiles" } : { page: "home" };
+    const page = startPage({
+      server,
+      signedIn: !!this.tokens?.signedIn,
+      household: this.householdSize(),
+      alwaysStartAs: this.alwaysStartAs(),
+      me: this.me.value,
+    });
+    return page === "link" ? { page, server: server ?? "" } : { page };
   }
 
   /** Signs in to `server` from now on (its tokens, if the TV has them). */

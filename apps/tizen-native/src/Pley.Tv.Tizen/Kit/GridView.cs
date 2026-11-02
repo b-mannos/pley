@@ -310,7 +310,8 @@ sealed class GridView : View
     {
         if (Disposed) return;
         gate.HoldEnded -= Landed;
-        scroll?.Stop();
+        // Only when disposed by the app: collected, the animation may have gone first (Kit/Held.cs).
+        if (type == DisposeTypes.Explicit) scroll?.Stop();
         base.Dispose(type);
     }
 

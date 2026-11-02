@@ -8,6 +8,15 @@ describes how they are made.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-02
+
+### Fixed
+
+- A wrong PIN, or too many, asks again with the reason in the dialog's
+  heading, and the profile in use shows its lock on "Who's watching?".
+  Switch profile in the settings asks the PIN of a profile that got one
+  after the list was loaded.
+
 ## [0.1.1] - 2026-11-01
 
 ### Added
@@ -106,7 +115,8 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-01...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-02...HEAD
+[0.1.2]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02
 [0.1.1]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01
-[0.1.0]: https://github.com/pley-media-server/pley/releases/tag/kodi-v0.1.0
-[0.0.1]: https://github.com/pley-media-server/pley/releases/tag/kodi-v0.0.1
+[0.1.0]: https://github.com/pley-media-server/pley/tree/94985f768f39f4a230060cb47af9498ee8779ddf
+[0.0.1]: https://github.com/pley-media-server/pley/tree/7e14bb9d498d054a73b2176cd8949b6864ffacd9

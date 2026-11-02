@@ -29,7 +29,7 @@ class StartGateTest {
         assertTrue(PleyKey.Servers.isGettingIn)
         assertTrue(PleyKey.SignIn("x").isGettingIn)
         assertTrue(PleyKey.Link("x").isGettingIn)
-        assertFalse(PleyKey.Profiles.isGettingIn)
+        assertFalse(PleyKey.Profiles().isGettingIn)
         assertFalse(PleyKey.Home.isGettingIn)
     }
 

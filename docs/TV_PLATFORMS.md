@@ -68,9 +68,12 @@ LG's CLI (`@webos-tools/cli`) is a dev dependency, installed by
 
 ## Using it
 
-Sign-in, server discovery (a sweep of the TV's subnet), the screens, the
-player's keys and panels, and offline behaviour follow the Android TV app.
-What differs:
+Sign-in, server discovery (a sweep of the TV's subnet), "Who's watching?"
+and its PINs, the screens, the player's keys and panels, and offline
+behaviour follow the Android TV app. With Always start as too, a start
+never goes on as a profile with a PIN without it: the TV keeps the profile
+it was left on (`GET /api/auth/me`, with `has_pin`), and until it has,
+asks "Who's watching?". What differs:
 
 ### Remote and pointer
 
@@ -203,14 +206,15 @@ also what waits for them, in red while some failed.
   Other news shows only as the number and in the lists.
 - **Discover:** a hero for the first trending title, then Trending this
   week, Popular movies, Popular shows, Coming to cinemas and Popular
-  anime, each loaded as it comes near the screen, then Your requests.
-  Search at the top asks TMDB 400 ms after typing stops. Posters say In
-  library, Partly in library, Requested or Declined. A list reads TMDB's
-  pages until it has more than a screenful, 5 at most at a time, since an
-  age limit can leave page after page empty: a row shows what they had,
-  and a grid (See all, search) ends in Show more, which reads 5 more, or
-  in Retry after a page failed. Back on the page, what failed is asked
-  again.
+  anime, each loaded as it comes near the screen, then Your requests;
+  at the top, the way to the requests with their number. It has no
+  search field: Search finds TMDB's titles. Posters say In library,
+  Partly in library, Requested or Declined. A list reads TMDB's pages
+  until it has more than a screenful, 5 at most at a time, since an age
+  limit can leave page after page empty: a row shows what they had, and
+  a grid (See all, and Search's Discover row's) ends in Show more,
+  which reads 5 more, or in Retry after a page failed. Back on the page,
+  what failed is asked again.
 - **A title's page:** backdrop, poster, facts, cast and seasons with their
   state, and one main action: Request, Request more seasons, Tell me too,
   Open (in a library), or why not (declined, with when it may be asked
@@ -227,9 +231,16 @@ also what waits for them, in red while some failed.
   TV's keyboard), Mark as added by hand, Delete, Try again, Request
   again. Approve is plain: the settings' profile and folder, the seasons
   asked.
-- **Search:** under the libraries' results, On TMDB for a profile that
-  may ask, asked beside them so they never wait for it, with See all on
-  Discover. A movie's or show's page in a library shows its request's
+- **Search:** under the libraries' results, Discover for a profile that
+  may ask: up to 20 movies and shows the libraries lack, read from at
+  most 3 of TMDB's pages, asked beside the libraries so they never wait
+  for it. A title opens its page, where it is requested. See all opens
+  a grid titled Results for “…” with every title TMDB has for the words,
+  each with its badge, and Back goes back to Search. When TMDB doesn't
+  answer, the row says why ("TMDB isn't answering", "TMDB refused this
+  server's key", "Requests aren't open to this account"), with Retry
+  where it can help. TMDB gets the words cut to the server's 200
+  characters. A movie's or show's page in a library shows its request's
   stage, and Request more seasons for a show missing some.
 - **Answers:** a requests route's `503` with Pley's `{ code }` is an
   answer, never the server being away: "TMDB isn't answering" with
@@ -258,8 +269,12 @@ bun run --cwd apps/webos build       # only an app's dist/ (apps/tizen too); --d
   Tizen Studio is deprecated), found through `TIZEN_STUDIO` or `tizen` on
   the PATH, and a security profile named by `PLEY_TIZEN_PROFILE` (default
   `pley-dev`).
-- **Icons:** `bun scripts/render-icons.mjs` draws Samsung's 512×423 icon,
-  LG's 80 and 130 px icons and LG's 1920×1080 launch picture.
+- **Icons:** `bun scripts/render-icons.mjs` draws Samsung's 512×423 icons,
+  LG's 80 and 130 px icons and LG's 1920×1080 launch picture. One TV may
+  have more than one of Pley's Samsung apps, so the native app's icon is
+  plain, the web app's says WEB on blue, and a profiling build of the native
+  app (an app of its own, `app.pley.tizen.debug`, "Pley (debug)") says DEBUG
+  on yellow.
 
 ### Testing without a TV
 
@@ -340,7 +355,10 @@ and field reports:
   Vorbis, PCM. **No DTS**, decoded or passed through. E-AC-3 with Atmos
   reaches a receiver when the TV's digital output passes Dolby; apps can
   read that setting (`tizen.tvaudiocontrol.getOutputMode()`) but not change
-  it. Apps reportedly can't pass TrueHD over eARC.
+  it. TrueHD doesn't leave an app: on a 2025 S95F the native player lists
+  a file's audio tracks without its TrueHD, and the E-AC-3 (Atmos) beside it
+  plays instead. The native app switches to a track by its place in the
+  player's list, once the player is ready, and Info shows the one playing.
 - **`<video>` and MSE** stop H.264 at 1080p; 4K and 8K need AVPlay.
 - **AVPlay sends no request headers** but a cookie and a User-Agent, so
   the app plays from [keyed addresses](API.md#keyed-urls).
@@ -451,7 +469,7 @@ Pley for Samsung TV, native, is the Samsung app rewritten in C# for Tizen
 than a web engine. It runs on Tizen 9 TVs and is built beside the web app,
 which stays the Samsung app until the native one has its features. So far
 it has the Android TV app's "Choose your server" screen (servers found on
-the network, an address pad and the TV's keyboard, forgetting a server),
+the network, an address typed on the TV's keyboard, forgetting a server),
 its sign-in with a code and a QR code, Who's watching? with PINs, and
 Home: the hero, the server's rows and the rail, and item pages: the hero
 and its buttons, seasons and episodes, Extras, Cast and More Like This,
@@ -531,7 +549,11 @@ screen is made, which takes the UI thread half a second the first time.
   from the subtitle plane to the screen.
 - The Core's tests also run the fixtures in `packages/tv/test/fixtures`,
   inputs with the answers `packages/tv` gives, so the two Samsung apps
-  answer the same questions the same way. Where the Android app is
+  answer the same questions the same way: `profiles.json` pins "Who's
+  watching?", which profile is current and locked, what choosing one
+  leads to, where each refusal of a PIN leaves the screen, and the first
+  screen a start opens (with Always start as, the PIN pad of the profile
+  the TV was left on when it has one). Where the Android app is
   stricter (a token answer without `token_type`, a device code without
   `expires_in`), the native app follows it, and its test says which
   fixture case it answers differently.
@@ -597,6 +619,45 @@ PLEY_TIZEN_METRICS=http://<computer>:7531 bun run tizen-native
 A build without `PLEY_TIZEN_METRICS` has none of this: the calls of
 `Kit/Profile.cs` are left out when it is compiled.
 
+### Videos on a USB drive
+
+While a drive is plugged into the TV, the rail ends with **USB drive**. It
+lists the drive's folders, then the videos the TV's player opens (MKV, MP4,
+M4V, MOV, TS, M2TS, WebM, AVI, MPEG), sorted as a person sorts names;
+hidden files and what Windows and macOS leave on a drive aren't shown. A
+folder opens over the one before, with ".." first to go back up. At the
+drive's top, the page says how full the drive is.
+
+A video plays in Pley's player as it is, with no server
+(`Local/LocalPlayerSource.cs`), so seeking, the panels, the sleep timer and
+the subtitles' look are the same; what only a server does isn't there:
+converting, seek previews, the next episode.
+
+- **Tracks and chapters** come from the file's head: an MKV's Info, Tracks
+  and Chapters (`MatroskaHead`), an MP4's movie box (`Mp4Head`). The audio
+  it starts with is the default track the TV decodes, else the first it
+  decodes (TrueHD and DTS don't play).
+- **HDR** is read from the head (Matroska's Colour and Dolby Vision
+  configuration, MP4's `colr` and `dvcC`) and from the first HEVC frames
+  (`HevcFrames`): HDR10's mastering display, HLG's transfer, HDR10+'s
+  metadata and Dolby Vision's RPU, which many files' heads leave out.
+  Dolby Vision plays as its HDR10 base layer, profile 7 too: there is no
+  server to convert it.
+- **Subtitles**: the `.srt` and `.vtt` files beside the video
+  (`Film.en.forced.srt`), and an MKV's own tracks, read block by block
+  through its Cues (`MatroskaSubtitles`): text as WebVTT, pictures handed
+  to the decoder as they are. A track still being read is asked for again
+  after 1 s, then 2, then every 4 s, and at once after a seek. An MKV
+  without Cues for them (FFmpeg writes them for video alone) shows only the
+  files beside it.
+- **Where it stopped** is kept on the TV; past 95 % it was watched.
+- **The TV's player** opens the file at its path. Its buffering is left as
+  the TV has it: read or set for a file, the player said Playing and stood
+  at 0. A file whose picture never starts says so after 12 s.
+- **Thumbnails can't be made on the TV**: frames taken out of a file decode
+  in software (15 to 20 s each, 4K not at all), and the player's frame
+  capture isn't on Samsung TVs (`multimedia.raw_video`).
+
 ### On the TV
 
 - **60 frames a second** is the most an app's screens get, also on panels
@@ -609,6 +670,21 @@ A build without `PLEY_TIZEN_METRICS` has none of this: the calls of
   are loaded from the TV, whatever version the app carries, so the app must
   ask for one no newer than the TV's: a newer one fails to load
   (`FileLoadException`).
+- **NUI objects the app doesn't dispose are freed on the UI thread.** A
+  view, animation, timer or picture that .NET collects goes into NUI's
+  dispose queue, and the UI thread frees all those collected together just
+  after, in no set order. A mistake there closes the app natively, with no
+  .NET exception to catch, so the app keeps to three rules:
+  - An animation or timer that runs is held until it ends
+    (`Kit/Held.cs`, the player's timers): collected while it ran, the TV
+    called into it later.
+  - A callback NUI calls from native code (a frame callback) is held in a
+    field for as long as NUI has it.
+  - A view's `Dispose(DisposeTypes)` calls into another NUI object (stops
+    an animation or a timer, hides or removes a child) only when the app
+    disposes it, `type == DisposeTypes.Explicit`: from the queue, that
+    object may have been freed first. `DisposeRulesTests` holds every
+    override to this.
 
 ## References
 

@@ -10,9 +10,12 @@ It has no releases yet: it is built and installed by hand
 
 ### Added
 
+- A profiling build of the native app is an app of its own, "Pley (debug)",
+  with a DEBUG icon on a yellow band, so it installs beside the app rather
+  than in its place; the app's own icon is the plain logo.
 - A native app for Samsung TVs with Tizen 9, beside the web app: so far the
   Android TV app's "Choose your server" screen, with servers found on the
-  network, an address pad, the TV's keyboard and forgetting a server; its
+  network, an address typed on the TV's keyboard and forgetting a server; its
   sign-in with a code and a QR code, the tokens kept sealed by the TV's key
   manager; Who's watching? with PINs; and Home, with the hero, the
   server's rows and the rail; item pages, with seasons and episodes, Extras,
@@ -150,6 +153,9 @@ It has no releases yet: it is built and installed by hand
   quality badge that doesn't fit the tile is left out rather than running
   past its edge, the unwatched count sits on the accent and the watched
   tick is an accent check, both with square corners.
+- A library's posters in the native app show 4K and the dynamic range (DV,
+  HDR10) whatever the sort, as the other apps do: no codec and no lower
+  resolution.
 - Live TV in the native app starts a channel in about 2 seconds, from its
   stream as the provider sends it, where it waited for the server's first
   segments before; channels with surround sound the TV decodes (AC3) play
@@ -174,12 +180,18 @@ It has no releases yet: it is built and installed by hand
   only the chapter pictures near the one shown, lets them go as the player
   goes, and reads a film's subtitle pictures once rather than every few
   seconds while the server makes them.
+- Picture subtitles chosen in the native app wait up to a minute, as
+  Android's do, for a server that hasn't made them yet, rather than saying
+  after 10 s that they couldn't be loaded.
 - Films start about half a second sooner in the native app: the player
   starts once it has as much as Android's does, and asks for the film
   while its screen is being made.
 - Back in the native app's Live TV guide goes to the categories, then the
   rail, rather than straight to the rail.
 - The native app's "Exit Pley?" is a narrower dialog.
+- The native app's rail opens and closes as Android TV's does: it widens
+  with its labels fading in, the page behind it dims, and its entries grow
+  and shrink as focus moves; with Reduce motion, it opens in place.
 - Coming back from a film in the native app, posters already shown stay
   as they were rather than flashing to their titles and fading in again.
 - Holding Up or Down in the native app's libraries slides the posters
@@ -209,3 +221,44 @@ It has no releases yet: it is built and installed by hand
   switch: the app goes on as that profile, and the pages offer Retry.
 - Exiting the native app while music plays ends the music's session on
   the server, with where it stopped.
+- The native app's Info no longer closes the app during a film: it reads
+  the TV player's stream details once, and again when the picture changes,
+  rather than every second; it opens with them, where it said "Asking the
+  server…" for a moment first.
+- Switching to a Japanese (or other) audio track in the native app works
+  where the file names its language in three letters and the TV in two
+  ("jpn", "ja"); the player no longer starts again at each try.
+- The native app's animations (a tile's focus, a film's title as it
+  begins, pictures fading in) are held while they run, where one could be
+  collected mid-way and close the app.
+- The native app's black bars meet a letterboxed film's picture exactly,
+  whatever its shape, where a sliver of the TV's menu could show between
+  them.
+- Picture subtitles (PGS, VobSub, DVB) in the native app no longer close
+  the app as a track still being made comes again: the same picture is
+  kept, and an old one's texture goes a second after it leaves the screen.
+- Videos on a USB drive play in the native app: the rail's USB drive,
+  while one is plugged in, lists its folders and videos; a video plays in
+  Pley's player from where it stopped, with its audio tracks, chapters,
+  HDR, its own subtitles and the subtitle files beside it.
+
+### Fixed
+
+- A film's audio track, chosen or saved, plays from the start: it was asked
+  for before the TV's player was ready, and the first track played. Beside a
+  TrueHD track the TV leaves out, the right track is chosen, and Info shows
+  the track playing.
+- Live TV no longer pauses for a quarter of a second as it opens and as a
+  channel is left, with a provider's hundreds of categories, and moving
+  through the guide is smoother: a row's programmes are painted again
+  rather than made again as focus moves, and a long description is cut to
+  what the panel shows.
+- Settings' Always start as no longer starts the TV as a profile with a
+  PIN without it: the start opens on that profile's PIN pad, and Back shows
+  the other profiles. While the TV doesn't know whether the profile it was
+  left on has a PIN, the start asks "Who's watching?".
+- The app no longer closes now and then as a screen is left (a disc's
+  titles, the Live TV guide, a film): a view tidied up after it had gone
+  stopped an animation that had gone with it.
+- Too many wrong PINs for the profile the TV starts as say how long to
+  wait, as a switch does, rather than "a few minutes".

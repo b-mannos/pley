@@ -51,6 +51,25 @@ a request there that got no answer); for the refresh token and a profile's
 PIN, one made then. What can't prove itself gets no token: the app shows
 what it saved and says "Another device answers there."
 
+### Profiles
+
+A TV asks "Who's watching?" as it starts when the household has more than
+one profile, unless Settings' Always start as names one; Switch profile
+opens it at any time, on phones too. A profile with a PIN shows a lock and
+asks it on a number pad: a wrong one clears the dots, too many say how
+long to wait, and a PIN locked after 100 wrong ones in a row stops the
+pad. Going on as the profile a TV was left on asks its PIN at a start. A
+profile that can see more and has no PIN takes its password: a phone signs
+in again in the browser, and a TV shows a code to approve on a phone,
+where its owner picks it.
+
+Always start as only skips the question: the TV starts as the profile it
+was left on, but never past its PIN. When that profile has one, the start
+opens "Who's watching?" on its PIN pad, and Back shows the other profiles.
+Whether it has one is the profile's `has_pin` from `GET /api/auth/me`, saved
+with the session, so the start reads it from the device; until the TV has
+heard it for that profile, the start asks "Who's watching?".
+
 ### TVs and Fire TV
 
 - Select opens, holding Select or Menu (☰) opens a title's actions, Back
@@ -170,15 +189,22 @@ Where the server takes requests ([API.md](API.md#requests)), people ask
 for movies and shows found on TMDB and administrators decide; Radarr and
 Sonarr fetch what is approved. On phones and tablets:
 
-- **Ways in**: Search before typing (Discover), Search's "On TMDB" row
-  after the libraries' results (See all on Discover), and Me's rows:
-  Discover, and Your requests (Requests for administrators) with its
-  number, which Me's tab carries too, in red while a request couldn't be
-  sent. An account that may not ask and has no requests sees none of it.
-- **Discover**: TMDB's search; a hero for the first trending title with
-  its main action; rows (Trending this week, Popular movies, Popular
-  shows, Coming to cinemas, Popular anime), each read as it comes into
-  view and page by page; the person's requests.
+- **Ways in**: Search before typing (Discover), Search's Discover row
+  after the libraries' results, and Me's rows: Discover, and Your requests
+  (Requests for administrators) with its number, which Me's tab carries
+  too, in red while a request couldn't be sent. An account that may not
+  ask and has no requests sees none of it.
+- **Search's Discover row**, after the libraries' results, shows TMDB's
+  titles that no library has, or why TMDB can't be searched (not
+  answering, its key refused, no access), with Retry where trying again
+  may help. See all opens every title TMDB finds for the words, with its
+  badge, in a grid under "Results for “dune”", read page by page; Back
+  goes back to Search. Words past the server's 200 characters are cut to
+  them.
+- **Discover**: a hero for the first trending title with its main action;
+  rows (Trending this week, Popular movies, Popular shows, Coming to
+  cinemas, Popular anime), each read as it comes into view and page by
+  page; the person's requests. It has no search of its own.
 - **A title's page** has the one main action (Request, Requested,
   Following, Tell me too, Open, Request more seasons, or why not), the
   requests for it with their stage, each season's state, and the cast.

@@ -204,7 +204,8 @@ sealed class ChapterStrip : View
     protected override void Dispose(DisposeTypes type)
     {
         if (Disposed) return;
-        slide?.Stop();
+        // Only when disposed by the app: collected, the animation may have gone first (Kit/Held.cs).
+        if (type == DisposeTypes.Explicit) slide?.Stop();
         base.Dispose(type);
     }
 

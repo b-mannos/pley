@@ -11,8 +11,10 @@ namespace Pley.Tv.Tizen.Kit;
 /// <param name="Key">Stays the same while the line is in the list: focus stays on it as the list changes.</param>
 /// <param name="Number">The track's number column; the track playing shows a glyph in its place.</param>
 /// <param name="Subtitle">Under the title, in Caption: the track's own artist, or "Artist · Album" in the queue.</param>
+/// <param name="Icon">In the number's place, on a tile: a drive's folder or video (Lucide's name).</param>
+/// <param name="Progress">How far through it is, 0 to 1: a bar under the words when more than 0.</param>
 sealed record TrackLine(string Key, string Title, bool Header = false, string Number = "", string? Subtitle = null, string Duration = "",
-    bool Current = false, bool Playing = false, bool Highlighted = false);
+    bool Current = false, bool Playing = false, bool Highlighted = false, string? Icon = null, float Progress = 0);
 
 /// <summary>
 /// A list of tracks (the Android app's TvTrackLine in a LazyColumn): lines 44 dp tall at least, 2 dp
@@ -142,7 +144,7 @@ sealed class TrackListView : View
 
     static float HeightOf(TrackLine line) => line.Header
         ? HeaderHeight
-        : Math.Max(MinLine, 12 + PleyType.Body.Line + (string.IsNullOrEmpty(line.Subtitle) ? 0 : PleyType.Caption.Line));
+        : Math.Max(line.Icon != null ? TrackLineView.IconLine : MinLine, 12 + PleyType.Body.Line + (string.IsNullOrEmpty(line.Subtitle) ? 0 : PleyType.Caption.Line) + (line.Progress > 0 ? 8 : 0));
 
     int IndexOf(FocusItem item)
     {
@@ -218,7 +220,8 @@ sealed class TrackListView : View
     protected override void Dispose(DisposeTypes type)
     {
         if (Disposed) return;
-        scrolling?.Stop();
+        // Only when disposed by the app: collected, the animation may have gone first (Kit/Held.cs).
+        if (type == DisposeTypes.Explicit) scrolling?.Stop();
         base.Dispose(type);
     }
 }
@@ -233,6 +236,9 @@ sealed class TrackListView : View
 sealed class TrackLineView : View
 {
     const float Inset = 12, NumberWidth = 28, NumberGap = 16, Glyph = 18;
+    /// <summary>A line with an icon: its tile, the icon on it, and the line's least height.</summary>
+    const float Tile = 36, TileIcon = 20, TileGap = 14, BarWidth = 160, BarHeight = 3;
+    public const float IconLine = 56;
 
     readonly FocusItem? item;
     readonly View fill;
@@ -241,6 +247,10 @@ sealed class TrackLineView : View
     readonly TextLabel title;
     readonly TextLabel? subtitle;
     readonly TextLabel? duration;
+    readonly View? tile;
+    readonly ImageView? icon;
+    readonly View? bar;
+    readonly View? barFill;
 
     public TrackLineView(TrackLine line, float widthDp, float heightDp, float topDp, FocusItem? item)
     {
@@ -258,7 +268,21 @@ sealed class TrackLineView : View
             fill.Add(title);
             return;
         }
-        if (line.Current)
+        if (line.Icon != null)
+        {
+            tile = new View
+            {
+                Size = new Size(Ui.Dp(Tile), Ui.Dp(Tile)),
+                Position = new Position(Ui.Dp(Inset), Ui.Dp((heightDp - Tile) / 2)),
+                CornerRadius = Ui.Dp(PleyShape.FieldRadius),
+                BackgroundColor = PleyColors.Surface2,
+            };
+            icon = Icons.Icon(line.Icon, TileIcon, PleyColors.Muted);
+            icon.Position = new Position(Ui.Dp((Tile - TileIcon) / 2), Ui.Dp((Tile - TileIcon) / 2));
+            tile.Add(icon);
+            fill.Add(tile);
+        }
+        else if (line.Current)
         {
             glyph = Icons.Icon(line.Playing ? "audio-lines" : "play", Glyph, PleyColors.Accent);
             glyph.Position = new Position(Ui.Dp(Inset + NumberWidth - Glyph), Ui.Dp((heightDp - Glyph) / 2));
@@ -271,7 +295,7 @@ sealed class TrackLineView : View
             number.Position = new Position(Ui.Dp(Inset), (Ui.Dp(heightDp) - number.SizeHeight) / 2);
             fill.Add(number);
         }
-        var x = Inset + NumberWidth + NumberGap;
+        var x = line.Icon != null ? Inset + Tile + TileGap : Inset + NumberWidth + NumberGap;
         var right = widthDp - Inset;
         if (line.Duration.Length > 0)
         {
@@ -290,13 +314,35 @@ sealed class TrackLineView : View
             subtitle = Text.Label(line.Subtitle!, PleyType.Caption, PleyColors.Muted, width: room);
             block += subtitle.SizeHeight;
         }
+        if (line.Progress > 0) block += Ui.Dp(6 + BarHeight);
         var top = (Ui.Dp(heightDp) - block) / 2;
         title.Position = new Position(Ui.Dp(x), top);
         fill.Add(title);
+        var under = top + title.SizeHeight;
         if (subtitle != null)
         {
-            subtitle.Position = new Position(Ui.Dp(x), top + title.SizeHeight);
+            subtitle.Position = new Position(Ui.Dp(x), under);
             fill.Add(subtitle);
+            under += subtitle.SizeHeight;
+        }
+        if (line.Progress > 0)
+        {
+            var barWidth = Math.Min(BarWidth, room);
+            bar = new View
+            {
+                Size = new Size(Ui.Dp(barWidth), Ui.Dp(BarHeight)),
+                Position = new Position(Ui.Dp(x), under + Ui.Dp(6)),
+                CornerRadius = Ui.Dp(BarHeight / 2),
+                BackgroundColor = PleyColors.ProgressTrackOnArt,
+            };
+            barFill = new View
+            {
+                Size = new Size(Ui.Dp(barWidth * Math.Min(1, line.Progress)), Ui.Dp(BarHeight)),
+                CornerRadius = Ui.Dp(BarHeight / 2),
+                BackgroundColor = PleyColors.Accent,
+            };
+            bar.Add(barFill);
+            fill.Add(bar);
         }
         if (item == null) return;
         item.FocusChanged += Look;
@@ -323,6 +369,9 @@ sealed class TrackLineView : View
         if (duration != null) duration.TextColor = secondary;
         if (number != null) number.TextColor = focused ? PleyColors.OnAccent : PleyColors.Subtle;
         if (glyph != null) glyph.Color = focused ? PleyColors.OnAccent : PleyColors.Accent;
+        if (tile != null) tile.BackgroundColor = focused ? new Color(0, 0, 0, 0.18f) : PleyColors.Surface2;
+        if (icon != null) icon.Color = focused ? PleyColors.OnAccent : PleyColors.Muted;
+        if (barFill != null) barFill.BackgroundColor = focused ? PleyColors.OnAccent : PleyColors.Accent;
     }
 
     protected override void Dispose(DisposeTypes type)

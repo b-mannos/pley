@@ -43,29 +43,48 @@ describes how they are made.
   row. Needs a server that gives the TV's player keyed live addresses.
 - Requests, on a server that has them turned on. Discover, in the rail,
   shows what is trending and popular on TMDB, coming to cinemas, and
-  anime, each title marked with what the libraries have, and searches
-  TMDB. A title's page asks for a movie, or for a show's seasons picked
-  in a panel beside it, and says where its request is. Your requests
-  follows them, and a notice pops up once one is ready to watch;
-  administrators get Requests, opening on those that need attention, to
-  approve, decline (with a reason typed on the TV's keyboard), mark as
-  added by hand or delete. A number on the rail counts what needs
-  attention or has news. Search lists what TMDB has under On TMDB, and a
-  movie's or show's page in a library shows its request's stage, with
-  Request more seasons for a show missing some.
+  anime, each title marked with what the libraries have. A title's page
+  asks for a movie, or for a show's seasons picked in a panel beside it,
+  and says where its request is. Your requests follows them, and a
+  notice pops up once one is ready to watch; administrators get
+  Requests, opening on those that need attention, to approve, decline
+  (with a reason typed on the TV's keyboard), mark as added by hand or
+  delete. A number on the rail counts what needs attention or has news.
+  Search shows what can be asked for in a Discover row after the
+  libraries' results; a movie's or show's page in a library shows its
+  request's stage, with Request more seasons for a show missing some.
 - Signing in with a code says when the server requires two-step sign-in:
   the phone that approves the code sets it up for whoever hasn't.
 
 ### Changed
 
+- "Enter an address" opens the TV's keyboard at once, on an empty field,
+  in place of the number pad, so a server's name or a whole https address
+  is as easy to type as an IP. The remote's digit keys still type once the
+  keyboard is closed.
+- The app's icon says WEB on a blue band, so it is told apart from the
+  native app on a TV that has both.
 - Pley for Samsung TV is free software under the GNU Affero General Public
   License, version 3 (`AGPL-3.0-only`, `LICENSE`).
 - The sign-in page names this app by its address on
   `pley-media-server.github.io`. It needs a server from the same release,
   which keeps it signed in.
+- A library's posters show 4K and the dynamic range (DV, HDR10) whatever
+  the sort, where they showed only when sorted by bitrate, and no longer a
+  lower resolution (1080p, 720p).
 
 ### Fixed
 
+- Settings' Always start as no longer starts the TV as a profile with a
+  PIN without it: the start opens on that profile's PIN pad, and Back shows
+  the other profiles. While the TV doesn't know whether the profile it was
+  left on has a PIN, the start asks "Who's watching?".
+- A profile that got a PIN after "Who's watching?" was loaded opens the
+  PIN pad, and one whose PIN is locked or asked too often says so on it,
+  as on Android TV; a refusal of another profile's switch no longer goes
+  on as the profile in use.
+- "Who's watching?" as the app starts asks the PIN of the profile it was
+  left on when that profile has one, as on Android TV, and shows its lock.
 - A server answering that it can't do something right now (the
   transcoder isn't running, a file can't be read) has its own message
   shown, instead of "Can't reach your server", and the TV doesn't go
@@ -96,5 +115,5 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/samsung-v0.0.1...HEAD
-[0.0.1]: https://github.com/pley-media-server/pley/releases/tag/samsung-v0.0.1
+[Unreleased]: https://github.com/pley-media-server/pley/compare/7e14bb9d498d054a73b2176cd8949b6864ffacd9...HEAD
+[0.0.1]: https://github.com/pley-media-server/pley/tree/7e14bb9d498d054a73b2176cd8949b6864ffacd9

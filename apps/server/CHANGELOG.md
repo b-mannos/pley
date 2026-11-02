@@ -19,6 +19,31 @@ describes how they are made.
   Pley's TV apps may read one from another page (CORS), so a device
   elsewhere can't get one passed on.
 
+## [0.1.3] - 2026-11-02
+
+### Added
+
+- Pley installs on a Synology NAS as a package (`.spk`) for DSM 7 on Intel
+  models, with FFmpeg from SynoCommunity's package and the NAS's GPU for
+  transcoding. A static Linux build, `linux-x86_64-static`, is published
+  with the other archives.
+- A playback with keyed addresses has its seek previews beside its media,
+  as a BIF file (`previews.bif`), which Roku's own player fetches and shows
+  as you fast forward and rewind.
+
+### Changed
+
+- The web app's PIN pad stops once a profile's PIN is locked after too
+  many wrong tries, as the other apps' pads do; a profile that got a PIN
+  after the list was loaded asks it; and the profile in use shows its lock.
+  `POST /api/auth/switch` answers a refused PIN with `code` `wrong_pin` or
+  `pin_locked`.
+- A library's posters in the web app show 4K and the dynamic range (DV,
+  HDR10) whatever the sort, where they showed only when sorted by bitrate,
+  and no longer the codec (H.264, HEVC) or a lower resolution (1080p,
+  720p). The next start reads each file's dynamic range once, for the
+  libraries to list it quickly.
+
 ## [0.1.2] - 2026-11-01
 
 ### Changed
@@ -49,6 +74,10 @@ describes how they are made.
 
 ### Fixed
 
+- Streams play with an FFmpeg build whose segment list names segments by
+  number alone, such as SynoCommunity's for Synology DSM. Before, the
+  transcoder never saw a segment finish with such a build, so every stream
+  that wasn't direct play waited forever.
 - Seek previews of a file the transcoder couldn't reach for a moment (a
   share whose disks slept, a share not mounted yet) are made when the file
   is next opened or scanned, instead of being given up until a restart.
@@ -305,8 +334,9 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-01.2...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-02...HEAD
+[0.1.3]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02
 [0.1.2]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01.2
 [0.1.1]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01
-[0.1.0]: https://github.com/pley-media-server/pley/releases/tag/server-v0.1.0
-[0.0.1]: https://github.com/pley-media-server/pley/releases/tag/server-v0.0.1
+[0.1.0]: https://github.com/pley-media-server/pley/tree/14792b986c3f69d55bd07b39e84716da0e8e1645
+[0.0.1]: https://github.com/pley-media-server/pley/tree/7e14bb9d498d054a73b2176cd8949b6864ffacd9

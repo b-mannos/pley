@@ -131,11 +131,14 @@ data class ProfilesUiState(
  *
  * [gate]: a TV's cold start, where continuing as a PIN profile asks its
  * PIN (Profiles.confirmPin; servers that can't check it let it through).
+ * [pin]: a TV's start as the profile in use ("Always start as"), whose pad
+ * opens first; Back shows the profiles.
  */
 class ProfilesViewModel(
     private val source: OnboardingSource,
     private val tv: Boolean,
     private val gate: Boolean,
+    pin: Boolean = false,
 ) : ViewModel() {
     private val _state = MutableStateFlow(ProfilesUiState())
     val state: StateFlow<ProfilesUiState> = _state.asStateFlow()
@@ -148,6 +151,9 @@ class ProfilesViewModel(
     private val pin = PinEntry()
     private var server: String? = null
     private var list: List<Profile> = emptyList()
+
+    /** The pad of the profile in use opens as soon as the profiles show it with a PIN. */
+    private var padFirst = gate && pin
 
     init {
         viewModelScope.launch { load() }
@@ -193,13 +199,21 @@ class ProfilesViewModel(
                 else -> tile.copy(current = false)
             }
         }
+        val pad = firstPad(tiles)
         _state.update { s ->
             s.copy(
                 loading = false,
                 profiles = tiles,
                 focus = s.focus?.takeIf { id -> tiles.any { it.id == id } } ?: tiles.firstOrNull { it.current }?.id ?: tiles.firstOrNull()?.id,
+                step = if (pad != null && s.step is ProfilesStep.Pick) ProfilesStep.Pin(pad, confirm = true) else s.step,
             )
         }
+    }
+
+    /** The profile in use, the first time [tiles] show it with a PIN, when its pad comes first. */
+    private fun firstPad(tiles: List<ProfileTile>): ProfileTile? {
+        if (!padFirst) return null
+        return tiles.firstOrNull { it.current && it.locked }?.also { padFirst = false }
     }
 
     /** [id] was chosen. */
@@ -316,8 +330,7 @@ class ProfilesViewModel(
         when (oauth?.reason) {
             "browser" -> _state.update { it.copy(step = if (tv) ProfilesStep.Approve(tile) else ProfilesStep.Browser(tile)) }
             "pin_locked" -> wrong(tile, Profiles.message(oauth), lockedOut = true)
-            // The server's own sentence says how long to wait.
-            "throttled" -> wrong(tile, oauth.description ?: Profiles.message(oauth), lockedOut = false)
+            "throttled" -> wrong(tile, Profiles.message(oauth), lockedOut = false)
             "wrong_pin" -> if (tile.needs == Needs.PIN || _state.value.step is ProfilesStep.Pin) {
                 wrong(tile, Profiles.message(oauth), lockedOut = false)
             } else {

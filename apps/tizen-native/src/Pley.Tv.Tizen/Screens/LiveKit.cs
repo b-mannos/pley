@@ -145,6 +145,8 @@ sealed class ChannelLogoView : View
 /// tall and 2 apart, the category shown filled with Surface3 and its icon in the accent, the
 /// focused one filled with the accent; headings in capitals. A region opens and closes with OK,
 /// one at a time; a category's OK says it was <see cref="Chosen"/>. The focused row stays in view.
+/// Every row has its place and focus, but only those near the screen have views: an IPTV
+/// provider's 200 rows took 260 ms to make, each time Live TV opened or a channel was left.
 /// </summary>
 sealed class CategoryColumnView : View
 {
@@ -154,7 +156,10 @@ sealed class CategoryColumnView : View
     readonly float width, height;
     readonly TextInput? search;
     readonly View content = new View();
-    readonly List<(CategoryRow Row, FocusItem? Item, float Top)> laid = new List<(CategoryRow, FocusItem?, float)>();
+    /// <summary>Every row: its place, its focus (none for a heading) and how its view is made (none for the search field).</summary>
+    readonly List<(CategoryRow Row, FocusItem? Item, float Top, Func<View>? Make)> laid = new List<(CategoryRow, FocusItem?, float, Func<View>?)>();
+    /// <summary>The rows with views, by their place in <see cref="laid"/>.</summary>
+    readonly Dictionary<int, View> made = new Dictionary<int, View>();
     LiveGroups? groups;
     LiveCategory selected = new LiveCategory.All();
     IReadOnlyList<LiveGroup>? found;
@@ -219,15 +224,16 @@ sealed class CategoryColumnView : View
     void Build()
     {
         if (Disposed) return;
+        var started = Profile.Start();
         var focused = HoldsFocus ? tree.Current!.Name : null;
         // The search field stays where it is: taken off the screen while typing, the TV closes its
         // keyboard, and every letter typed rebuilds the rows under it.
-        foreach (var child in content.Children.ToList())
+        foreach (var view in made.Values)
         {
-            if (child == search) continue;
-            content.Remove(child);
-            child.Dispose();
+            view.Unparent();
+            view.Dispose();
         }
+        made.Clear();
         Group.Clear();
         laid.Clear();
         var rows = LiveCategories.Rows(groups, selected, open, search != null, found);
@@ -242,15 +248,18 @@ sealed class CategoryColumnView : View
                     search.Position = new Position(Ui.Dp(LiveCategories.Inset - 10), Ui.Dp(y));
                     if (search.GetParent() != content) content.Add(search);
                     Group.Add(search.Item);
-                    laid.Add((row, search.Item, y));
+                    laid.Add((row, search.Item, y, null));
                     if (search.Item.Name == focused) again = search.Item;
                     y += SearchRoom + Gap;
                     break;
                 case CategoryRow.Heading heading:
-                    var label = Text.Label(heading.Text, PleyType.Badge, PleyColors.Subtle, width: width - LiveCategories.Inset);
-                    label.Position = new Position(Ui.Dp(LiveCategories.Inset), Ui.Dp(y + 14));
-                    content.Add(label);
-                    laid.Add((row, null, y));
+                    var headingTop = y;
+                    laid.Add((row, null, y, () =>
+                    {
+                        var label = Text.Label(heading.Text, PleyType.Badge, PleyColors.Subtle, width: width - LiveCategories.Inset);
+                        label.Position = new Position(Ui.Dp(LiveCategories.Inset), Ui.Dp(headingTop + 14));
+                        return label;
+                    }));
                     y += HeadingHeight + Gap;
                     break;
                 case CategoryRow.Choice choice:
@@ -263,24 +272,54 @@ sealed class CategoryColumnView : View
             }
         }
         content.Size = new Size(Ui.Dp(width), Ui.Dp(y));
+        Draw();
         if (again != null) tree.Focus(again);
         else if (focused != null) FocusShown();
+        Profile.Took($"live categories: {laid.Count} rows laid, {made.Count} made", started);
     }
 
     float AddRow(CategoryRow row, string? icon, string name, int? count, bool isSelected, float indent, Action choose, float y, string? focused, ref FocusItem? again)
     {
-        var view = new CategoryRowView(row.Key, width, icon, name, count, isSelected, indent, choose);
-        view.PositionY = Ui.Dp(y);
-        content.Add(view);
-        Group.Add(view.Item);
-        laid.Add((row, view.Item, y));
+        var item = new FocusItem(row.Key) { Selected = choose };
         var top = y;
-        view.Item.FocusChanged += on =>
+        Group.Add(item);
+        laid.Add((row, item, y, () =>
+        {
+            var view = new CategoryRowView(item, width, icon, name, count, isSelected, indent);
+            view.PositionY = Ui.Dp(top);
+            return view;
+        }));
+        item.FocusChanged += on =>
         {
             if (on && !Disposed) Reveal(top);
         };
-        if (row.Key == focused) again = view.Item;
+        if (row.Key == focused) again = item;
         return y + LiveCategories.RowHeight + Gap;
+    }
+
+    /// <summary>The rows in the column and half a column either side have views; the others go.</summary>
+    void Draw()
+    {
+        var from = scroll - height / 2;
+        var to = scroll + height * 1.5f;
+        for (var i = 0; i < laid.Count; i++)
+        {
+            var (_, _, top, make) = laid[i];
+            var near = top + LiveCategories.RowHeight >= from && top <= to;
+            if (made.TryGetValue(i, out var view))
+            {
+                if (near) continue;
+                view.Unparent();
+                view.Dispose();
+                made.Remove(i);
+            }
+            else if (near && make != null)
+            {
+                view = make();
+                content.Add(view);
+                made[i] = view;
+            }
+        }
     }
 
     /// <summary>A region opens, closing the one open; open, it closes.</summary>
@@ -300,25 +339,27 @@ sealed class CategoryColumnView : View
             if (search != null && scroll < SearchRoom + Gap) scroll = 0;
         }
         else if (top + LiveCategories.RowHeight > scroll + room) scroll = top + LiveCategories.RowHeight - room;
+        Draw();
         var a = new Animation(PleyMotion.FocusMs) { DefaultAlphaFunction = new AlphaFunction(AlphaFunction.BuiltinFunctions.EaseOut) };
         a.AnimateTo(content, "PositionY", -Ui.Dp(scroll));
-        a.Play();
+        a.PlayHeld();
     }
 
     /// <summary>One category or region: its icon, name and count; the one shown marked; focused, the accent fill.</summary>
     sealed class CategoryRowView : View
     {
         readonly bool selected;
+        readonly FocusItem item;
         readonly ImageView? icon;
         readonly TextLabel label;
         readonly TextLabel? count;
 
-        public CategoryRowView(string key, float width, string? iconName, string name, int? number, bool selected, float indent, Action choose)
+        public CategoryRowView(FocusItem item, float width, string? iconName, string name, int? number, bool selected, float indent)
         {
             this.selected = selected;
+            this.item = item;
             Size = new Size(Ui.Dp(width), Ui.Dp(LiveCategories.RowHeight));
             CornerRadius = Ui.Dp(PleyShape.ControlRadius);
-            Item = new FocusItem(key) { Selected = choose };
             var x = indent;
             if (iconName != null)
             {
@@ -341,11 +382,9 @@ sealed class CategoryColumnView : View
             label = Text.Label(name, PleyType.Label, PleyColors.Muted, width: Math.Max(20, right - x));
             label.Position = new Position(Ui.Dp(x), Ui.Dp((LiveCategories.RowHeight - PleyType.Label.Line) / 2));
             Add(label);
-            Item.FocusChanged += Look;
-            Look(false);
+            item.FocusChanged += Look;
+            Look(item.Focused);
         }
-
-        public FocusItem Item { get; }
 
         void Look(bool focused)
         {
@@ -355,6 +394,14 @@ sealed class CategoryColumnView : View
             label.TextColor = ink;
             if (icon != null) icon.Color = selected && !focused ? PleyColors.Accent : ink;
             if (count != null) count.TextColor = LiveViews.Alpha(ink, 0.7f);
+        }
+
+        protected override void Dispose(DisposeTypes type)
+        {
+            if (Disposed) return;
+            // The column keeps the row's focus: its view comes and goes as the column scrolls.
+            item.FocusChanged -= Look;
+            base.Dispose(type);
         }
     }
 }

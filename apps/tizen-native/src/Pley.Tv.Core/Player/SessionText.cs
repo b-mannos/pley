@@ -11,6 +11,9 @@ namespace Pley.Tv.Core.Player;
 public static class SessionText
 {
     public const string QualityOriginal = "Original";
+
+    /// <summary>The audio chosen isn't a track the TV's player offers (TrueHD): what plays instead.</summary>
+    public static string AudioNotOffered(string chosen, string playing) => $"This TV's player doesn't offer {chosen}: {playing} plays";
     public const string QualityAutomatic = "Automatic";
     public const string AutomaticHint = "Dynamically adjust to conditions";
     public const string LoweredNetwork = "Lowered for your connection";
@@ -18,6 +21,8 @@ public static class SessionText
     public const string SkipIntro = "Skip Intro";
     public const string SkipCredits = "Skip Credits";
     public const string LastEpisode = "This is the last episode";
+    /// <summary>A file on a drive whose picture never moved: nothing converts it, as a server would.</summary>
+    public const string LocalStuck = "This TV doesn't play this file: its picture never started. With no server to convert it, try another copy.";
     public const string LastInQueue = "This is the last one";
     public const string SubtitlesOff = "Off";
     public const string SubtitlesFailed = "These subtitles couldn't be loaded.";

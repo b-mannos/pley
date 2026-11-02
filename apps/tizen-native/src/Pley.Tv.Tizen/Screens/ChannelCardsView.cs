@@ -158,7 +158,7 @@ sealed class ChannelCardsView : View
             {
                 var a = Scrolling.Glide(gate);
                 a.AnimateTo(content, "PositionY", y);
-                a.Play();
+                a.PlayHeld();
             }
             else content.PositionY = y;
         }
@@ -315,7 +315,8 @@ sealed class ChannelCardsView : View
         protected override void Dispose(DisposeTypes type)
         {
             if (Disposed) return;
-            look?.Stop();
+            // Only when disposed by the app: collected, the animation may have gone first (Kit/Held.cs).
+            if (type == DisposeTypes.Explicit) look?.Stop();
             base.Dispose(type);
         }
     }

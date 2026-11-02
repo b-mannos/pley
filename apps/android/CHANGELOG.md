@@ -8,6 +8,13 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Fixed
+
+- Settings' Always start as no longer starts the TV as a profile with a
+  PIN without it: the start opens on that profile's PIN pad, and Back shows
+  the other profiles. While the TV doesn't know whether the profile it was
+  left on has a PIN, the start asks "Who's watching?".
+
 ### Security
 
 - Before the token goes to the server's address, the server proves it is
@@ -20,6 +27,23 @@ describes how they are made.
   access token (an hour's) within the half hour, never the refresh token.
   A sign-in from before starts checking within the hour, as its token is
   renewed.
+
+## [0.1.3] - 2026-11-02
+
+### Changed
+
+- A library's posters show 4K and the dynamic range (DV, HDR10) whatever
+  the sort, where they showed only when sorted by bitrate, and no longer
+  the codec (H.264, HEVC) or a lower resolution (1080p, 720p).
+- On Android TV and Fire TV, "Enter an address" opens the TV's keyboard at
+  once, on an empty field, in place of the number pad, so a server's name
+  or a whole https address is as easy to type as an IP. The remote's digit
+  keys still type once the keyboard is closed.
+
+### Fixed
+
+- Too many wrong PINs for the profile a TV starts as say how long to wait,
+  as a switch does, rather than "a few minutes".
 
 ## [0.1.2] - 2026-11-01
 
@@ -158,8 +182,9 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-01.2...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-02...HEAD
+[0.1.3]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02
 [0.1.2]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01.2
 [0.1.1]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01
-[0.1.0]: https://github.com/pley-media-server/pley/releases/tag/android-v0.1.0
-[0.0.1]: https://github.com/pley-media-server/pley/releases/tag/android-v0.0.1
+[0.1.0]: https://github.com/pley-media-server/pley/tree/94985f768f39f4a230060cb47af9498ee8779ddf
+[0.0.1]: https://github.com/pley-media-server/pley/tree/7e14bb9d498d054a73b2176cd8949b6864ffacd9

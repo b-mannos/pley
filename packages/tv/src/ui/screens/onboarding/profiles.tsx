@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { errorMessage, isApiError, unreachable, unreachableReason } from "../../../api/client";
-import type { HouseholdProfile } from "../../../api/types";
+import type { HouseholdProfile, User } from "../../../api/types";
 import { SignedOutError, TokenError } from "../../../auth/tokens";
 import { useUi } from "../../context";
 import { Pill, TextButton } from "../../kit/buttons";
@@ -58,17 +58,88 @@ export function switchRefusal(e: unknown): { message: string; locked?: boolean; 
 }
 
 /**
+ * Where a refused switch leaves "Who's watching?" (ProfilesViewModel's
+ * refused): `pad`, the PIN pad saying `message`, dimmed when `locked`, its
+ * dots shaken when `shake` (a refused PIN, not a server out of reach);
+ * `pick`, the profiles saying `message`; `approve`, approval on a phone;
+ * `done`, Home. `onPad`: the PIN was typed on the pad. From the picker, a
+ * refusal for the PIN means the list was older than the profile's PIN: the
+ * pad opens. `confirm`: the current profile's PIN, checked at a start,
+ * which a server that can't check it lets through.
+ */
+export function refusal(e: unknown, onPad: boolean, confirm: boolean): { step: "pad" | "pick" | "approve" | "done"; message: string | null; locked: boolean; shake: boolean } {
+  const r = switchRefusal(e);
+  if (r.letThrough && confirm) return { step: "done", message: null, locked: false, shake: false };
+  if (r.approve && !confirm) return { step: "approve", message: null, locked: false, shake: false };
+  if (r.offline) return { step: onPad ? "pad" : "pick", message: r.message, locked: false, shake: false };
+  const reason = e instanceof TokenError ? e.oauth?.reason : null;
+  if (reason === "wrong_pin" && !onPad) return { step: "pad", message: null, locked: false, shake: false };
+  let message = r.message;
+  if (r.letThrough) message = sentence((e as TokenError).oauth?.description || "you can't switch to this profile");
+  if (r.approve) message = "This profile needs its password: sign in again to use it.";
+  const forPin = reason === "pin_locked" || reason === "throttled";
+  return { step: onPad || forPin ? "pad" : "pick", message, locked: !!r.locked, shake: onPad || forPin };
+}
+
+/** Who the app is, as far as "Who's watching?" needs to know. */
+type Me = Pick<User, "id" | "has_pin">;
+
+/**
+ * The household as "Who's watching?" shows it (ProfilesViewModel's
+ * tiles). A saved list may be from before a switch, so `me` says which
+ * profile is current. The server says switching to that one needs nothing;
+ * it shows its lock when it has a PIN, which a start asks.
+ */
+export function profileTiles(household: HouseholdProfile[], me: Me | null): HouseholdProfile[] {
+  if (!me || !household.some((p) => p.id === me.id)) return household;
+  return household.map((p) => (p.id === me.id ? { ...p, current: true, needs: me.has_pin ? "pin" : "none" } : { ...p, current: false }));
+}
+
+/**
+ * What choosing `p` leads to: `confirm`, the current profile's PIN, checked
+ * with the switch-profile grant; `done`, Home as the current profile;
+ * `switch`, a switch without a PIN; `pin`, the pad for another profile's;
+ * `approve`, approval on a phone; `locked`, why it can't be used. `gate`:
+ * a start, where going on as a profile with a PIN asks it.
+ */
+export function profileChoice(p: HouseholdProfile, me: Me | null, gate: boolean): "confirm" | "done" | "switch" | "pin" | "approve" | "locked" {
+  if (p.current) return gate && me?.id === p.id && me.has_pin ? "confirm" : "done";
+  switch (p.needs) {
+    case "none":
+      return "switch";
+    case "pin":
+      return "pin";
+    case "password":
+      return "approve";
+    default:
+      return "locked";
+  }
+}
+
+/**
  * "Who's watching?" (TvProfilesScreen): the household's profiles, a PIN
  * pad for those with one, and approval on a phone for those that need a
  * password. At a cold start the current profile's PIN is asked too.
+ * `pin`: a start as the profile the TV was left on ("Always start as"),
+ * whose pad opens first; Back shows the profiles.
  */
-export function ProfilesScreen() {
+export function ProfilesScreen(p: { pin?: boolean }) {
   const app = useApp();
   const ui = useUi();
-  const [profiles, setProfiles] = useState<HouseholdProfile[]>(() => app.savedHousehold());
+  const [household, setHousehold] = useState<HouseholdProfile[]>(() => app.savedHousehold());
+  const profiles = profileTiles(household, app.me.value);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [step, setStep] = useState<Step>({ kind: "pick" });
+  const padFirst = useRef(!!p.pin && !app.profileGatePassed);
+  /** The current profile's pad, the first time `list` shows it with a PIN when its pad comes first. */
+  const firstPad = (list: HouseholdProfile[]): Step | null => {
+    if (!padFirst.current) return null;
+    const current = profileTiles(list, app.me.value).filter((x) => x.current && x.needs === "pin")[0];
+    if (!current) return null;
+    padFirst.current = false;
+    return { kind: "pin", profile: current, confirm: true, locked: false, error: null };
+  };
+  const [step, setStep] = useState<Step>(() => firstPad(household) ?? { kind: "pick" });
   const [busy, setBusy] = useState<number | null>(null);
   const lastFocused = useRef<number | null>(null);
   const canSwitch = (app.tokenStore?.scopes() ?? []).indexOf("profiles") >= 0;
@@ -79,18 +150,22 @@ export function ProfilesScreen() {
     const api = app.api.value;
     if (!api) return;
     setLoading(true);
-    api.profiles().then(
-      (list) => {
+    // Who the app is, for the current profile's PIN; alongside the list.
+    const me = app.me.value ? Promise.resolve() : app.loadAccount();
+    Promise.all([api.profiles(), me]).then(
+      ([list]) => {
         if (!alive.current) return;
         app.keepHousehold(list);
-        setProfiles(list);
+        setHousehold(list);
         setLoading(false);
+        const pad = firstPad(list);
+        if (pad) setStep((shown) => (shown.kind === "pick" ? pad : shown));
       },
       (e) => {
         if (!alive.current || e instanceof SignedOutError) return;
         setLoading(false);
         // With a list on screen, trouble stays quiet.
-        setProfiles((shown) => {
+        setHousehold((shown) => {
           if (!shown.length) setError(isApiError(e, 403) ? "This sign-in can't switch profiles." : sentence(errorMessage(e)));
           return shown;
         });
@@ -115,21 +190,23 @@ export function ProfilesScreen() {
     if (busy !== null) return;
     setError(null);
     lastFocused.current = p.id;
-    if (p.current) {
-      if (!app.profileGatePassed && p.needs === "pin") setStep({ kind: "pin", profile: p, confirm: true, locked: false, error: null });
-      else done();
-      return;
-    }
-    switch (p.needs) {
-      case "none":
+    switch (profileChoice(p, app.me.value, !app.profileGatePassed)) {
+      case "confirm":
+        setStep({ kind: "pin", profile: p, confirm: true, locked: false, error: null });
+        return;
+      case "done":
+        done();
+        return;
+      case "switch":
         setBusy(p.id);
         switchTo(p, null).then(
           () => alive.current && done(),
           (e) => {
-            if (!alive.current) return;
+            if (!alive.current || e instanceof SignedOutError) return;
             setBusy(null);
-            const r = switchRefusal(e);
-            if (r.approve) setStep({ kind: "approve", profile: p });
+            const r = refusal(e, false, false);
+            if (r.step === "approve") setStep({ kind: "approve", profile: p });
+            else if (r.step === "pad") setStep({ kind: "pin", profile: p, confirm: false, locked: r.locked, error: r.message });
             else setError(r.message);
           },
         );
@@ -137,10 +214,10 @@ export function ProfilesScreen() {
       case "pin":
         setStep({ kind: "pin", profile: p, confirm: false, locked: false, error: null });
         return;
-      case "password":
+      case "approve":
         setStep({ kind: "approve", profile: p });
         return;
-      default:
+      case "locked":
         setStep({ kind: "pin", profile: p, confirm: false, locked: true, error: "This profile can't be used from the app." });
     }
   };
@@ -173,16 +250,17 @@ export function ProfilesScreen() {
               if (alive.current) done();
               return null;
             } catch (e) {
-              const r = switchRefusal(e);
-              if (r.letThrough) {
+              if (e instanceof SignedOutError) return null;
+              const r = refusal(e, true, step.confirm);
+              if (r.step === "done") {
                 done();
                 return null;
               }
-              if (r.approve) {
+              if (r.step === "approve") {
                 setStep({ kind: "approve", profile: step.profile });
                 return null;
               }
-              return { message: r.message, locked: !!r.locked, offline: !!r.offline };
+              return { message: r.message ?? "", locked: r.locked, offline: !r.shake };
             }
           }}
         />

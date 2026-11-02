@@ -40,6 +40,8 @@ sealed class GuideView : View
     readonly TextLabel meta;
     readonly TextLabel words;
     View? badge;
+    string? badgeKey;
+    string? wordsShown;
     ChannelLogoView? tile;
     long? tileChannel;
 
@@ -323,7 +325,7 @@ sealed class GuideView : View
             var a = Scrolling.Glide(gate);
             a.AnimateTo(rowsLayer, "PositionY", y);
             a.AnimateTo(rowsTimeLayer, "PositionY", y);
-            a.Play();
+            a.PlayHeld();
         }
         else
         {
@@ -379,6 +381,7 @@ sealed class GuideView : View
             return;
         }
         Profile.Mark("live guide: draw");
+        var started = Profile.Start();
         var focused = Item.Focused;
         var channel = pages[cursor.Row];
         var programs = Programs(cursor.Row);
@@ -386,6 +389,9 @@ sealed class GuideView : View
         Info(channel, current);
         Text.Show(day, clock.Day(Math.Max(cursor.Left, cursor.Start), now));
         nowLine.PositionX = Ui.Dp(GuideLayout.X(now, cursor.Start) - GuideLayout.NowLineWidth / 2);
+        var infoMs = Ms(started);
+        double cellsMs = 0, rowsMs = 0;
+        int channelsMade = 0, rowsMade = 0;
 
         var shown = (int)Math.Ceiling(rowsHeight / GuideLayout.RowHeight);
         var first = Math.Max(0, top - 1);
@@ -399,14 +405,17 @@ sealed class GuideView : View
         {
             rows[i].View.Dispose();
             bars.Remove(i);
+            programCells.Remove(i);
             rows.Remove(i);
         }
         for (var i = first; i <= last; i++)
         {
             var c = pages[i];
             var rowFocused = focused && i == cursor.Row;
+            var at = Profile.Start();
             if (!cells.TryGetValue(i, out var cell) || !SameChannel(cell.Channel, c))
             {
+                channelsMade++;
                 cell?.Dispose();
                 cell = new GuideChannelCell(c, c != null ? LiveRules.ChannelName(c, listed) : "", origin, images, width);
                 cell.PositionY = Ui.Dp(i * GuideLayout.RowHeight);
@@ -414,9 +423,17 @@ sealed class GuideView : View
                 cells[i] = cell;
             }
             cell.Focus(rowFocused);
+            cellsMs += Ms(at);
+            at = Profile.Start();
             var look = LookOf(i, rowFocused);
             later.Remove(i);
             if (rows.TryGetValue(i, out var drawn) && Same(drawn.Look, look)) continue;
+            // Only the focus moved along the row, or onto it or off it: its cells painted again, not made.
+            if (drawn.View != null && Same(drawn.Look with { Focus = look.Focus }, look) && Refocus(i, look))
+            {
+                rows[i] = (look, drawn.View);
+                continue;
+            }
             // Now: a row coming into view, and the rows focus came to and left. The others (an answer
             // filling a screen of rows, ten at 10 to 15 ms each) catch up a few at a time, frame by frame.
             if (drawn.View != null && !rowFocused && drawn.Look.Focus == null)
@@ -429,17 +446,25 @@ sealed class GuideView : View
             if (drawn.View == null && !rowFocused)
             {
                 Build(i, look with { Programs = null, Loaded = false });
+                rowsMade++;
+                rowsMs += Ms(at);
                 later.Add(i);
                 continue;
             }
             Build(i, look);
+            rowsMade++;
+            rowsMs += Ms(at);
         }
+        if (Ms(started) > 16)
+            Profile.Mark($"live guide: drawn in {Ms(started):0} ms: the panel {infoMs:0}, {channelsMade} channels made {cellsMs:0}, {rowsMade} rows made {rowsMs:0}, the rest {Ms(started) - infoMs - cellsMs - rowsMs:0}");
         if (later.Count > 0 && !catchingUp)
         {
             catchingUp = true;
             catchUp.Start();
         }
     }
+
+    static double Ms(long start) => (Profile.Start() - start) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
 
     /// <summary>How row <paramref name="i"/> is to look now.</summary>
     ProgramsLook LookOf(int i, bool rowFocused)
@@ -453,11 +478,72 @@ sealed class GuideView : View
     {
         if (rows.TryGetValue(i, out var drawn)) drawn.View.Dispose();
         barsMade.Clear();
+        cellsMade.Clear();
         var view = ProgramsRow(look);
         view.PositionY = Ui.Dp(i * GuideLayout.RowHeight);
         rowsTimeLayer.Add(view);
         rows[i] = (look, view);
         bars[i] = barsMade.ToList();
+        programCells[i] = cellsMade.ToList();
+    }
+
+    /// <summary>A programme's cell in a row, with what changes as focus comes to it and leaves.</summary>
+    sealed class ProgramCell
+    {
+        public ProgramCell(LiveProgram program, View cell, TextLabel? name, TextLabel? span, View? bar)
+        {
+            Program = program;
+            Cell = cell;
+            Name = name;
+            Span = span;
+            Bar = bar;
+        }
+
+        public LiveProgram Program { get; }
+        public View Cell { get; }
+        public TextLabel? Name { get; }
+        public TextLabel? Span { get; }
+        public View? Bar { get; }
+        public bool? Bold { get; set; }
+        public bool? Focused { get; set; }
+    }
+
+    /// <summary>Each row's programme cells, to paint again as focus moves (a row made again took 25 ms).</summary>
+    readonly Dictionary<int, List<ProgramCell>> programCells = new Dictionary<int, List<ProgramCell>>();
+    readonly List<ProgramCell> cellsMade = new List<ProgramCell>();
+
+    /// <summary>Row <paramref name="i"/>'s cells painted for <paramref name="look"/>'s focus; false when it has none to paint.</summary>
+    bool Refocus(int i, ProgramsLook look)
+    {
+        if (!programCells.TryGetValue(i, out var list) || list.Count == 0) return false;
+        foreach (var c in list) Paint(c, look.Focus == c.Program.Start, look.Now);
+        return true;
+    }
+
+    /// <summary>A cell as it shows: the focused one in the accent, one airing marked, one ended dimmed.</summary>
+    static void Paint(ProgramCell c, bool focused, long now)
+    {
+        if (c.Focused == focused) return;
+        c.Focused = focused;
+        var airing = c.Program.AiringAt(now);
+        c.Cell.BackgroundColor = focused ? PleyColors.Accent : airing ? LiveViews.PrimaryContainer : PleyColors.Surface2;
+        c.Cell.Opacity = c.Program.Stop <= now && !focused ? GuideLayout.PastAlpha : 1f;
+        if (airing && !focused)
+        {
+            c.Cell.BorderlineWidth = Ui.Dp(1);
+            c.Cell.BorderlineColor = LiveViews.Alpha(PleyColors.Accent, 0.35f);
+            c.Cell.BorderlineOffset = -1;
+        }
+        else c.Cell.BorderlineWidth = 0;
+        if (c.Name != null)
+        {
+            c.Name.TextColor = focused ? PleyColors.OnAccent : PleyColors.Fg;
+            var bold = airing || focused;
+            if (c.Bold != bold) c.Name.FontStyle = Text.Weight(bold ? PleyType.Bold : PleyType.Label.Weight);
+            c.Bold = bold;
+        }
+        if (c.Span != null) c.Span.TextColor = focused ? LiveViews.Alpha(PleyColors.OnAccent, 0.8f) : PleyColors.Subtle;
+        if (c.Bar != null) c.Bar.BackgroundColor = focused ? PleyColors.OnAccent : PleyColors.Accent;
     }
 
     /// <summary>The bars of the programmes airing in each row made, to move with the time without making the row again.</summary>
@@ -508,6 +594,7 @@ sealed class GuideView : View
             var look = LookOf(i, focused && i == cursor.Row);
             if (!Same(drawn.Look, look)) Build(i, look);
         }
+        if (watch.Elapsed.TotalMilliseconds > 16) Profile.Mark($"live guide: caught up in {watch.Elapsed.TotalMilliseconds:0} ms, {later.Count} rows left");
         catchingUp = later.Count > 0;
         return catchingUp;
     }
@@ -521,20 +608,30 @@ sealed class GuideView : View
         }
         info.Show();
         var name = LiveRules.ChannelName(channel, listed);
-        badge?.Dispose();
-        badge = program != null ? LiveViews.BadgeOf(program) : null;
-        var x = 0f;
-        if (badge != null)
+        // The badge and the description again only when they change: the panel is drawn at every move.
+        var key = program != null && LiveText.Badge(program) is { } text ? $"{text}|{program.IsLive}" : null;
+        if (key != badgeKey)
         {
-            badge.Position = new Position(0, Ui.Dp(4) + (Text.LineHeight(PleyType.Section) - badge.SizeHeight) / 2);
-            info.Add(badge);
-            x = badge.SizeWidth + Ui.Dp(8);
+            badgeKey = key;
+            badge?.Dispose();
+            badge = program != null ? LiveViews.BadgeOf(program) : null;
+            if (badge != null)
+            {
+                badge.Position = new Position(0, Ui.Dp(4) + (Text.LineHeight(PleyType.Section) - badge.SizeHeight) / 2);
+                info.Add(badge);
+            }
         }
+        var x = badge != null ? badge.SizeWidth + Ui.Dp(8) : 0f;
         Text.Show(title, program?.Title ?? name);
         title.PositionX = x;
         title.SizeWidth = Ui.Dp(width - TileWidth - TileGap) - x;
         Text.Show(meta, LiveText.GuideMeta(channel, name, program, now, clock));
-        words.Text = LiveText.GuideText(program) ?? "";
+        var description = Shortened(LiveText.GuideText(program) ?? "");
+        if (description != wordsShown)
+        {
+            wordsShown = description;
+            words.Text = description;
+        }
         if (tileChannel != channel.Id || tile == null)
         {
             tile?.Dispose();
@@ -544,6 +641,21 @@ sealed class GuideView : View
             tileChannel = channel.Id;
         }
     }
+
+    /// <summary>
+    /// A description cut, at a word, to a little more than the panel's two lines hold: the TV lays
+    /// out all of a label's text before it ends it with "…", and a provider's description can run
+    /// to pages, which held each move along a row 20 to 40 ms.
+    /// </summary>
+    static string Shortened(string text)
+    {
+        if (text.Length <= DescriptionChars) return text;
+        var cut = text.LastIndexOf(' ', DescriptionChars);
+        return text.Substring(0, cut > DescriptionChars / 2 ? cut : DescriptionChars) + "…";
+    }
+
+    /// <summary>Three lines' worth of the panel's text, past which nothing shows.</summary>
+    const int DescriptionChars = 240;
 
     /// <summary>What a row of programmes shows: drawn again only when it changes.</summary>
     readonly record struct ProgramsLook(LiveChannel? Channel, IReadOnlyList<LiveProgram>? Programs, bool Loaded, long Left, long Now, long? Focus);
@@ -632,42 +744,37 @@ sealed class GuideView : View
                 Position = new Position(Ui.Dp(x + GuideLayout.CellInsetX), Ui.Dp(GuideLayout.CellInsetY)),
                 Size = new Size(Ui.Dp(cellWidth), Ui.Dp(cellHeight)),
                 CornerRadius = Ui.Dp(PleyShape.ControlRadius),
-                BackgroundColor = focused ? PleyColors.Accent : airing ? LiveViews.PrimaryContainer : PleyColors.Surface2,
-                Opacity = program.Stop <= look.Now && !focused ? GuideLayout.PastAlpha : 1f,
             };
-            if (airing && !focused)
-            {
-                cell.BorderlineWidth = Ui.Dp(1);
-                cell.BorderlineColor = LiveViews.Alpha(PleyColors.Accent, 0.35f);
-                cell.BorderlineOffset = -1;
-            }
+            TextLabel? name = null, span = null;
+            View? bar = null;
             if (w > GuideLayout.MinTextWidth)
             {
                 // A programme begun left of the grid keeps its title in view.
                 var offset = Math.Max(0, Math.Min(leftX - x, Math.Max(0, w - GuideLayout.TitleRoom)));
                 var textWidth = Math.Max(10, cellWidth - offset - 2 * GuideLayout.CellPadding);
-                var name = Text.Label(program.Title, PleyType.Label, focused ? PleyColors.OnAccent : PleyColors.Fg, width: textWidth);
-                if (airing || focused) name.FontStyle = Text.Weight(PleyType.Bold);
+                name = Text.Label(program.Title, PleyType.Label, PleyColors.Fg, width: textWidth);
                 var block = PleyType.Label.Line + PleyType.Caption.Line;
                 name.Position = new Position(Ui.Dp(offset + GuideLayout.CellPadding), Ui.Dp((cellHeight - block) / 2));
                 cell.Add(name);
-                var span = Text.Label(clock.Span(program), PleyType.Caption, focused ? LiveViews.Alpha(PleyColors.OnAccent, 0.8f) : PleyColors.Subtle, width: textWidth);
+                span = Text.Label(clock.Span(program), PleyType.Caption, PleyColors.Subtle, width: textWidth);
                 span.Position = new Position(Ui.Dp(offset + GuideLayout.CellPadding), Ui.Dp((cellHeight - block) / 2 + PleyType.Label.Line));
                 cell.Add(span);
             }
             if (airing)
             {
-                var bar = new View
+                bar = new View
                 {
                     Position = new Position(0, Ui.Dp(cellHeight - GuideLayout.ProgressHeight)),
                     Size = new Size(Ui.Dp(BarWidth(x + GuideLayout.CellInsetX, cellWidth, look.Now)), Ui.Dp(GuideLayout.ProgressHeight)),
-                    BackgroundColor = focused ? PleyColors.OnAccent : PleyColors.Accent,
                     // The cell doesn't clip (a GPU pass a cell): the bar takes its bottom left corner itself.
                     CornerRadius = new Vector4(0, 0, 0, Ui.Dp(PleyShape.ControlRadius)),
                 };
                 cell.Add(bar);
                 barsMade.Add((bar, x + GuideLayout.CellInsetX, cellWidth));
             }
+            var made = new ProgramCell(program, cell, name, span, bar) { Bold = false };
+            Paint(made, focused, look.Now);
+            cellsMade.Add(made);
             row.Add(cell);
         }
         return row;
@@ -676,8 +783,12 @@ sealed class GuideView : View
     protected override void Dispose(DisposeTypes type)
     {
         if (Disposed) return;
-        slide?.Stop();
-        catchUp.Stop();
+        // Only when disposed by the app: collected, the animation and the timer may have gone first (Kit/Held.cs).
+        if (type == DisposeTypes.Explicit)
+        {
+            slide?.Stop();
+            catchUp.Stop();
+        }
         base.Dispose(type);
     }
 }
@@ -733,9 +844,13 @@ sealed class GuideChannelCell : View
 
     public LiveChannel? Channel { get; }
 
+    /// <summary>Whether it shows as focused: painted again only when that changes, as the guide draws at every move.</summary>
+    bool? focused;
+
     public void Focus(bool on)
     {
-        if (Disposed || name == null) return;
+        if (Disposed || name == null || focused == on) return;
+        focused = on;
         box.BackgroundColor = on ? PleyColors.Surface3 : Color.Transparent;
         name.TextColor = on ? PleyColors.Fg : PleyColors.Muted;
     }

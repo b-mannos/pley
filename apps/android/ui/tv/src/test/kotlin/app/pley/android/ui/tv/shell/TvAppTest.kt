@@ -20,6 +20,8 @@ import app.pley.android.common.TestTags
 import app.pley.android.data.Loadable
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryKind
+import app.pley.android.model.Me
+import app.pley.android.screens.onboarding.ProfileGate
 import app.pley.android.testing.screens.onboarding.FakeOnboardingSource
 import app.pley.android.ui.tv.item.TV_ITEM_PAGE
 import app.pley.android.ui.tv.onboarding.LocalOnboardingSource
@@ -123,6 +125,16 @@ class TvAppTest {
         compose.onNodeWithText("Who's watching?").assertExists()
         // The profile in use, so one OK continues.
         compose.onNodeWithTag("pley.profiles.profile.1").assertIsFocused()
+    }
+
+    @Test
+    fun alwaysStartAsOpensOnThePadOfAProfileWithAPin() {
+        ProfileGate.passed = false
+        onboarding.signIn("http://s", Me(1, "anna", "Anna", hasPin = true))
+        app(StartFacts("http://s", true, profiles = 2, alwaysStartAs = 1, hasPin = true))
+        waitFor("Enter Anna's PIN")
+        back()
+        compose.onNodeWithText("Who's watching?").assertExists()
     }
 
     @Test

@@ -15,5 +15,5 @@ fun EntryProviderScope<NavKey>.onboardingEntries() {
     entry<PleyKey.Servers> { TvServersScreen() }
     entry<PleyKey.Link> { key -> TvLinkScreen(key.server) }
     entry<PleyKey.SignIn> { key -> TvLinkScreen(key.server) }
-    entry<PleyKey.Profiles> { TvProfilesScreen() }
+    entry<PleyKey.Profiles> { key -> TvProfilesScreen(pin = key.pin) }
 }

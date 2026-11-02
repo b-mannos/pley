@@ -166,7 +166,7 @@ sealed class PlaylistsScreen : ShellPage
         scroll = target;
         var move = Scrolling.Glide(gate);
         move.AnimateTo(covers, "PositionY", Ui.Dp(GridTop - scroll));
-        move.Play();
+        move.PlayHeld();
     }
 
     /// <summary>None yet: a heading and a sentence, 40 under the header; or a failure with Retry.</summary>
@@ -278,7 +278,8 @@ sealed class PlaylistsScreen : ShellPage
         {
             if (Disposed) return;
             Item.FocusChanged -= Look;
-            focusAnimation?.Stop();
+            // Only when disposed by the app: collected, the animation may have gone first (Kit/Held.cs).
+            if (type == DisposeTypes.Explicit) focusAnimation?.Stop();
             base.Dispose(type);
         }
     }
@@ -358,7 +359,7 @@ sealed class PlaylistArtView : View
             picture.ResourceUrl = file;
             var fade = new Animation(PleyMotion.ImageFadeMs);
             fade.AnimateTo(picture, "Opacity", 1f);
-            fade.Play();
+            fade.PlayHeld();
         });
         return picture;
     }

@@ -9,7 +9,8 @@ public abstract record PageKey
 {
     public sealed record Servers : PageKey;
     public sealed record Link(string Server) : PageKey;
-    public sealed record Profiles : PageKey;
+    /// <summary>"Who's watching?"; <paramref name="Pin"/>: a start as the profile the TV was left on, its PIN pad first.</summary>
+    public sealed record Profiles(bool Pin = false) : PageKey;
     public sealed record Home : PageKey;
     public sealed record Libraries : PageKey;
     /// <summary>A library's page: on <paramref name="Tab"/> (null: the one it was left on), in <paramref name="View"/> (a row's See all, "sort=added&amp;order=desc").</summary>
@@ -25,6 +26,8 @@ public abstract record PageKey
     public sealed record History : PageKey;
     public sealed record Settings : PageKey;
     public sealed record NowPlaying : PageKey;
+    /// <summary>A folder of the drive plugged into the TV; null: the drive's top.</summary>
+    public sealed record Storage(string? Path = null) : PageKey;
 }
 
 /// <summary>The kinds of place the rail goes to.</summary>
@@ -38,6 +41,7 @@ public enum RailSlot
     Playlists,
     Collections,
     NowPlaying,
+    Storage,
     Settings,
 }
 
@@ -63,6 +67,7 @@ public sealed record RailItem(string Id, RailSlot Slot, PageKey Key, string? Nam
         RailSlot.Playlists => "list-music",
         RailSlot.Collections => "layers",
         RailSlot.NowPlaying => "audio-lines",
+        RailSlot.Storage => "usb",
         _ => "settings",
     };
 
@@ -77,6 +82,7 @@ public sealed record RailItem(string Id, RailSlot Slot, PageKey Key, string? Nam
         RailSlot.Playlists => "Playlists",
         RailSlot.Collections => "Collections",
         RailSlot.NowPlaying => "Now Playing",
+        RailSlot.Storage => "USB drive",
         _ => "Settings",
     };
 }
@@ -95,6 +101,7 @@ public static class Rail
 
     public static readonly RailItem LiveTvItem = new RailItem("live-tv", RailSlot.LiveTv, new PageKey.LiveTv());
     public static readonly RailItem NowPlayingItem = new RailItem("now-playing", RailSlot.NowPlaying, new PageKey.NowPlaying());
+    public static readonly RailItem StorageItem = new RailItem("storage", RailSlot.Storage, new PageKey.Storage());
     /// <summary>Settings, pinned at the rail's foot.</summary>
     public static readonly RailItem SettingsItem = new RailItem("settings", RailSlot.Settings, new PageKey.Settings());
 
@@ -102,9 +109,10 @@ public static class Rail
     /// The entries above Settings: Search, Home, the first 3 libraries in the server's order,
     /// Playlists and Collections. With more libraries a "Libraries" entry, which lists them all,
     /// takes Collections' place. Live TV, where it has channels, comes after Home; while music has
-    /// a queue, Now Playing comes last. Each takes room as it is added.
+    /// a queue, Now Playing comes last; while a drive is plugged in, the drive after it. Each takes
+    /// room as it is added.
     /// </summary>
-    public static IReadOnlyList<RailItem> Items(IReadOnlyList<Library> libraries, bool nowPlaying = false, bool liveTv = false)
+    public static IReadOnlyList<RailItem> Items(IReadOnlyList<Library> libraries, bool nowPlaying = false, bool liveTv = false, bool storage = false)
     {
         var items = MainItems(libraries);
         if (liveTv)
@@ -113,6 +121,7 @@ public static class Rail
             items = room.Take(2).Concat(new[] { LiveTvItem }).Concat(room.Skip(2)).ToList();
         }
         if (nowPlaying) items = RoomIn(items).Concat(new[] { NowPlayingItem }).ToList();
+        if (storage) items = RoomIn(items).Concat(new[] { StorageItem }).ToList();
         return items;
     }
 
@@ -164,6 +173,7 @@ public static class Rail
         PageKey.Collections c => items.FirstOrDefault(i => i.Slot == RailSlot.Collections)?.Id
             ?? Current(new PageKey.Library(c.LibraryId), items),
         PageKey.Search => "search",
+        PageKey.Storage => StorageItem.Id,
         PageKey.Settings => SettingsItem.Id,
         PageKey.Profiles => ProfileItem,
         _ => items.FirstOrDefault(i => i.Key == root)?.Id,

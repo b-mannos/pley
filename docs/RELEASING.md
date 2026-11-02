@@ -4,9 +4,9 @@ Each app (a "unit") has its own version and changelog. A release takes the
 units whose versions went up since the last release, each at its own
 version, under one tag named after the day it was prepared
 (`release-2026-11-02`, then `release-2026-11-02.2` for a second that day),
-and one GitHub release with each unit's notes. Versions up to 0.1.1 were
-also tagged per unit (`kodi-v0.1.1`); 0.1.1's release is
-`release-2026-11-01`, and 0.1.0 has its tags but no release.
+and one GitHub release with each unit's notes. The first is
+`release-2026-11-01`, for 0.1.1; the versions before it have no tag, and
+the changelogs link them to the source at their commit.
 
 ## Releasing
 
@@ -71,6 +71,7 @@ bun scripts/release.mjs kodi patch --dry-run
 bun scripts/release.mjs kodi patch --commit
 bun scripts/release.mjs kodi notes 0.0.2 # a version's notes
 bun scripts/release.mjs pending          # the release HEAD waits for: its tag, units, and what stops it
+bun scripts/release.mjs check            # no unit below the version it had at the last release (CI runs it)
 bun test ./scripts                       # the scripts' tests
 ```
 
@@ -92,7 +93,7 @@ the tags, so fetch them first (`git fetch --tags`).
 
 | Unit | What | Version in | Release files |
 |---|---|---|---|
-| `server` | The server, its transcoder and the web app it embeds | `apps/server/Cargo.toml`, `apps/transcoder/Cargo.toml`, `packages/transcoder-api/Cargo.toml`, `apps/web/package.json` | `pley-server-<version>-<os>-<arch>.zip`/`.tar.gz`, the Windows installers `…-setup.exe`, the Docker image `ghcr.io/pley-media-server/pley:<version>`, `:<major>.<minor>` and `:latest` |
+| `server` | The server, its transcoder and the web app it embeds | `apps/server/Cargo.toml`, `apps/transcoder/Cargo.toml`, `packages/transcoder-api/Cargo.toml`, `apps/web/package.json` | `pley-server-<version>-<os>-<arch>.zip`/`.tar.gz` (with `linux-x86_64-static`), the Windows installers `…-setup.exe`, the Synology package `…-synology-x86_64.spk`, the Docker image `ghcr.io/pley-media-server/pley:<version>`, `:<major>.<minor>` and `:latest` |
 | `desktop` | The desktop app (Tauri) | `apps/desktop/package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` | `pley-desktop-<version>-<os>-<arch>` `.msi`, `-setup.exe`, `.dmg`, `.deb`, `.rpm`, `.AppImage` |
 | `android` | Phones, tablets, Android TV, Fire TV | `apps/android/app/build.gradle.kts` (`appVersion`) | `pley-android-<version>.apk`, `pley-android-<version>-play.aab` |
 | `samsung` | Samsung TVs (`apps/tizen`) | `apps/tizen/package.json`, `config.xml` | None: the package is signed with a Samsung certificate, by hand (`bun run --cwd apps/tizen package`) |
@@ -133,8 +134,15 @@ workflow's `on.paths` has the exact list.
 | Samsung TV (native) | `apps/tizen-native`, `packages/tv/test/fixtures`, `scripts/check-nuget-licenses.mjs`, `scripts/commit.mjs`; it has no release unit yet |
 | Kodi | `apps/kodi`, and the server's Rust code: its end-to-end test runs against a server built from the same commit |
 | Roku | `apps/roku`, the root `package.json` (Bun's version) |
-| Repository | `.github/workflows/`, the version and release scripts, any `CHANGELOG.md` |
+| Repository | `.github/workflows/`, the version and release scripts, any `CHANGELOG.md`, a unit's version (the first file in its "Version in") |
 | Release | A unit's version on master (the first file in its "Version in") |
+
+Repository also fails a pull request whose merge would leave a unit's
+version below the one it had at the last release tag (`release.mjs check`).
+A branch carrying a unit's manifests and CHANGELOG from before that release
+passes `version.mjs check`, since they agree with each other, yet would take
+the release back. What waits for the next release, a higher version or
+entries under Unreleased, passes.
 
 A CHANGELOG change alone runs only Repository. Prepare release and Audit
 (known vulnerabilities in the lock files) run only by hand.

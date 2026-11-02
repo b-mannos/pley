@@ -113,7 +113,7 @@ fun railCurrent(root: PleyKey, items: List<RailItem>): String? = when (root) {
         ?: railCurrent(PleyKey.Library(root.libraryId), items)
     is PleyKey.Search -> "search"
     PleyKey.Settings -> SettingsItem.id
-    PleyKey.Profiles -> PROFILE_ITEM
+    is PleyKey.Profiles -> PROFILE_ITEM
     else -> items.firstOrNull { it.key == root }?.id
 }
 

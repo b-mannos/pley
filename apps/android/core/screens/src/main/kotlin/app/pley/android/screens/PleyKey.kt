@@ -26,9 +26,12 @@ sealed interface PleyKey : NavKey {
     @Serializable
     data class Link(val server: String) : PleyKey
 
-    /** "Who's watching?": the household's profiles, and a PIN pad. */
+    /**
+     * "Who's watching?": the household's profiles, and a PIN pad. [pin]: a
+     * TV's start as the profile it was left on, whose pad opens first.
+     */
     @Serializable
-    data object Profiles : PleyKey
+    data class Profiles(val pin: Boolean = false) : PleyKey
 
     // Browsing.
 
@@ -83,9 +86,13 @@ sealed interface PleyKey : NavKey {
 
     // Requests.
 
-    /** Discover: what TMDB has to ask for; [query] opens its search with those words. */
+    /** Discover: what TMDB has to ask for. */
     @Serializable
-    data class Discover(val query: String = "") : PleyKey
+    data object Discover : PleyKey
+
+    /** Every title TMDB finds for [query] (the See all of search's Discover row). */
+    @Serializable
+    data class DiscoverResults(val query: String) : PleyKey
 
     /** A movie or show found on TMDB; [pick] opens its season picker once the page shows (Request more seasons). */
     @Serializable

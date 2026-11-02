@@ -119,6 +119,8 @@ public enum StartPage
     Servers,
     Link,
     Profiles,
+    /// <summary>"Who's watching?", opened on the PIN pad of the profile the TV was left on.</summary>
+    Pin,
     Home,
 }
 
@@ -289,11 +291,21 @@ public sealed class AppState
     void Write<T>(string key, T value, JsonSerializerOptions? options = null) => store.Set(key, JsonSerializer.Serialize(value, options ?? ApiJson.Options));
 
     /// <summary>The first screen, from what the TV kept (the tokens aren't opened for it).</summary>
-    public StartPage Start()
+    public StartPage Start() => StartOf(Server.Value != null, tokens?.Kept == true, HouseholdSize(), AlwaysStartAs(), Me.Value);
+
+    /// <summary>
+    /// The first screen (the Android app's startKey): no server, Servers; no sign-in, Link; a household
+    /// of several profiles, "Who's watching?". "Always start as" skips that question and goes on as the
+    /// profile the TV was left on (<paramref name="me"/>, as last heard), but never past its PIN: its
+    /// pad comes first when it has one, and "Who's watching?" when the TV doesn't know whether it has one.
+    /// </summary>
+    public static StartPage StartOf(bool server, bool signedIn, int household, long? alwaysStartAs, User? me)
     {
-        if (Server.Value == null) return StartPage.Servers;
-        if (tokens?.Kept != true) return StartPage.Link;
-        return HouseholdSize() > 1 && AlwaysStartAs() == null ? StartPage.Profiles : StartPage.Home;
+        if (!server) return StartPage.Servers;
+        if (!signedIn) return StartPage.Link;
+        if (household <= 1) return StartPage.Home;
+        if (alwaysStartAs == null || me == null) return StartPage.Profiles;
+        return me.HasPin ? StartPage.Pin : StartPage.Home;
     }
 
     Tokens NewTokens(string issuer, Action<SignOutReason>? onSignedOut = null) =>
