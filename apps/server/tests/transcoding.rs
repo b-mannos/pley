@@ -1288,6 +1288,23 @@ async fn partial_picture_subtitles_come_with_ranges() {
     assert_eq!(rest.headers[SUBTITLES_COMPLETE_HEADER], "0");
 }
 
+#[tokio::test]
+async fn picture_subtitles_are_asked_for_where_the_player_is() {
+    let w = world().await;
+    let (app, admin) = (&w.app, w.admin.as_str());
+    let file = app.file_of(w.movies["Feature"]).await;
+    // To the second: a player asking again a moment later asks for the same
+    // pictures.
+    app.get(&format!("/api/files/{file}/subtitles/3.mks?at=754500"), admin).await;
+    let asked = w.fake.tracks.lock()[0].clone();
+    assert_eq!((asked.from_ms, asked.rest), (Some(754_000), false));
+    let reply = app.get(&format!("/api/files/{file}/subtitles/3.mks?at=soon"), admin).await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    // Kodi reads its .sup once: all that is read so far.
+    app.get(&format!("/api/files/{file}/subtitles/3.sup"), admin).await;
+    assert!(w.fake.tracks.lock().iter().skip(1).all(|r| r.rest && r.from_ms.is_none()));
+}
+
 /// The web app's report: version 1, with the picture subtitles it draws.
 fn web_drawing_pictures() -> Value {
     json!({

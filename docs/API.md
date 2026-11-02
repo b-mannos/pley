@@ -1616,7 +1616,7 @@ removed or reordered (`400`).
 | GET | `/api/media/{key}/{file}` | `public` (the key) | a keyed session's media ([Keyed URLs](#keyed-urls)) |
 | GET | `/api/files/{id}/stream` | `play` | the raw file, with `Range` (direct play) |
 | GET | `/api/files/{id}/subtitles/{index}.vtt?offset_ms=` | `play` | WebVTT of a text subtitle track |
-| GET | `/api/files/{id}/subtitles/{index}.mks` | `play` | a picture subtitle track in a Matroska file of its own (`video/x-matroska`) |
+| GET | `/api/files/{id}/subtitles/{index}.mks?at=` | `play` | a picture subtitle track in a Matroska file of its own (`video/x-matroska`) |
 | GET | `/api/files/{id}/subtitles/{index}.sup` | `play` | a PGS track as a `.sup` file (Kodi's) |
 | GET | `/api/files/{id}/trickplay` | `play` | seek-bar previews: `{ id, interval_ms, width, height, columns, rows, count, sheets, version }` |
 | GET | `/api/files/{id}/trickplay/{n}.jpg?v={id}` | `play` | preview sprite sheet `n` |
@@ -1656,23 +1656,43 @@ removed or reordered (`400`).
   version by the transcoder, cached, served with `Range`. `404` for a text
   track or anything but subtitles; `503` with a transcoder too old to make
   it.
-  - A Matroska file whose Cues list the track's blocks is read in seconds
-    and the track comes whole. Otherwise the transcoder reads the whole
-    file (minutes for a big one on a network share): meanwhile the answer
-    is what is copied so far, up to its last whole cluster, with
-    `X-Pley-Complete: 0` and `Cache-Control: no-store`; a `Range` of it says
-    `*` for the length. Every answer is a Matroska file players read (the
-    track's header at least). Ask again for the rest, as for `.vtt`.
+  - While the track is copied out of its file, the answer is what is
+    copied so far, with `X-Pley-Complete: 0` and `Cache-Control: no-store`;
+    a `Range` of it says `*` for the length. Every answer is a Matroska file
+    players read (the track's header at least). Ask again for the rest, as
+    for `.vtt` (with a `Range` from what you have, if you like), and for all
+    of it once it is whole: what came before may not be its start. A
+    `Range` continues only a file still being written (its Segment's size
+    unknown): one whose size is written came whole (the pictures around
+    `at`), and more past it is another file, to ask for all of.
+  - A Matroska file whose Cues list the track's blocks is read through
+    them. Those around where the player is come first, within a few
+    seconds: from half a minute before `at` (ms of the file's time, taken
+    to the second; the playback's start for the copy a playback start
+    begins) to two minutes after it. The whole track follows within
+    seconds. A request whose `at` is away from where the copy started (a
+    seek) has the pictures there read at once, from 10 s before it to 40 s
+    after it, and is answered with those. So each request says where the
+    player is then (`at=0` at the start too), a seek asks again at once,
+    and the player asks again within half a minute as it plays on.
+  - Otherwise the transcoder reads the whole file (minutes for a big one on
+    a network share), and the answer is what it has copied so far, up to
+    its last whole cluster. A copy through the Cues that fails past the
+    pictures around `at` keeps answering with those until the transcoder's
+    copy of the whole file comes past them, then with that copy.
   - The copy starts as a playback starts whose player draws the track
     (`picture_subtitles_sideload`, the track picked or the profile's
-    choice), rather than when it asks, after the playback's own start.
+    choice), rather than when it asks. What isn't around `at` waits for the
+    playback's own start to be over.
 - **`.sup`**: a PGS track (in the file or next to it) as a `.sup` file, for
   players that read those beside a stream but no Matroska (Kodi): a `.sup`
   next to the media as it is, an embedded track made from its `.mks`, with
   an empty display set at 0 first (a reader that takes a file's first time
   for its start starts it where the video does). The answer waits up to
   8 s for the whole track, then has what is copied so far
-  (`X-Pley-Complete: 0`). `404` for anything but PGS.
+  (`X-Pley-Complete: 0`): through the Cues, everything read from around
+  where the playback started on, as Kodi reads the file once. `404` for
+  anything but PGS.
 - **`trickplay`**: `404` while previews are being made (asking, or opening
   the item, queues them). None start during a playback's first 30 s nor
   while anything is transcoded: a playback that starts puts off every file
