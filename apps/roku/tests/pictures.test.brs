@@ -135,14 +135,43 @@ sub test_pictures_tell_a_seek_from_playing()
     tkTrue(picSeeked(600000, 1000, 60000, 2000), "back")
 end sub
 
+' A file whose video is width × height.
+function picTestVideo(width as integer, height as integer) as object
+    return { streams: [{ index: 0, kind: "video", codec: "hevc", width: width, height: height }] }
+end function
+
 sub test_pictures_are_placed_on_the_screen_as_the_video_is()
     pictures = picRead(picTestList(true))
     cue = pictures.cues[0]
-    tkEqual(picBox(cue, pictures, 1920, 1080), { x: 400, y: 900, width: 1120, height: 120 })
-    tkEqual(picBox(cue, pictures, 1280, 720), { x: 267, y: 600, width: 747, height: 80 })
-    ' A 4:3 plane, centred between bars.
-    square = { width: 720, height: 540 }
-    tkEqual(picBox({ x: 0, y: 500, width: 720, height: 40 }, square, 1920, 1080), { x: 240, y: 1000, width: 1440, height: 80 })
+    hd = picPicture(picTestVideo(1920, 1080), 1920, 1080)
+    tkEqual(picBox(cue, pictures, picPlane(pictures, hd, 1920, 1080)), { x: 400, y: 900, width: 1120, height: 120 })
+    tkEqual(picBox(cue, pictures, picPlane(pictures, invalid, 1280, 720)), { x: 267, y: 600, width: 747, height: 80 }, "the video's size not known")
+    uhd = picPicture(picTestVideo(3840, 2160), 1920, 1080)
+    tkEqual(picBox(cue, pictures, picPlane(pictures, uhd, 1920, 1080)), { x: 400, y: 900, width: 1120, height: 120 }, "a 4K film's 1080p plane")
+end sub
+
+sub test_pictures_of_a_cropped_film_keep_their_planes_shape()
+    pictures = picRead(picTestList(true))
+    ' A Blu-ray's plane over a film cropped to 1920×800: its lines go where
+    ' the disc puts them, in the black bar.
+    cropped = picPicture(picTestVideo(1920, 800), 1920, 1080)
+    tkEqual(cropped, { x: 0, y: 140, width: 1920, height: 800 })
+    tkEqual(picBox(pictures.cues[0], pictures, picPlane(pictures, cropped, 1920, 1080)), { x: 400, y: 900, width: 1120, height: 120 })
+end sub
+
+sub test_pictures_of_sd_planes_stretch_over_the_picture()
+    ' A DVD's plane over its anamorphic 16:9 picture.
+    sd = { width: 720, height: 480 }
+    picture = picPicture(picTestVideo(720, 480), 1920, 1080)
+    tkEqual(picture, { x: 0, y: 0, width: 1920, height: 1080 }, "shown as 16:9")
+    tkEqual(picBox({ x: 180, y: 400, width: 360, height: 40 }, sd, picPlane(sd, picture, 1920, 1080)), { x: 480, y: 900, width: 960, height: 90 })
+    ' Over an HD picture (an SD track with a 1080p video), the same.
+    hd = picPicture(picTestVideo(1920, 1080), 1920, 1080)
+    tkEqual(picBox({ x: 180, y: 400, width: 360, height: 40 }, sd, picPlane(sd, hd, 1920, 1080)), { x: 480, y: 900, width: 960, height: 90 })
+    ' Without the video's size, it keeps its own shape.
+    tkEqual(picPlane(sd, invalid, 1920, 1080), { x: 150, y: 0, width: 1620, height: 1080 })
+    tkInvalid(picPicture({ streams: [{ kind: "video" }] }, 1920, 1080), "no size")
+    tkInvalid(picPicture(invalid, 1920, 1080))
 end sub
 
 ' A refusal as the server sends it (apps/server/src/error.rs).

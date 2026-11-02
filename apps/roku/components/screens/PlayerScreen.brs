@@ -134,15 +134,17 @@ sub init()
     m.pausedTimer.observeField("fire", "onPausedTick")
     m.video.observeField("downloadedSegment", "onSegment")
     ' Picture subtitles drawn here: the track (-1 none), its pictures known
-    ' (Pictures.brs), the folder of their files after the server, the cue
-    ' showing (-1 none), the frames (the one at front shows, the other loads
-    ' the next), which answer is awaited and whether a seek since wants
-    ' another at once, and the last position seen (and when) to tell a seek
-    ' by. Once the server turns out not to make them, they are burned in for
-    ' as long as the player shows.
+    ' (Pictures.brs), where the video's picture shows (invalid when the
+    ' file doesn't say its size), the folder of their files after the
+    ' server, the cue showing (-1 none), the frames (the one at front shows,
+    ' the other loads the next), which answer is awaited and whether a seek
+    ' since wants another at once, and the last position seen (and when) to
+    ' tell a seek by. Once the server turns out not to make them, they are
+    ' burned in for as long as the player shows.
     m.picturesOff = false
     m.pictureIndex = -1
     m.pictures = invalid
+    m.picturePicture = invalid
     m.pictureFolder = ""
     m.pictureShown = -1
     m.pictureFrames = [m.top.findNode("pictureA"), m.top.findNode("pictureB")]
@@ -1493,9 +1495,11 @@ end sub
 ' by, the server burns them in instead.
 sub startPictures()
     stopPictures()
-    index = picTrack(m.info, contentFile(m.item, m.info.file_id), m.picturesOff)
+    file = contentFile(m.item, m.info.file_id)
+    index = picTrack(m.info, file, m.picturesOff)
     if index < 0 then return
     m.pictureIndex = index
+    m.picturePicture = picPicture(file, 1920, 1080)
     m.pictureFolder = picFolder(m.info.url, m.global.session.server)
     if m.pictureFolder = ""
         picturesFailed()
@@ -1609,7 +1613,7 @@ sub drawPictures()
             if m.pictureFrames[m.pictureFront].uri <> uri and m.pictureFrames[1 - m.pictureFront].uri = uri then m.pictureFront = 1 - m.pictureFront
             front = m.pictureFrames[m.pictureFront]
             if front.uri <> uri then front.uri = uri
-            place = picBox(cue, m.pictures, 1920, 1080)
+            place = picBox(cue, m.pictures, picPlane(m.pictures, m.picturePicture, 1920, 1080))
             front.translation = [place.x, place.y]
             front.width = place.width
             front.height = place.height

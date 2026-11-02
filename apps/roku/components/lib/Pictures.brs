@@ -216,19 +216,62 @@ function picPlan(pictures as dynamic, positionMs as integer, syncMs as integer) 
     return plan
 end function
 
-' Where a cue of pictures shows on a screen of screenWidth × screenHeight:
-' the plane fitted to it and centred, as the video is; { x, y, width,
-' height }.
-function picBox(cue as object, pictures as object, screenWidth as integer, screenHeight as integer) as object
-    scale = screenWidth / pictures.width
-    if screenHeight / pictures.height < scale then scale = screenHeight / pictures.height
-    left = (screenWidth - pictures.width * scale) / 2
-    top = (screenHeight - pictures.height * scale) / 2
+' width × height fitted to a screen of screenWidth × screenHeight, centred:
+' { x, y, width, height }, in whole pixels.
+function picFit(width as dynamic, height as dynamic, screenWidth as integer, screenHeight as integer) as object
+    scale = screenWidth / width
+    if screenHeight / height < scale then scale = screenHeight / height
+    fitWidth = Int(width * scale + 0.5)
+    fitHeight = Int(height * scale + 0.5)
+    return { x: Int((screenWidth - fitWidth) / 2), y: Int((screenHeight - fitHeight) / 2), width: fitWidth, height: fitHeight }
+end function
+
+' Where the picture of a file's video shows on a screen of screenWidth ×
+' screenHeight, fitted to it (picFit); invalid when the file doesn't say
+' the video's size. A video of 576 lines or fewer shows as 16:9, as a
+' DVD's or an SD Blu-ray's anamorphic picture does: the file only says how
+' it is stored.
+function picPicture(file as dynamic, screenWidth as integer, screenHeight as integer) as dynamic
+    data = httpObject(file)
+    if data = invalid then return invalid
+    for each stream in httpArray(data.streams)
+        if GetInterface(stream, "ifAssociativeArray") <> invalid and httpString(stream.kind) = "video"
+            width = httpNumber(stream.width, 0)
+            height = httpNumber(stream.height, 0)
+            if width < 1 or height < 1 then return invalid
+            if height <= 576 then width = height * 16 / 9
+            return picFit(width, height, screenWidth, screenHeight)
+        end if
+    end for
+    return invalid
+end function
+
+' Where pictures' plane goes, as the web player puts it
+' (apps/web/src/player/pictures.ts, planeBox): over the picture
+' (picPicture's), which a DVD's or SD DVB's plane (576 lines or fewer)
+' stretches over, as the video it came with is stored anamorphic. An HD
+' plane of another shape than the picture (a Blu-ray's 1920×1080 over a
+' film cropped to 1920×800) keeps its own shape, fitted to the screen: its
+' lines go where the disc puts them, in the black bars when there are any.
+' So does any plane when the video's size isn't known.
+function picPlane(pictures as object, picture as dynamic, screenWidth as integer, screenHeight as integer) as object
+    if picture = invalid then return picFit(pictures.width, pictures.height, screenWidth, screenHeight)
+    if pictures.height <= 576 then return picture
+    shapes = (pictures.width / pictures.height) / (picture.width / picture.height)
+    if Abs(shapes - 1) < 0.02 then return picture
+    return picFit(pictures.width, pictures.height, screenWidth, screenHeight)
+end function
+
+' Where a cue of pictures shows, its plane at plane (picPlane's): { x, y,
+' width, height }, in whole pixels.
+function picBox(cue as object, pictures as object, plane as object) as object
+    scaleX = plane.width / pictures.width
+    scaleY = plane.height / pictures.height
     return {
-        x: Int(left + cue.x * scale + 0.5),
-        y: Int(top + cue.y * scale + 0.5),
-        width: Int(cue.width * scale + 0.5),
-        height: Int(cue.height * scale + 0.5)
+        x: Int(plane.x + cue.x * scaleX + 0.5),
+        y: Int(plane.y + cue.y * scaleY + 0.5),
+        width: Int(cue.width * scaleX + 0.5),
+        height: Int(cue.height * scaleY + 0.5)
     }
 end function
 
