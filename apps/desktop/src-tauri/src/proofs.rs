@@ -350,8 +350,8 @@ pub fn route_to(server: &Url) -> Option<IpAddr> {
     Some(socket.local_addr().ok()?.ip())
 }
 
-/// How long one look at the addresses may take before the computer counts
-/// as having slept in between (it may wake on another network).
+/// How long the watch's second of rest may last by the clock before the
+/// computer counts as having slept in it (it may wake on another network).
 const SLEPT: Duration = Duration::from_secs(5);
 
 /// Looks at the computer's addresses every second, for as long as the app
@@ -359,15 +359,15 @@ const SLEPT: Duration = Duration::from_secs(5);
 /// slept (`true`): every server proves itself again then, and the window
 /// leaves a server whose pages could otherwise send the session to whatever
 /// answers at its address now. A network that gives the computer the same
-/// addresses, joined in less than a second, goes unseen.
+/// addresses, joined in less than a second, goes unseen. Only the rest
+/// counts towards sleep, not the time `on_change` takes.
 pub async fn watch_network(on_change: impl Fn(bool)) {
     let mut seen = local_addresses();
-    let mut looked = SystemTime::now();
     loop {
+        let rested = SystemTime::now();
         tokio::time::sleep(Duration::from_secs(1)).await;
+        let slept = rested.elapsed().map_or(true, |gap| gap > SLEPT);
         let now = local_addresses();
-        let slept = looked.elapsed().map_or(true, |gap| gap > SLEPT);
-        looked = SystemTime::now();
         if now != seen || slept {
             seen = now;
             on_change(slept);

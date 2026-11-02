@@ -142,8 +142,8 @@ pub(crate) fn not_yours<R: Runtime>(app: &AppHandle<R>, server: &Url) {
 fn network_changed<R: Runtime>(app: &AppHandle<R>, slept: bool) {
     app.state::<proofs::Proofs>().doubt_all();
     let Some(window) = app.get_webview_window("main") else { return };
-    let pages = window.state::<Pages>();
     let (shown, route, picker) = {
+        let pages = window.state::<Pages>();
         let places = pages.0.lock().unwrap();
         let Some(shown) = places.server.clone() else { return };
         (shown, places.route, places.picker.clone())
@@ -157,9 +157,24 @@ fn network_changed<R: Runtime>(app: &AppHandle<R>, slept: bool) {
     if shown.scheme() != "http" || on_this_computer {
         return;
     }
-    if slept || proofs::route_to(&shown) != route {
+    if slept {
         leave_for(&window, picker);
+        return;
     }
+    tauri::async_runtime::spawn(async move {
+        let changed = route_to(shown.clone()).await != route;
+        // Unless the window went elsewhere while the name resolved.
+        let still = window.state::<Pages>().0.lock().unwrap().server.as_ref() == Some(&shown);
+        if changed && still {
+            leave_for(&window, picker);
+        }
+    });
+}
+
+/// [`proofs::route_to`], off the window's thread and the async runtime's:
+/// resolving a name can take seconds, the more so on another network.
+async fn route_to(server: Url) -> Option<std::net::IpAddr> {
+    tauri::async_runtime::spawn_blocking(move || proofs::route_to(&server)).await.ok().flatten()
 }
 
 fn leave_for<R: Runtime>(window: &WebviewWindow<R>, picker: Option<Url>) {
@@ -184,13 +199,13 @@ fn open_in_browser<R: Runtime>(app: &AppHandle<R>, url: &Url) {
 /// Shows the server at `url` in the window (the picker calls this once the
 /// server answered).
 #[tauri::command]
-fn open_server(window: WebviewWindow, url: String) -> Result<(), String> {
+async fn open_server(window: WebviewWindow, url: String) -> Result<(), String> {
     let origin = servers::server_origin(&url)?;
+    let route = route_to(origin.clone()).await;
     // The network may have changed since the picker checked it.
     if !window.state::<proofs::Proofs>().may_open(&origin) {
         return Err("the network changed: open it again".to_owned());
     }
-    let route = proofs::route_to(&origin);
     {
         let pages = window.state::<Pages>();
         let mut places = pages.0.lock().unwrap();
