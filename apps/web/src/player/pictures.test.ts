@@ -6,6 +6,13 @@ import { contain, fetchPictures, hlsLeadMs, hlsShiftMs, loadPictures, LOOKAHEAD_
 
 const track = (cues: [number, number][]) => PictureSubtitles.of(readPictureTrack(mks(cues)))!;
 
+/** FFmpeg's copy as it is made: its Segment's size isn't written yet. */
+const growing = (file: Uint8Array) => {
+  const out = file.slice();
+  out.set([0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], 12 + out[11]! + 4);
+  return out;
+};
+
 /** A box rounded to 1/100 px, for comparing. */
 const rounded = (b: { x: number; y: number; width: number; height: number }) =>
   Object.fromEntries(Object.entries(b).map(([k, v]) => [k, Math.round(v * 100) / 100 + 0]));
@@ -178,22 +185,22 @@ describe("fetchPictures", () => {
     expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "anew" });
   });
 
-  it("asks for all of another file when one that came whole has more, and takes the rest of one still being written", async () => {
-    const have = new Uint8Array(mks([[1000, 2000]]));
-    const other = new Uint8Array(mks([[1000, 2000], [5000, 6000]]));
-    const partial = { status: 206, headers: { "Content-Range": `bytes ${have.length}-${other.length - 1}/*`, "X-Pley-Complete": "0" } };
-    answer(new Response(other.slice(have.length), partial));
-    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "anew" });
+  it("asks for all of what follows a file that came whole, and the rest of one still being written", async () => {
+    // The pictures around where the player was, then a smaller file of those
+    // around where it is now.
+    const have = new Uint8Array(mks([[1000, 2000], [5000, 6000]]));
+    const other = new Uint8Array(mks([[20_000, 21_000]]));
+    answer(new Response(other, { status: 200, headers: { "X-Pley-Complete": "0" } }));
+    const next = await fetchPictures("/t.mks", new AbortController().signal, have, true);
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.headers).not.toHaveProperty("Range");
+    expect(next.kind === "track" && [next.bytes.length, next.subs.sampleAt(20_500)]).toEqual([other.length, 0]);
 
-    // FFmpeg's copy as it is made: its Segment's size isn't written yet.
-    const growing = (file: Uint8Array) => {
-      const out = file.slice();
-      out.set([0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], 12 + out[11]! + 4);
-      return out;
-    };
-    const file = growing(other);
-    answer(new Response(file.slice(have.length), partial));
-    const more = await fetchPictures("/t.mks", new AbortController().signal, file.slice(0, have.length), true);
+    const file = growing(have);
+    const cut = mks([[1000, 2000]]).byteLength;
+    const partial = { status: 206, headers: { "Content-Range": `bytes ${cut}-${file.length - 1}/*`, "X-Pley-Complete": "0" } };
+    answer(new Response(file.slice(cut), partial));
+    const more = await fetchPictures("/t.mks", new AbortController().signal, file.slice(0, cut), true);
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.headers).toMatchObject({ Range: `bytes=${cut}-` });
     expect(more.kind === "track" && more.subs.sampleAt(5500)).toBe(2);
   });
 
@@ -218,10 +225,13 @@ describe("loadPictures", () => {
   }
   const hooks = () => ({ onTrack: vi.fn<(s: PictureSubtitles) => void>(), onUnavailable: vi.fn(), onFailed: vi.fn() });
   const partial = (cues: [number, number][]) => () => new Response(mks(cues), { status: 200, headers: { "X-Pley-Complete": "0" } });
+  const copying = (cues: [number, number][]) => () => new Response(growing(new Uint8Array(mks(cues))), { status: 200, headers: { "X-Pley-Complete": "0" } });
   const whole = (cues: [number, number][]) => () => new Response(mks(cues), { status: 200 });
+  const ranges = (fetchFn: ReturnType<typeof server>) =>
+    fetchFn.mock.calls.map((c) => ((c as unknown[])[1] as RequestInit).headers as Record<string, string>).map((h) => h.Range ?? null);
 
   it("asks again while the answer is partial, and stops once it is whole", async () => {
-    const fetchFn = server([partial([[1000, 2000]]), partial([[1000, 2000]]), whole([[1000, 2000], [5000, 6000]])]);
+    const fetchFn = server([copying([[1000, 2000]]), copying([[1000, 2000]]), whole([[1000, 2000], [5000, 6000]])]);
     const h = hooks();
     loadPictures("/t.mks", h);
     await vi.advanceTimersByTimeAsync(0);
@@ -231,14 +241,25 @@ describe("loadPictures", () => {
     expect(h.onTrack).toHaveBeenCalledTimes(3);
     expect(h.onTrack.mock.calls[2]?.[0].sampleAt(5500)).toBe(2);
     await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS * 3);
-    // The rest, then the whole file once more now that it is finished.
+    // The rest of FFmpeg's copy, then the whole file once more now that it is finished.
     expect(fetchFn).toHaveBeenCalledTimes(4);
-    const ranges = fetchFn.mock.calls.map((c) => ((c as unknown[])[1] as RequestInit).headers as Record<string, string>).map((h) => h.Range ?? null);
-    expect(ranges[0]).toBeNull();
-    expect(ranges[1]).toMatch(/^bytes=\d+-$/);
-    expect(ranges[3]).toBeNull();
+    const asked = ranges(fetchFn);
+    expect(asked[0]).toBeNull();
+    expect(asked[1]).toMatch(/^bytes=\d+-$/);
+    expect(asked[3]).toBeNull();
     expect(h.onUnavailable).not.toHaveBeenCalled();
     expect(h.onFailed).not.toHaveBeenCalled();
+  });
+
+  it("asks for all of what follows pictures that came whole, which may be fewer, for where the player is now", async () => {
+    const fetchFn = server([partial([[1000, 2000], [5000, 6000]]), partial([[20_000, 21_000]])]);
+    const h = hooks();
+    loadPictures("/w.mks", h);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS);
+    expect(ranges(fetchFn).slice(0, 2)).toEqual([null, null]);
+    expect(h.onTrack).toHaveBeenCalledTimes(2);
+    expect(h.onTrack.mock.calls[1]?.[0].sampleAt(20_500)).toBe(0);
   });
 
   it("tells once when the server can't make it, and asks no more", async () => {
@@ -258,8 +279,8 @@ describe("loadPictures", () => {
     await vi.advanceTimersByTimeAsync(0);
     at = 603_000;
     await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS * 3);
-    // The last, all of it once it is whole.
-    expect(urls()).toEqual(["/at.mks?at=600000", "/at.mks?at=603000", "/at.mks?at=603000", "/at.mks?at=603000"]);
+    // Each answer came whole, so each ask is for all of it: the last, once the track is.
+    expect(urls()).toEqual(["/at.mks?at=600000", "/at.mks?at=603000", "/at.mks?at=603000"]);
     // Had whole: asked for as it was, which the browser's cache keeps.
     fetchFn.mockClear();
     loadPictures("/at.mks", hooks(), () => 900_000);

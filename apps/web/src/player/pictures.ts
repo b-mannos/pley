@@ -135,11 +135,14 @@ export type PictureLoad =
  * and a server that answers with the whole file again is fine too. Once
  * the track is whole, what came before may not be its start: the pictures
  * around where the player is come first, and a file being made has its
- * sizes written as it is finished. Nor is it when a file that came whole
- * (its size written: the pictures around the player, a file of their own)
- * has more: that is another file.
+ * sizes written as it is finished. A file that came whole (its size
+ * written: the pictures around where the player was, a file of their own)
+ * has no rest: what comes next is another file, asked for whole, and may
+ * be smaller (the pictures around where the player is now).
  */
 export async function fetchPictures(url: string, signal: AbortSignal, have: Uint8Array | null = null, again = false): Promise<PictureLoad> {
+  const end = have && matroskaEnd(have);
+  if (have && end !== null && end <= have.length) have = null;
   const headers: Record<string, string> = { Accept: "video/x-matroska" };
   if (have?.length) headers.Range = `bytes=${have.length}-`;
   let res: Response;
@@ -166,12 +169,6 @@ export async function fetchPictures(url: string, signal: AbortSignal, have: Uint
   // Nothing past what came before.
   if (res.status === 416 && have) return { kind: "early", bytes: have };
   if (!res.ok) return { kind: "failed" };
-  // More past a file that came whole: another file, not the rest of it.
-  const end = have && matroskaEnd(have);
-  if (res.status === 206 && have && end !== null && end <= have.length) {
-    void res.body?.cancel();
-    return { kind: "anew" };
-  }
   let bytes: Uint8Array;
   try {
     const body = new Uint8Array(await res.arrayBuffer());
