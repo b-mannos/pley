@@ -346,9 +346,52 @@ public class SubtitlePresenterTests
             clock.Advance(1_000);
         }
         // 3, 6, 12 s apart, then 15 s each time: the server answers from a read at a player elsewhere for 20 s past
-        // where it asked from, so each ask finds the read the last one started, the answer's own time and the
-        // server's second included. Each ask says where the player is then, the start too.
+        // where it asked from, so each ask finds the read the last one started, the server's second included. Each
+        // ask says where the player is then, the start too.
         Assert.Equal(new long[] { 0, 3_000, 9_000, 21_000, 36_000, 51_000, 66_000, 81_000, 96_000, 111_000 }.Select(AskedAt), asked);
+    }
+
+    [Fact]
+    public void The_next_ask_for_pictures_counts_from_the_last_ask_however_long_its_answer_waited()
+    {
+        // A read at a seek can hold an answer up to 12 s: the asks still go 15 s apart, so each finds the read the one
+        // before it started. An ask never follows an answer by less than 3 s.
+        var part = new SubtitlePictures(PictureKit.Mks("S_HDMV/PGS", new[] { new PictureKit.MksBlock(1000, Shown) }), Complete: false);
+        var pending = new List<TaskCompletionSource<SubtitlePictures>>();
+        var p = WithPending(pending);
+        var askedAt = new List<long> { 0 };
+        p.ShowPictures("http://pley/api/files/7/subtitles/4.mks");
+        for (var t = 1_000; t <= 80_000; t += 1_000)
+        {
+            position = t;
+            clock.Advance(1_000);
+            if (pending.Count > askedAt.Count) askedAt.Add(t);
+            // Each answer comes 8 s after its ask.
+            var due = askedAt.IndexOf(t - 8_000);
+            if (due >= 0) Answer(pending[due], part);
+        }
+        Assert.Equal(new long[] { 0, 11_000, 22_000, 34_000, 49_000, 64_000, 79_000 }, askedAt);
+        Assert.Equal(askedAt.Select(AskedAt), asked);
+    }
+
+    [Fact]
+    public void A_copy_of_the_whole_track_so_far_is_asked_for_every_24_s_at_most()
+    {
+        // Past 4 MB, an answer is the whole track as far as it is copied (its file's Cues don't list it): tens of MB
+        // for a film, and no read at a seek to spare.
+        var mks = PictureKit.Mks("S_HDMV/PGS", new[] { new PictureKit.MksBlock(1000, Shown) });
+        var copy = mks.Concat(new byte[SubtitlePresenter.CopyMinBytes]).ToArray();
+        var copies = new Queue<Func<SubtitlePictures>>();
+        for (var i = 0; i < 10; i++) copies.Enqueue(() => new SubtitlePictures(copy, Complete: false));
+        var p = WithPictures(copies, new List<string>());
+        p.ShowPictures("http://pley/api/files/7/subtitles/4.mks");
+        for (var t = 1_000; t <= 120_000; t += 1_000)
+        {
+            position = t;
+            clock.Advance(1_000);
+        }
+        Assert.NotNull(p.Picture.Value);
+        Assert.Equal(new long[] { 0, 3_000, 9_000, 21_000, 45_000, 69_000, 93_000, 117_000 }.Select(AskedAt), asked);
     }
 
     [Fact]
