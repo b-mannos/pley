@@ -356,13 +356,14 @@ describe("releases", () => {
     }
   });
 
-  test("count the per-unit tags from before as releases", () => {
+  test("count only release-<date> tags as releases", () => {
     const f = fixture();
-    f.git("tag", "kodi-v0.0.1");
+    f.git("tag", "release-2026-10-31");
     addEntry(f.dir, "kodi");
     bumped(f, "kodi", "patch");
+    f.git("tag", "kodi-v0.0.2");
     const p = pending(f.dir);
-    expect(p).toMatchObject({ since: "kodi-v0.0.1", tag: "release-2026-11-01", problems: [] });
+    expect(p).toMatchObject({ since: "release-2026-10-31", tag: "release-2026-11-01", problems: [] });
     expect(p.units.map((u) => u.unit)).toEqual(["kodi"]);
   }, SLOW);
 });

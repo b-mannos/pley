@@ -166,5 +166,5 @@ describes how they are made.
 [Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-01.2...HEAD
 [0.1.2]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01.2
 [0.1.1]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-01
-[0.1.0]: https://github.com/pley-media-server/pley/releases/tag/android-v0.1.0
-[0.0.1]: https://github.com/pley-media-server/pley/releases/tag/android-v0.0.1
+[0.1.0]: https://github.com/pley-media-server/pley/tree/94985f768f39f4a230060cb47af9498ee8779ddf
+[0.0.1]: https://github.com/pley-media-server/pley/tree/7e14bb9d498d054a73b2176cd8949b6864ffacd9
