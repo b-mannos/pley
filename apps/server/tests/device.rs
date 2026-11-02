@@ -239,6 +239,32 @@ async fn a_tv_tells_its_server_from_another_device_at_its_address() {
     let key_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&key).unwrap();
     let at_home = pley::identity::proof(&key_bytes, &id, "http://192.168.1.20:7539", challenge);
     assert_eq!(asked.body["proof"], json!(at_home));
+    assert_eq!(asked.body["address"], json!("http://192.168.1.20:7539"), "what the proof covers");
+    // A page in a sandboxed frame (Origin: null) in a browser at home can't
+    // read a proof; LG's TV app (null, and webOS in its User-Agent) and the
+    // apps that send file:// or app:// can.
+    let cors = |origin: &'static str, agent: &'static str| {
+        let (app, ask) = (&app, &ask);
+        async move {
+            let asked = app
+                .get_from(
+                    "192.168.1.30:50000",
+                    ask,
+                    &[("host", "192.168.1.20:7539"), ("origin", origin), ("user-agent", agent)],
+                )
+                .await;
+            asked.headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_some()
+        }
+    };
+    assert!(!cors("null", "Mozilla/5.0 (Macintosh) Safari/605.1.15").await, "a page");
+    assert!(cors("null", "Mozilla/5.0 (Web0S; Linux/SmartTV) Chrome/87").await, "LG's app");
+    assert!(cors("file://", "Mozilla/5.0 (SMART-TV; Linux; Tizen 9.0)").await);
+    let other =
+        app.get_from("192.168.1.30:50000", "/api/server", &[("host", "192.168.1.20:7539"), ("origin", "null")]).await;
+    assert!(
+        other.headers.get(header::ACCESS_CONTROL_ALLOW_ORIGIN).is_some(),
+        "the server's name, without a proof, as before"
+    );
     // Through the HTTPS proxy, for the public address: not a proof for the
     // home one, which an app at that address refuses.
     let proxy = [("host", "pley.example.com"), ("x-forwarded-proto", "https"), ("x-forwarded-for", "203.0.113.9")];

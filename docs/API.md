@@ -142,7 +142,10 @@ their web engines apply CORS. Their requests come with `Origin: file://`,
 A wildcard origin never lets a page read an answer made with cookies, so
 these answers only carry what a token in `Authorization` opens. The consent
 page's endpoints (`/api/oauth/requests…`, `/api/oauth/device/verify`) never
-answer CORS.
+answer CORS. Nor does a server's proof (`/api/server` with a `challenge`,
+[Telling servers apart](#telling-servers-apart)) to `Origin: null` unless
+the User-Agent says webOS, as LG's runtime does: a website's page in a
+sandboxed frame sends `null` too, and can't set that header.
 
 ### Errors
 
@@ -763,23 +766,31 @@ that key:
    ```
 
 3. The app computes the same with its `proof_key` and compares. Any
-   answer without the right `id` and `proof`, a redirect included, means
-   another device answers at the address: the app keeps its token to
-   itself. A `5xx` is the server, or a proxy before it, out of reach for
-   now. The app follows no redirect for this: a proof counts only from the
-   address itself.
+   answer without the right `id` and `proof`, a redirect or a `403`
+   included, means another device answers at the address: the app keeps
+   its token to itself. A `5xx` is the server, or a proxy before it, out of
+   reach for now. The app follows no redirect for this: a proof counts only
+   from the address itself. The answer's `address` says which address the
+   server proved itself for: the desktop app names a proxy that passes
+   another `Host` or scheme on when it differs.
 
-A proof counts for half an hour, and until the device changes networks or
-a request to the server gets no answer. A refresh token, a profile switch's
-PIN and a sign-out wait for a proof of their own, made then.
+For an access token, a proof counts for half an hour, until the device
+changes networks or a request to the server gets no answer. A refresh
+token, a profile switch's PIN and a sign-out wait for a proof of their own,
+made then.
 
 The proof covers the address, so a device elsewhere that passes the
 challenge on to the server's public address gets a proof for that address,
 which an app at the home address refuses. Passed on to the server's
 plain-http port, it would name the home address itself: the server makes
-no proof for a plain-http address to a client on the internet (`403`),
-which is how such a request looks. A device that reaches the server from
-its own network, or through a proxy that hides where clients come from
+no proof for a plain-http address to a client on the internet (`403`,
+before any other check), which is how such a request looks. The home
+network is the server's own: private, loopback and link-local addresses,
+global IPv6 ones in the server's own /64, and Tailscale's only when the
+server is on Tailscale. Nor may a website's page in a browser at home read
+a proof (CORS answers a proof request only to Pley's TV apps), which would
+pass it on from inside. A device that reaches the server from the home
+network itself, or through a proxy that hides where clients come from
 (Docker's userland proxy without `X-Forwarded-For`), could still pass a
 challenge on; an https address is checked by its certificate as well.
 
@@ -793,12 +804,18 @@ and stores nothing. Apps' tokens are refused there: they have their keys.
 `400` for a challenge or `proof_id` that isn't written so, or one sent
 without the other. `proof` is `null` while the server can't use its
 `secret.key`; a new `secret.key` changes every key, and apps then refuse
-the server until they sign in again. The answer isn't cached.
+the server until they sign in again (the desktop app until it forgets the
+server and connects again). The answer isn't cached.
 
-The desktop app checks the requests it makes itself. The server's pages
-in its window send the session on their own: they open only after a proof,
-and when the computer changes networks the window leaves a plain-http
-server within a second and opens it again through a proof.
+The desktop app checks the requests it makes itself, and opens no plain
+http address beyond the home network. The server's pages in its window
+send the session on their own: once the app has a key, they open only
+after a proof, and when the computer's addresses change and the way to the
+server with them, or the computer wakes from sleep, the window leaves a
+plain-http server within a second and opens it again through a proof. A
+network that gives the computer the same addresses, joined in less than a
+second, or another device taking the server's address on the same
+network, goes unseen until the next proof.
 
 The Samsung (web) and LG apps, Android and the desktop app check proofs.
 The native Samsung app, Kodi and Roku don't yet: they send their tokens

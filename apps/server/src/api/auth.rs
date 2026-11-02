@@ -61,10 +61,11 @@ pub async fn server_status(
             // An app reaches a plain-http address on its own network only:
             // asked for one from the internet, the server is being asked on
             // behalf of a device at that address elsewhere.
-            if address.starts_with("http://") && !source.is_some_and(crate::setup::is_local_address) {
+            if address.starts_with("http://") && !source.is_some_and(crate::identity::at_home) {
                 return Err(AppError::forbidden("a proof for a plain-http address is made for the home network only"));
             }
-            Some(state.identity.prove(proof_id, &address, challenge).map_err(AppError::bad_request)?)
+            let proof = state.identity.prove(proof_id, &address, challenge).map_err(AppError::bad_request)?;
+            Some((proof, address))
         }
         _ => return Err(AppError::bad_request("a proof takes both challenge and proof_id")),
     };
@@ -88,8 +89,11 @@ pub async fn server_status(
         // Signing in may take setting it up first (see second_step).
         "two_step_required": state.auth.two_step_required(),
     });
-    let Some(proof) = proof else { return Ok(Json(body).into_response()) };
+    let Some((proof, address)) = proof else { return Ok(Json(body).into_response()) };
     body["proof"] = serde_json::json!(proof);
+    // What the proof covers: an app that finds another address here can say
+    // a proxy in front of the server names it otherwise (its Host header).
+    body["address"] = serde_json::json!(address);
     // An answer to one challenge only.
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response())
 }

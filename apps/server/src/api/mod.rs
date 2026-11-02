@@ -318,6 +318,25 @@ fn cors_path(path: &str) -> bool {
     path.starts_with("/api/") && !path.starts_with("/api/oauth/requests") && path != "/api/oauth/device/verify"
 }
 
+/// Whether `request` asks for a server's proof (`/api/server` with a
+/// challenge) with `Origin: null` from something other than LG's TVs: a
+/// website's page in a sandboxed frame, in a browser at home, could
+/// otherwise read a proof for the home address and hand it to a device
+/// elsewhere (docs/API.md, "Telling servers apart"). LG's web runtime sends
+/// `null` and says webOS in its User-Agent, which a page can't set without
+/// a preflight that this CORS refuses; Samsung's sends no Origin at all.
+fn page_asking_for_a_proof(request: &axum::extract::Request) -> bool {
+    let proof = request.uri().path() == "/api/server"
+        && request.uri().query().is_some_and(|q| q.split('&').any(|pair| pair.starts_with("challenge=")));
+    let null = request.headers().get(header::ORIGIN).is_some_and(|o| o.as_bytes() == b"null");
+    let webos = request
+        .headers()
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|agent| agent.contains("Web0S") || agent.contains("webOS"));
+    proof && null && !webos
+}
+
 /// CORS for pley's packaged TV apps (docs/API.md, "CORS for TV apps"). Their web
 /// runtimes enforce it, so their API calls, which carry the app's token in
 /// `Authorization` and never a cookie, are answered with
@@ -327,7 +346,8 @@ fn cors_path(path: &str) -> bool {
 async fn tv_app_cors(request: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
     use axum::response::IntoResponse;
     let allowed = request.headers().get(header::ORIGIN).is_some_and(|o| tv_app_origin(o.as_bytes()))
-        && cors_path(request.uri().path());
+        && cors_path(request.uri().path())
+        && !page_asking_for_a_proof(&request);
     if !allowed {
         return next.run(request).await;
     }

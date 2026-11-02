@@ -20,6 +20,7 @@
 //! window's session ([`Identity::session_key`]). Its id is random, and the
 //! key derives from it, so nothing is stored for it either.
 
+use std::net::{IpAddr, Ipv6Addr, UdpSocket};
 use std::path::Path;
 
 use base64::Engine;
@@ -131,6 +132,41 @@ impl Identity {
     }
 }
 
+/// Whether a client at `ip` is on this server's own networks, for a proof
+/// of a plain-http address: private, loopback and link-local addresses; a
+/// global IPv6 address in the /64 the server itself reaches it from (the
+/// same link); and a Tailscale address (100.64.0.0/10) only when the server
+/// reaches it from one of its own, as an internet provider's shared
+/// addresses (the same range) are someone else's.
+pub fn at_home(ip: IpAddr) -> bool {
+    let ip = match ip {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(ip, IpAddr::V4),
+        v4 => v4,
+    };
+    match ip {
+        IpAddr::V4(v4) if v4.octets()[0] == 100 && (64..128).contains(&v4.octets()[1]) => {
+            matches!(own_address_towards(ip), Some(IpAddr::V4(own)) if own.octets()[0] == 100 && (64..128).contains(&own.octets()[1]))
+        }
+        IpAddr::V6(v6) if !crate::setup::is_local_address(ip) => {
+            matches!(own_address_towards(ip), Some(IpAddr::V6(own)) if same_64(own, v6))
+        }
+        _ => crate::setup::is_local_address(ip),
+    }
+}
+
+/// The address of this computer that a packet to `ip` would leave from:
+/// a UDP socket "connected" there, which sends nothing.
+fn own_address_towards(ip: IpAddr) -> Option<IpAddr> {
+    let any: IpAddr = if ip.is_ipv4() { std::net::Ipv4Addr::UNSPECIFIED.into() } else { Ipv6Addr::UNSPECIFIED.into() };
+    let socket = UdpSocket::bind((any, 0)).ok()?;
+    socket.connect((ip, 9)).ok()?;
+    Some(socket.local_addr().ok()?.ip())
+}
+
+fn same_64(a: Ipv6Addr, b: Ipv6Addr) -> bool {
+    a.segments()[..4] == b.segments()[..4]
+}
+
 /// HMAC-SHA256 under `key` of `pley-server-proof`, the server's id, the
 /// address it was asked at and the challenge, each on a line of its own, in
 /// base64url without padding.
@@ -201,6 +237,19 @@ mod tests {
         assert_eq!(identity.prove(&given.id, AT, CHALLENGE).unwrap().unwrap(), proof(&key, ID, AT, CHALLENGE));
         assert_ne!(identity.prove(&given.id, AT, CHALLENGE), identity.prove("17", AT, CHALLENGE));
         assert_eq!(Identity::with_secret(ID.into(), None).session_key(), None);
+    }
+
+    #[test]
+    fn the_home_network_is_where_the_server_is() {
+        for home in ["192.168.1.30", "10.0.0.4", "127.0.0.1", "::1", "fd00::5", "fe80::1", "::ffff:192.168.1.30"] {
+            assert!(at_home(home.parse().unwrap()), "{home}");
+        }
+        // Somewhere on the internet, and the internet's documentation ranges.
+        for away in ["203.0.113.9", "8.8.8.8", "2001:db8::5", "::ffff:203.0.113.9"] {
+            assert!(!at_home(away.parse().unwrap()), "{away}");
+        }
+        assert!(same_64("2001:db8:1:2::5".parse().unwrap(), "2001:db8:1:2:aaaa::9".parse().unwrap()));
+        assert!(!same_64("2001:db8:1:2::5".parse().unwrap(), "2001:db8:1:3::5".parse().unwrap()));
     }
 
     #[test]

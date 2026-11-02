@@ -114,7 +114,8 @@ protect your server.
   it from a backup of the data folder, or delete it for Pley to make a new
   one (authenticator apps set up before then stop working; recovery codes
   still sign in; apps say another device answers at the server's address
-  until they sign in again, as its proofs change).
+  until they sign in again, as its proofs change, and the desktop app until
+  the server is forgotten and connected again).
 
 ### Sessions
 
@@ -174,14 +175,18 @@ Apps sign in on Pley's own page with OAuth 2.1.
   sends its token to an address (the Samsung web and LG apps, Android and
   the desktop app; not yet the native Samsung app, Kodi or Roku). Another
   device at that address can't, nor can another app's key. The proof covers
-  the address it was asked at, and the server makes none for a plain-http
-  address to a client on the internet, so a device elsewhere can't pass the
-  challenge on to the server for it. One that reaches the server from the
-  home network could; an https address is checked by its certificate too.
-  The desktop app, which uses the web app's session, asks for a key of its
-  own with that session; the server's pages in its window send the session
-  themselves, and leave a plain-http server as soon as the computer changes
-  networks.
+  the address it was asked at; the server makes none for a plain-http
+  address to a client on the internet, and only Pley's TV apps may read
+  one from a page, so neither a device elsewhere nor a website's page open
+  at home can pass a challenge on for it. One that reaches the server from
+  the home network itself, or through a proxy that hides where clients
+  come from, could; an https address is checked by its certificate too.
+  Refresh tokens and PINs wait for a proof made then; an access token may
+  use one made within the half hour on the same network. The desktop app,
+  which uses the web app's session, asks for a key of its own with that
+  session; the server's pages in its window send the session themselves,
+  and leave a plain-http server within a second of the computer's way to
+  it changing, or of its waking from sleep.
 
 ### TVs signing in
 
