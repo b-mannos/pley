@@ -298,8 +298,13 @@ pub struct VideoOut {
     /// What libplacebo does of its work (see [`tonemap_quality`]).
     pub tonemap_quality: TonemapQuality,
     /// Tags the tone mapper's input when the source leaves colours unknown
-    /// ([`untagged_hdr_fix`]).
+    /// ([`untagged_hdr_fix`]): for zscale, OpenCL and Quick Sync, which a
+    /// libplacebo plan can move to ([`Plan::with_share`]). libplacebo itself
+    /// takes the frames untagged.
     pub tonemap_input: Option<String>,
+    /// libplacebo was asked for (`tonemap=libplacebo`): it tone maps however
+    /// busy the GPU is, Quick Sync's scaler never in its place.
+    pub libplacebo_asked: bool,
     /// FFmpeg uploads the frames to the AMD GPU for AMF ([`AMF_D3D11_DEVICE`]),
     /// which copies them from memory itself several times slower.
     pub amf_upload: bool,
@@ -631,6 +636,7 @@ impl Plan {
                         tonemap: None,
                         tonemap_quality: TonemapQuality::High,
                         tonemap_input: None,
+                        libplacebo_asked: false,
                         amf_upload: false,
                         vui_primaries: None,
                         hw_decode: None,
@@ -715,7 +721,7 @@ impl Plan {
                         && ff.caps.gpu_pipelines.iter().any(|p| p.accel == HwAccel::Qsv && p.codecs.contains(&key));
                     let tonemap = if qsv_opencl { Some(Tonemapper::Opencl) } else { tonemap };
                     let tonemap_input = match tonemap {
-                        Some(Tonemapper::Zscale | Tonemapper::Opencl) => untagged_hdr_fix(src),
+                        Some(Tonemapper::Zscale | Tonemapper::Opencl | Tonemapper::Libplacebo) => untagged_hdr_fix(src),
                         _ => None,
                     };
                     // Before a VAAPI encoder, Vulkan's device is made from VAAPI's.
@@ -838,6 +844,7 @@ impl Plan {
                         // `Plan::share_tonemapping`).
                         tonemap_quality: quality_for(ff.caps.tonemap_speed.as_ref(), src, (width, height), 0.0),
                         tonemap_input,
+                        libplacebo_asked: req.options.tonemap == TonemapMode::Libplacebo,
                         amf_upload,
                         // BT.709 out of every tone mapper; the source's otherwise.
                         vui_primaries: (ff.caps.h264_metadata
@@ -970,7 +977,8 @@ impl Plan {
             dynamic_range_out: (!v.copy).then(|| v.hdr.map_or(DynamicRange::Sdr, |h| h.range)),
             dv_profile: src.and_then(|s| s.dv_profile),
             dv_bl_compat: src.and_then(|s| s.dv_bl_compat),
-            tonemap: v.tonemap,
+            tonemap: v.tonemap.filter(|t| *t != Tonemapper::QuickSync),
+            tonemap_quick_sync: v.tonemap == Some(Tonemapper::QuickSync),
             tonemap_quality: (v.tonemap == Some(Tonemapper::Libplacebo)).then_some(v.tonemap_quality),
             encoder: if v.copy { None } else { encoder_override.or(v.encoder.as_ref()).map(|e| e.name.clone()) },
             decoder: Some(if v.copy { "copy".into() } else { v.hw_decode.clone().unwrap_or_else(|| "cpu".into()) }),
@@ -1070,11 +1078,15 @@ impl Plan {
 
     /// Whether Quick Sync's scaler could tone map this video in libplacebo's
     /// place ([`Tonemapper::QuickSync`]), where its start-up test passed
-    /// (`qsv_tonemap`): HDR10 made SDR, decoded and scaled by Quick Sync.
+    /// (`qsv_tonemap`): HDR10 made SDR, decoded and scaled by Quick Sync,
+    /// where libplacebo wasn't asked for.
     pub fn quick_sync_could_tonemap(&self, media: &MediaInfo, qsv_tonemap: bool) -> bool {
         qsv_tonemap
             && self.placebo_source(media).is_some_and(|(v, src)| {
-                v.hdr.is_none() && v.gpu_scale == Some(HwAccel::Qsv) && src.dynamic_range() == DynamicRange::Hdr10
+                !v.libplacebo_asked
+                    && v.hdr.is_none()
+                    && v.gpu_scale == Some(HwAccel::Qsv)
+                    && src.dynamic_range() == DynamicRange::Hdr10
             })
     }
 
@@ -1512,9 +1524,11 @@ impl Plan {
             let format = if v.hdr.is_some() { "p010le" } else { "nv12" };
             let scaler = match accel {
                 HwAccel::Vaapi => format!("scale_vaapi=w={w}:h={h}:format={format}"),
-                HwAccel::Qsv if v.tonemap == Some(Tonemapper::QuickSync) => qsv_tonemap(w, h),
                 // Tagged first where the source isn't: OpenCL refuses frames
-                // of unknown colours.
+                // of unknown colours, and Quick Sync leaves them as they are.
+                HwAccel::Qsv if v.tonemap == Some(Tonemapper::QuickSync) => {
+                    v.tonemap_input.iter().map(|f| format!("{f},")).chain([qsv_tonemap(w, h)]).collect()
+                }
                 HwAccel::Qsv if v.maps_qsv_to_opencl() => {
                     v.tonemap_input.iter().map(|f| format!("{f},")).chain([qsv_opencl_tonemap(w, h)]).collect()
                 }
@@ -1551,6 +1565,7 @@ impl Plan {
             // Tone mapped as it scales, for a software encoder standing in
             // for Quick Sync's.
             Some(HwAccel::Qsv) if v.tonemap == Some(Tonemapper::QuickSync) => {
+                pre.extend(v.tonemap_input.clone());
                 pre.push(format!("{},hwdownload,format=nv12", qsv_tonemap(w, h)));
                 false
             }
@@ -3078,16 +3093,22 @@ mod tests {
         let args = args_string(&intel, 0, 2);
         assert!(args.contains("-hwaccel qsv -hwaccel_output_format qsv"), "{args}");
         assert!(!args.contains("vulkan") && !args.contains("libplacebo"), "{args}");
+        // The test media is untagged: tagged first, Quick Sync leaving
+        // unknown colours as they are.
         assert!(
             args.contains(
-                "[0:0]vpp_qsv=w=1920:h=1080:format=p010le,vpp_qsv=procamp=1:brightness=16,vpp_qsv=tonemap=1:format=nv12,\
+                "[0:0]setparams=color_trc=smpte2084:color_primaries=bt2020:colorspace=bt2020nc,\
+                 vpp_qsv=w=1920:h=1080:format=p010le,vpp_qsv=procamp=1:brightness=16,vpp_qsv=tonemap=1:format=nv12,\
                  setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709[vout]"
             ),
             "{args}"
         );
         let shown = intel.video_plan(&m, None).unwrap();
-        assert_eq!((shown.tonemap, shown.tonemap_quality), (Some(Tonemapper::QuickSync), None));
+        assert_eq!((shown.tonemap, shown.tonemap_quick_sync, shown.tonemap_quality), (None, true, None));
         assert_eq!(shown.pipeline.as_deref(), Some("gpu"));
+        // Not as a `Tonemapper`, which a server older than it can't read.
+        let json = serde_json::to_string(&shown).unwrap();
+        assert!(json.contains(r#""tonemap":null"#) && !json.contains("vpp_qsv"), "{json}");
 
         // x264 standing in: the tone mapped frames come to memory.
         let x264 = x264();
@@ -3121,6 +3142,19 @@ mod tests {
         let hlg = ten_bit(media(DynamicRange::Hlg, None));
         let plan = Plan::build(&request(), &hlg, &ff, None).unwrap();
         assert!(!plan.quick_sync_could_tonemap(&hlg, true));
+
+        // Nor libplacebo asked for.
+        let mut req = request();
+        req.options.tonemap = TonemapMode::Libplacebo;
+        assert!(!Plan::build(&req, &m, &ff, None).unwrap().quick_sync_could_tonemap(&m, true));
+
+        // Tagged HDR10 goes to Quick Sync as it is.
+        let mut tagged = m.clone();
+        tagged.streams[0].color_transfer = Some("smpte2084".into());
+        tagged.streams[0].color_primaries = Some("bt2020".into());
+        tagged.streams[0].color_space = Some("bt2020nc".into());
+        let args = args_string(&Plan::build(&request(), &tagged, &ff, None).unwrap().with_share(share), 0, 2);
+        assert!(args.contains("[0:0]vpp_qsv=w=1920:h=1080:format=p010le,vpp_qsv=procamp="), "{args}");
     }
 
     /// HDR10 made SDR goes from Quick Sync's decoder through OpenCL's tone

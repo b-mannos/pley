@@ -1037,7 +1037,11 @@ impl JobManager {
                 (rt.share, rt.process.as_ref().is_some_and(|p| p.hardware))
             };
             let Some(have) = have else { continue };
-            let Some(want) = self.gpu_share(&job, hardware).filter(|want| *want != have) else { continue };
+            // On Quick Sync's scaler, libplacebo's quality changes nothing.
+            let same = |want: &Share| {
+                *want == have || (want.quick_sync && have.quick_sync && want.cpu_decode == have.cpu_decode)
+            };
+            let Some(want) = self.gpu_share(&job, hardware).filter(|want| !same(want)) else { continue };
             let Ok(mut guard) = job.process.try_lock() else { continue };
             // A paused process is far ahead already: it moves once it goes on.
             let Some(proc) = guard.as_ref().filter(|p| p.running() && !p.paused()) else { continue };
@@ -1886,7 +1890,11 @@ impl Job {
             if share.quick_sync
                 && let Some(intel) = self.plan.with_share(share).video_plan(&self.media, rt.encoder_override.as_ref())
             {
-                (v.tonemap, v.tonemap_quality, v.pipeline) = (intel.tonemap, None, intel.pipeline);
+                (v.tonemap, v.tonemap_quick_sync, v.tonemap_quality) = (intel.tonemap, intel.tonemap_quick_sync, None);
+                // CPU-decoded frames still go through memory (`hybrid`, above).
+                if !rt.decoded_in_software {
+                    v.pipeline = intel.pipeline;
+                }
             }
         }
         let mut warnings = self.plan.warnings.clone();

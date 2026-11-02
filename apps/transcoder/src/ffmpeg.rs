@@ -23,7 +23,7 @@ use crate::devices;
 use crate::util::{configure_child, resolve_executable};
 
 /// Bump when detection logic changes so stale caches are ignored.
-const DETECTION_REVISION: u32 = 17;
+const DETECTION_REVISION: u32 = 18;
 
 pub struct Ffmpeg {
     pub ffmpeg: PathBuf,
@@ -497,13 +497,10 @@ async fn measure_tonemap_speed(ffmpeg: &Path) -> Option<TonemapSpeed> {
     }
     // Each quality does less than the one above it: one that read slower was
     // slowed by something else (`fast` read 51 frames a second where
-    // `balanced` read 97, the first runs of a start on an Iris Xe).
-    if speed.balanced > 0.0 {
-        speed.balanced = speed.balanced.max(speed.high);
-    }
-    if speed.fast > 0.0 {
-        speed.fast = speed.fast.max(speed.balanced);
-    }
+    // `balanced` read 97, the first runs of a start on an Iris Xe). One that
+    // measured nothing (too fast to time) is as fast as the one above.
+    speed.balanced = speed.balanced.max(speed.high);
+    speed.fast = speed.fast.max(speed.balanced);
     (speed.fast > 0.0 || speed.balanced > 0.0 || speed.high > 0.0).then_some(speed)
 }
 
@@ -1062,11 +1059,14 @@ async fn detect_gpu_pipelines(
             async move { (key.to_string(), test.await) }
         }),
     );
+    // Quick Sync on Windows into its H.264 encoder: what the next three tests
+    // need (only Windows scales with Quick Sync on the way to memory).
+    let qsv_h264 = cfg!(windows) && candidates.iter().any(|(accel, ..)| *accel == HwAccel::Qsv) && working("h264_qsv");
     // HDR10 tone mapped by Quick Sync's scaler, from its decoder into its
     // H.264 encoder (see `Tonemapper::QuickSync`).
     let qsv_tonemap_test = async {
         let Some((_, clip)) = clips.iter().find(|(k, _)| *k == "hevc10") else { return false };
-        if !(candidates.iter().any(|(accel, ..)| *accel == HwAccel::Qsv) && working("h264_qsv")) {
+        if !qsv_h264 {
             return false;
         }
         let mut args = base("error", &["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"], clip);
@@ -1079,7 +1079,7 @@ async fn detect_gpu_pipelines(
     // picture uploaded to its device, made from Direct3D 11's.
     let qsv_overlay_test = async {
         let Some((_, clip)) = clips.iter().find(|(k, _)| *k == "h264") else { return false };
-        if !(cfg!(windows) && candidates.iter().any(|(accel, ..)| *accel == HwAccel::Qsv) && working("h264_qsv")) {
+        if !qsv_h264 {
             return false;
         }
         let mut args = base("error", &crate::plan::QSV_D3D11_DEVICES, clip);
@@ -1109,11 +1109,7 @@ async fn detect_gpu_pipelines(
     // 10-bit Quick Sync frames to OpenCL and have no BT.2390 there.
     let qsv_opencl_test = async {
         let Some((_, clip)) = clips.iter().find(|(k, _)| *k == "hevc10") else { return false };
-        if !(cfg!(windows)
-            && filters.contains("tonemap_opencl")
-            && candidates.iter().any(|(accel, ..)| *accel == HwAccel::Qsv)
-            && working("h264_qsv"))
-        {
+        if !(qsv_h264 && filters.contains("tonemap_opencl")) {
             return false;
         }
         let mut args = base("error", &crate::plan::QSV_OPENCL_DEVICES, clip);

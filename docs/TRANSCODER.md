@@ -191,7 +191,7 @@ before using what it names:
 | `vulkan_decode` | codecs the GPU decodes straight into Vulkan memory, for libplacebo |
 | `vulkan_encode` | `h264_vulkan` encodes libplacebo's output on the GPU |
 | `gpu_pipelines` | GPU-only decode → scale → encode pipelines, with the codecs each passed for, and `main10`: those Quick Sync's keeps in 10 bits into its HEVC Main 10 encoder (HDR kept) |
-| `qsv_tonemap` | Quick Sync's scaler tone maps HDR10 its decoder decoded into `h264_qsv` ([Sharing the GPU](#sharing-the-gpu)) |
+| `qsv_tonemap` | Quick Sync's scaler tone maps HDR10 its decoder decoded into `h264_qsv` (Windows; [Sharing the GPU](#sharing-the-gpu)) |
 | `qsv_opencl_tonemap` | OpenCL tone maps HDR10 between Quick Sync's decoder and `h264_qsv` with BT.2390's curve, the frames mapped rather than copied (Windows; [Tone mapping](#tone-mapping)) |
 | `vaapi_tonemappers` | tone mappers whose frames reach a VAAPI encoder ([VAAPI encoders](#vaapi-encoders)) |
 | `vaapi_vulkan_decode` | `vulkan_decode` on the Vulkan device made from the VAAPI one |
@@ -839,9 +839,10 @@ Several jobs tone mapping with libplacebo share the GPU (`src/share.rs`):
   again. Each is logged once, at `info`.
 - **Tone mapping on Quick Sync.** Where the GPU falls behind (as for decoding
   on the CPU), HDR10 made SDR that Quick Sync decodes and scales (Windows) is
-  tone mapped by its scaler instead (status `tonemap: vpp_qsv`), where that
-  passed a start-up test (`qsv_tonemap`): scaled in 10 bits, then brightness
-  16 up and tone mapped to NV12 at the output's size, each in a pass of its
+  tone mapped by its scaler instead (status `tonemap_quick_sync: true`),
+  where that passed a start-up test (`qsv_tonemap`) and libplacebo isn't
+  asked for (`tonemap=libplacebo`): scaled in 10 bits, then brightness 16 up
+  and tone mapped to NV12 at the output's size, each in a pass of its
   own (Quick Sync does each at the size it is given), into `h264_qsv`
   without leaving the GPU (to memory for x264 standing in, or for burned-in
   subtitles). It costs the GPU a fraction of libplacebo's work: a 4K60 film

@@ -416,7 +416,9 @@ pub enum Tonemapper {
     Zscale,
     /// Intel's GPU via Quick Sync's scaler (`vpp_qsv`), in place of
     /// libplacebo where the GPU falls behind: the transcoder's choice, never
-    /// one to ask for. Older transcoders lack it.
+    /// one to ask for. Never sent: a job's status says it with
+    /// [`VideoPlan::tonemap_quick_sync`], which older servers ignore, where
+    /// this value would make its status unreadable to them.
     #[serde(rename = "vpp_qsv")]
     QuickSync,
 }
@@ -1245,6 +1247,10 @@ pub struct VideoPlan {
     #[serde(default)]
     pub dv_bl_compat: Option<i64>,
     pub tonemap: Option<Tonemapper>,
+    /// Quick Sync's scaler tone maps in libplacebo's place
+    /// ([`Tonemapper::QuickSync`]); `tonemap` is then `None`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tonemap_quick_sync: bool,
     /// What libplacebo does of its work (`tonemap` libplacebo only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tonemap_quality: Option<TonemapQuality>,
