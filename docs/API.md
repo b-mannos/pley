@@ -1682,10 +1682,10 @@ removed or reordered (`400`).
     copy of the whole file comes past them, then with that copy.
   - The copy starts as a playback starts whose player draws the track
     (`picture_subtitles_sideload`, and `picture_subtitles_sideload_codecs`
-    when sent; the track picked or the profile's choice), rather than when
-    it asks. What isn't around `at` waits for the
-    playback's own start to be over. Only a track in the file, and only
-    for a stream: a file next to the media is copied when the player asks,
+    when sent; the track the user picked for the title, or the profile's
+    choice), rather than when it asks. What isn't around `at` waits for the
+    playback's own start to be over. Only a track in the file, and only for
+    a stream: a `.sup` next to the media is copied when the player asks,
     since its copy reads only that file.
 - **`.sup`**: a PGS track (in the file or next to it) as a `.sup` file, for
   players that read those beside a stream but no Matroska (Kodi): a `.sup`
