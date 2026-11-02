@@ -556,7 +556,7 @@ async fn test_segment_semantics(ffmpeg: &Path) -> bool {
     let first_end = out
         .text
         .lines()
-        .find(|l| l.starts_with("0.ts,"))
+        .find(|l| crate::job::parse_list_line(l) == Some(0))
         .and_then(|l| l.split(',').nth(2))
         .and_then(|v| v.trim().parse::<f64>().ok());
     match first_end {

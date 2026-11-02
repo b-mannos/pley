@@ -15,5 +15,6 @@
     <privilege>http://tizen.org/privilege/internet</privilege>
     <!-- The TV's own address and network, for searching the network. -->
     <privilege>http://tizen.org/privilege/network.get</privilege>
+    <privilege>http://tizen.org/privilege/externalstorage</privilege>
   </privileges>
 </manifest>

@@ -135,6 +135,7 @@ sealed class FakePlayerSource : IPlayerSource
     readonly List<Action<ServerEvent>> listeners = new List<Action<ServerEvent>>();
     int sessions;
 
+    public bool Local { get; set; }
     public string Server => ItemKit.Origin;
     public string ClientId => "tizen-test";
     public long? ProfileId { get; set; } = 1;

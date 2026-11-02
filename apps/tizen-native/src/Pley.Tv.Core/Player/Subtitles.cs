@@ -383,6 +383,12 @@ public sealed class SubtitlePresenter
     public const long PicturesRetryMostMs = 60_000;
     const long MinWaitMs = 20, MaxWaitMs = 250, IdleWaitMs = 500;
 
+    /// <summary>A file on a drive's partial picture track is asked for again after 1 s, then twice as long, this long at most.</summary>
+    public const long LocalPicturesRetryMs = 4_000;
+    const long LocalPicturesFirstRetryMs = 1_000;
+
+    readonly long picturesRetryMostMs;
+
     readonly IScheduler scheduler;
     readonly Func<string, Task<SubtitleText>> fetch;
     readonly Func<string, Task<SubtitlePictures>>? fetchPictures;
@@ -404,9 +410,15 @@ public sealed class SubtitlePresenter
     /// <param name="onFailed">The track couldn't be loaded: said once per choice.</param>
     /// <param name="fetchPictures">The .mks of a picture track at an absolute address, and whether it is whole.</param>
     /// <param name="onPicturesUnavailable">The server can't make picture subtitles (404 from an older server, 503 from an older transcoder).</param>
+    /// <param name="picturesRetryMostMs">
+    /// The longest wait before a partial picture track is asked for again: a server builds its
+    /// .mks again at each ask; a file on a drive is read out as it plays, and its next part is
+    /// wanted at once (<see cref="LocalPicturesRetryMs"/>).
+    /// </param>
     public SubtitlePresenter(IScheduler scheduler, Func<string, Task<SubtitleText>> fetch, Func<long> position, Func<long> offset, Func<double> speed, Action onFailed,
-        Func<string, Task<SubtitlePictures>>? fetchPictures = null, Action? onPicturesUnavailable = null)
+        Func<string, Task<SubtitlePictures>>? fetchPictures = null, Action? onPicturesUnavailable = null, long picturesRetryMostMs = PicturesRetryMostMs)
     {
+        this.picturesRetryMostMs = picturesRetryMostMs;
         this.scheduler = scheduler;
         this.fetch = fetch;
         this.position = position;
@@ -452,7 +464,7 @@ public sealed class SubtitlePresenter
         }
         Reset(url, true);
         Clear();
-        FetchPictures(url, generation, PartialRetryMs);
+        FetchPictures(url, generation, picturesRetryMostMs < PicturesRetryMostMs ? LocalPicturesFirstRetryMs : PartialRetryMs);
     }
 
     public void Hide()
@@ -467,6 +479,22 @@ public sealed class SubtitlePresenter
         tick?.Dispose();
         tick = null;
         Update();
+    }
+
+    /// <summary>
+    /// The film was sought: a file on a drive's track still being read is asked for again now, as
+    /// the reading goes where the film went. A server's waits for its next ask.
+    /// </summary>
+    public void Sought()
+    {
+        if (retry != null && Showing is string url && picturesRetryMostMs < PicturesRetryMostMs)
+        {
+            retry.Dispose();
+            retry = null;
+            if (showingPictures) FetchPictures(url, generation, LocalPicturesFirstRetryMs);
+            else Fetch(url, generation);
+        }
+        Refresh();
     }
 
     /// <summary>Stops the clock while nothing plays for a while; <see cref="Resume"/> starts it again.</summary>
@@ -544,7 +572,7 @@ public sealed class SubtitlePresenter
             // Each answer holds every picture found so far: the later one replaces the earlier.
             pictures = subs;
             Refresh();
-            if (!answer.Complete) retry = scheduler.After(waitMs, () => FetchPictures(url, at, Math.Min(waitMs * 2, PicturesRetryMostMs)));
+            if (!answer.Complete) retry = scheduler.After(waitMs, () => FetchPictures(url, at, Math.Min(waitMs * 2, picturesRetryMostMs)));
         }, e =>
         {
             if (Marks.On) Marks.Note($"subtitles: the pictures failed: {e.GetType().Name} {e.Message}{(at != generation ? ", for a track no longer shown" : "")}");
@@ -559,6 +587,11 @@ public sealed class SubtitlePresenter
     static async Task<(PictureTrack Track, bool Complete)> ReadPictures(Func<string, Task<SubtitlePictures>> fetch, string url)
     {
         var answer = await fetch(url).ConfigureAwait(false);
+        if (answer.Track is { } read)
+        {
+            if (Marks.On) Marks.Note($"subtitles: {read.Samples.Count} pictures read on the TV{(answer.Complete ? "" : ", more to come")}");
+            return (read, answer.Complete);
+        }
         if (Marks.On) Marks.Note($"subtitles: the pictures' .mks, {answer.Bytes.Length / 1024} KB{(answer.Complete ? "" : ", not whole yet")}");
         return (Mks.ReadPictureTrack(answer.Bytes), answer.Complete);
     }

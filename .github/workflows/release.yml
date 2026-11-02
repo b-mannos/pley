@@ -223,6 +223,7 @@ jobs:
           subject-path: |
             dist/*.zip
             dist/*.tar.gz
+            dist/*.spk
             dist/*.apk
             dist/*.aab
             dist/*.ipk

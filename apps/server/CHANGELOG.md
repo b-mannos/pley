@@ -13,6 +13,10 @@ describes how they are made.
 
 ### Added
 
+- Pley installs on a Synology NAS as a package (`.spk`) for DSM 7 on Intel
+  models, with FFmpeg from SynoCommunity's package and the NAS's GPU for
+  transcoding. A static Linux build, `linux-x86_64-static`, is published
+  with the other archives.
 - A playback with keyed addresses has its seek previews beside its media,
   as a BIF file (`previews.bif`), which Roku's own player fetches and shows
   as you fast forward and rewind.
@@ -60,6 +64,10 @@ describes how they are made.
 
 ### Fixed
 
+- Streams play with an FFmpeg build whose segment list names segments by
+  number alone, such as SynoCommunity's for Synology DSM. Before, the
+  transcoder never saw a segment finish with such a build, so every stream
+  that wasn't direct play waited forever.
 - Seek previews of a file the transcoder couldn't reach for a moment (a
   share whose disks slept, a share not mounted yet) are made when the file
   is next opened or scanned, instead of being given up until a restart.

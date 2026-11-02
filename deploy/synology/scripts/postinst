@@ -1,0 +1,5 @@
+#!/bin/sh
+# After installing or upgrading: nothing to do. DSM made the data folder
+# (the package's var) and gave it to the package user; the first start
+# creates everything in it.
+exit 0
