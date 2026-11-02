@@ -126,8 +126,13 @@ protect your server.
   page (`Sec-Fetch-Site`, or `Origin`), since a page on another port of the
   same host is the same site to the browser.
 - Other sites' pages can't make the API fetch anything with the cookie
-  (links, pictures); only the address bar and bookmarks can. A `?token=` in
-  their address changes nothing, since the cookie is what would sign them in.
+  (links, pictures) where the browser says which page asked
+  (`Sec-Fetch-Site`: over HTTPS, and to `localhost`); only the address bar
+  and bookmarks can. Over plain HTTP to another address browsers don't say
+  it, so a GET there does no more than read and play: the folder browser,
+  which opens whatever folder it is given, is a POST, whose `Origin` says.
+  A `?token=` in their address changes nothing, since the cookie is what
+  would sign them in.
 - The devices and apps lists show the address a request came from as the
   rate limits count it, which nobody on the internet can choose.
 - Administrators change their own password, PIN and two-step sign-in in
@@ -135,7 +140,7 @@ protect your server.
   list.
 - A session that is signed out, or whose account is disabled or changed,
   stops working at once, even one being checked at that moment. Its event
-  streams end too.
+  streams end within 30 seconds, when they check it again.
 - Switching from a restricted profile to one that can see more (an
   administrator, a higher age limit, other libraries) takes that profile's
   PIN, or its password (and code).
@@ -229,8 +234,23 @@ Apps sign in on Pley's own page with OAuth 2.1.
 - A symbolic link in a library is followed only to a file of the same kind
   (a video to a video, a picture to a picture). This is checked when the
   library is scanned and again whenever the file is used: played,
-  transcoded, downloaded, or its pictures or subtitles served. A link named
-  like a film can't hand out other files.
+  transcoded, downloaded, or its pictures or subtitles served. A symbolic
+  link named like a film can't hand out other files.
+- A hard link is the file itself, which no check can tell from any other:
+  where the system lets an account link a file it can't read (macOS, Linux
+  without `fs.protected_hardlinks`), one that can write in a library folder
+  could link Pley's database there under a film's name. Hard links don't
+  cross volumes, so keep the data folder on one that such accounts can't
+  write in.
+- What Pley sends of a library's files itself (a file played as it is, a
+  picture, a subtitle file) is opened first, checked as the file opened,
+  and sent from that file, so a link swapped in after the check is never
+  read.
+- A file the transcoder reads (a transcode, a download, a frame grab, a
+  cover, subtitles, seek previews) is checked just before it is asked to.
+  The transcoder opens it by its name, so a link swapped in at that moment
+  could still be read, but only as video, audio or subtitles, the only
+  formats its FFmpeg opens: never a database or a key.
 - The data folder (database, backups, log, settings) is kept to Pley's
   account: mode 0700 on Unix. On Windows, a folder every account could use
   (one on `D:\`, say) is limited to Pley's account, SYSTEM and the
@@ -250,6 +270,10 @@ Apps sign in on Pley's own page with OAuth 2.1.
   and MP4 sample tables can't take more memory than a real one's.
 - Pictures come only from the metadata services' hosts over HTTPS,
   redirects included, and are read up to 25 MB whatever their headers say.
+  Live TV's channel logos and programme pictures are the exception: they
+  come from wherever the provider's lists say, plain HTTP included, as its
+  streams do, up to 1 MB for a logo and 4 MB for a picture, and are kept
+  only when they are JPEG, PNG, WebP or GIF.
 - A profile picture is decoded only up to 4096 pixels.
 - Subtitles from OpenSubtitles come over HTTPS only, never redirected to
   plain HTTP.
@@ -263,7 +287,14 @@ Apps sign in on Pley's own page with OAuth 2.1.
   a token of at least 16 characters, since it reads whatever files it can
   open.
 - It keeps its work folder private, on Windows too, including the folders it
-  makes in one chosen elsewhere (segments, converted downloads, its caches).
+  makes in one chosen elsewhere (segments, live channels' too, converted
+  downloads, its caches). In a work folder other accounts may write in, a
+  link or a junction in place of one of those is taken away at start rather
+  than followed, segments' folders are checked again before each use, and
+  the caches' clean-up never prunes one that becomes a link later. A
+  folder's permissions are set on the folder opened, once it is known to be
+  the one there, so a link put back meanwhile is refused and what it leads
+  to keeps its own.
 - Segments kept in memory go in a folder of `/dev/shm` that it makes itself,
   private to its account. If another account took that name first, it
   refuses it and the segments go to disk.

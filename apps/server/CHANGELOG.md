@@ -58,6 +58,50 @@ describes how they are made.
   seeks are read, so on a NAS a seek soon after a film starts has its
   subtitles in about a second, where it could take four.
 
+### Security
+
+- A Live TV playlist's own guide is used only when it is a web address
+  (http or https). One naming a file or a network share
+  (`url-tvg="//host/share/guide.xml"`) had the server open it, on Windows
+  signing in to that share.
+- People who aren't administrators no longer see FFmpeg's words, which
+  name the server's files, in the activity's sessions or a download that
+  failed, as apps already didn't.
+- The folder browser (Settings, picking a library's or the transcoder's
+  folder) is asked with `POST /api/fs`, no longer `GET`. Over plain HTTP
+  browsers don't say which page asked for a GET, so another site's link
+  or picture could have the server open a folder of its choosing while an
+  administrator was signed in, and on Windows a share named so had the
+  server sign in to it.
+- A library's files are sent from the file checked: a file played as it is,
+  pictures, a `.sup` beside the media and the compatibility API's files and
+  subtitle files are opened once, checked, and read from what was opened.
+  The file was checked and then opened again by its name, so someone who
+  could write in a library folder could swap a link in between and have
+  the server hand out its database or `secret.key`.
+- Transcodes, downloads, frame grabs, album covers, subtitle copies and
+  seek previews check that a file hasn't become a link to another kind of
+  file since the scan, as playing it as it is does: the transcoder was
+  handed whatever the link led to.
+- Live TV's segments are kept to the transcoder's account in a transcode
+  folder chosen elsewhere (`/tmp`, `/dev/shm`, a folder on a second Windows
+  drive), as a playback's are: other accounts on the computer could read
+  what played, or swap a segment. A link or a junction another account put
+  in place of one of the transcoder's folders there is taken away rather
+  than followed: the hourly clean-up of its caches could delete whatever
+  it led to. One put back while the transcoder makes the folder is
+  refused, and what it leads to keeps its permissions.
+- While the transcoder isn't running, people and apps are told just that,
+  no longer its last words as it went, which named files and accounts:
+  administrators still find them in Settings → Transcoder and the log.
+- A guide saved as a file on this computer is read only as one, and only
+  up to a guide's size: no longer one on another computer
+  (`//host/share/…`, `\??\UNC\host\share\…`, which a playlist could have
+  saved before), a device or a pipe. A source with a guide file it couldn't read isn't saved.
+- A channel's stream asked for with `take_over` takes another channel's
+  connection only with a token: over plain HTTP, another site's link signed
+  in by an administrator's cookie could end what others watched.
+
 ## [0.1.3] - 2026-11-02
 
 ### Added

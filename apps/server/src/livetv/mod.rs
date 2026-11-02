@@ -1006,6 +1006,11 @@ impl LiveTv {
         {
             return Err(AppError::bad_request("the guide's address isn't a URL"));
         }
+        // A file is checked as its refresh will read it, so that the source
+        // isn't saved with a guide it never gets.
+        if let Some(Err(err)) = guide_file(input.guide_url.trim()) {
+            return Err(AppError::bad_request(err.to_string()));
+        }
         if !(0..=100).contains(&input.max_connections) {
             return Err(AppError::bad_request("connections must be between 0 (no limit) and 100"));
         }
@@ -1429,8 +1434,19 @@ impl LiveTv {
         use tokio::io::AsyncWriteExt;
         tokio::fs::create_dir_all(&self.downloads).await?;
         let path = self.downloads.join(format!("{}.xml", uuid::Uuid::new_v4().simple()));
-        if let Some(local) = url.strip_prefix("file://").or_else(|| url.starts_with('/').then_some(url)) {
-            tokio::fs::copy(local, &path).await.with_context(|| format!("{local} can't be read"))?;
+        if let Some(local) = guide_file(url) {
+            // Also one a playlist named before playlists' guides had to be
+            // web addresses: a file of a guide's size on this computer, not
+            // a device or a pipe, which would never end.
+            let local = local?;
+            let meta =
+                tokio::fs::metadata(&local).await.with_context(|| format!("{} can't be read", local.display()))?;
+            anyhow::ensure!(meta.is_file(), "{} isn't a file", local.display());
+            anyhow::ensure!(meta.len() <= MAX_GUIDE_BYTES, "the guide is larger than {} GB", MAX_GUIDE_BYTES >> 30);
+            if let Err(err) = tokio::fs::copy(&local, &path).await {
+                let _ = tokio::fs::remove_file(&path).await;
+                return Err(err).with_context(|| format!("{} can't be read", local.display()));
+            }
             return Ok(path);
         }
         let mut req = self.http.get(url).timeout(Duration::from_secs(15 * 60));
@@ -2202,6 +2218,38 @@ fn normalize(name: &str) -> String {
     s
 }
 
+/// The file a guide's address names, when it names one (`/…`, `file://…`)
+/// rather than a web address: checked to be on this computer
+/// ([`local_guide`]).
+fn guide_file(url: &str) -> Option<anyhow::Result<PathBuf>> {
+    url.strip_prefix("file://").or_else(|| url.starts_with('/').then_some(url)).map(local_guide)
+}
+
+/// The file on this computer `local` names: never one on another computer
+/// (`//host/share/…`, `\\host\share\…`), which Windows signs in to, as the
+/// account Pley runs as, wherever it is, nor a device (`\\.\…`).
+fn local_guide(local: &str) -> anyhow::Result<PathBuf> {
+    use std::path::{Component, Prefix};
+    let path = PathBuf::from(local);
+    // On Windows, `/…` is on the drive Pley runs from.
+    anyhow::ensure!(path.has_root(), "the guide's file is named from the top of its drive (/…)");
+    // Windows takes any two separators at the start as a share's, `/\host`
+    // too, though Rust sees no prefix there.
+    let separator = |c: char| c == '/' || c == '\\';
+    let mut start = local.chars();
+    let share = start.next().is_some_and(separator) && start.next().is_some_and(separator);
+    let mut components = path.components();
+    let here = !share
+        && match components.next() {
+            Some(Component::Prefix(prefix)) => matches!(prefix.kind(), Prefix::Disk(_)),
+            // `\??\…` is a path Windows passes on as it is, a share's
+            // (`\??\UNC\host\share\…`) too.
+            _ => components.next() != Some(Component::Normal("??".as_ref())),
+        };
+    anyhow::ensure!(here, "a guide on another computer is read from its web address (http:// or https://)");
+    Ok(path)
+}
+
 /// `text` with `secret` (a password in a URL) blanked out.
 fn redact(text: &str, secret: &str) -> String {
     if secret.len() < 2 { text.to_owned() } else { text.replace(secret, "••••") }
@@ -2226,6 +2274,45 @@ fn describe(e: &reqwest::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_local_guide_is_a_file_on_this_computer() {
+        for elsewhere in [
+            "//host/share/guide.xml",
+            r"\\host\share\guide.xml",
+            r"\\?\UNC\host\share\guide.xml",
+            r"\??\UNC\host\share\guide.xml",
+            r"/\host\share\guide.xml",
+            r"/??/UNC/host/share/guide.xml",
+        ] {
+            assert!(local_guide(elsewhere).is_err(), "{elsewhere}");
+        }
+        assert!(local_guide("guide.xml").is_err(), "nowhere in particular");
+        let here = if cfg!(windows) { "C:/guides/guide.xml" } else { "/srv/guides/guide.xml" };
+        assert_eq!(local_guide(here).unwrap(), PathBuf::from(here));
+        // On Windows, on Pley's own drive.
+        assert_eq!(local_guide("/guides/guide.xml").unwrap(), PathBuf::from("/guides/guide.xml"));
+        assert!(guide_file("https://p.example/guide.xml").is_none(), "a web address");
+        assert_eq!(guide_file("file:///guides/guide.xml").unwrap().unwrap(), PathBuf::from("/guides/guide.xml"));
+    }
+
+    /// A source isn't saved with a guide file its refresh would refuse.
+    #[test]
+    fn a_source_is_saved_only_with_a_guide_it_can_read() {
+        let input = |guide: &str| -> SourceInput {
+            let source =
+                serde_json::json!({"name": "P", "kind": "m3u", "url": "http://p.example/list.m3u", "guide_url": guide});
+            serde_json::from_value(source).unwrap()
+        };
+        for refused in
+            ["//host/share/guide.xml", r"\\host\share\guide.xml", "file://host/share/guide.xml", "file://guide.xml"]
+        {
+            assert!(LiveTv::check_input(&input(refused)).is_err(), "{refused}");
+        }
+        for taken in ["", "https://p.example/guide.xml.gz", "/guides/guide.xml", "file:///guides/guide.xml"] {
+            assert!(LiveTv::check_input(&input(taken)).is_ok(), "{taken}");
+        }
+    }
 
     /// A 100×100 logo: `ink` drawn in its middle, on nothing or on `ground`.
     fn logo(ink: [u8; 3], ground: Option<[u8; 3]>) -> image::DynamicImage {

@@ -2360,7 +2360,7 @@ interface DownloadInfo {
   state: "direct" | "queued" | "running" | "done" | "failed";
   progress: number;          // 0 to 1 (1 for the original)
   size: number | null;       // bytes: the original's, or the converted file's once done
-  error: string | null;      // why it failed (null for apps: see below)
+  error: string | null;      // why it failed (for administrators only: see below)
   url: string;               // the original, or the converted file
 }
 ```
@@ -2387,8 +2387,9 @@ interface DownloadInfo {
   (else `404`: ask again), and to those who may see its title.
 - `503` while the transcoder isn't running or the file can't be read (ask
   again later); `501` with a transcoder too old to convert, or to make MP4.
-- Apps aren't told why a conversion failed (`error` is `null`): the reason
-  names the server's files, and the server's log keeps it.
+- Only administrators are told why a conversion failed (`error` is `null`
+  for everyone else, apps included): the reason names the server's files,
+  and the server's log keeps it.
 - `DELETE` before the file is made stops the conversion; a file already
   made stays for whoever asks next. A conversion nobody asks about for an
   hour while it waits its turn is dropped (the device that wanted it went):
@@ -3085,7 +3086,8 @@ credits detection, `previews_pending` files waiting for seek previews
 (those being made included), `previews_running` those being made now, and
 `library_work` says why they wait while some do ([Library work](#library-work)).
 Non-administrators see only their own sessions and the scans of libraries
-they may open, with no `analysis` or `library_work`, and the counts 0.
+they may open, with no `analysis` or `library_work`, and the counts 0; a
+session's `transcode.last_error` is "the conversion failed" for them.
 
 `/api/events`: each stream gets the events of the libraries its user may
 open, and the user's own events. A comment line keeps it alive every 15 s.
@@ -3242,7 +3244,7 @@ interface TranscodeInfo {
   segments_total: number;
   bitrate_out: number | null;   // what a conversion aims for, video and audio together (bits per second);
                                 // null for copied video
-  last_error: string | null;
+  last_error: string | null;    // FFmpeg's words (they name the file): "the conversion failed" but for administrators
   rendition: number;            // a stream in several sizes: the one the player takes now (0 = the largest)
   variants: number;             // how many smaller sizes it has (0: one size)
 }
@@ -3308,7 +3310,7 @@ household) or `admins`; profiles with an age limit only with `age_limited`;
 | PUT | `/api/live/channels/{id}/favorite` | `play` | `204` |
 | DELETE | `/api/live/channels/{id}/favorite` | `play` | `204` |
 | POST | `/api/live/channels/{id}/watch` | `play` | optional `{ client_id?, keyed_urls?, take_over? }` → `{ session_id, url, kind: "hls", channel: LiveChannel }`: `url` is the channel's live HLS playlist; with `keyed_urls`, an address carrying a key of its own ([Keyed URLs](#keyed-urls)); `take_over`: see Watching, below |
-| GET | `/api/live/channels/{id}/stream.ts` | `play` | `?client_id=&take_over=`: the channel's MPEG-TS (`video/mp2t`) as the provider sends it, for as long as it is read (VLC, Kodi, TVs that read MPEG-TS) |
+| GET | `/api/live/channels/{id}/stream.ts` | `play` | `?client_id=&take_over=`: the channel's MPEG-TS (`video/mp2t`) as the provider sends it, for as long as it is read (VLC, Kodi, TVs that read MPEG-TS). `take_over` counts only with a token: over plain HTTP, a GET the browser's cookie signs in may be another site's link (Pley's page uses `POST …/watch`) |
 | GET | `/api/live/sessions/{session}/plan` | `play` | `LivePlan \| null`: what the transcoder makes of the channel, waited for up to 3 s; `null` when not known in time. A player that reads MPEG-TS plays a channel whose video and audio are copied from `stream.ts` (with a client id of its own), sooner than its first segments |
 | GET | `/api/live/sessions/{session}/{file}` | `play` | `index.m3u8` or a segment of a watching session; `410 session_stopped` once the session is over, with why as `message` |
 | GET | `/api/live/media/{key}/{file}` | `public` (the key) | the same, for a session watched with `keyed_urls` |
@@ -3352,7 +3354,7 @@ interface LiveSourceInput {
   name: string; kind: "m3u" | "xtream";
   url: string;                         // the playlist (m3u) or the Xtream server
   username?: string; password?: string; // Xtream
-  guide_url?: string;                  // XMLTV; empty: the playlist's own, or Xtream's
+  guide_url?: string;                  // XMLTV: a web address, or a file on this computer (/…, file://…), not a share; empty: the playlist's own (an http(s) address), or Xtream's
   user_agent?: string; max_connections?: number /* 1 */; enabled?: boolean /* true */;
 }
 interface LiveSource extends Omit<LiveSourceInput, "password"> {
@@ -3498,7 +3500,7 @@ interface LiveTuner {                  // a connection in use
 | PUT | `/api/settings` | `admin` | partial `Settings` → `Settings` |
 | POST | `/api/settings/test` | `admin` | `{ service, api_key?, pin?, username?, password? }` → `{ ok, message, ms }` |
 | POST | `/api/settings/arr` | `admin` | `{ service: "radarr" \| "sonarr", url?, api_key? }` → `ArrOptions`: what Radarr or Sonarr offers requests |
-| GET | `/api/fs?path=` | `admin` | `{ path: string \| null, parent: string \| null, entries: { name, path }[] }`: directories only (`path` left out: roots and drives) |
+| POST | `/api/fs` | `admin` | `{ path? }` → `{ path: string \| null, parent: string \| null, entries: { name, path }[] }`: directories only (`path` left out: roots and drives). A POST, as a GET over plain HTTP could be another site's link ([SECURITY.md](../SECURITY.md#sessions)) |
 | GET | `/api/network` | `admin` | `Network`: where Pley listens, and could |
 | PUT | `/api/network` | `admin` | `{ web, plex, plex_on_web?, discovery }` → `Network` |
 

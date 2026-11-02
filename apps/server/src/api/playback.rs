@@ -13,7 +13,7 @@ use dashmap::DashMap;
 use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use pley_transcoder_api::{
-    AudioMode, ConversionState, ConversionStatus, FileContainer, JobRequest, MediaInfo, MediaStream,
+    AudioMode, ConversionState, ConversionStatus, FileContainer, JobRequest, JobStatus, MediaInfo, MediaStream,
     SUBTITLES_COMPLETE_HEADER, StreamKind, VideoMode,
 };
 use serde::{Deserialize, Serialize};
@@ -29,8 +29,8 @@ use crate::events::ServerEvent;
 use crate::library::sidecar::EXTERNAL_INDEX_BASE;
 use crate::playback::{
     Decision, Delivery, HLS_PTS_OFFSET_MS, Method, PlaybackInfo, PlaybackRequest, Session, SessionStatus,
-    TranscodeSpec, decide, decide_with_audio, may_draw_pictures, new_media_key, picture_to_prepare, sentence,
-    subtitle_tracks, transcode_info, video_range_shown,
+    TranscodeInfo, TranscodeSpec, decide, decide_with_audio, may_draw_pictures, new_media_key, picture_to_prepare,
+    sentence, subtitle_tracks, transcode_info, video_range_shown,
 };
 use crate::state::AppState;
 use crate::streams;
@@ -365,18 +365,20 @@ pub async fn status(
 ) -> ApiResult<Json<SessionStatus>> {
     let session = owned_session(&state, &user, &id)?;
     let transcode = match session.job_id() {
-        Some(job) => state.transcoder.job_status(&job).await.ok().map(|status| transcode_info(&status)),
+        Some(job) => state.transcoder.job_status(&job).await.ok().map(|status| transcode_seen_by(&user, &status)),
         None => None,
     };
-    let transcode = transcode.map(|mut info| {
-        // FFmpeg's last words name the media file: an administrator's (as
-        // in `for_viewer`).
-        if !user.is_admin && info.last_error.is_some() {
-            info.last_error = Some("the conversion failed".to_owned());
-        }
-        info
-    });
     Ok(Json(SessionStatus { session_id: session.id.clone(), method: session.method, transcode }))
+}
+
+/// `job`'s transcode as `user` sees it, here and in the activity: FFmpeg's
+/// last words name the media file, an administrator's (as in `for_viewer`).
+pub(super) fn transcode_seen_by(user: &AuthUser, job: &JobStatus) -> TranscodeInfo {
+    let mut info = transcode_info(job);
+    if !user.is_admin && info.last_error.is_some() {
+        info.last_error = Some("the conversion failed".to_owned());
+    }
+    info
 }
 
 #[derive(Deserialize)]
@@ -670,11 +672,11 @@ pub struct DownloadInfo {
 }
 
 impl DownloadInfo {
-    /// `status` as `user` sees it: an app doesn't get FFmpeg's words, which
-    /// name the server's files (the log keeps them).
+    /// `status` as `user` sees it: FFmpeg's words, which name the server's
+    /// files, are an administrator's (the log keeps them); apps never get them.
     fn for_viewer(status: &ConversionStatus, user: &AuthUser) -> Self {
         let mut info = Self::of(status);
-        if user.app.is_some() {
+        if !user.is_admin {
             info.error = None;
         }
         info
@@ -973,12 +975,7 @@ pub async fn keyed_media(
         state.events.send(ServerEvent::SessionsChanged);
     }
     let row = visible_file(&state, &user, session.file_id).await?;
-    if !crate::library::walk::leads_to_its_kind(std::path::Path::new(&row.path)) {
-        return Err(AppError::not_found("file not found"));
-    }
-    let response =
-        ServeFile::new(&row.path).oneshot(request).await.map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
-    let mut response = response.map(Body::new);
+    let mut response = serve_library_file(&row.path, request.method(), request.headers()).await?;
     // Never cached anywhere: the address carries a key.
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, no-store"));
     Ok(response)
@@ -1309,13 +1306,82 @@ pub async fn stream_file(
     request: Request,
 ) -> ApiResult<Response> {
     let file = visible_file(&state, &user, id).await?;
-    if !crate::library::walk::leads_to_its_kind(std::path::Path::new(&file.path)) {
-        return Err(AppError::not_found("file not found"));
-    }
-    let response =
-        ServeFile::new(&file.path).oneshot(request).await.map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
-    let mut response = response.map(Body::new);
+    let mut response = serve_library_file(&file.path, request.method(), request.headers()).await?;
     response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=3600"));
+    Ok(response)
+}
+
+/// A file of a library (a media file, or one beside it) served as it is,
+/// with ranges, from the file opened and checked
+/// ([`crate::library::walk::open_of_its_kind`]): not opened again by its
+/// name, which a link swapped in meanwhile could lead elsewhere. Its tag
+/// (size and time) lets a download carry on where it stopped (`If-Range`)
+/// and a copy kept be asked about (`If-None-Match`).
+pub(crate) async fn serve_library_file(
+    path: &str,
+    method: &axum::http::Method,
+    headers: &axum::http::HeaderMap,
+) -> ApiResult<Response> {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let named = PathBuf::from(path);
+    let (file, meta) = tokio::task::spawn_blocking(move || crate::library::walk::open_of_its_kind(&named))
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?
+        .ok_or_else(|| AppError::not_found("file not found"))?;
+    let len = meta.len();
+    let etag = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|since| format!("\"{len:x}-{:x}.{:x}\"", since.as_secs(), since.subsec_nanos()));
+    let told = |name: header::HeaderName| headers.get(name).and_then(|v| v.to_str().ok());
+    if let (Some(etag), Some(kept)) = (&etag, told(header::IF_NONE_MATCH))
+        && kept.split(',').map(|tag| tag.trim().trim_start_matches("W/")).any(|tag| tag == etag || tag == "*")
+    {
+        let mut same = StatusCode::NOT_MODIFIED.into_response();
+        if let Ok(value) = HeaderValue::from_str(etag) {
+            same.headers_mut().insert(header::ETAG, value);
+        }
+        return Ok(same);
+    }
+    // A range of what the client has, if what it has is still this file.
+    let range =
+        headers.get(header::RANGE).filter(|_| told(header::IF_RANGE).is_none_or(|tag| Some(tag) == etag.as_deref()));
+    let (status, first, count) = match byte_range(range, len) {
+        Ok(None) => (StatusCode::OK, 0, len),
+        Ok(Some((first, last))) => (StatusCode::PARTIAL_CONTENT, first, last - first + 1),
+        Err(()) => {
+            let mut none = StatusCode::RANGE_NOT_SATISFIABLE.into_response();
+            if let Ok(value) = HeaderValue::from_str(&format!("bytes */{len}")) {
+                none.headers_mut().insert(header::CONTENT_RANGE, value);
+            }
+            return Ok(none);
+        }
+    };
+    let body = if method == axum::http::Method::HEAD {
+        Body::empty()
+    } else {
+        let mut file = tokio::fs::File::from_std(file);
+        file.seek(std::io::SeekFrom::Start(first)).await.map_err(|e| AppError::Internal(e.into()))?;
+        // Read 64 KiB at a time, as `ServeFile` does: 4 KiB reads would each
+        // be a trip to a blocking thread.
+        Body::from_stream(tokio_util::io::ReaderStream::with_capacity(file.take(count), 64 * 1024))
+    };
+    let mut response = Response::new(body);
+    *response.status_mut() = status;
+    let content_type = mime_guess::from_path(path).first_raw().unwrap_or("application/octet-stream");
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    headers.insert(header::CONTENT_LENGTH, HeaderValue::from(count));
+    headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    if let Some(value) = etag.as_deref().and_then(|tag| HeaderValue::from_str(tag).ok()) {
+        headers.insert(header::ETAG, value);
+    }
+    if status == StatusCode::PARTIAL_CONTENT
+        && let Ok(value) = HeaderValue::from_str(&format!("bytes {first}-{}/{len}", first + count - 1))
+    {
+        headers.insert(header::CONTENT_RANGE, value);
+    }
     Ok(response)
 }
 
@@ -1540,9 +1606,7 @@ async fn pgs_track(
     }
     let (cache, path, stream_index) = picture_source(state, &file, index).await?;
     if stream_index.is_none() && path.to_ascii_lowercase().ends_with(".sup") {
-        let response =
-            ServeFile::new(&path).oneshot(request).await.map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
-        let mut response = response.map(Body::new);
+        let mut response = serve_library_file(&path, request.method(), request.headers()).await?;
         response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(SUP));
         response.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("private, max-age=3600"));
         return Ok(response);

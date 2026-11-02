@@ -24,6 +24,8 @@ class ProxyTest(unittest.TestCase):
         self.stopped = []
         self.network = {"local": False, "ceiling_kbps": 8000, "source": "playback", "since": 1, "probe": False}
         self.network_down = False
+        # What happens, once, before the next request is answered.
+        self.before_answer = None
         self.server = support.FakeServer(self.handle)
         self.store = auth.Store(os.path.join(self.dir, "tokens.json"))
         self.store.save(
@@ -56,6 +58,9 @@ class ProxyTest(unittest.TestCase):
             return support.answer(200, {"access_token": "at-2", "refresh_token": "rt-2", "expires_in": 3600})
         if request.path == "/api/oauth/revoke":
             return 200, {}, b""
+        before, self.before_answer = self.before_answer, None
+        if before:
+            before()
         token = request.headers.get("authorization", "")[len("Bearer ") :]
         if token not in self.valid:
             return support.answer(401, {"code": "unauthorized", "message": "expired"})
@@ -120,6 +125,17 @@ class ProxyTest(unittest.TestCase):
         self.assertEqual(self.store.load()["access_token"], "at-2")
         paths = [r.path for r in self.server.requests]
         self.assertEqual(paths, ["/api/hubs/home", "/api/oauth/token", "/api/hubs/home"])
+
+    def test_a_server_left_meanwhile_never_gets_the_new_ones_token(self):
+        # Another server was chosen while this one held its answer, then
+        # refused the token: it isn't asked again, with the other's.
+        other = dict(self.store.load(), server="http://other.example:7539", access_token="at-other", refresh_token="rt-other")
+        self.valid = set()
+        self.before_answer = lambda: self.store.save(other)
+        response, data = self.ask("GET", "/%s/api/hubs/home" % SECRET)
+        self.assertEqual(response.status, 401, data)
+        sent = [r.headers.get("authorization") for r in self.server.requests if r.path == "/api/hubs/home"]
+        self.assertEqual(sent, ["Bearer at-1"])
 
     def test_bodies_go_through_as_they_are(self):
         body = json.dumps({"position_ms": 5000, "state": "playing"}).encode()

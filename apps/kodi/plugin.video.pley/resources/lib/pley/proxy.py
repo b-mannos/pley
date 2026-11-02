@@ -319,13 +319,12 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         upstream = None
         try:
             try:
-                token = proxy.tokens.access()
-                server = proxy.tokens.server()
+                server, token = proxy.tokens.session()
                 upstream = _Upstream(proxy, server)
                 response = upstream.send(self.command, rest, body, headers, token)
                 if response.status == 401:
                     upstream.close()
-                    token = proxy.tokens.refreshed(token)
+                    token = proxy.tokens.refreshed(token, server)
                     upstream = _Upstream(proxy, server)
                     response = upstream.send(self.command, rest, body, headers, token)
             except SignedOut:

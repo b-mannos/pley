@@ -383,10 +383,11 @@ class Tokens:
     def doubt(self):
         self.doubts += 1
 
-    def access(self):
-        return self.token
+    def session(self):
+        return self.url, self.token
 
-    def refreshed(self, token):
+    def refreshed(self, token, server):
+        assert server == self.url, "a token renewed for its own server only"
         self.token = "t2"
         return self.token
 

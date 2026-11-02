@@ -89,9 +89,19 @@ or `~/.cache/pley-transcoder` on Linux.
 - Temporaries left by a crash go after 3 hours untouched (a long subtitle pass
   touches its outputs every 10 minutes, and seek previews their folder, even
   while paused).
-- What the transcoder keeps here is private to its user, and so is the work
-  folder when the transcoder creates it or it is the default. A folder that
-  already exists (such as `/tmp`) keeps its permissions.
+- What the transcoder keeps here is private to its user, live channels'
+  segments included, and so is the work folder when the transcoder creates
+  it or it is the default. A folder that already exists (such as `/tmp`)
+  keeps its permissions.
+- In a work folder other accounts may write in (on Unix, one that isn't the
+  transcoder's account's or that its group or others may write in; on
+  Windows, one whose permissions are the drive's), a link or a junction in
+  place of one of these is removed at start rather than followed, segments'
+  folders are checked again before each job and channel, and the caches'
+  clean-up leaves alone one that becomes a link later. In any other work
+  folder, a cache may be a link the transcoder's account made, to keep it on
+  another disk. On Unix, one another account made first can't be made
+  private, and the transcoder doesn't start.
 
 ### Authentication
 
