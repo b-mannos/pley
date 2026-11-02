@@ -822,8 +822,8 @@ network that gives the computer the same addresses, joined in less than a
 second, or another device taking the server's address on the same
 network, goes unseen until the next proof.
 
-The Samsung apps (web and native), the LG app, Android and the desktop app
-check proofs. Kodi and Roku don't yet: they send their tokens as before.
+Every app checks proofs: the Samsung (web and native), LG, Android,
+Kodi, Roku and desktop apps.
 
 ### Signing in
 
