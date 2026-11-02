@@ -285,20 +285,46 @@ seconds (as a rule, when it can be read through the file's Cues). Otherwise it
 is the cues read so far, with `X-Pley-Complete: 0`, and the extraction goes on
 in the background.
 
-`POST /v1/subtitles/mks` takes the same fields and returns
-`video/x-matroska`: the track (or the subtitle file, without `stream_index`)
-copied as it is into a Matroska file of its own. It is for players that show
-picture subtitles (PGS, VobSub with its palette, DVB) next to an HLS stream.
+`POST /v1/subtitles/mks` takes the same fields, `from_ms?` (where the player
+is, in ms of the track's time) and `media?` (the file's media information,
+which spares a probe while a playback starts; as a job's, used only with a
+duration and a start time), and returns `video/x-matroska`: the track (or the
+subtitle file, without `stream_index`) copied as it is into a Matroska file
+of its own. It is for players that show picture subtitles (PGS, VobSub with
+its palette, DVB) next to an HLS stream.
 
 - Times are the original's from the start of the file (its start time taken
   off, as the HLS streams do), so the track lines up with playback.
-- A Matroska file whose Cues list the track's blocks is read through them in
-  seconds. Otherwise FFmpeg copies the track out (`-vn -an -dn`), reading
-  the whole file as one of the [passes over whole files](#ffmpeg-fallback).
-- With `partial` (capability `subtitle_matroska_partial`), it answers within
-  about 2 s with what has been copied so far, up to its last whole cluster,
-  and `X-Pley-Complete: 0` until it is whole. Every answer is a file players
-  read (the track's header at least).
+- A Matroska file whose Cues list the track's blocks is read through them.
+  The blocks around where the player is come first, at once: from half a
+  minute before `from_ms` to two minutes after it, written whole to a file
+  of their own. The rest waits for playbacks starting, as other background
+  work does, then comes a few hundred clusters at a time, and the whole
+  track is written, in order of time. A later request whose `from_ms` is
+  away from where the copy started (a seek) is answered with the blocks
+  there, from 10 s before it to 40 s after it: those the copy has read,
+  when it has all of them, else read through the Cues at once, beside the
+  copy, whose rest waits for that read. Such a read has a budget of its own
+  (32 MB, 10 s) and turns of its own, apart from the copies' reads; one
+  runs at a time per track, and one that a later one replaces while it
+  waits isn't run. An answer waits for it as long as for any (about 2 s),
+  then is what the copy has, and the player asks again.
+- `rest` (with `partial`) is for a player that reads the track once
+  (Kodi's `.sup`): the answer waits up to 8 s for the whole track, then is
+  everything read through the Cues so far, not only the blocks around
+  where the copy started (once that is being written whole, the whole
+  track).
+- Otherwise FFmpeg copies the track out (`-vn -an -dn`), once no playback is
+  starting, reading the whole file as one of the
+  [passes over whole files](#ffmpeg-fallback).
+- With `partial` (capability `subtitle_matroska_partial`), it answers with
+  what has been copied so far, and `X-Pley-Complete: 0` until it is whole:
+  the blocks around the player as soon as they are written, else what
+  FFmpeg has written within about 2 s, up to its last whole cluster. Every
+  answer is a file players read (the track's header at least). A read
+  through the Cues that fails past the blocks around the player answers
+  with those while FFmpeg copies the track, until FFmpeg's copy comes past
+  them; then with that copy.
 - Whole tracks are cached in `subtitles/`.
 
 ### Background work

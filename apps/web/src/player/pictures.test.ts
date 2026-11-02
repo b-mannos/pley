@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readPictureTrack } from "pley-picture-subtitles/mks";
 import { PictureSubtitles } from "pley-picture-subtitles/picture-track";
 import { pgsMks as mks } from "@/test/pictures";
-import { contain, fetchPictures, hlsLeadMs, hlsShiftMs, loadPictures, LOOKAHEAD_MS, PictureRenderer, PICTURES_AGAIN_MS, planeBox, trackMs } from "./pictures";
+import { contain, fetchPictures, hlsLeadMs, hlsShiftMs, loadPictures, LOOKAHEAD_MS, PictureRenderer, PICTURES_AGAIN_MS, pictureUrlAt, planeBox, trackMs } from "./pictures";
 
 const track = (cues: [number, number][]) => PictureSubtitles.of(readPictureTrack(mks(cues)))!;
 
@@ -168,6 +168,39 @@ describe("fetchPictures", () => {
     answer(new Response(null, { status: 416 }));
     expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "early", bytes: have });
   });
+
+  it("asks for all of a track once it is whole: what came before may not be its start", async () => {
+    const file = new Uint8Array(mks([[1000, 2000], [5000, 6000]]));
+    const have = file.slice(0, 50);
+    answer(new Response(file.slice(50), { status: 206, headers: { "Content-Range": `bytes 50-${file.length - 1}/${file.length}`, "X-Pley-Complete": "1" } }));
+    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "anew" });
+    answer(new Response(null, { status: 416, headers: { "X-Pley-Complete": "1" } }));
+    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "anew" });
+  });
+
+  it("asks for all of another file when one that came whole has more, and takes the rest of one still being written", async () => {
+    const have = new Uint8Array(mks([[1000, 2000]]));
+    const other = new Uint8Array(mks([[1000, 2000], [5000, 6000]]));
+    const partial = { status: 206, headers: { "Content-Range": `bytes ${have.length}-${other.length - 1}/*`, "X-Pley-Complete": "0" } };
+    answer(new Response(other.slice(have.length), partial));
+    expect(await fetchPictures("/t.mks", new AbortController().signal, have, true)).toEqual({ kind: "anew" });
+
+    // FFmpeg's copy as it is made: its Segment's size isn't written yet.
+    const growing = (file: Uint8Array) => {
+      const out = file.slice();
+      out.set([0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], 12 + out[11]! + 4);
+      return out;
+    };
+    const file = growing(other);
+    answer(new Response(file.slice(have.length), partial));
+    const more = await fetchPictures("/t.mks", new AbortController().signal, file.slice(0, have.length), true);
+    expect(more.kind === "track" && more.subs.sampleAt(5500)).toBe(2);
+  });
+
+  it("keeps nothing of a partial answer without a picture: the next may be another file", async () => {
+    answer(new Response(mks([]), { status: 200, headers: { "X-Pley-Complete": "0" } }));
+    expect(await fetchPictures("/t.mks", new AbortController().signal)).toEqual({ kind: "early", bytes: null });
+  });
 });
 
 describe("loadPictures", () => {
@@ -217,11 +250,61 @@ describe("loadPictures", () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 
+  it("asks from where the player is each time, so the server reads the pictures there first", async () => {
+    const fetchFn = server([partial([[1000, 2000]]), partial([[1000, 2000]]), whole([[1000, 2000]])]);
+    const urls = () => fetchFn.mock.calls.map((c) => (c as unknown[])[0]);
+    let at = 600_000.4;
+    loadPictures("/at.mks", hooks(), () => at);
+    await vi.advanceTimersByTimeAsync(0);
+    at = 603_000;
+    await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS * 3);
+    // The last, all of it once it is whole.
+    expect(urls()).toEqual(["/at.mks?at=600000", "/at.mks?at=603000", "/at.mks?at=603000", "/at.mks?at=603000"]);
+    // Had whole: asked for as it was, which the browser's cache keeps.
+    fetchFn.mockClear();
+    loadPictures("/at.mks", hooks(), () => 900_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(urls()).toEqual(["/at.mks"]);
+    // At the start too: a copy under way from elsewhere would answer with the pictures there.
+    expect(pictureUrlAt("/t.mks", 0)).toBe("/t.mks?at=0");
+    expect(pictureUrlAt("/t.mks", Number.NaN)).toBe("/t.mks?at=0");
+    expect(pictureUrlAt("/t.mks?k=1", 5000)).toBe("/t.mks?k=1&at=5000");
+  });
+
+  it("asks again at once from where a seek went, and takes no answer from before it", async () => {
+    let answered = null as ((r: Response) => void) | null;
+    const fetchFn = vi.fn((url: string) =>
+      url.endsWith("at=0") ? new Promise<Response>((resolve) => (answered = resolve)) : Promise.resolve(partial([[20_000, 21_000]])()),
+    );
+    vi.stubGlobal("fetch", fetchFn);
+    const h = hooks();
+    let at = 0;
+    const loading = loadPictures("/s.mks", h, () => at);
+    await vi.advanceTimersByTimeAsync(0);
+    at = 200_000;
+    loading.sought();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchFn.mock.calls.map((c) => c[0])).toEqual(["/s.mks?at=0", "/s.mks?at=200000"]);
+    expect(h.onTrack).toHaveBeenCalledTimes(1);
+    expect(h.onTrack.mock.calls[0]?.[0].sampleAt(20_500)).toBe(0);
+    // The answer from the start comes late: not what shows.
+    answered!(partial([[1000, 2000]])());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(h.onTrack).toHaveBeenCalledTimes(1);
+    // A seek once it is whole asks for nothing.
+    fetchFn.mockImplementation(() => Promise.resolve(whole([[1000, 2000]])()));
+    loading.sought();
+    await vi.advanceTimersByTimeAsync(0);
+    const asked = fetchFn.mock.calls.length;
+    loading.sought();
+    await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS * 2);
+    expect(fetchFn).toHaveBeenCalledTimes(asked);
+  });
+
   it("stops when told, a request under way included", async () => {
     const fetchFn = server([partial([[1000, 2000]])]);
     const h = hooks();
-    const stop = loadPictures("/t.mks", h);
-    stop();
+    loadPictures("/t.mks", h).stop();
     await vi.advanceTimersByTimeAsync(PICTURES_AGAIN_MS * 3);
     expect(h.onTrack).not.toHaveBeenCalled();
     expect(fetchFn).toHaveBeenCalledTimes(1);

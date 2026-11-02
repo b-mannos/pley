@@ -6,7 +6,7 @@
  * frame on screen. Direct play, repackaged streams, Dolby Vision and HDR
  * all stay as they are.
  */
-import { readPictureTrack } from "pley-picture-subtitles/mks";
+import { matroskaEnd, readPictureTrack } from "pley-picture-subtitles/mks";
 import { PictureSubtitles } from "pley-picture-subtitles/picture-track";
 import type { PictureFrame } from "pley-picture-subtitles/pictures";
 
@@ -15,6 +15,17 @@ export type { PictureSubtitles };
 /** Where the server serves picture track `index` of file `fileId`. */
 export function picturePath(fileId: number, index: number): string {
   return `/api/files/${fileId}/subtitles/${index}.mks`;
+}
+
+/**
+ * `url` asked for from where the player is (`atMs` of the file's time): a
+ * track the server hasn't copied out of its file yet comes from there first.
+ * At the start too: a copy under way from elsewhere answers with the
+ * pictures there to a player that doesn't say.
+ */
+export function pictureUrlAt(url: string, atMs: number): string {
+  const at = Math.max(0, Math.round(atMs)) || 0;
+  return `${url}${url.includes("?") ? "&" : "?"}at=${at}`;
 }
 
 /** A partial answer (a track still being read out of its file) is asked for again this often, as on the TVs. */
@@ -113,13 +124,20 @@ export type PictureLoad =
   | { kind: "unavailable" }
   | { kind: "failed" }
   /** Too little of a file still being made to read yet, or nothing new. */
-  | { kind: "early"; bytes: Uint8Array | null };
+  | { kind: "early"; bytes: Uint8Array | null }
+  /** What came before may not be the start of the file now (whole now, or another file): to ask for all of it. */
+  | { kind: "anew" };
 
 /**
  * One request for the track at `url`. A partial answer (`X-Pley-Complete:
  * 0`) comes with what the server has read out of the file so far; with
  * `have`, the bytes of the last one, only the rest is asked for (`Range`),
- * and a server that answers with the whole file again is fine too.
+ * and a server that answers with the whole file again is fine too. Once
+ * the track is whole, what came before may not be its start: the pictures
+ * around where the player is come first, and a file being made has its
+ * sizes written as it is finished. Nor is it when a file that came whole
+ * (its size written: the pictures around the player, a file of their own)
+ * has more: that is another file.
  */
 export async function fetchPictures(url: string, signal: AbortSignal, have: Uint8Array | null = null, again = false): Promise<PictureLoad> {
   const headers: Record<string, string> = { Accept: "video/x-matroska" };
@@ -138,10 +156,22 @@ export async function fetchPictures(url: string, signal: AbortSignal, have: Uint
     return { kind: "failed" };
   }
   if (res.status === 404 || res.status === 503) return { kind: "unavailable" };
+  const said = (res.headers.get(COMPLETE_HEADER) ?? "").trim();
+  const complete = said !== "0";
+  // Nothing past what came before, of a track that is whole now (in so many words).
+  if (have && (res.ok ? complete : res.status === 416 && said === "1")) {
+    void res.body?.cancel();
+    return { kind: "anew" };
+  }
   // Nothing past what came before.
   if (res.status === 416 && have) return { kind: "early", bytes: have };
   if (!res.ok) return { kind: "failed" };
-  const complete = (res.headers.get(COMPLETE_HEADER) ?? "").trim() !== "0";
+  // More past a file that came whole: another file, not the rest of it.
+  const end = have && matroskaEnd(have);
+  if (res.status === 206 && have && end !== null && end <= have.length) {
+    void res.body?.cancel();
+    return { kind: "anew" };
+  }
   let bytes: Uint8Array;
   try {
     const body = new Uint8Array(await res.arrayBuffer());
@@ -160,15 +190,22 @@ export async function fetchPictures(url: string, signal: AbortSignal, have: Uint
     if (signal.aborted) throw err;
     return { kind: "failed" };
   }
-  let subs: PictureSubtitles | null;
+  let track: ReturnType<typeof readPictureTrack>;
   try {
-    subs = PictureSubtitles.of(readPictureTrack(bytes.buffer as ArrayBuffer));
+    track = readPictureTrack(bytes.buffer as ArrayBuffer);
   } catch {
     return complete ? { kind: "failed" } : { kind: "early", bytes };
   }
+  const subs = PictureSubtitles.of(track);
   if (!subs) return complete ? { kind: "unavailable" } : { kind: "early", bytes };
+  // No picture yet: maybe a file the server stands in with while the copy
+  // starts, not the start of the one that comes next. Asked for whole again.
+  if (!complete && track.samples.length === 0) return { kind: "early", bytes: null };
   return { kind: "track", subs, complete, bytes };
 }
+
+/** The tracks this page has had whole: asked for again without where the player is, the browser's cache of them serves. */
+const wholeTracks = new Set<string>();
 
 export interface PictureHooks {
   /** The track, or more of it: what shows from now on. */
@@ -179,26 +216,42 @@ export interface PictureHooks {
   onFailed(): void;
 }
 
+/** A picture track loading (`loadPictures`). */
+export interface PictureLoader {
+  /** The player jumped: a track that isn't whole yet is asked for again at once, from there. */
+  sought(): void;
+  stop(): void;
+}
+
 /**
  * Loads the track at `url`, asking again every `PICTURES_AGAIN_MS` while
  * the answers are partial, as the TVs do (packages/tv/src/subs/presenter.ts),
  * but only for what it doesn't have yet. Once the server says it has it all,
- * the whole file is asked for once more, in case its start changed as it
- * was finished (a Matroska muxer writes the sizes it now knows). Returns
- * what stops it.
+ * all of it is asked for (`fetchPictures`). Each ask says where the player
+ * is then (`position`, `pictureUrlAt`), as the server answers with the
+ * pictures around there while it reads the rest.
  */
-export function loadPictures(url: string, hooks: PictureHooks): () => void {
+export function loadPictures(url: string, hooks: PictureHooks, position: () => number = () => 0): PictureLoader {
   const abort = new AbortController();
   let timer: number | undefined;
+  let asking = 0;
+  let whole = false;
   const load = (have: Uint8Array | null, again: boolean) => {
-    fetchPictures(url, abort.signal, have, again).then(
+    const ask = ++asking;
+    const asked = wholeTracks.has(url) ? url : pictureUrlAt(url, position());
+    fetchPictures(asked, abort.signal, have, again).then(
       (got) => {
-        if (abort.signal.aborted) return;
+        // Stopped, or asked for again from elsewhere since.
+        if (abort.signal.aborted || ask !== asking) return;
         if (got.kind === "unavailable") hooks.onUnavailable();
         else if (got.kind === "failed") hooks.onFailed();
-        else if (got.kind === "track" && got.complete && have) load(null, true);
+        else if (got.kind === "anew") load(null, true);
         else {
           if (got.kind === "track") hooks.onTrack(got.subs);
+          if (got.kind === "track" && got.complete) {
+            whole = true;
+            wholeTracks.add(url);
+          }
           if (got.kind === "early" || !got.complete) timer = window.setTimeout(() => load(got.bytes, true), PICTURES_AGAIN_MS);
         }
       },
@@ -206,9 +259,16 @@ export function loadPictures(url: string, hooks: PictureHooks): () => void {
     );
   };
   load(null, false);
-  return () => {
-    abort.abort();
-    window.clearTimeout(timer);
+  return {
+    sought: () => {
+      if (whole || abort.signal.aborted) return;
+      window.clearTimeout(timer);
+      load(null, true);
+    },
+    stop: () => {
+      abort.abort();
+      window.clearTimeout(timer);
+    },
   };
 }
 

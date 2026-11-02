@@ -17,6 +17,21 @@ describes how they are made.
   desktop app gets a key for its window's session. A proof for a plain-http
   address goes only to the home network (403 from the internet), and none
   goes to a website's page, so a device elsewhere can't get one passed on.
+- A playback with keyed addresses has its file's PGS subtitles beside its
+  media as pictures, each placed and timed (`subtitles-{index}.json` and its
+  PNGs), for a player that can't decode PGS: Roku draws them over the video
+  rather than have them burned in.
+
+### Changed
+
+- Picture subtitles (PGS, VobSub, DVB) that the apps draw show within a few
+  seconds of a playback starting, where they could take up to a minute:
+  the transcoder reads those around where the playback is out of a
+  Matroska file first, at once, and the rest of the track after the
+  playback's start. A `.mks` asked for with `at` (where the player is)
+  starts there, and a seek while the rest is read has the pictures where
+  the player went read at once. Kodi's `.sup` has everything read by the
+  time it opens, not only the pictures around the start.
 
 ## [0.1.3] - 2026-11-02
 

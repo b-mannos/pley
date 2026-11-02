@@ -242,6 +242,12 @@ It has no releases yet: it is built and installed by hand
   Pley's player from where it stopped, with its audio tracks, chapters,
   HDR, its own subtitles and the subtitle files beside it.
 
+### Changed
+
+- Picture subtitles (PGS, VobSub, DVB) show within a few seconds of a
+  playback starting, where they could take up to a minute: the TV tells
+  the server where it plays, and the server reads those around it first.
+
 ### Fixed
 
 - A film's audio track, chosen or saved, plays from the start: it was asked

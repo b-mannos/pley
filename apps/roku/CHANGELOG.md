@@ -8,6 +8,22 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- PGS subtitles are drawn by the app over the video instead of being burned
+  in by the server, so a file with them plays as it is and keeps its HDR,
+  and subtitle sync moves them without the video stopping. A server too old
+  to make their pictures still burns them in, and so does every server for
+  VobSub and DVB.
+
+### Fixed
+
+- Settings' Always start as no longer starts the Roku as a profile with a
+  PIN without it: the start opens on that profile's PIN pad, and Cancel
+  shows the other profiles. While the Roku doesn't know whether the
+  profile it was left on has a PIN, as at the first start after this
+  update, the start asks "Who's watching?".
+
 ### Security
 
 - Before the token goes to the server's address, the server proves it is
@@ -20,14 +36,6 @@ describes how they are made.
   the address on the Roku's own network may get an access token (an
   hour's) within the half hour, never the refresh token. A sign-in from
   before starts checking within the hour, as its token is renewed.
-
-### Fixed
-
-- Settings' Always start as no longer starts the Roku as a profile with a
-  PIN without it: the start opens on that profile's PIN pad, and Cancel
-  shows the other profiles. While the Roku doesn't know whether the
-  profile it was left on has a PIN, as at the first start after this
-  update, the start asks "Who's watching?".
 
 ## [0.1.2] - 2026-11-02
 
