@@ -11,8 +11,9 @@ describes how they are made.
 ### Changed
 
 - Picture subtitles (PGS, VobSub, DVB) show within a few seconds of a
-  playback starting, where they could take up to a minute: the TV tells
-  the server where it plays, and the server reads those around it first.
+  playback starting or a seek, where they could take up to a minute: the
+  TV tells the server where it plays, and the server reads those around it
+  first.
 
 ### Fixed
 

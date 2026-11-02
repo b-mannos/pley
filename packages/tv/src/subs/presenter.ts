@@ -78,7 +78,22 @@ export class SubtitlePresenter {
       return;
     }
     this.reset({ kind: "pictures", url });
-    this.fetchPictures(url, pictureUrlAt(url, this.hooks.position()));
+    this.fetchPictures(url);
+  }
+
+  /**
+   * The position jumped to `atMs` (the player may not say so yet): a picture track still being read is asked for
+   * again at once, from there.
+   */
+  sought(atMs: number): void {
+    const track = this.track;
+    if (track?.kind === "pictures" && (this.retry !== null || this.cancel !== null)) {
+      this.cancel?.cancel();
+      if (this.retry !== null) clearTimeout(this.retry);
+      this.retry = null;
+      this.fetchPictures(track.url, atMs);
+    }
+    this.refresh();
   }
 
   hide(): void {
@@ -147,15 +162,19 @@ export class SubtitlePresenter {
       });
   }
 
-  /** The track at `url`, asked for at `asked` (with where the player was as it was picked). */
-  private fetchPictures(url: string, asked: string): void {
+  /**
+   * The track at `url`, asked for from where the player is (`atMs`, else now): while the server reads the track, it
+   * answers with the pictures around there.
+   */
+  private fetchPictures(url: string, atMs = this.hooks.position()): void {
     const cancel = new Cancel();
     this.cancel = cancel;
     // An older server reads the whole file to make it the first time: minutes for a big one on a network share.
     this.api
-      .send(asked, { responseType: "arraybuffer", headers: { Accept: "video/x-matroska" }, cancel, timeoutMs: 15 * 60_000 })
+      .send(pictureUrlAt(url, atMs), { responseType: "arraybuffer", headers: { Accept: "video/x-matroska" }, cancel, timeoutMs: 15 * 60_000 })
       .then((res) => {
         if (cancel.cancelled || this.track?.url !== url) return;
+        this.cancel = null;
         const subs = PictureSubtitles.of(readPictureTrack(res.body as ArrayBuffer));
         if (!subs) {
           this.hooks.onPicturesUnavailable();
@@ -165,13 +184,14 @@ export class SubtitlePresenter {
         this.refresh();
         if ((res.header(COMPLETE_HEADER) ?? "").trim() === "0") {
           this.retry = setTimeout(() => {
-            this.cancel = null;
-            this.fetchPictures(url, asked);
+            this.retry = null;
+            this.fetchPictures(url);
           }, PARTIAL_RETRY_MS);
         }
       })
       .catch((e: unknown) => {
         if (cancel.cancelled || this.track?.url !== url) return;
+        this.cancel = null;
         if (e instanceof ApiError && (e.status === 404 || e.status === 503)) this.hooks.onPicturesUnavailable();
         else this.hooks.onFailed();
       });

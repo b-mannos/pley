@@ -20,10 +20,12 @@ export function picturePath(fileId: number, index: number): string {
 /**
  * `url` asked for from where the player is (`atMs` of the file's time): a
  * track the server hasn't copied out of its file yet comes from there first.
+ * At the start too: a copy under way from elsewhere answers with the
+ * pictures there to a player that doesn't say.
  */
 export function pictureUrlAt(url: string, atMs: number): string {
-  const at = Math.max(0, Math.round(atMs));
-  return at > 0 ? `${url}${url.includes("?") ? "&" : "?"}at=${at}` : url;
+  const at = Math.max(0, Math.round(atMs)) || 0;
+  return `${url}${url.includes("?") ? "&" : "?"}at=${at}`;
 }
 
 /** A partial answer (a track still being read out of its file) is asked for again this often, as on the TVs. */
@@ -214,27 +216,42 @@ export interface PictureHooks {
   onFailed(): void;
 }
 
+/** A picture track loading (`loadPictures`). */
+export interface PictureLoader {
+  /** The player jumped: a track that isn't whole yet is asked for again at once, from there. */
+  sought(): void;
+  stop(): void;
+}
+
 /**
  * Loads the track at `url`, asking again every `PICTURES_AGAIN_MS` while
  * the answers are partial, as the TVs do (packages/tv/src/subs/presenter.ts),
  * but only for what it doesn't have yet. Once the server says it has it all,
- * all of it is asked for (`fetchPictures`). `atMs` says where the player is
- * (`pictureUrlAt`). Returns what stops it.
+ * all of it is asked for (`fetchPictures`). Each ask says where the player
+ * is then (`position`, `pictureUrlAt`), as the server answers with the
+ * pictures around there while it reads the rest.
  */
-export function loadPictures(url: string, hooks: PictureHooks, atMs = 0): () => void {
+export function loadPictures(url: string, hooks: PictureHooks, position: () => number = () => 0): PictureLoader {
   const abort = new AbortController();
-  const asked = wholeTracks.has(url) ? url : pictureUrlAt(url, atMs);
   let timer: number | undefined;
+  let asking = 0;
+  let whole = false;
   const load = (have: Uint8Array | null, again: boolean) => {
+    const ask = ++asking;
+    const asked = wholeTracks.has(url) ? url : pictureUrlAt(url, position());
     fetchPictures(asked, abort.signal, have, again).then(
       (got) => {
-        if (abort.signal.aborted) return;
+        // Stopped, or asked for again from elsewhere since.
+        if (abort.signal.aborted || ask !== asking) return;
         if (got.kind === "unavailable") hooks.onUnavailable();
         else if (got.kind === "failed") hooks.onFailed();
         else if (got.kind === "anew") load(null, true);
         else {
           if (got.kind === "track") hooks.onTrack(got.subs);
-          if (got.kind === "track" && got.complete) wholeTracks.add(url);
+          if (got.kind === "track" && got.complete) {
+            whole = true;
+            wholeTracks.add(url);
+          }
           if (got.kind === "early" || !got.complete) timer = window.setTimeout(() => load(got.bytes, true), PICTURES_AGAIN_MS);
         }
       },
@@ -242,9 +259,16 @@ export function loadPictures(url: string, hooks: PictureHooks, atMs = 0): () => 
     );
   };
   load(null, false);
-  return () => {
-    abort.abort();
-    window.clearTimeout(timer);
+  return {
+    sought: () => {
+      if (whole || abort.signal.aborted) return;
+      window.clearTimeout(timer);
+      load(null, true);
+    },
+    stop: () => {
+      abort.abort();
+      window.clearTimeout(timer);
+    },
   };
 }
 
