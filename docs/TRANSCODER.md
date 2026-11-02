@@ -305,12 +305,15 @@ its palette, DVB) next to an HLS stream.
   there, from 10 s before it to 40 s after it: those the copy has read,
   when it has all of them, else read through the Cues at once, beside the
   copy, whose rest waits for that read. Such a read has a budget of its own
-  (32 MB, 10 s); one runs at a time per track, and one that a later one
-  replaces while it waits isn't run.
+  (32 MB, 10 s) and turns of its own, apart from the copies' reads; one
+  runs at a time per track, and one that a later one replaces while it
+  waits isn't run. An answer waits for it as long as for any (about 2 s),
+  then is what the copy has, and the player asks again.
 - `rest` (with `partial`) is for a player that reads the track once
   (Kodi's `.sup`): the answer waits up to 8 s for the whole track, then is
   everything read through the Cues so far, not only the blocks around
-  where the copy started.
+  where the copy started (once that is being written whole, the whole
+  track).
 - Otherwise FFmpeg copies the track out (`-vn -an -dn`), once no playback is
   starting, reading the whole file as one of the
   [passes over whole files](#ffmpeg-fallback).
@@ -320,7 +323,8 @@ its palette, DVB) next to an HLS stream.
   FFmpeg has written within about 2 s, up to its last whole cluster. Every
   answer is a file players read (the track's header at least). A read
   through the Cues that fails past the blocks around the player answers
-  with those while FFmpeg copies the track.
+  with those while FFmpeg copies the track, until FFmpeg's copy comes past
+  them; then with that copy.
 - Whole tracks are cached in `subtitles/`.
 
 ### Background work
