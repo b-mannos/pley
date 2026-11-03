@@ -191,10 +191,9 @@ It has no releases yet: it is built and installed by hand
 - Back in the native app's Live TV guide goes to the categories, then the
   rail, rather than straight to the rail.
 - The native app's "Exit Pley?" is a narrower dialog.
-- The native player's Info says "Server speed" for how fast the server
-  makes the video, and beside it "TV network speed", how fast it reaches
-  the TV: a video that stalls with the server keeping up has a network
-  that can't carry it.
+- The native player's Info says "TV network speed", how fast the video
+  reaches the TV, beside the server's Speed: a video that stalls with the
+  server keeping up has a network that can't carry it.
 - The native app's search finds Live TV channels, as Android TV's does: by
   name, number or what's on, in a Live TV row after People, each tile with
   the channel's logo, number and what's on. OK plays the channel, changing
@@ -210,11 +209,10 @@ It has no releases yet: it is built and installed by hand
 - Holding Up or Down in the native app's libraries slides the posters
   under a highlight that stays still, as rows do for Left and Right.
 - The native app's seek preview keeps its picture inside its rounded
-  edge, where the picture's square corners showed past it.
+  edge, where the picture's square corners showed past it and its sides
+  covered the edge, so it seemed wider than its box.
 - A channel's number and favourite star in the native app's Live TV
   cards stay on top of its logo, which covered them once it loaded.
-- The native app's seek preview keeps its picture inside its edge, which
-  the picture covered at its sides, so it seemed wider than its box.
 - Posters in the native app no longer stay empty, until the app starts
   again, after a library's sort or filter changes while they load.
 - In the native app's player, the seek preview and the chapters' cards

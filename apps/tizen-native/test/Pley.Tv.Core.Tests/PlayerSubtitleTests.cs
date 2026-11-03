@@ -504,7 +504,7 @@ public class PlaybackDetailsTests
             ("Video", "HEVC 4K Dolby Vision P8.1"),
             ("Audio", "EAC3 5.1 → AAC 2.0"),
             ("Bitrate", "62 Mbps → 40 Mbps"),
-            ("Server speed", "12.0× real time · 60 s ready"),
+            ("Speed", "12.0× real time · 60 s ready"),
         }, remux.Rows.Select(r => (r.Label, r.Value)));
         var direct = Details.Build(info with { Method = "direct", Hls = false }, file, null, null, 0, null);
         Assert.Equal("Direct play", direct.Method);
@@ -581,7 +581,8 @@ public class ReadoutTests
         Assert.Equal("Direct play", s["How it plays"]["Playback"]);
         Assert.False(s["How it plays"].ContainsKey("Why"));
         Assert.Equal("Original", s["How it plays"]["Quality"]);
-        // How fast it reaches the TV, among how it plays, beside the server's speed.
+        // Android TV's "Network" among this TV's stats is its player's own estimate. Tizen's player
+        // gives none, so here it is the TV's whole network, said so, beside the server's Speed.
         Assert.Equal("120 Mbps", s["How it plays"]["TV network speed"]);
         Assert.Equal("MKV", s["File"]["Container"]);
         Assert.Equal("62 Mbps", s["File"]["Overall bitrate"]);
