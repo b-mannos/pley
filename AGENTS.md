@@ -144,9 +144,24 @@ They go in `docs/QUESTIONS.md` or `docs/*.local.md`, which git ignores.
 - Its description is short and plain: why and what changed in a sentence
   or two, then what a reviewer should know, by app or area, then what was
   checked and what wasn't.
-- Write it as a person would: no bold labels, no tables or headings for a
-  few lines, no review history, no "Generated with …" line. Don't repeat
-  the diff or the docs; point to the doc.
+- A change people can see shows it, in a table under the description: a
+  row per change, the screen before it and after it (N/A before something
+  new), taken on the same screen through the same steps.
+  [DEVELOPMENT.md](docs/DEVELOPMENT.md#screenshots-for-a-pull-request)
+  says how for each app.
+  - Each screenshot marks where to look with a red box and an arrow
+    (`scripts/mark-screenshot.mjs`), and has a caption of a few words
+    under it in `<sub>`.
+  - A detail a few pixels wide (an edge, a border, a badge) is shown
+    zoomed in, pixel for pixel, until it's plain without the caption.
+  - Screenshots are attached with `gh pr create --attach`, never
+    committed.
+  - The description, pictures and all, is shown to whoever asked for the
+    change before it's posted.
+- Write it as a person would: no bold labels, no headings, no tables for
+  a few lines (the screenshots' table aside), no review history, no
+  "Generated with …" line. Don't repeat the diff or the docs; point to
+  the doc.
 
 ## Platform notes
 
