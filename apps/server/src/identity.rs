@@ -34,9 +34,38 @@ const CHALLENGE_BYTES: std::ops::RangeInclusive<usize> = 16..=64;
 /// key signs nothing else.
 const PROOF_CONTEXT: &str = "pley-server-proof";
 
+/// The file in the data folder that holds the server's id.
+pub const ID_FILE: &str = "server-id";
+/// Where older versions kept it, renamed to [`ID_FILE`] on start so apps
+/// keep recognising the server.
+const OLD_ID_FILE: &str = "plex-machine-id";
+
+/// The server's id, 40 hexadecimal characters: read from the data folder,
+/// made and saved there on first start.
+pub fn load_id(data_dir: &Path) -> String {
+    let file = data_dir.join(ID_FILE);
+    let old = data_dir.join(OLD_ID_FILE);
+    if !file.exists()
+        && old.exists()
+        && let Err(err) = std::fs::rename(&old, &file)
+    {
+        tracing::warn!("cannot rename {} to {}: {err}", old.display(), file.display());
+    }
+    let valid = |id: &String| id.len() == 40 && id.bytes().all(|b| b.is_ascii_hexdigit());
+    let saved = [&file, &old]
+        .into_iter()
+        .find_map(|path| std::fs::read_to_string(path).ok().map(|s| s.trim().to_owned()).filter(valid));
+    saved.unwrap_or_else(|| {
+        let id = format!("{}{}", uuid::Uuid::new_v4().simple(), &uuid::Uuid::new_v4().simple().to_string()[..8]);
+        if let Err(err) = std::fs::write(&file, &id) {
+            tracing::warn!("cannot save {}: {err}", file.display());
+        }
+        id
+    })
+}
+
 pub struct Identity {
-    /// The 40 hexadecimal characters discovery and the Plex-compatible API
-    /// answer with.
+    /// The 40 hexadecimal characters discovery and apps know the server by.
     pub id: String,
     /// Derives the proof keys; `None` while `secret.key` can't be used.
     root: Option<hmac::Key>,
@@ -57,7 +86,7 @@ pub struct ProofKey {
 
 impl Identity {
     pub fn new(data_dir: &Path) -> Self {
-        let id = crate::plex::PlexInfo::load(data_dir).machine_id;
+        let id = load_id(data_dir);
         // TwoStep::new says in the log why the key can't be used.
         let secret = crate::two_step::load_key(&data_dir.join(crate::two_step::KEY_FILE)).ok();
         Self::with_secret(id, secret.as_ref().map(|s| s.as_slice()))
@@ -187,6 +216,20 @@ mod tests {
     const ID: &str = "0123456789abcdef0123456789abcdef01234567";
     const CHALLENGE: &str = "AAECAwQFBgcICQoLDA0ODw";
     const AT: &str = "http://192.168.1.20:7539";
+
+    #[test]
+    fn the_id_is_made_once_and_kept_from_the_old_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let made = load_id(dir.path());
+        assert_eq!(made.len(), 40);
+        assert_eq!(load_id(dir.path()), made, "kept");
+
+        let older = tempfile::tempdir().unwrap();
+        std::fs::write(older.path().join(OLD_ID_FILE), format!("{ID}\n")).unwrap();
+        assert_eq!(load_id(older.path()), ID, "an older version's id stays the server's");
+        assert!(!older.path().join(OLD_ID_FILE).exists(), "renamed");
+        assert_eq!(std::fs::read_to_string(older.path().join(ID_FILE)).unwrap().trim(), ID);
+    }
 
     fn identity() -> Identity {
         Identity::with_secret(ID.into(), Some(&[7; 32]))

@@ -9,6 +9,44 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- A Jellyfin-compatible API, for Jellyfin's apps and others built on its
+  API: they sign in with Pley's accounts, browse the libraries, play files
+  as they are or as HLS from Pley's transcoder, with subtitles and Skip
+  Intro, and keep watch state, favorites (My List) and ratings with Pley's.
+  It is off until turned on in Settings → Network, on Pley's port or one of
+  its own (Jellyfin's is 8096; `--jellyfin-bind`, and `compose.jellyfin.yaml`
+  for Docker). Each sign-in gets a token of its own, which works on that API
+  only, never on Pley's own, and never as an administrator; accounts with
+  two-step sign-in can't sign in from these apps yet
+  ([COMPATIBILITY.md](../../docs/COMPATIBILITY.md)).
+- Account has Tokens for other apps: each app signed in through the
+  Jellyfin-compatible API, with its device and last use, to revoke, and
+  tokens made by hand for apps or scripts that take one, shown once to
+  copy.
+
+### Changed
+
+- The server's id is kept in `server-id` in the data folder. An older
+  version's `plex-machine-id` is renamed to it on start, so apps keep
+  recognising the server.
+- Search puts the closest matches first: a title, person or Live TV
+  channel named exactly what was typed, then those whose name begins with
+  it, then the rest.
+- The web app's search shows movies, shows and episodes first, then
+  music, then Live TV, then people.
+
+### Removed
+
+- The Plex-compatible API, and with it Tautulli, Kometa, `python-plexapi`
+  scripts and Plex players on Pley. `--plex-bind`, `PLEY_PLEX_BIND` and
+  `plex_bind` are read and ignored, with a warning in the log; Settings →
+  Network's next change takes `plex_bind` out of `pley.toml`. The Windows
+  installer no longer asks about it, and Docker's `compose.plex.yaml` is
+  `compose.jellyfin.yaml`. Smart collections' `guid` filter no longer takes
+  `plex://` guids.
+
 ## [0.1.4] - 2026-11-02
 
 ### Added

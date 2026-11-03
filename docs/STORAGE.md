@@ -13,7 +13,8 @@ are only read, never moved or changed.
   pley.db               the database (SQLite, WAL: also pley.db-wal, -shm)
   pley.lock             held while Pley runs: one server per data folder
   secret.key            encrypts authenticator secrets, keys hashes and proofs
-  plex-machine-id       the server's id (discovery, apps, compatibility API)
+  server-id             the server's id (discovery, apps); older versions'
+                        plex-machine-id is renamed to it
   metadata/blobs/       pictures that are metadata, named by their SHA-256
   media/ab/<fingerprint>/
     thumb.jpg           frame grab (movies and episodes without a still)
@@ -64,7 +65,7 @@ so the copy would be stale or inconsistent. Use a backup.
 folder. Without `secret.key`, people with two-step sign-in must use a
 recovery code and set it up again (or an administrator turns it off for
 them), and Automatic quality forgets the networks it measured. Without
-`secret.key` or `plex-machine-id`, apps no longer recognise the server
+`secret.key` or `server-id`, apps no longer recognise the server
 ([API.md](API.md#telling-servers-apart)): they say another device answers
 at its address until they sign in again, and the desktop app until the
 server is forgotten and connected again.
@@ -90,7 +91,7 @@ space used.
 | `cache/covers` | albums known to have no embedded cover | 30 days |
 | `cache/subtitles` | subtitles converted to WebVTT, picture subtitles copied into Matroska (`.mks`) | 90 days |
 | `cache/fingerprints` | audio fingerprints (intro and credits detection) | 90 days |
-| `cache/bif` | seek previews as Plex apps take them (BIF), cut from the previews when asked for | 30 days |
+| `cache/bif` | seek previews as Roku's player takes them (BIF), cut from the previews when asked for | 30 days |
 | `cache/live/pictures` | Live TV channel logos and programme pictures | fetched again after 7 days; removed after 30 days unused, or oldest first past 256 MB |
 | `cache/live/downloads` | guide files being read | emptied at every start |
 | `cache/discover` | TMDB's pictures for Discover and requests, as `<size>/<file>` (TMDB's size and file name), with no database row | 30 days, or oldest first past 256 MB |

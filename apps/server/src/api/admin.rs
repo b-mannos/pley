@@ -380,7 +380,7 @@ pub async fn put_network(
     listen.check().map_err(AppError::bad_request)?;
     let (now, fixed) = (state.network.wanted(), state.network.fixed);
     if (fixed.web && listen.web != now.web)
-        || (fixed.plex && (listen.plex != now.plex || listen.plex_on_web != now.plex_on_web))
+        || (fixed.jellyfin && (listen.jellyfin != now.jellyfin || listen.jellyfin_on_web != now.jellyfin_on_web))
         || (fixed.discovery && listen.discovery != now.discovery)
     {
         return Err(AppError::bad_request("the command line or the environment sets that: change it there"));
@@ -389,15 +389,15 @@ pub async fn put_network(
         let addresses =
             |list: &[std::net::SocketAddr]| list.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
         tracing::info!(
-            "{} changed where Pley listens: {} (the Plex-compatible API: {}; discovery {})",
+            "{} changed where Pley listens: {} (the Jellyfin-compatible API: {}; discovery {})",
             user.username,
             addresses(&listen.web),
-            if listen.plex_on_web {
+            if listen.jellyfin_on_web {
                 "on Pley's port".to_owned()
-            } else if listen.plex.is_empty() {
+            } else if listen.jellyfin.is_empty() {
                 "off".to_owned()
             } else {
-                addresses(&listen.plex)
+                addresses(&listen.jellyfin)
             },
             if listen.discovery { "on" } else { "off" },
         );

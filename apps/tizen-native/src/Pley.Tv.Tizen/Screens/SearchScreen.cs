@@ -14,8 +14,8 @@ namespace Pley.Tv.Tizen.Screens;
 /// Search on TV (design spec §4.5; the Android app's TvSearchScreen): the field at the top, 520
 /// wide, with initial focus; OK opens the TV's keyboard, and Back or its Search key closes it.
 /// Before typing, the recent searches as chips. While typing (250 ms after the last key), the
-/// results as rows, grouped (People, Live TV, Movies, Shows, Seasons, Episodes, Artists, Albums,
-/// Tracks), the first header at y = 96; a channel found plays at once. Down from the field goes
+/// results as rows, grouped (Movies, Shows, Seasons, Episodes, Artists, Albums, Tracks, Live TV,
+/// People), the first header at y = 96; a channel found plays at once. Down from the field goes
 /// into the rows, the chips or Retry, Up from the first row back to it; Left goes to the rail.
 /// </summary>
 sealed class SearchScreen : ShellPage
@@ -157,7 +157,7 @@ sealed class SearchScreen : ShellPage
         var groups = ready.Groups;
         ClearBody(groups);
         var column = new RowColumnView(gate, top: ResultsTop, headerY: ResultsTop);
-        // Live TV's row comes after People, as on the web.
+        // Live TV's row comes after the titles and before People, as on the web.
         var channelsAt = ready.Channels.Count > 0 ? SearchRules.ChannelsAt(groups) : -1;
         for (var i = 0; i <= groups.Count; i++)
         {

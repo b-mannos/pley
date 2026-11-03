@@ -45,8 +45,6 @@ pub struct Inner {
     pub watcher: Arc<LibraryWatcher>,
     pub images: Images,
     pub sessions: Arc<Sessions>,
-    /// The `sessionKey`s Plex tools know the sessions by.
-    pub(crate) plex_session_keys: crate::plex::SessionKeys,
     /// When library work runs (see [`crate::schedule`]).
     pub schedule: Arc<Scheduler>,
     pub markers: Arc<MarkerService>,
@@ -80,9 +78,9 @@ impl Deref for AppState {
 }
 
 impl AppState {
-    /// This server's stable id (Plex's `machineIdentifier`).
-    pub fn plex_machine_id(&self) -> String {
-        crate::plex::PlexInfo::load(&self.config.data_dir).machine_id
+    /// This server's stable id ([`crate::identity::load_id`]).
+    pub fn server_id(&self) -> String {
+        crate::identity::load_id(&self.config.data_dir)
     }
 
     pub async fn init(mut config: Config) -> anyhow::Result<Self> {
@@ -192,7 +190,6 @@ impl AppState {
                 resources,
                 auth,
                 sessions,
-                plex_session_keys: Default::default(),
                 schedule,
                 markers,
                 trickplay,

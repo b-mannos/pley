@@ -13,13 +13,12 @@ namespace Pley.Tv.Core.Ui;
 
 /// <summary>
 /// The groups results come in, in the order they show (the web's SearchPage; the Android app's
-/// SearchGroupKind): people first, then each kind of item. Live TV's channels aren't a group of
+/// SearchGroupKind): each kind of item, then people. Live TV's channels aren't a group of
 /// tiles: they come beside the groups (<see cref="SearchResultsState.Ready.Channels"/>), in a row
-/// after People.
+/// before People.
 /// </summary>
 public enum SearchGroupKind
 {
-    People,
     Movies,
     Shows,
     Seasons,
@@ -27,6 +26,7 @@ public enum SearchGroupKind
     Artists,
     Albums,
     Tracks,
+    People,
 }
 
 /// <summary>One group of results: its tiles, and the ids beside them.</summary>
@@ -52,7 +52,7 @@ public abstract record SearchResultsState
 
     /// <summary>
     /// Results for <paramref name="Query"/>, grouped, with the Live TV <paramref name="Channels"/>
-    /// found (shown after People, as on the web). While <paramref name="Refreshing"/>, a newer
+    /// found (shown after the titles, before People, as on the web). While <paramref name="Refreshing"/>, a newer
     /// query's answer is on its way and these stay until it comes.
     /// </summary>
     public sealed record Ready(string Query, IReadOnlyList<SearchGroup> Groups, IReadOnlyList<LiveChannel> Channels, bool Refreshing) : SearchResultsState;
@@ -150,10 +150,10 @@ public static class SearchRules
     public const long NowTickMs = 30_000;
 
     /// <summary>
-    /// Where the Live TV row goes among <paramref name="groups"/>' rows: after People, as on the
-    /// web, so first when there are no people.
+    /// Where the Live TV row goes among <paramref name="groups"/>' rows: after the titles and
+    /// before People, as on the web and Android TV, so last when there are no people.
     /// </summary>
-    public static int ChannelsAt(IReadOnlyList<SearchGroup> groups) => groups.Count(g => g.Kind == SearchGroupKind.People);
+    public static int ChannelsAt(IReadOnlyList<SearchGroup> groups) => groups.Count(g => g.Kind != SearchGroupKind.People);
 
     /// <summary>
     /// Watching a channel found: the live player changes channel among every channel, as a
@@ -184,15 +184,13 @@ public static class SearchRules
     };
 
     /// <summary>
-    /// <paramref name="answer"/> in its groups and the groups' order (people, movies, shows,
-    /// seasons, episodes, artists, albums, tracks), each keeping the server's order of relevance;
+    /// <paramref name="answer"/> in its groups and the groups' order (movies, shows, seasons,
+    /// episodes, artists, albums, tracks, people), each keeping the server's order of relevance;
     /// empty groups left out. Items of other kinds (extras) aren't shown, as on the web.
     /// </summary>
     public static IReadOnlyList<SearchGroup> Groups(SearchAnswer answer, string origin)
     {
         var groups = new List<SearchGroup>();
-        var people = answer.People ?? Array.Empty<PersonSummary>();
-        if (people.Count > 0) groups.Add(new SearchGroup(SearchGroupKind.People, people.Select(p => PersonTile(p, origin)).ToList(), people.Select(p => p.Id).ToList()));
         foreach (SearchGroupKind group in Enum.GetValues(typeof(SearchGroupKind)))
         {
             if (KindOf(group) is not { } kind) continue;
@@ -201,6 +199,8 @@ public static class SearchRules
             var tileKind = TileKindOf(group);
             groups.Add(new SearchGroup(group, items.Select(i => TileModel.Of(i, tileKind, origin)).ToList(), items.Select(i => i.Id).ToList()));
         }
+        var people = answer.People ?? Array.Empty<PersonSummary>();
+        if (people.Count > 0) groups.Add(new SearchGroup(SearchGroupKind.People, people.Select(p => PersonTile(p, origin)).ToList(), people.Select(p => p.Id).ToList()));
         return groups;
     }
 
@@ -237,9 +237,10 @@ public static class SearchRules
 /// Search (apps/web/src/pages/SearchPage.tsx; the Android app's SearchViewModel, as the TV uses
 /// it). What is typed is asked for once typing has paused 250 ms, and only the latest query's
 /// answer counts: a newer one gives up a request still on its way. The results already shown
-/// stay while the next ones load. Results come in groups: People, Live TV, Movies, Shows,
-/// Seasons, Episodes, Artists, Albums, Tracks; a channel found plays at once. A query is kept
-/// among the profile's last 10 searches when it is submitted or one of its results is opened.
+/// stay while the next ones load. Results come in groups: Movies, Shows, Seasons, Episodes,
+/// Artists, Albums, Tracks, Live TV, People, the server's closest matches first in each; a
+/// channel found plays at once. A query is kept among the profile's last 10 searches when it is
+/// submitted or one of its results is opened.
 ///
 /// The TV types with the system's keyboard over the field: the screen hands each change of the
 /// field's text to <see cref="Type"/>, and the keyboard's Search key to <see cref="Submit"/>.
@@ -463,7 +464,7 @@ public static class SearchText
     public const string Searching = "Searching…";
 
     public const string People = "People";
-    /// <summary>The channels' row, after People.</summary>
+    /// <summary>The channels' row, after the titles and before People.</summary>
     public const string LiveTv = "Live TV";
     public const string Movies = "Movies";
     public const string Shows = "Shows";

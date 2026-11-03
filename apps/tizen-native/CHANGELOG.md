@@ -195,9 +195,9 @@ It has no releases yet: it is built and installed by hand
   reaches the TV, beside the server's Speed: a video that stalls with the
   server keeping up has a network that can't carry it.
 - The native app's search finds Live TV channels, as Android TV's does: by
-  name, number or what's on, in a Live TV row after People, each tile with
-  the channel's logo, number and what's on. OK plays the channel, changing
-  channel among every channel.
+  name, number or what's on, in a Live TV row after the titles and before
+  People, each tile with the channel's logo, number and what's on. OK
+  plays the channel, changing channel among every channel.
 - Signing in to the native app with a code says when the server requires
   two-step sign-in: the phone that approves the code sets it up for
   whoever hasn't.
@@ -265,6 +265,8 @@ It has no releases yet: it is built and installed by hand
   playback starting or a seek, where they could take up to a minute: the
   TV tells the server where it plays, and the server reads those around it
   first.
+- Search shows movies, shows and episodes first, then music, then
+  people, the closest matches first in each.
 
 ### Fixed
 

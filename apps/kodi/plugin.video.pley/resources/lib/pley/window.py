@@ -2506,14 +2506,15 @@ class Search(Screen):
                 found = by_kind(kinds)
                 if found:
                     self.found.append({"key": title, "title": title, "shape": shape, "items": found})
-            people = answer.get("people") or []
-            if people:
-                self.found.insert(min(len(self.found), 3), {"key": "people", "title": T("people"), "shape": "person", "items": people})
-            # Live TV's channels, by name, number or what's on (a server
-            # with Live TV open to this profile).
+            # After the titles, Live TV's channels, by name, number or what's
+            # on (a server with Live TV open to this profile), then people,
+            # as on the other apps; the closest matches first in each.
             channels = answer.get("channels") or []
             if channels:
                 self.found.append({"key": "channels", "title": T("live_tv"), "shape": "channel", "items": channels})
+            people = answer.get("people") or []
+            if people:
+                self.found.append({"key": "people", "title": T("people"), "shape": "person", "items": people})
         self.win.put(L.SEARCH_FIELD, self.query or color(T("search_hint"), L.MUTED))
         self.draw()
 

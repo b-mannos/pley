@@ -8,6 +8,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- Search shows movies, shows and episodes first, then music, then Live
+  TV, then people, the closest matches first in each.
+
 ## [0.1.3] - 2026-11-02
 
 ### Changed
