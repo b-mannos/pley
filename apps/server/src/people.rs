@@ -493,10 +493,13 @@ pub async fn person(db: &Db, user_id: i64, person_id: i64) -> sqlx::Result<Optio
     Ok(Some(PersonDetail { id: person_id, name, photo_url: photo_url(person_id, photo.as_deref()), credits }))
 }
 
-/// People whose name has words starting with each word of `input`, most
-/// credited first, among those credited in items `user_id` may see.
+/// People whose name has words starting with each word of `input`, among
+/// those credited in items `user_id` may see: the closest names first (the
+/// whole name, then its beginning, …), the most credited first among them.
 pub async fn search(db: &Db, user_id: i64, input: &str, limit: i64) -> sqlx::Result<Vec<PersonSummary>> {
     let Some(fts) = catalog::fts_query(input) else { return Ok(Vec::new()) };
+    // More than are shown, for a name typed in full whose person has few credits.
+    let candidates = limit.max(100);
     let unrestricted: bool = sqlx::query_scalar(
         "SELECT (is_admin OR all_libraries) AND (is_admin OR max_age IS NULL) FROM users WHERE id = ?",
     )
@@ -514,7 +517,7 @@ pub async fn search(db: &Db, user_id: i64, input: &str, limit: i64) -> sqlx::Res
              ORDER BY (SELECT COUNT(*) FROM item_people c WHERE c.person_id = pe.id) DESC, pe.name LIMIT ?",
         )
         .bind(&fts)
-        .bind(limit)
+        .bind(candidates)
         .fetch_all(&db.read)
         .await
     } else {
@@ -535,16 +538,18 @@ pub async fn search(db: &Db, user_id: i64, input: &str, limit: i64) -> sqlx::Res
         )))
         .bind(user_id)
         .bind(&fts)
-        .bind(limit)
+        .bind(candidates)
         .fetch_all(&db.read)
         .await
     };
-    let rows = match rows {
+    let mut rows = match rows {
         Ok(rows) => rows,
         // A query FTS can't parse finds nobody.
         Err(sqlx::Error::Database(e)) if e.message().contains("fts5") => Vec::new(),
         Err(e) => return Err(e),
     };
+    rows.sort_by_cached_key(|(_, name, _)| catalog::match_rank(input, name));
+    rows.truncate(limit.max(0) as usize);
     Ok(rows
         .into_iter()
         .map(|(id, name, photo)| PersonSummary { id, photo_url: photo_url(id, photo.as_deref()), name })

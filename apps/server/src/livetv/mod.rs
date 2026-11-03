@@ -1732,7 +1732,7 @@ impl LiveTv {
                 || c.display_number().is_some_and(|n| n.starts_with(&search))
                 || c.guide_key().is_some_and(|k| airing.contains(&(c.source_id, k.to_owned())))
         };
-        let listed: Vec<&ChannelRow> = match category {
+        let mut listed: Vec<&ChannelRow> = match category {
             Category::Recent => {
                 let by_id: HashMap<i64, usize> = lineup.rows.iter().enumerate().map(|(i, c)| (c.id, i)).collect();
                 self.recent(user, RECENT)
@@ -1761,6 +1761,11 @@ impl LiveTv {
                     .collect()
             }
         };
+        // Found ones come closest first, the lineup's order among equals;
+        // recent ones stay in the order they were watched.
+        if !search.is_empty() && *category != Category::Recent {
+            listed.sort_by_cached_key(|c| channel_rank(&search, c.display_name(), c.display_number().as_deref()));
+        }
         let limit = limit.clamp(1, MAX_PAGE);
         let offset = match around.and_then(|id| listed.iter().position(|c| c.id == id)) {
             Some(at) => at / limit * limit,
@@ -2176,6 +2181,21 @@ fn sort_channels(rows: &mut [ChannelRow]) {
     rows.sort_by(|a, b| key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal));
 }
 
+/// How closely a channel named `name` answers a search for `search`, best
+/// first: its number in full, then by name as titles are
+/// ([`crate::catalog::match_rank`], a region before the name not counting),
+/// then those found by their number's beginning or by what's on.
+fn channel_rank(search: &str, name: &str, number: Option<&str>) -> u8 {
+    if number.is_some_and(|n| n.trim().eq_ignore_ascii_case(search)) {
+        return 0;
+    }
+    if !name.to_lowercase().contains(search) {
+        return 4;
+    }
+    let rank = crate::catalog::match_rank(search, name);
+    split_region(name).map_or(rank, |(_, rest)| rank.min(crate::catalog::match_rank(search, rest)))
+}
+
 /// A group name's region and the rest, when it begins with one the way
 /// providers write them: "UK| Sport", "|UK| Sport", "UK: Sport", "[UK] Sport".
 fn split_region(name: &str) -> Option<(&str, &str)> {
@@ -2274,6 +2294,21 @@ fn describe(e: &reqwest::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channels_found_come_closest_first() {
+        assert_eq!(channel_rank("101", "Anything", Some("101")), 0);
+        assert_eq!(channel_rank("news", "News", Some("7")), 0);
+        // A region before the name doesn't count.
+        assert_eq!(channel_rank("news", "UK| News", None), 0);
+        assert_eq!(channel_rank("news", "UK| News HD", None), 1);
+        assert_eq!(channel_rank("news", "World News", None), 2);
+        assert_eq!(channel_rank("news", "Newsroom", None), 1);
+        assert_eq!(channel_rank("ews", "News", None), 3);
+        // Found by its number's beginning or by what's on.
+        assert_eq!(channel_rank("10", "Sport", Some("101")), 4);
+        assert_eq!(channel_rank("quiz", "Sport", None), 4);
+    }
 
     #[test]
     fn a_local_guide_is_a_file_on_this_computer() {
