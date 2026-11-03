@@ -150,7 +150,12 @@ and setup link.
   the shared objects GPU drivers create. Impersonation is removed.
 - **The data folder** (database, the key that seals two-step sign-in
   secrets, logs) is owned by the administrators and closed to other users.
-  Setup refuses one that is, or contains, a link or junction.
+  Setup refuses one that is, or contains, a link or junction. It sets the
+  owner and permissions of every file in it only when the folder itself
+  isn't set up that way already for the same accounts: on an update, the
+  files inherit the folder's, and a library's artwork and seek previews
+  are hundreds of thousands of files. `pley service install
+  --reset-permissions` sets every file's again.
 - **RedirectionGuard is off** for Setup, so the Pley it starts can follow
   WinGet's FFmpeg links and junctions in media folders. Setup writes only in
   Program Files and its own temporary folder.
