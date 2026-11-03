@@ -712,6 +712,32 @@ impl LiveTv {
         if self.may_watch(user).await { Ok(()) } else { Err(AppError::forbidden("Live TV isn't open to this account")) }
     }
 
+    /// The account's name (its display name, else its username) when it is
+    /// one of the household's (in Home).
+    pub async fn home_name(&self, user_id: i64) -> Option<String> {
+        sqlx::query_as::<_, (String, Option<String>)>("SELECT username, display_name FROM users WHERE id = ? AND home")
+            .bind(user_id)
+            .fetch_optional(&self.db.read)
+            .await
+            .ok()
+            .flatten()
+            .map(|(username, display)| display.filter(|d| !d.trim().is_empty()).unwrap_or(username))
+    }
+
+    /// The home as it is now, when the account is in it: its name, which
+    /// the viewers whose connection it takes over are told when they are in
+    /// the home too, and the accounts in it.
+    pub async fn home_now(&self, user_id: i64) -> Option<tuner::InHome> {
+        let name = self.home_name(user_id).await?;
+        let accounts = sqlx::query_scalar::<_, i64>("SELECT id FROM users WHERE home")
+            .fetch_all(&self.db.read)
+            .await
+            .ok()?
+            .into_iter()
+            .collect();
+        Some(tuner::InHome { name, accounts })
+    }
+
     /// Whether the account is one of the household's (in Home).
     async fn in_home(&self, user_id: i64) -> bool {
         sqlx::query_scalar::<_, bool>("SELECT home FROM users WHERE id = ?")

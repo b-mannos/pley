@@ -199,6 +199,10 @@ describes how they are made.
 
 ### Fixed
 
+- When someone takes the connection of the Live TV channel you watch, the
+  player stops at once and says why ("Live TV stopped", the person and
+  their channel only when you are both in the home), with Watch again,
+  where it played on until the stream ran out.
 - On Android TV, the rail's grey panel fades into the dark under its
   entries over the last of its slide closed, where it went at once at the
   end.

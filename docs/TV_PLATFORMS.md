@@ -147,10 +147,16 @@ shows it after Home, remembered on the TV so it shows at launch. On this TV:
 - **Leaving:** `DELETE /api/live/sessions/{id}` on Back, on each change of
   channel, and when the TV hides the app.
 - **Failures:** a player failure is retried twice (after 1 s, then 3 s).
-  The TV's player says nothing of a playlist gone (`410`), so a stall of
-  5 s asks the server why watching ended
+  The TV's player says nothing of a playlist gone (`410`), so a failure,
+  or a stall of 5 s, asks the server why watching ended
   (`GET /api/live/sessions/{id}/plan`) and shows its words; a stall of 20 s
   is a failure.
+- **Taken over:** the server's `live_taken_over` event for the channel
+  playing stops the player at once, before its stream breaks off, so it
+  isn't tuned again into a connection that is gone. The card says "Live TV
+  stopped" with the server's words, and Watch again in place of Try again.
+  The card stays when the app is hidden and shown again; nothing is tuned
+  until Watch again.
 
 ### Requests
 
@@ -435,6 +441,12 @@ Live channels start once 0.5 s is buffered, 1.5 s after a stall, as on
 Android; films the same from a server at home, and 1 s and 2 s from
 elsewhere. A film asks the server for its stream before its player
 screen is made, which takes the UI thread half a second the first time.
+
+Someone taking over a channel's connection (the server's
+`live_taken_over`) stops it at once, as on Android TV: the card says "Live
+TV stopped" with the server's words, Watch again first and focused. The
+card stays when the app is hidden and shown again; nothing is tuned until
+Watch again.
 
 | | |
 |---|---|

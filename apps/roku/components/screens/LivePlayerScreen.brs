@@ -91,6 +91,7 @@ sub init()
     m.cardLogo.observeField("loadStatus", "onLogos")
     m.bannerLogo.observeField("loadStatus", "onLogos")
     m.top.observeField("active", "onActive")
+    m.top.observeField("liveTakenOver", "onTakenOver")
 end sub
 
 sub onActive()
@@ -422,6 +423,35 @@ sub onStall()
     if m.stalling then showWaiting(true)
 end sub
 
+' Someone took over the connection of the channel playing (the server's
+' live_taken_over, sent before the stream breaks off, one for each viewer
+' of the channel; matched on the channel): it stops at once with the
+' server's words, said once, and isn't tuned again by itself. Said already
+' from the playlist's 410 without words, the event's words show instead.
+' Changing channel already (Up or Down pressed), the change goes on to the
+' channel chosen, with no notice of the one left.
+sub onTakenOver(event as object)
+    data = event.getData()
+    if m.channel = invalid or not m.started then return
+    if Int(httpNumber(data.channel_id, 0)) <> m.channel.id then return
+    stopped = liveStopped(data.message)
+    if m.trouble <> invalid
+        if m.trouble.kind = "stopped" and httpSentence(data.message) <> "" and m.trouble.message <> stopped.message then trouble(stopped)
+        return
+    end if
+    ' What is on its way belongs to watching that ended, and its session is
+    ' gone on the server: nothing to leave.
+    m.attempt = m.attempt + 1
+    abandonWatch()
+    m.sessionId = ""
+    m.playlist = ""
+    if m.zapTo <> invalid
+        m.video.control = "stop"
+        return
+    end if
+    trouble(stopped)
+end sub
+
 sub showWaiting(shown as boolean)
     if shown = m.waiting.visible then return
     m.waiting.visible = shown
@@ -577,7 +607,8 @@ sub onToastTimer()
 end sub
 
 ' A watching that didn't start or stopped: what the server said, with Try
-' again where it may help, Other channels, and Back.
+' again where it may help (Watch again when it stopped), Other channels,
+' and Back.
 sub trouble(problem as object)
     m.trouble = problem
     m.video.control = "stop"

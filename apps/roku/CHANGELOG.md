@@ -24,6 +24,10 @@ describes how they are made.
 
 - Search shows movies, shows and episodes first, then music, then Live
   TV, then people, the closest matches first in each.
+- A Live TV channel whose connection someone else takes over stops at
+  once and says why, under "Live TV stopped", with Watch again, where it
+  said so only once its stream had broken, with no way to watch again
+  but Other channels.
 - Search shows every title, person and Live TV channel it finds, up to 200
   of each, where it stopped at 40 titles and 12 people and channels.
 

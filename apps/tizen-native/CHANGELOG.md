@@ -276,6 +276,11 @@ It has no releases yet: it is built and installed by hand
   first.
 - Search shows movies, shows and episodes first, then music, then
   people, the closest matches first in each.
+- A Live TV channel whose connection someone else takes over stops at
+  once and says why, under "Live TV stopped", with Watch again, where it
+  said so only once its picture had stopped, after a video's "Playback was
+  stopped by the server's administrator." "Live TV stopped" stays when the
+  app is hidden and shown again, until Watch again.
 - The native app's rail has smaller entries and lists up to six
   libraries, where four or more went behind Libraries; nothing leaves the
   rail to make room for Live TV, Now Playing or a USB drive any more, and

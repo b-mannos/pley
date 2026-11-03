@@ -132,6 +132,13 @@ describes how they are made.
 
 ### Fixed
 
+- When someone takes the connection of the Live TV channel you watch, your
+  players stop at once and say why ("Live TV stopped"), with Watch again,
+  in the web app and the apps, where they used to play on until the
+  stream ran out. Who took it, and for which channel, is said only to
+  their own devices and, when you are both in the home, to you; anyone
+  else is told only that the connection was needed. Someone starting the
+  channel you watch shares its connection and stops nothing.
 - Dolby Vision files whose container doesn't say they are Dolby Vision
   (some remuxes and older muxers leave that out) are found by what their
   frames carry. They are labelled Dolby Vision P8.1, P7 FEL and so on

@@ -10,6 +10,7 @@ import androidx.media3.datasource.HttpDataSource
 import app.pley.android.caps.CapsSnapshot
 import app.pley.android.model.BusyConnection
 import app.pley.android.model.LivePlan
+import app.pley.android.model.ServerEvent
 import app.pley.android.model.caps.ClientCaps
 import app.pley.android.network.ApiException
 import app.pley.android.testing.Fixtures
@@ -20,6 +21,7 @@ import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import org.junit.After
@@ -40,7 +42,8 @@ class LivePlaybackTest {
     private val scope = CoroutineScope(StandardTestDispatcher(scheduler) + SupervisorJob())
     private val live = FakeLiveTv()
     private val engines = mutableListOf<FakePlayerEngine>()
-    private val playback = LivePlayback(live, { FakePlayerEngine().also { engines += it } }, { "android-1" }, scope)
+    private val events = MutableSharedFlow<ServerEvent>(extraBufferCapacity = 8)
+    private val playback = LivePlayback(live, { FakePlayerEngine().also { engines += it } }, { "android-1" }, scope, events = events)
 
     @After
     fun close() {
@@ -269,6 +272,40 @@ class LivePlaybackTest {
     }
 
     @Test
+    fun `a connection taken over stops the channel at once and says why, without tuning again`() {
+        playback.tune(1)
+        settle()
+        engine().player.ready()
+        settle()
+
+        // Another channel's connection: nothing here.
+        events.tryEmit(ServerEvent.LiveTakenOver("other", 2, "Someone else needed this channel's connection to watch another channel."))
+        settle()
+        assertEquals(LivePhase.Playing, playback.state.value.phase)
+
+        val why = "Sam is watching Film Four now, on the connection this channel used."
+        events.tryEmit(ServerEvent.LiveTakenOver("stream-session", 1, why))
+        settle()
+        val failed = playback.state.value.phase as LivePhase.Failed
+        assertEquals(LiveTrouble(LiveTrouble.Kind.Stopped, why), failed.trouble)
+        assertTrue(failed.trouble.canRetry)
+
+        // The 410 and the stream's end that follow change nothing; gone at the server already: not left.
+        live.planFails = ApiException(410, "session_stopped", why)
+        engine().player.end()
+        events.tryEmit(ServerEvent.LiveTakenOver("live-1", 1, why))
+        scheduler.advanceTimeBy(LivePlayback.NEXT_RETRY_MS * 2)
+        settle()
+        assertEquals(failed, playback.state.value.phase)
+        assertEquals(listOf("watch 1 android-1"), live.sent)
+
+        // Watch again tunes it again.
+        playback.retry()
+        settle()
+        assertEquals(2, live.sent.count { it.startsWith("watch 1") })
+    }
+
+    @Test
     fun `a stall shows only once it has lasted`() {
         playback.tune(1)
         settle()
@@ -388,6 +425,35 @@ class LivePlaybackTest {
         settle()
         assertEquals("watch 3 android-1", live.sent.last())
         assertEquals(2, engines.size)
+    }
+
+    @Test
+    fun `a connection taken over stays stopped through the background, until watch again`() {
+        playback.tune(1)
+        settle()
+        engine().player.ready()
+        settle()
+        val why = "Sam is watching Film Four now, on the connection this channel used."
+        events.tryEmit(ServerEvent.LiveTakenOver("stream-session", 1, why))
+        settle()
+        val stopped = playback.state.value.phase
+
+        // The screen saver, the lock screen or Home, then back.
+        playback.stop()
+        settle()
+        assertTrue(engine().released)
+        assertNull(playback.engine.value)
+        playback.resume()
+        settle()
+        assertEquals(stopped, playback.state.value.phase)
+        assertEquals(LiveTrouble(LiveTrouble.Kind.Stopped, why), (playback.state.value.phase as LivePhase.Failed).trouble)
+        assertEquals(listOf("watch 1 android-1"), live.sent)
+
+        // Watch again tunes it again.
+        playback.retry()
+        settle()
+        assertEquals(2, live.sent.count { it.startsWith("watch 1") })
+        assertEquals(LivePhase.Tuning, playback.state.value.phase)
     }
 
     @Test

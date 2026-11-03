@@ -1353,3 +1353,19 @@ msgstr ""
 msgctxt "#30556"
 msgid "All dynamic ranges"
 msgstr ""
+
+msgctxt "#30557"
+msgid "Live TV stopped"
+msgstr ""
+
+msgctxt "#30558"
+msgid "This channel isn't being watched any more."
+msgstr ""
+
+msgctxt "#30559"
+msgid "Watch again"
+msgstr ""
+
+msgctxt "#30560"
+msgid "OK"
+msgstr ""

@@ -227,6 +227,8 @@ async fn start_watching(
     state.live.check_access(user).await?;
     // An app acts as a viewer, but whose connections it may take over goes by the account.
     let admin = user.is_admin || state.live.account_is_admin(user.id).await;
+    // Read as the take-over is asked for: who is in the home then is told who took their connection.
+    let home = if take_over.is_some() { state.live.home_now(user.id).await } else { None };
     let channel = state.live.channel(user, id).await?;
     let row = state.live.channel_row(id).await?;
     let (source_name, max_connections, user_agent) = state.live.source_of(&row).await?;
@@ -236,7 +238,7 @@ async fn start_watching(
         .watch(
             user,
             Tune { channel: &row, source_name, max_connections, user_agent },
-            WatchAs { client_id, kind, keyed, admin, take_over },
+            WatchAs { client_id, kind, keyed, admin, take_over, home },
         )
         .await?;
     state.live.watched(user.id, id).await;
@@ -299,7 +301,10 @@ pub async fn keyed_file(
     Path((key, file)): Path<(String, String)>,
 ) -> ApiResult<Response> {
     let gone = || AppError::SessionStopped(Some("this channel isn't being watched any more".into()));
-    let (session, user_id, grant) = state.live.tuners.by_media_key(&key).ok_or_else(gone)?;
+    let Some((session, user_id, grant)) = state.live.tuners.by_media_key(&key) else {
+        // Taken over: why, as the session's own address says.
+        return Err(state.live.tuners.ended_by_key(&key).map_or_else(gone, |why| AppError::SessionStopped(Some(why))));
+    };
     let mut user = AuthUser::load(&state.db, user_id).await?.ok_or_else(gone)?;
     if let Some(grant) = grant {
         // Signed out since: the key goes with the token.
