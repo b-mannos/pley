@@ -20,9 +20,10 @@ describes how they are made.
   no longer be read, the drive pulled out, says so with Try again, as the
   Android app does, also when it stands still after playing; one whose
   drive was pulled out while the TV showed Home says so and leaves.
-  Subtitle files saved as UTF-16 ("Unicode") read right, and a link that
-  leads off the drive isn't listed, played or read. When the rail has no
-  room left for the drive (Discover, Live TV and Now Playing there too),
+  Subtitle files saved as UTF-16 or UTF-32 ("Unicode"), or in Windows'
+  Western code page with its curly quotes and euro, read right, and a link
+  that leads off the drive isn't listed, played or read. When the rail has
+  no room left for the drive (Discover, Live TV and Now Playing there too),
   Playlists moves to the Libraries page, after the libraries.
 - The player's Info says the TV's network speed under How it plays,
   beside the server's Speed, as in the Samsung app: a video that stalls

@@ -34,7 +34,8 @@ describes how they are made.
   folder's path and lists the drive's folders and videos, sorted as a
   person sorts names, with where each video resumes, and a video plays in
   Pley's player with the subtitle files beside it (UTF-8, UTF-16 or
-  Latin-1), from where it stopped. A video whose picture never starts
+  UTF-32, or Windows' Western code page, its curly quotes and euro
+  included), from where it stopped. A video whose picture never starts
   says the TV doesn't play it; one that played and then stands still,
   that the drive may have been pulled out. An empty folder or no drive
   says so under an icon, with focus on the page, so the rail closes over
