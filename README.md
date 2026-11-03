@@ -29,12 +29,14 @@
 ## Apps
 
 Web, Windows, macOS, Linux, [Android](docs/ANDROID.md), [Kodi](docs/KODI.md),
-[Roku](docs/ROKU.md), [Samsung TV and LG TV](docs/TV_PLATFORMS.md).
+[Roku](docs/ROKU.md), [Samsung TV and LG TV](docs/TV_PLATFORMS.md). Jellyfin's
+apps work too, through the [Jellyfin-compatible API](docs/COMPATIBILITY.md).
 
 ## Install
 
 - [Docker](deploy/docker/README.md)
 - [Unraid](deploy/unraid/README.md)
+- [Synology](deploy/synology/README.md)
 - [Windows](deploy/windows/README.md)
 - [Linux and macOS](deploy/README.md)
 
@@ -42,7 +44,7 @@ Then [first start](docs/CONFIGURATION.md#first-start).
 
 ## Architecture
 
-![Architecture](docs/images/architecture.svg)
+![Pley's architecture: the apps talk to the server, which runs the transcoder, reads metadata sources and IPTV providers, sends requests to Radarr and Sonarr, and scans your media folders](docs/images/architecture.svg)
 
 ## Docs
 
@@ -51,7 +53,7 @@ Then [first start](docs/CONFIGURATION.md#first-start).
 [Quality](docs/QUALITY.md) ·
 [Storage](docs/STORAGE.md) ·
 [API](docs/API.md) ·
-[Compatibility API](docs/COMPATIBILITY.md) ·
+[Jellyfin-compatible API](docs/COMPATIBILITY.md) ·
 [Transcoder](docs/TRANSCODER.md) ·
 [Development](docs/DEVELOPMENT.md) ·
 [Releasing](docs/RELEASING.md) ·
