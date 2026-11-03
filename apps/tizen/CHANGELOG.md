@@ -77,6 +77,11 @@ describes how they are made.
   the sort, where they showed only when sorted by bitrate, and no longer a
   lower resolution (1080p, 720p).
 
+### Removed
+
+- The player's Back 10 seconds and Forward 10 seconds buttons. Left and
+  Right still seek.
+
 ### Fixed
 
 - Settings' Always start as no longer starts the TV as a profile with a

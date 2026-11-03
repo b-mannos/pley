@@ -8,6 +8,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Removed
+
+- The player's Back 10 seconds and Forward 10 seconds buttons. Left and
+  Right still seek.
+
 ## [0.1.3] - 2026-11-02
 
 ### Changed
