@@ -478,7 +478,8 @@ Home: the hero, the server's rows and the rail, and item pages: the hero
 and its buttons, seasons and episodes, Extras, Cast and More Like This,
 and the side panels; library pages (the chips and panels, the grid with
 the A to Z jump, Recommended and Collections) and the Libraries page;
-search (the field and the TV's keyboard, results in rows, recent
+search (the field and the TV's keyboard, results in rows, Live TV's
+channels in a row after People that play the one chosen, recent
 searches); people's pages (the photo, the name and a row per role); the
 rail's Collections and a collection's page, with Play and Shuffle; the
 watch history page; playlists (their covers, a playlist's page with

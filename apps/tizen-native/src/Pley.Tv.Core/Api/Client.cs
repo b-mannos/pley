@@ -99,7 +99,8 @@ public sealed record PlaylistDetail : Playlist
 {
     public IReadOnlyList<PlaylistEntry> Entries { get; init; } = new PlaylistEntry[0];
 }
-public sealed record SearchAnswer(IReadOnlyList<ItemSummary> Items, IReadOnlyList<PersonSummary>? People);
+/// <summary>Live TV's <see cref="Channels"/> (up to 12) by name, number or what's on, for those it's open to; none from a server without it.</summary>
+public sealed record SearchAnswer(IReadOnlyList<ItemSummary> Items, IReadOnlyList<PersonSummary>? People, IReadOnlyList<LiveChannel>? Channels = null);
 public sealed record CollectionRef(long Id, string Title);
 public sealed record ItemCollectionsAnswer(IReadOnlyList<CollectionRef> Collections);
 public sealed record AddedAnswer(long Added);

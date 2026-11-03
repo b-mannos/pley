@@ -195,6 +195,10 @@ It has no releases yet: it is built and installed by hand
   makes the video, and beside it "TV network speed", how fast it reaches
   the TV: a video that stalls with the server keeping up has a network
   that can't carry it.
+- The native app's search finds Live TV channels, as Android TV's does: by
+  name, number or what's on, in a Live TV row after People, each tile with
+  the channel's logo, number and what's on. OK plays the channel, changing
+  channel among every channel.
 - Signing in to the native app with a code says when the server requires
   two-step sign-in: the phone that approves the code sets it up for
   whoever hasn't.
