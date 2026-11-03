@@ -11,6 +11,10 @@ describes how they are made.
 
 ### Added
 
+- Streams say when their video carries no closed captions, so Apple TV
+  shows one Subtitles menu, not two. Files scanned before this say nothing
+  until they are scanned again; captions in a TV recording's frames are
+  found and still offered.
 - A Jellyfin-compatible API, for Jellyfin's apps and others built on its
   API: they sign in with Pley's accounts, browse the libraries, play files
   as they are or as HLS from Pley's transcoder, with subtitles and Skip

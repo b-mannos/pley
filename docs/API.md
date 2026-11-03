@@ -2331,7 +2331,7 @@ multivariant playlist can name it. A version 2 player sending
 #EXTM3U
 #EXT-X-VERSION:3
 #EXT-X-INDEPENDENT-SEGMENTS
-#EXT-X-STREAM-INF:BANDWIDTH=85293600,AVERAGE-BANDWIDTH=43050000,CODECS="hvc1.2.4.L153.B0,ec-3",SUPPLEMENTAL-CODECS="dvh1.08.06/db1p",RESOLUTION=3840x2160,FRAME-RATE=23.976,VIDEO-RANGE=PQ
+#EXT-X-STREAM-INF:BANDWIDTH=85293600,AVERAGE-BANDWIDTH=43050000,CODECS="hvc1.2.4.L153.B0,ec-3",SUPPLEMENTAL-CODECS="dvh1.08.06/db1p",RESOLUTION=3840x2160,FRAME-RATE=23.976,CLOSED-CAPTIONS=NONE,VIDEO-RANGE=PQ
 index.m3u8
 ```
 
@@ -2343,6 +2343,11 @@ index.m3u8
   (8.4, `HLG`) or `/db2g` (8.2, `SDR`), which Media3 turns into a
   `video/dolby-vision` track; profile 7 as `dvh1.07.LL`.
 - `VIDEO-RANGE` is `SDR`, `PQ` or `HLG`. `FRAME-RATE` has three decimals.
+- `CLOSED-CAPTIONS=NONE` when the probe found no CEA-608/708 captions in
+  the video. Captions in the frames (a TV recording's) survive copying and
+  encoding, so a video with them, or one probed before probes said, gets
+  nothing and players look for them. Without it, AVKit offers a captions
+  menu of its own beside the app's subtitles.
   `BANDWIDTH` is twice the copied video's average (discs peak about there),
   or the encoder's rate. TS segments are the same as `index.m3u8`'s.
 - Without `master_playlist` (and for every version 1 player, the web player
