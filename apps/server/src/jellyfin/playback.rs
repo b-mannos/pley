@@ -237,7 +237,9 @@ async fn playback_info(
         });
         let direct = direct_allowed && decision.method == Method::Direct && picture_subtitle.is_none();
         out.supports_direct_play = direct;
-        out.supports_direct_stream = direct || decision.method == Method::Remux;
+        // `/Videos/{id}/stream` sends the file as it is: what needs its
+        // sound or container changed goes through the HLS address.
+        out.supports_direct_stream = direct;
         if !direct {
             out.transcoding_url =
                 Some(transcoding_url(&jellyfin, &row, &out.id, &play_session, &client, &req, audio, picture_subtitle));
@@ -694,7 +696,8 @@ async fn subtitles_at(
 
 // ------------------------------------------------------------------ reports
 
-/// A player's report: where it is, paused or not, stopped.
+/// A player's report: where it is, paused or not, stopped. `starting` for
+/// the first, `/Sessions/Playing`.
 async fn report(
     state: &AppState,
     jellyfin: &Jellyfin,
@@ -702,19 +705,27 @@ async fn report(
     client: &Client,
     body: &Body,
     play_state: &str,
+    starting: bool,
 ) -> JfResult<()> {
     let Some(id) = body.str("ItemId") else { return Ok(()) };
     let row = visible_item(state, jellyfin, user, id).await?;
     if !dto::is_playable(&row.kind) {
         return Ok(());
     }
-    let position_ms = body.number("PositionTicks").unwrap_or(0).max(0) / TICKS_PER_MS;
+    let position = body.number("PositionTicks").map(|ticks| ticks.max(0) / TICKS_PER_MS);
+    let position_ms = position.unwrap_or(0);
     let play_state = if play_state == "playing" && body.flag("IsPaused") == Some(true) { "paused" } else { play_state };
     let duration = row.duration_ms.unwrap_or(0);
     let device = client.device.as_deref().or(client.client.as_deref());
-    let recorded =
-        catalog::record_progress(&state.db, &state.events, user.id, row.id, position_ms, duration, device, play_state)
-            .await?;
+    // A report without a place, or a start's at 0 (before the player has
+    // gone to where it resumes), leaves the resume point as it was.
+    let recorded = match position.filter(|ms| *ms > 0 || !starting) {
+        Some(ms) => {
+            catalog::record_progress(&state.db, &state.events, user.id, row.id, ms, duration, device, play_state)
+                .await?
+        }
+        None => catalog::Recorded::default(),
+    };
     if recorded.left_watchlist {
         state.events.send(ServerEvent::WatchlistChanged { user_id: user.id });
     }
@@ -772,7 +783,7 @@ async fn playing(
     JfUser { user, client }: JfUser,
     body: Body,
 ) -> JfResult<StatusCode> {
-    report(&state, &jellyfin, &user, &client, &body, "playing").await?;
+    report(&state, &jellyfin, &user, &client, &body, "playing", true).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -782,7 +793,7 @@ async fn progress(
     JfUser { user, client }: JfUser,
     body: Body,
 ) -> JfResult<StatusCode> {
-    report(&state, &jellyfin, &user, &client, &body, "playing").await?;
+    report(&state, &jellyfin, &user, &client, &body, "playing", false).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -792,7 +803,7 @@ async fn stopped(
     JfUser { user, client }: JfUser,
     body: Body,
 ) -> JfResult<StatusCode> {
-    report(&state, &jellyfin, &user, &client, &body, "stopped").await?;
+    report(&state, &jellyfin, &user, &client, &body, "stopped", false).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

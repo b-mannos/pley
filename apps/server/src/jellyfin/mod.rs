@@ -287,11 +287,17 @@ impl Q {
         self.0.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str()).filter(|v| !v.is_empty())
     }
 
-    /// A list: values separated by commas or `|`, as clients write them.
+    /// A list: values separated by commas or `|`, or the parameter repeated,
+    /// as clients write them.
     pub fn list(&self, name: &str) -> Vec<String> {
-        self.get(name)
-            .map(|v| v.split([',', '|']).map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect())
-            .unwrap_or_default()
+        self.0
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case(name))
+            .flat_map(|(_, v)| v.split([',', '|']))
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect()
     }
 
     pub fn flag(&self, name: &str) -> Option<bool> {

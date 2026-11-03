@@ -147,11 +147,11 @@ fn sort_of(q: &Q) -> String {
     for (i, field) in q.list("sortBy").iter().enumerate() {
         let key = match field.to_ascii_lowercase().as_str() {
             "sortname" | "name" => "titleSort",
-            "datecreated" => "addedAt",
+            "datecreated" | "datelastcontentadded" => "addedAt",
             "premieredate" => "originallyAvailableAt",
             "productionyear" => "year",
             "communityrating" | "criticrating" => "rating",
-            "dateplayed" | "datelastcontentadded" => "lastViewedAt",
+            "dateplayed" => "lastViewedAt",
             "playcount" => "viewCount",
             "runtime" => "duration",
             "indexnumber" | "parentindexnumber" | "airedepisodeorder" => "index",
@@ -234,34 +234,43 @@ async fn list_libraries(
     let page = page(q);
     let mut rows = Vec::new();
     let mut total = 0;
-    let several = libs.len() > 1;
-    // Each library's share of the page is among its first `start + size`.
-    let window = if several { Page { start: 0, size: page.size.map(|s| s + page.start) } } else { page };
-    let mut kinds_seen = 0;
-    for lib in libs {
-        for kind in kinds_in(lib, &wanted, recursive) {
-            kinds_seen += 1;
-            let mut pairs = filter_params(q, kind);
-            if let Some(ids) = restrict {
-                if ids.is_empty() {
-                    continue;
-                }
-                pairs.push(("id".into(), ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")));
+    let queries: Vec<(&LibraryRow, &'static str)> = libs
+        .iter()
+        .flat_map(|lib| kinds_in(lib, &wanted, recursive).into_iter().map(move |kind| (lib, kind)))
+        .collect();
+    let merged = queries.len() > 1;
+    let random = sort_of(q).contains("random");
+    // Each query's share of a merged page is among its first `start + size`;
+    // a random page is drawn from all of them.
+    let window = if random {
+        Page { start: 0, size: None }
+    } else if merged {
+        Page { start: 0, size: page.size.map(|s| s + page.start) }
+    } else {
+        page
+    };
+    for (lib, kind) in queries {
+        let mut pairs = filter_params(q, kind);
+        if let Some(ids) = restrict {
+            if ids.is_empty() {
+                continue;
             }
-            let params = Params(pairs);
-            let (found, count) = SectionQuery::new(lib.id, kind, &params).page(&state.db, user.id, &window).await?;
-            rows.extend(found);
-            total += count;
+            pairs.push(("id".into(), ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")));
         }
+        let params = Params(pairs);
+        let (found, count) = SectionQuery::new(lib.id, kind, &params).page(&state.db, user.id, &window).await?;
+        rows.extend(found);
+        total += count;
     }
-    if several || kinds_seen > 1 {
+    if random {
+        shuffle(&mut rows);
+    } else if merged {
         let sort = listing::parse_sort(Some(&sort_of(q)).filter(|s| !s.is_empty()).map(String::as_str));
         let bitrates = listing::bitrates_for(&state.db, &rows, &sort).await?;
         listing::sort_rows(&mut rows, &sort, &bitrates);
-        rows = rows.into_iter().skip(page.start).take(page.size.unwrap_or(usize::MAX)).collect();
     }
-    if sort_of(q).contains("random") {
-        shuffle(&mut rows);
+    if random || merged {
+        rows = rows.into_iter().skip(page.start).take(page.size.unwrap_or(usize::MAX)).collect();
     }
     Ok(Found { rows, total })
 }
@@ -408,12 +417,20 @@ fn asks_for_libraries(q: &Q) -> bool {
 }
 
 /// Collections and playlists, which `/Items` lists for `BoxSet` and
-/// `Playlist` (and clients show as their own rows).
+/// `Playlist` (and clients show as their own rows). Only when they are all
+/// that is asked for: a search, ids or other types go to the listing.
 async fn lists(state: &AppState, jellyfin: &Jellyfin, user: &AuthUser, q: &Q) -> JfResult<Option<(Vec<Item>, usize)>> {
     let types: Vec<String> = q.list("includeItemTypes").iter().map(|t| t.to_ascii_lowercase()).collect();
+    if types.is_empty()
+        || types.iter().any(|t| t != "boxset" && t != "playlist")
+        || q.get("searchTerm").is_some()
+        || q.get("ids").is_some()
+    {
+        return Ok(None);
+    }
     let page = page(q);
+    let mut items = Vec::new();
     if types.iter().any(|t| t == "boxset") {
-        let mut items = Vec::new();
         for lib in libraries(state, user).await? {
             if q.get("parentId").is_some_and(|p| jellyfin.ids.number(Kind::Library, p) != Some(lib.id)) {
                 continue;
@@ -435,32 +452,24 @@ async fn lists(state: &AppState, jellyfin: &Jellyfin, user: &AuthUser, q: &Q) ->
             }
         }
         items.sort_by(|a, b| a.sort_name.cmp(&b.sort_name));
-        let (items, total) = page.apply(items);
-        return Ok(Some((items, total)));
     }
     if types.iter().any(|t| t == "playlist") {
-        let items: Vec<Item> = crate::playlists::list(&state.db, user)
-            .await?
-            .into_iter()
-            .map(|p| {
-                list_item(
-                    jellyfin,
-                    Kind::Playlist,
-                    p.id,
-                    &p.title,
-                    "Playlist",
-                    p.item_count,
-                    p.updated_at,
-                    p.created_at,
-                    None,
-                    None,
-                )
-            })
-            .collect();
-        let (items, total) = page.apply(items);
-        return Ok(Some((items, total)));
+        items.extend(crate::playlists::list(&state.db, user).await?.into_iter().map(|p| {
+            list_item(
+                jellyfin,
+                Kind::Playlist,
+                p.id,
+                &p.title,
+                "Playlist",
+                p.item_count,
+                p.updated_at,
+                p.created_at,
+                None,
+                None,
+            )
+        }));
     }
-    Ok(None)
+    Ok(Some(page.apply(items)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -527,12 +536,13 @@ async fn items(
         return Ok(answer(items, total, start));
     }
     let (rows, total) = list(&state, &jellyfin, &user, &q).await?;
-    let items = dtos(&state, &jellyfin, &user, &rows, Fields::parse(q.get("fields"))).await?;
+    let items = dtos(&state, &jellyfin, &user, &rows, Fields::of(&q)).await?;
     Ok(answer(items, total, start))
 }
 
-/// `/Items/Latest`: the newest titles of a library, a bare list. Shows come
-/// as the episodes added, grouped by show unless `GroupItems=false`.
+/// `/Items/Latest`: the newest titles of a library, or of every library the
+/// user sees, a bare list: shows by their newest episode, as Pley's
+/// Recently Added has them.
 async fn latest(
     State(state): State<AppState>,
     Extension(jellyfin): Extension<Arc<Jellyfin>>,
@@ -556,9 +566,12 @@ async fn latest(
     for lib in &libs {
         rows.extend(catalog::recently_added(&state.db, user.id, lib.id, lib.kind().as_str(), limit).await?);
     }
-    rows.sort_by_key(|r| std::cmp::Reverse(r.added_at));
+    // One library's are in its order already; several are merged.
+    if libs.len() > 1 {
+        rows.sort_by_key(|r| std::cmp::Reverse(r.added_at));
+    }
     rows.truncate(limit as usize);
-    Ok(Json(dtos(&state, &jellyfin, &user, &rows, Fields::parse(q.get("fields"))).await?).into_response())
+    Ok(Json(dtos(&state, &jellyfin, &user, &rows, Fields::of(&q)).await?).into_response())
 }
 
 /// `/UserItems/Resume`: movies and episodes in progress.
@@ -586,7 +599,7 @@ async fn resume(
         .collect();
     let page = page(&q);
     let (rows, total) = page.apply(rows);
-    let items = dtos(&state, &jellyfin, &user, &rows, Fields::parse(q.get("fields"))).await?;
+    let items = dtos(&state, &jellyfin, &user, &rows, Fields::of(&q)).await?;
     Ok(answer(items, total, page.start))
 }
 
@@ -612,7 +625,7 @@ async fn next_up(
     };
     let rows: Vec<ItemRow> = rows.into_iter().filter(|r| libs.iter().any(|l| l.id == r.library_id)).collect();
     let total = rows.len();
-    let items = dtos(&state, &jellyfin, &user, &rows, Fields::parse(q.get("fields"))).await?;
+    let items = dtos(&state, &jellyfin, &user, &rows, Fields::of(&q)).await?;
     Ok(answer(items, total, 0))
 }
 
@@ -627,7 +640,7 @@ async fn seasons(
     let rows: Vec<ItemRow> =
         catalog::children(&state.db, user.id, show.id).await?.into_iter().filter(|r| r.kind == "season").collect();
     let total = rows.len();
-    let items = dtos(&state, &jellyfin, &user, &rows, Fields::parse(q.get("fields"))).await?;
+    let items = dtos(&state, &jellyfin, &user, &rows, Fields::of(&q)).await?;
     Ok(answer(items, total, 0))
 }
 
@@ -658,7 +671,7 @@ async fn episodes(
     }
     let page = page(&q);
     let (rows, total) = page.apply(rows);
-    let items = dtos(&state, &jellyfin, &user, &rows, Fields::parse(q.get("fields"))).await?;
+    let items = dtos(&state, &jellyfin, &user, &rows, Fields::of(&q)).await?;
     Ok(answer(items, total, page.start))
 }
 
@@ -689,7 +702,7 @@ async fn suggestions(
     rows.sort_by_key(|r| std::cmp::Reverse(r.added_at));
     rows.truncate(limit);
     let total = rows.len();
-    let items = dtos(&state, &jellyfin, &user, &rows, Fields::parse(q.get("fields"))).await?;
+    let items = dtos(&state, &jellyfin, &user, &rows, Fields::of(&q)).await?;
     Ok(answer(items, total, 0))
 }
 
@@ -806,7 +819,7 @@ async fn similar(
     let limit = q.number("limit").unwrap_or(12).clamp(1, 50) as usize;
     let rows = crate::related::related(&state.db, user.id, row.id, limit).await?;
     let total = rows.len();
-    let items = dtos(&state, &jellyfin, &user, &rows, Fields::parse(q.get("fields"))).await?;
+    let items = dtos(&state, &jellyfin, &user, &rows, Fields::of(&q)).await?;
     Ok(answer(items, total, 0))
 }
 
@@ -1024,7 +1037,7 @@ async fn artists(
         listing::sort_rows(&mut rows, &sort, &Default::default());
         rows = rows.into_iter().skip(page.start).take(page.size.unwrap_or(usize::MAX)).collect();
     }
-    let items = dtos(&state, &jellyfin, &user, &rows, Fields::parse(q.get("fields"))).await?;
+    let items = dtos(&state, &jellyfin, &user, &rows, Fields::of(&q)).await?;
     Ok(answer(items, total, page.start))
 }
 
@@ -1217,7 +1230,7 @@ async fn playlist_items(
     let (_, entries) = crate::playlists::get_rows(&state.db, &user, id).await?.ok_or(JfError::NotFound)?;
     let page = page(&q);
     let (rows, total) = page.apply(entries.into_iter().map(|(_, row)| row).collect());
-    let items = dtos(&state, &jellyfin, &user, &rows, Fields::parse(q.get("fields"))).await?;
+    let items = dtos(&state, &jellyfin, &user, &rows, Fields::of(&q)).await?;
     Ok(answer(items, total, page.start))
 }
 

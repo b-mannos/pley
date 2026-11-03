@@ -4,6 +4,8 @@
 
 mod common;
 
+use std::collections::HashSet;
+
 use axum::http::{Method, StatusCode, header};
 use futures::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -251,9 +253,29 @@ async fn libraries_list_with_filters_sorts_and_pages() {
     let tv = app.jf_library(w.tv);
     let recursive = app.jf_json(&format!("/Items?ParentId={tv}&IncludeItemTypes=Episode&Recursive=true"), admin).await;
     assert_eq!(recursive["TotalRecordCount"], json!(2));
+    // Several kinds of one library, merged, then a page of them; a list
+    // given as the parameter repeated too.
+    let mixed = format!("/Items?ParentId={tv}&IncludeItemTypes=Series,Episode&Recursive=true&SortBy=SortName");
+    let whole = jf_names(&app.jf_json(&mixed, admin).await);
+    assert_eq!(whole, ["Pilot", "Second", "Show"]);
+    let page = app.jf_json(&format!("{mixed}&StartIndex=1&Limit=2"), admin).await;
+    assert_eq!((jf_names(&page), &page["TotalRecordCount"]), (whole[1..].to_vec(), &json!(3)));
+    let repeated = format!("/Items?ParentId={tv}&IncludeItemTypes=Series&IncludeItemTypes=Episode&Recursive=true");
+    assert_eq!(app.jf_json(&repeated, admin).await["TotalRecordCount"], json!(3));
+    // A random pick is any of them, not the first in order.
+    let random = format!("/Items?ParentId={movies}&IncludeItemTypes=Movie&Recursive=true&SortBy=Random&Limit=1");
+    let mut picked = HashSet::new();
+    for _ in 0..40 {
+        let one = app.jf_json(&random, admin).await;
+        assert_eq!(one["TotalRecordCount"], json!(3));
+        picked.extend(jf_names(&one));
+    }
+    assert!(picked.len() > 1, "{picked:?}");
 
-    // Search.
+    // Search, and a search for titles and collections.
     assert_eq!(jf_names(&app.jf_json("/Items?SearchTerm=bravo&Recursive=true", admin).await), ["Bravo"]);
+    let with_boxsets = "/Items?SearchTerm=bravo&IncludeItemTypes=Movie,BoxSet&Recursive=true";
+    assert_eq!(jf_names(&app.jf_json(with_boxsets, admin).await), ["Bravo"]);
     let hints = app.jf_json("/Search/Hints?SearchTerm=alpha", admin).await;
     assert_eq!(hints["SearchHints"][0]["ItemId"], json!(app.jf_item(w.film)));
 }
@@ -414,6 +436,11 @@ async fn watch_state_favorites_and_ratings_are_pleys() {
     assert_eq!(jf_names(&resume), ["Alpha"]);
     assert_eq!(resume["Items"][0]["UserData"]["PlaybackPositionTicks"], json!(600_000_000_i64));
     assert_eq!(pley_state().await["position_ms"], json!(60_000));
+    // Starting again, before the player goes to the place: it stays.
+    for start in [json!({"ItemId": film}), json!({"ItemId": film, "PositionTicks": 0})] {
+        app.jf(Method::POST, "/Sessions/Playing", admin, Some(start)).await;
+        assert_eq!(pley_state().await["position_ms"], json!(60_000));
+    }
     let body = json!({"PlaybackPositionTicks": 0});
     let reset = app.jf(Method::POST, &format!("/UserItems/{film}/UserData"), admin, Some(body)).await;
     assert_eq!(reset.status, StatusCode::OK, "{}", reset.text());

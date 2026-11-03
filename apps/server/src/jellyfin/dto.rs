@@ -36,11 +36,11 @@ pub struct Fields {
 }
 
 impl Fields {
-    /// `Fields=Overview,Genres,…`, in any case.
-    pub fn parse(value: Option<&str>) -> Fields {
+    /// `Fields=Overview,Genres,…` (or `Fields` repeated), in any case.
+    pub fn of(q: &super::Q) -> Fields {
         let mut fields = Fields::default();
-        for name in value.unwrap_or_default().split(',') {
-            match name.trim().to_ascii_lowercase().as_str() {
+        for name in q.list("fields") {
+            match name.to_ascii_lowercase().as_str() {
                 "overview" => fields.overview = true,
                 "genres" => fields.genres = true,
                 "people" => fields.people = true,
@@ -393,7 +393,7 @@ impl Batch {
 }
 
 /// Which of `ids` are in the user's My List, Jellyfin's favorites.
-async fn favorites(db: &Db, user_id: i64, ids: &[i64]) -> sqlx::Result<std::collections::HashSet<i64>> {
+pub(super) async fn favorites(db: &Db, user_id: i64, ids: &[i64]) -> sqlx::Result<std::collections::HashSet<i64>> {
     let mut out = std::collections::HashSet::new();
     for chunk in ids.chunks(500) {
         let sql = format!(
@@ -875,12 +875,13 @@ fn codec_name(codec: &str) -> String {
     }
 }
 
-/// The file extension a text subtitle is served with.
+/// The file extension a text subtitle is served with: SubRip as it is, the
+/// rest as the WebVTT Pley makes of them (ASS and SSA too, their styles
+/// left out), as Jellyfin's address names what it delivers.
 pub fn subtitle_format(codec: &str) -> &'static str {
     match codec {
-        "ass" | "ssa" => "ass",
-        "webvtt" => "vtt",
-        _ => "srt",
+        "subrip" | "srt" => "srt",
+        _ => "vtt",
     }
 }
 

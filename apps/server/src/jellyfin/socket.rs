@@ -135,10 +135,13 @@ async fn translate(
         }
         ServerEvent::UserStateChanged { user_id, item_ids, .. } if *user_id == user.id => {
             let rows = crate::catalog::items_by_ids(&state.db, user.id, item_ids).await.ok()?;
+            let ids: Vec<i64> = rows.iter().map(|row| row.id).collect();
+            let favorites = super::dto::favorites(&state.db, user.id, &ids).await.ok()?;
             let list: Vec<Value> = rows
                 .iter()
                 .map(|row| {
-                    serde_json::to_value(super::dto::user_data(jellyfin, row, false, row.duration_ms))
+                    let favorite = favorites.contains(&row.id);
+                    serde_json::to_value(super::dto::user_data(jellyfin, row, favorite, row.duration_ms))
                         .unwrap_or_default()
                 })
                 .collect();
