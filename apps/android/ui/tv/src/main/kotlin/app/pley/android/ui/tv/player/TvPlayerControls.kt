@@ -80,7 +80,6 @@ import app.pley.android.designsystem.TvSafeArea
 import app.pley.android.designsystem.icon.Icon
 import app.pley.android.designsystem.icon.PleyIcon
 import app.pley.android.designsystem.icon.PleyIcons
-import app.pley.android.designsystem.icon.SkipIcon
 import app.pley.android.designsystem.image.Artwork
 import app.pley.android.designsystem.image.ArtworkImage
 import app.pley.android.model.MarkerKind
@@ -396,8 +395,8 @@ internal data class RowOptions(
 )
 
 /**
- * The control row, top y = 441 (design spec §2.7): Previous · −10 s ·
- * Play/Pause · +10 s · Next centred; Subtitles · Audio · Quality · Info at
+ * The control row, top y = 441 (design spec §2.7): Previous · Play/Pause ·
+ * Next centred; Subtitles · Audio · Quality · Info at
  * the right safe edge; Chapters, when the file has them, the sleep
  * timer and Speed at the left one. Up goes back to the scrubber. As in streaming
  * apps' players, the icons stand on the scrim alone until focused.
@@ -409,8 +408,6 @@ internal fun BoxScope.TvControlRow(
     ui: TvPlayerUi,
     alpha: State<Float>,
     onPlayPause: () -> Unit,
-    onBack10: () -> Unit,
-    onForward10: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
 ) {
@@ -420,7 +417,6 @@ internal fun BoxScope.TvControlRow(
     }
     // The 36 dp buttons sit this far down, so their centres line up with Play/Pause's.
     val beside = Modifier.padding(top = (PLAY_BUTTON - BUTTON) / 2).then(up)
-    val skipSeconds = TvPlayerText.seconds(TvSeeker.STEP_MS)
     Box(
         Modifier
             .align(Alignment.TopStart)
@@ -446,9 +442,6 @@ internal fun BoxScope.TvControlRow(
             if (options.previousNext) {
                 PlayerRoundButton(stringResource(R.string.tv_player_previous), PleyIcons.SkipBack, onPrevious, beside, ui, null, iconSize = TRANSPORT_ICON)
             }
-            PlayerRoundButton(stringResource(R.string.tv_player_back_10), onBack10, beside, ui, null) { tint ->
-                SkipIcon(forward = false, seconds = skipSeconds, size = TRANSPORT_ICON, tint = tint)
-            }
             PlayerRoundButton(
                 stringResource(if (playing) R.string.tv_player_pause else R.string.tv_player_play),
                 if (playing) PleyIcons.Pause else PleyIcons.Play,
@@ -459,9 +452,6 @@ internal fun BoxScope.TvControlRow(
                 size = PLAY_BUTTON,
                 iconSize = PLAY_ICON,
             )
-            PlayerRoundButton(stringResource(R.string.tv_player_forward_10), onForward10, beside, ui, null) { tint ->
-                SkipIcon(forward = true, seconds = skipSeconds, size = TRANSPORT_ICON, tint = tint)
-            }
             if (options.previousNext) {
                 PlayerRoundButton(stringResource(R.string.tv_player_next), PleyIcons.SkipForward, onNext, beside, ui, null, iconSize = TRANSPORT_ICON)
             }
