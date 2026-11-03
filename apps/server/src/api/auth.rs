@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::accounts::{self, UserDto};
 use crate::auth::grants::APP_TOKEN_PREFIX;
 use crate::auth::{
-    AuthUser, ClientIp, CurrentToken, PeerIp, SourceIp, clear_cookie, dummy_password_hash, forwarded_https,
-    hash_password, hash_token, session_cookie, token_from_parts, validate_password, validate_username, verify_password,
+    AuthUser, ClientIp, CurrentToken, PeerIp, SourceIp, clear_cookie, compatibility, dummy_password_hash,
+    forwarded_https, hash_password, hash_token, session_cookie, token_from_parts, validate_password, validate_username,
+    verify_password,
 };
 use crate::error::{ApiResult, AppError};
 use crate::state::AppState;
@@ -256,6 +257,9 @@ pub async fn setup(
     login_response(&state, id, &headers, ip.as_deref(), None).await
 }
 
+/// Signs in with a password (and its second step) for a session. Other
+/// apps sign in through the Jellyfin-compatible API for a token of their
+/// own ([`crate::jellyfin`]).
 pub async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -263,7 +267,28 @@ pub async fn login(
     SourceIp(source): SourceIp,
     Json(body): Json<Credentials>,
 ) -> ApiResult<Response> {
-    let username = body.username.trim().to_owned();
+    let account = check_password(&state, &body.username, body.password, source).await?;
+    let recovery_codes =
+        second_step(&state, account.id, &account.username, body.code.as_deref(), body.setup_id.as_deref()).await?;
+    login_response(&state, account.id, &headers, ip.as_deref(), recovery_codes).await
+}
+
+/// An account whose password was right.
+pub(crate) struct PasswordChecked {
+    pub id: i64,
+    pub username: String,
+}
+
+/// The first step of every sign-in with a password: attempts are limited
+/// per name and address, and a disabled account is refused once its
+/// password is right. The second step ([`second_step`]) is the caller's.
+pub(crate) async fn check_password(
+    state: &AppState,
+    username: &str,
+    password: String,
+    source: Option<std::net::IpAddr>,
+) -> ApiResult<PasswordChecked> {
+    let username = username.trim().to_owned();
     // No account has a longer name (`validate_username`): nothing to check,
     // and nothing to count and keep.
     if username.chars().count() > 64 {
@@ -280,11 +305,11 @@ pub async fn login(
     // real check against a stand-in hash takes as long as one against a
     // user's, so neither can be told apart by timing.
     let Some((id, hash, disabled)) = row.filter(|(_, hash, _)| !hash.starts_with('!')) else {
-        verify_password(body.password, dummy_password_hash().await).await?;
+        verify_password(password, dummy_password_hash().await).await?;
         attempt.failed();
         return Err(AppError::Unauthorized);
     };
-    if !verify_password(body.password, hash).await? {
+    if !verify_password(password, hash).await? {
         attempt.failed();
         return Err(AppError::Unauthorized);
     }
@@ -292,8 +317,7 @@ pub async fn login(
     if disabled {
         return Err(AppError::forbidden("this account is disabled"));
     }
-    let recovery_codes = second_step(&state, id, &username, body.code.as_deref(), body.setup_id.as_deref()).await?;
-    login_response(&state, id, &headers, ip.as_deref(), recovery_codes).await
+    Ok(PasswordChecked { id, username })
 }
 
 /// Checks that the signed-in user may change how their account signs in:
@@ -323,6 +347,10 @@ pub(crate) async fn confirm_password(state: &AppState, user: &AuthUser, password
 pub async fn logout(State(state): State<AppState>, request: axum::extract::Request) -> Response {
     let (parts, _) = request.into_parts();
     match token_from_parts(&parts) {
+        // A tool signing out ends its compatibility token.
+        Some(token) if token.starts_with(compatibility::PREFIX) => {
+            let _ = state.auth.end_compatibility_token_of(&token).await;
+        }
         // An app signing out ends its grant, wherever it put its token.
         Some(token) if token.starts_with(APP_TOKEN_PREFIX) => {
             state.auth.revoke_app_token(&token).await;

@@ -142,9 +142,10 @@ containers and SSH sessions never show it; `--no-tray` turns it off.
 
 ## Firewall and remote access
 
-- **TCP 7539** is the only port that must be reachable. The compatibility
-  API answers there too, unless you give it a port of its own
-  (`--plex-bind 0.0.0.0:32400`, or **Settings → Network**).
+- **TCP 7539** is the only port that must be reachable. The
+  Jellyfin-compatible API is off until you turn it on in **Settings →
+  Network**, where it answers on this port or one of its own (Jellyfin's is
+  8096; `--jellyfin-bind 0.0.0.0:8096` on the command line).
 - **UDP 7539** lets the apps find servers on the local network. Allow it, or
   type the server's address in the app. A container answers only on the
   host's network (`--network host`, or Unraid's `br0`).
