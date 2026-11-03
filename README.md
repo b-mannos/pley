@@ -7,7 +7,7 @@
 <p align="center">
 <a href="https://github.com/pley-media-server/pley/releases/latest"><img src="https://img.shields.io/github/v/release/pley-media-server/pley?display_name=release&label=release" alt="Latest release"></a>
 <a href="https://github.com/pley-media-server/pley/pkgs/container/pley"><img src="https://img.shields.io/badge/docker-ghcr.io-2496ED?logo=docker&logoColor=white" alt="Docker image"></a>
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License: AGPL-3.0"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-orange" alt="License: AGPL-3.0"></a>
 </p>
 
 > [!WARNING]
