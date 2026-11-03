@@ -50,8 +50,8 @@ It has no releases yet: it is built and installed by hand
 - Playing in the native app: a session on the server with the TV's
   capabilities, as the web Samsung app reports them, on the TV's own
   player; Left and Right seek 10 s, presses adding up and a held key
-  scrubbing; the title, clock, scrubber and Back 10 · Play/Pause ·
-  Forward 10 over a scrim; where it stopped goes to the server.
+  scrubbing; the title, clock, scrubber and Play/Pause over a scrim; where
+  it stopped goes to the server.
 - Search in the native app, from the rail: OK on the field opens the TV's
   keyboard, results come as you type, in rows (People, Movies, Shows,
   Seasons, Episodes, Artists, Albums, Tracks), and the last 10 searches

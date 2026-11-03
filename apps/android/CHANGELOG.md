@@ -13,6 +13,11 @@ describes how they are made.
 - Search shows movies, shows and episodes first, then music, then Live
   TV, then people, the closest matches first in each.
 
+### Removed
+
+- The player's −10 s and +10 s buttons, on phones and on TV. Double-tapping
+  the sides of the picture (phones) and Left and Right (TV) still seek.
+
 ## [0.1.4] - 2026-11-02
 
 ### Changed

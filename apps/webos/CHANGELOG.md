@@ -13,6 +13,11 @@ describes how they are made.
 - Search shows movies, shows and episodes first, then music, then Live
   TV, then people, the closest matches first in each.
 
+### Removed
+
+- The player's Back 10 seconds and Forward 10 seconds buttons. Left and
+  Right still seek.
+
 ## [0.1.3] - 2026-11-02
 
 ### Changed
