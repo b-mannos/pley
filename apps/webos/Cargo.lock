@@ -1260,7 +1260,7 @@ dependencies = [
 
 [[package]]
 name = "pley-lg"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "libc",
  "pley-base",
