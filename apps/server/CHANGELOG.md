@@ -28,6 +28,9 @@ describes how they are made.
 
 ### Changed
 
+- Updating the Windows service no longer takes minutes on a large library:
+  Setup no longer sets the permissions of every file in the data
+  folder again when the folder is set up already.
 - The server's id is kept in `server-id` in the data folder. An older
   version's `plex-machine-id` is renamed to it on start, so apps keep
   recognising the server.
