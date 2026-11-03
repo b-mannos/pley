@@ -11,8 +11,6 @@ import {
   Minimize,
   Pause,
   Play,
-  RotateCcw,
-  RotateCw,
   ServerOff,
   SkipForward,
   TriangleAlert,
@@ -1957,24 +1955,6 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             className="flex size-11 items-center justify-center rounded-full transition hover:bg-white/15"
           >
             {playing ? <Pause className="size-6 fill-current" /> : <Play className="ml-0.5 size-6 fill-current" />}
-          </button>
-          <button
-            type="button"
-            aria-label="Back 10 seconds"
-            title="Back 10 s (←)"
-            onClick={() => seekBy(-10)}
-            className="flex size-10 items-center justify-center rounded-full transition hover:bg-white/15"
-          >
-            <RotateCcw className="size-5" />
-          </button>
-          <button
-            type="button"
-            aria-label="Forward 30 seconds"
-            title="Forward 30 s"
-            onClick={() => seekBy(30)}
-            className="flex size-10 items-center justify-center rounded-full transition hover:bg-white/15"
-          >
-            <RotateCw className="size-5" />
           </button>
           {/* A phone's own buttons set the volume: the row keeps its room for the rest. */}
           <div className="group/vol hidden items-center sm:flex">

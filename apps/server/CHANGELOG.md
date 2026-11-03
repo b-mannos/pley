@@ -41,6 +41,8 @@ describes how they are made.
   installer no longer asks about it, and Docker's `compose.plex.yaml` is
   `compose.jellyfin.yaml`. Smart collections' `guid` filter no longer takes
   `plex://` guids.
+- The web player's Back 10 seconds and Forward 30 seconds buttons. Left
+  and Right (or J and L) still seek 10 s.
 
 ## [0.1.4] - 2026-11-02
 
