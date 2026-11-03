@@ -474,7 +474,13 @@ internal fun BoxScope.TvControlRow(
     }
 }
 
-/** A [PlayerRoundButton] showing [icon], [iconSize] square. */
+/**
+ * A button of the player (design spec §2.5): its [icon], [iconSize] square,
+ * alone on the scrim, in fg; focused, the accent fills a
+ * [control][PleyShape.Control] square behind it, 1.08 larger, and its label
+ * fades in 8 dp below (always there for screen readers). [target] names it
+ * for focus requests.
+ */
 @Composable
 private fun PlayerRoundButton(
     label: String,
@@ -485,26 +491,6 @@ private fun PlayerRoundButton(
     target: PlayerFocus?,
     size: Dp = BUTTON,
     iconSize: Dp = ICON,
-) = PlayerRoundButton(label, onClick, modifier, ui, target, size) { tint ->
-    Icon(icon, contentDescription = null, size = iconSize, tint = tint)
-}
-
-/**
- * A button of the player (design spec §2.5): its [glyph] alone on the
- * scrim, in fg; focused, the accent fills a [control][PleyShape.Control]
- * square behind it, 1.08 larger, and its label fades in 8 dp below (always
- * there for screen readers). [target] names it for focus requests; [glyph]
- * is drawn in the colour it is given.
- */
-@Composable
-private fun PlayerRoundButton(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier,
-    ui: TvPlayerUi,
-    target: PlayerFocus?,
-    size: Dp = BUTTON,
-    glyph: @Composable (Color) -> Unit,
 ) {
     val interactions = remember { MutableInteractionSource() }
     val focused by interactions.collectIsFocusedAsState()
@@ -537,7 +523,7 @@ private fun PlayerRoundButton(
             glow = IconButtonDefaults.glow(Glow.None, Glow.None, Glow.None),
             border = IconButtonDefaults.border(Border.None, Border.None, Border.None, Border.None, Border.None),
         ) {
-            glyph(androidx.tv.material3.LocalContentColor.current)
+            Icon(icon, contentDescription = null, size = iconSize, tint = androidx.tv.material3.LocalContentColor.current)
         }
         BasicText(
             label,
