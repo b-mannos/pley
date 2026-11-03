@@ -270,6 +270,13 @@ It has no releases yet: it is built and installed by hand
 
 ### Fixed
 
+- On an item page in the native app, Details moves as on Android TV: a
+  version or Media info moves it up only as far as keeps that row on the
+  screen, nothing of it shows under the title and summary, Down reads on
+  through open Media info a step at a time to its end, where a file's
+  streams taller than the screen were cut off, and it comes back down
+  under More Like This when focus goes up, where it had stayed over the
+  row's titles.
 - An empty USB drive's page keeps focus, so the rail closes rather than
   covering its message, which shows under a folder icon; at the drive's top,
   the line under the title is the folder's path ("/Films/2019"), and "/"
