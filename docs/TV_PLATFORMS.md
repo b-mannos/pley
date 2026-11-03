@@ -269,12 +269,12 @@ bun run --cwd apps/webos build       # only an app's dist/ (apps/tizen too); --d
   Tizen Studio is deprecated), found through `TIZEN_STUDIO` or `tizen` on
   the PATH, and a security profile named by `PLEY_TIZEN_PROFILE` (default
   `pley-dev`).
-- **Icons:** `bun scripts/render-icons.mjs` draws Samsung's 512×423 icons,
-  LG's 80 and 130 px icons and LG's 1920×1080 launch picture. One TV may
-  have more than one of Pley's Samsung apps, so the native app's icon is
-  plain, the web app's says WEB on blue, and a profiling build of the native
-  app (an app of its own, `app.pley.tizen.debug`, "Pley (debug)") says DEBUG
-  on yellow.
+- **Icons:** `bun scripts/render-icons.mjs` draws Samsung's icons, square
+  as the TV's menu draws its other apps, LG's 80 and 130 px icons and LG's
+  1920×1080 launch picture. One TV may have more than one of Pley's Samsung
+  apps, so the native app's icon is plain, the web app's says WEB on blue,
+  and a profiling build of the native app (an app of its own,
+  `app.pley.tizen.debug`, "Pley (debug)") says DEBUG on yellow.
 
 ### Testing without a TV
 
@@ -471,13 +471,15 @@ which stays the Samsung app until the native one has its features. So far
 it has the Android TV app's "Choose your server" screen (servers found on
 the network, an address typed on the TV's keyboard, forgetting a server),
 its sign-in with a code and a QR code (the server proving itself before
-a token goes, [Telling servers apart](API.md#telling-servers-apart)),
-Who's watching? with PINs, and
+a token goes, [Telling servers apart](API.md#telling-servers-apart), and
+saying when the server requires two-step sign-in, which the approving
+phone sets up), Who's watching? with PINs, and
 Home: the hero, the server's rows and the rail, and item pages: the hero
 and its buttons, seasons and episodes, Extras, Cast and More Like This,
 and the side panels; library pages (the chips and panels, the grid with
 the A to Z jump, Recommended and Collections) and the Libraries page;
-search (the field and the TV's keyboard, results in rows, recent
+search (the field and the TV's keyboard, results in rows, Live TV's
+channels in a row before People that play the one chosen, recent
 searches); people's pages (the photo, the name and a row per role); the
 rail's Collections and a collection's page, with Play and Shuffle; the
 watch history page; playlists (their covers, a playlist's page with
@@ -504,7 +506,10 @@ for a few seconds as each item begins, text subtitles in Settings' look
 DVB) decoded from the server's `.mks` and drawn as the web app draws them,
 burned in by the server only when it can't make that file, the side
 panels (Subtitles with Sync and the subtitles' look, Audio, Quality, the
-sleep timer, Speed where the TV's player has other speeds, and Info),
+sleep timer, Speed where the TV's player has other speeds, and Info,
+where the server's speed sits beside the TV's network speed: the fastest
+second of the last ten, from the bytes the TV's network received, since
+Tizen's player doesn't say how fast it downloads),
 Chapters opening the chapters' cards, Skip Intro and Skip Credits (over the scrubber, where Up
 reaches them, as on Android TV), Up
 Next (the next episode, or the next in a playlist or collection),
