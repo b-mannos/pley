@@ -31,6 +31,11 @@ describes how they are made.
 - The server's id is kept in `server-id` in the data folder. An older
   version's `plex-machine-id` is renamed to it on start, so apps keep
   recognising the server.
+- Search puts the closest matches first: a title, person or Live TV
+  channel named exactly what was typed, then those whose name begins with
+  it, then the rest.
+- The web app's search shows movies, shows and episodes first, then
+  music, then Live TV, then people.
 
 ### Removed
 

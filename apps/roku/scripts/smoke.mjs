@@ -845,10 +845,13 @@ async function walk() {
     await press("lit_o");
   });
   shoot("search");
-  // The results in rows by kind, People first: Right past the keyboard's
-  // last column reaches them, and OK on the first opens their page.
+  // The results in rows by kind, People last, just above Discover: Right
+  // past the keyboard's last column reaches them, and OK on the person
+  // opens their page.
   since = mark();
   await press("right", 7);
+  await press("down", 12); // Discover, the last row
+  await press("up"); // People
   await press("select");
   await waitFor(/^GET \/api\/people\/11$/, since, "the person found, first of the results");
   shoot("search-person");
@@ -1341,7 +1344,7 @@ const checks = [
   ["played the track OK was on under an album's second disc", music.disc === 5203],
   ["played a playlist from its top, the next entry to come", fixture.playbacks.some((p) => p.item === 101)],
   ["searched", asked(/^GET \/api\/search\?/)],
-  ["showed search's results in rows by kind, People first, a person's page opened from it", asked(/^GET \/api\/people\/11$/)],
+  ["showed search's results in rows by kind, People last, a person's page opened from it", asked(/^GET \/api\/people\/11$/)],
   ["searched a recent search again from the list shown before typing", searched.again],
   ["kept the recent searches on the Roku for the server and profile", registry !== null && /searches\.http[^"]*\|1","\[\\"mo\\"\]"/.test(JSON.stringify([...registry]))],
   ["showed Live TV's guide, its programmes for the channels in view", fixture.liveGuides.length > 0 && fixture.liveGuides.every((g) => g.ids.length > 0 && g.ids.length <= 50)],
