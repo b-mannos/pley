@@ -12,7 +12,7 @@ namespace Pley.Tv.Tizen.Screens;
 /// Search on TV (design spec §4.5; the Android app's TvSearchScreen): the field at the top, 520
 /// wide, with initial focus; OK opens the TV's keyboard, and Back or its Search key closes it.
 /// Before typing, the recent searches as chips. While typing (250 ms after the last key), the
-/// results as rows, grouped (People, Movies, Shows, Seasons, Episodes, Artists, Albums, Tracks),
+/// results as rows, grouped (Movies, Shows, Seasons, Episodes, Artists, Albums, Tracks, People),
 /// the first header at y = 96. Down from the field goes into the rows, the chips or Retry, Up from
 /// the first row back to it; Left goes to the rail.
 /// </summary>

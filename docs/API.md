@@ -1594,8 +1594,20 @@ WebVTT file named `.srt` is taken as WebVTT). Its language is kept as ISO
 - **Home** hubs, empty ones left out: `continue_watching` (in progress and
   next up), then `my_list` ("My List", its 20 newest), then
   `recently_added:<library_id>` per library in the libraries' order.
-- **Search**: items ranked by relevance; people whose name has words
-  starting with each word of `q`, most credited first.
+- **Search**: the closest matches first in each of `items`, `people` and
+  `channels`: a name that is the whole of `q` (case and punctuation aside;
+  a title's sort title counts, so "office" is the whole of "The Office"),
+  then names that begin with it, then a word of the name onwards, then the
+  rest. Items have words in their title or original title starting with
+  each word of `q`; when more match than `limit`, the closest are kept,
+  movies, shows and artists before their seasons, episodes, albums and
+  tracks among equals, and they come by kind: movies, shows, seasons,
+  episodes, artists, albums, tracks. People have words starting with each
+  word of `q`, the most credited first among equals. Channels match by
+  name, the beginning of their number or the title of what's on; a number
+  typed in full counts as the whole name, a region before the name ("UK|
+  News") doesn't count, and those found only by their number or what's on
+  come last. Apps show the titles first, then Live TV, then people.
 
 ### Continue Watching
 
@@ -3346,7 +3358,7 @@ household) or `admins`; profiles with an age limit only with `age_limited`;
 | GET | `/api/live` | `library` | `{ available, allowed, channels, sources, recent: Id[] }`: whether to show Live TV (`allowed`: open to this account; `available`: and it has channels), the channel count, the sources set up (administrators; else 0) and the 12 channels watched last, newest first |
 | GET | `/api/live/channels` | `library` | `LiveChannel[]`, the shown channels by number, each with what's on now and next |
 | GET | `/api/live/groups` | `library` | `{ total, favorites, recent, groups: LiveGroup[] }`: the groups in the lineup's order, and how many channels in all, marked and watched lately |
-| GET | `/api/live/browse` | `library` | `?category=all\|favorites\|recent\|group&group=&q=&offset=&limit=&around=` → `{ total, offset, channels: LiveChannel[] }`: a page (100 by default, 500 at most) of a category's channels matching `q` (a name, a number's beginning, or the title of what's on); `around` gives the page with that channel in it |
+| GET | `/api/live/browse` | `library` | `?category=all\|favorites\|recent\|group&group=&q=&offset=&limit=&around=` → `{ total, offset, channels: LiveChannel[] }`: a page (100 by default, 500 at most) of a category's channels matching `q` (a name, a number's beginning, or the title of what's on), the closest first as in search (`recent` keeps the order they were watched); `around` gives the page with that channel in it |
 | GET | `/api/live/channels/{id}` | `library` | `LiveChannel` |
 | GET | `/api/live/channels/{id}/logo` | `library` | the logo, kept a week at a time (no larger than 1 MB and 400 px; one drawn dark on a see-through background is made light, for dark screens); `?w=` resizes it, a see-through one staying see-through |
 | GET | `/api/live/channels/{id}/programs/{start}/image` | `library` | a programme's picture; `?w=` resizes it |

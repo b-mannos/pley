@@ -1005,7 +1005,8 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(len(page.rows.rows), 6, "a row of each kind the libraries have")
         work, then, _ = later.pop()
         then(work())
-        self.assertEqual([row["key"] for row in page.rows.rows][-1], "tmdb")
+        # The titles' rows, then Live TV's and people's, then Discover.
+        self.assertEqual([row["key"] for row in page.rows.rows][-3:], ["channels", "people", "tmdb"])
         self.assertEqual(win.made[L.slot_list(L.SEARCH_ROWS, 6, "poster")].items[0].label, "Saltwind 2")
 
     def test_search_when_the_libraries_have_nothing(self):

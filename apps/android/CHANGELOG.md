@@ -8,6 +8,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- Search shows movies, shows and episodes first, then music, then Live
+  TV, then people, the closest matches first in each.
+
 ### Removed
 
 - The player's −10 s and +10 s buttons, on phones and on TV. Double-tapping

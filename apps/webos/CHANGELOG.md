@@ -8,6 +8,11 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Changed
+
+- Search shows movies, shows and episodes first, then music, then Live
+  TV, then people, the closest matches first in each.
+
 ### Removed
 
 - The player's Back 10 seconds and Forward 10 seconds buttons. Left and

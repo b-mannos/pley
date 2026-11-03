@@ -250,6 +250,8 @@ It has no releases yet: it is built and installed by hand
   playback starting or a seek, where they could take up to a minute: the
   TV tells the server where it plays, and the server reads those around it
   first.
+- Search shows movies, shows and episodes first, then music, then
+  people, the closest matches first in each.
 
 ### Fixed
 
