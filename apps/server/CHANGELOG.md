@@ -11,6 +11,13 @@ describes how they are made.
 
 ### Added
 
+- Pley's apps for iPhone and iPad, Apple TV and Mac can sign in, as
+  "Pley for iPhone and iPad", "Pley for Apple TV" and "Pley for Mac". The
+  Apple TV signs in with a code, as the other TVs do; an iPhone or iPad
+  may too.
+- Devices and watch history name Pley's Apple apps by device: Pley for
+  iPhone, iPad, Mac or Apple TV.
+- A player may say it runs on a desktop (`form: "desktop"`).
 - The server can announce itself on the local network by Bonjour
   (`_pley._tcp`), with its id, name and version, so Apple's devices find it
   without its address. It is off until turned on in Settings → Network
