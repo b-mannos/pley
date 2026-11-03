@@ -972,7 +972,7 @@ sealed class PlayerScreen : Sheet
         Layout();
     }
 
-    /// <summary>Back and Forward: a step of 10 s each, as Left and Right; fast forward and rewind 30 s. They seek without waiting for OK.</summary>
+    /// <summary>Fast forward and rewind: 30 s, three of Left and Right's steps. They seek without waiting for OK.</summary>
     void Jump(int steps)
     {
         if (Busy) return;
