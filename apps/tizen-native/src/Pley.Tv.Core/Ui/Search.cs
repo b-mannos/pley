@@ -12,11 +12,10 @@ namespace Pley.Tv.Core.Ui;
 
 /// <summary>
 /// The groups results come in, in the order they show (the web's SearchPage; the Android app's
-/// SearchGroupKind): people first, then each kind of item.
+/// SearchGroupKind): each kind of item, then people.
 /// </summary>
 public enum SearchGroupKind
 {
-    People,
     Movies,
     Shows,
     Seasons,
@@ -24,6 +23,7 @@ public enum SearchGroupKind
     Artists,
     Albums,
     Tracks,
+    People,
 }
 
 /// <summary>One group of results: its tiles, and the ids beside them.</summary>
@@ -162,15 +162,13 @@ public static class SearchRules
     };
 
     /// <summary>
-    /// <paramref name="answer"/> in its groups and the groups' order (people, movies, shows,
-    /// seasons, episodes, artists, albums, tracks), each keeping the server's order of relevance;
+    /// <paramref name="answer"/> in its groups and the groups' order (movies, shows, seasons,
+    /// episodes, artists, albums, tracks, people), each keeping the server's order of relevance;
     /// empty groups left out. Items of other kinds (extras) aren't shown, as on the web.
     /// </summary>
     public static IReadOnlyList<SearchGroup> Groups(SearchAnswer answer, string origin)
     {
         var groups = new List<SearchGroup>();
-        var people = answer.People ?? Array.Empty<PersonSummary>();
-        if (people.Count > 0) groups.Add(new SearchGroup(SearchGroupKind.People, people.Select(p => PersonTile(p, origin)).ToList(), people.Select(p => p.Id).ToList()));
         foreach (SearchGroupKind group in Enum.GetValues(typeof(SearchGroupKind)))
         {
             if (KindOf(group) is not { } kind) continue;
@@ -179,6 +177,8 @@ public static class SearchRules
             var tileKind = TileKindOf(group);
             groups.Add(new SearchGroup(group, items.Select(i => TileModel.Of(i, tileKind, origin)).ToList(), items.Select(i => i.Id).ToList()));
         }
+        var people = answer.People ?? Array.Empty<PersonSummary>();
+        if (people.Count > 0) groups.Add(new SearchGroup(SearchGroupKind.People, people.Select(p => PersonTile(p, origin)).ToList(), people.Select(p => p.Id).ToList()));
         return groups;
     }
 
@@ -215,8 +215,8 @@ public static class SearchRules
 /// Search (apps/web/src/pages/SearchPage.tsx; the Android app's SearchViewModel, as the TV uses
 /// it). What is typed is asked for once typing has paused 250 ms, and only the latest query's
 /// answer counts: a newer one gives up a request still on its way. The results already shown
-/// stay while the next ones load. Results come in groups: People, Movies, Shows, Seasons,
-/// Episodes, Artists, Albums, Tracks. A query is kept among the profile's last 10 searches when
+/// stay while the next ones load. Results come in groups: Movies, Shows, Seasons, Episodes,
+/// Artists, Albums, Tracks, People, the server's closest matches first in each. A query is kept among the profile's last 10 searches when
 /// it is submitted or one of its results is opened.
 ///
 /// The TV types with the system's keyboard over the field: the screen hands each change of the

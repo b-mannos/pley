@@ -76,6 +76,8 @@ describes how they are made.
 - A library's posters show 4K and the dynamic range (DV, HDR10) whatever
   the sort, where they showed only when sorted by bitrate, and no longer a
   lower resolution (1080p, 720p).
+- Search shows movies, shows and episodes first, then music, then Live
+  TV, then people, the closest matches first in each.
 
 ### Fixed
 

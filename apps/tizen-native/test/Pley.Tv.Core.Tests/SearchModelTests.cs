@@ -96,8 +96,8 @@ public class SearchModelTests
         Assert.Equal(
             new[]
             {
-                SearchGroupKind.People, SearchGroupKind.Movies, SearchGroupKind.Shows, SearchGroupKind.Seasons,
-                SearchGroupKind.Episodes, SearchGroupKind.Artists, SearchGroupKind.Albums, SearchGroupKind.Tracks,
+                SearchGroupKind.Movies, SearchGroupKind.Shows, SearchGroupKind.Seasons, SearchGroupKind.Episodes,
+                SearchGroupKind.Artists, SearchGroupKind.Albums, SearchGroupKind.Tracks, SearchGroupKind.People,
             },
             groups.Select(g => g.Kind));
         var movies = groups.First(g => g.Kind == SearchGroupKind.Movies);
@@ -108,7 +108,7 @@ public class SearchModelTests
         Assert.Equal(TileKind.Landscape, groups.First(g => g.Kind == SearchGroupKind.Episodes).TileKind);
         Assert.Equal(TileKind.Square, groups.First(g => g.Kind == SearchGroupKind.Albums).TileKind);
         Assert.Equal(TileKind.Poster, movies.TileKind);
-        var person = groups.First();
+        var person = groups.Last();
         Assert.Equal(TileKind.Person, person.TileKind);
         Assert.Equal(new[] { "http://pley/api/people/70/photo" }, person.Tiles.Single().Images);
         // Opening: a person's page, a track's album, an album's page, the rest their item page.
