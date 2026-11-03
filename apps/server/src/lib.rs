@@ -57,6 +57,8 @@ pub mod state;
 pub mod store;
 pub mod streams;
 pub mod subtitles;
+#[cfg(test)]
+mod testing;
 pub mod transcoder;
 pub mod trickplay;
 pub mod two_step;
