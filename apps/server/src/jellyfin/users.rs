@@ -262,6 +262,12 @@ async fn authenticate(
     headers: HeaderMap,
     body: Body,
 ) -> JfResult<Response> {
+    // JSON only, as Jellyfin takes it: another site's page can send text or
+    // a form here without asking the server first, and its wrong passwords
+    // would lock the account out at its owner's address.
+    if !is_json(&headers) {
+        return Err(JfError::BadRequest("the body must be JSON".into()));
+    }
     // `Pw`; older clients sent `Password`.
     let username = body.str("Username").unwrap_or_default().to_owned();
     let password = body.str("Pw").or(body.str("Password")).unwrap_or_default().to_owned();
@@ -275,6 +281,14 @@ async fn authenticate(
     let used = UsedFrom { ip, user_agent };
     let user = state.auth.validate_compatibility(&token, Some(&used)).await.ok_or(JfError::Unauthorized)?;
     Ok(Json(signed_in(&state, &jellyfin, &user, &client, token).await?).into_response())
+}
+
+/// Whether the request's body is said to be JSON (`application/json`,
+/// `text/json`, `application/…+json`).
+fn is_json(headers: &HeaderMap) -> bool {
+    let Some(kind) = headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()) else { return false };
+    let kind = kind.split(';').next().unwrap_or_default().trim().to_ascii_lowercase();
+    kind == "application/json" || kind == "text/json" || (kind.starts_with("application/") && kind.ends_with("+json"))
 }
 
 async fn signed_in(
@@ -378,15 +392,11 @@ async fn avatar_of(state: &AppState, jellyfin: &Jellyfin, id: &str) -> JfResult<
     Ok((headers, bytes).into_response())
 }
 
-/// `POST /Sessions/Logout`: the token ends.
-async fn logout(
-    State(state): State<AppState>,
-    JfUser { client, .. }: JfUser,
-    headers: HeaderMap,
-) -> JfResult<StatusCode> {
-    let token = client.token.or_else(|| headers.get("x-emby-token").and_then(|v| v.to_str().ok()).map(str::to_owned));
-    if let Some(token) = token {
-        state.auth.end_compatibility_token_of(&token).await?;
+/// `POST /Sessions/Logout`: the token it was sent with ends, wherever it was
+/// sent (a header or `api_key`).
+async fn logout(State(state): State<AppState>, JfUser { user, .. }: JfUser) -> JfResult<StatusCode> {
+    if let Some(token) = user.compatibility {
+        state.auth.end_compatibility_token(user.id, token.token_id).await?;
     }
     Ok(StatusCode::NO_CONTENT)
 }

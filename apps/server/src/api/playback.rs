@@ -183,6 +183,7 @@ pub async fn start(
             start_ms,
         );
         session.app_grant = user.app.as_ref().map(|app| app.grant_id);
+        session.compatibility_token = user.compatibility.map(|c| c.token_id);
         session.media_key = req.keyed_urls.then(new_media_key);
         // The transcoder doesn't see direct plays: its background work waits
         // for the player's first reads too.
@@ -281,6 +282,7 @@ pub async fn start(
         start_ms,
     );
     session.app_grant = user.app.as_ref().map(|app| app.grant_id);
+    session.compatibility_token = user.compatibility.map(|c| c.token_id);
     session.media_key = req.keyed_urls.then(new_media_key);
     let session = state.sessions.insert_transcode(session, slot);
     state.events.send(ServerEvent::SessionsChanged);

@@ -62,6 +62,15 @@ async fn signing_in_gives_a_token_for_this_api_and_no_session() {
     let older = sign_in(&app, json!({"username": " admin ", "Password": "secret-one"})).await;
     assert_eq!(older.status, StatusCode::OK, "{}", older.text());
 
+    // Signing out ends the token it was sent with, in the query too.
+    let older = older.body["AccessToken"].as_str().unwrap().to_owned();
+    let out = app.jf_raw(Method::POST, &format!("/Sessions/Logout?api_key={older}"), &[], None).await;
+    assert_eq!(out.status, StatusCode::NO_CONTENT);
+    let after = app.jf_raw(Method::GET, "/Users/Me", &[("x-emby-token", &older)], None).await;
+    assert_eq!(after.status, StatusCode::UNAUTHORIZED);
+    let me = app.jf_raw(Method::GET, "/Users/Me", &[("x-emby-token", &token)], None).await;
+    assert_eq!(me.status, StatusCode::OK, "the other sign-in goes on");
+
     for wrong in [
         json!({"Username": "admin", "Pw": "wrong-one"}),
         json!({"Username": "nobody", "Pw": "secret-one"}),
@@ -92,8 +101,23 @@ async fn signing_in_takes_every_check_pleys_sign_in_does() {
     assert_eq!(two_step.status, StatusCode::UNAUTHORIZED);
     assert!(two_step.body.get("AccessToken").is_none());
 
-    // Wrong passwords count as any sign-in's: the right one waits too.
+    // Sent as text, as another site's page may without asking the server
+    // first: refused before the password is tried, so it locks no one out.
     app.user(&admin, "dave", json!({})).await;
+    for _ in 0..6 {
+        let req = axum::http::Request::builder()
+            .method(Method::POST)
+            .uri("/Users/AuthenticateByName")
+            .header("content-type", "text/plain;charset=UTF-8")
+            .body(axum::body::Body::from(json!({"Username": "dave", "Pw": "wrong-pass"}).to_string()))
+            .unwrap();
+        let status = tower::ServiceExt::oneshot(app.jellyfin.clone(), req).await.unwrap().status();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+    let right = sign_in(&app, json!({"Username": "dave", "Pw": "test-pass-1"})).await;
+    assert_eq!(right.status, StatusCode::OK, "{}", right.text());
+
+    // Wrong passwords count as any sign-in's: the right one waits too.
     for _ in 0..5 {
         let wrong = sign_in(&app, json!({"Username": "dave", "Pw": "wrong-pass"})).await;
         assert_eq!(wrong.status, StatusCode::UNAUTHORIZED);

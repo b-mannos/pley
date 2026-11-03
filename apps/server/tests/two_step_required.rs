@@ -490,16 +490,21 @@ async fn compatibility_stream_addresses_stop_with_the_sign_out() {
 
     let (app, admin, _) = with_admin().await;
     let admin_id = app.get("/api/auth/me", &admin).await.body["id"].as_i64().unwrap();
-    let (_, bob_id) = app.user(&admin, "bob", json!({})).await;
+    let (bob, bob_id) = app.user(&admin, "bob", json!({})).await;
     app.media_file("movies/Film (2020).mkv", 2048);
     let movies = app.library(&admin, "Movies", "movies", "movies").await;
     let film = app.ids(movies, &admin).await["Film"];
     let file = app.file_of(film).await;
-    // Streams a compatibility client started, as the transcoder would have.
+    app.compatibility_token(&bob, "play").await;
+    app.compatibility_token(&admin, "play").await;
+    let tokens: Vec<(i64, i64)> =
+        sqlx::query_as("SELECT user_id, id FROM compatibility_tokens").fetch_all(&app.state.db.read).await.unwrap();
+    // Streams compatibility clients started, as the transcoder would have.
     let stream = |user: i64| {
         let spec = TranscodeSpec { request: Default::default(), segment_count: 1, duration_ms: 1000 };
-        let session =
+        let mut session =
             Session::new(user, "u".into(), None, film, file, Play::Transcode, 1000, Some(spec), Some("job".into()), 0);
+        session.compatibility_token = tokens.iter().find(|(owner, _)| *owner == user).map(|(_, id)| *id);
         app.state.sessions.insert(session).id.clone()
     };
     let item = app.jf_item(film);
@@ -516,12 +521,13 @@ async fn compatibility_stream_addresses_stop_with_the_sign_out() {
     assert_ne!(playlist(&bobs).await, StatusCode::NOT_FOUND);
 
     assert_eq!(require(&app, &admin, true).await.status, StatusCode::OK);
-    // bob signed in with his password alone: his stream stops with the rest.
+    // bob signed in with his password alone: his token ends, and his stream
+    // with it.
     assert_eq!(playlist(&bobs).await, StatusCode::NOT_FOUND);
     assert_ne!(playlist(&admins).await, StatusCode::NOT_FOUND, "whoever uses it goes on");
-    // Not required any more: it goes on too.
+    // Not required any more: the token is gone, and so is the stream.
     require(&app, &admin, false).await;
-    assert_ne!(playlist(&bobs).await, StatusCode::NOT_FOUND);
+    assert_eq!(playlist(&bobs).await, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

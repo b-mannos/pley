@@ -27,6 +27,8 @@ use crate::state::AppState;
 const RECHECK: Duration = Duration::from_secs(30);
 /// What clients are told to keep the socket alive within, in seconds.
 const KEEP_ALIVE_SECS: i64 = 60;
+/// The most a message from a client may be, in bytes.
+const MAX_MESSAGE: usize = 64 * 1024;
 
 pub fn routes() -> Router<AppState> {
     Router::new().route("/socket", get(socket))
@@ -41,7 +43,11 @@ async fn socket(
 ) -> Response {
     let device = q.get("deviceId").map(str::to_owned).or(client.device_id);
     let token_id = user.compatibility.map(|c| c.token_id).unwrap_or(0);
-    upgrade.on_upgrade(move |socket| run(state, jellyfin, user, token_id, device, socket))
+    // Clients send keep-alives, a few bytes each.
+    upgrade
+        .max_message_size(MAX_MESSAGE)
+        .max_frame_size(MAX_MESSAGE)
+        .on_upgrade(move |socket| run(state, jellyfin, user, token_id, device, socket))
 }
 
 fn message(kind: &str, data: Value) -> Message {

@@ -603,7 +603,7 @@ pub async fn on_web_port(State(api): State<OnWebPort>, request: Request, next: N
         let headers = response.headers_mut();
         let mut vary: Vec<String> =
             headers.get_all(header::VARY).iter().filter_map(|v| v.to_str().ok()).map(str::to_owned).collect();
-        vary.push("Authorization, X-Emby-Authorization, X-Emby-Token".to_owned());
+        vary.push("Authorization, X-Emby-Authorization, X-Emby-Token, X-MediaBrowser-Token".to_owned());
         if let Ok(value) = HeaderValue::from_str(&vary.join(", ")) {
             headers.insert(header::VARY, value);
         }

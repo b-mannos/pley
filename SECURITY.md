@@ -225,8 +225,9 @@ other apps (`pley_ct_…`), never a session's
   guessed and another server's mean nothing. Players open streams,
   subtitles and pictures without a token: a media source's id stands for
   the sign-in it was listed to and works only while that sign-in does, for
-  what its user may see; HLS sessions are reached by their 128-bit id, as
-  Pley's own are; a picture answers for an id someone was given, and with a
+  what its user may see; HLS sessions started through this API are reached
+  by their 128-bit id while the token that started them works; a picture
+  answers for an id someone was given, and with a
   token only for what its user may see. Files are shown by their names,
   never where the server keeps them.
 - A token ends when it is revoked, after 90 days unused, and with the

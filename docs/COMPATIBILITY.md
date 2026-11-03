@@ -53,7 +53,8 @@ On Pley's port, requests are told apart like this:
 - A path both have (`/Library`, `/Playlists`, `/Search`) goes to it only
   with a Jellyfin app's `Authorization: MediaBrowser …` header or token,
   which browsers asking for the web app never send. Those answers vary with
-  `Authorization`, `X-Emby-Authorization` and `X-Emby-Token` for caches.
+  `Authorization`, `X-Emby-Authorization`, `X-Emby-Token` and
+  `X-MediaBrowser-Token` for caches.
 - Everything else, `/api/…` included, is Pley's own.
 
 Paths and query parameters are read in any case (`/Items` and `/items`,
@@ -85,7 +86,9 @@ Signing in goes through the checks of Pley's own sign-in: attempt limits
 per name and address, and disabled accounts (`403`). An account with
 two-step sign-in can't sign in this way (`401`), nor one without it while
 the server requires it: an app has nowhere to type the code. Quick Connect
-isn't offered.
+isn't offered. The body must be JSON (`400` otherwise), as Jellyfin's is:
+another site's page could send text without asking the server first, and
+lock an account out with wrong passwords.
 
 Apps send the token as Jellyfin's apps do:
 
@@ -122,9 +125,9 @@ A token ends when:
 - the account's password changes (its owner's change, an administrator's
   or `pley reset-password`), it is signed out everywhere, or it is deleted.
 
-It doesn't work while the account is disabled, nor while the server
-requires two-step sign-in of an account that doesn't use it, and works again
-when that ends, as the account's sessions do.
+It doesn't work while the account is disabled, and works again once the
+account is enabled. Requiring two-step sign-in ends the tokens of every
+account that doesn't use it, as it signs those accounts out everywhere.
 
 ## Ids, streams and pictures
 
@@ -142,9 +145,9 @@ Many players open streams, subtitles and pictures without a token:
   open with it alone, while that sign-in works, for what its user may see.
   Each sign-in is given its own.
 - **HLS.** A stream's playlists and segments are reached by its session's
-  id (128 random bits), as Pley's own players' are, and not once the
-  session ends, its account is disabled, or two-step sign-in it lacks
-  becomes required.
+  id (128 random bits), for streams started through this API, while the
+  token that started them works: not once the session ends, the token is
+  revoked or ends, or the account is disabled.
 - **Pictures.** `/Items/{id}/Images/{type}` answers without a token for an
   id it was given; with a token, only for what its user may see. A
   collection's picture, its own or its first title's, is chosen by whose

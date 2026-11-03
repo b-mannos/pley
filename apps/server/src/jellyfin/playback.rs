@@ -510,22 +510,23 @@ async fn master(
         .into_response())
 }
 
-/// A session's playlists and segments. The session's id (128 random bits)
-/// is the credential, as for Pley's own players. Not for sessions an app
-/// started, nor for a disabled account, nor for an account the server's
-/// two-step requirement signed out.
+/// A session's playlists and segments, which players fetch without a token:
+/// the session's id (128 random bits) stands for the token that started it
+/// through this API. Only those sessions, and only while that token works:
+/// not once it is revoked or ends, its account is disabled, or the server
+/// requires two-step sign-in the account lacks.
 async fn session_file(
     State(state): State<AppState>,
     Path((_id, session_id, file)): Path<(String, String, String)>,
 ) -> JfResult<Response> {
     let session = state.sessions.get(&session_id).ok_or(JfError::NotFound)?;
-    if session.app_grant.is_some() {
-        return Err(JfError::NotFound);
-    }
-    let user = AuthUser::load(&state.db, session.user_id).await?.ok_or(JfError::NotFound)?;
-    if state.auth.lacks_two_step(user.id).await? {
-        return Err(JfError::NotFound);
-    }
+    let token = session.compatibility_token.ok_or(JfError::NotFound)?;
+    let user = state
+        .auth
+        .compatibility_user(token)
+        .await
+        .filter(|user| user.id == session.user_id)
+        .ok_or(JfError::NotFound)?;
     Ok(crate::api::playback::hls_file(State(state), user, Path((session_id, file))).await?)
 }
 

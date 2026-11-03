@@ -777,7 +777,7 @@ async fn an_apps_event_stream_ends_when_its_grant_does() {
 }
 
 #[tokio::test]
-async fn jellyfin_session_files_refuse_app_sessions_and_disabled_accounts() {
+async fn jellyfin_session_files_are_its_tokens_while_they_work() {
     use pley::playback::{Method as Play, Session, TranscodeSpec};
 
     let app = TestApp::new().await;
@@ -786,7 +786,7 @@ async fn jellyfin_session_files_refuse_app_sessions_and_disabled_accounts() {
     let movies = app.library(&admin, "Movies", "movies", "movies").await;
     let film = app.ids(movies, &admin).await["Film"];
     let file = app.file_of(film).await;
-    let (_, bob) = app.user(&admin, "bob", json!({})).await;
+    let (bob_session, bob) = app.user(&admin, "bob", json!({})).await;
     let (token, _) = app.app_token(bob, "play").await;
 
     // Playback an app starts is marked with its grant.
@@ -800,14 +800,22 @@ async fn jellyfin_session_files_refuse_app_sessions_and_disabled_accounts() {
     assert_eq!(session_of(&by_app).app_grant, Some(grant));
     assert_eq!(session_of(&by_session).app_grant, None);
 
-    // Transcode sessions, as the transcoder would have started them.
-    let transcode = |user: i64, grant: Option<i64>| {
+    // Transcode sessions, as the transcoder would have started them for a
+    // compatibility token, an app or Pley's own player.
+    let transcode = |user: i64, grant: Option<i64>, compatibility: Option<i64>| {
         let spec = TranscodeSpec { request: Default::default(), segment_count: 1, duration_ms: 1000 };
         let mut session =
             Session::new(user, "u".into(), None, film, file, Play::Transcode, 1000, Some(spec), Some("job".into()), 0);
         session.app_grant = grant;
+        session.compatibility_token = compatibility;
         app.state.sessions.insert(session).id.clone()
     };
+    app.compatibility_token(&bob_session, "play").await;
+    let tool: i64 = sqlx::query_scalar("SELECT id FROM compatibility_tokens WHERE user_id = ?")
+        .bind(bob)
+        .fetch_one(&app.state.db.read)
+        .await
+        .unwrap();
     let item = app.jf_item(film);
     let session_file = |session: String| {
         let req =
@@ -815,13 +823,20 @@ async fn jellyfin_session_files_refuse_app_sessions_and_disabled_accounts() {
         let jellyfin = app.jellyfin.clone();
         async move { jellyfin.oneshot(req).await.unwrap().status() }
     };
-    let bobs = transcode(bob, None);
-    let apps = transcode(bob, Some(grant));
+    let bobs = transcode(bob, None, Some(tool));
     // No transcoder runs here: it gets as far as asking it.
     assert_ne!(session_file(bobs.clone()).await, StatusCode::NOT_FOUND);
-    assert_eq!(session_file(apps).await, StatusCode::NOT_FOUND, "an app's session");
+    assert_eq!(session_file(transcode(bob, Some(grant), None)).await, StatusCode::NOT_FOUND, "an app's session");
+    assert_eq!(session_file(transcode(bob, None, None)).await, StatusCode::NOT_FOUND, "Pley's own player's");
+    let admin_id = app.get("/api/auth/me", &admin).await.body["id"].as_i64().unwrap();
+    assert_eq!(session_file(transcode(admin_id, None, Some(tool))).await, StatusCode::NOT_FOUND, "someone else's");
     sqlx::query("UPDATE users SET disabled = 1 WHERE id = ?").bind(bob).execute(&app.state.db.write).await.unwrap();
-    assert_eq!(session_file(bobs).await, StatusCode::NOT_FOUND, "a disabled account's session");
+    assert_eq!(session_file(bobs.clone()).await, StatusCode::NOT_FOUND, "a disabled account's session");
+    sqlx::query("UPDATE users SET disabled = 0 WHERE id = ?").bind(bob).execute(&app.state.db.write).await.unwrap();
+    assert_ne!(session_file(bobs.clone()).await, StatusCode::NOT_FOUND);
+    let revoked = app.delete(&format!("/api/me/compatibility-tokens/{tool}"), &bob_session).await;
+    assert_eq!(revoked.status, StatusCode::NO_CONTENT);
+    assert_eq!(session_file(bobs).await, StatusCode::NOT_FOUND, "a revoked token's session");
 }
 
 // ------------------------------------------------------------------ the tables

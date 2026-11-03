@@ -1534,6 +1534,10 @@ pub struct Session {
     /// The app grant whose token started it (`None`: a session token). The
     /// Jellyfin API's token-less session files refuse these.
     pub app_grant: Option<i64>,
+    /// The compatibility token that started it, through the Jellyfin API:
+    /// that API's token-less session files serve only these, while the
+    /// token works.
+    pub compatibility_token: Option<i64>,
     /// What the session's keyed addresses carry (`/api/media/{key}/…`) when
     /// its player asked for them (`keyed_urls`): 256 random bits that open
     /// this session's media and nothing else, for as long as it lasts.
@@ -1580,6 +1584,7 @@ impl Session {
             started_at: now,
             play: Mutex::new(PlayState { position_ms: start_ms, state: "playing".into(), updated_at: now }),
             app_grant: None,
+            compatibility_token: None,
             media_key: None,
             recreate: tokio::sync::Mutex::new(()),
             bitrate: Mutex::new(None),
