@@ -277,6 +277,8 @@ It has no releases yet: it is built and installed by hand
   streams taller than the screen were cut off, and it comes back down
   under More Like This when focus goes up, where it had stayed over the
   row's titles.
+- An item page's "Details" and "Versions" headings show in the native app,
+  where the rail covered them.
 - An empty USB drive's page keeps focus, so the rail closes rather than
   covering its message, which shows under a folder icon; at the drive's top,
   the line under the title is the folder's path ("/Films/2019"), and "/"

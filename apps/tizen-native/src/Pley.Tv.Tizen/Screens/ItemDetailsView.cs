@@ -68,7 +68,9 @@ sealed class ItemDetailsView : View
     {
         var details = page.Details;
         float y = 0;
+        // At the gutter, as the cards and rows are: at 0 the rail covered it.
         var header = Text.Label(ItemText.Details, PleyType.Section, PleyColors.Fg, width: width);
+        header.PositionX = Ui.Dp(PleyTv.Gutter);
         inner.Add(header);
         y += PleyType.Section.Line + PleyTv.HeaderToTiles;
 
@@ -92,7 +94,7 @@ sealed class ItemDetailsView : View
         {
             y += 20;
             var title = Text.Label(ItemText.Versions, PleyType.Title, PleyColors.Fg, width: width);
-            title.PositionY = Ui.Dp(y);
+            title.Position = new Position(Ui.Dp(PleyTv.Gutter), Ui.Dp(y));
             inner.Add(title);
             y += PleyType.Title.Line + 8;
             foreach (var version in details.Versions)
