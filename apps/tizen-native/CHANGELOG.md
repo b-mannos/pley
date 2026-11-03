@@ -211,6 +211,8 @@ It has no releases yet: it is built and installed by hand
   under a highlight that stays still, as rows do for Left and Right.
 - The native app's seek preview keeps its picture inside its rounded
   edge, where the picture's square corners showed past it.
+- A channel's number and favourite star in the native app's Live TV
+  cards stay on top of its logo, which covered them once it loaded.
 - The native app's seek preview keeps its picture inside its edge, which
   the picture covered at its sides, so it seemed wider than its box.
 - Posters in the native app no longer stay empty, until the app starts
