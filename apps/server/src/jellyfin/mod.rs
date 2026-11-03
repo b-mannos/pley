@@ -5,11 +5,10 @@
 //! administrator turns it on (Settings → Network), on Pley's own port or on
 //! a port of its own.
 //!
-//! Its clients sign in with a password (`/Users/AuthenticateByName`) or with
-//! Quick Connect, approved in Pley, for a token for other apps
-//! ([`crate::auth::compatibility`]): such tokens work on this API only, and
-//! Pley's own tokens never on it. Paths are case-insensitive, as Jellyfin's
-//! are, and ids are [`ids`].
+//! Its clients sign in with a password (`/Users/AuthenticateByName`) for a
+//! token for other apps ([`crate::auth::compatibility`]): such tokens work
+//! on this API only, and Pley's own tokens never on it. Paths are
+//! case-insensitive, as Jellyfin's are, and ids are [`ids`].
 
 pub mod ids;
 

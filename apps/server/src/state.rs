@@ -45,7 +45,6 @@ pub struct Inner {
     pub watcher: Arc<LibraryWatcher>,
     pub images: Images,
     pub sessions: Arc<Sessions>,
-    /// The `sessionKey`s Plex tools know the sessions by.
     /// When library work runs (see [`crate::schedule`]).
     pub schedule: Arc<Scheduler>,
     pub markers: Arc<MarkerService>,
