@@ -195,6 +195,9 @@ It has no releases yet: it is built and installed by hand
   makes the video, and beside it "TV network speed", how fast it reaches
   the TV: a video that stalls with the server keeping up has a network
   that can't carry it.
+- Signing in to the native app with a code says when the server requires
+  two-step sign-in: the phone that approves the code sets it up for
+  whoever hasn't.
 - The native app's rail opens and closes as Android TV's does: it widens
   with its labels fading in, the page behind it dims, and its entries grow
   and shrink as focus moves; with Reduce motion, it opens in place.
