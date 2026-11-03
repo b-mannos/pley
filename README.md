@@ -4,7 +4,14 @@
 
 <p align="center">A self-hosted media server for movies, shows, music and live TV.</p>
 
-<p align="center"><sub>Pley is still in testing: expect rough edges, and keep backups of your data.</sub></p>
+<p align="center">
+<a href="https://github.com/pley-media-server/pley/releases/latest"><img src="https://img.shields.io/github/v/release/pley-media-server/pley?display_name=release&label=release" alt="Latest release"></a>
+<a href="https://github.com/pley-media-server/pley/pkgs/container/pley"><img src="https://img.shields.io/badge/docker-ghcr.io-2496ED?logo=docker&logoColor=white" alt="Docker image"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License: AGPL-3.0"></a>
+</p>
+
+> [!WARNING]
+> Pley is still in testing: expect rough edges, and keep backups of your data.
 
 ![Pley's Home in the web app](docs/images/web-home.jpg)
 
