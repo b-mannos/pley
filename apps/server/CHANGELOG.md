@@ -9,6 +9,8 @@ describes how they are made.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-11-04
+
 ### Added
 
 - Search finds titles, people and Live TV channels typed with a slip ("the
@@ -614,7 +616,8 @@ describes how they are made.
 - First release with a version of its own (builds before it carried 0.2.0,
   the version every app shared).
 
-[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-03...HEAD
+[Unreleased]: https://github.com/pley-media-server/pley/compare/release-2026-11-04...HEAD
+[0.1.6]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-04
 [0.1.5]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-03
 [0.1.4]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02.2
 [0.1.3]: https://github.com/pley-media-server/pley/releases/tag/release-2026-11-02
