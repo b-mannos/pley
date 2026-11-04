@@ -26,6 +26,11 @@ describes how they are made.
   along, and plays, pauses, seeks, skips, goes to the next or previous
   title or channel and stops it. Their players obey the remote too, and
   the dashboard says which device each session plays on.
+- Every session says which device plays it, the same for everything one
+  sign-in plays, and what kind of device that is (a TV, a phone, a
+  tablet, a computer, a browser): what the player says, else what the
+  server tells from the app. Remotes and dashboards can key players by
+  it, and pick TVs out.
 
 ### Fixed
 
