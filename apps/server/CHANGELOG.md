@@ -32,6 +32,12 @@ describes how they are made.
   server tells from the app. Remotes and dashboards can key players by
   it, and pick TVs out.
 
+### Changed
+
+- The setup page says more plainly where the setup code is: opening Pley
+  from its tray icon fills it in, and on a server without one it's in
+  Pley's log.
+
 ### Fixed
 
 - Someone who isn't an administrator no longer hears when other people's
