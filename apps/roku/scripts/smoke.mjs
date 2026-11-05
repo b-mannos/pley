@@ -419,11 +419,11 @@ async function walk() {
   await press("select"); // the first of Continue Watching: an episode
   await waitFor(/^GET \/api\/items\/103$/, since, "its details");
   shoot("details");
-  // More…, after Resume, Play from start, the watched mark and Audio and
-  // subtitles: Go to season, its episodes; Back to the episode's page, up
-  // to Resume.
-  await press("down", 4);
-  await press("select"); // Rate, Go to show, Go to season, Media info, Add to playlist
+  // More…, after Resume, From start, the watched mark, Audio and subtitles
+  // and Add to playlist: Go to season, its episodes; Back to the episode's
+  // page, up to Resume.
+  await press("down", 5);
+  await press("select"); // Rate, Go to show, Go to season, Media info, Details
   await sleep(500);
   shoot("episode-more");
   since = mark();
@@ -434,7 +434,7 @@ async function walk() {
   since = mark();
   await press("back");
   await waitFor(/^GET \/api\/items\/103$/, since, "the episode's page again");
-  await press("up", 4);
+  await press("up", 5);
   // Back while the player starts: the session that comes after is closed.
   since = mark();
   fixture.playbackDelayMs = 2500;
@@ -778,9 +778,12 @@ async function walk() {
   since = mark();
   await press("select"); // Severance: its page, with its next episode first
   await waitFor(/^GET \/api\/items\/99\/on-deck$/, since, "the show's next episode");
+  // What may still be asked for: Request more seasons, after From start.
+  await waitFor(/^GET \/api\/items\/99\/request$/, since, "what of the show may be asked for");
+  await settle();
   shoot("show-details");
   since = mark();
-  await press("down"); // Episodes
+  await press("down", 3); // Episodes
   await press("select");
   await waitFor(/^GET \/api\/items\/100\/children$/, since, "a season's episodes");
   shoot("show");
@@ -792,7 +795,7 @@ async function walk() {
   // More…, its last button: 4 stars from the rating's choices, saved at
   // once; Back from More to the buttons.
   since = mark();
-  await press("down", 3); // from Episodes, past the watched mark and My List
+  await press("down", 4); // from Episodes, past the watched mark, My List and Add to playlist
   await press("select");
   await sleep(500);
   shoot("show-more");
@@ -1163,8 +1166,8 @@ async function walk() {
   await press("back");
   await waitFor(/^DELETE \/api\/playback\//, pickedSince, "the trailer's session closed");
   await settle();
-  await press("down");
-  await press("select"); // Rate, Media info, Add to playlist
+  await press("down", 2); // past Add to playlist
+  await press("select"); // Rate, Media info, Details
   await sleep(500);
   await press("down");
   await press("select");

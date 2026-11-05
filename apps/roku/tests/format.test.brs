@@ -40,7 +40,6 @@ sub test_format_plurals()
 end sub
 
 sub test_format_resume_points()
-    tkEqual(fmtResume(754000), "Resume from 12:34")
     tkTrue(fmtResumable(600000, 6000000))
     tkFalse(fmtResumable(0, 6000000))
     tkFalse(fmtResumable(500, 6000000), "under a second")

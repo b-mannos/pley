@@ -6,7 +6,9 @@ sub init()
     m.column = m.top.findNode("column")
     m.text = m.top.findNode("text")
     m.heading = m.top.findNode("heading")
+    m.context = m.top.findNode("context")
     m.line = m.top.findNode("line")
+    m.left = m.top.findNode("left")
     m.genres = m.top.findNode("genres")
     m.credits = m.top.findNode("credits")
     m.tagline = m.top.findNode("tagline")
@@ -41,17 +43,19 @@ sub init()
     m.started = false
     ' What the server says of requests for the title (GET
     ' /api/items/{id}/request), invalid for nothing to show; the asks (an
-    ' answer to an earlier one is left out); Request more seasons' tile
-    ' while the person may ask for some.
+    ' answer to an earlier one is left out); where Request more seasons
+    ' goes (its tile's fields) while the person may ask for some.
     m.itemRequest = invalid
     m.requestAsks = 0
     m.askMore = invalid
     ' The item's JSON, which the player starts with, and what it shows; a
-    ' show's episode to play next, once the server said (invalid for none).
+    ' show's episode to play next, once the server said (invalid for none);
+    ' the titles of the collections it is part of.
     m.item = invalid
     m.detail = invalid
     m.onDeck = invalid
     m.onDeckKnown = false
+    m.partOf = []
     ' The rows under the details by key, as they come, and their keys as
     ' shown, in order.
     m.rowNodes = {}
@@ -129,20 +133,16 @@ end sub
 
 sub showDetail()
     if m.item = invalid then return
-    m.detail = contentDetail(m.item, m.global.session.server, m.onDeck)
+    beside = { fileId: m.fileId, askMore: m.askMore <> invalid, partOf: m.partOf }
+    m.detail = contentDetail(m.item, m.global.session.server, m.onDeck, beside)
     m.message.visible = false
     m.heading.text = m.detail.heading
+    m.context.text = m.detail.context
     m.line.text = m.detail.line
+    m.left.text = m.detail.left
     m.genres.text = m.detail.genres
     m.credits.text = m.detail.credits
-    m.tagline.text = m.detail.tagline
-    ' Seven buttons take a line from the summary (three, as on Android TV),
-    ' and so does the credits line: under a heading of two lines they would
-    ' reach the rows' title. More's Details has the whole of it.
-    m.summary.maxLines = 4
-    if m.detail.buttons.Count() > 6 then m.summary.maxLines = 3
-    if m.detail.credits <> "" then m.summary.maxLines = m.summary.maxLines - 1
-    m.summary.text = m.detail.summary
+    fitSummary()
     m.note.text = m.detail.note
     layoutText()
     agent = m.top.getScene().getHttpAgent()
@@ -158,6 +158,7 @@ sub showDetail()
     hasButtons = m.detail.buttons.Count() > 0 and (m.detail.kind <> "show" or m.onDeckKnown)
     if hasButtons
         focused = m.buttons.buttonFocused
+        if not m.buttons.visible then focused = m.detail.focus
         if FormatJson(m.buttons.buttons) <> FormatJson(m.detail.buttons) then m.buttons.buttons = m.detail.buttons
         if focused > 0 and focused < m.detail.buttons.Count() then m.buttons.focusButton = focused
     end if
@@ -180,11 +181,37 @@ sub showDetail()
     end if
 end sub
 
+' The column ends above the top of the rows, which shows under it: past
+' six buttons each takes a line from the summary (four at most), and so
+' do the context line, the time left and the credits; the tagline gives
+' its room up once the summary would keep fewer than two lines. That is
+' for a heading of two lines: one of a line gives one back. More's
+' Details has the whole summary.
+sub fitSummary()
+    room = 4
+    count = m.detail.buttons.Count()
+    if count > 6 then room = room - (count - 6)
+    for each part in [m.detail.context, m.detail.left, m.detail.credits]
+        if part <> "" then room = room - 1
+    end for
+    if m.heading.boundingRect().height < 100 then room = room + 1
+    tagline = m.detail.tagline
+    if tagline <> "" and room < 2
+        tagline = ""
+        room = room + 1
+    end if
+    if room < 1 then room = 1
+    if room > 4 then room = 4
+    m.tagline.text = tagline
+    m.summary.maxLines = room
+    m.summary.text = m.detail.summary
+end sub
+
 ' The labels with text, one under the other.
 sub layoutText()
     shown = [m.heading]
     spacings = []
-    for each part in [{ label: m.line, gap: 20 }, { label: m.genres, gap: 8 }, { label: m.credits, gap: 8 }, { label: m.tagline, gap: 28 }, { label: m.summary, gap: 20 }, { label: m.note, gap: 28 }]
+    for each part in [{ label: m.context, gap: 8 }, { label: m.line, gap: 16 }, { label: m.left, gap: 8 }, { label: m.genres, gap: 8 }, { label: m.credits, gap: 8 }, { label: m.tagline, gap: 28 }, { label: m.summary, gap: 20 }, { label: m.note, gap: 28 }]
         if part.label.text <> ""
             spacings.Push(part.gap)
             shown.Push(part.label)
@@ -225,7 +252,14 @@ sub onRow(event as object)
     row.title = request.spec.title
     row.appendChildren(request.content.getChildren(-1, 0))
     keepRow(request.spec.row, row, false)
-    if request.spec.row = "seasons" then placeAskTile()
+    ' The collections it is part of are on the genres' line too.
+    if request.spec.row = "collections"
+        m.partOf = []
+        for each tile in row.getChildren(-1, 0)
+            m.partOf.Push(tile.title)
+        end for
+        showDetail()
+    end if
     showRows()
 end sub
 
@@ -337,20 +371,11 @@ sub showItemRequest()
         m.stage.visible = true
         m.stageLine.visible = stage.line <> ""
     end if
+    ' Request more seasons is a button while more may be asked for.
+    asked = m.askMore <> invalid
     m.askMore = invalid
     if shown.askMore and shown.kind = "show" and shown.tmdbId > 0 then m.askMore = reqAskMoreTile(shown.kind, shown.tmdbId, httpSentence(m.item.title))
-    placeAskTile()
-end sub
-
-' Request more seasons at the end of the show's seasons, once they show,
-' while more may be asked for.
-sub placeAskTile()
-    if not m.rowNodes.DoesExist("seasons") then return
-    row = m.rowNodes.seasons.node
-    count = row.getChildCount()
-    placed = count > 0 and row.getChild(count - 1).kind = "askMore"
-    if placed and m.askMore = invalid then row.removeChildIndex(count - 1)
-    if not placed and m.askMore <> invalid then nodesAppend(row, [m.askMore])
+    if asked <> (m.askMore <> invalid) then showDetail()
 end sub
 
 ' The summary changed: the requests asked for, if they weren't yet;
@@ -384,10 +409,21 @@ sub onButton(event as object)
         params = { itemId: m.detail.itemId, startMs: startMs, item: m.item }
         if m.fileId <> invalid then params.fileId = m.fileId
         uiNavigate({ to: "player", params: params })
-    else if action = "playNext"
-        if m.onDeck = invalid then return
+    else if action = "playNext" or action = "nextFromStart"
+        if m.onDeck = invalid
+            uiToast("Nothing to play")
+            return
+        end if
         tile = contentTile(m.onDeck, m.global.session.server, true)
-        uiNavigate({ to: "player", params: { itemId: tile.itemId, startMs: playerStartOf(tile.positionMs, tile.durationMs) } })
+        startMs = 0
+        if action = "playNext" then startMs = playerStartOf(tile.positionMs, tile.durationMs)
+        uiNavigate({ to: "player", params: { itemId: tile.itemId, startMs: startMs } })
+    else if action = "unavailable"
+        ' Nothing plays: the other TVs' button can't be pressed.
+        return
+    else if action = "askMore"
+        ' The show's TMDB page, its season picker open.
+        if m.askMore <> invalid then uiOpenTile(m.askMore)
     else if action = "episodes"
         uiNavigate({ to: "show", params: { showId: m.detail.itemId, seasonId: 0 } })
     else if action = "trailer"
@@ -405,8 +441,22 @@ end sub
 ' What the title's tile would do with the Options key: mark it, My List,
 ' Add to playlist, Go to show or season.
 sub titleAction(action as string)
-    uiTitleAction({ itemId: m.detail.itemId, kind: m.detail.kind, parentId: m.detail.seasonId, grandparentId: m.detail.showId }, action)
+    uiTitleAction(ownTile(), action)
 end sub
+
+' The title as its tile would be, for the Options key and titleAction.
+function ownTile() as object
+    return {
+        itemId: m.detail.itemId,
+        kind: m.detail.kind,
+        title: m.detail.heading,
+        watched: m.detail.watched,
+        parentId: httpNumber(m.item.parent_id, 0),
+        grandparentId: httpNumber(m.item.grandparent_id, 0),
+        positionMs: m.detail.positionMs,
+        durationMs: m.detail.durationMs
+    }
+end function
 
 ' --- The panel ---
 
@@ -642,6 +692,8 @@ end sub
 sub chooseVersion(fileId as dynamic)
     m.fileId = fileId
     m.audioPick = -2
+    ' Its edition and quality on the line.
+    showDetail()
 end sub
 
 sub onTracksSaved(event as object)
@@ -707,9 +759,9 @@ function onKeyEvent(key as string, press as boolean) as boolean
         if row <> invalid then uiTileOptions(row.getChild(position[1]), false)
         return true
     end if
-    ' The title's own: Add to playlist besides what its buttons do.
+    ' The title's own, as its tile's.
     if key = "options" and m.detail <> invalid
-        uiTileOptions({ itemId: m.detail.itemId, kind: m.detail.kind, title: m.detail.heading, watched: m.detail.watched, parentId: m.detail.seasonId, grandparentId: m.detail.showId }, false)
+        uiTileOptions(ownTile(), false)
         return true
     end if
     return false

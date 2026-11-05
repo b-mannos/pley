@@ -57,11 +57,6 @@ function fmtEpisode(season as dynamic, episode as dynamic) as string
     return parts.Join(" · ")
 end function
 
-' "Resume from 12:34".
-function fmtResume(ms as dynamic) as string
-    return "Resume from " + fmtClock(ms)
-end function
-
 ' Whether a title has a place to resume from: started, not near its end.
 function fmtResumable(positionMs as dynamic, durationMs as dynamic) as boolean
     position = httpNumber(positionMs, 0)

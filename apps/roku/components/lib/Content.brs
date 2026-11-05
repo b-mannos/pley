@@ -429,46 +429,52 @@ function contentEpisodes(children as dynamic, server as string) as object
     return episodes
 end function
 
-' A title's details screen (a movie, an episode, a show or an extra): what
-' it shows and which buttons it has. actions match buttons: "resume",
-' "start", "playNext" (a show's next episode, onDeck), "episodes",
-' "watched", "unwatched", "tracks" (Audio and subtitles), "listAdd",
-' "listRemove", "trailer" (trailerId's) and "more". More holds what is
-' used less, as on the other TVs ([{ label, action }]): "rate", "show" and
-' "season" (an episode's), "info" (Media info) and "playlist". onDeck is
-' a show's episode to play next (ItemSummary), invalid until the server
-' said or when there is none.
-function contentDetail(detail as object, server as string, onDeck = invalid as dynamic) as object
+' A title's details screen (a movie, an episode, a show, a season or an
+' extra), as Android TV's title page says it: what it shows and which
+' buttons it has. heading is an episode's or a season's show; context, an
+' episode's "S1 · E3 · Pilot" or a season's own title under it; line, the
+' metadata (contentMeta); left, "1 h 33 min left" for a title resumed;
+' genres, with the collections it is part of ("Drama · Part of Dune").
+' actions match buttons: "resume", "start", "unavailable" (nothing plays:
+' it does nothing), "playNext" and "nextFromStart" (a show's or a
+' season's next episode, onDeck), "askMore" (Request more seasons),
+' "episodes", "watched", "unwatched", "tracks" (Audio and subtitles),
+' "listAdd", "listRemove", "trailer" (trailerId's), "playlist" and
+' "more"; focus is the button the focus starts on. More holds what is
+' used less, as on the other TVs ([{ label, action }]): "rate", "show"
+' (an episode's or a season's), "season" (an episode's), "info" (Media
+' info) and "about" (Details). onDeck is a show's or a season's episode to
+' play next (ItemSummary), invalid until the server said or when there is
+' none. beside, what the page loaded beside the title: { fileId (the
+' version chosen), askMore (more seasons may be asked for), partOf (the
+' collections' titles), years (its seasons' years) }.
+function contentDetail(detail as object, server as string, onDeck = invalid as dynamic, beside = invalid as dynamic) as object
+    page = httpObject(beside)
+    if page = invalid then page = {}
     kind = httpString(detail.kind)
     title = httpSentence(detail.title)
     heading = title
-    line = fmtMeta(detail)
-    if kind = "show"
-        parts = []
-        year = httpNumber(detail.year, 0)
-        if year > 0 then parts.Push(urlValue(year))
-        seasons = httpNumber(detail.child_count, 0)
-        if seasons = 1
-            parts.Push("1 season")
-        else if seasons > 1
-            parts.Push(urlValue(seasons) + " seasons")
-        end if
-        rating = httpSentence(detail.content_rating)
-        if rating <> "" then parts.Push(rating)
-        score = httpNumber(detail.rating, 0)
-        if score > 0 then parts.Push("★ " + fmtOneDecimal(score))
-        line = parts.Join(" · ")
-    else if kind = "episode"
+    context = ""
+    if kind = "episode"
         showTitle = httpSentence(detail.grandparent_title)
         code = fmtEpisode(detail.parent_index, detail.index)
-        if showTitle <> "" then heading = showTitle
         parts = []
         if code <> "" then parts.Push(code)
-        if showTitle <> "" then parts.Push(title)
-        meta = fmtMeta(detail)
-        if meta <> "" then parts.Push(meta)
-        line = parts.Join(" · ")
+        if showTitle <> ""
+            heading = showTitle
+            if title <> "" then parts.Push(title)
+        end if
+        context = parts.Join(" · ")
+    else if kind = "season"
+        title = contentSeasonTitle(detail)
+        heading = title
+        showTitle = httpSentence(detail.parent_title)
+        if showTitle <> ""
+            heading = showTitle
+            context = title
+        end if
     end if
+    file = contentFile(detail, page.fileId)
     tagline = httpSentence(detail.tagline)
     state = httpObject(detail.user_state)
     position = 0
@@ -476,34 +482,60 @@ function contentDetail(detail as object, server as string, onDeck = invalid as d
     duration = httpNumber(detail.duration_ms, 0)
     watched = false
     if state <> invalid then watched = httpTrue(state.watched)
+    container = kind = "show" or kind = "season"
+    ' A show or a season is watched once every episode is.
+    if container and httpNumber(detail.leaf_count, 0) > 0 then watched = contentUnwatched(detail) = 0
     inList = httpTrue(detail.in_watchlist)
     files = httpArray(detail.files)
     buttons = []
     actions = []
     note = ""
-    if kind = "show"
+    left = ""
+    if container
         upcoming = httpObject(onDeck)
         if upcoming <> invalid
-            verb = "Play "
+            ' "Play S1 · E3", "Resume S1 · E3".
+            code = fmtEpisode(upcoming.parent_index, upcoming.index)
+            if code <> "" then code = " " + code
             upcomingState = httpObject(upcoming.user_state)
-            if upcomingState <> invalid and fmtResumable(upcomingState.position_ms, upcoming.duration_ms) then verb = "Resume "
-            buttons.Push(verb + fmtEpisode(upcoming.parent_index, upcoming.index))
-            actions.Push("playNext")
+            if upcomingState <> invalid and not httpTrue(upcomingState.watched) and fmtResumable(upcomingState.position_ms, upcoming.duration_ms)
+                buttons = ["Resume" + code, "From start"]
+                actions = ["playNext", "nextFromStart"]
+                left = fmtLeft(upcomingState.position_ms, upcoming.duration_ms)
+            else
+                buttons = ["Play" + code]
+                actions = ["playNext"]
+            end if
+        else if httpNumber(detail.leaf_count, 0) = 0
+            buttons = ["Unavailable"]
+            actions = ["unavailable"]
+        else
+            ' Nothing next, though it has episodes: Play says so.
+            buttons = ["Play"]
+            actions = ["playNext"]
         end if
-        buttons.Push("Episodes")
-        actions.Push("episodes")
+        if kind = "show" and httpTrue(page.askMore)
+            buttons.Push("Request more seasons")
+            actions.Push("askMore")
+        end if
+        if kind = "show"
+            buttons.Push("Episodes")
+            actions.Push("episodes")
+        end if
     else if not contentPlayable(kind)
         note = "Pley for Roku doesn't play this kind of title yet."
     else if files.Count() = 0
-        note = "This item has no file to play."
-    else if fmtResumable(position, duration)
-        buttons = [fmtResume(position), "Play from start"]
+        buttons = ["Unavailable"]
+        actions = ["unavailable"]
+    else if not watched and fmtResumable(position, duration)
+        buttons = ["Resume", "From start"]
         actions = ["resume", "start"]
+        left = fmtLeft(position, duration)
     else
         buttons = ["Play"]
         actions = ["start"]
     end if
-    if kind = "movie" or kind = "episode" or kind = "show"
+    if kind = "movie" or kind = "episode" or container
         if watched
             buttons.Push("Mark as unwatched")
             actions.Push("unwatched")
@@ -531,36 +563,59 @@ function contentDetail(detail as object, server as string, onDeck = invalid as d
         buttons.Push("Trailer")
         actions.Push("trailer")
     end if
+    if kind = "movie" or kind = "episode" or container
+        buttons.Push("Add to playlist")
+        actions.Push("playlist")
+    end if
     stars = 0
     if state <> invalid then stars = contentStars(state.rating)
     more = []
     rateable = kind = "movie" or kind = "episode" or kind = "show"
     if rateable then more.Push({ label: contentRatingLabel(stars), action: "rate" })
-    if kind = "episode" and httpNumber(detail.grandparent_id, 0) > 0
-        more.Push({ label: "Go to show", action: "show" })
-        if httpNumber(detail.parent_id, 0) > 0 then more.Push({ label: "Go to season", action: "season" })
+    showId = 0
+    seasonId = 0
+    if kind = "episode"
+        showId = httpNumber(detail.grandparent_id, 0)
+        seasonId = httpNumber(detail.parent_id, 0)
+    else if kind = "season"
+        showId = httpNumber(detail.parent_id, 0)
     end if
+    if showId > 0 then more.Push({ label: "Go to show", action: "show" })
+    if kind = "episode" and showId > 0 and seasonId > 0 then more.Push({ label: "Go to season", action: "season" })
     if (kind = "movie" or kind = "episode") and files.Count() > 0 then more.Push({ label: "Media info", action: "info" })
     if contentAbout(detail, 0, 0) <> "" then more.Push({ label: "Details", action: "about" })
-    if rateable then more.Push({ label: "Add to playlist", action: "playlist" })
     if more.Count() > 0
         buttons.Push("More…")
         actions.Push("more")
     end if
+    ' Unavailable can't be pressed, as on the other TVs: the focus starts on
+    ' what can.
+    focus = 0
+    if actions.Count() > 1 and actions[0] = "unavailable" then focus = 1
     backdrop = urlImage(server, detail.backdrop_url, contentBackdropWidth())
     if backdrop = "" then backdrop = urlImage(server, detail.thumb_url, contentBackdropWidth())
     genres = []
     for each genre in httpArray(detail.genres)
         name = httpSentence(genre)
-        if name <> "" and genres.Count() < 3 then genres.Push(name)
+        if name <> "" and genres.Count() < 6 then genres.Push(name)
+    end for
+    collections = 0
+    for each collection in httpArray(page.partOf)
+        name = httpSentence(collection)
+        if name <> "" and collections < 3
+            genres.Push("Part of " + name)
+            collections = collections + 1
+        end if
     end for
     return {
         itemId: httpNumber(detail.id, 0),
         kind: kind,
         heading: heading,
-        line: line,
+        context: context,
+        line: contentMeta(detail, file, page.years),
+        left: left,
         tagline: tagline,
-        genres: genres.Join(", "),
+        genres: genres.Join(" · "),
         credits: contentCredits(detail),
         summary: httpClean(detail.summary, 1200, true),
         backdrop: backdrop,
@@ -570,14 +625,123 @@ function contentDetail(detail as object, server as string, onDeck = invalid as d
         watched: watched,
         inList: inList,
         stars: stars,
-        showId: httpNumber(detail.grandparent_id, 0),
-        seasonId: httpNumber(detail.parent_id, 0),
+        showId: showId,
+        seasonId: seasonId,
         trailerId: trailerId,
         buttons: buttons,
         actions: actions,
+        focus: focus,
         more: more,
         note: note
     }
+end function
+
+' A season's own title, else "Specials" for season 0, else "Season 2".
+function contentSeasonTitle(item as object) as string
+    title = httpSentence(item.title)
+    if title <> "" then return title
+    index = httpNumber(item.index, -1)
+    if index = 0 then return "Specials"
+    if index > 0 then return "Season " + urlValue(index)
+    return "Season"
+end function
+
+' A title page's metadata line, as Android TV's: a show's seasons and years
+' ("3 seasons · 2019-2024", from years, its seasons'), a season's year and
+' episodes, an episode's air day, else the year; then the version's
+' edition and the runtime (movies and episodes), the content rating, the
+' stars, and the quality of file (contentFileBadges).
+function contentMeta(detail as object, file as dynamic, years as dynamic) as string
+    parts = []
+    kind = httpString(detail.kind)
+    year = Int(httpNumber(detail.year, 0))
+    if kind = "show"
+        seasons = httpNumber(detail.child_count, 0)
+        if seasons > 0 then parts.Push(fmtPlural(seasons, "season"))
+        first = year
+        last = year
+        for each other in httpArray(years)
+            value = Int(httpNumber(other, 0))
+            if value > 0 and (first = 0 or value < first) then first = value
+            if value > last then last = value
+        end for
+        if first > 0 and last > first
+            parts.Push(urlValue(first) + "-" + urlValue(last))
+        else if first > 0
+            parts.Push(urlValue(first))
+        end if
+    else if kind = "season"
+        if year > 0 then parts.Push(urlValue(year))
+        episodes = httpNumber(detail.leaf_count, 0)
+        if episodes > 0 then parts.Push(fmtPlural(episodes, "episode"))
+    else
+        if kind = "episode"
+            aired = fmtDateText(detail.release_date, 0, 0)
+            if aired <> "" then parts.Push(aired)
+        else if year > 0
+            parts.Push(urlValue(year))
+        end if
+        if GetInterface(file, "ifAssociativeArray") <> invalid
+            edition = httpSentence(file.edition)
+            if edition <> "" then parts.Push(edition)
+        end if
+        duration = fmtDuration(detail.duration_ms)
+        if duration <> "" then parts.Push(duration)
+    end if
+    rating = httpSentence(detail.content_rating)
+    if rating <> "" then parts.Push(rating)
+    score = httpNumber(detail.rating, 0)
+    if score > 0 then parts.Push("★ " + fmtOneDecimal(score))
+    if kind = "movie" or kind = "episode"
+        for each badge in contentFileBadges(file)
+            parts.Push(badge)
+        end for
+    end if
+    return parts.Join(" · ")
+end function
+
+' The quality of a title page's file, as Android TV's line says it: the
+' badges Home's hero gives a file ("4K", "DV"; homeBadges), Dolby Vision
+' with its profile ("DV P8.1": the base layer's compatibility from
+' profile 8 on), then its first audio: "Atmos", else "7.1" or "5.1".
+function contentFileBadges(file as dynamic) as object
+    if GetInterface(file, "ifAssociativeArray") = invalid then return []
+    video = invalid
+    audio = invalid
+    for each stream in httpArray(file.streams)
+        if GetInterface(stream, "ifAssociativeArray") <> invalid
+            streamKind = httpString(stream.kind)
+            if streamKind = "video" and video = invalid then video = stream
+            ' The default track, else the first.
+            if streamKind = "audio" and (audio = invalid or (httpTrue(stream.default) and not httpTrue(audio.default))) then audio = stream
+        end if
+    end for
+    range = invalid
+    profile = 0
+    if video <> invalid
+        range = video.dynamic_range
+        profile = Int(httpNumber(video.dv_profile, 0))
+    end if
+    badges = contentQualityBadges({ width: file.width, height: file.height, dynamic_range: range })
+    for i = 0 to badges.Count() - 1
+        if badges[i] = "DV" and profile > 0
+            badges[i] = "DV P" + urlValue(profile)
+            compat = Int(httpNumber(video.dv_bl_compat, -1))
+            if profile >= 8 and compat >= 0 then badges[i] = badges[i] + "." + urlValue(compat)
+        end if
+    end for
+    if audio <> invalid
+        words = LCase(httpString(audio.profile) + " " + httpString(audio.title))
+        channels = httpNumber(audio.channels, 0)
+        if Instr(1, words, "atmos") > 0
+            badges.Push("Atmos")
+        else if channels >= 8
+            badges.Push("7.1")
+        else if channels >= 6
+            badges.Push("5.1")
+        end if
+    end if
+    return badges
 end function
 
 ' Who made a title and who is in it, as Android TV's title page says it:
@@ -670,9 +834,9 @@ function contentAbout(detail as object, now as integer, zone as integer) as stri
     if state <> invalid then plays = httpNumber(state.play_count, 0)
     if plays > 0 then facts.Push("Plays: " + urlValue(plays))
     summary = httpClean(detail.summary, 4000, true)
-    ' The page shows two lines of the summary at the least (seven buttons
-    ' and the credits line): anything longer may be cut there.
-    if facts.Count() = 0 and Len(summary) <= 140 then return ""
+    ' The page shows a line of the summary at the least (many buttons, and
+    ' the lines over it): anything longer may be cut there.
+    if facts.Count() = 0 and Len(summary) <= 70 then return ""
     if summary <> "" then lines.Push(summary)
     if facts.Count() > 0
         if lines.Count() > 0 then lines.Push("")

@@ -1,16 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A movie, an episode or a show: its backdrop and poster, what it is, and
-     its buttons (Resume / Play from start, a show's next episode and its
-     episodes, Mark as watched, Audio and subtitles, My List, Trailer,
+     its buttons, as on Android TV (Resume and From start, or Play; a
+     show's next episode, Request more seasons and its episodes; Mark as
+     watched, Audio and subtitles, My List, Trailer, Add to playlist,
      More…). Audio and subtitles and More open a panel over the right of
      the page: the version and tracks to play; the rating, Go to show and
-     season, Media info, Details (the whole summary and the title's facts),
-     Add to playlist. The text is laid out top to
-     bottom, leaving out what a title doesn't have. Under it, rows of a
-     show's seasons, cast and crew, extras, More Like This and the
-     collections it is part of: Down slides the page up to them. Under the
-     poster, how a request for the title stands; a show the person may ask
-     more seasons of ends its seasons with Request more seasons. -->
+     season, Media info, Details (the whole summary and the title's facts).
+     The text is laid out top to bottom, leaving out what a title doesn't
+     have. Under it, rows of a show's seasons, cast and crew, extras, More
+     Like This and the collections it is part of: Down slides the page up
+     to them. Under the poster, how a request for the title stands. -->
 <component name="DetailsScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -52,7 +51,12 @@
                 <!-- Only the labels with text stay in it (layoutText). -->
                 <LayoutGroup id="text" layoutDirection="vert">
                     <Label id="heading" width="1100" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+                    <!-- An episode's "S1 · E3 · Pilot", a season's title, under
+                         the show's name, as Home's hero says it. -->
+                    <Label id="context" width="1100" maxLines="1" color="0xEBEBEBFF" font="font:SmallBoldSystemFont" />
                     <Label id="line" width="1100" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+                    <!-- "1 h 33 min left" for a title resumed. -->
+                    <Label id="left" width="1100" maxLines="1" color="0x38BDF8FF" font="font:SmallerBoldSystemFont" />
                     <Label id="genres" width="1100" color="0x8B95A5FF" font="font:SmallestSystemFont" />
                     <!-- "Directed by … · Starring …". -->
                     <Label id="credits" width="1100" maxLines="1" color="0xA1A9B6FF" font="font:SmallestSystemFont" />

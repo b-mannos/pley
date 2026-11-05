@@ -93,14 +93,28 @@ is an episode, has 16:9 stills.
 
 ### A title's page
 
-A movie's, an episode's or a show's page has its buttons in a column at
-the left, Play (or Resume and Play from start) first, then Mark as
-watched, Audio and subtitles, My List, Trailer (where its extras have
-one: it plays from its start) and More…. Audio and subtitles and More
-open a panel at the right; Back closes it, and Down from the buttons goes
-to the rows under them. Over the summary, as on Android TV, a line says
-who made it and who is in it ("Directed by Grace Hopper · Starring Ada
-Lovelace, Alan Turing"; a show's "Created by").
+A movie's, an episode's or a show's page says what Android TV's does, in
+its order: the title (an episode's show, with "S1 · E3 · Pilot" under
+it), then a line of what it is: a movie's year, an episode's air day, a
+show's seasons and years ("3 seasons · 2019-2024"), the version's
+edition, the runtime, the content rating, the stars and the quality of
+the version Play plays ("4K · DV P8.1 · Atmos"). A title resumed says
+how much is left ("1 h 33 min left"); the genres are followed by the
+collections it is part of ("Drama · Part of Dune").
+
+Its buttons are in a column at the left: Resume and From start (or Play;
+a show's next episode, "Resume S1 · E3" or "Play S1 · E3"), Request more
+seasons for a show with seasons left to ask for, Mark as watched, Audio
+and subtitles, My List, Trailer (where its extras have one: it plays from
+its start), Add to playlist and More…. With nothing to play the first
+says Unavailable, and the focus starts on the next. Audio and subtitles
+and More open a panel at the right; Back closes it, and Down from the
+buttons goes to the rows under them. Over the summary, as on Android TV,
+a line says who made it and who is in it ("Directed by Grace Hopper ·
+Starring Ada Lovelace, Alan Turing"; a show's "Created by"). The column
+keeps above the rows: past six buttons the summary gives up lines, as it
+does for the lines over it, and the tagline goes when the summary would
+keep fewer than two.
 
 - **Audio and subtitles** (a movie or an episode with several files, or
   whose file has two audio tracks or more, or subtitles):
@@ -117,8 +131,8 @@ Lovelace, Alan Turing"; a show's "Created by").
 - **More**, what is used less, as on the other TVs: Rate (Your rating,
   once given: No rating, or 1 to 5 stars, kept for the profile on the
   server), an episode's Go to show (the show's page) and Go to season
-  (its episodes), Media info, Details and Add to playlist. The Options
-  key on an episode's tile goes to them alike.
+  (its episodes), Media info and Details. The Options key on an
+  episode's tile goes to them alike.
 - **Media info** (a movie or an episode with a file): each file, under its
   edition or "VERSION 2" when there are several, and every stream in
   full, in the other apps' words (codec, profile and level, size, frame
@@ -590,8 +604,8 @@ its number counts what waits: a manager's pending and failed requests
   for the words ("Results for “dune”") of every title TMDB has for them,
   with its badge, a page at a time as See all's are; Back goes back to
   Search. A library title that was asked for shows its request's stage
-  under the poster, and a show with seasons left to ask for ends its
-  seasons with Request more seasons.
+  under the poster, and a show with seasons left to ask for has Request
+  more seasons among its buttons.
 - **Ready to watch:** a requested title that arrives is told of in a
   card at the bottom right: its poster, "“The Last Lighthouse” is ready
   to watch." (a show's seasons once each batch is ready; "3 of your
