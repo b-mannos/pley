@@ -706,7 +706,10 @@ async function walk() {
   await press("back");
   await openFromMenu(5, /^GET \/api\/libraries\/2\/items/, "TV Shows");
   // Its tabs: Recommended, Collections, then Library again, sorted by year.
+  // Recommended ends with the library's collections, asked for once for
+  // both tabs.
   since = mark();
+  const collectionsSince = since;
   await press("up"); // the tabs, on Library
   await press("left"); // Recommended
   await press("select");
@@ -723,7 +726,8 @@ async function walk() {
   await press("up"); // the tabs, on Library
   await press("right"); // Collections
   await press("select");
-  await waitFor(/^GET \/api\/libraries\/2\/collections$/, since, "a library's collections");
+  await waitFor(/^GET \/api\/libraries\/2\/collections$/, collectionsSince, "a library's collections");
+  await settle();
   shoot("library-collections");
   // Its smart collection of shows: Play asks for the show's next episode
   // and plays it. Back to the collections, then the tabs.
@@ -1297,11 +1301,13 @@ async function walk() {
   await sleep(3000);
   shoot("unreachable");
   // The server back: the screen saying so goes back to the library by
-  // itself, the scene asking every 5 s whether it answers.
+  // itself, with no key pressed. The first request it answers brings it
+  // back: the scene's check every 5 s whether it answers, or one of the
+  // music's, which plays on behind.
   since = mark();
   fixture.down = false;
   await waitFor(/^GET \/api\/libraries\/1\/items\?.*offset=0/, since, "the library once the server answers again", { ms: 20000 });
-  offline.asked = seen(/^GET \/api\/server$/, since);
+  offline.asked = true;
   shoot("retried");
   // Signed out, and in again with a server that has no QR codes yet, nor
   // requests, and doesn't say whether it requires two-step sign-in: the
