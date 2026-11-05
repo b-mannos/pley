@@ -655,8 +655,11 @@ didn't.
 - **Subtitles and display:** subtitles look as the Roku's own caption
   settings say, which the row says.
 - **Server:** the server this TV uses, and Switch server.
-- **Diagnostics:** Open diagnostics: this TV, and what it tells the server
-  it plays (`capsLines` in `components/lib/Caps.brs`).
+- **Diagnostics:** Open diagnostics: under "This TV" the app, the model,
+  the Roku OS and the Roku's name, then under "What it plays" what it
+  tells the server it plays (`capsLines` in `components/lib/Caps.brs`),
+  as on Android TV a column of labels and one of values, a line each,
+  which Up and Down go through.
 - **About:** TMDB's notice, the version, and Open-source licences: Pley's
   licence and the notices of what the package bundles.
 - **Sign out:** "Sign this TV out of 192.168.1.20:7539. You'll need a new
