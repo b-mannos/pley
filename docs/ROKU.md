@@ -255,10 +255,11 @@ paused leaves the player, as in Roku's own apps.
   still, "Up next · S2 · E6" and the episode's title, then Play now and
   Cancel with the countdown beside them ("Next in 7"). A playlist's next
   entry is asked for as its item begins, for its episode's name. It shows
-  at the credits (else 30 s before the end). Cancelled, or with Play the next episode by itself off, it
-  waits at the end, paused, as on the other apps: Play now (or Play) plays
-  the next one, Cancel or Back leaves. With the setting on, the countdown
-  starts again there.
+  at the credits marker, else at the end, as on Android TV and the native
+  Samsung app. Shown at the credits, it goes on counting down past the
+  end. Cancelled, or with Play the next episode by itself off, it waits at
+  the end, paused: Play now (or Play) plays the next one, Cancel or Back
+  leaves. With the setting on, the countdown starts again there.
 - **The server out of reach:** once something played, the player keeps its
   place and its queue and asks again every 2 s, saying "Reconnecting…",
   for 90 s, as long as the server keeps a session it doesn't hear from;

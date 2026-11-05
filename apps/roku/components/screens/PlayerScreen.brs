@@ -1241,13 +1241,11 @@ sub ended()
         uiNavigate({ back: true })
         return
     end if
-    if not m.upNextCancelled and playerAutoplay(playbackSection())
-        playNext()
-        return
-    end if
-    ' Up Next waits at the end, as on the other apps: counting down again
-    ' after a Cancel when the next plays by itself, for Play now when not.
+    ' Up Next at the end, as on the other apps: shown since the credits, it
+    ' goes on counting down (or waiting for Play now); else it shows now,
+    ' counting down (again, after a Cancel) when the next plays by itself.
     m.ended = true
+    if m.upNext.visible then return
     m.upNextCancelled = false
     showUpNext()
 end sub

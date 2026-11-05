@@ -2,7 +2,7 @@
 <!-- The player: the Video node with its own controls, the picture
      subtitles the app draws, the title as each item begins and while
      paused (with the clock and when it ends), Skip Intro and Skip
-     Credits, Up Next before the end of an episode (and at its end),
+     Credits, Up Next at an episode's credits (or at its end),
      Pley's menu (Down: Subtitles, Audio, Quality, Subtitle sync,
      Chapters, Previous chapter, Next chapter, Next episode, Sleep timer,
      Find subtitles…, Playback details), the sleep timer's notice,

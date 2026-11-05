@@ -135,9 +135,9 @@ function playerFileMarkers(item as dynamic, fileId as dynamic) as object
     return found
 end function
 
-' When Up Next shows, in ms into the file: where its credits start, else
-' 30 s before the end; -1 for a file too short for it. markers are the
-' file's (playerFileMarkers).
+' When Up Next shows, in ms into the file: where its credits start, as on
+' Android TV and the native Samsung app; -1 without them, when it shows at
+' the end. markers are the file's (playerFileMarkers).
 function playerUpNextAt(durationMs as dynamic, markers as object) as integer
     duration = Int(httpNumber(durationMs, 0))
     credits = -1
@@ -145,7 +145,6 @@ function playerUpNextAt(durationMs as dynamic, markers as object) as integer
         if marker.kind = "credits" and marker.startMs > 0 and (credits = -1 or marker.startMs < credits) then credits = marker.startMs
     end for
     if credits > 0 and (duration <= 0 or credits < duration) then return credits
-    if duration > 60000 then return duration - 30000
     return -1
 end function
 

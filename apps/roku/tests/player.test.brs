@@ -101,9 +101,9 @@ sub test_player_up_next_at_the_credits()
     }
     tkEqual(playerUpNextAt(3300000, playerFileMarkers(item, 7)), 3100000)
     tkEqual(playerUpNextAt(3300000, playerFileMarkers(item, 8)), 3200000)
-    tkEqual(playerUpNextAt(3300000, playerFileMarkers(item, 9)), 3270000, "no credits for this file: 30 s before the end")
-    tkEqual(playerUpNextAt(3300000, []), 3270000)
-    tkEqual(playerUpNextAt(45000, []), -1, "too short")
+    tkEqual(playerUpNextAt(3300000, playerFileMarkers(item, 9)), -1, "no credits for this file: at the end, as on Android TV")
+    tkEqual(playerUpNextAt(3300000, []), -1)
+    tkEqual(playerUpNextAt(3000000, playerFileMarkers(item, 7)), -1, "credits past what the session says it holds")
 end sub
 
 sub test_player_up_next_card_as_android_tv()
