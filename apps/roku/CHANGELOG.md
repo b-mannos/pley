@@ -53,15 +53,50 @@ describes how they are made.
   Now Playing's scrubber, Up from its buttons, moves 10 s with Left and
   Right.
 - A playlist entry's Options key goes to its title's page.
-- The live player's Options key adds the channel playing to the
-  favourites or takes it out.
-- The live player's channel list shows another category or a search, and
-  a channel chosen there makes channel up and down go through that one.
+- In the live player, OK and the Options key open the channel list, at
+  the right, as on the other TVs; holding OK shows what's on with
+  Channels and Add to (or Remove from) favourites.
+- The live player's channel list shows another category or a search; a
+  channel chosen in a category makes channel up and down go through that
+  one, and a channel found by a search through every channel.
 - The Options key on a programme in Live TV's guide, or on a card, shows
-  its details.
+  its details in a panel at the right: its picture, episode, day and
+  times with On now, Live, New and its rating, how far it is, what the
+  guide says, then Watch now and the favourite, which changes in place.
 - The requests' tabs say how many each holds, and Discover's way to the
   requests how many wait there, in red while some couldn't be sent.
 - A Discover grid whose next page fails ends in a tile to try again.
+- A show's page has season tabs and a row of its episodes, opening on the
+  next episode's season with the focus on it, as on the other TVs; a
+  season has a page of its own.
+- A tile's Options key plays it (Resume and From start while it's in
+  progress), a season's goes to its show, and music's opens its page.
+- A library's chips add a one-press Unwatched, Genre, Year, and the
+  resolution or dynamic range chosen; filtered, the count says "23 of 342
+  movies". A library filtered to nothing says No matches, with Clear
+  filters, and its Recommended tab ends with its collections.
+- Past six libraries, Home's menu ends them with Libraries, a page
+  listing them all.
+- Paused, the player shows the title, how it plays, the clock and when it
+  ends; Skip Intro and Skip Credits stay while paused.
+- The player's menu has Next episode (or Next in the queue), Next chapter
+  and Previous chapter.
+- Settings has Playback details, which keeps a readout of how the video
+  plays over it.
+- A file the player converts by itself says why, and Quality then offers
+  Play original.
+- Discover's rows have an info block and a backdrop that follow the
+  title focus rests on, as on Home.
+- OK on a request opens a panel at the right: its stage, who asked and
+  when, then Open, what can be done with it, and Details. Withdraw,
+  Remove and Delete ask there first.
+- A TMDB title's page offers Overview when its overview is cut.
+- When the server can't be reached, "Pley is offline" shows at the top
+  right, and the page comes back by itself once the server answers.
+- Saved servers that don't answer say "Can't reach it" on their row, and
+  Search this network checks every address of the network.
+- A title's page and Live TV ask again when another device changes what
+  they show, as Home does.
 
 ### Changed
 
@@ -74,9 +109,10 @@ describes how they are made.
 - A title the server refuses to play offers Try again where asking again
   may help.
 - Playback details stay up to date while they show.
-- Home's menu is in the other TVs' order: Search, Home, Discover and the
-  requests, Live TV, the libraries, Playlists, Collections, Now Playing,
-  then Settings.
+- Home's menu is in the other TVs' order: Search, Home, one way into
+  requests (Discover where the profile may ask, else the requests) with
+  its number, Live TV, the libraries, Playlists, Collections, Now
+  Playing, then Settings.
 - Home with nothing to show says why: no libraries yet, a scan under way,
   or nothing in them yet.
 - Live TV opens at the last channel watched, after a restart too.
@@ -88,7 +124,9 @@ describes how they are made.
 - A page of channels or a part of the guide that didn't load is asked for
   again; with nothing to show, Live TV offers Try again.
 - What's on in Live TV and in the live player moves on as programmes end.
-- When every connection is in use and none can be taken over, the notice
+- When a Live TV channel doesn't play, a card shows its logo, a row for
+  each connection in use with its own Watch here instead, then Try again,
+  Other channels and Back to the guide; when none can be taken over, it
   says what can be done instead.
 - When trending has nothing the profile may ask for, Discover's hero is
   the first title of the next row that has one.
@@ -101,6 +139,85 @@ describes how they are made.
   title's poster, Open and Close, once the remote rests, as on the other
   TVs. It gives the focus back when closed, goes by itself after 10 s,
   and never shows on the requests.
+- What an action did, or why it didn't work, shows in a toast at the top
+  right that goes by itself, as on the other TVs, where a dialog used to
+  wait for OK. A cast's "Playing from …" shows there too.
+- Episode numbers read "S2 · E5", as on the other TVs.
+- Tiles say the time left ("26 min left"), a show's seasons, a season's
+  episodes and a track's artist and album; shows and seasons show how
+  many episodes are left to watch, and rows of episodes have 16:9 stills.
+- A title's page says the air date, edition, seasons and years, and
+  quality ("4K · DV P8.1 · Atmos"), the time left and the collections it
+  is part of. Resume and From start are separate buttons, as are Add to
+  playlist and Request more seasons, and a title with nothing to play
+  says Unavailable. Its cast row is called Cast, Crew, Cast & Crew or
+  Guest Stars, after Extras.
+- Under a title's buttons, an info block keeps the title or the focused
+  episode in view, and Back leaves the page from anywhere on it.
+- A page that can't load says so, with Retry: a title's page, Home, a
+  library's tabs, Collections, a collection, an album, an artist, the
+  playlists, a playlist and the watch history.
+- Playlists show as square mosaics of their first four entries, five
+  across, with how many items they hold and how long they last. A
+  playlist's page has its first entry's backdrop and says whether it's a
+  video, music or smart playlist, a smart one's filter in words; Play,
+  Shuffle and Rename show only where they apply.
+- Now Playing has the other TVs' buttons (no Stop; Next only with a track
+  after it), "Artist · Album", and a line that says Loading… or why a
+  track doesn't play. OK on its scrubber plays or pauses, and it dims
+  after two minutes without a key. A music library has the sort alone.
+- An album marks the track playing, OK on it pauses or goes on, and your
+  rating shows; an artist's albums are a row of square tiles.
+- A show as Home's hero plays its next episode, with Info beside it.
+- The Options key takes a play out of the watch history at once.
+- Up Next is a card at the bottom right with the episode's own title, and
+  comes at the credits, or else at the end.
+- Fast forward and rewind jump 30 s while Skip, Up Next or the player's
+  menu has the focus.
+- A spinner shows while a video loads or waits, with "Reconnecting…"
+  under it, and the player's error screen is centred, with Try again
+  beside Back. Stopped by the server or another device, the player says
+  so itself and leaves 20 s later.
+- The player says Skip Intro and Skip Credits, and gives a movie's year
+  in its title; a chapter named only by its time reads "Chapter 3". The
+  menu's Playback details scroll, and say "Asking the server…" first.
+- Left and Right go through a Live TV channel without a guide half an
+  hour at a time; Up from the guide's first channel goes to the Guide and
+  Channels tabs, and Down stops at the last channel.
+- A favourite changes at once in Live TV, and one the server refuses goes
+  back, a toast saying why.
+- Live TV says why it shows nothing, in a title and a line, as the other
+  TVs do; a search's groups show under "Groups found", and the live
+  player's list says when it has no channels. A radio channel shows its
+  logo, "Sound only" and what's on, and LIVE and NEW go before a
+  programme's title.
+- Discover's hero offers what the title's page does: Tell me too,
+  Requested or Following with the request's stage, Stop following, and
+  why a title can't be asked for.
+- Request asks for a movie at once, from Discover's hero and a title's
+  page, and a toast says what came of it; so do Tell me too, Which
+  seasons? and what's done to a request.
+- Signing in again for requests asks "Sign in again?" first.
+- A TMDB title's page shows its network with its genres, says when it's
+  in a library you can't open, and says "This title isn't on TMDB" for
+  one taken off; TMDB's problems say what to do about them.
+- With no requests to list, the page says why, with Find something to ask
+  for; Discover says "Nothing here right now" when TMDB has nothing to
+  ask for. Declining with a reason asks "Decline "X"?".
+- The sign-in screen follows the other TVs: numbered steps, the code in
+  two fields, the QR code in a light tile, a countdown while the server
+  doesn't answer, and expired codes renewed without a word three times.
+- A profile that needs its password is approved on the sign-in screen
+  ("Approve on your phone"); the PIN pad reads "Enter Anna's PIN", with
+  Use another profile.
+- An unencrypted address beyond the home network is still refused, and
+  the keyboard now says why.
+- Settings is in two panes, categories and their rows, each value under
+  its label, with who is signed in at the top of Profile; Saved shows as
+  a toast, and Switch profile only where the sign-in can.
+- Diagnostics lists its facts in label and value columns under This TV
+  and What it plays.
+- "Can't reach your server" says why, and offers Retry and Switch server.
 
 ### Fixed
 
@@ -114,6 +231,12 @@ describes how they are made.
   more.
 - Choosing a Live TV category or searching takes the focus to its
   channels.
+- Choosing a saved server, Switch server included, asks who's watching
+  and the profile's PIN, as starting the app does, where it used to open
+  Home past the PIN.
+- Music keeps its queue at its end, when a track can't be played, when
+  it's stopped from elsewhere, and while a video or a channel plays; Play
+  goes on from there.
 
 ## [0.1.5] - 2026-11-04
 
