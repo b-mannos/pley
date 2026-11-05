@@ -401,7 +401,18 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
   time, as on Android. TimeGrid draws a programme's title alone, and no
   time over its now line: Android's cells show their times too, and the
   time now sits on its line.
+- **The guide's channels** are TimeGrid's own column: a channel's logo,
+  or where it has none its number and name, a star before them for a
+  favourite; Android's cell shows the logo, the number and the name
+  together. TimeGrid's `channelInfoComponentName` could draw all three,
+  but Roku's documentation doesn't say from which Roku OS it is there (the
+  app runs from Roku OS 9), and brs-node, which the smoke run and the
+  preview use, doesn't draw it.
 - **Channels:** the other tab, as cards with what's on and what's next.
+- **Favourites:** a channel's star changes at once, on its card and in
+  the guide, and goes back if the server refuses, a toast saying so, as
+  on Android. The counts follow, and Favourites itself, when it shows,
+  is asked for again.
 - **What's on moves on** each 15 s: the programme above the guide, the
   cards in view and the player's bar and list show how far along it is. Once a programme listed as on now has ended, the cards in view are
   asked for again, and in the player the channel playing

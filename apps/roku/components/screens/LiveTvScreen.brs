@@ -976,26 +976,60 @@ sub onOptionChosen(event as object)
     if chosen = 0
         watch(channel)
     else if chosen = 1
-        method = "DELETE"
-        if not channel.favorite then method = "PUT"
-        uiRequest({ method: method, path: "/api/live/channels/" + urlValue(channel.id) + "/favorite", channelId: channel.id }, "onFavorite")
+        toggleFavorite(channel)
     end if
 end sub
 
-' PUT or DELETE …/favorite done: the counts, and the list again where it
-' was (a favourite's star, or the Favourites list itself).
+' A channel in or out of the favourites (PUT or DELETE
+' /api/live/channels/{id}/favorite): its star changes at once, and goes
+' back if the server refuses, a toast saying so, as on Android.
+sub toggleFavorite(channel as object)
+    favorite = not channel.favorite
+    markFavorite(channel.id, favorite)
+    method = "DELETE"
+    if favorite then method = "PUT"
+    uiRequest({ method: method, path: "/api/live/channels/" + urlValue(channel.id) + "/favorite", channelId: channel.id, favorite: favorite }, "onFavorite")
+end sub
+
+' The channel's star where Live TV shows it: its card, and in the guide
+' its name where no logo shows (Live.brs's liveGuideName).
+sub markFavorite(id as integer, favorite as boolean)
+    if m.page <> invalid
+        at = liveIndexOf(m.page.channels, id)
+        if at >= 0
+            channel = m.page.channels[at]
+            channel.favorite = favorite
+            row = invalid
+            if m.guide.content <> invalid then row = m.guide.content.getChild(at)
+            if row <> invalid then row.title = liveGuideName(channel)
+        end if
+    end if
+    at = liveIndexOf(m.cardChannels, id)
+    if at >= 0
+        m.cardChannels[at].favorite = favorite
+        item = invalid
+        if m.cards.content <> invalid then item = m.cards.content.getChild(at)
+        if item <> invalid then item.favorite = favorite
+    end if
+end sub
+
+' PUT or DELETE …/favorite done: the counts follow, and the Favourites
+' list itself is asked for again where it was; refused, the star goes
+' back.
 sub onFavorite(event as object)
     answer = event.getData()
+    spec = event.getRoSGNode().spec
     if not answer.ok
-        if not uiFailed(answer) then uiMessage("That didn't work", [answer.message])
+        markFavorite(spec.channelId, not spec.favorite)
+        if not uiFailed(answer) then uiToast(liveFavoriteFailed(answer.message), true)
         return
     end if
     loadGroups(false)
-    id = event.getRoSGNode().spec.channelId
+    if m.view.category <> "favorites" then return
     if m.view.tab = "guide" and m.page <> invalid
-        loadGuidePage(m.page.offset, id, "keep")
+        loadGuidePage(m.page.offset, spec.channelId, "keep")
     else
-        loadCards(0, id, false, true)
+        loadCards(0, spec.channelId, false, true)
     end if
 end sub
 

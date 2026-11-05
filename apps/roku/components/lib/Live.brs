@@ -700,9 +700,17 @@ function liveGuideRows(channels as object, kept as object, from as integer, upto
             if p.ends > at then at = p.ends
         end for
         programs.Append(liveGuideGaps(at, upto, gapTitle))
-        out.Push({ fields: { id: channel.id.ToStr(), title: liveTitle(channel), hdSmallIconUrl: channel.logo }, programs: programs })
+        out.Push({ fields: { id: channel.id.ToStr(), title: liveGuideName(channel), hdSmallIconUrl: channel.logo }, programs: programs })
     end for
     return out
+end function
+
+' A channel in the guide's column, where its logo doesn't show (the
+' TimeGrid draws one or the other): "★ 101  Pley News HD" for a
+' favourite, as Android's cell stars its number.
+function liveGuideName(channel as object) as string
+    if channel.favorite then return "★ " + liveTitle(channel)
+    return liveTitle(channel)
 end function
 
 ' Time the guide says nothing of, from from to upto, as cells on the half
