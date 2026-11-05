@@ -95,22 +95,63 @@ function libQuery(view as object, offset as integer, limit as integer) as object
     return query
 end function
 
-' What the filters keep, in words: "All titles", "Unwatched, Comedy, 1999,
-' 4K, Dolby Vision".
-function libFilterLabel(view as object) as string
-    parts = []
-    if view.watched = "false" then parts.Push("Unwatched")
-    if view.watched = "true" then parts.Push("Watched")
-    if view.genre <> "" then parts.Push(view.genre)
-    if view.year > 0 then parts.Push(urlValue(view.year))
-    if view.resolution <> "" then parts.Push(fmtTokenLabel(fmtResolutions(), view.resolution))
-    if view.dynamic_range <> "" then parts.Push(fmtTokenLabel(fmtDynamicRanges(), view.dynamic_range))
-    if parts.Count() = 0 then return "All titles"
-    return parts.Join(", ")
-end function
-
 function libFiltered(view as object) as boolean
     return view.watched <> "" or view.genre <> "" or view.year > 0 or view.resolution <> "" or view.dynamic_range <> ""
+end function
+
+' The chips at the right of the tabs, as on Android TV: [{ label, kind,
+' selected }]. Sort (its order in words); then, but for music, Filter (its
+' panel), Unwatched (one press turns it on or off), Genre and Year once
+' the library has some or one is chosen (filters: libFilters, invalid until
+' the server said), and the resolution and the dynamic range only while
+' one is chosen, saying it ("4K", "Dolby Vision"). A chip of a filter in
+' force is selected.
+function libChips(view as object, kind as string, filters as dynamic) as object
+    chips = [{ label: libSortLabel(view.sort, view.order), kind: "sort", selected: false }]
+    if kind = "music" then return chips
+    chips.Push({ label: "Filter", kind: "filter", selected: false })
+    chips.Push({ label: "Unwatched", kind: "unwatched", selected: view.watched = "false" })
+    genres = 0
+    years = 0
+    if filters <> invalid
+        genres = filters.genres.Count()
+        years = filters.years.Count()
+    end if
+    if genres > 0 or view.genre <> ""
+        label = "Genre"
+        if view.genre <> "" then label = libChipWords(view.genre)
+        chips.Push({ label: label, kind: "genre", selected: view.genre <> "" })
+    end if
+    if years > 0 or view.year > 0
+        label = "Year"
+        if view.year > 0 then label = urlValue(view.year)
+        chips.Push({ label: label, kind: "year", selected: view.year > 0 })
+    end if
+    if view.resolution <> "" then chips.Push({ label: fmtTokenLabel(fmtResolutions(), view.resolution), kind: "resolution", selected: true })
+    if view.dynamic_range <> "" then chips.Push({ label: fmtTokenLabel(fmtDynamicRanges(), view.dynamic_range), kind: "dynamic_range", selected: true })
+    return chips
+end function
+
+' A chip's words, cut short past 18 letters ("Science Fiction &…"), as
+' Android TV keeps a genre's chip narrow.
+function libChipWords(text as string) as string
+    if Len(text) <= 18 then return text
+    return Left(text, 17).Trim() + "…"
+end function
+
+' The Unwatched chip pressed: unwatched titles only, or every title again.
+function libToggleUnwatched(watched as string) as string
+    if watched = "false" then return ""
+    return "false"
+end function
+
+' What the Library tab counts: "342 movies", or filtered "23 of 342
+' movies", out of the library's own count (itemCount), as on Android TV;
+' not when that is below what the filters found (counted before a scan).
+function libCountLine(view as object, kind as string, total as integer, itemCount as dynamic) as string
+    all = Int(httpNumber(itemCount, -1))
+    if libFiltered(view) and all >= total then return urlValue(total) + " of " + fmtCount(all, kind)
+    return fmtCount(total, kind)
 end function
 
 ' Whether the Library tab's posters carry their quality badges ("4K",
@@ -299,8 +340,8 @@ function libViewKey(server as string, profileId as dynamic, libraryId as dynamic
 end function
 
 ' The view kept for key, checked against what a library of kind offers;
-' the default for anything else. Music has no resolutions or dynamic
-' ranges to filter by.
+' the default for anything else. Music has no filters, as on the other
+' TVs: only its tab and sort are kept.
 function libLoadView(section as object, key as string, kind as string) as object
     view = libDefaultView()
     kept = httpObject(httpJson(section.Read(key)))
@@ -316,15 +357,14 @@ function libLoadView(section as object, key as string, kind as string) as object
     view.order = libDefaultOrder(view.sort)
     order = httpString(kept.order)
     if order = "asc" or order = "desc" then view.order = order
+    if kind = "music" then return view
     watched = httpString(kept.watched)
     if watched = "true" or watched = "false" then view.watched = watched
     view.genre = httpSentence(kept.genre)
     year = httpNumber(kept.year, 0)
     if year > 0 then view.year = Int(year)
-    if kind <> "music"
-        if fmtTokenLabel(fmtResolutions(), kept.resolution) <> "" then view.resolution = kept.resolution
-        if fmtTokenLabel(fmtDynamicRanges(), kept.dynamic_range) <> "" then view.dynamic_range = kept.dynamic_range
-    end if
+    if fmtTokenLabel(fmtResolutions(), kept.resolution) <> "" then view.resolution = kept.resolution
+    if fmtTokenLabel(fmtDynamicRanges(), kept.dynamic_range) <> "" then view.dynamic_range = kept.dynamic_range
     return view
 end function
 

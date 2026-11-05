@@ -9,6 +9,7 @@ sub init()
     m.title = m.top.findNode("title")
     m.countLabel = m.top.findNode("count")
     m.tabs = m.top.findNode("tabs")
+    m.viewStrip = m.top.findNode("viewStrip")
     m.viewChips = m.top.findNode("view")
     m.grid = m.top.findNode("grid")
     m.letters = m.top.findNode("letters")
@@ -55,11 +56,20 @@ sub init()
     m.panelKind = ""
     m.values = []
     m.menuActions = []
+    ' What each chip is (lib/Library.brs's libChips), how far the chips
+    ' slid to keep the focused one in view, and the room they have; whether
+    ' the panel showing was opened from a filter's own chip, and goes back
+    ' to the chips once its choice is made.
+    m.chipKinds = []
+    m.chipScroll = 0
+    m.chipRoom = 0
+    m.chipPanel = false
     ' Where the focus goes once the first answer comes: into the titles.
     m.focusContent = true
     m.lastFocus = m.grid
     m.tabs.observeField("chosen", "onTabChosen")
     m.viewChips.observeField("chosen", "onViewChosen")
+    m.viewChips.observeField("focusIndex", "scrollChips")
     m.grid.observeField("itemSelected", "onSelected")
     m.grid.observeField("itemFocused", "onFocused")
     m.letters.observeField("chosen", "onLetter")
@@ -112,6 +122,8 @@ sub onActive()
         m.tabs.setFocus(true)
         showViewChips()
         showTab(m.view.tab)
+        ' What the titles can be filtered by, for the Genre and Year chips.
+        if m.library.kind <> "music" then askFilters()
         return
     end if
     ' What was played or marked meanwhile.
@@ -169,7 +181,7 @@ sub showTab(wanted as string)
             m.tabs.focusIndex = i
         end if
     end for
-    m.viewChips.visible = wanted = "library"
+    m.viewStrip.visible = wanted = "library"
     if m.grid.isInFocusChain() or m.rows.isInFocusChain() or m.letters.isInFocusChain() then m.tabs.setFocus(true)
     m.grid.visible = false
     m.rows.visible = false
@@ -249,7 +261,7 @@ end sub
 
 sub showCount()
     if m.view.tab = "library" and m.total >= 0
-        m.countLabel.text = fmtCount(m.total, m.library.kind)
+        m.countLabel.text = libCountLine(m.view, m.library.kind, m.total, m.library.itemCount)
     else if m.view.tab = "collections" and m.collections <> invalid
         n = m.collections.getChildCount()
         m.countLabel.text = urlValue(n) + " collections"
@@ -403,17 +415,59 @@ sub onRowTile(event as object)
     uiOpenTile(tile)
 end sub
 
-' The sort and the filters as chips, at the right of the tabs.
+' The sort and the filters as chips (libChips), each as wide as its
+' words, at the right of the tabs; the focus stays on the chip of the same
+' kind, as a filter chosen changes its words or a chip comes or goes.
 sub showViewChips()
-    ' As wide as their words, the filters' at most 420 pixels, so that a
-    ' long sort ("Date added, recently added first") clears the tabs.
-    filterLabel = libFilterLabel(m.view)
-    filterWidth = 0
-    if Len(filterLabel) > 20 then filterWidth = 420
-    m.viewChips.chips = [{ label: libSortLabel(m.view.sort, m.view.order), width: 0 }, { label: filterLabel, width: filterWidth }]
+    focusedKind = ""
+    at = m.viewChips.focusIndex
+    if at >= 0 and at < m.chipKinds.Count() then focusedKind = m.chipKinds[at]
+    m.chipKinds = []
+    chips = []
+    for each chip in libChips(m.view, m.library.kind, m.filters)
+        m.chipKinds.Push(chip.kind)
+        chips.Push({ label: chip.label, width: 0, selected: chip.selected })
+    end for
+    m.viewChips.chips = chips
     m.viewChips.current = -1
-    if libFiltered(m.view) then m.viewChips.current = 1
-    m.viewChips.translation = [1824 - m.viewChips.rowWidth, 132]
+    for i = 0 to m.chipKinds.Count() - 1
+        if m.chipKinds[i] = focusedKind then at = i
+    end for
+    if at >= m.chipKinds.Count() then at = m.chipKinds.Count() - 1
+    if at < 0 then at = 0
+    m.viewChips.focusIndex = at
+    ' From the tabs' end to the right edge; past it, they are cut off at
+    ' the tabs and slide (scrollChips).
+    m.chipRoom = 1824 - (m.tabs.translation[0] + m.tabs.rowWidth + 32)
+    width = m.viewChips.rowWidth
+    if width <= m.chipRoom
+        m.viewStrip.translation = [1824 - width, 132]
+        m.viewStrip.clippingRect = [0, 0, 0, 0]
+    else
+        m.viewStrip.translation = [1824 - m.chipRoom, 132]
+        m.viewStrip.clippingRect = [0, -8, m.chipRoom, 72]
+    end if
+    scrollChips()
+end sub
+
+' The chip in focus in view: the row slides no further than it needs, and
+' not at all when it fits.
+sub scrollChips()
+    places = m.viewChips.places
+    width = m.viewChips.rowWidth
+    scroll = m.chipScroll
+    at = m.viewChips.focusIndex
+    if width <= m.chipRoom or places = invalid
+        scroll = 0
+    else if at >= 0 and at < places.Count()
+        chip = places[at]
+        if chip[0] + chip[1] - scroll > m.chipRoom then scroll = chip[0] + chip[1] - m.chipRoom
+        if chip[0] < scroll then scroll = chip[0]
+    end if
+    if scroll > width - m.chipRoom then scroll = width - m.chipRoom
+    if scroll < 0 then scroll = 0
+    m.chipScroll = scroll
+    m.viewChips.translation = [-scroll, 0]
 end sub
 
 ' A new sort or filters: the Roku keeps them, and the titles come again.
@@ -515,11 +569,31 @@ end sub
 
 ' --- The sort's and the filters' panel ---
 
+' Sort and Filter open their panels; Unwatched turns on or off at once; a
+' filter's own chip (Genre, Year, a resolution, a dynamic range) opens its
+' choices, and the pick goes back to the chips, as on Android TV.
 sub onViewChosen(event as object)
-    if event.getData() = 0
+    at = event.getData()
+    if at < 0 or at >= m.chipKinds.Count() then return
+    kind = m.chipKinds[at]
+    m.chipPanel = false
+    if kind = "sort"
         openSort()
-    else
+    else if kind = "filter"
         openFilters()
+    else if kind = "unwatched"
+        m.view.watched = libToggleUnwatched(m.view.watched)
+        applyView()
+    else
+        m.chipPanel = true
+        if m.filters = invalid
+            ' Its choices once the server says what they are.
+            openFilters()
+            m.filterWanted = kind
+            m.panelHint.text = "Loading…"
+        else
+            openFilter(kind)
+        end if
     end if
 end sub
 
@@ -641,6 +715,8 @@ sub onFilters(event as object)
         return
     end if
     m.filters = libFilters(answer.data)
+    ' Genre and Year join the chips.
+    showViewChips()
     if not m.panel.visible or m.panelKind <> "filters" then return
     if wanted <> ""
         openFilter(wanted)
@@ -721,6 +797,11 @@ sub onChoice(event as object)
     if kind = "year" then m.view.year = value
     if kind = "resolution" then m.view.resolution = value
     if kind = "dynamic_range" then m.view.dynamic_range = value
+    if m.chipPanel
+        closePanel()
+        applyView()
+        return
+    end if
     applyView()
     openFilters()
 end sub
@@ -728,6 +809,7 @@ end sub
 sub closePanel()
     m.panel.visible = false
     m.panelKind = ""
+    m.chipPanel = false
     ' A filter picked while its choices were loading is forgotten with the panel.
     m.filterWanted = ""
     m.viewChips.setFocus(true)
@@ -737,13 +819,14 @@ end sub
 ' A to Z's first letter) back; right from the last tab reaches the sort
 ' and filters, and from the grid's last column the A to Z, at the letter
 ' of the title it leaves, which Left goes back to. Back closes the
-' panel (a filter's choices go back to the filters). The Options key on a
-' title offers what can be done with it.
+' panel (a filter's choices go back to the filters, unless its own chip
+' opened them). The Options key on a title offers what can be done with
+' it.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
     if m.panel.visible
         if key = "back" or key = "left"
-            if m.panelKind <> "sort" and m.panelKind <> "filters"
+            if m.panelKind <> "sort" and m.panelKind <> "filters" and not m.chipPanel
                 openFilters()
             else
                 closePanel()
@@ -770,7 +853,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
         m.grid.setFocus(true)
         return true
     end if
-    if key = "right" and m.tabs.isInFocusChain() and m.viewChips.visible
+    if key = "right" and m.tabs.isInFocusChain() and m.viewStrip.visible
         m.viewChips.focusIndex = 0
         m.viewChips.setFocus(true)
         return true

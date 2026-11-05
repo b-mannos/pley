@@ -3,6 +3,7 @@ sub init()
     m.backs = []
     m.labels = []
     m.numbers = []
+    m.selected = []
     m.top.observeField("focusedChild", "onLook")
 end sub
 
@@ -14,6 +15,8 @@ sub onChips()
     m.backs = []
     m.labels = []
     m.numbers = []
+    m.selected = []
+    places = []
     x = 0
     for each chip in m.top.chips
         back = m.top.createChild("Rectangle")
@@ -56,8 +59,11 @@ sub onChips()
         m.backs.Push(back)
         m.labels.Push(label)
         m.numbers.Push(number)
+        m.selected.Push(chip.DoesExist("selected") and chip.selected = true)
+        places.Push([x, width])
         x = x + width + 16
     end for
+    m.top.places = places
     m.top.rowWidth = x - 16
     if x = 0 then m.top.rowWidth = 0
     if m.top.focusIndex >= m.backs.Count() then m.top.focusIndex = 0
@@ -100,7 +106,7 @@ sub onLook()
         if lit
             m.backs[i].color = "0x38BDF8FF"
             words = "0x16191EFF"
-        else if i = m.top.current
+        else if i = m.top.current or m.selected[i]
             m.backs[i].color = "0x2E3440FF"
             words = "0xEBEBEBFF"
         else

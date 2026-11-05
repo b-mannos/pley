@@ -5,10 +5,12 @@
      the focus. A chip may end with a number (the requests' tabs). -->
 <component name="ChipRow" extends="Group">
     <interface>
-        <!-- [{ label, width, count, accent, danger }]: a chip's width in
-             pixels; 0, as wide as its words. count (optional): its
-             number's words, "" for none; accent or danger: the number in
-             that colour, as the menu's. -->
+        <!-- [{ label, width, count, accent, danger, selected }]: a
+             chip's width in pixels; 0, as wide as its words. count
+             (optional): its number's words, "" for none; accent or
+             danger: the number in that colour, as the menu's. selected
+             (optional): it stands out as the current one does (a filter
+             in force). -->
         <field id="chips" type="array" onChange="onChips" />
         <!-- The room either side of a chip's words, both sides together,
              for chips of width 0. -->
@@ -17,8 +19,10 @@
         <field id="focusIndex" type="integer" value="0" onChange="onLook" />
         <!-- The chip OK was pressed on. -->
         <field id="chosen" type="integer" alwaysNotify="true" />
-        <!-- How wide the chips are together, set with them. -->
+        <!-- How wide the chips are together, and each one's [left,
+             width], set with them. -->
         <field id="rowWidth" type="integer" />
+        <field id="places" type="array" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/items/ChipRow.brs" />
 </component>

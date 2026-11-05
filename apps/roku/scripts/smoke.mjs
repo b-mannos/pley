@@ -665,11 +665,13 @@ async function walk() {
   shoot("library-scrolled");
   await press("back");
   // Movies again, sorted by bitrate: the posters' quality badges, and
-  // their bitrate and size under them. Then the Filter panel, which adds
-  // Resolution and Dynamic range once the server says the movies differ in
-  // them, and Resolution's 4K: the grid lists 4K titles only, and the chip
-  // says so.
+  // their bitrate and size under them. Then the Filter panel, which has
+  // Resolution and Dynamic range since the server said, as the library
+  // opened, that the movies differ in them, and Resolution's 4K: the grid
+  // lists 4K titles only, and a chip says so.
+  since = mark();
   await openFromMenu(5, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies again");
+  await waitFor(/^GET \/api\/libraries\/1\/filters$/, since, "what a library can be filtered by");
   await settle();
   await press("up"); // the tabs, on Library
   await press("right", 2); // past Collections to the sort
@@ -681,11 +683,9 @@ async function walk() {
   await waitFor(/^GET \/api\/libraries\/1\/items\?.*sort=bitrate/, since, "the library sorted by bitrate");
   await settle();
   shoot("library-bitrate");
-  await press("right"); // the filters
-  since = mark();
+  await press("right"); // Filter
   await press("select");
-  await waitFor(/^GET \/api\/libraries\/1\/filters$/, since, "what a library can be filtered by");
-  await settle();
+  await sleep(500);
   shoot("library-filters");
   await press("down", 3); // Resolution, after Year
   await press("select");
