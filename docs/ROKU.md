@@ -684,7 +684,7 @@ then shows it. It is kept on the Roku for each server.
 | `components/MusicPlayer.*` | The music queue on the scene's Audio node |
 | `components/screens/` | One component per screen |
 | `components/shared/` | Screen helpers (`Ui.brs`), title actions (`Titles.brs`) |
-| `components/items/` | Tiles, rows, the player's skip button, the ready-to-watch card |
+| `components/items/` | Tiles (a playlist's mosaic too), rows, a page's message with its Retry, the player's skip button, the ready-to-watch card |
 | `components/tasks/ApiTask` | The only code that talks to the server |
 | `components/tasks/DiscoveryTask` | `pley?` to UDP port 7539 (`apps/server/src/discovery.rs`) |
 | `components/tasks/EventsTask` | The server's event stream, on a socket |
