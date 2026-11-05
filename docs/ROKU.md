@@ -264,10 +264,13 @@ paused leaves the player, as in Roku's own apps.
   after 500 ms, as Android TV's ring.
 - **The server out of reach:** once something played, the player keeps its
   place and its queue and asks again every 2 s, saying "Reconnecting…"
-  under the spinner, for 90 s, as long as the server keeps a session it doesn't hear from;
-  then, or when the first playback can't start, it says it can't reach the
-  server, with Try again. A refusal says why, with Try again where asking
-  again may help (not for a title gone or out of reach of the profile).
+  under the spinner, for 90 s, as long as the server keeps a session it
+  doesn't hear from; then, or when the first playback can't start, it says
+  "Can't reach your server", with Try again. A refusal says why, with Try
+  again where asking again may help (not for a title gone or out of reach
+  of the profile). What went wrong shows as on Android TV: centred on
+  black, the title, the reason in up to four lines, then Try again
+  (focused) beside Back.
 - **Stalls:** a playhead that stands still 12 s while meant to play is
   looked at, as the other apps do: a file played as it is that has its
   data is converted once a title (see [Quality](#quality)); a stream asks

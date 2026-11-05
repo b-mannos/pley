@@ -1369,14 +1369,13 @@ end sub
 ' The server doesn't answer. Once something played, the player keeps its
 ' place (and its queue) and asks again every 2 s, saying "Reconnecting…",
 ' as long as the server keeps a session it doesn't hear from (90 s), as the
-' other apps do; before anything played, or after that, it says so, with
-' Try again.
+' other apps do; before anything played, or after that, it says so in
+' Android TV's words, with Try again.
 sub reconnect()
     now = m.clock.TotalMilliseconds()
     if m.reconnectFrom < 0 then m.reconnectFrom = now
     if not m.everPlayed or now - m.reconnectFrom >= playerReconnectMs()
-        session = m.global.session
-        notice("Can't reach " + session.serverName, "Pley for Roku can't reach the server at " + urlDisplayAddress(session.server) + ". Check that it's on, and that this TV is on the same network as the server.", ["Try again", "Back"])
+        notice("Can't reach your server", "Check that the server is on and that this Roku is on its network.", ["Try again", "Back"])
         return
     end if
     hideBanner()
