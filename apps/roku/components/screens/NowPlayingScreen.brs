@@ -137,21 +137,12 @@ sub markRow(at as integer, current as boolean)
     m.rows.replaceChild(fresh, index)
 end sub
 
-' Stopped (the queue played out, or Stop), the screen goes; stopped from
-' another device or by the server's administrator, the scene says so over
-' the screen before, as after a video.
+' The queue forgotten (Stop), the screen goes. Played out, or stopped
+' from another device or by the server's administrator, the queue stays,
+' and the line under the album says why nothing plays.
 sub onMusicState()
-    music = m.global.music
-    if music.state = "stopped"
-        if not m.top.active then return
-        if music.stoppedBy = ""
-            uiNavigate({ back: true })
-            return
-        end if
-        lines = music.stoppedBy.Split(Chr(10))
-        message = []
-        if lines.Count() > 1 then message.Push(lines[1])
-        uiNavigate({ back: true, message: { title: lines[0], lines: message } })
+    if m.global.music.state = "stopped"
+        if m.top.active then uiNavigate({ back: true })
         return
     end if
     showButtons()
@@ -201,7 +192,7 @@ sub onSleep()
 end sub
 
 ' The line under the album: "Pausing in 12 s" in the sleep timer's last
-' 30 s, else what went wrong with a track before.
+' 30 s, else why the track doesn't play.
 sub showStatus()
     music = m.global.music
     if m.noticing

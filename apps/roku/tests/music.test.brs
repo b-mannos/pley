@@ -47,6 +47,11 @@ sub test_music_album_tracks_by_disc()
     tkEqual(musicDiscRows([]).Count(), 0, "no tracks")
 end sub
 
+sub test_music_failures_in_words()
+    tkEqual(musicFailure({ ok: false, status: 0, error: "network", message: "No answer." }), "Can't reach the server.")
+    tkEqual(musicFailure({ ok: false, status: 500, error: "http", message: "The transcoder failed." }), "This track can't be played.")
+end sub
+
 sub test_music_stream_formats()
     detail = { files: [{ id: 7, container: "flac" }] }
     tkEqual(musicStreamFormat({ hls: true, file_id: 7 }, detail), "hls")

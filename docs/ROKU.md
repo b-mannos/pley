@@ -235,6 +235,14 @@ past it; its Shuffle starts on any track and plays the others after it in
 a random order. As on the other TVs, an album's page also has Go to
 artist, and Now playing while music plays.
 
+As on the other apps, the queue stays until other music replaces it (or
+another profile, sign-in or server comes): at its end the last track
+stays, and Play starts it again; a track that can't be played stays,
+saying why ("Can't reach the server.", "This track can't be played."),
+and Play asks for it again. A video or a channel pauses the music, which
+lets go of its session (its paused reports would keep it through a whole
+film); Play goes on from where it was, in a new session.
+
 Now Playing shows the track, its cover and how far along it is, Shuffle,
 Previous, Pause, Next, Stop and the sleep timer, and Up next: the queue,
 numbered, the track playing in bold, which stays in view unless the
@@ -254,8 +262,8 @@ min, End of this track, and the button says what is left ("Sleep timer:
 23 min left"). In its last 30 s Now Playing says "Pausing in 12 s" and the
 button is Keep listening, which adds the same time again (or lets this
 track play to its end). Then the music pauses until Play, as on the other
-apps; at the end of a track, the next one waits, paused. Stop, or the
-queue's end, turns the timer off.
+apps; at the end of a track, the next one waits, paused. The queue's
+end turns the timer off.
 
 ### The player
 
@@ -478,8 +486,8 @@ remotes offer only Stop. They obey:
   buttons and scrubber do, while other screens show too: previous more
   than 3 s into a track, or on the first, goes back to its start. Music
   stopped from another device or by an administrator stops, as a video
-  does, saying who stopped it over Now Playing, or over whichever screen
-  is on top.
+  does, its queue kept: Now Playing's line says who stopped it (over
+  another screen on top, a message does), and Play goes on.
 - **Live TV:** next and previous, channel up and down through the category
   Up and Down go through, round its ends. It has no pause or seek. Stopped
   from another device or by an administrator (`session_stopped`), it

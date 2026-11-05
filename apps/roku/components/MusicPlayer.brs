@@ -3,14 +3,16 @@
 ' scene's Audio node (the token in its HTTP agent, renewed as the token
 ' is), reports progress about every 10 s, on pause and every 30 s while
 ' paused, and as "stopped" when it ends or another starts, and its session
-' is closed then. A track that
-' doesn't play as it is plays again converted, once; one that doesn't play
-' at all is passed over. The end of the queue stops it. The queue keeps
-' the order it was given in (lib/Music.brs), so Stop shuffling puts it
-' back. The sleep timer (lib/Sleep.brs) is the music player's, not Now
-' Playing's: the music plays on while other screens show. The user's
-' remote, on another device, controls it as Now Playing does (Remote.brs),
-' and its session stopped from elsewhere stops it.
+' is closed then. A track that doesn't play as it is plays again
+' converted, once. As on the other apps the queue stays, and Play goes on,
+' where nothing plays any more: at its end (its last track, from its
+' start), on a track that can't be played (saying why), after its session
+' was stopped from elsewhere, and while a video or a channel plays
+' ("suspend"), each waiting with no session. Only "stop" forgets it. The
+' queue keeps the order it was given in (lib/Music.brs), so Stop shuffling
+' puts it back. The sleep timer (lib/Sleep.brs) is the music player's, not
+' Now Playing's: the music plays on while other screens show. The user's
+' remote, on another device, controls it as Now Playing does (Remote.brs).
 
 sub init()
     m.audio = m.top.findNode("audio")
@@ -39,10 +41,11 @@ sub init()
     m.played = false
     m.lastReportAt = 0
     ' The sleep timer, off until set, for as long as music plays; whether
-    ' the track shown waits for Play, with no session yet (the timer ended
-    ' with the one before); and what Now Playing was told of it last.
+    ' the track shown waits for Play, with no session (hold), and where
+    ' Play starts it then; and what Now Playing was told of the timer last.
     m.sleep = sleepNew(0, 0#)
     m.waiting = false
+    m.resumeMs = 0
     m.sleepShown = ""
     m.sleepTimer = m.top.findNode("sleepTimer")
     m.sleepTimer.observeField("fire", "onSleepTick")
@@ -88,6 +91,9 @@ end sub
 ' file's container).
 sub playTrack(at as integer, mode as string, startMs = 0 as integer)
     showTrack(at, "loading")
+    ' What went wrong before is said no more.
+    m.top.message = ""
+    m.top.stoppedBy = ""
     m.mode = mode
     if startMs < 0 then startMs = 0
     m.startMs = startMs
@@ -108,6 +114,7 @@ sub showTrack(at as integer, state as string)
     m.detail = invalid
     m.played = false
     m.waiting = state = "paused"
+    m.resumeMs = 0
     track = musicTrackAt(m.queue, at)
     m.top.track = track
     m.top.at = at
@@ -129,7 +136,7 @@ sub onSession(event as object)
             stopAll()
             return
         end if
-        passOver(answer.message)
+        failed(musicFailure(answer))
         return
     end if
     m.info = answer.data
@@ -186,21 +193,26 @@ sub onState(event as object)
         m.pausedTimer.control = "start"
     else if state = "finished"
         m.top.positionMs = m.top.durationMs
+        hasNext = m.queue.at + 1 < m.queue.order.Count()
         ' The sleep timer ends with this track: the next one waits, paused.
         if sleepEndsWith(m.sleep, trackKey())
             sleepFired()
-            if m.queue.at + 1 < m.queue.order.Count()
+            if hasNext
                 showTrack(m.queue.at + 1, "paused")
                 return
             end if
         end if
-        nextTrack()
+        if hasNext
+            playTrack(m.queue.at + 1, "auto")
+        else
+            ended()
+        end if
     else if state = "error"
         ' The file as it is doesn't play on this Roku: converted, once.
         if not m.played and m.mode <> "transcode" and httpString(m.info.method) <> "transcode"
             playTrack(m.queue.at, "transcode")
         else
-            passOver("This track can't be played on this Roku.")
+            failed("This track can't be played.")
         end if
     end if
 end sub
@@ -247,7 +259,7 @@ sub onControl()
     if action = "pause"
         m.audio.control = "pause"
     else if action = "resume" and m.waiting
-        playTrack(m.queue.at, "auto")
+        playTrack(m.queue.at, "auto", m.resumeMs)
     else if action = "resume"
         m.audio.control = "resume"
     else if action = "next"
@@ -268,14 +280,29 @@ sub onControl()
             setSleep(sleepNextMinutes(m.sleep.minutes))
         end if
         showSleep(sleepNow())
+    else if action = "suspend"
+        suspend()
     else if action = "stop"
         stopAll()
     end if
 end sub
 
+' A video or a channel starts: the music lets go of its session, which its
+' paused reports would keep through a whole film, and waits where it was,
+' its queue kept, as on the other apps; Play goes on from there in a new
+' session. A track still being asked for isn't loaded.
+sub suspend()
+    state = m.top.state
+    if m.waiting or (state <> "playing" and state <> "paused" and state <> "loading") then return
+    from = m.top.positionMs
+    if state = "loading" then from = m.startMs
+    hold(from)
+end sub
+
 ' The track's session stopped from another device or by the server's
-' administrator: the music stops, as a video does, and Now Playing says
-' who stopped it. The server ended the session: nothing to report or close.
+' administrator: the music stops, as a video does, its queue kept, and
+' Now Playing says who stopped it; Play goes on. The server ended the
+' session: nothing to report or close.
 sub onServerStopped(event as object)
     stopFromServer(event.getData())
 end sub
@@ -284,8 +311,10 @@ sub stopFromServer(data as object)
     if m.sessionId = "" or httpString(data.session_id) <> m.sessionId then return
     m.sessionId = ""
     m.info = invalid
-    m.top.stoppedBy = playerStoppedMessage(data)
-    stopAll()
+    stoppedBy = playerStoppedMessage(data)
+    m.top.stoppedBy = stoppedBy
+    m.top.message = stoppedBy.Split(Chr(10)).Join(" ")
+    hold(m.top.positionMs)
 end sub
 
 ' A command of the user's remote, on another device, for the track's
@@ -317,18 +346,38 @@ sub onPlayerCommand(event as object)
     end if
 end sub
 
+' Next, with something after the track: nothing comes after the last.
 sub nextTrack()
-    if m.queue.at + 1 < m.queue.order.Count()
-        playTrack(m.queue.at + 1, "auto")
-    else
-        stopAll()
-    end if
+    if m.queue.at + 1 < m.queue.order.Count() then playTrack(m.queue.at + 1, "auto")
 end sub
 
-' A track that can't be played: said, and the next one plays.
-sub passOver(message as string)
-    m.top.message = musicTrackAt(m.queue, m.queue.at).title + ": " + message
-    nextTrack()
+' The queue played out: its last track stays, at its end, and Play starts
+' it again, as on the other apps; the sleep timer goes off with it.
+sub ended()
+    hold(0)
+    m.top.positionMs = m.top.durationMs
+    setSleep(0)
+    showSleep(sleepNow())
+end sub
+
+' A track that can't be played stays, saying why, as on the other apps:
+' Play asks for it again from where it was, and Next goes on.
+sub failed(message as string)
+    m.top.message = message
+    hold(m.top.positionMs)
+end sub
+
+' Nothing plays until Play, the queue kept: the track shown waits, its
+' session (if any) closed and answers still to come for it dropped, and
+' Play starts it at fromMs.
+sub hold(fromMs as integer)
+    m.pausedTimer.control = "stop"
+    finishTrack()
+    m.attempt = m.attempt + 1
+    m.audio.control = "stop"
+    m.waiting = true
+    m.resumeMs = fromMs
+    m.top.state = "paused"
 end sub
 
 ' Paused, the progress goes on being told, so the session stays the

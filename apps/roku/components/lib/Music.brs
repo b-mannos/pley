@@ -180,6 +180,14 @@ function musicStreamFormat(info as object, detail as dynamic) as string
     return "mp3"
 end function
 
+' Why a track's session didn't start (the API task's answer), in the
+' other apps' words: the server out of reach, or the track that can't be
+' played.
+function musicFailure(answer as object) as string
+    if answer.error = "network" then return "Can't reach the server."
+    return "This track can't be played."
+end function
+
 ' The music player's queue: the tracks as given, the order they play in
 ' (their places among the tracks), and where it is in that order (at).
 ' The same track may be in it twice: places, not ids, say which plays.
