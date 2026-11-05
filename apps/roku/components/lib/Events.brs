@@ -197,6 +197,12 @@ function evChangesHome(event as object) as boolean
     return kind = "user_state_changed" or kind = "watchlist_changed" or kind = "library_changed" or kind = "libraries_changed" or kind = "live_channels_changed"
 end function
 
+' Whether the kinds of events gathered ({ kind: true }) change titles:
+' watch state, My List, a library's titles or the libraries.
+function evChangesTitles(kinds as object) as boolean
+    return kinds.DoesExist("user_state_changed") or kinds.DoesExist("watchlist_changed") or kinds.DoesExist("library_changed") or kinds.DoesExist("libraries_changed")
+end function
+
 ' How long before connecting again after the stream ended or failed: 2 s,
 ' doubling, a minute at most.
 function evRetryMs(failures as integer) as integer

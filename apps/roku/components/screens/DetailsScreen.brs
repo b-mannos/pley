@@ -55,6 +55,8 @@ sub init()
     m.fileId = invalid
     m.audioPick = -2
     m.started = false
+    ' The scene's titleChanges this page has shown.
+    m.titlesSeen = 0
     ' What the server says of requests for the title (GET
     ' /api/items/{id}/request), invalid for nothing to show; the asks (an
     ' answer to an earlier one is left out); where Request more seasons
@@ -99,6 +101,7 @@ sub init()
     m.episodeRest.observeField("fire", "onEpisodeRested")
     m.requestPoll.observeField("fire", "askItemRequest")
     m.top.observeField("active", "onActive")
+    m.top.observeField("refresh", "onRefresh")
     m.top.observeField("requestSummary", "onSummary")
     m.top.observeField("requestsChanged", "onRequestsChanged")
 end sub
@@ -114,6 +117,7 @@ sub onActive()
         return
     end if
     uiChangesSince()
+    m.titlesSeen = m.top.getScene().titleChanges
     if m.panel.visible
         closePanel()
     else
@@ -126,6 +130,17 @@ sub onActive()
         m.started = true
         askDetail()
     end if
+end sub
+
+' Watched, put in My List or changed in its library on another device,
+' while the page shows: its details and episodes come again, the focus
+' where it is. (Covered, it asks as it shows anyway.)
+sub onRefresh()
+    if not m.top.active or not m.started then return
+    if m.top.getScene().titleChanges = m.titlesSeen then return
+    m.titlesSeen = m.top.getScene().titleChanges
+    uiGet("/api/items/" + urlValue(m.top.params.itemId), "onDetail")
+    if m.shownSeason <> 0 then askEpisodes(m.shownSeason)
 end sub
 
 sub askDetail()

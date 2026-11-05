@@ -33,6 +33,10 @@ sub init()
     m.renewing = ""
     m.gather = m.top.findNode("gather")
     m.gather.observeField("fire", "onGathered")
+    ' The kinds of the events gathered, and whether the stream was ever up
+    ' (once it was, up again means events were missed).
+    m.gatheredKinds = {}
+    m.streamWasLive = false
     session.observeField("accessToken", "onStream")
     session.observeField("server", "onStream")
     m.top.observeField("liveTv", "onStream")
@@ -202,11 +206,22 @@ sub onServerEvent(event as object)
         return
     end if
     if not evChangesHome(data) then return
+    m.gatheredKinds[httpString(data.type)] = true
     m.gather.control = "stop"
     m.gather.control = "start"
 end sub
 
 sub onGathered()
+    kinds = m.gatheredKinds
+    m.gatheredKinds = {}
+    noteChanges(evChangesTitles(kinds), kinds.DoesExist("live_channels_changed"))
+end sub
+
+' Other devices changed titles or Live TV's channels: Home and the page on
+' top ask again now, a covered page as it shows.
+sub noteChanges(titles as boolean, live as boolean)
+    if titles then m.top.titleChanges = m.top.titleChanges + 1
+    if live then m.top.liveChanges = m.top.liveChanges + 1
     m.top.remoteChanges = m.top.remoteChanges + 1
     if m.stack.Count() > 0 and m.stack.Peek().hasField("refresh") then m.stack.Peek().refresh = true
 end sub
@@ -303,6 +318,12 @@ end sub
 ' that answer starts it asking each 30 s.
 sub onStreamLive()
     m.top.eventsLive = m.events.live
+    ' Up again after a gap: what changed meanwhile wasn't told, so the
+    ' pages showing titles and channels ask again.
+    if m.events.live
+        if m.streamWasLive then noteChanges(true, true)
+        m.streamWasLive = true
+    end if
     if m.events.live and m.global.session.offline then reachServer()
     if m.events.live then askRequestSummary("live")
     pollRequests()

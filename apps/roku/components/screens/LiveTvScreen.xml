@@ -13,6 +13,9 @@
         <field id="params" type="assocarray" />
         <field id="navigate" type="assocarray" alwaysNotify="true" />
         <field id="active" type="boolean" alwaysNotify="true" />
+        <!-- Live TV's channels changed on the server (MainScene's
+             liveChanges). -->
+        <field id="refresh" type="boolean" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/LiveTvScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />

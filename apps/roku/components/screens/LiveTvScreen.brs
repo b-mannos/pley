@@ -49,6 +49,8 @@ sub init()
     ' the focus }), or invalid.
     m.details = invalid
     m.started = false
+    ' The scene's liveChanges this screen has shown.
+    m.liveSeen = 0
     m.twelve = CreateObject("roDeviceInfo").GetClockFormat() <> "24h"
     m.view = { tab: "guide", category: "all" }
     m.viewKey = ""
@@ -110,6 +112,25 @@ sub init()
     m.detailsLogo.observeField("loadStatus", "onDetailsLogo")
     m.clock.observeField("fire", "onClock")
     m.top.observeField("active", "onActive")
+    m.top.observeField("refresh", "onRefresh")
+end sub
+
+' The channels changed on the server while Live TV shows: the categories,
+' their counts and the list come again, at the channel in focus. A search
+' or a programme's panel shown is left be; the counts still come.
+sub onRefresh()
+    if not m.top.active or not m.started then return
+    scene = m.top.getScene()
+    if scene.liveChanges = m.liveSeen then return
+    m.liveSeen = scene.liveChanges
+    loadGroups(false)
+    if searching() or m.details <> invalid or not contentShown() then return
+    channel = channelInFocus()
+    if channel <> invalid
+        returnTo(channel.id)
+    else
+        returnTo(scene.liveChannel)
+    end if
 end sub
 
 sub onActive()
@@ -127,6 +148,8 @@ sub onActive()
         return
     end if
     scene = m.top.getScene()
+    stale = scene.liveChanges <> m.liveSeen
+    m.liveSeen = scene.liveChanges
     if not m.started
         m.started = true
         session = m.global.session
@@ -152,7 +175,13 @@ sub onActive()
     ' list opens at the channel watched.
     loadGroups(false)
     watched = scene.liveChannel
-    if watched > 0 then returnTo(watched)
+    if watched > 0
+        returnTo(watched)
+    else if stale and contentShown() and not searching()
+        ' The channels changed while it was covered.
+        channel = channelInFocus()
+        if channel <> invalid then returnTo(channel.id)
+    end if
 end sub
 
 function viewSection() as object

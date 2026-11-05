@@ -13,6 +13,13 @@
         <!-- Changes the server's event stream told of (other devices'): Home
              asks again after one. -->
         <field id="remoteChanges" type="integer" />
+        <!-- Of those, the ones about titles (watch state, My List, a
+             library's titles, the libraries) and about Live TV's channels:
+             the pages showing them ask again, as on Android TV. Both also
+             go up when the stream comes back after a gap, since it doesn't
+             tell what it missed. -->
+        <field id="titleChanges" type="integer" />
+        <field id="liveChanges" type="integer" />
         <!-- The latest titles marked watched or unwatched, played, put in
              My List or taken out, or out of Continue Watching
              ([{ count, itemId, action }], Ui.brs's uiNoteChange): the

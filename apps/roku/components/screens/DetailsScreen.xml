@@ -20,6 +20,8 @@
         <field id="params" type="assocarray" />
         <field id="navigate" type="assocarray" alwaysNotify="true" />
         <field id="active" type="boolean" alwaysNotify="true" />
+        <!-- Another device changed titles (MainScene's titleChanges). -->
+        <field id="refresh" type="boolean" alwaysNotify="true" />
         <!-- The scene's: what requests let the profile do. -->
         <field id="requestSummary" type="assocarray" />
         <!-- Set by the scene: requests changed (the title's is asked
