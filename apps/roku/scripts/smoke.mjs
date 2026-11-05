@@ -558,13 +558,29 @@ async function walk() {
   await press("select");
   await waitFor(/^POST \/api\/items\/103\/watched$/, since, "a title marked watched");
   // See all at the end of Recently Added in Music: the library's Library
-  // tab, newest added first, for this visit only; Back to Home.
+  // tab, newest added first, for this visit only; Back to Home. brs-node
+  // can stop reading keys for half a minute while it fetches a picture,
+  // and a key pressed meanwhile is lost: another row's See all goes Back,
+  // Up to the hero (the rows left on their first) and down again.
   await settle();
-  since = mark();
-  await press("down", 4); // past Continue Watching, My List, Movies and TV Shows
-  await press("right"); // See all, after the album
-  await press("select");
-  await waitFor(/^GET \/api\/libraries\/3\/items\?.*sort=added/, since, "Recently Added's See all");
+  for (let attempt = 0; ; attempt++) {
+    since = mark();
+    await press("down", 4); // past Continue Watching, My List, Movies and TV Shows
+    await press("right"); // See all, after the album
+    await press("select");
+    try {
+      await waitFor(/^GET \/api\/libraries\/3\/items\?.*sort=added/, since, "Recently Added's See all");
+      break;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      if (seen(/^GET \/api\/libraries\/\d+\/items/, since)) {
+        await press("back");
+        await settle();
+      }
+      await press("up", 8);
+      await press("down");
+    }
+  }
   shoot("see-all");
   await press("back");
   await settle();
@@ -823,9 +839,23 @@ async function walk() {
   await press("back");
   await settle();
   await press("down", 2); // past More like this to Collections
-  since = mark();
-  await press("select");
-  await waitFor(/^GET \/api\/collections\/1$/, since, "a collection of movies");
+  // A key lost to brs-node (above) leaves the focus a row short: the title
+  // opened from More like this goes Back, and Down to Collections.
+  for (let attempt = 0; ; attempt++) {
+    since = mark();
+    await press("select");
+    try {
+      await waitFor(/^GET \/api\/collections\/1$/, since, "a collection of movies");
+      break;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      if (seen(/^GET \/api\/items\/\d+$/, since)) {
+        await press("back");
+        await settle();
+        await press("down");
+      }
+    }
+  }
   shoot("collection");
   await press("down", 2); // past Shuffle
   await sleep(500);
