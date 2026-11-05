@@ -24,7 +24,16 @@
 sub init()
     m.video = m.top.findNode("video")
     m.skip = m.top.findNode("skip")
-    m.loading = m.top.findNode("loading")
+    ' Waiting for the video (the spinner shows 500 ms after it began, as
+    ' Android TV's ring), and "Reconnecting…" under it.
+    m.spinner = m.top.findNode("spinner")
+    m.spinner.poster.uri = "pkg:/images/spinner.png"
+    m.spinner.poster.width = 64
+    m.spinner.poster.height = 64
+    m.reconnecting = m.top.findNode("reconnecting")
+    m.waiting = false
+    m.spinnerTimer = m.top.findNode("spinnerTimer")
+    m.spinnerTimer.observeField("fire", "onSpinnerTimer")
     m.upNext = m.top.findNode("upNext")
     m.nextBack = m.top.findNode("nextBack")
     m.nextImage = m.top.findNode("nextImage")
@@ -434,7 +443,7 @@ sub open(itemId as dynamic, startMs as integer, item as dynamic, mode as string)
     hideSkip()
     hideUpNext()
     m.notice.visible = false
-    m.loading.visible = true
+    showWaiting()
     m.top.setFocus(true)
     if m.item = invalid
         uiRequest({ method: "GET", path: "/api/items/" + urlValue(itemId), attempt: m.attempt }, "onItem")
@@ -926,7 +935,7 @@ sub reopen(subtitle = "" as string)
     if showing = "" then showing = syncBaseUrl(httpString(m.video.currentSubtitleTrack))
     if showing = "" then showing = syncBaseUrl(httpString(m.video.subtitleTrack))
     m.positionMs = position
-    m.loading.visible = true
+    showWaiting()
     ' The tracks as the stream opens again are pley's doing.
     m.tracksFrom = -1
     showStream(contentStream(m.info, m.item, m.global.session.server, position), syncTrackUrl(showing, m.syncMs))
@@ -1037,11 +1046,14 @@ sub onState(event as object)
     m.seenAt = m.clock.TotalMilliseconds()
     if state <> "paused" then m.pausedTimer.control = "stop"
     if state <> "playing" then hideBanner()
+    ' Waiting for data once it played, as for the first: the spinner.
+    if state = "buffering" and m.played then showWaiting()
+    if state = "paused" or state = "finished" then hideWaiting()
     if state = "playing"
         m.played = true
         m.everPlayed = true
         endReconnect()
-        m.loading.visible = false
+        hideWaiting()
         if m.bannerDue
             showBanner()
         else
@@ -1283,6 +1295,7 @@ sub finish()
     m.stallTimer.control = "stop"
     m.detailsTimer.control = "stop"
     endReconnect()
+    hideWaiting()
     hideBanner()
     m.clockTimer.control = "stop"
     m.clockTicking = false
@@ -1336,7 +1349,7 @@ sub broken()
         return
     end if
     ' What became of the session says what to do.
-    m.loading.visible = true
+    showWaiting()
     uiRequest({ method: "GET", path: "/api/playback/" + urlEncode(m.sessionId), session: m.sessionId }, "onSessionState")
 end sub
 
@@ -1367,8 +1380,8 @@ sub reconnect()
         return
     end if
     hideBanner()
-    m.loading.text = "Reconnecting…"
-    m.loading.visible = true
+    showWaiting()
+    if m.spinner.visible then m.reconnecting.visible = true
     m.reconnectTimer.control = "start"
 end sub
 
@@ -1386,7 +1399,30 @@ end sub
 sub endReconnect()
     m.reconnectFrom = -1
     m.reconnectTimer.control = "stop"
-    m.loading.text = "Loading…"
+    m.reconnecting.visible = false
+end sub
+
+' The spinner once the wait has lasted 500 ms, so a quick start or a short
+' wait shows none.
+sub showWaiting()
+    if m.waiting then return
+    m.waiting = true
+    m.spinnerTimer.control = "start"
+end sub
+
+sub onSpinnerTimer()
+    if not m.waiting then return
+    m.spinner.visible = true
+    m.spinner.control = "start"
+    m.reconnecting.visible = m.reconnectFrom >= 0
+end sub
+
+sub hideWaiting()
+    m.waiting = false
+    m.spinnerTimer.control = "stop"
+    m.spinner.control = "stop"
+    m.spinner.visible = false
+    m.reconnecting.visible = false
 end sub
 
 ' --- Stalls ---
@@ -1472,7 +1508,7 @@ sub notice(title as string, text as string, buttons as object)
     endReconnect()
     hideBanner()
     m.stallTimer.control = "stop"
-    m.loading.visible = false
+    hideWaiting()
     closeMenu()
     hideSkip()
     hideUpNext()
@@ -1855,7 +1891,7 @@ sub pickTrack(kind as string, index as integer)
     ' The person's pick takes over from a cast's audio.
     m.playAudio = -1
     body = tracksStreamsBody(file.id, audio, subtitle)
-    m.loading.visible = true
+    showWaiting()
     uiRequest({ method: "PUT", path: "/api/items/" + urlValue(m.itemId) + "/streams", jsonText: FormatJson(body), attempt: m.attempt }, "onTrackPicked")
 end sub
 

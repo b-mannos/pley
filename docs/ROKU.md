@@ -260,9 +260,11 @@ paused leaves the player, as in Roku's own apps.
   end. Cancelled, or with Play the next episode by itself off, it waits at
   the end, paused: Play now (or Play) plays the next one, Cancel or Back
   leaves. With the setting on, the countdown starts again there.
+- **Waiting** for the video, as it opens or once it plays, shows a spinner
+  after 500 ms, as Android TV's ring.
 - **The server out of reach:** once something played, the player keeps its
-  place and its queue and asks again every 2 s, saying "Reconnecting…",
-  for 90 s, as long as the server keeps a session it doesn't hear from;
+  place and its queue and asks again every 2 s, saying "Reconnecting…"
+  under the spinner, for 90 s, as long as the server keeps a session it doesn't hear from;
   then, or when the first playback can't start, it says it can't reach the
   server, with Try again. A refusal says why, with Try again where asking
   again may help (not for a title gone or out of reach of the profile).
