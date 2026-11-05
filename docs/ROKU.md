@@ -54,7 +54,7 @@ each), Now Playing while music plays, and Settings.
 
 Beside it, as on Android TV and the native Samsung app, a hero shows the
 first of Continue Watching, else the newest title in the rows: its
-backdrop, its title (a show's name over an episode's "S2 E5 · Title"),
+backdrop, its title (a show's name over an episode's "S2 · E5 · Title"),
 year, length, content rating, stars and quality ("4K", "DV"), the time
 left, its summary, then Resume (or Play), From start, Info and Mark as
 watched. Resume has the focus as Home first shows. Down goes to the
@@ -239,7 +239,7 @@ queue's end, turns the timer off.
 
 As each item begins (the first, the next episode, a playlist's or a
 collection's next), its title shows at the top for 4 s, a show's name over
-the episode's "S1 E2 · Pilot", as on Android TV.
+the episode's "S1 · E2 · Pilot", as on Android TV.
 
 - **Up Next** shows at the credits (else 30 s before the end) with its
   countdown. Cancelled, or with Play the next episode by itself off, it

@@ -209,7 +209,7 @@ sub test_player_notices_a_seek()
 end sub
 
 sub test_player_banner_names_the_show_over_the_episode()
-    tkEqual(playerBanner({ kind: "episode", title: "Pilot", grandparent_title: "The Office", parent_index: 1, index: 2 }), { title: "The Office", line: "S1 E2 · Pilot" })
+    tkEqual(playerBanner({ kind: "episode", title: "Pilot", grandparent_title: "The Office", parent_index: 1, index: 2 }), { title: "The Office", line: "S1 · E2 · Pilot" })
     tkEqual(playerBanner({ kind: "episode", title: "Pilot", parent_index: 1, index: 2 }), { title: "Pilot", line: "" })
     tkEqual(playerBanner({ kind: "movie", title: "Dune" }), { title: "Dune", line: "" })
     tkEqual(playerBanner(invalid), { title: "", line: "" })

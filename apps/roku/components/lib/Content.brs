@@ -733,7 +733,7 @@ function contentSaysForced(name as string) as boolean
     return re.IsMatch(name)
 end function
 
-' "Show · S1 E2 · Pilot" for an episode, the title for a movie.
+' "Show · S1 · E2 · Pilot" for an episode, the title for a movie.
 function contentPlayerTitle(detail as object) as string
     title = httpSentence(detail.title)
     if httpString(detail.kind) <> "episode" then return title

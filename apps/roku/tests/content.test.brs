@@ -70,7 +70,7 @@ end sub
 sub test_content_episode_tiles_name_the_show()
     tile = contentTile(contentTestEpisode(), contentTestServer(), true)
     tkEqual(tile.title, "Severance")
-    tkEqual(tile.subtitle, "S1 E1 · Good News About Hell")
+    tkEqual(tile.subtitle, "S1 · E1 · Good News About Hell")
     tkEqual(tile.image, "http://nas:7539/api/items/101/images/thumb?v=2&w=400")
     tkTrue(tile.watched)
     tkEqual(tile.progress, 0, "watched shows no progress")
@@ -220,7 +220,7 @@ sub test_content_show_details_offer_its_next_episode_and_episodes()
     onDeck = contentTestEpisode()
     onDeck.user_state.position_ms = 600000
     detail = contentDetail(show, contentTestServer(), onDeck)
-    tkEqual(detail.buttons, ["Resume S1 E1", "Episodes", "Mark as watched", "Remove from My List", "More…"])
+    tkEqual(detail.buttons, ["Resume S1 · E1", "Episodes", "Mark as watched", "Remove from My List", "More…"])
     tkEqual(detail.actions, ["playNext", "episodes", "watched", "listRemove", "more"])
     tkEqual(detail.more, [{ label: "Rate", action: "rate" }, { label: "Add to playlist", action: "playlist" }])
 end sub
@@ -236,8 +236,8 @@ sub test_content_episode_details_name_show_and_episode()
     tkEqual(detail.showId, 99)
     tkEqual(detail.seasonId, 100)
     tkEqual(detail.heading, "Severance")
-    tkEqual(detail.line, "S1 E1 · Good News About Hell · 55 min")
-    tkEqual(contentPlayerTitle(episode), "Severance · S1 E1 · Good News About Hell")
+    tkEqual(detail.line, "S1 · E1 · Good News About Hell · 55 min")
+    tkEqual(contentPlayerTitle(episode), "Severance · S1 · E1 · Good News About Hell")
     tkEqual(contentPlayerTitle(contentTestMovie()), "Arrival")
 end sub
 
@@ -345,7 +345,7 @@ sub test_content_up_next_card()
     nextEpisode.user_state = { position_ms: 0, watched: false, play_count: 0 }
     card = contentUpNext(nextEpisode, contentTestServer())
     tkEqual(card.title, "Severance")
-    tkEqual(card.line, "S1 E2 · Half Loop")
+    tkEqual(card.line, "S1 · E2 · Half Loop")
     tkEqual(card.startMs, 0)
     nextEpisode.user_state.position_ms = 120000
     tkEqual(contentUpNext(nextEpisode, contentTestServer()).startMs, 120000, "its own place")

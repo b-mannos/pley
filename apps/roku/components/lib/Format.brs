@@ -46,13 +46,15 @@ function fmtProgress(positionMs as dynamic, durationMs as dynamic) as float
     return position / duration
 end function
 
-' "S1 E2"; "E2" without a season; "" without an episode.
+' "S1 · E2", as the other apps write it; "E2" without a season, "S1"
+' without an episode, "" with neither.
 function fmtEpisode(season as dynamic, episode as dynamic) as string
     s = httpNumber(season, -1)
     e = httpNumber(episode, -1)
-    if e < 0 then return ""
-    if s < 0 then return "E" + Int(e).ToStr()
-    return "S" + Int(s).ToStr() + " E" + Int(e).ToStr()
+    parts = []
+    if s >= 0 then parts.Push("S" + Int(s).ToStr())
+    if e >= 0 then parts.Push("E" + Int(e).ToStr())
+    return parts.Join(" · ")
 end function
 
 ' "Resume from 12:34".

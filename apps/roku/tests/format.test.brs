@@ -26,10 +26,11 @@ sub test_format_progress()
 end sub
 
 sub test_format_episode_codes()
-    tkEqual(fmtEpisode(1, 2), "S1 E2")
-    tkEqual(fmtEpisode(0, 3), "S0 E3")
+    tkEqual(fmtEpisode(1, 2), "S1 · E2", "as the other apps write it")
+    tkEqual(fmtEpisode(0, 3), "S0 · E3")
     tkEqual(fmtEpisode(invalid, 7), "E7")
-    tkEqual(fmtEpisode(1, invalid), "")
+    tkEqual(fmtEpisode(1, invalid), "S1")
+    tkEqual(fmtEpisode(invalid, invalid), "")
 end sub
 
 sub test_format_resume_points()

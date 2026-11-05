@@ -292,7 +292,7 @@ end function
 
 ' The title shown at the top for 4 s as each item begins, as on Android TV
 ' and the native Samsung app: { title, line }, a show's name over an
-' episode's "S1 E2 · Pilot".
+' episode's "S1 · E2 · Pilot".
 function playerBanner(item as dynamic) as object
     data = httpObject(item)
     banner = { title: "", line: "" }

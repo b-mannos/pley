@@ -25,7 +25,7 @@ end sub
 sub test_home_info_names_the_show_over_the_episode()
     info = homeInfo(homeTestEpisode(), "http://s", false)
     tkEqual(info.title, "Fixture Show")
-    tkEqual(info.context, "S2 E5 · The Long Night")
+    tkEqual(info.context, "S2 · E5 · The Long Night")
     tkEqual(info.meta, "2019 · 1 h")
     tkEqual(info.timeLeft, "26 min left")
     tkTrue(info.progress > 0.56 and info.progress < 0.57)
