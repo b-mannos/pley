@@ -232,6 +232,8 @@ sub init()
     m.localSubtitle = -1
     m.localCues = invalid
     m.localFrom = 0
+    m.localKeptAt = 0
+    m.localKeptMs = -1
     m.cue = m.top.findNode("cue")
     m.cueText = m.top.findNode("cueText")
     m.cueShadow = m.top.findNode("cueShadow")
@@ -411,6 +413,7 @@ sub openLocal(startMs as integer)
     ' Its subtitle sync is kept by its path, as its place is.
     m.syncKey = "drive|" + driveResumeKey(path)
     m.syncMs = syncOffset(syncSection(), m.syncKey)
+    styleCue()
     content = CreateObject("roSGNode", "ContentNode")
     content.url = path
     content.streamFormat = driveStreamFormat(path)
@@ -421,6 +424,8 @@ sub openLocal(startMs as integer)
     m.video.setFocus(true)
     m.loading.visible = true
     m.localFrom = m.clock.TotalMilliseconds()
+    m.localKeptAt = m.localFrom
+    m.localKeptMs = -1
     m.stillAt = startMs
     m.stillSince = m.localFrom
     m.stallTimer.control = "start"
@@ -442,6 +447,20 @@ sub keepLocal()
     seconds = m.video.position
     if not m.ended and seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
     driveRemember(CreateObject("roRegistrySection", "driveResume"), httpString(m.local.path), position, m.durationMs)
+end sub
+
+' A drive's video tells no server: its place is kept on the Roku as the
+' server's reports go (Android TV keeps it with each), but while it plays
+' only once a minute, and only when it moved, as the registry is the
+' Roku's flash.
+sub reportLocal(state as string)
+    now = m.clock.TotalMilliseconds()
+    if state = "playing" and now - m.localKeptAt < 60000 then return
+    m.lastReportAt = now
+    if m.positionMs = m.localKeptMs then return
+    m.localKeptAt = now
+    m.localKeptMs = m.positionMs
+    keepLocal()
 end sub
 
 ' Once a second: a picture that hasn't started in 12 s, or a playhead that
@@ -466,24 +485,34 @@ sub localFailed(text as string)
     notice("Can't play this video", text, ["Back"])
 end sub
 
-' The subtitle file picked (-1: none) is read by the drive task and drawn;
-' Roku's own captions stay off meanwhile, so the file's own track doesn't
-' show over it. An audio track is the Video node's.
-sub pickLocal(kind as string, index as integer)
+' A pick in Pley's menu (driveSubtitleChoices' value, or an audio track's
+' index). A subtitle file beside the video is read by the drive task and
+' drawn, Roku's captions off meanwhile so that the file's own track doesn't
+' show over it; the file's own track shows as the Roku draws it, captions
+' on; Off turns captions off. Captions go back as they were when the player
+' closes. An audio track is the Video node's.
+sub pickLocal(kind as string, value as dynamic)
     if kind = "audio"
         tracks = httpArray(m.video.availableAudioTracks)
-        if index >= 0 and index < tracks.Count() then m.video.audioTrack = httpString(tracks[index].Track)
+        if value >= 0 and value < tracks.Count() then m.video.audioTrack = httpString(tracks[value].Track)
+        return
+    end if
+    m.localSubtitle = -1
+    m.localCues = invalid
+    hideCue()
+    m.video.notificationInterval = 1
+    if Left(value, 6) = "track:"
+        captionsTo("On")
+        m.video.subtitleTrack = Mid(value, 7)
+        return
+    end if
+    index = -1
+    if Left(value, 5) = "file:" then index = Val(Mid(value, 6))
+    if index < 0 or index >= m.localSidecars.Count()
+        captionsTo("Off")
         return
     end if
     m.localSubtitle = index
-    m.localCues = invalid
-    hideCue()
-    if index < 0 or index >= m.localSidecars.Count()
-        m.localSubtitle = -1
-        m.video.notificationInterval = 1
-        captionsBack()
-        return
-    end if
     captionsTo("Off")
     uiDrive({ op: "cues", path: m.localSidecars[index].path, at: index, attempt: m.attempt }, "onCues")
 end sub
@@ -493,7 +522,6 @@ sub onCues(event as object)
     answer = event.getData()
     if not answer.ok
         m.localSubtitle = -1
-        captionsBack()
         showToast(httpString(answer.message))
         return
     end if
@@ -520,19 +548,35 @@ sub hideCue()
     m.cue.visible = false
 end sub
 
-' Pley's menu for a video on a drive: Subtitles (the files beside it) and
-' Audio (the Video node's tracks, where there are two or more), Subtitle
-' sync while a file shows, Sleep timer and Playback details.
+' The cues drawn as the Roku's caption settings say for the subtitles it
+' draws itself (Drive.brs's driveCueStyle), read as each video opens.
+sub styleCue()
+    device = CreateObject("roDeviceInfo")
+    options = {}
+    for each name in driveCueOptions()
+        options[name] = device.GetCaptionsOption(name)
+    end for
+    style = driveCueStyle(options)
+    m.cueText.font = style.font
+    m.cueShadow.font = style.font
+    m.cueText.color = style.color
+    m.cueShadow.color = style.shadowColor
+    m.cueShadow.visible = style.shadow
+end sub
+
+' Pley's menu for a video on a drive: Subtitles (the file's own and the
+' files beside it) and Audio (the Video node's tracks, where there are two
+' or more), Subtitle sync while a file beside it shows, Sleep timer and
+' Playback details.
 sub openLocalMenu()
     hideSkip()
     m.menuKind = "menu"
     m.menuTitle.text = "Playback"
     items = []
     m.menuActions = []
-    if m.localSidecars.Count() > 0
-        label = "Off"
-        if m.localSubtitle >= 0 then label = m.localSidecars[m.localSubtitle].label
-        items.Push({ title: "Subtitles: " + label })
+    subtitles = localSubtitles()
+    if subtitles.labels.Count() > 1
+        items.Push({ title: "Subtitles: " + subtitles.labels[subtitles.current] })
         m.menuActions.Push("subtitles")
     end if
     audio = localAudio()
@@ -559,6 +603,18 @@ sub openLocalMenu()
     m.menuList.setFocus(true)
 end sub
 
+' The subtitles Pley's menu offers (driveSubtitleChoices), and the one
+' showing: { labels, values, current }.
+function localSubtitles() as object
+    choices = driveSubtitleChoices(m.video.availableSubtitleTracks, m.localSidecars)
+    shown = driveSubtitleShown(m.localSubtitle, httpString(m.video.globalCaptionMode), httpString(m.video.currentSubtitleTrack))
+    choices.current = 0
+    for i = 0 to choices.values.Count() - 1
+        if choices.values[i] = shown then choices.current = i
+    end for
+    return choices
+end function
+
 ' The Video node's audio tracks: { labels, current }.
 function localAudio() as object
     labels = []
@@ -572,8 +628,7 @@ function localAudio() as object
     return { labels: labels, current: current }
 end function
 
-' The subtitle files (Off first) or the audio tracks, the one playing
-' checked.
+' The subtitles (Off first) or the audio tracks, the one playing checked.
 sub openLocalTracks(kind as string)
     m.menuKind = kind
     items = []
@@ -590,14 +645,13 @@ sub openLocalTracks(kind as string)
         return
     end if
     m.menuTitle.text = "Subtitles"
-    items.Push({ title: "Off" })
-    m.menuValues.Push(-1)
-    for i = 0 to m.localSidecars.Count() - 1
-        items.Push({ title: m.localSidecars[i].label })
-        m.menuValues.Push(i)
+    subtitles = localSubtitles()
+    for each label in subtitles.labels
+        items.Push({ title: label })
     end for
-    m.trackCurrent = m.localSubtitle
-    showMenuChoices(items, m.localSubtitle + 1)
+    m.menuValues = subtitles.values
+    m.trackCurrent = subtitles.values[subtitles.current]
+    showMenuChoices(items, subtitles.current)
 end sub
 
 ' What plays: the file as it is, from the drive.
@@ -1260,7 +1314,6 @@ sub onState(event as object)
     if state = "paused"
         m.paused = true
         report("paused")
-        keepLocal()
         m.pausedTimer.control = "start"
     else if state = "finished"
         ' Media that falls short of the title (resumed past the end of what
@@ -1384,6 +1437,10 @@ end sub
 ' POST /api/items/{id}/progress for the current session. Stopped, the
 ' screens showing the title follow (Ui.brs's uiNoteChange).
 sub report(state as string)
+    if m.local <> invalid
+        reportLocal(state)
+        return
+    end if
     if m.sessionId = "" then return
     if state = "stopped" then uiNoteChange({ itemId: m.itemId, action: "played", positionMs: m.positionMs, durationMs: m.durationMs, watched: playerWatched(m.positionMs, m.durationMs) })
     m.lastReportAt = m.clock.TotalMilliseconds()

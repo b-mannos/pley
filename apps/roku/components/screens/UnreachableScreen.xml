@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The server doesn't answer: Try again (the screen that needed it) or Switch
-     server. Shown in place of that screen. -->
+     server, and USB drive while one is plugged in. Shown in place of that
+     screen. -->
 <component name="UnreachableScreen" extends="Group">
     <interface>
         <field id="route" type="string" />

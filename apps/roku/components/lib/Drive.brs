@@ -401,6 +401,80 @@ function driveAudioName(track as dynamic, index as integer) as string
     return name
 end function
 
+' What Pley's menu calls a subtitle track of the file's own, as the Video
+' node lists it (availableSubtitleTracks): its description, else its
+' language's name, else "Track 2".
+function driveTrackName(track as dynamic, index as integer) as string
+    data = httpObject(track)
+    name = ""
+    if data <> invalid
+        name = httpSentence(data.Description)
+        if name = "" then name = fmtLanguageName(httpString(data.Language), "")
+    end if
+    if name = "" then name = "Track " + (index + 1).ToStr()
+    return name
+end function
+
+' Pley's Subtitles for a drive's video, as Android TV lists them: Off, the
+' file's own tracks as the Roku lists them (tracks), which the Roku shows,
+' then the files beside it (sidecars: [{ label }]), which Pley draws.
+' { labels, values }, values "off", "track:<TrackName>" and "file:<index>".
+function driveSubtitleChoices(tracks as dynamic, sidecars as object) as object
+    choices = { labels: ["Off"], values: ["off"] }
+    list = httpArray(tracks)
+    for i = 0 to list.Count() - 1
+        track = httpObject(list[i])
+        if track <> invalid and httpString(track.TrackName) <> ""
+            choices.labels.Push(driveTrackName(track, i))
+            choices.values.Push("track:" + httpString(track.TrackName))
+        end if
+    end for
+    for i = 0 to sidecars.Count() - 1
+        choices.labels.Push(httpString(sidecars[i].label))
+        choices.values.Push("file:" + i.ToStr())
+    end for
+    return choices
+end function
+
+' Which of driveSubtitleChoices shows: the file drawn (drawn, -1 for
+' none), else the Roku's own track while its captions are on, else Off.
+function driveSubtitleShown(drawn as integer, captionMode as string, track as string) as string
+    if drawn >= 0 then return "file:" + drawn.ToStr()
+    if LCase(captionMode) = "on" and track <> "" then return "track:" + track
+    return "off"
+end function
+
+' The Roku's caption settings a drive's subtitle files are drawn with,
+' read with roDeviceInfo's GetCaptionsOption (Settings → Accessibility →
+' Captions style).
+function driveCueOptions() as object
+    return ["Text/Size", "Text/Color", "Text/Opacity", "Text/Effect"]
+end function
+
+' How a drive's subtitle files are drawn, as the Roku's caption settings
+' say for the subtitles it draws itself (options: { "Text/Size": "Large",
+' … }, driveCueOptions' values): { font, color, shadow, shadowColor }.
+' "Default", or a setting the app doesn't know, is medium white text with
+' a shadow; an effect of "None" has no shadow. Colours are broadcast safe,
+' as the app's are: white is the app's text colour, black a near black.
+function driveCueStyle(options as object) as object
+    fonts = { "extra small": "font:SmallestBoldSystemFont", "small": "font:SmallBoldSystemFont", "medium": "font:MediumBoldSystemFont", "large": "font:LargeBoldSystemFont", "extra large": "font:ExtraLargeBoldSystemFont" }
+    colors = { white: "EBEBEB", black: "101010", red: "EB1010", green: "10EB10", blue: "1010EB", yellow: "EBEB10", magenta: "EB10EB", cyan: "10EBEB" }
+    alphas = { "25%": "40", "50%": "80", "75%": "BF", "100%": "FF" }
+    size = LCase(httpString(options["Text/Size"]))
+    color = LCase(httpString(options["Text/Color"]))
+    opacity = httpString(options["Text/Opacity"])
+    font = "font:MediumBoldSystemFont"
+    if fonts.DoesExist(size) then font = fonts[size]
+    rgb = colors.white
+    if colors.DoesExist(color) then rgb = colors[color]
+    alpha = "FF"
+    if alphas.DoesExist(opacity) then alpha = alphas[opacity]
+    shadow = colors.black
+    if color = "black" then shadow = colors.white
+    return { font: font, color: "0x" + rgb + alpha, shadow: LCase(httpString(options["Text/Effect"])) <> "none", shadowColor: "0x" + shadow + "CC" }
+end function
+
 ' The most a subtitle file read beside a video may be, as on Samsung TVs.
 function driveSubtitleMaxBytes() as integer
     return 2097152

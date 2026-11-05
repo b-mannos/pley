@@ -1,9 +1,10 @@
 ' The USB drive (lib/Drive.brs): which one is plugged in, looked at as the
-' task starts, as Roku mounts or unmounts one (roFileSystemEvent) and as a
-' screen asks for a folder; and what the screens ask of it: a folder's
-' lines, the subtitle files beside a video, and a subtitle file's cues.
-' roFileSystem works only in a Task, and a folder of thousands of entries,
-' or a drive waking up, takes a while: the render thread never waits on it.
+' task starts, as Roku mounts or unmounts one (roFileSystemEvent), and as
+' Home, the server out of reach or the drive's page shows, for a Roku that
+' tells nothing; and what the screens ask of it: a folder's lines, the
+' subtitle files beside a video, and a subtitle file's cues. roFileSystem
+' works only in a Task, and a folder of thousands of entries, or a drive
+' waking up, takes a while: the render thread never waits on it.
 
 sub init()
     m.top.functionName = "driveRun"
@@ -50,7 +51,9 @@ sub driveAccept(request as dynamic)
     spec = request.spec
     if spec = invalid then spec = {}
     op = httpString(spec.op)
-    if op = "list"
+    if op = "look"
+        driveLook()
+    else if op = "list"
         driveList(request, httpString(spec.folder))
     else if op = "sidecars"
         driveSidecarsOf(request, httpString(spec.path))

@@ -16,7 +16,7 @@
 // Home whose movie's audio and subtitles are picked on its page, a USB
 // drive plugged in (its page, a folder, an empty one, a video's menu and
 // its subtitle file picked) and pulled out, Settings, the
-// server gone and Try again, then signing out and in again on a server
+// server gone (a drive's page opened from there) and Try again, then signing out and in again on a server
 // too old for QR codes, requests and two-step sign-in. Then it starts
 // the app again, signed in,
 // and times how soon Home is asked for. Fails on a BrightScript error or
@@ -498,7 +498,7 @@ const mediaInfo = { shown: false };
 // The USB drive's page: its top listed, a video's resume bar, a folder
 // opened on its first video, an empty one saying so, a video's menu in the
 // player, and the drive pulled out.
-const drive = { listed: false, resume: false, folder: false, empty: false, menu: false, gone: false };
+const drive = { listed: false, resume: false, folder: false, empty: false, menu: false, gone: false, offline: false, offlinePage: false };
 
 // A pixel of the screen, in the app's 1920 by 1080.
 function pixel(x, y) {
@@ -528,6 +528,20 @@ function driveMessageDrawn(top) {
     for (let x = 896; x < 1024; x += 2) {
       const [r, g, b] = pixel(x, y);
       if (r > 120 && g > 130 && b > 140 && r < 230) return true;
+    }
+  }
+  return false;
+}
+// The server out of reach: a third button, USB drive, after Try again and
+// Switch server (UnreachableScreen.xml's buttons from 96, 620, which
+// brs-node stacks, a button each 57 down, where a Roku puts them side by
+// side).
+function unreachableDriveButton() {
+  if (!frame) return false;
+  for (let y = 750; y < 795; y += 3) {
+    for (let x = 120; x < 320; x += 3) {
+      const [r, g, b] = pixel(x, y);
+      if ((r > 200 && g > 200 && b > 200) || accent([r, g, b])) return true;
     }
   }
   return false;
@@ -1463,6 +1477,19 @@ async function walk() {
   await press("select");
   await sleep(3000);
   shoot("unreachable");
+  // A USB drive plugged in meanwhile: its videos still play, from the
+  // button it adds; pulled out again, the button goes.
+  pluggedDrive();
+  drive.offline = await drawnWithin(8000, unreachableDriveButton);
+  shoot("unreachable-drive");
+  await press("down", 2); // USB drive, brs-node's buttons stacked
+  await press("select");
+  drive.offlinePage = await drawnWithin(8000, () => driveLineFocused(0));
+  await press("back");
+  await sleep(1000);
+  pulledDrive();
+  await drawnWithin(8000, () => !unreachableDriveButton());
+  await press("up", 2); // Try again
   fixture.down = false;
   since = mark();
   await press("select"); // Try again
@@ -1621,6 +1648,7 @@ const checks = [
   ["offered a drive's video's subtitle files in the player's menu", drive.menu],
   ["said a drive's empty folder has nothing to play", drive.empty],
   ["said there is no USB drive once it was pulled out", drive.gone],
+  ["opened a USB drive's page while the server was out of reach", drive.offline && drive.offlinePage],
   ["went to an episode's season from its More", season.opened],
   ["played a movie's trailer from its page, from the start", fixture.playbacks.some((p) => p.item === 4000 && p.start_ms === 0)],
   ["asked for a show's More Like This and collections", asked(/^GET \/api\/items\/99\/related\?limit=20$/) && asked(/^GET \/api\/items\/99\/collections$/)],

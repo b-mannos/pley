@@ -91,6 +91,8 @@ sub onActive()
         if m.heroButtons.isInFocusChain() then m.lastFocus = m.heroButtons
         return
     end if
+    ' A drive plugged in that told nothing gets its entry too.
+    uiDrive({ op: "look" }, "")
     if not m.started
         m.started = true
         uiChangesSince()

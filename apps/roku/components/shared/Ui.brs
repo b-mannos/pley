@@ -56,8 +56,9 @@ function uiGet(path as string, callback as string) as object
 end function
 
 ' Sends spec to the drive task (components/tasks/DriveTask), as uiRequest
-' does to the API task: { op: "list", folder }, { op: "sidecars", path }
-' or { op: "cues", path }.
+' does to the API task: { op: "look" } (which drive is plugged in, told in
+' its drive field), { op: "list", folder }, { op: "sidecars", path } or
+' { op: "cues", path }.
 function uiDrive(spec as object, callback as string) as object
     request = CreateObject("roSGNode", "ApiRequest")
     request.spec = spec

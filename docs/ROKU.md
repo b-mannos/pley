@@ -620,10 +620,13 @@ the page, under an icon. The page and the menu follow the drive as it is
 plugged in or pulled out.
 
 A video plays in Pley's player as it is, with no server, also while the
-server is out of reach: seeking, the sleep timer and Playback details are
-the same. What only a server does isn't there: converting, Quality, seek
-previews, Find subtitles…, saving track choices, the next episode,
-Continue Watching and the remote on other devices.
+server is out of reach: the screen that says so has **USB drive** beside
+Try again and Switch server while a drive is plugged in, and Back from
+the drive's page comes back to it. Seeking, the sleep timer and Playback
+details are the same as for the server's videos. What only a server does
+isn't there: converting, Quality, seek previews, Find subtitles…, saving
+track choices, the next episode, Continue Watching and the remote on
+other devices.
 
 - **The drive** is the first of Roku's USB volumes (`ext1:`, `ext2:`…,
   `roFileSystem`'s `GetVolumeList`), read by the drive task
@@ -631,31 +634,39 @@ Continue Watching and the remote on other devices.
   a large folder takes a while. It lists a folder with
   `GetDirectoryListing`, then `Stat` for each name that shows, 5,000
   entries at most, folders first. Roku tells of a drive plugged in or
-  pulled out (`roFileSystemEvent`), and the task looks again as the page
-  asks for a folder. Roku mounts USB drives read-only.
+  pulled out (`roFileSystemEvent`), and the task looks again as Home, the
+  screen saying the server is out of reach or the drive's page shows, for
+  a Roku that tells nothing. Roku mounts USB drives read-only.
 - **The Video node** is given the file's path as its address
   (`ext1:/Films/Ad Astra.mkv`, no `file://`), as Roku Media Player plays
   a drive's files; Roku's documentation of the Video node names no local
   address, only that `mp4` covers MOV and M4V and `mkv` WebM.
-- **Pley's menu** (Down) has Subtitles: Off, then the `.srt` and `.vtt`
-  files beside the video, named after it and then a language, "forced"
-  and SDH in any order (`Film.en.forced.srt`; `Film 2.srt` is Film 2's);
-  Audio, the Video node's tracks, where it has two or more; Subtitle sync
-  while a file shows; Sleep timer; Playback details. Subtitles start off.
-  The file's own subtitles are in Roku's options (\*), as the Roku shows
-  them.
+- **Pley's menu** (Down) has Subtitles: Off, the file's own tracks as the
+  Video node lists them, which the Roku shows (captions on for them), then
+  the `.srt` and `.vtt` files beside the video, named after it and then a
+  language, "forced" and SDH in any order (`Film.en.forced.srt`;
+  `Film 2.srt` is Film 2's); Audio, the Video node's tracks, where it has
+  two or more; Subtitle sync while a file beside it shows; Sleep timer;
+  Playback details. Subtitles start as the Roku's captions have them; a
+  pick turns captions on or off for the playback, and they go back as
+  they were after. Roku's options (\*) offer the file's own tracks too.
 - **Subtitle files** are drawn by the app over the video, as Android draws
   them: the drive task reads the file (2 MB at most) as UTF-16 or UTF-32
   when it starts with that byte-order mark, UTF-16 without one when its
   NUL bytes say so, else UTF-8, else Windows-1252, as the other apps do,
   and hands the player its cues without their styling
-  (`components/lib/Drive.brs`). They show while the video plays, white
-  over a shadow at the foot of the picture; Roku's captions are off
-  meanwhile, and back as they were after. Subtitle sync moves them at once,
-  and is kept by the file's path.
-- **Where it stopped** is kept on the Roku by the file's path, as it pauses
-  and as the player closes (registry section `driveResume`, the latest 50
-  videos); past 95 % it was watched, and it starts over next time.
+  (`components/lib/Drive.brs`). They show while the video plays, at the
+  foot of the picture, Roku's captions off meanwhile, in the text size,
+  colour, opacity and edge the Roku's caption settings give
+  (`GetCaptionsOption`; white over a shadow by default), with no
+  background behind them. Subtitle sync moves them at once, and is kept by
+  the file's path; it doesn't move the file's own tracks, as on Android
+  TV.
+- **Where it stopped** is kept on the Roku by the file's path (registry
+  section `driveResume`, the latest 50 videos) as the server's progress
+  would go: as it pauses, once a minute while it plays (Android TV keeps
+  it every 10 s; the registry is the Roku's flash) and as the player
+  closes. Past 95 % it was watched, and it starts over next time.
 - **What doesn't play** says so: a file the Roku can't play as it is ("a
   file on a drive has no server to convert it"), a picture that doesn't
   start in 12 s, and a video that stops, or stands still 12 s, once it
@@ -818,7 +829,8 @@ bun run icons     # the USB drive page's icons, from Lucide's
   opens a title from its ready-to-watch card on Home (which waited while
   the requests showed), plugs in a USB drive (a zip brs-node mounts as
   `ext1:`) and walks its page, a folder, an empty one and a video's menu,
-  then pulls it out, and checks that a server
+  then pulls it out, opens the drive's page from the screen saying the
+  server is out of reach, and checks that a server
   without requests is asked nothing but the summary. The fake server also
   checks that a video's reports say which audio and subtitles play, and
   music's don't.
@@ -862,6 +874,7 @@ The manifest asks for SceneGraph 1.2, which every Roku OS from 9 runs.
   has no stream format for them (a transport stream only as HLS's
   segments). The drive's make and model aren't given to apps, so its page
   is titled with the drive's label. A size `Stat` gives as no positive
-  number isn't shown.
+  number isn't shown. A drive's video has no Chapters: the Video node
+  doesn't tell a file's chapters.
 - Not yet: an editable music queue.
 

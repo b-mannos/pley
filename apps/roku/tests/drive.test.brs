@@ -319,3 +319,29 @@ sub test_drive_audio_tracks_say_their_name_or_language()
     tkEqual(driveAudioName({ Track: "4", Language: "eng", Name: "English AC3", Format: "AC3" }, 3), "English AC3", "its format not said twice")
     tkEqual(driveAudioName(invalid, 0), "Track 1")
 end sub
+
+sub test_drive_subtitles_list_the_file_s_own_tracks_then_the_files_beside_it()
+    tracks = [{ TrackName: "mkv/2", Language: "eng", Description: "" }, { TrackName: "mkv/3", Language: "fre", Description: "French SDH" }, { TrackName: "", Language: "spa" }]
+    sidecars = [{ path: "ext1:/Film.en.srt", label: "English" }]
+    choices = driveSubtitleChoices(tracks, sidecars)
+    tkEqual(choices.labels, ["Off", "English", "French SDH", "English"])
+    tkEqual(choices.values, ["off", "track:mkv/2", "track:mkv/3", "file:0"], "a track the Roku names nothing isn't offered")
+    tkEqual(driveSubtitleChoices(invalid, []).values, ["off"])
+    tkEqual(driveTrackName({ TrackName: "mkv/4", Language: "", Description: "" }, 3), "Track 4")
+end sub
+
+sub test_drive_the_subtitles_shown_are_the_file_drawn_else_the_roku_s()
+    tkEqual(driveSubtitleShown(0, "Off", ""), "file:0", "a file beside it, drawn")
+    tkEqual(driveSubtitleShown(-1, "On", "mkv/2"), "track:mkv/2", "the file's own, with captions on")
+    tkEqual(driveSubtitleShown(-1, "Off", "mkv/2"), "off", "captions off show none")
+    tkEqual(driveSubtitleShown(-1, "On", ""), "off")
+end sub
+
+sub test_drive_subtitle_files_are_drawn_as_the_roku_s_caption_settings_say()
+    tkEqual(driveCueStyle({ "Text/Size": "Default", "Text/Color": "Default", "Text/Opacity": "Default", "Text/Effect": "Default" }), { font: "font:MediumBoldSystemFont", color: "0xEBEBEBFF", shadow: true, shadowColor: "0x101010CC" })
+    style = driveCueStyle({ "Text/Size": "Extra Large", "Text/Color": "Yellow", "Text/Opacity": "75%", "Text/Effect": "None" })
+    tkEqual(style, { font: "font:ExtraLargeBoldSystemFont", color: "0xEBEB10BF", shadow: false, shadowColor: "0x101010CC" })
+    tkEqual(driveCueStyle({ "Text/Color": "Black" }).shadowColor, "0xEBEBEBCC", "black text over a light shadow")
+    tkEqual(driveCueStyle({}).font, "font:MediumBoldSystemFont", "nothing said")
+    tkEqual(driveCueOptions(), ["Text/Size", "Text/Color", "Text/Opacity", "Text/Effect"])
+end sub
