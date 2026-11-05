@@ -1,14 +1,14 @@
 ' A title on TMDB (GET /api/discover/{movie|show}/{tmdbId}): its one main
 ' action, its request's stage and actions (lib/Requests.brs's
 ' reqTitlePage), and rows of its seasons and cast. A movie is asked for
-' after a question; a show's seasons are picked (requestSeasons). It asks
-' again each time it shows, as requests change (the scene's
-' requestsChanged), each 10 s while something on it downloads, and each
-' 30 s while it shows a request and the event stream is down. params:
-' { kind, tmdbId, title, ask (Discover's Request: the main action at
-' once), pick (a library's Request more seasons: the picker at once),
-' requestId (the request a list opened it for: its stage and actions show,
-' where the title has it) }.
+' at once, a toast saying what came of it; a show's seasons are picked
+' (requestSeasons). It asks again each time it shows, as requests change
+' (the scene's requestsChanged), each 10 s while something on it
+' downloads, and each 30 s while it shows a request and the event stream
+' is down. params: { kind, tmdbId, title, pick (Request more seasons, a
+' show's Request on Discover: the picker at once), requestId (the request
+' a list opened it for: its stage and actions show, where the title has
+' it) }.
 
 sub init()
     m.backdrop = m.top.findNode("backdrop")
@@ -20,7 +20,7 @@ sub init()
     m.text = m.top.findNode("text")
     m.heading = m.top.findNode("heading")
     m.line = m.top.findNode("line")
-    m.genres = m.top.findNode("genres")
+    m.facts = m.top.findNode("facts")
     m.tagline = m.top.findNode("tagline")
     m.overview = m.top.findNode("overview")
     m.stage = m.top.findNode("stage")
@@ -33,6 +33,10 @@ sub init()
     m.problemTitle = m.top.findNode("problemTitle")
     m.problemText = m.top.findNode("problemText")
     m.problemButtons = m.top.findNode("problemButtons")
+    m.overviewWhole = m.top.findNode("overviewWhole")
+    m.panel = m.top.findNode("panel")
+    m.panelTitle = m.top.findNode("panelTitle")
+    m.whole = m.top.findNode("whole")
     m.poll = m.top.findNode("poll")
     ' The title as the server sent it (DiscoverDetail), and as the page
     ' shows it (reqTitlePage's).
@@ -40,8 +44,10 @@ sub init()
     m.shown = invalid
     ' Loads asked for: answers to earlier ones are left out.
     m.loads = 0
-    ' params' ask or pick was done, or given up.
+    ' params' pick was done, or given up; asking is on its way (a second
+    ' press waits).
     m.acted = false
+    m.asking = false
     ' The title's status and library title as last loaded: when they
     ' change (asked for here or in the picker), its tiles elsewhere get
     ' the new badge.
@@ -65,6 +71,8 @@ sub onActive()
     end if
     if m.problem.visible and m.problemButtons.visible
         m.problemButtons.setFocus(true)
+    else if m.panel.visible
+        m.whole.setFocus(true)
     else if m.rows.visible and m.page.translation[1] < 0
         m.rows.setFocus(true)
     else if m.buttons.visible
@@ -94,9 +102,7 @@ sub onDetail(event as object)
             return
         end if
         if uiFailed(answer) then return
-        problem = reqProblem(answer, reqSummaryOf(m.top.requestSummary).manage)
-        if problem = invalid then problem = { title: "Couldn't load this title", text: answer.message, retry: answer.status <> 404, signIn: false }
-        showProblem(problem)
+        showProblem(reqTitleProblem(answer, reqSummaryOf(m.top.requestSummary).manage))
         return
     end if
     m.detail = answer.data
@@ -114,18 +120,8 @@ sub onDetail(event as object)
     if not m.acted
         m.acted = true
         ' A page left (Back) or covered before its title came asks nothing.
-        if m.top.active and (httpTrue(m.top.params.ask) or httpTrue(m.top.params.pick)) then actFirst()
+        if m.top.active and httpTrue(m.top.params.pick) and hasAction("pick") then openPicker(-1)
     end if
-end sub
-
-' Discover's Request, and a library's Request more seasons, go on at once.
-sub actFirst()
-    for each action in m.shown.actions
-        if action = "request" or action = "pick"
-            act(action)
-            return
-        end if
-    end for
 end sub
 
 ' Asked again each 10 s while something on it downloads or goes into a
@@ -150,7 +146,7 @@ sub showDetail()
     m.message.visible = false
     m.heading.text = m.shown.title
     m.line.text = m.shown.line
-    m.genres.text = m.shown.genres
+    m.facts.text = m.shown.facts
     m.tagline.text = m.shown.tagline
     m.overview.text = m.shown.overview
     m.note.text = m.shown.note
@@ -165,6 +161,7 @@ sub showDetail()
         m.stageLine.text = ""
     end if
     layoutText()
+    if overviewCut() then reqPushButton(m.shown, "Overview", "overview")
     agent = m.top.getScene().getHttpAgent()
     if m.backdrop.uri <> m.shown.backdrop
         m.backdrop.setHttpAgent(agent)
@@ -186,7 +183,7 @@ sub showDetail()
     m.column.visible = true
     m.credit.visible = true
     ' Only while this screen has the focus: a dialog over it keeps it.
-    if m.top.isInFocusChain() and not m.rows.isInFocusChain()
+    if m.top.isInFocusChain() and not m.rows.isInFocusChain() and not m.panel.visible
         if hasButtons
             m.buttons.setFocus(true)
         else
@@ -201,7 +198,7 @@ sub layoutText()
     spacings = []
     parts = [
         { node: m.line, gap: 20, filled: m.line.text <> "" },
-        { node: m.genres, gap: 8, filled: m.genres.text <> "" },
+        { node: m.facts, gap: 8, filled: m.facts.text <> "" },
         { node: m.tagline, gap: 28, filled: m.tagline.text <> "" },
         { node: m.overview, gap: 20, filled: m.overview.text <> "" },
         { node: m.stage, gap: 28, filled: m.stage.text <> "" },
@@ -217,6 +214,35 @@ sub layoutText()
     m.text.removeChildrenIndex(m.text.getChildCount(), 0)
     m.text.appendChildren(shown)
     m.text.itemSpacings = spacings
+end sub
+
+' Whether the page's four lines cut the overview: Overview then shows it
+' whole.
+function overviewCut() as boolean
+    if m.overview.text = "" then return false
+    m.overviewWhole.text = m.overview.text
+    return m.overviewWhole.boundingRect().height > m.overview.boundingRect().height + 2
+end function
+
+' The tagline and the whole overview, in a panel over the right of the
+' page.
+sub openOverview()
+    m.panelTitle.text = m.shown.title
+    parts = []
+    if m.shown.tagline <> "" then parts.Push(m.shown.tagline)
+    parts.Push(m.shown.overview)
+    m.whole.text = parts.Join(Chr(10) + Chr(10))
+    m.panel.visible = true
+    m.whole.setFocus(true)
+end sub
+
+sub closeOverview()
+    m.panel.visible = false
+    if m.buttons.visible
+        m.buttons.setFocus(true)
+    else
+        m.top.setFocus(true)
+    end if
 end sub
 
 ' --- The rows ---
@@ -319,18 +345,20 @@ sub onButton(event as object)
     act(m.shown.actions[event.getData()])
 end sub
 
-' What a button does (reqTitlePage's actions).
+' What a button does (reqTitlePage's actions, and Overview).
 sub act(action as string)
     if action = "signIn"
-        uiNavigate({ to: "link", params: { reason: "requests" } })
+        uiSignInAgain("requests")
     else if action = "open"
         uiNavigate({ to: "details", params: { itemId: m.shown.itemId } })
     else if action = "request"
-        confirmAsk()
+        ask(invalid)
     else if action = "pick"
         openPicker(-1)
     else if action = "follow"
         ask(reqFollowSeasons(m.detail.seasons))
+    else if action = "overview"
+        openOverview()
     else
         uiRequestAct(requestTarget(), action)
     end if
@@ -341,48 +369,37 @@ sub openPicker(only as integer)
     uiNavigate({ to: "requestSeasons", params: { kind: m.shown.kind, tmdbId: m.shown.tmdbId, title: m.shown.title, year: httpNumber(m.detail.year, 0), detail: m.detail, only: only } })
 end sub
 
-' A movie is asked for once the question is answered.
-sub confirmAsk()
-    confirm = reqAskConfirm(m.shown.title, m.shown.access, m.shown.allowance, CreateObject("roDateTime").AsSeconds())
-    dialog = CreateObject("roSGNode", "StandardMessageDialog")
-    dialog.title = confirm.title
-    dialog.message = confirm.lines
-    dialog.buttons = ["Request", "Cancel"]
-    dialog.observeField("buttonSelected", "onAskConfirmed")
-    m.top.getScene().dialog = dialog
-end sub
-
-sub onAskConfirmed(event as object)
-    uiCloseDialog()
-    if event.getData() = 0 then ask(invalid)
-end sub
-
-' Asks for the title (POST /api/requests): a movie, or Tell me too (a
-' show's seasons someone asked for already), which costs nothing.
+' Asks for the title at once (POST /api/requests), as the other TVs do: a
+' movie, or Tell me too (a show's seasons someone asked for already),
+' which costs nothing.
 sub ask(seasons as dynamic)
+    if m.asking then return
+    m.asking = true
     uiRequest({ method: "POST", path: "/api/requests", jsonText: reqAskBody(m.shown.kind, m.shown.tmdbId, seasons) }, "onAsked")
 end sub
 
-' What came of asking, in a message over the page as it is now.
+' What came of asking, in a toast over the page as it is now.
 sub onAsked(event as object)
+    m.asking = false
     answer = event.getData()
     title = m.shown.title
     if not answer.ok
         if uiFailed(answer) then return
-        uiMessage("That didn't work", [reqAskProblem(answer, m.shown.allowance, m.shown.kind, CreateObject("roDateTime").AsSeconds())])
+        uiToast(reqAskProblem(answer, m.shown.allowance, m.shown.kind, CreateObject("roDateTime").AsSeconds()), true)
         ' Someone asked meanwhile, or it arrived, or the limits moved.
         if answer.status = 409 or answer.status = 429 then changedHere()
         return
     end if
-    uiMessage(title, [reqAsked(answer.status, answer.data, title)])
+    uiToast(reqAsked(answer.status, answer.data, title))
     changedHere()
 end sub
 
 ' The request the page shows, as RequestActions.brs takes it.
 function requestTarget() as object
-    target = { requestId: m.shown.requestId, title: m.shown.title, status: m.shown.requestStatus, stage: "", kind: m.shown.kind, tmdbId: m.shown.tmdbId, seasons: [], libraryId: m.shown.itemId, actions: [] }
+    target = { requestId: m.shown.requestId, title: m.shown.title, status: m.shown.requestStatus, stage: "", kind: m.shown.kind, tmdbId: m.shown.tmdbId, seasons: [], libraryId: m.shown.itemId, actions: [], mine: false }
     request = reqShownRequest(m.detail)
     if request <> invalid
+        target.mine = httpTrue(request.mine)
         target.stage = httpString(request.stage)
         target.seasons = reqSeasonNumbers(request.seasons)
         target.actions = reqActionNames(request.actions)
@@ -412,18 +429,20 @@ end sub
 ' --- What stops the page ---
 
 ' In place of the title, why it can't be shown: with Sign in, Try
-' again, or nothing to do here.
+' again, Back (a title gone from TMDB), or nothing to do here.
 sub showProblem(problem as object)
     m.problemShown = problem
     m.message.visible = false
     m.column.visible = false
     m.credit.visible = false
     m.rows.visible = false
+    m.panel.visible = false
     m.problemTitle.text = problem.title
     m.problemText.text = problem.text
     buttons = []
     if problem.signIn then buttons.Push("Sign in")
     if problem.retry then buttons.Push("Try again")
+    if problem.back then buttons.Push("Back")
     m.problemButtons.buttons = buttons
     m.problemButtons.visible = buttons.Count() > 0
     m.problem.visible = true
@@ -438,7 +457,11 @@ end sub
 sub onProblemButton()
     if m.problemShown = invalid then return
     if m.problemShown.signIn
-        uiNavigate({ to: "link", params: { reason: "requests" } })
+        uiSignInAgain("requests")
+        return
+    end if
+    if m.problemShown.back
+        uiNavigate({ back: true })
         return
     end if
     m.problem.visible = false
@@ -449,8 +472,16 @@ sub onProblemButton()
 end sub
 
 ' Down from the buttons goes to the rows, up from the first row back.
+' Back (or Left) closes Overview's panel.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press or m.problem.visible then return false
+    if m.panel.visible
+        if key = "back" or key = "left"
+            closeOverview()
+            return true
+        end if
+        return false
+    end if
     if key = "down" and not m.rows.isInFocusChain() and m.rows.visible
         focusRows(true)
         return true

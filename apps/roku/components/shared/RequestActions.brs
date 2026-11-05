@@ -104,10 +104,29 @@ sub uiRequestActed(event as object)
     if not answer.ok
         if uiFailed(answer) then return
         text = reqActProblem(answer, spec.action, reqSummaryOf(m.top.getScene().requestSummary), httpString(m.requestTarget.kind), CreateObject("roDateTime").AsSeconds())
-        uiMessage("That didn't work", [text])
+        uiToast(text, true)
         if answer.status = 404 or answer.status = 409 or answer.status = 429 then onRequestActed()
         return
     end if
-    if spec.action = "ask_again" then uiMessage(spec.requestTitle, [reqAsked(answer.status, answer.data, spec.requestTitle)])
+    if spec.action = "ask_again" then uiToast(reqAsked(answer.status, answer.data, spec.requestTitle))
     onRequestActed()
+end sub
+
+' Signing in again, so this TV may ask for movies and shows (reason
+' "requests") or decide on them ("approvals"), asked first: Sign in opens
+' the link screen with a new code, whose approval replaces this sign-in.
+sub uiSignInAgain(reason as string)
+    m.signInReason = reason
+    question = reqSignInQuestion(m.global.session.server)
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
+    dialog.title = question.title
+    dialog.message = [question.message]
+    dialog.buttons = ["Sign in", "Cancel"]
+    dialog.observeField("buttonSelected", "uiSignInAgainChosen")
+    m.top.getScene().dialog = dialog
+end sub
+
+sub uiSignInAgainChosen(event as object)
+    uiCloseDialog()
+    if event.getData() = 0 then uiNavigate({ to: "link", params: { reason: m.signInReason } })
 end sub

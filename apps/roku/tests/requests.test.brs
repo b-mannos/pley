@@ -451,10 +451,11 @@ end sub
 
 sub test_requests_title_page_of_a_movie()
     summary = reqTestSummary({ moviesLimit: 3 })
-    page = reqTitlePage(reqTestDetail({}), summary, "http://nas:7539", reqTestNow(), 0)
+    page = reqTitlePage(reqTestDetail({ network: "Warner Bros. Pictures" }), summary, "http://nas:7539", reqTestNow(), 0)
     tkEqual(page.title, "Inception")
     tkEqual(page.line, "2010 · 2 h 28 min · PG-13 · ★ 8.4")
-    tkEqual(page.genres, "Action, Science Fiction, Adventure")
+    tkEqual(page.facts, "Warner Bros. Pictures · Action · Science Fiction · Adventure · Thriller", "its studio, then its genres")
+    tkEqual(reqTitlePage(reqTestDetail({}), summary, "", reqTestNow(), 0).facts, "Action · Science Fiction · Adventure · Thriller")
     tkEqual(page.poster, "http://nas:7539/api/discover/images/poster/inc.jpg?w=420")
     tkEqual(page.backdrop, "http://nas:7539/api/discover/images/backdrop/inc.jpg?w=640")
     tkEqual(page.buttons, ["Request"])
@@ -464,6 +465,9 @@ sub test_requests_title_page_of_a_movie()
     library = reqTitlePage(reqTestDetail({ status: "library", item_id: 12 }), summary, "http://nas:7539", reqTestNow(), 0)
     tkEqual(library.actions, ["open"])
     tkEqual(library.itemId, 12)
+    elsewhere = reqTitlePage(reqTestDetail({ status: "library", item_id: invalid }), summary, "", reqTestNow(), 0)
+    tkEqual(elsewhere.buttons, [])
+    tkEqual(elsewhere.note, "Ready, in a library you can't open: ask an administrator", "a library the profile can't open")
     restricted = reqTitlePage(reqTestDetail({ status: "restricted", restriction: "Rated R: above this account's age limit" }), summary, "", reqTestNow(), 0)
     tkEqual(restricted.buttons, [])
     tkEqual(restricted.note, "Rated R: above this account's age limit")
@@ -486,14 +490,26 @@ sub test_requests_title_page_leaves_out_what_can_t_be_pressed()
     tkEqual(again.note, "Sign in again to ask for movies and shows.")
 end sub
 
-' A movie is asked for after a question: what asking does, what may still
-' be asked for.
-sub test_requests_asking_for_a_movie_asks_first()
-    now = reqTestNow()
-    allowance = { moviesLeft: 2, seasonsLeft: -1, moviesNextAt: 0, seasonsNextAt: 0, moviesLimit: 3, seasonsLimit: -1 }
-    tkEqual(reqAskConfirm("Dune", "ask", allowance, now), { title: "Ask for “Dune”?", lines: ["An administrator decides on it. You'll hear when it's ready to watch.", "You can ask for 2 more movies.", "Limit: 3 movies per 7 days."] })
-    tkEqual(reqAskConfirm("Dune", "auto", reqNoSummary(false), now).lines, ["Approved as you ask, and sent on to download."], "no limit")
+' Sign in, for requests, asks first: a new code links this TV to the
+' server again.
+sub test_requests_sign_in_again_asks_first()
+    tkEqual(reqSignInQuestion("http://nas:7539"), { title: "Sign in again?", message: "This TV shows a code to link it to nas again." }, "pley's own port goes unsaid")
+    tkEqual(reqSignInQuestion("https://pley.example.com:8443").message, "This TV shows a code to link it to pley.example.com:8443 again.")
 end sub
+
+' A title's page that can't show: gone from TMDB (Back), what stops
+' requests, or any other failure with Try again.
+sub test_requests_title_page_problems()
+    gone = reqTitleProblem({ status: 404, error: "not_found", message: "This isn't on the server any more." }, false)
+    tkEqual(gone, { title: "This title isn't on TMDB", text: "It may have been taken off since.", retry: false, signIn: false, back: true })
+    down = reqTitleProblem({ status: 503, error: "tmdb_down", message: "" }, false)
+    tkEqual(down.title, "TMDB isn't answering")
+    tkTrue(down.retry)
+    tkFalse(down.back)
+    other = reqTitleProblem({ status: 500, error: "internal", message: "database is locked" }, false)
+    tkEqual(other, { title: "Couldn't load this title", text: "database is locked", retry: true, signIn: false, back: false })
+end sub
+
 
 sub test_requests_title_page_of_a_request()
     now = reqTestNow()

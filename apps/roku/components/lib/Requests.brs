@@ -194,20 +194,10 @@ function reqAllowance(allowance as object, now as integer) as object
     return { text: text, limits: limitText }
 end function
 
-' What asking from this session does, before a movie is asked for.
+' What asking from this session does, beside Which seasons?.
 function reqAskWords(access as string) as string
     if access = "auto" then return "Approved as you ask, and sent on to download."
     return "An administrator decides on it. You'll hear when it's ready to watch."
-end function
-
-' The question before a movie is asked for (a TV's OK is pressed often):
-' { title, lines }, what asking does and what may still be asked for.
-function reqAskConfirm(title as string, access as string, allowance as object, now as integer) as object
-    lines = [reqAskWords(access)]
-    words = reqAllowance(allowance, now)
-    if words.text <> "" then lines.Push(words.text)
-    if words.limits <> "" then lines.Push(words.limits)
-    return { title: "Ask for " + reqQuoted(title) + "?", lines: lines }
 end function
 
 ' "Season 2", "Seasons 1–3, 5", "Seasons 1–2 and specials", "Specials";
@@ -314,6 +304,24 @@ end function
 ' A sign-in from before apps could ask: Discover shows only this.
 function reqSignInAgain() as object
     return { title: "Sign in again to ask for movies and shows", text: "", retry: false, signIn: true }
+end function
+
+' The question before signing in again for requests (or approvals): a
+' new code links this TV to server again, and its approval replaces this
+' sign-in. { title, message }; its buttons are Sign in and Cancel.
+function reqSignInQuestion(server as string) as object
+    return { title: "Sign in again?", message: "This TV shows a code to link it to " + urlDisplayAddress(server) + " again." }
+end function
+
+' Why a TMDB title's page can't show, as reqProblem says it, or the
+' title gone from TMDB (404: Back), or any other failure under "Couldn't
+' load this title" with Try again. { title, text, retry, signIn, back }.
+function reqTitleProblem(answer as object, manage as boolean) as object
+    if answer.status = 404 then return { title: "This title isn't on TMDB", text: "It may have been taken off since.", retry: false, signIn: false, back: true }
+    problem = reqProblem(answer, manage)
+    if problem = invalid then problem = { title: "Couldn't load this title", text: answer.message, retry: true, signIn: false }
+    problem.back = false
+    return problem
 end function
 
 ' What asking (POST /api/requests) did: 201 a new request, 200 following
@@ -866,19 +874,22 @@ function reqDetailRows(detail as object, server as string, manage as boolean, no
     return rows
 end function
 
-' A title's page as the screen shows it: what it is; its one main action
-' (the first that applies) and the actions of its request as buttons;
-' the line shown where a button can't be pressed (Roku's buttons can't be
-' disabled: the button goes, its line shows); and the stage of the
-' request it shows. actions match buttons: "signIn", "open" (the
-' library's title), "request" (a movie, after a confirm), "pick" (a
-' show's seasons), "follow" (Tell me too), and those of reqActions.
-function reqTitlePage(detail as object, summary as object, server as string, now as integer, zone as integer) as object
+' A button and its action, at the end of shown's (a page's or a hero's).
+sub reqPushButton(shown as object, label as string, action as string)
+    shown.buttons.Push(label)
+    shown.actions.Push(action)
+end sub
+
+' A title's one main action, the first that applies, as the title's page
+' and Discover's hero have it: { buttons, actions, note }, note the line
+' shown where a button can't be pressed (Roku's buttons can't be
+' disabled: the button goes, its line shows). actions match buttons:
+' "signIn", "open" (the library's title), "request" (a movie, asked for
+' at once), "pick" (a show's seasons), "follow" (Tell me too).
+function reqMainAction(detail as object, summary as object, now as integer) as object
     kind = httpString(detail.kind)
     status = httpString(detail.status)
     itemId = httpNumber(detail.item_id, 0)
-    manage = summary.manage = true
-    shown = reqShownRequest(detail)
     allowance = reqTitleAllowance(detail, summary)
     remaining = allowance.moviesLeft
     if kind = "show" then remaining = allowance.seasonsLeft
@@ -889,92 +900,92 @@ function reqTitlePage(detail as object, summary as object, server as string, now
     else if remaining = 0
         blocked = reqAllowance(allowance, now).text
     end if
-    buttons = []
-    actions = []
-    note = ""
+    out = { buttons: [], actions: [], note: "" }
     if summary.signInAgain = "requests"
-        again = reqSignInAgain()
-        note = again.title + "."
-        buttons.Push("Sign in")
-        actions.Push("signIn")
+        out.note = reqSignInAgain().title + "."
+        reqPushButton(out, "Sign in", "signIn")
     else if status = "restricted"
-        note = httpSentence(detail.restriction)
+        out.note = httpSentence(detail.restriction)
     else if status = "library"
         if itemId > 0
-            buttons.Push("Open")
-            actions.Push("open")
+            reqPushButton(out, "Open", "open")
+        else
+            out.note = "Ready, in a library you can't open: ask an administrator"
         end if
     else if status = "declined"
-        note = reqDeclinedText(detail.declined, now)
+        out.note = reqDeclinedText(detail.declined, now)
     else if status = "requested"
         if reqHasMine(detail)
-            note = "Requested"
+            out.note = "Requested"
         else if httpTrue(detail.watching)
-            note = "Following"
+            out.note = "Following"
         else if summary.access = "off"
-            note = blocked
+            out.note = blocked
         else
-            buttons.Push("Tell me too")
-            actions.Push("follow")
-            note = "Someone asked for it already."
+            reqPushButton(out, "Tell me too", "follow")
+            out.note = "Someone asked for it already."
         end if
     else if status = "partial"
-        if itemId > 0
-            buttons.Push("Open")
-            actions.Push("open")
-        end if
+        if itemId > 0 then reqPushButton(out, "Open", "open")
         if reqCanAskMore(detail.seasons, false)
             if blocked <> ""
-                note = blocked
+                out.note = blocked
             else
-                buttons.Push("Request more seasons")
-                actions.Push("pick")
+                reqPushButton(out, "Request more seasons", "pick")
             end if
         end if
     else if kind = "movie" or reqCanAskAny(detail.seasons, false)
         if blocked <> ""
-            note = blocked
+            out.note = blocked
+        else if kind = "show"
+            reqPushButton(out, "Request", "pick")
         else
-            buttons.Push("Request")
-            if kind = "show"
-                actions.Push("pick")
-            else
-                actions.Push("request")
-            end if
+            reqPushButton(out, "Request", "request")
         end if
     end if
+    return out
+end function
+
+' A title's page as the screen shows it: what it is; its one main action
+' (reqMainAction) and the actions of its request as buttons; and the
+' stage of the request it shows. actions match buttons: reqMainAction's,
+' and those of reqActions.
+function reqTitlePage(detail as object, summary as object, server as string, now as integer, zone as integer) as object
+    kind = httpString(detail.kind)
+    manage = summary.manage = true
+    shown = reqShownRequest(detail)
+    allowance = reqTitleAllowance(detail, summary)
+    remaining = allowance.moviesLeft
+    if kind = "show" then remaining = allowance.seasonsLeft
+    page = reqMainAction(detail, summary, now)
     stage = invalid
     requestId = 0
     if shown <> invalid and summary.signInAgain <> "requests"
         stage = reqStage(shown, manage, now, zone)
         requestId = httpNumber(shown.id, 0)
         for each option in reqActions(shown, 0)
-            if option.action <> "delete" and option.action <> "watch" and option.action <> "ask_again"
-                buttons.Push(option.label)
-                actions.Push(option.action)
-            end if
+            if option.action <> "delete" and option.action <> "watch" and option.action <> "ask_again" then reqPushButton(page, option.label, option.action)
         end for
     end if
-    genres = []
+    ' Its network (a movie's studio) and genres, as one line.
+    facts = []
+    network = httpSentence(detail.network)
+    if network <> "" then facts.Push(network)
     for each genre in httpArray(detail.genres)
         name = httpSentence(genre)
-        if name <> "" and genres.Count() < 3 then genres.Push(name)
+        if name <> "" and facts.Count() < 6 then facts.Push(name)
     end for
-    title = httpSentence(detail.title)
-    return {
+    page.Append({
         kind: kind,
         tmdbId: httpNumber(detail.tmdb_id, 0),
-        title: title,
+        title: httpSentence(detail.title),
         line: reqDetailLine(detail),
-        genres: genres.Join(", "),
+        facts: facts.Join(" · "),
         tagline: httpSentence(detail.tagline),
         overview: httpClean(detail.overview, 1200, true),
         poster: urlImage(server, detail.poster_url, contentDetailPosterWidth()),
         backdrop: urlImage(server, detail.backdrop_url, contentBackdropWidth()),
-        itemId: itemId,
-        buttons: buttons,
-        actions: actions,
-        note: note,
+        itemId: httpNumber(detail.item_id, 0),
         stage: stage,
         requestId: requestId,
         requestStatus: reqShownStatus(shown),
@@ -982,7 +993,8 @@ function reqTitlePage(detail as object, summary as object, server as string, now
         allowance: allowance,
         remaining: remaining,
         access: summary.access
-    }
+    })
+    return page
 end function
 
 ' Whether one of a title's requests downloads or goes into a library now:

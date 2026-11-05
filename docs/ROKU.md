@@ -529,9 +529,14 @@ Where an administrator has turned requests on, people ask for movies and
 shows found on TMDB, administrators approve them, and Radarr and Sonarr
 fetch them ([API.md](API.md#requests)). An administrator's Roku manages
 them (a manager, below) once its sign-in allows `approvals`; one signed in
-before is offered Sign in again. The menu shows what the profile may do;
-its number counts what waits: a manager's pending and failed requests
-(red while some failed) and their own news, anyone else's news.
+before is offered Sign in, which asks "Sign in again?" first (this TV
+shows a code to link it to the server's address again; Sign in and
+Cancel). The menu shows what the profile may do; its number counts what
+waits: a manager's pending and failed requests (red while some failed)
+and their own news, anyone else's news. What an action did, or why it
+didn't work, shows in a toast at the top right, as on the other TVs:
+"Asked for “Dune”: an administrator decides.", or the server's words for
+one approved as it was asked.
 
 - **Discover**, for those who may ask: a hero for the first trending title
   (its main action and Details; once nothing of its kind is left to ask
@@ -548,13 +553,17 @@ its number counts what waits: a manager's pending and failed requests
   the way to the requests, with the menu's number of what waits there.
   TMDB is searched from Search.
 - **A TMDB title's page:** backdrop and poster, year, runtime or seasons,
-  certification, genres, rating, tagline and overview; one main action
-  (Open, Request, Request more seasons, Tell me too) or the line that says
-  why there is none (the limit and when it frees up, declined, not out
-  yet); its request's stage and what can be done with it; rows of seasons,
-  each saying how it stands, and the cast. A movie's Request asks first,
-  saying what will happen; a show's opens **Which seasons?**, those left to
-  ask for ticked, OK ticking or unticking one, then Request 3 seasons.
+  certification, rating; its network (a movie's studio) and genres;
+  tagline and four lines of overview; one main action (Open, Request,
+  Request more seasons, Tell me too) or the line that says why there is
+  none (the limit and when it frees up, declined, not out yet, "Ready, in a
+  library you can't open: ask an administrator"); its request's stage and
+  what can be done with it; Overview where the four lines cut the
+  overview, a panel with the tagline and all of it; rows of seasons, each
+  saying how it stands, and the cast. A movie's Request asks at once; a
+  show's opens **Which seasons?**, those left to ask for ticked, OK ticking
+  or unticking one, then Request 3 seasons. A title gone from TMDB (404)
+  says "This title isn't on TMDB", with Back.
 - **Your requests** (a manager's **Requests**): tabs by status, each
   with how many it holds (the statuses' counts come with a tab's list,
   and are asked for beside Needs attention's and Yours', which count
