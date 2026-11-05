@@ -867,7 +867,7 @@ async function walk() {
   shoot("now-playing");
   await press("back"); // the artist, the music playing on
   await settle();
-  await press("right"); // the albums, the newest first
+  await press("down"); // the albums' row, on the newest
   await press("right"); // the older one
   since = mark();
   await press("select");

@@ -135,11 +135,12 @@ libraries ("3 movies · 2 shows in your libraries"), then a row for each
 thing they did (Acting, Directing, Creating, Writing, Producing) of their
 titles, newest first, each with its year and the part ("2019 · as Neo").
 
-An artist's page has their picture, their name, albums, tracks and
-genres, their summary, and Play and Shuffle, which hand every track of
-theirs to the music player, album by album, and open Now Playing (Now
-playing goes back to it while music plays); their albums are on the
-right, newest first.
+An artist's page, as on Android TV, has their picture, beside it their
+name, albums, tracks and genres and their summary, then Play and
+Shuffle, which hand every track of theirs to the music player, album by
+album, and open Now Playing (Now playing goes back to it while music
+plays); under them, their albums in a row of square tiles, newest first,
+each with its year.
 
 Playlists shows each playlist as a square cover, five across, as on
 Android TV: a mosaic of its first four entries' pictures (decoded at a

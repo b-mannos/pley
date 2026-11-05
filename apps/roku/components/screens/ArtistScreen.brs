@@ -1,7 +1,8 @@
-' An artist (GET /api/items/{id}, their albums /children). Play and
-' Shuffle gather every track of theirs, album by album as the server
-' lists them, hand them to the music player and open Now Playing; Now
-' playing goes back to it while music plays. OK on an album opens it.
+' An artist (GET /api/items/{id}, their albums /children), as Android
+' TV's page: Play and Shuffle gather every track of theirs, album by album
+' as the server lists them, hand them to the music player and open Now
+' Playing; Now playing goes back to it while music plays. Their albums are
+' a row under the buttons; OK on one opens it.
 ' params: { id, title (shown until the server answers) }.
 
 sub init()
@@ -22,7 +23,9 @@ sub init()
     ' server's order, invalid until they came.
     m.artist = invalid
     m.albumIds = invalid
-    ' What the buttons do, in their order: "play", "shuffle", "nowPlaying".
+    ' What the buttons say and do, in their order: "play", "shuffle",
+    ' "nowPlaying".
+    m.labels = []
     m.actions = []
     ' Play's tracks being gathered: { shuffled, lists (each album's, in
     ' order), next (the album to ask for next), left, ask }; invalid when
@@ -30,8 +33,8 @@ sub init()
     m.gathering = invalid
     m.asks = 0
     m.lastFocus = m.buttons
-    m.buttons.observeField("buttonSelected", "onButton")
-    m.albums.observeField("itemSelected", "onAlbum")
+    m.buttons.observeField("chosen", "onButton")
+    m.albums.observeField("rowItemSelected", "onAlbum")
     m.top.observeField("active", "onActive")
 end sub
 
@@ -90,13 +93,17 @@ sub onAlbums(event as object)
         return
     end if
     m.albumIds = answer.data.order
-    m.albums.content = event.getRoSGNode().content
     showLine()
     showButtons()
     if answer.data.shown = 0
         m.message.text = "No albums found."
         return
     end if
+    ' The task's tiles, as the row's.
+    content = CreateObject("roSGNode", "ContentNode")
+    row = content.createChild("ContentNode")
+    row.appendChildren(event.getRoSGNode().content.getChildren(-1, 0))
+    m.albums.content = content
     m.message.visible = false
     m.albumsLabel.visible = true
     if m.top.hasFocus() and m.buttons.visible then m.buttons.setFocus(true)
@@ -140,16 +147,23 @@ sub showButtons()
         labels.Push("Now playing")
     end if
     m.actions = actions
-    if FormatJson(labels) <> FormatJson(m.buttons.buttons)
-        focused = m.buttons.buttonFocused
-        m.buttons.buttons = labels
-        if focused > 0 and focused < labels.Count() then m.buttons.focusButton = focused
+    if FormatJson(labels) <> FormatJson(m.labels)
+        m.labels = labels
+        focused = m.buttons.focusIndex
+        chips = []
+        for each label in labels
+            chips.Push({ label: label, width: 0 })
+        end for
+        m.buttons.chips = chips
+        if focused > 0 and focused < labels.Count() then m.buttons.focusIndex = focused
     end if
     m.buttons.visible = labels.Count() > 0
 end sub
 
 sub onButton(event as object)
-    action = m.actions[event.getData()]
+    at = event.getData()
+    if at < 0 or at >= m.actions.Count() then return
+    action = m.actions[at]
     if action = "nowPlaying"
         uiNavigate({ to: "nowPlaying" })
     else
@@ -216,27 +230,34 @@ sub onAlbumTracks(event as object)
     uiNavigate({ to: "nowPlaying" })
 end sub
 
+' The album in focus in the row, or invalid.
+function albumAt(position as dynamic) as dynamic
+    if m.albums.content = invalid or GetInterface(position, "ifArray") = invalid or position.Count() < 2 then return invalid
+    row = m.albums.content.getChild(position[0])
+    if row = invalid then return invalid
+    return row.getChild(position[1])
+end function
+
 sub onAlbum(event as object)
-    uiOpenTile(m.albums.content.getChild(event.getData()))
+    uiOpenTile(albumAt(event.getData()))
 end sub
 
-' Right from the buttons goes to the albums, Left from their first column
-' back; the Options key adds the album in focus, or the artist, to a
-' playlist.
+' Down from the buttons goes to the albums, Up back; the Options key adds
+' the album in focus, or the artist, to a playlist.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
     hasAlbums = m.albums.content <> invalid and m.albums.content.getChildCount() > 0
-    if key = "right" and m.buttons.isInFocusChain() and hasAlbums
+    if key = "down" and m.buttons.isInFocusChain() and hasAlbums
         m.albums.setFocus(true)
         return true
     end if
-    if key = "left" and m.albums.isInFocusChain()
+    if key = "up" and m.albums.isInFocusChain() and m.buttons.visible
         m.buttons.setFocus(true)
         return true
     end if
     if key = "options"
         if m.albums.isInFocusChain() and hasAlbums
-            uiTileOptions(m.albums.content.getChild(m.albums.itemFocused), false)
+            uiTileOptions(albumAt(m.albums.rowItemFocused), false)
         else if m.artist <> invalid
             uiTileOptions({ itemId: m.artist.id, kind: "artist", title: httpSentence(m.artist.title) }, false)
         end if
