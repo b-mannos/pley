@@ -972,7 +972,7 @@ sub onState(event as object)
     drawPictures()
     ' The playhead is read again from now: a pause, or a seek's wait, isn't
     ' time it should have moved in. The last reading stays, so a seek made
-    ' here (Skip intro, Chapters) moves the next one away from it.
+    ' here (Skip Intro, Chapters) moves the next one away from it.
     m.seenAt = m.clock.TotalMilliseconds()
     if state <> "paused" then m.pausedTimer.control = "stop"
     if state <> "playing" then hideBanner()

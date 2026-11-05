@@ -76,7 +76,7 @@ yet, Scanning your libraries…, or Nothing here yet.
 | Options (\*) | A request | What can be done with it (Approve, Decline, Withdraw…) |
 | Down | The player | Pley's menu: Subtitles, Audio, Quality, Subtitle sync, Chapters, Sleep timer, Find subtitles…, Playback details |
 | Options (\*) | The player | Roku's own options: subtitles and audio tracks |
-| OK | Skip intro, Skip credits | Skips; fast forward and rewind jump 30 s, instant replay 10 s back |
+| OK | Skip Intro, Skip Credits | Skips; fast forward and rewind jump 30 s, instant replay 10 s back |
 | Options (\*) | Live TV | A programme's details (a card's: what's on), Watch, Add to or remove from favourites |
 | Options (\*) | The live player | Add to or remove from favourites |
 | Replay | Live TV, the live player's channel list | Search (Roku remotes have no search key for apps) |
@@ -239,7 +239,8 @@ queue's end, turns the timer off.
 
 As each item begins (the first, the next episode, a playlist's or a
 collection's next), its title shows at the top for 4 s, a show's name over
-the episode's "S1 E2 · Pilot", as on Android TV.
+the episode's "S1 · E2 · Pilot", or a movie's "Dune (2021)", as on Android
+TV. Skip Intro and Skip Credits are named as on the other apps.
 
 - **Up Next** shows at the credits (else 30 s before the end) with its
   countdown. Cancelled, or with Play the next episode by itself off, it
@@ -754,7 +755,7 @@ bun run images    # the nine-patch focus and watched-mark images
   without requests is asked nothing but the summary. The fake server also
   checks that a video's reports say which audio and subtitles play, and
   music's don't.
-- **brs-node limits:** its own fonts, no video or audio (Skip intro, Up
+- **brs-node limits:** its own fonts, no video or audio (Skip Intro, Up
   Next and its wait at the end, the title as an item begins, reconnecting,
   stalls, media that ends short, the sleep timers' ends, picture
   subtitles shown in time and the remote's commands, which a player obeys

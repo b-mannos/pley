@@ -173,9 +173,10 @@ function playerSkipFor(markers as object, positionMs as integer, upNextComing as
     return marker
 end function
 
+' In the other apps' words.
 function playerSkipLabel(marker as object) as string
-    if marker.kind = "credits" then return "Skip credits"
-    return "Skip intro"
+    if marker.kind = "credits" then return "Skip Credits"
+    return "Skip Intro"
 end function
 
 ' Where skipping lands, in ms: just before an intro ends, so its last
@@ -303,13 +304,17 @@ end function
 
 ' The title shown at the top for 4 s as each item begins, as on Android TV
 ' and the native Samsung app: { title, line }, a show's name over an
-' episode's "S1 E2 · Pilot".
+' episode's "S1 · E2 · Pilot" (Format.brs's code), a movie's "Title
+' (Year)".
 function playerBanner(item as dynamic) as object
     data = httpObject(item)
     banner = { title: "", line: "" }
     if data = invalid then return banner
     title = httpSentence(data.title)
-    if httpString(data.kind) = "episode"
+    kind = httpString(data.kind)
+    year = Int(httpNumber(data.year, 0))
+    if kind = "movie" and title <> "" and year > 0 then title = title + " (" + year.ToStr() + ")"
+    if kind = "episode"
         showTitle = httpSentence(data.grandparent_title)
         parts = []
         code = fmtEpisode(data.parent_index, data.index)

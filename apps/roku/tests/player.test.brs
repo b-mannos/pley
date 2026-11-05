@@ -141,8 +141,8 @@ sub test_player_shows_a_skip_button_until_a_second_before_the_end()
     tkEqual(playerActiveMarker(markers, 68999).key, "intro:10000")
     tkInvalid(playerActiveMarker(markers, 69000), "a second before the intro ends")
     tkEqual(playerActiveMarker(markers, 1250000).key, "credits:1200000")
-    tkEqual(playerSkipLabel(markers[0]), "Skip intro")
-    tkEqual(playerSkipLabel(markers[1]), "Skip credits")
+    tkEqual(playerSkipLabel(markers[0]), "Skip Intro", "in the other apps' words")
+    tkEqual(playerSkipLabel(markers[1]), "Skip Credits")
 end sub
 
 sub test_player_leaves_an_episodes_credits_to_up_next()
@@ -214,8 +214,10 @@ sub test_player_notices_a_seek()
 end sub
 
 sub test_player_banner_names_the_show_over_the_episode()
-    tkEqual(playerBanner({ kind: "episode", title: "Pilot", grandparent_title: "The Office", parent_index: 1, index: 2 }), { title: "The Office", line: "S1 E2 · Pilot" })
-    tkEqual(playerBanner({ kind: "episode", title: "Pilot", parent_index: 1, index: 2 }), { title: "Pilot", line: "" })
+    ' The episode's code is Format.brs's, as everywhere in the app.
+    tkEqual(playerBanner({ kind: "episode", title: "Pilot", grandparent_title: "The Office", parent_index: 1, index: 2 }), { title: "The Office", line: fmtEpisode(1, 2) + " · Pilot" })
+    tkEqual(playerBanner({ kind: "episode", title: "Pilot", parent_index: 1, index: 2, year: 2005 }), { title: "Pilot", line: "" })
+    tkEqual(playerBanner({ kind: "movie", title: "Dune", year: 2021 }), { title: "Dune (2021)", line: "" }, "a movie's year, as on Android TV")
     tkEqual(playerBanner({ kind: "movie", title: "Dune" }), { title: "Dune", line: "" })
     tkEqual(playerBanner(invalid), { title: "", line: "" })
 end sub
