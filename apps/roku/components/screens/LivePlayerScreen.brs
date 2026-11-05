@@ -1226,13 +1226,13 @@ sub troubleRow(c as object, y as integer)
     name = row.createChild("Label")
     name.translation = [24, 10]
     name.width = room
-    name.font = "font:SmallBoldSystemFont"
+    name.font = typeFont(700, 32)
     name.color = "0xEBEBEBFF"
     typeSet(name, c.channelName)
     holders = row.createChild("Label")
     holders.translation = [24, 48]
     holders.width = room
-    holders.font = "font:SmallestSystemFont"
+    holders.font = typeFont(500, 26)
     holders.color = "0xA1A9B6FF"
     typeSet(holders, c.holders)
 end sub

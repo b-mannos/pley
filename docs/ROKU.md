@@ -154,7 +154,8 @@ The app has the Android TV app's look, as far as Roku allows:
   hero's buttons, Live TV's tabs and its Search, Favourites, Recently
   watched and All channels, a region's chevron, and favourite channels'
   stars.
-- **Tiles** have rounded corners. The focused one grows to 1.05 with a
+- **Tiles**, a title's or a playlist's, have rounded corners, and a
+  profile's avatar is round. The focused tile grows to 1.05 with a
   ring around it and its title turns bold, the look coming in over 150 ms
   eased out and going over 120 ms eased in; only the tile's scale and the
   ring's opacity change, which a Roku draws without laying anything out.

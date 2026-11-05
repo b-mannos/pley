@@ -54,7 +54,7 @@ sub init()
     m.choiceKind = ""
     items = []
     for each category in settingsCategories()
-        items.Push({ title: category.title, value: "", state: "", danger: category.id = "signOut", rowWidth: 320, rowHeight: 72 })
+        items.Push({ title: category.title, value: "", state: "", danger: category.id = "signOut", rowWidth: 348, rowHeight: 72 })
     end for
     m.categories.content = nodesContent(items)
     m.categories.observeField("itemFocused", "onCategoryFocused")

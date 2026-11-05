@@ -48,12 +48,12 @@ sub onFocus()
     m.chosen.visible = m.top.itemHasFocus and not m.top.listHasFocus
     if focused
         m.name.color = "0x16191EFF"
-        m.name.font = "font:MediumBoldSystemFont"
+        m.name.font = typeFont(700, 28)
         m.value.color = "0x16191EFF"
         m.state.color = "0x16191EFF"
         return
     end if
-    m.name.font = "font:MediumSystemFont"
+    m.name.font = typeFont(400, 28)
     if m.danger
         m.name.color = "0xEB6B70FF"
     else

@@ -1124,15 +1124,13 @@ sub drawDetailsBadges(d as object)
     m.detailsBadges.removeChildrenIndex(m.detailsBadges.getChildCount(), 0)
     for each badge in d.badges
         label = m.detailsBadges.createChild("Label")
-        label.font = "font:SmallestBoldSystemFont"
-        typeSet(label, badge.text)
+        typeSet(label, badge.text, typeFont(700, 26))
         label.color = "0x7DD3FCFF"
         if badge.live then label.color = "0xEB6B70FF"
     end for
     if d.rating <> ""
         label = m.detailsBadges.createChild("Label")
-        label.font = "font:SmallestBoldSystemFont"
-        typeSet(label, d.rating)
+        typeSet(label, d.rating, typeFont(700, 26))
         label.color = "0xA1A9B6FF"
     end if
 end sub
