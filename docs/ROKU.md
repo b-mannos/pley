@@ -250,7 +250,10 @@ it) and the sleep timer, and Up next: the queue, numbered, the track
 playing in bold, which stays in view unless the focus is on the list. OK
 on one plays it, and the queue goes on from there. Up from the buttons
 goes to the scrubber, where Left and Right move 10 s and OK plays or
-pauses, as on Android TV. A long queue is listed 250 tracks at a time, from
+pauses, as on Android TV. After two minutes without a key it dims to 30 %,
+to spare the screen, and the next key wakes it (the remote's rest is
+Roku's `TimeSinceLastKeypress`, looked at each second, four times a
+second while dimmed). A long queue is listed 250 tracks at a time, from
 50 before the one playing, the next part as playing nears the end of this
 one: each row is a node the Roku draws, and a playlist holds up to
 5,000. Shuffle plays the other tracks after the one playing in a random

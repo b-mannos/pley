@@ -41,6 +41,11 @@ sub init()
     m.marked = -1
     ' Whether the sleep timer's last 30 s were counting down.
     m.noticing = false
+    ' Dimmed after two minutes without a key, as on Android TV.
+    m.device = CreateObject("roDeviceInfo")
+    m.dimmed = false
+    m.restTimer = m.top.findNode("restTimer")
+    m.restTimer.observeField("fire", "onRestTick")
     ' The focus starts on Pause (or Play).
     showButtons()
     m.buttons.observeField("chosen", "onButton")
@@ -57,8 +62,11 @@ sub onActive()
             end for
             m.watching = false
         end if
+        m.restTimer.control = "stop"
+        setDimmed(false)
         return
     end if
+    m.restTimer.control = "start"
     if not m.watching
         music.observeFieldScoped("track", "onTrack")
         music.observeFieldScoped("at", "onAt")
@@ -251,6 +259,24 @@ end sub
 sub onButton(event as object)
     at = event.getData()
     if at >= 0 and at < m.buttonActions.Count() then m.global.music.control = m.buttonActions[at]
+end sub
+
+' Two minutes without a key, the screen dims to 30 %; the next key, which
+' does what it does too, wakes it.
+sub onRestTick()
+    setDimmed(musicDimmed(m.device.TimeSinceLastKeypress()))
+end sub
+
+sub setDimmed(dimmed as boolean)
+    if dimmed = m.dimmed then return
+    m.dimmed = dimmed
+    if dimmed
+        m.top.opacity = musicDimmedOpacity()
+        m.restTimer.duration = 0.25
+    else
+        m.top.opacity = 1.0
+        m.restTimer.duration = 1
+    end if
 end sub
 
 sub onUpNext(event as object)

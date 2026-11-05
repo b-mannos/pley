@@ -180,6 +180,18 @@ function musicStreamFormat(info as object, detail as dynamic) as string
     return "mp3"
 end function
 
+' Now Playing dims, to spare the screen, once the remote has rested this
+' long (seconds, as Roku's TimeSinceLastKeypress counts them), as on
+' Android TV; the next key wakes it.
+function musicDimmed(restSeconds as integer) as boolean
+    return restSeconds >= 120
+end function
+
+' How bright Now Playing stays, dimmed.
+function musicDimmedOpacity() as float
+    return 0.3
+end function
+
 ' Why a track's session didn't start (the API task's answer), in the
 ' other apps' words: the server out of reach, or the track that can't be
 ' played.

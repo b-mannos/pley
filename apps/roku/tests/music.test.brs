@@ -47,6 +47,14 @@ sub test_music_album_tracks_by_disc()
     tkEqual(musicDiscRows([]).Count(), 0, "no tracks")
 end sub
 
+sub test_music_now_playing_dims_after_two_minutes()
+    tkFalse(musicDimmed(0), "a key just pressed")
+    tkFalse(musicDimmed(119))
+    tkTrue(musicDimmed(120), "two minutes untouched")
+    tkTrue(musicDimmed(3600))
+    tkTrue(Abs(musicDimmedOpacity() - 0.3) < 0.001, "to 30 %")
+end sub
+
 sub test_music_failures_in_words()
     tkEqual(musicFailure({ ok: false, status: 0, error: "network", message: "No answer." }), "Can't reach the server.")
     tkEqual(musicFailure({ ok: false, status: 500, error: "http", message: "The transcoder failed." }), "This track can't be played.")
