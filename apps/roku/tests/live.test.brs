@@ -311,6 +311,19 @@ sub test_live_guide_gaps_by_half_hours()
     tkEqual(rows[2].programs[11].playStart + rows[2].programs[11].playDuration, 3600 + 6 * 3600, "to what is fetched")
 end sub
 
+sub test_live_guide_goes_round_only_between_pages()
+    size = livePageSize()
+    tkEqual(liveGuideEdge(0, size, size * 3, size - 1, 0), "next", "Down from a page's last row: the next page")
+    tkEqual(liveGuideEdge(size, size, size * 3, 0, size - 1), "previous", "Up from a page's first row: the page before")
+    tkEqual(liveGuideEdge(size * 2, size, size * 3, size - 1, 0), "last", "Down from the category's last channel stays there")
+    tkEqual(liveGuideEdge(0, size, size * 3, 0, size - 1), "tabs", "Up from its first goes to the tabs")
+    tkEqual(liveGuideEdge(0, 7, 7, 6, 0), "last", "a category on one page")
+    tkEqual(liveGuideEdge(0, 7, 7, 0, 6), "tabs")
+    tkEqual(liveGuideEdge(0, 7, 7, 3, 4), "", "a step")
+    tkEqual(liveGuideEdge(0, 2, 2, 1, 0), "", "two rows: going round can't be told from a step")
+    tkEqual(liveGuideEdge(100, 7, 107, 6, 0), "last", "a last page shorter than the others")
+end sub
+
 sub test_live_guide_window()
     start = liveGuideStart(7300)
     tkEqual(start, 5400, "the half hour before the one now is in")

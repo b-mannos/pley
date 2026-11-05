@@ -740,6 +740,27 @@ function liveGuideMissing(start as integer, loadedTo as integer, leftEdge as int
     return { from: loadedTo, to: upto }
 end function
 
+' Where the guide's focus goes as the TimeGrid moved it from row wasRow
+' to row, in a page of count channels from offset of a category of total.
+' The TimeGrid goes round its rows (Up from the first to the last, Down
+' from the last to the first): between pages, that is the page after
+' ("next") or the one before ("previous"); at the category's ends, as on
+' Android, Down stays on its last channel ("last") and Up leaves for the
+' tabs above ("tabs"). "" for a move within the page, and in a page of
+' two channels or fewer, where going round can't be told from a step.
+function liveGuideEdge(offset as integer, count as integer, total as integer, wasRow as integer, row as integer) as string
+    if count <= 2 then return ""
+    if wasRow = count - 1 and row = 0
+        if offset + count >= total then return "last"
+        return "next"
+    end if
+    if wasRow = 0 and row = count - 1
+        if offset <= 0 then return "tabs"
+        return "previous"
+    end if
+    return ""
+end function
+
 ' Whether the guide is away from now, so that Back brings it back first:
 ' now isn't in the time shown (left, and shown seconds on), or the
 ' programme in focus (from, upto; upto 0 for none) isn't on at now. Time

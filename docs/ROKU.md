@@ -392,11 +392,15 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
   forward move two hours, Play goes back to now. OK on what's on watches
   the channel; on a later programme it shows its details, as Options (\*)
   does on any programme (on a card, what's on), with Watch and the
-  favourite. Time the guide says nothing of (a channel without a guide)
-  is cut at the half hours, so Left and Right go through it half an hour
-  at a time, as on Android. TimeGrid draws a programme's title alone, and
-  no time over its now line: Android's cells show their times too, and
-  the time now sits on its line.
+  favourite. Up and Down past a page's ends bring the page before or
+  after; Up from the category's first channel goes to the Guide and
+  Channels tabs, and Down stops at its last, as on Android (the TimeGrid
+  goes round its rows, so at the category's ends the focus is put back at
+  once). Time the guide says nothing of (a channel without a guide) is cut
+  at the half hours, so Left and Right go through it half an hour at a
+  time, as on Android. TimeGrid draws a programme's title alone, and no
+  time over its now line: Android's cells show their times too, and the
+  time now sits on its line.
 - **Channels:** the other tab, as cards with what's on and what's next.
 - **What's on moves on** each 15 s: the programme above the guide, the
   cards in view and the player's bar and list show how far along it is. Once a programme listed as on now has ended, the cards in view are

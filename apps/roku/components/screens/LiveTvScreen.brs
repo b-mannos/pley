@@ -612,9 +612,11 @@ sub onLeftEdge()
     uiRequest({ op: "liveGuide", channels: m.page.channels, start: m.guideStart, upto: missing.to, asked: m.asked, focus: "keep", focusId: 0 }, "onGuide")
 end sub
 
-' The focus moved: the programme above the guide, and past the page's last
-' row (or before its first) the next page (or the one before), round the
-' ends of the category, as the guide itself goes round.
+' The focus moved: the programme above the guide. The guide goes round
+' its rows: past the page's last row (or before its first) the next page
+' (or the one before) comes; at the category's ends the focus goes back
+' at once, Down staying on the last channel and Up going on to the tabs,
+' as on Android (Live.brs's liveGuideEdge).
 sub onProgramFocused()
     details = m.guide.programFocusedDetails
     if details <> invalid and m.page <> invalid
@@ -622,23 +624,44 @@ sub onProgramFocused()
         count = m.page.channels.Count()
         wasRow = m.lastRow
         m.lastRow = row
+        edge = ""
         if m.jumped
             m.jumped = false
-        else if m.page.total > count and count > 2 and not m.loading and liveMayAskAgain(m.failedAt, m.span.TotalMilliseconds())
-            size = livePageSize()
-            pages = Int((m.page.total + size - 1) / size)
-            pageNo = Int(m.page.offset / size)
-            if wasRow = count - 1 and row = 0
-                loadGuidePage(((pageNo + 1) mod pages) * size, 0, "first")
-                return
+        else
+            edge = liveGuideEdge(m.page.offset, count, m.page.total, wasRow, row)
+        end if
+        if edge = "last"
+            holdGuideAt(count - 1)
+            return
+        end if
+        if edge = "tabs"
+            holdGuideAt(0)
+            m.tabs.focusIndex = m.tabs.current
+            m.tabs.setFocus(true)
+            return
+        end if
+        if (edge = "next" or edge = "previous") and not m.loading and liveMayAskAgain(m.failedAt, m.span.TotalMilliseconds())
+            if edge = "next"
+                loadGuidePage(m.page.offset + count, 0, "first")
+            else
+                offset = m.page.offset - livePageSize()
+                if offset < 0 then offset = 0
+                loadGuidePage(offset, 0, "last")
             end if
-            if wasRow = 0 and row = count - 1
-                loadGuidePage(((pageNo - 1 + pages) mod pages) * size, 0, "last")
-                return
-            end if
+            return
         end if
     end if
     showProgram()
+end sub
+
+' The guide's focus put back on row, where the TimeGrid went round from,
+' at the time shown.
+sub holdGuideAt(row as integer)
+    left = guideLeft()
+    m.jumped = true
+    m.lastRow = row
+    m.guide.jumpToChannel = row
+    m.guide.leftEdgeTargetTime = left
 end sub
 
 ' The channel and programme in focus: { channel, program } (program
@@ -979,7 +1002,8 @@ end sub
 ' Back goes up a step at a time: the guide back to now, a search back to
 ' the category before, the channels to the categories, and on the rail it
 ' leaves. Left from the channels goes to the categories too, Right from
-' them to the channels; up from the rail's top, the tabs. The Options key
+' them to the channels; up from the rail's top, and from the first
+' channel of the guide or the cards, the tabs. The Options key
 ' on a programme or a card: the channel's options.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
@@ -1037,7 +1061,10 @@ function onKeyEvent(key as string, press as boolean) as boolean
         m.rail.setFocus(true)
         return true
     end if
-    if key = "up" and m.cards.isInFocusChain()
+    ' Up from the cards' top row, or from a guide of one channel (a longer
+    ' one goes round, onProgramFocused), goes to the tabs.
+    if key = "up" and (m.cards.isInFocusChain() or m.guide.isInFocusChain())
+        m.tabs.focusIndex = m.tabs.current
         m.tabs.setFocus(true)
         return true
     end if
