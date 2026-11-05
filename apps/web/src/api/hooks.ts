@@ -7,6 +7,7 @@ import type {
   Activity,
   Backup,
   Backups,
+  CastRequest,
   CleanReport,
   Control,
   Device,
@@ -29,6 +30,7 @@ import type {
   PersonDetail,
   PlayingSession,
   RecoveryCodes,
+  RemoteDevice,
   RequestAccess,
   Resources,
   ProfilePatch,
@@ -70,6 +72,7 @@ export const keys = {
   history: (scope: HistoryScope, pageSize: number) => ["history", scope, pageSize] as const,
   activity: ["activity"] as const,
   sessions: ["sessions"] as const,
+  remoteDevices: ["remote", "devices"] as const,
   users: ["users"] as const,
   userDevices: (id: Id) => ["users", id, "devices"] as const,
   profiles: ["profiles"] as const,
@@ -354,6 +357,13 @@ export const queries = {
     queryOptions({
       queryKey: keys.sessions,
       queryFn: () => api.get<PlayingSession[]>("/api/sessions").then((list) => received(list, Date.now())),
+      staleTime: 2_000,
+    }),
+  /** The user's own devices that take casts, which a remote lists with what they play. */
+  remoteDevices: () =>
+    queryOptions({
+      queryKey: keys.remoteDevices,
+      queryFn: () => api.get<RemoteDevice[]>("/api/remote/devices"),
       staleTime: 2_000,
     }),
   item: (id: Id) => queryOptions({ queryKey: keys.item(id), queryFn: ({ signal }) => api.get<ItemDetail>(`/api/items/${id}`, { signal }) }),
@@ -947,6 +957,15 @@ export function usePlayingSessions() {
   return useQuery(queries.sessions());
 }
 
+/**
+ * The user's own devices that take casts (their apps with the event stream
+ * open as a receiver). Fetched again as they come and go, which the event
+ * stream says with `sessions_changed`.
+ */
+export function useRemoteDevices() {
+  return useQuery(queries.remoteDevices());
+}
+
 export interface SessionCommand {
   sessionId: string;
   command: Control;
@@ -954,6 +973,10 @@ export interface SessionCommand {
   positionMs?: number;
   /** `skip`: how far (ms), back when negative. */
   offsetMs?: number;
+  /** `audio` and `subtitles`: the track's stream index (subtitles -1: off). */
+  streamIndex?: number;
+  /** `quality`: the id of one of the session's `qualities`. */
+  quality?: string;
 }
 
 /**
@@ -963,10 +986,10 @@ export interface SessionCommand {
 export function useSessionCommand() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ sessionId, command, positionMs, offsetMs }: SessionCommand) =>
+    mutationFn: ({ sessionId, command, positionMs, offsetMs, streamIndex, quality }: SessionCommand) =>
       request<void>(`/api/sessions/${encodeURIComponent(sessionId)}/command`, {
         method: "POST",
-        body: { command, position_ms: positionMs, offset_ms: offsetMs },
+        body: { command, position_ms: positionMs, offset_ms: offsetMs, stream_index: streamIndex, quality },
       }),
     onError: (err, { sessionId }) => {
       // Its player is gone, or no longer obeys that: the list says what is left.
@@ -981,6 +1004,31 @@ export function sessionCommandError(err: unknown, device: string | null): string
   const it = device ?? "This device";
   if (isApiError(err, 404)) return `${it} isn't playing any more`;
   if (isApiError(err, 409)) return `${it} can't do that`;
+  if (isApiError(err, 429)) return "Too many at once: try again in a moment";
+  return errorMessage(err);
+}
+
+/**
+ * Sends one of the user's own devices that take casts something to play
+ * (`receiverId`: its `receiver_id`). It plays it as its own Play would, and
+ * its session shows in the list as it starts.
+ */
+export function useCast() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ receiverId, cast }: { receiverId: string; cast: CastRequest }) =>
+      api.post<void>(`/api/remote/devices/${encodeURIComponent(receiverId)}/cast`, cast),
+    onError: (err) => {
+      // It went, or takes other things now: the list says what is left.
+      if (isApiError(err, 404) || isApiError(err, 409)) void qc.invalidateQueries({ queryKey: keys.remoteDevices });
+    },
+  });
+}
+
+/** What "Play on…" says when `device` didn't take a cast. */
+export function castError(err: unknown, device: string): string {
+  if (isApiError(err, 404)) return `${device} isn't on any more`;
+  if (isApiError(err, 409)) return `${device} can't play that`;
   if (isApiError(err, 429)) return "Too many at once: try again in a moment";
   return errorMessage(err);
 }

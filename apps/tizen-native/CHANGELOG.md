@@ -35,6 +35,22 @@ It has no releases yet: it is built and installed by hand
 
 ### Added
 
+- Your phone or browser changes the quality of a film or episode playing
+  on the TV, as the player's own Quality does, and sees which is picked.
+- A film or an episode sent from your phone or browser plays with the
+  audio and subtitles picked on its page there.
+- Your phone or browser plays a film, an episode, a show, an album, an
+  artist, a track, a playlist or a Live TV channel on the TV ("Play on…"):
+  it starts as the TV's own Play would, in place of what plays, and the
+  TV says "Playing from" the device it came from.
+- Your phone or browser changes the audio and subtitles of a film or
+  episode playing on the TV, as the player's own Audio and Subtitles do,
+  and sees which play.
+- Your phone or browser controls what plays on the TV: a film or episode
+  plays, pauses, seeks and skips, and goes on to the next one; music does
+  the same, and goes back a track; Live TV changes channel. Live TV
+  stopped from another device, or by the server's administrator, stops
+  on the TV and says who, with their message.
 - Discover and requests, as on Android TV: Discover in the rail for a
   profile that may ask (else Your requests, Requests for administrators)
   with its number; TMDB's rows, a hero and a title's page with Request,
@@ -335,6 +351,9 @@ It has no releases yet: it is built and installed by hand
 
 ### Fixed
 
+- Live TV's channel up or down, still finding the next channel when another
+  is picked from the list or the app goes to the background, no longer
+  changes channel a moment later.
 - A single press of a direction moves focus once: a held key starts
   moving focus by itself after 400 ms, as on Android TV, where it started
   after 180 ms and a slow press moved focus twice.

@@ -12,6 +12,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import app.pley.android.auth.AuthEvent
 import app.pley.android.common.describe
 import app.pley.android.data.Loadable
+import app.pley.android.data.OtherDevice
+import app.pley.android.data.RemoteRepository
 import app.pley.android.data.RequestNotice
 import app.pley.android.network.ApiException
 import app.pley.android.network.OfflineException
@@ -21,6 +23,8 @@ import app.pley.android.screens.requests.RequestTexts
 import app.pley.android.screens.requests.RequestsEntry
 import app.pley.android.ui.phone.R
 import app.pley.android.ui.phone.kit.ToastHostState
+import app.pley.android.ui.phone.remote.CastTarget
+import app.pley.android.ui.phone.remote.RemoteAsk
 import app.pley.android.screens.R as ScreensR
 
 /**
@@ -61,6 +65,31 @@ class PhoneShellState internal constructor(
     /** The music playing in the background, for the mini player. */
     var nowPlaying: NowPlaying? by mutableStateOf(null)
         internal set
+
+    /** The profile's other devices that are on, for the remote's bar; followed while the app shows. */
+    var remoteDevices: List<OtherDevice> by mutableStateOf(emptyList())
+        internal set
+
+    /** What the remote sends its commands through; `null` until after the first frame. */
+    var remote: RemoteRepository? by mutableStateOf(null)
+        internal set
+
+    /** What Play on…'s chooser sends, while it shows ([playOn]); `null` while it doesn't. */
+    internal var playingOn: CastTarget? by mutableStateOf(null)
+
+    /** The device the remote was last asked to open on ([openRemote]). */
+    internal var remoteAsked: RemoteAsk? by mutableStateOf(null)
+        private set
+
+    /** Play on…: the chooser of the profile's other devices that play [target] shows over the page. */
+    internal fun playOn(target: CastTarget) {
+        playingOn = target
+    }
+
+    /** The remote opens on [deviceId], its controls showing once what it was sent plays. */
+    internal fun openRemote(deviceId: String) {
+        remoteAsked = RemoteAsk(deviceId)
+    }
 
     /** The ways into requests and their number, for Me's tab. */
     var requests: RequestsEntry by mutableStateOf(RequestsEntry.None)

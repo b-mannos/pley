@@ -10,6 +10,47 @@ describes how they are made.
 
 ### Added
 
+- The phone is a remote for your other devices: while something plays on
+  one of them, a bar above the tabs says where and what, and opens a
+  remote with what plays on each, how far, and the controls its player
+  obeys (play and pause, back 10 s and forward 30 s, next and previous,
+  channel up and down, a slider to seek), and Stop. A device that doesn't
+  act on a command within a few seconds is said not to have answered.
+  TVs show no remote.
+- The players obey the remote on your other devices, on phones and TVs:
+  videos play, pause, seek, skip and go to the next episode; music does
+  all that and goes back a track; Live TV changes channel, and stops with
+  a word when stopped from elsewhere. Music playing with the screen off
+  still hears it, until it has been paused for a minute and a half. Remotes show the device by its name in Android's
+  settings.
+- The video players change their audio and subtitles when your remote on
+  another device asks, as their own track menus do, and tell your remotes
+  which tracks they play.
+- The phone's remote lists your devices: every other device that is on,
+  playing or ready to play, those that play first, each with an icon for
+  its kind. Choosing one shows its controls, now with Next for every
+  episode, track and channel (dimmed where it can't go on), and Audio and
+  Subtitles menus that change what it plays.
+- Phones, tablets and TVs play what your remotes send them while Pley is
+  open: a title, a show's next episode, music, a playlist or a Live TV
+  channel plays as Play would play it there, and says for a few seconds
+  which device it came from.
+- Play on… sends a title, a show, a season, music or a playlist from the
+  phone to another of your devices, and Watch on… a Live TV channel:
+  beside Play on their pages, in an item's actions and in the live
+  player. Choose the device (an album, an artist or a playlist can go
+  shuffled), and the remote opens on it.
+- The video players change their quality when your remote on another
+  device asks, as their own Quality menu does, and tell your remotes
+  which quality they play. Phones and TVs play a title cast to them with
+  the audio and subtitles picked on the remote's page, for that play
+  only.
+- The phone's remote has a Quality menu beside Audio and Subtitles, all
+  three as icons, and Stop asks first. A Live TV channel shows its
+  programme, how far it is, its times and what's next, with a channel
+  rocker in place of the seek bar and the skips. Play on… on a title's
+  page is a square button as tall as Play, and sends the audio and
+  subtitles picked on the page.
 - Diagnostics can show the frame rate (on TVs, Settings → Diagnostics):
   while something moves, a small box at the top gives the frames
   drawn a second, the longest frame and how many were late, and the same

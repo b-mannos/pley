@@ -200,6 +200,157 @@ fn sessions_stopped_from_elsewhere_answer_410() {
 }
 
 #[test]
+fn the_remote_sends_a_players_command_only_to_its_own_user_and_only_what_it_obeys() {
+    let server =
+        FixtureServer::start_with(Options { keep_alive: Duration::from_millis(200), ..Options::default() }).unwrap();
+    let api = Api::alex(&server);
+    let mut events = Events::open(&api);
+    let body = json!({
+        "item_id": ids::SAMPLE_HDR10, "keyed_urls": true, "caps": {},
+        "controls": ["play", "pause", "seek", "shuffle"], "device_kind": "tv",
+    });
+    let session = play(&api, body)["session_id"].as_str().unwrap().to_string();
+    let listed = api.get("/api/sessions").json();
+    let mine = listed["sessions"].as_array().unwrap().iter().find(|s| s["session_id"] == session).unwrap().clone();
+    // What the server doesn't know is left out.
+    assert_eq!(
+        (&mine["kind"], &mine["controls"], &mine["device_kind"]),
+        (&json!("item"), &json!(["play", "pause", "seek"]), &json!("tv"))
+    );
+
+    let path = format!("/api/sessions/{session}/command");
+    assert_eq!(api.post(&path, &json!({ "command": "seek", "position_ms": 60_000 })).status, 202);
+    let heard = events.wait_for("player_command", Duration::from_secs(5)).expect("the player hears it");
+    assert_eq!(
+        heard,
+        json!({
+            "type": "player_command", "session_id": session, "command": "seek",
+            "position_ms": 60_000, "offset_ms": null, "stream_index": null, "quality": null,
+        })
+    );
+    let refused = api.post(&path, &json!({ "command": "next" }));
+    assert_eq!((refused.status, refused.json()["code"].as_str()), (409, Some("not_controllable")));
+    assert_eq!(api.post(&path, &json!({ "command": "seek" })).status, 400);
+    assert_eq!(api.post(&path, &json!({ "command": "shuffle" })).status, 400);
+    assert_eq!(api.post("/api/sessions/nope/command", &json!({ "command": "pause" })).status, 404);
+    // Someone else's session isn't theirs to command.
+    let sam = Api::new(&server, ids::SAM);
+    let theirs = play(&sam, json!({ "item_id": ids::SAMPLE_1080P, "caps": {}, "controls": ["pause"] }));
+    let theirs = format!("/api/sessions/{}/command", theirs["session_id"].as_str().unwrap());
+    assert_eq!(api.post(&theirs, &json!({ "command": "pause" })).status, 403);
+}
+
+/// The session of `id` in Alex's list.
+fn listed(api: &Api, id: &str) -> Value {
+    let all = api.get("/api/sessions").json();
+    all["sessions"].as_array().unwrap().iter().find(|s| s["session_id"] == id).cloned().expect("the session is listed")
+}
+
+#[test]
+fn the_remote_picks_one_of_the_files_tracks_and_reports_say_which_play() {
+    let server =
+        FixtureServer::start_with(Options { keep_alive: Duration::from_millis(200), ..Options::default() }).unwrap();
+    let api = Api::alex(&server);
+    let mut events = Events::open(&api);
+    // English AC-3 and French E-AC-3, English text and French picture subtitles.
+    let body = json!({
+        "item_id": ids::PGS_MOVIE, "keyed_urls": true, "caps": tv_caps(),
+        "controls": ["play", "pause", "audio", "subtitles"], "device_kind": "tv",
+    });
+    let session = play(&api, body)["session_id"].as_str().unwrap().to_string();
+    let mine = listed(&api, &session);
+    assert_eq!(mine["controls"], json!(["play", "pause", "audio", "subtitles"]));
+    // Until the player says, what its play request started with: the audio the server chose,
+    // and no subtitles (none chosen for the film).
+    assert_eq!((&mine["audio_index"], &mine["subtitle_index"]), (&json!(1), &json!(-1)));
+    let indexes =
+        |list: &Value| list.as_array().unwrap().iter().map(|t| t["index"].as_i64().unwrap()).collect::<Vec<_>>();
+    assert_eq!((indexes(&mine["tracks"]["audio"]), indexes(&mine["tracks"]["subtitles"])), (vec![1, 2], vec![3, 4]));
+    assert_eq!(
+        mine["tracks"]["audio"][1],
+        json!({
+            "index": 2, "language": "fre", "title": null, "codec": "eac3", "channels": 6,
+            "default": false, "forced": false,
+        })
+    );
+
+    let path = format!("/api/sessions/{session}/command");
+    assert_eq!(api.post(&path, &json!({ "command": "audio", "stream_index": 2 })).status, 202);
+    let heard = events.wait_for("player_command", Duration::from_secs(5)).expect("the player hears it");
+    assert_eq!((heard["command"].as_str(), heard["stream_index"].as_i64()), (Some("audio"), Some(2)));
+    assert_eq!(api.post(&path, &json!({ "command": "subtitles", "stream_index": -1 })).status, 202);
+    let heard = events.wait_for("player_command", Duration::from_secs(5)).expect("the player hears it");
+    assert_eq!((heard["command"].as_str(), heard["stream_index"].as_i64()), (Some("subtitles"), Some(-1)));
+    // A track the file doesn't have, a subtitle as audio, or none at all.
+    for refused in [
+        json!({ "command": "audio", "stream_index": 3 }),
+        json!({ "command": "audio", "stream_index": -1 }),
+        json!({ "command": "subtitles", "stream_index": 9 }),
+        json!({ "command": "subtitles" }),
+    ] {
+        assert_eq!(api.post(&path, &refused).status, 400, "{refused}");
+    }
+
+    // The player says what it plays: kept, and the profile's remotes hear of it.
+    let report = |audio: Value, subtitle: Value| {
+        let body = json!({
+            "position_ms": 30_000, "state": "playing", "session_id": session,
+            "audio_index": audio, "subtitle_index": subtitle,
+        });
+        api.post(&format!("/api/items/{}/progress", ids::PGS_MOVIE), &body).status
+    };
+    while events.next(Duration::from_millis(300)).is_some() {}
+    assert_eq!(report(json!(2), json!(4)), 204);
+    assert!(events.wait_for("sessions_changed", Duration::from_secs(5)).is_some(), "the remotes heard nothing");
+    let mine = listed(&api, &session);
+    assert_eq!((&mine["audio_index"], &mine["subtitle_index"]), (&json!(2), &json!(4)));
+    // One left out or out of range keeps what was known; the same again changes nothing.
+    assert_eq!(report(Value::Null, json!(-2)), 204);
+    assert_eq!(report(json!(2), json!(4)), 204);
+    assert!(events.wait_for("sessions_changed", Duration::from_millis(600)).is_none(), "nothing changed");
+    assert_eq!(report(json!(1), json!(-1)), 204);
+    let mine = listed(&api, &session);
+    assert_eq!((&mine["audio_index"], &mine["subtitle_index"]), (&json!(1), &json!(-1)));
+}
+
+#[test]
+fn the_remote_picks_one_of_the_qualities_its_menu_offers_and_reports_say_which() {
+    let server =
+        FixtureServer::start_with(Options { keep_alive: Duration::from_millis(200), ..Options::default() }).unwrap();
+    let api = Api::alex(&server);
+    let mut events = Events::open(&api);
+    let body = json!({
+        "item_id": ids::SAMPLE_HDR10, "keyed_urls": true, "caps": tv_caps(),
+        "controls": ["play", "pause", "quality"], "device_kind": "tv",
+    });
+    let session = play(&api, body)["session_id"].as_str().unwrap().to_string();
+    let mine = listed(&api, &session);
+    // What its menu offers for the file, as every app works it out; none picked until it says.
+    let ids_of = |list: &Value| {
+        list.as_array().unwrap().iter().map(|q| q["id"].as_str().unwrap().to_string()).collect::<Vec<_>>()
+    };
+    let offered = ids_of(&mine["qualities"]);
+    assert_eq!(offered[..2], ["original", "auto"]);
+    assert!(offered.contains(&"8m".to_string()), "{offered:?}");
+    assert_eq!(mine["quality"], Value::Null);
+
+    let path = format!("/api/sessions/{session}/command");
+    assert_eq!(api.post(&path, &json!({ "command": "quality", "quality": "8m" })).status, 202);
+    let heard = events.wait_for("player_command", Duration::from_secs(5)).expect("the player hears it");
+    assert_eq!((heard["command"].as_str(), heard["quality"].as_str()), (Some("quality"), Some("8m")));
+    // One its menu doesn't have, or none at all.
+    assert_eq!(api.post(&path, &json!({ "command": "quality", "quality": "best" })).status, 400);
+    assert_eq!(api.post(&path, &json!({ "command": "quality" })).status, 400);
+
+    // The player says what its menu has picked: kept, and the profile's remotes hear of it.
+    while events.next(Duration::from_millis(300)).is_some() {}
+    let body = json!({ "position_ms": 30_000, "state": "playing", "session_id": session, "quality": "8m" });
+    assert_eq!(api.post(&format!("/api/items/{}/progress", ids::SAMPLE_HDR10), &body).status, 204);
+    assert!(events.wait_for("sessions_changed", Duration::from_secs(5)).is_some(), "the remotes heard nothing");
+    assert_eq!(listed(&api, &session)["quality"], "8m");
+}
+
+#[test]
 fn subtitles_as_webvtt_and_mks() {
     let server = FixtureServer::start();
     let api = Api::alex(&server);

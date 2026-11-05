@@ -67,7 +67,9 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the channel cards, favourites and recently watched, a programme's
   details, and the live player with channel up and down, a channel number
   typed or on Apple TV's number pad, AirPlay, and Watch here instead when
-  every connection is in use. Search shows the channels it finds.
+  every connection is in use. Search shows the channels it finds. Live TV
+  stopped from another device, or its connection taken, stops at once and
+  says why.
 - Music: Play and Shuffle on albums, artists and music playlists, a track
   plays its album from there, and it plays on in the background and with
   the screen locked. A mini player and Now Playing (a window on the Mac,
@@ -104,4 +106,26 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the tabs, or a toolbar button on the Mac, shows what plays on them, and
   plays, pauses, seeks, skips, goes to the next or previous track (or
   channel) and stops it. Every Apple device, Apple TV included, obeys
-  your remotes, the web's too, while Pley is open or music plays.
+  your remotes, the web's too, while Pley is open or music plays, and
+  music paused here stays on them.
+- Your remotes can change the audio and subtitles of a movie or an episode
+  playing on an Apple device, and see which ones it plays.
+- The remote lists all your other devices that are on, playing or ready
+  to play, each with its kind: choose one for its controls, with Audio and
+  Subtitles, and Next wherever there is one.
+- Play on… sends a title, a show, an album, an artist, a track or a
+  playlist (Watch on…, a Live TV channel) to another of your devices.
+  Every Apple device, Apple TV included, plays what you send it as its own
+  Play would, and says where it came from; on Apple TV the player's other
+  notices show too.
+- Your remotes can change the quality of a movie or an episode playing on
+  an Apple device, as its Quality menu does, and see which one it plays.
+- Play on… sends the audio and subtitles picked on a movie's or an
+  episode's page, and the device plays it with them. A channel sent to a
+  device already watching Live TV changes channel there, and what you send
+  to an iPhone, iPad or Apple TV no longer waits behind a sheet open on it.
+- The remote on iPhone, iPad and Mac: Audio, Subtitles and a new Quality
+  are symbols beside Stop, which now asks first. Live TV shows how far
+  along the programme is, its times and what's next, with a channel
+  rocker in place of the seek bar and skips. A device playing nothing says
+  "Send something here with Play on…"

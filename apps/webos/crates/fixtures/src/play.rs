@@ -3,9 +3,11 @@
 //! can't send a token), the sample clips with Range, the sample HLS stream,
 //! subtitles as WebVTT (one track partial the first time) and pictures as
 //! `.mks`, seek previews and chapter pictures, bitrate changes, sessions
-//! stopped from elsewhere (`session_stopped`, then `410`); progress, watched
-//! marks, ratings, track choices and track defaults, which change what the
-//! profile reads next.
+//! stopped from elsewhere (`session_stopped`, then `410`), the user's remote
+//! (`player_command`, to what a player said it obeys, a track one of the
+//! session file's); progress, with the tracks a player plays, watched marks,
+//! ratings, track choices and track defaults, which change what the profile
+//! reads next.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,7 +15,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::catalog::{FileEntry, trickplay_id};
+use crate::catalog::{Catalog, FileEntry, trickplay_id};
 use crate::http::{Body, Request, Response, lock};
 use crate::media::{Clip, HLS_SEGMENTS};
 use crate::model::{ItemDetail, Kind, MediaFile, MediaStream, is_false};
@@ -43,6 +45,9 @@ const HLS_PTS_OFFSET_MS: i64 = 1_400;
 const PICTURE_EVERY_MS: i64 = 6_000;
 /// Added subtitles' indexes start here, clear of the file's and its sidecars'.
 const ADDED_FROM: i64 = 9_000;
+/// The highest stream index a report may name: files' own below 1000, subtitle files and added
+/// subtitles below 10,000.
+const MAX_STREAM_INDEX: i64 = 9_999;
 
 /// A playback session: the file it plays and how.
 pub(crate) struct PlaySession {
@@ -57,6 +62,113 @@ pub(crate) struct PlaySession {
     /// What the stream may use at most, and uses now (kbps; transcodes).
     pub ceiling_kbps: i64,
     pub bitrate_kbps: i64,
+    /// The remote's commands its player obeys, and what it plays on (docs/API.md, "Remote control").
+    pub controls: Vec<String>,
+    pub device_kind: Option<String>,
+    /// The audio it plays and the subtitles it shows (-1: none): what its player last said, else
+    /// what its play request started with; none while not known.
+    pub audio_index: Option<i64>,
+    pub subtitle_index: Option<i64>,
+    /// The quality its Quality menu has picked, by id, as its player last said; none until it does.
+    pub quality: Option<&'static str>,
+}
+
+impl PlaySession {
+    /// Keeps the quality a report says its menu has picked: one that isn't the menu's, or none,
+    /// keeps what was known. Whether it changed.
+    fn report_quality(&mut self, quality: Option<&str>) -> bool {
+        let Some(id) = quality.and_then(|q| QUALITY_MENU.iter().map(|m| m.0).find(|id| *id == q)) else {
+            return false;
+        };
+        let changed = self.quality != Some(id);
+        self.quality = Some(id);
+        changed
+    }
+
+    /// Keeps the tracks a report says its player plays: one left out, or out of range, keeps
+    /// what was known. Whether either changed.
+    fn report_tracks(&mut self, audio_index: Option<i64>, subtitle_index: Option<i64>) -> bool {
+        let before = (self.audio_index, self.subtitle_index);
+        if let Some(index) = audio_index.filter(|i| (0..=MAX_STREAM_INDEX).contains(i)) {
+            self.audio_index = Some(index);
+        }
+        if let Some(index) = subtitle_index.filter(|i| (-1..=MAX_STREAM_INDEX).contains(i)) {
+            self.subtitle_index = Some(index);
+        }
+        (self.audio_index, self.subtitle_index) != before
+    }
+}
+
+/// The Quality menu every player offers, in its order (apps/server/src/playback.rs, `MENU`): id,
+/// label, and the kbps and lines a copy holds the video to.
+type MenuEntry = (&'static str, &'static str, Option<(i64, i64)>);
+const QUALITY_MENU: [MenuEntry; 9] = [
+    ("original", "Original", None),
+    ("auto", "Automatic", None),
+    ("30m", "30 Mbps 4K", Some((30_000, 2160))),
+    ("15m", "15 Mbps 4K", Some((15_000, 2160))),
+    ("20m", "20 Mbps 1080p", Some((20_000, 1080))),
+    ("12m", "12 Mbps 1080p", Some((12_000, 1080))),
+    ("8m", "8 Mbps 1080p", Some((8_000, 1080))),
+    ("4m", "4 Mbps 720p", Some((4_000, 720))),
+    ("2m", "2 Mbps 480p", Some((2_000, 480))),
+];
+
+/// The qualities a player's menu offers for `file`, as the server works them out
+/// (apps/server/src/playback.rs, `offered_qualities`): none for a file without video (music);
+/// else the original and Automatic, then each copy with fewer lines than the file or at most 80 %
+/// of its bitrate (every one when neither is known), named by the file's own lines when taller,
+/// once for each bitrate and lines, tallest first.
+fn offered_qualities(file: &MediaFile) -> Vec<(&'static str, String)> {
+    if file.video_codec.is_none() {
+        return Vec::new();
+    }
+    let (w, h) = (file.width.unwrap_or(0), file.height.unwrap_or(0));
+    let lines = (w > 0 || h > 0).then_some(if w >= 3800 || h >= 2100 {
+        2160
+    } else if w >= 1800 || h >= 1000 {
+        1080
+    } else if w >= 1200 || h >= 700 {
+        720
+    } else {
+        480
+    });
+    let kbps = file.bitrate.filter(|b| *b > 0).map(|b| b as f64 / 1000.0);
+    let height = file.height.filter(|h| *h > 0);
+    let known = kbps.is_some() || height.is_some();
+    let mut out = Vec::new();
+    let mut copies: Vec<(&'static str, String, i64, i64)> = Vec::new();
+    for (id, label, cap) in QUALITY_MENU {
+        let Some((cap_kbps, cap_lines)) = cap.filter(|_| known) else {
+            out.push((id, label.to_string()));
+            continue;
+        };
+        let fewer_lines = height.is_some_and(|h| cap_lines < h);
+        let lighter = kbps.is_some_and(|k| cap_kbps as f64 <= k * 0.8);
+        let shown = lines.map_or(cap_lines, |l| cap_lines.min(l));
+        if (!fewer_lines && !lighter) || copies.iter().any(|c| (c.2, c.3) == (cap_kbps, shown)) {
+            continue;
+        }
+        let label = match lines {
+            Some(l) if cap_lines > l => {
+                format!("{} Mbps {}", cap_kbps / 1000, if l >= 2160 { "4K".to_string() } else { format!("{l}p") })
+            }
+            _ => label.to_string(),
+        };
+        copies.push((id, label, cap_kbps, shown));
+    }
+    copies.sort_by(|a, b| b.3.cmp(&a.3).then(b.2.cmp(&a.2)));
+    out.extend(copies.into_iter().map(|c| (c.0, c.1)));
+    out
+}
+
+/// The remote's commands a body's `controls` names; the ones the server doesn't know are left out.
+pub(crate) fn controls_of(controls: &Value) -> Vec<String> {
+    const KNOWN: [&str; 9] = ["play", "pause", "seek", "skip", "next", "previous", "audio", "subtitles", "quality"];
+    let named = controls.as_array().into_iter().flatten().filter_map(Value::as_str);
+    let mut list: Vec<String> = named.filter(|c| KNOWN.contains(c)).map(str::to_string).collect();
+    list.dedup();
+    list
 }
 
 /// A session the server stopped, and why.
@@ -187,19 +299,12 @@ pub(crate) fn routes() -> Vec<Route> {
         free("GET", "/api/playback/*/*", play, session_file),
         free("GET", "/api/media/*/*", Need::Public, keyed_file),
         locked("DELETE", "/api/sessions/*", play, stop_from_elsewhere),
+        locked("POST", "/api/sessions/*/command", play, command),
         // The fixture server's own (Pley lists sessions in /api/activity, for
-        // its web app): to find one to stop by hand.
+        // its web app): to find one to stop or command by hand.
         locked("GET", "/api/sessions", play, |cx, state| {
             let me = cx.caller().profile;
-            let admin = me == ids::ALEX;
-            let list: Vec<Value> = state
-                .playback
-                .sessions
-                .values()
-                .filter(|s| admin || s.profile == me)
-                .map(|s| json!({ "session_id": s.id, "profile_id": s.profile, "item_id": s.item, "method": s.method }))
-                .collect();
-            Ok(json(200, &json!({ "sessions": list })))
+            Ok(json(200, &json!({ "sessions": listed(cx.catalog(), state, me, me == ids::ALEX) })))
         }),
         free("GET", "/api/files/*/stream", play, |cx| {
             let (entry, _) = file_of(cx)?;
@@ -624,6 +729,13 @@ fn start(cx: &Cx<'_>, state: &mut State) -> Answer {
     if let Some(key) = &key {
         state.playback.keys.insert(key.clone(), id.clone());
     }
+    // Until the player says, remotes see what it starts with: the subtitles burned in, else those
+    // the profile's choices pick (which players start with), none for a file without subtitles.
+    let subtitle_index = match burn {
+        Some(s) => Some(s.index),
+        None if info.subtitles.is_empty() => None,
+        None => Some(views::with_choices(item, file, state.profile(me)).selected_subtitle.unwrap_or(-1)),
+    };
     state.playback.sessions.insert(
         id.clone(),
         PlaySession {
@@ -636,6 +748,11 @@ fn start(cx: &Cx<'_>, state: &mut State) -> Answer {
             key,
             ceiling_kbps: ceiling,
             bitrate_kbps: ceiling,
+            controls: controls_of(&body["controls"]),
+            device_kind: body["device_kind"].as_str().map(str::to_string),
+            audio_index: chosen_audio.map(|a| a.index),
+            subtitle_index,
+            quality: None,
         },
     );
     cx.shared.events.emit(&ServerEvent::SessionsChanged);
@@ -737,22 +854,34 @@ fn bitrate(cx: &Cx<'_>, state: &mut State) -> Answer {
 }
 
 /// DELETE /api/sessions/{id} with an optional `{ "message" }`: Alex (the
-/// administrator here) stops any session, others their own. The player
-/// hears `session_stopped`; the session answers `410` from then on.
+/// administrator here) stops any session, a live viewer's too, others their
+/// own. The player hears `session_stopped`; the session answers `410` from
+/// then on.
 fn stop_from_elsewhere(cx: &Cx<'_>, state: &mut State) -> Answer {
     let (id, me) = (cx.value(0).to_string(), cx.caller().profile);
     let admin = me == ids::ALEX;
+    let message =
+        cx.req.json().and_then(|b| b["message"].as_str().map(|m| m.trim().to_string())).filter(|m| !m.is_empty());
+    if message.as_ref().is_some_and(|m| m.chars().count() > 200) {
+        return Err(bad_request("the message is longer than 200 characters"));
+    }
+    if let Some((owner, _)) = state.live.viewer(&id) {
+        if owner != me && !admin {
+            return Err(forbidden("not your session"));
+        }
+        state.live.end(&id, message.clone());
+        cx.shared
+            .events
+            .emit_to(owner, &ServerEvent::SessionStopped { session_id: id, message, by_admin: owner != me });
+        cx.shared.events.emit(&ServerEvent::SessionsChanged);
+        return Ok(no_content());
+    }
     let Some(owner) = state.playback.sessions.get(&id).map(|s| s.profile) else {
         let stopped = state.playback.stopped.get(&id).ok_or_else(|| not_found("no such session"))?;
         return if stopped.profile == me || admin { Ok(no_content()) } else { Err(forbidden("not your session")) };
     };
     if owner != me && !admin {
         return Err(forbidden("not your session"));
-    }
-    let message =
-        cx.req.json().and_then(|b| b["message"].as_str().map(|m| m.trim().to_string())).filter(|m| !m.is_empty());
-    if message.as_ref().is_some_and(|m| m.chars().count() > 200) {
-        return Err(bad_request("the message is longer than 200 characters"));
     }
     // Its key keeps answering, with 410.
     if let Some(session) = state.playback.sessions.remove(&id)
@@ -764,6 +893,130 @@ fn stop_from_elsewhere(cx: &Cx<'_>, state: &mut State) -> Answer {
     cx.shared.events.emit_to(owner, &ServerEvent::SessionStopped { session_id: id, message, by_admin: owner != me });
     cx.shared.events.emit(&ServerEvent::SessionsChanged);
     Ok(no_content())
+}
+
+/// The sessions `me` sees in the fixture's own list: their own, or everyone's for an administrator;
+/// videos and music (`kind: "item"`), with the tracks their file has and which play, and the
+/// qualities its menu offers and which is picked, then live viewers.
+pub(crate) fn listed(catalog: &Catalog, state: &State, me: i64, admin: bool) -> Vec<Value> {
+    let mut list: Vec<&PlaySession> = state.playback.sessions.values().filter(|s| admin || s.profile == me).collect();
+    list.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut list: Vec<Value> = list
+        .into_iter()
+        .map(|s| {
+            let file = catalog.file(s.file).map(|(_, f)| f);
+            let tracks = file.map(|f| track_options(state, f));
+            let qualities: Vec<Value> = file
+                .map(offered_qualities)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(id, label)| json!({ "id": id, "label": label }))
+                .collect();
+            json!({
+                "session_id": s.id, "kind": "item", "profile_id": s.profile, "item_id": s.item,
+                "method": s.method, "controls": s.controls, "device_kind": s.device_kind,
+                "audio_index": s.audio_index, "subtitle_index": s.subtitle_index,
+                "tracks": tracks.unwrap_or_else(|| json!({ "audio": [], "subtitles": [] })),
+                "quality": s.quality, "qualities": qualities,
+            })
+        })
+        .collect();
+    list.extend(state.live.listed(me, admin));
+    list
+}
+
+/// A file's tracks as remotes pick among them (`PlayingSession.tracks`): its audio, then its
+/// subtitles with those added to it.
+fn track_options(state: &State, file: &MediaFile) -> Value {
+    let option = |s: &MediaStream| {
+        json!({
+            "index": s.index, "language": s.language, "title": s.title,
+            "codec": Some(&s.codec).filter(|c| !c.is_empty()),
+            "channels": if s.is("audio") { s.channels } else { None },
+            "default": s.default, "forced": s.forced,
+        })
+    };
+    let audio: Vec<Value> = file.streams.iter().filter(|s| s.is("audio")).map(option).collect();
+    let mut subtitles: Vec<Value> = file.streams.iter().filter(|s| s.is("subtitle")).map(option).collect();
+    if let Some(added) = state.added_subtitles.get(&file.id) {
+        subtitles.extend(added.iter().map(|a| option(&a.stream())));
+    }
+    json!({ "audio": audio, "subtitles": subtitles })
+}
+
+/// Whether `index` is one of file `file`'s tracks of `kind` (`audio`, `subtitle`): its own, or a
+/// subtitle added to it.
+pub(crate) fn has_track(catalog: &Catalog, state: &State, file: i64, kind: &str, index: i64) -> bool {
+    let own = catalog.file(file).is_some_and(|(_, f)| f.streams.iter().any(|s| s.is(kind) && s.index == index));
+    let added =
+        kind == "subtitle" && state.added_subtitles.get(&file).is_some_and(|a| a.iter().any(|a| a.index == index));
+    own || added
+}
+
+/// POST /api/sessions/{id}/command `{ command, position_ms?, offset_ms?, stream_index?, quality? }`
+/// (docs/API.md, "Remote control"): one of the caller's own players, a video's, the music's or a
+/// live viewer's, is sent `player_command`. Someone else's session is refused, an administrator's
+/// request too; a track must be one of the session file's (subtitles -1: none), a quality one of
+/// the qualities its menu offers, and Live TV has neither; a command its player didn't list
+/// answers `409`.
+fn command(cx: &Cx<'_>, state: &mut State) -> Answer {
+    let (id, me) = (cx.value(0).to_string(), cx.caller().profile);
+    let body = cx.req.json().unwrap_or(Value::Null);
+    let command = body["command"].as_str().unwrap_or_default().to_string();
+    if controls_of(&json!([command])).is_empty() {
+        return Err(bad_request("unknown command"));
+    }
+    let (position_ms, offset_ms) = (body["position_ms"].as_i64(), body["offset_ms"].as_i64());
+    let stream_index = body["stream_index"].as_i64();
+    match command.as_str() {
+        "seek" if position_ms.is_none_or(|p| p < 0) => return Err(bad_request("seek needs position_ms")),
+        "skip" if offset_ms.is_none_or(|o| o.abs() > 600_000) => return Err(bad_request("skip needs offset_ms")),
+        _ => {}
+    }
+    let (owner, controls, file) = match state.live.viewer(&id) {
+        Some((owner, controls)) => (owner, controls, None),
+        None => {
+            let s = state.playback.sessions.get(&id).ok_or_else(|| not_found("no such session"))?;
+            (s.profile, s.controls.clone(), Some(s.file))
+        }
+    };
+    if owner != me {
+        return Err(forbidden("not your session"));
+    }
+    let track = match command.as_str() {
+        "audio" => Some("audio"),
+        "subtitles" => Some("subtitle"),
+        _ => None,
+    };
+    if let Some(kind) = track {
+        let file = file.ok_or_else(|| bad_request("Live TV has no tracks to pick"))?;
+        let index = stream_index.ok_or_else(|| bad_request(&format!("{command} needs stream_index")))?;
+        let off = kind == "subtitle" && index == -1;
+        if !off && !has_track(cx.catalog(), state, file, kind, index) {
+            return Err(bad_request(&format!("stream_index must be one of the file's {kind} tracks")));
+        }
+    }
+    let quality = body["quality"].as_str().map(str::to_string);
+    if command == "quality" {
+        let file = file.ok_or_else(|| bad_request("Live TV has no qualities to pick"))?;
+        let offered = cx.catalog().file(file).map(|(_, f)| offered_qualities(f)).unwrap_or_default();
+        if !quality.as_deref().is_some_and(|q| offered.iter().any(|(id, _)| *id == q)) {
+            return Err(bad_request("quality must be one of the session's qualities"));
+        }
+    }
+    if !controls.contains(&command) {
+        return Err(json(409, &json!({ "code": "not_controllable", "message": "That player doesn't do that." })));
+    }
+    let (position_ms, offset_ms, stream_index, quality) = match command.as_str() {
+        "seek" => (position_ms, None, None, None),
+        "skip" => (None, offset_ms, None, None),
+        "audio" | "subtitles" => (None, None, stream_index, None),
+        "quality" => (None, None, None, quality),
+        _ => (None, None, None, None),
+    };
+    let event = ServerEvent::PlayerCommand { session_id: id, command, position_ms, offset_ms, stream_index, quality };
+    cx.shared.events.emit_to(owner, &event);
+    Ok(Response::new(202))
 }
 
 /// What a session's address may name: its playlists, segments or file.
@@ -988,8 +1241,8 @@ fn webvtt(cues: &[(i64, i64, String)]) -> String {
     out
 }
 
-/// The device a User-Agent names, for watch history.
-fn device_name(agent: Option<&str>) -> Option<String> {
+/// The device a User-Agent names, for watch history, receivers and casts.
+pub(crate) fn device_name(agent: Option<&str>) -> Option<String> {
     let agent = agent?;
     Some(if agent.contains("pleyLG") || agent.contains("Web0S") || agent.contains("webOS") {
         "LG TV".to_string()
@@ -1055,6 +1308,16 @@ fn progress(cx: &Cx<'_>, state: &mut State) -> Answer {
         && let Some(stopped) = state.playback.stopped.get(session).filter(|s| s.profile == me)
     {
         return Err(session_stopped(stopped.message.as_deref()));
+    }
+    // The tracks its player plays and the quality its menu has picked are kept on its session for
+    // the profile's remotes, which hear of a change at once.
+    if let Some(session) = body["session_id"].as_str().and_then(|s| state.playback.sessions.get_mut(s))
+        && session.profile == me
+    {
+        let switched = session.report_tracks(body["audio_index"].as_i64(), body["subtitle_index"].as_i64());
+        if session.report_quality(body["quality"].as_str()) || switched {
+            cx.shared.events.emit(&ServerEvent::SessionsChanged);
+        }
     }
     Ok(no_content())
 }

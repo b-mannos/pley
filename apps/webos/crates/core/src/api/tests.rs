@@ -159,11 +159,23 @@ fn a_busy_source_and_an_ended_session_are_read_from_their_bodies() {
         })
     });
     let e = api
-        .watch_channel(2, &WatchRequest { client_id: Some("webos-1".into()), keyed_urls: true, take_over: None })
+        .watch_channel(
+            2,
+            &WatchRequest {
+                client_id: Some("webos-1".into()),
+                keyed_urls: true,
+                controls: vec![Control::Next, Control::Previous],
+                device_kind: Some(DeviceKind::Tv),
+                ..WatchRequest::default()
+            },
+        )
         .unwrap_err();
     assert!(e.busy().unwrap().connections[0].can_take_over);
     let sent: serde_json::Value = serde_json::from_slice(fake.requests()[0].body.as_ref().unwrap()).unwrap();
-    assert_eq!(sent, json!({"client_id": "webos-1", "keyed_urls": true}));
+    assert_eq!(
+        sent,
+        json!({"client_id": "webos-1", "keyed_urls": true, "controls": ["next", "previous"], "device_kind": "tv"})
+    );
     assert_eq!(api.why_live_ended("abc").unwrap().as_deref(), Some("Watching moved to BBC One on another device."));
 }
 
@@ -188,8 +200,13 @@ fn progress_and_track_choices_send_what_the_server_reads() {
         state: ProgressState::Paused,
         session_id: Some("9c1e".into()),
         age_ms: None,
+        audio_index: Some(2),
+        subtitle_index: Some(-1),
+        quality: Some("auto".into()),
     };
     api.progress(42, &report).unwrap();
+    // Music's reports name no tracks.
+    api.progress(43, &ProgressReport { position_ms: 1_000, ..ProgressReport::default() }).unwrap();
     api.set_streams(42, &StreamChoice { file_id: Some(7), audio: AudioChoice::Keep, subtitle_index: None }).unwrap();
     api.set_streams(42, &StreamChoice { file_id: None, audio: AudioChoice::Automatic, subtitle_index: Some(3) })
         .unwrap();
@@ -199,7 +216,11 @@ fn progress_and_track_choices_send_what_the_server_reads() {
     assert_eq!(
         bodies,
         [
-            json!({"position_ms": 754000, "duration_ms": 5400000, "state": "paused", "session_id": "9c1e"}),
+            json!({
+                "position_ms": 754000, "duration_ms": 5400000, "state": "paused", "session_id": "9c1e",
+                "audio_index": 2, "subtitle_index": -1, "quality": "auto",
+            }),
+            json!({"position_ms": 1000, "state": "playing"}),
             json!({"file_id": 7}),
             json!({"audio_index": null, "subtitle_index": 3}),
             json!({}),
@@ -235,7 +256,7 @@ fn up_next_and_on_deck_may_be_none() {
 }
 
 #[test]
-fn a_channel_s_stream_ts_is_read_with_the_token_under_its_own_client_id() {
+fn a_channel_s_stream_ts_is_read_with_the_token_under_its_own_client_id_on_a_tv() {
     let (api, fake) = api(|r| {
         assert!(r.url.contains("/stream.ts"));
         Ok(Response { status: 200, headers: vec![("Content-Type".into(), "video/mp2t".into())], body: vec![0x47; 376] })
@@ -245,7 +266,10 @@ fn a_channel_s_stream_ts_is_read_with_the_token_under_its_own_client_id() {
     answer.body.read_to_end(&mut body).unwrap();
     assert_eq!(body.len(), 376);
     let req = &fake.requests()[0];
-    assert_eq!(req.url, "http://192.168.1.20:7539/api/live/channels/7/stream.ts?client_id=webos-1-stream");
+    assert_eq!(
+        req.url,
+        "http://192.168.1.20:7539/api/live/channels/7/stream.ts?client_id=webos-1-stream&device_kind=tv"
+    );
     assert_eq!(token(req), Some("Bearer pley_at_x"));
     assert_eq!(req.header_value("Accept-Encoding"), Some("identity"));
     // Read for as long as it runs: no limit on the whole, one on each wait.

@@ -1,5 +1,6 @@
 package app.pley.android.player
 
+import android.content.res.Resources
 import app.pley.android.player.session.SavedPlaybackState
 
 /**
@@ -19,7 +20,11 @@ data class PlayRequest(
      * device plays best.
      */
     val audioIndex: Long? = null,
-    /** The server's subtitle stream index; `null` keeps the remembered or default one. */
+    /**
+     * The server's subtitle stream index, `-1` for none
+     * ([PlayingSession.SUBTITLES_OFF][app.pley.android.model.PlayingSession.SUBTITLES_OFF]);
+     * `null` keeps the remembered or default one.
+     */
     val subtitleIndex: Long? = null,
     /** A playlist or collection to keep playing from, in order. */
     val queue: PlayQueue? = null,
@@ -28,6 +33,8 @@ data class PlayRequest(
      * is, with no server ([itemId] is [DRIVE_ITEM]).
      */
     val drivePath: String? = null,
+    /** A remote on another of the profile's devices sent it here: the player says so as it starts. */
+    val castFrom: CastFrom? = null,
 ) {
     companion object {
         /** The item a video on a drive plays as: no server's item is negative. */
@@ -36,6 +43,18 @@ data class PlayRequest(
         /** The video at [path] on a drive, from where it stopped. */
         fun drive(path: String): PlayRequest = PlayRequest(itemId = DRIVE_ITEM, drivePath = path)
     }
+}
+
+/**
+ * Something a remote on another of the profile's devices sent here to play
+ * (docs/API.md, "Casting"): its [device], `null` when the server can't
+ * name it.
+ */
+data class CastFrom(val device: String?) {
+    /** What the players and the shells say as it starts: "Playing from Living room TV", or from another device. */
+    fun notice(resources: Resources): String =
+        device?.trim()?.takeIf { it.isNotEmpty() }?.let { resources.getString(R.string.cast_playing_from, it) }
+            ?: resources.getString(R.string.cast_playing_from_another)
 }
 
 /** Where the next item comes from when this one ends. */

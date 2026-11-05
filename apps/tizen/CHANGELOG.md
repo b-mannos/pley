@@ -33,6 +33,22 @@ describes how they are made.
 
 ### Added
 
+- Your phone or browser changes the quality of a film or episode playing
+  on the TV, as the player's Quality menu does (the pick is kept for the
+  next ones), and sees which is picked. A film or episode sent from a
+  title's page plays with the audio and subtitles picked there.
+- Your phone or browser plays a film, an episode, a show, an album, an
+  artist, a track, a playlist or a Live TV channel on the TV ("Play on…"):
+  it starts as the TV's own Play would, in place of what plays, and the
+  TV says "Playing from" the device it came from.
+- Your phone or browser changes the audio and subtitles of a film or
+  episode playing on the TV, as the player's own Audio and Subtitles do,
+  and sees which play.
+- Your phone or browser controls what plays on the TV: a film or episode
+  plays, pauses, seeks and skips, and goes on to the next one; music does
+  the same, and goes back a track; Live TV changes channel. Live TV
+  stopped from another device, or by the server's administrator, stops
+  on the TV and says who, with their message.
 - Live TV, where the server has IPTV channels for the profile, by
   category: Favourites, Recently watched, All
   channels, the regions in alphabetical order, each opening to its
@@ -119,6 +135,11 @@ describes how they are made.
 
 ### Fixed
 
+- Live TV's channel up or down, still finding the next channel when another
+  is picked from the list or the app is hidden, no longer changes channel
+  a moment later.
+- Seeking in a track the server converts ends the track's session before
+  the new one starts, so a pause meanwhile no longer pauses the old one.
 - A film the TV can't play falls back one step at a time, to a conversion
   of its audio before one of the whole film: the TV's player says a failure
   twice, and the second skipped a step and started a second session.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import type HlsType from "hls.js";
@@ -93,9 +93,19 @@ const PROGRESS_INTERVAL = 10_000;
 /** While paused: the server forgets players it hasn't heard from for 90 s. */
 const PAUSED_HEARTBEAT = 30_000;
 const HIDE_CONTROLS_AFTER = 3_000;
-/** The remote's commands a video obeys; `next` only where something can come next. */
-const VIDEO_CONTROLS: Control[] = ["play", "pause", "seek", "skip"];
-const VIDEO_CONTROLS_NEXT: Control[] = [...VIDEO_CONTROLS, "next"];
+/**
+ * The remote's commands a video obeys: `next` only where something can come
+ * next, `audio` where its own menu offers Audio (more than one track), and
+ * `subtitles` and `quality` always, as its menu offers Subtitles (a track
+ * found or added while it plays can be picked too) and Quality.
+ */
+function videoControls(next: boolean, audioTracks: number): Control[] {
+  const controls: Control[] = ["play", "pause", "seek", "skip"];
+  if (next) controls.push("next");
+  if (audioTracks > 1) controls.push("audio");
+  controls.push("subtitles", "quality");
+  return controls;
+}
 
 type WebkitVideo = HTMLVideoElement & { webkitEnterFullscreen?: () => void };
 
@@ -535,6 +545,28 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
 
   /** Set once mounted: a progress report that answers 410 stops playback. */
   const progressGone = useRef<(sessionId: string) => void>(() => undefined);
+  /**
+   * What session `s` plays, which each of its reports says for the user's
+   * remotes: its audio track, and the subtitles shown now (-1: none).
+   */
+  const shownSubtitleIndex = selectedSub?.index ?? -1;
+  const shownSubtitle = useRef(shownSubtitleIndex);
+  useLayoutEffect(() => {
+    shownSubtitle.current = shownSubtitleIndex;
+  }, [shownSubtitleIndex]);
+  // …and its Quality menu's pick.
+  const pickedQuality = useRef(selectedQuality.id);
+  useLayoutEffect(() => {
+    pickedQuality.current = selectedQuality.id;
+  }, [selectedQuality.id]);
+  const tracksOf = useCallback(
+    (s: PlaybackInfo) => ({
+      audio_index: s.audio_index ?? undefined,
+      subtitle_index: shownSubtitle.current,
+      quality: pickedQuality.current,
+    }),
+    [],
+  );
   const report = useCallback(
     (state: PlaybackState, keepalive = false) => {
       const s = sessionRef.current;
@@ -546,12 +578,13 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           duration_ms: s.duration_ms || undefined,
           state,
           session_id: s.session_id,
+          ...tracksOf(s),
         },
         keepalive,
         () => progressGone.current(s.session_id),
       );
     },
-    [item.id],
+    [item.id, tracksOf],
   );
 
   const goBack = useCallback(() => {
@@ -726,7 +759,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       setBuffering(false);
       const prev = sessionRef.current;
       sessionRef.current = null;
-      if (prev) void endSession(item.id, prev, positionRef.current * 1000);
+      if (prev) void endSession(item.id, prev, positionRef.current * 1000, false, tracksOf(prev));
       destroyHls();
       video.pause();
       video.removeAttribute("src");
@@ -774,7 +807,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
           start_ms: Math.round(startSec * 1000),
           mode: requestMode,
           caps: videoCaps(),
-          controls: hasNext ? VIDEO_CONTROLS_NEXT : VIDEO_CONTROLS,
+          controls: videoControls(hasNext, audioStreams.length),
           ...(alongside ? { keep_previous: true } : {}),
         });
       let pinfo: PlaybackInfo;
@@ -977,7 +1010,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
         video.removeAttribute("src");
         video.load();
       }
-      const done = s ? endSession(item.id, s, positionRef.current * 1000, true) : Promise.resolve();
+      const done = s ? endSession(item.id, s, positionRef.current * 1000, true, tracksOf(s)) : Promise.resolve();
       void done.then(() => invalidateWatchState(qc));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -991,7 +1024,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       const s = sessionRef.current;
       if (!s) return;
       sessionRef.current = null;
-      void endSession(item.id, s, positionRef.current * 1000, true);
+      void endSession(item.id, s, positionRef.current * 1000, true, tracksOf(s));
     };
     const onShow = (e: PageTransitionEvent) => {
       if (e.persisted && !sessionRef.current) restartAt(positionRef.current);
@@ -1002,7 +1035,7 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       window.removeEventListener("pagehide", onHide);
       window.removeEventListener("pageshow", onShow);
     };
-  }, [item.id, restartAt]);
+  }, [item.id, restartAt, tracksOf]);
 
   // ---------------------------------------------------------------------
   // Media element events.
@@ -1014,7 +1047,13 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
     const durMs = s?.duration_ms || Math.round(duration * 1000);
     positionRef.current = durMs / 1000;
     const done = s
-      ? reportProgress(item.id, { position_ms: durMs, duration_ms: durMs || undefined, state: "stopped", session_id: s.session_id })
+      ? reportProgress(item.id, {
+          position_ms: durMs,
+          duration_ms: durMs || undefined,
+          state: "stopped",
+          session_id: s.session_id,
+          ...tracksOf(s),
+        })
       : Promise.resolve();
     void done.then(() => invalidateWatchState(qc));
     if (!hasNext) {
@@ -1583,13 +1622,15 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       void qc.invalidateQueries({ queryKey: keys.item(item.id), refetchType: "none" });
     });
   };
-  const changeAudio = (index: number) => {
+  /** Another track: a new session, made ready while this one plays on. False: it plays already. */
+  const changeAudio = (index: number): boolean => {
     const playing = audioIndex ?? info?.audio_index ?? audioStreams.find((s) => s.default)?.index ?? audioStreams[0]?.index;
-    if (index === playing) return;
+    if (index === playing) return false;
     startMsRef.current = currentMs();
     prepareNext.current = true;
     setAudioIndex(index);
     rememberTracks(index, subIndex);
+    return true;
   };
   /**
    * A quality picked in the menu, kept for the next titles. Automatic
@@ -1690,11 +1731,15 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
             () => report("playing"),
             () => setNeedsGesture(true),
           );
+        } else {
+          // Playing already: said again, so a remote a little behind settles.
+          report("playing");
         }
         break;
       case "pause":
-        // Its pause event reports.
+        // Its pause event reports; paused already, it is said again.
         if (!v.paused) v.pause();
+        else report("paused");
         break;
       case "seek":
       case "skip": {
@@ -1711,9 +1756,38 @@ export function VideoPlayer({ item, startMs, fileId, audio: initialAudio, sub: i
       case "previous":
         // Videos have none.
         break;
+      // As its own menu picks them; what plays already is said again at once.
+      // A new audio track's session says it as it starts, and other
+      // subtitles are said as they show (below).
+      case "audio":
+        if (ev.stream_index === null) break;
+        if (!changeAudio(ev.stream_index)) report(v.paused ? "paused" : "playing");
+        break;
+      case "subtitles": {
+        if (ev.stream_index === null) break;
+        const index = ev.stream_index < 0 ? null : ev.stream_index;
+        if (index === (selectedSub?.index ?? null)) report(v.paused ? "paused" : "playing");
+        else changeSubtitle(index);
+        break;
+      }
+      // As its Quality menu picks it: the stream starts again at that
+      // quality, whose session says it as it starts.
+      case "quality":
+        if (!ev.quality || !qualities.some((q) => q.id === ev.quality)) break;
+        if (ev.quality === selectedQuality.id) report(v.paused ? "paused" : "playing");
+        else changeQuality(ev.quality);
+        break;
     }
   });
   useEffect(() => onServerEvent(onCommand), []);
+
+  // Other subtitles or another quality, wherever they were picked (the menu,
+  // C, a remote), are said at once, for the user's remotes to show.
+  const qualityShown = selectedQuality.id;
+  useEffect(() => {
+    const v = videoRef.current;
+    if (v) report(v.paused ? "paused" : "playing");
+  }, [shownSubtitleIndex, qualityShown, report]);
 
   // Skip Intro / Skip Credits; an episode's credits bring up Up Next.
   const markers = useMemo(() => fileMarkers(item, info?.file_id ?? file?.id), [item, info?.file_id, file?.id]);

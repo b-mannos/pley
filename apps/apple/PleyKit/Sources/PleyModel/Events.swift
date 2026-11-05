@@ -53,8 +53,15 @@ public enum ServerEvent: Hashable, Sendable {
     /// The profile's remote, on another device, sent the player of
     /// `sessionId` a command.
     case playerCommand(sessionId: String, command: PlayerCommand)
+    /// The profile's remote, on another device, sent the device of
+    /// `receiverId` something to play; `from` is the remote's device, as
+    /// the server names it.
+    case cast(receiverId: String, target: CastTarget, from: String?)
     case liveChannelsChanged
     case liveTunersChanged
+    /// Someone took the connection the Live TV session `sessionId` used:
+    /// its player stops at once and says `message`.
+    case liveTakenOver(sessionId: String, message: String)
     /// A request changed (`requestId` with its title), or many did (all
     /// `nil`): what shows it is read again.
     case requestsChanged(requestId: Int?, kind: TitleKind?, tmdbId: Int?)
@@ -99,6 +106,16 @@ public enum ServerEvent: Hashable, Sendable {
         var command: Control?
         var positionMs: Int?
         var offsetMs: Int?
+        var streamIndex: Int?
+        var quality: String?
+        var receiverId: String?
+        var playlistId: Int?
+        var channelId: Int?
+        var startMs: Int?
+        var shuffle: Bool?
+        var audioIndex: Int?
+        var subtitleIndex: Int?
+        var from: String?
     }
 
     /// The event in `data` (one `data:` line's JSON); `nil` when it isn't
@@ -129,9 +146,27 @@ public enum ServerEvent: Hashable, Sendable {
         case "player_command":
             guard let id = wire.sessionId, let command = wire.command else { return .unknown(wire.type) }
             return .playerCommand(sessionId: id, command: PlayerCommand(command, positionMs: wire.positionMs,
-                                                                         offsetMs: wire.offsetMs))
+                                                                         offsetMs: wire.offsetMs,
+                                                                         streamIndex: wire.streamIndex,
+                                                                         quality: wire.quality))
+        case "cast":
+            // One of a title, a playlist and a channel; without one, or a receiver, there is nothing to play.
+            let what: CastTarget.What?
+            if let id = wire.itemId {
+                what = .item(id)
+            } else if let id = wire.playlistId {
+                what = .playlist(id)
+            } else {
+                what = wire.channelId.map { CastTarget.What.channel($0) }
+            }
+            guard let receiver = wire.receiverId, let what else { return .unknown(wire.type) }
+            let target = CastTarget(what, startMs: wire.startMs, shuffle: wire.shuffle ?? false,
+                                    audioIndex: wire.audioIndex, subtitleIndex: wire.subtitleIndex)
+            return .cast(receiverId: receiver, target: target, from: wire.from)
         case "live_channels_changed": return .liveChannelsChanged
         case "live_tuners_changed": return .liveTunersChanged
+        case "live_taken_over":
+            return wire.sessionId.map { .liveTakenOver(sessionId: $0, message: wire.message ?? "") }
         case "requests_changed":
             return .requestsChanged(requestId: wire.requestId, kind: wire.kind, tmdbId: wire.tmdbId)
         case "request_available":

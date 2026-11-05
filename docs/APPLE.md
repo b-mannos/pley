@@ -58,7 +58,7 @@ in to another server starts every section again at Home.
   Libraries. While music has a queue, the mini player sits above the tab
   bar (on iOS 26.1 and later, in the tab bar's own accessory, whose words
   stop growing at the largest size below the accessibility sizes, as the
-  tab bar's own do). While another of the profile's devices plays, the
+  tab bar's own do). While another of the profile's devices is on, the
   remote's bar sits there too ([Remote control](#remote-control)).
 - **iPad** at regular width, and the **Mac**: a sidebar with Home, Live
   TV when it shows, Search and Playlists, then the libraries in the profile's order, each with its kind's symbol and a
@@ -66,7 +66,7 @@ in to another server starts every section again at Home.
   picture, name and server, which opens Me. The Mac's window is at least
   800 by 560 points, and opens at 1100 by 720. While music has a queue,
   the mini player sits at the foot of the page beside the sidebar. While
-  another of the profile's devices plays, the remote's card sits above it
+  another of the profile's devices is on, the remote's card sits above it
   on iPad, and the Mac's toolbar has the remote's button
   ([Remote control](#remote-control)).
 - **Apple TV**: tabs across the top: Search (a magnifying glass alone,
@@ -312,8 +312,10 @@ behind it.
   and the file's quality badges ("4K", "DV", "Atmos"). Then **Play** or
   **Resume**, with how far it was played and the time left (a show or
   season plays its next episode: "Play S1 · E3"), **From start** when
-  part played, **Watched**, **My List** (movies and shows), **Trailer**
-  when there is one, and **More** with the rest of the title's actions.
+  part played, **Play on…** while another of the profile's devices takes
+  it (iPhone, iPad and Mac, [Remote control](#remote-control)),
+  **Watched**, **My List** (movies and shows), **Trailer** when there is
+  one, and **More** with the rest of the title's actions.
   The profile's own rating, in half stars: a tap on iPhone, iPad and Mac
   (the left half of a star for a half star; a scroll that starts on the
   stars only scrolls), the arrow keys and Delete on the Mac, one
@@ -443,7 +445,9 @@ behind it.
   what's on with its progress and what's next, the star, channel up and
   down (through the category it was opened in, round its ends; Recently
   watched in the order it had when the player opened), Channels (the
-  category's list, and Other channels for another), AirPlay and "Live". A
+  category's list, and Other channels for another), Watch on… while
+  another of the profile's devices takes channels
+  ([Remote control](#remote-control)), AirPlay and "Live". A
   keyboard's digits tune a number (up to five, 1.4 seconds after the last,
   or Return), and ↑ and ↓ change channel; on the Mac, F fills the screen,
   ⌘W leaves, and the Playback menu has Channel Up (⌘↑) and Channel Down
@@ -458,9 +462,13 @@ behind it.
   what they watch, and offers **Watch here instead** on one it may take. A stall shows a spinner after 0.7
   seconds; a channel with no picture shows its logo and "Sound only".
   When AVPlayer fails, the session's plan is asked once: a stop at the
-  server says why, anything else tunes again. Leaving ends the session at
-  the server at once. In the background the channel and its connection
-  are let go, and back in front it tunes again from the live edge. One
+  server says why, anything else tunes again. Stopped from another device
+  or by an administrator (`session_stopped`), or its connection taken over
+  (`live_taken_over`), it stops as the event comes and says who or why,
+  with Watch again. Leaving ends the session at the server at once. In the
+  background the channel and its connection are let go, and back in front
+  it tunes again from the live edge, unless it had failed (the server
+  stopped it, every connection in use): that stays, with Watch again. One
   playback at a time: a video closes the live player, and Live TV closes
   a video.
 - **The mini player and Now Playing** (while music has a queue): the mini
@@ -914,11 +922,11 @@ playback on that server and profile.
   front of it answering `502` or `504`): AVPlayer plays what it has
   loaded, and the new session is asked for again, 0.5 to 2 seconds apart,
   for 90 seconds from when the server was lost, as long as the server
-  keeps a session it doesn't hear from. "Reconnecting…" shows once
-  (iPhone, iPad and Mac); once the server answers, it plays on where it
-  stood, and after 90 seconds it says the server can't be reached, with
-  Try again. A server that answers, even with an error, isn't waited for,
-  and neither is one out of reach before anything played.
+  keeps a session it doesn't hear from. "Reconnecting…" shows once; once
+  the server answers, it plays on where it stood, and after 90 seconds it
+  says the server can't be reached, with Try again. A server that
+  answers, even with an error, isn't waited for, and neither is one out
+  of reach before anything played.
 
 AVPlayer decodes video with or without a view on screen: a video output
 is attached to every item, and the frames it gives are counted for that
@@ -1174,7 +1182,9 @@ background mode). It is a port of the Android app's `MusicPlayback`:
   starting doesn't end music's session, nor the other way round. Before
   the next track starts, the one before ends (`stopped`, then `DELETE`,
   waiting 2 seconds at most), so a conversion never waits on it.
-- **Reports**: progress every 10 seconds while it plays and at a pause; at
+- **Reports**: progress every 10 seconds while it plays, `paused` at a
+  pause and every 30 seconds while paused (the server forgets a player
+  quiet for 90 seconds, and remotes drop it); at
   a track's end, `stopped` at its length, and the next track starts.
   Reports that can't go out wait with the video's ([Reports](#playing)).
 - **Failures**: a track the device can't decode is asked for again as a
@@ -1278,7 +1288,9 @@ are drawn by the app in the player's content overlay, under the controls
   picture's size fitted to the screen. Skip Intro, Skip
   Credits, Up Next ("Play Next (8)", Cancel) and the sleep timer's Keep
   Watching are the player's own contextual buttons, and the chapters its chapter markers, with their
-  pictures. Menu closes the player when the transport bar isn't showing.
+  pictures. The player's notices ("Reconnecting…", "Playing from …")
+  show at the top for 4 seconds, as on the other devices, without taking
+  the focus. Menu closes the player when the transport bar isn't showing.
   The display's frame rate and dynamic range follow the video when the
   Apple TV is set to match content.
 - **Mac**: a window of its own per playback, opened from the item's page;
@@ -1310,47 +1322,153 @@ address or a token.
 
 ### Remote control
 
-A profile's devices control what plays on its other devices
-([API.md](API.md#remote-control)): pause the TV from the phone, skip a
-track playing on the Mac. iPhone, iPad and Mac are remotes and players;
-Apple TV is only a player, as the other TV apps are.
+A profile's devices control what plays on its other devices, and start
+something there ([API.md](API.md#remote-control), [Casting](API.md#casting)):
+pause the TV from the phone, change its subtitles, skip a track playing on
+the Mac, or start a film on the TV. iPhone, iPad and Mac are remotes and
+players; Apple TV is only a player, as the other TV apps are.
 
-**The remote** lists the profile's sessions (`GET /api/sessions`) other
-than the ones this device plays, read again on `sessions_changed`, when
-the event stream connects again and when the app comes back to the
-front.
+**The remote** lists the profile's other devices that are on: those that
+take casts (`GET /api/remote/devices`), whose apps are open, and what
+plays on each (`GET /api/sessions`), the two merged by `device_id`. This
+device is left out: the sessions it plays, its own receiver, and any
+session of its `device_id` whose end the server hasn't heard yet. A
+device whose app takes no casts (a Jellyfin or Plex app) is listed while
+it plays. Both lists are read again on `sessions_changed` (a receiver
+appearing or going sends it too), when the event stream connects again
+and when the app comes back to the front.
 
 - **iPhone and iPad**: a bar above the tabs with the device and what
-  plays there, or how many devices and their names, and Play or Pause
-  when one device plays and its player obeys it: pausing the TV takes one
-  tap. From iOS 26.1 it is the tab bar's own accessory, where the mini
-  player sits too; the accessory holds one of them, so while music plays
-  here the mini player keeps it and has the remote's button at its end.
-  Before iOS 26.1, and at the foot of the page beside the iPad's sidebar,
-  it is a card above the mini player. Choosing it opens the remote as a
-  sheet, which closes by itself once nothing plays on another device.
+  plays there ("Ready to play" on one that plays nothing), or how many
+  devices and their names, and Play or Pause when one device plays and
+  its player obeys it: pausing the TV takes one tap. From iOS 26.1 it is
+  the tab bar's own accessory, where the mini player sits too; the
+  accessory holds one of them, so while music plays here the mini player
+  keeps it and has the remote's button at its end. Before iOS 26.1, and
+  at the foot of the page beside the iPad's sidebar, it is a card above
+  the mini player. Choosing it opens the remote as a sheet, which closes
+  by itself once no other device is on.
 - **Mac**: a remote button in the toolbar, as in the web app's header,
   opens the same remote as a popover.
 
-The remote has a row per device, one after another: the poster (a
-channel's logo on Live TV), the title (the channel and what's on), the
-device's name ("Living room TV", numbered when two have the same), and
-for a title how far it is, with a seek slider when its player seeks.
-Under them are the buttons the player listed: Previous (Previous channel
-on Live TV), Back 10 seconds, Play or Pause, Forward 30 seconds and Next
-(Next channel), and Stop, which every player obeys. The place moves on
-while it plays: the last report, plus how long ago the server says that
-was, plus the time since the answer came, by this device's clock. A
-command dims the buttons until the list shows the player acted on it (a
-new state, title or channel, or a report from the place sent to); after
-5 seconds without that the list is read once more, and the row says
+**Your devices**: a row per device, those playing first, then those
+ready to play, each by name. A row has the device's kind as a symbol (a
+TV, an iPhone, an iPad, a laptop, a globe for a browser, a question mark
+for the rest), its name ("Living room TV", numbered when two have the
+same, in the order of their ids so a number stays as they play and stop),
+and what it plays (the title, or the channel's number and name) with a
+thin line of how far, or "Ready to play". A device with several sessions
+shows its newest. Choosing a device shows its controls: on iPhone (and an
+iPad in a narrow window) on a page of their own, which Back leaves; on
+iPad and the Mac below the list, the row marked. One device alone shows
+its controls at once. The choice is kept while the remote is open.
+
+A playing device's controls, top to bottom:
+
+1. the poster (a channel's logo), the device, and what plays: an
+   episode's show, season and number ("Show · S1 · E2"), then its title;
+   a track's title, then its artist; a channel's number and name, then
+   what's on; anything else, its title;
+2. for a title, how far it is, with a seek slider when its player seeks;
+   for a channel, no seek: a thin bar of how far along the programme on
+   is, by this device's clock between its start and end (`now_start`,
+   `now_stop`), its times under it ("8:00 PM – 9:00 PM", in the system's
+   time format), and "Next: …" when the guide says what follows;
+3. the buttons, centred. For a title: Previous where the player listed
+   it, Back 10 seconds and Forward 30 seconds where it skips, Play or
+   Pause, and Next, which shows for every episode and track and for a
+   title with one after it, dimmed when the player doesn't take it. For a
+   channel: a capsule of channel down, "Channel" and channel up, as a TV
+   remote's rocker (each half dimmed when the player doesn't take
+   `previous` or `next`; VoiceOver reads "Previous channel on …" and
+   "Next channel on …"), with Play or Pause beside it where the player
+   takes it;
+4. on the left, **Audio**, **Subtitles** and **Quality** as symbols (the
+   speaker, the captions bubble, and the sliders the player's own Quality
+   menu has), each where the player listed it and there is something to
+   pick (more than one audio track; any subtitles; the session's
+   `qualities`). Each is a menu, as the system draws them, with the one
+   playing ticked: the session's tracks (`tracks`), named as the player's
+   own menus name them ("French – Commentary (EAC3 5.1)", "English (SRT,
+   Forced)"), Subtitles with Off first (`audio_index`, `subtitle_index`);
+   the qualities by their menu's names ("8 Mbps 1080p"), none ticked
+   until the player says its pick (`quality`). Choosing one sends
+   `{ command: "audio" | "subtitles", stream_index }` (`-1` for Off) or
+   `{ command: "quality", quality }`. VoiceOver reads them "Audio on
+   Living room TV", "Subtitles on …", "Quality on …", which the pointer's
+   tooltip shows too, and Large Content names them;
+5. on the right, Stop, which every player obeys. It asks first, in the
+   system's confirmation dialog: "Stop playing on Living room TV?", with
+   Stop (destructive) and Cancel; on iPad and the Mac it shows beside the
+   button.
+
+A device ready to play shows its symbol and name, "Nothing playing" and
+"Send something here with Play on…"
+
+The place moves on while it plays: the last report, plus how long ago
+the server says that was, plus the time since the answer came, by this
+device's clock. A command dims the buttons until the list shows the
+player acted on it (a new state, title or channel, a report from the
+place sent to, or, for a track or a quality, the one it says it plays);
+after 5 seconds without that the list is read once more, and the
+device's controls say
 "Living room TV didn't answer." A Next or Previous with nothing there
-says nothing. A `404` means the device stopped meanwhile: its row goes.
-Other refusals say what happened: "… can't do that." (`409`, the list is
-read again), "Too many at once: try again in a moment." (`429`), and the
-server's own words otherwise. VoiceOver reads each button with its
-device ("Pause on Living room TV"), the slider's swipes go back 10 and
-forward 30 seconds, and a refusal is read out as it shows.
+says nothing. A `404` means the device stopped meanwhile: its session
+goes. Other refusals say what happened: "… can't do that." (`409`, the
+list is read again), "Too many at once: try again in a moment." (`429`),
+and the server's own words otherwise. VoiceOver reads each button with
+its device ("Pause on Living room TV", "Audio on Living room TV"), the
+slider's swipes go back 10 and forward 30 seconds, and a refusal is read
+out as it shows.
+
+**Play on…** On iPhone, iPad and Mac, beside the Play of a movie, an
+episode, a show or a season (with the title page's other buttons), an
+album, an artist and a playlist (beside Play and Shuffle), in a track's
+menu on its album's page, and as **Watch on…** for a Live TV channel (a
+channel's menu in the guide and the cards, beside a programme's Watch
+now, and in the live player's overlay). It shows while another device's
+app takes that (`casts`: `item` for titles, music and playlists, `live`
+for channels), and lists those devices as the remote does, with what each
+plays now. An album's, an artist's and a playlist's has **Shuffle on…**
+in it. Choosing a device sends `POST /api/remote/devices/{id}/cast` with
+the title (a movie or an episode from where its Play starts it here, its
+resume point, with the tracks the page's pickers show for the version
+shown: `audio_index` when an audio track was picked rather than
+Automatic, which leaves the device its own best track of the language,
+and `subtitle_index`, `-1` for Off, where the file has subtitles; a show
+or a season, whose device plays its next episode), the playlist or the
+channel. The quality is never sent: the device keeps its own, since what
+suits a phone's network doesn't suit a TV's. "Playing on Living room TV"
+says it went, and the remote opens on that device, whose controls show
+once its session does. A refusal says why: "Living room TV isn't on any more" (`404`),
+"Living room TV can't play that" (`409`), "Too many at once: try again
+in a moment" (`429`), and the server's own words otherwise.
+
+**Taking casts.** Every Apple app, Apple TV included, opens its event
+stream as a receiver
+(`/api/events?receiver=&device_name=&device_kind=&casts=`): this
+install's client id (the play requests' `client_id`), the device's name
+as its play requests give it (where they do), its kind (`tv`, `phone`,
+`tablet`, `computer`), and `item`, with `live` while Live TV shows for the
+profile (the stream reads that before it opens, and opens again when it
+changes). A `cast` for this device's id, while the app is in front and
+signed in, plays as the app's own Play does on that page: a movie or an
+episode from the remote's `start_ms` (else its resume point), with the
+cast's `audio_index` and `subtitle_index` in place of the profile's saved
+choices for that play only (nothing is saved; a track its file doesn't
+have, of another version, leaves the saved choice), a show or a season
+its next episode (On Deck), a track its album from it, an album, an
+artist or a playlist what it holds, in order or shuffled, and a channel
+live: the live player opens on it, or, when it is open already, tunes it
+as its Channels list does. What played is replaced. "Playing from
+Kitchen tablet" (from another device the server can't name: "Playing
+from another device") says where it came from for 4 seconds: over the
+player, or the live player, on every device (Apple TV's included), and
+as a toast for music. On iPhone, iPad and Apple TV the player covers the
+app, so the remote's sheet, Now Playing and the shell's own sheets close
+first; on the Mac a video or a channel opens in a window of its own, as
+from its page. A cast for another device, or one that comes while the
+app is in the background, does nothing.
 
 **The players obey** `player_command` for the session they play now and
 ignore any other, then report at once. Each says what it obeys in its
@@ -1359,25 +1477,31 @@ Mac the computer's name from System Settings; on iPhone, iPad and Apple
 TV the name the system gives when it is one of the person's own, and
 none otherwise (the system says only "iPhone" without Apple's
 entitlement for it), so the server names the device from the app's
-User-Agent ("Pley for iPhone").
+User-Agent ("Pley for iPhone"). A video's every report says the tracks it
+plays (`audio_index`, `subtitle_index`, `-1` for none) and its Quality
+menu's pick (`quality`: `auto` while Automatic, `original`, `8m`…), so
+the remotes follow them; a download played here has no session, so it
+says neither.
 
 | What plays | Obeys | How |
 |---|---|---|
-| A movie or an episode | Play, Pause, Seek, Skip, and Next for an episode, or a title of a collection or playlist with one after it | A seek stops at the start and 250 ms before the end; a skip counts from where it is; Next plays what Up Next would |
+| A movie or an episode | Play, Pause, Seek, Skip; Next for an episode, or a title of a collection or playlist with one after it; Audio where the file has several audio tracks, and Subtitles where it has any; Quality | A seek stops at the start and 250 ms before the end; a skip counts from where it is; Next plays what Up Next would; Audio and Subtitles change as the player's own menus do, saved for the movie or show (a track AVPlayer can't switch, or picture subtitles to burn in, start a session beside the one playing); Quality picks as the Quality menu does, kept for this kind of network (another quality starts a session beside the one playing); the one playing already is said again |
 | Music | Play, Pause, Seek, Skip, Next, Previous | Previous does as Now Playing's: the track again after 3 seconds of it, the one before otherwise; Next at the end of the queue does nothing |
 | Live TV | Next, Previous | Channel up and down, through the category the player was opened in, round at its ends. No pause or seek: the live player can't go back in a channel |
 
 Stop is the stop from another device the players already obeyed
 ([Updates from the server](#updates-from-the-server)): a video's player
-closes and says so, and music stops.
+closes and says so, music stops, and Live TV stops and says so.
 
 **In the background.** Music playing in the background, or a video in
 Picture in Picture, keeps the event stream, as on Android, so a remote
-reaches it on the lock screen or over other apps too. Once the music
-pauses or the video ends, the system suspends the app, so the stream goes
-until something plays again or the app comes back to the front, and
-remotes reach it only then. Apple TV obeys while Pley is open, or while
-its music plays in the background: otherwise tvOS suspends the app.
+reaches it on the lock screen or over other apps too; a cast that comes
+meanwhile does nothing, since casts play only while the app is in front.
+Once the music pauses or the video ends, the system suspends the app, so
+the stream goes until something plays again or the app comes back to the
+front, and remotes reach it only then. Apple TV obeys while Pley is open,
+or while its music plays in the background: otherwise tvOS suspends the
+app.
 
 ## Downloads and offline
 
@@ -2186,9 +2310,6 @@ Delete the folder afterwards.
   shows is read again. So Apple TV obeys a remote only while Pley is open
   or its music plays, and music paused in the background hears none until
   it plays again or the app is back.
-- Live TV stopped from a remote closes once its stream fails, not as the
-  event comes: its player then asks for the session's plan, which says
-  why.
 - The Mac app has no UI tests: driving it needs Accessibility and Screen
   Recording permissions that only a person can grant. Its views are
   checked by building it, and its models and menus' state by the

@@ -23,6 +23,9 @@ import app.pley.android.data.Loadable
 import app.pley.android.data.PeopleRepository
 import app.pley.android.data.PlayItem
 import app.pley.android.data.PlaylistsRepository
+import app.pley.android.data.OtherDevice
+import app.pley.android.data.RemoteRepository
+import app.pley.android.data.RemoteSession
 import app.pley.android.data.ScanState
 import app.pley.android.data.SearchRepository
 import app.pley.android.data.ServersRepository
@@ -32,8 +35,10 @@ import app.pley.android.data.SessionState
 import app.pley.android.data.SnapshotStore
 import app.pley.android.data.TrackDefaultsRepository
 import app.pley.android.data.WatchStateRepository
+import app.pley.android.model.CastRequest
 import app.pley.android.model.CollectionSummary
 import app.pley.android.model.Hubs
+import app.pley.android.model.PlayerCommandRequest
 import app.pley.android.model.PlaylistKind
 import app.pley.android.model.PlaylistDetail
 import app.pley.android.model.PlaylistSummary
@@ -73,6 +78,13 @@ class TestGraph(server: String? = SERVER) : ScreensGraph {
     val scans = MutableStateFlow<List<ScanState>>(emptyList())
     val music = MutableStateFlow<NowPlaying?>(null)
     val sessionState = MutableStateFlow<SessionState>(SessionState.Starting)
+
+    /** The profile's other devices that are on, for the remote's bar. */
+    val remoteDevices = MutableStateFlow<List<OtherDevice>>(emptyList())
+
+    /** What Play on… sent, by receiver id; [castFailure] refuses the next ones. */
+    val castsSent: MutableList<Pair<String, CastRequest>> = Collections.synchronizedList(mutableListOf())
+    @Volatile var castFailure: Exception? = null
 
     override val device = DeviceProfile(FormFactor.Phone, fireTv = false, tier = Tier.T2, model = "test", totalRamBytes = 8L shl 30, lowRam = false)
 
@@ -115,6 +127,19 @@ class TestGraph(server: String? = SERVER) : ScreensGraph {
         }
         override val liveUpdates = object : LiveUpdates {
             override val scans: StateFlow<List<ScanState>> = this@TestGraph.scans
+        }
+        override val remote = object : RemoteRepository {
+            override val sessions: StateFlow<List<RemoteSession>> = MutableStateFlow(emptyList())
+            override val devices: StateFlow<List<OtherDevice>> = this@TestGraph.remoteDevices
+            override val clock: () -> Long = { 0L }
+            override suspend fun refresh(): List<RemoteSession> = remoteDevices.value.mapNotNull { it.session }
+            override suspend fun command(sessionId: String, command: PlayerCommandRequest) = Unit
+            override suspend fun stop(sessionId: String) = Unit
+            override suspend fun cast(receiverId: String, request: CastRequest) {
+                castFailure?.let { throw it }
+                castsSent += receiverId to request
+            }
+            override fun here(player: Any, sessionId: String?) = Unit
         }
         override val session = object : SessionRepository {
             override val session: StateFlow<Session?> = MutableStateFlow(null)

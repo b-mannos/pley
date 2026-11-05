@@ -696,7 +696,17 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       return res.end();
     }
     if ((match = path.match(/^\/api\/items\/(\d+)\/progress$/)) && req.method === "POST") {
-      progress.push({ item: Number(match[1]), ...JSON.parse(body) });
+      const told = JSON.parse(body);
+      progress.push({ item: Number(match[1]), ...told });
+      // A video says which audio and subtitles play, for the user's
+      // remotes (-1: none); music, neither.
+      const kind = items.get(Number(match[1]))?.kind;
+      const tracks = [told.audio_index, told.subtitle_index];
+      if (told.session_id && kind === "track" && ("audio_index" in told || "subtitle_index" in told)) problems.push("a track's report that names audio or subtitles");
+      if (told.session_id && (kind === "movie" || kind === "episode")) {
+        if (!tracks.every((index) => Number.isInteger(index) && index >= -1)) problems.push(`a ${kind}'s report with tracks ${JSON.stringify(tracks)}`);
+        fixture.videoReports += 1;
+      }
       res.writeHead(204);
       return res.end();
     }
@@ -708,7 +718,15 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       const ask = JSON.parse(body);
       if (ask.caps?.caps_version !== 2) problems.push("a playback request without caps_version 2");
       if (!ask.caps?.hls?.master_playlist) problems.push("a playback request without hls.master_playlist");
+      // What the user's remotes see of the player (docs/API.md, "Remote control").
+      if (ask.device_kind !== "tv") problems.push("a playback request that doesn't say it plays on a TV");
+      if (!Array.isArray(ask.controls) || !ask.controls.includes("pause")) problems.push("a playback request without its controls");
       const item = items.get(ask.item_id);
+      // A film's or an episode's file has audio and subtitles for the
+      // remote to pick; music has none to pick.
+      const picks = ["audio", "subtitles"].filter((control) => ask.controls?.includes(control));
+      if (item?.kind === "track" && picks.length > 0) problems.push("music that says the remote picks its tracks");
+      if ((item?.kind === "movie" || item?.kind === "episode") && picks.length !== 2) problems.push(`a ${item.kind} that doesn't say the remote picks its audio and subtitles`);
       // A movie's Director's Cut is its second file.
       const files = item?.kind === "movie" ? [7000 + ask.item_id, 9000 + ask.item_id] : [7000 + ask.item_id];
       if (ask.file_id != null && !files.includes(ask.file_id)) problems.push(`playback of file ${ask.file_id} for item ${ask.item_id}`);
@@ -838,6 +856,8 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
       const ask = body ? JSON.parse(body) : {};
       fixture.liveWatches.push({ id, client_id: ask.client_id ?? null, take_over: ask.take_over ?? null });
       if (!ask.client_id) problems.push("a watch without a client_id");
+      if (ask.device_kind !== "tv") problems.push("a watch that doesn't say it plays on a TV");
+      if (JSON.stringify(ask.controls) !== JSON.stringify(["next", "previous"])) problems.push(`a watch obeying ${JSON.stringify(ask.controls)}`);
       const channel = liveChannels().find((c) => c.id === id);
       if (!channel) return json(404, { code: "not_found", message: "no such channel" });
       // Channel 3's source has one connection, Ben's other device on
@@ -920,7 +940,7 @@ export function startFixture({ accessSeconds = 3600, refuse = [] } = {}) {
 
   const fixture = { issuer: "", down: false, qr: true, proofs: 0, requestScopes: true, requestsOn: true, twoStep: false, scopesAsked: [], playbackDelayMs: 0, refreshes: 0, playbacks: [], libraryOrder: [1, 2, 3], orders: [], trackDefaults: { audio_language: null, subtitle_language: null, subtitle_mode: "forced" }, trackDefaultsSaved: [], streams: [], picks: new Map(), ratings: [], myList: [1003], marks: [], playlistEntries: [[1, 1000], [2, 101], [3, 102]], playlistRemoved: [], playlistOrders: [], playlistsAsked: [], playlistsMade: [], smartPlaylists: [], nextPlaylist: 2,
     household: [{ id: 1, name: "Anna", avatar_url: null, avatar_color: "#38bdf8", current: true, needs: "none" }, { id: 2, name: "Ben", avatar_url: null, avatar_color: "#f472b6", current: false, needs: "none" }],
-    switched: [], subtitlesAdded: [], picturesMissing: false, picturesAsked: [], picturesFetched: [], probed: false, networkTold: [], speedTests: [], requestsAsked: [], requestsActed: [], discoverPictures: [], problems, requests, progress, closed, close: () => server.close(),
+    switched: [], subtitlesAdded: [], picturesMissing: false, picturesAsked: [], picturesFetched: [], probed: false, networkTold: [], speedTests: [], requestsAsked: [], requestsActed: [], discoverPictures: [], problems, requests, progress, videoReports: 0, closed, close: () => server.close(),
     liveRecent: [2], liveBrowses: [], liveFavorites: [], liveFavoriteChanges: [], liveGuides: [], liveWatches: [], liveSessions: new Map(), livePlaylists: [], liveLeft: [] };
   // The channels, each with what's on now and next, by the half hour.
   function liveProgram(channelId, start) {

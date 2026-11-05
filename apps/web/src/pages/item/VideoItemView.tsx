@@ -6,6 +6,7 @@ import { keys } from "@/api/hooks";
 import type { ItemDetail, MediaFile } from "@/api/types";
 import { PartOfCollections } from "@/components/lists/PartOfCollections";
 import { MissingKeyNotice } from "@/components/MetadataNotice";
+import { PlayOn } from "@/components/PlayOn";
 import { StarRating } from "@/components/StarRating";
 import { Button, Select } from "@/components/ui";
 import { audioPicked, automaticAudioLabel, codecLabel, formatBytes, formatDate, formatDuration, resolutionLabel, seasonTitle, streamLabel } from "@/lib/format";
@@ -199,6 +200,19 @@ export function VideoItemView({ item }: { item: ItemDetail }) {
               >
                 <span className="hidden sm:inline">From start</span>
               </Button>
+            ) : null}
+            {item.files.length ? (
+              // Where Play would resume, there too, with the tracks shown here.
+              <PlayOn
+                kind="item"
+                compact
+                cast={() => ({
+                  item_id: item.id,
+                  ...(resumable ? { start_ms: item.user_state.position_ms } : {}),
+                  ...(audioChoice !== "auto" && audioChoice != null ? { audio_index: audioChoice } : {}),
+                  ...(subStreams.length ? { subtitle_index: subIndex ?? -1 } : {}),
+                })}
+              />
             ) : null}
             {item.kind === "movie" ? <MyListButton item={item} /> : null}
             <WatchedButton item={item} />

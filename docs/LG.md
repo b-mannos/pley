@@ -281,6 +281,96 @@ app and, if it was playing, plays on from there when the app is back. The
 remote's media keys work it from every page but a player's: play, pause
 and Stop (which pauses), play/pause, next, previous, and ◀◀ and ▶▶ 10 s.
 
+### Remote control
+
+The TV obeys the remote on the profile's other devices (the web app, the
+Android phone app, the Apple apps; [API.md](API.md#remote-control)) and
+shows no remote of its own. Its players say what they obey when they
+start (`controls`) and that they play on a TV (`device_kind: "tv"`, on the
+`stream.ts` it reads too); webOS gives the app no name of the set's own,
+so the server names the TV from its `User-Agent`. They obey:
+
+- **Movies and episodes:** play, pause, seek and skip, and next where
+  something can come next (an episode, a playlist or collection). Next at
+  the end does nothing, and says nothing on the TV; a video has no
+  previous.
+- **Audio and subtitles** of a movie or episode (`audio`, `subtitles`,
+  declared where its file has tracks of that kind), picked as the
+  player's own Audio and Subtitles panels pick them, and kept for the
+  show or movie as those are: an audio track the TV's pipeline switches
+  in place, else in a new session; text subtitles, and picture ones drawn
+  from the server's `.mks`, at once; burned-in ones in a new session.
+  Every progress report says which play (`audio_index`, and
+  `subtitle_index`, -1 for none), so a pick played in place, or one that
+  is playing already, is said at once; a new session says its tracks as
+  it starts.
+- **Quality** of a movie or episode (`quality`, declared by every video the
+  server sends; one on a USB drive has no Quality menu), one of the ids
+  its Quality menu offers for the file, picked as a pick in that menu is
+  and kept for the next titles: a new session where it asks for another
+  stream, which says the pick as it begins, else said at once. Every
+  progress report says which quality the menu has picked (`quality`:
+  `auto`, `original`, `8m`…); one the menu doesn't offer does nothing.
+- **Music:** play, pause, seek, skip, next and previous, as the buttons:
+  previous more than 3 s into a track, or on the first, goes back to its
+  start. Music has no tracks to pick, and its reports name none. Music
+  playing behind the other pages obeys too; music that gave way to a
+  video or a channel has no session, and obeys nothing until it plays
+  again.
+- **Live TV:** next and previous, channel up and down through the
+  category the player was opened from, round its ends, as CH+ and CH− go.
+  It has no pause or seek. Stopped from another device or by an
+  administrator (`session_stopped`), it shows **Live TV stopped** with
+  who stopped it and, on a line of its own, their message, with Watch
+  again, as for a connection taken over.
+
+Only the player of the session named acts on a command, a seek stays
+within the title, and a skip counts from where it is. Each change is
+reported at once, so the remote sees it; another title, track or channel
+tells the server with its own session. A play on a player already
+playing, or a pause on one already paused, says so again at once, so a
+remote a little behind settles. The rule is `crates/player/src/remote.rs`,
+pinned by the TV apps' shared fixture `packages/tv/test/fixtures/remote.json`
+(and a video's tracks and quality, which the fixture doesn't have, by its
+own tests).
+
+**Casts.** The TV is one of the devices the profile's remotes play things
+on ([API.md](API.md#casting)) while its event stream is open, so while
+the app shows and is signed in. The stream names it a receiver by its
+install id (the `client_id` its plays send), a TV (`device_kind=tv`)
+taking titles and playlists (`casts=item`) and, where the profile has Live
+TV, channels (`live`). Until the server first says whether it has, the TV
+takes channels too, and the stream opens again when Live TV comes or goes.
+It sends no name, so the server names it from its `User-Agent`, as it
+does its players. What a remote sends plays as the TV's own Play would,
+in place of what plays, over whatever page shows (a player showing gives
+way to it):
+
+- a movie or an episode in the player, from the place sent, else where
+  Play resumes, with the audio and subtitles picked on the remote's page
+  (`audio_index`, `subtitle_index`, -1 for none) for that play, in place of
+  the saved ones, which stay for a track its file doesn't have; the
+  quality is the TV's own. A show or a season its next episode, where
+  Play resumes it;
+- an album or an artist as the music's queue, in order or shuffled from a
+  random track, with Now Playing; a track its album from it, at the place
+  sent;
+- a playlist: music as the music's queue (the playlist page's own Play
+  opens the entry's album instead, as Android TV's does), video in the
+  player through the playlist (shuffled: from a random entry);
+- a channel in the live player, channel up and down going through All
+  channels.
+
+"Playing from" and the remote's device ("another device" when the server
+couldn't name it) shows at the top right for 4 s, as the app's other
+notices do, over the player too, and the dimmed screen wakes. A show,
+album or playlist with nothing to play says "Nothing to play", and what
+can't be fetched says why, as Play does. A cast for another device, or
+one that comes while the app is hidden, signing in or asking who's
+watching, does nothing, so a remote never gets past a profile's PIN; of
+two sent close together, the later plays. The rules are
+`crates/shell/src/cast.rs`.
+
 ### Requests
 
 Where the server takes requests, they work as in the Samsung app
@@ -461,7 +551,7 @@ The code, by crate:
 | `crates/local` | Videos on a USB drive: folders, MKV and MP4 heads, subtitle files and tracks, resume points, and the player's server for a file |
 | `crates/player` | Playback: the controller, Automatic, recovery, Up Next, music, Live TV sessions |
 | `crates/webos` | The TV: SDL2, luna-service2, its facts, the capability report, the uMediaServer engine, the data folder, the log |
-| `crates/shell` | Routes, the back stack, the rail, the app's state |
+| `crates/shell` | Routes, the back stack, the rail, the app's state, what a remote casts |
 | `crates/screens/*` | The screens: onboarding, Home, browsing, a title, search, music, settings, Live TV, the player |
 | `crates/screens/storage` | The USB drive's page: a folder's folders and videos |
 | `crates/host`, `crates/app` | The frame loop and the command line; the binary `pley` (package `pley-lg`) |
@@ -627,7 +717,7 @@ The fake server listens on 127.0.0.1: a demo household with profiles
 draws itself, Live TV with a guide, the code sign-in approved at once
 (and the proofs that tell the server apart, keyed the same on every run),
 playback of the Android app's test media, subtitles, seek previews and
-the event stream.
+the event stream, with the remote's commands and its casts to the TV.
 
 ### The TV build
 

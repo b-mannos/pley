@@ -7,11 +7,13 @@ import app.pley.android.common.Addresses
 import app.pley.android.common.DeviceProfile
 import app.pley.android.common.Tier
 import app.pley.android.common.sha1Hex
+import app.pley.android.model.DeviceKind
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import okhttp3.Cache
 import okhttp3.Dispatcher
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 
@@ -78,6 +80,8 @@ interface NetworkGraph {
                 lans = lans,
                 route = LocalRoute(lans::bypass),
                 localNetworkOf = { PermissionsLocalNetworkAccess.of(app) },
+                deviceName = { DeviceNames.of(app) },
+                deviceKind = { DeviceKinds.of(app, profile) },
             )
         }
     }
@@ -96,7 +100,13 @@ internal class HttpNetworkGraph(
     private val lans: LanNetworks,
     private val route: LocalRoute?,
     localNetworkOf: () -> LocalNetworkAccess,
+    /** What remotes call this device, read once when a playback first asks. */
+    deviceName: () -> String? = { null },
+    /** What kind of device this is, read with every playback: a foldable is a phone folded and a tablet open. */
+    private val deviceKind: () -> DeviceKind? = { null },
 ) : NetworkGraph {
+    private val device by lazy(deviceName)
+
     private val base: OkHttpClient by lazy { root.newBuilder().apply { route?.applyTo(this) }.build() }
 
     private val auths = ConcurrentHashMap<String, IssuerAuth>()
@@ -109,7 +119,7 @@ internal class HttpNetworkGraph(
 
     override fun api(issuer: String, userId: Long?): PleyApi {
         val origin = originOf(issuer)
-        return apis.getOrPut(origin to userId) { HttpPleyApi(origin, { apiClient(origin, userId) }) }
+        return apis.getOrPut(origin to userId) { HttpPleyApi(origin, { apiClient(origin, userId) }, deviceName = { device }, deviceKind = deviceKind) }
     }
 
     /**
@@ -165,8 +175,25 @@ internal class HttpNetworkGraph(
 
     override fun events(issuer: String): ServerEvents {
         val origin = originOf(issuer)
-        return EventStream(OkHttpSseConnection({ eventsClient(origin) }, "$origin/api/events"))
+        val url = "$origin/api/events"
+        return EventStream(
+            OkHttpSseConnection({ eventsClient(origin) }, url),
+            asReceiver = { receiver -> OkHttpSseConnection({ eventsClient(origin) }, receiverUrl(url, receiver)) },
+        )
     }
+
+    /**
+     * [url] naming this device as [receiver] (docs/API.md, "Casting"): its
+     * id, the name and kind its play requests give, and what it plays when
+     * cast to.
+     */
+    internal fun receiverUrl(url: String, receiver: EventReceiver): String = url.toHttpUrl().newBuilder()
+        .addQueryParameter("receiver", receiver.id)
+        .apply { device?.let { addQueryParameter("device_name", it) } }
+        .apply { deviceKind()?.let { addQueryParameter("device_kind", it.wire) } }
+        .addQueryParameter("casts", receiver.casts.joinToString(",") { it.wire })
+        .build()
+        .toString()
 
     private fun signedInClient(origin: String, readSeconds: Long): OkHttpClient = base.newBuilder()
         .readTimeout(readSeconds, TimeUnit.SECONDS)

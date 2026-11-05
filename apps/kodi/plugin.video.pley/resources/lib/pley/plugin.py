@@ -91,7 +91,8 @@ class Plugin(asking.Asking):
             if item["kind"] in listing.PLAYABLE:
                 # The resume point goes along, so playing needs no details first.
                 position = (item.get("user_state") or {}).get("position_ms") or 0
-                entries.append((self.url(route="play", id=item["id"], pos=position), li, False))
+                # So is its kind: what the user's remote may do (playback.obeys).
+                entries.append((self.url(route="play", id=item["id"], pos=position, kind=item["kind"]), li, False))
             else:
                 entries.append((self.url(route="item", id=item["id"]), li, True))
         xbmcplugin.addDirectoryItems(self.handle, entries, len(entries))
@@ -414,14 +415,30 @@ class Plugin(asking.Asking):
         item_id = int(self.params["id"])
         listed = self.params.get("pos")
         detail = None
-        if self.resume and listed is None:
+        if (self.params.get("start") or "").isdigit():
+            # Where it was asked to start, whatever Kodi was told: a cast's
+            # place, or its resume point where the add-on's Play resumes.
+            start_ms = int(self.params["start"])
+        elif self.resume and listed is None:
             # Not from a listing: the resume point is in the details.
             detail = client.get("/api/items/%d" % item_id)
             start_ms = (detail.get("user_state") or {}).get("position_ms", 0)
         else:
             start_ms = int(listed or 0) if self.resume else 0
-        li = playback.prepare(client, self.proxy_base, item_id, start_ms, detail)
+        given = self.given_tracks()
+        li = playback.prepare(client, self.proxy_base, item_id, start_ms, detail, kind=self.params.get("kind"), given=given)
         xbmcplugin.setResolvedUrl(self.handle, True, li)
+
+    def given_tracks(self):
+        """The tracks a cast named (casting.play checked them against the
+        file): {"audio", "subtitle"}, -1 for no subtitles; None for none."""
+        found = {}
+        for name in ("audio", "subtitle"):
+            value = self.params.get(name) or ""
+            found[name] = int(value) if re.fullmatch(r"-1|\d{1,9}", value) else None
+        if found["audio"] == -1:
+            found["audio"] = None
+        return found if found["audio"] is not None or found["subtitle"] is not None else None
 
     # --------------------------------------------------------------- Live TV
 

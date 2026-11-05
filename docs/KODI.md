@@ -133,7 +133,9 @@ Settings → Playback → Quality offers [the menu](QUALITY.md#the-menu):
 Original, Automatic (the default), 30 Mbps 4K down to 2 Mbps 480p. Kodi's
 player has no Pley quality menu, so you choose before playing, and one
 setting serves every title: the server converts a file above it and plays
-one below it as it is.
+one below it as it is. The remote on your other devices changes it while
+a title plays ([Remote control](#remote-control)), and the title plays
+again where it was at the new quality.
 
 Automatic follows the rules for
 [players that go black between streams](QUALITY.md#players-that-go-black-between-streams).
@@ -169,8 +171,16 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Kodi:
   deinterlaces it itself, surround reaches a receiver, the server converts
   nothing, and it starts at once.
 - **Tuning:** the add-on first asks `POST …/watch` with this Kodi's
-  `client_id`, then Kodi reads the stream under the same id, so changing
-  channel never holds two connections.
+  `client_id`, then Kodi reads the stream for that session as
+  `<client_id>-stream`, so changing channel never holds two connections,
+  and the watch session stays while Kodi reads it: it is the one your
+  other devices see and control ([Remote control](#remote-control)).
+- **Leaving:** when Kodi stops reading a channel (you stop it, another
+  channel or a title plays, Kodi exits), the service ends its session
+  with `DELETE /api/live/sessions/{session}` at once, rather than the
+  server waiting 45 s, so it doesn't hold a connection or stay on your
+  remotes. A session the server ended (taken over, stopped from
+  elsewhere) is left as it is.
 - **No pause or seeking:** the stream has no length and no
   `Accept-Ranges`, so Kodi's controls offer only Previous, Stop and Next.
 - **Channel up and down:** the channels around the one playing (100 each
@@ -184,6 +194,102 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Kodi:
   server's words with OK and Watch again, which plays the channel as any
   channel plays. A stream that ends without that event within a second
   says "The server stopped this stream."
+- **Stopped from another device** (`session_stopped` for the channel's
+  session): it stops as when taken over, and the dialog says "Live TV was
+  stopped from another device." or "Live TV was stopped by the server's
+  administrator.", with their words on the next line.
+
+### Remote control
+
+Your other devices control what Kodi plays (see
+[API.md](API.md#remote-control)); Kodi itself shows no remote. The
+service (`service.py`) acts on `player_command` for the session playing
+here, by the shared remote-control rule, written in `remote.py` and
+tested against every case of `packages/tv/test/fixtures/remote.json`:
+
+- **What it says:** each play request and Live TV watch lists what Kodi
+  obeys (`controls`), names it by the name it was given in Kodi's Settings,
+  Services, General, Device name (at most 64 characters) and says it is a
+  TV (`device_kind: tv`): Kodi is made for the TV, on a computer too, so
+  remotes list it with the TVs. Until it is given a name, Kodi calls itself
+  "Kodi" with the computer's host name after it, which isn't sent: the
+  server names it from the add-on instead.
+- **Movies and episodes:** play, pause, seek, skip, audio, subtitles and
+  quality, and next when Kodi's queue has something after it. An episode
+  always lists next: with nothing queued after it, Next plays the episode
+  after it, as Up Next does (and does nothing on a show's last).
+- **Audio and subtitles:** a video lists `audio` and `subtitles` when its
+  file has tracks of them, and both while its details are still loading
+  (they come with the server's answer). A pick switches Kodi's player to
+  that track, found by its place in Kodi's lists as a pick in Kodi's own
+  menu is (`tracks.py`), and is saved for the show or movie the same way
+  once it has held 2 seconds. Kodi switches only to what it lists: a
+  converted stream carries only the audio the server put in, subtitles
+  drawn onto the video stay, and picture subtitles Kodi wasn't given as a
+  file can't be picked. Such a pick does nothing.
+- **Quality:** the Quality setting is Kodi's Quality menu. A video lists
+  `quality`, and the remote picks among what the menu offers for the file
+  ([QUALITY.md](QUALITY.md#the-menu)). A pick changes the setting, as
+  choosing it there does (Automatic picked again starts afresh), and the
+  title plays again where it is at it, a new session that the remote
+  sees as it starts. The quality picked already reports again; one the
+  file isn't offered does nothing.
+- **What plays:** every progress report of a video says the audio and
+  subtitles Kodi plays, by the server's stream indexes (`audio_index`,
+  `subtitle_index`, `-1` for none), so remotes tick them. A track the
+  server doesn't know (captions Kodi found in the video, subtitles added
+  from Kodi's dialog) is left out, and the server keeps the one it knew.
+  It says the quality picked too (`quality`): the setting, or Original
+  for a file that isn't offered it, which then plays as it is.
+- **Music:** play, pause, seek, skip, next and previous. Previous starts the
+  track again past 3 seconds in, or on the first track, else plays the one
+  before.
+- **Live TV:** next and previous change channel within Kodi's queue of
+  channels, round its ends, when there is one; the stream can't pause or
+  go back, so nothing else. Without a queue (a channel played again with
+  Watch again), it obeys only Stop.
+- Play while playing, pause while paused, or the audio, subtitles or
+  quality that play already change nothing and report again, so a remote
+  a little behind settles. A seek, a skip or another track is reported at
+  once; another title, channel or quality reports with its own session.
+- Kodi stopped or playing something else obeys nothing. A command it
+  doesn't know, or a seek or skip without its place, does nothing.
+
+### Casting
+
+Your other devices play things on Kodi (their Play on…, see
+[API.md](API.md#casting)); Kodi itself casts to nothing. The service does
+it (`casting.py`):
+
+- **Taking casts:** its event stream makes Kodi a receiver, by the
+  `client_id` its plays are made with, as a TV named as its plays are
+  named. It takes titles and playlists always, and Live TV's channels
+  where the account has Live TV as the stream opens.
+- **What plays:** what is sent plays as the add-on's own Play plays it,
+  through the plugin's play routes, in place of what plays:
+  - a movie or an episode from where it was sent, else where Play starts
+    it (its resume point), with the audio and subtitles picked on the
+    remote's page in place of the account's choice for that play, where
+    the file it plays (its first) has them: the audio is asked for with
+    the play request's `audio_index`, the subtitles shown as the account's
+    choice would be, and neither is saved. A track of another version
+    leaves the account's choice. Played again (another quality,
+    Automatic), it keeps them;
+  - a show or a season its next episode;
+  - an album or an artist as Kodi's music queue, shuffled when asked, and
+    a track its album from it;
+  - a playlist what it holds: music as Kodi's music queue, titles as
+    Kodi's video queue, played through;
+  - a channel in Kodi's queue of channels, the lineup's channels around
+    it, so channel up and down work as for a channel played from Live TV.
+- **Where it came from:** "Playing from {device}" ("Playing from another
+  device" when the remote's has no name) shows for 4 seconds as a Kodi
+  notification with the add-on's icon, and "Nothing to play" when a show
+  has no next episode or an album or a playlist is empty.
+- **Not taken:** a cast for another device, or one that comes while the
+  add-on is signed out or while Pley's window asks "Who's watching?" as
+  Kodi starts (a cast doesn't play past its PINs), does nothing. Of two
+  casts close together, the later plays.
 
 ### Requests
 
@@ -297,8 +403,9 @@ TMDB API but is not endorsed or certified by TMDB."
   5, which has none, is converted instead.
 - **Progress** goes to the server every 10 seconds while playing, every 30
   while paused, and on stop.
-- **Events:** the service keeps `GET /api/events` open and refreshes what
-  is on screen, never behind a playing video.
+- **Events:** the service keeps `GET /api/events` open, as a receiver of
+  casts ([Casting](#casting)), and refreshes what is on screen, never
+  behind a playing video.
 - **Requests** (`requests.py` holds the rules and words, `asking.py` the
   listings, `news.py` the service's part): the service reads the summary
   as Kodi starts, on another sign-in or profile, when the event stream
@@ -333,7 +440,8 @@ python -m unittest discover -s . -p "test_*.py"
 ```
 
 `test_e2e.py` runs the add-on against a real server: sign-in, browsing,
-direct play, a converted stream, progress, token renewal and sign-out. It
+direct play, a converted stream, progress, a cast, token renewal and
+sign-out. It
 needs the server and transcoder built
 (`cargo build -p pley-server -p pley-transcoder`) and FFmpeg:
 

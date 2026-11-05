@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The remote of the profile's other devices: the bar above the tabs and its sheet (apps/web/src/components/Remote.tsx). -->
+    <string name="remote_playing_on">Playing on %1$s</string>
+    <plurals name="remote_playing_on_devices">
+        <item quantity="one">Playing on %1$d device</item>
+        <item quantity="other">Playing on %1$d devices</item>
+    </plurals>
+    <string name="remote_open">Open the remote</string>
+    <string name="remote_title">Your devices</string>
+    <string name="remote_unknown_device">Unknown device</string>
+    <!-- Two devices of the same name, told apart: "Living room TV (2)". -->
+    <string name="remote_device_numbered">%1$s (%2$d)</string>
+    <!-- Between the devices' names on the bar: "Living room TV, Pixel 8". -->
+    <string name="remote_device_separator">", "</string>
+    <string name="remote_live_tv">Live TV</string>
+
+    <!-- A device in the list that plays nothing, and its controls then. -->
+    <string name="remote_ready">Ready to play</string>
+    <string name="remote_nothing_playing">Nothing playing</string>
+    <string name="remote_idle_hint">Send something here with Play on…</string>
+    <!-- What TalkBack says a device's row does, and the way back from its controls. -->
+    <string name="remote_open_device">Show its controls</string>
+    <string name="remote_back_to_devices">Back to your devices</string>
+
+    <!-- What TalkBack says of each control: "Pause on Living room TV". -->
+    <string name="remote_play">Play on %1$s</string>
+    <string name="remote_pause">Pause on %1$s</string>
+    <string name="remote_previous">Previous on %1$s</string>
+    <string name="remote_next">Next on %1$s</string>
+    <!-- Between a channel's down and up buttons, in small capitals. -->
+    <string name="remote_channel">Channel</string>
+    <string name="remote_previous_channel">Previous channel on %1$s</string>
+    <string name="remote_next_channel">Next channel on %1$s</string>
+    <string name="remote_back">Back 10 seconds on %1$s</string>
+    <string name="remote_forward">Forward 30 seconds on %1$s</string>
+    <string name="remote_seek">Seek on %1$s</string>
+    <string name="remote_progress">Progress on %1$s</string>
+    <string name="remote_stop">Stop</string>
+    <string name="remote_stop_on">Stop on %1$s</string>
+    <!-- Stop asks first. -->
+    <string name="remote_stop_confirm">Stop playing on %1$s?</string>
+    <string name="remote_waiting">Waiting for %1$s</string>
+    <string name="remote_position">%1$s of %2$s</string>
+
+    <!-- The tracks and the quality a device plays, each an icon that opens a menu: its hint on a long press, and what TalkBack says. -->
+    <string name="remote_audio">Audio</string>
+    <string name="remote_subtitles">Subtitles</string>
+    <string name="remote_quality">Quality</string>
+    <string name="remote_subtitles_off">Off</string>
+    <string name="remote_audio_on">Audio on %1$s</string>
+    <string name="remote_subtitles_on">Subtitles on %1$s</string>
+    <string name="remote_quality_on">Quality on %1$s</string>
+
+    <!-- A channel playing: the programme on, its times ("20:00 – 21:00"), and the one after it. -->
+    <string name="remote_live_span">%1$s – %2$s</string>
+    <string name="remote_live_next">Next: %1$s</string>
+
+    <!-- A command that didn't go through, said under the device's controls. -->
+    <string name="remote_no_answer">%1$s didn\'t answer.</string>
+    <string name="remote_gone">%1$s isn\'t playing any more.</string>
+    <string name="remote_cant">%1$s can\'t do that.</string>
+    <string name="remote_too_many">Too many at once: try again in a moment.</string>
+
+    <!-- Play on…: sending what a page plays to another of the profile's devices, and its chooser. -->
+    <string name="play_on">Play on…</string>
+    <string name="play_on_live">Watch on…</string>
+    <string name="play_on_shuffle">Shuffle on…</string>
+    <!-- The chooser's switch: what is sent plays shuffled. -->
+    <string name="play_on_shuffle_switch">Shuffle</string>
+    <!-- Sent: the toast, with the device's name. -->
+    <string name="play_on_sent">Playing on %1$s</string>
+    <!-- Refused, said under the chooser's devices. -->
+    <string name="play_on_gone">%1$s isn\'t on any more.</string>
+    <string name="play_on_cant">%1$s can\'t play that.</string>
+</resources>

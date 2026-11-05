@@ -1,9 +1,9 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ItemDetail, MediaFile } from "@/api/types";
-import { makeItem, makeStream } from "@/test/fixtures";
-import { renderWithProviders } from "@/test/render";
+import { makeItem, makeReceiver, makeStream } from "@/test/fixtures";
+import { mockApi, renderWithProviders } from "@/test/render";
 import { VideoItemView } from "./VideoItemView";
 
 const saveStreamChoice = vi.hoisted(() => vi.fn<(itemId: number, body: unknown) => Promise<void>>(() => Promise.resolve()));
@@ -91,6 +91,52 @@ describe("the title page's audio", () => {
     await user.selectOptions(audioMenu(), "Automatic (English)");
     expect(audioMenu().selectedOptions[0]?.textContent).toBe("Automatic (English)");
     expect(saveStreamChoice).toHaveBeenLastCalledWith(5, { file_id: 7, audio_index: null, subtitle_index: null });
+  });
+});
+
+describe("the title page's Play on…", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** What casting a film in `user_state` to the living room TV asks it to play, after `before` on the page. */
+  async function castFrom(
+    user_state: ItemDetail["user_state"],
+    f: MediaFile = file(),
+    before: (user: ReturnType<typeof userEvent.setup>) => Promise<void> = () => Promise.resolve(),
+  ) {
+    const requests = mockApi({
+      "GET /api/sessions": () => [],
+      "GET /api/remote/devices": () => [makeReceiver()],
+      "POST /api/remote/devices/tv-1/cast": () => undefined,
+      "PUT /api/items/5/streams": () => undefined,
+    });
+    const user = userEvent.setup();
+    const { unmount } = renderWithProviders(<VideoItemView item={{ ...movie(f), title: "Test Pattern", user_state }} />);
+    await before(user);
+    await user.click(await screen.findByRole("button", { name: "Play on…" }));
+    await user.click(screen.getByRole("menuitem", { name: "Living room TV" }));
+    await waitFor(() => expect(requests.some((r) => r.method === "POST")).toBe(true));
+    unmount();
+    return requests.find((r) => r.method === "POST")?.body;
+  }
+
+  it("plays it on another device from where Play would resume, and as Play would otherwise", async () => {
+    expect(await castFrom({ position_ms: 90_000, watched: false, play_count: 0 })).toEqual({ item_id: 5, start_ms: 90_000 });
+    expect(await castFrom({ position_ms: 0, watched: true, play_count: 1 })).toEqual({ item_id: 5 });
+  });
+
+  it("sends the audio picked here, and the subtitles shown here (Off included)", async () => {
+    const watched = { position_ms: 0, watched: true, play_count: 1 };
+    const subtitled = file({
+      streams: [
+        ...file().streams,
+        makeStream({ index: 3, kind: "subtitle", codec: "subrip", language: "fre", default: false }),
+      ],
+    });
+    expect(await castFrom(watched, subtitled)).toEqual({ item_id: 5, subtitle_index: -1 });
+    const picked = await castFrom(watched, subtitled, async (user) => {
+      await user.selectOptions(audioMenu(), "English (AAC Stereo)");
+    });
+    expect(picked).toEqual({ item_id: 5, audio_index: 2, subtitle_index: -1 });
   });
 });
 

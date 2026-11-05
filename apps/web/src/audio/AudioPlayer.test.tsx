@@ -83,6 +83,7 @@ const command = (
   command,
   position_ms: more.position_ms ?? null,
   offset_ms: more.offset_ms ?? null,
+  stream_index: null,
 });
 const send = (ev: ServerEvent) => act(() => FakeEventSource.last?.send(ev));
 const starts = (requests: FakeRequest[]) => requests.filter((r) => r.method === "POST" && r.path === "/api/playback");
@@ -127,6 +128,7 @@ describe("AudioPlayer obeying the remote", () => {
 
   it("says what it obeys as a track starts, and plays it in this tab", async () => {
     const { requests } = await playing();
+    // Neither audio nor subtitles: music has no tracks to pick.
     expect(starts(requests)[0]?.body).toMatchObject({
       item_id: 21,
       controls: ["play", "pause", "seek", "skip", "next", "previous"],
@@ -154,6 +156,18 @@ describe("AudioPlayer obeying the remote", () => {
     send(command("play"));
     expect(media.play).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(reports(requests).at(-1)).toMatchObject({ state: "playing", session_id: "t1" }));
+  });
+
+  it("says again that it plays, or is paused, when told so already, so a remote a little behind settles", async () => {
+    const { requests, setPaused } = await playing();
+    send(command("play"));
+    expect(media.play).not.toHaveBeenCalled();
+    await waitFor(() => expect(reports(requests).at(-1)).toMatchObject({ state: "playing", session_id: "t1" }));
+
+    setPaused(true);
+    send(command("pause"));
+    expect(media.pause).not.toHaveBeenCalled();
+    await waitFor(() => expect(reports(requests).at(-1)).toMatchObject({ state: "paused", session_id: "t1" }));
   });
 
   it("seeks, no further than the track's end, and reports where at once", async () => {
@@ -196,5 +210,56 @@ describe("AudioPlayer obeying the remote", () => {
 
     send(command("previous", { session_id: "t2" }));
     await waitFor(() => expect(starts(requests).at(-1)?.body).toMatchObject({ item_id: 21 }));
+  });
+});
+
+describe("AudioPlayer paused", () => {
+  beforeEach(() => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => undefined);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps saying it is paused, so remotes keep listing it", async () => {
+    const requests = serve();
+    const { container } = renderWithProviders(
+      <AudioPlayerProvider>
+        <Queue />
+      </AudioPlayerProvider>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Play" }));
+    const audio = container.querySelector("audio")!;
+    await waitFor(() => expect(audio.getAttribute("src")).toBe("/api/playback/t1/file"));
+    act(() => {
+      audio.dispatchEvent(new Event("play"));
+    });
+
+    vi.useFakeTimers();
+    act(() => {
+      audio.dispatchEvent(new Event("pause"));
+    });
+    const paused = reports(requests).length;
+    expect(reports(requests).at(-1)).toMatchObject({ state: "paused", session_id: "t1" });
+
+    // The server counts a player quiet for 90 s as gone: one report every 30 s.
+    act(() => {
+      vi.advanceTimersByTime(29_000);
+    });
+    expect(reports(requests)).toHaveLength(paused);
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+    expect(reports(requests)).toHaveLength(paused + 1);
+    expect(reports(requests).at(-1)).toMatchObject({ state: "paused", session_id: "t1" });
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(reports(requests)).toHaveLength(paused + 3);
   });
 });

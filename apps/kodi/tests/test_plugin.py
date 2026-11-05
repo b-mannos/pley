@@ -93,6 +93,47 @@ class SwitchProfileTest(unittest.TestCase):
         told.assert_called_with(kodi.text("watching_as") % "Ben")
 
 
+class PlayRouteTest(unittest.TestCase):
+    """Where the play route starts a title."""
+
+    def setUp(self):
+        kodi.set_property(kodi.PROXY, "http://127.0.0.1:5000/s3cret")
+        self.addCleanup(kodi.clear_property, kodi.PROXY)
+        self.started = []
+        self.given = []
+
+        def prepare(client, base, item_id, start_ms, detail=None, kind=None, given=None):
+            self.started.append(start_ms)
+            self.given.append(given)
+            return xbmcgui.ListItem()
+
+        patch = mock.patch.object(plugin.playback, "prepare", side_effect=prepare)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def play(self, query, resume=False):
+        plugin.Plugin(["plugin://plugin.video.pley/", "1", "?" + query, "resume:%s" % ("true" if resume else "false")]).run()
+
+    def test_a_place_it_is_given_whatever_kodi_was_told(self):
+        # A cast's place, from the start or not.
+        self.play("route=play&id=5&kind=movie&start=60000")
+        self.play("route=play&id=5&kind=movie&start=60000", resume=True)
+        self.play("route=play&id=5&kind=movie&start=0", resume=True)
+        # A listing's resume point, where Kodi was told to resume.
+        self.play("route=play&id=5&pos=30000")
+        self.play("route=play&id=5&pos=30000", resume=True)
+        self.play("route=play&id=5&start=soon")
+        self.assertEqual(self.started, [60000, 60000, 0, 0, 30000, 0])
+
+    def test_a_casts_tracks_go_with_the_play(self):
+        self.play("route=play&id=5&kind=movie&start=0&audio=2&subtitle=3")
+        self.play("route=play&id=5&kind=movie&start=0&subtitle=-1")
+        self.play("route=play&id=5&kind=movie&start=0&audio=-1")
+        self.play("route=play&id=5&kind=movie&start=0&audio=two&subtitle=-2")
+        self.play("route=play&id=5&kind=movie&start=0")
+        self.assertEqual(self.given, [{"audio": 2, "subtitle": 3}, {"audio": None, "subtitle": -1}, None, None, None])
+
+
 class TwoStepTest(unittest.TestCase):
     """Whether the server requires two-step sign-in, which the sign-in
     screen says: the phone that approves the code sets it up."""

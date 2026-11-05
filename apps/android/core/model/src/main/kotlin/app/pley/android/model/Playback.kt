@@ -82,6 +82,249 @@ data class PlaybackRequest(
     val keepPrevious: Boolean? = null,
     /** What this device decodes. */
     val caps: ClientCaps = ClientCaps(),
+    /** The remote's commands this player obeys (Remote control); `null` leaves them out: none but Stop. */
+    val controls: List<Control>? = null,
+    /** What remotes call this device ("Living room TV"); `null`: the server names it from the User-Agent. */
+    val deviceName: String? = null,
+    /** What kind of device it plays on; `null`: the server tells from the app, which for this one is [DeviceKind.Other]. */
+    val deviceKind: DeviceKind? = null,
+)
+
+/**
+ * What kind of device a session plays on (docs/API.md, "Remote control"):
+ * what its player says in its play request, else what the server makes of
+ * the app.
+ */
+@Serializable(with = DeviceKind.Serializer::class)
+enum class DeviceKind(override val wire: String) : WireEnum {
+    Tv("tv"),
+    Phone("phone"),
+    Tablet("tablet"),
+    Computer("computer"),
+    Browser("browser"),
+    Other("other"),
+    Unknown("unknown"),
+    ;
+
+    object Serializer : LenientEnumSerializer<DeviceKind>("DeviceKind", DeviceKind.entries, DeviceKind.Unknown)
+}
+
+/**
+ * A command of the remote, from another of the profile's devices
+ * (docs/API.md, "Remote control"): what a player says it obeys in its play
+ * request, and what a remote sends it. Stop is always obeyed, and isn't one.
+ */
+@Serializable(with = Control.Serializer::class)
+enum class Control(override val wire: String) : WireEnum {
+    Play("play"),
+    Pause("pause"),
+
+    /** To a place: `position_ms`. */
+    Seek("seek"),
+
+    /** Back or forward from where it is: `offset_ms`. */
+    Skip("skip"),
+
+    /** The next episode or track; on Live TV, the next channel. */
+    Next("next"),
+
+    /** The track before, or the start of this one; on Live TV, the channel before. */
+    Previous("previous"),
+
+    /** Another audio track of the title: `stream_index`. */
+    Audio("audio"),
+
+    /** Other subtitles of the title, or none: `stream_index`, `-1` for none. */
+    Subtitles("subtitles"),
+
+    /** Another entry of the Quality menu: `quality`, one of the session's [PlayingSession.qualities]. */
+    Quality("quality"),
+    Unknown("unknown"),
+    ;
+
+    object Serializer : LenientEnumSerializer<Control>("Control", Control.entries, Control.Unknown)
+}
+
+/** What a session of GET /api/sessions plays. */
+@Serializable(with = PlayingKind.Serializer::class)
+enum class PlayingKind(override val wire: String) : WireEnum {
+    /** A movie, an episode or a track: [PlayingSession.item]. */
+    Item("item"),
+
+    /** A Live TV channel: [PlayingSession.channel]. */
+    Live("live"),
+    Unknown("unknown"),
+    ;
+
+    object Serializer : LenientEnumSerializer<PlayingKind>("PlayingKind", PlayingKind.entries, PlayingKind.Unknown)
+}
+
+/**
+ * The channel a live session of GET /api/sessions watches: [now] is the
+ * programme on, from [nowStart] to [nowStop] (unix seconds), and [next] the
+ * one after it.
+ */
+@Serializable
+data class PlayingChannel(
+    val id: Long,
+    val name: String = "",
+    val number: String? = null,
+    val logo: String? = null,
+    val now: String? = null,
+    val nowStart: Long? = null,
+    val nowStop: Long? = null,
+    val next: String? = null,
+)
+
+/**
+ * One of the profile's sessions whose player is there (GET /api/sessions),
+ * on this device or another. While it plays, it is at [positionMs] plus
+ * [ageMs] plus the time since the answer came, by this device's clock: the
+ * server says how long ago its player reported rather than when, so the
+ * two clocks are never compared.
+ */
+@Serializable
+data class PlayingSession(
+    val sessionId: String,
+    val kind: PlayingKind = PlayingKind.Unknown,
+    /** What the player calls its device; `null` when the server can't tell. */
+    val device: String? = null,
+    /**
+     * Which device that is, the same for everything one sign-in plays
+     * ("app-12", "web-9f2c…"); empty from a server before it said.
+     */
+    val deviceId: String = "",
+    /** And what kind; [DeviceKind.Unknown] from a server before it said. */
+    val deviceKind: DeviceKind = DeviceKind.Unknown,
+    val item: ItemSummary? = null,
+    val channel: PlayingChannel? = null,
+    /** Playing, paused or buffering; live is always playing. */
+    val state: ProgressState = ProgressState.Unknown,
+    /** Live: 0. */
+    val positionMs: Long = 0,
+    /** `null` when the length isn't known, and on live. */
+    val durationMs: Long? = null,
+    /** Its player's last report: unix seconds, by the server's clock. */
+    val updatedAt: Long = 0,
+    /** How long before the answer that report was, by the server's clock. */
+    val ageMs: Long = 0,
+    /** What its player obeys; Stop always works. */
+    val controls: List<Control> = emptyList(),
+    /** The audio track it plays, by stream index; `null` when not known, and on live. */
+    val audioIndex: Int? = null,
+    /** The subtitles it shows, by stream index, [SUBTITLES_OFF] for none; `null` when not known, and on live. */
+    val subtitleIndex: Int? = null,
+    /** Its file's tracks, which [Control.Audio] and [Control.Subtitles] pick from; none on live. */
+    val tracks: SessionTracks = SessionTracks(),
+    /** Its Quality menu's pick, by id ("auto", "original", "8m"…); `null` until its player says, and on live and music. */
+    val quality: String? = null,
+    /** What its Quality menu offers for the file, which [Control.Quality] picks from; none on live and music. */
+    val qualities: List<QualityOption> = emptyList(),
+) {
+    companion object {
+        /** The subtitle index of none, in sessions, commands and progress reports. */
+        const val SUBTITLES_OFF = -1
+    }
+}
+
+/** The tracks of a session's file (GET /api/sessions): the audio and the subtitles a remote picks from. */
+@Serializable
+data class SessionTracks(
+    val audio: List<TrackOption> = emptyList(),
+    val subtitles: List<TrackOption> = emptyList(),
+)
+
+/** One of [SessionTracks]: [index] is the stream index commands and reports name. */
+@Serializable
+data class TrackOption(
+    val index: Int,
+    /** "eng". */
+    val language: String? = null,
+    val title: String? = null,
+    /** "eac3", "subrip". */
+    val codec: String? = null,
+    /** Audio only. */
+    val channels: Int? = null,
+    val default: Boolean = false,
+    val forced: Boolean = false,
+)
+
+/** One entry of a session's Quality menu (GET /api/sessions): [id] is what commands and reports name. */
+@Serializable
+data class QualityOption(
+    /** "auto", "original", "8m"… */
+    val id: String,
+    /** "Automatic", "Original", "8 Mbps 1080p"… */
+    val label: String = "",
+)
+
+/**
+ * The body of POST /api/sessions/{id}/command: [positionMs] for
+ * [Control.Seek] (0 to the length), [offsetMs] for [Control.Skip] (up to
+ * 10 minutes either way), [streamIndex] for [Control.Audio] and
+ * [Control.Subtitles] (one of the session's tracks; subtitles
+ * [PlayingSession.SUBTITLES_OFF] for none), [quality] for [Control.Quality]
+ * (one of the session's [PlayingSession.qualities]); the other commands take
+ * none.
+ */
+@Serializable
+data class PlayerCommandRequest(
+    val command: Control,
+    val positionMs: Long? = null,
+    val offsetMs: Long? = null,
+    val streamIndex: Int? = null,
+    val quality: String? = null,
+)
+
+/** What a device plays when a remote casts to it (docs/API.md, "Casting"). */
+@Serializable(with = CastKind.Serializer::class)
+enum class CastKind(override val wire: String) : WireEnum {
+    /** Titles, music and playlists. */
+    Item("item"),
+
+    /** Live TV channels. */
+    Live("live"),
+    Unknown("unknown"),
+    ;
+
+    object Serializer : LenientEnumSerializer<CastKind>("CastKind", CastKind.entries, CastKind.Unknown)
+}
+
+/**
+ * One of the profile's devices that takes casts (GET /api/remote/devices):
+ * one of its apps with the event stream open as a receiver, the one that
+ * connected last for its device.
+ */
+@Serializable
+data class RemoteDevice(
+    /** The app's own id for the device: where casts go. */
+    val receiverId: String,
+    /** As [PlayingSession.deviceId]: what it plays has the same. */
+    val deviceId: String = "",
+    /** As [PlayingSession.device]; `null` when the server can't tell. */
+    val name: String? = null,
+    val kind: DeviceKind = DeviceKind.Unknown,
+    /** What it plays when cast to. */
+    val casts: List<CastKind> = emptyList(),
+)
+
+/**
+ * The body of POST /api/remote/devices/{id}/cast: exactly one of [itemId]
+ * (a movie, an episode, a show, a season, a track, an album or an artist),
+ * [playlistId] and [channelId]; [startMs] where a title starts (0 to a
+ * day), [shuffle] for a playlist, an album or an artist; [audioIndex] and
+ * [subtitleIndex] ([PlayingSession.SUBTITLES_OFF]: none) the tracks picked
+ * on a movie's or an episode's page, which the device plays with.
+ */
+@Serializable
+data class CastRequest(
+    val itemId: Long? = null,
+    val playlistId: Long? = null,
+    val channelId: Long? = null,
+    val startMs: Long? = null,
+    val shuffle: Boolean? = null,
+    val audioIndex: Int? = null,
+    val subtitleIndex: Int? = null,
 )
 
 /** Where a download stands on the server (apps/server/src/api/playback.rs, `DownloadState`). */
@@ -308,6 +551,12 @@ data class ProgressReport(
      * to the item since.
      */
     val ageMs: Long? = null,
+    /** The audio track the player plays, by stream index; `null` leaves it out, and the server keeps what it knew. */
+    val audioIndex: Int? = null,
+    /** The subtitles it shows, by stream index, [PlayingSession.SUBTITLES_OFF] for none; `null` leaves it out. */
+    val subtitleIndex: Int? = null,
+    /** Its Quality menu's pick, by id ("auto", "original", "8m"…); `null` leaves it out (music, Live TV). */
+    val quality: String? = null,
 )
 
 /**

@@ -17,14 +17,26 @@ function playerShouldReport(state as string, sinceLastMs as integer) as boolean
     return state = "playing" and sinceLastMs >= playerReportEveryMs()
 end function
 
-' The body of POST /api/items/{id}/progress.
-function playerProgress(positionMs as dynamic, durationMs as dynamic, state as string, sessionId as string) as object
+' The body of POST /api/items/{id}/progress. A video's tracks ({ audio,
+' subtitle, quality }: the stream indexes it plays, -1 for none, and the
+' id of its Quality menu's pick) go with it, for the user's remotes to
+' tick; one not known (-2, or "") is left out, which keeps what the server
+' knew. Music has none.
+function playerProgress(positionMs as dynamic, durationMs as dynamic, state as string, sessionId as string, tracks = invalid as dynamic) as object
     position = Int(httpNumber(positionMs, 0))
     if position < 0 then position = 0
     body = { position_ms: position, state: state }
     duration = Int(httpNumber(durationMs, 0))
     if duration > 0 then body.duration_ms = duration
     if sessionId <> "" then body.session_id = sessionId
+    if tracks <> invalid
+        audio = Int(httpNumber(tracks.audio, -2))
+        subtitle = Int(httpNumber(tracks.subtitle, -2))
+        if audio >= -1 then body.audio_index = audio
+        if subtitle >= -1 then body.subtitle_index = subtitle
+        quality = httpString(tracks.quality)
+        if quality <> "" then body.quality = quality
+    end if
     return body
 end function
 
@@ -179,6 +191,16 @@ function playerSkipTarget(marker as object, durationMs as dynamic) as integer
     duration = Int(httpNumber(durationMs, 0))
     if duration > 0 and target >= duration - playerSkipTailMs() then return -1
     return target
+end function
+
+' Whether something may come after item: a playlist's or collection's
+' next entry (queue, the entries, playing the one at queueAt), else the
+' next episode, which only an episode may have. The user's remote is told
+' the video obeys next when it may (Remote.brs).
+function playerMayHaveNext(item as dynamic, queue as dynamic, queueAt as integer) as boolean
+    if GetInterface(queue, "ifArray") <> invalid then return queueAt + 1 < queue.Count()
+    data = httpObject(item)
+    return data <> invalid and httpString(data.kind) = "episode"
 end function
 
 ' Up Next counts down this many seconds before the next episode plays.

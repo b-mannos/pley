@@ -641,6 +641,14 @@ object PleyIcons {
         "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2z",
     )
 
+    /** Lucide `circle-stop`. */
+    val CircleStop = PleyIcon(
+        "circle-stop",
+        false,
+        "M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0z",
+        "M10 9h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1v-4a1 1 0 0 1 1 -1z",
+    )
+
     /** Lucide `loader-circle`. */
     val LoaderCircle = PleyIcon(
         "loader-circle",
@@ -872,6 +880,43 @@ object PleyIcons {
         "M2 8.82a15 15 0 0 1 20 0",
         "M5 12.859a10 10 0 0 1 14 0",
         "M8.5 16.429a5 5 0 0 1 7 0",
+    )
+
+    /** Lucide `tablet`. */
+    val Tablet = PleyIcon(
+        "tablet",
+        false,
+        "M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-16a2 2 0 0 1 2 -2z",
+        "M12 18L12.01 18",
+    )
+
+    /** Lucide `globe`. */
+    val Globe = PleyIcon(
+        "globe",
+        false,
+        "M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0z",
+        "M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20",
+        "M2 12h20",
+    )
+
+    /** Lucide `monitor-smartphone`. */
+    val MonitorSmartphone = PleyIcon(
+        "monitor-smartphone",
+        false,
+        "M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8",
+        "M10 19v-3.96 3.15",
+        "M7 19h5",
+        "M18 12h2a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2v-6a2 2 0 0 1 2 -2z",
+    )
+
+    /** Lucide `cast`. */
+    val Cast = PleyIcon(
+        "cast",
+        false,
+        "M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6",
+        "M2 12a9 9 0 0 1 8 8",
+        "M2 16a5 5 0 0 1 4 4",
+        "M2 20L2.01 20",
     )
 
     /** Lucide `hard-drive`. */

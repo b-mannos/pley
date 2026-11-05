@@ -305,14 +305,25 @@ public struct ProgressReport: Codable, Hashable, Sendable {
     /// How long ago the report was made, for one sent late: the server
     /// keeps whatever happened to the item since.
     public var ageMs: Int?
+    /// The tracks the player plays now, by stream index (`subtitleIndex`
+    /// `SessionTracks.off`: none), kept on the session for the profile's
+    /// remotes; `nil` leaves out what it doesn't say (music, a download).
+    public var audioIndex: Int?
+    public var subtitleIndex: Int?
+    /// The Quality menu's pick, by id ("auto", "8m"), kept on the session
+    /// for the profile's remotes; `nil` for music and a download.
+    public var quality: String?
 
     public init(positionMs: Int, durationMs: Int? = nil, state: ProgressState = .playing, sessionId: String? = nil,
-                ageMs: Int? = nil) {
+                ageMs: Int? = nil, audioIndex: Int? = nil, subtitleIndex: Int? = nil, quality: String? = nil) {
         self.positionMs = positionMs
         self.durationMs = durationMs
         self.state = state
         self.sessionId = sessionId
         self.ageMs = ageMs
+        self.audioIndex = audioIndex
+        self.subtitleIndex = subtitleIndex
+        self.quality = quality
     }
 }
 

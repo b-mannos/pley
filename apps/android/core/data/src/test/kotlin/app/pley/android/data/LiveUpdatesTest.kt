@@ -1,13 +1,17 @@
 package app.pley.android.data
 
+import app.pley.android.model.CastKind
 import app.pley.android.model.ItemKind
 import app.pley.android.model.ItemList
 import app.pley.android.model.ItemSummary
 import app.pley.android.model.Library
 import app.pley.android.model.LibraryKind
+import app.pley.android.model.LiveSummary
 import app.pley.android.model.ScanPhase
 import app.pley.android.model.ServerEvent
+import app.pley.android.network.EventReceiver
 import app.pley.android.network.LiveEvent
+import app.pley.android.network.OfflineException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -49,6 +53,193 @@ class LiveUpdatesTest {
         testScheduler.runCurrent()
         assertEquals(0, data.events.connected.value)
         assertEquals(2, data.events.connections)
+    }
+
+    @Test
+    fun `while something plays the stream stays open in the background, and closes when it ends`() = runTest {
+        val data = signedIn(folder.newFolder())
+        val live = data.graph.liveUpdates
+        live.start()
+        testScheduler.runCurrent()
+        val music = Any()
+        val video = Any()
+        live.playing(music, true)
+        live.playing(video, true)
+        data.foreground.value = false
+        testScheduler.runCurrent()
+        // Kept open, naming this device no more: nothing cast plays in the background.
+        assertEquals(1, data.events.connected.value)
+        assertEquals(2, data.events.connections)
+        assertEquals(null, data.events.receivers.last())
+
+        live.playing(video, false)
+        testScheduler.runCurrent()
+        assertEquals(1, data.events.connected.value)
+        // Saying it twice changes nothing.
+        live.playing(music, true)
+        live.playing(music, false)
+        live.playing(music, false)
+        testScheduler.runCurrent()
+        assertEquals(0, data.events.connected.value)
+
+        // A playback that starts in the background opens it.
+        live.playing(music, true)
+        testScheduler.runCurrent()
+        assertEquals(1, data.events.connected.value)
+        assertEquals(3, data.events.connections)
+    }
+
+    @Test
+    fun `signing out closes the stream something playing kept open`() = runTest {
+        val data = signedIn(folder.newFolder())
+        val live = data.graph.liveUpdates
+        live.start()
+        live.playing(this, true)
+        data.foreground.value = false
+        testScheduler.runCurrent()
+        assertEquals(1, data.events.connected.value)
+        data.graph.session.signOut()
+        testScheduler.runCurrent()
+        assertEquals(0, data.events.connected.value)
+        live.playing(this, false)
+    }
+
+    @Test
+    fun `coming back while something kept the stream open asks again for what is old`() = runTest {
+        val data = signedIn(folder.newFolder())
+        collect(data.graph.hubs.home())
+        val live = data.graph.liveUpdates
+        live.start()
+        live.playing(this, true)
+        testScheduler.runCurrent()
+        data.foreground.value = false
+        time(60_000)
+
+        data.foreground.value = true
+        testScheduler.runCurrent()
+        // Opened again, naming this device again.
+        assertEquals(3, data.events.connections)
+        assertEquals(2, data.api.calls("homeHubs").size)
+        live.playing(this, false)
+    }
+
+    @Test
+    fun `in the background, events and reconnections only mark what they touch, asked for when next shown`() = runTest {
+        val data = signedIn(folder.newFolder())
+        collect(data.graph.hubs.home())
+        val live = data.graph.liveUpdates
+        live.start()
+        live.playing(this, true)
+        testScheduler.runCurrent()
+        data.foreground.value = false
+        time(60_000)
+
+        data.events.send(LiveEvent.Dropped)
+        data.events.send(LiveEvent.Reconnected)
+        data.events.send(LiveEvent.Event(ServerEvent.WatchlistChanged))
+        data.events.send(LiveEvent.Event(ServerEvent.LibraryChanged(1)))
+        time(2_000)
+        assertEquals(1, data.api.calls("homeHubs").size)
+
+        data.foreground.value = true
+        testScheduler.runCurrent()
+        assertEquals(2, data.api.calls("homeHubs").size)
+        live.playing(this, false)
+    }
+
+    @Test
+    fun `a stream refused while something plays opens again on coming back`() = runTest {
+        val data = signedIn(folder.newFolder())
+        val live = data.graph.liveUpdates
+        live.start()
+        live.playing(this, true)
+        testScheduler.runCurrent()
+        data.foreground.value = false
+        testScheduler.runCurrent()
+        data.events.refuse(403)
+        time(120_000)
+        assertEquals(2, data.events.connections)
+
+        data.foreground.value = true
+        testScheduler.runCurrent()
+        assertEquals(3, data.events.connections)
+        live.playing(this, false)
+    }
+
+    @Test
+    fun `in front the stream names this device as a receiver of titles, and of channels while Live TV is open`() = runTest {
+        val data = signedIn(folder.newFolder())
+        val id = data.graph.servers.clientId()
+        val live = data.graph.liveUpdates
+        live.start()
+        testScheduler.runCurrent()
+        assertEquals(listOf(EventReceiver(id, listOf(CastKind.Item, CastKind.Live))), data.events.receivers)
+        // Casts are this device's once it is connected as one.
+        assertEquals(null, live.receiver.value)
+        data.events.send(LiveEvent.Reconnected)
+        testScheduler.runCurrent()
+        assertEquals(id, live.receiver.value)
+
+        data.events.send(LiveEvent.Dropped)
+        testScheduler.runCurrent()
+        assertEquals(null, live.receiver.value)
+    }
+
+    @Test
+    fun `Live TV closed to the profile, the stream names titles only`() = runTest {
+        val data = signedIn(folder.newFolder()) { api.answer("liveSummary", LiveSummary(available = false, allowed = false)) }
+        data.graph.liveUpdates.start()
+        testScheduler.runCurrent()
+        assertEquals(listOf(CastKind.Item), data.events.receivers.single()?.casts)
+    }
+
+    @Test
+    fun `Live TV out of reach, the stream names titles only`() = runTest {
+        val data = signedIn(folder.newFolder()) { api.fail("liveSummary", OfflineException(java.io.IOException("away"))) }
+        data.graph.liveUpdates.start()
+        testScheduler.runCurrent()
+        assertEquals(listOf(CastKind.Item), data.events.receivers.single()?.casts)
+    }
+
+    @Test
+    fun `Live TV not known yet, the stream waits a moment for it, then names titles`() = runTest {
+        val data = signedIn(folder.newFolder())
+        data.api.hold()
+        data.graph.liveUpdates.start()
+        testScheduler.runCurrent()
+        assertEquals(0, data.events.connections)
+        time(ServerLiveUpdates.LIVE_WAIT_MS)
+        assertEquals(listOf(CastKind.Item), data.events.receivers.single()?.casts)
+        data.api.release()
+    }
+
+    @Test
+    fun `in the background and signed out, casts aren't this device's`() = runTest {
+        val data = signedIn(folder.newFolder())
+        val live = data.graph.liveUpdates
+        live.start()
+        live.playing(this, true)
+        testScheduler.runCurrent()
+        data.events.send(LiveEvent.Reconnected)
+        testScheduler.runCurrent()
+        assertTrue(live.receiver.value != null)
+
+        data.foreground.value = false
+        testScheduler.runCurrent()
+        assertEquals(null, live.receiver.value)
+        data.events.send(LiveEvent.Reconnected)
+        testScheduler.runCurrent()
+        assertEquals(null, live.receiver.value)
+
+        data.foreground.value = true
+        testScheduler.runCurrent()
+        data.events.send(LiveEvent.Reconnected)
+        testScheduler.runCurrent()
+        assertTrue(live.receiver.value != null)
+        data.graph.session.signOut()
+        testScheduler.runCurrent()
+        assertEquals(null, live.receiver.value)
+        live.playing(this, false)
     }
 
     @Test

@@ -15,12 +15,12 @@ use std::sync::{Arc, Weak};
 
 use pley_base::Key;
 use pley_core::http::sentence;
-use pley_core::model::{ItemKind, ItemList, ItemSummary, ServerEvent};
+use pley_core::model::{Control, ItemKind, ItemList, ItemSummary, ServerEvent};
 use pley_core::{Api, ApiError, PlayerEngine, Promise, Tasks};
-use pley_player::music::RESTART_MS;
+use pley_player::remote::{Command, RemoteAction, restarts_track};
 use pley_player::sleep::SleepState;
 use pley_player::{MusicSession, NowPlaying, PlayerEnv};
-use pley_shell::{AppCx, BackgroundSession};
+use pley_shell::{AppCx, BackgroundSession, CastTracks};
 use pley_ui::Ui;
 
 use crate::pages::{self, SEEK_STEP_MS};
@@ -227,9 +227,14 @@ impl MusicPlayer {
     /// Plays `tracks` from `at` (shuffled with `at` first); an artist's Play still on its way gives
     /// way to it.
     pub fn play(&mut self, tracks: Vec<ItemSummary>, at: usize, shuffle: bool) {
+        self.play_from(tracks, at, shuffle, 0);
+    }
+
+    /// [`MusicPlayer::play`], `from_ms` into the first track.
+    pub fn play_from(&mut self, tracks: Vec<ItemSummary>, at: usize, shuffle: bool, from_ms: i64) {
         self.gathering = None;
         self.forget_place();
-        self.session.play(tracks, at, shuffle);
+        self.session.play_from(tracks, at, shuffle, from_ms);
     }
 
     /// Play/Pause: plays or pauses; during a track's start, the start opens paused (or plays
@@ -280,7 +285,7 @@ impl MusicPlayer {
     pub fn previous(&mut self) {
         let Some(index) = self.session.now_playing().map(|n| n.index) else { return };
         if let Some(at) = self.held_at {
-            if at <= RESTART_MS && index > 0 {
+            if !restarts_track(at, index) {
                 self.forget_place();
                 self.session.jump_to(index - 1);
             } else {
@@ -501,8 +506,24 @@ impl BackgroundSession for MusicPlayer {
         self.session.stop();
     }
 
+    /// A stop, or the user's remote on another device. The remote acts only while a session
+    /// plays the track, never on a place held after the music gave way: a track or place it goes
+    /// to is the one shown. While the track starts, its Pause opens it paused, as the Pause here
+    /// does, and its Play wins over a Pause pressed here.
     fn server_event(&mut self, event: &ServerEvent) {
-        self.session.server_event(event);
+        let Some(command) = Command::of(event) else {
+            self.session.server_event(event);
+            return;
+        };
+        let starting = self.starting();
+        match self.session.obey(&command) {
+            RemoteAction::Seek(_) | RemoteAction::Next | RemoteAction::Previous => self.forget_place(),
+            RemoteAction::Play => self.hold = false,
+            // A start counts as playing: Play finds it so.
+            RemoteAction::Report if command.command == Control::Play => self.hold = false,
+            RemoteAction::Pause if starting => self.hold = true,
+            _ => {}
+        }
     }
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
@@ -534,12 +555,20 @@ pub fn current_track(cx: &mut AppCx) -> Option<(i64, bool)> {
 /// Plays `tracks` from `at` (shuffled with `at` first) on the app's music player; false without a
 /// server to play from.
 pub fn play(cx: &mut AppCx, tracks: Vec<ItemSummary>, at: usize, shuffle: bool) -> bool {
+    cast(cx, CastTracks { tracks, at, shuffle, start_ms: 0 })
+}
+
+/// Plays the tracks a remote cast on the app's music player, as an album's Play or Shuffle does,
+/// from where the cast says in the first; false without a server to play from. The shell opens
+/// Now Playing.
+pub fn cast(cx: &mut AppCx, cast: CastTracks) -> bool {
+    let CastTracks { tracks, at, shuffle, start_ms } = cast;
     if tracks.is_empty() {
         return false;
     }
     let now_ms = (cx.now * 1000.0) as i64;
     let Some(m) = player(cx) else { return false };
-    m.play(tracks, at, shuffle);
+    m.play_from(tracks, at, shuffle, start_ms);
     m.session.tick(now_ms);
     true
 }

@@ -564,6 +564,12 @@ export interface ProgressRequest {
   duration_ms?: number;
   state: PlaybackState;
   session_id?: string;
+  /** The audio track it plays, by stream index, for the user's remotes; left out: as known before. */
+  audio_index?: number;
+  /** The subtitles it shows, by stream index (-1: none). */
+  subtitle_index?: number;
+  /** Its Quality menu's pick, by id ("auto", "original", "8m"…). */
+  quality?: string;
 }
 
 export type ScanPhase = "queued" | "walking" | "probing" | "metadata" | "done";
@@ -629,17 +635,49 @@ export interface SessionInfo {
 }
 
 /** A command a remote sends one of the user's players (`POST /api/sessions/{id}/command`). */
-export type Control = "play" | "pause" | "seek" | "skip" | "next" | "previous";
+export type Control = "play" | "pause" | "seek" | "skip" | "next" | "previous" | "audio" | "subtitles" | "quality";
+
+/** What kind of device plays a session, or takes casts: remotes show each with its own icon. */
+export type DeviceKind = "tv" | "phone" | "tablet" | "computer" | "browser" | "other";
+
+/** One of a title's audio or subtitle tracks, which a remote picks from (`PlayingSession.tracks`). */
+export interface TrackOption {
+  /** The stream index commands and progress reports name. */
+  index: number;
+  language: string | null;
+  title: string | null;
+  codec: string | null;
+  /** Audio only. */
+  channels: number | null;
+  default: boolean;
+  forced: boolean;
+}
 
 /** One of the user's own sessions whose player is there (`GET /api/sessions`): what remotes control. */
 export interface PlayingSession {
   session_id: string;
   kind: "item" | "live";
   device: string | null;
+  /** Which device plays it: everything one sign-in plays has the same, which receivers have too. */
+  device_id: string;
+  device_kind: DeviceKind;
   /** What plays (kind "item"). */
   item: ItemSummary | null;
-  /** The channel watched (kind "live"); `now`: the programme on. */
-  channel: { id: Id; name: string; number: string | null; logo: string | null; now: string | null } | null;
+  /**
+   * The channel watched (kind "live"): `now`, the programme on, from
+   * `now_start` to `now_stop` (unix seconds), and `next`, the one after it.
+   * The times and `next` are absent from servers before them.
+   */
+  channel: {
+    id: Id;
+    name: string;
+    number: string | null;
+    logo: string | null;
+    now: string | null;
+    now_start?: Timestamp | null;
+    now_stop?: Timestamp | null;
+    next?: string | null;
+  } | null;
   /** Live: always "playing". */
   state: "playing" | "paused" | "buffering";
   /** Live: 0. */
@@ -652,6 +690,47 @@ export interface PlayingSession {
   age_ms: number;
   /** What its player obeys; Stop always works. */
   controls: Control[];
+  /** The audio track it plays, by stream index; null when not known, and on live. */
+  audio_index: number | null;
+  /** The subtitles it shows, by stream index (-1: none); null when not known, and on live. */
+  subtitle_index: number | null;
+  /** Its file's tracks, which `audio` and `subtitles` pick from; empty on live. */
+  tracks: { audio: TrackOption[]; subtitles: TrackOption[] };
+  /** Its Quality menu's pick, by id; null until its player says (absent from servers before it). */
+  quality?: string | null;
+  /** What its Quality menu offers for the file, which `quality` picks from; empty for music and on live. */
+  qualities?: { id: string; label: string }[];
+}
+
+/** What a device plays when cast to: titles, music and playlists (`item`), Live TV channels (`live`). */
+export type CastKind = "item" | "live";
+
+/** One of the user's devices that takes casts (`GET /api/remote/devices`). */
+export interface RemoteDevice {
+  /** The app's own id for the device: where casts go. */
+  receiver_id: string;
+  /** As its sessions say it: what it plays has the same. */
+  device_id: string;
+  name: string | null;
+  kind: DeviceKind;
+  casts: CastKind[];
+}
+
+/**
+ * What a remote sends a device to play (`POST /api/remote/devices/{id}/cast`):
+ * exactly one of a title, a playlist and a channel.
+ */
+export interface CastRequest {
+  item_id?: Id;
+  playlist_id?: Id;
+  channel_id?: Id;
+  /** Where a title starts (ms); left out, where the device's own Play would. */
+  start_ms?: number;
+  /** A playlist, an album or an artist, shuffled. */
+  shuffle?: boolean;
+  /** A movie or an episode: the audio track and subtitles (-1: off) picked on the page, by stream index. */
+  audio_index?: number;
+  subtitle_index?: number;
 }
 
 export interface Activity {
@@ -723,9 +802,36 @@ export type ServerEvent =
   | { type: "session_stopped"; session_id: string; message: string | null; by_admin: boolean }
   /**
    * The user's remote sent their player of `session_id` a command: `seek`
-   * has `position_ms`, `skip` has `offset_ms` (back when negative).
+   * has `position_ms`, `skip` has `offset_ms` (back when negative), `audio`
+   * and `subtitles` the track's `stream_index` (subtitles -1: off),
+   * `quality` the Quality menu's entry by id (absent from servers before it).
    */
-  | { type: "player_command"; session_id: string; command: Control; position_ms: number | null; offset_ms: number | null }
+  | {
+      type: "player_command";
+      session_id: string;
+      command: Control;
+      position_ms: number | null;
+      offset_ms: number | null;
+      stream_index: number | null;
+      quality?: string | null;
+    }
+  /**
+   * The user's remote sent their device of `receiver_id` something to play
+   * (`from`: the remote's device name). For apps that take casts: the web
+   * app is a remote only, and leaves it.
+   */
+  | {
+      type: "cast";
+      receiver_id: string;
+      item_id: Id | null;
+      playlist_id: Id | null;
+      channel_id: Id | null;
+      start_ms: number | null;
+      shuffle: boolean;
+      audio_index?: number | null;
+      subtitle_index?: number | null;
+      from: string | null;
+    }
   /** Live TV's sources, channels or guide changed. */
   | { type: "live_channels_changed" }
   /** A live channel started or stopped being watched: the connections in use changed. */

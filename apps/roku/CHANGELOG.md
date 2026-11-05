@@ -10,6 +10,27 @@ describes how they are made.
 
 ### Added
 
+- Your phone or browser changes the quality of a film or episode playing
+  on the Roku, as the player's Quality menu does (the pick is kept as the
+  Roku's), and sees which is picked. A film or episode sent with "Play
+  on…" plays with the audio and subtitles picked on its page.
+- Your phone or browser plays a film, an episode, a show, an album, an
+  artist, a track, a playlist or a Live TV channel on the Roku ("Play
+  on…"): it starts as the Roku's own Play would, in place of what plays,
+  and the Roku says "Playing from" the device it came from. It needs an
+  `http://` server, as the rest of the remote does.
+- Your phone or browser changes the audio and subtitles of a film or
+  episode playing on the Roku, as the player's own menu does (a pick is
+  saved for the show or movie), and sees which play. Like the rest of the
+  remote, it needs an `http://` server.
+- Your phone or browser controls what plays on the Roku: a film or
+  episode plays, pauses, seeks and skips, and goes on to the next one;
+  music does the same, and goes back a track; Live TV changes channel.
+  Remotes list the Roku by the name it has in Roku's settings, and need
+  an `http://` server: with `https://`, they offer only Stop. Music
+  stopped from another device or by the server's administrator now stops
+  too, and Live TV stopped that way says who stopped it, with their
+  message.
 - The player's menu (Down) has Subtitles and Audio, listing every track of
   the file, picture subtitles too, as the other apps' players do. A pick is
   saved for the show or movie.
@@ -81,6 +102,8 @@ describes how they are made.
 
 ### Fixed
 
+- Live TV's Up or Down, still finding the next channel when another is
+  picked from the list, no longer changes channel a moment later.
 - A video resumed past the end of what its file holds is converted or
   opened again, instead of being counted as watched.
 - The server hears of a seek at once, so the title resumes from there on

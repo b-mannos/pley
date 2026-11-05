@@ -177,6 +177,187 @@ heard it for that profile, the start asks "Who's watching?".
   this screen doesn't show Dolby Vision)"). Their Decoded line names what
   the decoder makes: HEVC and HDR10 for a base layer.
 
+### Remote control
+
+The phone is a remote for the profile's other devices, and sends them
+what to play (Play on…); phones and TVs alike obey a remote and play
+what one sends them. A TV shows no remote and has no Play on….
+
+On the phone, while another of the profile's devices is on, playing or
+not, a bar above the tabs, over the mini player when music plays here
+too, says **Playing on** the device and what plays there, or how many
+devices play and their names, or, while none plays, **Your devices**.
+The devices are the receivers (`GET /api/remote/devices`, the apps that
+take casts) merged with the sessions (`GET /api/sessions`) by
+`device_id`, both read again on `sessions_changed`, `session_stopped`
+and each time the event stream connects; a session whose device takes no
+casts (a Jellyfin or Plex app) is listed too, and a device with several
+sessions shows its newest. The phone's own sessions are left out (its
+players say which they play), and so is its own receiver.
+
+Tapping the bar opens the remote, a sheet of **Your devices**: a row for
+each, those that play first, then the others, each by name (**Unknown
+device** when the server can't name it; two of the same name are
+numbered), with an icon for its kind (TV, phone, tablet, computer,
+browser, other), and what it plays (an episode as "Show — S1 · E2 —
+Title", a channel as its number and name) with a thin bar of how far,
+or **Ready to play**. Choosing one shows its controls in the list's
+place; Back, or the arrow by its name, goes back to the list. With one
+device only, its controls show at once. The device chosen is kept while
+the sheet is open, so it shows what plays there once it starts.
+
+A device's controls, top to bottom:
+
+- the poster or the channel's logo, and what plays: an episode's show,
+  season and number over its title, a track over its artist, a channel's
+  number and name over Live TV, a movie over its year;
+- how far it is, estimated each second while it plays from the last
+  report, its age and the time since, by the phone's clock: a slider when
+  its player seeks, a bar otherwise. On Live TV, the programme on, a thin
+  bar of how far it is by the phone's clock, from when it started to when
+  it ends (the channel's `now_start` and `now_stop`), its times as the
+  phone writes them ("20:00 – 21:00"), and **Next:** the programme after
+  it; no seek bar;
+- the transport, centred: previous, back 10 s, play or pause, forward
+  30 s where its player declares them, and next where its player declares
+  it or what plays has a next by nature (an episode, a track), dimmed when
+  the player didn't declare it; a movie whose player declares none has no
+  next. On Live TV, play or pause only where its player declares pause,
+  then a channel rocker: one rounded pill holding channel down, the word
+  **CHANNEL** and channel up, each dimmed when the player can't change
+  channel that way;
+- on the left, **Audio**, **Subtitles** and **Quality** as icons, each
+  where its player declares it and has a choice: more than one audio
+  track, any subtitles, the qualities its Quality menu offers for the file
+  (the session's `qualities`). A long press says which is which; each
+  opens a menu, showing as selected while it is open, of the tracks
+  labelled as the phone's own player labels them, or of the qualities, the
+  one playing ticked (no quality is until its player says which);
+  Subtitles starts with **Off**. On the right, **Stop**, which asks first
+  (**Stop playing on** the device?, Stop or Cancel).
+
+A device that plays nothing shows **Nothing playing**, and under it
+**Send something here with Play on…**.
+
+A command waits up to 5 s for the list to show it acted (a new state, a
+new title, a report from where it was sent, the track or quality
+picked), and the controls say it's waiting meanwhile; without one they say the device
+**didn't answer**, until the device reports again. A next or previous
+with nothing there changes nothing, and isn't a failure. While a command
+waits, the sheet stays open with nothing listed, as when a next ends one
+session before the next one's is listed. Refusals are said plainly: the
+device isn't playing any more, can't do that, or too many commands at
+once.
+
+The players obey the remote on the profile's other devices
+([API.md](API.md#remote-control)), on phones and TVs alike, and say what
+they obey when they start (`controls`), with the device's name from
+Android's settings (else its model) as remotes show it, and whether it
+is a TV, a tablet or a phone (`device_kind`: a TV in the TV interface,
+else a tablet when the screen is at least 600 dp at its narrowest). They
+obey:
+
+- **Movies and episodes:** play, pause, seek and skip, and next where
+  something can come next (an episode, a playlist or collection). Next at
+  the end does nothing, and says nothing on the device; a video has no
+  previous. Audio and subtitles, where the file has them, change as the
+  player's own track menu changes them, and are remembered the same way:
+  another track in the file as it plays switches at once, one a stream
+  doesn't carry, or picture subtitles to burn in, starts a new session
+  where it is. The quality changes as a pick in the player's Quality menu
+  does, and is kept as its pick the same way. A pick of what plays
+  already is said again at once.
+- **Music:** play, pause, seek, skip, next and previous, as the buttons:
+  previous more than 3 s into a track goes back to its start.
+- **Live TV:** next and previous, channel up and down in the order the
+  player goes through. It has no pause or seek. Stopped from another
+  device or by an administrator, it shows **Live TV stopped** and says who
+  and why, as for a connection taken over.
+
+Only the player of the session named acts on a command, a seek stays
+within the title, and a skip counts from where it is. Each change is
+reported at once, so the remote sees it, and a play or pause that changes
+nothing is reported too, so a remote a little behind settles. A video's
+reports say the audio and subtitles it plays (`audio_index` and
+`subtitle_index`, `-1` for none), and its Quality menu's pick (`quality`:
+`auto`, `original`, `8m`…); a track that needs a new session is said by
+that session as it starts, not by the one it replaces, and a quality is
+said at once and again as its session starts. While a
+player has a session, the event stream stays open in the background too,
+so music playing with the screen off still hears the remote; it closes
+once playback ends, once music has been paused for 90 s (the server's
+window for a session it hasn't heard from), or on signing out. The
+phone's video player, its screen left, obeys nothing until it shows
+again: its engine is stopped, and a next episode would play with no
+screen. What the server's events change meanwhile is fetched again
+on coming back, not in the background.
+
+#### Play on…
+
+On the phone, what a page plays goes to another of the profile's devices
+that takes it ([API.md](API.md#casting)): a receiver whose `casts` names
+`item` for titles, music and playlists, or `live` for a channel. **Play
+on…** shows only while one does:
+
+- beside Play on a movie's, an episode's, a show's and a season's page,
+  a square button as tall as Play: a title being watched starts there
+  where its Resume would (`start_ms`), with the audio and subtitles picked
+  on the page (`audio_index` when a track is picked, else the device plays
+  its best of the language as Play does; `subtitle_index`, `-1` for none,
+  when the file has subtitles), and a show or a season plays its next
+  episode;
+- beside Play and Shuffle on an album's and an artist's page;
+- under Play on a playlist's page, where the row beside it is full;
+- as **Watch on…** under Watch in a programme's details in Live TV, and
+  in the live player's bar;
+- in an item's actions (a long press on its tile or row, a track's too),
+  after the ways to play it here.
+
+It opens a chooser of those devices as the remote lists them: an icon for
+the kind, the name, and what each plays now or **Ready to play**. An
+album, an artist or a playlist has a Shuffle switch, which makes it
+**Shuffle on…** and sends `shuffle`. Picking a device sends
+`POST /api/remote/devices/{id}/cast`; once it is on its way the chooser
+closes, **Playing on** the device shows in a toast, and the remote opens
+on that device, its controls showing once what it was sent plays. The
+live player closes as its channel goes to the device, and the shell says
+so. A refusal is said under the devices, and another can be picked: the
+device **isn't on any more** (`404`), **can't play that** (`409`), **Too
+many at once** (`429`), else the server's own words.
+
+#### Taking casts
+
+Phones, tablets and TVs play what the profile's remotes send them
+([API.md](API.md#casting)). While the app is in front and signed in, its
+event stream names the device as a receiver: its install id (the
+`client_id` its players send), its name and kind as its play requests
+give them, and what it plays, titles always and Live TV's channels while
+Live TV is open to the profile (the stream waits up to 2 s for Live TV's
+summary as it opens, so it doesn't open twice). In the background, where
+a player keeps the stream open, it names none: going there and back opens
+the stream again, and nothing cast plays while the app is hidden.
+
+A `cast` for this device's receiver, heard while the stream names it,
+plays as the app's own Play on that page would: a movie or an episode in
+the player, from `start_ms` when given, else where Play resumes, with the
+audio and subtitles cast (`audio_index`, `subtitle_index`, `-1` for none)
+in place of the profile's saved choices for that play, not saved, a track
+the file it plays doesn't have leaving the choice to them; a show or a
+season its next episode; a track, an album or an artist in the
+music player, shuffled with `shuffle`; a playlist from its first entry
+(a random one with `shuffle`), video as a queue in the player and music
+in the music player; a channel in the live player, tuned as Watch on that
+channel would, on a phone or a TV, Fire TV included. What plays makes way,
+as for Play there: music pauses for a video or a channel, and a player
+window open closes for music; one player window shows at a time, video
+or Live TV. A cast for another device does nothing.
+
+As it starts, it says where it came from, **Playing from** the remote's
+device (**Playing from another device** when the server can't name it),
+for about 4 s: the video players in their toast, the live players at the
+top, the phone's shell in a toast while music plays, and a TV's shell at
+the top right as it opens Now Playing for music.
+
 ### Libraries
 
 A library's Library tab sorts and filters its grid as the web app does:
@@ -281,7 +462,8 @@ connections are set up in the web app's Settings → Live TV
   guide asks only for the rows in view, six hours at a time, so a lineup of
   50,000 channels opens at once.
 - **Live only:** no pause, rewind or seeking; play, pause, rewind and fast
-  forward do nothing in the player.
+  forward do nothing in the player, and the remote offers only next and
+  previous ([Remote control](#remote-control)).
 - **Changing channel:** channel up and down stay in the category the player
   was opened from, wrapping round its ends. A typed number tunes that
   channel among all channels.

@@ -8,11 +8,36 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Your phone or browser changes the quality of the film or episode on
+  the TV, as the player's Quality menu does (the pick is kept for the
+  next ones), and shows which is picked. A film or episode sent from a
+  title's page plays with the audio and subtitles picked there.
+- Your phone or browser plays a film, an episode, a show, an album, an
+  artist, a track, a playlist or a Live TV channel on the TV ("Play on…"):
+  it starts as the TV's own Play would, in place of what plays, and the
+  TV says "Playing from" the device it came from.
+- Your phone or browser controls what plays on the TV: a film or episode
+  plays, pauses, seeks and skips, and goes on to the next one; music does
+  the same, and goes back a track; Live TV changes channel. Live TV
+  stopped from another device, or by the server's administrator, stops
+  on the TV and says who, with their message.
+- Your phone or browser changes the audio and subtitles of the film or
+  episode on the TV, as the player's own menu does, and shows which
+  play.
+
 ### Changed
 
 - When the server can't be reached, the app says "Pley is offline", where
   it said "Showing what Pley had saved. Reconnecting…". It still shows
   what it saved and reconnects by itself.
+
+### Fixed
+
+- Live TV's channel up or down, still finding the next channel when
+  another is picked from the list, Watch again is pressed or the app is
+  hidden, no longer changes channel a moment later.
 
 ## [0.1.5] - 2026-11-04
 

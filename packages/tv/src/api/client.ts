@@ -3,6 +3,7 @@ import { NOT_YOUR_SERVER, SignedOutError, type Tokens } from "../auth/tokens";
 import { Cancel, NetworkError, TIMED_OUT, withQuery, type HttpRequest, type HttpResponse, type Transport } from "../net/transport";
 import type {
   Collection,
+  Control,
   DiscoverDetail,
   DiscoverList,
   DiscoverPage,
@@ -31,6 +32,7 @@ import type {
   PlaybackInfo,
   PlaybackRequest,
   PlaybackState,
+  PlayingTracks,
   Playlist,
   PlaylistEntry,
   RequestList,
@@ -459,8 +461,10 @@ export class Api {
 
   // ---- playback
 
+  /** Starts a playback session; everything played here plays on the TV, which remotes are told. */
   play(req: PlaybackRequest, cancel?: Cancel): Promise<PlaybackInfo> {
-    return this.send("/api/playback", { method: "POST", body: req, cancel, timeoutMs: 60_000 }).then((r) => r.body as PlaybackInfo);
+    const body: PlaybackRequest = { ...req, device_kind: "tv" };
+    return this.send("/api/playback", { method: "POST", body, cancel, timeoutMs: 60_000 }).then((r) => r.body as PlaybackInfo);
   }
 
   /**
@@ -520,12 +524,21 @@ export class Api {
     return this.call("DELETE", `/api/playback/${encodeURIComponent(session)}`);
   }
 
-  progress(itemId: Id, positionMs: number, durationMs: number | null, state: PlaybackState, session: string | null): Promise<unknown> {
+  /**
+   * Where a playback is. `tracks`: a video's audio and subtitles playing
+   * (`subtitle` `-1`: none), by stream index, and its Quality menu's pick,
+   * which the server keeps on the session for the user's remotes; music has
+   * none to say.
+   */
+  progress(itemId: Id, positionMs: number, durationMs: number | null, state: PlaybackState, session: string | null, tracks?: PlayingTracks): Promise<unknown> {
     return this.call("POST", `/api/items/${itemId}/progress`, {
       position_ms: Math.max(0, Math.round(positionMs)),
       duration_ms: durationMs && durationMs > 0 ? Math.round(durationMs) : undefined,
       state,
       session_id: session ?? undefined,
+      audio_index: tracks && tracks.audio !== null ? tracks.audio : undefined,
+      subtitle_index: tracks ? tracks.subtitle : undefined,
+      quality: tracks?.quality,
     });
   }
 
@@ -591,10 +604,11 @@ export class Api {
    * the TV's player, which can't send the token. The server waits for
    * the provider when it tunes the channel. Every connection being in use
    * (`409`, with `connections`), `takeOver` is the channel whose
-   * connection to take, one the `409` said may be.
+   * connection to take, one the `409` said may be. `controls`: the
+   * remote's commands the player obeys (docs/API.md, "Remote control").
    */
-  watchChannel(channelId: Id, clientId: string, cancel?: Cancel, takeOver?: Id): Promise<LiveWatching> {
-    const body: Record<string, unknown> = { client_id: clientId, keyed_urls: true };
+  watchChannel(channelId: Id, clientId: string, cancel?: Cancel, takeOver?: Id, controls: Control[] = []): Promise<LiveWatching> {
+    const body: Record<string, unknown> = { client_id: clientId, keyed_urls: true, controls, device_kind: "tv" };
     if (takeOver !== undefined) body.take_over = takeOver;
     return this.send(`/api/live/channels/${channelId}/watch`, { method: "POST", body, cancel, timeoutMs: 45_000 }).then((r) => r.body as LiveWatching);
   }

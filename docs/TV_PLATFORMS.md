@@ -158,6 +158,75 @@ shows it after Home, remembered on the TV so it shows at launch. On this TV:
   The card stays when the app is hidden and shown again; nothing is tuned
   until Watch again.
 
+### Remote control
+
+The TV obeys the remote on the profile's other devices that have one
+([API.md](API.md#remote-control)) and shows no remote of its own. Its
+players say what they obey when they start (`controls`) and that they play
+on a TV (`device_kind: "tv"`); the server names the TV from its web engine
+("Samsung TV"). They obey:
+
+- **Movies and episodes:** play, pause, seek and skip, and next where
+  something can come next (an episode, a playlist or collection). Next at
+  the end does nothing, and says nothing on the TV; a video has no
+  previous. The audio and subtitles, where the file has them (`audio`,
+  `subtitles`), change as the player's own Audio and Subtitles change
+  them, picks saved the same way: in place where the TV's player can, else
+  with a new session (a stream's audio, picture subtitles burned in). The
+  quality (`quality`, one of the ids the Quality menu offers for the file)
+  changes as a pick in that menu does, kept for the next titles; a new
+  session plays it where it asks for another stream.
+- **Music:** play, pause, seek, skip, next and previous, as the buttons:
+  previous more than 3 s into a track, or on the first, goes back to its
+  start. Music playing behind the other screens obeys too.
+- **Live TV:** next and previous, channel up and down in the order CH+
+  and CH− go through, round the ends. It has no pause or seek. Stopped
+  from another device or by an administrator (`session_stopped`), it
+  shows **Live TV stopped** and says who and why, with Watch again, as for
+  a connection taken over.
+
+Only the player of the session named acts on a command, a seek stays
+within the title, and a skip counts from where it is. Each change is
+reported at once, so the remote sees it; another title, track or channel
+tells the server with its own session, and a new session for an audio or
+subtitle track reports as it begins. A play on a player already playing,
+a pause on one already paused, or a track picked that is the one chosen,
+says so again at once, so a remote a little behind settles; a track the
+file doesn't have, or a quality its menu doesn't offer, does nothing.
+Every report of a video says which audio and subtitles play
+(`audio_index`, `subtitle_index`, `-1` for none) and which quality is
+picked (`quality`: `auto`, `original`, `8m`…), so the remote ticks them;
+music has none. The rule is pinned for both Samsung apps by
+`packages/tv/test/fixtures/remote.json`, and the tracks and the quality by
+`tracks.json` beside it.
+
+**Casts.** The TV is one of the devices the profile's remotes play things
+on ([API.md](API.md#casting)) while its event stream is open: the stream
+names it a receiver by its id (`pley.installId`), a TV taking titles and
+playlists (`casts=item`) and channels while the rail shows Live TV
+(`live`), and opens again when Live TV comes or goes; the server names
+it, as it does its players. What a remote sends plays as the TV's own
+Play would, in place of what plays:
+
+- a movie or an episode in the player, from the place sent, else where
+  Play resumes, with the audio and subtitles sent (`-1`: none) for that
+  play, in place of the saved ones, which stay for a track its file
+  doesn't have; a show or a season its next episode. The quality is the
+  TV's own;
+- an album or an artist as the music's queue, in order or shuffled, with
+  Now Playing; a track its album from it, at the place sent;
+- a playlist as its page plays it: music as the queue, video in the
+  player through the playlist (shuffled: from a random entry);
+- a channel in the live player, channel up and down going through All
+  channels.
+
+"Playing from" and the remote's device ("another device" when it has no
+name) shows over what starts for 4 s, as the app's toasts do; a show,
+album or playlist with nothing to play says "Nothing to play". A cast for
+another device, or one that comes while the app is hidden, signing in or
+asking who's watching, does nothing, and of two sent close together the
+later plays. The rules are in `packages/tv/test/fixtures/tracks.json` too.
+
 ### Requests
 
 Where the server takes requests ([API.md](API.md#requests)), the rail has
@@ -282,7 +351,7 @@ its packages into the SDK by hand and it runs on WHPX.
 | `requests.ts` | Requests' words and rules: badges, a title's one main action, the season picker, stages, what may be done to a request, the server's answers |
 | `ui/focus.ts`, `ui/input.ts`, `ui/keys.ts` | Focus, remote keys, a pointer and its wheel |
 | `ui/shell/`, `ui/screens/`, `ui/kit/` | The rail, back stack and screens |
-| `player/` | Playback: the play request, recovery, quality, Up Next, skip markers, seek previews, sleep timer, reports, music |
+| `player/` | Playback: the play request, recovery, quality, Up Next, skip markers, seek previews, sleep timer, reports, music, the remote and casts |
 | `live/` | Live TV: categories, the guide's pages, a channel on the TV's player |
 | `subs/` | Subtitles drawn by the app |
 | `caps/` | The server's direct-play rules, so Playback details can say why |
@@ -497,6 +566,39 @@ Someone taking over a channel's connection (the server's
 TV stopped" with the server's words, Watch again first and focused. The
 card stays when the app is hidden and shown again; nothing is tuned until
 Watch again.
+
+The remote on the profile's other devices is obeyed as by the web app
+([Remote control](#remote-control)) and Android TV's players: the player,
+the music behind the other pages and the live player say what they obey
+(`controls`) and that they play on a TV (`device_kind: "tv"`, on the
+`stream.ts` it reads too), act only on their own session, and report each
+change at once; a film or music told to play or pause as it already is
+says so again. The player changes the audio and subtitles as its Audio
+and Subtitles panels do, and the quality (`quality`) as its Quality panel
+does, the pick kept for the next titles as the panel's is: a quality that
+plays something else starts a new session, which reports as it begins,
+and Original from Automatic, or the quality picked already, reports at
+once. Every report of it says which tracks play and which quality is
+picked (`quality`, by id: `auto`, `original`, `8m`…). A file on a drive
+has no Quality menu, and lists no `quality`. The
+remote's next and previous on Live TV go through the
+channels as channel up and down do. Live TV stopped from another device or
+by an administrator (`session_stopped`) shows the same card, saying who
+stopped it and, on a line of its own, their message, as on Android TV. The
+rule is `Player/Remote.cs`, pinned by the same fixtures as the web app's.
+Casts play as on the web app ([Remote control](#remote-control)), taken
+while the rail's pages or a player show: what a remote sends takes the
+place of the player showing once that one has let go of the TV's player,
+with "Playing from …" at the player's top right, or over Now Playing as
+the pages' toasts show, at their foot. A movie or an episode sent with
+the tracks picked on the remote's page (`audio_index`, `subtitle_index`,
+`-1` for none) plays with them, for that play only and without saving
+them; a track its file doesn't have (another version's) leaves the choice
+to the profile's, and the quality stays the TV's own. A channel opens the
+live player on it, as Watch on that channel does, with channel up and
+down going through All channels. A music playlist plays as the
+music's queue, where the playlist page's own Play opens its first entry's
+album, as Android TV's does. The rules are `Player/Cast.cs`.
 
 | | |
 |---|---|

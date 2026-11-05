@@ -19,6 +19,9 @@ ADDON_ID = "plugin.video.pley"
 HOME = 10000
 PROXY = "pley.proxy"
 PLAYING = "pley.playing"
+# The live channel the plugin last watched, and its session, for the
+# user's remote: Kodi's stream of it never learns the session.
+LIVE = "pley.live"
 # Set while pley's own window is open: the service tells it of changes.
 WINDOW_OPEN = "pley.ui"
 
@@ -233,6 +236,12 @@ TEXT = {
     "live_stopped_body": 30558,
     "watch_again": 30559,
     "ok": 30560,
+    "live_stopped_elsewhere": 30561,
+    "live_stopped_by_admin": 30562,
+    # Casts from the user's remote (casting.py).
+    "playing_from": 30563,
+    "playing_from_another": 30564,
+    "nothing_to_play": 30565,
     "two_step_required": 30279,
     # Requests (requests.py, asking.py, news.py).
     "discover": 30447,
@@ -435,6 +444,11 @@ def temp_dir() -> str:
 
 def addon_dir() -> str:
     return xbmcvfs.translatePath(addon().getAddonInfo("path"))
+
+
+def addon_icon() -> str:
+    """The add-on's icon, as Kodi shows it in its list of add-ons."""
+    return addon().getAddonInfo("icon")
 
 
 def log(message: str, level: int = xbmc.LOGINFO) -> None:

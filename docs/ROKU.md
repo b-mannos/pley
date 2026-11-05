@@ -312,7 +312,8 @@ next.
   Pley's menu (Down) lists every track of the file, as the title's page
   does: Subtitles (Off, then each, PGS too) and Audio (Automatic, then
   each). A pick there is saved for the show or movie, and the stream opens
-  again where it was with it.
+  again where it was with it. The remote on the profile's other devices
+  picks them the same way ([Remote control](#remote-control)).
   A text track picked in the options takes the place of the pictures, and
   captions turned off there turn them off; captions turned on without a
   text track leave them be.
@@ -349,7 +350,8 @@ The menu, Original and Automatic follow [QUALITY.md](QUALITY.md#the-menu);
 the code is `components/lib/AutoQuality.brs`. On Roku:
 
 - **Settings → Quality** is kept on the Roku. One chosen in the player's
-  menu becomes the setting, and the title reopens at it.
+  menu, or by the remote on another device, becomes the setting, and the
+  title reopens at it.
 - **Several sizes:** in an adaptive session the Video node moves between
   sizes itself. Other streams come in one size, so the app steps down.
 - **Signals:** a wait is the Video node's `buffering` after at least 2 s of
@@ -426,6 +428,100 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
   with the server's words, and Watch again in place of Try again. Taken
   while Up or Down changes channel, the change goes on, with no notice.
 - **Radio:** a channel with no picture keeps its card with what's on.
+
+### Remote control
+
+The Roku obeys the remote on the profile's other devices that have one
+([API.md](API.md#remote-control)), and plays what it casts here (Casts,
+below); it shows no remote of its own and casts nothing. Its
+players say what they obey when they start (`controls`), that they play
+on a TV (`device_kind: "tv"`) and the name given to the Roku in its
+settings (`device_name`, "Living room Roku"; a Roku nobody named goes by
+its model, without the serial number Roku adds). Commands come on the
+event stream, so like the other live updates they need an `http://`
+server: from an `https://` one the players say they obey nothing, and
+remotes offer only Stop. They obey:
+
+- **Movies and episodes:** play, pause, seek and skip, and next where
+  something can come next (an episode, a playlist's or collection's next
+  entry). Next moves on without counting the title as watched; next with
+  nothing after it does nothing; a video has no previous. The audio and
+  subtitles, where the file has them (`audio`, `subtitles`), change as a
+  pick in Pley's menu changes them: saved for the show or movie, and the
+  stream opened again where it was with them. The quality (`quality`), one
+  of those the player's Quality menu offers for the file, changes as a
+  pick there does: kept as the Roku's, and the title opened again where it
+  was at it.
+- **Music:** play, pause, seek, skip, next and previous, as Now Playing's
+  buttons and scrubber do, while other screens show too: previous more
+  than 3 s into a track, or on the first, goes back to its start. Music
+  stopped from another device or by an administrator stops, as a video
+  does, saying who stopped it over Now Playing, or over whichever screen
+  is on top.
+- **Live TV:** next and previous, channel up and down through the category
+  Up and Down go through, round its ends. It has no pause or seek. Stopped
+  from another device or by an administrator (`session_stopped`), it
+  shows "Live TV stopped", saying who stopped it and, on a line of its
+  own, their message, with Watch again, as for a connection taken over;
+  a channel change on its way ends too.
+
+Only the player of the session named acts on a command. A title or track
+acts only while it plays or is paused: not while it starts, after it
+stopped, or while it says what went wrong. Live TV changes channel while a
+channel is still tuning too, as Up and Down do, but not after it stopped
+or while it says what went wrong. A seek stays within the title and a
+skip counts from where it is. Each change is reported at once, so the
+remote sees it; another title, track or channel tells the server with its
+own session, and the stream opened again for an audio or subtitle track,
+or a quality, tells it as it plays. A play on a player already playing, a
+pause on one already paused, or the audio, subtitles or quality playing
+picked again, says so again at once, so a remote a little behind settles;
+a track the file doesn't have, or a quality its menu doesn't offer, does
+nothing. Every report of a video says which audio and subtitles play
+(`audio_index`, `subtitle_index`, `-1` for none) and the Quality menu's
+pick (`quality`: the setting, or Original for a file that doesn't offer
+it, which then plays as it is), so the remote ticks them; music's say
+none of these. A channel step that waits for the
+next page of the category goes on only if the channel is still the one it
+started from and none was picked meanwhile (from the list, or Watch
+again), the same channel again too; tuning a channel again after its
+stream broke off isn't a pick. A seek or skip while Up Next counts down
+puts Up Next away, as Rewind does. The rule is
+`components/lib/Remote.brs` (the step's, `components/lib/Live.brs`),
+pinned by `packages/tv/test/fixtures/remote.json`, which the tests read
+(the tracks and the quality by cases of their own).
+
+**Casts.** While its event stream is open (an `http://` server, as for
+the commands), the Roku is one of the devices the profile's remotes play
+things on ([API.md](API.md#casting)): the stream names it a receiver by
+the `client_id` its players send, a TV with the name its players give,
+taking titles and playlists (`casts=item`) and channels while Home's menu
+has Live TV (`live`), and opens again when Live TV comes or goes. What a
+remote sends plays as the Roku's own Play would, in place of what plays:
+
+- a movie or an episode in the player, from the place sent, else where
+  its page's Play starts it, with the audio and subtitles picked on the
+  remote's page in place of the profile's choices for that play (asked
+  for with the play request's `audio_index`, shown as the menu's pick, and
+  not saved), where its first file has them; a show or a season its next
+  episode;
+- an album or an artist as the music's queue, in order or shuffled, with
+  Now Playing; a track its album from it, from the place sent;
+- a playlist as its page plays it: music as the queue, videos in the
+  player one after the other, shuffled as its Shuffle does;
+- a channel in the live player, Up and Down going through All channels.
+
+A video or a channel playing gives way to it, as does music to a video.
+"Playing from" and the remote's device ("another device" when it has no
+name) shows for 4 s at the top, as the players' notices do (over the
+video player, under the title it shows as an item begins); a show,
+album, artist or playlist with nothing to play says "Nothing to play",
+and what couldn't be fetched says why. A cast for another device, or one
+that comes while the Roku is signed out, signing in or asking who's
+watching, does nothing (a cast never gets past a profile's PIN), and of
+two sent close together the later plays. The rules are
+`components/lib/Cast.brs`; the scene (`components/MainScene.brs`)
+fetches what a cast needs and plays it.
 
 ### Requests and Discover
 
@@ -531,7 +627,7 @@ then shows it. It is kept on the Roku for each server.
 | Path | What |
 |---|---|
 | `source/main.brs` | Starts the scene |
-| `components/MainScene.*` | The screen stack, the HTTP agent for pictures, sign-in when the server ends it |
+| `components/MainScene.*` | The screen stack, the HTTP agent for pictures, sign-in when the server ends it, what the user's remotes cast here |
 | `components/MusicPlayer.*` | The music queue on the scene's Audio node |
 | `components/screens/` | One component per screen |
 | `components/shared/` | Screen helpers (`Ui.brs`), title actions (`Titles.brs`) |
@@ -655,12 +751,17 @@ bun run images    # the nine-patch focus and watched-mark images
   asks for a movie and three seasons from Discover, approves a request,
   opens a title from its ready-to-watch card on Home (which waited while
   the requests showed), and checks that a server
-  without requests is asked nothing but the summary.
+  without requests is asked nothing but the summary. The fake server also
+  checks that a video's reports say which audio and subtitles play, and
+  music's don't.
 - **brs-node limits:** its own fonts, no video or audio (Skip intro, Up
   Next and its wait at the end, the title as an item begins, reconnecting,
-  stalls, media that ends short, the sleep timers' ends and picture
-  subtitles shown in time have only unit tests), one fetch at a time, the
-  odd dropped key, and no measure of a Roku's speed.
+  stalls, media that ends short, the sleep timers' ends, picture
+  subtitles shown in time and the remote's commands, which a player obeys
+  only once it plays, have only unit tests), sockets that connect but send
+  nothing (the event stream, and the casts it brings, have only unit
+  tests), one fetch at a time, the odd dropped key, and no measure of a
+  Roku's speed.
 - **Images:** `bun run images` runs `scripts/make_images.py` (Python
   standard library). The home screen icons and splash screens come from
   `bun scripts/render-icons.mjs` at the repository root.
@@ -677,7 +778,11 @@ The manifest asks for SceneGraph 1.2, which every Roku OS from 9 runs.
 - No playback speed or audio delay: the Video node has neither.
 - Live updates need an `http://` server; with `https://`, Home and the
   requests' summary refresh once a minute, the requests, Discover's Your
-  requests and a title page with a request each 30 s.
+  requests and a title page with a request each 30 s. The remote on other
+  devices reaches the Roku only through them; with `https://`, the Roku
+  offers remotes only Stop and takes no casts, and a film or music
+  stopped from another device stops at its next report (within 10 s while
+  playing, 30 s while paused), a channel when its stream breaks off.
 - Audio other than the file's default isn't played as it is.
 - Live TV has no channel numbers to type: Roku remotes have no number keys.
 - Not yet: an editable music queue.

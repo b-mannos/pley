@@ -58,13 +58,194 @@ private func playOnTheTv(_ app: AppModel, controls: [Control] = [.play, .pause, 
     }
 
     @Test func twoDevicesOfOneNameAreNumbered() {
-        let sessions = [PlayingSession(sessionId: "a", device: "Living room TV"),
-                        PlayingSession(sessionId: "b", device: "Living room TV"),
-                        PlayingSession(sessionId: "c")]
-        #expect(Words.deviceNames(sessions) == ["a": "Living room TV (1)", "b": "Living room TV (2)",
-                                                "c": "Unknown device"])
-        #expect(Words.remoteLabel(1) == "Remote, 1 device playing")
-        #expect(Words.remoteLabel(2) == "Remote, 2 devices playing")
+        // In the order of their ids, whatever the list's: a device keeps its number as it plays and stops.
+        let devices: [(id: String, name: String?)] = [("app-2", "Living room TV"), ("app-1", "Living room TV"),
+                                                      ("app-3", nil)]
+        #expect(Words.deviceNames(devices) == ["app-1": "Living room TV (1)", "app-2": "Living room TV (2)",
+                                               "app-3": "Unknown device"])
+        #expect(Words.remoteLabel(1) == "Remote, 1 device")
+        #expect(Words.remoteLabel(2) == "Remote, 2 devices")
+    }
+
+    @Test func devicesAreTheReceiversWithWhatTheyPlayThisOneLeftOut() async throws {
+        let server = try await fixture()
+        defer { server.stop() }
+        server.addPlayable(.init(itemId: 7, fileId: 70, durationMs: 600_000))
+        let app = try await signedIn(server)
+        let model = RemoteModel(app: app)
+        server.addReceiver("den-tv", deviceId: "app-90", name: "Den TV")
+        server.addReceiver("bedroom-tv", deviceId: "app-91", name: "Bedroom TV", casts: ["item"])
+        let bedroom = server.playElsewhere(7, deviceId: "app-91", device: "Bedroom TV")
+        // An app that takes no casts (a Jellyfin app's): listed all the same.
+        let other = server.playElsewhere(7, deviceId: "token-5", device: "Other app", kind: "other", controls: [])
+        // A session of this device's own sign-in that doesn't play here (its end not heard yet): this device's.
+        let api = try #require(await app.session.api)
+        _ = try await api.startPlayback(PlaybackRequest(itemId: 7, clientId: "apple-test-gone"))
+        await model.reload()
+        // This device's own stream named it: it is a receiver, but not one of the remote's devices.
+        #expect(model.receivers.contains { $0.receiverId == app.receiverId })
+        #expect(model.entries.count == 3)
+        let devices = model.devices
+        // Those playing first, then those ready to play, each by name.
+        #expect(devices.map(\.id) == ["app-91", "token-5", "app-90"])
+        #expect(devices[0].receiver?.receiverId == "bedroom-tv" && devices[0].entry?.id == bedroom)
+        #expect(devices[0].kind == .tv && model.name(devices[0]) == "Bedroom TV")
+        #expect(devices[1].receiver == nil && devices[1].entry?.id == other && devices[1].kind == .other)
+        #expect(devices[2].entry == nil && model.name(devices[2]) == "Den TV")
+        // "Play on…" offers those that take it.
+        #expect(model.takers(.item).map(\.id) == ["app-91", "app-90"])
+        #expect(model.takers(.live).map(\.id) == ["app-90"])
+        // Several devices: none chosen until one is; closed, the choice goes.
+        #expect(model.selected == nil)
+        model.show("app-90")
+        #expect(model.presented && model.selected?.id == "app-90")
+        model.presented = false
+        #expect(model.chosen == nil)
+
+        // One device alone is chosen at once.
+        server.removeReceiver("den-tv")
+        server.removeReceiver("bedroom-tv")
+        _ = try await app.session.api?.stopSession(bedroom)
+        await model.reload()
+        #expect(model.devices.map(\.id) == ["token-5"])
+        #expect(model.selected?.id == "token-5")
+    }
+
+    @Test func aTrackIsAnsweredByTheTrackItPlays() async throws {
+        let server = try await fixture()
+        defer { server.stop() }
+        var movie = FixtureServer.Playable(itemId: 7, fileId: 70, durationMs: 600_000)
+        movie.audio = [MediaStream(index: 1, kind: .audio, codec: "aac", language: "eng", default: true),
+                       MediaStream(index: 2, kind: .audio, codec: "ac3", language: "fre")]
+        movie.subtitles = [MediaStream(index: 3, kind: .subtitle, codec: "subrip", language: "eng")]
+        server.addPlayable(movie)
+        let app = try await signedIn(server)
+        let model = RemoteModel(app: app, answerWait: .milliseconds(300))
+        let tv = server.playElsewhere(7, deviceId: "app-90", device: "Bedroom TV",
+                                      controls: ["play", "pause", "audio", "subtitles"])
+        await model.reload()
+        let entry = try #require(model.others.first)
+        #expect(entry.session.tracks.audio.count == 2 && entry.session.audioIndex == 1)
+        #expect(entry.session.subtitleIndex == SessionTracks.off)
+
+        await model.send(.audio(2), to: entry)
+        #expect(model.waiting == [tv])
+        // The TV plays it and reports: the list shows the track, which answers the command.
+        let version = app.sessionsVersion
+        server.reportSession(tv, state: "playing", positionMs: 0, audioIndex: 2)
+        #expect(await eventually { app.sessionsVersion > version })
+        await model.reload()
+        #expect(model.waiting.isEmpty)
+        #expect(model.others.first?.session.audioIndex == 2)
+
+        // Subtitles the TV doesn't change: it didn't answer.
+        let again = try #require(model.others.first)
+        await model.send(.subtitles(3), to: again)
+        #expect(await eventually { model.errors[tv] == "Bedroom TV didn't answer." })
+        #expect(model.waiting.isEmpty)
+    }
+
+    @Test func playOnSendsItThereAndOpensTheRemoteOnThatDevice() async throws {
+        let server = try await fixture()
+        defer { server.stop() }
+        let app = try await signedIn(server)
+        let model = RemoteModel(app: app)
+        server.addReceiver("den-tv", deviceId: "app-90", name: "Den TV", casts: ["item"])
+        await model.reload()
+        let den = try #require(model.devices.first)
+        #expect(model.takers(.item).map(\.id) == ["app-90"] && model.takers(.live).isEmpty)
+
+        await model.cast(.item(7, startMs: 5_000), to: den)
+        let sent = try #require(server.castsReceived.last)
+        #expect(sent.receiverId == "den-tv")
+        #expect(String(decoding: sent.body, as: UTF8.self) == #"{"item_id":7,"start_ms":5000}"#)
+        #expect(app.shell.toast?.text == "Playing on Den TV")
+        #expect(model.presented && model.selected?.id == "app-90")
+
+        // Refusals say why, in every app's words.
+        server.refuseCasts(status: 429)
+        await model.cast(.item(7), to: den)
+        #expect(app.shell.toast?.text == "Too many at once: try again in a moment")
+        #expect(app.shell.toast?.style == .error)
+        server.refuseCasts(status: 409, code: "not_castable")
+        await model.cast(.item(7), to: den)
+        #expect(app.shell.toast?.text == "Den TV can't play that")
+        server.refuseCasts(status: nil)
+        server.removeReceiver("den-tv")
+        await model.cast(.item(7), to: den)
+        #expect(app.shell.toast?.text == "Den TV isn't on any more")
+        // It goes from the list.
+        #expect(await eventually { model.devices.isEmpty })
+    }
+
+    @Test func playOnSendsTheTracksThePagesPickersShow() async throws {
+        let server = try await fixture()
+        defer { server.stop() }
+        var movie = FixtureServer.Playable(itemId: 7, fileId: 70, durationMs: 600_000, positionMs: 30_000)
+        movie.audio = [MediaStream(index: 1, kind: .audio, codec: "aac", language: "eng", default: true),
+                       MediaStream(index: 2, kind: .audio, codec: "ac3", language: "fre")]
+        movie.subtitles = [MediaStream(index: 3, kind: .subtitle, codec: "subrip", language: "eng")]
+        server.addPlayable(movie)
+        let app = try await signedIn(server)
+        let page = ItemModel(app: app, itemId: 7)
+        await page.load()
+        // Automatic audio leaves the device its own; subtitles off are sent off.
+        #expect(page.castTarget == .item(7, startMs: 30_000, subtitleIndex: SessionTracks.off))
+        await page.chooseAudio(2)
+        await page.chooseSubtitle(3)
+        #expect(page.castTarget == .item(7, startMs: 30_000, audioIndex: 2, subtitleIndex: 3))
+        // A file with one audio track and no subtitles has no pickers: nothing to send.
+        server.addPlayable(.init(itemId: 8, fileId: 80, durationMs: 600_000))
+        let plain = ItemModel(app: app, itemId: 8)
+        await plain.load()
+        #expect(plain.castTarget == .item(8))
+    }
+
+    @Test func aQualityCommandIsAnsweredByTheReportThatSaysIt() async throws {
+        let server = try await fixture()
+        defer { server.stop() }
+        server.addPlayable(.init(itemId: 7, fileId: 70, durationMs: 600_000, bitrate: 10_000_000, width: 1920,
+                                 height: 1080))
+        let app = try await signedIn(server)
+        let model = RemoteModel(app: app, answerWait: .milliseconds(300))
+        let tv = server.playElsewhere(7, deviceId: "app-90", device: "Bedroom TV",
+                                      controls: ["play", "pause", "quality"])
+        await model.reload()
+        let entry = try #require(model.others.first)
+        #expect(entry.session.qualities.map(\.id) == ["original", "auto", "8m", "4m", "2m"])
+        #expect(entry.session.quality == nil)
+
+        await model.send(.quality("4m"), to: entry)
+        #expect(model.waiting == [tv])
+        let version = app.sessionsVersion
+        server.reportSession(tv, state: "playing", positionMs: 0, quality: "4m")
+        #expect(await eventually { app.sessionsVersion > version })
+        await model.reload()
+        #expect(model.waiting.isEmpty)
+        #expect(model.others.first?.session.quality == "4m")
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(model.errors.isEmpty)
+    }
+
+    @Test func aQualityIsAnsweredByThePickItSays() {
+        let received = Date(timeIntervalSince1970: 1_000)
+        let film = ItemSummary(id: 7, libraryId: 1, kind: .movie, title: "Film")
+        let before = RemoteModel.Entry(PlayingSession(sessionId: "a", item: film, quality: "auto"), received: received)
+        let sent = RemoteModel.Sent(command: .quality, before: before, sentAt: received, target: nil, quality: "4m")
+        #expect(!RemoteModel.answered(sent, before, at: received))
+        let picked = RemoteModel.Entry(PlayingSession(sessionId: "a", item: film, quality: "4m"), received: received)
+        #expect(RemoteModel.answered(sent, picked, at: received))
+        // Another quality plays in a session beside it: the one sent to goes.
+        #expect(RemoteModel.answered(sent, nil, at: received))
+    }
+
+    @Test func theRemoteSaysItsControlsInEveryAppsWords() {
+        #expect(Words.castHint == "Send something here with Play on…")
+        #expect(Words.remoteQuality("Living room TV") == "Quality on Living room TV")
+        #expect(Words.remoteStopQuestion("Living room TV") == "Stop playing on Living room TV?")
+        #expect(Words.remoteNextProgramme("Weather") == "Next: Weather")
+        #expect(Words.remotePrevious("Living room TV", live: true) == "Previous channel on Living room TV")
+        #expect(Words.remoteNext("Living room TV", live: true) == "Next channel on Living room TV")
     }
 
     @Test func thePlaceMovesOnWhilePlayingByThisDevicesClock() {

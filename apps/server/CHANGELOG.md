@@ -31,6 +31,33 @@ describes how they are made.
   tablet, a computer, a browser): what the player says, else what the
   server tells from the app. Remotes and dashboards can key players by
   it, and pick TVs out.
+- A user's remotes can cast to their other devices: an app that keeps its
+  event stream open as a receiver is listed, and plays the title,
+  playlist or Live TV channel sent to it, as its own Play would, and says
+  which device sent it, by the name that device gave itself. Only the
+  user's own devices are listed and cast to, an administrator's too.
+- Remotes change the audio track and the subtitles of what plays on
+  another device: sessions list their file's tracks and which play, and
+  players that say they take a change of track switch to the one picked.
+  Jellyfin apps that take media control switch track too.
+- Remotes change the quality of what plays on another device, from the
+  qualities its Quality menu offers for the file, and show which it plays.
+  A cast plays with the audio track and subtitles picked on the remote's
+  page, and a Live TV channel on a remote shows how far along the
+  programme is and what's on next.
+- The web and desktop apps' remote has Audio, Subtitles and a new Quality
+  as icons beside Stop, and asks before it stops what plays. On a Live TV
+  channel it shows the programme's progress and what's next, with
+  channel buttons. Play on… from a title's page plays with the audio and
+  subtitles picked there, and the video player takes a remote's change of
+  quality as its own menu does.
+- The web and desktop apps' remote lists your other devices that are on,
+  those playing first, then those ready to play, and changes the audio
+  track and the subtitles of what plays on one. Play on… beside Play
+  (Shuffle on… beside Shuffle, Watch on… for a Live TV channel) plays a
+  title, music, a playlist or a channel on one of them, and opens the
+  remote on it. Their video player takes a remote's change of audio and
+  subtitles as its own menu does, and tells remotes which it plays.
 
 ### Changed
 
@@ -46,6 +73,9 @@ describes how they are made.
 - Someone who isn't an administrator no longer hears when other people's
   playback starts or stops: the event for it goes only to that person's
   own devices and to administrators.
+- Music paused in the web app stays on your other devices' remotes: it
+  says it is paused every 30 seconds, where it used to drop off after a
+  minute and a half.
 
 ## [0.1.6] - 2026-11-04
 

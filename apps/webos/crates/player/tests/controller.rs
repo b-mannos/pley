@@ -12,8 +12,8 @@ use std::sync::Arc;
 use common::*;
 use pley_core::media::MediaKind;
 use pley_core::model::{
-    AudioChoice, ClientCaps, DynamicRange, PlaybackMethod, PlaybackMode, PlaybackRequest, ServerEvent, SubtitleResult,
-    SubtitleTrack,
+    AudioChoice, ClientCaps, Control, DeviceKind, DynamicRange, ItemKind, ItemSummary, PlaybackMethod, PlaybackMode,
+    PlaybackRequest, ServerEvent, SubtitleResult, SubtitleTrack,
 };
 use pley_player::autoquality::Remembered;
 use pley_player::controller::{Phase, SubtitleSearch};
@@ -90,7 +90,7 @@ fn tracks_picked_say_whether_the_audio_is_a_pick() {
 }
 
 #[test]
-fn the_play_request_asks_for_keyed_addresses_and_sends_the_caps() {
+fn the_play_request_asks_for_keyed_addresses_says_it_plays_on_a_tv_and_sends_the_caps() {
     let req = playback_request(70, &choices(|_| ()), "webos-abc", Some(&lg()), true);
     let want = PlaybackRequest {
         item_id: 70,
@@ -100,6 +100,7 @@ fn the_play_request_asks_for_keyed_addresses_and_sends_the_caps() {
         client_id: Some("webos-abc".into()),
         caps: lg(),
         keyed_urls: true,
+        device_kind: Some(DeviceKind::Tv),
         ..PlaybackRequest::default()
     };
     assert_eq!(req, want);
@@ -285,6 +286,291 @@ fn stops_for_good_when_the_server_stops_the_session_keeping_the_resume_point() {
     assert!(message.contains("Bedtime"));
     assert!(w.c.state().stopped_by_server);
     assert!(w.fake.calls().iter().all(|c| !c.starts_with("delete")));
+}
+
+// ---- the user's remote, on another device
+
+fn command(session: &str, command: Control, position_ms: Option<i64>, offset_ms: Option<i64>) -> ServerEvent {
+    ServerEvent::PlayerCommand {
+        session_id: session.into(),
+        command,
+        position_ms,
+        offset_ms,
+        stream_index: None,
+        quality: None,
+    }
+}
+
+/// The progress reports said since the last look.
+fn reports_since(w: &World, from: usize) -> Vec<String> {
+    w.fake.calls().into_iter().filter(|c| c.starts_with("progress")).skip(from).collect()
+}
+
+fn reports_so_far(w: &World) -> usize {
+    reports_since(w, 0).len()
+}
+
+#[test]
+fn a_video_says_what_the_remote_may_do_and_obeys_it_on_its_own_session_reporting_at_once() {
+    let mut w = World::new(Fake::new(item(file()), |_| info(|_| ())), |_| ());
+    w.start();
+    w.open();
+    // A film alone has nothing next: no next for the remote (its tracks follow the rest).
+    let req = w.fake.requests()[0].clone();
+    assert_eq!(req.controls[..4], [Control::Play, Control::Pause, Control::Seek, Control::Skip]);
+    assert!(!req.controls.contains(&Control::Next));
+    assert_eq!(req.device_kind, Some(DeviceKind::Tv));
+
+    // Someone else's session: nothing.
+    let before = reports_so_far(&w);
+    w.c.server_event(&command("s2", Control::Pause, None, None));
+    w.settle();
+    assert_eq!(w.c.state().phase, Phase::Playing);
+    assert_eq!(reports_so_far(&w), before);
+
+    w.c.server_event(&command("s1", Control::Pause, None, None));
+    w.settle();
+    assert_eq!(w.c.state().phase, Phase::Paused);
+    assert_eq!(reports_since(&w, before), ["progress paused 600000"]);
+    // Paused already: said again at once, so a remote a little behind settles.
+    w.c.server_event(&command("s1", Control::Pause, None, None));
+    w.settle();
+    assert_eq!(reports_since(&w, before), ["progress paused 600000", "progress paused 600000"]);
+    w.c.server_event(&command("s1", Control::Play, None, None));
+    w.settle();
+    assert_eq!(w.c.state().phase, Phase::Playing);
+    assert_eq!(reports_since(&w, before + 2), ["progress playing 600000"]);
+
+    // A seek reports at once where it went, not a second later; past the end it stops short of it.
+    w.c.server_event(&command("s1", Control::Seek, Some(1_200_000), None));
+    w.settle();
+    assert_eq!(reports_since(&w, before + 3), ["progress playing 1200000"]);
+    assert_eq!(w.sim.position(), 1_200_000);
+    w.advance(1_500);
+    assert_eq!(reports_since(&w, before + 3).len(), 1, "the seek reported twice");
+    let at = w.sim.position() as i64;
+    w.c.server_event(&command("s1", Control::Skip, None, Some(-10_000)));
+    w.settle();
+    assert_eq!(w.sim.position() as i64, at - 10_000);
+    w.c.server_event(&command("s1", Control::Seek, Some(9_000_000), None));
+    w.settle();
+    assert_eq!(w.sim.position(), 7_200_000 - 250);
+
+    // Nothing next, and no previous on a video: nothing, and nothing said on the TV.
+    let before = reports_so_far(&w);
+    w.c.server_event(&command("s1", Control::Next, None, None));
+    w.c.server_event(&command("s1", Control::Previous, None, None));
+    w.settle();
+    assert_eq!(reports_so_far(&w), before);
+    assert!(w.fake.questions().iter().all(|q| q != "next"));
+    assert!(w.notices.is_empty(), "{:?}", w.notices);
+    assert_eq!(w.fake.requests().len(), 1);
+}
+
+#[test]
+fn an_episodes_next_from_the_remote_plays_the_next_and_its_last_says_nothing_on_the_tv() {
+    let mut detail = item(file());
+    detail.summary.kind = ItemKind::Episode;
+    let fake = Fake::new(detail, |req| info(|i| i.session_id = format!("s{}", req.item_id)));
+    let mut w = World::new(fake, |_| ());
+    w.start();
+    w.open();
+    assert_eq!(w.fake.requests()[0].controls.get(4), Some(&Control::Next));
+    // The last episode: the remote's next finds nothing, and says nothing here.
+    w.c.server_event(&command("s70", Control::Next, None, None));
+    w.settle();
+    assert!(w.fake.questions().iter().any(|q| q == "next"));
+    assert!(w.notices.is_empty(), "{:?}", w.notices);
+    assert_eq!(w.fake.requests().len(), 1);
+    // With one after it, it plays that.
+    w.fake.set_next(Some(ItemSummary { id: 71, kind: ItemKind::Episode, ..ItemSummary::default() }));
+    w.c.server_event(&command("s70", Control::Next, None, None));
+    w.settle();
+    assert_eq!(w.fake.requests().last().map(|r| r.item_id), Some(71));
+}
+
+fn pick(session: &str, command: Control, stream_index: i64) -> ServerEvent {
+    ServerEvent::PlayerCommand {
+        session_id: session.into(),
+        command,
+        position_ms: None,
+        offset_ms: None,
+        stream_index: Some(stream_index),
+        quality: None,
+    }
+}
+
+/// The tracks the reports said, from the `from`-th on: `(state, audio, subtitles)`.
+fn tracks_reported(w: &World, from: usize) -> Vec<(String, Option<i64>, Option<i64>)> {
+    let reports = w.fake.reports();
+    reports.iter().skip(from).map(|r| (r.state.as_str().to_string(), r.audio_index, r.subtitle_index)).collect()
+}
+
+#[test]
+fn a_video_says_the_remote_may_pick_its_tracks_and_every_report_says_which_play() {
+    let mut w = World::new(Fake::new(item(file()), |_| info(|_| ())), |_| ());
+    w.start();
+    w.open();
+    // Two audio tracks and two subtitle tracks: the remote picks among them, and the quality.
+    let req = w.fake.requests()[0].clone();
+    assert_eq!(
+        req.controls,
+        [
+            Control::Play,
+            Control::Pause,
+            Control::Seek,
+            Control::Skip,
+            Control::Audio,
+            Control::Subtitles,
+            Control::Quality
+        ]
+    );
+    // The audio the server chose, no subtitles: in the reports every 10 s, on pause, and at the end.
+    w.advance(10_000);
+    w.c.pause();
+    w.settle();
+    w.c.close();
+    w.settle();
+    let said = tracks_reported(&w, 0);
+    assert_eq!(said.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["playing", "paused", "stopped"]);
+    assert!(said.iter().all(|r| (r.1, r.2) == (Some(1), Some(-1))), "{said:?}");
+
+    // A file without subtitles has none for the remote to pick.
+    let mut bare = file();
+    bare.streams.retain(|s| s.kind != pley_core::model::StreamKind::Subtitle);
+    let mut w = World::new(Fake::new(item(bare), |_| info(|_| ())), |_| ());
+    w.start();
+    let controls = &w.fake.requests()[0].controls;
+    assert_eq!(controls[controls.len() - 2..], [Control::Audio, Control::Quality]);
+}
+
+fn quality(session: &str, id: &str) -> ServerEvent {
+    ServerEvent::PlayerCommand {
+        session_id: session.into(),
+        command: Control::Quality,
+        position_ms: None,
+        offset_ms: None,
+        stream_index: None,
+        quality: Some(id.into()),
+    }
+}
+
+/// The quality the reports said, from the `from`-th on: `(state, quality)`.
+fn qualities_reported(w: &World, from: usize) -> Vec<(String, Option<String>)> {
+    w.fake.reports().iter().skip(from).map(|r| (r.state.as_str().to_string(), r.quality.clone())).collect()
+}
+
+#[test]
+fn the_remotes_quality_plays_as_the_menus_does_and_every_report_says_which_is_picked() {
+    let answer = |req: &PlaybackRequest| info(|i| i.session_id = format!("s{}", req.max_bitrate.map_or(1, |_| 2)));
+    let mut w = World::new(Fake::new(item(file()), answer), |_| ());
+    w.start();
+    w.open();
+    let from = w.fake.reports().len();
+    let said = |state: &str, id: &str| (state.to_string(), Some(id.to_string()));
+    // The one picked already: said again at once. One the menu doesn't offer, or another
+    // session's: nothing.
+    w.c.server_event(&quality("s1", "original"));
+    w.c.server_event(&quality("s1", "best"));
+    w.c.server_event(&quality("s2", "4m"));
+    w.settle();
+    assert_eq!(qualities_reported(&w, from), [said("playing", "original")]);
+    assert_eq!(w.fake.requests().len(), 1);
+    // Another: as picked in the menu, a new session made ready beside this one, which says the
+    // pick as it begins.
+    w.c.server_event(&quality("s1", "4m"));
+    w.settle();
+    let asked = w.fake.requests().last().cloned().unwrap();
+    assert_eq!((asked.max_bitrate.is_some(), asked.keep_previous), (true, true));
+    assert_eq!(
+        qualities_reported(&w, from),
+        [said("playing", "original"), said("stopped", "4m"), said("playing", "4m")]
+    );
+    assert_eq!(w.c.state().quality, "4 Mbps 720p");
+}
+
+#[test]
+fn the_remotes_track_plays_as_the_menus_does_and_is_reported_at_once() {
+    let mut w = World::new(Fake::new(item(file()), |_| info(|_| ())), |_| ());
+    w.start();
+    w.open();
+    let from = w.fake.reports().len();
+
+    // Text subtitles, then picture ones drawn here from the server's .mks, then off: each said at once.
+    w.c.server_event(&pick("s1", Control::Subtitles, 4));
+    w.settle();
+    assert!(w.fake.subtitle_asks().iter().any(|a| a.contains("/subtitles/4.vtt")), "{:?}", w.fake.subtitle_asks());
+    w.c.server_event(&pick("s1", Control::Subtitles, 3));
+    w.settle();
+    assert!(w.fake.subtitle_asks().iter().any(|a| a.contains("/subtitles/3.mks")), "{:?}", w.fake.subtitle_asks());
+    assert_eq!(selected(&w.c.state().subtitles), [Some(3)], "the menu shows the remote's pick");
+    w.c.server_event(&pick("s1", Control::Subtitles, -1));
+    w.settle();
+    assert_eq!(selected(&w.c.state().subtitles), [None]);
+    // What plays already changes nothing, and says so again, so the remote settles.
+    w.c.server_event(&pick("s1", Control::Subtitles, -1));
+    w.c.server_event(&pick("s1", Control::Audio, 1));
+    w.settle();
+    let playing = |audio, subtitles| ("playing".to_string(), Some(audio), Some(subtitles));
+    assert_eq!(
+        tracks_reported(&w, from),
+        [playing(1, 4), playing(1, 3), playing(1, -1), playing(1, -1), playing(1, -1)]
+    );
+    // Saved as the menu's picks are, for the next episode or viewing.
+    assert_eq!(w.fake.saved(), [(AudioChoice::Keep, Some(4)), (AudioChoice::Keep, Some(3)), (AudioChoice::Keep, None)]);
+    // Another session's pick, or a track the file doesn't have: nothing changes.
+    w.c.server_event(&pick("s2", Control::Subtitles, 4));
+    w.c.server_event(&pick("s1", Control::Audio, 9));
+    w.settle();
+    assert_eq!((selected(&w.c.state().audio), selected(&w.c.state().subtitles)), (vec![Some(1)], vec![None]));
+    assert_eq!(w.fake.requests().len(), 1, "a pick took a new session");
+}
+
+#[test]
+fn an_audio_track_the_tv_cant_switch_to_in_place_plays_in_a_new_session_that_says_so() {
+    // The session's id names its audio: the first the server's choice, then the pick.
+    let answer = |req: &PlaybackRequest| {
+        info(|i| {
+            i.session_id = format!("s{}", req.audio_index.unwrap_or(1));
+            i.audio_index = req.audio_index.or(Some(1));
+        })
+    };
+    let mut w = World::new(Fake::new(item(file()), answer), |_| ());
+    w.start();
+    w.open();
+    let from = w.fake.reports().len();
+    // An E-AC-3 track switches in place: said at once.
+    w.c.server_event(&pick("s1", Control::Audio, 1));
+    w.settle();
+    assert_eq!(tracks_reported(&w, from), [("playing".to_string(), Some(1), Some(-1))]);
+    // TrueHD isn't decoded here: a new session, made ready beside this one, names it; this one's
+    // last report still says the track it played.
+    w.c.server_event(&pick("s1", Control::Audio, 2));
+    w.settle();
+    let asked = w.fake.requests().last().cloned().unwrap();
+    assert_eq!((asked.audio_index, asked.keep_previous), (Some(2), true));
+    assert_eq!(tracks_reported(&w, from + 1), [("stopped".to_string(), Some(1), Some(-1))]);
+    assert_eq!(selected(&w.c.state().audio), [Some(2)]);
+    w.open();
+    w.c.pause();
+    w.settle();
+    assert_eq!(tracks_reported(&w, from + 2), [("paused".to_string(), Some(2), Some(-1))]);
+    assert_eq!(w.c.session().map(|s| s.session_id.as_str()), Some("s2"));
+}
+
+#[test]
+fn a_video_stopped_or_in_trouble_obeys_nothing() {
+    let mut w = World::new(Fake::new(item(file()), |_| info(|_| ())), |_| ());
+    w.start();
+    w.open();
+    w.c.server_event(&ServerEvent::SessionStopped { session_id: "s1".into(), message: None, by_admin: false });
+    w.settle();
+    let before = w.fake.calls().len();
+    w.c.server_event(&command("s1", Control::Play, None, None));
+    w.c.server_event(&command("s1", Control::Seek, Some(0), None));
+    w.settle();
+    assert_eq!(w.fake.calls().len(), before);
+    assert!(matches!(w.c.state().phase, Phase::Error { .. }));
 }
 
 #[test]

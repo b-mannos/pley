@@ -18,8 +18,8 @@ namespace Pley.Tv.Core.Api;
 /// One of the server's events (docs/API.md, "Activity &amp; events"). Types: library_changed,
 /// libraries_changed, sessions_changed, watchlist_changed, user_state_changed, session_stopped,
 /// scan_started, scan_progress, scan_finished, live_channels_changed, live_tuners_changed,
-/// live_taken_over, and requests' requests_changed, request_available, request_decided,
-/// request_created, request_failed and requests_settings_changed.
+/// live_taken_over, player_command, cast, and requests' requests_changed, request_available,
+/// request_decided, request_created, request_failed and requests_settings_changed.
 /// </summary>
 public sealed record ServerEvent
 {
@@ -30,10 +30,46 @@ public sealed record ServerEvent
     /// <summary>user_state_changed: everything under the first item changed too.</summary>
     public bool? Children { get; init; }
     public string? SessionId { get; init; }
-    /// <summary>live_taken_over: the channel whose connection someone took over, every viewer of it ended.</summary>
+    /// <summary>
+    /// live_taken_over: the channel whose connection someone took over, every viewer of it ended;
+    /// cast: the channel to tune.
+    /// </summary>
     public long? ChannelId { get; init; }
+    /// <summary>
+    /// cast: the profile's remote, on another device, sent the device of this receiver id something
+    /// to play (docs/API.md, "Casting"): one of <see cref="ItemId"/>, <see cref="PlaylistId"/> and
+    /// <see cref="ChannelId"/>, a title from <see cref="StartMs"/>, a movie or an episode with the
+    /// tracks <see cref="AudioIndex"/> and <see cref="SubtitleIndex"/> picked on the remote's page, a
+    /// playlist, album or artist <see cref="Shuffle"/>d; <see cref="From"/> names the remote's device,
+    /// when it has a name.
+    /// </summary>
+    public string? ReceiverId { get; init; }
+    /// <summary>cast: the title to play; request_available: where this account can open the title asked for.</summary>
+    public long? ItemId { get; init; }
+    public long? PlaylistId { get; init; }
+    public long? StartMs { get; init; }
+    public bool? Shuffle { get; init; }
+    /// <summary>cast: the audio to play, by stream index; null leaves it to the profile's choices.</summary>
+    public int? AudioIndex { get; init; }
+    /// <summary>cast: the subtitles to show, by stream index, -1 none; null leaves them to the profile's choices.</summary>
+    public int? SubtitleIndex { get; init; }
+    public string? From { get; init; }
     public string? Message { get; init; }
     public bool? ByAdmin { get; init; }
+    /// <summary>
+    /// player_command: what the profile's remote, on another device, asks of the player of
+    /// <see cref="SessionId"/> ("play", "pause", "seek", "skip", "next", "previous", "audio",
+    /// "subtitles", "quality"; a newer server may send others), with <see cref="PositionMs"/> for a
+    /// seek, <see cref="OffsetMs"/> for a skip, <see cref="StreamIndex"/> for a track and
+    /// <see cref="Quality"/> for a quality.
+    /// </summary>
+    public string? Command { get; init; }
+    public long? PositionMs { get; init; }
+    public long? OffsetMs { get; init; }
+    /// <summary>player_command: the audio or subtitle track to play, by stream index; -1 turns the subtitles off.</summary>
+    public int? StreamIndex { get; init; }
+    /// <summary>player_command: the Quality menu's entry to play, by id ("auto", "original", "8m"…).</summary>
+    public string? Quality { get; init; }
     /// <summary>scan_progress: "queued", "walking", "probing", "metadata" or "done".</summary>
     public string? Phase { get; init; }
     /// <summary>scan_progress: the files read so far, of <see cref="Total"/>.</summary>
@@ -47,8 +83,6 @@ public sealed record ServerEvent
     public string? Kind { get; init; }
     public long? TmdbId { get; init; }
     public string? Title { get; init; }
-    /// <summary>request_available: where this account can open it.</summary>
-    public long? ItemId { get; init; }
     /// <summary>request_available: the title's poster on the server, which the TV's pop-up shows.</summary>
     public string? PosterUrl { get; init; }
     /// <summary>request_available: the seasons ready, when not all are; request_created: those asked for.</summary>
@@ -121,8 +155,9 @@ public sealed class SseReader
     static bool Readable(ServerEvent e) => e.Type switch
     {
         "library_changed" or "scan_started" or "scan_progress" or "scan_finished" => e.LibraryId != null,
-        "session_stopped" => !string.IsNullOrEmpty(e.SessionId),
+        "session_stopped" or "player_command" => !string.IsNullOrEmpty(e.SessionId),
         "live_taken_over" => e.ChannelId != null,
+        "cast" => !string.IsNullOrEmpty(e.ReceiverId),
         "libraries_changed" or "sessions_changed" or "watchlist_changed" or "user_state_changed" or "live_channels_changed" or "live_tuners_changed" => true,
         "requests_changed" or "requests_settings_changed" => true,
         "request_available" or "request_decided" or "request_created" or "request_failed" => e.RequestId != null,
@@ -161,15 +196,19 @@ public sealed class EventStream
     readonly EventConnect connect;
     readonly IScheduler scheduler;
     readonly string? userAgent;
+    readonly Func<string>? query;
     readonly Action? onDrop;
     CancellationTokenSource? running;
     IDisposable? timer;
     int failures;
     bool stopped = true;
+    /// <summary>Bumped by each stop: a connection still waiting for its token when one comes is no longer wanted.</summary>
+    int runs;
 
     /// <param name="onDrop">A connection that opened ended, or the stream was stopped: events can't come until the next <c>onReconnect</c>.</param>
+    /// <param name="query">Asked at each connection: what the stream is for (this TV as a receiver of casts).</param>
     public EventStream(string server, Tokens tokens, Action<ServerEvent> onEvent, Action onReconnect, EventConnect connect, IScheduler scheduler,
-        string? userAgent = null, Action? onDrop = null)
+        string? userAgent = null, Action? onDrop = null, Func<string>? query = null)
     {
         this.onDrop = onDrop;
         this.server = server;
@@ -179,6 +218,7 @@ public sealed class EventStream
         this.connect = connect;
         this.scheduler = scheduler;
         this.userAgent = userAgent;
+        this.query = query;
     }
 
     /// <summary>Whether the stream is followed: started, and not stopped by the server's refusal since.</summary>
@@ -195,6 +235,7 @@ public sealed class EventStream
     public void Stop()
     {
         stopped = true;
+        runs++;
         timer?.Dispose();
         timer = null;
         running?.Cancel();
@@ -229,6 +270,7 @@ public sealed class EventStream
     async Task Connect(bool refreshed)
     {
         if (stopped) return;
+        var run = runs;
         string? token;
         try
         {
@@ -237,16 +279,17 @@ public sealed class EventStream
         catch (NetworkException)
         {
             // A refresh that couldn't reach the server: the server is away, not the sign-in.
-            if (!stopped) Failed();
+            if (!stopped && run == runs) Failed();
             return;
         }
         catch (Exception)
         {
             // Signed out, or the tokens can't be kept: nothing to follow until the next start.
-            Stop();
+            if (run == runs) Stop();
             return;
         }
-        if (stopped) return;
+        // Stopped, or started over (another profile, another receiver's query), while the token came.
+        if (stopped || run != runs) return;
         if (token == null)
         {
             Stop();
@@ -262,11 +305,12 @@ public sealed class EventStream
             ["Authorization"] = "Bearer " + token,
         };
         if (userAgent != null) headers["User-Agent"] = userAgent;
+        var q = query?.Invoke();
         EventEnd end;
         try
         {
             // The stream is read off the UI thread; what it says is told there, in order.
-            end = await connect($"{server}/api/events", headers, () => scheduler.Post(() =>
+            end = await connect(string.IsNullOrEmpty(q) ? $"{server}/api/events" : $"{server}/api/events?{q}", headers, () => scheduler.Post(() =>
             {
                 if (openedAt >= 0 || running != mine) return;
                 openedAt = scheduler.Elapsed;

@@ -8,6 +8,29 @@ describes how they are made.
 
 ## [Unreleased]
 
+### Added
+
+- Your phone, the web and your other devices control what Kodi plays:
+  play, pause, seek and skip, the next title in Kodi's queue or the next
+  episode, the next or previous track, and channel up and down on Live TV.
+  Remotes list Kodi with your TVs, by the device name it was given in
+  Kodi's settings. Needs a server from the same release.
+- Your phone, the web and your other devices change the audio and subtitles
+  of what Kodi plays, and see which ones play. A pick is saved for the show
+  or movie, as one made in Kodi's player is.
+- Your phone, the web and your other devices play things on Kodi: a film,
+  an episode, a show's next episode, music, a playlist or a Live TV
+  channel, in place of what plays. Kodi says which device sent it.
+- Your phone, the web and your other devices change the quality of a film
+  or episode playing on Kodi: the Quality setting changes, as picking it
+  there does, and the title plays again where it was. They see which
+  quality is picked. A film or episode they send plays with the audio and
+  subtitles picked on its page.
+- Live TV stopped from another device, or by the server's administrator,
+  says so, with their message.
+- Stopping a Live TV channel, or Kodi, frees its connection at once, so
+  another channel or device can use it straight away.
+
 ## [0.1.5] - 2026-11-04
 
 ### Changed

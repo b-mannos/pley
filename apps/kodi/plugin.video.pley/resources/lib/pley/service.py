@@ -1,7 +1,8 @@
-"""The service: it holds the sign-in, runs the proxy, and tells the server
+"""The service: it holds the sign-in, runs the proxy, tells the server
 where playback is (docs/API.md, Playback): every 10 seconds while playing,
 every 30 while paused (the server ends a session it hasn't heard of for 90
-seconds), and when it stops, after which the session ends."""
+seconds), and when it stops, after which the session ends; and it obeys the
+user's remote and plays what the remote casts here (remote.py, casting.py)."""
 
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ import urllib.parse
 
 import xbmc
 
-from . import api, auth, autoquality, kodi, news, overlay, prompts, requests, tracks
+from . import api, auth, autoquality, kodi, listing, news, overlay, profiles, prompts, remote, requests, tracks
 from .events import CHANGES, Events, Refresher
 from .proxy import Proxy, new_secret
 
@@ -47,7 +48,9 @@ FULLSCREEN = "Window.IsActive(fullscreenvideo) + !Window.IsVisible(videoosd) + !
 
 class Reports:
     """Progress reports for one playback, by the rules above. `send(path,
-    body)` and `end(path)` reach the server."""
+    body)` and `end(path)` reach the server. `tracks()` says the audio and
+    subtitles a video plays (tracks.Follower.playing), which each report
+    carries for the user's remotes, with the Quality menu's pick."""
 
     def __init__(self, playing: dict, send, end, clock=time.monotonic):
         self.playing = playing
@@ -58,14 +61,26 @@ class Reports:
         self.last = None
         self.paused = False
         self.credits_from = None
+        self.tracks = None
 
     def body(self, state: str) -> dict:
-        return {
+        body = {
             "position_ms": int(self.position_ms),
             "duration_ms": int(self.playing.get("duration_ms") or 0),
             "state": state,
             "session_id": self.playing["session_id"],
         }
+        # The server's stream indexes, -1 for no subtitles. One not known
+        # yet is left out: the server keeps what the play asked for.
+        audio, subtitle = (self.tracks() if self.tracks is not None else None) or (None, None)
+        if audio is not None:
+            body["audio_index"] = audio
+        if subtitle is not None:
+            body["subtitle_index"] = subtitle
+        # The Quality menu's pick (Kodi's setting, as the file offers it).
+        if self.playing.get("quality"):
+            body["quality"] = self.playing["quality"]
+        return body
 
     def report(self, state: str) -> None:
         self.last = self.clock()
@@ -163,6 +178,9 @@ class Player(xbmc.Player):
         # the server last ended, and when.
         self.taken = (None, float("-inf"))
         self.live_end = (None, float("-inf"))
+        # The live channel's watch session Kodi plays ({session_id,
+        # channel_id}), left when Kodi stops reading it (leave_live).
+        self.live = None
         # Automatic (docs/QUALITY.md): the playback's watch and what it
         # was given (playback.automatic), what the proxy counts, and the
         # title being played again at another quality: (item id, watch,
@@ -172,6 +190,8 @@ class Player(xbmc.Player):
         self.clock = time.monotonic
         self.meter = autoquality.Meter()
         self.restarting = None
+        # Casts heard: only the last one heard plays (play_cast).
+        self.casts = 0
 
     # ------------------------------------------------------------ requests
 
@@ -242,6 +262,7 @@ class Player(xbmc.Player):
         channel = livetv.channel_of(path)
         now = time.monotonic()
         self.live_end = (channel, now)
+        self.server_ended_live(channel)
 
         def taken():
             channel_taken, at = self.taken
@@ -272,6 +293,7 @@ class Player(xbmc.Player):
 
         if not isinstance(channel_id, int):
             return
+        self.server_ended_live(channel_id)
         now = time.monotonic()
         playing = livetv.channel_of(self.playing_file())
         ended, ended_at = self.live_end
@@ -324,11 +346,267 @@ class Player(xbmc.Player):
             with self.lock:
                 playing = self.reports.playing if self.reports is not None else None
             if playing is None or event.get("session_id") != playing.get("session_id"):
-                return
+                return self.live_stopped(event)
             by = "stopped_by_admin" if event.get("by_admin") else "stopped_elsewhere"
             self.stopped_by_server(event.get("message") or kodi.text(by))
         elif kind == "live_taken_over":
             self.taken_over(event.get("channel_id"), event.get("message"))
+        elif kind == "player_command":
+            try:
+                self.obey(event)
+            except Exception as e:  # noqa: BLE001 - one command never ends the stream
+                # Kodi stopped between the check and the call, say (seekTime
+                # raises then): out of here, it would drop the event stream,
+                # which misses what happens while it connects again.
+                kodi.log("the remote's %s failed: %r" % (event.get("command"), e), xbmc.LOGWARNING)
+        elif kind == "cast":
+            try:
+                self.cast(event)
+            except Exception as e:  # noqa: BLE001 - one cast never ends the stream
+                kodi.log("the remote's cast failed: %r" % e, xbmc.LOGWARNING)
+
+    def live_session(self):
+        """The live channel's watch session (kodi.LIVE): {session_id,
+        channel_id}, or None."""
+        try:
+            live = json.loads(kodi.get_property(kodi.LIVE) or "null")
+        except ValueError:
+            return None
+        return live if isinstance(live, dict) and live.get("session_id") else None
+
+    def live_stopped(self, event: dict) -> None:
+        """The live channel's session stopped from another device or by an
+        administrator: it stops as one taken over does, saying who stopped
+        it, then their words on a line of their own."""
+        live = self.live_session()
+        if live is None or event.get("session_id") != live["session_id"]:
+            return
+        why = kodi.text("live_stopped_by_admin" if event.get("by_admin") else "live_stopped_elsewhere")
+        message = event.get("message")
+        self.taken_over(live.get("channel_id"), "%s\n%s" % (why, message) if message else why)
+
+    def follow_live(self) -> None:
+        """What Kodi plays now, for the live session it holds: another
+        channel, or anything else, leaves the one before; the channel the
+        plugin last watched (kodi.LIVE) is held once Kodi plays its stream."""
+        from . import livetv
+
+        channel = livetv.channel_of(self.playing_file())
+        live = self.live_session()
+        now = live if live is not None and channel is not None and live.get("channel_id") == channel else None
+        with self.lock:
+            before = self.live
+            if before is not None and now is not None and before["session_id"] == now["session_id"]:
+                return
+            self.live = now
+        if before is not None:
+            self.leave_live(before)
+
+    def stopped_live(self) -> None:
+        """Kodi stopped, or its stream ended without the server ending it:
+        the live session it held is left, unless Kodi still plays it (Kodi
+        tells of a stop late)."""
+        from . import livetv
+
+        channel = livetv.channel_of(self.playing_file())
+        with self.lock:
+            before = self.live
+            if before is None or before.get("channel_id") == channel:
+                return
+            self.live = None
+        self.leave_live(before)
+
+    def closing(self) -> None:
+        """Kodi is exiting: the live session it holds is left, whether or
+        not its stream still plays."""
+        with self.lock:
+            before, self.live = self.live, None
+        if before is not None:
+            self.leave_live(before)
+
+    def server_ended_live(self, channel_id) -> None:
+        """The server ended the channel's session (taken over, stopped from
+        elsewhere, its stream ended): there is nothing to leave."""
+        with self.lock:
+            if self.live is not None and self.live.get("channel_id") == channel_id:
+                self.live = None
+
+    def leave_live(self, live: dict) -> None:
+        """DELETE /api/live/sessions/{session}, on the worker: Kodi's stream
+        keeps its session up to 45 s after Kodi stops reading it, which
+        would hold a connection of the source (a one-connection account's
+        only one) and stay in the user's remote. Best effort: a session the
+        server ended meanwhile answers 404, and nothing else is tried."""
+        path = "/api/live/sessions/%s" % urllib.parse.quote(live["session_id"], safe="")
+        self.worker.put(lambda: self.call("DELETE", path, timeout=LAST_TIMEOUT, fine=(404, 410)))
+
+    # ------------------------------------------------------------ the remote
+
+    def obey(self, command: dict) -> None:
+        """A command of the user's remote (remote.py), from the event
+        stream's thread: for the title or the live channel playing here.
+        Kodi stopped, or playing something else, obeys nothing."""
+        with self.lock:
+            reports = self.reports if self.restarting is None and self.tracked_playing() else None
+        if reports is not None:
+            return self.obey_title(reports, command)
+        live = self.live_session()
+        if live is not None:
+            self.obey_live(live, command)
+
+    def obey_title(self, reports: Reports, command: dict) -> None:
+        if command.get("command") == "quality":
+            return self.obey_quality(reports, command)
+        playing = reports.playing
+        paused = xbmc.getCondVisibility("Player.Paused")
+        place = remote.queue_place(playing["item_id"])
+        queued = place is not None and place[1] + 1 < place[2]
+        # Nothing queued after an episode: the one after it, as Up Next
+        # plays it (find_next), once the server has said which.
+        with self.lock:
+            moments = self.moments if self.reports is reports else None
+        following = moments.next_item if moments is not None and playing.get("kind") == "episode" else None
+        player = {
+            "session_id": playing.get("session_id"),
+            "state": "paused" if paused else "playing",
+            "position_ms": self.position(),
+            "duration_ms": playing.get("duration_ms") or None,
+            "has_next": queued or following is not None,
+        }
+        if (place is not None and place[0] == "music") or playing.get("kind") in listing.MUSIC:
+            player["index"] = place[1] if place is not None else 0
+        if command.get("command") in remote.TRACKS:
+            # Switched in Kodi's player (tracks.Follower.obey); music, and a
+            # title without tracks, have none to switch.
+            with self.lock:
+                follower = self.tracks if self.reports is reports else None
+            action = follower.obey(playing.get("session_id"), command) if follower is not None else dict(remote.NONE)
+        else:
+            action = remote.obey(player, command)
+        act = action["act"]
+        if act in ("play", "pause"):
+            # Kodi's pause turns it either way; said by onPlayBackPaused or
+            # onPlayBackResumed, at once.
+            self.pause()
+        elif act == "seek":
+            # Up Next goes first, as the TV apps' does, its countdown starting
+            # again should the place still be in the credits: left counting, it
+            # would play the next episode over the place the remote asked for.
+            with self.ui:
+                if moments is not None:
+                    moments.next_since = None
+                self.close_overlay()
+            self.seekTime(action["position_ms"] / 1000.0)
+        elif act == "next" and queued:
+            self.playnext()
+        elif act == "next":
+            with self.ui:
+                self.play_next(following)
+        elif act == "previous":
+            self.playprevious()
+        if action["report"] and act not in ("play", "pause"):
+            with self.lock:
+                if self.reports is not reports:
+                    return
+                reports.position_ms = action["position_ms"] if act == "seek" else player["position_ms"]
+                if paused != reports.paused:
+                    # Kodi's word on a pause not heard yet: said with it.
+                    (reports.pause if paused else reports.resume)()
+                else:
+                    reports.report("paused" if paused else "playing")
+
+    def obey_quality(self, reports: Reports, command: dict) -> None:
+        """The remote's quality (remote.obey_quality), as picking it in
+        Kodi's Quality setting, the add-on's Quality menu: the setting
+        changes (Automatic picked again starts afresh, as QualitySetting
+        sees), and the title plays again where it is at it, a new session
+        that reports as it starts. The one picked already is said again."""
+        from . import playback
+
+        playing = reports.playing
+        if "qualities" not in playing:
+            # Music, which has no quality.
+            return
+        player = {"session_id": playing.get("session_id"), "qualities": playing["qualities"], "quality": playing.get("quality")}
+        action = remote.obey_quality(player, command)
+        if action["act"] == "none":
+            if action["report"]:
+                with self.lock:
+                    if self.reports is reports:
+                        reports.position_ms = self.position()
+                        reports.report("paused" if reports.paused else "playing")
+            return
+        kodi.set_setting(playback.QUALITY, action["quality"])
+        kodi.log("the remote picked the quality %s" % action["quality"])
+        item_id, position = playing["item_id"], self.position()
+        with self.lock:
+            # Not Automatic's restart: the title gets a watch of its own.
+            self.restarting = (item_id, None, None)
+        self.worker.put(lambda: self.restart(item_id, position, None))
+
+    def obey_live(self, live: dict, command: dict) -> None:
+        """Channel up and down in Kodi's queue of channels, for the channel
+        playing now: Kodi asks the plugin for it, which watches it as any
+        channel is watched (a new session, which the remote then lists)."""
+        from . import livetv
+
+        channel = livetv.channel_of(self.playing_file())
+        if channel is None or channel != live.get("channel_id"):
+            return
+        channels = livetv.queued_channels()
+        action = remote.obey_live({"session_id": live["session_id"], "channel": channel, "channels": channels}, command)
+        if action["act"] == "channel":
+            # Kodi's video queue, which window.play_channels started: this
+            # player's playselected would first switch to the playlist it last
+            # played itself (music, unless it played one).
+            self.play(xbmc.PlayList(xbmc.PLAYLIST_VIDEO), startpos=channels.index(action["channel"]))
+
+    # --------------------------------------------------------------- casts
+
+    def taking(self) -> bool:
+        """Whether Kodi takes casts now: signed in, and "Who's watching?"
+        not on screen, whose PINs a cast mustn't play past."""
+        return bool(self.tokens.server()) and not kodi.get_property(profiles.PICKING)
+
+    def cast(self, event: dict) -> None:
+        """A cast of the user's remote (casting.py), from the event stream's
+        thread: one for this Kodi plays on the worker, which asks the
+        server what it needs first; of two close together, the later."""
+        from . import casting, playback
+
+        action = casting.action(playback.install_id(), self.taking(), event)
+        if action["act"] == "none":
+            return
+        with self.lock:
+            self.casts += 1
+            mine = self.casts
+        self.worker.put(lambda: self.play_cast(action, event.get("from"), mine))
+
+    def play_cast(self, action: dict, device, mine: int) -> None:
+        """Plays a cast as the add-on's own Play would, in place of what
+        plays, through the service's proxy; then says where it came from,
+        over what starts, as the add-on's other notices are said."""
+        from . import casting
+
+        base = kodi.get_property(kodi.PROXY)
+        if not base:
+            return
+
+        def current():
+            return self.casts == mine and self.taking()
+
+        client = api.Client(base, self.user_agent, local=True)
+        try:
+            outcome = casting.play(client, base, action, self, current) if current() else casting.DROPPED
+        except api.ApiError as e:
+            kodi.log("cast %r: %s %s" % (action, e.code, e.message), xbmc.LOGWARNING)
+            if current():
+                kodi.notify(kodi.text("server_error") % e.message, error=True)
+            return
+        if outcome == casting.PLAYED:
+            kodi.notify(casting.banner(device), icon=kodi.addon_icon(), ms=casting.BANNER_MS)
+        elif outcome == casting.NOTHING:
+            kodi.notify(kodi.text("nothing_to_play"), icon=kodi.addon_icon(), ms=casting.BANNER_MS)
 
     # ----------------------------------------------------- what is playing
 
@@ -351,6 +629,7 @@ class Player(xbmc.Player):
             if self.reports is not None and file != self.reports.playing["path"]:
                 # Something else plays now: the one before is over.
                 self._finish_locked(ended=False)
+        self.follow_live()
         raw = kodi.get_property(kodi.PLAYING)
         if not raw:
             return
@@ -373,6 +652,7 @@ class Player(xbmc.Player):
             follower = tracks.Follower(
                 playing["tracks"], kodi.rpc, lambda body: self.worker.put(lambda: self.save_tracks(playing, body))
             )
+            reports.tracks = follower.playing
         watch, notice = self.watching(playing)
         with self.lock:
             self.after_end = None
@@ -402,7 +682,7 @@ class Player(xbmc.Player):
             return None, None
         now = self.clock()
         stream = dict(live=bool(auto.get("live")), lines=auto.get("lines"), converted=auto.get("converted"))
-        if restarting is not None and restarting[0] == playing.get("item_id"):
+        if restarting is not None and restarting[1] is not None and restarting[0] == playing.get("item_id"):
             _, watch, notice = restarting
             watch.restarted(now, auto["quality"], auto.get("playing_kbps"), **stream)
             return watch, notice
@@ -521,22 +801,27 @@ class Player(xbmc.Player):
         with self.lock:
             watch.answered(kbps, got)
 
-    def restart(self, item_id: int, position_ms: float, quality: str) -> None:
-        """Plays the title again where it is, at `quality` (from the
-        worker): a new session, which ends the one before."""
+    def restart(self, item_id: int, position_ms: float, quality) -> None:
+        """Plays the title again where it is, at `quality` (Automatic's;
+        None for the setting's, as the remote picked it), from the worker:
+        a new session, which ends the one before. A cast's tracks stay."""
         from . import playback
 
         if not self.still_playing(item_id):
             self.restarting = None
             return
         base = kodi.get_property(kodi.PROXY)
+        with self.lock:
+            # What the remote may do stays as it was (playback.obeys).
+            playing = self.reports.playing if self.reports is not None else {}
+            kind, given = playing.get("kind"), playing.get("given")
         try:
             # The settings as they are now (the service's are read once).
             kodi.begin()
             client = api.Client(base, self.user_agent, timeout=60, local=True)
-            li = playback.prepare(client, base, item_id, int(position_ms), restart=quality)
+            li = playback.prepare(client, base, item_id, int(position_ms), restart=quality, kind=kind, given=given)
         except (api.ApiError, OSError, ValueError, KeyError) as e:
-            kodi.log("automatic: couldn't play %d at %s: %r" % (item_id, quality, e), xbmc.LOGWARNING)
+            kodi.log("couldn't play %d again at %s: %r" % (item_id, quality or "the quality setting", e), xbmc.LOGWARNING)
             self.restarting = None
             return
         if not self.still_playing(item_id):
@@ -609,11 +894,14 @@ class Player(xbmc.Player):
 
     def onPlayBackStopped(self) -> None:
         self.finish(ended=False)
+        self.stopped_live()
 
     def onPlayBackEnded(self) -> None:
         self.finish(ended=True)
+        self.stopped_live()
 
     def onPlayBackError(self) -> None:
+        self.stopped_live()
         if self.fall_back():
             return
         self.finish(ended=False)
@@ -807,7 +1095,7 @@ class Player(xbmc.Player):
                 self._finish_locked(ended=False)
             self.moments = None
             self.after_end = None
-        self.play("plugin://%s/?route=play&id=%d" % (kodi.ADDON_ID, item["id"]))
+        self.play("plugin://%s/?route=play&id=%d&kind=%s" % (kodi.ADDON_ID, item["id"], item.get("kind") or "episode"))
 
 
 def proxy_config(profile: str) -> dict:
@@ -826,6 +1114,24 @@ def proxy_config(profile: str) -> dict:
 
 def save_proxy_config(profile: str, config: dict) -> None:
     auth.write_private(os.path.join(profile, "proxy.json"), json.dumps(config))
+
+
+def receiver_query(user_agent: str):
+    """The event stream's query (events.Events' `query`) that makes this
+    Kodi a receiver of the user's casts (casting.receiver_query), asked as
+    the stream opens: channels too where the account has Live TV then."""
+
+    def query(server: str, token: str) -> dict:
+        from . import casting, livetv, playback
+
+        try:
+            live = livetv.available(livetv.summary(api.Client(server, user_agent, token, timeout=TIMEOUT)))
+        except (api.ApiError, ValueError):
+            # Out of reach: the stream won't open either, and asks again.
+            live = False
+        return casting.receiver_query(playback.install_id(), live)
+
+    return query
 
 
 class QualitySetting:
@@ -902,7 +1208,7 @@ def run() -> None:
         player.heard(event)
         told.heard(event)
 
-    events = Events(tokens, user_agent, heard, opened=told.opened)
+    events = Events(tokens, user_agent, heard, opened=told.opened, query=receiver_query(user_agent))
     events.start()
     # A quality chosen before Automatic, shown in the settings as it was.
     worker.put(quality.read)
@@ -922,6 +1228,7 @@ def run() -> None:
         except Exception as e:  # noqa: BLE001 - the loop outlives any one turn
             kodi.log("requests' news failed: %r" % e, xbmc.LOGERROR)
     player.close_overlay()
+    player.closing()
     kodi.clear_property(kodi.PROXY)
     kodi.clear_property(requests.SUMMARY)
     # Ends after what it is doing, unwaited for: the last report has the

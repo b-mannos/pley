@@ -250,6 +250,14 @@ public final class FixtureServer: Sendable {
         let durationMs: Int
         /// The order sessions started in, for `GET /api/sessions`.
         var order = 0
+        /// Which device plays it, as the server says it: its sign-in's (`app-<grant>`), and what kind.
+        var deviceId = ""
+        var deviceKind = "other"
+        /// The tracks it plays, as its play request started and its reports say (subtitles `-1`: none).
+        var audioIndex: Int?
+        var subtitleIndex: Int?
+        /// The Quality menu's pick, as its reports say; `nil` until one does.
+        var quality: String?
     }
 
     /// NWListener is Sendable from iOS 17 only; it is safe to share, and only
@@ -802,7 +810,9 @@ public final class FixtureServer: Sendable {
                 return image(width: 320, height: 180, type: "public.jpeg", contentType: "image/jpeg")
             }
         case ("POST", 2, "playback"):
-            return withToken(&s, request, scope: "play") { s, _ in startSession(&s, request.body) }
+            return withToken(&s, request, scope: "play") { s, access in
+                startSession(&s, request.body, deviceId: deviceId(access))
+            }
         case ("GET", 3, "playback") where parts[2] == "network":
             return withToken(&s, request, scope: "play") { s, _ in
                 guard s.network.routes else { return notFound(request.path) }
@@ -872,7 +882,7 @@ public final class FixtureServer: Sendable {
         }
     }
 
-    private static func startSession(_ s: inout State, _ body: Data) -> Answer {
+    private static func startSession(_ s: inout State, _ body: Data, deviceId: String) -> Answer {
         s.playbackBodies.append(body)
         if let status = s.playbackFails { return json(status, ["code": "unavailable", "message": "no transcode free"]) }
         let asked = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
@@ -890,20 +900,24 @@ public final class FixtureServer: Sendable {
         // The track asked for, else the one picked for the item, else the file's first.
         let audioIndex = asked["audio_index"] as? Int ?? playable.selectedAudio ?? playable.audio.first?.index ?? 1
         let lines = (asked["max_height"] as? Int).map { min($0, playable.height) } ?? playable.height
-        s.remote.started += 1
-        s.sessions[id] = PlaySession(itemId: itemId, key: key, method: method,
-                                     videoOut: "H.264 \(lines * 16 / 9)×\(lines)",
-                                     controls: asked["controls"] as? [String] ?? [],
-                                     device: asked["device_name"] as? String,
-                                     positionMs: asked["start_ms"] as? Int ?? 0, durationMs: playable.durationMs,
-                                     order: s.remote.started)
-        s.outbox.append(Self.sessionsChanged)
         let hls = method != "direct"
         let autoQuality: Any = method == "transcode" && maxBitrate == nil ? s.autoQuality : NSNull()
         // Picture subtitles asked for are burned into the stream.
         let burned = (asked["subtitle_index"] as? Int).flatMap { index in
             playable.subtitles.first { $0.index == index && $0.textBased == false && hls }?.index
         }
+        s.remote.started += 1
+        s.sessions[id] = PlaySession(itemId: itemId, key: key, method: method,
+                                     videoOut: "H.264 \(lines * 16 / 9)×\(lines)",
+                                     controls: asked["controls"] as? [String] ?? [],
+                                     device: asked["device_name"] as? String,
+                                     positionMs: asked["start_ms"] as? Int ?? 0, durationMs: playable.durationMs,
+                                     order: s.remote.started, deviceId: deviceId,
+                                     deviceKind: asked["device_kind"] as? String ?? "other",
+                                     audioIndex: playable.audio.isEmpty ? nil : audioIndex,
+                                     // As the server says until the player reports: burned in, else the profile's.
+                                     subtitleIndex: burned ?? playable.selectedSubtitle ?? -1)
+        s.outbox.append(Self.sessionsChanged)
         let subtitles: [Any] = playable.subtitles.map { stream in
             let text = stream.textBased != false
             return ["index": stream.index, "codec": stream.codec, "language": stream.language as Any? ?? NSNull(),
