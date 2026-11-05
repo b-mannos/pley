@@ -202,11 +202,12 @@ function homeEmpty(libraries as dynamic) as object
     return { title: "Nothing here yet", text: "Your libraries are empty. Add media to the library folders and run a scan." }
 end function
 
-' Home's menu, in the order of the other TVs' rail: Search, Home, Discover
-' and the requests (requests: their entries, from the summary), Live TV
-' where the server has it, the libraries, Playlists, Collections where
-' there is a library of movies or shows (the page says when none has any),
-' Now Playing while music plays, and Settings last. [{ title, action, library, count, danger }].
+' Home's menu, in the order of the other TVs' rail: Search, Home, the way
+' into requests (requests: its entry, homeRequestsEntries), Live TV where
+' the server has it, the libraries, Playlists, Collections where there is
+' a library of movies or shows (the page says when none has any), Now
+' Playing while music plays, and Settings last. [{ title, action, library,
+' count, danger }].
 function homeMenu(libraries as object, live as boolean, requests as object, music as boolean) as object
     entries = [{ title: "Search", action: "search" }, { title: "Home", action: "home" }]
     for each entry in requests
@@ -220,7 +221,28 @@ function homeMenu(libraries as object, live as boolean, requests as object, musi
     end for
     entries.Push({ title: "Playlists", action: "playlists" })
     if videos then entries.Push({ title: "Collections", action: "collections" })
-    if music then entries.Push({ title: "Now playing", action: "nowPlaying" })
+    if music then entries.Push({ title: "Now Playing", action: "nowPlaying" })
     entries.Push({ title: "Settings", action: "settings" })
     return entries
+end function
+
+' The menu's one way into requests, as on Android TV's rail, from the
+' requests' summary (lib/Requests.brs): Discover where the profile may
+' ask, else the requests (Your requests, a manager's Requests) where it
+' has some to see, else none; it carries their number (Discover leads to
+' them). [] or [{ title, action, count, danger }].
+function homeRequestsEntries(summary as object) as object
+    entry = invalid
+    if reqShowsDiscover(summary)
+        entry = { title: "Discover", action: "discover" }
+    else if reqShowsRequests(summary)
+        entry = { title: reqPageName(summary), action: "requests" }
+    end if
+    if entry = invalid then return []
+    if reqShowsRequests(summary)
+        badge = reqBadge(summary)
+        entry.count = badge.count
+        entry.danger = badge.danger
+    end if
+    return [entry]
 end function

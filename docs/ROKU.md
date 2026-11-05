@@ -48,9 +48,11 @@ in to with a code, choosing it in the browser.
 ### Home
 
 Home's menu, at the left, is in the order of the other TVs' rail: Search,
-Home, Discover and the requests (where the server has them), Live TV, the
-libraries, Playlists, Collections (every library's collections, a row
-each), Now Playing while music plays, and Settings.
+Home, one way into requests (where the server has them: Discover where
+the profile may ask, else Your requests, a manager's Requests, with the
+number of what waits there), Live TV, the libraries, Playlists,
+Collections (every library's collections, a row each), Now Playing while
+music plays, and Settings.
 
 Beside it, as on Android TV and the native Samsung app, a hero shows the
 first of Continue Watching, else the newest title in the rows: its
@@ -569,9 +571,11 @@ Where an administrator has turned requests on, people ask for movies and
 shows found on TMDB, administrators approve them, and Radarr and Sonarr
 fetch them ([API.md](API.md#requests)). An administrator's Roku manages
 them (a manager, below) once its sign-in allows `approvals`; one signed in
-before is offered Sign in again. The menu shows what the profile may do;
-its number counts what waits: a manager's pending and failed requests
-(red while some failed) and their own news, anyone else's news.
+before is offered Sign in again. As on Android TV, the menu has one way
+in, for what the profile may do: Discover for those who may ask (the
+requests are at its top), else Your requests (a manager's Requests). Its
+number counts what waits: a manager's pending and failed requests (red
+while some failed) and their own news, anyone else's news.
 
 - **Discover**, for those who may ask: a hero for the first trending title
   (its main action and Details; once nothing of its kind is left to ask

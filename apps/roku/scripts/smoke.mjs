@@ -576,7 +576,7 @@ async function walk() {
   // listed there, then a channel whose
   // source has no connection left; Back leaves to the guide at that
   // channel, then the Channels tab.
-  await openFromMenu(4, /^GET \/api\/live\/guide\?/, "Live TV's guide");
+  await openFromMenu(3, /^GET \/api\/live\/guide\?/, "Live TV's guide");
   await sleep(1500);
   shoot("live-guide");
   await press("right"); // the guide
@@ -641,7 +641,7 @@ async function walk() {
   await press("back"); // Home
   await settle();
   since = mark();
-  await openFromMenu(5, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies");
+  await openFromMenu(4, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies");
   // Sorted by title: the A to Z, once every title's letter came, right of
   // the grid's last column (a right press more than needed, which the
   // letters take). Down from "#" to W, whose first title is on the third
@@ -670,7 +670,7 @@ async function walk() {
   // opened, that the movies differ in them, and Resolution's 4K: the grid
   // lists 4K titles only, and a chip says so.
   since = mark();
-  await openFromMenu(5, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies again");
+  await openFromMenu(4, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies again");
   await waitFor(/^GET \/api\/libraries\/1\/filters$/, since, "what a library can be filtered by");
   await settle();
   await press("up"); // the tabs, on Library
@@ -701,7 +701,7 @@ async function walk() {
   await settle();
   shoot("library-4k");
   await press("back");
-  await openFromMenu(6, /^GET \/api\/libraries\/2\/items/, "TV Shows");
+  await openFromMenu(5, /^GET \/api\/libraries\/2\/items/, "TV Shows");
   // Its tabs: Recommended, Collections, then Library again, sorted by year.
   since = mark();
   await press("up"); // the tabs, on Library
@@ -852,7 +852,7 @@ async function walk() {
   // album's order again (Previous plays the one before), and the sleep
   // timer's button. Now Playing left; then the album's second disc played
   // from its list in place of the album, and Back to Home.
-  await openFromMenu(7, /^GET \/api\/libraries\/3\/items\?.*offset=0/, "Music");
+  await openFromMenu(6, /^GET \/api\/libraries\/3\/items\?.*offset=0/, "Music");
   shoot("music");
   since = mark();
   await press("select"); // the artist
@@ -982,7 +982,7 @@ async function walk() {
   // key's Move, then taken out, and the playlist played from the top. Then
   // New playlist, for Movies & TV, named on the keyboard: it opens, made.
   // Back to Home.
-  await openFromMenu(8, /^GET \/api\/playlists$/, "Playlists");
+  await openFromMenu(7, /^GET \/api\/playlists$/, "Playlists");
   shoot("playlists");
   since = mark();
   await press("select"); // the first playlist
@@ -1073,12 +1073,18 @@ async function walk() {
     await press("back"); // Discover's rows, its hero, Home
     await settle();
   }
-  // The managers' Requests, on Needs attention: the Options key on the
-  // oldest, Approve. Meanwhile Anna's download came into a library, which
-  // no event told of: the summary asked after Approve has news, whose
-  // notice waits while the requests show. Then Yours, the last tab, which
-  // marks Anna's news seen.
-  await openFromMenu(3, /^GET \/api\/requests\?.*attention=1/, "Requests");
+  // The managers' Requests, on Needs attention, from Discover's way to
+  // them over its hero (the menu's one entry for requests is Discover):
+  // the Options key on the oldest, Approve. Meanwhile Anna's download came
+  // into a library, which no event told of: the summary asked after
+  // Approve has news, whose notice waits while the requests show. Then
+  // Yours, the last tab, which marks Anna's news seen.
+  await openFromMenu(2, /^GET \/api\/discover\/trending\?page=1$/, "Discover again");
+  await settle();
+  since = mark();
+  await press("up"); // the requests' chip, over the hero
+  await press("select");
+  await waitFor(/^GET \/api\/requests\?.*attention=1/, since, "Requests");
   shoot("requests");
   since = mark();
   await press("options");
@@ -1100,8 +1106,8 @@ async function walk() {
   await waitFor(/^POST \/api\/requests\/seen$/, since, "the news marked seen");
   shoot("requests-yours");
   // Home: the notice's card, once the remote has rested, with Open
-  // focused.
-  await press("back");
+  // focused. Discover goes by before it can show there.
+  await press("back", 2); // Discover, then Home
   notice.shown = await drawnWithin(8000, readyNoticeDrawn);
   // An OK in the card's first 0.6 s was meant for the page.
   await sleep(800);
@@ -1261,7 +1267,7 @@ async function walk() {
   fixture.down = true;
   await press("left", 3);
   await press("up", 11);
-  await press("down", 5); // Movies, after Search, Home, Discover, Your requests and Live TV
+  await press("down", 4); // Movies, after Search, Home, Discover and Live TV
   await press("select");
   await sleep(3000);
   shoot("unreachable");

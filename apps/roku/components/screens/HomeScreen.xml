@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Home: the menu on the left (Search, Home, Discover and the requests
+<!-- Home: the menu on the left (Search, Home, Discover or the requests
      where the server has them, Live TV, the libraries, Playlists,
      Collections, Now Playing, Settings), then, as on Android TV and the
      native Samsung app, a hero for the first of Continue Watching (its
@@ -16,7 +16,7 @@
         <!-- Set by the scene when other devices changed what Home shows. -->
         <field id="refresh" type="boolean" alwaysNotify="true" />
         <!-- What requests let the profile do (the scene's): the menu's
-             Discover and requests, and their number. -->
+             way into them, and its number. -->
         <field id="requestSummary" type="assocarray" onChange="onRequestSummary" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/HomeScreen.brs" />

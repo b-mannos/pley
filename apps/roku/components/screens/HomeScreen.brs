@@ -209,9 +209,9 @@ sub showEmpty()
     m.emptyShown = true
 end sub
 
-' The menu, in the other TVs' order (homeMenu); Discover and the requests
-' (Your requests, a manager's Requests, with their number) where the
-' summary has them.
+' The menu, in the other TVs' order (homeMenu); Discover, else the
+' requests (Your requests, a manager's Requests), with their number,
+' where the summary has them.
 sub buildMenu()
     m.requestEntries = requestEntries()
     m.musicShown = m.global.music.state <> "stopped"
@@ -243,17 +243,10 @@ sub buildMenu()
     if at > 0 then m.menu.jumpToItem = at
 end sub
 
-' The menu's entries for requests, from the summary: Discover, and the
-' requests with their number.
+' The menu's way into requests, from the summary: Discover, else the
+' requests, with their number (homeRequestsEntries).
 function requestEntries() as object
-    summary = reqSummaryOf(m.top.requestSummary)
-    entries = []
-    if reqShowsDiscover(summary) then entries.Push({ title: "Discover", action: "discover" })
-    if reqShowsRequests(summary)
-        badge = reqBadge(summary)
-        entries.Push({ title: reqPageName(summary), action: "requests", count: badge.count, danger: badge.danger })
-    end if
-    return entries
+    return homeRequestsEntries(reqSummaryOf(m.top.requestSummary))
 end function
 
 ' The summary changed: the menu follows when its entries do.

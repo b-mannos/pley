@@ -76,15 +76,30 @@ end sub
 sub test_home_menu_follows_the_other_tvs_rail()
     movies = { id: 1, name: "Movies", kind: "movies" }
     music = { id: 3, name: "Music", kind: "music" }
-    requests = [{ title: "Discover", action: "discover" }, { title: "Requests", action: "requests", count: 2, danger: false }]
+    requests = [{ title: "Discover", action: "discover", count: 2, danger: false }]
     actions = []
+    titles = []
     for each entry in homeMenu([movies, music], true, requests, true)
         actions.Push(entry.action)
+        titles.Push(entry.title)
     end for
-    tkEqual(actions, ["search", "home", "discover", "requests", "live", "library", "library", "playlists", "collections", "nowPlaying", "settings"])
+    tkEqual(actions, ["search", "home", "discover", "live", "library", "library", "playlists", "collections", "nowPlaying", "settings"])
+    tkEqual(titles[8], "Now Playing", "as the other TVs write it")
     actions = []
     for each entry in homeMenu([music], false, [], false)
         actions.Push(entry.action)
     end for
     tkEqual(actions, ["search", "home", "library", "playlists", "settings"], "no Collections without movies or shows")
+end sub
+
+sub test_home_menu_has_one_way_into_requests()
+    summary = reqSummary({ enabled: true, access: "ask", manage: true, pending: 2, failed: 1, unseen: 1 })
+    tkEqual(homeRequestsEntries(summary), [{ title: "Discover", action: "discover", count: 4, danger: true }], "Discover for those who may ask, with the requests' number")
+    summary = reqSummary({ enabled: true, access: "off", manage: true, pending: 2, failed: 0, unseen: 0 })
+    tkEqual(homeRequestsEntries(summary), [{ title: "Requests", action: "requests", count: 2, danger: false }], "a manager who may not ask: Requests")
+    summary = reqSummary({ enabled: true, access: "off", own: 3, unseen: 1 })
+    tkEqual(homeRequestsEntries(summary), [{ title: "Your requests", action: "requests", count: 1, danger: false }], "their own requests left to see")
+    tkEqual(homeRequestsEntries(reqSummary({ enabled: true, access: "off" })), [], "nothing to ask or see")
+    tkEqual(homeRequestsEntries(reqSummary({ enabled: false, access: "ask" })), [], "requests off")
+    tkEqual(homeRequestsEntries(reqNoSummary(false)), [], "no summary yet")
 end sub
