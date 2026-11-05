@@ -2,7 +2,7 @@
 ' every 10 s while playing, on pause and every 30 s while paused, and as
 ' "stopped" on the way out, then the session is closed. A stream that
 ' breaks is checked with the server: stopped by an administrator (410),
-' the player leaves and says so; otherwise it starts again where it was,
+' the player says so, then leaves; otherwise it starts again where it was,
 ' with a new session and the current token (a token that ran out answers
 ' 401 to the Video node). Skip Intro and Skip Credits follow the web
 ' player: an episode's credits bring up Up Next instead. Down brings up
@@ -251,6 +251,9 @@ sub init()
     m.playNotice = ""
     m.detailsTimer = m.top.findNode("detailsTimer")
     m.detailsTimer.observeField("fire", "onDetailsTick")
+    m.stoppedTimer = m.top.findNode("stoppedTimer")
+    m.stoppedTimer.duration = playerStoppedLeaveMs() / 1000
+    m.stoppedTimer.observeField("fire", "onStoppedTimer")
     m.top.observeField("active", "onActive")
     m.top.observeField("serverStopped", "onServerStopped")
     m.top.observeField("playerCommand", "onPlayerCommand")
@@ -429,6 +432,7 @@ sub open(itemId as dynamic, startMs as integer, item as dynamic, mode as string)
     m.upNextCancelled = false
     m.ended = false
     m.stallTimer.control = "stop"
+    m.stoppedTimer.control = "stop"
     m.slowSaid = false
     m.seenMs = -1
     m.markers = []
@@ -1294,6 +1298,7 @@ sub finish()
     m.sleepNotice.visible = false
     m.stallTimer.control = "stop"
     m.detailsTimer.control = "stop"
+    m.stoppedTimer.control = "stop"
     endReconnect()
     hideWaiting()
     hideBanner()
@@ -1313,17 +1318,22 @@ sub finish()
     scene.played = scene.played + 1
 end sub
 
-' The server stopped the stream: the player leaves, and the scene says why
-' over the screen before.
+' The server stopped the stream, by its administrator or for another
+' device: the player says so itself, "Playback stopped" and why, as
+' Android TV's, then leaves 20 s later (or at Back).
 sub stopped(data as dynamic)
     m.tracksFrom = -1
     stopPictures()
     m.sessionId = ""
     m.video.control = "stop"
-    lines = playerStoppedMessage(data).Split(Chr(10))
-    message = []
-    if lines.Count() > 1 then message.Push(lines[1])
-    uiNavigate({ back: true, message: { title: lines[0], lines: message } })
+    ' Automatic has nothing left to watch: it would open the title again.
+    newTitle()
+    notice("Playback stopped", playerStoppedMessage(data), ["Back"])
+    m.stoppedTimer.control = "start"
+end sub
+
+sub onStoppedTimer()
+    if m.notice.visible and m.top.active then uiNavigate({ back: true })
 end sub
 
 sub broken()

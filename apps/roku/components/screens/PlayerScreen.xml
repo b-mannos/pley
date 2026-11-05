@@ -136,6 +136,9 @@
         <Timer id="clockTimer" duration="1" repeat="true" />
         <!-- The spinner's wait before it shows. -->
         <Timer id="spinnerTimer" duration="0.5" />
+        <!-- A playback stopped from elsewhere says why this long, then
+             the player leaves. -->
+        <Timer id="stoppedTimer" />
         <!-- The server asked again while it is out of reach. -->
         <Timer id="reconnectTimer" duration="2" />
         <!-- A look once a second at whether the playhead stands still. -->

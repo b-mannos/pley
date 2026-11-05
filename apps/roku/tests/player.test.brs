@@ -90,6 +90,10 @@ sub test_player_says_who_stopped_the_stream()
     tkEqual(playerStoppedMessage({ session_id: "s1", message: invalid, by_admin: false }), "Playback was stopped from another device.", "the event stream says who")
 end sub
 
+sub test_player_leaves_a_stopped_playback_after_saying_why()
+    tkEqual(playerStoppedLeaveMs(), 20000, "as Android TV's")
+end sub
+
 sub test_player_up_next_at_the_credits()
     item = {
         files: [{ id: 7 }, { id: 8 }],

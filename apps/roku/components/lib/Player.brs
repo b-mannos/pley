@@ -93,6 +93,12 @@ function playerSessionState(status as integer) as string
     return "alive"
 end function
 
+' Stopped by the server or another device, the player says why this long
+' before it leaves by itself, as Android TV's does.
+function playerStoppedLeaveMs() as integer
+    return 20000
+end function
+
 ' What the player says when the server stopped the stream: the answer's
 ' message, when the one who stopped it wrote one. The event stream says
 ' whether that was an administrator (by_admin); a 410 doesn't, and is

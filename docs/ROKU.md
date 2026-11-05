@@ -271,6 +271,9 @@ paused leaves the player, as in Roku's own apps.
   of the profile). What went wrong shows as on Android TV: centred on
   black, the title, the reason in up to four lines, then Try again
   (focused) beside Back.
+- **Stopped** by the server's administrator or from another device, the
+  player says so itself, as Android TV's: "Playback stopped", who stopped
+  it and their message, with Back; it leaves by itself 20 s later.
 - **Stalls:** a playhead that stands still 12 s while meant to play is
   looked at, as the other apps do: a file played as it is that has its
   data is converted once a title (see [Quality](#quality)); a stream asks
