@@ -57,7 +57,9 @@ first of Continue Watching, else the newest title in the rows: its
 backdrop, its title (a show's name over an episode's "S2 E5 · Title"),
 year, length, content rating, stars and quality ("4K", "DV"), the time
 left, its summary, then Resume (or Play), From start, Info and Mark as
-watched. Resume has the focus as Home first shows. Down goes to the
+watched; a show's (or a season's) Play plays its next episode, as on
+Android TV, and "Nothing to play" says when it has none. Resume has the
+focus as Home first shows. Down goes to the
 server's rows: there an info block about the title focus rests on (0.4 s)
 takes the hero's place, and the backdrop follows it. Up from the first row
 goes back to the hero; Left or Back, to the menu, the hero shown again.

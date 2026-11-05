@@ -155,8 +155,9 @@ function homeBackdropWidth() as integer
 end function
 
 ' The hero's buttons: { labels, actions }. A movie or an episode plays
-' (Resume and From start while in progress); anything else opens. Info
-' opens the title's page, and the watched mark toggles.
+' (Resume and From start while in progress); a show or a season plays its
+' next episode ("next"), as on Android TV; anything else opens. Info opens
+' the title's page, and the watched mark toggles.
 function homeHeroButtons(info as object) as object
     labels = []
     actions = []
@@ -170,6 +171,9 @@ function homeHeroButtons(info as object) as object
         end if
         labels.Push("Info")
         actions.Push("info")
+    else if info.kind = "show" or info.kind = "season"
+        labels = ["Play", "Info"]
+        actions = ["next", "info"]
     else
         labels = ["Open"]
         actions = ["info"]

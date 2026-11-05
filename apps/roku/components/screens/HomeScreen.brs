@@ -39,6 +39,8 @@ sub init()
     m.heroInfo = invalid
     m.heroActions = []
     m.heroLabels = []
+    ' A show's next episode is being asked for (its Play).
+    m.askingNext = false
     m.infos = {}
     m.infoShown = 0
     m.restingOn = 0
@@ -547,8 +549,9 @@ function focusedNode() as dynamic
 end function
 
 ' Resume or Play plays a movie or an episode (From start, from its
-' start); Info, and Open for anything else, opens its page; the watched
-' mark toggles, and Home asks for its rows again.
+' start), a show's or a season's Play its next episode (GET
+' /api/items/{id}/on-deck); Info, and Open for anything else, opens its
+' page; the watched mark toggles, and Home asks for its rows again.
 sub onHeroButton(event as object)
     info = m.heroInfo
     if info = invalid then return
@@ -559,11 +562,37 @@ sub onHeroButton(event as object)
         uiNavigate({ to: "player", params: { itemId: info.itemId, startMs: Int(info.positionMs) } })
     else if action = "start"
         uiNavigate({ to: "player", params: { itemId: info.itemId, startMs: 0 } })
+    else if action = "next"
+        if not m.askingNext
+            m.askingNext = true
+            uiGet("/api/items/" + urlValue(info.itemId) + "/on-deck", "onHeroNext")
+        end if
     else if action = "info"
         uiOpenTile({ itemId: info.itemId, kind: info.kind, title: info.title })
     else
         uiTitleAction({ itemId: info.itemId, kind: info.kind, parentId: 0, grandparentId: 0 }, action)
     end if
+end sub
+
+' The show's next episode plays where its Play starts it; with none, a
+' toast says so, as on Android TV.
+sub onHeroNext(event as object)
+    m.askingNext = false
+    answer = event.getData()
+    if not answer.ok
+        if not uiFailed(answer) then uiToast(answer.message, true)
+        return
+    end if
+    episode = invalid
+    if answer.data <> invalid then episode = httpObject(answer.data.item)
+    ' Left meanwhile: nothing starts behind the screen now on top.
+    if not m.top.active then return
+    if episode = invalid
+        uiToast("Nothing to play")
+        return
+    end if
+    tile = contentTile(episode, m.global.session.server, true)
+    uiNavigate({ to: "player", params: { itemId: tile.itemId, startMs: playerStartOf(tile.positionMs, tile.durationMs) } })
 end sub
 
 ' A title opens; See all, its library on the Library tab in the row's
