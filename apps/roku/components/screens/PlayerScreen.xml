@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The player: the Video node with its own controls, the picture
-     subtitles the app draws, the title as each item begins, Skip Intro and
-     Skip Credits, Up Next before the end of an episode (and at its end),
+     subtitles the app draws, the title as each item begins and while
+     paused (with the clock and when it ends), Skip Intro and Skip
+     Credits, Up Next at an episode's credits (or at its end),
      Pley's menu (Down: Subtitles, Audio, Quality, Subtitle sync,
-     Chapters, Sleep timer, Find subtitles…, Playback details), the sleep
-     timer's notice, Automatic's notice of a lower quality, "Reconnecting…"
-     while the server is out of reach, and what went wrong when it did. -->
+     Chapters, Previous chapter, Next chapter, Next episode, Sleep timer,
+     Find subtitles…, Playback details), the sleep timer's notice,
+     Automatic's notice of a lower quality, "Reconnecting…" while the
+     server is out of reach, and what went wrong when it did. -->
 <component name="PlayerScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -50,22 +52,44 @@
             </Group>
             <SkipButton id="skip" translation="[1544, 924]" visible="false" />
         </Video>
-        <!-- The title for 4 s as each item begins, at the top. -->
+        <!-- The title at the top, for 4 s as each item begins and while
+             paused or Roku's bar shows; then, at the right, as on Android
+             TV, how it plays, the clock and, paused, when it ends. -->
         <Group id="banner" visible="false">
             <Rectangle width="1920" height="200" color="0x000000A6" />
-            <Label id="bannerTitle" translation="[96, 56]" width="1500" maxLines="1" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="bannerLine" translation="[96, 116]" width="1500" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+            <Label id="bannerTitle" translation="[96, 56]" width="1144" maxLines="1" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Label id="bannerLine" translation="[96, 116]" width="1144" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+            <Group id="bannerRight" visible="false">
+                <Label id="bannerStatus" translation="[1264, 60]" width="560" horizAlign="right" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+                <Label id="bannerEnds" translation="[1264, 108]" width="560" horizAlign="right" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+            </Group>
         </Group>
-        <!-- "Loading…", or "Reconnecting…" while the server is out of reach. -->
-        <Label id="loading" translation="[0, 500]" width="1920" horizAlign="center" text="Loading…" color="0xA1A9B6FF" font="font:MediumSystemFont" />
-        <Group id="upNext" translation="[0, 700]" visible="false">
-            <Rectangle width="1920" height="380" color="0x16191EE6" />
-            <Poster id="nextImage" translation="[96, 60]" width="400" height="225" loadWidth="400" loadHeight="225" loadDisplayMode="scaleToZoom" />
-            <Label translation="[540, 56]" text="Up next" color="0x38BDF8FF" font="font:SmallerBoldSystemFont" />
-            <Label id="nextTitle" translation="[540, 100]" width="880" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="nextLine" translation="[540, 156]" width="880" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
-            <Label id="countdown" translation="[540, 214]" width="880" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
-            <ButtonGroup id="nextButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[1460, 60]" minWidth="360" />
+        <!-- Settings → Playback details: how it plays, at the top left in
+             the title's place while nothing else shows (updateReadout). -->
+        <Group id="readout" translation="[96, 54]" visible="false">
+            <Rectangle id="readoutBack" width="840" color="0x16191EB8" />
+            <Label id="readoutText" translation="[24, 16]" width="792" wrap="true" maxLines="8" lineSpacing="4" color="0xEBEBEBFF" font="font:SmallestSystemFont" />
+        </Group>
+        <!-- Waiting for the video, after 500 ms: the spinner in the middle,
+             as Android TV's ring, and while the server is out of reach
+             "Reconnecting…" 32 px under it, on a backing, as the picture
+             behind it can be anything. -->
+        <BusySpinner id="spinner" translation="[928, 508]" visible="false" />
+        <Group id="reconnecting" visible="false">
+            <Rectangle translation="[790, 604]" width="340" height="60" color="0x16191E99" />
+            <Label translation="[790, 604]" width="340" height="60" horizAlign="center" vertAlign="center" text="Reconnecting…" color="0xEBEBEBFF" font="font:SmallSystemFont" />
+        </Group>
+        <!-- Up Next, Android TV's card at the bottom right: the next one's
+             still, "Up next · S2 · E6", its title, then Play now and
+             Cancel, the countdown beside them (showUpNext sizes and places
+             it). -->
+        <Group id="upNext" visible="false">
+            <Rectangle id="nextBack" width="600" color="0x16191EE6" />
+            <Poster id="nextImage" width="600" height="338" loadWidth="640" loadHeight="360" loadDisplayMode="scaleToZoom" />
+            <Label id="nextHeading" translation="[32, 362]" width="536" maxLines="1" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
+            <Label id="nextTitle" translation="[32, 404]" width="536" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <ButtonGroup id="nextButtons" layoutDirection="horiz" itemSpacings="[16]" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="200" maxWidth="200" buttonHeight="64" />
+            <Label id="countdown" width="120" height="64" horizAlign="right" vertAlign="center" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
         </Group>
         <!-- At the top, clear of the subtitles it moves. -->
         <Group id="sync" translation="[560, 72]" visible="false">
@@ -85,11 +109,16 @@
             <Label id="menuText" translation="[1296, 168]" width="568" wrap="true" maxLines="18" lineSpacing="8" color="0xEBEBEBFF" font="font:SmallerSystemFont" visible="false" />
             <Label id="menuHint" translation="[1296, 940]" width="568" wrap="true" maxLines="3" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
         </Group>
+        <!-- What went wrong, as Android TV's: centred on black, the title,
+             the reason in up to four lines, then Try again (focused)
+             beside Back. -->
         <Group id="notice" visible="false">
-            <Rectangle width="1920" height="1080" color="0x16191EF2" />
-            <Label id="noticeTitle" translation="[96, 340]" width="1728" wrap="true" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
-            <Label id="noticeText" translation="[96, 430]" width="1500" wrap="true" maxLines="6" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-            <ButtonGroup id="noticeButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 700]" minWidth="400" />
+            <Rectangle width="1920" height="1080" color="0x000000FF" />
+            <LayoutGroup translation="[960, 540]" layoutDirection="vert" horizAlignment="center" vertAlignment="center" itemSpacings="[24, 64]">
+                <Label id="noticeTitle" width="1280" horizAlign="center" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+                <Label id="noticeText" width="1280" horizAlign="center" wrap="true" maxLines="4" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+                <ButtonGroup id="noticeButtons" layoutDirection="horiz" itemSpacings="[24]" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="300" />
+            </LayoutGroup>
         </Group>
         <!-- The sleep timer's last 30 s, at the bottom left: Keep watching
              adds the same time again. -->
@@ -98,13 +127,7 @@
             <Label id="sleepText" translation="[40, 0]" width="420" height="112" vertAlign="center" color="0xEBEBEBFF" font="font:SmallSystemFont" />
             <ButtonGroup id="sleepButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[480, 20]" minWidth="320" />
         </Group>
-        <!-- Automatic saying it went down, briefly, at the top. -->
-        <Group id="toast" visible="false">
-            <Rectangle translation="[460, 72]" width="1000" height="96" color="0x16191EE6" />
-            <Label id="toastText" translation="[460, 72]" width="1000" height="96" horizAlign="center" vertAlign="center" color="0xEBEBEBFF" font="font:SmallSystemFont" />
-        </Group>
         <Timer id="countdownTimer" duration="1" repeat="true" />
-        <Timer id="toastTimer" duration="4" />
         <!-- Progress told while paused (Player.brs). -->
         <Timer id="pausedTimer" repeat="true" />
         <!-- The sleep timer's look, once a second while it is set. -->
@@ -115,6 +138,13 @@
         <Timer id="autoTimer" duration="1" repeat="true" />
         <!-- The title's banner as an item begins. -->
         <Timer id="bannerTimer" duration="4" />
+        <!-- The banner's clock and end time, once a second while they show. -->
+        <Timer id="clockTimer" duration="1" repeat="true" />
+        <!-- The spinner's wait before it shows. -->
+        <Timer id="spinnerTimer" duration="0.5" />
+        <!-- A playback stopped from elsewhere says why this long, then
+             the player leaves. -->
+        <Timer id="stoppedTimer" />
         <!-- The server asked again while it is out of reach. -->
         <Timer id="reconnectTimer" duration="2" />
         <!-- A look once a second at whether the playhead stands still. -->

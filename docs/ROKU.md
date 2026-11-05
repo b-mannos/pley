@@ -117,9 +117,9 @@ page comes back by itself once it does.
 | Options (\*) | A title | As on Android TV: Play (a show's or a season's next episode), or Resume and From start; the watched mark, Remove from Continue Watching, My List, Add to playlist, an episode's Go to show and Go to season, a season's Go to show; music's Open and Add to playlist. What it came to ("Added to Road trip", or why not) shows in a toast at the top right |
 | Options (\*) | Watch history | Removes it |
 | Options (\*) | A playlist entry | Move (Up and Down carry it, OK puts it there, Back puts it back), Remove from playlist, Go to its title's page |
-| Down | The player | Pley's menu: Subtitles, Audio, Quality, Subtitle sync, Chapters, Sleep timer, Find subtitles…, Playback details |
+| Down | The player | Pley's menu: Subtitles, Audio, Quality, Subtitle sync, Chapters, Previous chapter, Next chapter, Next episode (or Next in the queue), Sleep timer, Find subtitles…, Playback details |
 | Options (\*) | The player | Roku's own options: subtitles and audio tracks |
-| OK | Skip intro, Skip credits | Skips; fast forward and rewind move 10 s |
+| OK | Skip Intro, Skip Credits | Skips; fast forward and rewind jump 30 s, instant replay 10 s back |
 | Options (\*) | Live TV | A programme's details (a card's: what's on), Watch, Add to or remove from favourites |
 | OK, Options (\*) | The live player | The channel list, at the right |
 | OK held | The live player | What's on, with Channels and Add to or remove from favourites |
@@ -323,33 +323,76 @@ queue's end, turns the timer off.
 
 As each item begins (the first, the next episode, a playlist's or a
 collection's next), its title shows at the top for 4 s, a show's name over
-the episode's "S1 · E2 · Pilot", as on Android TV.
+the episode's "S1 · E2 · Pilot", or a movie's "Dune (2021)", as on Android
+TV. Skip Intro and Skip Credits are named as on the other apps.
 
-- **Up Next** shows at the credits (else 30 s before the end) with its
-  countdown. Cancelled, or with Play the next episode by itself off, it
-  waits at the end, paused, as on the other apps: Play now (or Play) plays
-  the next one, Cancel or Back leaves. With the setting on, the countdown
-  starts again there.
+Paused, or while Roku's bar shows, the title stays at the top with, at
+the right as on Android TV, how it plays (Direct play, Direct stream or
+Transcoding), the clock (on the Roku's 12- or 24-hour clock) and, paused,
+when it ends ("Ends at 10:42 PM"). Skip Intro and Skip
+Credits stay while paused, above Roku's bar. The bar itself is Roku's,
+with its seeking (fast forward and rewind speeds, seek previews, instant
+replay): there is no control row or scrubber of Pley's own, and Back while
+paused leaves the player, as in Roku's own apps.
+
+- **Up Next** is Android TV's card at the bottom right: the next one's
+  still, "Up next · S2 · E6" and the episode's title, then Play now and
+  Cancel with the countdown beside them ("Next in 7"). A playlist's next
+  entry is asked for as its item begins, for its episode's name. It shows
+  at the credits marker, else at the end, as on Android TV and the native
+  Samsung app. Shown at the credits, it goes on counting down past the
+  end. Cancelled, or with Play the next episode by itself off, it waits at
+  the end, paused: Play now (or Play) plays the next one, Cancel or Back
+  leaves. With the setting on, the countdown starts again there.
+- **Waiting** for the video, as it opens or once it plays, shows a spinner
+  after 500 ms, as Android TV's ring.
 - **The server out of reach:** once something played, the player keeps its
-  place and its queue and asks again every 2 s, saying "Reconnecting…",
-  for 90 s, as long as the server keeps a session it doesn't hear from;
-  then, or when the first playback can't start, it says it can't reach the
-  server, with Try again. A refusal says why, with Try again where asking
-  again may help (not for a title gone or out of reach of the profile).
+  place and its queue and asks again every 2 s, saying "Reconnecting…"
+  under the spinner, for 90 s, as long as the server keeps a session it
+  doesn't hear from; then, or when the first playback can't start, it says
+  "Can't reach your server", with Try again. A refusal says why, with Try
+  again where asking again may help (not for a title gone or out of reach
+  of the profile). What went wrong shows as on Android TV: centred on
+  black, the title, the reason in up to four lines, then Try again
+  (focused) beside Back.
+- **Stopped** by the server's administrator or from another device, the
+  player says so itself, as Android TV's: "Playback stopped", who stopped
+  it and their message, with Back; it leaves by itself 20 s later.
 - **Stalls:** a playhead that stands still 12 s while meant to play is
   looked at, as the other apps do: a file played as it is that has its
-  data is converted once; a stream asks the server how fast it converts,
-  and below real time says "The server can't keep up with this video"
-  (Automatic goes lower by itself); otherwise the stream opens again where
-  it was.
+  data is converted once a title (see [Quality](#quality)); a stream asks
+  the server how fast it converts, and below real time says "The server
+  can't keep up with this video" (Automatic goes lower by itself);
+  otherwise the stream opens again where it was.
 - **Media that ends short** (moments after it started, a minute or more
   before the title's end, as a file resumed past what it holds) isn't the
   end: a file played as it is is converted, and a stream opened again;
   falling short again within the minute, the player says so.
+- **Music** gives way to a video or a channel: it pauses, its session
+  ends, and its queue stays for Now Playing.
+- **Notices** (a lower quality, subtitles added, a server that can't keep
+  up) show in the app's toast at the top right, under the title at the
+  top, and go by themselves.
 - **Progress** goes to the server every 10 s while playing, every 30 s
   paused, and at once after a seek, in Roku's own bar too.
-- **Playback details** are asked for again every 2 s while they show.
-- **Chapters** are in the menu for a file with two or more.
+- **Playback details** in the menu say "Asking the server…" until a
+  conversion's details come, are asked for again every 2 s while they
+  show, and scroll with Up and Down when they don't fit.
+- **Settings → Playback details** (kept on the Roku, off at first) keeps a
+  short readout at the top left while nothing else shows, in the place of
+  the title, which then doesn't show as an item begins, as on Android TV:
+  how it plays, the file's video and audio (and, converted, what the Roku
+  decodes), the subtitles, the bitrate (the file's, and a conversion's),
+  and the network as the Roku measures it. The setting is read as the
+  player opens; the readout follows the video each second.
+- **Chapters** are in the menu for a file with two or more, each named by
+  its title, or "Chapter 3" when it has none or only its time ("00:06:19",
+  as mkvmerge names them). With them come Previous chapter (the start of
+  the chapter playing, or of the one before within its first 3 s) and,
+  before the last, Next chapter, as Android TV's Previous and Next.
+- **Next episode** (Next in the queue for a playlist or a collection) is in
+  the menu while something comes next, as Android TV's Next: the episode
+  keeps its place.
 
 Fast forward and rewind show seek previews in Roku's own bar: the server's
 previews of the file as a BIF file, which the Video node fetches beside the
@@ -435,7 +478,15 @@ the code is `components/lib/AutoQuality.brs`. On Roku:
 
 - **Settings → Quality** is kept on the Roku. One chosen in the player's
   menu, or by the remote on another device, becomes the setting, and the
-  title reopens at it.
+  title reopens at it, played as that quality plays (the original as it
+  is), whatever the player converted before.
+- **Conversions the player chose:** a file that doesn't play on this Roku,
+  or ends short, is converted, and Quality says so above its hints ("This
+  Roku couldn't play the original file."). One that has its data but
+  stands still is converted once a title, as on Android TV, and says so
+  as the conversion plays: "The original didn't play smoothly on this
+  Roku. Play original is in Quality." Quality then offers Play original
+  above its choices (Automatic's menu has Original instead).
 - **Several sizes:** in an adaptive session the Video node moves between
   sizes itself. Other streams come in one size, so the app steps down.
 - **Signals:** a wait is the Video node's `buffering` after at least 2 s of
@@ -948,7 +999,7 @@ bun run images    # the nine-patch focus and watched-mark images
   without requests is asked nothing but the summary. The fake server also
   checks that a video's reports say which audio and subtitles play, and
   music's don't.
-- **brs-node limits:** its own fonts, no video or audio (Skip intro, Up
+- **brs-node limits:** its own fonts, no video or audio (Skip Intro, Up
   Next and its wait at the end, the title as an item begins, reconnecting,
   stalls, media that ends short, the sleep timers' ends, picture
   subtitles shown in time and the remote's commands, which a player obeys

@@ -93,6 +93,19 @@ function playerSessionState(status as integer) as string
     return "alive"
 end function
 
+' Settings → Playback details, kept on the Roku in the "playback" section
+' ("true" or "false"): a short readout of how the video plays at the top
+' left while nothing else shows, as on Android TV. Off unless set.
+function playerShowsDetails(section as object) as boolean
+    return section.Read("showDetails") = "true"
+end function
+
+' Stopped by the server or another device, the player says why this long
+' before it leaves by itself, as Android TV's does.
+function playerStoppedLeaveMs() as integer
+    return 20000
+end function
+
 ' What the player says when the server stopped the stream: the answer's
 ' message, when the one who stopped it wrote one. The event stream says
 ' whether that was an administrator (by_admin); a 410 doesn't, and is
@@ -135,9 +148,9 @@ function playerFileMarkers(item as dynamic, fileId as dynamic) as object
     return found
 end function
 
-' When Up Next shows, in ms into the file: where its credits start, else
-' 30 s before the end; -1 for a file too short for it. markers are the
-' file's (playerFileMarkers).
+' When Up Next shows, in ms into the file: where its credits start, as on
+' Android TV and the native Samsung app; -1 without them, when it shows at
+' the end. markers are the file's (playerFileMarkers).
 function playerUpNextAt(durationMs as dynamic, markers as object) as integer
     duration = Int(httpNumber(durationMs, 0))
     credits = -1
@@ -145,7 +158,6 @@ function playerUpNextAt(durationMs as dynamic, markers as object) as integer
         if marker.kind = "credits" and marker.startMs > 0 and (credits = -1 or marker.startMs < credits) then credits = marker.startMs
     end for
     if credits > 0 and (duration <= 0 or credits < duration) then return credits
-    if duration > 60000 then return duration - 30000
     return -1
 end function
 
@@ -173,9 +185,10 @@ function playerSkipFor(markers as object, positionMs as integer, upNextComing as
     return marker
 end function
 
+' In the other apps' words.
 function playerSkipLabel(marker as object) as string
-    if marker.kind = "credits" then return "Skip credits"
-    return "Skip intro"
+    if marker.kind = "credits" then return "Skip Credits"
+    return "Skip Intro"
 end function
 
 ' Where skipping lands, in ms: just before an intro ends, so its last
@@ -203,9 +216,60 @@ function playerMayHaveNext(item as dynamic, queue as dynamic, queueAt as integer
     return data <> invalid and httpString(data.kind) = "episode"
 end function
 
+' Up Next's card for what plays next, as Android TV's: { heading ("Up next
+' · S2 · E6", or "Up next" for what isn't an episode), title (the
+' episode's own), image (its still, 640 wide) }. item is the next one's
+' summary or details; until they are known, the card has the title and
+' still of the queue's entry (Content.brs's contentUpNext).
+function playerUpNextCard(item as dynamic, server as string, entry = invalid as dynamic) as object
+    card = { heading: "Up next", title: "", image: "" }
+    if entry <> invalid
+        card.title = httpString(entry.title)
+        card.image = httpString(entry.image)
+    end if
+    data = httpObject(item)
+    if data = invalid then return card
+    card.title = httpSentence(data.title)
+    if httpString(data.kind) = "episode"
+        code = fmtEpisode(data.parent_index, data.index)
+        if code <> "" then card.heading = "Up next · " + code
+    end if
+    for each key in ["thumb_url", "backdrop_url", "poster_url"]
+        url = urlImage(server, data[key], 640)
+        if url <> ""
+            card.image = url
+            exit for
+        end if
+    end for
+    return card
+end function
+
 ' Up Next counts down this many seconds before the next episode plays.
 function playerUpNextSeconds() as integer
     return 10
+end function
+
+' "Next in 7", beside Play now while Up Next counts down.
+function playerNextIn(seconds as integer) as string
+    return "Next in " + seconds.ToStr()
+end function
+
+' The menu's entry for what comes next, as Android TV's Next plays it: a
+' playlist's or collection's next entry, else the next episode.
+function playerNextLabel(queue as dynamic) as string
+    if GetInterface(queue, "ifArray") <> invalid then return "Next in the queue"
+    return "Next episode"
+end function
+
+' Fast forward and rewind jump 30 s while Skip, Up Next or Pley's menu has
+' the focus (Roku's own bar has the video's), as Android TV's keys do;
+' instant replay goes back 10 s.
+function playerJumpMs() as integer
+    return 30000
+end function
+
+function playerReplayMs() as integer
+    return 10000
 end function
 
 ' Whether Up Next plays the next episode by itself at the end of its
@@ -264,6 +328,22 @@ function playerMayTryAgain(status as integer) as boolean
     return status <> 400 and status <> 401 and status <> 403 and status <> 404 and status <> 410
 end function
 
+' Why the player converted a file it was to play as it is, in the Quality
+' menu's words, as Android TV's: "unplayable" (it didn't play here, or
+' ended short), "struggled" (it had its data and didn't move); "" for
+' none.
+function playerFallbackNote(reason as string) as string
+    if reason = "unplayable" then return "This Roku couldn't play the original file."
+    if reason = "struggled" then return "The original didn't play smoothly on this Roku."
+    return ""
+end function
+
+' Said as the conversion of a file that struggled plays, outside Automatic
+' (whose menu has Original): why, and where the way back is.
+function playerTranscodeToast(reason as string) as string
+    return playerFallbackNote(reason) + " Play original is in Quality."
+end function
+
 ' How long the playhead may stand still while the video is meant to play
 ' before it counts as stalled (Android's and the web's STALL_MS).
 function playerStallMs() as integer
@@ -292,13 +372,17 @@ end function
 
 ' The title shown at the top for 4 s as each item begins, as on Android TV
 ' and the native Samsung app: { title, line }, a show's name over an
-' episode's "S1 · E2 · Pilot".
+' episode's "S1 · E2 · Pilot" (Format.brs's code), a movie's "Title
+' (Year)".
 function playerBanner(item as dynamic) as object
     data = httpObject(item)
     banner = { title: "", line: "" }
     if data = invalid then return banner
     title = httpSentence(data.title)
-    if httpString(data.kind) = "episode"
+    kind = httpString(data.kind)
+    year = Int(httpNumber(data.year, 0))
+    if kind = "movie" and title <> "" and year > 0 then title = title + " (" + year.ToStr() + ")"
+    if kind = "episode"
         showTitle = httpSentence(data.grandparent_title)
         parts = []
         code = fmtEpisode(data.parent_index, data.index)
@@ -316,4 +400,34 @@ end function
 
 function playerBannerMs() as integer
     return 4000
+end function
+
+' A time of day as this Roku writes it: "8:05 PM" on a 12-hour clock,
+' "20:05" on a 24-hour one (roDeviceInfo's GetClockFormat), as the other
+' apps follow their device's.
+function playerClockText(hours as integer, minutes as integer, twelve as boolean) as string
+    if not twelve then return fmtTwo(hours) + ":" + fmtTwo(minutes)
+    suffix = " AM"
+    if hours >= 12 then suffix = " PM"
+    shown = hours mod 12
+    if shown = 0 then shown = 12
+    return shown.ToStr() + ":" + fmtTwo(minutes) + suffix
+end function
+
+' seconds (since the epoch) in this Roku's time zone.
+function playerClock(seconds as integer, twelve as boolean) as string
+    at = CreateObject("roDateTime")
+    at.FromSeconds(seconds)
+    at.ToLocalTime()
+    return playerClockText(at.GetHours(), at.GetMinutes(), twelve)
+end function
+
+' "Ends at 10:42 PM": when what plays ends, played on from positionMs at
+' now (seconds since the epoch); "" without a duration.
+function playerEndsAt(now as integer, positionMs as dynamic, durationMs as dynamic, twelve as boolean) as string
+    duration = httpNumber(durationMs, 0)
+    if duration <= 0 then return ""
+    remaining = duration - httpNumber(positionMs, 0)
+    if remaining < 0 then remaining = 0
+    return "Ends at " + playerClock(now + Int(remaining / 1000), twelve)
 end function

@@ -90,6 +90,10 @@ sub test_player_says_who_stopped_the_stream()
     tkEqual(playerStoppedMessage({ session_id: "s1", message: invalid, by_admin: false }), "Playback was stopped from another device.", "the event stream says who")
 end sub
 
+sub test_player_leaves_a_stopped_playback_after_saying_why()
+    tkEqual(playerStoppedLeaveMs(), 20000, "as Android TV's")
+end sub
+
 sub test_player_up_next_at_the_credits()
     item = {
         files: [{ id: 7 }, { id: 8 }],
@@ -101,9 +105,25 @@ sub test_player_up_next_at_the_credits()
     }
     tkEqual(playerUpNextAt(3300000, playerFileMarkers(item, 7)), 3100000)
     tkEqual(playerUpNextAt(3300000, playerFileMarkers(item, 8)), 3200000)
-    tkEqual(playerUpNextAt(3300000, playerFileMarkers(item, 9)), 3270000, "no credits for this file: 30 s before the end")
-    tkEqual(playerUpNextAt(3300000, []), 3270000)
-    tkEqual(playerUpNextAt(45000, []), -1, "too short")
+    tkEqual(playerUpNextAt(3300000, playerFileMarkers(item, 9)), -1, "no credits for this file: at the end, as on Android TV")
+    tkEqual(playerUpNextAt(3300000, []), -1)
+    tkEqual(playerUpNextAt(3000000, playerFileMarkers(item, 7)), -1, "credits past what the session says it holds")
+end sub
+
+sub test_player_up_next_card_as_android_tv()
+    server = "http://pley.test:8096"
+    episode = { id: 104, kind: "episode", title: "Half Loop", grandparent_title: "Severance", parent_index: 1, index: 4, thumb_url: "/api/items/104/images/thumb?v=1", poster_url: "/api/items/104/images/poster" }
+    card = playerUpNextCard(episode, server)
+    tkEqual(card.heading, "Up next · " + fmtEpisode(1, 4), "the episode's code, as Format.brs writes it")
+    tkEqual(card.title, "Half Loop", "the episode's own title")
+    tkEqual(card.image, server + "/api/items/104/images/thumb?v=1&w=640", "its still")
+    movie = { id: 7, kind: "movie", title: "Dune", year: 2021, backdrop_url: "/api/items/7/images/backdrop" }
+    tkEqual(playerUpNextCard(movie, server), { heading: "Up next", title: "Dune", image: server + "/api/items/7/images/backdrop?w=640" })
+    ' A queue's entry, until its details come.
+    entry = { itemId: 104, title: "Severance", line: "", image: server + "/thumb?w=400", startMs: 0 }
+    tkEqual(playerUpNextCard(invalid, server, entry), { heading: "Up next", title: "Severance", image: server + "/thumb?w=400" })
+    tkEqual(playerUpNextCard({ kind: "episode", title: "Half Loop", parent_index: 1, index: 4 }, server, entry).image, server + "/thumb?w=400", "no still of its own")
+    tkEqual(playerNextIn(7), "Next in 7")
 end sub
 
 sub test_player_takes_the_markers_of_the_file_played()
@@ -141,8 +161,8 @@ sub test_player_shows_a_skip_button_until_a_second_before_the_end()
     tkEqual(playerActiveMarker(markers, 68999).key, "intro:10000")
     tkInvalid(playerActiveMarker(markers, 69000), "a second before the intro ends")
     tkEqual(playerActiveMarker(markers, 1250000).key, "credits:1200000")
-    tkEqual(playerSkipLabel(markers[0]), "Skip intro")
-    tkEqual(playerSkipLabel(markers[1]), "Skip credits")
+    tkEqual(playerSkipLabel(markers[0]), "Skip Intro", "in the other apps' words")
+    tkEqual(playerSkipLabel(markers[1]), "Skip Credits")
 end sub
 
 sub test_player_leaves_an_episodes_credits_to_up_next()
@@ -161,6 +181,50 @@ sub test_player_skips_to_the_end_of_an_intro_or_credits()
     tkEqual(playerSkipTarget(markers[1], 1300000), -1, "credits to the end: the title ends")
     tkEqual(playerSkipTarget(markers[1], 1300800), -1, "less than a second left")
     tkEqual(playerSkipTarget(markers[1], invalid), 1300000, "no duration known")
+end sub
+
+sub test_player_names_what_comes_next()
+    tkEqual(playerNextLabel(invalid), "Next episode")
+    tkEqual(playerNextLabel([{ itemId: 1 }, { itemId: 2 }]), "Next in the queue", "a playlist's or a collection's")
+end sub
+
+sub test_player_shows_details_when_settings_say_so()
+    section = CreateObject("roRegistrySection", "playerDetailsTest")
+    section.Delete("showDetails")
+    tkFalse(playerShowsDetails(section), "off unless set")
+    section.Write("showDetails", "true")
+    tkTrue(playerShowsDetails(section))
+    section.Write("showDetails", "false")
+    tkFalse(playerShowsDetails(section))
+    section.Delete("showDetails")
+end sub
+
+sub test_player_jumps_as_android_tvs_keys()
+    tkEqual(playerJumpMs(), 30000, "fast forward and rewind")
+    tkEqual(playerReplayMs(), 10000, "instant replay")
+end sub
+
+sub test_player_writes_the_clock_as_the_roku_does()
+    tkEqual(playerClockText(20, 5, true), "8:05 PM")
+    tkEqual(playerClockText(0, 30, true), "12:30 AM")
+    tkEqual(playerClockText(12, 0, true), "12:00 PM")
+    tkEqual(playerClockText(20, 5, false), "20:05", "a 24-hour clock")
+    tkEqual(playerClockText(7, 9, false), "07:09")
+end sub
+
+sub test_player_says_when_a_paused_title_ends()
+    now = 1700000000
+    tkEqual(playerEndsAt(now, 600000, 3300000, true), "Ends at " + playerClock(now + 2700, true), "45 minutes left")
+    tkEqual(playerEndsAt(now, 3400000, 3300000, false), "Ends at " + playerClock(now, false), "past its end")
+    tkEqual(playerEndsAt(now, 0, 0, true), "", "no duration known")
+    tkEqual(playerEndsAt(now, 0, invalid, true), "")
+end sub
+
+sub test_player_says_why_it_converted_a_file()
+    tkEqual(playerFallbackNote("unplayable"), "This Roku couldn't play the original file.")
+    tkEqual(playerFallbackNote("struggled"), "The original didn't play smoothly on this Roku.")
+    tkEqual(playerFallbackNote(""), "", "the quality's own way")
+    tkEqual(playerTranscodeToast("struggled"), "The original didn't play smoothly on this Roku. Play original is in Quality.", "Android TV's words")
 end sub
 
 sub test_player_limits_restarts()
@@ -209,8 +273,10 @@ sub test_player_notices_a_seek()
 end sub
 
 sub test_player_banner_names_the_show_over_the_episode()
-    tkEqual(playerBanner({ kind: "episode", title: "Pilot", grandparent_title: "The Office", parent_index: 1, index: 2 }), { title: "The Office", line: "S1 · E2 · Pilot" })
-    tkEqual(playerBanner({ kind: "episode", title: "Pilot", parent_index: 1, index: 2 }), { title: "Pilot", line: "" })
+    ' The episode's code is Format.brs's, as everywhere in the app.
+    tkEqual(playerBanner({ kind: "episode", title: "Pilot", grandparent_title: "The Office", parent_index: 1, index: 2 }), { title: "The Office", line: fmtEpisode(1, 2) + " · Pilot" })
+    tkEqual(playerBanner({ kind: "episode", title: "Pilot", parent_index: 1, index: 2, year: 2005 }), { title: "Pilot", line: "" })
+    tkEqual(playerBanner({ kind: "movie", title: "Dune", year: 2021 }), { title: "Dune (2021)", line: "" }, "a movie's year, as on Android TV")
     tkEqual(playerBanner({ kind: "movie", title: "Dune" }), { title: "Dune", line: "" })
     tkEqual(playerBanner(invalid), { title: "", line: "" })
 end sub

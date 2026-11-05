@@ -494,7 +494,7 @@ async function walk() {
   // The sleep timer, after Chapters: 15 minutes, which the menu then
   // counts down.
   await press("down");
-  await press("down"); // Sleep timer
+  await press("down", 4); // past Previous chapter, Next chapter, Next episode: Sleep timer
   await press("select");
   await sleep(300);
   shoot("player-sleep");

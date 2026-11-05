@@ -2,33 +2,43 @@
 ' every 10 s while playing, on pause and every 30 s while paused, and as
 ' "stopped" on the way out, then the session is closed. A stream that
 ' breaks is checked with the server: stopped by an administrator (410),
-' the player leaves and says so; otherwise it starts again where it was,
+' the player says so, then leaves; otherwise it starts again where it was,
 ' with a new session and the current token (a token that ran out answers
 ' 401 to the Video node). Skip Intro and Skip Credits follow the web
 ' player: an episode's credits bring up Up Next instead. Down brings up
 ' Pley's menu: the file's subtitles and audio (every track, pictures too),
 ' Quality, subtitle sync for a file with text subtitles or pictures drawn
-' here (SubtitleSync.brs), the file's chapters, the sleep timer
-' (Sleep.brs) and the playback's details (Details.brs). Subtitles (or
-' audio) the person picks in Roku's options are remembered on the server
-' for the show or the movie (Tracks.brs), so the next episode starts with
-' matching ones; the user's remote, on another device, picks them as the
-' menu does. The quality is the one chosen in Settings or the menu (the
-' remote chooses it as the menu does); when it doesn't play well,
-' Automatic lowers a conversion's bitrate as it is sent, or opens the
-' stream again lower where it was once it stopped anyway
-' (AutoQuality.brs). PGS subtitles are drawn over the video from
-' the server's pictures (Pictures.brs), so the file plays as it is; the
-' server burns them in only where it can't make those.
+' here (SubtitleSync.brs), the file's chapters and the previous and next
+' ones, the next episode, the sleep timer (Sleep.brs) and the playback's
+' details (Details.brs). Subtitles (or audio) the person picks in Roku's
+' options are remembered on the server for the show or the movie
+' (Tracks.brs), so the next episode starts with matching ones; the user's
+' remote, on another device, picks them as the menu does. The quality is
+' the one chosen in Settings or the menu (the remote chooses it as the
+' menu does); when it doesn't play well, Automatic lowers a conversion's
+' bitrate as it is sent, or opens the stream again lower where it was once
+' it stopped anyway (AutoQuality.brs). PGS subtitles are drawn over the
+' video from the server's pictures (Pictures.brs), so the file plays as it
+' is; the server burns them in only where it can't make those.
 
 sub init()
     m.video = m.top.findNode("video")
     m.skip = m.top.findNode("skip")
-    m.loading = m.top.findNode("loading")
+    ' Waiting for the video (the spinner shows 500 ms after it began, as
+    ' Android TV's ring), and "Reconnecting…" under it.
+    m.spinner = m.top.findNode("spinner")
+    m.spinner.poster.uri = "pkg:/images/spinner.png"
+    m.spinner.poster.width = 64
+    m.spinner.poster.height = 64
+    m.reconnecting = m.top.findNode("reconnecting")
+    m.waiting = false
+    m.spinnerTimer = m.top.findNode("spinnerTimer")
+    m.spinnerTimer.observeField("fire", "onSpinnerTimer")
     m.upNext = m.top.findNode("upNext")
+    m.nextBack = m.top.findNode("nextBack")
     m.nextImage = m.top.findNode("nextImage")
+    m.nextHeading = m.top.findNode("nextHeading")
     m.nextTitle = m.top.findNode("nextTitle")
-    m.nextLine = m.top.findNode("nextLine")
     m.countdown = m.top.findNode("countdown")
     m.nextButtons = m.top.findNode("nextButtons")
     m.notice = m.top.findNode("notice")
@@ -85,7 +95,10 @@ sub init()
     m.playAudio = -1
     ' Whether this opening's video has played yet (errors before are the file's).
     m.played = false
+    ' What plays next (Content.brs's contentUpNext) and Up Next's card for
+    ' it (Player.brs's playerUpNextCard).
     m.next = invalid
+    m.nextCard = invalid
     m.upNextAt = -1
     m.upNextShown = false
     m.upNextCancelled = false
@@ -122,10 +135,6 @@ sub init()
     m.watchItem = invalid
     m.autoQuality = ""
     m.autoNotice = ""
-    m.toast = m.top.findNode("toast")
-    m.toastText = m.top.findNode("toastText")
-    m.toastTimer = m.top.findNode("toastTimer")
-    m.toastTimer.observeField("fire", "onToastTimer")
     m.autoTimer = m.top.findNode("autoTimer")
     m.autoTimer.observeField("fire", "onAutoTick")
     ' The sleep timer, off until set in the menu, for the whole time the
@@ -190,14 +199,34 @@ sub init()
     m.nextButtons.observeField("buttonSelected", "onNextButton")
     m.noticeButtons.observeField("buttonSelected", "onNoticeButton")
     m.countdownTimer.observeField("fire", "onCountdown")
-    ' The title at the top as each item begins, once it plays.
+    ' The title at the top as each item begins, once it plays (bannerUp),
+    ' and while paused or Roku's bar shows (barShown), with how it plays,
+    ' the clock on this Roku's 12- or 24-hour clock, and when it ends.
     m.banner = m.top.findNode("banner")
     m.bannerTitle = m.top.findNode("bannerTitle")
     m.bannerLine = m.top.findNode("bannerLine")
+    m.bannerRight = m.top.findNode("bannerRight")
+    m.bannerStatus = m.top.findNode("bannerStatus")
+    m.bannerEnds = m.top.findNode("bannerEnds")
     m.bannerDue = false
+    m.bannerUp = false
+    m.barShown = false
+    m.clockTicking = false
+    m.twelve = CreateObject("roDeviceInfo").GetClockFormat() <> "24h"
     m.bannerTimer = m.top.findNode("bannerTimer")
     m.bannerTimer.duration = playerBannerMs() / 1000
     m.bannerTimer.observeField("fire", "hideBanner")
+    m.clockTimer = m.top.findNode("clockTimer")
+    m.clockTimer.observeField("fire", "updateBanner")
+    ' Settings → Playback details: the readout in the title's place, read
+    ' as the player opens.
+    m.showDetails = false
+    m.readout = m.top.findNode("readout")
+    m.readoutBack = m.top.findNode("readoutBack")
+    m.readoutText = m.top.findNode("readoutText")
+    ' Whether Roku's bar shows, where the Video node says so; elsewhere
+    ' the controls are up while paused alone.
+    m.video.observeField("trickPlayBarVisibilityHint", "onBar")
     ' The server out of reach: since when (clock ms), -1 while it answers.
     ' Until something played, that is said at once.
     m.reconnectFrom = -1
@@ -219,8 +248,24 @@ sub init()
     ' stream was opened again for falling short of its end.
     m.ended = false
     m.shortTries = 0
+    ' Why the player converted this title's file by itself (Player.brs's
+    ' playerFallbackNote: "unplayable", "struggled", "" for none), whether
+    ' it did so once already for its not moving, and what to say once the
+    ' conversion plays.
+    m.fallback = ""
+    m.struggled = false
+    m.playNotice = ""
+    ' The menu's Playback details: their lines, the first shown (Up and
+    ' Down scroll them), and whether they wait for the server's first
+    ' answer.
+    m.detailLines = []
+    m.detailTop = 0
+    m.detailsWaiting = false
     m.detailsTimer = m.top.findNode("detailsTimer")
     m.detailsTimer.observeField("fire", "onDetailsTick")
+    m.stoppedTimer = m.top.findNode("stoppedTimer")
+    m.stoppedTimer.duration = playerStoppedLeaveMs() / 1000
+    m.stoppedTimer.observeField("fire", "onStoppedTimer")
     m.top.observeField("active", "onActive")
     m.top.observeField("serverStopped", "onServerStopped")
     m.top.observeField("playerCommand", "onPlayerCommand")
@@ -344,8 +389,9 @@ sub onActive()
     end if
     if m.started then return
     m.started = true
-    ' A video takes over from the music.
-    m.global.music.control = "stop"
+    m.showDetails = playerShowsDetails(playbackSection())
+    ' A video takes over from the music, which pauses and keeps its queue.
+    m.global.music.control = "suspend"
     ' Playlists and segments carry the token: a refreshed one goes to the
     ' Video node's agent at once.
     m.global.session.observeFieldScoped("accessToken", "onToken")
@@ -360,6 +406,8 @@ sub onActive()
     newTitle()
     m.bannerDue = true
     m.shortTries = 0
+    m.fallback = ""
+    m.struggled = false
     open(params.itemId, Int(httpNumber(params.startMs, 0)), params.item, "auto")
 end sub
 
@@ -392,10 +440,12 @@ sub open(itemId as dynamic, startMs as integer, item as dynamic, mode as string)
     m.paused = false
     m.played = false
     m.next = invalid
+    m.nextCard = invalid
     m.upNextShown = false
     m.upNextCancelled = false
     m.ended = false
     m.stallTimer.control = "stop"
+    m.stoppedTimer.control = "stop"
     m.slowSaid = false
     m.seenMs = -1
     m.markers = []
@@ -410,7 +460,7 @@ sub open(itemId as dynamic, startMs as integer, item as dynamic, mode as string)
     hideSkip()
     hideUpNext()
     m.notice.visible = false
-    m.loading.visible = true
+    showWaiting()
     m.top.setFocus(true)
     if m.item = invalid
         uiRequest({ method: "GET", path: "/api/items/" + urlValue(itemId), attempt: m.attempt }, "onItem")
@@ -562,10 +612,13 @@ sub onItem(event as object)
 end sub
 
 ' An episode has a next one to offer before its end; a playlist's entry,
-' the entry after it.
+' the entry after it, whose details give Up Next's card its episode.
 sub itemKnown()
     if m.queue <> invalid
-        if m.queueAt + 1 < m.queue.Count() then m.next = m.queue[m.queueAt + 1]
+        if m.queueAt + 1 >= m.queue.Count() then return
+        m.next = m.queue[m.queueAt + 1]
+        m.nextCard = playerUpNextCard(invalid, m.global.session.server, m.next)
+        uiRequest({ method: "GET", path: "/api/items/" + urlValue(m.next.itemId), attempt: m.attempt }, "onNextItem")
         return
     end if
     if httpString(m.item.kind) <> "episode" then return
@@ -665,7 +718,7 @@ end sub
 sub watchState(state as string)
     if m.watch = invalid then return
     if state = "playing" and m.autoNotice <> ""
-        showToast(m.autoNotice)
+        uiToast(m.autoNotice)
         m.autoNotice = ""
     end if
     underrun = invalid
@@ -712,7 +765,7 @@ sub autoStep(decision as object)
     if decision.memory >= 0 then keepCeiling(decision.memory)
     if decision.kind = "next" then return
     if decision.kind = "bitrate"
-        if decision.down then showToast("Quality lowered to " + aqBitrateLabel(decision.kbps, m.watch.lines))
+        if decision.down then uiToast("Quality lowered to " + aqBitrateLabel(decision.kbps, m.watch.lines))
         setBitrate(decision.kbps)
         return
     end if
@@ -757,33 +810,101 @@ sub onBitrate(event as object)
     aqAnswered(m.watch, httpNumber(spec.kbps, 0), kbps)
 end sub
 
-sub showToast(text as string)
-    m.toastText.text = text
-    m.toast.visible = true
-    m.toastTimer.control = "stop"
-    m.toastTimer.control = "start"
-end sub
-
-sub onToastTimer()
-    m.toast.visible = false
-end sub
-
 ' The title at the top for 4 s as an item begins to play (the first, the
-' next episode, a queue's next), not as the same one opens again.
+' next episode, a queue's next), not as the same one opens again; not with
+' Playback details, which have its place, as on Android TV.
 sub showBanner()
     m.bannerDue = false
-    banner = playerBanner(m.item)
-    if banner.title = "" then return
-    m.bannerTitle.text = banner.title
-    m.bannerLine.text = banner.line
-    m.banner.visible = true
+    if m.showDetails
+        updateBanner()
+        return
+    end if
+    m.bannerUp = true
     m.bannerTimer.control = "stop"
     m.bannerTimer.control = "start"
+    updateBanner()
 end sub
 
 sub hideBanner()
     m.bannerTimer.control = "stop"
-    m.banner.visible = false
+    m.bannerUp = false
+    updateBanner()
+end sub
+
+' Settings → Playback details: the readout at the top left while nothing
+' else shows (the controls, the menu, Up Next, subtitle sync, what went
+' wrong), read again as the video plays: Details.brs's detReadout, with
+' what the Video node says of the stream.
+sub updateReadout()
+    shown = m.showDetails and m.info <> invalid and not controlsShown() and not m.menu.visible and not m.upNext.visible and not m.notice.visible and not m.sync.visible
+    m.readout.visible = shown
+    if not shown then return
+    node = { videoFormat: m.video.videoFormat, audioFormat: m.video.audioFormat, streamBps: 0, networkBps: 0, subtitles: subtitleLabel() }
+    stream = httpObject(m.video.streamInfo)
+    if stream <> invalid
+        node.streamBps = httpNumber(stream.streamBitrate, 0)
+        node.networkBps = httpNumber(stream.measuredBitrate, 0)
+    end if
+    m.readoutText.text = detReadout(m.info, playingFile(), m.audioPlaying, node).Join(Chr(10))
+    m.readoutBack.height = m.readoutText.boundingRect().height + 32
+end sub
+
+' The subtitles showing, as the menu names them: Off, a track of the file,
+' or "" for one it doesn't list.
+function subtitleLabel() as string
+    tracks = mediaTracks(playingFile()).subtitles
+    playing = subtitlePlaying()
+    for i = 0 to tracks.values.Count() - 1
+        if tracks.values[i] = playing then return tracks.labels[i]
+    end for
+    if playing < 0 then return "Off"
+    return ""
+end function
+
+' Roku's bar showing or gone (trick play, a pause, OK pressed).
+sub onBar()
+    m.barShown = httpTrue(m.video.trickPlayBarVisibilityHint)
+    updateBanner()
+    updateSkip()
+end sub
+
+' Whether the player's controls are up, as Android TV's: paused or Roku's
+' bar showing, once the video played, with nothing over it (subtitle sync
+' has the top).
+function controlsShown() as boolean
+    if not m.played or m.ended or m.notice.visible or m.upNext.visible or m.sync.visible then return false
+    return m.video.state = "paused" or m.barShown
+end function
+
+' The banner as it is now: the title while it is up or the controls are;
+' with the controls, how it plays and the clock at the right, and, paused,
+' when it ends.
+sub updateBanner()
+    controls = controlsShown()
+    banner = playerBanner(m.item)
+    shown = (m.bannerUp or controls) and banner.title <> ""
+    m.banner.visible = shown
+    m.bannerTitle.text = banner.title
+    m.bannerLine.text = banner.line
+    ticking = shown and controls
+    m.bannerRight.visible = ticking
+    updateReadout()
+    if ticking <> m.clockTicking
+        m.clockTicking = ticking
+        if ticking
+            m.clockTimer.control = "start"
+        else
+            m.clockTimer.control = "stop"
+        end if
+    end if
+    if not ticking then return
+    now = CreateObject("roDateTime").AsSeconds()
+    status = []
+    if m.info <> invalid then status.Push(detMethod(m.info))
+    status.Push(playerClock(now, m.twelve))
+    m.bannerStatus.text = status.Join(" · ")
+    m.bannerEnds.text = ""
+    if m.video.state = "paused" then m.bannerEnds.text = playerEndsAt(now, m.positionMs, m.durationMs, m.twelve)
 end sub
 
 ' Gives the Video node stream, its text tracks moved as the sync says,
@@ -823,6 +944,7 @@ sub openSync()
     m.syncWas = m.syncMs
     m.syncValue.text = syncLabel(m.syncMs)
     m.sync.visible = true
+    updateBanner()
     m.syncButtons.focusButton = 0
     m.syncButtons.setFocus(true)
 end sub
@@ -849,6 +971,7 @@ sub closeSync()
     if not m.sync.visible then return
     m.sync.visible = false
     m.video.setFocus(true)
+    updateBanner()
     if m.syncMs = m.syncWas then return
     syncRemember(syncSection(), m.syncKey, m.syncMs)
     if m.pictureIndex < 0 then reopen()
@@ -865,7 +988,7 @@ sub reopen(subtitle = "" as string)
     if showing = "" then showing = syncBaseUrl(httpString(m.video.currentSubtitleTrack))
     if showing = "" then showing = syncBaseUrl(httpString(m.video.subtitleTrack))
     m.positionMs = position
-    m.loading.visible = true
+    showWaiting()
     ' The tracks as the stream opens again are pley's doing.
     m.tracksFrom = -1
     showStream(contentStream(m.info, m.item, m.global.session.server, position), syncTrackUrl(showing, m.syncMs))
@@ -972,22 +1095,33 @@ sub onState(event as object)
     drawPictures()
     ' The playhead is read again from now: a pause, or a seek's wait, isn't
     ' time it should have moved in. The last reading stays, so a seek made
-    ' here (Skip intro, Chapters) moves the next one away from it.
+    ' here (Skip Intro, Chapters) moves the next one away from it.
     m.seenAt = m.clock.TotalMilliseconds()
     if state <> "paused" then m.pausedTimer.control = "stop"
     if state <> "playing" then hideBanner()
+    ' Waiting for data once it played, as for the first: the spinner.
+    if state = "buffering" and m.played then showWaiting()
+    if state = "paused" or state = "finished" then hideWaiting()
     if state = "playing"
         m.played = true
         m.everPlayed = true
         endReconnect()
-        m.loading.visible = false
-        if m.bannerDue then showBanner()
+        hideWaiting()
+        if m.bannerDue
+            showBanner()
+        else
+            updateBanner()
+        end if
         ' Played again after the sleep timer's pause: the player stays.
         if m.sleepPausedAt >= 0
             m.sleepPausedAt = -1#
             if m.sleep.minutes = 0 then m.sleepTimer.control = "stop"
         end if
         if m.tracksFrom < 0 then m.tracksFrom = m.clock.TotalMilliseconds() + tracksSettleMs()
+        if m.playNotice <> ""
+            uiToast(m.playNotice)
+            m.playNotice = ""
+        end if
         if m.paused or m.reportAtPlay
             m.paused = false
             m.reportAtPlay = false
@@ -996,12 +1130,14 @@ sub onState(event as object)
         updateSkip()
         return
     end if
-    ' Paused, in trick play or waiting: the Video node's own controls.
-    hideSkip()
+    ' Waiting or at the end: the Video node's own. Paused, Skip stays, as
+    ' on Android TV, above Roku's bar.
+    if state <> "paused" then hideSkip()
     if state = "paused"
         m.paused = true
         report("paused")
         m.pausedTimer.control = "start"
+        updateSkip()
     else if state = "finished"
         ' Media that falls short of the title (resumed past the end of what
         ' the file or stream holds) isn't its end.
@@ -1041,10 +1177,11 @@ sub onPosition(event as object)
     updateSkip()
     followPictures()
     drawPictures()
+    if m.readout.visible then updateReadout()
 end sub
 
 ' Skip Intro or Skip Credits while the playhead is in one and the video
-' plays.
+' plays or is paused; above Roku's bar while that shows.
 sub updateSkip()
     marker = playerSkipFor(m.markers, m.positionMs, m.next <> invalid and not m.upNextCancelled)
     key = ""
@@ -1055,7 +1192,11 @@ sub updateSkip()
         if marker <> invalid then m.skip.text = playerSkipLabel(marker)
     end if
     m.skipMarker = marker
-    shown = marker <> invalid and not m.skipDismissed and m.video.state = "playing" and not m.upNext.visible and not m.notice.visible and not m.sync.visible and not m.menu.visible
+    state = m.video.state
+    top = 924
+    if controlsShown() then top = 760
+    m.skip.translation = [1544, top]
+    shown = marker <> invalid and not m.skipDismissed and (state = "playing" or state = "paused") and not m.upNext.visible and not m.notice.visible and not m.sync.visible and not m.menu.visible
     if shown = m.skip.visible then return
     if shown
         m.skip.visible = true
@@ -1090,9 +1231,9 @@ sub onSkipKey(event as object)
     playerKey(event.getData())
 end sub
 
-' What play, fast forward and rewind do when the skip button or Up Next
-' has the focus instead of the video: pause or go on, or 10 s further or
-' back.
+' What play, fast forward, rewind and instant replay do when the skip
+' button, Up Next or the menu has the focus instead of the video: pause or
+' go on, 30 s further or back, or 10 s back.
 sub playerKey(key as string)
     if key = "play"
         if m.video.state = "paused"
@@ -1101,9 +1242,11 @@ sub playerKey(key as string)
             m.video.control = "pause"
         end if
     else if key = "fastforward"
-        seekTo(m.positionMs + 10000)
+        seekTo(m.positionMs + playerJumpMs())
+    else if key = "rewind"
+        seekTo(m.positionMs - playerJumpMs())
     else
-        seekTo(m.positionMs - 10000)
+        seekTo(m.positionMs - playerReplayMs())
     end if
 end sub
 
@@ -1162,13 +1305,11 @@ sub ended()
         uiNavigate({ back: true })
         return
     end if
-    if not m.upNextCancelled and playerAutoplay(playbackSection())
-        playNext()
-        return
-    end if
-    ' Up Next waits at the end, as on the other apps: counting down again
-    ' after a Cancel when the next plays by itself, for Play now when not.
+    ' Up Next at the end, as on the other apps: shown since the credits, it
+    ' goes on counting down (or waiting for Play now); else it shows now,
+    ' counting down (again, after a Cancel) when the next plays by itself.
     m.ended = true
+    if m.upNext.visible then return
     m.upNextCancelled = false
     showUpNext()
 end sub
@@ -1181,6 +1322,7 @@ sub endedShort()
     m.stallTimer.control = "stop"
     hideBanner()
     if m.info <> invalid and httpString(m.info.method) <> "transcode" and m.mode <> "transcode"
+        m.fallback = "unplayable"
         open(m.itemId, m.startMs, m.item, "transcode")
         return
     end if
@@ -1206,11 +1348,13 @@ sub finish()
     m.sleepNotice.visible = false
     m.stallTimer.control = "stop"
     m.detailsTimer.control = "stop"
+    m.stoppedTimer.control = "stop"
     endReconnect()
+    hideWaiting()
     hideBanner()
+    m.clockTimer.control = "stop"
+    m.clockTicking = false
     newTitle()
-    m.toastTimer.control = "stop"
-    m.toast.visible = false
     stopPictures()
     if m.sessionId <> ""
         report("stopped")
@@ -1224,23 +1368,30 @@ sub finish()
     scene.played = scene.played + 1
 end sub
 
-' The server stopped the stream: the player leaves, and the scene says why
-' over the screen before.
+' The server stopped the stream, by its administrator or for another
+' device: the player says so itself, "Playback stopped" and why, as
+' Android TV's, then leaves 20 s later (or at Back).
 sub stopped(data as dynamic)
     m.tracksFrom = -1
     stopPictures()
     m.sessionId = ""
     m.video.control = "stop"
-    lines = playerStoppedMessage(data).Split(Chr(10))
-    message = []
-    if lines.Count() > 1 then message.Push(lines[1])
-    uiNavigate({ back: true, message: { title: lines[0], lines: message } })
+    ' Automatic has nothing left to watch: it would open the title again.
+    newTitle()
+    notice("Playback stopped", playerStoppedMessage(data), ["Back"])
+    m.stoppedTimer.control = "start"
+end sub
+
+sub onStoppedTimer()
+    if m.notice.visible and m.top.active then uiNavigate({ back: true })
 end sub
 
 sub broken()
     if playerErrorKind(m.video.errorCode, m.video.errorInfo, m.played) = "media"
-        ' The original doesn't play on this Roku after all: converted, once.
+        ' The original doesn't play on this Roku after all: converted, once,
+        ' which Quality says.
         if m.info <> invalid and httpString(m.info.method) <> "transcode" and m.mode <> "transcode"
+            m.fallback = "unplayable"
             open(m.itemId, m.positionMs, m.item, "transcode")
             return
         end if
@@ -1258,7 +1409,7 @@ sub broken()
         return
     end if
     ' What became of the session says what to do.
-    m.loading.visible = true
+    showWaiting()
     uiRequest({ method: "GET", path: "/api/playback/" + urlEncode(m.sessionId), session: m.sessionId }, "onSessionState")
 end sub
 
@@ -1278,19 +1429,18 @@ end sub
 ' The server doesn't answer. Once something played, the player keeps its
 ' place (and its queue) and asks again every 2 s, saying "Reconnecting…",
 ' as long as the server keeps a session it doesn't hear from (90 s), as the
-' other apps do; before anything played, or after that, it says so, with
-' Try again.
+' other apps do; before anything played, or after that, it says so in
+' Android TV's words, with Try again.
 sub reconnect()
     now = m.clock.TotalMilliseconds()
     if m.reconnectFrom < 0 then m.reconnectFrom = now
     if not m.everPlayed or now - m.reconnectFrom >= playerReconnectMs()
-        session = m.global.session
-        notice("Can't reach " + session.serverName, "Pley for Roku can't reach the server at " + urlDisplayAddress(session.server) + ". Check that it's on, and that this TV is on the same network as the server.", ["Try again", "Back"])
+        notice("Can't reach your server", "Check that the server is on and that this Roku is on its network.", ["Try again", "Back"])
         return
     end if
     hideBanner()
-    m.loading.text = "Reconnecting…"
-    m.loading.visible = true
+    showWaiting()
+    if m.spinner.visible then m.reconnecting.visible = true
     m.reconnectTimer.control = "start"
 end sub
 
@@ -1308,7 +1458,30 @@ end sub
 sub endReconnect()
     m.reconnectFrom = -1
     m.reconnectTimer.control = "stop"
-    m.loading.text = "Loading…"
+    m.reconnecting.visible = false
+end sub
+
+' The spinner once the wait has lasted 500 ms, so a quick start or a short
+' wait shows none.
+sub showWaiting()
+    if m.waiting then return
+    m.waiting = true
+    m.spinnerTimer.control = "start"
+end sub
+
+sub onSpinnerTimer()
+    if not m.waiting then return
+    m.spinner.visible = true
+    m.spinner.control = "start"
+    m.reconnecting.visible = m.reconnectFrom >= 0
+end sub
+
+sub hideWaiting()
+    m.waiting = false
+    m.spinnerTimer.control = "stop"
+    m.spinner.control = "stop"
+    m.spinner.visible = false
+    m.reconnecting.visible = false
 end sub
 
 ' --- Stalls ---
@@ -1330,8 +1503,12 @@ sub onStallTick()
     end if
     method = httpString(m.info.method)
     ' A file that has its data and doesn't move doesn't play smoothly here:
-    ' converted, once.
-    if not starving and method = "direct" and m.mode <> "transcode"
+    ' converted, once a title, as on Android TV, saying so as it plays and
+    ' offering Play original in Quality (Automatic's menu has Original).
+    if not starving and method = "direct" and m.mode <> "transcode" and not m.struggled
+        m.struggled = true
+        m.fallback = "struggled"
+        if aqChoice(playbackSection()) <> "auto" then m.playNotice = playerTranscodeToast(m.fallback)
         open(m.itemId, m.positionMs, m.item, "transcode")
         return
     end if
@@ -1366,7 +1543,7 @@ sub onStallChecked(event as object)
         ' Automatic goes lower by itself; otherwise the person is told, once.
         if m.watch = invalid and not m.slowSaid
             m.slowSaid = true
-            showToast("The server can't keep up with this video. Try a lower quality: Down, then Quality.")
+            uiToast("The server can't keep up with this video. Try a lower quality: Down, then Quality.", true)
         end if
         return
     end if
@@ -1390,7 +1567,7 @@ sub notice(title as string, text as string, buttons as object)
     endReconnect()
     hideBanner()
     m.stallTimer.control = "stop"
-    m.loading.visible = false
+    hideWaiting()
     closeMenu()
     hideSkip()
     hideUpNext()
@@ -1398,6 +1575,7 @@ sub notice(title as string, text as string, buttons as object)
     m.noticeText.text = text
     m.noticeButtons.buttons = buttons
     m.notice.visible = true
+    updateBanner()
     m.noticeButtons.setFocus(true)
 end sub
 
@@ -1415,32 +1593,54 @@ sub onNext(event as object)
     answer = event.getData()
     if not answer.ok or answer.data = invalid then return
     item = httpObject(answer.data.item)
-    if item <> invalid then m.next = contentUpNext(item, m.global.session.server)
+    if item = invalid then return
+    m.next = contentUpNext(item, m.global.session.server)
+    m.nextCard = playerUpNextCard(item, m.global.session.server)
 end sub
 
+' The queue's next entry's details: its card names the episode.
+sub onNextItem(event as object)
+    if not isCurrent(event) or m.next = invalid then return
+    answer = event.getData()
+    if not answer.ok or httpObject(answer.data) = invalid then return
+    if httpNumber(answer.data.id, 0) = m.next.itemId then m.nextCard = playerUpNextCard(answer.data, m.global.session.server, m.next)
+end sub
+
+' The card at the bottom right, as tall as its title: 978 is the bottom of
+' Android TV's, 1824 its right edge.
 sub showUpNext()
     closeSync()
     closeMenu()
     hideSkip()
     m.upNextShown = true
-    m.nextTitle.text = m.next.title
-    m.nextLine.text = m.next.line
+    card = m.nextCard
+    if card = invalid then card = playerUpNextCard(invalid, m.global.session.server, m.next)
+    m.nextHeading.text = card.heading
+    m.nextTitle.text = card.title
     m.nextImage.setHttpAgent(m.top.getScene().getHttpAgent())
-    m.nextImage.uri = m.next.image
+    m.nextImage.uri = card.image
+    buttonsAt = 404 + m.nextTitle.boundingRect().height + 32
+    m.nextButtons.translation = [32, buttonsAt]
+    m.countdown.translation = [448, buttonsAt]
+    height = buttonsAt + 64 + 32
+    m.nextBack.height = height
+    m.upNext.translation = [1224, 978 - height]
     m.upNext.visible = true
+    updateBanner()
     m.nextButtons.focusButton = 0
     m.nextButtons.setFocus(true)
     ' Turned off in Settings, the next episode waits for Play now.
     m.countdown.text = ""
     if not playerAutoplay(playbackSection()) then return
     m.countdownLeft = playerUpNextSeconds()
-    m.countdown.text = "Next in " + m.countdownLeft.ToStr() + " s"
+    m.countdown.text = playerNextIn(m.countdownLeft)
     m.countdownTimer.control = "start"
 end sub
 
 sub hideUpNext()
     m.countdownTimer.control = "stop"
     m.upNext.visible = false
+    updateBanner()
 end sub
 
 sub onCountdown()
@@ -1448,7 +1648,7 @@ sub onCountdown()
     if m.countdownLeft <= 0
         playNext()
     else
-        m.countdown.text = "Next in " + m.countdownLeft.ToStr() + " s"
+        m.countdown.text = playerNextIn(m.countdownLeft)
     end if
 end sub
 
@@ -1492,6 +1692,8 @@ sub playNext(finished = true as boolean)
     m.playAudio = -1
     m.bannerDue = true
     m.shortTries = 0
+    m.fallback = ""
+    m.struggled = false
     if m.queue <> invalid then m.queueAt = m.queueAt + 1
     open(nextEpisode.itemId, nextEpisode.startMs, invalid, "auto")
 end sub
@@ -1529,6 +1731,10 @@ function onKeyEvent(key as string, press as boolean) as boolean
         ' The video's own keys go on as ever.
         if key = "play" or key = "fastforward" or key = "rewind"
             playerKey(key)
+            return true
+        end if
+        if m.menuKind = "details" and (key = "up" or key = "down")
+            scrollDetails(key = "down")
             return true
         end if
         return false
@@ -1575,8 +1781,12 @@ end function
 ' --- Pley's menu ---
 
 ' Its entries: Subtitles and Audio for a file with them, Quality, Subtitle
-' sync for a file with text subtitles or pictures drawn here, Chapters for
-' a file with two or more, Sleep timer, Find subtitles…, Playback details.
+' sync for a file with text subtitles or pictures drawn here; for a file
+' with two or more chapters, Chapters, Previous chapter and, before the
+' last, Next chapter; Next episode (or Next in the queue) while something
+' comes next; Sleep timer, Find subtitles…, Playback details. Previous and
+' Next are those of Android TV's control row, which Roku's remote has no
+' keys for.
 sub openMenu()
     hideSkip()
     m.menuKind = "menu"
@@ -1600,9 +1810,20 @@ sub openMenu()
         items.Push({ title: "Subtitle sync: " + syncLabel(m.syncMs) })
         m.menuActions.Push("sync")
     end if
-    if detChapters(playingFile()).Count() > 1
+    chapters = detChapters(playingFile())
+    if chapters.Count() > 1
         items.Push({ title: "Chapters" })
         m.menuActions.Push("chapters")
+        items.Push({ title: "Previous chapter" })
+        m.menuActions.Push("previousChapter")
+        if detNextChapter(chapters, m.positionMs) >= 0
+            items.Push({ title: "Next chapter" })
+            m.menuActions.Push("nextChapter")
+        end if
+    end if
+    if m.next <> invalid
+        items.Push({ title: playerNextLabel(m.queue) })
+        m.menuActions.Push("next")
     end if
     items.Push({ title: "Sleep timer: " + sleepLabel(m.sleep, sleepNow(), playingKind()) })
     m.menuActions.Push("sleep")
@@ -1618,6 +1839,7 @@ sub openMenu()
     m.menuList.visible = true
     m.menuHint.text = "Back closes this."
     m.menu.visible = true
+    updateReadout()
     m.menuList.setFocus(true)
 end sub
 
@@ -1627,6 +1849,7 @@ sub closeMenu()
     m.menuKind = ""
     m.video.setFocus(true)
     updateSkip()
+    updateReadout()
 end sub
 
 ' The file playing: the session's, else the item's first.
@@ -1679,6 +1902,12 @@ sub onMenuEntry(event as object)
         openSync()
     else if action = "chapters"
         openChapters()
+    else if action = "previousChapter" or action = "nextChapter"
+        goToChapter(action = "nextChapter")
+    else if action = "next"
+        ' As the user's remote moves on: the episode keeps its place.
+        closeMenu()
+        playNext(false)
     else if action = "sleep"
         openSleep()
     else
@@ -1727,7 +1956,7 @@ sub pickTrack(kind as string, index as integer)
     ' The person's pick takes over from a cast's audio.
     m.playAudio = -1
     body = tracksStreamsBody(file.id, audio, subtitle)
-    m.loading.visible = true
+    showWaiting()
     uiRequest({ method: "PUT", path: "/api/items/" + urlValue(m.itemId) + "/streams", jsonText: FormatJson(body), attempt: m.attempt }, "onTrackPicked")
 end sub
 
@@ -1737,7 +1966,7 @@ sub onTrackPicked(event as object)
     if not isCurrent(event) then return
     answer = event.getData()
     if answer.error = "signed_out" then return
-    if not answer.ok then showToast("Couldn't save that choice for next time.")
+    if not answer.ok then uiToast("Couldn't save that choice for next time.", true)
     position = m.positionMs
     seconds = m.video.position
     if seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
@@ -1745,14 +1974,20 @@ sub onTrackPicked(event as object)
     open(m.itemId, position, invalid, m.mode)
 end sub
 
-' The qualities this file is offered, the one chosen checked.
+' The qualities this file is offered, the one chosen checked; after the
+' player converted a file that didn't play smoothly, Play original above
+' them, as on Android TV.
 sub openQualities()
     m.menuKind = "quality"
     m.menuTitle.text = "Quality"
     choice = aqChoice(playbackSection())
     items = []
     m.menuValues = []
-    current = 0
+    if m.fallback = "struggled" and choice <> "auto"
+        items.Push({ title: "Play original" })
+        m.menuValues.Push("playOriginal")
+    end if
+    current = items.Count()
     for each quality in aqMenuFor(playingFile())
         if quality.id = choice then current = items.Count()
         items.Push({ title: quality.label })
@@ -1772,6 +2007,18 @@ sub openChapters()
         m.menuValues.Push(chapter.startMs)
     end for
     showMenuChoices(items, detChapterAt(chapters, m.positionMs))
+end sub
+
+' Next chapter, or Previous chapter (detPreviousChapterMs).
+sub goToChapter(forward as boolean)
+    closeMenu()
+    chapters = detChapters(playingFile())
+    if not forward
+        seekTo(detPreviousChapterMs(chapters, m.positionMs))
+        return
+    end if
+    at = detNextChapter(chapters, m.positionMs)
+    if at >= 0 then seekTo(chapters[at].startMs)
 end sub
 
 ' Off, minutes, or the end of what plays; the one set checked.
@@ -1801,10 +2048,18 @@ sub showMenuChoices(items as object, current as integer)
     m.menuChoices.setFocus(true)
 end sub
 
+' A quality's hint, under why the player converted the file, if it did.
 sub onMenuChoiceFocused()
     if m.menuKind <> "quality" then return
     at = m.menuChoices.itemFocused
-    if at >= 0 and at < m.menuValues.Count() then m.menuHint.text = aqHint(m.menuValues[at])
+    if at < 0 or at >= m.menuValues.Count() then return
+    lines = []
+    note = playerFallbackNote(m.fallback)
+    if note <> "" then lines.Push(note)
+    hint = "Try the original again"
+    if m.menuValues[at] <> "playOriginal" then hint = aqHint(m.menuValues[at])
+    if hint <> "" then lines.Push(hint)
+    m.menuHint.text = lines.Join(Chr(10))
 end sub
 
 ' A quality is kept as the Roku's (Settings shows it) and the title opens
@@ -1833,22 +2088,41 @@ sub onMenuChoice(event as object)
         setSleep(value)
         return
     end if
+    if value = "playOriginal"
+        playOriginal()
+        return
+    end if
     if value = aqChoice(playbackSection()) then return
     chooseQuality(value)
 end sub
 
 ' A quality picked, in the menu or by the user's remote: kept as the
-' Roku's, and the title opened again at it where it was.
+' Roku's, and the title opened again at it where it was, as that quality
+' plays (the original as it is), not as the player converted it.
 sub chooseQuality(value as string)
     aqChoose(playbackSection(), value)
     ' Picked again, Automatic starts afresh at the original.
     if value = "auto" then keepCeiling(0)
+    newTitle()
+    m.fallback = ""
+    open(m.itemId, livePosition(), m.item, "auto")
+end sub
+
+' Play original, after the player converted a file that didn't play
+' smoothly: the quality chosen, as it plays, from where it was. Should it
+' stand still again, it isn't converted again for this title.
+sub playOriginal()
+    m.fallback = ""
+    open(m.itemId, livePosition(), m.item, "auto")
+end sub
+
+' Where the video is now: the Video node's position once it has one.
+function livePosition() as integer
     position = m.positionMs
     seconds = m.video.position
     if seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
-    newTitle()
-    open(m.itemId, position, m.item, m.mode)
-end sub
+    return position
+end function
 
 ' --- The sleep timer ---
 
@@ -1920,11 +2194,19 @@ sub onKeepWatching()
 end sub
 
 ' How the stream plays, and for a conversion what the server makes of it
-' (GET /api/playback/{session}).
+' (GET /api/playback/{session}): "Asking the server…" until it answers,
+' as on the native Samsung app.
 sub openDetails()
     m.menuKind = "details"
     m.menuTitle.text = "Playback details"
-    showDetails(invalid)
+    m.detailTop = 0
+    m.detailsWaiting = m.sessionId <> "" and httpString(m.info.method) <> "direct"
+    if m.detailsWaiting
+        m.detailLines = ["Asking the server…"]
+        showDetailLines()
+    else
+        showDetails(invalid)
+    end if
     m.menuList.visible = false
     m.menuChoices.visible = false
     m.menuText.visible = true
@@ -1948,10 +2230,15 @@ sub onDetailsTick()
     end if
 end sub
 
+' The server's answer; without one, what the player knows itself.
 sub onDetails(event as object)
     if event.getRoSGNode().spec.session <> m.sessionId or m.menuKind <> "details" then return
     answer = event.getData()
-    if answer.ok and answer.data <> invalid then showDetails(httpObject(answer.data.transcode))
+    if answer.ok and answer.data <> invalid
+        showDetails(httpObject(answer.data.transcode))
+    else if m.detailsWaiting
+        showDetails(invalid)
+    end if
 end sub
 
 sub showDetails(live as dynamic)
@@ -1965,7 +2252,36 @@ sub showDetails(live as dynamic)
     end for
     if m.pictureIndex >= 0 then lines.Push("Subtitles: Drawn by Pley")
     if m.watch <> invalid and aqLowered(m.watch) then lines.Push("Quality: " + qualityShown() + " · Lowered for your connection")
-    m.menuText.text = lines.Join(Chr(10))
+    m.detailsWaiting = false
+    m.detailLines = lines
+    showDetailLines()
+end sub
+
+' The details from the line scrolled to, as many as the panel holds; asked
+' for again, they stay where they were scrolled to.
+sub showDetailLines()
+    last = m.detailLines.Count() - 1
+    if m.detailTop > last then m.detailTop = last
+    if m.detailTop < 0 then m.detailTop = 0
+    shown = []
+    for i = m.detailTop to last
+        shown.Push(m.detailLines[i])
+    end for
+    m.menuText.text = shown.Join(Chr(10))
+end sub
+
+' Up and Down: a line back, or on while the panel cuts the rest off.
+sub scrollDetails(down as boolean)
+    if down
+        more = m.menuText.isTextEllipsized
+        if GetInterface(more, "ifBoolean") = invalid then more = m.detailTop < m.detailLines.Count() - 1
+        if not more then return
+        m.detailTop = m.detailTop + 1
+    else
+        if m.detailTop = 0 then return
+        m.detailTop = m.detailTop - 1
+    end if
+    showDetailLines()
 end sub
 
 ' --- Picture subtitles drawn here (Pictures.brs) ---
@@ -2242,7 +2558,7 @@ sub onSubtitlesAdded(event as object)
     if file <> invalid then file.selected_subtitle = index
     stream = contentStream(m.info, m.item, m.global.session.server, m.positionMs)
     m.textTracks = stream.subtitleTracks.Count()
-    showToast("Subtitles added: " + contentSubtitleName(track, httpString(track.language)))
+    uiToast("Subtitles added: " + contentSubtitleName(track, httpString(track.language)))
     if tracksNeedNewSession(burned, index)
         position = m.positionMs
         seconds = m.video.position
