@@ -2213,18 +2213,24 @@ URLs, and so do the Apple apps, whose AVPlayer adds no header of its own.
   `Cache-Control: private, no-store`.
 - The key is `pley_mk_` and 256 random bits, kept in memory only. It opens
   that session's playlists and segments, or its file, its seek previews and
-  its file's PGS pictures, and nothing else: no API route takes it as a
-  token.
+  its file's subtitle pictures, and nothing else: no API route takes it as
+  a token.
 - `/api/media/{key}/previews.bif` is the file's seek previews as a BIF file,
   for a player that fetches them itself (Roku's); `404` while they are being
   made, as for `trickplay`.
-- `/api/media/{key}/subtitles-{index}.json?at=` is the file's PGS track
-  `index` as pictures, for a player that draws them without decoding PGS
-  (Roku's): `{ complete, width, height, cues: [{ start_ms, end_ms, x, y,
-  width, height, image }] }`.
-  - `width`×`height` is the plane the pictures are placed on (a Blu-ray's
-    1920×1080). Each cue shows its picture from `start_ms` until `end_ms`
-    (the file's time, before the person's subtitle sync), `width`×`height`
+- `/api/media/{key}/subtitles-{index}.json?at=` is the file's picture
+  subtitle track `index` (PGS, VobSub or DVB) as pictures, for a player
+  that draws them without decoding them (Roku's): `{ complete, width,
+  height, cues: [{ start_ms, end_ms, x, y, width, height, image }] }`. The
+  server decodes them as the apps that draw picture subtitles do
+  (`packages/picture-subtitles`): the same times, places and colours.
+  - `width`×`height` is the plane the pictures are placed on: a PGS
+    track's first composition's (a Blu-ray's 1920×1080), the size a VobSub
+    track's header says, a DVB track's first display definition's (720×576
+    for either without one). Each cue shows its picture from `start_ms`
+    until `end_ms` (the file's time, before the person's subtitle sync):
+    until the next one, or sooner when the track says (a block's duration,
+    VobSub's stop command, a DVB page's time-out). It is `width`×`height`
     at `x`, `y` of the plane and within it, in order of time, never two at
     once.
   - `image` is the picture's address beside this one,
@@ -2235,7 +2241,9 @@ URLs, and so do the Apple apps, whose AVPlayer adds no header of its own.
     as for it: while the track is copied, the cues so far (those around
     `at` first) with `X-Pley-Complete: 0`, less a last one whose end isn't
     copied yet; ask again for the rest.
-  - `404` for anything but PGS (VobSub and DVB are burned in); `503` with a
+  - `404` "no picture subtitle track has this index" for anything but
+    PGS, VobSub and DVB (servers before VobSub's and DVB's pictures say "no
+    PGS subtitle track has this index", for those too); `503` with a
     transcoder too old to copy the track ("update it"), or none running at
     the moment ("try again in a moment").
 - It ends with the session (closed by its player, or forgotten after 15
@@ -2375,8 +2383,8 @@ reports still send the version 1 fields: `containers` always counts;
   version 1 (HLS segments carry no subtitles). Subtitle
   files next to the media are always burned in. A player with
   `picture_subtitles_sideload` shows them next to the HLS stream from
-  `/api/files/{id}/subtitles/{index}.mks` instead (or, for PGS it can't
-  decode, as pictures from its keyed `subtitles-{index}.json`: Roku): it
+  `/api/files/{id}/subtitles/{index}.mks` instead (or, when it can't
+  decode them, as pictures from its keyed `subtitles-{index}.json`: Roku): it
   asks for no `subtitle_index`, so nothing is burned in (and HDR can stay
   HDR). A `subtitle_index` it does send is burned in as for any player.
   `picture_subtitles_sideload_codecs` names the codecs it shows so, when

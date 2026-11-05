@@ -61,6 +61,10 @@ describes how they are made.
 
 ### Changed
 
+- A playback with keyed addresses has its file's VobSub and DVB subtitles
+  beside its media as pictures too, as PGS's (`subtitles-{index}.json` and
+  its PNGs), placed, timed and coloured as the apps that draw them do: Roku
+  draws all three over the video rather than have them burned in.
 - The setup page says more plainly where the setup code is: opening Pley
   from its tray icon fills it in, and on a server without one it's in
   Pley's log.

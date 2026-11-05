@@ -1,8 +1,7 @@
-//! PGS subtitles made of the server's Matroska file of the track
-//! (`/api/files/{id}/subtitles/{index}.mks`), for players that can't read
-//! that file: a `.sup` file (the Blu-ray's own format, which Kodi reads next
-//! to a stream), or the pictures themselves, placed and timed
-//! ([`PgsPictures`], for a TV's own player that can't decode PGS: Roku's).
+//! PGS subtitles made of the server's Matroska file of the track, for
+//! players that can't read that file: a `.sup` file (the Blu-ray's own
+//! format, which Kodi reads next to a stream), or the pictures themselves,
+//! placed and timed ([`PgsPictures`]).
 //!
 //! A Matroska block of a PGS track is a display set's segments one after
 //! the other (type, 16-bit size, data); a `.sup` file has the same segments,
@@ -11,18 +10,21 @@
 
 use std::collections::HashMap;
 
-/// The `.sup` file of the PGS track in the Matroska file `mks` (one written
-/// as the transcoder writes them: one track, blocks not laced, a file being
-/// written read to its last whole element), with an empty display set at 0
-/// first: a reader that takes a file's first time for its start (FFmpeg
-/// does) starts it where the video does. `None` for anything else.
+use super::mks::{self, Track};
+use super::{MAX_SIDE, Picture, PictureCue, end_ms, so_far, union, ycbcr_to_rgb};
+
+/// The `.sup` file of the PGS track in the Matroska file `mks`, with an
+/// empty display set at 0 first: a reader that takes a file's first time
+/// for its start (FFmpeg does) starts it where the video does. `None` for
+/// anything else.
 pub fn from_matroska(mks: &[u8]) -> Option<Vec<u8>> {
-    let (scale_ns, blocks) = pgs_blocks(mks)?;
-    let mut out = Vec::with_capacity(blocks.iter().map(|b| b.data.len() + 64).sum());
+    let track = mks::read(mks).filter(is_pgs)?;
+    let mut out = Vec::with_capacity(track.blocks.iter().map(|b| b.data.len() + 64).sum());
     let mut first = true;
-    for Block { ticks, data, .. } in blocks {
+    for block in &track.blocks {
         // Nanoseconds to 90 kHz ticks: 90 a millisecond.
-        let pts = (i128::from(ticks) * i128::from(scale_ns) * 90 / 1_000_000).clamp(0, 0xFFFF_FFFF) as u32;
+        let pts = (i128::from(block.ticks) * i128::from(track.scale_ns) * 90 / 1_000_000).clamp(0, 0xFFFF_FFFF) as u32;
+        let data = block.data;
         let mut at = 0;
         while at + 3 <= data.len() {
             let len = usize::from(u16::from_be_bytes([data[at + 1], data[at + 2]]));
@@ -49,66 +51,8 @@ pub fn from_matroska(mks: &[u8]) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// A block of a PGS track: its time and duration (ticks; the duration when
-/// the block says) and its display set.
-struct Block<'a> {
-    ticks: i64,
-    duration: Option<u64>,
-    data: &'a [u8],
-}
-
-/// The PGS track of the Matroska file `mks` (as [`from_matroska`] takes
-/// it): nanoseconds a tick, and its blocks in the order of the file. `None`
-/// for anything else.
-fn pgs_blocks(mks: &[u8]) -> Option<(u64, Vec<Block<'_>>)> {
-    let (id, size, at) = header(mks, 0)?;
-    if id != EBML {
-        return None;
-    }
-    let (id, segment_size, start) = header(mks, at.checked_add(usize::try_from(size?).ok()?)?)?;
-    if id != SEGMENT {
-        return None;
-    }
-    let end =
-        segment_size.and_then(|s| start.checked_add(usize::try_from(s).ok()?)).map_or(mks.len(), |e| e.min(mks.len()));
-    let mut scale_ns = 1_000_000u64;
-    let mut pgs = false;
-    let mut blocks = Vec::new();
-    for (id, data) in children(mks, start, end) {
-        match id {
-            INFO => {
-                if let Some((_, scale)) = elements(data).find(|(id, _)| *id == TIMESTAMP_SCALE) {
-                    scale_ns = uint(scale).filter(|s| *s > 0)?;
-                }
-            }
-            TRACKS => {
-                let entry = elements(data).find(|(id, _)| *id == TRACK_ENTRY)?.1;
-                pgs = elements(entry).any(|(id, codec)| id == CODEC_ID && codec.starts_with(b"S_HDMV/PGS"));
-                if elements(entry).any(|(id, _)| id == CONTENT_ENCODINGS) {
-                    return None;
-                }
-            }
-            CLUSTER => {
-                let mut cluster_time = 0i64;
-                for (id, data) in elements(data) {
-                    match id {
-                        CLUSTER_TIMESTAMP => cluster_time = i64::try_from(uint(data)?).ok()?,
-                        SIMPLE_BLOCK => blocks.extend(block(data, cluster_time, None)),
-                        BLOCK_GROUP => {
-                            let duration =
-                                elements(data).find(|(id, _)| *id == BLOCK_DURATION).and_then(|(_, d)| uint(d));
-                            if let Some((_, b)) = elements(data).find(|(id, _)| *id == BLOCK) {
-                                blocks.extend(block(b, cluster_time, duration));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    pgs.then_some((scale_ns, blocks))
+fn is_pgs(track: &Track) -> bool {
+    track.codec_id.starts_with(b"S_HDMV/PGS")
 }
 
 // ---------------------------------------------------------------------------
@@ -122,13 +66,8 @@ const ODS: u8 = 0x15;
 const FRESH_STATES: u8 = 0xC0;
 /// A composition object's flag: cropping follows its place.
 const CROPPED: u8 = 0x80;
-/// The widest and tallest a plane or object is read (Blu-ray's are
-/// 1920×1080).
-const MAX_SIDE: u32 = 4096;
 /// The most objects a composition places.
 const MAX_PLACED: u8 = 2;
-/// How long a picture shows that nothing follows (ms): the last of a track.
-const LAST_PICTURE_MS: i64 = 10_000;
 
 /// A PGS track's pictures, for a player that shows them without decoding
 /// PGS: when each shows and where ([`PgsPictures::cues`]), and each picture
@@ -142,26 +81,6 @@ pub struct PgsPictures<'a> {
     pub height: u32,
     /// In order of time.
     sets: Vec<DisplaySet<'a>>,
-}
-
-/// A picture showing from `start_ms` until `end_ms` (the track's time),
-/// `width`×`height` at `x`, `y` of the plane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PictureCue {
-    pub start_ms: i64,
-    pub end_ms: i64,
-    pub x: u32,
-    pub y: u32,
-    pub width: u32,
-    pub height: u32,
-}
-
-/// A picture's pixels: `width`×`height`, RGBA, not premultiplied.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Picture {
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<u8>,
 }
 
 struct DisplaySet<'a> {
@@ -278,32 +197,14 @@ impl<'a> Epoch<'a> {
     }
 }
 
-/// The smallest box holding every one of `boxes` (x, y, width, height).
-fn union(boxes: impl Iterator<Item = (u32, u32, u32, u32)>) -> Option<(u32, u32, u32, u32)> {
-    boxes.fold(None, |all, (x, y, w, h)| {
-        let (x0, y0, x1, y1) = match all {
-            None => (x, y, x + w, y + h),
-            Some((ax, ay, aw, ah)) => (ax.min(x), ay.min(y), (ax + aw).max(x + w), (ay + ah).max(y + h)),
-        };
-        Some((x0, y0, x1 - x0, y1 - y0))
-    })
-}
-
 impl<'a> PgsPictures<'a> {
-    /// The display sets of the PGS track in the Matroska file `mks` (as
-    /// [`from_matroska`] takes it); `None` for anything else.
-    pub fn read(mks: &'a [u8]) -> Option<Self> {
-        let (scale_ns, blocks) = pgs_blocks(mks)?;
-        let ms =
-            |ticks: i64| (i128::from(ticks) * i128::from(scale_ns) / 1_000_000).clamp(0, i128::from(i64::MAX)) as i64;
-        let mut sets: Vec<DisplaySet> = blocks
-            .iter()
-            .map(|b| display_set(b.data, ms(b.ticks), b.duration.map(|d| ms(i64::try_from(d).unwrap_or(i64::MAX)))))
-            .collect();
-        sets.sort_by_key(|s| s.time_ms);
+    /// The display sets of a PGS track.
+    pub(super) fn of(track: &Track<'a>) -> Self {
+        let sets: Vec<DisplaySet> =
+            track.samples().into_iter().map(|s| display_set(s.data, s.time_ms, s.duration_ms)).collect();
         let plane = sets.iter().find_map(|s| s.composition.as_ref().map(|c| (c.width, c.height)));
         let (width, height) = plane.filter(|&(w, h)| w > 0 && h > 0).unwrap_or((1920, 1080));
-        Some(Self { width, height, sets })
+        Self { width, height, sets }
     }
 
     /// When each picture shows and where, in order of time: from its
@@ -331,18 +232,11 @@ impl<'a> PgsPictures<'a> {
         cues
     }
 
-    /// [`PgsPictures::cues`] of a track copied only so far: a last picture
-    /// that nothing after it ends is left out, as what ends it may not be
-    /// copied yet. A player asks again, and has it with its end.
+    /// [`PgsPictures::cues`] of a track copied only so far
+    /// ([`super::PictureTrack::cues_so_far`]).
     pub fn cues_so_far(&self) -> Vec<PictureCue> {
-        let mut cues = self.cues();
-        let unended = self.sets.last().filter(|last| !last.duration_ms.is_some_and(|own| own > 0));
-        if let Some(last) = unended
-            && cues.last().is_some_and(|cue| cue.start_ms == last.time_ms)
-        {
-            cues.pop();
-        }
-        cues
+        let last = self.sets.last().map(|last| (last.time_ms, last.duration_ms.is_some_and(|own| own > 0)));
+        so_far(self.cues(), last)
     }
 
     /// The picture that shows from `start_ms` (a cue's start), or `None`.
@@ -386,12 +280,7 @@ impl<'a> PgsPictures<'a> {
     /// When display set `i` stops showing: at the next one, or after its
     /// block's own duration when that is sooner.
     fn end_of(&self, i: usize) -> i64 {
-        let start = self.sets[i].time_ms;
-        let next = self.sets.get(i + 1).map_or(start.saturating_add(LAST_PICTURE_MS), |s| s.time_ms);
-        match self.sets[i].duration_ms {
-            Some(own) if own > 0 => next.min(start.saturating_add(own)),
-            _ => next,
-        }
+        end_ms(self.sets[i].time_ms, self.sets.get(i + 1).map(|s| s.time_ms), self.sets[i].duration_ms)
     }
 }
 
@@ -508,33 +397,6 @@ fn decode_rle(rle: &[u8], width: u32, height: u32) -> Vec<u8> {
     out
 }
 
-/// Limited-range YCbCr to RGB, as FFmpeg's decoder takes PGS colors: BT.709
-/// for HD planes, BT.601 for SD ones.
-fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8, hd: bool) -> [u8; 3] {
-    let yy = 1.164_383 * (f32::from(y) - 16.0);
-    let (u, v) = (f32::from(cb) - 128.0, f32::from(cr) - 128.0);
-    let (r, g, b) = if hd {
-        (yy + 1.792_741 * v, yy - 0.213_249 * u - 0.532_909 * v, yy + 2.112_402 * u)
-    } else {
-        (yy + 1.596_027 * v, yy - 0.391_762 * u - 0.812_968 * v, yy + 2.017_232 * u)
-    };
-    [r, g, b].map(|c| c.round().clamp(0.0, 255.0) as u8)
-}
-
-const EBML: u32 = 0x1A45_DFA3;
-const SEGMENT: u32 = 0x1853_8067;
-const INFO: u32 = 0x1549_A966;
-const TIMESTAMP_SCALE: u32 = 0x2A_D7B1;
-const TRACKS: u32 = 0x1654_AE6B;
-const TRACK_ENTRY: u32 = 0xAE;
-const CODEC_ID: u32 = 0x86;
-const CONTENT_ENCODINGS: u32 = 0x6D80;
-const CLUSTER: u32 = 0x1F43_B675;
-const CLUSTER_TIMESTAMP: u32 = 0xE7;
-const SIMPLE_BLOCK: u32 = 0xA3;
-const BLOCK_GROUP: u32 = 0xA0;
-const BLOCK: u32 = 0xA1;
-const BLOCK_DURATION: u32 = 0x9B;
 /// Segment types: presentation composition, end of display set.
 const PCS: u8 = 0x16;
 const END: u8 = 0x80;
@@ -546,92 +408,10 @@ fn push(out: &mut Vec<u8>, pts: u32, segment: &[u8]) {
     out.extend_from_slice(segment);
 }
 
-/// A block at its absolute time (ticks), with its `duration` when its group
-/// says; `None` for a laced one.
-fn block(data: &[u8], cluster_time: i64, duration: Option<u64>) -> Option<Block<'_>> {
-    let (_, track_len) = vint(data, 0)?;
-    let rest = data.get(track_len..)?;
-    if rest.len() < 3 || rest[2] & 0x06 != 0 {
-        return None;
-    }
-    let relative = i16::from_be_bytes([rest[0], rest[1]]);
-    Some(Block { ticks: cluster_time.checked_add(i64::from(relative))?, duration, data: &rest[3..] })
-}
-
-/// The children of the element whose data runs from `start` to `end`, an
-/// element of unknown size (a cluster being written) to the next of its
-/// level, the last one cut short left out.
-fn children(bytes: &[u8], start: usize, end: usize) -> Vec<(u32, &[u8])> {
-    let mut found = Vec::new();
-    let mut at = start;
-    while let Some((id, size, data)) = header(bytes, at) {
-        let next = match size {
-            Some(size) => match usize::try_from(size).ok().and_then(|size| data.checked_add(size)) {
-                Some(next) if next <= end => next,
-                _ => break,
-            },
-            // A cluster of unknown size: up to the next cluster, or the end.
-            None => (data..end.saturating_sub(4)).find(|&i| bytes[i..i + 4] == CLUSTER.to_be_bytes()).unwrap_or(end),
-        };
-        found.push((id, &bytes[data..next]));
-        at = next;
-        if at >= end {
-            break;
-        }
-    }
-    found
-}
-
-/// The child elements of an element's data, as far as they are whole.
-fn elements(data: &[u8]) -> impl Iterator<Item = (u32, &[u8])> {
-    let mut at = 0;
-    std::iter::from_fn(move || {
-        let (id, size, start) = header(data, at)?;
-        let end = start.checked_add(usize::try_from(size?).ok()?)?;
-        let body = data.get(start..end)?;
-        at = end;
-        Some((id, body))
-    })
-}
-
-/// An element's id, size (`None`: unknown) and where its data starts.
-fn header(bytes: &[u8], at: usize) -> Option<(u32, Option<u64>, usize)> {
-    let first = *bytes.get(at)?;
-    let id_len = first.leading_zeros() as usize + 1;
-    if id_len > 4 {
-        return None;
-    }
-    let id = bytes.get(at..at + id_len)?.iter().fold(0u32, |v, b| (v << 8) | u32::from(*b));
-    let (size, len) = vint(bytes, at + id_len)?;
-    let unknown = size == (1u64 << (7 * len)) - 1;
-    Some((id, (!unknown).then_some(size), at + id_len + len))
-}
-
-/// A variable-length integer (its marker taken off) and its length.
-fn vint(bytes: &[u8], at: usize) -> Option<(u64, usize)> {
-    let first = *bytes.get(at)?;
-    let len = first.leading_zeros() as usize + 1;
-    if len > 8 {
-        return None;
-    }
-    let raw = bytes.get(at..at + len)?;
-    let marker = if len == 8 { 0 } else { 0xFFu8 >> len };
-    let value = raw[1..].iter().fold(u64::from(raw[0] & marker), |v, b| (v << 8) | u64::from(*b));
-    Some((value, len))
-}
-
-fn uint(data: &[u8]) -> Option<u64> {
-    (data.len() <= 8).then(|| data.iter().fold(0u64, |v, b| (v << 8) | u64::from(*b)))
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::mks::testing::{Cluster, lasting, mks_of};
     use super::*;
-
-    fn el(id: &[u8], data: &[u8]) -> Vec<u8> {
-        assert!(data.len() < 0x3FFF);
-        [id, &[0x40 | (data.len() >> 8) as u8, data.len() as u8], data].concat()
-    }
 
     /// A display set: a PCS of 1920×1080 with one object, an END.
     fn display_set(composition: u8) -> Vec<u8> {
@@ -639,30 +419,16 @@ mod tests {
         [&pcs[..], &[0x80, 0, 0]].concat()
     }
 
-    /// A cluster: its time, and its blocks (time in it, data).
-    type Cluster<'a> = (u64, &'a [(i16, Vec<u8>)]);
-
     fn mks(clusters: &[Cluster], unknown_cluster: bool) -> Vec<u8> {
-        let tracks = el(&[0x16, 0x54, 0xAE, 0x6B], &el(&[0xAE], &el(&[0x86], b"S_HDMV/PGS")));
-        let info = el(&[0x15, 0x49, 0xA9, 0x66], &el(&[0x2A, 0xD7, 0xB1], &[0x0F, 0x42, 0x40]));
-        let mut segment = [info, tracks].concat();
-        for (time, blocks) in clusters {
-            let mut body = el(&[0xE7], &time.to_be_bytes()[5..]);
-            for (relative, data) in blocks.iter() {
-                let block = [&[0x81][..], &relative.to_be_bytes(), &[0x80], data].concat();
-                body.extend(el(&[0xA3], &block));
-            }
-            if unknown_cluster {
-                segment.extend(
-                    [&[0x1F, 0x43, 0xB6, 0x75, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF][..], &body].concat(),
-                );
-            } else {
-                segment.extend(el(&[0x1F, 0x43, 0xB6, 0x75], &body));
-            }
+        mks_of(b"S_HDMV/PGS", None, clusters, unknown_cluster)
+    }
+
+    /// The pictures of a PGS track's file.
+    fn read(mks: &[u8]) -> Option<PgsPictures<'_>> {
+        match super::super::PictureTrack::read(mks)? {
+            super::super::PictureTrack::Pgs(pictures) => Some(pictures),
+            _ => None,
         }
-        let ebml = el(&[0x1A, 0x45, 0xDF, 0xA3], &el(&[0x42, 0x82], b"matroska"));
-        // The segment's size unknown, as FFmpeg writes it until it is done.
-        [ebml, vec![0x18, 0x53, 0x80, 0x67, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF], segment].concat()
     }
 
     /// The `.sup` segments: (pts, type, size).
@@ -709,8 +475,7 @@ mod tests {
     #[test]
     fn only_pgs_matroska_files_are_made_sup() {
         assert_eq!(from_matroska(b"not matroska"), None);
-        let vobsub = mks(&[(0, &[(0, vec![1, 2, 3])])], false);
-        let vobsub = String::from_utf8_lossy(&vobsub).replace("S_HDMV/PGS", "S_VOBSUB__").into_bytes();
+        let vobsub = mks_of(b"S_VOBSUB", None, &[(0, &[(0, vec![1, 2, 3])])], false);
         assert_eq!(from_matroska(&vobsub), None);
         // No block yet: an empty file.
         assert_eq!(from_matroska(&mks(&[], false)), Some(Vec::new()));
@@ -780,7 +545,7 @@ mod tests {
             ],
             false,
         );
-        let pictures = PgsPictures::read(&file).unwrap();
+        let pictures = read(&file).unwrap();
         assert_eq!((pictures.width, pictures.height), (1920, 1080));
         let cue = |start_ms, end_ms, x, y| PictureCue { start_ms, end_ms, x, y, width: 4, height: 2 };
         assert_eq!(pictures.cues(), [cue(1_000, 3_000, 100, 900), cue(5_000, 6_000, 200, 800)]);
@@ -812,7 +577,7 @@ mod tests {
             )],
             false,
         );
-        let pictures = PgsPictures::read(&file).unwrap();
+        let pictures = read(&file).unwrap();
         // Both in one picture, the box that holds them, until 10 s on (no
         // display set after).
         let cue = PictureCue { start_ms: 1_000, end_ms: 11_000, x: 100, y: 900, width: 502, height: 52 };
@@ -829,11 +594,8 @@ mod tests {
     fn a_blocks_own_duration_ends_its_picture_sooner() {
         // A cluster at 1 s holding a BlockGroup that lasts 1.5 s.
         let data = set(&[pcs(0x80, &[(0, 0, 0, 0, None)]), pds(&[WHITE]), ods(0, 2, 2, 1)]);
-        let block = el(&[0xA1], &[&[0x81, 0, 0, 0][..], &data].concat());
-        let group = el(&[0xA0], &[block, el(&[0x9B], &[0x05, 0xDC])].concat());
-        let cluster = el(&[0x1F, 0x43, 0xB6, 0x75], &[el(&[0xE7], &[0x03, 0xE8]), group].concat());
-        let file = [mks(&[], false), cluster].concat();
-        let pictures = PgsPictures::read(&file).unwrap();
+        let file = [mks(&[], false), lasting(1_000, 1_500, &data)].concat();
+        let pictures = read(&file).unwrap();
         assert_eq!(pictures.cues().iter().map(|c| (c.start_ms, c.end_ms)).collect::<Vec<_>>(), [(1_000, 2_500)]);
     }
 
@@ -856,13 +618,13 @@ mod tests {
             ],
             false,
         );
-        let pictures = PgsPictures::read(&file).unwrap();
+        let pictures = read(&file).unwrap();
         assert!(pictures.cues().is_empty());
         assert_eq!(pictures.picture(1_000), None);
-        assert!(PgsPictures::read(b"not matroska").is_none());
+        assert!(read(b"not matroska").is_none());
         // No palette: nothing to draw, so no cue either.
         let file = mks(&[(1_000, &[(0, set(&[pcs(0x80, &[(0, 0, 0, 0, None)]), ods(0, 2, 2, 1)]))])], false);
-        let pictures = PgsPictures::read(&file).unwrap();
+        let pictures = read(&file).unwrap();
         assert_eq!((pictures.cues(), pictures.picture(1_000)), (Vec::new(), None));
     }
 
@@ -874,7 +636,7 @@ mod tests {
             &[(1_000, &[(0, set(&[pcs(0x80, &[(0, 0, 1820, 1078, None)]), pds(&[WHITE]), ods(0, 200, 4, 1)]))])],
             false,
         );
-        let pictures = PgsPictures::read(&file).unwrap();
+        let pictures = read(&file).unwrap();
         let cue = PictureCue { start_ms: 1_000, end_ms: 11_000, x: 1820, y: 1078, width: 100, height: 2 };
         assert_eq!(pictures.cues(), [cue]);
         let picture = pictures.picture(1_000).unwrap();
@@ -887,7 +649,7 @@ mod tests {
         let shown = || set(&[pcs(0x80, &[(0, 0, 100, 900, None)]), pds(&[WHITE]), ods(0, 4, 2, 1)]);
         let file =
             mks(&[(1_000, &[(0, shown())]), (3_000, &[(0, set(&[pcs(0, &[])]))]), (5_000, &[(0, shown())])], false);
-        let pictures = PgsPictures::read(&file).unwrap();
+        let pictures = read(&file).unwrap();
         let times = |cues: Vec<PictureCue>| cues.iter().map(|c| (c.start_ms, c.end_ms)).collect::<Vec<_>>();
         // Whole, the last picture shows 10 s; copied so far, what ends it may
         // be copied later.
@@ -905,7 +667,7 @@ mod tests {
             )],
             false,
         );
-        let pictures = PgsPictures::read(&file).unwrap();
+        let pictures = read(&file).unwrap();
         assert_eq!(pictures.cues()[0].width, 12, "the third object, far right, left out");
     }
 
@@ -919,12 +681,5 @@ mod tests {
         assert_eq!(&out[8..], &[9; 8]);
         // Cut short: what came, the rest transparent.
         assert_eq!(decode_rle(&[5, 5], 4, 1), [5, 5, 0, 0]);
-    }
-
-    #[test]
-    fn colors_are_bt709_for_hd_and_bt601_for_sd() {
-        assert_eq!(ycbcr_to_rgb(235, 128, 128, true), [255, 255, 255]);
-        assert_eq!(ycbcr_to_rgb(16, 128, 128, false), [0, 0, 0]);
-        assert_ne!(ycbcr_to_rgb(81, 90, 240, true), ycbcr_to_rgb(81, 90, 240, false));
     }
 }

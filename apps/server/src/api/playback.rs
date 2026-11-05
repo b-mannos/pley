@@ -1009,9 +1009,9 @@ fn hls_file_kind(name: &str) -> Option<HlsFile> {
 /// send the Authorization header, a TV's own player (docs/API.md, "Keyed
 /// URLs"). The key its play request asked for (`keyed_urls`) stands in for
 /// the token, for this session's playlists and segments or its file, its
-/// seek previews and its file's PGS pictures, and nothing else; it ends with
-/// the session, the account, or the app's sign-in. A session stopped from
-/// elsewhere answers `410` here too.
+/// seek previews and its file's subtitle pictures, and nothing else; it
+/// ends with the session, the account, or the app's sign-in. A session
+/// stopped from elsewhere answers `410` here too.
 pub async fn keyed_media(
     State(state): State<AppState>,
     Path((key, file)): Path<(String, String)>,
@@ -1052,7 +1052,7 @@ pub async fn keyed_media(
         )
             .into_response());
     }
-    // PGS subtitles as pictures, for a player that can't decode them
+    // Picture subtitles as PNGs, for a player that can't decode them
     // (Roku's), which fetches them itself too.
     if let Some(name) = file.strip_prefix("subtitles-") {
         let row = visible_file(&state, &user, session.file_id).await?;
@@ -1075,8 +1075,9 @@ pub async fn keyed_media(
     Ok(response)
 }
 
-/// What a keyed session's file's PGS track `index` shows, for a player that
-/// can't decode PGS (Roku's), made of the track's `.mks` ([`picture_track`])
+/// What a keyed session's file's picture subtitle track `index` (PGS,
+/// VobSub or DVB) shows, for a player that can't decode those (Roku's),
+/// made of the track's `.mks` ([`picture_track`])
 /// as far as it is copied, from around `at` first (docs/API.md, "Keyed
 /// URLs"): `subtitles-{index}.json` its pictures as cues (when, where), with
 /// `X-Pley-Complete` as for the `.mks`; `subtitles-{index}-{start_ms}.png`
@@ -1099,12 +1100,13 @@ async fn keyed_pictures(
         }
     };
     let index: i64 = index.parse().map_err(|_| unknown())?;
-    let pgs = file
-        .streams()
-        .iter()
-        .any(|s| s.index == index && s.kind == StreamKind::Subtitle && s.codec == "hdmv_pgs_subtitle");
-    if !pgs {
-        return Err(AppError::not_found("no PGS subtitle track has this index"));
+    let pictures = file.streams().iter().any(|s| {
+        s.index == index
+            && s.kind == StreamKind::Subtitle
+            && matches!(s.codec.as_str(), "hdmv_pgs_subtitle" | "dvd_subtitle" | "dvb_subtitle")
+    });
+    if !pictures {
+        return Err(AppError::not_found("no picture subtitle track has this index"));
     }
     // A picture is made of the track as its list was: while the track is
     // copied, the transcoder answers the same place with the same pictures,
@@ -1114,11 +1116,13 @@ async fn keyed_pictures(
     let (mks, complete) = picture_track_so_far(state, user, &file, index, at).await?;
     // A film's track is tens of megabytes: read off the async threads.
     let made = tokio::task::spawn_blocking(move || {
-        let pictures = crate::pgs::PgsPictures::read(&mks).ok_or_else(|| anyhow::anyhow!("not a PGS track"))?;
+        let pictures = crate::picture_subtitles::PictureTrack::read(&mks)
+            .ok_or_else(|| anyhow::anyhow!("not a picture subtitle track"))?;
         let Some(start_ms) = start_ms else {
             let cues = if complete { pictures.cues() } else { pictures.cues_so_far() };
             let cues = cues.into_iter().map(|c| PictureCueJson::of(c, index, at)).collect();
-            let body = PictureCues { complete, width: pictures.width, height: pictures.height, cues };
+            let (width, height) = pictures.plane();
+            let body = PictureCues { complete, width, height, cues };
             return Ok(Some((serde_json::to_vec(&body)?, "application/json")));
         };
         let Some(picture) = pictures.picture(start_ms) else { return Ok(None) };
@@ -1173,8 +1177,8 @@ struct PictureCueJson {
 }
 
 impl PictureCueJson {
-    fn of(cue: crate::pgs::PictureCue, index: i64, at: Option<i64>) -> Self {
-        let crate::pgs::PictureCue { start_ms, end_ms, x, y, width, height } = cue;
+    fn of(cue: crate::picture_subtitles::PictureCue, index: i64, at: Option<i64>) -> Self {
+        let crate::picture_subtitles::PictureCue { start_ms, end_ms, x, y, width, height } = cue;
         let image = match at {
             Some(at) => format!("subtitles-{index}-{start_ms}.png?at={at}"),
             None => format!("subtitles-{index}-{start_ms}.png"),
@@ -1732,7 +1736,8 @@ async fn pgs_track(
             }
         }
     };
-    let sup = crate::pgs::from_matroska(&mks).ok_or_else(|| AppError::Internal(anyhow::anyhow!("not a PGS track")))?;
+    let sup = crate::picture_subtitles::pgs::from_matroska(&mks)
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("not a PGS track")))?;
     Ok(held_bytes(request.headers(), Bytes::from(sup), complete, SUP))
 }
 

@@ -163,7 +163,8 @@ struct RawBlock {
 /// Elements the file holds whole are read for good; the cluster the bytes
 /// end in is read as far as its blocks are whole, and again once more of it
 /// arrives. Track header, clusters and samples are what the server's files
-/// hold (`apps/server/src/pgs.rs`); everything else is skipped by its size.
+/// hold (`apps/server/src/picture_subtitles/mks.rs`); everything else is
+/// skipped by its size.
 #[derive(Clone)]
 pub struct MksReader {
     /// The last answer's bytes, or what remained unread of the one before and

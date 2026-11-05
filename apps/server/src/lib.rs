@@ -39,7 +39,7 @@ pub mod network;
 pub mod oauth;
 pub mod overrides;
 pub mod people;
-pub mod pgs;
+pub mod picture_subtitles;
 pub mod playback;
 pub mod playlists;
 pub mod plex;
