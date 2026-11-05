@@ -50,6 +50,9 @@ sub apiRun()
     m.tokens = invalid
     m.signIn = invalid
     m.signIns = 0
+    ' "Search this network" under way (apiSweep), and how many there were.
+    m.sweep = invalid
+    m.sweeps = 0
     ' A profile switch waiting for a refresh or another switch to end:
     ' { request, spec }; and whether one is under way.
     m.switchWaiting = invalid
@@ -146,6 +149,11 @@ sub apiAccept(request as dynamic)
         apiForgetServer(request, spec)
     else if op = "checkServer"
         apiCheckServer(request, spec)
+    else if op = "sweep"
+        apiSweep(request)
+    else if op = "sweepStop"
+        apiSweepEnd()
+        apiAnswer(request, apiOk(invalid))
     else if op = "signIn"
         apiSignInStart(request)
     else if op = "signInStop"
@@ -297,6 +305,8 @@ sub apiAnswered(job as object, status as integer, body as string, headers as dyn
         apiRefreshAnswered(job, status, body)
     else if purpose = "check"
         apiCheckAnswered(job, status, body)
+    else if purpose = "sweep"
+        apiSweepAnswered(job, status, body)
     else if purpose = "metadata"
         apiMetadataAnswered(job, status, body)
     else if purpose = "device"
@@ -918,7 +928,10 @@ sub apiCheckAnswered(job as object, status as integer, body as string)
         if httpTrue(data.setup_required)
             apiAnswer(job.request, apiFail("setup", "This server isn't set up yet: open " + urlDisplayAddress(server) + " in a browser first."))
         else if urlUnencrypted(server)
-            apiAnswer(job.request, apiFail("unencrypted", job.address + " isn't on your network and isn't encrypted: open it by its https address."))
+            ' Android TV goes ahead once asked again; the Roku never sends a
+            ' code or a token over plain HTTP beyond the home network
+            ' (SECURITY.md), so it says why it won't.
+            apiAnswer(job.request, apiFail("unencrypted", job.address + " isn't encrypted: what you watch could be read on the way, and Pley for Roku doesn't sign in over plain HTTP beyond your network. Use its https address if it has one."))
         else
             name = httpSentence(data.name)
             if name = "" then name = urlDisplayAddress(server)
@@ -936,6 +949,67 @@ sub apiCheckAnswered(job as object, status as integer, body as string)
     else
         apiAnswer(job.request, apiFail("unreachable", "Couldn't reach " + job.address + ". Check the address, and that the server is on."))
     end if
+end sub
+
+' --- Searching the network ---
+
+' "Search this network": GET /api/server, without a token, at every other
+' address of the Roku's /24 network (Discovery.brs's discoverySweep), a
+' few at a time and briefly each, so that a Roku Express isn't swamped: a
+' home network's server answers in milliseconds. Each server that answers
+' as Pley is an update of the request ({ server }); its answer comes once
+' every address had its turn. One sweep at a time: a new one, or
+' sweepStop, ends the one before.
+sub apiSweep(request as object)
+    apiSweepEnd()
+    m.sweeps = m.sweeps + 1
+    m.sweep = { id: m.sweeps, request: request, urls: discoverySweep(m.device.GetConnectionInfo().ip), next: 0, out: 0 }
+    apiSweepNext()
+end sub
+
+' Addresses asked at once, and how long each has to answer.
+function apiSweepAtOnce() as integer
+    return 24
+end function
+
+function apiSweepTimeoutMs() as integer
+    return 1000
+end function
+
+sub apiSweepNext()
+    sweep = m.sweep
+    if sweep = invalid then return
+    while sweep.out < apiSweepAtOnce() and sweep.next < sweep.urls.Count()
+        job = apiJob("sweep", "GET", sweep.urls[sweep.next] + "/api/server")
+        job.sweep = sweep.id
+        job.origin = sweep.urls[sweep.next]
+        job.timeoutMs = apiSweepTimeoutMs()
+        sweep.next = sweep.next + 1
+        sweep.out = sweep.out + 1
+        apiSend(job)
+        ' A transfer that couldn't start answers at once, and may have
+        ' ended the sweep.
+        if m.sweep = invalid or m.sweep.id <> sweep.id then return
+    end while
+    if sweep.out = 0 then apiSweepEnd()
+end sub
+
+sub apiSweepAnswered(job as object, status as integer, body as string)
+    sweep = m.sweep
+    if sweep = invalid or sweep.id <> job.sweep then return
+    sweep.out = sweep.out - 1
+    server = discoverySwept(job.origin, status, body)
+    if server <> invalid then sweep.request.update = { server: server }
+    apiSweepNext()
+end sub
+
+' The sweep under way is over: its request is answered, and what it still
+' asks is let go when it answers.
+sub apiSweepEnd()
+    sweep = m.sweep
+    if sweep = invalid then return
+    m.sweep = invalid
+    apiAnswer(sweep.request, apiOk(invalid))
 end sub
 
 ' --- Signing in with a TV code (RFC 8628) ---

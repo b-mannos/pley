@@ -33,7 +33,16 @@ the app prints and its errors.
 
 The app finds Pley servers on the local network (or takes an address) and
 signs in with a code shown on the TV, approved on the server's `/link` page
-or by its QR code. The sign-in screen is laid out as Android TV's: three
+or by its QR code. Choose your server lists the saved servers first, then
+those that answer the broadcast. A saved server the broadcast didn't find
+is asked directly (`GET /api/server`, without a token), and its row says
+"Can't reach it" when it doesn't answer as Pley; the row chosen says
+"Connecting to …". Search this network asks every other address of the
+Roku's network ("Checking 192.168.1.1-254…"), 24 at a time, a second
+each, for servers that never hear the broadcast (Docker on a bridge
+network). An address typed on the keyboard that can't be used says why
+on the keyboard, shown again: one over plain HTTP beyond the home network
+is refused, as SECURITY.md says of the TV apps. The sign-in screen is laid out as Android TV's: three
 numbered steps (scan the code, or go to the address, and enter the code,
 in two fields), the QR code at the right in a light tile that is dimmed
 once the code expires, and Change server under it. An expired code gives

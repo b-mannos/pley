@@ -1,3 +1,11 @@
+' "Choose your server", as Android TV's: saved servers first, then those
+' that answer on the local network. A saved server the search didn't find
+' is asked directly, and its row says "Can't reach it" when it doesn't
+' answer as Pley; the row chosen says "Connecting to …". Search this
+' network asks every address of the TV's network (ApiTask's sweep), for
+' servers that never hear the broadcast. An address typed on the keyboard
+' that can't be used says why there, with the keyboard again.
+
 sub init()
     m.list = m.top.findNode("list")
     m.actions = m.top.findNode("actions")
@@ -7,8 +15,13 @@ sub init()
     m.saved = []
     m.found = []
     m.rows = []
+    ' Saved servers that didn't answer as Pley ({ url: true }), and the row
+    ' being connected to.
+    m.unreachable = {}
+    m.connecting = ""
     m.started = false
     m.searching = false
+    m.sweeping = false
     m.listFocused = false
     m.address = ""
     m.dialog = invalid
@@ -19,7 +32,12 @@ sub init()
 end sub
 
 sub onActive()
-    if not m.top.active then return
+    if not m.top.active
+        ' The sweep asks no more once the screen is left.
+        if m.sweeping then uiRequest({ op: "sweepStop" }, "")
+        m.sweeping = false
+        return
+    end if
     if not m.started
         m.started = true
         uiRequest({ op: "listServers" }, "onSaved")
@@ -35,6 +53,32 @@ end sub
 sub onSaved(event as object)
     answer = event.getData()
     if answer.ok then m.saved = answer.data.servers
+    render()
+    probeSaved()
+end sub
+
+' Saved servers are asked directly, without a token, whether they answer as
+' Pley (the address check's GET /api/server), as the search may not reach
+' them: those that don't say so on their row. The ten used most lately.
+sub probeSaved()
+    asked = 0
+    for each server in serversByLastUse(m.saved)
+        if asked >= 10 then exit for
+        asked = asked + 1
+        uiRequest({ op: "checkServer", address: server.url }, "onProbed")
+    end for
+end sub
+
+' What isn't Pley, or doesn't answer, can't be reached; a server not set up,
+' or one beyond the home network over plain HTTP, answers as Pley.
+sub onProbed(event as object)
+    url = httpString(event.getRoSGNode().spec.address)
+    answer = event.getData()
+    if answer.ok or (answer.error <> "unreachable" and answer.error <> "not_pley")
+        m.unreachable.Delete(url)
+    else
+        m.unreachable[url] = true
+    end if
     render()
 end sub
 
@@ -55,11 +99,45 @@ end sub
 
 sub onSearched()
     m.searching = false
+    if not m.sweeping then sayFound()
+end sub
+
+sub sayFound()
     if m.rows.Count() = 0
-        setStatus("No servers found. Make sure this TV and the server are on the same network, or enter the server's address.", false)
+        setStatus("No servers found. Make sure this TV and the server are on the same network.", false)
     else
         setStatus("", false)
     end if
+end sub
+
+' Search this network: every other address of the TV's /24, the servers
+' coming as they answer. Without an IPv4 address, the broadcast again.
+sub sweep()
+    if m.sweeping then return
+    range = discoverySweepRange(CreateObject("roDeviceInfo").GetConnectionInfo().ip)
+    if range = ""
+        search()
+        return
+    end if
+    m.sweeping = true
+    setStatus("Checking " + range + "…", false)
+    request = uiRequest({ op: "sweep" }, "onSwept")
+    request.observeField("update", "onSweepFound")
+end sub
+
+' A server the sweep found.
+sub onSweepFound(event as object)
+    server = httpObject(event.getData().server)
+    if server = invalid then return
+    m.found = discoveryAdd(m.found, server)
+    m.unreachable.Delete(server.url)
+    render()
+end sub
+
+sub onSwept()
+    if not m.sweeping then return
+    m.sweeping = false
+    if not m.searching then sayFound()
 end sub
 
 sub render()
@@ -81,12 +159,19 @@ sub render()
             warning = true
         else if row.found
             tag = "On this network"
-        else if row.saved
-            tag = "Saved"
+        end if
+        ' Under the name: its address, or how connecting to it goes.
+        line = row.address
+        problem = false
+        if row.url = m.connecting
+            line = "Connecting to " + row.address + "…"
+        else if not row.found and m.unreachable.DoesExist(row.url)
+            line = "Can't reach it"
+            problem = true
         end if
         if row.saved then anySaved = true
         if row.url = focusedUrl then focusIndex = i
-        items.Push({ title: row.name, address: row.address, tag: tag, warning: warning, found: row.found })
+        items.Push({ title: row.name, address: line, problem: problem, tag: tag, warning: warning, found: row.found })
     end for
     m.list.content = nodesContent(items)
     m.list.jumpToItem = focusIndex
@@ -109,19 +194,23 @@ end sub
 
 sub onServerSelected(event as object)
     row = m.rows[event.getData()]
-    setStatus("Connecting to " + row.address + "…", false)
+    m.connecting = row.url
+    render()
     uiRequest({ op: "useServer", url: row.url, name: row.name, id: row.id }, "onServerUsed")
 end sub
 
 sub onServerUsed(event as object)
     answer = event.getData()
+    m.connecting = ""
     if not answer.ok
+        render()
         setStatus(answer.message, true)
         return
     end if
     setStatus("", false)
     data = answer.data
     if not data.signedIn
+        render()
         uiNavigate({ to: "link" })
         return
     end if
@@ -134,16 +223,22 @@ end sub
 
 sub onAction(event as object)
     if event.getData() = 0
-        askAddress()
+        askAddress("")
     else
-        search()
+        sweep()
     end if
 end sub
 
-sub askAddress()
+' The keyboard, with the address typed before; problem: why that one can't
+' be used, said where it was typed, as on Android TV.
+sub askAddress(problem as string)
     dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
     dialog.title = "Enter your server's address"
-    dialog.message = ["Such as 192.168.1.20, nas or pley.example.com. Port 7539 is used by default."]
+    if problem = ""
+        dialog.message = ["Such as 192.168.1.20, nas or pley.example.com. Port 7539 is used by default."]
+    else
+        dialog.message = [problem]
+    end if
     dialog.buttons = ["Connect", "Cancel"]
     dialog.text = m.address
     dialog.observeField("buttonSelected", "onAddressButton")
@@ -165,7 +260,8 @@ end sub
 sub onChecked(event as object)
     answer = event.getData()
     if not answer.ok
-        setStatus(answer.message, true)
+        setStatus("", false)
+        askAddress(answer.message)
         return
     end if
     server = answer.data

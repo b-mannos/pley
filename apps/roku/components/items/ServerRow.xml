@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A server in the server list: its name, its address and where it came
-     from (saved, on this network) or a warning. -->
+<!-- A server in the server list: its name, under it its address (or
+     "Connecting to …", or "Can't reach it" for a saved one that doesn't
+     answer), and where it came from (on this network) or a warning. -->
 <component name="ServerRow" extends="Group">
     <interface>
         <field id="itemContent" type="node" onChange="onContent" />

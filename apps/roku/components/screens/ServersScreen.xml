@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- "Choose your server": saved servers, then those that answer on the
-     local network; an address typed on the keyboard. -->
+     local network (the broadcast, or every address of it); an address
+     typed on the keyboard. -->
 <component name="ServersScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -15,6 +16,7 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nodes.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Servers.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Discovery.brs" />
     <children>
         <Label id="title" translation="[96, 72]" text="Choose your server" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
         <Label id="wordmark" translation="[1524, 72]" width="300" horizAlign="right" text="Pley" color="0x38BDF8FF" font="font:ExtraLargeBoldSystemFont" />
