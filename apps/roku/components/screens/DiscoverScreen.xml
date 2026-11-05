@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Discover: titles on TMDB to ask for. A hero of the first trending
      title, or of the next list's while trending has none for the profile
-     (its backdrop, what it is, a line of its overview, its main
-     action), then rows of posters with their badges (Trending this week,
-     Popular movies, Popular shows, Coming to cinemas, Popular anime), each
-     loaded as it comes into view and ending with See all, then Your
-     requests for those who have any. The requests at the top, with the
-     number that waits there; Down
-     slides the page up to the rows. A sign-in from before apps could
-     ask sees only how to sign in again. -->
+     (its backdrop, what it is, a line of its overview, its main action as
+     on its page, and Details), then rows of posters with their badges
+     (Trending this week, Popular movies, Popular shows, Coming to cinemas,
+     Popular anime), each loaded as it comes into view and ending with See
+     all, then Your requests for those who have any. The requests at the
+     top, with the number that waits there. Down slides the page up to the
+     rows, where an info block about the tile focus rests on takes the
+     hero's place and the backdrop follows it, as on Home. A sign-in from
+     before apps could ask sees only how to sign in again; with nothing to
+     ask for, the page says so. -->
 <component name="DiscoverScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -17,14 +19,16 @@
         <field id="active" type="boolean" alwaysNotify="true" />
         <!-- The scene's: what requests let the profile do. -->
         <field id="requestSummary" type="assocarray" />
-        <!-- Set by the scene: requests changed (Your requests asks again),
-             and a title's request changed (its badge follows). -->
+        <!-- Set by the scene: requests changed (Your requests and the
+             hero's title ask again), and a title's request changed (its
+             badge follows). -->
         <field id="requestsChanged" type="assocarray" alwaysNotify="true" />
         <field id="requestNote" type="assocarray" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/DiscoverScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/RequestBadges.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/RequestActions.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
@@ -40,17 +44,39 @@
             <Label id="heading" translation="[96, 48]" text="Discover" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
             <ChipRow id="chips" translation="[460, 62]" />
             <Label id="credit" translation="[1124, 78]" width="700" horizAlign="right" text="Details and pictures from TMDB." color="0x8B95A5FF" font="font:SmallestSystemFont" />
-            <LayoutGroup id="hero" translation="[96, 196]" layoutDirection="vert" itemSpacings="[16, 20, 36, 20]" visible="false">
+            <!-- Only the parts with text stay in it (layOutHero). -->
+            <LayoutGroup id="hero" translation="[96, 196]" layoutDirection="vert" visible="false">
                 <Label id="heroName" width="1100" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
                 <Label id="heroLine" width="1100" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-                <Label id="heroOverview" width="1080" wrap="true" maxLines="2" lineSpacing="6" color="0xEBEBEBFF" font="font:SmallerSystemFont" />
-                <ButtonGroup id="heroButtons" layoutDirection="horiz" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="300" />
-                <!-- In place of Request, with nothing of its kind left to ask for. -->
+                <Label id="heroOverview" width="1080" color="0xEBEBEBFF" font="font:SmallerSystemFont" />
+                <!-- Requested or Following, its request's stage beside it. -->
+                <LayoutGroup id="heroStatus" layoutDirection="horiz" itemSpacings="[20]" vertAlignment="center">
+                    <Label id="heroStatusText" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+                    <StagePill id="heroStage" />
+                </LayoutGroup>
+                <!-- What stands in for a button that can't be pressed: why
+                     there is no Request, that someone asked already. -->
                 <Label id="heroNote" width="1100" wrap="true" maxLines="2" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+                <ButtonGroup id="heroButtons" layoutDirection="horiz" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="300" />
             </LayoutGroup>
             <!-- Its top shows under the hero; the page slides up to it. -->
             <RowList id="rows" translation="[96, 700]" itemComponentName="Tile" itemSize="[1728, 470]" rowItemSize="[[220, 410]]" numRows="2" itemSpacing="[0, 28]" rowItemSpacing="[[28, 0]]" showRowLabel="[true]" rowLabelOffset="[[0, 12]]" rowLabelColor="0xEBEBEBFF" drawFocusFeedback="false" rowFocusAnimationStyle="floatingFocus" vertFocusAnimationStyle="floatingFocus" rowLabelFont="font:MediumBoldSystemFont" visible="false" />
         </Group>
+        <!-- In the rows: what the tile focus rests on is, over them. A
+             title's facts and overview; a request's stage with the seasons
+             asked for, who asked and when, and its stage's line. Only the
+             parts with text stay in it. -->
+        <LayoutGroup id="info" translation="[96, 56]" layoutDirection="vert" visible="false">
+            <Label id="infoTitle" width="1500" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Label id="infoMeta" width="1500" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+            <LayoutGroup id="infoStatus" layoutDirection="horiz" itemSpacings="[20]" vertAlignment="center">
+                <StagePill id="infoStage" />
+                <Label id="infoSeasons" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+            </LayoutGroup>
+            <Label id="infoSummary" width="1100" wrap="true" maxLines="2" lineSpacing="6" color="0xEBEBEBFF" font="font:SmallerSystemFont" />
+            <Label id="infoWho" width="1500" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+            <Label id="infoLine" width="1500" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        </LayoutGroup>
         <!-- Why Discover can't be used, and what to do about it. -->
         <LayoutGroup id="problem" translation="[96, 360]" layoutDirection="vert" itemSpacings="[20, 48]" visible="false">
             <Label id="problemTitle" width="1400" wrap="true" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
@@ -60,5 +86,7 @@
         <!-- Your requests asked again while one of them downloads, or
              while the event stream is down. -->
         <Timer id="busy" duration="10" />
+        <!-- Focus resting on a tile: the info block and the backdrop follow. -->
+        <Timer id="rest" duration="0.4" />
     </children>
 </component>

@@ -1,11 +1,11 @@
 ' The requests (GET /api/requests), 50 at a time, the next as the focus
 ' nears the end: a tab for each status with its number (lib/Requests.brs's
 ' reqTabs, reqTabCount), a manager's filters (movies or shows, who asked,
-' words of the title), and what can be done with each request
-' (shared/RequestActions.brs). It asks again as it shows, as requests
-' change (the scene's requestsChanged), each 10 s while one of them
-' downloads, each 30 s while the event stream is down, and after an
-' action, the focus staying on the request it was on. Shown to the
+' words of the title), and what can be done with each request, in a
+' panel OK opens (shared/RequestActions.brs). It asks again as it shows,
+' as requests change (the scene's requestsChanged), each 10 s while one
+' of them downloads, each 30 s while the event stream is down, and after
+' an action, the focus staying on the request it was on. Shown to the
 ' account, its news is seen (POST /api/requests/seen). params: { view (a
 ' tab's key; "mine" opens a manager's Yours, everyone else's All) }.
 
@@ -16,13 +16,19 @@ sub init()
     m.side = m.top.findNode("side")
     m.list = m.top.findNode("list")
     m.message = m.top.findNode("message")
-    m.hint = m.top.findNode("hint")
+    m.empty = m.top.findNode("empty")
+    m.emptyTitle = m.top.findNode("emptyTitle")
+    m.emptyText = m.top.findNode("emptyText")
+    m.emptyButtons = m.top.findNode("emptyButtons")
     m.problem = m.top.findNode("problem")
     m.problemTitle = m.top.findNode("problemTitle")
     m.problemText = m.top.findNode("problemText")
     m.problemButtons = m.top.findNode("problemButtons")
     m.panel = m.top.findNode("panel")
     m.panelTitle = m.top.findNode("panelTitle")
+    m.head = m.top.findNode("head")
+    m.headStage = m.top.findNode("headStage")
+    m.headLines = m.top.findNode("headLines")
     m.choices = m.top.findNode("choices")
     m.menu = m.top.findNode("menu")
     m.busy = m.top.findNode("busy")
@@ -58,15 +64,23 @@ sub init()
     m.problemShown = invalid
     m.sideAction = ""
     m.lastFocus = ""
-    ' The panel: the filters, or one filter's choices (their values and
-    ' words).
+    ' The panel: the filters ("filters"), one filter's choices ("kind",
+    ' "person": their values and words), a request ("request": its id, what
+    ' it offers, the last one chosen, what it showed as JSON), or the
+    ' question an action asks first ("confirm": the action).
     m.panelKind = ""
     m.values = []
     m.choiceLabels = []
+    m.panelRequest = 0
+    m.panelChoices = []
+    m.panelUsed = ""
+    m.panelShown = ""
+    m.confirming = ""
     m.list.observeField("itemSelected", "onRow")
     m.list.observeField("itemFocused", "onRowFocused")
     m.tabs.observeField("chosen", "onTab")
     m.side.observeField("chosen", "onSide")
+    m.emptyButtons.observeField("buttonSelected", "onFind")
     m.problemButtons.observeField("buttonSelected", "onProblemButton")
     m.menu.observeField("itemSelected", "onMenu")
     m.choices.observeField("itemSelected", "onChoice")
@@ -86,6 +100,7 @@ sub onActive()
         m.lastFocus = "tabs"
         if m.list.isInFocusChain() then m.lastFocus = "list"
         if m.side.isInFocusChain() then m.lastFocus = "side"
+        if m.emptyButtons.isInFocusChain() then m.lastFocus = "empty"
         return
     end if
     if not m.started
@@ -127,6 +142,7 @@ sub showPage(view as string)
     m.problem.visible = false
     m.problemShown = invalid
     m.panel.visible = false
+    m.panelKind = ""
     m.tabs.visible = true
     showTabs()
     startListing()
@@ -222,10 +238,10 @@ sub startListing()
     m.loading = false
     m.reloading = false
     m.reloadWanted = false
-    if m.list.isInFocusChain() then m.tabs.setFocus(true)
+    if m.list.isInFocusChain() or m.emptyButtons.isInFocusChain() then m.tabs.setFocus(true)
     m.list.content = CreateObject("roSGNode", "ContentNode")
     m.list.visible = true
-    m.hint.visible = false
+    m.empty.visible = false
     m.message.text = "Loading…"
     m.message.visible = true
     showCount()
@@ -272,16 +288,39 @@ end sub
 ' first shows.
 sub showList()
     showCount()
+    m.message.visible = false
     if m.list.content.getChildCount() = 0
-        m.message.text = reqEmptyText(m.view, not m.manage or m.view = "mine", hasFilters())
-        m.message.visible = true
-        m.hint.visible = false
-        if m.list.isInFocusChain() or m.top.hasFocus() then m.tabs.setFocus(true)
+        showEmpty()
+        if m.list.isInFocusChain() or m.top.hasFocus()
+            if m.emptyButtons.visible
+                m.emptyButtons.setFocus(true)
+            else
+                m.tabs.setFocus(true)
+            end if
+        end if
         return
     end if
-    m.message.visible = false
-    m.hint.visible = true
+    if m.emptyButtons.isInFocusChain() then m.list.setFocus(true)
+    m.empty.visible = false
     if m.top.hasFocus() then m.list.setFocus(true)
+end sub
+
+' None to list: why, as on the other TVs (reqEmpty), and for those who
+' may ask, Find something to ask for.
+sub showEmpty()
+    empty = reqEmpty(m.view, hasFilters(), reqMayAsk(reqSummaryOf(m.top.requestSummary)), m.manage)
+    m.emptyTitle.text = empty.title
+    m.emptyText.text = empty.text
+    buttons = []
+    if empty.find then buttons.Push("Find something to ask for")
+    if FormatJson(m.emptyButtons.buttons) <> FormatJson(buttons) then m.emptyButtons.buttons = buttons
+    m.emptyButtons.visible = buttons.Count() > 0
+    if not m.emptyButtons.visible and m.emptyButtons.isInFocusChain() then m.tabs.setFocus(true)
+    m.empty.visible = true
+end sub
+
+sub onFind()
+    uiNavigate({ to: "discover" })
 end sub
 
 ' Two rows before the end, the next page comes.
@@ -324,6 +363,7 @@ sub onReloaded(event as object)
         putRows(rows)
         keepCounts(data.counts)
         showList()
+        refreshPanel()
         m.listBusy = data.busy
         markSeen()
     end if
@@ -420,19 +460,149 @@ end sub
 
 ' --- The requests ---
 
-' OK opens the title's page, showing this request.
+' OK on a card: what can be done with its request, in the panel.
 sub onRow(event as object)
     row = m.list.content.getChild(event.getData())
     if row = invalid then return
-    uiNavigate({ to: "requestTitle", params: { kind: row.tmdbKind, tmdbId: row.tmdbId, title: row.title, requestId: row.requestId } })
+    m.panelUsed = ""
+    m.panelShown = ""
+    showRequest(row)
 end sub
 
-' The Options key: what can be done with the request focused.
-sub rowOptions()
-    row = m.list.content.getChild(m.list.itemFocused)
-    if row = invalid then return
-    target = { requestId: row.requestId, title: row.title, status: row.status, stage: row.stage, kind: row.tmdbKind, tmdbId: row.tmdbId, seasons: row.seasons, libraryId: row.libraryId, actions: row.actions }
-    if not uiRequestOptions(target) then uiMessage(row.title, ["Nothing can be done with this request now."])
+' A row as RequestActions.brs takes it.
+function targetOf(row as object) as object
+    return { requestId: row.requestId, title: row.title, status: row.status, stage: row.stage, kind: row.tmdbKind, tmdbId: row.tmdbId, seasons: row.seasons, libraryId: row.libraryId, actions: row.actions, mine: row.mine }
+end function
+
+' The row of a request, or invalid once it left the list.
+function rowById(requestId as dynamic) as dynamic
+    content = m.list.content
+    for i = 0 to content.getChildCount() - 1
+        row = content.getChild(i)
+        if row.requestId = requestId then return row
+    end for
+    return invalid
+end function
+
+' A request's panel, as on the other TVs: at its head its title, stage,
+' what was asked for and who asked when, and what to know of it; then Open
+' where a library has it for this account, the server's actions in its
+' order, and Details, its title's page (reqPanelChoices). The focus goes
+' to the choice last made, else the first.
+sub showRequest(row as object)
+    m.panelKind = "request"
+    m.panelRequest = row.requestId
+    m.requestTarget = targetOf(row)
+    m.panelChoices = reqPanelChoices(m.requestTarget)
+    m.panelShown = FormatJson([row.panelTitle, row.panelLines, row.stageText, row.stageColor, row.progress, m.panelChoices])
+    m.panelTitle.text = row.panelTitle
+    m.headStage.color = row.stageColor
+    m.headStage.progress = row.progress
+    m.headStage.text = row.stageText
+    m.headLines.text = row.panelLines.Join(Chr(10))
+    m.head.visible = true
+    items = []
+    at = 0
+    for i = 0 to m.panelChoices.Count() - 1
+        items.Push({ title: m.panelChoices[i].label })
+        if m.panelChoices[i].action = m.panelUsed then at = i
+    end for
+    m.menu.content = nodesContent(items)
+    m.menu.jumpToItem = at
+    m.choices.visible = false
+    m.menu.visible = true
+    placePanel()
+    m.panel.visible = true
+    m.menu.setFocus(true)
+end sub
+
+' A choice of a request's panel: Open and Details go there; Withdraw,
+' Remove and Delete ask first, in the panel; Decline with a reason… asks
+' for it on the keyboard; the others go at once, the panel closing.
+sub onRequestChoice(at as integer)
+    if at < 0 or at >= m.panelChoices.Count() then return
+    action = m.panelChoices[at].action
+    m.panelUsed = action
+    target = m.requestTarget
+    if action = "open"
+        closePanel()
+        uiNavigate({ to: "details", params: { itemId: target.libraryId } })
+    else if action = "details"
+        closePanel()
+        uiNavigate({ to: "requestTitle", params: { kind: target.kind, tmdbId: target.tmdbId, title: target.title, requestId: target.requestId } })
+    else if action = "declineReason"
+        uiRequestReason(target, "onReasonGiven")
+    else
+        confirm = reqConfirm(action, target.title, httpString(target.status))
+        if confirm <> invalid
+            showConfirm(action, confirm)
+        else
+            closePanel()
+            uiRequestAct(target, action)
+        end if
+    end if
+end sub
+
+' The question an action asks first, in the panel: Cancel first, as the
+' other questions, so OK pressed twice undoes nothing.
+sub showConfirm(action as string, confirm as object)
+    m.panelKind = "confirm"
+    m.confirming = action
+    m.panelTitle.text = confirm.message
+    m.head.visible = false
+    m.menu.content = nodesContent([{ title: "Cancel" }, { title: confirm.button }])
+    m.menu.jumpToItem = 0
+    placePanel()
+    m.menu.setFocus(true)
+end sub
+
+sub onConfirmChoice(at as integer)
+    if at = 1
+        closePanel()
+        uiRequestCall(m.confirming, "")
+    else
+        backToRequest()
+    end if
+end sub
+
+' Decline: the reason goes with it; Cancel goes back to the panel.
+sub onReasonGiven(event as object)
+    reason = uiRequestReasonText()
+    if event.getData() = 0
+        closePanel()
+        uiRequestCall("declineReason", reason)
+    else
+        m.menu.setFocus(true)
+    end if
+end sub
+
+' From a question back to the request's choices, or out of the panel once
+' the request left the list.
+sub backToRequest()
+    row = rowById(m.panelRequest)
+    if row = invalid
+        closePanel()
+    else
+        showRequest(row)
+    end if
+end sub
+
+' The list asked again while a request's panel shows: the panel follows
+' its request, and closes once it left the list.
+sub refreshPanel()
+    if m.panelKind <> "request" and m.panelKind <> "confirm" then return
+    row = rowById(m.panelRequest)
+    if row = invalid
+        closePanel()
+        return
+    end if
+    if m.panelKind <> "request" then return
+    shown = FormatJson([row.panelTitle, row.panelLines, row.stageText, row.stageColor, row.progress, reqPanelChoices(targetOf(row))])
+    if shown = m.panelShown then return
+    ' The choice focus is on stays focused where it is still offered.
+    at = m.menu.itemFocused
+    if at >= 0 and at < m.panelChoices.Count() then m.panelUsed = m.panelChoices[at].action
+    showRequest(row)
 end sub
 
 ' An action was done, or refused as the request had changed: the list as
@@ -461,7 +631,7 @@ end sub
 
 sub onSide()
     if m.sideAction = "signIn"
-        uiNavigate({ to: "link", params: { reason: "approvals" } })
+        uiSignInAgain("approvals")
     else if m.sideAction = "filter"
         openFilters()
     end if
@@ -471,6 +641,7 @@ end sub
 sub openFilters()
     m.panelKind = "filters"
     m.panelTitle.text = "Filter"
+    m.head.visible = false
     kind = "Movies and shows"
     if m.kind = "movie" then kind = "Movies"
     if m.kind = "show" then kind = "Shows"
@@ -485,12 +656,33 @@ sub openFilters()
     if at > 0 and at < items.Count() then m.menu.jumpToItem = at
     m.choices.visible = false
     m.menu.visible = true
+    placePanel()
     m.panel.visible = true
     m.menu.setFocus(true)
 end sub
 
+' The panel's list under its title, and under a request's head.
+sub placePanel()
+    top = 56 + m.panelTitle.boundingRect().height + 32
+    if m.head.visible
+        m.head.translation = [1056, top - 8]
+        top = top - 8 + m.head.boundingRect().height + 40
+    end if
+    if top < 150 then top = 150
+    m.menu.translation = [1056, top]
+    m.choices.translation = [1056, top]
+end sub
+
 sub onMenu(event as object)
     at = event.getData()
+    if m.panelKind = "request"
+        onRequestChoice(at)
+        return
+    end if
+    if m.panelKind = "confirm"
+        onConfirmChoice(at)
+        return
+    end if
     if at = 0
         current = 0
         if m.kind = "movie" then current = 1
@@ -538,6 +730,7 @@ sub showChoices(kind as string, title as string, labels as object, values as obj
     m.choices.jumpToItem = current
     m.menu.visible = false
     m.choices.visible = true
+    placePanel()
     m.panel.visible = true
     m.choices.setFocus(true)
 end sub
@@ -586,10 +779,21 @@ sub applyFilters()
     startListing()
 end sub
 
+' The panel closes: the focus goes back to the filters, or a request's
+' card (else the list, the card gone).
 sub closePanel()
+    request = m.panelKind = "request" or m.panelKind = "confirm"
     m.panel.visible = false
     m.panelKind = ""
-    m.side.setFocus(true)
+    if not request
+        m.side.setFocus(true)
+    else if m.list.content.getChildCount() > 0
+        m.list.setFocus(true)
+    else if m.emptyButtons.visible
+        m.emptyButtons.setFocus(true)
+    else
+        m.tabs.setFocus(true)
+    end if
 end sub
 
 ' The summary changed: a manager's page in place of Your requests, or
@@ -606,6 +810,7 @@ sub onSummary()
     m.heading.text = reqPageName(summary)
     showTabs()
     showCount()
+    if m.empty.visible then showEmpty()
 end sub
 
 ' --- What stops the requests ---
@@ -619,8 +824,9 @@ sub showProblem(problem as object)
     m.side.visible = false
     m.list.visible = false
     m.message.visible = false
-    m.hint.visible = false
+    m.empty.visible = false
     m.panel.visible = false
+    m.panelKind = ""
     m.count.text = ""
     m.problemTitle.text = problem.title
     m.problemText.text = problem.text
@@ -641,7 +847,7 @@ end sub
 sub onProblemButton()
     if m.problemShown = invalid then return
     if m.problemShown.signIn
-        uiNavigate({ to: "link", params: { reason: "requests" } })
+        uiSignInAgain("requests")
         return
     end if
     m.top.setFocus(true)
@@ -661,21 +867,25 @@ sub restoreFocus()
         m.list.setFocus(true)
     else if m.lastFocus = "side" and m.side.visible
         m.side.setFocus(true)
+    else if m.lastFocus = "empty" and m.empty.visible and m.emptyButtons.visible
+        m.emptyButtons.setFocus(true)
     else
         m.tabs.setFocus(true)
     end if
 end sub
 
-' Down from the tabs goes to the requests, up from the first back; right
-' from the last tab reaches the filters (or Sign in). Back closes
-' the panel (a filter's choices go back to the filters). The Options key
-' on a request offers what can be done with it.
+' Down from the tabs goes to the requests (or Find something to ask for),
+' up from the first back; right from the last tab reaches the filters
+' (or Sign in). Back closes the panel: a filter's choices go back to the
+' filters, an action's question to the request's choices.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
     if m.panel.visible
         if key = "back" or key = "left"
-            if m.panelKind = "filters"
+            if m.panelKind = "filters" or m.panelKind = "request"
                 closePanel()
+            else if m.panelKind = "confirm"
+                backToRequest()
             else
                 openFilters()
             end if
@@ -690,11 +900,15 @@ function onKeyEvent(key as string, press as boolean) as boolean
         return true
     end if
     rows = m.list.content.getChildCount() > 0
-    if key = "down" and (m.tabs.isInFocusChain() or m.side.isInFocusChain()) and rows
-        m.list.setFocus(true)
+    if key = "down" and (m.tabs.isInFocusChain() or m.side.isInFocusChain())
+        if rows
+            m.list.setFocus(true)
+        else if m.empty.visible and m.emptyButtons.visible
+            m.emptyButtons.setFocus(true)
+        end if
         return true
     end if
-    if key = "up" and m.list.isInFocusChain()
+    if key = "up" and (m.list.isInFocusChain() or m.emptyButtons.isInFocusChain())
         m.tabs.setFocus(true)
         return true
     end if
@@ -704,10 +918,6 @@ function onKeyEvent(key as string, press as boolean) as boolean
     end if
     if key = "left" and m.side.isInFocusChain()
         m.tabs.setFocus(true)
-        return true
-    end if
-    if key = "options" and m.list.isInFocusChain() and rows
-        rowOptions()
         return true
     end if
     return false

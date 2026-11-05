@@ -1,45 +1,17 @@
 ' What can be done with a request from the screens that show it (a TMDB
-' title's page, the requests). On the render thread, with Ui.brs and
+' title's page, Discover's hero, the requests' panel), and signing in
+' again for requests. On the render thread, with Ui.brs and
 ' lib/Requests.brs. A screen that includes this file has
 ' onRequestActed(), called once the server did what an action asked, or
 ' refused it as the request had changed or gone (m.requestTarget is the
-' request it was for).
-
-' What can be done with a request, in a dialog titled with it: target is
-' { requestId, title, status, stage, kind, tmdbId, seasons, libraryId,
-' actions } (a row's fields, reqRow's, its tmdbKind as kind). Nothing to
-' do: false.
-function uiRequestOptions(target as object) as boolean
-    options = reqActions(target, target.libraryId)
-    if options.Count() = 0 then return false
-    labels = []
-    for each option in options
-        labels.Push(option.label)
-    end for
-    labels.Push("Cancel")
-    m.requestTarget = target
-    m.requestOptions = options
-    dialog = CreateObject("roSGNode", "StandardMessageDialog")
-    dialog.title = target.title
-    dialog.buttons = labels
-    dialog.observeField("buttonSelected", "uiRequestOptionChosen")
-    m.top.getScene().dialog = dialog
-    return true
-end function
-
-sub uiRequestOptionChosen(event as object)
-    chosen = event.getData()
-    options = m.requestOptions
-    m.requestOptions = invalid
-    uiCloseDialog()
-    if options = invalid or chosen < 0 or chosen >= options.Count() then return
-    uiRequestAct(m.requestTarget, options[chosen].action)
-end sub
+' request it was for). What came of an action is said in a toast, as on
+' the other TVs.
 
 ' Does an action (reqActions'): Watch opens the library's title; Request
 ' again asks as before; Withdraw, Remove and Delete ask first; Decline
 ' with a reason… asks for the reason on the keyboard; the others go at
-' once.
+' once. target is { requestId, title, status, stage, kind, tmdbId,
+' seasons, libraryId, actions, mine }.
 sub uiRequestAct(target as object, action as string)
     m.requestTarget = target
     if action = "watch"
@@ -51,12 +23,7 @@ sub uiRequestAct(target as object, action as string)
         return
     end if
     if action = "declineReason"
-        dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
-        dialog.title = "Decline " + reqQuoted(target.title)
-        dialog.message = ["The reason goes to whoever asked for it."]
-        dialog.buttons = ["Decline", "Cancel"]
-        dialog.observeField("buttonSelected", "uiRequestReasonGiven")
-        m.top.getScene().dialog = dialog
+        uiRequestReason(target, "uiRequestReasonGiven")
         return
     end if
     confirm = reqConfirm(action, target.title, httpString(target.status))
@@ -77,11 +44,30 @@ sub uiRequestConfirmed(event as object)
     if event.getData() = 0 then uiRequestCall(m.requestConfirmed, "")
 end sub
 
-sub uiRequestReasonGiven(event as object)
+' A decline's reason on the keyboard, its buttons Decline and Cancel;
+' callback gets the dialog's choice (0 for Decline) and reads the words
+' with uiRequestReasonText.
+sub uiRequestReason(target as object, callback as string)
+    question = reqDeclineQuestion(target.title, httpTrue(target.mine))
+    dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
+    dialog.title = question.title
+    dialog.message = question.message
+    dialog.buttons = ["Decline", "Cancel"]
+    dialog.observeField("buttonSelected", callback)
+    m.top.getScene().dialog = dialog
+end sub
+
+' The reason typed, the keyboard closed.
+function uiRequestReasonText() as string
     dialog = m.top.getScene().dialog
     reason = ""
     if dialog <> invalid then reason = dialog.text
     uiCloseDialog()
+    return reason
+end function
+
+sub uiRequestReasonGiven(event as object)
+    reason = uiRequestReasonText()
     if event.getData() = 0 then uiRequestCall("declineReason", reason)
 end sub
 
@@ -104,10 +90,29 @@ sub uiRequestActed(event as object)
     if not answer.ok
         if uiFailed(answer) then return
         text = reqActProblem(answer, spec.action, reqSummaryOf(m.top.getScene().requestSummary), httpString(m.requestTarget.kind), CreateObject("roDateTime").AsSeconds())
-        uiMessage("That didn't work", [text])
+        uiToast(text, true)
         if answer.status = 404 or answer.status = 409 or answer.status = 429 then onRequestActed()
         return
     end if
-    if spec.action = "ask_again" then uiMessage(spec.requestTitle, [reqAsked(answer.status, answer.data, spec.requestTitle)])
+    if spec.action = "ask_again" then uiToast(reqAsked(answer.status, answer.data, spec.requestTitle))
     onRequestActed()
+end sub
+
+' Signing in again, so this TV may ask for movies and shows (reason
+' "requests") or decide on them ("approvals"), asked first: Sign in opens
+' the link screen with a new code, whose approval replaces this sign-in.
+sub uiSignInAgain(reason as string)
+    m.signInReason = reason
+    question = reqSignInQuestion(m.global.session.server)
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
+    dialog.title = question.title
+    dialog.message = [question.message]
+    dialog.buttons = ["Sign in", "Cancel"]
+    dialog.observeField("buttonSelected", "uiSignInAgainChosen")
+    m.top.getScene().dialog = dialog
+end sub
+
+sub uiSignInAgainChosen(event as object)
+    uiCloseDialog()
+    if event.getData() = 0 then uiNavigate({ to: "link", params: { reason: m.signInReason } })
 end sub

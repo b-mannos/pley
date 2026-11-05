@@ -2,8 +2,8 @@
 ' last, each with how it stands (lib/Requests.brs's reqPickerRows). The
 ' askable missing ones are ticked to start with, lowest first, as many as
 ' may be asked for; OK ticks or unticks one. Request asks for those ticked
-' (POST /api/requests), then the title's page shows again, saying what
-' came of it. Roku's buttons can't be disabled: with none ticked, or more
+' (POST /api/requests), then the title's page shows again, a toast saying
+' what came of it. Roku's buttons can't be disabled: with none ticked, or more
 ' than may be asked for, Request goes and its line shows. params: { kind,
 ' tmdbId, title, year, detail (DiscoverDetail), only (a season's number,
 ' ticked alone; -1 for the usual ones) }.
@@ -130,7 +130,8 @@ sub send()
     uiRequest({ method: "POST", path: "/api/requests", jsonText: reqAskBody("show", m.top.params.tmdbId, numbers) }, "onSent")
 end sub
 
-' Asked: the title's page, with what came of it. Refused: why, here.
+' Asked: the title's page, a toast saying what came of it. Refused: why,
+' here.
 sub onSent(event as object)
     m.sending = false
     answer = event.getData()
@@ -144,7 +145,8 @@ sub onSent(event as object)
         m.line.color = "0xEB6B70FF"
         return
     end if
-    uiNavigate({ back: true, message: { title: title, lines: [reqAsked(answer.status, answer.data, title)] } })
+    uiToast(reqAsked(answer.status, answer.data, title))
+    uiNavigate({ back: true })
 end sub
 
 ' Right from the seasons goes to Request, left back.

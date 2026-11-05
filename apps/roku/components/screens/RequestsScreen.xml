@@ -2,9 +2,9 @@
 <!-- The requests: Your requests (the account's own and those it follows),
      or a manager's Requests (everyone's, opening on Needs attention, with
      filters in a panel at the right). Tabs by status; a row for each
-     request with its poster, its stage and what to know of it. OK opens
-     the title's page; the Options key offers what can be done with the
-     request. Each tab says how many it holds. -->
+     request with its poster, its stage and what to know of it. OK opens a
+     panel at the right of what can be done with the request, as on the
+     other TVs. Each tab says how many it holds. -->
 <component name="RequestsScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -40,17 +40,32 @@
         <ChipRow id="side" translation="[1600, 132]" pad="44" visible="false" />
         <MarkupList id="list" translation="[96, 212]" itemComponentName="RequestRow" itemSize="[1728, 184]" itemSpacing="[0, 16]" numRows="4" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
         <Label id="message" translation="[96, 480]" width="1728" wrap="true" horizAlign="center" color="0xA1A9B6FF" text="Loading…" font="font:MediumSystemFont" />
-        <Label id="hint" translation="[96, 1016]" width="1728" color="0x8B95A5FF" text="Press * on a request for what can be done with it." visible="false" font="font:SmallestSystemFont" />
+        <!-- With none to list: why, and for those who may ask, the way to
+             Discover. -->
+        <LayoutGroup id="empty" translation="[96, 280]" layoutDirection="vert" itemSpacings="[16, 40]" visible="false">
+            <Label id="emptyTitle" width="1400" wrap="true" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Label id="emptyText" width="1100" wrap="true" color="0xA1A9B6FF" font="font:MediumSystemFont" />
+            <ButtonGroup id="emptyButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="520" />
+        </LayoutGroup>
         <!-- Why the requests can't be shown, and what to do about it. -->
         <LayoutGroup id="problem" translation="[96, 360]" layoutDirection="vert" itemSpacings="[20, 48]" visible="false">
             <Label id="problemTitle" width="1400" wrap="true" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
             <Label id="problemText" width="1400" wrap="true" color="0xA1A9B6FF" font="font:MediumSystemFont" />
             <ButtonGroup id="problemButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="420" />
         </LayoutGroup>
-        <!-- The filters, each opening its choices, over the right half. -->
+        <!-- Over the right half: the filters, each opening its choices; or
+             a request, its head over what can be done with it, and the
+             question an action asks first. The list goes under the head
+             (placePanel). -->
         <Group id="panel" visible="false">
             <Rectangle translation="[1000, 0]" width="920" height="1080" color="0x1E222AFF" />
-            <Label id="panelTitle" translation="[1056, 56]" width="808" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Label id="panelTitle" translation="[1056, 56]" width="808" wrap="true" maxLines="3" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <!-- A request's stage, what was asked for and who asked when,
+                 and what to know of it. -->
+            <LayoutGroup id="head" translation="[1056, 150]" layoutDirection="vert" itemSpacings="[16]" visible="false">
+                <StagePill id="headStage" maxWidth="808" />
+                <Label id="headLines" width="808" wrap="true" maxLines="9" lineSpacing="4" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+            </LayoutGroup>
             <RadioButtonList id="choices" translation="[1056, 150]" itemSize="[808, 64]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus" font="font:MediumSystemFont" focusedFont="font:MediumBoldSystemFont" />
             <LabelList id="menu" translation="[1056, 150]" itemSize="[808, 64]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus" font="font:MediumSystemFont" focusedFont="font:MediumBoldSystemFont" visible="false" />
         </Group>
