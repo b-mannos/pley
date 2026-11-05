@@ -413,21 +413,36 @@ function pageInitials(name as string) as string
     return out
 end function
 
-' What the Options key offers on a tile: [{ label, action }]. inList: the
-' title is in My List (true or false), or invalid when not known; a
-' Continue Watching tile can be taken out of it. Kinds without actions
+' What the Options key offers on a tile, in the other TVs' order: [{
+' label, action }]. Play ("play": a show's or a season's next episode),
+' or Resume and From start ("resume", "start") while in progress; the
+' watched mark; Remove from Continue Watching from that row
+' (continueWatching); My List, where inList says whether the title is in
+' it (true or false; invalid when not known); Add to playlist; an
+' episode's Go to show and Go to season, a season's Go to show. Music
+' opens its page ("open") or goes in a playlist. Kinds without actions
 ' get none.
 function pageTileOptions(tile as object, continueWatching as boolean, inList as dynamic) as object
     kind = httpString(tile.kind)
     options = []
     ' Music has no watched marks or My List.
-    if contentMusic(kind) then return [{ label: "Add to playlist", action: "playlist" }]
+    if contentMusic(kind) then return [{ label: "Open", action: "open" }, { label: "Add to playlist", action: "playlist" }]
     if kind <> "movie" and kind <> "show" and kind <> "season" and kind <> "episode" then return options
-    if httpTrue(tile.watched)
+    watched = httpTrue(tile.watched)
+    ' A show or a season is watched once every episode is.
+    if (kind = "show" or kind = "season") and httpNumber(tile.leafCount, 0) > 0 then watched = httpNumber(tile.unwatched, 0) = 0
+    if (kind = "movie" or kind = "episode") and not watched and fmtResumable(tile.positionMs, tile.durationMs)
+        options.Push({ label: "Resume", action: "resume" })
+        options.Push({ label: "From start", action: "start" })
+    else
+        options.Push({ label: "Play", action: "play" })
+    end if
+    if watched
         options.Push({ label: "Mark as unwatched", action: "unwatched" })
     else
         options.Push({ label: "Mark as watched", action: "watched" })
     end if
+    if continueWatching then options.Push({ label: "Remove from Continue Watching", action: "hide" })
     if (kind = "movie" or kind = "show") and GetInterface(inList, "ifBoolean") <> invalid
         if inList
             options.Push({ label: "Remove from My List", action: "listRemove" })
@@ -436,11 +451,9 @@ function pageTileOptions(tile as object, continueWatching as boolean, inList as 
         end if
     end if
     options.Push({ label: "Add to playlist", action: "playlist" })
-    if continueWatching then options.Push({ label: "Remove from Continue Watching", action: "hide" })
-    if kind = "episode" and httpNumber(tile.grandparentId, 0) > 0
-        options.Push({ label: "Go to show", action: "show" })
-        if httpNumber(tile.parentId, 0) > 0 then options.Push({ label: "Go to season", action: "season" })
-    end if
+    if kind = "episode" and httpNumber(tile.grandparentId, 0) > 0 then options.Push({ label: "Go to show", action: "show" })
+    if kind = "episode" and httpNumber(tile.parentId, 0) > 0 then options.Push({ label: "Go to season", action: "season" })
+    if kind = "season" and httpNumber(tile.parentId, 0) > 0 then options.Push({ label: "Go to show", action: "show" })
     return options
 end function
 

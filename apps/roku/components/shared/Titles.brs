@@ -7,9 +7,10 @@
 ' (uiChangesSince).
 
 ' The Options key (*) on a tile: what can be done with its title, in a
-' dialog (Mark as watched or unwatched, Add to or Remove from My List,
-' Remove from Continue Watching, Go to show, Go to season). My List is as
-' Home last saw it.
+' dialog, as on the other TVs (pageTileOptions: Play, or Resume and From
+' start, the watched mark, Remove from Continue Watching, My List, Add to
+' playlist, Go to show, Go to season; music's Open). My List is as Home
+' last saw it.
 sub uiTileOptions(tile as dynamic, continueWatching as boolean)
     if tile = invalid then return
     options = pageTileOptions(tile, continueWatching, pageInList(m.top.getScene().myList, tile.itemId))
@@ -23,7 +24,17 @@ sub uiTileOptions(tile as dynamic, continueWatching as boolean)
     dialog.title = tile.title
     dialog.buttons = labels
     dialog.observeField("buttonSelected", "uiTileOptionChosen")
-    m.tileOptions = { tile: { itemId: tile.itemId, kind: tile.kind, parentId: tile.parentId, grandparentId: tile.grandparentId }, options: options }
+    kept = {}
+    for each key in ["itemId", "kind", "title", "parentId", "grandparentId", "positionMs", "durationMs"]
+        value = invalid
+        if GetInterface(tile, "ifAssociativeArray") <> invalid
+            value = tile[key]
+        else if tile.hasField(key)
+            value = tile.getField(key)
+        end if
+        kept[key] = value
+    end for
+    m.tileOptions = { tile: kept, options: options }
     m.top.getScene().dialog = dialog
 end sub
 
@@ -37,15 +48,26 @@ sub uiTileOptionChosen(event as object)
 end sub
 
 ' Does what an action of the Options key or a title's page says, for tile
-' ({ itemId, kind, parentId, grandparentId }): goes to an episode's show
-' (its page) or season (its episodes, the season's page on Roku), as on
-' the other apps, or asks the server.
+' ({ itemId, kind, title, parentId, grandparentId, positionMs, durationMs
+' }): plays it (a show's or a season's next episode), opens music's page,
+' goes to an episode's show or season or a season's show (their pages),
+' as on the other apps, or asks the server.
 sub uiTitleAction(tile as object, action as string)
     if action = "playlist"
         uiAddToPlaylist(tile)
         return
     end if
+    kind = httpString(tile.kind)
+    if action = "play" or action = "resume" or action = "start"
+        uiPlayTitle(tile, action)
+        return
+    end if
+    if action = "open"
+        uiOpenTile(tile)
+        return
+    end if
     showId = httpNumber(tile.grandparentId, 0)
+    if kind = "season" then showId = httpNumber(tile.parentId, 0)
     if action = "show"
         if showId > 0 then uiNavigate({ to: "details", params: { itemId: showId } })
         return
@@ -61,11 +83,43 @@ sub uiTitleAction(tile as object, action as string)
     uiRequest(request, "uiTitleActionDone")
 end sub
 
+' Play plays a movie or an episode from its place (or its start), Resume
+' from its place, From start from 0; a show or a season plays its next
+' episode, as its page's Play does.
+sub uiPlayTitle(tile as object, action as string)
+    kind = httpString(tile.kind)
+    if kind = "show" or kind = "season"
+        uiRequest({ method: "GET", path: "/api/items/" + urlValue(tile.itemId) + "/on-deck" }, "uiTitleOnDeck")
+        return
+    end if
+    startMs = 0
+    if action <> "start" and fmtResumable(tile.positionMs, tile.durationMs) then startMs = Int(httpNumber(tile.positionMs, 0))
+    uiNavigate({ to: "player", params: { itemId: tile.itemId, startMs: startMs } })
+end sub
+
+sub uiTitleOnDeck(event as object)
+    answer = event.getData()
+    if not answer.ok
+        if not uiFailed(answer) then uiToast(answer.message, true)
+        return
+    end if
+    episode = invalid
+    if answer.data <> invalid then episode = httpObject(answer.data.item)
+    if episode = invalid
+        uiToast("Nothing to play")
+        return
+    end if
+    state = httpObject(episode.user_state)
+    startMs = 0
+    if state <> invalid and fmtResumable(state.position_ms, episode.duration_ms) then startMs = Int(httpNumber(state.position_ms, 0))
+    uiNavigate({ to: "player", params: { itemId: httpNumber(episode.id, 0), startMs: startMs } })
+end sub
+
 sub uiTitleActionDone(event as object)
     answer = event.getData()
     spec = event.getRoSGNode().spec
     if not answer.ok
-        if not uiFailed(answer) then uiMessage("That didn't work", [answer.message])
+        if not uiFailed(answer) then uiToast(answer.message, true)
         return
     end if
     scene = m.top.getScene()
@@ -78,7 +132,7 @@ end sub
 ' --- Add to playlist ---
 
 ' The profile's playlists of the title's kind, to add it to one, or to a
-' new one named on the keyboard.
+' new one named on the keyboard. What it came to shows in a toast.
 sub uiAddToPlaylist(tile as object)
     m.playlistTile = tile
     uiRequest({ method: "GET", path: "/api/playlists" }, "uiPlaylistsListed")
@@ -87,7 +141,7 @@ end sub
 sub uiPlaylistsListed(event as object)
     answer = event.getData()
     if not answer.ok or answer.data = invalid
-        if not uiFailed(answer) then uiMessage("That didn't work", [answer.message])
+        if not uiFailed(answer) then uiToast(answer.message, true)
         return
     end if
     m.playlistChoices = pagePlaylistChoices(answer.data.playlists, pagePlaylistKind(httpString(m.playlistTile.kind)))
@@ -132,9 +186,9 @@ end sub
 sub uiPlaylistAdded(event as object)
     answer = event.getData()
     if answer.ok
-        uiMessage("Added", ["Added to " + event.getRoSGNode().spec.playlist + "."])
+        uiToast("Added to " + event.getRoSGNode().spec.playlist)
     else if not uiFailed(answer)
-        uiMessage("That didn't work", [pagePlaylistRefusal(answer)])
+        uiToast(pagePlaylistRefusal(answer), true)
     end if
 end sub
 

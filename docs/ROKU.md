@@ -80,7 +80,7 @@ is an episode, has 16:9 stills.
 
 | Key | Where | What it does |
 |---|---|---|
-| Options (\*) | A title | Mark watched, My List, Add to playlist, Remove from Continue Watching, Go to show, Go to season |
+| Options (\*) | A title | As on Android TV: Play (a show's or a season's next episode), or Resume and From start; the watched mark, Remove from Continue Watching, My List, Add to playlist, an episode's Go to show and Go to season, a season's Go to show; music's Open and Add to playlist. What it came to ("Added to Road trip", or why not) shows in a toast at the top right |
 | Options (\*) | Watch history | Removes it |
 | Options (\*) | A playlist entry | Move (Up and Down carry it, OK puts it there, Back puts it back), Remove from playlist, Go to its title's page |
 | Options (\*) | A request | What can be done with it (Approve, Decline, Withdraw…) |

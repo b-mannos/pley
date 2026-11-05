@@ -549,12 +549,13 @@ async function walk() {
   since = mark();
   await press("back"); // Home, which asks for its rows again after playing
   await waitFor(/^GET \/api\/hubs\/home$/, since, "Home's rows after playing");
-  // The Options key on the first of Continue Watching: Mark as watched, and
-  // Home asks for its rows again.
+  // The Options key on the first of Continue Watching: Mark as watched,
+  // after Resume and From start, and Home asks for its rows again.
   since = mark();
   await press("options");
   await sleep(500);
   shoot("home-options");
+  await press("down", 2);
   await press("select");
   await waitFor(/^POST \/api\/items\/103\/watched$/, since, "a title marked watched");
   // See all at the end of Recently Added in Music: the library's Library
