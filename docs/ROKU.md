@@ -634,14 +634,36 @@ decline, and the requests' settings (the web).
 
 ### Settings
 
-Settings has the audio and subtitle defaults, Quality, Play the next
-episode by itself (Up Next counts down only while it is on), Watch
-history, Switch profile, Always start as, Sort libraries, Switch server
-and Sign out. It says where the account is managed on the web (the
-server's address and `/account`), and carries TMDB's notice. Right of the
-settings, Diagnostics shows this Roku and what it tells the server it
-plays (`capsLines` in `components/lib/Caps.brs`), and Open-source licences
-shows Pley's licence and the notices of what the package bundles.
+Settings is in two panes, as on Android TV: the categories at the left,
+the focused category's rows at the right, each with its value on the line
+under its label. Right or OK goes into the rows, at their first, and Left
+back; choices open in a panel at the right, and switches turn On or Off
+with OK. What a change did shows as a toast ("Saved"), and so does why it
+didn't.
+
+- **Profile:** who is signed in (the picture, the name, "Managed profile ·
+  192.168.1.20:7539"), then Switch profile (for a sign-in that may switch
+  them), the audio and subtitle defaults, Watch history, Sort libraries,
+  Always start as (a household of several) and Manage your account on the
+  web, which shows the address to type on a phone or computer. The other
+  TVs draw its QR code too; the server draws QR codes of sign-in codes
+  only, so Roku shows the address alone.
+- **Playback:** Quality, Play the next episode by itself (Up Next counts
+  down only while it is on) and Playback details, which has the player
+  show how a video plays over it (the registry's `playback` section,
+  `showDetails`).
+- **Subtitles and display:** subtitles look as the Roku's own caption
+  settings say, which the row says.
+- **Server:** the server this TV uses, and Switch server.
+- **Diagnostics:** Open diagnostics: this TV, and what it tells the server
+  it plays (`capsLines` in `components/lib/Caps.brs`).
+- **About:** TMDB's notice, the version, and Open-source licences: Pley's
+  licence and the notices of what the package bundles.
+- **Sign out:** "Sign this TV out of 192.168.1.20:7539. You'll need a new
+  link code to sign in again.", and Sign out, which asks first.
+
+Android TV's Audio (passthrough by format) has no place: the Roku's own
+settings decide what goes to a receiver.
 
 Always start as, for a household of several profiles, names the profile
 the app starts as, or Ask who's watching. As on the other TVs it only

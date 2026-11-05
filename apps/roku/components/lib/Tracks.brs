@@ -70,20 +70,21 @@ function tracksAsksSubtitleLanguage(mode as string) as boolean
     return mode = "foreign" or mode = "always"
 end function
 
-' Settings' rows for the defaults, in order: [{ kind, text }]. defaults is
-' invalid until the profile came; readOnly once the server refused a change.
+' Settings' rows for the defaults, in order: [{ kind, label, value }], the
+' value on the line under the label. defaults is invalid until the profile
+' came (no values then); readOnly once the server refused a change.
 function tracksRows(defaults as dynamic, readOnly as boolean) as object
     suffix = ""
     if readOnly then suffix = " · change on the web"
     if defaults = invalid
-        return [{ kind: "audio", text: "Audio language" }, { kind: "mode", text: "Subtitles" }]
+        return [{ kind: "audio", label: "Audio language", value: "" }, { kind: "mode", label: "Subtitles", value: "" }]
     end if
     rows = [
-        { kind: "audio", text: "Audio language: " + fmtLanguageName(defaults.audio, "The file's default") + suffix },
-        { kind: "mode", text: "Subtitles: " + tracksModeLabel(defaults.mode) + suffix }
+        { kind: "audio", label: "Audio language", value: fmtLanguageName(defaults.audio, "The file's default") + suffix },
+        { kind: "mode", label: "Subtitles", value: tracksModeLabel(defaults.mode) + suffix }
     ]
     if tracksAsksSubtitleLanguage(defaults.mode)
-        rows.Push({ kind: "subtitle", text: "Subtitle language: " + fmtLanguageName(defaults.subtitle, "Same as the audio language") + suffix })
+        rows.Push({ kind: "subtitle", label: "Subtitle language", value: fmtLanguageName(defaults.subtitle, "Same as the audio language") + suffix })
     end if
     return rows
 end function
