@@ -488,8 +488,9 @@ end function
 ' what was asked for and who asked when, and what to know of it; then Open
 ' where a library has it for this account, the server's actions in its
 ' order, and Details, its title's page (reqPanelChoices). The focus goes
-' to the choice last made, else the first.
-sub showRequest(row as object)
+' to the choice last made, else the first; redrawn (focus false), it stays
+' where it is, a keyboard over the panel keeping it.
+sub showRequest(row as object, focus = true as boolean)
     m.panelKind = "request"
     m.panelRequest = row.requestId
     m.requestTarget = targetOf(row)
@@ -513,7 +514,7 @@ sub showRequest(row as object)
     m.menu.visible = true
     placePanel()
     m.panel.visible = true
-    m.menu.setFocus(true)
+    if focus then m.menu.setFocus(true)
 end sub
 
 ' A choice of a request's panel: Open and Details go there; Withdraw,
@@ -602,7 +603,7 @@ sub refreshPanel()
     ' The choice focus is on stays focused where it is still offered.
     at = m.menu.itemFocused
     if at >= 0 and at < m.panelChoices.Count() then m.panelUsed = m.panelChoices[at].action
-    showRequest(row)
+    showRequest(row, m.menu.isInFocusChain())
 end sub
 
 ' An action was done, or refused as the request had changed: the list as
@@ -671,6 +672,11 @@ sub placePanel()
     if top < 150 then top = 150
     m.menu.translation = [1056, top]
     m.choices.translation = [1056, top]
+    ' As many rows as fit above the safe area's foot; the rest scroll.
+    rows = Int((1026 - top) / 64)
+    if rows < 3 then rows = 3
+    if rows > 11 then rows = 11
+    m.menu.numRows = rows
 end sub
 
 sub onMenu(event as object)

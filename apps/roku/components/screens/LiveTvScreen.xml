@@ -71,7 +71,7 @@
              programme's picture, title, episode, day and times with its
              badges, how far it is while it airs, what the guide says of
              it, then Watch and the favourite. showDetails places them. -->
-        <Group id="details" visible="false">
+        <Group id="panel" visible="false">
             <Rectangle width="1920" height="1080" color="0x000000A0" />
             <Rectangle translation="[1200, 0]" width="720" height="1080" color="0x262B35FF" />
             <Rectangle translation="[1248, 56]" width="128" height="72" color="0x2E3440FF" />

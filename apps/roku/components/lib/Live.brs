@@ -1015,7 +1015,8 @@ end function
 
 ' What the trouble card says (Android's): { title, lead, rows, note, text }.
 ' Every connection in use: how many are watching (lead), a row for each
-' (rows: liveBusyConnections's, the first five), each that may be taken
+' (rows: liveBusyConnections's, the first three, so the card fits the
+' screen), each that may be taken
 ' over with its own Watch here instead, and when none may, what can be
 ' done instead (note). Otherwise what the server said (text).
 function liveTroubleCard(problem as object) as object
@@ -1029,7 +1030,7 @@ function liveTroubleCard(problem as object) as object
     if connections.Count() = 1 then card.lead = "Its one connection is watching:"
     takeable = false
     for each c in connections
-        if card.rows.Count() < 5 then card.rows.Push(c)
+        if card.rows.Count() < 3 then card.rows.Push(c)
         if c.canTakeOver then takeable = true
     end for
     if not takeable then card.note = "A channel already being watched can be joined, or try again once one is stopped."

@@ -30,7 +30,9 @@ sub init()
     m.retry = m.top.findNode("retry")
     m.clock = m.top.findNode("clock")
     m.hint = m.top.findNode("hint")
-    m.detailsGroup = m.top.findNode("details")
+    ' Named "panel", as every page's panel is: the ready-to-watch card
+    ' never shows over one (MainScene's noticeFree).
+    m.detailsGroup = m.top.findNode("panel")
     m.detailsLogo = m.top.findNode("detailsLogo")
     m.detailsInitials = m.top.findNode("detailsInitials")
     m.detailsChannel = m.top.findNode("detailsChannel")

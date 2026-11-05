@@ -655,7 +655,7 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
 - **The card** of what went wrong is Android TV's, in the middle of the
   screen: the channel's logo, why, and Try again, Other channels and Back
   to the guide, Left and Right between them. Every connection in use, it
-  lists what each watches and who (five at most), with Watch here instead
+  lists what each watches and who (three at most), with Watch here instead
   on each this account may take over, which has the focus first; Up and
   Down go between those and the buttons.
 - **Taken over:** the server's `live_taken_over` event for the channel

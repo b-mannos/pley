@@ -110,6 +110,8 @@ sub uiTitleOnDeck(event as object)
         uiToast("Nothing to play")
         return
     end if
+    ' Left meanwhile: nothing starts behind the screen now on top.
+    if m.top.hasField("active") and not m.top.active then return
     state = httpObject(episode.user_state)
     startMs = 0
     if state <> invalid and fmtResumable(state.position_ms, episode.duration_ms) then startMs = Int(httpNumber(state.position_ms, 0))
@@ -206,7 +208,7 @@ sub uiPatchTiles(content as dynamic, change as object)
             uiPatchTiles(node, change)
         else if node.hasField("itemId") and node.itemId = change.itemId and node.hasField("watched")
             fields = {}
-            for each key in ["title", "subtitle", "image", "wide", "square", "progress", "watched", "unwatched", "leafCount", "itemId", "kind", "parentId", "grandparentId", "positionMs", "durationMs", "summary", "entryId", "historyId", "qualityBadges"]
+            for each key in ["title", "subtitle", "name", "line", "image", "wide", "square", "progress", "watched", "unwatched", "leafCount", "itemId", "kind", "parentId", "grandparentId", "positionMs", "durationMs", "summary", "entryId", "historyId", "qualityBadges"]
                 if node.hasField(key) then fields[key] = node.getField(key)
             end for
             fields.positionMs = 0

@@ -519,7 +519,7 @@ sub test_live_busy_connections()
         many.Push({ channel_id: i, channel_name: "c", watchers: [], people: 1, yours: false, can_take_over: false })
     end for
     crowded = liveTroubleCard(liveTrouble({ status: 409, message: "", data: { connections: many } }, "x"))
-    tkEqual(crowded.rows.Count(), 5, "five rows at most")
+    tkEqual(crowded.rows.Count(), 3, "three rows at most, so the card fits the screen")
     tkEqual(crowded.lead, "Its 7 connections are watching:", "all counted")
 end sub
 
