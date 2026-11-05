@@ -446,18 +446,41 @@ end function
 
 ' --- Playlists ---
 
-' "12 titles · 3 h 20 min", "Smart · 40 titles": what a playlist holds.
+' What a playlist's page says under its name, as on Android TV: "12 items
+' · 3 h 20 min", a smart one's filter in words after it ("40 items ·
+' Genre: Drama · Unwatched").
 function pagePlaylistLine(playlist as object) as string
-    parts = []
-    if httpString(playlist.smart_filter) <> "" then parts.Push("Smart")
-    count = httpNumber(playlist.item_count, 0)
-    noun = " titles"
-    if httpString(playlist.kind) = "audio" then noun = " tracks"
-    if count = 1 then noun = Left(noun, Len(noun) - 1)
-    parts.Push(urlValue(count) + noun)
-    duration = fmtDuration(playlist.duration_ms)
-    if duration <> "" then parts.Push(duration)
+    parts = [pagePlaylistMeta(playlist)]
+    filter = httpString(playlist.smart_filter)
+    if filter <> "" then parts.Append(pageFilterNotes(filter))
     return parts.Join(" · ")
+end function
+
+' The line over a playlist's name: what it plays, or that a filter fills
+' it.
+function pagePlaylistKindLine(kind as string, smart as boolean) as string
+    if smart then return "Smart playlist"
+    if kind = "audio" then return "Music playlist"
+    return "Video playlist"
+end function
+
+' The picture behind a playlist's page: its first entry's backdrop (an
+' episode's, else its show's), a track's cover; "" without entries.
+function pagePlaylistBackdrop(entries as dynamic, server as string) as string
+    for each entry in httpArray(entries)
+        item = invalid
+        if GetInterface(entry, "ifAssociativeArray") <> invalid then item = httpObject(entry.item)
+        if item <> invalid
+            width = contentBackdropWidth()
+            if contentMusic(httpString(item.kind)) then return contentTileImage(item, server, false, width)
+            url = urlImage(server, item.backdrop_url, width)
+            showId = httpNumber(item.grandparent_id, 0)
+            if url = "" and showId > 0 then url = urlImage(server, "/api/items/" + urlValue(showId) + "/images/backdrop", width)
+            if url = "" then url = contentTileImage(item, server, true, width)
+            return url
+        end if
+    end for
+    return ""
 end function
 
 ' "12 items · 3 h 12 min", "1 item": what a playlist holds, as the other

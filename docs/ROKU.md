@@ -148,7 +148,13 @@ first one's alone, under it "12 items · 3 h 12 min" (and "Smart"). New
 playlist, at the right of its heading, asks what it is for
 (Movies & TV or Music), then its name on the Roku's keyboard. The new
 playlist opens, empty; Add to playlist, the Options key on a title, fills
-it. A playlist's entries move with the Options key's Move.
+it. A playlist's page, as on Android TV, has its first entry's backdrop,
+"Video playlist", "Music playlist" or "Smart playlist" over its name,
+what it holds (a smart one's filter in words, after a Smart badge), and
+Play and Shuffle (one entry, or two, at least), Rename (not for a smart
+playlist, which its filter fills) and Delete. Its entries move with the
+Options key's Move; an entry taken out, or a change refused, says so in a
+toast.
 
 ### Libraries
 
