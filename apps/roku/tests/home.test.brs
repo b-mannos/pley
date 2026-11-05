@@ -90,6 +90,21 @@ sub test_home_menu_follows_the_other_tvs_rail()
         actions.Push(entry.action)
     end for
     tkEqual(actions, ["search", "home", "library", "playlists", "settings"], "no Collections without movies or shows")
+    libraries = []
+    for i = 1 to 7
+        libraries.Push({ id: i, name: "Library " + i.ToStr(), kind: "movies" })
+    end for
+    actions = []
+    for each entry in homeMenu(libraries, false, [], false)
+        actions.Push(entry.action)
+    end for
+    tkEqual(actions, ["search", "home", "library", "library", "library", "library", "library", "library", "libraries", "playlists", "settings"], "six, then Libraries in place of Collections")
+    libraries.Pop()
+    actions = []
+    for each entry in homeMenu(libraries, false, [], false)
+        actions.Push(entry.action)
+    end for
+    tkEqual(actions, ["search", "home", "library", "library", "library", "library", "library", "library", "playlists", "collections", "settings"], "six fit")
 end sub
 
 sub test_home_menu_has_one_way_into_requests()

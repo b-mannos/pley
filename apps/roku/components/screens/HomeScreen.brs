@@ -625,6 +625,8 @@ sub onMenu(event as object)
         uiNavigate({ to: "live" })
     else if action = "library"
         uiNavigate({ to: "library", params: { library: m.menuLibraries[index] } })
+    else if action = "libraries"
+        uiNavigate({ to: "libraries", params: { libraries: m.libraries } })
     else if action = "playlists"
         uiNavigate({ to: "grid", params: { kind: "playlists", id: 0, title: "Playlists" } })
     else if action = "collections"

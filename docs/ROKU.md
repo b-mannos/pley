@@ -52,7 +52,9 @@ Home, one way into requests (where the server has them: Discover where
 the profile may ask, else Your requests, a manager's Requests, with the
 number of what waits there), Live TV, the libraries, Playlists,
 Collections (every library's collections, a row each), Now Playing while
-music plays, and Settings.
+music plays, and Settings. With more than six libraries, as on Android
+TV, the menu lists the first six, then Libraries in place of
+Collections: every library, with what it holds ("Movies · 412 movies").
 
 Beside it, as on Android TV and the native Samsung app, a hero shows the
 first of Continue Watching, else the newest title in the rows: its

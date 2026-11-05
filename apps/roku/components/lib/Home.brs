@@ -204,10 +204,11 @@ end function
 
 ' Home's menu, in the order of the other TVs' rail: Search, Home, the way
 ' into requests (requests: its entry, homeRequestsEntries), Live TV where
-' the server has it, the libraries, Playlists, Collections where there is
-' a library of movies or shows (the page says when none has any), Now
-' Playing while music plays, and Settings last. [{ title, action, library,
-' count, danger }].
+' the server has it, the libraries (six at most, then Libraries, which
+' lists them all, as on Android TV), Playlists, Collections where there is
+' a library of movies or shows (the page says when none has any) and
+' Libraries isn't, Now Playing while music plays, and Settings last.
+' [{ title, action, library, count, danger }].
 function homeMenu(libraries as object, live as boolean, requests as object, music as boolean) as object
     entries = [{ title: "Search", action: "search" }, { title: "Home", action: "home" }]
     for each entry in requests
@@ -215,15 +216,25 @@ function homeMenu(libraries as object, live as boolean, requests as object, musi
     end for
     if live then entries.Push({ title: "Live TV", action: "live" })
     videos = false
+    shown = 0
     for each library in libraries
-        entries.Push({ title: library.name, action: "library", library: library })
+        if shown < homeMenuLibraries() then entries.Push({ title: library.name, action: "library", library: library })
+        shown = shown + 1
         if library.kind = "movies" or library.kind = "shows" then videos = true
     end for
+    many = libraries.Count() > homeMenuLibraries()
+    if many then entries.Push({ title: "Libraries", action: "libraries" })
     entries.Push({ title: "Playlists", action: "playlists" })
-    if videos then entries.Push({ title: "Collections", action: "collections" })
+    if videos and not many then entries.Push({ title: "Collections", action: "collections" })
     if music then entries.Push({ title: "Now Playing", action: "nowPlaying" })
     entries.Push({ title: "Settings", action: "settings" })
     return entries
+end function
+
+' How many libraries the menu lists before Libraries takes their place, as
+' on the other TVs' rail.
+function homeMenuLibraries() as integer
+    return 6
 end function
 
 ' The menu's one way into requests, as on Android TV's rail, from the
