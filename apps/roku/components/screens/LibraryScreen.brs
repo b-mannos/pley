@@ -9,6 +9,7 @@ sub init()
     m.title = m.top.findNode("title")
     m.countLabel = m.top.findNode("count")
     m.tabs = m.top.findNode("tabs")
+    m.viewStrip = m.top.findNode("viewStrip")
     m.viewChips = m.top.findNode("view")
     m.grid = m.top.findNode("grid")
     m.letters = m.top.findNode("letters")
@@ -39,10 +40,16 @@ sub init()
     m.alpha = invalid
     m.alphaMaking = invalid
     m.jumpTo = -1
-    ' The other tabs, once loaded (invalid until then).
+    ' The other tabs, once loaded (invalid until then), whether the
+    ' collections are being asked, and Recommended's rows' keys and sizes,
+    ' and whether they end with the collections yet.
     m.collections = invalid
+    m.collectionsAsked = false
     m.recommended = invalid
     m.recommendedKeys = []
+    m.rowSizes = []
+    m.rowHeights = []
+    m.collectionsRow = false
     ' What the titles can be filtered by, once the server said
     ' (lib/Library.brs's libFilters); whether it's being asked, and the
     ' filter whose choices wait for it.
@@ -55,11 +62,22 @@ sub init()
     m.panelKind = ""
     m.values = []
     m.menuActions = []
+    ' What each chip is (lib/Library.brs's libChips), how far the chips
+    ' slid to keep the focused one in view, and the room they have; whether
+    ' the panel showing was opened from a filter's own chip, and goes back
+    ' to the chips once its choice is made.
+    m.chipKinds = []
+    m.chipScroll = 0
+    m.chipRoom = 0
+    m.chipPanel = false
+    ' What the message's button does (showMessage), "" without one.
+    m.messageAction = ""
     ' Where the focus goes once the first answer comes: into the titles.
     m.focusContent = true
     m.lastFocus = m.grid
     m.tabs.observeField("chosen", "onTabChosen")
     m.viewChips.observeField("chosen", "onViewChosen")
+    m.viewChips.observeField("focusIndex", "scrollChips")
     m.grid.observeField("itemSelected", "onSelected")
     m.grid.observeField("itemFocused", "onFocused")
     m.letters.observeField("chosen", "onLetter")
@@ -67,6 +85,7 @@ sub init()
     m.rows.observeField("rowItemSelected", "onRowTile")
     m.choices.observeField("itemSelected", "onChoice")
     m.menu.observeField("itemSelected", "onMenu")
+    m.message.observeField("chosen", "onMessageAction")
     m.top.observeField("active", "onActive")
 end sub
 
@@ -81,6 +100,7 @@ sub onActive()
         if m.grid.isInFocusChain() then m.lastFocus = m.grid
         if m.letters.isInFocusChain() then m.lastFocus = m.letters
         if m.rows.isInFocusChain() then m.lastFocus = m.rows
+        if m.message.isInFocusChain() then m.lastFocus = m.message
         return
     end if
     if not m.started
@@ -112,6 +132,8 @@ sub onActive()
         m.tabs.setFocus(true)
         showViewChips()
         showTab(m.view.tab)
+        ' What the titles can be filtered by, for the Genre and Year chips.
+        if m.library.kind <> "music" then askFilters()
         return
     end if
     ' What was played or marked meanwhile.
@@ -169,8 +191,8 @@ sub showTab(wanted as string)
             m.tabs.focusIndex = i
         end if
     end for
-    m.viewChips.visible = wanted = "library"
-    if m.grid.isInFocusChain() or m.rows.isInFocusChain() or m.letters.isInFocusChain() then m.tabs.setFocus(true)
+    m.viewStrip.visible = wanted = "library"
+    if m.grid.isInFocusChain() or m.rows.isInFocusChain() or m.letters.isInFocusChain() or m.message.isInFocusChain() then m.tabs.setFocus(true)
     m.grid.visible = false
     m.rows.visible = false
     showLetters()
@@ -187,12 +209,14 @@ sub showTab(wanted as string)
     else if wanted = "collections"
         if m.collections = invalid
             showMessage("Loading…")
-            uiRequest({ method: "GET", path: "/api/libraries/" + urlValue(m.library.id) + "/collections", build: "collections" }, "onCollections")
+            askCollections()
         else
             m.grid.content = m.collections
             showContent()
         end if
     else
+        ' Its rows end with the collections (addCollectionsRow).
+        askCollections()
         if m.recommended = invalid
             showMessage("Loading…")
             uiRequest({ method: "GET", path: "/api/libraries/" + urlValue(m.library.id) + "/hubs", build: "rows" }, "onRecommended")
@@ -213,13 +237,20 @@ sub showContent()
     else if shownTab = "collections"
         if m.collections.getChildCount() = 0 then empty = "This library has no collections."
     else if m.content.getChildCount() = 0
-        empty = "This library is empty."
-        if libFiltered(m.view) then empty = "No titles match these filters."
+        if libFiltered(m.view)
+            ' Nothing matches: Clear filters, as on Android TV.
+            showMessage("Nothing in this library matches the current filters.", "No matches", "clear")
+        else
+            showMessage("This library is empty.")
+        end if
+        return
     end if
     if empty <> ""
         showMessage(empty)
         return
     end if
+    ' The message's button had the focus: the titles take it.
+    if m.message.isInFocusChain() then m.focusContent = true
     m.message.visible = false
     m.rows.visible = shownTab = "recommended"
     m.grid.visible = shownTab <> "recommended"
@@ -230,13 +261,51 @@ sub showContent()
     end if
 end sub
 
-sub showMessage(text as string)
+' What the tab says in place of its titles: text, under title, with the
+' button of action ("clear": Clear filters, "retry": Retry) where it has
+' one. That button takes the focus that was in the titles, or that waited
+' for them to come; else the focus in the titles goes to the tabs. On the
+' chips or the tabs, it stays.
+sub showMessage(text as string, title = "" as string, action = "" as string)
+    inContent = m.top.hasFocus() or m.grid.isInFocusChain() or m.rows.isInFocusChain() or m.letters.isInFocusChain() or m.message.isInFocusChain()
     m.grid.visible = false
     m.rows.visible = false
     showLetters()
+    m.messageAction = action
+    label = ""
+    if action = "clear" then label = "Clear filters"
+    if action = "retry" then label = "Retry"
+    m.message.title = title
     m.message.text = text
+    m.message.action = label
     m.message.visible = true
-    if not m.panel.visible and m.top.isInFocusChain() and not m.viewChips.isInFocusChain() then m.tabs.setFocus(true)
+    if m.panel.visible or not m.top.isInFocusChain() then return
+    if label <> "" and (inContent or m.focusContent)
+        m.focusContent = false
+        m.message.setFocus(true)
+    else if inContent
+        m.tabs.setFocus(true)
+    end if
+end sub
+
+' The tab couldn't load, as on Android TV: what didn't, the server's
+' sentence, and Retry.
+sub showFailure(answer as object)
+    titles = { library: "Couldn't load this library", recommended: "Couldn't load recommendations", collections: "Couldn't load collections" }
+    showMessage(answer.message, titles[m.view.tab], "retry")
+end sub
+
+' The message's button: Clear filters lists every title again, Retry asks
+' for the tab again, the focus going to the titles as they come.
+sub onMessageAction()
+    action = m.messageAction
+    m.focusContent = true
+    if action = "clear"
+        libClearFilters(m.view)
+        applyView()
+    else if action = "retry"
+        showTab(m.view.tab)
+    end if
 end sub
 
 sub focusContent()
@@ -244,12 +313,14 @@ sub focusContent()
         m.rows.setFocus(true)
     else if m.grid.visible
         m.grid.setFocus(true)
+    else if m.message.visible and m.message.action <> ""
+        m.message.setFocus(true)
     end if
 end sub
 
 sub showCount()
     if m.view.tab = "library" and m.total >= 0
-        m.countLabel.text = fmtCount(m.total, m.library.kind)
+        m.countLabel.text = libCountLine(m.view, m.library.kind, m.total, m.library.itemCount)
     else if m.view.tab = "collections" and m.collections <> invalid
         n = m.collections.getChildCount()
         m.countLabel.text = urlValue(n) + " collections"
@@ -259,14 +330,25 @@ sub showCount()
     end if
 end sub
 
+' The library's collections, for the Collections tab and the end of
+' Recommended, asked once at a time; a music library has none.
+sub askCollections()
+    if m.collections <> invalid or m.collectionsAsked or m.library.kind = "music" then return
+    m.collectionsAsked = true
+    uiRequest({ method: "GET", path: "/api/libraries/" + urlValue(m.library.id) + "/collections", build: "collections" }, "onCollections")
+end sub
+
 sub onCollections(event as object)
+    m.collectionsAsked = false
     answer = event.getData()
     if not answer.ok
-        if not uiFailed(answer) and m.view.tab = "collections" then showMessage(answer.message)
+        if not uiFailed(answer) and m.view.tab = "collections" then showFailure(answer)
         return
     end if
     m.collections = event.getRoSGNode().content
     if m.collections = invalid then m.collections = CreateObject("roSGNode", "ContentNode")
+    addCollectionsRow()
+    if m.view.tab = "recommended" and m.recommended <> invalid then showContent()
     if m.view.tab <> "collections" then return
     m.grid.content = m.collections
     showCount()
@@ -276,27 +358,53 @@ end sub
 sub onRecommended(event as object)
     answer = event.getData()
     if not answer.ok
-        if not uiFailed(answer) and m.view.tab = "recommended" then showMessage(answer.message)
+        if not uiFailed(answer) and m.view.tab = "recommended" then showFailure(answer)
         return
     end if
     content = event.getRoSGNode().content
     if content = invalid then content = CreateObject("roSGNode", "ContentNode")
-    sizes = []
-    heights = []
+    m.rowSizes = []
+    m.rowHeights = []
     m.recommendedKeys = []
     for each row in answer.data.rows
         m.recommendedKeys.Push(row.key)
         shape = contentRowSize(row.wide, row.square)
-        sizes.Push(shape.size)
-        heights.Push(shape.height)
+        m.rowSizes.Push(shape.size)
+        m.rowHeights.Push(shape.height)
     end for
     m.recommended = content
-    if sizes.Count() > 0
-        m.rows.rowItemSize = sizes
-        m.rows.rowHeights = heights
+    m.collectionsRow = false
+    if m.rowSizes.Count() > 0
+        m.rows.rowItemSize = m.rowSizes
+        m.rows.rowHeights = m.rowHeights
         m.rows.content = content
     end if
+    addCollectionsRow()
     if m.view.tab = "recommended" then showContent()
+end sub
+
+' The collections end the Recommended tab once both came, as on Android
+' TV (libCollectionsRow): copies of the Collections tab's tiles, whose
+' nodes are that grid's. With no other rows, they are its only one.
+sub addCollectionsRow()
+    if m.recommended = invalid or m.collections = invalid or m.collectionsRow then return
+    tiles = []
+    for each node in m.collections.getChildren(20, 0)
+        tiles.Push({ title: node.title, subtitle: node.subtitle, image: node.image, wide: false, progress: 0.0, watched: false, itemId: node.itemId, kind: node.kind })
+    end for
+    row = libCollectionsRow(tiles)
+    if row = invalid then return
+    m.collectionsRow = true
+    shape = contentRowSize(false, false)
+    m.rowSizes.Push(shape.size)
+    m.rowHeights.Push(shape.height)
+    m.recommendedKeys.Push(row.key)
+    m.rows.rowItemSize = m.rowSizes
+    m.rows.rowHeights = m.rowHeights
+    rowNode = m.recommended.createChild("ContentNode")
+    rowNode.title = row.title
+    nodesAppend(rowNode, row.tiles)
+    if m.rows.content = invalid or not m.rows.content.isSameNode(m.recommended) then m.rows.content = m.recommended
 end sub
 
 ' --- The Library tab ---
@@ -320,7 +428,7 @@ sub onPage(event as object)
     if not answer.ok
         ' Asked again when the focus comes near it.
         m.pages.Delete(spec.page.ToStr())
-        if m.content.getChildCount() = 0 and not uiFailed(answer) and m.view.tab = "library" then showMessage(answer.message)
+        if m.content.getChildCount() = 0 and not uiFailed(answer) and m.view.tab = "library" then showFailure(answer)
         return
     end if
     page = answer.data
@@ -386,12 +494,18 @@ sub onSelected(event as object)
 end sub
 
 ' A title opens; See all shows the Library tab in its row's order, which
-' isn't kept, the focus in the titles once they come.
+' isn't kept, the focus in the titles once they come; the collections'
+' See all, the Collections tab.
 sub onRowTile(event as object)
     position = event.getData()
     row = m.rows.content.getChild(position[0])
     if row = invalid then return
     tile = row.getChild(position[1])
+    if tile <> invalid and tile.kind = "more" and tile.hasField("opens")
+        m.focusContent = true
+        showTab("collections")
+        return
+    end if
     if tile <> invalid and tile.kind = "more" and tile.hasField("sort")
         m.view = libSeeAllView(tile.sort, m.library.kind)
         m.seeAll = true
@@ -403,17 +517,59 @@ sub onRowTile(event as object)
     uiOpenTile(tile)
 end sub
 
-' The sort and the filters as chips, at the right of the tabs.
+' The sort and the filters as chips (libChips), each as wide as its
+' words, at the right of the tabs; the focus stays on the chip of the same
+' kind, as a filter chosen changes its words or a chip comes or goes.
 sub showViewChips()
-    ' As wide as their words, the filters' at most 420 pixels, so that a
-    ' long sort ("Date added, recently added first") clears the tabs.
-    filterLabel = libFilterLabel(m.view)
-    filterWidth = 0
-    if Len(filterLabel) > 20 then filterWidth = 420
-    m.viewChips.chips = [{ label: libSortLabel(m.view.sort, m.view.order), width: 0 }, { label: filterLabel, width: filterWidth }]
+    focusedKind = ""
+    at = m.viewChips.focusIndex
+    if at >= 0 and at < m.chipKinds.Count() then focusedKind = m.chipKinds[at]
+    m.chipKinds = []
+    chips = []
+    for each chip in libChips(m.view, m.library.kind, m.filters)
+        m.chipKinds.Push(chip.kind)
+        chips.Push({ label: chip.label, width: 0, selected: chip.selected })
+    end for
+    m.viewChips.chips = chips
     m.viewChips.current = -1
-    if libFiltered(m.view) then m.viewChips.current = 1
-    m.viewChips.translation = [1824 - m.viewChips.rowWidth, 132]
+    for i = 0 to m.chipKinds.Count() - 1
+        if m.chipKinds[i] = focusedKind then at = i
+    end for
+    if at >= m.chipKinds.Count() then at = m.chipKinds.Count() - 1
+    if at < 0 then at = 0
+    m.viewChips.focusIndex = at
+    ' From the tabs' end to the right edge; past it, they are cut off at
+    ' the tabs and slide (scrollChips).
+    m.chipRoom = 1824 - (m.tabs.translation[0] + m.tabs.rowWidth + 32)
+    width = m.viewChips.rowWidth
+    if width <= m.chipRoom
+        m.viewStrip.translation = [1824 - width, 132]
+        m.viewStrip.clippingRect = [0, 0, 0, 0]
+    else
+        m.viewStrip.translation = [1824 - m.chipRoom, 132]
+        m.viewStrip.clippingRect = [0, -8, m.chipRoom, 72]
+    end if
+    scrollChips()
+end sub
+
+' The chip in focus in view: the row slides no further than it needs, and
+' not at all when it fits.
+sub scrollChips()
+    places = m.viewChips.places
+    width = m.viewChips.rowWidth
+    scroll = m.chipScroll
+    at = m.viewChips.focusIndex
+    if width <= m.chipRoom or places = invalid
+        scroll = 0
+    else if at >= 0 and at < places.Count()
+        chip = places[at]
+        if chip[0] + chip[1] - scroll > m.chipRoom then scroll = chip[0] + chip[1] - m.chipRoom
+        if chip[0] < scroll then scroll = chip[0]
+    end if
+    if scroll > width - m.chipRoom then scroll = width - m.chipRoom
+    if scroll < 0 then scroll = 0
+    m.chipScroll = scroll
+    m.viewChips.translation = [-scroll, 0]
 end sub
 
 ' A new sort or filters: the Roku keeps them, and the titles come again.
@@ -515,11 +671,31 @@ end sub
 
 ' --- The sort's and the filters' panel ---
 
+' Sort and Filter open their panels; Unwatched turns on or off at once; a
+' filter's own chip (Genre, Year, a resolution, a dynamic range) opens its
+' choices, and the pick goes back to the chips, as on Android TV.
 sub onViewChosen(event as object)
-    if event.getData() = 0
+    at = event.getData()
+    if at < 0 or at >= m.chipKinds.Count() then return
+    kind = m.chipKinds[at]
+    m.chipPanel = false
+    if kind = "sort"
         openSort()
-    else
+    else if kind = "filter"
         openFilters()
+    else if kind = "unwatched"
+        m.view.watched = libToggleUnwatched(m.view.watched)
+        applyView()
+    else
+        m.chipPanel = true
+        if m.filters = invalid
+            ' Its choices once the server says what they are.
+            openFilters()
+            m.filterWanted = kind
+            m.panelHint.text = "Loading…"
+        else
+            openFilter(kind)
+        end if
     end if
 end sub
 
@@ -641,6 +817,8 @@ sub onFilters(event as object)
         return
     end if
     m.filters = libFilters(answer.data)
+    ' Genre and Year join the chips.
+    showViewChips()
     if not m.panel.visible or m.panelKind <> "filters" then return
     if wanted <> ""
         openFilter(wanted)
@@ -721,6 +899,11 @@ sub onChoice(event as object)
     if kind = "year" then m.view.year = value
     if kind = "resolution" then m.view.resolution = value
     if kind = "dynamic_range" then m.view.dynamic_range = value
+    if m.chipPanel
+        closePanel()
+        applyView()
+        return
+    end if
     applyView()
     openFilters()
 end sub
@@ -728,6 +911,7 @@ end sub
 sub closePanel()
     m.panel.visible = false
     m.panelKind = ""
+    m.chipPanel = false
     ' A filter picked while its choices were loading is forgotten with the panel.
     m.filterWanted = ""
     m.viewChips.setFocus(true)
@@ -737,13 +921,14 @@ end sub
 ' A to Z's first letter) back; right from the last tab reaches the sort
 ' and filters, and from the grid's last column the A to Z, at the letter
 ' of the title it leaves, which Left goes back to. Back closes the
-' panel (a filter's choices go back to the filters). The Options key on a
-' title offers what can be done with it.
+' panel (a filter's choices go back to the filters, unless its own chip
+' opened them). The Options key on a title offers what can be done with
+' it.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
     if m.panel.visible
         if key = "back" or key = "left"
-            if m.panelKind <> "sort" and m.panelKind <> "filters"
+            if m.panelKind <> "sort" and m.panelKind <> "filters" and not m.chipPanel
                 openFilters()
             else
                 closePanel()
@@ -753,11 +938,11 @@ function onKeyEvent(key as string, press as boolean) as boolean
         return false
     end if
     chips = m.tabs.isInFocusChain() or m.viewChips.isInFocusChain()
-    if key = "down" and chips and (m.grid.visible or m.rows.visible)
+    if key = "down" and chips and (m.grid.visible or m.rows.visible or (m.message.visible and m.message.action <> ""))
         focusContent()
         return true
     end if
-    if key = "up" and (m.grid.isInFocusChain() or m.rows.isInFocusChain() or m.letters.isInFocusChain())
+    if key = "up" and (m.grid.isInFocusChain() or m.rows.isInFocusChain() or m.letters.isInFocusChain() or m.message.isInFocusChain())
         m.tabs.setFocus(true)
         return true
     end if
@@ -770,7 +955,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
         m.grid.setFocus(true)
         return true
     end if
-    if key = "right" and m.tabs.isInFocusChain() and m.viewChips.visible
+    if key = "right" and m.tabs.isInFocusChain() and m.viewStrip.visible
         m.viewChips.focusIndex = 0
         m.viewChips.setFocus(true)
         return true

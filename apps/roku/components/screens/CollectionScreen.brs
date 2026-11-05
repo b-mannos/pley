@@ -31,7 +31,17 @@ sub init()
     m.picking = false
     m.buttons.observeField("buttonSelected", "onButton")
     m.grid.observeField("itemSelected", "onTile")
+    m.message.observeField("chosen", "onRetry")
     m.top.observeField("active", "onActive")
+end sub
+
+' Retry, after the collection couldn't load.
+sub onRetry()
+    m.message.title = ""
+    m.message.text = "Loading…"
+    m.message.action = ""
+    m.top.setFocus(true)
+    load()
 end sub
 
 ' Loaded each time it shows: back from playing, where each title was left
@@ -44,6 +54,8 @@ sub onActive()
             m.grid.setFocus(true)
         else if m.buttons.visible
             m.buttons.setFocus(true)
+        else if m.message.visible and m.message.action <> ""
+            m.message.setFocus(true)
         else
             m.top.setFocus(true)
         end if
@@ -65,11 +77,17 @@ sub onTitleChanged(change as object)
     uiPatchTiles(m.grid.content, change)
 end sub
 
-' A reload that fails leaves the page as it was.
+' A reload that fails leaves the page as it was; the first says so, with
+' Retry, as on Android TV.
 sub onCollection(event as object)
     answer = event.getData()
     if not answer.ok or answer.data = invalid
-        if m.collection = invalid and not uiFailed(answer) then m.message.text = answer.message
+        if m.collection = invalid and not uiFailed(answer)
+            m.message.title = "Couldn't load this collection"
+            m.message.text = answer.message
+            m.message.action = "Retry"
+            if m.top.hasFocus() then m.message.setFocus(true)
+        end if
         return
     end if
     m.collection = answer.data

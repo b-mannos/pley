@@ -52,6 +52,7 @@
             <!-- Its top shows under the buttons; the page slides up to it. -->
             <MarkupGrid id="grid" translation="[96, 720]" itemComponentName="Tile" numColumns="7" numRows="2" itemSize="[220, 410]" itemSpacing="[28, 24]" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" visible="false" />
         </Group>
-        <Label id="message" translation="[96, 480]" width="1100" wrap="true" color="0xA1A9B6FF" text="Loading…" font="font:MediumSystemFont" />
+        <!-- Loading, or what failed with Retry. -->
+        <PageMessage id="message" translation="[960, 440]" width="1100" text="Loading…" />
     </children>
 </component>

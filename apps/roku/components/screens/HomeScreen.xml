@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Home: the menu on the left (Search, Home, Discover and the requests
+<!-- Home: the menu on the left (Search, Home, Discover or the requests
      where the server has them, Live TV, the libraries, Playlists,
      Collections, Now Playing, Settings), then, as on Android TV and the
      native Samsung app, a hero for the first of Continue Watching (its
@@ -16,7 +16,7 @@
         <!-- Set by the scene when other devices changed what Home shows. -->
         <field id="refresh" type="boolean" alwaysNotify="true" />
         <!-- What requests let the profile do (the scene's): the menu's
-             Discover and requests, and their number. -->
+             way into them, and its number. -->
         <field id="requestSummary" type="assocarray" onChange="onRequestSummary" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/HomeScreen.brs" />
@@ -61,10 +61,8 @@
             <Label id="infoSummary" width="1100" wrap="true" maxLines="2" lineSpacing="6" color="0xEBEBEBFF" font="font:SmallerSystemFont" />
         </LayoutGroup>
         <RowList id="rows" translation="[440, 620]" itemComponentName="Tile" itemSize="[1480, 470]" numRows="3" itemSpacing="[0, 28]" rowItemSpacing="[[28, 0]]" showRowLabel="[true]" rowLabelOffset="[[0, 12]]" rowLabelColor="0xEBEBEBFF" drawFocusFeedback="false" rowFocusAnimationStyle="floatingFocus" vertFocusAnimationStyle="floatingFocus" visible="false" rowLabelFont="font:MediumBoldSystemFont" />
-        <LayoutGroup id="message" translation="[440, 440]" layoutDirection="vert" itemSpacings="[16]">
-            <Label id="messageTitle" width="1380" wrap="true" horizAlign="center" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="messageText" width="1380" wrap="true" horizAlign="center" color="0xA1A9B6FF" text="Loading…" font="font:MediumSystemFont" />
-        </LayoutGroup>
+        <!-- Loading, why Home is empty, or what failed with Retry. -->
+        <PageMessage id="message" translation="[1130, 440]" width="1380" text="Loading…" />
         <!-- Focus resting on a tile: the info block and the backdrop follow. -->
         <Timer id="rest" duration="0.4" />
     </children>

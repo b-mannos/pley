@@ -59,7 +59,9 @@ sub test_home_hero_buttons()
     watched = homeInfo({ id: 5, kind: "movie", title: "Dune", user_state: { watched: true } }, "http://s", false)
     tkEqual(homeHeroButtons(watched), { labels: ["Play", "Info", "Mark as unwatched"], actions: ["start", "info", "unwatched"] })
     show = homeInfo({ id: 9, kind: "show", title: "A show", user_state: {} }, "http://s", false)
-    tkEqual(homeHeroButtons(show), { labels: ["Open", "Mark as watched"], actions: ["info", "watched"] })
+    tkEqual(homeHeroButtons(show), { labels: ["Play", "Info", "Mark as watched"], actions: ["next", "info", "watched"] }, "a show plays its next episode, as on Android TV")
+    season = homeInfo({ id: 10, kind: "season", title: "Season 1", user_state: {} }, "http://s", false)
+    tkEqual(homeHeroButtons(season).actions, ["next", "info", "watched"])
     album = homeInfo({ id: 7, kind: "album", title: "An album", user_state: {} }, "http://s", false)
     tkEqual(homeHeroButtons(album), { labels: ["Open"], actions: ["info"] })
 end sub
@@ -74,15 +76,45 @@ end sub
 sub test_home_menu_follows_the_other_tvs_rail()
     movies = { id: 1, name: "Movies", kind: "movies" }
     music = { id: 3, name: "Music", kind: "music" }
-    requests = [{ title: "Discover", action: "discover" }, { title: "Requests", action: "requests", count: 2, danger: false }]
+    requests = [{ title: "Discover", action: "discover", count: 2, danger: false }]
     actions = []
+    titles = []
     for each entry in homeMenu([movies, music], true, requests, true)
         actions.Push(entry.action)
+        titles.Push(entry.title)
     end for
-    tkEqual(actions, ["search", "home", "discover", "requests", "live", "library", "library", "playlists", "collections", "nowPlaying", "settings"])
+    tkEqual(actions, ["search", "home", "discover", "live", "library", "library", "playlists", "collections", "nowPlaying", "settings"])
+    tkEqual(titles[8], "Now Playing", "as the other TVs write it")
     actions = []
     for each entry in homeMenu([music], false, [], false)
         actions.Push(entry.action)
     end for
     tkEqual(actions, ["search", "home", "library", "playlists", "settings"], "no Collections without movies or shows")
+    libraries = []
+    for i = 1 to 7
+        libraries.Push({ id: i, name: "Library " + i.ToStr(), kind: "movies" })
+    end for
+    actions = []
+    for each entry in homeMenu(libraries, false, [], false)
+        actions.Push(entry.action)
+    end for
+    tkEqual(actions, ["search", "home", "library", "library", "library", "library", "library", "library", "libraries", "playlists", "settings"], "six, then Libraries in place of Collections")
+    libraries.Pop()
+    actions = []
+    for each entry in homeMenu(libraries, false, [], false)
+        actions.Push(entry.action)
+    end for
+    tkEqual(actions, ["search", "home", "library", "library", "library", "library", "library", "library", "playlists", "collections", "settings"], "six fit")
+end sub
+
+sub test_home_menu_has_one_way_into_requests()
+    summary = reqSummary({ enabled: true, access: "ask", manage: true, pending: 2, failed: 1, unseen: 1 })
+    tkEqual(homeRequestsEntries(summary), [{ title: "Discover", action: "discover", count: 4, danger: true }], "Discover for those who may ask, with the requests' number")
+    summary = reqSummary({ enabled: true, access: "off", manage: true, pending: 2, failed: 0, unseen: 0 })
+    tkEqual(homeRequestsEntries(summary), [{ title: "Requests", action: "requests", count: 2, danger: false }], "a manager who may not ask: Requests")
+    summary = reqSummary({ enabled: true, access: "off", own: 3, unseen: 1 })
+    tkEqual(homeRequestsEntries(summary), [{ title: "Your requests", action: "requests", count: 1, danger: false }], "their own requests left to see")
+    tkEqual(homeRequestsEntries(reqSummary({ enabled: true, access: "off" })), [], "nothing to ask or see")
+    tkEqual(homeRequestsEntries(reqSummary({ enabled: false, access: "ask" })), [], "requests off")
+    tkEqual(homeRequestsEntries(reqNoSummary(false)), [], "no summary yet")
 end sub

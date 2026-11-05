@@ -2,8 +2,6 @@ sub init()
     m.menu = m.top.findNode("menu")
     m.rows = m.top.findNode("rows")
     m.message = m.top.findNode("message")
-    m.messageTitle = m.top.findNode("messageTitle")
-    m.messageText = m.top.findNode("messageText")
     m.backdrop = m.top.findNode("backdrop")
     m.hero = m.top.findNode("hero")
     m.heroTitle = m.top.findNode("heroTitle")
@@ -39,6 +37,8 @@ sub init()
     m.heroInfo = invalid
     m.heroActions = []
     m.heroLabels = []
+    ' A show's next episode is being asked for (its Play).
+    m.askingNext = false
     m.infos = {}
     m.infoShown = 0
     m.restingOn = 0
@@ -62,6 +62,7 @@ sub init()
     m.rows.observeField("rowItemSelected", "onTile")
     m.rows.observeField("rowItemFocused", "onTileFocused")
     m.heroButtons.observeField("chosen", "onHeroButton")
+    m.message.observeField("chosen", "onRetry")
     m.rest.observeField("fire", "onRested")
     ' Changes told by the server's event stream at the last load.
     m.remoteSeen = 0
@@ -173,8 +174,12 @@ sub onRows(event as object)
     if request.spec.asked <> m.rowsAsked then return
     answer = event.getData()
     if not answer.ok
-        ' A refresh that fails leaves the rows as they were.
-        if m.rowKeys.Count() = 0 and not uiFailed(answer) then showMessage("", answer.message)
+        ' A refresh that fails leaves the rows as they were; with none,
+        ' Home says so, with Retry, as on Android TV.
+        if m.rowKeys.Count() = 0 and not uiFailed(answer)
+            showMessage("Couldn't load your home screen", answer.message, "Retry")
+            if m.top.isInFocusChain() then focusPage()
+        end if
         return
     end if
     m.top.getScene().myList = answer.data.myList
@@ -207,9 +212,9 @@ sub showEmpty()
     m.emptyShown = true
 end sub
 
-' The menu, in the other TVs' order (homeMenu); Discover and the requests
-' (Your requests, a manager's Requests, with their number) where the
-' summary has them.
+' The menu, in the other TVs' order (homeMenu); Discover, else the
+' requests (Your requests, a manager's Requests), with their number,
+' where the summary has them.
 sub buildMenu()
     m.requestEntries = requestEntries()
     m.musicShown = m.global.music.state <> "stopped"
@@ -241,17 +246,10 @@ sub buildMenu()
     if at > 0 then m.menu.jumpToItem = at
 end sub
 
-' The menu's entries for requests, from the summary: Discover, and the
-' requests with their number.
+' The menu's way into requests, from the summary: Discover, else the
+' requests, with their number (homeRequestsEntries).
 function requestEntries() as object
-    summary = reqSummaryOf(m.top.requestSummary)
-    entries = []
-    if reqShowsDiscover(summary) then entries.Push({ title: "Discover", action: "discover" })
-    if reqShowsRequests(summary)
-        badge = reqBadge(summary)
-        entries.Push({ title: reqPageName(summary), action: "requests", count: badge.count, danger: badge.danger })
-    end if
-    return entries
+    return homeRequestsEntries(reqSummaryOf(m.top.requestSummary))
 end function
 
 ' The summary changed: the menu follows when its entries do.
@@ -260,21 +258,29 @@ sub onRequestSummary()
     if FormatJson(requestEntries()) <> FormatJson(m.requestEntries) then buildMenu()
 end sub
 
-sub showMessage(title as string, text as string)
+' In place of the page: title and text, and the button of action (Retry)
+' where it has one.
+sub showMessage(title as string, text as string, action = "" as string)
     m.emptyShown = false
     m.inRows = false
-    if m.rows.isInFocusChain() or m.heroButtons.isInFocusChain() then m.menu.setFocus(true)
+    if m.rows.isInFocusChain() or m.heroButtons.isInFocusChain() or (m.message.isInFocusChain() and action = "") then m.menu.setFocus(true)
     m.rows.visible = false
     m.hero.visible = false
     m.info.visible = false
     m.backdrop.uri = ""
-    m.messageTitle.text = title
-    m.messageText.text = text
-    m.message.removeChildrenIndex(m.message.getChildCount(), 0)
-    if title <> "" then m.message.appendChild(m.messageTitle)
-    m.message.appendChild(m.messageText)
+    m.message.title = title
+    m.message.text = text
+    m.message.action = action
     m.message.visible = true
     if text <> "Loading…" then uiLaunched()
+end sub
+
+' Retry: Home asks again, the focus in the menu until the page shows.
+sub onRetry()
+    m.menu.setFocus(true)
+    m.rowKeys = []
+    m.rowSigs = {}
+    load()
 end sub
 
 ' Puts rows ([{ key, wide, sig, built }]) on the screen: the
@@ -547,8 +553,9 @@ function focusedNode() as dynamic
 end function
 
 ' Resume or Play plays a movie or an episode (From start, from its
-' start); Info, and Open for anything else, opens its page; the watched
-' mark toggles, and Home asks for its rows again.
+' start), a show's or a season's Play its next episode (GET
+' /api/items/{id}/on-deck); Info, and Open for anything else, opens its
+' page; the watched mark toggles, and Home asks for its rows again.
 sub onHeroButton(event as object)
     info = m.heroInfo
     if info = invalid then return
@@ -559,11 +566,37 @@ sub onHeroButton(event as object)
         uiNavigate({ to: "player", params: { itemId: info.itemId, startMs: Int(info.positionMs) } })
     else if action = "start"
         uiNavigate({ to: "player", params: { itemId: info.itemId, startMs: 0 } })
+    else if action = "next"
+        if not m.askingNext
+            m.askingNext = true
+            uiGet("/api/items/" + urlValue(info.itemId) + "/on-deck", "onHeroNext")
+        end if
     else if action = "info"
         uiOpenTile({ itemId: info.itemId, kind: info.kind, title: info.title })
     else
         uiTitleAction({ itemId: info.itemId, kind: info.kind, parentId: 0, grandparentId: 0 }, action)
     end if
+end sub
+
+' The show's next episode plays where its Play starts it; with none, a
+' toast says so, as on Android TV.
+sub onHeroNext(event as object)
+    m.askingNext = false
+    answer = event.getData()
+    if not answer.ok
+        if not uiFailed(answer) then uiToast(answer.message, true)
+        return
+    end if
+    episode = invalid
+    if answer.data <> invalid then episode = httpObject(answer.data.item)
+    ' Left meanwhile: nothing starts behind the screen now on top.
+    if not m.top.active then return
+    if episode = invalid
+        uiToast("Nothing to play")
+        return
+    end if
+    tile = contentTile(episode, m.global.session.server, true)
+    uiNavigate({ to: "player", params: { itemId: tile.itemId, startMs: playerStartOf(tile.positionMs, tile.durationMs) } })
 end sub
 
 ' A title opens; See all, its library on the Library tab in the row's
@@ -592,6 +625,8 @@ sub onMenu(event as object)
         uiNavigate({ to: "live" })
     else if action = "library"
         uiNavigate({ to: "library", params: { library: m.menuLibraries[index] } })
+    else if action = "libraries"
+        uiNavigate({ to: "libraries", params: { libraries: m.libraries } })
     else if action = "playlists"
         uiNavigate({ to: "grid", params: { kind: "playlists", id: 0, title: "Playlists" } })
     else if action = "collections"
@@ -612,7 +647,8 @@ sub onMenu(event as object)
     end if
 end sub
 
-' From the menu into the page: the hero's buttons, else the rows.
+' From the menu into the page: the hero's buttons, else the rows, else a
+' message's Retry.
 sub focusPage()
     if m.hero.visible
         m.heroButtons.setFocus(true)
@@ -620,6 +656,8 @@ sub focusPage()
     else if m.rows.visible
         m.rows.setFocus(true)
         m.inRows = true
+    else if m.message.visible and m.message.action <> ""
+        m.message.setFocus(true)
     end if
 end sub
 
@@ -658,6 +696,13 @@ function onKeyEvent(key as string, press as boolean) as boolean
             position = m.rows.rowItemFocused
             row = m.rows.content.getChild(position[0])
             if row <> invalid then uiTileOptions(row.getChild(position[1]), contentContinueWatching(m.rowKeys[position[0]]))
+            return true
+        end if
+        return false
+    end if
+    if m.message.isInFocusChain()
+        if key = "left" or key = "back"
+            m.menu.setFocus(true)
             return true
         end if
         return false

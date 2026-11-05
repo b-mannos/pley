@@ -7,6 +7,24 @@ sub test_library_tabs_by_kind()
     tkEqual(libTabLabel("library"), "Library")
 end sub
 
+sub test_library_recommended_ends_with_collections()
+    tkInvalid(libCollectionsRow([]), "no collections, no row")
+    tiles = []
+    for i = 1 to 25
+        tiles.Push({ title: "Collection " + i.ToStr(), itemId: i, kind: "collection" })
+    end for
+    row = libCollectionsRow(tiles)
+    tkEqual(row.key, "collections")
+    tkEqual(row.title, "Collections")
+    tkEqual(row.tiles.Count(), 21, "the first 20, then See all")
+    tkEqual(row.tiles[19].itemId, 20)
+    last = row.tiles[20]
+    tkEqual(last.kind, "more")
+    tkEqual(last.title, "See all")
+    tkEqual(last.opens, "collections", "which opens the Collections tab")
+    tkEqual(libCollectionsRow([tiles[0]]).tiles.Count(), 2, "See all after one too")
+end sub
+
 sub test_library_sorts_by_kind()
     ids = function(sorts as object) as object
         out = []
@@ -28,28 +46,25 @@ end sub
 sub test_library_query_and_filters()
     view = libDefaultView()
     tkEqual(libQuery(view, 0, 70), { sort: "title", order: "asc", offset: 0, limit: 70 })
-    tkEqual(libFilterLabel(view), "All titles")
     tkFalse(libFiltered(view))
     view.watched = "false"
     view.genre = "Comedy"
     view.year = 1999
     tkEqual(libQuery(view, 70, 70), { sort: "title", order: "asc", offset: 70, limit: 70, watched: "false", genre: "Comedy", year: 1999 })
-    tkEqual(libFilterLabel(view), "Unwatched, Comedy, 1999")
     tkTrue(libFiltered(view))
     view.resolution = "4k"
     view.dynamic_range = "dolby_vision"
     tkEqual(libQuery(view, 0, 70), { sort: "title", order: "asc", offset: 0, limit: 70, watched: "false", genre: "Comedy", year: 1999, resolution: "4k", dynamic_range: "dolby_vision" })
-    tkEqual(libFilterLabel(view), "Unwatched, Comedy, 1999, 4K, Dolby Vision", "labels, never tokens")
     libClearFilters(view)
     tkEqual(view, libDefaultView(), "Clear filters clears them all")
     view.dynamic_range = "hdr"
     tkTrue(libFiltered(view), "a dynamic range alone filters")
     tkEqual(libQuery(view, 0, 70), { sort: "title", order: "asc", offset: 0, limit: 70, dynamic_range: "hdr" })
-    tkEqual(libFilterLabel(view), "Any HDR")
+    tkEqual(libChips(view, "movies", invalid)[3].label, "Any HDR", "its chip: labels, never tokens")
     view.dynamic_range = ""
     view.resolution = "sd"
     tkTrue(libFiltered(view), "a resolution alone filters")
-    tkEqual(libFilterLabel(view), "SD")
+    tkEqual(libChips(view, "movies", invalid)[3].label, "SD")
 end sub
 
 sub test_library_posters_badged_only_where_it_says_something()
@@ -113,6 +128,61 @@ sub test_library_filter_panel_rows()
     tkEqual(rows[4].title, "Dynamic range: Dolby Vision")
 end sub
 
+sub test_library_chips()
+    kinds = function(chips as object) as object
+        out = []
+        for each chip in chips
+            out.Push(chip.kind)
+        end for
+        return out
+    end function
+    view = libDefaultView()
+    offered = { genres: ["Drama"], years: [2022], resolutions: ["4k"], dynamicRanges: ["hdr"] }
+    none = { genres: [], years: [], resolutions: [], dynamicRanges: [] }
+    tkEqual(kinds(libChips(view, "movies", invalid)), ["sort", "filter", "unwatched"], "until the server says what the titles have")
+    tkEqual(kinds(libChips(view, "movies", none)), ["sort", "filter", "unwatched"], "no genres or years")
+    chips = libChips(view, "shows", offered)
+    tkEqual(kinds(chips), ["sort", "filter", "unwatched", "genre", "year"], "a resolution and a dynamic range only once chosen")
+    tkEqual(chips[0], { label: "Title, A to Z", kind: "sort", selected: false })
+    tkEqual(chips[3].label, "Genre")
+    tkEqual(chips[4].label, "Year")
+    tkEqual(kinds(libChips(view, "music", offered)), ["sort"], "music: the sort alone")
+    view.watched = "false"
+    view.genre = "Science Fiction & Fantasy"
+    view.year = 1999
+    view.resolution = "4k"
+    view.dynamic_range = "dolby_vision"
+    chips = libChips(view, "movies", none)
+    tkEqual(kinds(chips), ["sort", "filter", "unwatched", "genre", "year", "resolution", "dynamic_range"], "each chosen one, though the library no longer lists it")
+    labels = []
+    selected = []
+    for each chip in chips
+        labels.Push(chip.label)
+        selected.Push(chip.selected)
+    end for
+    tkEqual(labels, ["Title, A to Z", "Filter", "Unwatched", "Science Fiction &…", "1999", "4K", "Dolby Vision"])
+    tkEqual(selected, [false, false, true, true, true, true, true])
+    view.watched = "true"
+    tkFalse(libChips(view, "movies", none)[2].selected, "watched titles only: Unwatched isn't on")
+end sub
+
+sub test_library_unwatched_chip_toggles()
+    tkEqual(libToggleUnwatched(""), "false", "on")
+    tkEqual(libToggleUnwatched("false"), "", "off: every title")
+    tkEqual(libToggleUnwatched("true"), "false", "from watched only, unwatched only")
+end sub
+
+sub test_library_count_line()
+    view = libDefaultView()
+    tkEqual(libCountLine(view, "movies", 342, 342), "342 movies")
+    tkEqual(libCountLine(view, "shows", 1, invalid), "1 show")
+    view.genre = "Drama"
+    tkEqual(libCountLine(view, "movies", 23, 342), "23 of 342 movies", "filtered: out of the library's own count")
+    tkEqual(libCountLine(view, "movies", 0, 1), "0 of 1 movie", "the noun by the library's count")
+    tkEqual(libCountLine(view, "movies", 23, 20), "23 movies", "a library's count from before a scan")
+    tkEqual(libCountLine(view, "movies", 23, invalid), "23 movies", "no count of its own")
+end sub
+
 sub test_library_quality_filter_choices()
     choices = libQualityChoices(fmtResolutions(), ["4k", "1080", "sd"], "", "All resolutions")
     tkEqual(choices, { labels: ["All resolutions", "4K", "1080p", "SD"], values: ["", "4k", "1080", "sd"], current: 0 }, "the server's, in its order")
@@ -146,9 +216,10 @@ sub test_library_views_kept_and_checked()
     libSaveView(section, key, view)
     tkEqual(libLoadView(section, key, "movies"), view, "a resolution and a dynamic range kept")
     music = libLoadView(section, key, "music")
-    tkEqual(music.resolution, "", "music has neither")
+    tkEqual(music.resolution, "", "music has no filters, as on the other TVs")
     tkEqual(music.dynamic_range, "")
-    tkEqual(music.genre, "Drama")
+    tkEqual(music.genre, "")
+    tkFalse(libFiltered(music))
     section.Write(key, "{""sort"":""title"",""resolution"":""4K"",""dynamic_range"":""hdr11""}")
     kept = libLoadView(section, key, "movies")
     tkEqual(kept.resolution, "", "not a token: dropped")

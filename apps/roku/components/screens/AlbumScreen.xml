@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- An album: its cover, its artist, year and length, Play and Shuffle on
-     the left, its tracks on the right (under "Disc 1", "Disc 2" when they
-     are on several discs); OK on a track plays the album from it with the
-     music player. -->
+<!-- An album: its cover, its artist, year and length, the profile's
+     rating, Play and Shuffle on the left, its tracks on the right (under
+     "Disc 1", "Disc 2" when they are on several discs), the one playing
+     marked; OK on a track plays the album from it with the music player,
+     on the one playing pauses or goes on. -->
 <component name="AlbumScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -27,9 +28,12 @@
         <Rectangle translation="[96, 64]" width="420" height="420" color="0x262B35FF" />
         <Poster id="cover" translation="[96, 64]" width="420" height="420" loadWidth="420" loadHeight="420" loadDisplayMode="scaleToZoom" />
         <Label id="title" translation="[96, 508]" width="560" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-        <Label id="line" translation="[96, 640]" width="560" wrap="true" maxLines="2" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        <Label id="line" translation="[96, 640]" width="560" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        <!-- The profile's own rating, once given. -->
+        <Label id="rating" translation="[96, 680]" width="560" color="0x38BDF8FF" font="font:SmallestSystemFont" />
         <ButtonGroup id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 730]" minWidth="520" maxWidth="540" visible="false" />
         <MarkupList id="tracks" translation="[700, 64]" itemComponentName="TrackRow" itemSize="[1124, 80]" itemSpacing="[0, 8]" numRows="11" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
-        <Label id="message" translation="[700, 400]" width="1124" wrap="true" horizAlign="center" color="0xA1A9B6FF" text="Loading…" font="font:SmallSystemFont" />
+        <!-- Loading, or what failed with Retry. -->
+        <PageMessage id="message" translation="[1262, 400]" width="1124" text="Loading…" />
     </children>
 </component>

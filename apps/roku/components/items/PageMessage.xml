@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What a page says in place of its content, as on Android TV: a title,
+     a sentence under it, and a button that takes the focus (Retry, Clear
+     filters), centred on the translation's x. Without a title or a button
+     it is the sentence alone ("Loading…"). -->
+<component name="PageMessage" extends="LayoutGroup">
+    <interface>
+        <field id="title" type="string" onChange="onText" />
+        <field id="text" type="string" onChange="onText" />
+        <!-- The button's words; "" for none. -->
+        <field id="action" type="string" onChange="onText" />
+        <!-- How wide the title and the sentence may be. -->
+        <field id="width" type="float" value="1380" onChange="onText" />
+        <!-- OK on the button. -->
+        <field id="chosen" type="boolean" alwaysNotify="true" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/items/PageMessage.brs" />
+    <children>
+        <Label id="heading" horizAlign="center" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+        <Label id="body" horizAlign="center" wrap="true" maxLines="4" color="0xA1A9B6FF" font="font:MediumSystemFont" />
+        <ButtonGroup id="button" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="360" maxWidth="360" />
+    </children>
+</component>

@@ -10,14 +10,20 @@
              there. -->
         <field id="play" type="assocarray" alwaysNotify="true" />
         <!-- "toggle", "pause", "resume", "next", "previous", "shuffle",
-             "unshuffle", "stop", or "sleep": the sleep timer's button
-             (Keep listening in its last 30 s, else its next choice). -->
+             "unshuffle", "sleep": the sleep timer's button (Keep
+             listening in its last 30 s, else its next choice);
+             "suspend": a video or a channel starts, and the music lets
+             go of its session and waits where it was, its queue kept;
+             "stop": the queue is forgotten (another profile, sign-in or
+             server). -->
         <field id="control" type="string" alwaysNotify="true" />
         <!-- Plays the track at this place in the queue. -->
         <field id="jump" type="integer" alwaysNotify="true" />
         <!-- Goes to this place (ms) in the track playing. -->
         <field id="seek" type="integer" alwaysNotify="true" />
-        <!-- "stopped", "loading", "playing", "paused". -->
+        <!-- "stopped" (no queue), "loading", "playing", "paused" (also
+             while the track waits for Play with no session: the queue's
+             end, a failure, a stop from elsewhere, a video). -->
         <field id="state" type="string" value="stopped" />
         <!-- The queue: its tracks in the order they play, and a number
              that changes with it. -->
@@ -31,7 +37,8 @@
         <field id="at" type="integer" alwaysNotify="true" />
         <field id="positionMs" type="integer" />
         <field id="durationMs" type="integer" />
-        <!-- What went wrong with the track before, or "". -->
+        <!-- Why the track shown doesn't play (it can't be played, the
+             server is out of reach, who stopped it), or "". -->
         <field id="message" type="string" />
         <!-- Its session stopped from another device or by the server's
              administrator, as the event stream tells it ({ session_id,

@@ -10,6 +10,7 @@ function navScreen(name as string) as string
         live: "LiveTvScreen",
         livePlayer: "LivePlayerScreen",
         library: "LibraryScreen",
+        libraries: "LibrariesScreen",
         details: "DetailsScreen",
         grid: "GridScreen",
         collection: "CollectionScreen",

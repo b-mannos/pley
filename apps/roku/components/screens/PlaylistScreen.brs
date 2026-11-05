@@ -1,13 +1,21 @@
-' A playlist (GET /api/playlists/{id}): Play and Shuffle play its entries
-' one after the other, Up Next bringing on the next; Rename and Delete
+' A playlist (GET /api/playlists/{id}), as Android TV's page: Play and
+' Shuffle play its entries one after the other, Up Next bringing on the
+' next; Rename (not a smart one's, which its filter fills) and Delete
 ' change it (PATCH, DELETE), which needs the sign-in to allow playlists.
+' What an action did, or why it didn't, shows in a toast.
 ' Move lifts an entry, which follows the focus up and down, its title
 ' marked, until OK puts it there (PUT …/order) or Back puts it back; the
 ' rows change in place, so focus moves only with keys.
 ' params: { id, title (shown until the server answers) }.
 
 sub init()
+    m.backdrop = m.top.findNode("backdrop")
+    m.column = m.top.findNode("column")
+    m.kindLabel = m.top.findNode("kindLabel")
     m.title = m.top.findNode("title")
+    m.smart = m.top.findNode("smart")
+    m.smartBack = m.top.findNode("smartBack")
+    m.smartText = m.top.findNode("smartText")
     m.line = m.top.findNode("line")
     m.buttons = m.top.findNode("buttons")
     m.entries = m.top.findNode("entries")
@@ -23,11 +31,23 @@ sub init()
     m.dialog = invalid
     m.entryOptions = invalid
     m.lastFocus = m.buttons
-    m.buttons.buttons = ["Play", "Shuffle", "Rename", "Delete"]
+    ' What the buttons do, in their order: "play", "shuffle", "rename",
+    ' "delete".
+    m.actions = []
     m.buttons.observeField("buttonSelected", "onButton")
     m.entries.observeField("itemSelected", "onEntry")
     m.entries.observeField("itemFocused", "onEntryFocused")
+    m.message.observeField("chosen", "onRetry")
     m.top.observeField("active", "onActive")
+end sub
+
+' Retry, after the playlist couldn't load.
+sub onRetry()
+    m.message.title = ""
+    m.message.text = "Loading…"
+    m.message.action = ""
+    m.top.setFocus(true)
+    load()
 end sub
 
 ' Loaded each time it shows: back from playing, the places have changed.
@@ -44,7 +64,11 @@ sub onActive()
         m.top.setFocus(true)
     else
         uiChangesSince()
-        if m.buttons.visible then m.lastFocus.setFocus(true)
+        if m.buttons.visible
+            m.lastFocus.setFocus(true)
+        else if m.message.action <> ""
+            m.message.setFocus(true)
+        end if
     end if
     load()
 end sub
@@ -60,34 +84,91 @@ end sub
 sub onPlaylist(event as object)
     answer = event.getData()
     if not answer.ok
-        if m.playlist = invalid and not uiFailed(answer) then m.message.text = answer.message
+        ' The first time, the page says so, with Retry, as on Android TV.
+        if m.playlist = invalid and not uiFailed(answer)
+            m.message.title = "Couldn't load this playlist"
+            m.message.text = answer.message
+            m.message.action = "Retry"
+            if m.top.hasFocus() then m.message.setFocus(true)
+        end if
         return
     end if
     m.playlist = answer.data
+    m.message.title = ""
+    m.message.action = ""
+    m.kindLabel.text = pagePlaylistKindLine(m.playlist.kind, m.playlist.smart)
     m.title.text = m.playlist.title
-    m.line.text = m.playlist.line
+    showFacts()
+    if m.backdrop.uri <> m.playlist.backdrop
+        m.backdrop.setHttpAgent(m.top.getScene().getHttpAgent())
+        m.backdrop.uri = m.playlist.backdrop
+    end if
     keep = m.entries.itemFocused
     m.entries.content = event.getRoSGNode().content
     if keep > 0 and keep < m.playlist.shown then m.entries.jumpToItem = keep
     if m.playlist.shown = 0
         m.message.text = "This playlist is empty. Add titles to it with the Options key on them."
+        if m.playlist.smart then m.message.text = "Nothing matches this playlist's filter yet."
         m.message.visible = true
+        if m.entries.isInFocusChain() then m.buttons.setFocus(true)
     else
         m.message.visible = false
     end if
     first = not m.buttons.visible
-    m.buttons.visible = true
+    showButtons()
     if first and m.top.hasFocus() then m.buttons.setFocus(true)
+end sub
+
+' What it holds, after the Smart badge for a smart one.
+sub showFacts()
+    m.smart.visible = m.playlist.smart
+    x = 0
+    if m.playlist.smart
+        m.smartBack.width = m.smartText.boundingRect().width + 24
+        x = m.smartBack.width + 12
+    end if
+    m.line.translation = [x, 0]
+    m.line.width = 540 - x
+    m.line.text = m.playlist.line
+end sub
+
+' Play with entries to play, Shuffle with two or more, as on Android TV;
+' Rename but for a smart playlist; Delete. The focus stays on the button
+' it was on.
+sub showButtons()
+    actions = []
+    labels = []
+    if m.playlist.shown > 0
+        actions.Push("play")
+        labels.Push("Play")
+    end if
+    if m.playlist.shown > 1
+        actions.Push("shuffle")
+        labels.Push("Shuffle")
+    end if
+    if not m.playlist.smart
+        actions.Push("rename")
+        labels.Push("Rename")
+    end if
+    actions.Push("delete")
+    labels.Push("Delete")
+    m.actions = actions
+    if FormatJson(labels) <> FormatJson(m.buttons.buttons)
+        focused = m.buttons.buttonFocused
+        m.buttons.buttons = labels
+        if focused > 0 and focused < labels.Count() then m.buttons.focusButton = focused
+    end if
+    m.buttons.visible = true
 end sub
 
 sub onButton(event as object)
     if m.playlist = invalid then return
-    chosen = m.buttons.buttons[event.getData()]
-    if chosen = "Play"
+    chosen = m.actions[event.getData()]
+    if chosen = "play"
         play(0, false)
-    else if chosen = "Shuffle"
+    else if chosen = "shuffle"
         play(0, true)
-    else if chosen = "Rename"
+    else if chosen = "rename"
         dialog = CreateObject("roSGNode", "StandardKeyboardDialog")
         dialog.title = "Rename playlist"
         dialog.text = m.playlist.title
@@ -157,18 +238,21 @@ sub onDeleted(event as object)
     if answer.ok
         uiNavigate({ back: true })
     else if not uiFailed(answer)
-        uiMessage("The playlist wasn't deleted", [pagePlaylistRefusal(answer)])
+        uiToast(pagePlaylistRefusal(answer), true)
     end if
 end sub
 
-' A change made, or refused: the playlist again, as the server has it now
-' (a move refused goes back where it was).
+' A change made, or refused (why, in a toast): the playlist again, as the
+' server has it now (a move refused goes back where it was). An entry
+' taken out says so, as on Android TV.
 sub onChanged(event as object)
     answer = event.getData()
     if answer.ok
+        removed = httpString(event.getRoSGNode().spec.removed)
+        if removed <> "" then uiToast("Removed “" + removed + "”")
         load()
     else if not uiFailed(answer)
-        uiMessage("That didn't work", [pagePlaylistRefusal(answer)])
+        uiToast(pagePlaylistRefusal(answer), true)
         load()
     end if
 end sub
@@ -213,7 +297,7 @@ sub onEntryOption(event as object)
     if action = "move"
         lift(m.entries.itemFocused)
     else if action = "remove"
-        uiRequest({ method: "DELETE", path: "/api/playlists/" + urlValue(m.top.params.id) + "/items/" + urlValue(state.entryId) }, "onChanged")
+        uiRequest({ method: "DELETE", path: "/api/playlists/" + urlValue(m.top.params.id) + "/items/" + urlValue(state.entryId), removed: httpSentence(state.tile.title) }, "onChanged")
     else if action = "open"
         uiOpenTile(state.tile)
     else

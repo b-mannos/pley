@@ -190,12 +190,12 @@ function pageTextDrawn() {
 
 // Whether Now Playing's sleep timer button, focused (in the accent), says
 // more than "Sleep timer": it is the last of the buttons, which start at
-// 96, 560 (NowPlayingScreen.brs: the five before it take 1100), and only
-// a longer label reaches past 1500.
+// 96, 560 (NowPlayingScreen.brs: the four before it, Next among them,
+// take 924), and only a longer label reaches past 1324.
 function sleepButtonLong() {
   if (!frame) return false;
   for (let y = 566; y < 610; y += 4) {
-    for (let x = 1500; x < 1580; x += 4) {
+    for (let x = 1324; x < 1404; x += 4) {
       const at = (Math.round(y * (frame.height / 1080)) * frame.width + Math.round(x * (frame.width / 1920))) * 4;
       if (frame.data[at] < 120 && frame.data[at + 1] > 150 && frame.data[at + 2] > 200) return true;
     }
@@ -579,7 +579,7 @@ async function walk() {
   // listed there, then a channel whose
   // source has no connection left; Back leaves to the guide at that
   // channel, then the Channels tab.
-  await openFromMenu(4, /^GET \/api\/live\/guide\?/, "Live TV's guide");
+  await openFromMenu(3, /^GET \/api\/live\/guide\?/, "Live TV's guide");
   await sleep(1500);
   shoot("live-guide");
   await press("right"); // the guide
@@ -644,7 +644,7 @@ async function walk() {
   await press("back"); // Home
   await settle();
   since = mark();
-  await openFromMenu(5, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies");
+  await openFromMenu(4, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies");
   // Sorted by title: the A to Z, once every title's letter came, right of
   // the grid's last column (a right press more than needed, which the
   // letters take). Down from "#" to W, whose first title is on the third
@@ -668,11 +668,13 @@ async function walk() {
   shoot("library-scrolled");
   await press("back");
   // Movies again, sorted by bitrate: the posters' quality badges, and
-  // their bitrate and size under them. Then the Filter panel, which adds
-  // Resolution and Dynamic range once the server says the movies differ in
-  // them, and Resolution's 4K: the grid lists 4K titles only, and the chip
-  // says so.
-  await openFromMenu(5, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies again");
+  // their bitrate and size under them. Then the Filter panel, which has
+  // Resolution and Dynamic range since the server said, as the library
+  // opened, that the movies differ in them, and Resolution's 4K: the grid
+  // lists 4K titles only, and a chip says so.
+  since = mark();
+  await openFromMenu(4, /^GET \/api\/libraries\/1\/items\?.*offset=0/, "Movies again");
+  await waitFor(/^GET \/api\/libraries\/1\/filters$/, since, "what a library can be filtered by");
   await settle();
   await press("up"); // the tabs, on Library
   await press("right", 2); // past Collections to the sort
@@ -684,11 +686,9 @@ async function walk() {
   await waitFor(/^GET \/api\/libraries\/1\/items\?.*sort=bitrate/, since, "the library sorted by bitrate");
   await settle();
   shoot("library-bitrate");
-  await press("right"); // the filters
-  since = mark();
+  await press("right"); // Filter
   await press("select");
-  await waitFor(/^GET \/api\/libraries\/1\/filters$/, since, "what a library can be filtered by");
-  await settle();
+  await sleep(500);
   shoot("library-filters");
   await press("down", 3); // Resolution, after Year
   await press("select");
@@ -704,7 +704,7 @@ async function walk() {
   await settle();
   shoot("library-4k");
   await press("back");
-  await openFromMenu(6, /^GET \/api\/libraries\/2\/items/, "TV Shows");
+  await openFromMenu(5, /^GET \/api\/libraries\/2\/items/, "TV Shows");
   // Its tabs: Recommended, Collections, then Library again, sorted by year.
   since = mark();
   await press("up"); // the tabs, on Library
@@ -858,13 +858,14 @@ async function walk() {
     await settle();
   }
   // Music: the artist's page, whose Play gathers every album's tracks for
-  // the music player; Now Playing stopped. Then their older album, its
-  // tracks played; the next in Now Playing's Up next played, then Shuffle,
-  // which puts the track playing first (Previous plays it again), and Stop
-  // shuffling, the album's order again (Previous plays the one before), and
-  // the sleep timer's button. Now Playing stopped; then the album's second
-  // disc played from its list and stopped, and Back to Home.
-  await openFromMenu(7, /^GET \/api\/libraries\/3\/items\?.*offset=0/, "Music");
+  // the music player; Now Playing left, the music playing on. Then their
+  // older album, its tracks played in place of the artist's; the next in
+  // Now Playing's Up next played, then Shuffle, which puts the track
+  // playing first (Previous plays it again), and Stop shuffling, the
+  // album's order again (Previous plays the one before), and the sleep
+  // timer's button. Now Playing left; then the album's second disc played
+  // from its list in place of the album, and Back to Home.
+  await openFromMenu(6, /^GET \/api\/libraries\/3\/items\?.*offset=0/, "Music");
   shoot("music");
   since = mark();
   await press("select"); // the artist
@@ -877,18 +878,17 @@ async function walk() {
   artistPlayed.first = fixture.playbacks.at(-1)?.item === 5201;
   await sleep(1500);
   shoot("now-playing");
-  since = mark();
-  await press("right", 2); // Stop: back to the artist
-  await press("select");
-  await waitFor(/^DELETE \/api\/playback\//, since, "the artist's track's session closed");
-  await press("right"); // the albums, the newest first
+  await press("back"); // the artist, the music playing on
+  await settle();
+  await press("down"); // the albums' row, on the newest
   await press("right"); // the older one
   since = mark();
   await press("select");
   await waitFor(/^GET \/api\/items\/5100\/children$/, since, "an album's tracks");
   shoot("album");
   since = mark();
-  await press("select"); // Play
+  await press("select"); // Play, in place of the artist's tracks
+  await waitFor(/^DELETE \/api\/playback\//, since, "the artist's track's session closed");
   await waitFor(/^POST \/api\/playback$/, since, "a track played");
   await sleep(1500);
   shoot("now-playing");
@@ -910,7 +910,7 @@ async function walk() {
   music.unshuffled = await playedBy("Previous, in the album's order");
   // The sleep timer's button: 15 minutes, saying what is left, then on
   // through its choices to End of this track and Off again.
-  await press("right", 4); // Sleep timer
+  await press("right", 3); // Sleep timer, after Next
   await sleep(300);
   music.sleepOff = !sleepButtonLong();
   await press("select");
@@ -920,22 +920,18 @@ async function walk() {
   music.sleepEnd = await drawnWithin(2000, sleepButtonLong);
   await press("select"); // Off
   music.sleepCycled = await drawnWithin(2000, () => !sleepButtonLong());
-  since = mark();
-  await press("left"); // Stop
-  await press("select");
-  await waitFor(/^DELETE \/api\/playback\//, since, "the track's session closed");
+  await press("back"); // the album, the music playing on
   // The album again: its tracks under "Disc 1" and "Disc 2", headings the
-  // focus passes over; OK on the second disc's track plays that one, and
-  // stopped, the album shows again.
+  // focus passes over; OK on the second disc's track plays that one in
+  // place of the track playing, and Back shows the album again.
   await settle();
   await press("right"); // the tracks, on the first under "Disc 1"
   await press("down", 2); // the second, then past "Disc 2" to its track
   shoot("album-discs");
-  music.disc = await playedBy("a track of the album's second disc");
   since = mark();
-  await press("right", 2); // Stop
-  await press("select");
-  await waitFor(/^DELETE \/api\/playback\//, since, "its session closed");
+  music.disc = await playedBy("a track of the album's second disc");
+  await waitFor(/^DELETE \/api\/playback\//, since, "the track before's session closed");
+  await press("back"); // the album, the music playing on
   await settle();
   for (let i = 0; i < 3; i++) {
     await press("back"); // the artist, the library, Home
@@ -999,7 +995,7 @@ async function walk() {
   // key's Move, then taken out, and the playlist played from the top. Then
   // New playlist, for Movies & TV, named on the keyboard: it opens, made.
   // Back to Home.
-  await openFromMenu(8, /^GET \/api\/playlists$/, "Playlists");
+  await openFromMenu(7, /^GET \/api\/playlists$/, "Playlists");
   shoot("playlists");
   since = mark();
   await press("select"); // the first playlist
@@ -1089,12 +1085,18 @@ async function walk() {
     await press("back"); // Discover's rows, its hero, Home
     await settle();
   }
-  // The managers' Requests, on Needs attention: OK on the oldest opens its
-  // panel, Approve first. Meanwhile Anna's download came into a library, which
-  // no event told of: the summary asked after Approve has news, whose
-  // notice waits while the requests show. Then Yours, the last tab, which
-  // marks Anna's news seen.
-  await openFromMenu(3, /^GET \/api\/requests\?.*attention=1/, "Requests");
+  // The managers' Requests, on Needs attention, from Discover's way to
+  // them over its hero (the menu's one entry for requests is Discover): OK
+  // on the oldest opens its panel, Approve first. Meanwhile Anna's download
+  // came into a library, which no event told of: the summary asked after
+  // Approve has news, whose notice waits while the requests show. Then
+  // Yours, the last tab, which marks Anna's news seen.
+  await openFromMenu(2, /^GET \/api\/discover\/trending\?page=1$/, "Discover again");
+  await settle();
+  since = mark();
+  await press("up"); // the requests' chip, over the hero
+  await press("select");
+  await waitFor(/^GET \/api\/requests\?.*attention=1/, since, "Requests");
   shoot("requests");
   since = mark();
   await press("select"); // its panel
@@ -1116,8 +1118,8 @@ async function walk() {
   await waitFor(/^POST \/api\/requests\/seen$/, since, "the news marked seen");
   shoot("requests-yours");
   // Home: the notice's card, once the remote has rested, with Open
-  // focused.
-  await press("back");
+  // focused. Discover goes by before it can show there.
+  await press("back", 2); // Discover, then Home
   notice.shown = await drawnWithin(8000, readyNoticeDrawn);
   // An OK in the card's first 0.6 s was meant for the page.
   await sleep(800);
@@ -1290,7 +1292,7 @@ async function walk() {
   fixture.down = true;
   await press("left", 3);
   await press("up", 11);
-  await press("down", 5); // Movies, after Search, Home, Discover, Your requests and Live TV
+  await press("down", 4); // Movies, after Search, Home, Discover and Live TV
   await press("select");
   await sleep(3000);
   shoot("unreachable");

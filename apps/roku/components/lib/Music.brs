@@ -88,6 +88,38 @@ function musicAlbumLine(album as object, tracks as object) as string
     return parts.Join(" · ")
 end function
 
+' The profile's own rating of an album (its details' user_state.rating, 0
+' to 10 in half stars), as Android TV shows it under the album's line:
+' "Your rating: 4 stars"; "" for none.
+function musicRatingLine(album as object) as string
+    state = httpObject(album.user_state)
+    if state = invalid then return ""
+    stars = contentStars(state.rating)
+    if stars = 0 then return ""
+    return "Your rating: " + contentStarsLabel(stars)
+end function
+
+' An album's rows (musicDiscRows) with the track whose id is trackId
+' marked current (none for 0): those to draw again, [{ at (the row),
+' fields }], as each row's node changes.
+function musicMarkedRows(rows as object, trackId as dynamic) as object
+    changed = []
+    playing = httpNumber(trackId, 0)
+    for i = 0 to rows.Count() - 1
+        row = rows[i]
+        current = false
+        if row.kind = "track" and playing > 0 then current = httpNumber(row.itemId, 0) = playing
+        was = httpTrue(row.current)
+        if current <> was
+            fields = {}
+            fields.Append(row)
+            fields.current = current
+            changed.Push({ at: i, fields: fields })
+        end if
+    end for
+    return changed
+end function
+
 ' An artist's albums (GET /api/items/{id}/children): { tiles, order }.
 ' tiles are the albums newest first (then by title), each captioned with
 ' its year; order has their ids as the server sent them, the order Play
@@ -178,6 +210,26 @@ function musicStreamFormat(info as object, detail as dynamic) as string
     formats = { mp3: "mp3", flac: "flac", m4a: "mp4", mp4: "mp4", mov: "mp4", aac: "es.aac-adts", wav: "wav", mka: "mka", wma: "wma" }
     if formats.DoesExist(container) then return formats[container]
     return "mp3"
+end function
+
+' Now Playing dims, to spare the screen, once the remote has rested this
+' long (seconds, as Roku's TimeSinceLastKeypress counts them), as on
+' Android TV; the next key wakes it.
+function musicDimmed(restSeconds as integer) as boolean
+    return restSeconds >= 120
+end function
+
+' How bright Now Playing stays, dimmed.
+function musicDimmedOpacity() as float
+    return 0.3
+end function
+
+' Why a track's session didn't start (the API task's answer), in the
+' other apps' words: the server out of reach, or the track that can't be
+' played.
+function musicFailure(answer as object) as string
+    if answer.error = "network" then return "Can't reach the server."
+    return "This track can't be played."
 end function
 
 ' The music player's queue: the tracks as given, the order they play in

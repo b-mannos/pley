@@ -19,7 +19,17 @@ sub init()
     m.buttons.buttons = ["New playlist"]
     m.buttons.observeField("buttonSelected", "onNew")
     m.grid.observeField("itemSelected", "onSelected")
+    m.message.observeField("chosen", "onRetry")
     m.top.observeField("active", "onActive")
+end sub
+
+' Retry, after the playlists couldn't load.
+sub onRetry()
+    m.message.title = ""
+    m.message.text = "Loading…"
+    m.message.action = ""
+    m.top.setFocus(true)
+    load()
 end sub
 
 ' Loaded each time it shows: a playlist renamed, emptied, deleted or made
@@ -56,7 +66,13 @@ end sub
 sub onPlaylists(event as object)
     answer = event.getData()
     if not answer.ok
-        if m.shown < 0 and not uiFailed(answer) then m.message.text = answer.message
+        ' The first time, the page says so, with Retry, as on Android TV.
+        if m.shown < 0 and not uiFailed(answer)
+            m.message.title = "Couldn't load your playlists"
+            m.message.text = answer.message
+            m.message.action = "Retry"
+            if m.top.hasFocus() then m.message.setFocus(true)
+        end if
         return
     end if
     m.shown = answer.data.shown
@@ -65,6 +81,8 @@ sub onPlaylists(event as object)
     if focused > 0 and focused < m.shown then m.grid.jumpToItem = focused
     m.buttons.visible = true
     if m.shown = 0
+        m.message.title = ""
+        m.message.action = ""
         m.message.text = "No playlists yet. Make one with New playlist, or with Add to playlist, the Options key on a title."
         m.message.visible = true
         ' With nothing to focus in the grid, New playlist takes it.

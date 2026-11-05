@@ -520,7 +520,7 @@ sub apiBuild(job as object, answer as object)
         kind = httpString(data.kind)
         queue = pagePlaylistQueue(data.entries, server)
         if kind = "audio" then queue = musicTracks(data.entries, server)
-        answer.data = { title: httpSentence(data.title), line: pagePlaylistLine(data), kind: kind, smart: httpString(data.smart_filter) <> "", queue: queue, shown: rows.Count() }
+        answer.data = { title: httpSentence(data.title), line: pagePlaylistLine(data), kind: kind, smart: httpString(data.smart_filter) <> "", queue: queue, shown: rows.Count(), backdrop: pagePlaylistBackdrop(data.entries, server) }
     else if job.build = "history"
         entries = httpArray(data.entries)
         rows = pageHistoryRows(entries, server, apiNow())

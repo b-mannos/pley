@@ -70,16 +70,22 @@ switch profiles offers Sign in as another profile, the same way.
 ### Home
 
 Home's menu, at the left, is in the order of the other TVs' rail: Search,
-Home, Discover and the requests (where the server has them), Live TV, the
-libraries, Playlists, Collections (every library's collections, a row
-each), Now Playing while music plays, and Settings.
+Home, one way into requests (where the server has them: Discover where
+the profile may ask, else Your requests, a manager's Requests, with the
+number of what waits there), Live TV, the libraries, Playlists,
+Collections (every library's collections, a row each), Now Playing while
+music plays, and Settings. With more than six libraries, as on Android
+TV, the menu lists the first six, then Libraries in place of
+Collections: every library, with what it holds ("Movies · 412 movies").
 
 Beside it, as on Android TV and the native Samsung app, a hero shows the
 first of Continue Watching, else the newest title in the rows: its
 backdrop, its title (a show's name over an episode's "S2 · E5 · Title"),
 year, length, content rating, stars and quality ("4K", "DV"), the time
 left, its summary, then Resume (or Play), From start, Info and Mark as
-watched. Resume has the focus as Home first shows. Down goes to the
+watched; a show's (or a season's) Play plays its next episode, as on
+Android TV, and "Nothing to play" says when it has none. Resume has the
+focus as Home first shows. Down goes to the
 server's rows: there an info block about the title focus rests on (0.4 s)
 takes the hero's place, and the backdrop follows it. Up from the first row
 goes back to the hero; Left or Back, to the menu, the hero shown again.
@@ -98,6 +104,13 @@ episodes left to watch where the watched mark goes, the mark only once
 every one is watched. Continue Watching, and any row whose first title
 is an episode, has 16:9 stills.
 
+What can't be loaded says so in the page, as on Android TV: what didn't
+load ("Couldn't load your home screen"), the server's sentence, and Retry,
+which has the focus. So do a library's tabs, Collections, a collection,
+an album, an artist, the playlists, a playlist and the watch history. A
+server that doesn't answer at all has a screen of its own, with
+Retry.
+
 ### The server out of reach
 
 When the server answers nothing, or another device answers at its
@@ -115,7 +128,7 @@ page comes back by itself once it does.
 | Key | Where | What it does |
 |---|---|---|
 | Options (\*) | A title | As on Android TV: Play (a show's or a season's next episode), or Resume and From start; the watched mark, Remove from Continue Watching, My List, Add to playlist, an episode's Go to show and Go to season, a season's Go to show; music's Open and Add to playlist. What it came to ("Added to Road trip", or why not) shows in a toast at the top right |
-| Options (\*) | Watch history | Removes it |
+| Options (\*) | Watch history | Removes the play at once, as Android TV's cross does; a toast says so, and the focus goes to the next |
 | Options (\*) | A playlist entry | Move (Up and Down carry it, OK puts it there, Back puts it back), Remove from playlist, Go to its title's page |
 | Down | The player | Pley's menu: Subtitles, Audio, Quality, Subtitle sync, Chapters, Previous chapter, Next chapter, Next episode (or Next in the queue), Sleep timer, Find subtitles…, Playback details |
 | Options (\*) | The player | Roku's own options: subtitles and audio tracks |
@@ -219,16 +232,27 @@ libraries ("3 movies · 2 shows in your libraries"), then a row for each
 thing they did (Acting, Directing, Creating, Writing, Producing) of their
 titles, newest first, each with its year and the part ("2019 · as Neo").
 
-An artist's page has their picture, their name, albums, tracks and
-genres, their summary, and Play and Shuffle, which hand every track of
-theirs to the music player, album by album, and open Now Playing (Now
-playing goes back to it while music plays); their albums are on the
-right, newest first.
+An artist's page, as on Android TV, has their picture, beside it their
+name, albums, tracks and genres and their summary, then Play and
+Shuffle, which hand every track of theirs to the music player, album by
+album, and open Now Playing (Now playing goes back to it while music
+plays); under them, their albums in a row of square tiles, newest first,
+each with its year.
 
-Playlists has New playlist at the right of its heading: what it is for
+Playlists shows each playlist as a square cover, five across, as on
+Android TV: a mosaic of its first four entries' pictures (decoded at a
+quarter of the cover each, for a Roku Express's texture memory), or the
+first one's alone, under it "12 items · 3 h 12 min" (and "Smart"). New
+playlist, at the right of its heading, asks what it is for
 (Movies & TV or Music), then its name on the Roku's keyboard. The new
 playlist opens, empty; Add to playlist, the Options key on a title, fills
-it. A playlist's entries move with the Options key's Move.
+it. A playlist's page, as on Android TV, has its first entry's backdrop,
+"Video playlist", "Music playlist" or "Smart playlist" over its name,
+what it holds (a smart one's filter in words, after a Smart badge), and
+Play and Shuffle (one entry, or two, at least), Rename (not for a smart
+playlist, which its filter fills) and Delete. Its entries move with the
+Options key's Move; an entry taken out, or a change refused, says so in a
+toast.
 
 ### Libraries
 
@@ -245,6 +269,8 @@ left on, kept on the Roku for each server, profile and library.
   Sorted by bitrate, its bitrate and size take the year's place under the
   poster ("42 Mbps · 23.4 GB"). Otherwise, and in rows, collections,
   playlists and search, posters have no quality badges.
+- **Recommended** is the library's rows, then, as on Android TV, its
+  collections (the first 20), whose See all opens the Collections tab.
 - **See all** ends the rows of a library's newest, newly released and top
   rated titles, on Home and on a library's Recommended tab. It shows the
   library's Library tab in the row's order (date added, release date or
@@ -258,13 +284,23 @@ left on, kept on the Roku for each server, profile and library.
   index of letters: the app reads the listing's titles a thousand at a
   time and keeps only where each letter starts
   (`components/lib/Library.brs`).
-- **Filter**, the chip after the sort's, opens a panel: Show (all titles,
-  unwatched or watched), Genre and Year, then, in a library of movies or
-  shows, Resolution (4K, 1080p, 720p, SD) and Dynamic range (Any HDR,
-  HDR, which takes in Dolby Vision and HDR+, Dolby Vision, HDR+, HLG,
-  SDR). Those two show once the server says the titles differ in them,
-  offering the choices it lists, or while one is chosen; a title counts by
-  its best file, a show by its best episode. The chip says what is kept ("Unwatched, 4K, Dolby Vision").
+- **Chips**, at the right of the tabs, as on Android TV: the sort (its
+  order in words), Filter, Unwatched (one press turns it on or off),
+  Genre and Year once the server says what the titles have, and the
+  resolution or dynamic range chosen ("4K", "Dolby Vision"); a filter in
+  force is lit. Genre, Year and those two open their choices, and the
+  pick goes back to the chips. A music library has the sort alone. When
+  they don't fit beside the tabs, the chips slide to keep the one in
+  focus in view. Filtered, the count at the top right says "23 of 342
+  movies".
+- **Filter** opens a panel: Show (all titles, unwatched or watched),
+  Genre and Year, then Resolution (4K, 1080p, 720p, SD) and Dynamic range
+  (Any HDR, HDR, which takes in Dolby Vision and HDR+, Dolby Vision, HDR+,
+  HLG, SDR). Those two show once the server says the titles differ in
+  them, offering the choices it lists, or while one is chosen; a title
+  counts by its best file, a show by its best episode. Filters that
+  nothing matches show No matches, with Clear filters, which takes the
+  focus.
 - **Save as…:** once filters are set, the Filter panel ends with Clear
   filters and Save as…, which saves them and the order as a smart playlist
   (`POST /api/playlists` with `library_id` and `smart_filter`, written as
@@ -294,15 +330,30 @@ when they are on several discs (the tracks' `parent_index`), each
 numbered on its disc; the focus passes over the headings. An album or a
 music playlist plays whole, from the track chosen, so Previous goes back
 past it; its Shuffle starts on any track and plays the others after it in
-a random order. As on the other TVs, an album's page also has Go to
-artist, and Now playing while music plays.
+a random order. As on Android TV, the track playing is marked in the
+list, OK on it pauses or goes on, and the profile's rating shows under
+the album's line ("Your rating: 4 stars"). As on the other TVs, an
+album's page also has Go to artist, and Now playing while music plays.
 
-Now Playing shows the track, its cover and how far along it is, Shuffle,
-Previous, Pause, Next, Stop and the sleep timer, and Up next: the queue,
-numbered, the track playing in bold, which stays in view unless the
-focus is on the list. OK on one plays it, and the queue goes on from
-there. Up from the buttons goes to the scrubber, where Left and Right move
-10 s, as on Android TV. A long queue is listed 250 tracks at a time, from
+As on the other apps, the queue stays until other music replaces it (or
+another profile, sign-in or server comes): at its end the last track
+stays, and Play starts it again; a track that can't be played stays,
+saying why ("Can't reach the server.", "This track can't be played."),
+and Play asks for it again. A video or a channel pauses the music, which
+lets go of its session (its paused reports would keep it through a whole
+film); Play goes on from where it was, in a new session.
+
+Now Playing shows, as on Android TV, the track, "Artist · Album", its
+cover and how far along it is, a line saying Loading… or why the track
+doesn't play, Shuffle, Previous, Pause, Next (while a track comes after
+it) and the sleep timer, and Up next: the queue, numbered, the track
+playing in bold, which stays in view unless the focus is on the list. OK
+on one plays it, and the queue goes on from there. Up from the buttons
+goes to the scrubber, where Left and Right move 10 s and OK plays or
+pauses, as on Android TV. After two minutes without a key it dims to 30 %,
+to spare the screen, and the next key wakes it (the remote's rest is
+Roku's `TimeSinceLastKeypress`, looked at each second, four times a
+second while dimmed). A long queue is listed 250 tracks at a time, from
 50 before the one playing, the next part as playing nears the end of this
 one: each row is a node the Roku draws, and a playlist holds up to
 5,000. Shuffle plays the other tracks after the one playing in a random
@@ -316,8 +367,8 @@ min, End of this track, and the button says what is left ("Sleep timer:
 23 min left"). In its last 30 s Now Playing says "Pausing in 12 s" and the
 button is Keep listening, which adds the same time again (or lets this
 track play to its end). Then the music pauses until Play, as on the other
-apps; at the end of a track, the next one waits, paused. Stop, or the
-queue's end, turns the timer off.
+apps; at the end of a track, the next one waits, paused. The queue's
+end turns the timer off.
 
 ### The player
 
@@ -644,8 +695,8 @@ remotes offer only Stop. They obey:
   buttons and scrubber do, while other screens show too: previous more
   than 3 s into a track, or on the first, goes back to its start. Music
   stopped from another device or by an administrator stops, as a video
-  does, saying who stopped it over Now Playing, or over whichever screen
-  is on top.
+  does, its queue kept: Now Playing's line says who stopped it (over
+  another screen on top, a message does), and Play goes on.
 - **Live TV:** next and previous, channel up and down through the category
   Up and Down go through, round its ends. It has no pause or seek. Stopped
   from another device or by an administrator (`session_stopped`), it
@@ -719,13 +770,14 @@ fetch them ([API.md](API.md#requests)). An administrator's Roku manages
 them (a manager, below) once its sign-in allows `approvals`; one signed in
 before is offered Sign in, which asks "Sign in again?" first (this TV
 shows a code to link it to the server's address again; Sign in and
-Cancel). The menu
-shows what the profile may do; its number counts what waits: a manager's
-pending and failed requests (red while some failed) and their own news,
-anyone else's news. What an action did, or why it didn't work, shows in
-a toast at the top right, as on the other TVs: "Asked for “Dune”: an
-administrator decides.", or the server's words for one approved as it
-was asked.
+Cancel). As on Android TV, the menu has one way in, for what the
+profile may do: Discover for those who may ask (the requests are at
+its top), else Your requests (a manager's Requests). Its number counts
+what waits: a manager's pending and failed requests (red while some
+failed) and their own news, anyone else's news. What an action did, or
+why it didn't work, shows in a toast at the top right, as on the other
+TVs: "Asked for “Dune”: an administrator decides.", or the server's
+words for one approved as it was asked.
 
 - **Discover**, for those who may ask: a hero for the first trending title
   (its facts, a line of its overview, its main action and Details); when
@@ -876,7 +928,7 @@ then shows it. It is kept on the Roku for each server.
 | `components/MusicPlayer.*` | The music queue on the scene's Audio node |
 | `components/screens/` | One component per screen |
 | `components/shared/` | Screen helpers (`Ui.brs`), title actions (`Titles.brs`) |
-| `components/items/` | Tiles, rows, the player's skip button, the ready-to-watch card |
+| `components/items/` | Tiles (a playlist's mosaic too), rows, a page's message with its Retry, the player's skip button, the ready-to-watch card |
 | `components/tasks/ApiTask` | The only code that talks to the server |
 | `components/tasks/DiscoveryTask` | `pley?` to UDP port 7539 (`apps/server/src/discovery.rs`) |
 | `components/tasks/EventsTask` | The server's event stream, on a socket |

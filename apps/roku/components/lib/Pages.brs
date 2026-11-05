@@ -457,27 +457,81 @@ end function
 
 ' --- Playlists ---
 
-' "12 titles · 3 h 20 min", "Smart · 40 titles": what a playlist holds.
+' What a playlist's page says under its name, as on Android TV: "12 items
+' · 3 h 20 min", a smart one's filter in words after it ("40 items ·
+' Genre: Drama · Unwatched").
 function pagePlaylistLine(playlist as object) as string
-    parts = []
-    if httpString(playlist.smart_filter) <> "" then parts.Push("Smart")
-    count = httpNumber(playlist.item_count, 0)
-    noun = " titles"
-    if httpString(playlist.kind) = "audio" then noun = " tracks"
-    if count = 1 then noun = Left(noun, Len(noun) - 1)
-    parts.Push(urlValue(count) + noun)
+    parts = [pagePlaylistMeta(playlist)]
+    filter = httpString(playlist.smart_filter)
+    if filter <> "" then parts.Append(pageFilterNotes(filter))
+    return parts.Join(" · ")
+end function
+
+' The line over a playlist's name: what it plays, or that a filter fills
+' it.
+function pagePlaylistKindLine(kind as string, smart as boolean) as string
+    if smart then return "Smart playlist"
+    if kind = "audio" then return "Music playlist"
+    return "Video playlist"
+end function
+
+' The picture behind a playlist's page: its first entry's backdrop (an
+' episode's, else its show's), a track's cover; "" without entries.
+function pagePlaylistBackdrop(entries as dynamic, server as string) as string
+    for each entry in httpArray(entries)
+        item = invalid
+        if GetInterface(entry, "ifAssociativeArray") <> invalid then item = httpObject(entry.item)
+        if item <> invalid
+            width = contentBackdropWidth()
+            if contentMusic(httpString(item.kind)) then return contentTileImage(item, server, false, width)
+            url = urlImage(server, item.backdrop_url, width)
+            showId = httpNumber(item.grandparent_id, 0)
+            if url = "" and showId > 0 then url = urlImage(server, "/api/items/" + urlValue(showId) + "/images/backdrop", width)
+            if url = "" then url = contentTileImage(item, server, true, width)
+            return url
+        end if
+    end for
+    return ""
+end function
+
+' "12 items · 3 h 12 min", "1 item": what a playlist holds, as the other
+' apps count it.
+function pagePlaylistMeta(playlist as object) as string
+    count = Int(httpNumber(playlist.item_count, 0))
+    parts = [urlValue(count) + " items"]
+    if count = 1 then parts[0] = "1 item"
     duration = fmtDuration(playlist.duration_ms)
     if duration <> "" then parts.Push(duration)
     return parts.Join(" · ")
 end function
 
-' A playlist as a tile: its first entry's picture, its name and what it
-' holds.
+' A playlist as its square cover in the playlists' grid (PlaylistTile), as
+' on Android TV: images, the pictures of its first four entries, each a
+' quarter of the cover (one to three: the first fills it), its name, and
+' what it holds ("Smart" after it for a smart one).
 function pagePlaylistTile(playlist as object, server as string) as object
-    image = ""
-    artwork = httpArray(playlist.artwork)
-    if artwork.Count() > 0 then image = urlImage(server, artwork[0], contentPosterWidth())
-    return { title: httpSentence(playlist.title), subtitle: pagePlaylistLine(playlist), image: image, wide: false, progress: 0.0, watched: false, itemId: httpNumber(playlist.id, 0), kind: "playlist" }
+    artwork = []
+    for each url in httpArray(playlist.artwork)
+        if httpString(url) <> "" and artwork.Count() < 4 then artwork.Push(url)
+    end for
+    width = pagePlaylistCoverWidth()
+    if artwork.Count() = 4 then width = Int(width / 2)
+    images = []
+    for each url in artwork
+        image = urlImage(server, url, width)
+        if image <> "" then images.Push(image)
+    end for
+    if images.Count() > 0 and images.Count() < 4 then images = [urlImage(server, artwork[0], pagePlaylistCoverWidth())]
+    first = ""
+    if images.Count() > 0 then first = images[0]
+    subtitle = pagePlaylistMeta(playlist)
+    if httpString(playlist.smart_filter) <> "" then subtitle = subtitle + " · Smart"
+    return { title: httpSentence(playlist.title), subtitle: subtitle, image: first, images: images, square: true, wide: false, progress: 0.0, watched: false, itemId: httpNumber(playlist.id, 0), kind: "playlist" }
+end function
+
+' A playlist's cover in the grid, five across.
+function pagePlaylistCoverWidth() as integer
+    return 320
 end function
 
 function pagePlaylistTiles(playlists as dynamic, server as string) as object
