@@ -252,6 +252,63 @@ sub test_live_cards_and_list_items()
     tkEqual(liveListItem(channels[2], 1500, false).line, "")
 end sub
 
+sub test_live_programme_picture_and_rating()
+    news = liveChannels(liveSample(), "")[0]
+    tkEqual(news.after.rating, "TV-PG")
+    tkEqual(news.now.rating, "")
+    tkEqual(news.now.image, "", "none")
+    tkEqual(liveProgram({ start: 1, stop: 2, title: "x", image: "/api/live/channels/1/programs/1/image" }).image, "/api/live/channels/1/programs/1/image")
+    tkEqual(liveProgramImage("https://elsewhere.example/a.jpg"), "", "an address elsewhere would get the token")
+    tkEqual(liveProgramImage("//elsewhere.example/a.jpg"), "")
+    tkEqual(liveProgramImage("/a" + Chr(10) + "b"), "", "a control character")
+    tkEqual(liveProgramImage(String(201, "a")), "")
+    tkEqual(liveProgramImage(7), "")
+end sub
+
+sub test_live_days()
+    ' Noon UTC on 1 January 2026, a Thursday; the zone's seconds added.
+    noon = 1767268800
+    tkEqual(liveDay(noon, noon, 0), "Today")
+    tkEqual(liveDay(noon + 86400, noon, 0), "Tomorrow")
+    tkEqual(liveDay(noon - 86400, noon, 0), "Yesterday")
+    tkEqual(liveDay(noon + 2 * 86400, noon, 0), "Saturday")
+    tkEqual(liveDay(noon + 12 * 3600 + 60, noon, 0), "Tomorrow", "past midnight")
+    tkEqual(liveDay(noon + 12 * 3600 + 60, noon, -3600), "Today", "an hour behind")
+end sub
+
+sub test_live_programme_details()
+    channels = liveChannels(liveSample(), "")
+    news = channels[0]
+    on = liveDetails(news, news.now, 1500, false, 0)
+    tkEqual(on.heading, "101  Pley News HD")
+    tkEqual(on.title, "Morning Briefing")
+    tkEqual(on.episode, "S1 E7 · Part 7")
+    tkEqual(on.when, liveDay(1000, 1500, 0) + " · " + liveSpan(news.now, false))
+    tkTrue(on.airing)
+    tkEqual(on.badges, [{ text: "ON NOW", live: true }])
+    tkEqual(on.progress, 0.5)
+    tkEqual(on.left, "8 min left")
+    tkEqual(on.text, "Everything you need to know.")
+    tkTrue(on.said)
+    tkFalse(on.ended)
+    tkEqual(on.watch, "Watch now")
+    tkEqual(on.favorite, "Add to favourites")
+    later = liveDetails(news, news.after, 1500, false, 0)
+    tkFalse(later.airing)
+    tkEqual(later.badges, [{ text: "NEW", live: false }])
+    tkEqual(later.rating, "TV-PG")
+    tkEqual(later.text, "The guide says nothing more of it.")
+    tkFalse(later.said)
+    tkEqual(later.watch, "Watch channel", "a programme not on now")
+    tkTrue(liveDetails(news, news.now, 2500, false, 0).ended, "It has ended.")
+    sport = liveDetails(channels[1], channels[1].now, 1500, false, 0)
+    tkEqual(sport.badges, [{ text: "ON NOW", live: true }, { text: "LIVE", live: true }])
+    tkEqual(sport.favorite, "Remove from favourites")
+    alone = liveDetails(channels[2], invalid, 1500, false, 0)
+    tkEqual(alone.title, "")
+    tkEqual(alone.watch, "Watch now", "the channel alone")
+end sub
+
 sub test_live_favourite_refused()
     tkEqual(liveFavoriteFailed("Live TV isn't open to this account."), "The favourite wasn't saved: Live TV isn't open to this account.")
     tkEqual(liveFavoriteFailed(invalid), "The favourite wasn't saved.", "without the server's words")

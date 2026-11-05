@@ -27,6 +27,24 @@ sub init()
     m.retry = m.top.findNode("retry")
     m.clock = m.top.findNode("clock")
     m.hint = m.top.findNode("hint")
+    m.detailsGroup = m.top.findNode("details")
+    m.detailsLogo = m.top.findNode("detailsLogo")
+    m.detailsInitials = m.top.findNode("detailsInitials")
+    m.detailsChannel = m.top.findNode("detailsChannel")
+    m.detailsPicture = m.top.findNode("detailsPicture")
+    m.detailsTitle = m.top.findNode("detailsTitle")
+    m.detailsEpisode = m.top.findNode("detailsEpisode")
+    m.detailsWhen = m.top.findNode("detailsWhen")
+    m.detailsBadges = m.top.findNode("detailsBadges")
+    m.detailsTrack = m.top.findNode("detailsTrack")
+    m.detailsFill = m.top.findNode("detailsFill")
+    m.detailsLeft = m.top.findNode("detailsLeft")
+    m.detailsText = m.top.findNode("detailsText")
+    m.detailsEnded = m.top.findNode("detailsEnded")
+    m.detailsButtons = m.top.findNode("detailsButtons")
+    ' The programme the panel shows ({ channel, program, back: what had
+    ' the focus }), or invalid.
+    m.details = invalid
     m.started = false
     m.twelve = CreateObject("roDeviceInfo").GetClockFormat() <> "24h"
     m.view = { tab: "guide", category: "all" }
@@ -85,6 +103,8 @@ sub init()
     m.guide.observeField("leftEdgeTargetTime", "onLeftEdge")
     m.cards.observeField("itemSelected", "onCardSelected")
     m.cards.observeField("itemFocused", "onCardFocused")
+    m.detailsButtons.observeField("buttonSelected", "onDetailsButton")
+    m.detailsLogo.observeField("loadStatus", "onDetailsLogo")
     m.clock.observeField("fire", "onClock")
     m.top.observeField("active", "onActive")
 end sub
@@ -93,6 +113,8 @@ sub onActive()
     m.clock.control = "stop"
     if m.top.active then m.clock.control = "start"
     if not m.top.active
+        ' Covered (a cast, say): the panel goes, the focus back where it was.
+        closeDetails()
         m.lastFocus = m.rail
         if m.tabs.isInFocusChain() then m.lastFocus = m.tabs
         if m.searchRow.isInFocusChain() then m.lastFocus = m.searchRow
@@ -565,7 +587,7 @@ sub onGuide(event as object)
     m.guide.visible = true
     m.info.visible = true
     showCount()
-    m.hint.text = "OK: watch   ·   Options (*): favourite   ·   Rewind and fast forward: earlier and later   ·   Play: now   ·   Replay: search"
+    m.hint.text = "OK: watch   ·   Options (*): details   ·   Rewind and fast forward: earlier and later   ·   Play: now   ·   Replay: search"
     showProgram()
     if m.toContent then focusContent()
 end sub
@@ -726,34 +748,13 @@ end function
 ' "Tomorrow 8:00 PM – 9:00 PM", the day left out for today.
 function daySpan(p as object, now as integer) as string
     span = liveSpan(p, m.twelve)
-    day = dayLabel(p.start, now)
-    if day <> "" then span = day + " " + span
+    day = liveDay(p.start, now, fmtZoneSeconds())
+    if day <> "Today" then span = day + " " + span
     return span
 end function
 
-' "Tomorrow", "Yesterday", a weekday, or "" for today, in the Roku's
-' time zone.
-function dayLabel(seconds as integer, now as integer) as string
-    at = localDay(seconds)
-    today = localDay(now)
-    if at = today then return ""
-    if at = today + 1 then return "Tomorrow"
-    if at = today - 1 then return "Yesterday"
-    when = CreateObject("roDateTime")
-    when.FromSeconds(seconds)
-    when.ToLocalTime()
-    return when.GetWeekday()
-end function
-
-function localDay(seconds as integer) as integer
-    when = CreateObject("roDateTime")
-    when.FromSeconds(seconds)
-    when.ToLocalTime()
-    return Int(when.AsSeconds() / 86400)
-end function
-
 ' OK on a programme: one on now (or time without a guide) watches the
-' channel; another says what it is, with Watch.
+' channel; another shows its details, with Watch.
 sub onProgramSelected()
     focused = focusedGuide()
     if focused = invalid then return
@@ -762,7 +763,7 @@ sub onProgramSelected()
     if program <> invalid and program.id <> "gap"
         p = programTimes(program)
         if p.start > now or p.ends <= now
-            channelOptions(focused.channel, programOf(program))
+            showDetails(focused.channel, programOf(program))
             return
         end if
     end if
@@ -839,7 +840,7 @@ sub onCards(event as object)
     m.cards.visible = true
     m.guide.visible = false
     m.info.visible = false
-    m.hint.text = "OK: watch   ·   Options (*): favourite   ·   Replay: search"
+    m.hint.text = "OK: watch   ·   Options (*): details   ·   Replay: search"
     showCount()
     if m.toContent then focusContent()
 end sub
@@ -875,6 +876,7 @@ end function
 ' guide's programmes are fetched hours ahead).
 sub onClock()
     if m.guide.visible then showProgram()
+    if m.details <> invalid then drawDetails()
     if not m.cards.visible or m.cards.content = invalid then return
     now = nowSeconds()
     shown = cardsInView()
@@ -925,12 +927,18 @@ sub watch(channel as object)
 end sub
 
 ' A programme of the guide (its ContentNode) as Live.brs keeps one ({
-' start, ends, title, description }), or invalid for time without a guide.
+' start, ends, title, line, description, live, isNew, rating, image }), or
+' invalid for time without a guide.
 function programOf(program as dynamic) as dynamic
     if program = invalid or program.id = "gap" then return invalid
     p = programTimes(program)
     p.title = program.title
+    p.line = program.shortDescriptionLine1
     p.description = program.description
+    p.live = program.isLive = true
+    p.isNew = program.isNew = true
+    p.rating = httpString(program.rating)
+    p.image = httpString(program.picture)
     return p
 end function
 
@@ -944,39 +952,150 @@ function programInFocus(channel as object) as dynamic
 end function
 
 ' The Options key on a programme or a card (or OK on a programme not on
-' now): the channel's name, the programme's details (p, as Live.brs keeps
-' one, or invalid), Watch, and Add to or Remove from favourites.
-sub channelOptions(channel as object, p as dynamic)
-    m.optionsChannel = channel
-    buttons = ["Watch " + channel.name]
-    if channel.favorite
-        buttons.Push("Remove from favourites")
-    else
-        buttons.Push("Add to favourites")
-    end if
-    buttons.Push("Cancel")
-    dialog = CreateObject("roSGNode", "StandardMessageDialog")
-    dialog.title = liveTitle(channel)
-    if p <> invalid
-        lines = [p.title, daySpan(p, nowSeconds())]
-        if p.description <> "" then lines.Push(p.description)
-        dialog.message = lines
-    end if
-    dialog.buttons = buttons
-    dialog.observeField("buttonSelected", "onOptionChosen")
-    m.top.getScene().dialog = dialog
+' now): the programme's details in the panel at the right (p, as Live.brs
+' keeps one, or invalid for the channel alone), with Watch and the
+' favourite, as Android's side panel. Back or Left closes it, the focus
+' going back where it was.
+sub showDetails(channel as object, p as dynamic)
+    m.details = { channel: channel, program: p, back: m.guide }
+    if m.cards.isInFocusChain() then m.details.back = m.cards
+    ' The scene's agent carries the token; it changes with each refresh.
+    agent = m.top.getScene().getHttpAgent()
+    m.detailsLogo.setHttpAgent(agent)
+    m.detailsLogo.uri = channel.logo
+    m.detailsInitials.text = channel.name
+    onDetailsLogo()
+    m.detailsPicture.setHttpAgent(agent)
+    m.detailsPicture.uri = ""
+    if p <> invalid and p.image <> "" then m.detailsPicture.uri = urlImage(m.global.session.server, p.image, 576)
+    drawDetails()
+    detailsButtons(0)
+    m.detailsGroup.visible = true
+    m.detailsButtons.setFocus(true)
 end sub
 
-sub onOptionChosen(event as object)
-    chosen = event.getData()
-    channel = m.optionsChannel
-    m.optionsChannel = invalid
-    uiCloseDialog()
-    if channel = invalid then return
-    if chosen = 0
+' The panel's words, placed from the top: what the guide says of the
+' programme gets the lines left above the buttons, one at least, six at
+' most. Drawn again as the clock moves (how far it is, and once it ends).
+sub drawDetails()
+    d = liveDetails(m.details.channel, m.details.program, nowSeconds(), m.twelve, fmtZoneSeconds())
+    m.detailsChannel.text = d.heading
+    x = 1248
+    y = 128
+    m.detailsPicture.visible = m.detailsPicture.uri <> ""
+    if m.detailsPicture.visible
+        m.detailsPicture.translation = [x, y + 28]
+        y = y + 28 + 324
+    end if
+    shown = m.details.program <> invalid
+    for each label in [m.detailsTitle, m.detailsEpisode, m.detailsWhen, m.detailsText]
+        label.visible = shown
+    end for
+    m.detailsBadges.visible = shown
+    m.detailsTrack.visible = d.airing
+    m.detailsFill.visible = d.airing
+    m.detailsLeft.visible = d.airing
+    m.detailsEnded.visible = d.ended
+    if not shown then return
+    y = y + 28
+    m.detailsTitle.text = d.title
+    m.detailsTitle.translation = [x, y]
+    y = y + m.detailsTitle.boundingRect().height
+    m.detailsEpisode.text = d.episode
+    m.detailsEpisode.visible = d.episode <> ""
+    if m.detailsEpisode.visible
+        m.detailsEpisode.translation = [x, y + 4]
+        y = y + 4 + m.detailsEpisode.boundingRect().height
+    end if
+    m.detailsWhen.text = d.when
+    m.detailsWhen.translation = [x, y + 16]
+    y = y + 16 + m.detailsWhen.boundingRect().height
+    drawDetailsBadges(d)
+    if m.detailsBadges.getChildCount() > 0
+        m.detailsBadges.translation = [x, y + 12]
+        y = y + 12 + m.detailsBadges.boundingRect().height
+    end if
+    if d.airing
+        m.detailsLeft.text = d.left
+        width = m.detailsLeft.boundingRect().width
+        track = 576 - width - 20
+        m.detailsLeft.translation = [x + track + 20, y + 20]
+        lineHeight = m.detailsLeft.boundingRect().height
+        m.detailsTrack.translation = [x, y + 20 + Int((lineHeight - 6) / 2)]
+        m.detailsTrack.width = track
+        m.detailsFill.translation = m.detailsTrack.translation
+        m.detailsFill.width = Int(track * d.progress)
+        y = y + 20 + lineHeight
+    end if
+    m.detailsText.text = d.text
+    m.detailsText.color = "0xEBEBEBFF"
+    if not d.said then m.detailsText.color = "0x8B95A5FF"
+    m.detailsText.translation = [x, y + 20]
+    y = y + 20
+    ' Above the buttons, with "It has ended." under the text once it has.
+    bottom = 852
+    if d.ended then bottom = bottom - 12 - m.detailsEnded.boundingRect().height
+    lines = 6
+    m.detailsText.maxLines = lines
+    while lines > 1 and y + m.detailsText.boundingRect().height > bottom
+        lines = lines - 1
+        m.detailsText.maxLines = lines
+    end while
+    if d.ended then m.detailsEnded.translation = [x, y + m.detailsText.boundingRect().height + 12]
+end sub
+
+' On now, Live and New, then the rating, a label each after the day and
+' times.
+sub drawDetailsBadges(d as object)
+    m.detailsBadges.removeChildrenIndex(m.detailsBadges.getChildCount(), 0)
+    for each badge in d.badges
+        label = m.detailsBadges.createChild("Label")
+        label.font = "font:SmallestBoldSystemFont"
+        label.text = badge.text
+        label.color = "0x7DD3FCFF"
+        if badge.live then label.color = "0xEB6B70FF"
+    end for
+    if d.rating <> ""
+        label = m.detailsBadges.createChild("Label")
+        label.font = "font:SmallestBoldSystemFont"
+        label.text = d.rating
+        label.color = "0xA1A9B6FF"
+    end if
+end sub
+
+' Watch now (Watch channel for a programme not on now) and the favourite,
+' the focus on the one at at.
+sub detailsButtons(at as integer)
+    d = liveDetails(m.details.channel, m.details.program, nowSeconds(), m.twelve, 0)
+    m.detailsButtons.buttons = [d.watch, d.favorite]
+    m.detailsButtons.focusButton = at
+end sub
+
+sub onDetailsLogo()
+    m.detailsInitials.visible = m.detailsLogo.uri = "" or m.detailsLogo.loadStatus = "failed"
+end sub
+
+' Watch closes the panel and watches; the favourite changes in place.
+sub onDetailsButton(event as object)
+    if m.details = invalid then return
+    channel = m.details.channel
+    if event.getData() = 0
+        closeDetails()
         watch(channel)
-    else if chosen = 1
+    else
         toggleFavorite(channel)
+    end if
+end sub
+
+sub closeDetails()
+    if m.details = invalid then return
+    back = m.details.back
+    m.details = invalid
+    m.detailsGroup.visible = false
+    if back.visible
+        back.setFocus(true)
+    else
+        m.rail.setFocus(true)
     end if
 end sub
 
@@ -991,9 +1110,14 @@ sub toggleFavorite(channel as object)
     uiRequest({ method: method, path: "/api/live/channels/" + urlValue(channel.id) + "/favorite", channelId: channel.id, favorite: favorite }, "onFavorite")
 end sub
 
-' The channel's star where Live TV shows it: its card, and in the guide
-' its name where no logo shows (Live.brs's liveGuideName).
+' The channel's star where Live TV shows it: its card, in the guide its
+' name where no logo shows (Live.brs's liveGuideName), and the panel's
+' button, which keeps the focus.
 sub markFavorite(id as integer, favorite as boolean)
+    if m.details <> invalid and m.details.channel.id = id
+        m.details.channel.favorite = favorite
+        detailsButtons(m.detailsButtons.buttonFocused)
+    end if
     if m.page <> invalid
         at = liveIndexOf(m.page.channels, id)
         if at >= 0
@@ -1041,6 +1165,12 @@ end sub
 ' on a programme or a card: the channel's options.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+    ' The panel keeps the focus until Back, Left or the Options key
+    ' closes it.
+    if m.details <> invalid
+        if key = "back" or key = "left" or key = "options" then closeDetails()
+        return true
+    end if
     if key = "back" and m.guide.isInFocusChain() and backToNow() then return true
     ' Then a search back to the category before.
     if key = "back" and searching()
@@ -1104,7 +1234,7 @@ function onKeyEvent(key as string, press as boolean) as boolean
     end if
     if key = "options" and content
         focused = channelInFocus()
-        if focused <> invalid then channelOptions(focused, programInFocus(focused))
+        if focused <> invalid then showDetails(focused, programInFocus(focused))
         return true
     end if
     return false

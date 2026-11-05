@@ -352,8 +352,9 @@ end function
 ' --- Channels ---
 
 ' A programme as the screens keep it: { start, ends, title, line,
-' description, badges, live, isNew }, or invalid for none (or one that
-' ends before it starts).
+' description, badges, live, isNew, rating, image (its picture's path on
+' the server, or "") }, or invalid for none (or one that ends before it
+' starts).
 function liveProgram(raw as dynamic) as dynamic
     p = httpObject(raw)
     if p = invalid then return invalid
@@ -370,7 +371,7 @@ function liveProgram(raw as dynamic) as dynamic
     badges = []
     if httpTrue(p.is_live) then badges.Push("Live")
     if httpTrue(p.is_new) then badges.Push("New")
-    rating = httpSentence(p.rating)
+    rating = httpClean(p.rating, 24, false)
     if rating <> "" then badges.Push(rating)
     return {
         start: start,
@@ -380,8 +381,21 @@ function liveProgram(raw as dynamic) as dynamic
         description: httpClean(p.description, 600, false),
         badges: badges.Join(" · "),
         live: httpTrue(p.is_live),
-        isNew: httpTrue(p.is_new)
+        isNew: httpTrue(p.is_new),
+        rating: rating,
+        image: liveProgramImage(p.image)
     }
+end function
+
+' A programme's picture: its path on the server (GET
+' /api/live/channels/{id}/programs/{start}/image), or "" for none, or for
+' an address elsewhere, which would get the scene's token with it.
+function liveProgramImage(path as dynamic) as string
+    text = httpString(path)
+    if Left(text, 1) <> "/" or Left(text, 2) = "//" or Instr(1, text, "\") > 0 then return ""
+    ' A line of at most 200 characters, without control or hidden ones.
+    if text <> httpSentence(text) then return ""
+    return text
 end function
 
 ' A channel as the screens keep it: { id, name, number, group, logo,
@@ -516,6 +530,52 @@ end function
 ' "8:00 PM – 9:30 PM".
 function liveSpan(p as object, twelve as boolean) as string
     return liveClock(p.start, twelve) + " – " + liveClock(p.ends, twelve)
+end function
+
+' The day of seconds as Live TV says it: "Today", "Tomorrow", "Yesterday",
+' else its weekday, in the Roku's time zone (zone: Format.brs's
+' fmtZoneSeconds).
+function liveDay(seconds as integer, now as integer, zone as integer) as string
+    day = (seconds + zone) \ 86400
+    today = (now + zone) \ 86400
+    if day = today then return "Today"
+    if day = today + 1 then return "Tomorrow"
+    if day = today - 1 then return "Yesterday"
+    when = CreateObject("roDateTime")
+    when.FromSeconds(seconds + zone)
+    return when.GetWeekday()
+end function
+
+' A programme's details as the panel at the right shows them (Android's
+' ProgramPanel), for channel and p (as liveProgram keeps one, invalid for
+' none): { heading, title, episode, when ("Today · 8:00 PM – 9:00 PM"),
+' badges ([{ text, live }]: On now, Live, New), rating, airing, progress
+' and left (while it airs), text (what the guide says, or that it says
+' nothing more), said, ended, watch and favorite (the buttons' words) }.
+function liveDetails(channel as object, p as dynamic, now as integer, twelve as boolean, zone as integer) as object
+    out = { heading: liveTitle(channel), title: "", episode: "", when: "", badges: [], rating: "", airing: false, progress: 0.0, left: "", text: "", said: false, ended: false, watch: "Watch now", favorite: "Add to favourites" }
+    if channel.favorite then out.favorite = "Remove from favourites"
+    if p = invalid then return out
+    out.title = p.title
+    out.episode = p.line
+    out.when = liveDay(p.start, now, zone) + " · " + liveSpan(p, twelve)
+    out.airing = p.start <= now and p.ends > now
+    if out.airing
+        out.badges.Push({ text: "ON NOW", live: true })
+        out.progress = liveProgress(p, now)
+        out.left = liveTimeLeft(p, now)
+    else
+        ' Later, or over: the channel, not the programme.
+        out.watch = "Watch channel"
+    end if
+    if p.live then out.badges.Push({ text: "LIVE", live: true })
+    if p.isNew then out.badges.Push({ text: "NEW", live: false })
+    out.rating = p.rating
+    out.said = p.description <> ""
+    out.text = p.description
+    if not out.said then out.text = "The guide says nothing more of it."
+    out.ended = p.ends <= now
+    return out
 end function
 
 ' Where a channel is in channels, or -1.
@@ -695,7 +755,11 @@ function liveGuideRows(channels as object, kept as object, from as integer, upto
                 playDuration: p.ends - p.start,
                 description: p.description,
                 shortDescriptionLine1: p.line,
-                shortDescriptionLine2: p.badges
+                shortDescriptionLine2: p.badges,
+                isLive: p.live,
+                isNew: p.isNew,
+                rating: p.rating,
+                picture: p.image
             })
             if p.ends > at then at = p.ends
         end for
@@ -732,7 +796,7 @@ function liveGuideGaps(from as integer, upto as integer, title as string) as obj
 end function
 
 function liveGuideGap(from as integer, upto as integer, title as string) as object
-    return { id: "gap", title: title, playStart: from, playDuration: upto - from, description: "", shortDescriptionLine1: "", shortDescriptionLine2: "" }
+    return { id: "gap", title: title, playStart: from, playDuration: upto - from, description: "", shortDescriptionLine1: "", shortDescriptionLine2: "", isLive: false, isNew: false, rating: "", picture: "" }
 end function
 
 ' The part of the guide to fetch for the time shown (left edge and the

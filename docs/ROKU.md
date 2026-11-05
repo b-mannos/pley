@@ -391,16 +391,22 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
 - **Guide:** Roku's TimeGrid, 50 channels by two hours. Rewind and fast
   forward move two hours, Play goes back to now. OK on what's on watches
   the channel; on a later programme it shows its details, as Options (\*)
-  does on any programme (on a card, what's on), with Watch and the
-  favourite. Up and Down past a page's ends bring the page before or
-  after; Up from the category's first channel goes to the Guide and
-  Channels tabs, and Down stops at its last, as on Android (the TimeGrid
-  goes round its rows, so at the category's ends the focus is put back at
-  once). Time the guide says nothing of (a channel without a guide) is cut
-  at the half hours, so Left and Right go through it half an hour at a
-  time, as on Android. TimeGrid draws a programme's title alone, and no
-  time over its now line: Android's cells show their times too, and the
-  time now sits on its line.
+  does on any programme (on a card, what's on). Up and Down past a page's
+  ends bring the page before or after; Up from the category's first
+  channel goes to the Guide and Channels tabs, and Down stops at its last,
+  as on Android (the TimeGrid goes round its rows, so at the category's
+  ends the focus is put back at once). Time the guide says nothing of (a
+  channel without a guide) is cut at the half hours, so Left and Right go
+  through it half an hour at a time, as on Android. TimeGrid draws a
+  programme's title alone, and no time over its now line: Android's cells
+  show their times too, and the time now sits on its line.
+- **A programme's details** show in a panel at the right, as Android's
+  side panel: the channel, the programme's picture, title, episode, day
+  and times with On now, Live and New and its rating, a bar of how far it
+  is and the time left while it airs, then what the guide says of it (or
+  that it says nothing more, and "It has ended." once it has). Under them
+  are Watch now (Watch channel for a programme not on now) and the
+  favourite, which changes in place. Back or Left closes it.
 - **The guide's channels** are TimeGrid's own column: a channel's logo,
   or where it has none its number and name, a star before them for a
   favourite; Android's cell shows the logo, the number and the name
@@ -418,10 +424,10 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
   asked for again, and in the player the channel playing
   (`GET /api/live/channels/{id}`), each at most once a minute. The guide's
   programmes come six hours ahead, so the guide itself needs nothing new.
-- **Back** goes up a step at a time: the guide back to now (when another
-  time shows, or a programme not on now has focus), a search back to the
-  category before, the guide or the cards to the categories, then out of
-  Live TV.
+- **Back** goes up a step at a time: a programme's details closed, the
+  guide back to now (when another time shows, or a programme not on now
+  has focus), a search back to the category before, the guide or the
+  cards to the categories, then out of Live TV.
 - **The player** tunes with `POST …/watch`, waits for the server's live HLS
   playlist (up to 50 s), then plays it with `Live = true`. Up and Down
   change channel, tuning 0.7 s after the last press: a Roku starts its
