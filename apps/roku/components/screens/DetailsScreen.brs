@@ -270,7 +270,7 @@ end sub
 ' The rows there are, in their order; the focus stays on its row.
 sub showRows()
     keys = []
-    for each key in ["seasons", "credits", "extras", "related", "collections"]
+    for each key in ["seasons", "extras", "credits", "related", "collections"]
         if m.rowNodes.DoesExist(key) then keys.Push(key)
     end for
     if keys.Count() = 0 or FormatJson(keys) = FormatJson(m.rowKeys) then return

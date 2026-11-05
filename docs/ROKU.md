@@ -116,6 +116,10 @@ keeps above the rows: past six buttons the summary gives up lines, as it
 does for the lines over it, and the tagline goes when the summary would
 keep fewer than two.
 
+The rows under the buttons are in Android TV's order: Extras, then the
+people, titled by who is there (Cast, Crew or Cast & Crew; an episode's
+Guest Stars), More like this and the collections the title is part of.
+
 - **Audio and subtitles** (a movie or an episode with several files, or
   whose file has two audio tracks or more, or subtitles):
   - Version, for several files: one line each ("Director's Cut · 4K ·

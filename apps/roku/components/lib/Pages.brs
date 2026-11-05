@@ -88,14 +88,33 @@ function pageExtras(detail as object, server as string) as object
 end function
 
 ' The rows under a title's details that come with it: [{ key, title,
-' wide, tiles }], cast and crew then extras, rows without tiles left out.
+' wide, tiles }], extras then cast and crew, as on Android TV, rows
+' without tiles left out.
 function pageDetailRows(detail as object, server as string) as object
     rows = []
-    credits = pageCredits(detail, server)
-    if credits.Count() > 0 then rows.Push({ key: "credits", title: "Cast & crew", wide: false, tiles: credits })
     extras = pageExtras(detail, server)
     if extras.Count() > 0 then rows.Push({ key: "extras", title: "Extras", wide: true, tiles: extras })
+    credits = pageCredits(detail, server)
+    if credits.Count() > 0 then rows.Push({ key: "credits", title: pageCreditsTitle(detail), wide: false, tiles: credits })
     return rows
+end function
+
+' The cast and crew row's title, by what it holds, as Android TV's: "Cast",
+' "Crew" or "Cast & Crew"; an episode's cast are its "Guest Stars".
+function pageCreditsTitle(detail as object) as string
+    cast = false
+    for each credit in httpArray(detail.cast)
+        if GetInterface(credit, "ifAssociativeArray") <> invalid and httpNumber(credit.id, 0) > 0 then cast = true
+    end for
+    crew = false
+    for each credit in httpArray(detail.crew)
+        if GetInterface(credit, "ifAssociativeArray") <> invalid and httpNumber(credit.id, 0) > 0 and pageRoleLabel(httpString(credit.role)) <> "" then crew = true
+    end for
+    actors = "Cast"
+    if httpString(detail.kind) = "episode" then actors = "Guest Stars"
+    if not crew then return actors
+    if not cast then return "Crew"
+    return actors + " & Crew"
 end function
 
 ' A collection as a tile: its poster (the server's own picture of it when

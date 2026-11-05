@@ -40,6 +40,21 @@ sub test_pages_extras_say_what_they_are()
     tkEqual(rows[0].key, "extras")
 end sub
 
+sub test_pages_cast_row_is_titled_by_what_it_holds_after_extras()
+    actor = { id: 7, name: "Amy Adams", role: "actor", character: "Louise Banks" }
+    director = { id: 9, name: "Denis Villeneuve", role: "director" }
+    both = { kind: "movie", cast: [actor], crew: [director], extras: [{ id: 40, kind: "extra", extra_type: "trailer" }] }
+    rows = pageDetailRows(both, "http://nas:7539")
+    tkEqual(rows[0].key, "extras", "Extras first, as on Android TV")
+    tkEqual(rows[1].key, "credits")
+    tkEqual(rows[1].title, "Cast & Crew")
+    tkEqual(pageCreditsTitle({ kind: "movie", cast: [actor], crew: [] }), "Cast")
+    tkEqual(pageCreditsTitle({ kind: "movie", cast: [], crew: [director] }), "Crew")
+    tkEqual(pageCreditsTitle({ kind: "episode", cast: [actor], crew: [] }), "Guest Stars")
+    tkEqual(pageCreditsTitle({ kind: "episode", cast: [actor], crew: [director] }), "Guest Stars & Crew")
+    tkEqual(pageCreditsTitle({ kind: "movie", cast: [actor], crew: [{ id: 10, name: "Someone", role: "gaffer" }] }), "Cast", "a role the row doesn't show")
+end sub
+
 sub test_pages_person_has_a_row_per_role()
     person = { id: 7, name: "Amy Adams", photo_url: "/api/people/7/photo?v=1", credits: [
         { item: { id: 99, kind: "show", title: "Sharp Objects", year: 2018 }, roles: [{ role: "actor", character: "Camille", episodes: 8 }, { role: "producer" }] },
