@@ -22,6 +22,7 @@ sub init()
     m.cardInitials = m.top.findNode("cardInitials")
     m.cardLogo = m.top.findNode("cardLogo")
     m.tuning = m.top.findNode("tuning")
+    m.cardKind = m.top.findNode("cardKind")
     m.cardTitle = m.top.findNode("cardTitle")
     m.cardLine = m.top.findNode("cardLine")
     m.banner = m.top.findNode("banner")
@@ -922,18 +923,13 @@ end sub
 
 ' The channel's logo (or its name) in the middle, over black, the spinner
 ' under it while it tunes; over a channel without pictures ("radio"),
-' what's on instead.
+' "Sound only" and what's on instead (Live.brs's liveTuningCard).
 sub showCard(channel as object, kind as string)
-    m.cardTitle.text = liveTitle(channel)
-    on = liveOnNow(channel, nowSeconds())
-    line = "Tuning…"
-    if kind = "radio"
-        line = "Radio"
-        if on <> invalid then line = on.title
-    else if on <> invalid
-        line = on.title
-    end if
-    m.cardLine.text = line
+    words = liveTuningCard(channel, kind = "radio", nowSeconds())
+    m.cardKind.text = words.kind
+    m.cardKind.visible = words.kind <> ""
+    m.cardTitle.text = words.title
+    m.cardLine.text = words.line
     m.cardInitials.text = channel.name
     ' The scene's agent carries the token; it changes with each refresh.
     m.cardLogo.setHttpAgent(m.top.getScene().getHttpAgent())

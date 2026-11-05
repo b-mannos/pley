@@ -477,7 +477,9 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
   `410` there stops it too. Either way the card says "Live TV stopped"
   with the server's words, and Watch again in place of Try again. Taken
   while Up or Down changes channel, the change goes on, with no card.
-- **Radio:** a channel with no picture keeps its card with what's on.
+- **Radio:** a channel with no picture (3 s after it plays, the Video
+  node says it has audio and no video) keeps its card, as on Android: its
+  logo, "Sound only", and what's on.
 
 ### Remote control
 

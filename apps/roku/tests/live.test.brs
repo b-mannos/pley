@@ -238,6 +238,14 @@ function liveSamplePage(offset as integer, count as integer, total as integer) a
     return { total: total, offset: offset, channels: channels }
 end function
 
+sub test_live_tuning_and_radio_cards()
+    channels = liveChannels(liveSample(), "")
+    tkEqual(liveTuningCard(channels[0], false, 1500), { kind: "", title: "101  Pley News HD", line: "Morning Briefing" })
+    tkEqual(liveTuningCard(channels[2], false, 1500).line, "Tuning…", "nothing in the guide")
+    tkEqual(liveTuningCard(channels[0], true, 1500), { kind: "Sound only", title: "Morning Briefing", line: "" }, "radio: its logo, Sound only and what's on")
+    tkEqual(liveTuningCard(channels[2], true, 1500), { kind: "Sound only", title: "", line: "" })
+end sub
+
 sub test_live_zapping_pages_round_the_ends()
     one = liveSamplePage(0, 3, 3)
     tkEqual(liveZap(one, 1, 1).channel.id, 2)

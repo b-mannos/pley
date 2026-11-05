@@ -636,6 +636,22 @@ function liveZap(page as object, id as dynamic, by as integer) as dynamic
     return { offset: ((pageNo + 1) mod pages) * size, last: false }
 end function
 
+' What the player says over black under a channel's logo ({ kind, title,
+' line }), as Android's: while it tunes, its number and name, then what's
+' on (or "Tuning…"); a channel with sound only (radio), "Sound only", then
+' what's on, if the guide says.
+function liveTuningCard(channel as object, radio as boolean, now as integer) as object
+    on = liveOnNow(channel, now)
+    if radio
+        title = ""
+        if on <> invalid then title = on.title
+        return { kind: "Sound only", title: title, line: "" }
+    end if
+    line = "Tuning…"
+    if on <> invalid then line = on.title
+    return { kind: "", title: liveTitle(channel), line: line }
+end function
+
 ' The count of channels picked, after a tuning: the list, Watch again or
 ' the remote's pick counts, so a step waiting for a page can tell a
 ' channel was chosen meanwhile, the same one again too. A tuning that up

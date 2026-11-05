@@ -47,6 +47,8 @@
             <Label id="cardInitials" translation="[780, 280]" width="360" height="180" horizAlign="center" vertAlign="center" wrap="true" maxLines="2" color="0xA1A9B6FF" font="font:MediumBoldSystemFont" />
             <Poster id="cardLogo" translation="[808, 300]" width="304" height="140" loadWidth="304" loadHeight="140" loadDisplayMode="scaleToFit" />
             <BusySpinner id="tuning" translation="[928, 492]" />
+            <!-- Radio: "Sound only" where the spinner was. -->
+            <Label id="cardKind" translation="[160, 496]" width="1600" horizAlign="center" color="0xA1A9B6FF" font="font:SmallSystemFont" visible="false" />
             <Label id="cardTitle" translation="[160, 580]" width="1600" horizAlign="center" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
             <Label id="cardLine" translation="[160, 646]" width="1600" horizAlign="center" color="0xA1A9B6FF" font="font:SmallSystemFont" />
         </Group>
