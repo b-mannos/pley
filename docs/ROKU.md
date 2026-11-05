@@ -378,18 +378,24 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
 - **Paging:** channels come 50 at a time, and the guide only for those 50
   (`GET /api/live/guide?ids=`). A page of channels or a part of the guide
   that didn't load is asked for again once 10 s have passed, as the list
-  moves (in the player, as the list moves or Up or Down is pressed); with
-  nothing to show, the screen says why, with Try again.
+  moves (in the player, as the list moves or Up or Down is pressed). With
+  nothing to show, the screen says why in Android's words, a title and a
+  line under it: "Live TV didn't load" with the server's words and Try
+  again, "Live TV isn't open to this profile", "No channels yet", "No
+  favourites yet", "Nothing watched yet", "No channels match", "No
+  channels in this group." The player's channel list says the same of a
+  category or search without channels.
 - **Categories** run down the left under Search. Rewind and fast forward
   move a screen at a time. The category, the tab and the last channel
   watched are kept per server and profile (registry section `liveViews`):
   the list opens at that channel, back from the player and after a
   restart.
 - **Search** (the entry over the categories, or Replay) is typed on
-  Roku's keyboard; Clear in it, or Back, goes back to the category shown
-  before. A channel watched from a search (here, in the player's list or
-  in the app's Search) makes Up and Down in the player go through every
-  channel, as on Android.
+  Roku's keyboard, the groups it names listed under "Groups found" at the
+  top of the categories; Clear in it, or Back, goes back to the category
+  shown before. A channel watched from a search (here, in the player's
+  list or in the app's Search) makes Up and Down in the player go through
+  every channel, as on Android.
 - **Guide:** Roku's TimeGrid, 50 channels by two hours. Rewind and fast
   forward move two hours, Play goes back to now. OK on what's on watches
   the channel; on a later programme it shows its details, as Options (\*)

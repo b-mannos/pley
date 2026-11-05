@@ -24,6 +24,8 @@ sub init()
     m.guide = m.top.findNode("guide")
     m.cards = m.top.findNode("cards")
     m.message = m.top.findNode("message")
+    m.messageTitle = m.top.findNode("messageTitle")
+    m.messageText = m.top.findNode("messageText")
     m.retry = m.top.findNode("retry")
     m.clock = m.top.findNode("clock")
     m.hint = m.top.findNode("hint")
@@ -136,7 +138,7 @@ sub onActive()
         if m.view.tab = "channels" then m.tabs.current = 1
         m.tabs.focusIndex = m.tabs.current
         m.rail.setFocus(true)
-        showMessage("Loading…")
+        showMessage("", "Loading…")
         loadGroups(true)
         return
     end if
@@ -173,17 +175,14 @@ sub onGroups(event as object)
     first = event.getRoSGNode().spec.first = true
     if not answer.ok
         if not first or uiFailed(answer) then return
-        if answer.status = 403
-            showMessage("Live TV isn't open to this account." + Chr(10) + "An administrator can open it on the web, in Settings → Live TV.")
-        else
-            showFailed(answer.message, "groups", 0)
-        end if
+        showFailed(answer, "groups", 0)
         return
     end if
     m.summary = liveSummary(answer.data)
     m.groups = liveGroups(answer.data)
     if m.summary.total = 0
-        showMessage("No channels yet." + Chr(10) + "Channels appear here once an administrator adds an IPTV provider on the web, in Settings → Live TV.")
+        empty = liveEmpty("all")
+        showMessage(empty.title, empty.body)
         return
     end if
     category = liveCategoryValid(m.view.category, m.summary, m.groups)
@@ -432,22 +431,31 @@ sub onTabChosen(event as object)
     showCategory(around)
 end sub
 
-sub showMessage(text as string)
+' Why nothing shows, as on Android: a title ("" for none, as while
+' loading) and a line under it.
+sub showMessage(title as string, text as string)
     focused = m.guide.isInFocusChain() or m.cards.isInFocusChain() or m.retry.isInFocusChain()
     m.guide.visible = false
     m.info.visible = false
     m.cards.visible = false
     m.retry.visible = false
     m.hint.text = ""
-    m.message.text = text
+    m.messageTitle.text = title
+    m.messageText.text = text
+    m.message.removeChildrenIndex(m.message.getChildCount(), 0)
+    if title <> "" then m.message.appendChild(m.messageTitle)
+    if text <> "" then m.message.appendChild(m.messageText)
     m.message.visible = true
     if focused then m.rail.setFocus(true)
 end sub
 
-' What failed with nothing to show, with Try again under it (what: the
-' groups, or the category's channels around a channel).
-sub showFailed(text as string, what as string, around as integer)
-    showMessage(text)
+' What failed with nothing to show (answer's failure), with Try again
+' under it (what: the groups, or the category's channels around a
+' channel); not where Live TV isn't open to the profile.
+sub showFailed(answer as object, what as string, around as integer)
+    failure = liveLoadFailed(answer)
+    showMessage(failure.title, failure.body)
+    if not failure.retry then return
     m.retryWhat = what
     m.retryAround = around
     m.retry.visible = true
@@ -459,7 +467,7 @@ end sub
 sub onRetry()
     m.toContent = m.retry.isInFocusChain()
     if m.retryWhat = "groups"
-        showMessage("Loading…")
+        showMessage("", "Loading…")
         loadGroups(true)
     else
         showCategory(m.retryAround)
@@ -522,7 +530,7 @@ sub loadGuidePage(offset as integer, around as integer, focus as string)
     end if
     m.asked = m.asked + 1
     m.loading = true
-    if m.guide.content = invalid then showMessage("Loading the guide…")
+    if m.guide.content = invalid then showMessage("", "Loading the guide…")
     uiRequest({ op: "livePage", kind: "guide", category: m.view.category, offset: offset, limit: livePageSize(), around: around, start: m.guideStart, upto: m.loadedTo, asked: m.asked, focus: focus, focusId: around }, "onGuide")
 end sub
 
@@ -540,7 +548,7 @@ sub onGuide(event as object)
             ' it moves.
             m.failedAt = m.span.TotalMilliseconds()
         else if not uiFailed(answer)
-            showFailed(answer.message, "channels", spec.focusId)
+            showFailed(answer, "channels", spec.focusId)
         end if
         return
     end if
@@ -562,7 +570,7 @@ sub onGuide(event as object)
         m.page = invalid
         m.guide.content = invalid
         m.toContent = false
-        showMessage(emptyText())
+        showEmpty()
         return
     end if
     m.page = data
@@ -592,12 +600,11 @@ sub onGuide(event as object)
     if m.toContent then focusContent()
 end sub
 
-function emptyText() as string
-    if searching() then return "No channel's name, number or programme on now has “" + m.query + "” in it."
-    if m.view.category = "favorites" then return "No favourites yet: the Options key (*) on a channel adds it."
-    if m.view.category = "recent" then return "Nothing watched yet."
-    return "No channels here."
-end function
+' The category, or the search, has no channels: why, in its own words.
+sub showEmpty()
+    empty = liveEmpty(m.view.category)
+    showMessage(empty.title, empty.body)
+end sub
 
 ' "2,345 channels   ·   Channels 51–100 of 2,345".
 sub showCount()
@@ -777,7 +784,7 @@ end sub
 sub loadCards(offset as integer, around as integer, before as boolean, replace as boolean)
     if m.cardsLoading and not replace then return
     m.cardsLoading = true
-    if m.cardChannels.Count() = 0 then showMessage("Loading…")
+    if m.cardChannels.Count() = 0 then showMessage("", "Loading…")
     m.cardsRequest = uiRequest({ op: "livePage", kind: "cards", category: m.view.category, offset: offset, limit: livePageSize(), around: around, before: before, replace: replace, focusId: around }, "onCards")
 end sub
 
@@ -795,7 +802,7 @@ sub onCards(event as object)
             ' The cards stay; the page is asked for again as they move.
             m.failedAt = m.span.TotalMilliseconds()
         else if not uiFailed(answer)
-            showFailed(answer.message, "channels", spec.focusId)
+            showFailed(answer, "channels", spec.focusId)
         end if
         return
     end if
@@ -832,7 +839,7 @@ sub onCards(event as object)
     end if
     if m.cardChannels.Count() = 0
         m.toContent = false
-        showMessage(emptyText())
+        showEmpty()
         return
     end if
     m.message.visible = false

@@ -82,6 +82,8 @@
             <Label id="listTitle" translation="[64, 56]" width="672" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
             <Label id="listRange" translation="[64, 120]" width="672" color="0x8B95A5FF" font="font:SmallestSystemFont" />
             <MarkupList id="channelList" translation="[40, 176]" itemComponentName="LiveChannelRow" itemSize="[720, 100]" itemSpacing="[0, 4]" numRows="8" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
+            <!-- A category, or a search, without channels. -->
+            <Label id="listEmpty" translation="[64, 192]" width="672" wrap="true" color="0x8B95A5FF" font="font:SmallSystemFont" visible="false" />
             <!-- Left in the list: another category to list. -->
             <MarkupList id="categoryList" translation="[40, 176]" itemComponentName="LiveRailItem" itemSize="[720, 56]" itemSpacing="[0, 4]" numRows="14" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" visible="false" />
             <!-- Two lines: what the channels do, then the categories and search. -->

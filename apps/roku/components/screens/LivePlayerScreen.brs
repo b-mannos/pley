@@ -40,6 +40,7 @@ sub init()
     m.listRange = m.top.findNode("listRange")
     m.channelList = m.top.findNode("channelList")
     m.categoryList = m.top.findNode("categoryList")
+    m.listEmpty = m.top.findNode("listEmpty")
     m.listHint = m.top.findNode("listHint")
     m.listHint.text = listHintText()
     m.notice = m.top.findNode("notice")
@@ -262,6 +263,7 @@ end sub
 sub showListPage(page as object, content as object, pick as string)
     m.listPage = page
     m.channelList.content = content
+    showListEmpty()
     markCurrent()
     if not m.categoryList.visible then m.listRange.text = liveRange(page.offset, page.channels.Count(), page.total)
     at = -1
@@ -269,6 +271,14 @@ sub showListPage(page as object, content as object, pick as string)
     if at < 0 or pick = "top" then at = 0
     if pick = "bottom" then at = content.getChildCount() - 1
     if at >= 0 and at < content.getChildCount() then m.channelList.jumpToItem = at
+end sub
+
+' A page of the list without channels says so, as on Android: "No
+' channels in this group.", "No channels match"…
+sub showListEmpty()
+    empty = m.listPage <> invalid and m.listPage.channels.Count() = 0 and not m.categoryList.visible
+    if empty then m.listEmpty.text = liveEmpty(m.listCategory).title
+    m.listEmpty.visible = empty
 end sub
 
 ' The channel playing stands out in the list.
@@ -295,6 +305,7 @@ sub openList()
         m.listPage = invalid
         m.channelList.content = invalid
         m.listRange.text = ""
+        showListEmpty()
         if m.page <> invalid then showListPage(m.page, m.pageContent, "")
     end if
     m.listName = m.categoryName
@@ -395,6 +406,7 @@ sub showListCategory(category as string)
     m.listCategory = category
     m.listPage = invalid
     m.channelList.content = invalid
+    showListEmpty()
     if category = m.category and m.page <> invalid
         m.listAsked = m.pageAsked
         showListPage(m.page, m.pageContent, "")
@@ -412,6 +424,7 @@ end sub
 sub openCategories()
     m.channelList.visible = false
     m.categoryList.visible = true
+    showListEmpty()
     m.listTitle.text = "Categories"
     m.listRange.text = ""
     m.listHint.text = "OK: its channels   ·   Back: the channels"
@@ -489,6 +502,7 @@ sub closeCategories()
     m.listHint.text = listHintText()
     m.listRange.text = ""
     if m.listPage <> invalid then m.listRange.text = liveRange(m.listPage.offset, m.listPage.channels.Count(), m.listPage.total)
+    showListEmpty()
     if m.list.visible then m.channelList.setFocus(true)
 end sub
 

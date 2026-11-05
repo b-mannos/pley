@@ -140,6 +140,25 @@ function liveCategoryName(category as string, groups as object) as string
     return name
 end function
 
+' What Live TV says where a category, or a search, has no channels, as
+' Android says it: { title, body } (body "" for none). On a Roku a
+' favourite is added from a channel's details, which Options (*) shows.
+function liveEmpty(category as string) as object
+    if Left(category, 7) = "search:" then return { title: "No channels match", body: "No channel's name, number or programme on now has “" + Mid(category, 8) + "” in it." }
+    if category = "favorites" then return { title: "No favourites yet", body: "Press Options (*) on a channel and add it to your favourites to find it here." }
+    if category = "recent" then return { title: "Nothing watched yet", body: "The channels you watch show here, the last first." }
+    if Left(category, 6) = "group:" then return { title: "No channels in this group.", body: "" }
+    return { title: "No channels yet", body: "Channels appear here once an administrator adds an IPTV provider in Pley's web app." }
+end function
+
+' What Live TV says when what it asked for failed with nothing to show:
+' { title, body, retry }: not open to the profile (403), else "Live TV
+' didn't load" with the server's words and Try again.
+function liveLoadFailed(answer as object) as object
+    if answer.status = 403 then return { title: "Live TV isn't open to this profile", body: "An administrator can open it in Pley's web app, under Settings → Live TV.", retry: false }
+    return { title: "Live TV didn't load", body: httpSentence(answer.message), retry: true }
+end function
+
 ' The category Up and Down go through in the player once a channel of
 ' category is watched: a search's results go through every channel, as
 ' on Android.
@@ -266,16 +285,18 @@ function liveBeforeSearch(category as string, before as string) as string
 end function
 
 ' The categories down the side, under the Search entry pinned above them:
-' the groups whose names match the words searched for, as links,
-' Favourites, Recently watched, All channels, then "Regions" in
-' alphabetical order, the one open with its groups under it, and "More
-' groups", the rest in the provider's order (one plain list, "Groups",
-' with fewer than two regions). [{ kind ("category", "region" or
+' the groups whose names match the words searched for, as links under
+' "Groups found", Favourites, Recently watched, All channels, then
+' "Regions" in alphabetical order, the one open with its groups under it,
+' and "More groups", the rest in the provider's order (one plain list,
+' "Groups", with fewer than two regions). [{ kind ("category", "region" or
 ' "heading"), key (the category, or the region), label, count (-1 for
 ' none), inner (set in under the entry above) }].
 function liveRail(summary as object, groups as object, open as string, query as string) as object
     rail = []
-    for each g in liveGroupsMatching(groups, query)
+    found = liveGroupsMatching(groups, query)
+    if found.Count() > 0 then rail.Push({ kind: "heading", key: "", label: "Groups found", count: -1, inner: false })
+    for each g in found
         rail.Push({ kind: "category", key: "group:" + g.name, label: liveGroupLabel(g), count: g.count, inner: true })
     end for
     rail.Push({ kind: "category", key: "favorites", label: "Favourites", count: summary.favorites, inner: false })
