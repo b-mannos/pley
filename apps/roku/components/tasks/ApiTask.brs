@@ -975,7 +975,6 @@ end sub
 function apiSignInUnreachable(signIn as object, status as integer, body as string) as boolean
     answer = httpAnswer(status, body)
     if answer.error <> "network" then return false
-    if signIn.server = m.server then apiReached(false)
     m.signIn = invalid
     apiAnswer(signIn.request, answer)
     return true

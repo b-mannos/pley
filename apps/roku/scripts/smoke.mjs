@@ -99,22 +99,22 @@ function shoot(name) {
   writeFileSync(join(shots, `${String(step).padStart(2, "0")}-${name}.png`), canvas.toBuffer("image/png"));
 }
 
-// Whether the sign-in screen shows a QR code: its quiet zone is white where
-// the screen is dark (LinkScreen.xml centres the picture in a column from
-// 1384 to 1824, from 432 down).
+// Whether the sign-in screen shows a QR code: its tile is white once the
+// picture has come, dark as a placeholder before (LinkScreen.xml's tile
+// from 1200, 240, 536 a side).
 function qrDrawn() {
   if (!frame) return false;
-  const x = Math.round((1384 + 220) * (frame.width / 1920));
-  const y = Math.round((432 + 12) * (frame.height / 1080));
+  const x = Math.round((1200 + 12) * (frame.width / 1920));
+  const y = Math.round((240 + 12) * (frame.height / 1080));
   const at = (y * frame.width + x) * 4;
   return frame.data[at] > 200 && frame.data[at + 1] > 200 && frame.data[at + 2] > 200;
 }
 // Whether the sign-in screen says the server requires two-step sign-in:
-// muted text under the server's name (LinkScreen.xml, from 96, 306), where
+// muted text under the title (LinkScreen.xml's note, from 96, 280), where
 // the walk's sign-ins show nothing else (no reason to sign in again).
 function twoStepDrawn() {
   if (!frame) return false;
-  for (let y = 310; y < 334; y += 2) {
+  for (let y = 286; y < 308; y += 2) {
     for (let x = 100; x < 700; x += 2) {
       const at = (Math.round(y * (frame.height / 1080)) * frame.width + Math.round(x * (frame.width / 1920))) * 4;
       if (frame.data[at] > 130 && frame.data[at + 1] > 130 && frame.data[at + 2] > 140) return true;

@@ -33,9 +33,15 @@ the app prints and its errors.
 
 The app finds Pley servers on the local network (or takes an address) and
 signs in with a code shown on the TV, approved on the server's `/link` page
-or by its QR code. When the server requires two-step sign-in, the sign-in
-screen says so: the phone that approves the code sets it up for whoever
-hasn't yet. It asks "Who's watching?" at start when the household has more
+or by its QR code. The sign-in screen is laid out as Android TV's: three
+numbered steps (scan the code, or go to the address, and enter the code,
+in two fields), the QR code at the right in a light tile that is dimmed
+once the code expires, and Change server under it. An expired code gives
+way to a new one without a word, three times (half an hour of codes);
+then OK gets the next. When the server doesn't answer, the screen says
+when it tries again, counting down the seconds. When the server requires
+two-step sign-in, the sign-in screen says so: the phone that approves the
+code sets it up for whoever hasn't yet. It asks "Who's watching?" at start when the household has more
 than one profile, unless Settings' Always start as names one. Going on
 there as the profile it was left on asks that profile's PIN when it has
 one, as on the other TVs, and so does Always start as: the start opens on

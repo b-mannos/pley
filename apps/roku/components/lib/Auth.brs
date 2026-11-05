@@ -407,6 +407,27 @@ function authShownCode(code as string) as string
     return httpSentence(code)
 end function
 
+' A user code as the sign-in screen shows it, in its fields: "BCDF-GHJK"
+' as ["BCDF", "GHJK"] (the screen puts a dash between), anything else
+' whole.
+function authCodeHalves(code as string) as object
+    letters = authCodeLetters(code)
+    if Len(letters) = 8 then return [Left(letters, 4), Mid(letters, 5)]
+    return [httpSentence(code)]
+end function
+
+' Where to type the code, as the sign-in screen says it: the address
+' without its scheme, with its port and path ("192.168.1.20:7539/link").
+function authShownAddress(uri as string) as string
+    text = uri
+    at = Instr(1, text, "://")
+    if at > 0 then text = Mid(text, at + 3)
+    while Len(text) > 1 and Right(text, 1) = "/"
+        text = Left(text, Len(text) - 1)
+    end while
+    return text
+end function
+
 ' A user code's letters and digits, in capitals: "BCDFGHJK".
 function authCodeLetters(code as string) as string
     letters = ""
