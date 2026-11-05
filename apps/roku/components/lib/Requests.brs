@@ -1247,8 +1247,22 @@ function reqRow(request as object, server as string, manage as boolean, now as i
     if libraryId = 0 and (stage.tone = "ready") then lines.Push("Ready, in a library you can't open: ask an administrator")
     note = httpSentence(request.note)
     if note <> "" then lines.Push(note)
+    title = httpSentence(request.title)
+    ' Its panel's head: the title with its year, then what was asked for
+    ' and who asked when, what the card says, and where a manager's
+    ' request was sent.
+    heading = title
+    if year > 0 then heading = title + " (" + urlValue(year) + ")"
+    what = seasons
+    if what = "" then what = reqKindLabel(kind)
+    head = [what + " · " + reqWho(request, now, zone)]
+    head.Append(lines)
+    sent = reqSentTo(request)
+    if manage and sent <> "" then head.Push(sent)
     return {
-        title: httpSentence(request.title),
+        title: title,
+        panelTitle: heading,
+        panelLines: head,
         subtitle: parts.Join(" · "),
         image: urlImage(server, request.poster_url, reqRowPosterWidth()),
         stageText: stage.text,
@@ -1267,6 +1281,19 @@ function reqRow(request as object, server as string, manage as boolean, now as i
         seasons: reqSeasonNumbers(request.seasons),
         mine: httpTrue(request.mine)
     }
+end function
+
+' Where a manager's request was sent: "Radarr · HD-1080p · /movies"; ""
+' before it was sent.
+function reqSentTo(request as object) as string
+    sent = httpObject(request.sent_to)
+    if sent = invalid then return ""
+    parts = ["Radarr"]
+    if httpString(request.kind) = "show" then parts = ["Sonarr"]
+    for each part in [httpSentence(sent.quality_profile), httpClean(sent.root_folder, 512, false)]
+        if part <> "" then parts.Push(part)
+    end for
+    return parts.Join(" · ")
 end function
 
 ' A row's poster, 120 pixels wide.
@@ -1379,6 +1406,32 @@ function reqActions(request as object, itemId as dynamic) as object
     return options
 end function
 
+' What a request's panel offers (OK on its card): Open where a library
+' has it for this account, what the server lets this session do in its
+' order (reqActions'), then Details, its title's page. [{ label, action
+' }]; request: a row (reqRow), as reqActions takes it.
+function reqPanelChoices(request as object) as object
+    choices = []
+    if httpNumber(request.libraryId, 0) > 0 then choices.Push({ label: "Open", action: "open" })
+    choices.Append(reqActions(request, 0))
+    choices.Push({ label: "Details", action: "details" })
+    return choices
+end function
+
+' Declining with a reason, on the keyboard: { title, message }; the hint
+' is left out on one's own request.
+function reqDeclineQuestion(title as string, mine as boolean) as object
+    message = []
+    if not mine then message.Push("The person who asked sees it.")
+    return { title: "Decline " + reqQuoted(title) + "?", message: message }
+end function
+
+' The longest reason a decline takes (the server's limit): a longer one
+' keeps its first characters.
+function reqReasonMax() as integer
+    return 500
+end function
+
 ' The question an action asks first: { message, button }, or invalid for
 ' none.
 function reqConfirm(action as string, title as string, status as string) as dynamic
@@ -1400,8 +1453,9 @@ function reqActionCall(action as string, requestId as dynamic, reason as string)
     if action = "approve" or action = "retry" then return { method: "POST", path: base + "/approve", jsonText: "{}" }
     if action = "decline" then return { method: "POST", path: base + "/decline", jsonText: "{}" }
     if action = "declineReason"
-        if reason.Trim() = "" then return { method: "POST", path: base + "/decline", jsonText: "{}" }
-        return { method: "POST", path: base + "/decline", jsonText: FormatJson({ reason: reason.Trim() }) }
+        words = Left(reason.Trim(), reqReasonMax()).Trim()
+        if words = "" then return { method: "POST", path: base + "/decline", jsonText: "{}" }
+        return { method: "POST", path: base + "/decline", jsonText: FormatJson({ reason: words }) }
     end if
     if action = "handled" then return { method: "POST", path: base + "/handled", jsonText: "{}" }
     return invalid
@@ -1425,21 +1479,17 @@ function reqFollowSeasons(seasons as dynamic) as object
     return out
 end function
 
-' The empty requests' list, for a tab: mine, the account's own (the
-' managers' Yours, and everyone else's every tab); filtered, something
-' is looked for.
-function reqEmptyText(view as string, mine as boolean, filtered as boolean) as string
-    if filtered then return "Nothing matches."
-    of = ""
-    if mine then of = " of yours"
-    if view = "attention" then return "Nothing needs your attention."
-    if view = "pending" then return "No requests" + of + " wait for a decision."
-    if view = "approved" then return "No requests" + of + " are on their way."
-    if view = "available" then return "No requests" + of + " are ready to watch yet."
-    if view = "declined" then return "No requests" + of + " were declined."
-    if view = "failed" then return "No requests" + of + " failed."
-    if mine then return "You haven't asked for anything yet."
-    return "No one has asked for anything yet."
+' What the requests say with none to list, as the other TVs: { title,
+' text, find (Find something to ask for, which opens Discover) }. A
+' status's tab, Yours, or a manager's filters (narrowed) list what
+' matches; Needs attention, what waits for a decision or couldn't be
+' sent; All, everything. mayAsk: the account may ask (reqMayAsk); find
+' is for those who may and don't manage.
+function reqEmpty(view as string, narrowed as boolean, mayAsk as boolean, manage as boolean) as object
+    if narrowed or (view <> "all" and view <> "attention") then return { title: "No requests match", text: "Try other filters.", find: false }
+    if view = "attention" then return { title: "Nothing needs you", text: "Requests waiting for a decision, and those that couldn't be sent, show here.", find: false }
+    if not mayAsk then return { title: "Nothing asked for yet", text: "Requests you made or follow show here.", find: false }
+    return { title: "Nothing asked for yet", text: "Find movies and shows in Discover, and ask for what the libraries don't have.", find: not manage }
 end function
 
 ' The requests' tabs: [{ key, label }]. A manager opens on Needs

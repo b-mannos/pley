@@ -311,10 +311,21 @@ sub test_requests_rows()
     tkEqual(row.line, "“Not in this quality” · Added by hand")
     tkEqual(row.actions, ["withdraw", "delete"])
     tkEqual(row.seasons, [1, 2])
-    followed = reqRow(reqTestRequest({ mine: false, watching: true, requested_by: invalid, status: "available", stage: "available", seasons: invalid, kind: "movie" }), "http://nas:7539", false, now, 0)
-    tkEqual(followed.subtitle, "2008 · Movie · Following")
+    tkTrue(row.mine)
+    ' Its panel's head.
+    tkEqual(row.panelTitle, "Breaking Bad (2008)")
+    tkEqual(row.panelLines, ["Seasons 1–2 · Asked for by you · 3 days ago", "“Not in this quality”", "Added by hand"])
+    followed = reqRow(reqTestRequest({ mine: false, watching: true, requested_by: invalid, status: "available", stage: "available", seasons: invalid, kind: "movie", year: invalid }), "http://nas:7539", false, now, 0)
+    tkEqual(followed.subtitle, "Movie · Following")
     tkEqual(followed.who, "Asked for by someone else · 3 days ago")
     tkEqual(followed.line, "Ready, in a library you can't open: ask an administrator")
+    tkEqual(followed.panelTitle, "Breaking Bad", "no year")
+    tkEqual(followed.panelLines[0], "Movie · Asked for by someone else · 3 days ago")
+    sent = reqTestRequest({ status: "approved", stage: "searching", sent_to: { service: "sonarr", quality_profile: "HD-1080p", root_folder: "/tv" } })
+    tkEqual(reqRow(sent, "", true, now, 0).panelLines, ["Seasons 1–2 · Asked for by you · 3 days ago", "Sonarr · HD-1080p · /tv"], "a manager sees where it went")
+    tkEqual(reqRow(sent, "", false, now, 0).panelLines.Count(), 1)
+    tkEqual(reqSentTo(reqTestRequest({ kind: "movie", sent_to: { service: "radarr", quality_profile: invalid, root_folder: "/movies" } })), "Radarr · /movies")
+    tkEqual(reqSentTo(reqTestRequest({})), "", "not sent yet")
     other = reqRow(reqTestRequest({ mine: false, requested_by: { id: 2, name: "Ben" } }), "http://nas:7539", true, now, 0)
     tkEqual(other.who, "Asked for by Ben · 3 days ago")
     tkTrue(reqBusy("downloading"))
@@ -366,6 +377,20 @@ sub test_requests_actions_in_the_server_s_order()
     tkEqual(ready, [{ label: "Watch", action: "watch" }, { label: "Request again", action: "ask_again" }, { label: "Stop following", action: "unwatch" }, { label: "Try again", action: "retry" }])
 end sub
 
+' OK on a request's card opens its panel: Open where a library has it for
+' this account, the server's actions in its order, then Details.
+sub test_requests_panel_offers_open_the_actions_and_details()
+    pending = { status: "pending", stage: "pending", actions: ["approve", "decline", "delete"], libraryId: 0 }
+    labels = []
+    for each choice in reqPanelChoices(pending)
+        labels.Push(choice.label)
+    end for
+    tkEqual(labels, ["Approve", "Decline", "Decline with a reason…", "Delete", "Details"])
+    ready = reqPanelChoices({ status: "available", stage: "available", actions: ["withdraw"], libraryId: 12 })
+    tkEqual(ready, [{ label: "Open", action: "open" }, { label: "Withdraw", action: "withdraw" }, { label: "Details", action: "details" }], "Open in Watch's place")
+    tkEqual(reqPanelChoices({ status: "approved", stage: "searching", actions: [], libraryId: 0 }), [{ label: "Details", action: "details" }], "always its title's page")
+end sub
+
 sub test_requests_confirms_and_calls()
     tkEqual(reqConfirm("withdraw", "Dune", "pending"), { message: "Withdraw your request for “Dune”?", button: "Withdraw" })
     tkEqual(reqConfirm("withdraw", "Dune", "declined"), { message: "Remove “Dune” from your requests?", button: "Remove" })
@@ -377,6 +402,11 @@ sub test_requests_confirms_and_calls()
     tkEqual(reqActionCall("handled", 42, ""), { method: "POST", path: "/api/requests/42/handled", jsonText: "{}" })
     tkEqual(reqActionCall("declineReason", 42, "  Not in 4K "), { method: "POST", path: "/api/requests/42/decline", jsonText: "{""reason"":""Not in 4K""}" })
     tkEqual(reqActionCall("declineReason", 42, " "), { method: "POST", path: "/api/requests/42/decline", jsonText: "{}" })
+    long = reqActionCall("declineReason", 42, String(600, "a"))
+    tkEqual(ParseJson(long.jsonText).reason, String(500, "a"), "the server's limit: its first characters kept")
+    ' The reason's question, its hint left out on one's own request.
+    tkEqual(reqDeclineQuestion("Dune", false), { title: "Decline “Dune”?", message: ["The person who asked sees it."] })
+    tkEqual(reqDeclineQuestion("Dune", true).message, [], "one's own")
     tkInvalid(reqActionCall("watch", 42, ""))
     tkEqual(ParseJson(reqAskBody("show", 1396, [1, 2])), { kind: "show", tmdb_id: 1396, seasons: [1, 2] })
     tkEqual(ParseJson(reqAskBody("movie", 27205, invalid)), { kind: "movie", tmdb_id: 27205 })
@@ -756,11 +786,18 @@ sub test_requests_list_queries_and_empty_lists()
     tkEqual(reqTabs(true)[0], { key: "attention", label: "Needs attention" })
     tkEqual(reqTabs(true).Peek(), { key: "mine", label: "Yours" })
     tkEqual(reqTabs(false).Count(), 6)
-    tkEqual(reqEmptyText("pending", true, false), "No requests of yours wait for a decision.")
-    tkEqual(reqEmptyText("failed", false, false), "No requests failed.")
-    tkEqual(reqEmptyText("all", false, false), "No one has asked for anything yet.")
-    tkEqual(reqEmptyText("all", true, false), "You haven't asked for anything yet.")
-    tkEqual(reqEmptyText("pending", false, true), "Nothing matches.")
+end sub
+
+' With none to list, the requests say why as the other TVs do, and offer
+' Discover to those who may ask and don't manage.
+sub test_requests_empty_lists_say_why()
+    tkEqual(reqEmpty("all", false, true, false), { title: "Nothing asked for yet", text: "Find movies and shows in Discover, and ask for what the libraries don't have.", find: true })
+    tkEqual(reqEmpty("all", false, false, false), { title: "Nothing asked for yet", text: "Requests you made or follow show here.", find: false }, "may not ask")
+    tkFalse(reqEmpty("all", false, true, true).find, "a manager")
+    tkEqual(reqEmpty("attention", false, true, true), { title: "Nothing needs you", text: "Requests waiting for a decision, and those that couldn't be sent, show here.", find: false })
+    tkEqual(reqEmpty("pending", false, true, false), { title: "No requests match", text: "Try other filters.", find: false }, "a status's tab")
+    tkEqual(reqEmpty("mine", false, true, true).title, "No requests match", "Yours")
+    tkEqual(reqEmpty("attention", true, true, true).title, "No requests match", "a manager's filters")
 end sub
 
 sub test_requests_tabs_say_how_many_each_holds()

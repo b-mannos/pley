@@ -1071,23 +1071,22 @@ async function walk() {
   await press("right"); // Request 3 seasons
   await press("select");
   await waitFor(/^POST \/api\/requests$/, since, "the seasons asked for");
-  shoot("request-seasons-asked");
-  await press("select"); // OK: the show's page
+  shoot("request-seasons-asked"); // the show's page, a toast saying so
   for (let i = 0; i < 3; i++) {
     await press("back"); // Discover's rows, its hero, Home
     await settle();
   }
-  // The managers' Requests, on Needs attention: the Options key on the
-  // oldest, Approve. Meanwhile Anna's download came into a library, which
+  // The managers' Requests, on Needs attention: OK on the oldest opens its
+  // panel, Approve first. Meanwhile Anna's download came into a library, which
   // no event told of: the summary asked after Approve has news, whose
   // notice waits while the requests show. Then Yours, the last tab, which
   // marks Anna's news seen.
   await openFromMenu(3, /^GET \/api\/requests\?.*attention=1/, "Requests");
   shoot("requests");
   since = mark();
-  await press("options");
+  await press("select"); // its panel
   await sleep(500);
-  shoot("requests-options");
+  shoot("requests-panel");
   fixture.requestArrives(3, 1011);
   await press("select"); // Approve
   await waitFor(/^POST \/api\/requests\/1\/approve$/, since, "a request approved");
@@ -1463,9 +1462,9 @@ const checks = [
   ["showed all of TMDB's results for the words searched", asked(/^GET \/api\/discover\/search\?q=mo&page=1$/)],
   ["showed Discover's rows", asked(/^GET \/api\/discover\/trending\?page=1$/) && asked(/^GET \/api\/discover\/movies\?page=1$/)],
   ["asked for TMDB's pictures through the server, at the size drawn", fixture.discoverPictures.length > 0 && fixture.discoverPictures.every((p) => /^\d+$/.test(p.w ?? ""))],
-  ["asked for a movie once its question was answered", fixture.requestsAsked.some((a) => a.kind === "movie" && a.tmdb_id === 7001 && !("seasons" in a))],
+  ["asked for a movie at once from Discover's hero", fixture.requestsAsked.some((a) => a.kind === "movie" && a.tmdb_id === 7001 && !("seasons" in a))],
   ["asked for a show's missing seasons, ticked to start with", fixture.requestsAsked.some((a) => a.kind === "show" && a.tmdb_id === 8004 && JSON.stringify(a.seasons) === "[1,2,3]")],
-  ["approved a request from the Options key", fixture.requestsActed.some((a) => a.id === 1 && a.action === "approve")],
+  ["approved a request from its panel", fixture.requestsActed.some((a) => a.id === 1 && a.action === "approve")],
   ["marked the profile's news seen once its requests showed", fixture.requestsActed.some((a) => a.action === "seen")],
   ["kept a ready-to-watch notice from the requests, showing it in a card once they were left and the remote rested", notice.waited && notice.shown],
   ["told of a title ready to watch, which Open opened", notice.opened],
