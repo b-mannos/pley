@@ -100,7 +100,13 @@ sub search()
 end sub
 
 sub onFound(event as object)
-    m.found = event.getData()
+    ' The broadcast's list is only those that heard it: those a sweep
+    ' found stay.
+    found = event.getData()
+    for each server in m.swept
+        found = discoveryAdd(found, server)
+    end for
+    m.found = found
     render()
 end sub
 
@@ -136,6 +142,7 @@ end sub
 sub onSweepFound(event as object)
     server = httpObject(event.getData().server)
     if server = invalid then return
+    m.swept = discoveryAdd(m.swept, server)
     m.found = discoveryAdd(m.found, server)
     m.unreachable.Delete(server.url)
     render()

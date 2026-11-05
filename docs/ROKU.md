@@ -39,8 +39,12 @@ is asked directly (`GET /api/server`, without a token), and its row says
 "Can't reach it" when it doesn't answer as Pley; the row chosen says
 "Connecting to …". Search this network asks every other address of the
 Roku's network ("Checking 192.168.1.1-254…"), 24 at a time, a second
-each, for servers that never hear the broadcast (Docker on a bridge
-network). An address typed on the keyboard that can't be used says why
+each, without a token, for servers that never hear the broadcast (Docker
+on a bridge network). It does so only on a private network (10/8,
+172.16/12, 192.168/16, or a link-local address), so a Roku on a
+provider's shared addresses never asks its neighbours; elsewhere it
+sends the broadcast again. An answer longer than 4 KB isn't read, and a
+server's id is kept only as up to 64 letters, digits and dashes. An address typed on the keyboard that can't be used says why
 on the keyboard, shown again: one over plain HTTP beyond the home network
 is refused, as SECURITY.md says of the TV apps. The sign-in screen is laid out as Android TV's: three
 numbered steps (scan the code, or go to the address, and enter the code,

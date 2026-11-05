@@ -31,6 +31,11 @@ sub test_discovery_sweeps_the_tvs_network()
     tkEqual(discoverySweep(invalid).Count(), 0)
     tkEqual(discoverySweep("fe80::1").Count(), 0)
     tkEqual(discoverySweepRange("1234.1.1.1"), "")
+    tkEqual(discoverySweepRange("10.0.4.7"), "10.0.4.1-254")
+    tkEqual(discoverySweepRange("172.20.1.9"), "172.20.1.1-254")
+    tkEqual(discoverySweep("100.72.3.4").Count(), 0, "a provider's shared addresses: the neighbours' aren't asked")
+    tkEqual(discoverySweep("81.2.69.160").Count(), 0, "nor a public network's")
+    tkEqual(discoverySweep("172.32.0.5").Count(), 0)
 end sub
 
 sub test_discovery_reads_what_a_sweep_found()
@@ -40,6 +45,13 @@ sub test_discovery_reads_what_a_sweep_found()
     tkInvalid(discoverySwept("http://192.168.1.20:7539", 200, "{""name"":""Router""}"), "not Pley")
     tkInvalid(discoverySwept("http://192.168.1.20:7539", 200, "<html></html>"))
     tkInvalid(discoverySwept("http://192.168.1.20:7539", 404, answer))
+    long = "{""version"":""0.1.0"",""name"":""" + String(5000, "x") + """}"
+    tkInvalid(discoverySwept("http://192.168.1.20:7539", 200, long), "an answer far longer than Pley's isn't read")
+    odd = discoverySwept("http://192.168.1.20:7539", 200, "{""version"":""" + String(40, "9") + """,""id"":""a/../b""}")
+    tkEqual(odd.id, "", "an id that isn't letters, digits and dashes isn't kept")
+    tkEqual(Len(odd.version), 32, "a version is cut to 32 characters")
+    tkEqual(discoveryId(String(65, "a")), "", "an id past 64 characters isn't kept")
+    tkEqual(discoveryId("3f2a-9c"), "3f2a-9c")
     tkInvalid(discoverySwept("http://192.168.1.20:7539", -28, ""), "no answer in time")
 end sub
 

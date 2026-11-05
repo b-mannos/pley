@@ -871,7 +871,7 @@ sub apiUseServer(request as object, spec as object)
     end if
     name = httpSentence(spec.name)
     if name = "" then name = urlDisplayAddress(url)
-    servers = serversWith(apiSavedServers(), { url: url, name: name, id: httpString(spec.id), lastUsed: apiNow() })
+    servers = serversWith(apiSavedServers(), { url: url, name: name, id: discoveryId(spec.id), lastUsed: apiNow() })
     m.serversSection.Write("list", serversSerialize(servers))
     m.serversSection.Write("current", url)
     m.serversSection.Flush()
@@ -919,8 +919,10 @@ end sub
 
 sub apiCheckAnswered(job as object, status as integer, body as string)
     server = job.candidates[job.index]
-    data = httpObject(httpJson(body))
-    if status = 200 and data <> invalid and httpString(data.version) <> ""
+    ' As for a sweep: an answer far longer than Pley's isn't read.
+    data = invalid
+    if Len(body) <= discoveryAnswerMax() then data = httpObject(httpJson(body))
+    if status = 200 and data <> invalid and discoveryVersion(data.version) <> ""
         if httpTrue(data.setup_required)
             apiAnswer(job.request, apiFail("setup", "This server isn't set up yet: open " + urlDisplayAddress(server) + " in a browser first."))
         else if urlUnencrypted(server)
@@ -931,7 +933,7 @@ sub apiCheckAnswered(job as object, status as integer, body as string)
         else
             name = httpSentence(data.name)
             if name = "" then name = urlDisplayAddress(server)
-            apiAnswer(job.request, apiOk({ url: server, name: name, version: data.version }))
+            apiAnswer(job.request, apiOk({ url: server, name: name, version: discoveryVersion(data.version) }))
         end if
         return
     end if
@@ -974,7 +976,11 @@ end function
 
 sub apiSweepNext()
     sweep = m.sweep
-    if sweep = invalid then return
+    if sweep = invalid or sweep.sending = true then return
+    ' A transfer that can't start answers at once, from inside apiSend:
+    ' that answer leaves the next address to this loop rather than calling
+    ' back into it, which would nest once per address.
+    sweep.sending = true
     while sweep.out < apiSweepAtOnce() and sweep.next < sweep.urls.Count()
         job = apiJob("sweep", "GET", sweep.urls[sweep.next] + "/api/server")
         job.sweep = sweep.id
@@ -983,10 +989,9 @@ sub apiSweepNext()
         sweep.next = sweep.next + 1
         sweep.out = sweep.out + 1
         apiSend(job)
-        ' A transfer that couldn't start answers at once, and may have
-        ' ended the sweep.
         if m.sweep = invalid or m.sweep.id <> sweep.id then return
     end while
+    sweep.sending = false
     if sweep.out = 0 then apiSweepEnd()
 end sub
 
