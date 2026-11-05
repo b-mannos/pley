@@ -154,7 +154,7 @@ sub onActive()
     if m.started then return
     m.started = true
     ' A channel takes over from the music.
-    m.global.music.control = "stop"
+    m.global.music.control = "suspend"
     ' The playlist and its segments carry the token: a refreshed one goes
     ' to the Video node's agent at once.
     m.global.session.observeFieldScoped("accessToken", "onToken")

@@ -284,6 +284,8 @@ paused leaves the player, as in Roku's own apps.
   before the title's end, as a file resumed past what it holds) isn't the
   end: a file played as it is is converted, and a stream opened again;
   falling short again within the minute, the player says so.
+- **Music** gives way to a video or a channel: it pauses, its session
+  ends, and its queue stays for Now Playing.
 - **Notices** (a lower quality, subtitles added, a server that can't keep
   up) show in the app's toast at the top right, under the title at the
   top, and go by themselves.

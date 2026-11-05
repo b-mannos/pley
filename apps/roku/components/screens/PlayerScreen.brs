@@ -390,8 +390,8 @@ sub onActive()
     if m.started then return
     m.started = true
     m.showDetails = playerShowsDetails(playbackSection())
-    ' A video takes over from the music.
-    m.global.music.control = "stop"
+    ' A video takes over from the music, which pauses and keeps its queue.
+    m.global.music.control = "suspend"
     ' Playlists and segments carry the token: a refreshed one goes to the
     ' Video node's agent at once.
     m.global.session.observeFieldScoped("accessToken", "onToken")
