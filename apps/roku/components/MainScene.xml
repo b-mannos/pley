@@ -48,6 +48,10 @@
              has it): the event stream says this Roku takes channels from
              the user's remotes. -->
         <field id="liveTv" type="boolean" />
+        <!-- A short message at the top right, gone by itself ({ text,
+             error }, Ui.brs's uiToast): what an action did, or why it
+             didn't, as the other TVs' toasts say it. -->
+        <field id="toast" type="assocarray" alwaysNotify="true" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
@@ -68,13 +72,14 @@
         <Group id="screens" />
         <!-- Ready-to-watch news, at the bottom right over the pages. -->
         <RequestNotice id="notice" translation="[1104, 702]" visible="false" />
-        <!-- "Playing from …" as a cast starts, over the screen on top, as
-             the players' notices look (castSay places it). -->
-        <Group id="castToast" visible="false">
-            <Rectangle width="1000" height="96" color="0x16191EE6" />
-            <Label id="castToastText" width="1000" height="96" horizAlign="center" vertAlign="center" color="0xEBEBEBFF" font="font:SmallSystemFont" />
+        <!-- The toast: what an action did, or "Playing from …" as a cast
+             starts, over the screen on top (showToast sizes and places
+             it). -->
+        <Group id="toast" visible="false">
+            <Rectangle id="toastBack" color="0x2E3440FF" />
+            <Label id="toastText" translation="[40, 22]" color="0xEBEBEBFF" font="font:SmallSystemFont" />
         </Group>
-        <Timer id="castToastTimer" duration="4" />
+        <Timer id="toastTimer" duration="3.5" />
         <!-- While a notice waits: whether the remote has rested and the
              page is free for it, four times a second. -->
         <Timer id="noticeWait" duration="0.25" repeat="true" />

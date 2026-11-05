@@ -107,6 +107,12 @@ sub uiLaunched()
     scene.signalBeacon("AppLaunchComplete")
 end sub
 
+' A toast at the top right, gone by itself (MainScene's showToast): what an
+' action did, or, with isError, why it didn't.
+sub uiToast(text as string, isError = false as boolean)
+    m.top.getScene().toast = { text: text, error: isError }
+end sub
+
 ' A message with an OK button.
 sub uiMessage(title as string, lines as object)
     dialog = CreateObject("roSGNode", "StandardMessageDialog")

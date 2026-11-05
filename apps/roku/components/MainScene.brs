@@ -42,10 +42,14 @@ sub init()
     ' it, and the notice saying where it came from.
     m.castAsk = 0
     m.castGather = invalid
-    m.castToast = m.top.findNode("castToast")
-    m.castToastText = m.top.findNode("castToastText")
-    m.castToastTimer = m.top.findNode("castToastTimer")
-    m.castToastTimer.observeField("fire", "onCastToastTimer")
+    ' The toast (uiToast): one at a time, the latest in place of the one
+    ' before.
+    m.toast = m.top.findNode("toast")
+    m.toastBack = m.top.findNode("toastBack")
+    m.toastText = m.top.findNode("toastText")
+    m.toastTimer = m.top.findNode("toastTimer")
+    m.toastTimer.observeField("fire", "onToastTimer")
+    m.top.observeField("toast", "onToast")
 
     ' Requests: what the profile may do (the summary), asked as a profile
     ' signs in, as the stream connects, a second after request events and,
@@ -807,21 +811,53 @@ sub castShow(nav as object, banner as string)
     castSay(banner)
 end sub
 
-' A cast's notice for 4 s at the top, as the players' notices show; over
-' the video player, under the title it shows at the top as an item
-' begins.
+' A cast's notice for 4 s, in the toast.
 sub castSay(text as string)
-    top = 72
-    if m.stack.Count() > 0 and m.stack.Peek().subtype() = "PlayerScreen" then top = 232
-    m.castToast.translation = [460, top]
-    m.castToastText.text = text
-    m.castToast.visible = true
-    m.castToastTimer.control = "stop"
-    m.castToastTimer.control = "start"
+    showToast(text, false, 4)
 end sub
 
-sub onCastToastTimer()
-    m.castToast.visible = false
+sub onToast()
+    toast = m.top.toast
+    if toast = invalid or toast.text = invalid or toast.text = "" then return
+    showToast(toast.text, toast.error = true, 0)
+end sub
+
+' The toast at the top right, inside the TV's safe area, as Android TV's
+' (at most 840 wide, wrapping beyond): 3.5 s, an error 6 s in the danger
+' colour, or seconds when given. Over the video player it sits under the
+' title the player shows at the top as an item begins.
+sub showToast(text as string, isError as boolean, seconds as float)
+    colors = uiColors()
+    m.toastText.wrap = false
+    m.toastText.width = 0
+    m.toastText.text = text
+    m.toastText.color = colors.fg
+    if isError then m.toastText.color = colors.danger
+    size = m.toastText.boundingRect()
+    width = size.width
+    if width > 760
+        width = 760
+        m.toastText.width = width
+        m.toastText.wrap = true
+        size = m.toastText.boundingRect()
+    end if
+    m.toastBack.width = width + 80
+    m.toastBack.height = size.height + 44
+    top = 54
+    if m.stack.Count() > 0 and m.stack.Peek().subtype() = "PlayerScreen" then top = 232
+    m.toast.translation = [1824 - m.toastBack.width, top]
+    m.toast.visible = true
+    if seconds <= 0
+        seconds = 3.5
+        if isError then seconds = 6
+    end if
+    m.toastTimer.duration = seconds
+    m.toastTimer.control = "stop"
+    m.toastTimer.control = "start"
+end sub
+
+sub onToastTimer()
+    m.toast.visible = false
 end sub
 
 ' Music stopped from another device or by the server's administrator
