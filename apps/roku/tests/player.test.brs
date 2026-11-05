@@ -106,6 +106,22 @@ sub test_player_up_next_at_the_credits()
     tkEqual(playerUpNextAt(45000, []), -1, "too short")
 end sub
 
+sub test_player_up_next_card_as_android_tv()
+    server = "http://pley.test:8096"
+    episode = { id: 104, kind: "episode", title: "Half Loop", grandparent_title: "Severance", parent_index: 1, index: 4, thumb_url: "/api/items/104/images/thumb?v=1", poster_url: "/api/items/104/images/poster" }
+    card = playerUpNextCard(episode, server)
+    tkEqual(card.heading, "Up next · " + fmtEpisode(1, 4), "the episode's code, as Format.brs writes it")
+    tkEqual(card.title, "Half Loop", "the episode's own title")
+    tkEqual(card.image, server + "/api/items/104/images/thumb?v=1&w=640", "its still")
+    movie = { id: 7, kind: "movie", title: "Dune", year: 2021, backdrop_url: "/api/items/7/images/backdrop" }
+    tkEqual(playerUpNextCard(movie, server), { heading: "Up next", title: "Dune", image: server + "/api/items/7/images/backdrop?w=640" })
+    ' A queue's entry, until its details come.
+    entry = { itemId: 104, title: "Severance", line: "", image: server + "/thumb?w=400", startMs: 0 }
+    tkEqual(playerUpNextCard(invalid, server, entry), { heading: "Up next", title: "Severance", image: server + "/thumb?w=400" })
+    tkEqual(playerUpNextCard({ kind: "episode", title: "Half Loop", parent_index: 1, index: 4 }, server, entry).image, server + "/thumb?w=400", "no still of its own")
+    tkEqual(playerNextIn(7), "Next in 7")
+end sub
+
 sub test_player_takes_the_markers_of_the_file_played()
     item = {
         files: [{ id: 1 }, { id: 2 }],

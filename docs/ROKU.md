@@ -251,8 +251,11 @@ with its seeking (fast forward and rewind speeds, seek previews, instant
 replay): there is no control row or scrubber of Pley's own, and Back while
 paused leaves the player, as in Roku's own apps.
 
-- **Up Next** shows at the credits (else 30 s before the end) with its
-  countdown. Cancelled, or with Play the next episode by itself off, it
+- **Up Next** is Android TV's card at the bottom right: the next one's
+  still, "Up next · S2 · E6" and the episode's title, then Play now and
+  Cancel with the countdown beside them ("Next in 7"). A playlist's next
+  entry is asked for as its item begins, for its episode's name. It shows
+  at the credits (else 30 s before the end). Cancelled, or with Play the next episode by itself off, it
   waits at the end, paused, as on the other apps: Play now (or Play) plays
   the next one, Cancel or Back leaves. With the setting on, the countdown
   starts again there.

@@ -204,9 +204,42 @@ function playerMayHaveNext(item as dynamic, queue as dynamic, queueAt as integer
     return data <> invalid and httpString(data.kind) = "episode"
 end function
 
+' Up Next's card for what plays next, as Android TV's: { heading ("Up next
+' · S2 · E6", or "Up next" for what isn't an episode), title (the
+' episode's own), image (its still, 640 wide) }. item is the next one's
+' summary or details; until they are known, the card has the title and
+' still of the queue's entry (Content.brs's contentUpNext).
+function playerUpNextCard(item as dynamic, server as string, entry = invalid as dynamic) as object
+    card = { heading: "Up next", title: "", image: "" }
+    if entry <> invalid
+        card.title = httpString(entry.title)
+        card.image = httpString(entry.image)
+    end if
+    data = httpObject(item)
+    if data = invalid then return card
+    card.title = httpSentence(data.title)
+    if httpString(data.kind) = "episode"
+        code = fmtEpisode(data.parent_index, data.index)
+        if code <> "" then card.heading = "Up next · " + code
+    end if
+    for each key in ["thumb_url", "backdrop_url", "poster_url"]
+        url = urlImage(server, data[key], 640)
+        if url <> ""
+            card.image = url
+            exit for
+        end if
+    end for
+    return card
+end function
+
 ' Up Next counts down this many seconds before the next episode plays.
 function playerUpNextSeconds() as integer
     return 10
+end function
+
+' "Next in 7", beside Play now while Up Next counts down.
+function playerNextIn(seconds as integer) as string
+    return "Next in " + seconds.ToStr()
 end function
 
 ' The menu's entry for what comes next, as Android TV's Next plays it: a

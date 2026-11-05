@@ -66,14 +66,17 @@
         </Group>
         <!-- "Loading…", or "Reconnecting…" while the server is out of reach. -->
         <Label id="loading" translation="[0, 500]" width="1920" horizAlign="center" text="Loading…" color="0xA1A9B6FF" font="font:MediumSystemFont" />
-        <Group id="upNext" translation="[0, 700]" visible="false">
-            <Rectangle width="1920" height="380" color="0x16191EE6" />
-            <Poster id="nextImage" translation="[96, 60]" width="400" height="225" loadWidth="400" loadHeight="225" loadDisplayMode="scaleToZoom" />
-            <Label translation="[540, 56]" text="Up next" color="0x38BDF8FF" font="font:SmallerBoldSystemFont" />
-            <Label id="nextTitle" translation="[540, 100]" width="880" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="nextLine" translation="[540, 156]" width="880" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
-            <Label id="countdown" translation="[540, 214]" width="880" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
-            <ButtonGroup id="nextButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[1460, 60]" minWidth="360" />
+        <!-- Up Next, Android TV's card at the bottom right: the next one's
+             still, "Up next · S2 · E6", its title, then Play now and
+             Cancel, the countdown beside them (showUpNext sizes and places
+             it). -->
+        <Group id="upNext" visible="false">
+            <Rectangle id="nextBack" width="600" color="0x16191EE6" />
+            <Poster id="nextImage" width="600" height="338" loadWidth="640" loadHeight="360" loadDisplayMode="scaleToZoom" />
+            <Label id="nextHeading" translation="[32, 362]" width="536" maxLines="1" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
+            <Label id="nextTitle" translation="[32, 404]" width="536" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <ButtonGroup id="nextButtons" layoutDirection="horiz" itemSpacings="[16]" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="200" maxWidth="200" buttonHeight="64" />
+            <Label id="countdown" width="120" height="64" horizAlign="right" vertAlign="center" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
         </Group>
         <!-- At the top, clear of the subtitles it moves. -->
         <Group id="sync" translation="[560, 72]" visible="false">

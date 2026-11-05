@@ -26,9 +26,10 @@ sub init()
     m.skip = m.top.findNode("skip")
     m.loading = m.top.findNode("loading")
     m.upNext = m.top.findNode("upNext")
+    m.nextBack = m.top.findNode("nextBack")
     m.nextImage = m.top.findNode("nextImage")
+    m.nextHeading = m.top.findNode("nextHeading")
     m.nextTitle = m.top.findNode("nextTitle")
-    m.nextLine = m.top.findNode("nextLine")
     m.countdown = m.top.findNode("countdown")
     m.nextButtons = m.top.findNode("nextButtons")
     m.notice = m.top.findNode("notice")
@@ -85,7 +86,10 @@ sub init()
     m.playAudio = -1
     ' Whether this opening's video has played yet (errors before are the file's).
     m.played = false
+    ' What plays next (Content.brs's contentUpNext) and Up Next's card for
+    ' it (Player.brs's playerUpNextCard).
     m.next = invalid
+    m.nextCard = invalid
     m.upNextAt = -1
     m.upNextShown = false
     m.upNextCancelled = false
@@ -406,6 +410,7 @@ sub open(itemId as dynamic, startMs as integer, item as dynamic, mode as string)
     m.paused = false
     m.played = false
     m.next = invalid
+    m.nextCard = invalid
     m.upNextShown = false
     m.upNextCancelled = false
     m.ended = false
@@ -576,10 +581,13 @@ sub onItem(event as object)
 end sub
 
 ' An episode has a next one to offer before its end; a playlist's entry,
-' the entry after it.
+' the entry after it, whose details give Up Next's card its episode.
 sub itemKnown()
     if m.queue <> invalid
-        if m.queueAt + 1 < m.queue.Count() then m.next = m.queue[m.queueAt + 1]
+        if m.queueAt + 1 >= m.queue.Count() then return
+        m.next = m.queue[m.queueAt + 1]
+        m.nextCard = playerUpNextCard(invalid, m.global.session.server, m.next)
+        uiRequest({ method: "GET", path: "/api/items/" + urlValue(m.next.itemId), attempt: m.attempt }, "onNextItem")
         return
     end if
     if httpString(m.item.kind) <> "episode" then return
@@ -1489,18 +1497,38 @@ sub onNext(event as object)
     answer = event.getData()
     if not answer.ok or answer.data = invalid then return
     item = httpObject(answer.data.item)
-    if item <> invalid then m.next = contentUpNext(item, m.global.session.server)
+    if item = invalid then return
+    m.next = contentUpNext(item, m.global.session.server)
+    m.nextCard = playerUpNextCard(item, m.global.session.server)
 end sub
 
+' The queue's next entry's details: its card names the episode.
+sub onNextItem(event as object)
+    if not isCurrent(event) or m.next = invalid then return
+    answer = event.getData()
+    if not answer.ok or httpObject(answer.data) = invalid then return
+    if httpNumber(answer.data.id, 0) = m.next.itemId then m.nextCard = playerUpNextCard(answer.data, m.global.session.server, m.next)
+end sub
+
+' The card at the bottom right, as tall as its title: 978 is the bottom of
+' Android TV's, 1824 its right edge.
 sub showUpNext()
     closeSync()
     closeMenu()
     hideSkip()
     m.upNextShown = true
-    m.nextTitle.text = m.next.title
-    m.nextLine.text = m.next.line
+    card = m.nextCard
+    if card = invalid then card = playerUpNextCard(invalid, m.global.session.server, m.next)
+    m.nextHeading.text = card.heading
+    m.nextTitle.text = card.title
     m.nextImage.setHttpAgent(m.top.getScene().getHttpAgent())
-    m.nextImage.uri = m.next.image
+    m.nextImage.uri = card.image
+    buttonsAt = 404 + m.nextTitle.boundingRect().height + 32
+    m.nextButtons.translation = [32, buttonsAt]
+    m.countdown.translation = [448, buttonsAt]
+    height = buttonsAt + 64 + 32
+    m.nextBack.height = height
+    m.upNext.translation = [1224, 978 - height]
     m.upNext.visible = true
     updateBanner()
     m.nextButtons.focusButton = 0
@@ -1509,7 +1537,7 @@ sub showUpNext()
     m.countdown.text = ""
     if not playerAutoplay(playbackSection()) then return
     m.countdownLeft = playerUpNextSeconds()
-    m.countdown.text = "Next in " + m.countdownLeft.ToStr() + " s"
+    m.countdown.text = playerNextIn(m.countdownLeft)
     m.countdownTimer.control = "start"
 end sub
 
@@ -1524,7 +1552,7 @@ sub onCountdown()
     if m.countdownLeft <= 0
         playNext()
     else
-        m.countdown.text = "Next in " + m.countdownLeft.ToStr() + " s"
+        m.countdown.text = playerNextIn(m.countdownLeft)
     end if
 end sub
 
