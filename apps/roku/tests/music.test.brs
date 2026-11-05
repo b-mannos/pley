@@ -47,6 +47,39 @@ sub test_music_album_tracks_by_disc()
     tkEqual(musicDiscRows([]).Count(), 0, "no tracks")
 end sub
 
+sub test_music_album_marks_the_track_playing()
+    tracks = []
+    for each place in [[1, 1], [2, 1]]
+        item = musicTestTrack()
+        item.id = 5200 + place[0]
+        item.parent_index = place[0]
+        item.index = place[1]
+        tracks.Push(musicTrack(item, "http://nas:7539"))
+    end for
+    rows = musicDiscRows(tracks)
+    changed = musicMarkedRows(rows, 5202)
+    tkEqual(changed.Count(), 1, "only the row of the track playing")
+    tkEqual(changed[0].at, 3, "past the second disc's heading")
+    tkTrue(changed[0].fields.current)
+    tkEqual(changed[0].fields.title, rows[3].title, "the row as it was, marked")
+    rows[3] = changed[0].fields
+    tkEqual(musicMarkedRows(rows, 5202).Count(), 0, "marked already: nothing to draw again")
+    changed = musicMarkedRows(rows, 5201)
+    tkEqual(changed.Count(), 2, "the mark moves")
+    tkEqual(changed[0].at, 1)
+    tkTrue(changed[0].fields.current)
+    tkEqual(changed[1].at, 3)
+    tkFalse(changed[1].fields.current)
+    tkEqual(musicMarkedRows(musicDiscRows(tracks), 0).Count(), 0, "nothing playing: none marked")
+end sub
+
+sub test_music_album_rating_line()
+    tkEqual(musicRatingLine({ user_state: { rating: 8 } }), "Your rating: 4 stars")
+    tkEqual(musicRatingLine({ user_state: { rating: 1 } }), "Your rating: 1 star", "a half star rounds up")
+    tkEqual(musicRatingLine({ user_state: { rating: invalid } }), "", "none given")
+    tkEqual(musicRatingLine({}), "")
+end sub
+
 sub test_music_now_playing_dims_after_two_minutes()
     tkFalse(musicDimmed(0), "a key just pressed")
     tkFalse(musicDimmed(119))

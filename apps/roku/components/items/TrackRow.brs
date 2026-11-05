@@ -8,8 +8,8 @@ sub init()
     ' never drawn focused.
     m.heading = m.top.findNode("heading")
     m.isHeading = false
-    ' Up next's track playing (current; an album's tracks have none): in
-    ' bold, in the accent.
+    ' The track playing (current), in Up next or an album's list: in bold,
+    ' in the accent.
     m.isCurrent = false
 end sub
 

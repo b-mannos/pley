@@ -1,7 +1,8 @@
 ' An album (GET /api/items/{id}, its tracks /children): Play, Shuffle and
 ' OK on a track hand its tracks to the music player and open Now Playing;
-' as on the other TVs, Go to artist opens its artist's page, and Now
-' playing goes back to the music while it plays.
+' as on Android TV, the track playing is marked, and OK on it pauses or
+' goes on instead. As on the other TVs, Go to artist opens its artist's
+' page, and Now playing goes back to the music while it plays.
 ' On several discs, each disc's tracks are under its heading, a row of
 ' the list that the focus passes over (lib/Music.brs, musicDiscRows).
 ' params: { id, title (shown until the server answers), trackId (the
@@ -12,12 +13,17 @@ sub init()
     m.cover = m.top.findNode("cover")
     m.title = m.top.findNode("title")
     m.line = m.top.findNode("line")
+    m.rating = m.top.findNode("rating")
     m.buttons = m.top.findNode("buttons")
     m.tracks = m.top.findNode("tracks")
     m.message = m.top.findNode("message")
     m.started = false
     m.album = invalid
     m.queue = []
+    ' The list's rows' fields, the one playing marked (musicMarkedRows),
+    ' and whether the music player is followed (while this screen shows).
+    m.rowFields = []
+    m.watchingMusic = false
     ' The row of the track that had the focus last, which says which way
     ' it was going when it lands on a heading.
     m.trackRow = 0
@@ -33,11 +39,23 @@ sub init()
 end sub
 
 sub onActive()
+    music = m.global.music
     if not m.top.active
         m.lastFocus = m.buttons
         if m.tracks.isInFocusChain() then m.lastFocus = m.tracks
+        if m.watchingMusic
+            music.unobserveFieldScoped("track")
+            music.unobserveFieldScoped("state")
+            m.watchingMusic = false
+        end if
         return
     end if
+    if not m.watchingMusic
+        music.observeFieldScoped("track", "markPlaying")
+        music.observeFieldScoped("state", "onMusicState")
+        m.watchingMusic = true
+    end if
+    markPlaying()
     uiChangesSince()
     if m.started
         ' Now playing comes and goes with the music.
@@ -71,6 +89,7 @@ sub onAlbum(event as object)
     end if
     m.album = answer.data
     m.title.text = httpSentence(m.album.title)
+    m.rating.text = musicRatingLine(m.album)
     showLine()
     showButtons()
     image = contentTileImage(m.album, m.global.session.server, false, 420)
@@ -93,6 +112,11 @@ sub onTracks(event as object)
     end if
     m.queue = answer.data.queue
     m.tracks.content = event.getRoSGNode().content
+    m.rowFields = []
+    for each node in m.tracks.content.getChildren(-1, 0)
+        m.rowFields.Push({ title: node.title, subtitle: node.subtitle, duration: node.duration, itemId: httpNumber(node.itemId, 0), kind: node.kind, at: node.at })
+    end for
+    markPlaying()
     showLine()
     if m.queue.Count() = 0
         m.message.text = "This album has no tracks."
@@ -186,9 +210,42 @@ sub onButton(event as object)
     end if
 end sub
 
+' OK on the track playing pauses or goes on (playOrToggle, as on Android
+' TV); on another, the album plays from it.
 sub onTrack(event as object)
     at = trackAt(event.getData())
-    if at >= 0 then play(at, false)
+    if at < 0 then return
+    if m.queue[at].itemId = playingId()
+        m.global.music.control = "toggle"
+    else
+        play(at, false)
+    end if
+end sub
+
+' The track the music player has, 0 for none.
+function playingId() as dynamic
+    music = m.global.music
+    if music.state = "stopped" or music.track = invalid then return 0
+    return httpNumber(music.track.itemId, 0)
+end function
+
+' The row of the track playing is marked, as on Android TV: a new node,
+' which the list draws again, for each row that changes.
+sub markPlaying()
+    content = m.tracks.content
+    if content = invalid then return
+    for each change in musicMarkedRows(m.rowFields, playingId())
+        m.rowFields[change.at] = change.fields
+        fresh = CreateObject("roSGNode", "ContentNode")
+        nodesFill(fresh, change.fields)
+        content.replaceChild(fresh, change.at)
+    end for
+end sub
+
+' The music stopped or started: the mark, and Now playing, follow.
+sub onMusicState()
+    markPlaying()
+    showButtons()
 end sub
 
 ' Right from the buttons goes to the tracks, left back; the Options key on

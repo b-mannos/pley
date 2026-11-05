@@ -232,8 +232,10 @@ when they are on several discs (the tracks' `parent_index`), each
 numbered on its disc; the focus passes over the headings. An album or a
 music playlist plays whole, from the track chosen, so Previous goes back
 past it; its Shuffle starts on any track and plays the others after it in
-a random order. As on the other TVs, an album's page also has Go to
-artist, and Now playing while music plays.
+a random order. As on Android TV, the track playing is marked in the
+list, OK on it pauses or goes on, and the profile's rating shows under
+the album's line ("Your rating: 4 stars"). As on the other TVs, an
+album's page also has Go to artist, and Now playing while music plays.
 
 As on the other apps, the queue stays until other music replaces it (or
 another profile, sign-in or server comes): at its end the last track

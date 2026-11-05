@@ -88,6 +88,38 @@ function musicAlbumLine(album as object, tracks as object) as string
     return parts.Join(" · ")
 end function
 
+' The profile's own rating of an album (its details' user_state.rating, 0
+' to 10 in half stars), as Android TV shows it under the album's line:
+' "Your rating: 4 stars"; "" for none.
+function musicRatingLine(album as object) as string
+    state = httpObject(album.user_state)
+    if state = invalid then return ""
+    stars = contentStars(state.rating)
+    if stars = 0 then return ""
+    return "Your rating: " + contentStarsLabel(stars)
+end function
+
+' An album's rows (musicDiscRows) with the track whose id is trackId
+' marked current (none for 0): those to draw again, [{ at (the row),
+' fields }], as each row's node changes.
+function musicMarkedRows(rows as object, trackId as dynamic) as object
+    changed = []
+    playing = httpNumber(trackId, 0)
+    for i = 0 to rows.Count() - 1
+        row = rows[i]
+        current = false
+        if row.kind = "track" and playing > 0 then current = httpNumber(row.itemId, 0) = playing
+        was = httpTrue(row.current)
+        if current <> was
+            fields = {}
+            fields.Append(row)
+            fields.current = current
+            changed.Push({ at: i, fields: fields })
+        end if
+    end for
+    return changed
+end function
+
 ' An artist's albums (GET /api/items/{id}/children): { tiles, order }.
 ' tiles are the albums newest first (then by title), each captioned with
 ' its year; order has their ids as the server sent them, the order Play
