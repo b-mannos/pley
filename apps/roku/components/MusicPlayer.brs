@@ -158,8 +158,7 @@ end sub
 sub begin()
     if m.info = invalid or m.detail = invalid then return
     track = musicTrackAt(m.queue, m.queue.at)
-    url = httpString(m.info.url)
-    if Left(url, 1) = "/" then url = m.global.session.server + url
+    url = urlOnServer(m.global.session.server, httpString(m.info.url))
     content = CreateObject("roSGNode", "ContentNode")
     content.url = url
     content.streamFormat = musicStreamFormat(m.info, m.detail)

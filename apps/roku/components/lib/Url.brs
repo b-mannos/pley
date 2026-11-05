@@ -221,9 +221,20 @@ end function
 ' "/api/items/12/images/poster?v=1729600000"), asking for width pixels.
 ' "" without a picture.
 function urlImage(server as string, path as dynamic, width as integer) as string
-    if GetInterface(path, "ifString") = invalid or path = "" then return ""
-    url = path
-    if Left(path, 1) = "/" then url = server + path
+    url = urlOnServer(server, path)
+    if url = "" then return ""
     if Instr(1, url, "?") > 0 then return url + "&w=" + width.ToStr()
     return url + "?w=" + width.ToStr()
+end function
+
+' path, one of the server's own ("/api/…", or an address on server), as
+' an address on server; "" for anything else. Pictures and streams are
+' asked for with the scene's agent, which carries the token, so an
+' address elsewhere in an answer is never asked for.
+function urlOnServer(server as string, path as dynamic) as string
+    if GetInterface(path, "ifString") = invalid or path = "" or server = "" then return ""
+    if Instr(1, path, "\") > 0 then return ""
+    if Left(path, 1) = "/" and Left(path, 2) <> "//" then return server + path
+    if Left(path, Len(server) + 1) = server + "/" then return path
+    return ""
 end function
