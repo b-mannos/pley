@@ -141,7 +141,11 @@ theirs to the music player, album by album, and open Now Playing (Now
 playing goes back to it while music plays); their albums are on the
 right, newest first.
 
-Playlists has New playlist at the right of its heading: what it is for
+Playlists shows each playlist as a square cover, five across, as on
+Android TV: a mosaic of its first four entries' pictures (decoded at a
+quarter of the cover each, for a Roku Express's texture memory), or the
+first one's alone, under it "12 items · 3 h 12 min" (and "Smart"). New
+playlist, at the right of its heading, asks what it is for
 (Movies & TV or Music), then its name on the Roku's keyboard. The new
 playlist opens, empty; Add to playlist, the Options key on a title, fills
 it. A playlist's entries move with the Options key's Move.

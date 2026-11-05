@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A playlist in the playlists' grid, as on Android TV: a square cover,
+     a 2 by 2 mosaic of its first four entries' pictures (or the first
+     entry's alone, or its name in the frame), and two lines under it. The
+     pictures are decoded at the size they're drawn: four small textures. -->
+<component name="PlaylistTile" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent" />
+        <field id="width" type="float" onChange="onLayout" />
+        <field id="height" type="float" onChange="onLayout" />
+        <field id="itemHasFocus" type="boolean" onChange="onFocus" />
+        <field id="gridHasFocus" type="boolean" value="true" onChange="onFocus" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/items/PlaylistTile.brs" />
+    <children>
+        <Rectangle id="frame" color="0x262B35FF" />
+        <Label id="fallback" color="0xA1A9B6FF" horizAlign="center" vertAlign="center" wrap="true" maxLines="4" font="font:SmallestBoldSystemFont" />
+        <Poster id="cover" loadDisplayMode="scaleToZoom" />
+        <Poster id="cell0" loadDisplayMode="scaleToZoom" />
+        <Poster id="cell1" loadDisplayMode="scaleToZoom" />
+        <Poster id="cell2" loadDisplayMode="scaleToZoom" />
+        <Poster id="cell3" loadDisplayMode="scaleToZoom" />
+        <Label id="title" color="0xEBEBEBFF" font="font:SmallestBoldSystemFont" />
+        <Label id="subtitle" color="0xA1A9B6FF" font="font:TinySystemFont" />
+    </children>
+</component>
