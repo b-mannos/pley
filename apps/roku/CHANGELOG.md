@@ -121,6 +121,9 @@ describes how they are made.
   more.
 - Choosing a Live TV category or searching takes the focus to its
   channels.
+- Picture subtitles made for a DVD-sized picture stretch with it to 16:9,
+  as the other apps draw them, rather than keeping their stored shape and
+  showing too narrow.
 
 ## [0.1.5] - 2026-11-04
 

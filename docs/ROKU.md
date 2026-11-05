@@ -302,15 +302,16 @@ next.
   list isn't whole, the app asks again every 3 s from where the video is
   (at once after a seek), and keeps what it has. The subtitle plane goes
   over the picture as the web player puts it: a DVD-sized plane (576 lines
-  or fewer) stretches over it, and an HD plane of another shape than the
-  video (a film cropped to 1920×800) keeps its own, fitted to the screen.
-  The file says only how its video is stored, so a video of 576 lines or
-  fewer is taken to show as 16:9. A picture shows while the video plays,
-  under the skip button and the player's panels; paused or seeking, Roku's
-  bar has the bottom of the screen. The next picture loads in a second
-  frame while one shows, and one that fails to load loads again 3 s later.
-  The Video node tells its position every 0.2 s while pictures are drawn,
-  else every second.
+  or fewer) stretches over it, its pictures with it, and an HD plane of
+  another shape than the video (a film cropped to 1920×800) keeps its
+  own, fitted to the screen. The file says only how its video is stored,
+  so a video of 576 lines or fewer is taken to show as 16:9. A picture
+  fills its place on the plane, as the other apps draw it. It shows while
+  the video plays, under the skip button and the player's panels; paused
+  or seeking, Roku's bar has the bottom of the screen. The next picture
+  loads in a second frame while one shows, and one that fails to load
+  loads again 3 s later. The Video node tells its position every 0.2 s
+  while pictures are drawn, else every second.
 - Roku's options list only text tracks, and a conversion's one audio.
   Pley's menu (Down) lists every track of the file, as the title's page
   does: Subtitles (Off, then each, pictures too) and Audio (Automatic, then

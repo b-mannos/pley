@@ -43,10 +43,12 @@
         <Video id="video" width="1920" height="1080">
             <!-- Picture subtitles (Pictures.brs): the one showing, and the
                  next loading in the other frame. Under the skip button and
-                 the player's panels, as captions are. -->
+                 the player's panels, as captions are. Each fills its box:
+                 a DVD's plane stretched over a 16:9 picture stretches its
+                 pictures with it, as the other apps draw them. -->
             <Group id="pictures">
-                <Poster id="pictureA" opacity="0" loadDisplayMode="scaleToFit" />
-                <Poster id="pictureB" opacity="0" loadDisplayMode="scaleToFit" />
+                <Poster id="pictureA" opacity="0" loadDisplayMode="scaleToFill" />
+                <Poster id="pictureB" opacity="0" loadDisplayMode="scaleToFill" />
             </Group>
             <SkipButton id="skip" translation="[1544, 924]" visible="false" />
         </Video>
