@@ -126,10 +126,6 @@ sub init()
     m.watchItem = invalid
     m.autoQuality = ""
     m.autoNotice = ""
-    m.toast = m.top.findNode("toast")
-    m.toastText = m.top.findNode("toastText")
-    m.toastTimer = m.top.findNode("toastTimer")
-    m.toastTimer.observeField("fire", "onToastTimer")
     m.autoTimer = m.top.findNode("autoTimer")
     m.autoTimer.observeField("fire", "onAutoTick")
     ' The sleep timer, off until set in the menu, for the whole time the
@@ -687,7 +683,7 @@ end sub
 sub watchState(state as string)
     if m.watch = invalid then return
     if state = "playing" and m.autoNotice <> ""
-        showToast(m.autoNotice)
+        uiToast(m.autoNotice)
         m.autoNotice = ""
     end if
     underrun = invalid
@@ -734,7 +730,7 @@ sub autoStep(decision as object)
     if decision.memory >= 0 then keepCeiling(decision.memory)
     if decision.kind = "next" then return
     if decision.kind = "bitrate"
-        if decision.down then showToast("Quality lowered to " + aqBitrateLabel(decision.kbps, m.watch.lines))
+        if decision.down then uiToast("Quality lowered to " + aqBitrateLabel(decision.kbps, m.watch.lines))
         setBitrate(decision.kbps)
         return
     end if
@@ -777,17 +773,6 @@ sub onBitrate(event as object)
         if GetInterface(answer.data, "ifAssociativeArray") <> invalid then kbps = httpNumber(answer.data.bitrate, kbps)
     end if
     aqAnswered(m.watch, httpNumber(spec.kbps, 0), kbps)
-end sub
-
-sub showToast(text as string)
-    m.toastText.text = text
-    m.toast.visible = true
-    m.toastTimer.control = "stop"
-    m.toastTimer.control = "start"
-end sub
-
-sub onToastTimer()
-    m.toast.visible = false
 end sub
 
 ' The title at the top for 4 s as an item begins to play (the first, the
@@ -1288,8 +1273,6 @@ sub finish()
     m.clockTimer.control = "stop"
     m.clockTicking = false
     newTitle()
-    m.toastTimer.control = "stop"
-    m.toast.visible = false
     stopPictures()
     if m.sessionId <> ""
         report("stopped")
@@ -1445,7 +1428,7 @@ sub onStallChecked(event as object)
         ' Automatic goes lower by itself; otherwise the person is told, once.
         if m.watch = invalid and not m.slowSaid
             m.slowSaid = true
-            showToast("The server can't keep up with this video. Try a lower quality: Down, then Quality.")
+            uiToast("The server can't keep up with this video. Try a lower quality: Down, then Quality.", true)
         end if
         return
     end if
@@ -1860,7 +1843,7 @@ sub onTrackPicked(event as object)
     if not isCurrent(event) then return
     answer = event.getData()
     if answer.error = "signed_out" then return
-    if not answer.ok then showToast("Couldn't save that choice for next time.")
+    if not answer.ok then uiToast("Couldn't save that choice for next time.", true)
     position = m.positionMs
     seconds = m.video.position
     if seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
@@ -2377,7 +2360,7 @@ sub onSubtitlesAdded(event as object)
     if file <> invalid then file.selected_subtitle = index
     stream = contentStream(m.info, m.item, m.global.session.server, m.positionMs)
     m.textTracks = stream.subtitleTracks.Count()
-    showToast("Subtitles added: " + contentSubtitleName(track, httpString(track.language)))
+    uiToast("Subtitles added: " + contentSubtitleName(track, httpString(track.language)))
     if tracksNeedNewSession(burned, index)
         position = m.positionMs
         seconds = m.video.position

@@ -276,6 +276,9 @@ paused leaves the player, as in Roku's own apps.
   before the title's end, as a file resumed past what it holds) isn't the
   end: a file played as it is is converted, and a stream opened again;
   falling short again within the minute, the player says so.
+- **Notices** (a lower quality, subtitles added, a server that can't keep
+  up) show in the app's toast at the top right, under the title at the
+  top, and go by themselves.
 - **Progress** goes to the server every 10 s while playing, every 30 s
   paused, and at once after a seek, in Roku's own bar too.
 - **Playback details** are asked for again every 2 s while they show.
