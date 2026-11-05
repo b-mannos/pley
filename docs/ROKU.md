@@ -461,16 +461,22 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
 - **Failures:** a playlist the server doesn't give (a `503` while the
   provider sends nothing, or another failure of its), or a stream that
   breaks while its playlist is still there, tunes the channel again twice,
-  after 1 s and then 3 s, before the notice says why; not when the server
+  after 1 s and then 3 s, before the card says why; not when the server
   refused it (`409` every connection in use, `410`, `403`, `404`). Try
   again starts the count again. When the server doesn't answer at all,
   the app says it can't be reached, as on any screen.
+- **The card** of what went wrong is Android TV's, in the middle of the
+  screen: the channel's logo, why, and Try again, Other channels and Back
+  to the guide, Left and Right between them. Every connection in use, it
+  lists what each watches and who (five at most), with Watch here instead
+  on each this account may take over, which has the focus first; Up and
+  Down go between those and the buttons.
 - **Taken over:** the server's `live_taken_over` event for the channel
   playing (the scene hands it to the player) stops it at once, before its
   stream breaks off. A stream that breaks asks its playlist again, and a
-  `410` there stops it too. Either way the notice says "Live TV stopped"
+  `410` there stops it too. Either way the card says "Live TV stopped"
   with the server's words, and Watch again in place of Try again. Taken
-  while Up or Down changes channel, the change goes on, with no notice.
+  while Up or Down changes channel, the change goes on, with no card.
 - **Radio:** a channel with no picture keeps its card with what's on.
 
 ### Remote control

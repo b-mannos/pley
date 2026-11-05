@@ -148,16 +148,15 @@ function infoDrawn() {
   return false;
 }
 
-// The live player's notice: its dark panel over the whole screen, its
-// title in the app's text colour at the left (from 96, 120 when it lists what
-// holds each connection).
+// The live player's trouble card: its surface (0x262B35) in the middle of
+// the screen, 1200 wide from 360 and centred down it
+// (LivePlayerScreen.brs's trouble), seen in its left margin, where the
+// card draws nothing else; the tuning card there is black.
 function noticeDrawn() {
   if (!frame) return false;
-  for (let y = 130; y < 180; y += 2) {
-    for (let x = 100; x < 600; x += 2) {
-      const at = (Math.round(y * (frame.height / 1080)) * frame.width + Math.round(x * (frame.width / 1920))) * 4;
-      if (frame.data[at] > 200 && frame.data[at + 1] > 200 && frame.data[at + 2] > 200) return true;
-    }
+  for (const y of [500, 540, 580]) {
+    const at = (Math.round(y * (frame.height / 1080)) * frame.width + Math.round(380 * (frame.width / 1920))) * 4;
+    if (Math.abs(frame.data[at] - 0x26) < 8 && Math.abs(frame.data[at + 1] - 0x2b) < 8 && Math.abs(frame.data[at + 2] - 0x35) < 8) return true;
   }
   return false;
 }

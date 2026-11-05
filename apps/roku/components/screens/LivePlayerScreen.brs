@@ -44,9 +44,20 @@ sub init()
     m.listHint = m.top.findNode("listHint")
     m.listHint.text = listHintText()
     m.notice = m.top.findNode("notice")
+    m.noticeCard = m.top.findNode("noticeCard")
+    m.noticeBack = m.top.findNode("noticeBack")
+    m.noticeInitials = m.top.findNode("noticeInitials")
+    m.noticeLogo = m.top.findNode("noticeLogo")
     m.noticeTitle = m.top.findNode("noticeTitle")
+    m.noticeLead = m.top.findNode("noticeLead")
+    m.noticeRows = m.top.findNode("noticeRows")
+    m.noticeNote = m.top.findNode("noticeNote")
     m.noticeText = m.top.findNode("noticeText")
-    m.noticeButtons = m.top.findNode("noticeButtons")
+    m.noticeChoices = m.top.findNode("noticeChoices")
+    ' What takes the card's focus, top to bottom (each Watch here instead,
+    ' then the buttons), and the one that has it.
+    m.troubleStops = []
+    m.troubleAt = 0
     m.bannerTimer = m.top.findNode("bannerTimer")
     m.okTimer = m.top.findNode("okTimer")
     m.zapTimer = m.top.findNode("zapTimer")
@@ -132,7 +143,7 @@ sub init()
     m.trouble = invalid
     m.video.notificationInterval = 1
     m.video.observeField("state", "onState")
-    m.noticeButtons.observeField("buttonSelected", "onNoticeButton")
+    m.noticeChoices.observeField("chosen", "onNoticeButton")
     m.channelList.observeField("itemSelected", "onListSelected")
     m.categoryList.observeField("itemSelected", "onCategorySelected")
     m.categoryList.observeField("itemFocused", "onCategoryFocused")
@@ -147,6 +158,7 @@ sub init()
     m.retryTimer.observeField("fire", "onRetryTimer")
     m.cardLogo.observeField("loadStatus", "onLogos")
     m.bannerLogo.observeField("loadStatus", "onLogos")
+    m.noticeLogo.observeField("loadStatus", "onLogos")
     m.top.observeField("active", "onActive")
     m.top.observeField("liveTakenOver", "onTakenOver")
     m.top.observeField("serverStopped", "onServerStopped")
@@ -325,7 +337,7 @@ sub closeList()
     ' The list gives the focus up: its parent taking it may not.
     m.channelList.setFocus(false)
     if m.notice.visible
-        m.noticeButtons.setFocus(true)
+        focusTrouble()
     else
         m.top.setFocus(true)
     end if
@@ -940,6 +952,7 @@ end sub
 sub onLogos()
     m.cardInitials.visible = m.cardLogo.uri = "" or m.cardLogo.loadStatus = "failed"
     m.bannerInitials.visible = m.bannerLogo.uri = "" or m.bannerLogo.loadStatus = "failed"
+    m.noticeInitials.visible = m.noticeLogo.uri = "" or m.noticeLogo.loadStatus = "failed"
 end sub
 
 ' The bar: the channel, what's on with when and how long it has left, how
@@ -1100,9 +1113,12 @@ sub redrawList()
     end for
 end sub
 
-' A watching that didn't start or stopped: what the server said, with Try
-' again where it may help (Watch again when it stopped), Other channels,
-' and Back.
+' A watching that didn't start or stopped: a card in the middle, as
+' Android TV's (Live.brs's liveTroubleCard), with Try again where it may
+' help (Watch again when it stopped), Other channels, and Back to the
+' guide. Every connection in use, a row for each with what holds it, and
+' Watch here instead where this account may take it over, which has the
+' focus first.
 sub trouble(problem as object)
     m.trouble = problem
     m.retryTimer.control = "stop"
@@ -1112,44 +1128,115 @@ sub trouble(problem as object)
     showWaiting(false)
     forgetOk()
     hideBanner()
-    m.noticeTitle.text = problem.title
-    m.noticeText.text = problem.lines
-    ' What holds each connection takes room: the text on the left, the
-    ' buttons beside it, all from the top.
-    if problem.connections.Count() > 0
-        m.noticeTitle.translation = [96, 120]
-        m.noticeText.translation = [96, 210]
-        m.noticeText.width = 920
-        m.noticeText.maxLines = 16
-        m.noticeButtons.translation = [1104, 210]
-        m.noticeButtons.minWidth = 720
-    else
-        m.noticeTitle.translation = [96, 340]
-        m.noticeText.translation = [96, 430]
-        m.noticeText.width = 1500
-        m.noticeText.maxLines = 6
-        m.noticeButtons.translation = [96, 700]
-        m.noticeButtons.minWidth = 400
+    card = liveTroubleCard(problem)
+    channel = m.channel
+    m.noticeInitials.text = ""
+    m.noticeLogo.uri = ""
+    if channel <> invalid
+        m.noticeInitials.text = channel.name
+        m.noticeLogo.setHttpAgent(m.top.getScene().getHttpAgent())
+        m.noticeLogo.uri = channel.logo
     end if
-    ' Every connection in use: what holds each, and Watch here instead
-    ' where this account may take one over.
-    m.noticeActions = liveTroubleButtons(problem)
-    labels = []
-    for each button in m.noticeActions
-        labels.Push(button.label)
+    onLogos()
+    m.noticeTitle.text = card.title
+    y = 236 + m.noticeTitle.boundingRect().height
+    m.noticeLead.text = card.lead
+    m.noticeLead.visible = card.lead <> ""
+    if m.noticeLead.visible
+        m.noticeLead.translation = [64, y + 16]
+        y = y + 16 + m.noticeLead.boundingRect().height + 8
+    end if
+    ' A row for each connection; the focus goes through their Watch here
+    ' instead, then the buttons under them (focusTrouble).
+    m.noticeRows.removeChildrenIndex(m.noticeRows.getChildCount(), 0)
+    m.troubleStops = []
+    for each c in card.rows
+        y = y + 12
+        troubleRow(c, y)
+        y = y + 88
     end for
-    m.noticeButtons.buttons = labels
+    m.noticeNote.text = card.note
+    m.noticeNote.visible = card.note <> ""
+    if m.noticeNote.visible
+        m.noticeNote.translation = [64, y + 12]
+        y = y + 12 + m.noticeNote.boundingRect().height
+    end if
+    m.noticeText.text = card.text
+    m.noticeText.visible = card.text <> ""
+    if m.noticeText.visible
+        m.noticeText.translation = [64, y + 16]
+        y = y + 16 + m.noticeText.boundingRect().height
+    end if
+    m.noticeActions = liveTroubleButtons(problem)
+    chips = []
+    for each button in m.noticeActions
+        chips.Push({ label: button.label, width: 0 })
+    end for
+    m.noticeChoices.chips = chips
+    m.noticeChoices.focusIndex = 0
+    m.noticeChoices.translation = [Int((1200 - m.noticeChoices.rowWidth) / 2), y + 40]
+    m.troubleStops.Push(m.noticeChoices)
+    height = y + 40 + 56 + 64
+    m.noticeBack.height = height
+    m.noticeCard.translation = [360, Int((1080 - height) / 2)]
+    m.troubleAt = 0
     m.notice.visible = true
-    if not m.list.visible then m.noticeButtons.setFocus(true)
+    if not m.list.visible then focusTrouble()
+end sub
+
+' A connection's row on the card: its channel, who holds it, and Watch
+' here instead where it may be taken over.
+sub troubleRow(c as object, y as integer)
+    row = m.noticeRows.createChild("Group")
+    row.translation = [64, y]
+    back = row.createChild("Rectangle")
+    back.width = 1072
+    back.height = 88
+    back.color = "0x2E3440FF"
+    take = invalid
+    room = 1072 - 48
+    if c.canTakeOver
+        take = row.createChild("ChipRow")
+        take.chips = [{ label: "Watch here instead", width: 0 }]
+        take.translation = [1072 - 16 - take.rowWidth, 16]
+        ' The connection it takes over, read back as it is chosen.
+        take.id = c.channelId.ToStr()
+        take.observeField("chosen", "onTakeOver")
+        room = room - take.rowWidth - 16
+        m.troubleStops.Push(take)
+    end if
+    name = row.createChild("Label")
+    name.translation = [24, 10]
+    name.width = room
+    name.font = "font:SmallBoldSystemFont"
+    name.color = "0xEBEBEBFF"
+    name.text = c.channelName
+    holders = row.createChild("Label")
+    holders.translation = [24, 48]
+    holders.width = room
+    holders.font = "font:SmallestSystemFont"
+    holders.color = "0xA1A9B6FF"
+    holders.text = c.holders
+end sub
+
+' The card's focus: on its stop at m.troubleAt (a Watch here instead, or
+' the buttons under them).
+sub focusTrouble()
+    if m.troubleStops.Count() = 0 then return
+    if m.troubleAt >= m.troubleStops.Count() then m.troubleAt = m.troubleStops.Count() - 1
+    m.troubleStops[m.troubleAt].setFocus(true)
+end sub
+
+sub onTakeOver(event as object)
+    channelId = event.getRoSGNode().id.ToInt()
+    if channelId > 0 then tune(m.channel, channelId)
 end sub
 
 sub onNoticeButton(event as object)
     at = event.getData()
     if m.noticeActions = invalid or at < 0 or at >= m.noticeActions.Count() then return
     button = m.noticeActions[at]
-    if button.action = "takeOver"
-        tune(m.channel, button.channelId)
-    else if button.action = "retry"
+    if button.action = "retry"
         tune(m.channel)
     else if button.action = "list"
         openList()
@@ -1185,7 +1272,8 @@ end sub
 ' past its ends go to the page before or after, Left opens the categories
 ' (Back and Right close them), Replay searches, Back leaves a search for
 ' the category before, and Back and Right close it. Over what went wrong,
-' the Options key opens the list too. Otherwise Back leaves (the scene).
+' Up and Down go between the card's rows and its buttons, and the Options
+' key opens the list too. Otherwise Back leaves (the scene).
 function onKeyEvent(key as string, press as boolean) as boolean
     if key = "OK" and not press
         ' The rest of an OK held is the bar's.
@@ -1241,7 +1329,17 @@ function onKeyEvent(key as string, press as boolean) as boolean
         openList()
         return true
     end if
-    if m.notice.visible then return false
+    ' The card: Up and Down between its Watch here instead and the buttons
+    ' under them, which take Left, Right and OK.
+    if m.notice.visible
+        if key = "up" or key = "down"
+            if key = "up" and m.troubleAt > 0 then m.troubleAt = m.troubleAt - 1
+            if key = "down" and m.troubleAt < m.troubleStops.Count() - 1 then m.troubleAt = m.troubleAt + 1
+            focusTrouble()
+            return true
+        end if
+        return false
+    end if
     ' The bar has the focus: its chips take Left, Right and OK.
     if m.banner.visible
         if key = "back"

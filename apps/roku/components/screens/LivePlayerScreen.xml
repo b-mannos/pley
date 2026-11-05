@@ -5,8 +5,9 @@
      change channel within the category it was opened from, the
      category's channels at the right (OK or the Options key; another
      category, or a search, can be listed there), a bar of what's on and
-     next with Channels and the favourite (OK held), and what went wrong
-     when it did (every connection in use, the channel not playing). -->
+     next with Channels and the favourite (OK held), and a card of what
+     went wrong when it did (every connection in use, the channel not
+     playing). -->
 <component name="LivePlayerScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -69,12 +70,25 @@
             <!-- Channels, then the favourite; Left and Right between them. -->
             <ChipRow id="controls" translation="[384, 930]" />
         </Group>
-        <!-- What went wrong, and what can be done. -->
+        <!-- What went wrong, and what can be done: a card in the middle,
+             as Android TV's (trouble places its parts): the channel's
+             logo, why, what holds each connection when all are in use
+             (Watch here instead on those this account may take), then
+             Try again, Other channels and Back to the guide. -->
         <Group id="notice" visible="false">
-            <Rectangle width="1920" height="1080" color="0x16191EF2" />
-            <Label id="noticeTitle" translation="[96, 340]" width="1728" wrap="true" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
-            <Label id="noticeText" translation="[96, 430]" width="1500" wrap="true" maxLines="6" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-            <ButtonGroup id="noticeButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 700]" minWidth="400" />
+            <Rectangle width="1920" height="1080" color="0x000000E0" />
+            <Group id="noticeCard" translation="[360, 0]">
+                <Rectangle id="noticeBack" width="1200" color="0x262B35FF" />
+                <Rectangle translation="[480, 64]" width="240" height="136" color="0x2E3440FF" />
+                <Label id="noticeInitials" translation="[480, 64]" width="240" height="136" horizAlign="center" vertAlign="center" wrap="true" maxLines="2" color="0xA1A9B6FF" font="font:SmallBoldSystemFont" />
+                <Poster id="noticeLogo" translation="[496, 76]" width="208" height="112" loadWidth="208" loadHeight="112" loadDisplayMode="scaleToFit" />
+                <Label id="noticeTitle" translation="[64, 236]" width="1072" wrap="true" maxLines="2" horizAlign="center" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+                <Label id="noticeLead" width="1072" horizAlign="center" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+                <Group id="noticeRows" />
+                <Label id="noticeNote" width="1072" wrap="true" maxLines="2" horizAlign="center" color="0x8B95A5FF" font="font:SmallestSystemFont" />
+                <Label id="noticeText" width="1072" wrap="true" maxLines="6" horizAlign="center" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+                <ChipRow id="noticeChoices" />
+            </Group>
         </Group>
         <!-- The category's channels, at the right over the video. -->
         <Group id="list" translation="[1120, 0]" visible="false">

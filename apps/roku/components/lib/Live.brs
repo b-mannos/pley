@@ -891,9 +891,9 @@ end function
 ' --- The player ---
 
 ' A watching that didn't start, as the player says it: { kind, title,
-' message, retry, connections, lines }. kind "busy" (every connection of
-' the source in use, 409: the server's message, and what holds each
-' connection as liveBusyConnections reads them, lines the notice's), "missing"
+' message, retry, connections, lines (the message) }. kind "busy" (every
+' connection of the source in use, 409: the server's message, and what
+' holds each connection as liveBusyConnections reads them), "missing"
 ' (404), "closed" (403), "stopped" (410: its connection taken over, or
 ' stopped by an administrator, liveStopped), "unavailable" (503) or "other".
 function liveTrouble(answer as object, channelName as string) as object
@@ -901,7 +901,7 @@ function liveTrouble(answer as object, channelName as string) as object
     message = httpSentence(answer.message)
     if status = 409
         connections = liveBusyConnections(answer.data)
-        return { kind: "busy", title: "All connections are in use", message: message, retry: true, connections: connections, lines: liveBusyLines(message, connections) }
+        return { kind: "busy", title: "All connections are in use", message: message, retry: true, connections: connections, lines: message }
     end if
     if status = 410
         ' The server's own words, not a status's.
@@ -912,7 +912,7 @@ function liveTrouble(answer as object, channelName as string) as object
     end if
     problem = { kind: "other", title: channelName + " didn't start", message: message, retry: true, connections: [] }
     if status = 404 then problem = { kind: "missing", title: "This channel isn't here any more", message: "It may have been hidden, or its source removed.", retry: false, connections: [] }
-    if status = 403 then problem = { kind: "closed", title: "Live TV isn't open to this account", message: "An administrator can open it in Settings → Live TV, on the web.", retry: false, connections: [] }
+    if status = 403 then problem = { kind: "closed", title: "Live TV isn't open to this profile", message: "An administrator can open it in Pley's web app, under Settings → Live TV.", retry: false, connections: [] }
     if status = 503 then problem = { kind: "unavailable", title: channelName + " isn't playing", message: message, retry: true, connections: [] }
     problem.lines = problem.message
     return problem
@@ -994,54 +994,42 @@ function liveHolders(c as object) as string
     return people.ToStr() + " people"
 end function
 
-' The busy notice's text: the server's message, then what each connection
-' watches and who, and when none may be taken over, what can be done
-' instead (Android's words).
-function liveBusyLines(message as string, connections as object) as string
-    lines = []
-    if message <> "" then lines.Push(message)
-    if connections.Count() > 0
-        if lines.Count() > 0 then lines.Push("")
-        if connections.Count() = 1
-            lines.Push("Its one connection is watching:")
-        else
-            lines.Push("Its " + connections.Count().ToStr() + " connections are watching:")
-        end if
-        takeable = false
-        for each c in connections
-            lines.Push("•  " + c.channelName + "  —  " + c.holders)
-            if c.canTakeOver then takeable = true
-        end for
-        if not takeable
-            lines.Push("")
-            lines.Push("A channel already being watched can be joined, or try again once one is stopped.")
-        end if
+' What the trouble card says (Android's): { title, lead, rows, note, text }.
+' Every connection in use: how many are watching (lead), a row for each
+' (rows: liveBusyConnections's, the first five), each that may be taken
+' over with its own Watch here instead, and when none may, what can be
+' done instead (note). Otherwise what the server said (text).
+function liveTroubleCard(problem as object) as object
+    card = { title: problem.title, lead: "", rows: [], note: "", text: "" }
+    connections = problem.connections
+    if connections.Count() = 0
+        card.text = problem.message
+        return card
     end if
-    return lines.Join(Chr(10))
+    card.lead = "Its " + connections.Count().ToStr() + " connections are watching:"
+    if connections.Count() = 1 then card.lead = "Its one connection is watching:"
+    takeable = false
+    for each c in connections
+        if card.rows.Count() < 5 then card.rows.Push(c)
+        if c.canTakeOver then takeable = true
+    end for
+    if not takeable then card.note = "A channel already being watched can be joined, or try again once one is stopped."
+    return card
 end function
 
-' The buttons of a trouble's notice, and what each does ([{ label, action,
-' channelId }]): "Watch here instead" for each connection that may be taken
-' over (naming its channel when there are several), Try again (Watch again
-' when watching ended on the server), Other channels, Back.
+' The trouble card's buttons under the rest, and what each does ([{
+' label, action }]): Try again (Watch again when watching ended on the
+' server), Other channels, Back to the guide. A connection that may be
+' taken over has its own, in its row (liveTroubleCard).
 function liveTroubleButtons(problem as object) as object
     out = []
-    takeable = []
-    for each c in problem.connections
-        if c.canTakeOver then takeable.Push(c)
-    end for
-    for each c in takeable
-        label = "Watch here instead"
-        if takeable.Count() > 1 then label = "Watch here instead of " + c.channelName
-        out.Push({ label: label, action: "takeOver", channelId: c.channelId })
-    end for
     if problem.retry
         label = "Try again"
         if problem.kind = "stopped" then label = "Watch again"
-        out.Push({ label: label, action: "retry", channelId: 0 })
+        out.Push({ label: label, action: "retry" })
     end if
-    out.Push({ label: "Other channels", action: "list", channelId: 0 })
-    out.Push({ label: "Back", action: "back", channelId: 0 })
+    out.Push({ label: "Other channels", action: "list" })
+    out.Push({ label: "Back to the guide", action: "back" })
     return out
 end function
 
