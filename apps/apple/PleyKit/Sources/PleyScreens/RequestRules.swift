@@ -160,11 +160,8 @@ public enum RequestProblem: Hashable, Sendable {
         case .noAccess:
             ProblemWords(title: RequestWords.noAccessTitle, body: RequestWords.noAccessBody, symbol: "lock")
         case .signInAgain(let scope):
-            scope == .approvals
-                ? ProblemWords(title: RequestWords.signInApprovals, symbol: "rectangle.portrait.and.arrow.right",
-                               signInAgain: true)
-                : ProblemWords(title: RequestWords.signInTitle, body: RequestWords.signInBody,
-                               symbol: "rectangle.portrait.and.arrow.right", signInAgain: true)
+            ProblemWords(title: scope == .approvals ? RequestWords.signInApprovals : RequestWords.signInTitle,
+                         symbol: "rectangle.portrait.and.arrow.right", signInAgain: true)
         case .tmdbKey:
             ProblemWords(title: RequestWords.tmdbKey,
                          body: manage ? RequestWords.tmdbKeyManage : RequestWords.tmdbKeyOthers,
@@ -210,7 +207,7 @@ public struct ProblemWords: Hashable, Sendable {
     public var symbol: String
     /// A Retry shows.
     public var retry: Bool
-    /// A Sign in again shows.
+    /// A Sign in shows.
     public var signInAgain: Bool
 
     public init(title: String, body: String? = nil, symbol: String, retry: Bool = false, signInAgain: Bool = false) {
@@ -406,6 +403,15 @@ public enum RequestRules {
         if item != nil && (request.stage == .available || request.stage == .partial) { return item }
         if mayAsk { return .discoverTitle(request.kind, tmdbId: request.tmdbId) }
         return item
+    }
+
+    /// Where a title's poster opens: the library's title when a library
+    /// this account can open has it whole, since its Discover page would
+    /// offer only Open; else its Discover page. A show partly there opens
+    /// its Discover page, where more seasons can be asked for.
+    public static func opens(_ title: DiscoverTitle) -> Screen {
+        if title.status == .library, let itemId = title.itemId { return .item(itemId) }
+        return .discoverTitle(title.kind, tmdbId: title.tmdbId)
     }
 
     /// The badge of a title's poster.

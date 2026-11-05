@@ -58,6 +58,8 @@ describes how they are made.
 
 ### Changed
 
+- Requests: a sign-in from before the app could ask says "Sign in again to ask for movies
+  and shows" without a second line, and its button reads Sign in.
 - On Android TV and Fire TV, a key held through a library's grid, along
   Home's rows or down through them scrolls more smoothly: tiles cost far
   less to bring in and to draw, rows are made ahead of the screen, and a
@@ -71,9 +73,20 @@ describes how they are made.
   Downloads beside it on phones and tablets, where it said "Showing what
   Pley had saved. Reconnecting…". It still shows what it saved and
   reconnects by itself.
+- A movie or show in Discover or Search's Discover row that a library
+  has whole opens its library page, where it plays, not a page with only
+  Open on it. A show partly there still opens its Discover page, for
+  Request more seasons.
 
 ### Fixed
 
+- On Fire TV, Amazon's keyboard shows what you type: its box kept the
+  words it opened with (nothing for a new playlist, the old name for a
+  rename) while each key reached the field. Its Back closes it and keeps
+  the words, as Gboard's does, where it acted as Done: it saved the
+  name, made the playlist or ran the search.
+- In Discover, a show whose request is ready but that still lacks
+  seasons nobody asked for says Partly in library, not In library.
 - On Android TV and Fire TV, a press of a direction key that lasts a
   little long (200 or 300 ms) moves focus once, not twice: a held key
   starts moving by itself after 400 ms, as the system's own repeats do,

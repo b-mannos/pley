@@ -17,6 +17,7 @@ import {
   titleBadge,
   titleFacts,
   titleKey,
+  titlePage,
   titleSubtitle,
   titleTone,
   TMDB_CREDIT,
@@ -364,7 +365,7 @@ function DiscoverRows(p: { entry: Entry; inRows: boolean; setInRows: (v: boolean
                 fid={`${r.list}/${titleKey(t)}`}
                 priority={place.priority}
                 onFocus={place.onFocus}
-                onSelect={() => ui.nav.open({ name: "title", kind: t.kind, tmdbId: t.tmdb_id })}
+                onSelect={() => ui.nav.open(titlePage(t))}
               />
             )}
             seeAll={(place) => <SeeAllTile kind="poster" fid={`${r.list}/all`} onFocus={place.onFocus} onSelect={() => ui.nav.open({ name: "discoverList", list: r.list })} />}
@@ -597,13 +598,15 @@ function GridSkeleton(p: { top: number }) {
 }
 
 /** What a grid of titles says instead of titles: none found, or why none came (Retry where it may help). */
-function GridNote(p: { title: string; body: string; onRetry?: () => void }) {
+function GridNote(p: { title: string; body: string | null; onRetry?: () => void }) {
   return (
     <div class="discover-note" role="status">
       <div class="t-title c-fg">{p.title}</div>
-      <div class="t-body c-muted" style="margin-top:8px">
-        {p.body}
-      </div>
+      {p.body && (
+        <div class="t-body c-muted" style="margin-top:8px">
+          {p.body}
+        </div>
+      )}
       {p.onRetry && (
         <G kind="row" style="margin-top:20px">
           <Pill label="Retry" icon="refresh-cw" fid="retry" onSelect={p.onRetry} />
@@ -614,7 +617,7 @@ function GridNote(p: { title: string; body: string; onRetry?: () => void }) {
 }
 
 /** Why a grid's first page didn't come, in the words of requests or the app's. */
-function gridProblem(e: unknown, title: string): { title: string; body: string; retry: boolean } {
+function gridProblem(e: unknown, title: string): { title: string; body: string | null; retry: boolean } {
   const words = problemWords(requestsProblem(e), false);
   return words ?? { title: failedTitle(e, title), body: problem(e), retry: true };
 }
@@ -687,7 +690,7 @@ function TitleGrid(p: {
             initial={p.initial && i === 0}
             priority={place.priority}
             onFocus={place.onFocus}
-            onSelect={() => ui.nav.open({ name: "title", kind: t.kind, tmdbId: t.tmdb_id })}
+            onSelect={() => ui.nav.open(titlePage(t))}
           />
         );
       }}
@@ -711,9 +714,11 @@ function GridAside(p: { pages: Pages; nothing: string; failed: string }) {
   return (
     <div class="discover-aside" role="status">
       <div class="t-title c-fg">{why.title}</div>
-      <div class="t-body c-muted" style="margin-top:8px">
-        {why.body}
-      </div>
+      {why.body && (
+        <div class="t-body c-muted" style="margin-top:8px">
+          {why.body}
+        </div>
+      )}
     </div>
   );
 }

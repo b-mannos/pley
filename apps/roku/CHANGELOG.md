@@ -69,6 +69,8 @@ describes how they are made.
   the video, as PGS subtitles are, instead of being burned in by the
   server, so a file with them plays as it is and keeps its HDR. A server
   too old to make their pictures still burns them in.
+- Requests: a sign-in from before the app could ask says "Sign in again to ask for movies
+  and shows" without a second line, and its button reads Sign in.
 - Up Next waits at the end of an episode once cancelled, or when the next
   episode doesn't play by itself, where the player used to leave.
 - A video that stands still for 12 s is converted or opened again, and the
@@ -103,6 +105,9 @@ describes how they are made.
   title's poster, Open and Close, once the remote rests, as on the other
   TVs. It gives the focus back when closed, goes by itself after 10 s,
   and never shows on the requests.
+- A movie or show in Discover or Search's Discover row that a library has
+  whole opens its library page, where it plays, not a page with only Open
+  on it.
 
 ### Fixed
 

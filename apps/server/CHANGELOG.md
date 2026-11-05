@@ -11,6 +11,10 @@ describes how they are made.
 
 ### Added
 
+- In the desktop app the web app takes casts, as a TV does: your other
+  devices' Play on… lists it by its system ("Pley for Windows"), and what
+  they send it plays there with the tracks picked, saying where it came
+  from. A browser tab is still a remote only.
 - The server lets a user's devices control what plays on their other
   devices: it lists the user's own sessions with the device each plays
   on, Live TV channels included, and passes play, pause, seek, skip, next
@@ -65,12 +69,18 @@ describes how they are made.
   beside its media as pictures too, as PGS's (`subtitles-{index}.json` and
   its PNGs), placed, timed and coloured as the apps that draw them do: Roku
   draws all three over the video rather than have them burned in.
+- Requests on the web: a sign-in from before the app could ask says "Sign in again to ask
+  for movies and shows" without a second line, and its button reads Sign in.
 - The setup page says more plainly where the setup code is: opening Pley
   from its tray icon fills it in, and on a server without one it's in
   Pley's log.
 - When the server can't be reached, the web app and the desktop app say
   "Pley is offline", where they said "Can't reach the server.
   Reconnecting…". The desktop app's Downloads stays beside it.
+- In the web and desktop apps, a movie or show in Discover or Search's
+  Discover results that a library has whole opens its library page, where
+  it plays, not a page with only Open on it. A show partly there still
+  opens its Discover page, to ask for more seasons.
 
 ### Fixed
 

@@ -29,9 +29,15 @@ describes how they are made.
 
 ### Changed
 
+- Requests: a sign-in from before the app could ask says "Sign in again to ask for movies
+  and shows" without a second line, and its button reads Sign in.
 - When the server can't be reached, the app says "Pley is offline", where
   it said "Showing what Pley had saved. Reconnecting…". It still shows
   what it saved and reconnects by itself.
+- A movie or show in Discover, its See all and Search's Discover row that
+  a library has whole opens its library page, where it plays, not a page
+  with only Open on it. A show partly there still opens its Discover page,
+  with Request more seasons.
 
 ### Fixed
 

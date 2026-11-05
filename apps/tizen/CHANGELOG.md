@@ -67,10 +67,11 @@ describes how they are made.
   row. Needs a server that gives the TV's player keyed live addresses.
 - Requests, on a server that has them turned on. Discover, in the rail,
   shows what is trending and popular on TMDB, coming to cinemas, and
-  anime, each title marked with what the libraries have. A title's page
-  asks for a movie, or for a show's seasons picked in a panel beside it,
-  and says where its request is. Your requests follows them, and a
-  notice pops up once one is ready to watch; administrators get
+  anime, each title marked with what the libraries have; one a library
+  has whole opens its library page, where it plays, here and in Search.
+  A title's page asks for a movie, or for a show's seasons picked in a
+  panel beside it, and says where its request is. Your requests follows
+  them, and a notice pops up once one is ready to watch; administrators get
   Requests, opening on those that need attention, to approve, decline
   (with a reason typed on the TV's keyboard), mark as added by hand or
   delete. A number on the rail counts what needs attention or has news.
@@ -88,6 +89,8 @@ describes how they are made.
 
 ### Changed
 
+- Requests: a sign-in from before the app could ask says "Sign in again to ask for movies
+  and shows" without a second line, and its button reads Sign in.
 - The app's icon is square, as the TV's menu draws the other apps, where
   it was wider than the rest.
 - When the server can't be reached, the app says "Pley is offline", where

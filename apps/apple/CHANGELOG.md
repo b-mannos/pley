@@ -102,6 +102,8 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   posters to browse and ask for, Which seasons? and each request's actions
   in a panel down the side, Discover's titles in Search, and a pop-up when
   something you asked for is ready to watch.
+- In Discover and Search's Discover titles, a movie or show a library has
+  whole opens its library page, where it plays.
 - A remote for your other devices on iPhone, iPad and Mac: a bar above
   the tabs, or a toolbar button on the Mac, shows what plays on them, and
   plays, pauses, seeks, skips, goes to the next or previous track (or
@@ -129,3 +131,8 @@ and versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   along the programme is, its times and what's next, with a channel
   rocker in place of the seek bar and skips. A device playing nothing says
   "Send something here with Play on…"
+
+### Changed
+
+- Requests: a sign-in from before the app could ask says "Sign in again to ask for movies
+  and shows" without a second line, and its button reads Sign in.

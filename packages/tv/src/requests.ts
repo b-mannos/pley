@@ -13,6 +13,7 @@ import type {
   TitleStatus,
 } from "./api/types";
 import { dayAndTime, formatRuntime, pluralize, relativeTime, shortDate, timeUntil } from "./format/format";
+import type { PageKey } from "./ui/shell/navigator";
 
 /*
  * Requests and Discover in words and rules, as every client has them
@@ -28,7 +29,6 @@ export const TMDB_CREDIT = "Details and pictures from TMDB.";
 export const TMDB_NOTICE = "This product uses the TMDB API but is not endorsed or certified by TMDB.";
 
 export const SIGN_IN_TITLE = "Sign in again to ask for movies and shows";
-export const SIGN_IN_BODY = "This app signed in before it could ask. Signing in again lets it.";
 export const SIGN_IN_APPROVALS = "Sign in again to approve and decline here.";
 export const NO_ACCESS = "Requests aren't open to this account.";
 
@@ -207,6 +207,16 @@ export function titleTone(t: { status: TitleStatus; item_id: number | null }): T
 /** A tile's second line: the year, and in rows of both kinds which it is. */
 export function titleSubtitle(t: { kind: TitleKind; year: number | null }, mixed: boolean): string {
   return [t.year ? String(t.year) : "", mixed ? (t.kind === "show" ? "Show" : "Movie") : ""].filter(Boolean).join(" · ");
+}
+
+/**
+ * Where a title's poster opens: the library's title when a library this
+ * account can open has it whole, since its Discover page would offer only
+ * Open; else its Discover page. A show partly there opens its Discover
+ * page, where more seasons can be asked for.
+ */
+export function titlePage(t: { kind: TitleKind; tmdb_id: number; status: TitleStatus; item_id: number | null }): PageKey {
+  return t.status === "library" && t.item_id !== null ? { name: "item", id: t.item_id } : { name: "title", kind: t.kind, tmdbId: t.tmdb_id };
 }
 
 /** A title page's facts line: year, runtime or seasons, the certification is shown apart. */
@@ -767,7 +777,7 @@ export function requestsProblem(e: unknown): RequestsProblem {
 }
 
 /** A page that can't show requests: why, and whether Retry may help; `null` for what isn't about requests being usable. */
-export function problemWords(p: RequestsProblem, manage: boolean): { title: string; body: string; retry: boolean } | null {
+export function problemWords(p: RequestsProblem, manage: boolean): { title: string; body: string | null; retry: boolean } | null {
   switch (p.kind) {
     case "off":
       return { title: "Requests are off", body: "This server doesn't take requests for movies and shows.", retry: false };
@@ -778,7 +788,7 @@ export function problemWords(p: RequestsProblem, manage: boolean): { title: stri
     case "tmdbKey":
       return { title: "TMDB refused this server's key", body: manage ? "Check it in Settings → Server, on the web." : "An administrator needs to check it.", retry: false };
     case "signIn":
-      return { title: SIGN_IN_TITLE, body: SIGN_IN_BODY, retry: false };
+      return { title: SIGN_IN_TITLE, body: null, retry: false };
     default:
       return null;
   }
