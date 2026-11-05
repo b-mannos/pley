@@ -243,12 +243,14 @@ and Play asks for it again. A video or a channel pauses the music, which
 lets go of its session (its paused reports would keep it through a whole
 film); Play goes on from where it was, in a new session.
 
-Now Playing shows the track, its cover and how far along it is, Shuffle,
-Previous, Pause, Next, Stop and the sleep timer, and Up next: the queue,
-numbered, the track playing in bold, which stays in view unless the
-focus is on the list. OK on one plays it, and the queue goes on from
-there. Up from the buttons goes to the scrubber, where Left and Right move
-10 s, as on Android TV. A long queue is listed 250 tracks at a time, from
+Now Playing shows, as on Android TV, the track, "Artist · Album", its
+cover and how far along it is, a line saying Loading… or why the track
+doesn't play, Shuffle, Previous, Pause, Next (while a track comes after
+it) and the sleep timer, and Up next: the queue, numbered, the track
+playing in bold, which stays in view unless the focus is on the list. OK
+on one plays it, and the queue goes on from there. Up from the buttons
+goes to the scrubber, where Left and Right move 10 s and OK plays or
+pauses, as on Android TV. A long queue is listed 250 tracks at a time, from
 50 before the one playing, the next part as playing nears the end of this
 one: each row is a node the Roku draws, and a playlist holds up to
 5,000. Shuffle plays the other tracks after the one playing in a random

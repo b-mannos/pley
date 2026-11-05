@@ -1,21 +1,21 @@
-' Now Playing: what the music player (m.global.music) plays, and Up next,
-' the queue with the track playing marked (Music.brs lists a long one a
-' part at a time): OK on one plays it, and the queue goes on from there.
-' Shuffle plays the other tracks after this one in a random order; Stop
-' shuffling puts the order back. The sleep timer's button steps through
-' its choices, and in the timer's last 30 s, while a line counts down, it
-' is Keep listening. The remote's play pauses or goes on, fast forward and
+' Now Playing, as on Android TV: what the music player (m.global.music)
+' plays, and Up next, the queue with the track playing marked (Music.brs
+' lists a long one a part at a time): OK on one plays it, and the queue
+' goes on from there. Shuffle plays the other tracks after this one in a
+' random order; Stop shuffling puts the order back. Next shows while a
+' track comes after this one. The sleep timer's button steps through its
+' choices, and in the timer's last 30 s, while a line counts down, it is
+' Keep listening. The remote's play pauses or goes on, fast forward and
 ' rewind go to the next track or back. Down goes from the buttons to Up
 ' next, Up from its first track back; Up from the buttons goes to the
-' scrubber, where Left and Right move 10 s, as on Android TV. Its fields
-' are followed only while this screen shows.
+' scrubber, where Left and Right move 10 s and OK plays or pauses, as on
+' Android TV. Its fields are followed only while this screen shows.
 
 sub init()
     m.backdrop = m.top.findNode("backdrop")
     m.cover = m.top.findNode("cover")
     m.title = m.top.findNode("title")
-    m.artist = m.top.findNode("artist")
-    m.album = m.top.findNode("album")
+    m.byline = m.top.findNode("byline")
     m.track = m.top.findNode("track")
     m.fill = m.top.findNode("fill")
     m.scrubber = m.top.findNode("scrubber")
@@ -23,12 +23,14 @@ sub init()
     m.elapsed = m.top.findNode("elapsed")
     m.left = m.top.findNode("left")
     m.buttons = m.top.findNode("buttons")
-    m.queue = m.top.findNode("queue")
     m.message = m.top.findNode("message")
     m.upNextTitle = m.top.findNode("upNextTitle")
     m.upNext = m.top.findNode("upNext")
     m.watching = false
+    ' The buttons' words, and what each does: "shuffle" (or "unshuffle"),
+    ' "previous", "toggle", "next", "sleep".
     m.labels = []
+    m.buttonActions = []
     ' Up next: the queue it lists (its queueId) and its tracks, read once,
     ' the part of it listed ({ first, last }, invalid before any), its
     ' rows, and the track marked as playing (-1 for none).
@@ -39,8 +41,8 @@ sub init()
     m.marked = -1
     ' Whether the sleep timer's last 30 s were counting down.
     m.noticing = false
+    ' The focus starts on Pause (or Play).
     showButtons()
-    m.buttons.focusIndex = 2
     m.buttons.observeField("chosen", "onButton")
     m.upNext.observeField("itemSelected", "onUpNext")
     m.top.observeField("active", "onActive")
@@ -79,8 +81,10 @@ sub onTrack()
     track = m.global.music.track
     if track = invalid then return
     m.title.text = track.title
-    m.artist.text = track.artist
-    m.album.text = track.album
+    byline = []
+    if track.artist <> "" then byline.Push(track.artist)
+    if track.album <> "" then byline.Push(track.album)
+    m.byline.text = byline.Join(" · ")
     if m.cover.uri <> track.image
         agent = m.top.getScene().getHttpAgent()
         m.cover.setHttpAgent(agent)
@@ -98,7 +102,8 @@ end sub
 sub onAt()
     music = m.global.music
     at = music.at
-    m.queue.text = "Track " + urlValue(at + 1) + " of " + urlValue(music.queueSize)
+    ' Next comes or goes with a track after this one.
+    showButtons()
     if music.queueId <> m.queueId
         m.queueId = music.queueId
         m.tracks = music.queue
@@ -146,29 +151,62 @@ sub onMusicState()
         return
     end if
     showButtons()
+    showStatus()
 end sub
 
-' Shuffle (or Stop shuffling), Previous, Pause (or Play, paused), Next and
-' Stop side by side, each wide enough for either of its words, then the
-' sleep timer's button, as wide as what it says.
+' Shuffle (or Stop shuffling), Previous, Pause (or Play, paused) and Next
+' (with a track after this one) side by side, each wide enough for either
+' of its words, then the sleep timer's button, as wide as what it says.
+' The focus stays on the button it was on; on Next as it goes, on Play.
 sub showButtons()
     music = m.global.music
     shuffle = "Shuffle"
-    if music.shuffled then shuffle = "Stop shuffling"
+    shuffleAction = "shuffle"
+    if music.shuffled
+        shuffle = "Stop shuffling"
+        shuffleAction = "unshuffle"
+    end if
     toggle = "Pause"
     if music.state = "paused" then toggle = "Play"
     sleep = "Sleep timer"
     if music.sleep <> invalid then sleep = music.sleep.button
-    labels = [shuffle, "Previous", toggle, "Next", "Stop", sleep]
+    labels = [shuffle, "Previous", toggle]
+    actions = [shuffleAction, "previous", "toggle"]
+    widths = [300, 220, 180]
+    if music.at + 1 < music.queueSize
+        labels.Push("Next")
+        actions.Push("next")
+        widths.Push(160)
+    end if
+    labels.Push(sleep)
+    actions.Push("sleep")
+    widths.Push(0)
     if FormatJson(labels) = FormatJson(m.labels) then return
+    focused = ""
+    if m.buttons.focusIndex < m.buttonActions.Count() then focused = m.buttonActions[m.buttons.focusIndex]
+    if focused = "unshuffle" then focused = "shuffle"
     m.labels = labels
-    widths = [300, 220, 180, 160, 160, 0]
+    m.buttonActions = actions
     chips = []
     for i = 0 to labels.Count() - 1
         chips.Push({ label: labels[i], width: widths[i] })
     end for
     m.buttons.chips = chips
+    at = buttonAt(focused)
+    if at < 0 then at = buttonAt("toggle")
+    m.buttons.focusIndex = at
 end sub
+
+' The place of the button that does action ("shuffle" for either of
+' Shuffle's), -1 for none.
+function buttonAt(action as string) as integer
+    for i = 0 to m.buttonActions.Count() - 1
+        shown = m.buttonActions[i]
+        if shown = "unshuffle" then shown = "shuffle"
+        if shown = action then return i
+    end for
+    return -1
+end function
 
 sub onPosition()
     music = m.global.music
@@ -186,30 +224,33 @@ sub onSleep()
     sleep = m.global.music.sleep
     noticing = sleep <> invalid and sleep.secondsLeft >= 0
     showButtons()
-    if noticing and not m.noticing and m.buttons.hasFocus() then m.buttons.focusIndex = 5
+    if noticing and not m.noticing and m.buttons.hasFocus() then m.buttons.focusIndex = buttonAt("sleep")
     m.noticing = noticing
     showStatus()
 end sub
 
-' The line under the album: "Pausing in 12 s" in the sleep timer's last
-' 30 s, else why the track doesn't play.
+' The line under the artist and album, as on Android TV: why the track
+' doesn't play (in the danger colour), else Loading… while it loads, else
+' "Pausing in 12 s" in the sleep timer's last 30 s.
 sub showStatus()
     music = m.global.music
-    if m.noticing
+    m.message.color = "0x8B95A5FF"
+    if music.message <> ""
+        m.message.text = music.message
+        m.message.color = "0xEB6B70FF"
+    else if music.state = "loading"
+        m.message.text = "Loading…"
+    else if m.noticing
         m.message.text = "Pausing in " + urlValue(music.sleep.secondsLeft) + " s"
         m.message.color = "0xA1A9B6FF"
     else
-        m.message.text = music.message
-        m.message.color = "0xEB6B70FF"
+        m.message.text = ""
     end if
 end sub
 
 sub onButton(event as object)
-    music = m.global.music
-    shuffle = "shuffle"
-    if music.shuffled then shuffle = "unshuffle"
-    actions = [shuffle, "previous", "toggle", "next", "stop", "sleep"]
-    music.control = actions[event.getData()]
+    at = event.getData()
+    if at >= 0 and at < m.buttonActions.Count() then m.global.music.control = m.buttonActions[at]
 end sub
 
 sub onUpNext(event as object)
@@ -231,6 +272,10 @@ function onKeyEvent(key as string, press as boolean) as boolean
         return true
     end if
     if m.scrubber.hasFocus()
+        if key = "OK"
+            m.global.music.control = "toggle"
+            return true
+        end if
         if key = "left" or key = "right"
             music = m.global.music
             moveMs = 10000
