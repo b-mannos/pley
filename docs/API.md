@@ -2232,7 +2232,11 @@ URLs, and so do the Apple apps, whose AVPlayer adds no header of its own.
     until the next one, or sooner when the track says (a block's duration,
     VobSub's stop command, a DVB page's time-out). It is `width`×`height`
     at `x`, `y` of the plane and within it, in order of time, never two at
-    once.
+    once. A DVB picture is made on its own display set's plane, as the
+    apps decode it: one of another display definition than the first (a
+    recording from an HD programme into an SD one) has its cue at the
+    same fractions of the track's plane, and its PNG stretched to fill
+    it.
   - `image` is the picture's address beside this one,
     `subtitles-{index}-{start_ms}.png?at=` with the list's `at`: a PNG with
     transparency, made of the track as the list was while it isn't whole

@@ -67,8 +67,11 @@ const MAP48: [u8; 16] =
 /// A DVB track's pictures: each display set shows from its time until the
 /// next one's, or until its page's time-out when that is sooner.
 pub struct DvbPictures<'a> {
-    /// The plane the pictures are placed on: the track's first display
-    /// definition's, as FFmpeg keeps one until another comes.
+    /// The plane the cues are placed on: the track's first display
+    /// definition's. A picture is decoded on its own display set's plane
+    /// (the last display definition since its acquisition point or mode
+    /// change, else SD's), as the apps' decoder does, and its cue placed at
+    /// the same fractions of this one.
     pub width: u32,
     pub height: u32,
     /// In order of time.
@@ -83,21 +86,19 @@ impl<'a> DvbPictures<'a> {
 
     fn new(samples: Vec<Sample<'a>>) -> Self {
         let display = samples.iter().flat_map(|s| segments(s.data)).find(|&(kind, b)| kind == DISPLAY && b.len() >= 5);
-        // Its width and height less one.
-        let side = |hi: u8, lo: u8| u32::from(u16::from_be_bytes([hi, lo])) + 1;
-        let plane = display.map(|(_, b)| (side(b[1], b[2]), side(b[3], b[4])));
-        let (width, height) = plane.filter(|&(w, h)| w <= MAX_SIDE && h <= MAX_SIDE).unwrap_or(DEFAULT_PLANE);
+        let (width, height) = display.and_then(|(_, b)| display_plane(b)).unwrap_or(DEFAULT_PLANE);
         Self { width, height, samples }
     }
 
     /// When each picture shows and where, in order of time: the regions its
-    /// page places that show something, cut to the plane. Read in one pass
-    /// that draws no pixels, only notes which values each region holds,
-    /// within a budget of work for the track's size.
+    /// page places that show something, cut to its plane, at the same
+    /// fractions of the track's. Read in one pass that draws no pixels, only
+    /// notes which values each region holds, within a budget of work for the
+    /// track's size.
     pub fn cues(&self) -> Vec<PictureCue> {
         let bytes = self.samples.iter().map(|s| s.data.len() as i64).sum::<i64>();
         let budget = MAX_WORK.saturating_add(bytes.saturating_mul(CUES_WORK_PER_BYTE));
-        let mut decoder = Decoder::new(false, self.hd(), budget);
+        let mut decoder = Decoder::new(false, budget);
         let mut cues = Vec::new();
         for (i, sample) in self.samples.iter().enumerate() {
             if page_head(sample.data).is_some_and(|(_, state)| state != 0) {
@@ -107,9 +108,11 @@ impl<'a> DvbPictures<'a> {
             if decoder.work <= 0 {
                 break;
             }
-            let Some((x, y, width, height)) = union(decoder.shown(self.plane()).iter().map(|(area, _)| *area)) else {
+            let plane = decoder.plane;
+            let Some(area) = union(decoder.shown(plane).iter().map(|(area, _)| *area)) else {
                 continue;
             };
+            let (x, y, width, height) = onto(area, plane, self.plane());
             let end_ms = self.end_of(i);
             if end_ms > sample.time_ms {
                 cues.push(PictureCue { start_ms: sample.time_ms, end_ms, x, y, width, height });
@@ -127,8 +130,9 @@ impl<'a> DvbPictures<'a> {
 
     /// The picture that shows from `start_ms` (a cue's start), or `None`:
     /// decoded from the last acquisition point or mode change, [`MAX_EPOCH`]
-    /// display sets back at most. Regions placed over one another are drawn
-    /// in the page's order, the later on top where it shows.
+    /// display sets back at most, on its own plane. Regions placed over one
+    /// another are drawn in the page's order, the later on top where it
+    /// shows.
     pub fn picture(&self, start_ms: i64) -> Option<Picture> {
         let index = self.samples.iter().rposition(|s| s.time_ms == start_ms)?;
         let mut from = index;
@@ -138,14 +142,14 @@ impl<'a> DvbPictures<'a> {
         {
             from -= 1;
         }
-        let mut decoder = Decoder::new(true, self.hd(), MAX_WORK);
+        let mut decoder = Decoder::new(true, MAX_WORK);
         for sample in &self.samples[from..=index] {
             decoder.take(sample.data);
             if decoder.work <= 0 {
                 return None;
             }
         }
-        let shown = decoder.shown(self.plane());
+        let shown = decoder.shown(decoder.plane);
         let (ux, uy, width, height) = union(shown.iter().map(|(area, _)| *area))?;
         let mut rgba = vec![0u8; width as usize * height as usize * 4];
         for &((x, y, w, h), region) in &shown {
@@ -168,11 +172,6 @@ impl<'a> DvbPictures<'a> {
         (self.width, self.height)
     }
 
-    /// BT.709 colours on an HD plane, BT.601 on an SD one.
-    fn hd(&self) -> bool {
-        self.height > 576
-    }
-
     /// When display set `i` stops showing: at the next one, or after its
     /// own duration when that is sooner.
     fn end_of(&self, i: usize) -> i64 {
@@ -187,6 +186,28 @@ fn own_ms(sample: &Sample) -> Option<i64> {
     sample
         .duration_ms
         .or_else(|| page_head(sample.data).map(|(timeout_s, _)| i64::from(timeout_s) * 1000).filter(|&ms| ms > 0))
+}
+
+/// The plane a display definition's body says (its width and height less
+/// one), or `None` past [`MAX_SIDE`].
+fn display_plane(b: &[u8]) -> Option<(u32, u32)> {
+    let side = |hi: u8, lo: u8| u32::from(u16::from_be_bytes([hi, lo])) + 1;
+    let (width, height) = (side(*b.get(1)?, *b.get(2)?), side(*b.get(3)?, *b.get(4)?));
+    (width <= MAX_SIDE && height <= MAX_SIDE).then_some((width, height))
+}
+
+/// `area` of a plane of `from` at the same fractions of a plane of `to`, a
+/// pixel at least and within it.
+fn onto((x, y, width, height): (u32, u32, u32, u32), from: (u32, u32), to: (u32, u32)) -> (u32, u32, u32, u32) {
+    if from == to {
+        return (x, y, width, height);
+    }
+    // Both planes are MAX_SIDE at most: no product overflows.
+    let scale = |v: u32, from: u32, to: u32| (v * to + from / 2) / from;
+    let (x0, x1) = (scale(x, from.0, to.0), scale(x + width, from.0, to.0));
+    let (y0, y1) = (scale(y, from.1, to.1), scale(y + height, from.1, to.1));
+    let (width, height) = ((x1 - x0).max(1), (y1 - y0).max(1));
+    (x0.min(to.0 - width), y0.min(to.1 - height), width, height)
 }
 
 /// A display set's segments (type, body), [`MAX_SEGMENTS`] at most.
@@ -287,8 +308,9 @@ struct Decoder {
     /// Whether pixels are drawn, or only the values each region holds:
     /// enough to tell what shows and where.
     draw: bool,
-    /// Colours as BT.709, else BT.601.
-    hd: bool,
+    /// The plane the page is placed on: the last display definition's, else
+    /// SD's.
+    plane: (u32, u32),
     /// The regions the page places (id, x, y).
     page: Option<Vec<(u8, u32, u32)>>,
     regions: BTreeMap<u8, Region>,
@@ -300,13 +322,15 @@ struct Decoder {
 }
 
 impl Decoder {
-    fn new(draw: bool, hd: bool, work: i64) -> Self {
-        Self { draw, hd, page: None, regions: BTreeMap::new(), held: 0, cluts: HashMap::new(), work }
+    fn new(draw: bool, work: i64) -> Self {
+        let (page, regions, cluts) = (None, BTreeMap::new(), HashMap::new());
+        Self { draw, plane: DEFAULT_PLANE, page, regions, held: 0, cluts, work }
     }
 
     /// Lets go of everything defined, at an acquisition point or mode
     /// change: it defines everything anew.
     fn start_epoch(&mut self) {
+        self.plane = DEFAULT_PLANE;
         self.page = None;
         self.regions.clear();
         self.held = 0;
@@ -335,6 +359,7 @@ impl Decoder {
                 REGION => self.region(b),
                 CLUT => self.clut(b),
                 OBJECT => self.object(b),
+                DISPLAY => self.plane = display_plane(b).unwrap_or(self.plane),
                 _ => {}
             }
         }
@@ -407,7 +432,9 @@ impl Decoder {
         if b.len() < 2 {
             return;
         }
-        let hd = self.hd;
+        // BT.709 colours on an HD plane, BT.601 on an SD one, as the plane
+        // is when the table comes.
+        let hd = self.plane.1 > 576;
         let clut = self.cluts.entry(b[0]).or_insert_with(|| DEFAULT_CLUT.clone());
         let mut at = 2;
         while at + 2 <= b.len() {
@@ -748,7 +775,7 @@ mod tests {
     /// The sizes of the regions a display set of `segs` shows on the largest
     /// plane, decoded as a picture is; `None` when it isn't decoded.
     fn sizes(segs: &[Vec<u8>]) -> Option<Vec<(u32, u32)>> {
-        let mut decoder = Decoder::new(true, false, MAX_WORK);
+        let mut decoder = Decoder::new(true, MAX_WORK);
         decoder.take(&set(segs));
         (decoder.work > 0).then(|| decoder.shown((MAX_SIDE, MAX_SIDE)).iter().map(|((.., w, h), _)| (*w, *h)).collect())
     }
@@ -831,6 +858,39 @@ mod tests {
         let [r, g, b] = ycbcr_to_rgb(81, 90, 240, true);
         assert_eq!((pixel(0, 0), pixel(39, 19)), (&[r, g, b, 255][..], &[r, g, b, 255][..]));
         assert_eq!(pixel(10, 5), [0, 0, 0, 0], "between them, nothing");
+    }
+
+    #[test]
+    fn each_picture_is_placed_by_its_own_display_definition() {
+        // An HD programme (1920×1080), its page again in a normal case, then
+        // an SD one with no display definition (720×576).
+        let display = seg(DISPLAY, &[0, 0x07, 0x7F, 0x04, 0x37]);
+        let hd = set(&[display, placing(&[(0, 960, 540)]), filled(0, 8, 4), red()]);
+        let again = set(&[page(0, &[(0, 960, 540)])]);
+        let sd = set(&[placing(&[(0, 360, 288)]), filled(0, 4, 2), red()]);
+        let pictures = pictures(&[(0, &hd), (1_000, &again), (2_000, &sd)]);
+        assert_eq!((pictures.width, pictures.height), (1920, 1080));
+        let places: Vec<_> = pictures.cues().iter().map(|c| (c.x, c.y, c.width, c.height)).collect();
+        // The SD picture at the same fractions of the track's plane.
+        assert_eq!(places, [(960, 540, 8, 4), (960, 540, 8, 4), (960, 540, 11, 4)]);
+        // Each picture its own size, in its own plane's colours.
+        let [r, g, b] = ycbcr_to_rgb(81, 90, 240, true);
+        assert_eq!(pictures.picture(1_000).unwrap().rgba, [r, g, b, 255].repeat(32));
+        let picture = pictures.picture(2_000).unwrap();
+        let [r, g, b] = ycbcr_to_rgb(81, 90, 240, false);
+        assert_eq!((picture.width, picture.height, picture.rgba), (4, 2, [r, g, b, 255].repeat(8)));
+    }
+
+    #[test]
+    fn a_box_goes_onto_another_plane_at_the_same_fractions() {
+        assert_eq!(onto((10, 20, 30, 40), (720, 576), (720, 576)), (10, 20, 30, 40));
+        assert_eq!(onto((360, 288, 4, 2), (720, 576), (1920, 1080)), (960, 540, 11, 4));
+        // A pixel at least, on the plane.
+        assert_eq!(onto((1919, 1079, 1, 1), (1920, 1080), (720, 576)), (719, 575, 1, 1));
+        // A display definition past 4096 pixels is left out.
+        assert_eq!(display_plane(&[0, 0x07, 0x7F, 0x04, 0x37]), Some((1920, 1080)));
+        assert_eq!(display_plane(&[0, 0x10, 0x00, 0x04, 0x37]), None);
+        assert_eq!(display_plane(&[0, 0x07, 0x7F, 0x04]), None);
     }
 
     #[test]
