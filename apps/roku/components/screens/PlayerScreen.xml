@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The player: the Video node with its own controls, the picture
-     subtitles the app draws, the title as each item begins, Skip Intro and
-     Skip Credits, Up Next before the end of an episode (and at its end),
+     subtitles the app draws, the title as each item begins and while
+     paused (with the clock and when it ends), Skip Intro and Skip
+     Credits, Up Next before the end of an episode (and at its end),
      Pley's menu (Down: Subtitles, Audio, Quality, Subtitle sync,
      Chapters, Sleep timer, Find subtitles…, Playback details), the sleep
      timer's notice, Automatic's notice of a lower quality, "Reconnecting…"
@@ -50,11 +51,17 @@
             </Group>
             <SkipButton id="skip" translation="[1544, 924]" visible="false" />
         </Video>
-        <!-- The title for 4 s as each item begins, at the top. -->
+        <!-- The title at the top, for 4 s as each item begins and while
+             paused or Roku's bar shows; then, at the right, as on Android
+             TV, how it plays, the clock and, paused, when it ends. -->
         <Group id="banner" visible="false">
             <Rectangle width="1920" height="200" color="0x000000A6" />
-            <Label id="bannerTitle" translation="[96, 56]" width="1500" maxLines="1" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="bannerLine" translation="[96, 116]" width="1500" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+            <Label id="bannerTitle" translation="[96, 56]" width="1144" maxLines="1" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Label id="bannerLine" translation="[96, 116]" width="1144" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+            <Group id="bannerRight" visible="false">
+                <Label id="bannerStatus" translation="[1264, 60]" width="560" horizAlign="right" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+                <Label id="bannerEnds" translation="[1264, 108]" width="560" horizAlign="right" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+            </Group>
         </Group>
         <!-- "Loading…", or "Reconnecting…" while the server is out of reach. -->
         <Label id="loading" translation="[0, 500]" width="1920" horizAlign="center" text="Loading…" color="0xA1A9B6FF" font="font:MediumSystemFont" />
@@ -115,6 +122,8 @@
         <Timer id="autoTimer" duration="1" repeat="true" />
         <!-- The title's banner as an item begins. -->
         <Timer id="bannerTimer" duration="4" />
+        <!-- The banner's clock and end time, once a second while they show. -->
+        <Timer id="clockTimer" duration="1" repeat="true" />
         <!-- The server asked again while it is out of reach. -->
         <Timer id="reconnectTimer" duration="2" />
         <!-- A look once a second at whether the playhead stands still. -->

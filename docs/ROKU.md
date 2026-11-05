@@ -242,6 +242,15 @@ collection's next), its title shows at the top for 4 s, a show's name over
 the episode's "S1 · E2 · Pilot", or a movie's "Dune (2021)", as on Android
 TV. Skip Intro and Skip Credits are named as on the other apps.
 
+Paused, or while Roku's bar shows, the title stays at the top with, at
+the right as on Android TV, how it plays (Direct play, Direct stream or
+Transcoding), the clock (on the Roku's 12- or 24-hour clock) and, paused,
+when it ends ("Ends at 10:42 PM"). Skip Intro and Skip
+Credits stay while paused, above Roku's bar. The bar itself is Roku's,
+with its seeking (fast forward and rewind speeds, seek previews, instant
+replay): there is no control row or scrubber of Pley's own, and Back while
+paused leaves the player, as in Roku's own apps.
+
 - **Up Next** shows at the credits (else 30 s before the end) with its
   countdown. Cancelled, or with Play the next episode by itself off, it
   waits at the end, paused, as on the other apps: Play now (or Play) plays

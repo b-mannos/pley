@@ -190,14 +190,28 @@ sub init()
     m.nextButtons.observeField("buttonSelected", "onNextButton")
     m.noticeButtons.observeField("buttonSelected", "onNoticeButton")
     m.countdownTimer.observeField("fire", "onCountdown")
-    ' The title at the top as each item begins, once it plays.
+    ' The title at the top as each item begins, once it plays (bannerUp),
+    ' and while paused or Roku's bar shows (barShown), with how it plays,
+    ' the clock on this Roku's 12- or 24-hour clock, and when it ends.
     m.banner = m.top.findNode("banner")
     m.bannerTitle = m.top.findNode("bannerTitle")
     m.bannerLine = m.top.findNode("bannerLine")
+    m.bannerRight = m.top.findNode("bannerRight")
+    m.bannerStatus = m.top.findNode("bannerStatus")
+    m.bannerEnds = m.top.findNode("bannerEnds")
     m.bannerDue = false
+    m.bannerUp = false
+    m.barShown = false
+    m.clockTicking = false
+    m.twelve = CreateObject("roDeviceInfo").GetClockFormat() <> "24h"
     m.bannerTimer = m.top.findNode("bannerTimer")
     m.bannerTimer.duration = playerBannerMs() / 1000
     m.bannerTimer.observeField("fire", "hideBanner")
+    m.clockTimer = m.top.findNode("clockTimer")
+    m.clockTimer.observeField("fire", "updateBanner")
+    ' Whether Roku's bar shows, where the Video node says so; elsewhere
+    ' the controls are up while paused alone.
+    m.video.observeField("trickPlayBarVisibilityHint", "onBar")
     ' The server out of reach: since when (clock ms), -1 while it answers.
     ' Until something played, that is said at once.
     m.reconnectFrom = -1
@@ -772,18 +786,61 @@ end sub
 ' next episode, a queue's next), not as the same one opens again.
 sub showBanner()
     m.bannerDue = false
-    banner = playerBanner(m.item)
-    if banner.title = "" then return
-    m.bannerTitle.text = banner.title
-    m.bannerLine.text = banner.line
-    m.banner.visible = true
+    m.bannerUp = true
     m.bannerTimer.control = "stop"
     m.bannerTimer.control = "start"
+    updateBanner()
 end sub
 
 sub hideBanner()
     m.bannerTimer.control = "stop"
-    m.banner.visible = false
+    m.bannerUp = false
+    updateBanner()
+end sub
+
+' Roku's bar showing or gone (trick play, a pause, OK pressed).
+sub onBar()
+    m.barShown = httpTrue(m.video.trickPlayBarVisibilityHint)
+    updateBanner()
+    updateSkip()
+end sub
+
+' Whether the player's controls are up, as Android TV's: paused or Roku's
+' bar showing, once the video played, with nothing over it (subtitle sync
+' has the top).
+function controlsShown() as boolean
+    if not m.played or m.ended or m.notice.visible or m.upNext.visible or m.sync.visible then return false
+    return m.video.state = "paused" or m.barShown
+end function
+
+' The banner as it is now: the title while it is up or the controls are;
+' with the controls, how it plays and the clock at the right, and, paused,
+' when it ends.
+sub updateBanner()
+    controls = controlsShown()
+    banner = playerBanner(m.item)
+    shown = (m.bannerUp or controls) and banner.title <> ""
+    m.banner.visible = shown
+    m.bannerTitle.text = banner.title
+    m.bannerLine.text = banner.line
+    ticking = shown and controls
+    m.bannerRight.visible = ticking
+    if ticking <> m.clockTicking
+        m.clockTicking = ticking
+        if ticking
+            m.clockTimer.control = "start"
+        else
+            m.clockTimer.control = "stop"
+        end if
+    end if
+    if not ticking then return
+    now = CreateObject("roDateTime").AsSeconds()
+    status = []
+    if m.info <> invalid then status.Push(detMethod(m.info))
+    status.Push(playerClock(now, m.twelve))
+    m.bannerStatus.text = status.Join(" · ")
+    m.bannerEnds.text = ""
+    if m.video.state = "paused" then m.bannerEnds.text = playerEndsAt(now, m.positionMs, m.durationMs, m.twelve)
 end sub
 
 ' Gives the Video node stream, its text tracks moved as the sync says,
@@ -823,6 +880,7 @@ sub openSync()
     m.syncWas = m.syncMs
     m.syncValue.text = syncLabel(m.syncMs)
     m.sync.visible = true
+    updateBanner()
     m.syncButtons.focusButton = 0
     m.syncButtons.setFocus(true)
 end sub
@@ -849,6 +907,7 @@ sub closeSync()
     if not m.sync.visible then return
     m.sync.visible = false
     m.video.setFocus(true)
+    updateBanner()
     if m.syncMs = m.syncWas then return
     syncRemember(syncSection(), m.syncKey, m.syncMs)
     if m.pictureIndex < 0 then reopen()
@@ -981,7 +1040,11 @@ sub onState(event as object)
         m.everPlayed = true
         endReconnect()
         m.loading.visible = false
-        if m.bannerDue then showBanner()
+        if m.bannerDue
+            showBanner()
+        else
+            updateBanner()
+        end if
         ' Played again after the sleep timer's pause: the player stays.
         if m.sleepPausedAt >= 0
             m.sleepPausedAt = -1#
@@ -996,12 +1059,14 @@ sub onState(event as object)
         updateSkip()
         return
     end if
-    ' Paused, in trick play or waiting: the Video node's own controls.
-    hideSkip()
+    ' Waiting or at the end: the Video node's own. Paused, Skip stays, as
+    ' on Android TV, above Roku's bar.
+    if state <> "paused" then hideSkip()
     if state = "paused"
         m.paused = true
         report("paused")
         m.pausedTimer.control = "start"
+        updateSkip()
     else if state = "finished"
         ' Media that falls short of the title (resumed past the end of what
         ' the file or stream holds) isn't its end.
@@ -1044,7 +1109,7 @@ sub onPosition(event as object)
 end sub
 
 ' Skip Intro or Skip Credits while the playhead is in one and the video
-' plays.
+' plays or is paused; above Roku's bar while that shows.
 sub updateSkip()
     marker = playerSkipFor(m.markers, m.positionMs, m.next <> invalid and not m.upNextCancelled)
     key = ""
@@ -1055,7 +1120,11 @@ sub updateSkip()
         if marker <> invalid then m.skip.text = playerSkipLabel(marker)
     end if
     m.skipMarker = marker
-    shown = marker <> invalid and not m.skipDismissed and m.video.state = "playing" and not m.upNext.visible and not m.notice.visible and not m.sync.visible and not m.menu.visible
+    state = m.video.state
+    top = 924
+    if controlsShown() then top = 760
+    m.skip.translation = [1544, top]
+    shown = marker <> invalid and not m.skipDismissed and (state = "playing" or state = "paused") and not m.upNext.visible and not m.notice.visible and not m.sync.visible and not m.menu.visible
     if shown = m.skip.visible then return
     if shown
         m.skip.visible = true
@@ -1210,6 +1279,8 @@ sub finish()
     m.detailsTimer.control = "stop"
     endReconnect()
     hideBanner()
+    m.clockTimer.control = "stop"
+    m.clockTicking = false
     newTitle()
     m.toastTimer.control = "stop"
     m.toast.visible = false
@@ -1400,6 +1471,7 @@ sub notice(title as string, text as string, buttons as object)
     m.noticeText.text = text
     m.noticeButtons.buttons = buttons
     m.notice.visible = true
+    updateBanner()
     m.noticeButtons.setFocus(true)
 end sub
 
@@ -1430,6 +1502,7 @@ sub showUpNext()
     m.nextImage.setHttpAgent(m.top.getScene().getHttpAgent())
     m.nextImage.uri = m.next.image
     m.upNext.visible = true
+    updateBanner()
     m.nextButtons.focusButton = 0
     m.nextButtons.setFocus(true)
     ' Turned off in Settings, the next episode waits for Play now.
@@ -1443,6 +1516,7 @@ end sub
 sub hideUpNext()
     m.countdownTimer.control = "stop"
     m.upNext.visible = false
+    updateBanner()
 end sub
 
 sub onCountdown()

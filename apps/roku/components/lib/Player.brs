@@ -333,3 +333,33 @@ end function
 function playerBannerMs() as integer
     return 4000
 end function
+
+' A time of day as this Roku writes it: "8:05 PM" on a 12-hour clock,
+' "20:05" on a 24-hour one (roDeviceInfo's GetClockFormat), as the other
+' apps follow their device's.
+function playerClockText(hours as integer, minutes as integer, twelve as boolean) as string
+    if not twelve then return fmtTwo(hours) + ":" + fmtTwo(minutes)
+    suffix = " AM"
+    if hours >= 12 then suffix = " PM"
+    shown = hours mod 12
+    if shown = 0 then shown = 12
+    return shown.ToStr() + ":" + fmtTwo(minutes) + suffix
+end function
+
+' seconds (since the epoch) in this Roku's time zone.
+function playerClock(seconds as integer, twelve as boolean) as string
+    at = CreateObject("roDateTime")
+    at.FromSeconds(seconds)
+    at.ToLocalTime()
+    return playerClockText(at.GetHours(), at.GetMinutes(), twelve)
+end function
+
+' "Ends at 10:42 PM": when what plays ends, played on from positionMs at
+' now (seconds since the epoch); "" without a duration.
+function playerEndsAt(now as integer, positionMs as dynamic, durationMs as dynamic, twelve as boolean) as string
+    duration = httpNumber(durationMs, 0)
+    if duration <= 0 then return ""
+    remaining = duration - httpNumber(positionMs, 0)
+    if remaining < 0 then remaining = 0
+    return "Ends at " + playerClock(now + Int(remaining / 1000), twelve)
+end function

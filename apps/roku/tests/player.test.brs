@@ -168,6 +168,22 @@ sub test_player_jumps_as_android_tvs_keys()
     tkEqual(playerReplayMs(), 10000, "instant replay")
 end sub
 
+sub test_player_writes_the_clock_as_the_roku_does()
+    tkEqual(playerClockText(20, 5, true), "8:05 PM")
+    tkEqual(playerClockText(0, 30, true), "12:30 AM")
+    tkEqual(playerClockText(12, 0, true), "12:00 PM")
+    tkEqual(playerClockText(20, 5, false), "20:05", "a 24-hour clock")
+    tkEqual(playerClockText(7, 9, false), "07:09")
+end sub
+
+sub test_player_says_when_a_paused_title_ends()
+    now = 1700000000
+    tkEqual(playerEndsAt(now, 600000, 3300000, true), "Ends at " + playerClock(now + 2700, true), "45 minutes left")
+    tkEqual(playerEndsAt(now, 3400000, 3300000, false), "Ends at " + playerClock(now, false), "past its end")
+    tkEqual(playerEndsAt(now, 0, 0, true), "", "no duration known")
+    tkEqual(playerEndsAt(now, 0, invalid, true), "")
+end sub
+
 sub test_player_limits_restarts()
     tkTrue(playerMayRestart([], 100000))
     tkTrue(playerMayRestart([50000, 90000], 100000))
