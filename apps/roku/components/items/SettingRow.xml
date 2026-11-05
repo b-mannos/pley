@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A row of Settings, as Android TV's: a category at the left, or a
+     setting at the right with its value on the line under its label and
+     On or Off for a switch; Sign out in the danger colour. The category
+     shown keeps a lighter ground while the focus is in its rows. -->
+<component name="SettingRow" extends="Group">
+    <interface>
+        <field id="itemContent" type="node" onChange="onContent" />
+        <field id="itemHasFocus" type="boolean" onChange="onFocus" />
+        <field id="listHasFocus" type="boolean" value="true" onChange="onFocus" />
+    </interface>
+    <script type="text/brightscript" uri="pkg:/components/items/SettingRow.brs" />
+    <children>
+        <Rectangle id="chosen" color="0x262B35FF" visible="false" />
+        <Poster id="focus" uri="pkg:/images/button-focus.9.png" visible="false" />
+        <Label id="name" translation="[24, 0]" vertAlign="center" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+        <Label id="value" translation="[24, 54]" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        <Label id="state" horizAlign="right" vertAlign="center" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+    </children>
+</component>

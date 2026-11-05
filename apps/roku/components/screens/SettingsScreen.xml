@@ -1,11 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Settings: the server and the profile this TV uses; the profile's audio
-     and subtitle defaults and this Roku's quality, chosen in a panel at
-     the right, and whether the next episode plays by itself; the watch
-     history, switch profile, the profile to always start as, sort the
-     libraries, switch server or sign out. Under the app's version, TMDB's
-     notice, then where the account is managed on the web; at the right,
-     Diagnostics and the open-source licences. -->
+<!-- Settings in two panes, as on Android TV: the categories at the left,
+     the focused category's rows at the right (who is signed in above
+     Profile's, what signing out does above Sign out's), and the choices of
+     a row in a panel over the right half. -->
 <component name="SettingsScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -28,24 +25,18 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Profiles.brs" />
     <children>
         <Label translation="[96, 56]" text="Settings" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
-        <Label translation="[96, 170]" text="Server" color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <Label id="server" translation="[96, 206]" width="840" color="0xEBEBEBFF" font="font:MediumSystemFont" />
-        <Label translation="[96, 280]" text="Signed in as" color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <Label id="profile" translation="[96, 316]" width="840" color="0xEBEBEBFF" text="…" font="font:MediumSystemFont" />
-        <Label translation="[1000, 170]" text="This Roku" color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <Label id="device" translation="[1000, 206]" width="824" color="0xEBEBEBFF" font="font:MediumSystemFont" />
-        <Label translation="[1000, 280]" text="Pley for Roku" color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <Label id="version" translation="[1000, 316]" width="824" color="0xEBEBEBFF" font="font:MediumSystemFont" />
-        <!-- Discover's titles and pictures come from TMDB. -->
-        <Label translation="[1000, 372]" width="824" wrap="true" maxLines="2" text="This product uses the TMDB API but is not endorsed or certified by TMDB." color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <ButtonGroup id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 400]" minWidth="840" maxWidth="840" />
-        <!-- What the other TVs' "Manage your account on the web" says: Roku
-             has no QR code of its own, so the address alone. -->
-        <Label translation="[1000, 460]" text="Manage your account on the web" color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <Label id="web" translation="[1000, 496]" width="824" color="0x7DD3FCFF" font="font:MediumSystemFont" />
-        <Label translation="[1000, 552]" width="824" wrap="true" maxLines="2" text="Name, picture, password, PIN, two-step, devices and apps, from a phone or computer on the same network." color="0x8B95A5FF" font="font:SmallestSystemFont" />
-        <Label id="message" translation="[1000, 650]" width="824" wrap="true" maxLines="4" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-        <ButtonGroup id="about" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[1000, 850]" minWidth="600" maxWidth="824" />
+        <MarkupList id="categories" translation="[96, 170]" itemComponentName="SettingRow" itemSize="[320, 72]" itemSpacing="[0, 4]" numRows="8" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
+        <!-- Above Profile's rows: who is signed in, and where. -->
+        <Group id="header" translation="[484, 170]" visible="false">
+            <Rectangle id="face" width="96" height="96" color="0x2E3440FF" />
+            <Label id="initial" width="96" height="96" horizAlign="center" vertAlign="center" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Poster id="picture" width="96" height="96" loadWidth="96" loadHeight="96" loadDisplayMode="scaleToZoom" />
+            <Label id="name" translation="[124, 8]" width="852" color="0xEBEBEBFF" font="font:MediumBoldSystemFont" />
+            <Label id="who" translation="[124, 56]" width="852" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        </Group>
+        <!-- Above Sign out's row (what it does) and About's (TMDB's notice). -->
+        <Label id="intro" translation="[484, 170]" width="976" wrap="true" maxLines="2" color="0xA1A9B6FF" visible="false" font="font:SmallSystemFont" />
+        <MarkupList id="rows" translation="[460, 300]" itemComponentName="SettingRow" itemSize="[1000, 100]" itemSpacing="[0, 8]" numRows="7" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
         <!-- The choices of one row, over the right half. -->
         <Group id="panel" visible="false">
             <Rectangle translation="[1000, 0]" width="920" height="1080" color="0x1E222AFF" />

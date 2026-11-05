@@ -80,20 +80,23 @@ sub uiOpenTile(tile as dynamic)
     if nav <> invalid then uiNavigate(nav)
 end sub
 
-' The server doesn't answer: this screen gives way to one that says so,
-' with Try again (this screen again, or retry) and Switch server. A covered
-' screen leaves it be; it asks again when it shows.
-sub uiUnreachable(retry = invalid as dynamic)
+' The server doesn't answer: this screen gives way to one that says so, as
+' Android TV's pages do ("Can't reach your server", why, what to check),
+' with Retry (this screen again, or retry) and Switch server, and that
+' comes back to it by itself once the server answers. reason: why, as the
+' failed answer's message says it. A covered screen leaves it be; it asks
+' again when it shows.
+sub uiUnreachable(retry = invalid as dynamic, reason = "" as string)
     if not m.top.active then return
     if retry = invalid then retry = { to: m.top.route, params: m.top.params }
-    uiNavigate({ to: "unreachable", replace: true, params: { retry: retry } })
+    uiNavigate({ to: "unreachable", replace: true, params: { retry: retry, reason: reason } })
 end sub
 
 ' What a failed answer leads to: true when it was handled here (the server
 ' doesn't answer, or the sign-in ended and the scene shows sign-in).
 function uiFailed(answer as object) as boolean
     if answer.error = "network"
-        uiUnreachable()
+        uiUnreachable(invalid, httpString(answer.message))
         return true
     end if
     return answer.error = "signed_out"

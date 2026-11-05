@@ -1,58 +1,89 @@
-' Settings: the server, the profile and this Roku; the profile's audio and
-' subtitle defaults (Tracks.brs), as on Samsung and LG: Audio language,
-' Subtitles, and Subtitle language when subtitles come on by language. OK on
-' one opens its choices in a panel at the right; a choice is saved at once
-' (PUT /api/me/track-defaults, all three) and shows before the server
-' answers, put back if it refuses. A server or sign-in that doesn't let apps
-' change them says to change them on the web. Quality is this Roku's own
-' (AutoQuality.brs), kept in its registry, and so is "Always start as"
-' (Profiles.brs), offered when the household has more than one profile.
+' Settings in two panes, as on Android TV and the native Samsung app: the
+' categories at the left (Profile, Playback, Subtitles and display, Server,
+' Diagnostics, About, Sign out), the focused category's rows at the right,
+' each with its value on the line under its label. Right or OK goes into
+' the rows, at their first, and Left back; OK on Sign out asks first. What
+' a change did, or why it didn't, shows as a toast.
+'
+' Profile has the profile's audio and subtitle defaults (Tracks.brs), as
+' on Samsung and LG: Audio language, Subtitles, and Subtitle language when
+' subtitles come on by language. OK on one opens its choices in a panel at
+' the right; a choice is saved at once (PUT /api/me/track-defaults, all
+' three) and shows before the server answers, put back if it refuses. A
+' server or sign-in that doesn't let apps change them shows where they are
+' changed on the web. Quality and Playback details are this Roku's own
+' (AutoQuality.brs, the registry's playback section), and so is "Always
+' start as" (Profiles.brs), offered when the household has more than one
+' profile. Switch profile shows for a sign-in that may switch them.
 
 sub init()
-    m.server = m.top.findNode("server")
-    m.profile = m.top.findNode("profile")
-    m.device = m.top.findNode("device")
-    m.version = m.top.findNode("version")
-    m.web = m.top.findNode("web")
-    m.buttons = m.top.findNode("buttons")
-    m.message = m.top.findNode("message")
+    m.categories = m.top.findNode("categories")
+    m.rows = m.top.findNode("rows")
+    m.header = m.top.findNode("header")
+    m.face = m.top.findNode("face")
+    m.initial = m.top.findNode("initial")
+    m.picture = m.top.findNode("picture")
+    m.name = m.top.findNode("name")
+    m.who = m.top.findNode("who")
+    m.intro = m.top.findNode("intro")
     m.panel = m.top.findNode("panel")
     m.panelTitle = m.top.findNode("panelTitle")
     m.choices = m.top.findNode("choices")
     m.panelHint = m.top.findNode("panelHint")
-    ' Diagnostics and the licences, at the right: Right and Left go between
-    ' them and the settings, and the focus comes back to the one it was on.
-    m.about = m.top.findNode("about")
-    m.about.buttons = ["Diagnostics", "Open-source licences"]
-    m.about.observeField("buttonSelected", "onAbout")
-    m.lastFocus = m.buttons
+    ' The category shown, what each of its rows does (in order), and what
+    ' they show, so that the same rows aren't set again.
+    m.shown = "profile"
+    m.kinds = []
+    m.rowsShown = ""
+    ' The pane the focus comes back to.
+    m.lastFocus = m.categories
     m.dialog = invalid
-    ' The profile's defaults as Settings knows them ({ audio, subtitle,
-    ' mode }), invalid until GET /api/auth/me answered; refused once the
-    ' server said apps can't change them.
+    ' The profile as GET /api/auth/me last said it, and its defaults as
+    ' Settings knows them ({ audio, subtitle, mode }), invalid until it
+    ' answered; refused once the server said apps can't change them.
+    m.me = invalid
     m.defaults = invalid
     m.refused = false
     m.saving = 0
     ' The household's profiles ([{ id, name }]), for "Always start as".
     m.household = []
-    ' What each button does, in order, and the choices the panel shows.
-    m.actions = []
+    ' The choices the panel shows, and whose they are.
     m.choice = invalid
     m.choiceKind = ""
-    m.buttons.observeField("buttonSelected", "onButton")
+    items = []
+    for each category in settingsCategories()
+        items.Push({ title: category.title, value: "", state: "", danger: category.id = "signOut", rowWidth: 320, rowHeight: 72 })
+    end for
+    m.categories.content = nodesContent(items)
+    m.categories.observeField("itemFocused", "onCategoryFocused")
+    m.categories.observeField("itemSelected", "onCategorySelected")
+    m.rows.observeField("itemSelected", "onRow")
     m.choices.observeField("itemSelected", "onChoice")
     m.choices.observeField("itemFocused", "onChoiceFocused")
     m.top.observeField("active", "onActive")
     showRows()
 end sub
 
+' The categories, top to bottom. Android TV's Audio (passthrough by
+' format) has no place here: the Roku's own settings decide what goes to a
+' receiver.
+function settingsCategories() as object
+    return [
+        { id: "profile", title: "Profile" },
+        { id: "playback", title: "Playback" },
+        { id: "display", title: "Subtitles and display" },
+        { id: "server", title: "Server" },
+        { id: "diagnostics", title: "Diagnostics" },
+        { id: "about", title: "About" },
+        { id: "signOut", title: "Sign out" }
+    ]
+end function
+
 sub onActive()
     if not m.top.active then return
     session = m.global.session
-    m.server.text = session.serverName + " (" + urlDisplayAddress(session.server) + ")"
-    m.device.text = session.device
-    m.version.text = session.appVersion
-    m.web.text = webAddress()
+    ' What the player changed meanwhile (the quality) shows.
+    showRows()
     if m.panel.visible
         m.choices.setFocus(true)
     else
@@ -78,13 +109,29 @@ end function
 ' and signing out need no answer.
 sub onMe(event as object)
     answer = event.getData()
-    if answer.ok and answer.data <> invalid
-        m.profile.text = httpSentence(answer.data.name)
-        ' A choice still on its way stays as chosen.
-        if m.saving = 0 then useProfile(answer.data)
-    else if answer.error = "network"
-        m.profile.text = "The server can't be reached right now."
-    end if
+    if not answer.ok or httpObject(answer.data) = invalid then return
+    m.me = answer.data
+    showProfile()
+    ' A choice still on its way stays as chosen.
+    if m.saving = 0 then useProfile(answer.data)
+end sub
+
+' Who is signed in, above Profile's rows: the picture (or the initial on
+' the profile's colour), the name, and "Managed profile · host:port".
+sub showProfile()
+    me = m.me
+    server = m.global.session.server
+    name = httpSentence(me.name)
+    m.name.text = name
+    m.initial.text = UCase(Left(name, 1))
+    m.face.color = profColor(me.avatar_color)
+    ' The scene's agent carries the token, which a profile's picture needs.
+    m.picture.setHttpAgent(m.top.getScene().getHttpAgent())
+    m.picture.uri = urlImage(server, me.avatar_url, 96)
+    who = authShownAddress(server)
+    if httpTrue(me.managed) then who = "Managed profile · " + who
+    m.who.text = who
+    showRows()
 end sub
 
 ' The profile as the server has it (GET /api/auth/me, or the answer to a
@@ -95,91 +142,165 @@ sub useProfile(me as dynamic)
     showRows()
 end sub
 
-' The buttons: the defaults' rows, this Roku's quality and whether the
-' next episode plays by itself, then Watch history, Switch profile, "Always
-' start as" (a household of several), Sort libraries, Switch server and Sign
-' out; the focus stays on the row it was on.
+' The rows of the category shown: { kind, label, value, on (a switch's),
+' danger }.
+function rowsOf(category as string) as object
+    session = m.global.session
+    rows = []
+    if category = "profile"
+        if authAllows(session.scope, "profiles") then rows.Push({ kind: "switchProfile", label: "Switch profile", value: "" })
+        rows.Append(tracksRows(m.defaults, m.refused))
+        rows.Push({ kind: "history", label: "Watch history", value: "" })
+        rows.Push({ kind: "sortLibraries", label: "Sort libraries", value: "Your order, on all your devices" })
+        if m.household.Count() > 1
+            rows.Push({ kind: "startAs", label: "Always start as", value: profStartAsLabel(m.household, profStartAs(startAsSection(), session.server)) })
+        end if
+        rows.Push({ kind: "web", label: "Manage your account on the web", value: "Name, picture, password, PIN, two-step, devices and apps" })
+    else if category = "playback"
+        ' This Roku's, kept on it: no server needed.
+        rows.Push({ kind: "quality", label: "Quality", value: aqLabel(aqChoice(playbackSection())) })
+        rows.Push({ kind: "autoplay", label: "Play the next episode by itself", value: "After a 10 second countdown", on: playerAutoplay(playbackSection()) })
+        rows.Push({ kind: "details", label: "Playback details", value: "Show how a video plays (direct, remux or transcode) over it", on: showsDetails() })
+    else if category = "display"
+        ' The app never sets captionStyle, which would change them for the
+        ' whole Roku: subtitles look as its own settings say.
+        rows.Push({ kind: "captions", label: "Subtitle style", value: "As this Roku's settings say: Accessibility, Captions style" })
+    else if category = "server"
+        rows.Push({ kind: "server", label: authShownAddress(session.server), value: "The server this TV uses" })
+        rows.Push({ kind: "switchServer", label: "Switch server", value: "" })
+    else if category = "diagnostics"
+        rows.Push({ kind: "diagnostics", label: "Open diagnostics", value: "What this TV decodes and shows, and why" })
+    else if category = "about"
+        rows.Push({ kind: "version", label: "Version", value: session.appVersion })
+        rows.Push({ kind: "licences", label: "Open-source licences", value: "Pley's licence, and the notices of what the app bundles" })
+    else
+        rows.Push({ kind: "signOut", label: "Sign out", value: "", danger: true })
+    end if
+    return rows
+end function
+
+' The rows of the category shown, under what goes above them; the focus
+' stays on the row it was on.
 sub showRows()
-    labels = []
-    actions = []
-    for each row in tracksRows(m.defaults, m.refused)
-        labels.Push(row.text)
-        actions.Push(row.kind)
-    end for
-    ' This Roku's, kept on it: no server needed.
-    labels.Push("Quality: " + aqLabel(aqChoice(playbackSection())))
-    actions.Push("quality")
-    autoplay = "Off"
-    if playerAutoplay(playbackSection()) then autoplay = "On"
-    labels.Push("Play the next episode by itself: " + autoplay)
-    actions.Push("autoplay")
-    for each action in ["Watch history", "Switch profile"]
-        labels.Push(action)
-        actions.Push(action)
-    end for
-    if m.household.Count() > 1
-        labels.Push("Always start as: " + profStartAsLabel(m.household, profStartAs(startAsSection(), m.global.session.server)))
-        actions.Push("startAs")
+    top = 170
+    m.header.visible = false
+    m.intro.visible = false
+    if m.shown = "profile"
+        ' Room for who is signed in, shown once the server said.
+        m.header.visible = m.me <> invalid
+        top = 300
+    else if m.shown = "signOut"
+        m.intro.text = "Sign this TV out of " + authShownAddress(m.global.session.server) + ". You'll need a new link code to sign in again."
+        m.intro.visible = true
+        top = 270
+    else if m.shown = "about"
+        ' Discover's titles and pictures come from TMDB, whose terms ask
+        ' for this.
+        m.intro.text = "This product uses the TMDB API but is not endorsed or certified by TMDB."
+        m.intro.visible = true
+        top = 270
     end if
-    for each action in ["Sort libraries", "Switch server", "Sign out"]
-        labels.Push(action)
-        actions.Push(action)
+    m.rows.translation = [460, top]
+    m.rows.numRows = Int((1020 - top) / 108)
+    items = []
+    kinds = []
+    for each row in rowsOf(m.shown)
+        state = ""
+        if row.DoesExist("on")
+            state = "Off"
+            if row.on then state = "On"
+        end if
+        items.Push({ title: row.label, value: row.value, state: state, danger: httpTrue(row.danger), rowWidth: 1000, rowHeight: 100 })
+        kinds.Push(row.kind)
     end for
+    shows = m.shown + FormatJson(items)
+    if shows = m.rowsShown then return
     focused = ""
-    if m.actions.Count() > 0
-        at = m.buttons.buttonFocused
-        if at >= 0 and at < m.actions.Count() then focused = m.actions[at]
-    end if
-    if FormatJson(labels) = FormatJson(m.buttons.buttons) then return
-    hadFocus = m.buttons.isInFocusChain()
-    m.actions = actions
-    m.buttons.buttons = labels
-    for i = 0 to actions.Count() - 1
-        if actions[i] = focused then m.buttons.focusButton = i
+    at = m.rows.itemFocused
+    if m.kinds.Count() > 0 and at >= 0 and at < m.kinds.Count() then focused = m.kinds[at]
+    hadFocus = m.rows.isInFocusChain()
+    m.rowsShown = shows
+    m.kinds = kinds
+    m.rows.content = nodesContent(items)
+    for i = 0 to kinds.Count() - 1
+        if kinds[i] = focused then m.rows.jumpToItem = i
     end for
-    if hadFocus then m.buttons.setFocus(true)
+    if hadFocus then m.rows.setFocus(true)
 end sub
 
-sub onButton(event as object)
-    chosen = m.actions[event.getData()]
-    if chosen = "quality"
-        openQuality()
-        return
+' The focus on a category shows its rows.
+sub onCategoryFocused(event as object)
+    at = event.getData()
+    categories = settingsCategories()
+    if at < 0 or at >= categories.Count() then return
+    m.shown = categories[at].id
+    showRows()
+end sub
+
+sub onCategorySelected(event as object)
+    if settingsCategories()[event.getData()].id = "signOut"
+        askSignOut()
+    else
+        focusRows()
     end if
-    if chosen = "autoplay"
+end sub
+
+' Into the rows, at their first.
+sub focusRows()
+    if m.kinds.Count() = 0 then return
+    m.rows.jumpToItem = 0
+    m.lastFocus = m.rows
+    m.rows.setFocus(true)
+end sub
+
+sub focusCategories()
+    m.lastFocus = m.categories
+    m.categories.setFocus(true)
+end sub
+
+sub onRow(event as object)
+    at = event.getData()
+    if at < 0 or at >= m.kinds.Count() then return
+    kind = m.kinds[at]
+    m.lastFocus = m.rows
+    if kind = "quality"
+        openQuality()
+    else if kind = "autoplay"
         playerSetAutoplay(playbackSection(), not playerAutoplay(playbackSection()))
         showRows()
-        return
-    end if
-    if chosen = "Watch history"
-        uiNavigate({ to: "history" })
-        return
-    end if
-    if chosen = "startAs"
-        m.message.text = ""
+    else if kind = "details"
+        setShowsDetails(not showsDetails())
+        showRows()
+    else if kind = "audio" or kind = "mode" or kind = "subtitle"
+        openChoices(kind)
+    else if kind = "startAs"
         showChoices("startAs", profStartAsChoices(m.household, profStartAs(startAsSection(), m.global.session.server)))
-        return
-    end if
-    if chosen = "audio" or chosen = "mode" or chosen = "subtitle"
-        openChoices(chosen)
-        return
-    end if
-    if chosen = "Sort libraries"
-        uiNavigate({ to: "sortLibraries" })
-        return
-    end if
-    if chosen = "Switch profile"
+    else if kind = "switchProfile"
         uiNavigate({ to: "profiles" })
-        return
-    end if
-    if chosen = "Switch server"
+    else if kind = "history"
+        uiNavigate({ to: "history" })
+    else if kind = "sortLibraries"
+        uiNavigate({ to: "sortLibraries" })
+    else if kind = "web"
+        showWeb()
+    else if kind = "switchServer"
         uiNavigate({ to: "servers", reset: true })
-        return
+    else if kind = "diagnostics"
+        uiNavigate({ to: "diagnostics" })
+    else if kind = "licences"
+        uiNavigate({ to: "licences" })
+    else if kind = "signOut"
+        askSignOut()
     end if
+    ' The rest (the server, the version, the subtitles' style) only say.
+end sub
+
+' Sign out asks first, Cancel first: "You'll be signed out of host:port."
+sub askSignOut()
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
     dialog.title = "Sign out?"
-    dialog.message = ["You'll be signed out of " + m.global.session.serverName + "."]
-    dialog.buttons = ["Sign out", "Cancel"]
+    dialog.message = ["You'll be signed out of " + authShownAddress(m.global.session.server) + "."]
+    dialog.buttons = ["Cancel", "Sign out"]
     dialog.observeField("buttonSelected", "onSignOutButton")
     m.dialog = dialog
     m.top.getScene().dialog = dialog
@@ -187,33 +308,53 @@ end sub
 
 ' Signed out, the scene shows sign-in (MainScene.onSignedIn).
 sub onSignOutButton(event as object)
-    if m.dialog <> invalid then m.dialog.close = true
-    m.dialog = invalid
-    if event.getData() = 0 then uiRequest({ op: "signOut" }, "")
+    closeDialog()
+    if event.getData() = 1 then uiRequest({ op: "signOut" }, "")
 end sub
 
-' --- The defaults ---
+' Where the account is managed: the address to type on a phone or
+' computer. The other TVs draw its QR code too; the server draws QR codes
+' of sign-in codes only, so Roku says the address alone.
+sub showWeb()
+    dialog = CreateObject("roSGNode", "StandardMessageDialog")
+    dialog.title = "Manage your account on the web"
+    dialog.message = ["Go to this address on a phone or computer on the same network:", webAddress()]
+    dialog.buttons = ["Close"]
+    dialog.observeField("buttonSelected", "closeDialog")
+    m.dialog = dialog
+    m.top.getScene().dialog = dialog
+end sub
+
+sub closeDialog()
+    if m.dialog <> invalid then m.dialog.close = true
+    m.dialog = invalid
+end sub
+
+' Where the defaults are changed instead: the web app's account page.
+function webAddress() as string
+    return authShownAddress(m.global.session.server + "/account")
+end function
+
+' --- The choices ---
 
 ' The choices of one row, the current one checked and focused.
 sub openChoices(kind as string)
     if m.defaults = invalid
         ' The profile hasn't come: asked again.
-        m.message.text = "Loading your profile…"
+        uiToast("Loading your profile…")
         uiGet("/api/auth/me", "onMe")
         return
     end if
     if m.refused
-        m.message.text = "Change these on the web, at " + webAddress() + "."
+        showWeb()
         return
     end if
-    m.message.text = ""
     showChoices(kind, tracksChoices(kind, m.defaults))
 end sub
 
 ' The Quality menu (docs/QUALITY.md), kept on this Roku: Automatic unless
 ' another was chosen.
 sub openQuality()
-    m.message.text = ""
     current = aqChoice(playbackSection())
     choice = { title: "Quality", labels: [], values: [], hints: [], current: 0 }
     for each quality in aqMenu()
@@ -225,10 +366,25 @@ sub openQuality()
     showChoices("quality", choice)
 end sub
 
-' Where the quality setting is kept on this Roku (the player reads it).
+' Where this Roku's playback settings are kept (the player reads them).
 function playbackSection() as object
     return CreateObject("roRegistrySection", "playback")
 end function
+
+' Playback details, this Roku's (its playback section's showDetails,
+' "true" or "false", off unless turned on): the player shows how a video
+' plays over it while it is on.
+function showsDetails() as boolean
+    return playbackSection().Read("showDetails") = "true"
+end function
+
+sub setShowsDetails(shown as boolean)
+    section = playbackSection()
+    value = "false"
+    if shown then value = "true"
+    section.Write("showDetails", value)
+    section.Flush()
+end sub
 
 sub showChoices(kind as string, choice as object)
     m.choiceKind = kind
@@ -250,14 +406,14 @@ end sub
 
 sub closeChoices()
     m.panel.visible = false
-    m.buttons.setFocus(true)
+    m.rows.setFocus(true)
 end sub
 
 sub onChoiceFocused(event as object)
     choiceHint(event.getData())
 end sub
 
-' A subtitle mode's hint, under its choices.
+' A choice's hint, under the choices.
 sub choiceHint(at as integer)
     text = ""
     if m.choice <> invalid and at >= 0 and at < m.choice.hints.Count() then text = m.choice.hints[at]
@@ -295,7 +451,6 @@ sub saveDefaults(defaults as object)
     if tracksSame(defaults, m.defaults) then return
     before = m.defaults
     m.defaults = defaults
-    m.message.text = ""
     showRows()
     m.saving = m.saving + 1
     uiRequest({ method: "PUT", path: "/api/me/track-defaults", jsonText: FormatJson(tracksDefaultsBody(defaults)), before: before }, "onSaved")
@@ -305,7 +460,7 @@ sub onSaved(event as object)
     m.saving = m.saving - 1
     answer = event.getData()
     if answer.ok
-        m.message.text = "Saved."
+        uiToast("Saved")
         if m.saving = 0 then useProfile(answer.data)
         return
     end if
@@ -316,29 +471,15 @@ sub onSaved(event as object)
     end if
     if tracksRefused(answer.status)
         m.refused = true
-        m.message.text = "This server doesn't let the app change these: change them on the web, at " + webAddress() + "."
+        uiToast("This server doesn't let the app change these: change them on the web", true)
     else
-        m.message.text = answer.message
+        uiToast(answer.message, true)
     end if
     showRows()
 end sub
 
-' Where the defaults are changed instead: the web app's account page.
-function webAddress() as string
-    return urlDisplayAddress(m.global.session.server) + "/account"
-end function
-
-sub onAbout(event as object)
-    m.lastFocus = m.about
-    if event.getData() = 0
-        uiNavigate({ to: "diagnostics" })
-    else
-        uiNavigate({ to: "licences" })
-    end if
-end sub
-
-' Back closes the choices; left from them does too. Right and Left go
-' between the settings and Diagnostics.
+' Back closes the choices; Left from them does too. Right and Left go
+' between the categories and their rows.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
     if m.panel.visible
@@ -348,13 +489,12 @@ function onKeyEvent(key as string, press as boolean) as boolean
         end if
         return false
     end if
-    if key = "right" and m.buttons.isInFocusChain()
-        m.about.setFocus(true)
+    if key = "right" and m.categories.isInFocusChain()
+        focusRows()
         return true
     end if
-    if key = "left" and m.about.isInFocusChain()
-        m.lastFocus = m.buttons
-        m.buttons.setFocus(true)
+    if key = "left" and m.rows.isInFocusChain()
+        focusCategories()
         return true
     end if
     return false

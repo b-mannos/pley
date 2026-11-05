@@ -39,6 +39,9 @@ sub apiRun()
     m.proving = false
     m.proofRetryAt = 0
     m.proofSeq = 0
+    ' Whether the server in use answered nothing when last asked, as the
+    ' session says it (apiReached).
+    m.offline = false
     ' Joining or leaving a network: the server proves itself again.
     m.device = CreateObject("roDeviceInfo")
     m.device.SetMessagePort(m.port)
@@ -47,6 +50,9 @@ sub apiRun()
     m.tokens = invalid
     m.signIn = invalid
     m.signIns = 0
+    ' "Search this network" under way (apiSweep), and how many there were.
+    m.sweep = invalid
+    m.sweeps = 0
     ' A profile switch waiting for a refresh or another switch to end:
     ' { request, spec }; and whether one is under way.
     m.switchWaiting = invalid
@@ -143,6 +149,11 @@ sub apiAccept(request as dynamic)
         apiForgetServer(request, spec)
     else if op = "checkServer"
         apiCheckServer(request, spec)
+    else if op = "sweep"
+        apiSweep(request)
+    else if op = "sweepStop"
+        apiSweepEnd()
+        apiAnswer(request, apiOk(invalid))
     else if op = "signIn"
         apiSignInStart(request)
     else if op = "signInStop"
@@ -294,6 +305,8 @@ sub apiAnswered(job as object, status as integer, body as string, headers as dyn
         apiRefreshAnswered(job, status, body)
     else if purpose = "check"
         apiCheckAnswered(job, status, body)
+    else if purpose = "sweep"
+        apiSweepAnswered(job, status, body)
     else if purpose = "metadata"
         apiMetadataAnswered(job, status, body)
     else if purpose = "device"
@@ -384,6 +397,7 @@ sub apiCallAnswered(job as object, status as integer, body as string, headers as
         return
     end if
     answer = httpAnswer(status, body)
+    if job.server = m.server then apiReached(answer.error <> "network")
     if job.network <> "" then aqNetworkKeep(m.networkKept, job.network, answer, m.clock.TotalMilliseconds())
     if httpTrue(job.me) then apiKnowProfile(job, answer)
     if answer.ok and job.play and apiAbandoned(job.request)
@@ -705,6 +719,7 @@ sub apiEnd(reason as string)
 end sub
 
 sub apiFailWaiting(answer as object)
+    if answer.error = "network" then apiReached(false)
     jobs = m.waiting
     m.waiting = []
     for each job in jobs
@@ -759,19 +774,24 @@ sub apiBoot(request as object)
         end for
         apiSelect(current, name)
     end if
-    ' "Who's watching?" first when the household had more than one profile,
-    ' unless Settings' "Always start as" names one of them, which still
-    ' opens it on the PIN pad of the profile signed in when that one has a
-    ' PIN (pin).
+    start = apiStartScreen()
+    apiAnswer(request, apiOk({ screen: start.screen, pin: start.pin, servers: servers }))
+end sub
+
+' The first screen on the server in use, at a start or once it is chosen
+' (serversStart): "Who's watching?" first when the household had more than
+' one profile, unless Settings' "Always start as" names one of them, which
+' still opens it on the PIN pad of the profile signed in when that one has
+' a PIN (pin).
+function apiStartScreen() as object
     atStart = ""
     if m.tokens <> invalid
         household = profKeptHousehold(CreateObject("roRegistrySection", "household"), m.server)
         startAs = profStartAs(CreateObject("roRegistrySection", "startAs"), m.server)
         atStart = profAtStart(m.tokens.scope, household, startAs)
     end if
-    screen = serversStartScreen(m.server, m.tokens <> invalid, atStart <> "")
-    apiAnswer(request, apiOk({ screen: screen, pin: atStart = "pin", servers: servers }))
-end sub
+    return serversStart(m.server, m.tokens <> invalid, atStart)
+end function
 
 ' Makes url the server the screens talk to, signed in when it has tokens.
 sub apiSelect(url as string, name as string)
@@ -785,6 +805,8 @@ sub apiSelect(url as string, name as string)
     end if
     m.signIn = invalid
     m.server = url
+    ' Whether this one answers isn't known yet.
+    apiReached(true)
     m.tokens = invalid
     if url <> "" then m.tokens = tokensLoad(m.tokensSection, url)
     m.lastIssued = invalid
@@ -802,6 +824,16 @@ sub apiSelect(url as string, name as string)
     apiPublish()
     m.session.signedIn = m.tokens <> invalid
     apiAskProfile()
+end sub
+
+' Whether the server in use answers, for the session (its offline): a
+' request it answered nothing, or a proof another device gave in its place,
+' says it doesn't; any answer, or a proof it gave, says it does. Told only
+' when it changes.
+sub apiReached(answered as boolean)
+    if m.offline = not answered then return
+    m.offline = not answered
+    m.session.offline = m.offline
 end sub
 
 ' Who the sign-in acts as (GET /api/auth/me), for the screens: asked as a
@@ -844,7 +876,10 @@ sub apiUseServer(request as object, spec as object)
     m.serversSection.Write("current", url)
     m.serversSection.Flush()
     apiSelect(url, name)
-    apiAnswer(request, apiOk({ signedIn: m.tokens <> invalid }))
+    ' Where the server leads, as at a start: sign-in, "Who's watching?"
+    ' (pin: on the PIN pad of the profile signed in) or Home.
+    start = apiStartScreen()
+    apiAnswer(request, apiOk({ signedIn: m.tokens <> invalid, screen: start.screen, pin: start.pin }))
 end sub
 
 sub apiForgetServer(request as object, spec as object)
@@ -889,7 +924,10 @@ sub apiCheckAnswered(job as object, status as integer, body as string)
         if httpTrue(data.setup_required)
             apiAnswer(job.request, apiFail("setup", "This server isn't set up yet: open " + urlDisplayAddress(server) + " in a browser first."))
         else if urlUnencrypted(server)
-            apiAnswer(job.request, apiFail("unencrypted", job.address + " isn't on your network and isn't encrypted: open it by its https address."))
+            ' Android TV goes ahead once asked again; the Roku never sends a
+            ' code or a token over plain HTTP beyond the home network
+            ' (SECURITY.md), so it says why it won't.
+            apiAnswer(job.request, apiFail("unencrypted", job.address + " isn't encrypted: what you watch could be read on the way, and Pley for Roku doesn't sign in over plain HTTP beyond your network. Use its https address if it has one."))
         else
             name = httpSentence(data.name)
             if name = "" then name = urlDisplayAddress(server)
@@ -907,6 +945,67 @@ sub apiCheckAnswered(job as object, status as integer, body as string)
     else
         apiAnswer(job.request, apiFail("unreachable", "Couldn't reach " + job.address + ". Check the address, and that the server is on."))
     end if
+end sub
+
+' --- Searching the network ---
+
+' "Search this network": GET /api/server, without a token, at every other
+' address of the Roku's /24 network (Discovery.brs's discoverySweep), a
+' few at a time and briefly each, so that a Roku Express isn't swamped: a
+' home network's server answers in milliseconds. Each server that answers
+' as Pley is an update of the request ({ server }); its answer comes once
+' every address had its turn. One sweep at a time: a new one, or
+' sweepStop, ends the one before.
+sub apiSweep(request as object)
+    apiSweepEnd()
+    m.sweeps = m.sweeps + 1
+    m.sweep = { id: m.sweeps, request: request, urls: discoverySweep(m.device.GetConnectionInfo().ip), next: 0, out: 0 }
+    apiSweepNext()
+end sub
+
+' Addresses asked at once, and how long each has to answer.
+function apiSweepAtOnce() as integer
+    return 24
+end function
+
+function apiSweepTimeoutMs() as integer
+    return 1000
+end function
+
+sub apiSweepNext()
+    sweep = m.sweep
+    if sweep = invalid then return
+    while sweep.out < apiSweepAtOnce() and sweep.next < sweep.urls.Count()
+        job = apiJob("sweep", "GET", sweep.urls[sweep.next] + "/api/server")
+        job.sweep = sweep.id
+        job.origin = sweep.urls[sweep.next]
+        job.timeoutMs = apiSweepTimeoutMs()
+        sweep.next = sweep.next + 1
+        sweep.out = sweep.out + 1
+        apiSend(job)
+        ' A transfer that couldn't start answers at once, and may have
+        ' ended the sweep.
+        if m.sweep = invalid or m.sweep.id <> sweep.id then return
+    end while
+    if sweep.out = 0 then apiSweepEnd()
+end sub
+
+sub apiSweepAnswered(job as object, status as integer, body as string)
+    sweep = m.sweep
+    if sweep = invalid or sweep.id <> job.sweep then return
+    sweep.out = sweep.out - 1
+    server = discoverySwept(job.origin, status, body)
+    if server <> invalid then sweep.request.update = { server: server }
+    apiSweepNext()
+end sub
+
+' The sweep under way is over: its request is answered, and what it still
+' asks is let go when it answers.
+sub apiSweepEnd()
+    sweep = m.sweep
+    if sweep = invalid then return
+    m.sweep = invalid
+    apiAnswer(sweep.request, apiOk(invalid))
 end sub
 
 ' --- Signing in with a TV code (RFC 8628) ---
@@ -1245,6 +1344,7 @@ sub apiProofAnswered(job as object, status as integer, body as string)
             m.proved = { at: m.clock.TotalMilliseconds(), network: job.network }
             m.doubted = false
         end if
+        if current then apiReached(true)
         apiPublish()
         if job.after <> invalid
             apiSend(job.after)

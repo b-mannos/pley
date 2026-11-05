@@ -50,6 +50,13 @@ sub init()
     m.toastTimer = m.top.findNode("toastTimer")
     m.toastTimer.observeField("fire", "onToastTimer")
     m.top.observeField("toast", "onToast")
+    ' The server out of reach (the session's offline, which the API task
+    ' sets): "Pley is offline" as it goes, then a question every 5 s, one
+    ' at a time, until it answers; the screen on top hears of it then.
+    m.offlinePoll = m.top.findNode("offlinePoll")
+    m.offlinePoll.observeField("fire", "onOfflinePoll")
+    m.reaching = false
+    session.observeField("offline", "onOffline")
 
     ' Requests: what the profile may do (the summary), asked as a profile
     ' signs in, as the stream connects, a second after request events and,
@@ -296,6 +303,7 @@ end sub
 ' that answer starts it asking each 30 s.
 sub onStreamLive()
     m.top.eventsLive = m.events.live
+    if m.events.live and m.global.session.offline then reachServer()
     if m.events.live then askRequestSummary("live")
     pollRequests()
     pokeRequests({ requestId: 0, kind: "", tmdbId: 0 })
@@ -858,6 +866,44 @@ end sub
 
 sub onToastTimer()
     m.toast.visible = false
+end sub
+
+' --- The server out of reach ---
+
+' As Android TV says it: "Pley is offline" for 6 s each time the server
+' goes (the players say "Reconnecting…" themselves), while the screen that
+' needed it says so in its place (Ui.brs's uiUnreachable). Once it answers
+' again, the screen on top that has a reached field hears of it and comes
+' back by itself.
+sub onOffline()
+    if m.global.session.offline
+        m.offlinePoll.control = "start"
+        top = ""
+        if m.stack.Count() > 0 then top = m.stack.Peek().subtype()
+        if top <> "PlayerScreen" and top <> "LivePlayerScreen" then showToast("Pley is offline", false, 6)
+        return
+    end if
+    m.offlinePoll.control = "stop"
+    if m.stack.Count() > 0 and m.stack.Peek().hasField("reached") then m.stack.Peek().reached = true
+end sub
+
+sub onOfflinePoll()
+    reachServer()
+end sub
+
+' Whether the server answers: GET /api/server, which the API task's answer
+' turns into the session's offline. Signed in, it goes with the token, so
+' it waits for the server there to prove itself: another device answering
+' at the address doesn't count as the server back.
+sub reachServer()
+    session = m.global.session
+    if m.reaching or session.server = "" then return
+    m.reaching = true
+    uiRequest({ method: "GET", path: "/api/server", auth: session.signedIn, timeoutMs: 5000 }, "onReached")
+end sub
+
+sub onReached()
+    m.reaching = false
 end sub
 
 ' Music stopped from another device or by the server's administrator

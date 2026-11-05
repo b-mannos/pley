@@ -33,17 +33,39 @@ the app prints and its errors.
 
 The app finds Pley servers on the local network (or takes an address) and
 signs in with a code shown on the TV, approved on the server's `/link` page
-or by its QR code. When the server requires two-step sign-in, the sign-in
-screen says so: the phone that approves the code sets it up for whoever
-hasn't yet. It asks "Who's watching?" at start when the household has more
+or by its QR code. Choose your server lists the saved servers first, then
+those that answer the broadcast. A saved server the broadcast didn't find
+is asked directly (`GET /api/server`, without a token), and its row says
+"Can't reach it" when it doesn't answer as Pley; the row chosen says
+"Connecting to …". Search this network asks every other address of the
+Roku's network ("Checking 192.168.1.1-254…"), 24 at a time, a second
+each, for servers that never hear the broadcast (Docker on a bridge
+network). An address typed on the keyboard that can't be used says why
+on the keyboard, shown again: one over plain HTTP beyond the home network
+is refused, as SECURITY.md says of the TV apps. The sign-in screen is laid out as Android TV's: three
+numbered steps (scan the code, or go to the address, and enter the code,
+in two fields), the QR code at the right in a light tile that is dimmed
+once the code expires, and Change server under it. An expired code gives
+way to a new one without a word, three times (half an hour of codes);
+then OK gets the next. When the server doesn't answer, the screen says
+when it tries again, counting down the seconds. When the server requires
+two-step sign-in, the sign-in screen says so: the phone that approves the
+code sets it up for whoever hasn't yet. It asks "Who's watching?" at start when the household has more
 than one profile, unless Settings' Always start as names one. Going on
 there as the profile it was left on asks that profile's PIN when it has
 one, as on the other TVs, and so does Always start as: the start opens on
-that profile's PIN pad, and Cancel shows the other profiles. A PIN is
-typed on Roku's own PIN pad: a wrong one, or too many, asks again saying
-why; a PIN locked after too many wrong tries is said on the screen, since
-Roku's pad can't be dimmed. A profile that needs its password is signed
-in to with a code, choosing it in the browser.
+that profile's PIN pad, and Use another profile shows the other profiles.
+Choosing a saved server (Settings' Switch server too) is a start on it:
+it asks the same, whatever was answered on the server before. A PIN is
+typed on Roku's own PIN pad ("Enter Anna's PIN"): a wrong one, or too
+many, asks again saying why. Where Android TV dims its pad (a PIN locked
+after too many wrong tries, a profile that can't be used from the app),
+Roku's pad can't be dimmed: a message under the same title says why, with
+Use another profile. A profile that needs its password opens the sign-in
+screen as "Approve on your phone": "Robin's profile needs its password:
+approve this code on a phone signed in to Pley, and pick Robin there.",
+with Use another profile back to the profiles. A sign-in that can't
+switch profiles offers Sign in as another profile, the same way.
 
 ### Home
 
@@ -75,6 +97,18 @@ when not started). A show's or a season's tile has the number of its
 episodes left to watch where the watched mark goes, the mark only once
 every one is watched. Continue Watching, and any row whose first title
 is an episode, has 16:9 stills.
+
+### The server out of reach
+
+When the server answers nothing, or another device answers at its
+address, "Pley is offline" shows at the top right for 6 s, as on Android
+TV (not over the players, which say "Reconnecting…" themselves). A page
+that needed the server gives way to "Can't reach your server": why, then
+"Check that the server is on and that this device is on its network.",
+with Retry and Switch server. Meanwhile the app asks every 5 s whether the
+server answers (`GET /api/server`, signed in with the token, so the
+answer counts only once the server there has proved itself), and that
+page comes back by itself once it does.
 
 ### Remote keys
 
@@ -735,14 +769,39 @@ decline, and the requests' settings (the web).
 
 ### Settings
 
-Settings has the audio and subtitle defaults, Quality, Play the next
-episode by itself (Up Next counts down only while it is on), Watch
-history, Switch profile, Always start as, Sort libraries, Switch server
-and Sign out. It says where the account is managed on the web (the
-server's address and `/account`), and carries TMDB's notice. Right of the
-settings, Diagnostics shows this Roku and what it tells the server it
-plays (`capsLines` in `components/lib/Caps.brs`), and Open-source licences
-shows Pley's licence and the notices of what the package bundles.
+Settings is in two panes, as on Android TV: the categories at the left,
+the focused category's rows at the right, each with its value on the line
+under its label. Right or OK goes into the rows, at their first, and Left
+back; choices open in a panel at the right, and switches turn On or Off
+with OK. What a change did shows as a toast ("Saved"), and so does why it
+didn't.
+
+- **Profile:** who is signed in (the picture, the name, "Managed profile ·
+  192.168.1.20:7539"), then Switch profile (for a sign-in that may switch
+  them), the audio and subtitle defaults, Watch history, Sort libraries,
+  Always start as (a household of several) and Manage your account on the
+  web, which shows the address to type on a phone or computer. The other
+  TVs draw its QR code too; the server draws QR codes of sign-in codes
+  only, so Roku shows the address alone.
+- **Playback:** Quality, Play the next episode by itself (Up Next counts
+  down only while it is on) and Playback details, which has the player
+  show how a video plays over it (the registry's `playback` section,
+  `showDetails`).
+- **Subtitles and display:** subtitles look as the Roku's own caption
+  settings say, which the row says.
+- **Server:** the server this TV uses, and Switch server.
+- **Diagnostics:** Open diagnostics: under "This TV" the app, the model,
+  the Roku OS and the Roku's name, then under "What it plays" what it
+  tells the server it plays (`capsLines` in `components/lib/Caps.brs`),
+  as on Android TV a column of labels and one of values, a line each,
+  which Up and Down go through.
+- **About:** TMDB's notice, the version, and Open-source licences: Pley's
+  licence and the notices of what the package bundles.
+- **Sign out:** "Sign this TV out of 192.168.1.20:7539. You'll need a new
+  link code to sign in again.", and Sign out, which asks first.
+
+Android TV's Audio (passthrough by format) has no place: the Roku's own
+settings decide what goes to a receiver.
 
 Always start as, for a household of several profiles, names the profile
 the app starts as, or Ask who's watching. As on the other TVs it only
@@ -762,7 +821,7 @@ then shows it. It is kept on the Roku for each server.
 | Path | What |
 |---|---|
 | `source/main.brs` | Starts the scene |
-| `components/MainScene.*` | The screen stack, the HTTP agent for pictures, sign-in when the server ends it, what the user's remotes cast here |
+| `components/MainScene.*` | The screen stack, the HTTP agent for pictures, sign-in when the server ends it, "Pley is offline" and the question whether the server answers again, what the user's remotes cast here |
 | `components/MusicPlayer.*` | The music queue on the scene's Audio node |
 | `components/screens/` | One component per screen |
 | `components/shared/` | Screen helpers (`Ui.brs`), title actions (`Titles.brs`) |

@@ -5,6 +5,7 @@ sub init()
     m.tag = m.top.findNode("tag")
     m.warning = false
     m.found = false
+    m.problem = false
 end sub
 
 sub onContent()
@@ -15,6 +16,7 @@ sub onContent()
     m.tag.text = row.tag
     m.warning = row.warning
     m.found = row.found
+    m.problem = row.hasField("problem") and row.problem = true
     onFocus()
 end sub
 
@@ -29,7 +31,12 @@ sub onFocus()
     end if
     m.background.color = "0x262B35FF"
     m.name.color = "0xEBEBEBFF"
-    m.address.color = "0xA1A9B6FF"
+    ' "Can't reach it" in the danger colour, as on Android TV.
+    if m.problem
+        m.address.color = "0xEB6B70FF"
+    else
+        m.address.color = "0xA1A9B6FF"
+    end if
     if m.warning
         m.tag.color = "0xEB6B70FF"
     else if m.found

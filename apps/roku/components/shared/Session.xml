@@ -25,5 +25,9 @@
              0 and "" until then. -->
         <field id="profileId" type="integer" />
         <field id="profileName" type="string" />
+        <!-- The server in use answered nothing the last time it was asked,
+             or another device answered for it: the scene says "Pley is
+             offline" and asks again every 5 s until it answers. -->
+        <field id="offline" type="boolean" />
     </interface>
 </component>

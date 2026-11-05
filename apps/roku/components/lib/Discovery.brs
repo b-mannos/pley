@@ -53,6 +53,48 @@ function discoveryHost(address as string) as string
     return Left(address, colon - 1)
 end function
 
+' "Search this network", for servers that never hear the broadcast
+' (Docker on a bridge network), as Android TV searches it: GET /api/server
+' on pley's port at every other address of the TV's /24 network, from its
+' IPv4 address. None without one.
+function discoverySweep(localIp as dynamic) as object
+    urls = []
+    parts = discoveryIpParts(localIp)
+    if parts = invalid then return urls
+    own = Int(Val(parts[4]))
+    for n = 1 to 254
+        if n <> own then urls.Push("http://" + parts[1] + "." + parts[2] + "." + parts[3] + "." + n.ToStr() + ":" + discoveryPort().ToStr())
+    end for
+    return urls
+end function
+
+' What the screen says a sweep checks: "192.168.1.1-254", or "" without an
+' IPv4 address.
+function discoverySweepRange(localIp as dynamic) as string
+    parts = discoveryIpParts(localIp)
+    if parts = invalid then return ""
+    return parts[1] + "." + parts[2] + "." + parts[3] + ".1-254"
+end function
+
+function discoveryIpParts(localIp as dynamic) as dynamic
+    re = CreateObject("roRegex", "^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$", "")
+    parts = re.Match(httpString(localIp))
+    if parts.Count() <> 5 then return invalid
+    return parts
+end function
+
+' The server behind a sweep's answer from origin ("http://192.168.1.20:7539")
+' to GET /api/server: { url, name, id, version }, or invalid for anything
+' that isn't Pley.
+function discoverySwept(origin as string, status as integer, text as dynamic) as dynamic
+    if status <> 200 then return invalid
+    data = httpObject(httpJson(text))
+    if data = invalid or httpString(data.version) = "" then return invalid
+    name = httpSentence(data.name)
+    if name = "" then name = discoveryHost(Mid(origin, Len("http://") + 1))
+    return { url: origin, name: name, id: httpString(data.id), version: httpString(data.version) }
+end function
+
 ' found with server in it, once per server (by id, else address), by name.
 function discoveryAdd(found as object, server as object) as object
     for each known in found

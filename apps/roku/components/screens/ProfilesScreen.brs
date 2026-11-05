@@ -2,10 +2,12 @@
 ' on a profile switches to it (the switch-profile grant, through the API
 ' task), after its PIN for one that has one; the one signed in goes on,
 ' its PIN asked first at a start. A profile that needs its password is
-' signed in to with a code, chosen in the browser. Shown as the app
-' starts when the household has more than one profile, and from Settings.
-' params.pin: a start as the profile signed in ("Always start as"), whose
-' PIN pad opens first; Cancel shows the profiles.
+' approved with a code on a phone, the sign-in screen saying so ("Approve
+' on your phone"); one that can't be used from the app says so on its PIN
+' pad, as Android TV's locked pad does. Shown as the app starts when the
+' household has more than one profile, as a server is chosen, and from
+' Settings. params.pin: a start as the profile signed in ("Always start
+' as"), whose PIN pad opens first; Use another profile shows the profiles.
 
 sub init()
     m.profiles = m.top.findNode("profiles")
@@ -24,9 +26,13 @@ sub init()
     m.sentPin = false
     ' The PIN pad of the profile signed in opens once the profiles show it.
     m.padFirst = false
+    ' The profiles couldn't be loaded: Retry shows, and the server answering
+    ' again (reached) loads them by itself.
+    m.failed = false
     m.profiles.observeField("itemSelected", "onPicked")
     m.buttons.observeField("buttonSelected", "onButton")
     m.top.observeField("active", "onActive")
+    m.top.observeField("reached", "onReached")
 end sub
 
 sub onActive()
@@ -46,10 +52,12 @@ sub onActive()
 end sub
 
 ' A sign-in from before the app asked to switch profiles can't list them:
-' signing in again, choosing the profile in the browser, does instead.
+' signing in again as another profile, choosing it in the browser, does
+' instead.
 sub load()
+    m.failed = false
     if not authAllows(m.global.session.scope, "profiles")
-        showMessage("This sign-in can't switch profiles: sign in again, and choose the profile in the browser.", ["Sign in again"])
+        showMessage("This sign-in can't switch profiles: sign in again, and choose the profile in the browser.", [anotherProfile()])
         return
     end if
     showMessage("Loading…", [])
@@ -58,6 +66,14 @@ sub load()
     ' Who the app is, for the PIN of the profile signed in; alongside the
     ' list.
     uiGet("/api/auth/me", "onMe")
+end sub
+
+function anotherProfile() as string
+    return "Sign in as another profile"
+end function
+
+sub onReached()
+    if m.failed and not m.busy then load()
 end sub
 
 sub onProfiles(event as object)
@@ -77,16 +93,20 @@ sub showProfiles()
     if answer.ok and not m.answers.me.ok then answer = m.answers.me
     if not answer.ok
         if answer.error = "signed_out" then return
-        message = answer.message
-        if answer.status = 403 then message = "This sign-in can't switch profiles: sign in again, and choose the profile in the browser."
-        showMessage(message, ["Try again", "Sign in again"])
+        m.failed = true
+        if answer.status = 403
+            showMessage("This sign-in can't switch profiles: sign in again, and choose the profile in the browser.", ["Retry", anotherProfile()])
+        else
+            showMessage(answer.message, ["Retry"])
+        end if
         return
     end if
     m.me = profMe(m.answers.me.data)
     m.list = profTiles(answer.data, m.global.session.server, m.me)
     profKeepHousehold(CreateObject("roRegistrySection", "household"), m.global.session.server, answer.data)
     if m.list.Count() = 0
-        showMessage("No profiles to choose from.", ["Try again", "Sign in again"])
+        m.failed = true
+        showMessage("No profiles to choose from.", ["Retry"])
         return
     end if
     shown = m.list.Count()
@@ -113,10 +133,10 @@ end sub
 
 sub onButton(event as object)
     if m.busy then return
-    if m.buttons.buttons[event.getData()] = "Try again"
+    if m.buttons.buttons[event.getData()] = "Retry"
         load()
     else
-        uiNavigate({ to: "link" })
+        uiNavigate({ to: "link", params: { reason: "another" } })
     end if
 end sub
 
@@ -132,20 +152,22 @@ sub onPicked(event as object)
     else if choice = "confirm" or choice = "pin"
         askPin(profile, "")
     else if choice = "approve"
-        askSignIn(profile)
+        approve(profile)
     else
-        m.message.text = "This profile can't be used from the app."
+        locked(profile, "This profile can't be used from the app.")
     end if
 end sub
 
+' The PIN pad, saying why it asks again when it does; Use another profile
+' goes back to the profiles.
 sub askPin(profile as object, problem as string)
     m.picked = profile
     dialog = CreateObject("roSGNode", "StandardPinPadDialog")
-    dialog.title = "PIN for " + profile.title
+    dialog.title = "Enter " + profile.title + "'s PIN"
     lines = []
     if problem <> "" then lines.Push(problem)
     dialog.message = lines
-    dialog.buttons = ["OK", "Cancel"]
+    dialog.buttons = ["OK", "Use another profile"]
     dialog.observeField("buttonSelected", "onPin")
     m.dialog = dialog
     m.top.getScene().dialog = dialog
@@ -163,21 +185,29 @@ sub onPin(event as object)
     switchTo(m.picked, pin)
 end sub
 
-' The profile needs its password, which apps never see: sign in to it with
-' a code instead, choosing it in the browser.
-sub askSignIn(profile as object)
+' A profile whose PIN can't be typed here (it can't be used from the app,
+' or its PIN is locked after too many wrong tries): Android TV's pad,
+' dimmed, with why and Use another profile. Roku's pad can't be dimmed, so
+' a message stands in its place.
+sub locked(profile as object, why as string)
     dialog = CreateObject("roSGNode", "StandardMessageDialog")
-    dialog.title = profile.title
-    dialog.message = ["This profile needs its password: sign in to it with a code, and choose it in the browser."]
-    dialog.buttons = ["Sign in with a code", "Cancel"]
-    dialog.observeField("buttonSelected", "onSignIn")
+    dialog.title = "Enter " + profile.title + "'s PIN"
+    dialog.message = [why]
+    dialog.buttons = ["Use another profile"]
+    dialog.observeField("buttonSelected", "onLocked")
     m.dialog = dialog
     m.top.getScene().dialog = dialog
 end sub
 
-sub onSignIn(event as object)
+sub onLocked()
     closeDialog()
-    if event.getData() = 0 then uiNavigate({ to: "link" })
+end sub
+
+' The profile needs its password, which apps never see: a code approved on
+' a phone signed in to Pley, picking the profile there, as Android TV's
+' "Approve on your phone". Use another profile comes back here.
+sub approve(profile as object)
+    uiNavigate({ to: "link", params: { reason: "profile", name: profile.title } })
 end sub
 
 sub closeDialog()
@@ -211,11 +241,12 @@ sub onSwitched(event as object)
         ' The list was older than the profile's PIN: it is asked for.
         askPin(m.picked, "")
     else if answer.error = "wrong_pin" or answer.error = "throttled"
-        ' The pad again, saying why: a wrong PIN, or how long to wait. A
-        ' locked one says so on the screen, as the pad can't be dimmed.
+        ' The pad again, saying why: a wrong PIN, or how long to wait.
         askPin(m.picked, answer.message)
+    else if answer.error = "pin_locked"
+        locked(m.picked, answer.message)
     else if answer.error = "browser"
-        askSignIn(m.picked)
+        approve(m.picked)
     else
         m.message.text = answer.message
     end if

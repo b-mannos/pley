@@ -126,3 +126,14 @@ function serversStartScreen(current as string, signedIn as boolean, askWho = fal
     if askWho then return "profiles"
     return "home"
 end function
+
+' The first screen on server, as the app starts or once the server is
+' chosen: { screen, pin }. Signed in, "Who's watching?" comes first as
+' atStart (Profiles.brs's profAtStart for the server) says, on the PIN
+' pad of the profile signed in when pin is true. Choosing a server is a
+' start on it: its profile's PIN is never skipped because another
+' server's was given.
+function serversStart(server as string, signedIn as boolean, atStart as string) as object
+    if not signedIn then atStart = ""
+    return { screen: serversStartScreen(server, signedIn, atStart <> ""), pin: atStart = "pin" }
+end function

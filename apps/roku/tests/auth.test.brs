@@ -140,6 +140,18 @@ sub test_auth_shows_user_codes_in_two_halves()
     tkEqual(authShownCode("BCDFGHJK"), "BCDF-GHJK")
     tkEqual(authShownCode("bcdf ghjk"), "BCDF-GHJK")
     tkEqual(authShownCode("ABC"), "ABC")
+    tkEqual(authCodeHalves("BCDF-GHJK"), ["BCDF", "GHJK"], "the screen's two fields")
+    tkEqual(authCodeHalves("bcdf ghjk"), ["BCDF", "GHJK"])
+    tkEqual(authCodeHalves("ABC"), ["ABC"], "anything else whole")
+end sub
+
+' Where to type the code, as Android TV says it: no scheme, the port and
+' the path kept.
+sub test_auth_shows_where_to_type_the_code()
+    tkEqual(authShownAddress("http://192.168.1.20:7539/link"), "192.168.1.20:7539/link")
+    tkEqual(authShownAddress("https://pley.example.com/link/"), "pley.example.com/link")
+    tkEqual(authShownAddress("https://pley.example.com/"), "pley.example.com")
+    tkEqual(authShownAddress("nas/link"), "nas/link")
 end sub
 
 sub test_auth_keeps_a_refresh_only_while_its_sign_in_lasts()
