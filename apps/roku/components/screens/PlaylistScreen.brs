@@ -37,7 +37,17 @@ sub init()
     m.buttons.observeField("buttonSelected", "onButton")
     m.entries.observeField("itemSelected", "onEntry")
     m.entries.observeField("itemFocused", "onEntryFocused")
+    m.message.observeField("chosen", "onRetry")
     m.top.observeField("active", "onActive")
+end sub
+
+' Retry, after the playlist couldn't load.
+sub onRetry()
+    m.message.title = ""
+    m.message.text = "Loading…"
+    m.message.action = ""
+    m.top.setFocus(true)
+    load()
 end sub
 
 ' Loaded each time it shows: back from playing, the places have changed.
@@ -54,7 +64,11 @@ sub onActive()
         m.top.setFocus(true)
     else
         uiChangesSince()
-        if m.buttons.visible then m.lastFocus.setFocus(true)
+        if m.buttons.visible
+            m.lastFocus.setFocus(true)
+        else if m.message.action <> ""
+            m.message.setFocus(true)
+        end if
     end if
     load()
 end sub
@@ -70,10 +84,18 @@ end sub
 sub onPlaylist(event as object)
     answer = event.getData()
     if not answer.ok
-        if m.playlist = invalid and not uiFailed(answer) then m.message.text = answer.message
+        ' The first time, the page says so, with Retry, as on Android TV.
+        if m.playlist = invalid and not uiFailed(answer)
+            m.message.title = "Couldn't load this playlist"
+            m.message.text = answer.message
+            m.message.action = "Retry"
+            if m.top.hasFocus() then m.message.setFocus(true)
+        end if
         return
     end if
     m.playlist = answer.data
+    m.message.title = ""
+    m.message.action = ""
     m.kindLabel.text = pagePlaylistKindLine(m.playlist.kind, m.playlist.smart)
     m.title.text = m.playlist.title
     showFacts()

@@ -18,6 +18,7 @@ sub init()
     m.removing = {}
     m.entries.observeField("itemSelected", "onEntry")
     m.entries.observeField("itemFocused", "onFocused")
+    m.message.observeField("chosen", "onRetry")
     m.top.observeField("active", "onActive")
 end sub
 
@@ -33,9 +34,20 @@ sub onActive()
     end if
     if m.content.getChildCount() > 0
         m.entries.setFocus(true)
+    else if m.message.action <> ""
+        m.message.setFocus(true)
     else
         m.top.setFocus(true)
     end if
+end sub
+
+' Retry, after the history couldn't load.
+sub onRetry()
+    m.message.title = ""
+    m.message.text = "Loading…"
+    m.message.action = ""
+    m.top.setFocus(true)
+    loadMore()
 end sub
 
 sub loadMore()
@@ -48,9 +60,17 @@ sub onPage(event as object)
     m.loading = false
     answer = event.getData()
     if not answer.ok
-        if m.content.getChildCount() = 0 and not uiFailed(answer) then m.message.text = answer.message
+        ' With nothing listed, the page says so, with Retry, as on Android TV.
+        if m.content.getChildCount() = 0 and not uiFailed(answer)
+            m.message.title = "Couldn't load your watch history"
+            m.message.text = answer.message
+            m.message.action = "Retry"
+            if m.top.hasFocus() then m.message.setFocus(true)
+        end if
         return
     end if
+    m.message.title = ""
+    m.message.action = ""
     m.total = answer.data.total
     m.offset = m.offset + answer.data.listed
     if answer.data.listed = 0 then m.total = m.offset

@@ -35,6 +35,7 @@ sub init()
     m.lastFocus = m.buttons
     m.buttons.observeField("chosen", "onButton")
     m.albums.observeField("rowItemSelected", "onAlbum")
+    m.message.observeField("chosen", "onRetry")
     m.top.observeField("active", "onActive")
 end sub
 
@@ -48,7 +49,11 @@ sub onActive()
     if m.started
         ' Now playing comes and goes with the music.
         showButtons()
-        if m.buttons.visible then m.lastFocus.setFocus(true)
+        if m.buttons.visible
+            m.lastFocus.setFocus(true)
+        else if m.message.action <> ""
+            m.message.setFocus(true)
+        end if
         return
     end if
     m.started = true
@@ -56,9 +61,31 @@ sub onActive()
     m.initials.text = pageInitials(m.name.text)
     layoutText()
     m.top.setFocus(true)
+    ask()
+end sub
+
+' What hasn't come: the artist's details, their albums.
+sub ask()
     path = "/api/items/" + urlValue(m.top.params.id)
-    uiGet(path, "onArtist")
-    uiRequest({ method: "GET", path: path + "/children", build: "albums" }, "onAlbums")
+    if m.artist = invalid then uiGet(path, "onArtist")
+    if m.albumIds = invalid then uiRequest({ method: "GET", path: path + "/children", build: "albums" }, "onAlbums")
+end sub
+
+' What didn't load, the server's sentence, and Retry, as on Android TV.
+sub showFailure(answer as object)
+    m.message.title = "Couldn't load this artist"
+    m.message.text = answer.message
+    m.message.action = "Retry"
+    m.message.visible = true
+    if m.top.hasFocus() then m.message.setFocus(true)
+end sub
+
+sub onRetry()
+    m.message.title = ""
+    m.message.text = "Loading…"
+    m.message.action = ""
+    m.top.setFocus(true)
+    ask()
 end sub
 
 ' Albums have no watched marks or My List: only Add to playlist is
@@ -70,7 +97,7 @@ end sub
 sub onArtist(event as object)
     answer = event.getData()
     if not answer.ok or answer.data = invalid
-        if not uiFailed(answer) then m.message.text = answer.message
+        if not uiFailed(answer) then showFailure(answer)
         return
     end if
     m.artist = answer.data
@@ -89,14 +116,17 @@ end sub
 sub onAlbums(event as object)
     answer = event.getData()
     if not answer.ok
-        if not uiFailed(answer) then m.message.text = answer.message
+        if not uiFailed(answer) then showFailure(answer)
         return
     end if
     m.albumIds = answer.data.order
     showLine()
     showButtons()
     if answer.data.shown = 0
+        m.message.title = ""
+        m.message.action = ""
         m.message.text = "No albums found."
+        if m.top.hasFocus() and m.buttons.visible then m.buttons.setFocus(true)
         return
     end if
     ' The task's tiles, as the row's.

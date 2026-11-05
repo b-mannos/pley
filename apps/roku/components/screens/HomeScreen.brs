@@ -2,8 +2,6 @@ sub init()
     m.menu = m.top.findNode("menu")
     m.rows = m.top.findNode("rows")
     m.message = m.top.findNode("message")
-    m.messageTitle = m.top.findNode("messageTitle")
-    m.messageText = m.top.findNode("messageText")
     m.backdrop = m.top.findNode("backdrop")
     m.hero = m.top.findNode("hero")
     m.heroTitle = m.top.findNode("heroTitle")
@@ -64,6 +62,7 @@ sub init()
     m.rows.observeField("rowItemSelected", "onTile")
     m.rows.observeField("rowItemFocused", "onTileFocused")
     m.heroButtons.observeField("chosen", "onHeroButton")
+    m.message.observeField("chosen", "onRetry")
     m.rest.observeField("fire", "onRested")
     ' Changes told by the server's event stream at the last load.
     m.remoteSeen = 0
@@ -175,8 +174,12 @@ sub onRows(event as object)
     if request.spec.asked <> m.rowsAsked then return
     answer = event.getData()
     if not answer.ok
-        ' A refresh that fails leaves the rows as they were.
-        if m.rowKeys.Count() = 0 and not uiFailed(answer) then showMessage("", answer.message)
+        ' A refresh that fails leaves the rows as they were; with none,
+        ' Home says so, with Retry, as on Android TV.
+        if m.rowKeys.Count() = 0 and not uiFailed(answer)
+            showMessage("Couldn't load your home screen", answer.message, "Retry")
+            if m.top.isInFocusChain() then focusPage()
+        end if
         return
     end if
     m.top.getScene().myList = answer.data.myList
@@ -255,21 +258,29 @@ sub onRequestSummary()
     if FormatJson(requestEntries()) <> FormatJson(m.requestEntries) then buildMenu()
 end sub
 
-sub showMessage(title as string, text as string)
+' In place of the page: title and text, and the button of action (Retry)
+' where it has one.
+sub showMessage(title as string, text as string, action = "" as string)
     m.emptyShown = false
     m.inRows = false
-    if m.rows.isInFocusChain() or m.heroButtons.isInFocusChain() then m.menu.setFocus(true)
+    if m.rows.isInFocusChain() or m.heroButtons.isInFocusChain() or (m.message.isInFocusChain() and action = "") then m.menu.setFocus(true)
     m.rows.visible = false
     m.hero.visible = false
     m.info.visible = false
     m.backdrop.uri = ""
-    m.messageTitle.text = title
-    m.messageText.text = text
-    m.message.removeChildrenIndex(m.message.getChildCount(), 0)
-    if title <> "" then m.message.appendChild(m.messageTitle)
-    m.message.appendChild(m.messageText)
+    m.message.title = title
+    m.message.text = text
+    m.message.action = action
     m.message.visible = true
     if text <> "Loading…" then uiLaunched()
+end sub
+
+' Retry: Home asks again, the focus in the menu until the page shows.
+sub onRetry()
+    m.menu.setFocus(true)
+    m.rowKeys = []
+    m.rowSigs = {}
+    load()
 end sub
 
 ' Puts rows ([{ key, wide, sig, built }]) on the screen: the
@@ -634,7 +645,8 @@ sub onMenu(event as object)
     end if
 end sub
 
-' From the menu into the page: the hero's buttons, else the rows.
+' From the menu into the page: the hero's buttons, else the rows, else a
+' message's Retry.
 sub focusPage()
     if m.hero.visible
         m.heroButtons.setFocus(true)
@@ -642,6 +654,8 @@ sub focusPage()
     else if m.rows.visible
         m.rows.setFocus(true)
         m.inRows = true
+    else if m.message.visible and m.message.action <> ""
+        m.message.setFocus(true)
     end if
 end sub
 
@@ -680,6 +694,13 @@ function onKeyEvent(key as string, press as boolean) as boolean
             position = m.rows.rowItemFocused
             row = m.rows.content.getChild(position[0])
             if row <> invalid then uiTileOptions(row.getChild(position[1]), contentContinueWatching(m.rowKeys[position[0]]))
+            return true
+        end if
+        return false
+    end if
+    if m.message.isInFocusChain()
+        if key = "left" or key = "back"
+            m.menu.setFocus(true)
             return true
         end if
         return false

@@ -1,13 +1,15 @@
 ' Collections (GET /api/libraries/{id}/collections for each library of
 ' movies or shows): a row each, named after its library, in the libraries'
 ' order, once every library answered; a library without collections has no
-' row. params: { libraries ([{ id, name, kind }], Home's menu's) }.
+' row. When none could be loaded, the page says so, with Retry, as on
+' Android TV. params: { libraries ([{ id, name, kind }], Home's menu's) }.
 
 sub init()
     m.rows = m.top.findNode("rows")
     m.message = m.top.findNode("message")
     m.started = false
     m.rows.observeField("rowItemSelected", "onTile")
+    m.message.observeField("chosen", "load")
     m.top.observeField("active", "onActive")
 end sub
 
@@ -16,6 +18,8 @@ sub onActive()
     if m.started
         if m.rows.visible
             m.rows.setFocus(true)
+        else if m.message.action <> ""
+            m.message.setFocus(true)
         else
             m.top.setFocus(true)
         end if
@@ -27,14 +31,24 @@ sub onActive()
     for each library in httpArray(m.top.params.libraries)
         if GetInterface(library, "ifAssociativeArray") <> invalid and (library.kind = "movies" or library.kind = "shows") then m.libraries.Push(library)
     end for
-    ' Each library's collections as they come ({ id: ContentNode }), and
-    ' how many answers are still to come.
+    load()
+end sub
+
+' Every library's collections, asked together.
+sub load()
+    ' Each library's collections as they come ({ id: ContentNode }), how
+    ' many answers are still to come, and why one failed.
     m.found = {}
     m.waiting = m.libraries.Count()
+    m.failed = invalid
+    m.message.title = ""
+    m.message.action = ""
+    if m.message.isInFocusChain() then m.top.setFocus(true)
     if m.waiting = 0
         m.message.text = "No collections yet."
         return
     end if
+    m.message.text = "Loading…"
     for each library in m.libraries
         uiRequest({ method: "GET", path: "/api/libraries/" + urlValue(library.id) + "/collections", build: "collections", libraryId: library.id }, "onCollections")
     end for
@@ -62,8 +76,14 @@ sub onCollections(event as object)
         end if
     end for
     if content.getChildCount() = 0
-        m.message.text = "No collections yet."
-        if m.failed <> invalid then m.message.text = m.failed
+        if m.failed <> invalid
+            m.message.title = "Couldn't load collections"
+            m.message.text = m.failed
+            m.message.action = "Retry"
+            if m.top.hasFocus() then m.message.setFocus(true)
+        else
+            m.message.text = "No collections yet."
+        end if
         return
     end if
     m.message.visible = false

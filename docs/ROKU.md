@@ -70,6 +70,13 @@ The hero's summary, content rating and quality come with its details
 do the info block's. With nothing to show, Home says why: No libraries
 yet, Scanning your libraries…, or Nothing here yet.
 
+What can't be loaded says so in the page, as on Android TV: what didn't
+load ("Couldn't load your home screen"), the server's sentence, and Retry,
+which has the focus. So do a library's tabs, Collections, a collection,
+an album, an artist, the playlists, a playlist and the watch history. A
+server that doesn't answer at all has a screen of its own, with Try
+again.
+
 ### Remote keys
 
 | Key | Where | What it does |

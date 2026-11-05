@@ -35,7 +35,34 @@ sub init()
     m.buttons.observeField("buttonSelected", "onButton")
     m.tracks.observeField("itemSelected", "onTrack")
     m.tracks.observeField("itemFocused", "onTrackFocused")
+    m.message.observeField("chosen", "onRetry")
     m.top.observeField("active", "onActive")
+    ' Whether the tracks came.
+    m.tracksLoaded = false
+end sub
+
+' What didn't load, the server's sentence, and Retry, as on Android TV.
+sub showFailure(answer as object)
+    m.message.title = "Couldn't load this album"
+    m.message.text = answer.message
+    m.message.action = "Retry"
+    m.message.visible = true
+    if m.top.hasFocus() then m.message.setFocus(true)
+end sub
+
+' Retry: what didn't come is asked again.
+sub onRetry()
+    m.message.title = ""
+    m.message.text = "Loading…"
+    m.message.action = ""
+    m.top.setFocus(true)
+    ask()
+end sub
+
+sub ask()
+    path = "/api/items/" + urlValue(m.top.params.id)
+    if m.album = invalid then uiGet(path, "onAlbum")
+    if not m.tracksLoaded then uiRequest({ method: "GET", path: path + "/children", build: "tracks" }, "onTracks")
 end sub
 
 sub onActive()
@@ -64,15 +91,15 @@ sub onActive()
             focusTracks()
         else if m.buttons.visible
             m.buttons.setFocus(true)
+        else if m.message.action <> ""
+            m.message.setFocus(true)
         end if
         return
     end if
     m.started = true
     m.title.text = httpSentence(m.top.params.title)
     m.top.setFocus(true)
-    path = "/api/items/" + urlValue(m.top.params.id)
-    uiGet(path, "onAlbum")
-    uiRequest({ method: "GET", path: path + "/children", build: "tracks" }, "onTracks")
+    ask()
 end sub
 
 ' Tracks have no watched marks or My List: only Add to playlist is
@@ -84,7 +111,7 @@ end sub
 sub onAlbum(event as object)
     answer = event.getData()
     if not answer.ok or answer.data = invalid
-        if not uiFailed(answer) then m.message.text = answer.message
+        if not uiFailed(answer) then showFailure(answer)
         return
     end if
     m.album = answer.data
@@ -107,9 +134,10 @@ end sub
 sub onTracks(event as object)
     answer = event.getData()
     if not answer.ok
-        if not uiFailed(answer) then m.message.text = answer.message
+        if not uiFailed(answer) then showFailure(answer)
         return
     end if
+    m.tracksLoaded = true
     m.queue = answer.data.queue
     m.tracks.content = event.getRoSGNode().content
     m.rowFields = []
@@ -119,6 +147,8 @@ sub onTracks(event as object)
     markPlaying()
     showLine()
     if m.queue.Count() = 0
+        m.message.title = ""
+        m.message.action = ""
         m.message.text = "This album has no tracks."
         return
     end if

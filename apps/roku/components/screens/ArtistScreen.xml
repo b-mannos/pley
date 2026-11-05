@@ -43,6 +43,7 @@
         <ChipRow id="buttons" translation="[96, 344]" pad="80" visible="false" />
         <Label id="albumsLabel" translation="[96, 440]" text="Albums" color="0xEBEBEBFF" font="font:MediumBoldSystemFont" visible="false" />
         <RowList id="albums" translation="[96, 496]" itemComponentName="Tile" itemSize="[1728, 400]" rowItemSize="[[260, 340]]" numRows="1" rowItemSpacing="[[28, 0]]" showRowLabel="[false]" drawFocusFeedback="false" rowFocusAnimationStyle="floatingFocus" vertFocusAnimationStyle="floatingFocus" />
-        <Label id="message" translation="[96, 560]" width="1728" wrap="true" horizAlign="center" color="0xA1A9B6FF" text="Loading…" font="font:SmallSystemFont" />
+        <!-- Loading, or what failed with Retry. -->
+        <PageMessage id="message" translation="[960, 560]" width="1728" text="Loading…" />
     </children>
 </component>

@@ -243,10 +243,6 @@ sub showContent()
         else
             showMessage("This library is empty.")
         end if
-        if m.message.action <> "" and m.focusContent and m.top.isInFocusChain() and not m.panel.visible
-            m.focusContent = false
-            focusContent()
-        end if
         return
     end if
     if empty <> ""
@@ -266,9 +262,10 @@ sub showContent()
 end sub
 
 ' What the tab says in place of its titles: text, under title, with the
-' button of action ("clear": Clear filters) where it has one. The focus
-' in the titles goes to that button, else to the tabs; on the chips or
-' the tabs, it stays.
+' button of action ("clear": Clear filters, "retry": Retry) where it has
+' one. That button takes the focus that was in the titles, or that waited
+' for them to come; else the focus in the titles goes to the tabs. On the
+' chips or the tabs, it stays.
 sub showMessage(text as string, title = "" as string, action = "" as string)
     inContent = m.top.hasFocus() or m.grid.isInFocusChain() or m.rows.isInFocusChain() or m.letters.isInFocusChain() or m.message.isInFocusChain()
     m.grid.visible = false
@@ -277,25 +274,37 @@ sub showMessage(text as string, title = "" as string, action = "" as string)
     m.messageAction = action
     label = ""
     if action = "clear" then label = "Clear filters"
+    if action = "retry" then label = "Retry"
     m.message.title = title
     m.message.text = text
     m.message.action = label
     m.message.visible = true
-    if m.panel.visible or not inContent or not m.top.isInFocusChain() then return
-    if label <> ""
+    if m.panel.visible or not m.top.isInFocusChain() then return
+    if label <> "" and (inContent or m.focusContent)
+        m.focusContent = false
         m.message.setFocus(true)
-    else
+    else if inContent
         m.tabs.setFocus(true)
     end if
 end sub
 
-' The message's button: Clear filters lists every title again, the focus
-' going to them as they come.
+' The tab couldn't load, as on Android TV: what didn't, the server's
+' sentence, and Retry.
+sub showFailure(answer as object)
+    titles = { library: "Couldn't load this library", recommended: "Couldn't load recommendations", collections: "Couldn't load collections" }
+    showMessage(answer.message, titles[m.view.tab], "retry")
+end sub
+
+' The message's button: Clear filters lists every title again, Retry asks
+' for the tab again, the focus going to the titles as they come.
 sub onMessageAction()
-    if m.messageAction = "clear"
+    action = m.messageAction
+    m.focusContent = true
+    if action = "clear"
         libClearFilters(m.view)
-        m.focusContent = true
         applyView()
+    else if action = "retry"
+        showTab(m.view.tab)
     end if
 end sub
 
@@ -333,7 +342,7 @@ sub onCollections(event as object)
     m.collectionsAsked = false
     answer = event.getData()
     if not answer.ok
-        if not uiFailed(answer) and m.view.tab = "collections" then showMessage(answer.message)
+        if not uiFailed(answer) and m.view.tab = "collections" then showFailure(answer)
         return
     end if
     m.collections = event.getRoSGNode().content
@@ -349,7 +358,7 @@ end sub
 sub onRecommended(event as object)
     answer = event.getData()
     if not answer.ok
-        if not uiFailed(answer) and m.view.tab = "recommended" then showMessage(answer.message)
+        if not uiFailed(answer) and m.view.tab = "recommended" then showFailure(answer)
         return
     end if
     content = event.getRoSGNode().content
@@ -419,7 +428,7 @@ sub onPage(event as object)
     if not answer.ok
         ' Asked again when the focus comes near it.
         m.pages.Delete(spec.page.ToStr())
-        if m.content.getChildCount() = 0 and not uiFailed(answer) and m.view.tab = "library" then showMessage(answer.message)
+        if m.content.getChildCount() = 0 and not uiFailed(answer) and m.view.tab = "library" then showFailure(answer)
         return
     end if
     page = answer.data
