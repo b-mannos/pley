@@ -289,8 +289,9 @@ paused leaves the player, as in Roku's own apps.
   top, and go by themselves.
 - **Progress** goes to the server every 10 s while playing, every 30 s
   paused, and at once after a seek, in Roku's own bar too.
-- **Playback details** in the menu are asked for again every 2 s while
-  they show.
+- **Playback details** in the menu say "Asking the server…" until a
+  conversion's details come, are asked for again every 2 s while they
+  show, and scroll with Up and Down when they don't fit.
 - **Settings → Playback details** (kept on the Roku, off at first) keeps a
   short readout at the top left while nothing else shows, in the place of
   the title, which then doesn't show as an item begins, as on Android TV:

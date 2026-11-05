@@ -255,6 +255,12 @@ sub init()
     m.fallback = ""
     m.struggled = false
     m.playNotice = ""
+    ' The menu's Playback details: their lines, the first shown (Up and
+    ' Down scroll them), and whether they wait for the server's first
+    ' answer.
+    m.detailLines = []
+    m.detailTop = 0
+    m.detailsWaiting = false
     m.detailsTimer = m.top.findNode("detailsTimer")
     m.detailsTimer.observeField("fire", "onDetailsTick")
     m.stoppedTimer = m.top.findNode("stoppedTimer")
@@ -1727,6 +1733,10 @@ function onKeyEvent(key as string, press as boolean) as boolean
             playerKey(key)
             return true
         end if
+        if m.menuKind = "details" and (key = "up" or key = "down")
+            scrollDetails(key = "down")
+            return true
+        end if
         return false
     end if
     if m.sync.visible
@@ -2184,11 +2194,19 @@ sub onKeepWatching()
 end sub
 
 ' How the stream plays, and for a conversion what the server makes of it
-' (GET /api/playback/{session}).
+' (GET /api/playback/{session}): "Asking the server…" until it answers,
+' as on the native Samsung app.
 sub openDetails()
     m.menuKind = "details"
     m.menuTitle.text = "Playback details"
-    showDetails(invalid)
+    m.detailTop = 0
+    m.detailsWaiting = m.sessionId <> "" and httpString(m.info.method) <> "direct"
+    if m.detailsWaiting
+        m.detailLines = ["Asking the server…"]
+        showDetailLines()
+    else
+        showDetails(invalid)
+    end if
     m.menuList.visible = false
     m.menuChoices.visible = false
     m.menuText.visible = true
@@ -2212,10 +2230,15 @@ sub onDetailsTick()
     end if
 end sub
 
+' The server's answer; without one, what the player knows itself.
 sub onDetails(event as object)
     if event.getRoSGNode().spec.session <> m.sessionId or m.menuKind <> "details" then return
     answer = event.getData()
-    if answer.ok and answer.data <> invalid then showDetails(httpObject(answer.data.transcode))
+    if answer.ok and answer.data <> invalid
+        showDetails(httpObject(answer.data.transcode))
+    else if m.detailsWaiting
+        showDetails(invalid)
+    end if
 end sub
 
 sub showDetails(live as dynamic)
@@ -2229,7 +2252,36 @@ sub showDetails(live as dynamic)
     end for
     if m.pictureIndex >= 0 then lines.Push("Subtitles: Drawn by Pley")
     if m.watch <> invalid and aqLowered(m.watch) then lines.Push("Quality: " + qualityShown() + " · Lowered for your connection")
-    m.menuText.text = lines.Join(Chr(10))
+    m.detailsWaiting = false
+    m.detailLines = lines
+    showDetailLines()
+end sub
+
+' The details from the line scrolled to, as many as the panel holds; asked
+' for again, they stay where they were scrolled to.
+sub showDetailLines()
+    last = m.detailLines.Count() - 1
+    if m.detailTop > last then m.detailTop = last
+    if m.detailTop < 0 then m.detailTop = 0
+    shown = []
+    for i = m.detailTop to last
+        shown.Push(m.detailLines[i])
+    end for
+    m.menuText.text = shown.Join(Chr(10))
+end sub
+
+' Up and Down: a line back, or on while the panel cuts the rest off.
+sub scrollDetails(down as boolean)
+    if down
+        more = m.menuText.isTextEllipsized
+        if GetInterface(more, "ifBoolean") = invalid then more = m.detailTop < m.detailLines.Count() - 1
+        if not more then return
+        m.detailTop = m.detailTop + 1
+    else
+        if m.detailTop = 0 then return
+        m.detailTop = m.detailTop - 1
+    end if
+    showDetailLines()
 end sub
 
 ' --- Picture subtitles drawn here (Pictures.brs) ---
