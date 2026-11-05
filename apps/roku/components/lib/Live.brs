@@ -674,20 +674,22 @@ end function
 ' the channel's ContentNode's (its name as the guide writes it when the
 ' logo doesn't show, the logo, its id) and programs its children's
 ' (TITLE, PLAYSTART, PLAYDURATION; the details as the screen above the
-' grid shows them). Between from and upto (what is fetched), time the
-' guide says nothing of is a programme too (id "gap"), else the TimeGrid
-' would say it is still loading: "No guide information", or across a
-' channel without a guide, its name.
+' grid shows them), each with the same fields: the first of a list says
+' which a node has of its own. Between from and upto (what is fetched),
+' time the guide says nothing of is a programme too (id "gap"), else the
+' TimeGrid would say it is still loading: "No information for this
+' time", or across a channel without a guide, its name.
 function liveGuideRows(channels as object, kept as object, from as integer, upto as integer) as object
     out = []
     for each channel in channels
-        gapTitle = "No guide information"
+        gapTitle = "No information for this time"
         if not channel.hasGuide then gapTitle = channel.name
         programs = []
         at = from
         for each p in liveGuidePrograms(kept, channel.id)
-            if p.start - at >= 60 then programs.Push(liveGuideGap(at, p.start, gapTitle))
+            programs.Append(liveGuideGaps(at, p.start, gapTitle))
             programs.Push({
+                id: "",
                 title: p.title,
                 playStart: p.start,
                 playDuration: p.ends - p.start,
@@ -697,9 +699,27 @@ function liveGuideRows(channels as object, kept as object, from as integer, upto
             })
             if p.ends > at then at = p.ends
         end for
-        if upto - at >= 60 then programs.Push(liveGuideGap(at, upto, gapTitle))
+        programs.Append(liveGuideGaps(at, upto, gapTitle))
         out.Push({ fields: { id: channel.id.ToStr(), title: liveTitle(channel), hdSmallIconUrl: channel.logo }, programs: programs })
     end for
+    return out
+end function
+
+' Time the guide says nothing of, from from to upto, as cells on the half
+' hours, so that Left and Right go through it half an hour at a time, as
+' on Android (one cell across it took Right to its end at once). A sliver
+' of less than a minute goes with the cell beside it; none for a gap that
+' short.
+function liveGuideGaps(from as integer, upto as integer, title as string) as object
+    out = []
+    at = from
+    while upto - at >= 60
+        cut = at - (at mod 1800) + 1800
+        if cut - at < 60 then cut = cut + 1800
+        if upto - cut < 60 then cut = upto
+        out.Push(liveGuideGap(at, cut, title))
+        at = cut
+    end while
     return out
 end function
 

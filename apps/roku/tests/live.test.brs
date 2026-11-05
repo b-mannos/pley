@@ -277,9 +277,10 @@ sub test_live_guide_programmes()
     tkEqual(rows[0].programs[3].playStart, 300)
     tkEqual(rows[0].programs[3].playDuration, 100)
     tkEqual(rows[0].programs[4].id, "gap")
-    tkEqual(rows[0].programs[4].title, "No guide information")
+    tkEqual(rows[0].programs[4].title, "No information for this time")
     tkEqual(rows[0].programs[4].playDuration, 200)
-    tkEqual(rows[2].programs.Count(), 1, "no guide: one gap over what is fetched")
+    tkEqual(rows[0].programs[0].id, "", "a programme's fields are a gap's: the first of a row says which a node has")
+    tkEqual(rows[2].programs.Count(), 1, "no guide, less than a half hour fetched: one gap")
     tkEqual(rows[2].programs[0].title, "Film Four", "a channel without a guide: its name across it")
     kept = {}
     liveGuideKeep(kept, { "1": [{ start: 1000, stop: 1030, title: "A" }, { start: 1100, stop: 1200, title: "B" }] })
@@ -288,6 +289,26 @@ sub test_live_guide_programmes()
     tkEqual(programs[0].playDuration, 100)
     tkEqual(programs[2].playStart, 1030)
     tkEqual(liveIds(liveChannels(liveSample(), "")), "1,2,3")
+end sub
+
+sub test_live_guide_gaps_by_half_hours()
+    starts = []
+    for each gap in liveGuideGaps(900, 7200, "x")
+        starts.Push([gap.playStart, gap.playDuration])
+    end for
+    tkEqual(starts, [[900, 900], [1800, 1800], [3600, 1800], [5400, 1800]], "on the half hours, the first cut to fit")
+    gaps = liveGuideGaps(1770, 5430, "x")
+    tkEqual(gaps.Count(), 2, "slivers of less than a minute go with the cells beside them")
+    tkEqual(gaps[0].playStart, 1770)
+    tkEqual(gaps[0].playDuration, 1830)
+    tkEqual(gaps[1].playDuration, 1830)
+    tkEqual(liveGuideGaps(1000, 1059, "x"), [], "less than a minute")
+    tkEqual(liveGuideGaps(1000, 1060, "x").Count(), 1)
+    ' A channel without a guide, six hours fetched: twelve half hours, its name on each.
+    rows = liveGuideRows(liveChannels(liveSample(), ""), {}, 3600, 3600 + 6 * 3600)
+    tkEqual(rows[2].programs.Count(), 12)
+    tkEqual(rows[2].programs[11].title, "Film Four")
+    tkEqual(rows[2].programs[11].playStart + rows[2].programs[11].playDuration, 3600 + 6 * 3600, "to what is fetched")
 end sub
 
 sub test_live_guide_window()

@@ -673,8 +673,8 @@ sub showProgram()
     m.infoLogo.uri = channel.logo
     if program = invalid or program.id = "gap"
         m.infoTitle.text = channel.name
-        m.infoMeta.text = "No guide information"
-        if not channel.hasGuide then m.infoMeta.text = "This channel has no guide"
+        m.infoMeta.text = "No information for this time"
+        if not channel.hasGuide then m.infoMeta.text = "No guide for this channel"
         m.infoText.text = ""
         return
     end if
