@@ -140,6 +140,33 @@ function liveCategoryName(category as string, groups as object) as string
     return name
 end function
 
+' What Live TV says where a category, or a search, has no channels, as
+' Android says it: { title, body } (body "" for none). On a Roku a
+' favourite is added from a channel's details, which Options (*) shows.
+function liveEmpty(category as string) as object
+    if Left(category, 7) = "search:" then return { title: "No channels match", body: "No channel's name, number or programme on now has “" + Mid(category, 8) + "” in it." }
+    if category = "favorites" then return { title: "No favourites yet", body: "Press Options (*) on a channel and add it to your favourites to find it here." }
+    if category = "recent" then return { title: "Nothing watched yet", body: "The channels you watch show here, the last first." }
+    if Left(category, 6) = "group:" then return { title: "No channels in this group.", body: "" }
+    return { title: "No channels yet", body: "Channels appear here once an administrator adds an IPTV provider in Pley's web app." }
+end function
+
+' What Live TV says when what it asked for failed with nothing to show:
+' { title, body, retry }: not open to the profile (403), else "Live TV
+' didn't load" with the server's words and Try again.
+function liveLoadFailed(answer as object) as object
+    if answer.status = 403 then return { title: "Live TV isn't open to this profile", body: "An administrator can open it in Pley's web app, under Settings → Live TV.", retry: false }
+    return { title: "Live TV didn't load", body: httpSentence(answer.message), retry: true }
+end function
+
+' The category Up and Down go through in the player once a channel of
+' category is watched: a search's results go through every channel, as
+' on Android.
+function liveZapCategory(category as string) as string
+    if Left(category, 7) = "search:" then return "all"
+    return category
+end function
+
 ' Whether a category still has channels: a group gone, or nothing marked
 ' any more, shows every channel.
 function liveCategoryValid(category as string, summary as object, groups as object) as string
@@ -258,16 +285,18 @@ function liveBeforeSearch(category as string, before as string) as string
 end function
 
 ' The categories down the side, under the Search entry pinned above them:
-' the groups whose names match the words searched for, as links,
-' Favourites, Recently watched, All channels, then "Regions" in
-' alphabetical order, the one open with its groups under it, and "More
-' groups", the rest in the provider's order (one plain list, "Groups",
-' with fewer than two regions). [{ kind ("category", "region" or
+' the groups whose names match the words searched for, as links under
+' "Groups found", Favourites, Recently watched, All channels, then
+' "Regions" in alphabetical order, the one open with its groups under it,
+' and "More groups", the rest in the provider's order (one plain list,
+' "Groups", with fewer than two regions). [{ kind ("category", "region" or
 ' "heading"), key (the category, or the region), label, count (-1 for
 ' none), inner (set in under the entry above) }].
 function liveRail(summary as object, groups as object, open as string, query as string) as object
     rail = []
-    for each g in liveGroupsMatching(groups, query)
+    found = liveGroupsMatching(groups, query)
+    if found.Count() > 0 then rail.Push({ kind: "heading", key: "", label: "Groups found", count: -1, inner: false })
+    for each g in found
         rail.Push({ kind: "category", key: "group:" + g.name, label: liveGroupLabel(g), count: g.count, inner: true })
     end for
     rail.Push({ kind: "category", key: "favorites", label: "Favourites", count: summary.favorites, inner: false })
@@ -352,8 +381,9 @@ end function
 ' --- Channels ---
 
 ' A programme as the screens keep it: { start, ends, title, line,
-' description, badges, live, isNew }, or invalid for none (or one that
-' ends before it starts).
+' description, live, isNew, rating, image (its picture's path on the
+' server, or "") }, or invalid for none (or one that ends before it
+' starts).
 function liveProgram(raw as dynamic) as dynamic
     p = httpObject(raw)
     if p = invalid then return invalid
@@ -367,21 +397,38 @@ function liveProgram(raw as dynamic) as dynamic
     if episode <> "" then line.Push(episode)
     subtitle = httpSentence(p.subtitle)
     if subtitle <> "" and subtitle <> title then line.Push(subtitle)
-    badges = []
-    if httpTrue(p.is_live) then badges.Push("Live")
-    if httpTrue(p.is_new) then badges.Push("New")
-    rating = httpSentence(p.rating)
-    if rating <> "" then badges.Push(rating)
     return {
         start: start,
         ends: ends,
         title: title,
         line: line.Join(" · "),
         description: httpClean(p.description, 600, false),
-        badges: badges.Join(" · "),
         live: httpTrue(p.is_live),
-        isNew: httpTrue(p.is_new)
+        isNew: httpTrue(p.is_new),
+        rating: httpClean(p.rating, 24, false),
+        image: liveProgramImage(p.image)
     }
+end function
+
+' The label before a programme's title, above the guide and in the
+' player's bar, as Android's: "LIVE", else "NEW", else "" (p as
+' liveProgram keeps one, or invalid).
+function liveBadge(p as dynamic) as string
+    if p = invalid then return ""
+    if p.live = true then return "LIVE"
+    if p.isNew = true then return "NEW"
+    return ""
+end function
+
+' A programme's picture: its path on the server (GET
+' /api/live/channels/{id}/programs/{start}/image), or "" for none, or for
+' an address elsewhere, which would get the scene's token with it.
+function liveProgramImage(path as dynamic) as string
+    text = httpString(path)
+    if Left(text, 1) <> "/" or Left(text, 2) = "//" or Instr(1, text, "\") > 0 then return ""
+    ' A line of at most 200 characters, without control or hidden ones.
+    if text <> httpSentence(text) then return ""
+    return text
 end function
 
 ' A channel as the screens keep it: { id, name, number, group, logo,
@@ -518,6 +565,52 @@ function liveSpan(p as object, twelve as boolean) as string
     return liveClock(p.start, twelve) + " – " + liveClock(p.ends, twelve)
 end function
 
+' The day of seconds as Live TV says it: "Today", "Tomorrow", "Yesterday",
+' else its weekday, in the Roku's time zone (zone: Format.brs's
+' fmtZoneSeconds).
+function liveDay(seconds as integer, now as integer, zone as integer) as string
+    day = (seconds + zone) \ 86400
+    today = (now + zone) \ 86400
+    if day = today then return "Today"
+    if day = today + 1 then return "Tomorrow"
+    if day = today - 1 then return "Yesterday"
+    when = CreateObject("roDateTime")
+    when.FromSeconds(seconds + zone)
+    return when.GetWeekday()
+end function
+
+' A programme's details as the panel at the right shows them (Android's
+' ProgramPanel), for channel and p (as liveProgram keeps one, invalid for
+' none): { heading, title, episode, when ("Today · 8:00 PM – 9:00 PM"),
+' badges ([{ text, live }]: On now, Live, New), rating, airing, progress
+' and left (while it airs), text (what the guide says, or that it says
+' nothing more), said, ended, watch and favorite (the buttons' words) }.
+function liveDetails(channel as object, p as dynamic, now as integer, twelve as boolean, zone as integer) as object
+    out = { heading: liveTitle(channel), title: "", episode: "", when: "", badges: [], rating: "", airing: false, progress: 0.0, left: "", text: "", said: false, ended: false, watch: "Watch now", favorite: "Add to favourites" }
+    if channel.favorite then out.favorite = "Remove from favourites"
+    if p = invalid then return out
+    out.title = p.title
+    out.episode = p.line
+    out.when = liveDay(p.start, now, zone) + " · " + liveSpan(p, twelve)
+    out.airing = p.start <= now and p.ends > now
+    if out.airing
+        out.badges.Push({ text: "ON NOW", live: true })
+        out.progress = liveProgress(p, now)
+        out.left = liveTimeLeft(p, now)
+    else
+        ' Later, or over: the channel, not the programme.
+        out.watch = "Watch channel"
+    end if
+    if p.live then out.badges.Push({ text: "LIVE", live: true })
+    if p.isNew then out.badges.Push({ text: "NEW", live: false })
+    out.rating = p.rating
+    out.said = p.description <> ""
+    out.text = p.description
+    if not out.said then out.text = "The guide says nothing more of it."
+    out.ended = p.ends <= now
+    return out
+end function
+
 ' Where a channel is in channels, or -1.
 function liveIndexOf(channels as object, id as dynamic) as integer
     for i = 0 to channels.Count() - 1
@@ -545,6 +638,22 @@ function liveZap(page as object, id as dynamic, by as integer) as dynamic
     pageNo = Int(page.offset / size)
     if by < 0 then return { offset: ((pageNo - 1 + pages) mod pages) * size, last: true }
     return { offset: ((pageNo + 1) mod pages) * size, last: false }
+end function
+
+' What the player says over black under a channel's logo ({ kind, title,
+' line }), as Android's: while it tunes, its number and name, then what's
+' on (or "Tuning…"); a channel with sound only (radio), "Sound only", then
+' what's on, if the guide says.
+function liveTuningCard(channel as object, radio as boolean, now as integer) as object
+    on = liveOnNow(channel, now)
+    if radio
+        title = ""
+        if on <> invalid then title = on.title
+        return { kind: "Sound only", title: title, line: "" }
+    end if
+    line = "Tuning…"
+    if on <> invalid then line = on.title
+    return { kind: "", title: liveTitle(channel), line: line }
 end function
 
 ' The count of channels picked, after a tuning: the list, Watch again or
@@ -615,6 +724,14 @@ function liveListItem(channel as object, now as integer, twelve as boolean) as o
     return { channelId: channel.id, number: channel.number, title: channel.name, image: channel.logo, line: line, progress: progress, favorite: channel.favorite, current: false }
 end function
 
+' What the toast says when the server refused a favourite (its star put
+' back), as on Android: "The favourite wasn't saved: …".
+function liveFavoriteFailed(message as dynamic) as string
+    words = httpSentence(message)
+    if words = "" then return "The favourite wasn't saved."
+    return "The favourite wasn't saved: " + words
+end function
+
 ' --- The guide ---
 
 ' Programmes of GET /api/live/guide added to kept ({ "<channel id>": {
@@ -666,37 +783,68 @@ end function
 ' the channel's ContentNode's (its name as the guide writes it when the
 ' logo doesn't show, the logo, its id) and programs its children's
 ' (TITLE, PLAYSTART, PLAYDURATION; the details as the screen above the
-' grid shows them). Between from and upto (what is fetched), time the
-' guide says nothing of is a programme too (id "gap"), else the TimeGrid
-' would say it is still loading: "No guide information", or across a
-' channel without a guide, its name.
+' grid shows them), each with the same fields: the first of a list says
+' which a node has of its own. Between from and upto (what is fetched),
+' time the guide says nothing of is a programme too (id "gap"), else the
+' TimeGrid would say it is still loading: "No information for this
+' time", or across a channel without a guide, its name.
 function liveGuideRows(channels as object, kept as object, from as integer, upto as integer) as object
     out = []
     for each channel in channels
-        gapTitle = "No guide information"
+        gapTitle = "No information for this time"
         if not channel.hasGuide then gapTitle = channel.name
         programs = []
         at = from
         for each p in liveGuidePrograms(kept, channel.id)
-            if p.start - at >= 60 then programs.Push(liveGuideGap(at, p.start, gapTitle))
+            programs.Append(liveGuideGaps(at, p.start, gapTitle))
             programs.Push({
+                id: "",
                 title: p.title,
                 playStart: p.start,
                 playDuration: p.ends - p.start,
                 description: p.description,
                 shortDescriptionLine1: p.line,
-                shortDescriptionLine2: p.badges
+                isLive: p.live,
+                isNew: p.isNew,
+                rating: p.rating,
+                picture: p.image
             })
             if p.ends > at then at = p.ends
         end for
-        if upto - at >= 60 then programs.Push(liveGuideGap(at, upto, gapTitle))
-        out.Push({ fields: { id: channel.id.ToStr(), title: liveTitle(channel), hdSmallIconUrl: channel.logo }, programs: programs })
+        programs.Append(liveGuideGaps(at, upto, gapTitle))
+        out.Push({ fields: { id: channel.id.ToStr(), title: liveGuideName(channel), hdSmallIconUrl: channel.logo }, programs: programs })
     end for
     return out
 end function
 
+' A channel in the guide's column, where its logo doesn't show (the
+' TimeGrid draws one or the other): "★ 101  Pley News HD" for a
+' favourite, as Android's cell stars its number.
+function liveGuideName(channel as object) as string
+    if channel.favorite then return "★ " + liveTitle(channel)
+    return liveTitle(channel)
+end function
+
+' Time the guide says nothing of, from from to upto, as cells on the half
+' hours, so that Left and Right go through it half an hour at a time, as
+' on Android (one cell across it took Right to its end at once). A sliver
+' of less than a minute goes with the cell beside it; none for a gap that
+' short.
+function liveGuideGaps(from as integer, upto as integer, title as string) as object
+    out = []
+    at = from
+    while upto - at >= 60
+        cut = at - (at mod 1800) + 1800
+        if cut - at < 60 then cut = cut + 1800
+        if upto - cut < 60 then cut = upto
+        out.Push(liveGuideGap(at, cut, title))
+        at = cut
+    end while
+    return out
+end function
+
 function liveGuideGap(from as integer, upto as integer, title as string) as object
-    return { id: "gap", title: title, playStart: from, playDuration: upto - from, description: "", shortDescriptionLine1: "", shortDescriptionLine2: "" }
+    return { id: "gap", title: title, playStart: from, playDuration: upto - from, description: "", shortDescriptionLine1: "", isLive: false, isNew: false, rating: "", picture: "" }
 end function
 
 ' The part of the guide to fetch for the time shown (left edge and the
@@ -710,6 +858,27 @@ function liveGuideMissing(start as integer, loadedTo as integer, leftEdge as int
     upto = loadedTo + liveGuideChunk()
     if upto > last then upto = last
     return { from: loadedTo, to: upto }
+end function
+
+' Where the guide's focus goes as the TimeGrid moved it from row wasRow
+' to row, in a page of count channels from offset of a category of total.
+' The TimeGrid goes round its rows (Up from the first to the last, Down
+' from the last to the first): between pages, that is the page after
+' ("next") or the one before ("previous"); at the category's ends, as on
+' Android, Down stays on its last channel ("last") and Up leaves for the
+' tabs above ("tabs"). "" for a move within the page, and in a page of
+' two channels or fewer, where going round can't be told from a step.
+function liveGuideEdge(offset as integer, count as integer, total as integer, wasRow as integer, row as integer) as string
+    if count <= 2 then return ""
+    if wasRow = count - 1 and row = 0
+        if offset + count >= total then return "last"
+        return "next"
+    end if
+    if wasRow = 0 and row = count - 1
+        if offset <= 0 then return "tabs"
+        return "previous"
+    end if
+    return ""
 end function
 
 ' Whether the guide is away from now, so that Back brings it back first:
@@ -741,9 +910,9 @@ end function
 ' --- The player ---
 
 ' A watching that didn't start, as the player says it: { kind, title,
-' message, retry, connections, lines }. kind "busy" (every connection of
-' the source in use, 409: the server's message, and what holds each
-' connection as liveBusyConnections reads them, lines the notice's), "missing"
+' message, retry, connections, lines (the message) }. kind "busy" (every
+' connection of the source in use, 409: the server's message, and what
+' holds each connection as liveBusyConnections reads them), "missing"
 ' (404), "closed" (403), "stopped" (410: its connection taken over, or
 ' stopped by an administrator, liveStopped), "unavailable" (503) or "other".
 function liveTrouble(answer as object, channelName as string) as object
@@ -751,7 +920,7 @@ function liveTrouble(answer as object, channelName as string) as object
     message = httpSentence(answer.message)
     if status = 409
         connections = liveBusyConnections(answer.data)
-        return { kind: "busy", title: "All connections are in use", message: message, retry: true, connections: connections, lines: liveBusyLines(message, connections) }
+        return { kind: "busy", title: "All connections are in use", message: message, retry: true, connections: connections, lines: message }
     end if
     if status = 410
         ' The server's own words, not a status's.
@@ -762,7 +931,7 @@ function liveTrouble(answer as object, channelName as string) as object
     end if
     problem = { kind: "other", title: channelName + " didn't start", message: message, retry: true, connections: [] }
     if status = 404 then problem = { kind: "missing", title: "This channel isn't here any more", message: "It may have been hidden, or its source removed.", retry: false, connections: [] }
-    if status = 403 then problem = { kind: "closed", title: "Live TV isn't open to this account", message: "An administrator can open it in Settings → Live TV, on the web.", retry: false, connections: [] }
+    if status = 403 then problem = { kind: "closed", title: "Live TV isn't open to this profile", message: "An administrator can open it in Pley's web app, under Settings → Live TV.", retry: false, connections: [] }
     if status = 503 then problem = { kind: "unavailable", title: channelName + " isn't playing", message: message, retry: true, connections: [] }
     problem.lines = problem.message
     return problem
@@ -844,54 +1013,42 @@ function liveHolders(c as object) as string
     return people.ToStr() + " people"
 end function
 
-' The busy notice's text: the server's message, then what each connection
-' watches and who, and when none may be taken over, what can be done
-' instead (Android's words).
-function liveBusyLines(message as string, connections as object) as string
-    lines = []
-    if message <> "" then lines.Push(message)
-    if connections.Count() > 0
-        if lines.Count() > 0 then lines.Push("")
-        if connections.Count() = 1
-            lines.Push("Its one connection is watching:")
-        else
-            lines.Push("Its " + connections.Count().ToStr() + " connections are watching:")
-        end if
-        takeable = false
-        for each c in connections
-            lines.Push("•  " + c.channelName + "  —  " + c.holders)
-            if c.canTakeOver then takeable = true
-        end for
-        if not takeable
-            lines.Push("")
-            lines.Push("A channel already being watched can be joined, or try again once one is stopped.")
-        end if
+' What the trouble card says (Android's): { title, lead, rows, note, text }.
+' Every connection in use: how many are watching (lead), a row for each
+' (rows: liveBusyConnections's, the first five), each that may be taken
+' over with its own Watch here instead, and when none may, what can be
+' done instead (note). Otherwise what the server said (text).
+function liveTroubleCard(problem as object) as object
+    card = { title: problem.title, lead: "", rows: [], note: "", text: "" }
+    connections = problem.connections
+    if connections.Count() = 0
+        card.text = problem.message
+        return card
     end if
-    return lines.Join(Chr(10))
+    card.lead = "Its " + connections.Count().ToStr() + " connections are watching:"
+    if connections.Count() = 1 then card.lead = "Its one connection is watching:"
+    takeable = false
+    for each c in connections
+        if card.rows.Count() < 5 then card.rows.Push(c)
+        if c.canTakeOver then takeable = true
+    end for
+    if not takeable then card.note = "A channel already being watched can be joined, or try again once one is stopped."
+    return card
 end function
 
-' The buttons of a trouble's notice, and what each does ([{ label, action,
-' channelId }]): "Watch here instead" for each connection that may be taken
-' over (naming its channel when there are several), Try again (Watch again
-' when watching ended on the server), Other channels, Back.
+' The trouble card's buttons under the rest, and what each does ([{
+' label, action }]): Try again (Watch again when watching ended on the
+' server), Other channels, Back to the guide. A connection that may be
+' taken over has its own, in its row (liveTroubleCard).
 function liveTroubleButtons(problem as object) as object
     out = []
-    takeable = []
-    for each c in problem.connections
-        if c.canTakeOver then takeable.Push(c)
-    end for
-    for each c in takeable
-        label = "Watch here instead"
-        if takeable.Count() > 1 then label = "Watch here instead of " + c.channelName
-        out.Push({ label: label, action: "takeOver", channelId: c.channelId })
-    end for
     if problem.retry
         label = "Try again"
         if problem.kind = "stopped" then label = "Watch again"
-        out.Push({ label: label, action: "retry", channelId: 0 })
+        out.Push({ label: label, action: "retry" })
     end if
-    out.Push({ label: "Other channels", action: "list", channelId: 0 })
-    out.Push({ label: "Back", action: "back", channelId: 0 })
+    out.Push({ label: "Other channels", action: "list" })
+    out.Push({ label: "Back to the guide", action: "back" })
     return out
 end function
 

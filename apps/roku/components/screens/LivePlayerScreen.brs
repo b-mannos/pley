@@ -8,7 +8,7 @@
 ' are off, and nothing pauses, rewinds or skips. Up and down
 ' change channel within the category the player was opened from (or the
 ' one a channel was last chosen in from the list, which can list another
-' category or a search), a page of it at a time (GET
+' category or a search; a search's, every channel), a page of it at a time (GET
 ' /api/live/browse?around=), round its ends. Leaving
 ' sends DELETE /api/live/sessions/{session}, so the connection goes at
 ' once, and Live TV opens back at the channel watched. The user's remote,
@@ -22,37 +22,49 @@ sub init()
     m.cardInitials = m.top.findNode("cardInitials")
     m.cardLogo = m.top.findNode("cardLogo")
     m.tuning = m.top.findNode("tuning")
+    m.cardKind = m.top.findNode("cardKind")
     m.cardTitle = m.top.findNode("cardTitle")
     m.cardLine = m.top.findNode("cardLine")
     m.banner = m.top.findNode("banner")
     m.bannerInitials = m.top.findNode("bannerInitials")
     m.bannerLogo = m.top.findNode("bannerLogo")
     m.bannerChannel = m.top.findNode("bannerChannel")
+    m.bannerBadge = m.top.findNode("bannerBadge")
     m.bannerTitle = m.top.findNode("bannerTitle")
     m.bannerMeta = m.top.findNode("bannerMeta")
     m.bannerTrack = m.top.findNode("bannerTrack")
     m.bannerFill = m.top.findNode("bannerFill")
     m.bannerNext = m.top.findNode("bannerNext")
-    m.bannerHint = m.top.findNode("bannerHint")
+    m.controls = m.top.findNode("controls")
     m.star = m.top.findNode("star")
     m.list = m.top.findNode("list")
     m.listTitle = m.top.findNode("listTitle")
     m.listRange = m.top.findNode("listRange")
     m.channelList = m.top.findNode("channelList")
     m.categoryList = m.top.findNode("categoryList")
+    m.listEmpty = m.top.findNode("listEmpty")
     m.listHint = m.top.findNode("listHint")
     m.listHint.text = listHintText()
     m.notice = m.top.findNode("notice")
+    m.noticeCard = m.top.findNode("noticeCard")
+    m.noticeBack = m.top.findNode("noticeBack")
+    m.noticeInitials = m.top.findNode("noticeInitials")
+    m.noticeLogo = m.top.findNode("noticeLogo")
     m.noticeTitle = m.top.findNode("noticeTitle")
+    m.noticeLead = m.top.findNode("noticeLead")
+    m.noticeRows = m.top.findNode("noticeRows")
+    m.noticeNote = m.top.findNode("noticeNote")
     m.noticeText = m.top.findNode("noticeText")
-    m.noticeButtons = m.top.findNode("noticeButtons")
-    m.toast = m.top.findNode("toast")
-    m.toastText = m.top.findNode("toastText")
+    m.noticeChoices = m.top.findNode("noticeChoices")
+    ' What takes the card's focus, top to bottom (each Watch here instead,
+    ' then the buttons), and the one that has it.
+    m.troubleStops = []
+    m.troubleAt = 0
     m.bannerTimer = m.top.findNode("bannerTimer")
+    m.okTimer = m.top.findNode("okTimer")
     m.zapTimer = m.top.findNode("zapTimer")
     m.clock = m.top.findNode("clock")
     m.pictureTimer = m.top.findNode("pictureTimer")
-    m.toastTimer = m.top.findNode("toastTimer")
     m.retryTimer = m.top.findNode("retryTimer")
     m.stallTimer = m.top.findNode("stallTimer")
     m.stallTimer.observeField("fire", "onStall")
@@ -65,6 +77,11 @@ sub init()
     end for
     m.twelve = CreateObject("roDeviceInfo").GetClockFormat() <> "24h"
     m.started = false
+    ' OK went down with nothing over the picture, timed by okTimer: let go
+    ' first, it opens the channel list; still down, it was held and shows
+    ' the bar, whose OK the rest of that press isn't (okHeld).
+    m.okTiming = false
+    m.okHeld = false
     ' The channel shown (Live.brs's liveChannel), and the one up and down
     ' lead to before it is tuned.
     m.channel = invalid
@@ -128,18 +145,22 @@ sub init()
     m.trouble = invalid
     m.video.notificationInterval = 1
     m.video.observeField("state", "onState")
-    m.noticeButtons.observeField("buttonSelected", "onNoticeButton")
+    m.noticeChoices.observeField("chosen", "onNoticeButton")
     m.channelList.observeField("itemSelected", "onListSelected")
     m.categoryList.observeField("itemSelected", "onCategorySelected")
     m.categoryList.observeField("itemFocused", "onCategoryFocused")
     m.bannerTimer.observeField("fire", "onBannerTimer")
+    m.okTimer.observeField("fire", "onOkHeld")
+    m.controls.observeField("chosen", "onControl")
+    ' Moving between them counts as a touch: the bar stays.
+    m.controls.observeField("focusIndex", "pokeBanner")
     m.zapTimer.observeField("fire", "onZapTimer")
     m.clock.observeField("fire", "onClock")
     m.pictureTimer.observeField("fire", "onPictureTimer")
-    m.toastTimer.observeField("fire", "onToastTimer")
     m.retryTimer.observeField("fire", "onRetryTimer")
     m.cardLogo.observeField("loadStatus", "onLogos")
     m.bannerLogo.observeField("loadStatus", "onLogos")
+    m.noticeLogo.observeField("loadStatus", "onLogos")
     m.top.observeField("active", "onActive")
     m.top.observeField("liveTakenOver", "onTakenOver")
     m.top.observeField("serverStopped", "onServerStopped")
@@ -161,11 +182,12 @@ sub onActive()
     m.clock.control = "start"
     params = m.top.params
     category = httpString(params.category)
-    if category <> "" then m.category = category
+    ' From a search (Search's Live TV row, say): every channel.
+    if category <> "" then m.category = liveZapCategory(category)
     channel = params.channel
     if GetInterface(channel, "ifAssociativeArray") = invalid then return
     m.categoryName = httpString(params.categoryName)
-    if m.categoryName = "" then m.categoryName = liveCategoryName(m.category, [])
+    if m.categoryName = "" or Left(category, 7) = "search:" then m.categoryName = liveCategoryName(m.category, [])
     m.listCategory = m.category
     m.listName = m.categoryName
     m.listTitle.text = m.categoryName
@@ -237,7 +259,7 @@ sub onPage(event as object)
         if m.channel <> invalid then at = liveIndexOf(page.channels, m.channel.id)
         if at >= 0
             m.channel = page.channels[at]
-            if m.banner.visible then showBanner(false)
+            if m.banner.visible then drawBanner()
         end if
         ' The step waited for this page: it goes on only from where it
         ' started, and while watching goes on, so it can't undo a channel
@@ -255,6 +277,7 @@ end sub
 sub showListPage(page as object, content as object, pick as string)
     m.listPage = page
     m.channelList.content = content
+    showListEmpty()
     markCurrent()
     if not m.categoryList.visible then m.listRange.text = liveRange(page.offset, page.channels.Count(), page.total)
     at = -1
@@ -262,6 +285,14 @@ sub showListPage(page as object, content as object, pick as string)
     if at < 0 or pick = "top" then at = 0
     if pick = "bottom" then at = content.getChildCount() - 1
     if at >= 0 and at < content.getChildCount() then m.channelList.jumpToItem = at
+end sub
+
+' A page of the list without channels says so, as on Android: "No
+' channels in this group.", "No channels match"…
+sub showListEmpty()
+    empty = m.listPage <> invalid and m.listPage.channels.Count() = 0 and not m.categoryList.visible
+    if empty then m.listEmpty.text = liveEmpty(m.listCategory).title
+    m.listEmpty.visible = empty
 end sub
 
 ' The channel playing stands out in the list.
@@ -279,6 +310,7 @@ end sub
 ' playing, as on Android: another chosen in it last time, or a search,
 ' isn't kept.
 sub openList()
+    forgetOk()
     hideBanner()
     m.listSearched = false
     if m.listCategory <> m.category
@@ -287,6 +319,7 @@ sub openList()
         m.listPage = invalid
         m.channelList.content = invalid
         m.listRange.text = ""
+        showListEmpty()
         if m.page <> invalid then showListPage(m.page, m.pageContent, "")
     end if
     m.listName = m.categoryName
@@ -306,7 +339,7 @@ sub closeList()
     ' The list gives the focus up: its parent taking it may not.
     m.channelList.setFocus(false)
     if m.notice.visible
-        m.noticeButtons.setFocus(true)
+        focusTrouble()
     else
         m.top.setFocus(true)
     end if
@@ -346,9 +379,17 @@ sub onListSelected(event as object)
     at = event.getData()
     if at < 0 or at >= page.channels.Count() then return
     channel = page.channels[at]
-    ' Chosen in another category (or a search): up and down go through
-    ' that one from now on.
-    if m.listCategory <> m.category
+    ' Chosen in another category: up and down go through that one from
+    ' now on; chosen in a search, through every channel, as on Android,
+    ' around the channel chosen.
+    zapping = liveZapCategory(m.listCategory)
+    if zapping <> m.listCategory
+        m.category = zapping
+        m.categoryName = liveCategoryName(zapping, m.groups)
+        m.page = invalid
+        m.pageContent = invalid
+        askPage(zapping, 0, channel.id, "")
+    else if m.listCategory <> m.category
         m.category = m.listCategory
         m.categoryName = m.listName
         m.page = page
@@ -379,6 +420,7 @@ sub showListCategory(category as string)
     m.listCategory = category
     m.listPage = invalid
     m.channelList.content = invalid
+    showListEmpty()
     if category = m.category and m.page <> invalid
         m.listAsked = m.pageAsked
         showListPage(m.page, m.pageContent, "")
@@ -396,6 +438,7 @@ end sub
 sub openCategories()
     m.channelList.visible = false
     m.categoryList.visible = true
+    showListEmpty()
     m.listTitle.text = "Categories"
     m.listRange.text = ""
     m.listHint.text = "OK: its channels   ·   Back: the channels"
@@ -473,6 +516,7 @@ sub closeCategories()
     m.listHint.text = listHintText()
     m.listRange.text = ""
     if m.listPage <> invalid then m.listRange.text = liveRange(m.listPage.offset, m.listPage.channels.Count(), m.listPage.total)
+    showListEmpty()
     if m.list.visible then m.channelList.setFocus(true)
 end sub
 
@@ -522,17 +566,17 @@ end sub
 
 ' A channel in or out of the favourites (PUT or DELETE
 ' /api/live/channels/{id}/favorite): its star changes at once wherever it
-' shows, and goes back if the server refuses.
+' shows, and goes back if the server refuses, saying so, as on Android.
 sub toggleFavorite(channel as object)
     favorite = not channel.favorite
     markFavorite(channel.id, favorite)
     method = "DELETE"
     if favorite then method = "PUT"
-    uiRequest({ method: method, path: "/api/live/channels/" + urlValue(channel.id) + "/favorite", channelId: channel.id, favorite: favorite, name: channel.name }, "onFavorite")
+    uiRequest({ method: method, path: "/api/live/channels/" + urlValue(channel.id) + "/favorite", channelId: channel.id, favorite: favorite }, "onFavorite")
 end sub
 
 ' The channel's star: on the channel playing (or the one Up or Down leads
-' to), in the pages held and their rows, and on the banner.
+' to), in the pages held and their rows, and on the bar.
 sub markFavorite(id as integer, favorite as boolean)
     for each channel in [m.channel, m.zapTo]
         if channel <> invalid and channel.id = id then channel.favorite = favorite
@@ -548,22 +592,15 @@ sub markFavorite(id as integer, favorite as boolean)
             end if
         end if
     end for
-    if m.banner.visible then showBanner(false)
+    if m.banner.visible then drawBanner()
 end sub
 
 sub onFavorite(event as object)
     answer = event.getData()
+    if answer.ok then return
     spec = event.getRoSGNode().spec
-    if not answer.ok
-        markFavorite(spec.channelId, not spec.favorite)
-        if not uiFailed(answer) then showToast(answer.message)
-        return
-    end if
-    if spec.favorite
-        showToast(spec.name + " is in your favourites")
-    else
-        showToast(spec.name + " is out of your favourites")
-    end if
+    markFavorite(spec.channelId, not spec.favorite)
+    if not uiFailed(answer) then uiToast(liveFavoriteFailed(answer.message), true)
 end sub
 
 ' --- Tuning ---
@@ -682,7 +719,7 @@ sub onWatch(event as object)
     fresh = liveChannel(answer.data.channel, m.global.session.server, liveLogoWidth(), m.category)
     if fresh <> invalid and fresh.id = m.channel.id then m.channel = fresh
     showCard(m.channel, "")
-    if m.banner.visible then showBanner(false)
+    if m.banner.visible then drawBanner()
     ' The playlist once, waited for: the server answers it once the
     ' channel's first segments are made, or says why not.
     uiRequest({ method: "GET", path: m.playlist, timeoutMs: 50000, attempt: m.attempt }, "onPlaylist")
@@ -887,18 +924,13 @@ end sub
 
 ' The channel's logo (or its name) in the middle, over black, the spinner
 ' under it while it tunes; over a channel without pictures ("radio"),
-' what's on instead.
+' "Sound only" and what's on instead (Live.brs's liveTuningCard).
 sub showCard(channel as object, kind as string)
-    m.cardTitle.text = liveTitle(channel)
-    on = liveOnNow(channel, nowSeconds())
-    line = "Tuning…"
-    if kind = "radio"
-        line = "Radio"
-        if on <> invalid then line = on.title
-    else if on <> invalid
-        line = on.title
-    end if
-    m.cardLine.text = line
+    words = liveTuningCard(channel, kind = "radio", nowSeconds())
+    m.cardKind.text = words.kind
+    m.cardKind.visible = words.kind <> ""
+    m.cardTitle.text = words.title
+    m.cardLine.text = words.line
     m.cardInitials.text = channel.name
     ' The scene's agent carries the token; it changes with each refresh.
     m.cardLogo.setHttpAgent(m.top.getScene().getHttpAgent())
@@ -917,14 +949,14 @@ end sub
 sub onLogos()
     m.cardInitials.visible = m.cardLogo.uri = "" or m.cardLogo.loadStatus = "failed"
     m.bannerInitials.visible = m.bannerLogo.uri = "" or m.bannerLogo.loadStatus = "failed"
+    m.noticeInitials.visible = m.noticeLogo.uri = "" or m.noticeLogo.loadStatus = "failed"
 end sub
 
-' The banner: the channel, what's on with when and how long it has left,
-' how far along, what's next, and the Live chip. With hides, it goes
-' after 5 s.
-sub showBanner(hides as boolean)
-    channel = m.zapTo
-    if channel = invalid then channel = m.channel
+' The bar: the channel, what's on (LIVE or NEW before it, as on Android)
+' with when and how long it has left, how far along, what's next, the
+' Live chip, and Channels and the favourite.
+sub drawBanner()
+    channel = bannerChannel()
     if channel = invalid then return
     now = nowSeconds()
     on = liveOnNow(channel, now)
@@ -934,11 +966,12 @@ sub showBanner(hides as boolean)
     m.bannerLogo.setHttpAgent(m.top.getScene().getHttpAgent())
     m.bannerLogo.uri = channel.logo
     onLogos()
+    placeBadge(m.bannerBadge, m.bannerTitle, liveBadge(on), 1100)
     if on <> invalid
         m.bannerTitle.text = on.title
         meta = [liveSpan(on, m.twelve), liveTimeLeft(on, now)]
         if on.line <> "" then meta.Push(on.line)
-        if on.badges <> "" then meta.Push(on.badges)
+        if on.rating <> "" then meta.Push(on.rating)
         m.bannerMeta.text = meta.Join("   ·   ")
         m.bannerFill.width = Int(1100 * liveProgress(on, now))
         m.bannerTrack.visible = true
@@ -954,27 +987,109 @@ sub showBanner(hides as boolean)
     if coming <> invalid then m.bannerNext.text = "Next   " + liveClock(coming.start, m.twelve) + "   " + coming.title
     m.star.text = ""
     if channel.favorite then m.star.text = "★ Favourite"
-    m.bannerHint.text = "Up and down: channels   ·   Left: " + m.categoryName + "   ·   Options (*): favourite   ·   OK: close"
-    if m.list.visible or m.notice.visible then return
+    favorite = "Add to favourites"
+    if channel.favorite then favorite = "Remove from favourites"
+    ' Drawn again only when the favourite's words change: the chips are
+    ' made anew each time.
+    chips = m.controls.chips
+    if chips = invalid or chips.Count() <> 2 or chips[1].label <> favorite then m.controls.chips = [{ label: "Channels", width: 0 }, { label: favorite, width: 0 }]
+end sub
+
+' A programme's LIVE or NEW (text, "" for neither) in badge, a small
+' label of its own before its title, which takes the rest of width.
+sub placeBadge(badge as object, title as object, text as string, width as integer)
+    x = badge.translation[0]
+    y = title.translation[1]
+    badge.text = text
+    badge.visible = text <> ""
+    if text = ""
+        title.translation = [x, y]
+        title.width = width
+        return
+    end if
+    badge.color = "0x7DD3FCFF"
+    if text = "LIVE" then badge.color = "0xEB6B70FF"
+    room = Int(badge.boundingRect().width) + 16
+    title.translation = [x + room, y]
+    title.width = width - room
+end sub
+
+' The channel the bar is of: the one Up or Down leads to, else the one
+' playing.
+function bannerChannel() as dynamic
+    if m.zapTo <> invalid then return m.zapTo
+    return m.channel
+end function
+
+' OK held: the bar, Channels in focus, as Android's long press shows its
+' controls.
+sub showControls()
+    if bannerChannel() = invalid or m.list.visible or m.notice.visible then return
+    drawBanner()
+    m.controls.focusIndex = 0
     m.banner.visible = true
-    m.bannerTimer.control = "stop"
-    if hides then m.bannerTimer.control = "start"
+    m.controls.setFocus(true)
+    pokeBanner()
 end sub
 
 sub hideBanner()
     m.bannerTimer.control = "stop"
+    if not m.banner.visible then return
     m.banner.visible = false
+    ' The bar gives the focus back to the picture.
+    if m.controls.isInFocusChain() then m.top.setFocus(true)
 end sub
 
+' A touch: the bar goes 6 s after the last.
+sub pokeBanner()
+    if not m.banner.visible then return
+    m.bannerTimer.control = "stop"
+    m.bannerTimer.control = "start"
+end sub
+
+' Left alone, the bar goes once the channel plays; while it tunes, it
+' waits.
 sub onBannerTimer()
-    if m.zapTo = invalid then hideBanner()
+    if m.played and m.zapTo = invalid
+        hideBanner()
+    else
+        pokeBanner()
+    end if
+end sub
+
+' Channels opens the list; the favourite changes in place, the bar
+' staying.
+sub onControl(event as object)
+    if event.getData() = 0
+        openList()
+        return
+    end if
+    channel = bannerChannel()
+    if channel <> invalid then toggleFavorite(channel)
+    pokeBanner()
+end sub
+
+' What covers the picture now (the list, what went wrong) takes the OK
+' going down: let go, it opens nothing more.
+sub forgetOk()
+    m.okTiming = false
+    m.okTimer.control = "stop"
+end sub
+
+' OK still down: it was held. The bar shows, and the rest of the press is
+' its own.
+sub onOkHeld()
+    if not m.okTiming then return
+    m.okTiming = false
+    m.okHeld = true
+    showControls()
 end sub
 
 ' Each 15 s: what's on moves on, on the banner and in the list; once the
 ' programme listed as on now has ended, the channel playing is asked for
 ' again (GET /api/live/channels/{id}), at most once a minute.
 sub onClock()
-    if m.banner.visible then showBanner(false)
+    if m.banner.visible then drawBanner()
     if m.list.visible then redrawList()
     if m.channel = invalid or not liveNowEnded([m.channel], 0, 1, nowSeconds()) then return
     ms = m.span.TotalMilliseconds()
@@ -995,7 +1110,7 @@ sub onChannelFresh(event as object)
             if at >= 0 then page.channels[at] = fresh
         end if
     end for
-    if m.banner.visible then showBanner(false)
+    if m.banner.visible then drawBanner()
     if m.list.visible then redrawList()
     ' Radio shows what's on in its card.
     if m.played and m.card.visible and m.zapTo = invalid then showCard(m.channel, "radio")
@@ -1016,20 +1131,12 @@ sub redrawList()
     end for
 end sub
 
-sub showToast(text as string)
-    m.toastText.text = text
-    m.toast.visible = true
-    m.toastTimer.control = "stop"
-    m.toastTimer.control = "start"
-end sub
-
-sub onToastTimer()
-    m.toast.visible = false
-end sub
-
-' A watching that didn't start or stopped: what the server said, with Try
-' again where it may help (Watch again when it stopped), Other channels,
-' and Back.
+' A watching that didn't start or stopped: a card in the middle, as
+' Android TV's (Live.brs's liveTroubleCard), with Try again where it may
+' help (Watch again when it stopped), Other channels, and Back to the
+' guide. Every connection in use, a row for each with what holds it, and
+' Watch here instead where this account may take it over, which has the
+' focus first.
 sub trouble(problem as object)
     m.trouble = problem
     m.retryTimer.control = "stop"
@@ -1037,45 +1144,117 @@ sub trouble(problem as object)
     m.card.visible = false
     m.tuning.control = "stop"
     showWaiting(false)
+    forgetOk()
     hideBanner()
-    m.noticeTitle.text = problem.title
-    m.noticeText.text = problem.lines
-    ' What holds each connection takes room: the text on the left, the
-    ' buttons beside it, all from the top.
-    if problem.connections.Count() > 0
-        m.noticeTitle.translation = [96, 120]
-        m.noticeText.translation = [96, 210]
-        m.noticeText.width = 920
-        m.noticeText.maxLines = 16
-        m.noticeButtons.translation = [1104, 210]
-        m.noticeButtons.minWidth = 720
-    else
-        m.noticeTitle.translation = [96, 340]
-        m.noticeText.translation = [96, 430]
-        m.noticeText.width = 1500
-        m.noticeText.maxLines = 6
-        m.noticeButtons.translation = [96, 700]
-        m.noticeButtons.minWidth = 400
+    card = liveTroubleCard(problem)
+    channel = m.channel
+    m.noticeInitials.text = ""
+    m.noticeLogo.uri = ""
+    if channel <> invalid
+        m.noticeInitials.text = channel.name
+        m.noticeLogo.setHttpAgent(m.top.getScene().getHttpAgent())
+        m.noticeLogo.uri = channel.logo
     end if
-    ' Every connection in use: what holds each, and Watch here instead
-    ' where this account may take one over.
-    m.noticeActions = liveTroubleButtons(problem)
-    labels = []
-    for each button in m.noticeActions
-        labels.Push(button.label)
+    onLogos()
+    m.noticeTitle.text = card.title
+    y = 236 + m.noticeTitle.boundingRect().height
+    m.noticeLead.text = card.lead
+    m.noticeLead.visible = card.lead <> ""
+    if m.noticeLead.visible
+        m.noticeLead.translation = [64, y + 16]
+        y = y + 16 + m.noticeLead.boundingRect().height + 8
+    end if
+    ' A row for each connection; the focus goes through their Watch here
+    ' instead, then the buttons under them (focusTrouble).
+    m.noticeRows.removeChildrenIndex(m.noticeRows.getChildCount(), 0)
+    m.troubleStops = []
+    for each c in card.rows
+        y = y + 12
+        troubleRow(c, y)
+        y = y + 88
     end for
-    m.noticeButtons.buttons = labels
+    m.noticeNote.text = card.note
+    m.noticeNote.visible = card.note <> ""
+    if m.noticeNote.visible
+        m.noticeNote.translation = [64, y + 12]
+        y = y + 12 + m.noticeNote.boundingRect().height
+    end if
+    m.noticeText.text = card.text
+    m.noticeText.visible = card.text <> ""
+    if m.noticeText.visible
+        m.noticeText.translation = [64, y + 16]
+        y = y + 16 + m.noticeText.boundingRect().height
+    end if
+    m.noticeActions = liveTroubleButtons(problem)
+    chips = []
+    for each button in m.noticeActions
+        chips.Push({ label: button.label, width: 0 })
+    end for
+    m.noticeChoices.chips = chips
+    m.noticeChoices.focusIndex = 0
+    m.noticeChoices.translation = [Int((1200 - m.noticeChoices.rowWidth) / 2), y + 40]
+    m.troubleStops.Push(m.noticeChoices)
+    height = y + 40 + 56 + 64
+    m.noticeBack.height = height
+    m.noticeCard.translation = [360, Int((1080 - height) / 2)]
+    m.troubleAt = 0
     m.notice.visible = true
-    if not m.list.visible then m.noticeButtons.setFocus(true)
+    if not m.list.visible then focusTrouble()
+end sub
+
+' A connection's row on the card: its channel, who holds it, and Watch
+' here instead where it may be taken over.
+sub troubleRow(c as object, y as integer)
+    row = m.noticeRows.createChild("Group")
+    row.translation = [64, y]
+    back = row.createChild("Rectangle")
+    back.width = 1072
+    back.height = 88
+    back.color = "0x2E3440FF"
+    take = invalid
+    room = 1072 - 48
+    if c.canTakeOver
+        take = row.createChild("ChipRow")
+        take.chips = [{ label: "Watch here instead", width: 0 }]
+        take.translation = [1072 - 16 - take.rowWidth, 16]
+        ' The connection it takes over, read back as it is chosen.
+        take.id = c.channelId.ToStr()
+        take.observeField("chosen", "onTakeOver")
+        room = room - take.rowWidth - 16
+        m.troubleStops.Push(take)
+    end if
+    name = row.createChild("Label")
+    name.translation = [24, 10]
+    name.width = room
+    name.font = "font:SmallBoldSystemFont"
+    name.color = "0xEBEBEBFF"
+    name.text = c.channelName
+    holders = row.createChild("Label")
+    holders.translation = [24, 48]
+    holders.width = room
+    holders.font = "font:SmallestSystemFont"
+    holders.color = "0xA1A9B6FF"
+    holders.text = c.holders
+end sub
+
+' The card's focus: on its stop at m.troubleAt (a Watch here instead, or
+' the buttons under them).
+sub focusTrouble()
+    if m.troubleStops.Count() = 0 then return
+    if m.troubleAt >= m.troubleStops.Count() then m.troubleAt = m.troubleStops.Count() - 1
+    m.troubleStops[m.troubleAt].setFocus(true)
+end sub
+
+sub onTakeOver(event as object)
+    channelId = event.getRoSGNode().id.ToInt()
+    if channelId > 0 then tune(m.channel, channelId)
 end sub
 
 sub onNoticeButton(event as object)
     at = event.getData()
     if m.noticeActions = invalid or at < 0 or at >= m.noticeActions.Count() then return
     button = m.noticeActions[at]
-    if button.action = "takeOver"
-        tune(m.channel, button.channelId)
-    else if button.action = "retry"
+    if button.action = "retry"
         tune(m.channel)
     else if button.action = "list"
         openList()
@@ -1091,24 +1270,43 @@ sub finish()
     abandonWatch()
     leave()
     m.video.control = "stop"
-    for each timer in [m.bannerTimer, m.zapTimer, m.clock, m.pictureTimer, m.toastTimer, m.stallTimer, m.retryTimer]
+    for each timer in [m.bannerTimer, m.okTimer, m.zapTimer, m.clock, m.pictureTimer, m.stallTimer, m.retryTimer]
         timer.control = "stop"
     end for
+    m.okTiming = false
     if m.channel <> invalid then m.top.getScene().liveChannel = m.channel.id
     if m.started then m.global.session.unobserveFieldScoped("accessToken")
 end sub
 
-' Up and down change channel (Up: the next number); Left opens the
-' category's channels, Right and OK show what's on (it never shows by
-' itself as a channel starts), and the Options key (*) puts the channel in
-' the favourites or takes it out, the banner showing its star; play,
-' rewind, fast forward and Replay do nothing. In the list:
-' the Options key adds to or takes out of the favourites, up and down past
-' its ends go to the page before or after, Left opens the categories
+' With nothing over the picture, as on Android TV: up and down change
+' channel (Up: the next number); OK, as it is let go, and the Options key
+' (*), Roku's menu key, open the channel list at the right; OK held shows
+' the bar of what's on with Channels and the favourite, which goes 6 s
+' after it was last touched (Back hides it sooner). Left and Right do
+' nothing, nor do play, rewind, fast forward and Replay: live is live.
+' What's on never shows by itself as a channel starts, and Roku remotes
+' have no Info key: it shows in that bar. In the list: the Options key
+' puts the channel in focus in the favourites or takes it out, up and down
+' past its ends go to the page before or after, Left opens the categories
 ' (Back and Right close them), Replay searches, Back leaves a search for
-' the category before, and Back and Right close it. Back with the banner
-' showing hides it; otherwise it leaves (the scene).
+' the category before, and Back and Right close it. Over what went wrong,
+' Up and Down go between the card's rows and its buttons, and the Options
+' key opens the list too. Otherwise Back leaves (the scene).
 function onKeyEvent(key as string, press as boolean) as boolean
+    if key = "OK" and not press
+        ' The rest of an OK held is the bar's.
+        if m.okHeld
+            m.okHeld = false
+            return true
+        end if
+        if m.okTiming
+            m.okTiming = false
+            m.okTimer.control = "stop"
+            openList()
+            return true
+        end if
+        return false
+    end if
     if not press then return false
     if m.list.visible and m.categoryList.visible
         if key = "back" or key = "right" then closeCategories()
@@ -1145,7 +1343,30 @@ function onKeyEvent(key as string, press as boolean) as boolean
         end if
         return true
     end if
-    if m.notice.visible then return false
+    if key = "options"
+        openList()
+        return true
+    end if
+    ' The card: Up and Down between its Watch here instead and the buttons
+    ' under them, which take Left, Right and OK.
+    if m.notice.visible
+        if key = "up" or key = "down"
+            if key = "up" and m.troubleAt > 0 then m.troubleAt = m.troubleAt - 1
+            if key = "down" and m.troubleAt < m.troubleStops.Count() - 1 then m.troubleAt = m.troubleAt + 1
+            focusTrouble()
+            return true
+        end if
+        return false
+    end if
+    ' The bar has the focus: its chips take Left, Right and OK.
+    if m.banner.visible
+        if key = "back"
+            hideBanner()
+        else
+            pokeBanner()
+        end if
+        return true
+    end if
     if key = "up"
         zap(1)
         return true
@@ -1154,32 +1375,14 @@ function onKeyEvent(key as string, press as boolean) as boolean
         zap(-1)
         return true
     end if
-    if key = "left"
-        openList()
+    if key = "OK"
+        if not m.okTiming
+            m.okTiming = true
+            m.okTimer.control = "start"
+        end if
         return true
     end if
     ' Live is live: no pause, rewind or skip.
-    if key = "play" or key = "rewind" or key = "fastforward" or key = "replay" then return true
-    if key = "options"
-        channel = m.zapTo
-        if channel = invalid then channel = m.channel
-        if channel <> invalid
-            toggleFavorite(channel)
-            showBanner(true)
-        end if
-        return true
-    end if
-    if key = "right" or key = "OK"
-        if m.banner.visible
-            hideBanner()
-        else
-            showBanner(true)
-        end if
-        return true
-    end if
-    if key = "back" and m.banner.visible and m.zapTo = invalid
-        hideBanner()
-        return true
-    end if
+    if key = "left" or key = "right" or key = "play" or key = "rewind" or key = "fastforward" or key = "replay" then return true
     return false
 end function

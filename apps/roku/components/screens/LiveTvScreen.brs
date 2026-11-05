@@ -18,15 +18,36 @@ sub init()
     m.info = m.top.findNode("info")
     m.infoLogo = m.top.findNode("infoLogo")
     m.infoChannel = m.top.findNode("infoChannel")
+    m.infoBadge = m.top.findNode("infoBadge")
     m.infoTitle = m.top.findNode("infoTitle")
     m.infoMeta = m.top.findNode("infoMeta")
     m.infoText = m.top.findNode("infoText")
     m.guide = m.top.findNode("guide")
     m.cards = m.top.findNode("cards")
     m.message = m.top.findNode("message")
+    m.messageTitle = m.top.findNode("messageTitle")
+    m.messageText = m.top.findNode("messageText")
     m.retry = m.top.findNode("retry")
     m.clock = m.top.findNode("clock")
     m.hint = m.top.findNode("hint")
+    m.detailsGroup = m.top.findNode("details")
+    m.detailsLogo = m.top.findNode("detailsLogo")
+    m.detailsInitials = m.top.findNode("detailsInitials")
+    m.detailsChannel = m.top.findNode("detailsChannel")
+    m.detailsPicture = m.top.findNode("detailsPicture")
+    m.detailsTitle = m.top.findNode("detailsTitle")
+    m.detailsEpisode = m.top.findNode("detailsEpisode")
+    m.detailsWhen = m.top.findNode("detailsWhen")
+    m.detailsBadges = m.top.findNode("detailsBadges")
+    m.detailsTrack = m.top.findNode("detailsTrack")
+    m.detailsFill = m.top.findNode("detailsFill")
+    m.detailsLeft = m.top.findNode("detailsLeft")
+    m.detailsText = m.top.findNode("detailsText")
+    m.detailsEnded = m.top.findNode("detailsEnded")
+    m.detailsButtons = m.top.findNode("detailsButtons")
+    ' The programme the panel shows ({ channel, program, back: what had
+    ' the focus }), or invalid.
+    m.details = invalid
     m.started = false
     m.twelve = CreateObject("roDeviceInfo").GetClockFormat() <> "24h"
     m.view = { tab: "guide", category: "all" }
@@ -85,6 +106,8 @@ sub init()
     m.guide.observeField("leftEdgeTargetTime", "onLeftEdge")
     m.cards.observeField("itemSelected", "onCardSelected")
     m.cards.observeField("itemFocused", "onCardFocused")
+    m.detailsButtons.observeField("buttonSelected", "onDetailsButton")
+    m.detailsLogo.observeField("loadStatus", "onDetailsLogo")
     m.clock.observeField("fire", "onClock")
     m.top.observeField("active", "onActive")
 end sub
@@ -93,6 +116,8 @@ sub onActive()
     m.clock.control = "stop"
     if m.top.active then m.clock.control = "start"
     if not m.top.active
+        ' Covered (a cast, say): the panel goes, the focus back where it was.
+        closeDetails()
         m.lastFocus = m.rail
         if m.tabs.isInFocusChain() then m.lastFocus = m.tabs
         if m.searchRow.isInFocusChain() then m.lastFocus = m.searchRow
@@ -114,7 +139,7 @@ sub onActive()
         if m.view.tab = "channels" then m.tabs.current = 1
         m.tabs.focusIndex = m.tabs.current
         m.rail.setFocus(true)
-        showMessage("Loading…")
+        showMessage("", "Loading…")
         loadGroups(true)
         return
     end if
@@ -151,17 +176,14 @@ sub onGroups(event as object)
     first = event.getRoSGNode().spec.first = true
     if not answer.ok
         if not first or uiFailed(answer) then return
-        if answer.status = 403
-            showMessage("Live TV isn't open to this account." + Chr(10) + "An administrator can open it on the web, in Settings → Live TV.")
-        else
-            showFailed(answer.message, "groups", 0)
-        end if
+        showFailed(answer, "groups", 0)
         return
     end if
     m.summary = liveSummary(answer.data)
     m.groups = liveGroups(answer.data)
     if m.summary.total = 0
-        showMessage("No channels yet." + Chr(10) + "Channels appear here once an administrator adds an IPTV provider on the web, in Settings → Live TV.")
+        empty = liveEmpty("all")
+        showMessage(empty.title, empty.body)
         return
     end if
     category = liveCategoryValid(m.view.category, m.summary, m.groups)
@@ -410,22 +432,31 @@ sub onTabChosen(event as object)
     showCategory(around)
 end sub
 
-sub showMessage(text as string)
+' Why nothing shows, as on Android: a title ("" for none, as while
+' loading) and a line under it.
+sub showMessage(title as string, text as string)
     focused = m.guide.isInFocusChain() or m.cards.isInFocusChain() or m.retry.isInFocusChain()
     m.guide.visible = false
     m.info.visible = false
     m.cards.visible = false
     m.retry.visible = false
     m.hint.text = ""
-    m.message.text = text
+    m.messageTitle.text = title
+    m.messageText.text = text
+    m.message.removeChildrenIndex(m.message.getChildCount(), 0)
+    if title <> "" then m.message.appendChild(m.messageTitle)
+    if text <> "" then m.message.appendChild(m.messageText)
     m.message.visible = true
     if focused then m.rail.setFocus(true)
 end sub
 
-' What failed with nothing to show, with Try again under it (what: the
-' groups, or the category's channels around a channel).
-sub showFailed(text as string, what as string, around as integer)
-    showMessage(text)
+' What failed with nothing to show (answer's failure), with Try again
+' under it (what: the groups, or the category's channels around a
+' channel); not where Live TV isn't open to the profile.
+sub showFailed(answer as object, what as string, around as integer)
+    failure = liveLoadFailed(answer)
+    showMessage(failure.title, failure.body)
+    if not failure.retry then return
     m.retryWhat = what
     m.retryAround = around
     m.retry.visible = true
@@ -437,7 +468,7 @@ end sub
 sub onRetry()
     m.toContent = m.retry.isInFocusChain()
     if m.retryWhat = "groups"
-        showMessage("Loading…")
+        showMessage("", "Loading…")
         loadGroups(true)
     else
         showCategory(m.retryAround)
@@ -500,7 +531,7 @@ sub loadGuidePage(offset as integer, around as integer, focus as string)
     end if
     m.asked = m.asked + 1
     m.loading = true
-    if m.guide.content = invalid then showMessage("Loading the guide…")
+    if m.guide.content = invalid then showMessage("", "Loading the guide…")
     uiRequest({ op: "livePage", kind: "guide", category: m.view.category, offset: offset, limit: livePageSize(), around: around, start: m.guideStart, upto: m.loadedTo, asked: m.asked, focus: focus, focusId: around }, "onGuide")
 end sub
 
@@ -518,7 +549,7 @@ sub onGuide(event as object)
             ' it moves.
             m.failedAt = m.span.TotalMilliseconds()
         else if not uiFailed(answer)
-            showFailed(answer.message, "channels", spec.focusId)
+            showFailed(answer, "channels", spec.focusId)
         end if
         return
     end if
@@ -540,7 +571,7 @@ sub onGuide(event as object)
         m.page = invalid
         m.guide.content = invalid
         m.toContent = false
-        showMessage(emptyText())
+        showEmpty()
         return
     end if
     m.page = data
@@ -565,17 +596,16 @@ sub onGuide(event as object)
     m.guide.visible = true
     m.info.visible = true
     showCount()
-    m.hint.text = "OK: watch   ·   Options (*): favourite   ·   Rewind and fast forward: earlier and later   ·   Play: now   ·   Replay: search"
+    m.hint.text = "OK: watch   ·   Options (*): details   ·   Rewind and fast forward: earlier and later   ·   Play: now   ·   Replay: search"
     showProgram()
     if m.toContent then focusContent()
 end sub
 
-function emptyText() as string
-    if searching() then return "No channel's name, number or programme on now has “" + m.query + "” in it."
-    if m.view.category = "favorites" then return "No favourites yet: the Options key (*) on a channel adds it."
-    if m.view.category = "recent" then return "Nothing watched yet."
-    return "No channels here."
-end function
+' The category, or the search, has no channels: why, in its own words.
+sub showEmpty()
+    empty = liveEmpty(m.view.category)
+    showMessage(empty.title, empty.body)
+end sub
 
 ' "2,345 channels   ·   Channels 51–100 of 2,345".
 sub showCount()
@@ -612,9 +642,11 @@ sub onLeftEdge()
     uiRequest({ op: "liveGuide", channels: m.page.channels, start: m.guideStart, upto: missing.to, asked: m.asked, focus: "keep", focusId: 0 }, "onGuide")
 end sub
 
-' The focus moved: the programme above the guide, and past the page's last
-' row (or before its first) the next page (or the one before), round the
-' ends of the category, as the guide itself goes round.
+' The focus moved: the programme above the guide. The guide goes round
+' its rows: past the page's last row (or before its first) the next page
+' (or the one before) comes; at the category's ends the focus goes back
+' at once, Down staying on the last channel and Up going on to the tabs,
+' as on Android (Live.brs's liveGuideEdge).
 sub onProgramFocused()
     details = m.guide.programFocusedDetails
     if details <> invalid and m.page <> invalid
@@ -622,23 +654,44 @@ sub onProgramFocused()
         count = m.page.channels.Count()
         wasRow = m.lastRow
         m.lastRow = row
+        edge = ""
         if m.jumped
             m.jumped = false
-        else if m.page.total > count and count > 2 and not m.loading and liveMayAskAgain(m.failedAt, m.span.TotalMilliseconds())
-            size = livePageSize()
-            pages = Int((m.page.total + size - 1) / size)
-            pageNo = Int(m.page.offset / size)
-            if wasRow = count - 1 and row = 0
-                loadGuidePage(((pageNo + 1) mod pages) * size, 0, "first")
-                return
+        else
+            edge = liveGuideEdge(m.page.offset, count, m.page.total, wasRow, row)
+        end if
+        if edge = "last"
+            holdGuideAt(count - 1)
+            return
+        end if
+        if edge = "tabs"
+            holdGuideAt(0)
+            m.tabs.focusIndex = m.tabs.current
+            m.tabs.setFocus(true)
+            return
+        end if
+        if (edge = "next" or edge = "previous") and not m.loading and liveMayAskAgain(m.failedAt, m.span.TotalMilliseconds())
+            if edge = "next"
+                loadGuidePage(m.page.offset + count, 0, "first")
+            else
+                offset = m.page.offset - livePageSize()
+                if offset < 0 then offset = 0
+                loadGuidePage(offset, 0, "last")
             end if
-            if wasRow = 0 and row = count - 1
-                loadGuidePage(((pageNo - 1 + pages) mod pages) * size, 0, "last")
-                return
-            end if
+            return
         end if
     end if
     showProgram()
+end sub
+
+' The guide's focus put back on row, where the TimeGrid went round from,
+' at the time shown.
+sub holdGuideAt(row as integer)
+    left = guideLeft()
+    m.jumped = true
+    m.lastRow = row
+    m.guide.jumpToChannel = row
+    m.guide.leftEdgeTargetTime = left
 end sub
 
 ' The channel and programme in focus: { channel, program } (program
@@ -660,8 +713,9 @@ function focusedGuide() as dynamic
     return { channel: m.page.channels[channelAt], program: program }
 end function
 
-' Above the guide: the channel, the programme's title, when it is on
-' (and how long it has left, on now), its episode and what it is.
+' Above the guide: the channel, the programme's title (LIVE or NEW before
+' it, as on Android), when it is on (and how long it has left, on now),
+' its episode and rating, and what it is.
 sub showProgram()
     focused = focusedGuide()
     if focused = invalid then return
@@ -671,15 +725,16 @@ sub showProgram()
     ' The scene's agent carries the token; it changes with each refresh.
     m.infoLogo.setHttpAgent(m.top.getScene().getHttpAgent())
     m.infoLogo.uri = channel.logo
-    if program = invalid or program.id = "gap"
+    p = programOf(program)
+    if p = invalid
+        placeBadge(m.infoBadge, m.infoTitle, "", 1020)
         m.infoTitle.text = channel.name
-        m.infoMeta.text = "No guide information"
-        if not channel.hasGuide then m.infoMeta.text = "This channel has no guide"
+        m.infoMeta.text = "No information for this time"
+        if not channel.hasGuide then m.infoMeta.text = "No guide for this channel"
         m.infoText.text = ""
         return
     end if
     now = nowSeconds()
-    p = programTimes(program)
     meta = []
     if p.start <= now and p.ends > now
         meta.Push("On now")
@@ -688,11 +743,31 @@ sub showProgram()
     else
         meta.Push(daySpan(p, now))
     end if
-    if program.shortDescriptionLine1 <> "" then meta.Push(program.shortDescriptionLine1)
-    if program.shortDescriptionLine2 <> "" then meta.Push(program.shortDescriptionLine2)
-    m.infoTitle.text = program.title
+    if p.line <> "" then meta.Push(p.line)
+    if p.rating <> "" then meta.Push(p.rating)
+    placeBadge(m.infoBadge, m.infoTitle, liveBadge(p), 1020)
+    m.infoTitle.text = p.title
     m.infoMeta.text = meta.Join("   ·   ")
-    m.infoText.text = program.description
+    m.infoText.text = p.description
+end sub
+
+' A programme's LIVE or NEW (text, "" for neither) in badge, a small
+' label of its own before its title, which takes the rest of width.
+sub placeBadge(badge as object, title as object, text as string, width as integer)
+    x = badge.translation[0]
+    y = title.translation[1]
+    badge.text = text
+    badge.visible = text <> ""
+    if text = ""
+        title.translation = [x, y]
+        title.width = width
+        return
+    end if
+    badge.color = "0x7DD3FCFF"
+    if text = "LIVE" then badge.color = "0xEB6B70FF"
+    room = Int(badge.boundingRect().width) + 16
+    title.translation = [x + room, y]
+    title.width = width - room
 end sub
 
 function programTimes(program as object) as object
@@ -703,34 +778,13 @@ end function
 ' "Tomorrow 8:00 PM – 9:00 PM", the day left out for today.
 function daySpan(p as object, now as integer) as string
     span = liveSpan(p, m.twelve)
-    day = dayLabel(p.start, now)
-    if day <> "" then span = day + " " + span
+    day = liveDay(p.start, now, fmtZoneSeconds())
+    if day <> "Today" then span = day + " " + span
     return span
 end function
 
-' "Tomorrow", "Yesterday", a weekday, or "" for today, in the Roku's
-' time zone.
-function dayLabel(seconds as integer, now as integer) as string
-    at = localDay(seconds)
-    today = localDay(now)
-    if at = today then return ""
-    if at = today + 1 then return "Tomorrow"
-    if at = today - 1 then return "Yesterday"
-    when = CreateObject("roDateTime")
-    when.FromSeconds(seconds)
-    when.ToLocalTime()
-    return when.GetWeekday()
-end function
-
-function localDay(seconds as integer) as integer
-    when = CreateObject("roDateTime")
-    when.FromSeconds(seconds)
-    when.ToLocalTime()
-    return Int(when.AsSeconds() / 86400)
-end function
-
 ' OK on a programme: one on now (or time without a guide) watches the
-' channel; another says what it is, with Watch.
+' channel; another shows its details, with Watch.
 sub onProgramSelected()
     focused = focusedGuide()
     if focused = invalid then return
@@ -739,7 +793,7 @@ sub onProgramSelected()
     if program <> invalid and program.id <> "gap"
         p = programTimes(program)
         if p.start > now or p.ends <= now
-            channelOptions(focused.channel, programOf(program))
+            showDetails(focused.channel, programOf(program))
             return
         end if
     end if
@@ -753,7 +807,7 @@ end sub
 sub loadCards(offset as integer, around as integer, before as boolean, replace as boolean)
     if m.cardsLoading and not replace then return
     m.cardsLoading = true
-    if m.cardChannels.Count() = 0 then showMessage("Loading…")
+    if m.cardChannels.Count() = 0 then showMessage("", "Loading…")
     m.cardsRequest = uiRequest({ op: "livePage", kind: "cards", category: m.view.category, offset: offset, limit: livePageSize(), around: around, before: before, replace: replace, focusId: around }, "onCards")
 end sub
 
@@ -771,7 +825,7 @@ sub onCards(event as object)
             ' The cards stay; the page is asked for again as they move.
             m.failedAt = m.span.TotalMilliseconds()
         else if not uiFailed(answer)
-            showFailed(answer.message, "channels", spec.focusId)
+            showFailed(answer, "channels", spec.focusId)
         end if
         return
     end if
@@ -808,7 +862,7 @@ sub onCards(event as object)
     end if
     if m.cardChannels.Count() = 0
         m.toContent = false
-        showMessage(emptyText())
+        showEmpty()
         return
     end if
     m.message.visible = false
@@ -816,7 +870,7 @@ sub onCards(event as object)
     m.cards.visible = true
     m.guide.visible = false
     m.info.visible = false
-    m.hint.text = "OK: watch   ·   Options (*): favourite   ·   Replay: search"
+    m.hint.text = "OK: watch   ·   Options (*): details   ·   Replay: search"
     showCount()
     if m.toContent then focusContent()
 end sub
@@ -852,6 +906,7 @@ end function
 ' guide's programmes are fetched hours ahead).
 sub onClock()
     if m.guide.visible then showProgram()
+    if m.details <> invalid then drawDetails()
     if not m.cards.visible or m.cards.content = invalid then return
     now = nowSeconds()
     shown = cardsInView()
@@ -896,18 +951,26 @@ end sub
 
 ' --- Watching and favourites ---
 
-' The player, with the category: up and down stay in it.
+' The player, with the category: up and down stay in it, or, from a
+' search, go through every channel.
 sub watch(channel as object)
-    uiNavigate({ to: "livePlayer", params: { channel: channel, category: m.view.category, categoryName: liveCategoryName(m.view.category, m.groups) } })
+    category = liveZapCategory(m.view.category)
+    uiNavigate({ to: "livePlayer", params: { channel: channel, category: category, categoryName: liveCategoryName(category, m.groups) } })
 end sub
 
 ' A programme of the guide (its ContentNode) as Live.brs keeps one ({
-' start, ends, title, description }), or invalid for time without a guide.
+' start, ends, title, line, description, live, isNew, rating, image }), or
+' invalid for time without a guide.
 function programOf(program as dynamic) as dynamic
     if program = invalid or program.id = "gap" then return invalid
     p = programTimes(program)
     p.title = program.title
+    p.line = program.shortDescriptionLine1
     p.description = program.description
+    p.live = program.isLive = true
+    p.isNew = program.isNew = true
+    p.rating = httpString(program.rating)
+    p.image = httpString(program.picture)
     return p
 end function
 
@@ -921,68 +984,225 @@ function programInFocus(channel as object) as dynamic
 end function
 
 ' The Options key on a programme or a card (or OK on a programme not on
-' now): the channel's name, the programme's details (p, as Live.brs keeps
-' one, or invalid), Watch, and Add to or Remove from favourites.
-sub channelOptions(channel as object, p as dynamic)
-    m.optionsChannel = channel
-    buttons = ["Watch " + channel.name]
-    if channel.favorite
-        buttons.Push("Remove from favourites")
-    else
-        buttons.Push("Add to favourites")
-    end if
-    buttons.Push("Cancel")
-    dialog = CreateObject("roSGNode", "StandardMessageDialog")
-    dialog.title = liveTitle(channel)
-    if p <> invalid
-        lines = [p.title, daySpan(p, nowSeconds())]
-        if p.description <> "" then lines.Push(p.description)
-        dialog.message = lines
-    end if
-    dialog.buttons = buttons
-    dialog.observeField("buttonSelected", "onOptionChosen")
-    m.top.getScene().dialog = dialog
+' now): the programme's details in the panel at the right (p, as Live.brs
+' keeps one, or invalid for the channel alone), with Watch and the
+' favourite, as Android's side panel. Back or Left closes it, the focus
+' going back where it was.
+sub showDetails(channel as object, p as dynamic)
+    m.details = { channel: channel, program: p, back: m.guide }
+    if m.cards.isInFocusChain() then m.details.back = m.cards
+    ' The scene's agent carries the token; it changes with each refresh.
+    agent = m.top.getScene().getHttpAgent()
+    m.detailsLogo.setHttpAgent(agent)
+    m.detailsLogo.uri = channel.logo
+    m.detailsInitials.text = channel.name
+    onDetailsLogo()
+    m.detailsPicture.setHttpAgent(agent)
+    m.detailsPicture.uri = ""
+    if p <> invalid and p.image <> "" then m.detailsPicture.uri = urlImage(m.global.session.server, p.image, 576)
+    drawDetails()
+    detailsButtons(0)
+    m.detailsGroup.visible = true
+    m.detailsButtons.setFocus(true)
 end sub
 
-sub onOptionChosen(event as object)
-    chosen = event.getData()
-    channel = m.optionsChannel
-    m.optionsChannel = invalid
-    uiCloseDialog()
-    if channel = invalid then return
-    if chosen = 0
+' The panel's words, placed from the top: what the guide says of the
+' programme gets the lines left above the buttons, one at least, six at
+' most. Drawn again as the clock moves (how far it is, and once it ends).
+sub drawDetails()
+    d = liveDetails(m.details.channel, m.details.program, nowSeconds(), m.twelve, fmtZoneSeconds())
+    m.detailsChannel.text = d.heading
+    x = 1248
+    y = 128
+    m.detailsPicture.visible = m.detailsPicture.uri <> ""
+    if m.detailsPicture.visible
+        m.detailsPicture.translation = [x, y + 28]
+        y = y + 28 + 324
+    end if
+    shown = m.details.program <> invalid
+    for each label in [m.detailsTitle, m.detailsEpisode, m.detailsWhen, m.detailsText]
+        label.visible = shown
+    end for
+    m.detailsBadges.visible = shown
+    m.detailsTrack.visible = d.airing
+    m.detailsFill.visible = d.airing
+    m.detailsLeft.visible = d.airing
+    m.detailsEnded.visible = d.ended
+    if not shown then return
+    y = y + 28
+    m.detailsTitle.text = d.title
+    m.detailsTitle.translation = [x, y]
+    y = y + m.detailsTitle.boundingRect().height
+    m.detailsEpisode.text = d.episode
+    m.detailsEpisode.visible = d.episode <> ""
+    if m.detailsEpisode.visible
+        m.detailsEpisode.translation = [x, y + 4]
+        y = y + 4 + m.detailsEpisode.boundingRect().height
+    end if
+    m.detailsWhen.text = d.when
+    m.detailsWhen.translation = [x, y + 16]
+    y = y + 16 + m.detailsWhen.boundingRect().height
+    drawDetailsBadges(d)
+    if m.detailsBadges.getChildCount() > 0
+        m.detailsBadges.translation = [x, y + 12]
+        y = y + 12 + m.detailsBadges.boundingRect().height
+    end if
+    if d.airing
+        m.detailsLeft.text = d.left
+        width = m.detailsLeft.boundingRect().width
+        track = 576 - width - 20
+        m.detailsLeft.translation = [x + track + 20, y + 20]
+        lineHeight = m.detailsLeft.boundingRect().height
+        m.detailsTrack.translation = [x, y + 20 + Int((lineHeight - 6) / 2)]
+        m.detailsTrack.width = track
+        m.detailsFill.translation = m.detailsTrack.translation
+        m.detailsFill.width = Int(track * d.progress)
+        y = y + 20 + lineHeight
+    end if
+    m.detailsText.text = d.text
+    m.detailsText.color = "0xEBEBEBFF"
+    if not d.said then m.detailsText.color = "0x8B95A5FF"
+    m.detailsText.translation = [x, y + 20]
+    y = y + 20
+    ' Above the buttons, with "It has ended." under the text once it has.
+    bottom = 852
+    if d.ended then bottom = bottom - 12 - m.detailsEnded.boundingRect().height
+    lines = 6
+    m.detailsText.maxLines = lines
+    while lines > 1 and y + m.detailsText.boundingRect().height > bottom
+        lines = lines - 1
+        m.detailsText.maxLines = lines
+    end while
+    if d.ended then m.detailsEnded.translation = [x, y + m.detailsText.boundingRect().height + 12]
+end sub
+
+' On now, Live and New, then the rating, a label each after the day and
+' times.
+sub drawDetailsBadges(d as object)
+    m.detailsBadges.removeChildrenIndex(m.detailsBadges.getChildCount(), 0)
+    for each badge in d.badges
+        label = m.detailsBadges.createChild("Label")
+        label.font = "font:SmallestBoldSystemFont"
+        label.text = badge.text
+        label.color = "0x7DD3FCFF"
+        if badge.live then label.color = "0xEB6B70FF"
+    end for
+    if d.rating <> ""
+        label = m.detailsBadges.createChild("Label")
+        label.font = "font:SmallestBoldSystemFont"
+        label.text = d.rating
+        label.color = "0xA1A9B6FF"
+    end if
+end sub
+
+' Watch now (Watch channel for a programme not on now) and the favourite,
+' the focus on the one at at.
+sub detailsButtons(at as integer)
+    d = liveDetails(m.details.channel, m.details.program, nowSeconds(), m.twelve, 0)
+    m.detailsButtons.buttons = [d.watch, d.favorite]
+    m.detailsButtons.focusButton = at
+end sub
+
+sub onDetailsLogo()
+    m.detailsInitials.visible = m.detailsLogo.uri = "" or m.detailsLogo.loadStatus = "failed"
+end sub
+
+' Watch closes the panel and watches; the favourite changes in place.
+sub onDetailsButton(event as object)
+    if m.details = invalid then return
+    channel = m.details.channel
+    if event.getData() = 0
+        closeDetails()
         watch(channel)
-    else if chosen = 1
-        method = "DELETE"
-        if not channel.favorite then method = "PUT"
-        uiRequest({ method: method, path: "/api/live/channels/" + urlValue(channel.id) + "/favorite", channelId: channel.id }, "onFavorite")
+    else
+        toggleFavorite(channel)
     end if
 end sub
 
-' PUT or DELETE …/favorite done: the counts, and the list again where it
-' was (a favourite's star, or the Favourites list itself).
+sub closeDetails()
+    if m.details = invalid then return
+    back = m.details.back
+    m.details = invalid
+    m.detailsGroup.visible = false
+    if back.visible
+        back.setFocus(true)
+    else
+        m.rail.setFocus(true)
+    end if
+end sub
+
+' A channel in or out of the favourites (PUT or DELETE
+' /api/live/channels/{id}/favorite): its star changes at once, and goes
+' back if the server refuses, a toast saying so, as on Android.
+sub toggleFavorite(channel as object)
+    favorite = not channel.favorite
+    markFavorite(channel.id, favorite)
+    method = "DELETE"
+    if favorite then method = "PUT"
+    uiRequest({ method: method, path: "/api/live/channels/" + urlValue(channel.id) + "/favorite", channelId: channel.id, favorite: favorite }, "onFavorite")
+end sub
+
+' The channel's star where Live TV shows it: its card, in the guide its
+' name where no logo shows (Live.brs's liveGuideName), and the panel's
+' button, which keeps the focus.
+sub markFavorite(id as integer, favorite as boolean)
+    if m.details <> invalid and m.details.channel.id = id
+        m.details.channel.favorite = favorite
+        detailsButtons(m.detailsButtons.buttonFocused)
+    end if
+    if m.page <> invalid
+        at = liveIndexOf(m.page.channels, id)
+        if at >= 0
+            channel = m.page.channels[at]
+            channel.favorite = favorite
+            row = invalid
+            if m.guide.content <> invalid then row = m.guide.content.getChild(at)
+            if row <> invalid then row.title = liveGuideName(channel)
+        end if
+    end if
+    at = liveIndexOf(m.cardChannels, id)
+    if at >= 0
+        m.cardChannels[at].favorite = favorite
+        item = invalid
+        if m.cards.content <> invalid then item = m.cards.content.getChild(at)
+        if item <> invalid then item.favorite = favorite
+    end if
+end sub
+
+' PUT or DELETE …/favorite done: the counts follow, and the Favourites
+' list itself is asked for again where it was; refused, the star goes
+' back.
 sub onFavorite(event as object)
     answer = event.getData()
+    spec = event.getRoSGNode().spec
     if not answer.ok
-        if not uiFailed(answer) then uiMessage("That didn't work", [answer.message])
+        markFavorite(spec.channelId, not spec.favorite)
+        if not uiFailed(answer) then uiToast(liveFavoriteFailed(answer.message), true)
         return
     end if
     loadGroups(false)
-    id = event.getRoSGNode().spec.channelId
+    if m.view.category <> "favorites" then return
     if m.view.tab = "guide" and m.page <> invalid
-        loadGuidePage(m.page.offset, id, "keep")
+        loadGuidePage(m.page.offset, spec.channelId, "keep")
     else
-        loadCards(0, id, false, true)
+        loadCards(0, spec.channelId, false, true)
     end if
 end sub
 
 ' Back goes up a step at a time: the guide back to now, a search back to
 ' the category before, the channels to the categories, and on the rail it
 ' leaves. Left from the channels goes to the categories too, Right from
-' them to the channels; up from the rail's top, the tabs. The Options key
+' them to the channels; up from the rail's top, and from the first
+' channel of the guide or the cards, the tabs. The Options key
 ' on a programme or a card: the channel's options.
 function onKeyEvent(key as string, press as boolean) as boolean
     if not press then return false
+    ' The panel keeps the focus until Back, Left or the Options key
+    ' closes it.
+    if m.details <> invalid
+        if key = "back" or key = "left" or key = "options" then closeDetails()
+        return true
+    end if
     if key = "back" and m.guide.isInFocusChain() and backToNow() then return true
     ' Then a search back to the category before.
     if key = "back" and searching()
@@ -1037,13 +1257,16 @@ function onKeyEvent(key as string, press as boolean) as boolean
         m.rail.setFocus(true)
         return true
     end if
-    if key = "up" and m.cards.isInFocusChain()
+    ' Up from the cards' top row, or from a guide of one channel (a longer
+    ' one goes round, onProgramFocused), goes to the tabs.
+    if key = "up" and (m.cards.isInFocusChain() or m.guide.isInFocusChain())
+        m.tabs.focusIndex = m.tabs.current
         m.tabs.setFocus(true)
         return true
     end if
     if key = "options" and content
         focused = channelInFocus()
-        if focused <> invalid then channelOptions(focused, programInFocus(focused))
+        if focused <> invalid then showDetails(focused, programInFocus(focused))
         return true
     end if
     return false

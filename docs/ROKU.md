@@ -77,7 +77,9 @@ yet, Scanning your libraries…, or Nothing here yet.
 | Options (\*) | The player | Roku's own options: subtitles and audio tracks |
 | OK | Skip intro, Skip credits | Skips; fast forward and rewind move 10 s |
 | Options (\*) | Live TV | A programme's details (a card's: what's on), Watch, Add to or remove from favourites |
-| Options (\*) | The live player | Add to or remove from favourites |
+| OK, Options (\*) | The live player | The channel list, at the right |
+| OK held | The live player | What's on, with Channels and Add to or remove from favourites |
+| Options (\*) | The live player's channel list | Adds the channel in focus to the favourites or removes it |
 | Replay | Live TV, the live player's channel list | Search (Roku remotes have no search key for apps) |
 
 ### A title's page
@@ -375,58 +377,111 @@ Live TV works as in the [Android app](ANDROID.md#live-tv). On Roku
 - **Paging:** channels come 50 at a time, and the guide only for those 50
   (`GET /api/live/guide?ids=`). A page of channels or a part of the guide
   that didn't load is asked for again once 10 s have passed, as the list
-  moves (in the player, as the list moves or Up or Down is pressed); with
-  nothing to show, the screen says why, with Try again.
+  moves (in the player, as the list moves or Up or Down is pressed). With
+  nothing to show, the screen says why in Android's words, a title and a
+  line under it: "Live TV didn't load" with the server's words and Try
+  again, "Live TV isn't open to this profile", "No channels yet", "No
+  favourites yet", "Nothing watched yet", "No channels match", "No
+  channels in this group." The player's channel list says the same of a
+  category or search without channels.
 - **Categories** run down the left under Search. Rewind and fast forward
   move a screen at a time. The category, the tab and the last channel
   watched are kept per server and profile (registry section `liveViews`):
   the list opens at that channel, back from the player and after a
   restart.
 - **Search** (the entry over the categories, or Replay) is typed on
-  Roku's keyboard; Clear in it, or Back, goes back to the category shown
-  before.
+  Roku's keyboard, the groups it names listed under "Groups found" at the
+  top of the categories; Clear in it, or Back, goes back to the category
+  shown before. A channel watched from a search (here, in the player's
+  list or in the app's Search) makes Up and Down in the player go through
+  every channel, as on Android.
 - **Guide:** Roku's TimeGrid, 50 channels by two hours. Rewind and fast
   forward move two hours, Play goes back to now. OK on what's on watches
   the channel; on a later programme it shows its details, as Options (\*)
-  does on any programme (on a card, what's on), with Watch and the
-  favourite.
+  does on any programme (on a card, what's on). Up and Down past a page's
+  ends bring the page before or after; Up from the category's first
+  channel goes to the Guide and Channels tabs, and Down stops at its last,
+  as on Android (the TimeGrid goes round its rows, so at the category's
+  ends the focus is put back at once). Time the guide says nothing of (a
+  channel without a guide) is cut at the half hours, so Left and Right go
+  through it half an hour at a time, as on Android. TimeGrid draws a
+  programme's title alone, and no time over its now line: Android's cells
+  show their times too, and the time now sits on its line.
+- **A programme's details** show in a panel at the right, as Android's
+  side panel: the channel, the programme's picture, title, episode, day
+  and times with On now, Live and New and its rating, a bar of how far it
+  is and the time left while it airs, then what the guide says of it (or
+  that it says nothing more, and "It has ended." once it has). Under them
+  are Watch now (Watch channel for a programme not on now) and the
+  favourite, which changes in place. Back or Left closes it.
+- **The guide's channels** are TimeGrid's own column: a channel's logo,
+  or where it has none its number and name, a star before them for a
+  favourite; Android's cell shows the logo, the number and the name
+  together. TimeGrid's `channelInfoComponentName` could draw all three,
+  but Roku's documentation doesn't say from which Roku OS it is there (the
+  app runs from Roku OS 9), and brs-node, which the smoke run and the
+  preview use, doesn't draw it.
+- **Badges:** LIVE, else NEW, is a label of its own before the
+  programme's title, above the guide and in the player's bar, as on
+  Android; the rating stays in the line under the title.
 - **Channels:** the other tab, as cards with what's on and what's next.
+- **Favourites:** a channel's star changes at once, on its card and in
+  the guide, and goes back if the server refuses, a toast saying so, as
+  on Android. The counts follow, and Favourites itself, when it shows,
+  is asked for again.
 - **What's on moves on** each 15 s: the programme above the guide, the
-  cards in view and the player's banner and list show how far along it
-  is. Once a programme listed as on now has ended, the cards in view are
+  cards in view and the player's bar and list show how far along it is. Once a programme listed as on now has ended, the cards in view are
   asked for again, and in the player the channel playing
   (`GET /api/live/channels/{id}`), each at most once a minute. The guide's
   programmes come six hours ahead, so the guide itself needs nothing new.
-- **Back** goes up a step at a time: the guide back to now (when another
-  time shows, or a programme not on now has focus), a search back to the
-  category before, the guide or the cards to the categories, then out of
-  Live TV.
+- **Back** goes up a step at a time: a programme's details closed, the
+  guide back to now (when another time shows, or a programme not on now
+  has focus), a search back to the category before, the guide or the
+  cards to the categories, then out of Live TV.
 - **The player** tunes with `POST …/watch`, waits for the server's live HLS
   playlist (up to 50 s), then plays it with `Live = true`. Up and Down
-  change channel, tuning 0.7 s after the last press. Left opens the
-  channel list; Right or OK show the banner. Options (\*) puts the channel
-  in the favourites or takes it out, in the list the channel in focus,
-  else the one playing, the banner showing its star. Leaving, or changing
-  channel, sends `DELETE /api/live/sessions/{session}`.
-- **The channel list** opens on the category Up and Down go through, at
-  the channel playing. Left in it lists the categories as Live TV does
-  (OK on one lists its channels instead, Back goes back), and Replay
-  searches every channel (Back leaves the search). A channel chosen from
-  another category, or a search, makes Up and Down go through that one.
+  change channel, tuning 0.7 s after the last press: a Roku starts its
+  Video node again for each channel, so a run of presses tunes only the
+  channel it stops on, where Android tunes each at once. OK (as it is let
+  go) and Options (\*), Roku's menu key, open the channel list, as
+  Android's OK, Menu and Guide do. Options (\*) doesn't change the
+  favourite by itself: OK held (half a second) shows a bar of what's on
+  and next with Channels and Add to (or Remove from) favourites, which
+  changes in place; the bar goes 6 s after it was last touched, or with
+  Back. Left and Right do nothing. Roku remotes have no Info key, so
+  what's on shows only in that bar, never by itself as a channel starts.
+  The favourite's star changes at once, and goes back if the server
+  refuses, a toast saying so. Leaving, or changing channel, sends
+  `DELETE /api/live/sessions/{session}`.
+- **The channel list** opens at the right, on the category Up and Down go
+  through, at the channel playing. Options (\*) in it adds the channel in
+  focus to the favourites or removes it. Left in it lists the categories
+  as Live TV does (OK on one lists its channels instead, Back goes back),
+  and Replay searches every channel (Back leaves the search). A channel
+  chosen from another category makes Up and Down go through that one;
+  from a search, through every channel.
 - **Failures:** a playlist the server doesn't give (a `503` while the
   provider sends nothing, or another failure of its), or a stream that
   breaks while its playlist is still there, tunes the channel again twice,
-  after 1 s and then 3 s, before the notice says why; not when the server
+  after 1 s and then 3 s, before the card says why; not when the server
   refused it (`409` every connection in use, `410`, `403`, `404`). Try
   again starts the count again. When the server doesn't answer at all,
   the app says it can't be reached, as on any screen.
+- **The card** of what went wrong is Android TV's, in the middle of the
+  screen: the channel's logo, why, and Try again, Other channels and Back
+  to the guide, Left and Right between them. Every connection in use, it
+  lists what each watches and who (five at most), with Watch here instead
+  on each this account may take over, which has the focus first; Up and
+  Down go between those and the buttons.
 - **Taken over:** the server's `live_taken_over` event for the channel
   playing (the scene hands it to the player) stops it at once, before its
   stream breaks off. A stream that breaks asks its playlist again, and a
-  `410` there stops it too. Either way the notice says "Live TV stopped"
+  `410` there stops it too. Either way the card says "Live TV stopped"
   with the server's words, and Watch again in place of Try again. Taken
-  while Up or Down changes channel, the change goes on, with no notice.
-- **Radio:** a channel with no picture keeps its card with what's on.
+  while Up or Down changes channel, the change goes on, with no card.
+- **Radio:** a channel with no picture (3 s after it plays, the Video
+  node says it has audio and no video) keeps its card, as on Android: its
+  logo, "Sound only", and what's on.
 
 ### Remote control
 
