@@ -8,18 +8,18 @@
 ' player: an episode's credits bring up Up Next instead. Down brings up
 ' Pley's menu: the file's subtitles and audio (every track, pictures too),
 ' Quality, subtitle sync for a file with text subtitles or pictures drawn
-' here (SubtitleSync.brs), the file's chapters, the sleep timer
-' (Sleep.brs) and the playback's details (Details.brs). Subtitles (or
-' audio) the person picks in Roku's options are remembered on the server
-' for the show or the movie (Tracks.brs), so the next episode starts with
-' matching ones; the user's remote, on another device, picks them as the
-' menu does. The quality is the one chosen in Settings or the menu (the
-' remote chooses it as the menu does); when it doesn't play well,
-' Automatic lowers a conversion's bitrate as it is sent, or opens the
-' stream again lower where it was once it stopped anyway
-' (AutoQuality.brs). PGS subtitles are drawn over the video from
-' the server's pictures (Pictures.brs), so the file plays as it is; the
-' server burns them in only where it can't make those.
+' here (SubtitleSync.brs), the file's chapters and the previous and next
+' ones, the next episode, the sleep timer (Sleep.brs) and the playback's
+' details (Details.brs). Subtitles (or audio) the person picks in Roku's
+' options are remembered on the server for the show or the movie
+' (Tracks.brs), so the next episode starts with matching ones; the user's
+' remote, on another device, picks them as the menu does. The quality is
+' the one chosen in Settings or the menu (the remote chooses it as the
+' menu does); when it doesn't play well, Automatic lowers a conversion's
+' bitrate as it is sent, or opens the stream again lower where it was once
+' it stopped anyway (AutoQuality.brs). PGS subtitles are drawn over the
+' video from the server's pictures (Pictures.brs), so the file plays as it
+' is; the server burns them in only where it can't make those.
 
 sub init()
     m.video = m.top.findNode("video")
@@ -1651,8 +1651,12 @@ end function
 ' --- Pley's menu ---
 
 ' Its entries: Subtitles and Audio for a file with them, Quality, Subtitle
-' sync for a file with text subtitles or pictures drawn here, Chapters for
-' a file with two or more, Sleep timer, Find subtitles…, Playback details.
+' sync for a file with text subtitles or pictures drawn here; for a file
+' with two or more chapters, Chapters, Previous chapter and, before the
+' last, Next chapter; Next episode (or Next in the queue) while something
+' comes next; Sleep timer, Find subtitles…, Playback details. Previous and
+' Next are those of Android TV's control row, which Roku's remote has no
+' keys for.
 sub openMenu()
     hideSkip()
     m.menuKind = "menu"
@@ -1676,9 +1680,20 @@ sub openMenu()
         items.Push({ title: "Subtitle sync: " + syncLabel(m.syncMs) })
         m.menuActions.Push("sync")
     end if
-    if detChapters(playingFile()).Count() > 1
+    chapters = detChapters(playingFile())
+    if chapters.Count() > 1
         items.Push({ title: "Chapters" })
         m.menuActions.Push("chapters")
+        items.Push({ title: "Previous chapter" })
+        m.menuActions.Push("previousChapter")
+        if detNextChapter(chapters, m.positionMs) >= 0
+            items.Push({ title: "Next chapter" })
+            m.menuActions.Push("nextChapter")
+        end if
+    end if
+    if m.next <> invalid
+        items.Push({ title: playerNextLabel(m.queue) })
+        m.menuActions.Push("next")
     end if
     items.Push({ title: "Sleep timer: " + sleepLabel(m.sleep, sleepNow(), playingKind()) })
     m.menuActions.Push("sleep")
@@ -1755,6 +1770,12 @@ sub onMenuEntry(event as object)
         openSync()
     else if action = "chapters"
         openChapters()
+    else if action = "previousChapter" or action = "nextChapter"
+        goToChapter(action = "nextChapter")
+    else if action = "next"
+        ' As the user's remote moves on: the episode keeps its place.
+        closeMenu()
+        playNext(false)
     else if action = "sleep"
         openSleep()
     else
@@ -1848,6 +1869,18 @@ sub openChapters()
         m.menuValues.Push(chapter.startMs)
     end for
     showMenuChoices(items, detChapterAt(chapters, m.positionMs))
+end sub
+
+' Next chapter, or Previous chapter (detPreviousChapterMs).
+sub goToChapter(forward as boolean)
+    closeMenu()
+    chapters = detChapters(playingFile())
+    if not forward
+        seekTo(detPreviousChapterMs(chapters, m.positionMs))
+        return
+    end if
+    at = detNextChapter(chapters, m.positionMs)
+    if at >= 0 then seekTo(chapters[at].startMs)
 end sub
 
 ' Off, minutes, or the end of what plays; the one set checked.

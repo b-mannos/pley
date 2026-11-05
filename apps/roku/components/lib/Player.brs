@@ -209,6 +209,13 @@ function playerUpNextSeconds() as integer
     return 10
 end function
 
+' The menu's entry for what comes next, as Android TV's Next plays it: a
+' playlist's or collection's next entry, else the next episode.
+function playerNextLabel(queue as dynamic) as string
+    if GetInterface(queue, "ifArray") <> invalid then return "Next in the queue"
+    return "Next episode"
+end function
+
 ' Fast forward and rewind jump 30 s while Skip, Up Next or Pley's menu has
 ' the focus (Roku's own bar has the video's), as Android TV's keys do;
 ' instant replay goes back 10 s.

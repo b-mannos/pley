@@ -163,6 +163,11 @@ sub test_player_skips_to_the_end_of_an_intro_or_credits()
     tkEqual(playerSkipTarget(markers[1], invalid), 1300000, "no duration known")
 end sub
 
+sub test_player_names_what_comes_next()
+    tkEqual(playerNextLabel(invalid), "Next episode")
+    tkEqual(playerNextLabel([{ itemId: 1 }, { itemId: 2 }]), "Next in the queue", "a playlist's or a collection's")
+end sub
+
 sub test_player_jumps_as_android_tvs_keys()
     tkEqual(playerJumpMs(), 30000, "fast forward and rewind")
     tkEqual(playerReplayMs(), 10000, "instant replay")

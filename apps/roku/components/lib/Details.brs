@@ -193,22 +193,28 @@ function detPlayback(info as object, file as dynamic, audioIndex as integer, liv
     return { method: detMethod(info), why: why, rows: rows }
 end function
 
-' A file's chapters, by start: [{ label ("1. Opening · 0:00"), startMs }].
+' A file's chapters, by start: [{ label ("Opening · 0:00"), startMs }].
 function detChapters(file as dynamic) as object
     out = []
     if file = invalid then return out
     for each chapter in httpArray(file.chapters)
         if GetInterface(chapter, "ifAssociativeArray") <> invalid
             startMs = Int(httpNumber(chapter.start_ms, -1))
-            if startMs >= 0
-                number = out.Count() + 1
-                title = httpSentence(chapter.title)
-                if title = "" then title = "Chapter " + urlValue(number)
-                out.Push({ label: urlValue(number) + ". " + title + " · " + fmtClock(startMs), startMs: startMs })
-            end if
+            if startMs >= 0 then out.Push({ label: detChapterName(chapter.title, out.Count() + 1) + " · " + fmtClock(startMs), startMs: startMs })
         end if
     end for
     return out
+end function
+
+' A chapter's name, as the other apps write it: its title, unless it has
+' none or the title only says where it starts ("00:06:19.212", as mkvmerge
+' names chapters, or "6:19"), which tells a viewer nothing: then "Chapter
+' 3". A time inside a real name ("Act 2: 12:00 at Noon") keeps it.
+function detChapterName(title as dynamic, number as integer) as string
+    name = httpSentence(title).Trim()
+    timeOnly = CreateObject("roRegex", "^\d{1,2}(:\d{2}){1,2}([.,]\d+)?$", "")
+    if name = "" or timeOnly.IsMatch(name) then return "Chapter " + urlValue(number)
+    return name
 end function
 
 ' The chapter positionMs is in (its index), 0 before the first.
@@ -218,4 +224,24 @@ function detChapterAt(chapters as object, positionMs as integer) as integer
         if chapters[i].startMs <= positionMs then at = i
     end for
     return at
+end function
+
+' The chapter Next chapter goes to, as Android TV's Next: the first
+' starting more than 1 s after positionMs (its index), -1 for none.
+function detNextChapter(chapters as object, positionMs as integer) as integer
+    for i = 0 to chapters.Count() - 1
+        if chapters[i].startMs > positionMs + 1000 then return i
+    end for
+    return -1
+end function
+
+' Where Previous chapter goes, as Android TV's Previous: the start of the
+' chapter playing once more than 3 s into it (and of the first, always),
+' else the start of the one before; the file's start before the first.
+function detPreviousChapterMs(chapters as object, positionMs as integer) as integer
+    if chapters.Count() = 0 or positionMs < chapters[0].startMs then return 0
+    at = detChapterAt(chapters, positionMs)
+    start = chapters[at].startMs
+    if at = 0 or positionMs - start > 3000 then return start
+    return chapters[at - 1].startMs
 end function

@@ -74,7 +74,7 @@ yet, Scanning your libraries…, or Nothing here yet.
 | Options (\*) | Watch history | Removes it |
 | Options (\*) | A playlist entry | Move (Up and Down carry it, OK puts it there, Back puts it back), Remove from playlist, Go to its title's page |
 | Options (\*) | A request | What can be done with it (Approve, Decline, Withdraw…) |
-| Down | The player | Pley's menu: Subtitles, Audio, Quality, Subtitle sync, Chapters, Sleep timer, Find subtitles…, Playback details |
+| Down | The player | Pley's menu: Subtitles, Audio, Quality, Subtitle sync, Chapters, Previous chapter, Next chapter, Next episode (or Next in the queue), Sleep timer, Find subtitles…, Playback details |
 | Options (\*) | The player | Roku's own options: subtitles and audio tracks |
 | OK | Skip Intro, Skip Credits | Skips; fast forward and rewind jump 30 s, instant replay 10 s back |
 | Options (\*) | Live TV | A programme's details (a card's: what's on), Watch, Add to or remove from favourites |
@@ -275,7 +275,14 @@ paused leaves the player, as in Roku's own apps.
 - **Progress** goes to the server every 10 s while playing, every 30 s
   paused, and at once after a seek, in Roku's own bar too.
 - **Playback details** are asked for again every 2 s while they show.
-- **Chapters** are in the menu for a file with two or more.
+- **Chapters** are in the menu for a file with two or more, each named by
+  its title, or "Chapter 3" when it has none or only its time ("00:06:19",
+  as mkvmerge names them). With them come Previous chapter (the start of
+  the chapter playing, or of the one before within its first 3 s) and,
+  before the last, Next chapter, as Android TV's Previous and Next.
+- **Next episode** (Next in the queue for a playlist or a collection) is in
+  the menu while something comes next, as Android TV's Next: the episode
+  keeps its place.
 
 Fast forward and rewind show seek previews in Roku's own bar: the server's
 previews of the file as a BIF file, which the Video node fetches beside the

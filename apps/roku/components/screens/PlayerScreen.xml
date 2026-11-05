@@ -4,9 +4,10 @@
      paused (with the clock and when it ends), Skip Intro and Skip
      Credits, Up Next before the end of an episode (and at its end),
      Pley's menu (Down: Subtitles, Audio, Quality, Subtitle sync,
-     Chapters, Sleep timer, Find subtitles…, Playback details), the sleep
-     timer's notice, Automatic's notice of a lower quality, "Reconnecting…"
-     while the server is out of reach, and what went wrong when it did. -->
+     Chapters, Previous chapter, Next chapter, Next episode, Sleep timer,
+     Find subtitles…, Playback details), the sleep timer's notice,
+     Automatic's notice of a lower quality, "Reconnecting…" while the
+     server is out of reach, and what went wrong when it did. -->
 <component name="PlayerScreen" extends="Group">
     <interface>
         <field id="route" type="string" />

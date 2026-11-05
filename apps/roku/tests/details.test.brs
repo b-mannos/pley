@@ -41,8 +41,30 @@ end sub
 
 sub test_details_chapters()
     chapters = detChapters(detailsTestFile())
-    tkEqual(chapters, [{ label: "1. Opening · 0:00", startMs: 0 }, { label: "2. Chapter 2 · 1:00", startMs: 60000 }])
+    tkEqual(chapters, [{ label: "Opening · 0:00", startMs: 0 }, { label: "Chapter 2 · 1:00", startMs: 60000 }])
     tkEqual(detChapterAt(chapters, 59999), 0)
     tkEqual(detChapterAt(chapters, 60000), 1)
     tkEqual(detChapters(invalid).Count(), 0)
+end sub
+
+sub test_details_number_chapters_named_by_their_time()
+    tkEqual(detChapterName("00:06:19.212", 3), "Chapter 3", "as mkvmerge names them")
+    tkEqual(detChapterName("6:19", 3), "Chapter 3")
+    tkEqual(detChapterName("01:02:03,500", 4), "Chapter 4")
+    tkEqual(detChapterName(" ", 1), "Chapter 1")
+    tkEqual(detChapterName(invalid, 2), "Chapter 2")
+    tkEqual(detChapterName("Act 2: 12:00 at Noon", 2), "Act 2: 12:00 at Noon", "a time inside a real name")
+    tkEqual(detChapterName("The Heist", 5), "The Heist")
+end sub
+
+sub test_details_next_and_previous_chapters_as_android_tv()
+    chapters = [{ label: "", startMs: 0 }, { label: "", startMs: 60000 }, { label: "", startMs: 120000 }]
+    tkEqual(detNextChapter(chapters, 30000), 1)
+    tkEqual(detNextChapter(chapters, 59500), 2, "one starting within a second is where it is already")
+    tkEqual(detNextChapter(chapters, 130000), -1, "the last chapter")
+    tkEqual(detPreviousChapterMs(chapters, 70000), 60000, "back to the start of the chapter playing")
+    tkEqual(detPreviousChapterMs(chapters, 62000), 0, "just into it: the one before")
+    tkEqual(detPreviousChapterMs(chapters, 2000), 0, "the first's start")
+    tkEqual(detPreviousChapterMs([{ label: "", startMs: 5000 }, { label: "", startMs: 60000 }], 3000), 0, "before the first: the file's start")
+    tkEqual(detPreviousChapterMs([], 3000), 0)
 end sub
