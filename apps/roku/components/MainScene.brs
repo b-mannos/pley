@@ -99,6 +99,10 @@ sub init()
     m.events.control = "run"
     m.api.observeField("ready", "onApiReady")
     m.api.control = "run"
+    ' The USB drive plugged in, for Home's menu and the drive's page.
+    m.drive = CreateObject("roSGNode", "DriveTask")
+    m.global.addFields({ drive: m.drive })
+    m.drive.control = "run"
 end sub
 
 ' The task listens: the first request can go.

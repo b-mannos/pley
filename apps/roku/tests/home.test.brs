@@ -85,4 +85,9 @@ sub test_home_menu_follows_the_other_tvs_rail()
         actions.Push(entry.action)
     end for
     tkEqual(actions, ["search", "home", "library", "playlists", "settings"], "no Collections without movies or shows")
+    actions = []
+    for each entry in homeMenu([movies], false, [], true, true)
+        actions.Push(entry.action)
+    end for
+    tkEqual(actions, ["search", "home", "library", "playlists", "collections", "nowPlaying", "drive", "settings"], "USB drive before Settings while one is plugged in")
 end sub

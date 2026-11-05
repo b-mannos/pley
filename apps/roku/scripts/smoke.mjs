@@ -13,7 +13,9 @@
 // Channels tab), Search (and its Discover row's
 // See all), Discover (a movie asked for, a show's seasons picked), the
 // managers' Requests (Approve, then Yours), a ready-to-watch notice on
-// Home whose movie's audio and subtitles are picked on its page, Settings, the
+// Home whose movie's audio and subtitles are picked on its page, a USB
+// drive plugged in (its page, a folder, an empty one, a video's menu and
+// its subtitle file picked) and pulled out, Settings, the
 // server gone and Try again, then signing out and in again on a server
 // too old for QR codes, requests and two-step sign-in. Then it starts
 // the app again, signed in,
@@ -29,6 +31,7 @@ import { createRequire } from "node:module";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { crc32 } from "node:zlib";
 import { startFixture } from "./fixture-server.mjs";
 
 const require = createRequire(import.meta.url);
@@ -227,8 +230,99 @@ async function drawnWithin(ms, test) {
   return test();
 }
 
+// A USB drive, as a zip brs-node mounts as ext1: once it is plugged in
+// (pluggedDrive) and unmounts once pulled out (pulledDrive), telling the app
+// as a Roku does (roFileSystemEvent). Its films are a few bytes each:
+// brs-node reads a whole file for its size, and plays no video.
+const DRIVE_FILES = [
+  ["Films/", null],
+  ["Films/Ad Astra (2019).mkv", "not a film"],
+  ["Films/Ad Astra (2019).en.srt", "1\r\n00:00:01,000 --> 00:00:04,000\r\nGround control.\r\n"],
+  ["Films/Ad Astra (2019).fr.vtt", "WEBVTT\n\n00:01.000 --> 00:04.000\nContrôle au sol.\n"],
+  ["Series/", null],
+  ["Series/Part 10.mkv", "not a film"],
+  ["Series/Part 2.mkv", "not a film"],
+  ["Series/Part 1.mkv", "not a film"],
+  ["Empty/", null],
+  ["System Volume Information/", null],
+  [".Spotlight-V100/", null],
+  ["Clip.mp4", "not a film"],
+  ["Big Buck Bunny.mov", "not a film"],
+  ["notes.txt", "not a film"],
+  ["._Clip.mp4", "not a film"],
+];
+// Where the walk's drive says Clip.mp4 resumes: 12:34 of 30:00.
+const DRIVE_RESUME = { path: "ext1:/Clip.mp4", positionMs: 754000, durationMs: 1800000 };
+
+// The files as a zip, stored as they are; folders end with "/".
+function driveZip(files) {
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  for (const [name, text] of files) {
+    const data = Buffer.from(text ?? "", "utf8");
+    const path = Buffer.from(name, "utf8");
+    const crc = text === null ? 0 : crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0x0800, 6); // names in UTF-8
+    local.writeUInt16LE(0x21, 12); // 1 January 1980
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(path.length, 26);
+    const entry = Buffer.alloc(46);
+    entry.writeUInt32LE(0x02014b50, 0);
+    entry.writeUInt16LE(20, 4);
+    entry.writeUInt16LE(20, 6);
+    entry.writeUInt16LE(0x0800, 8);
+    entry.writeUInt16LE(0x21, 14);
+    entry.writeUInt32LE(crc, 16);
+    entry.writeUInt32LE(data.length, 20);
+    entry.writeUInt32LE(data.length, 24);
+    entry.writeUInt16LE(path.length, 28);
+    entry.writeUInt32LE(text === null ? 0x10 : 0, 38); // a folder's attribute
+    entry.writeUInt32LE(offset, 42);
+    parts.push(local, path, data);
+    central.push(entry, path);
+    offset += local.length + path.length + data.length;
+  }
+  const directory = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  const zip = Buffer.concat([...parts, directory, end]);
+  return zip.buffer.slice(zip.byteOffset, zip.byteOffset + zip.byteLength);
+}
+
+// What the app keeps a video's place under (lib/Drive.brs's
+// driveResumeKey): four 16-bit hashes of its path, in hex.
+function driveResumeKey(path) {
+  const primes = [65521, 65519, 65497, 65479];
+  const factors = [31, 37, 131, 257];
+  const hashes = [0, 0, 0, 0];
+  for (const c of path) {
+    for (let j = 0; j < 4; j++) hashes[j] = (hashes[j] * factors[j] + c.codePointAt(0)) % primes[j];
+  }
+  return hashes.map((hash) => hash.toString(16).padStart(4, "0")).join("");
+}
+
+const driveVolume = new brs.SharedObject(brs.ExtVolInitialSize, brs.ExtVolMaxSize);
+function pluggedDrive() {
+  driveVolume.storeData(driveZip(DRIVE_FILES));
+  Atomics.store(control, brs.DataType.EVE, 1);
+}
+function pulledDrive() {
+  Atomics.store(control, brs.DataType.EVE, 0);
+}
+
 function launch(saved) {
   return brs.createPayloadFromFiles([], { developerId: "smoke", displayMode: "1080p", registry: saved }, undefined, root).then((payload) => {
+    payload.extZip = driveVolume.getBuffer();
     payload.extensions = [brs.SupportedExtension.SceneGraph];
     payload.device.extensions = new Map([[brs.SupportedExtension.SceneGraph, "brs-sg.node.js"]]);
     return brs.executeApp(payload, { sharedBuffer: shared });
@@ -270,6 +364,7 @@ const server = fixture.issuer;
 const running = launch(new Map([
   ["smoke.servers.list", JSON.stringify([{ url: server, name: "Fixture", id: "fixture", last_used: 1 }])],
   ["smoke.servers.current", server],
+  ["smoke.driveResume.points", JSON.stringify([[driveResumeKey(DRIVE_RESUME.path), DRIVE_RESUME.positionMs, DRIVE_RESUME.durationMs]])],
 ]));
 
 const mark = () => fixture.requests.length;
@@ -400,8 +495,106 @@ const seeAll = { after: -1 };
 const searched = { again: false };
 // A title's media info filled its panel.
 const mediaInfo = { shown: false };
+// The USB drive's page: its top listed, a video's resume bar, a folder
+// opened on its first video, an empty one saying so, a video's menu in the
+// player, and the drive pulled out.
+const drive = { listed: false, resume: false, folder: false, empty: false, menu: false, gone: false };
+
+// A pixel of the screen, in the app's 1920 by 1080.
+function pixel(x, y) {
+  const at = (Math.round(y * (frame.height / 1080)) * frame.width + Math.round(x * (frame.width / 1920))) * 4;
+  return [frame.data[at], frame.data[at + 1], frame.data[at + 2]];
+}
+const accent = ([r, g, b]) => r < 120 && g > 150 && b > 200;
+// The drive's page: line index focused (its bar in the accent, DriveRow.xml
+// at 96, 196, a line each 100 down).
+function driveLineFocused(index) {
+  return frame !== null && accent(pixel(99, 196 + index * 100 + 48));
+}
+// Line index drawn at all (its surface, lighter than the page).
+function driveLineShown(index) {
+  if (!frame) return false;
+  const [r, g, b] = pixel(700, 196 + index * 100 + 8);
+  return r >= 0x1c && g >= 0x20 && b >= 0x28;
+}
+// Line index's bar of how far through it is, filled in the accent.
+function driveResumeBar(index) {
+  return frame !== null && accent(pixel(220, 196 + index * 100 + 84));
+}
+// The page's message: its icon, muted, centred from top (under ".." or not).
+function driveMessageDrawn(top) {
+  if (!frame) return false;
+  for (let y = top; y < top + 128; y += 2) {
+    for (let x = 896; x < 1024; x += 2) {
+      const [r, g, b] = pixel(x, y);
+      if (r > 120 && g > 130 && b > 140 && r < 230) return true;
+    }
+  }
+  return false;
+}
+// Pley's menu in the player, its focused entry in the accent (from 1296, 168;
+// the focus reaches left of the text).
+function playerMenuDrawn() {
+  return frame !== null && accent(pixel(1276, 180));
+}
 // An episode's More went to its season.
 const season = { opened: false };
+
+// A USB drive plugged in: Home's menu has USB drive before Settings (the
+// eleventh entry, no music playing), its page lists the drive's folders and
+// videos (Clip.mp4 resuming at 12:34), Films opens on its film under "..",
+// whose player's menu offers the subtitle files beside it, one picked;
+// Empty says there is nothing to play; the drive pulled out, the page says
+// so, and Home's menu is as before. The page asks the server nothing: the
+// screen says what it shows.
+async function walkDrive() {
+  pluggedDrive();
+  await sleep(2000);
+  for (let attempt = 0; attempt < 3 && !drive.listed; attempt++) {
+    await press("left", 3);
+    await press("up", 11);
+    await press("down", 10);
+    await sleep(500);
+    shoot("home-drive");
+    const since = mark();
+    await press("select");
+    drive.listed = await drawnWithin(8000, () => driveLineFocused(0));
+    if (!drive.listed && seen(/^GET \/api\/auth\/me$/, since)) await press("back"); // Settings: the entry wasn't there yet
+  }
+  if (!drive.listed) throw new Error("no USB drive's page from Home's menu");
+  await sleep(1000);
+  drive.resume = driveResumeBar(4);
+  shoot("drive");
+  await press("down"); // Films
+  await press("select");
+  drive.folder = await drawnWithin(8000, () => driveLineFocused(1));
+  shoot("drive-folder");
+  await press("select"); // its film, in the player
+  await sleep(2500);
+  await press("down");
+  drive.menu = await drawnWithin(3000, playerMenuDrawn);
+  shoot("drive-player-menu");
+  await press("select"); // Subtitles: Off, English, French
+  await sleep(600);
+  await press("down");
+  await press("select"); // English
+  await sleep(800);
+  await press("back"); // out of the player
+  await sleep(1500);
+  await press("back"); // the drive's top, on Films
+  await sleep(1000);
+  await press("up"); // Empty
+  await press("select");
+  drive.empty = await drawnWithin(8000, () => driveLineFocused(0) && driveMessageDrawn(196 + 96 + 48));
+  shoot("drive-empty");
+  await press("back");
+  await sleep(1000);
+  pulledDrive();
+  drive.gone = await drawnWithin(10000, () => !driveLineShown(0) && driveMessageDrawn(300));
+  shoot("drive-gone");
+  await press("back"); // Home, its menu as before
+  await sleep(2000);
+}
 
 async function walk() {
   // A cold start of brs-node can take a while.
@@ -569,6 +762,7 @@ async function walk() {
   await press("back");
   await settle();
   seeAll.after = mark();
+  await walkDrive();
   // Live TV: the categories and the guide of every channel (a page, its
   // programmes for those channels), OK on what's on now watches the
   // channel, Up the next one (the server ends the first by the
@@ -1421,6 +1615,12 @@ const checks = [
   ["turned its subtitles off on its page, the audio picked there kept", fixture.streams.some((s) => s.item === 1011 && s.audio_index === 2 && s.subtitle_index === null)],
   ["played the version chosen on its page", fixture.playbacks.some((p) => p.item === 1011 && p.file_id === 10011)],
   ["showed a movie's media info from its More", mediaInfo.shown],
+  ["listed a USB drive's folders and videos, from Home's menu", drive.listed],
+  ["said where a drive's video resumes, with a bar of how far through", drive.resume],
+  ["opened a drive's folder on its first video, under ..", drive.folder],
+  ["offered a drive's video's subtitle files in the player's menu", drive.menu],
+  ["said a drive's empty folder has nothing to play", drive.empty],
+  ["said there is no USB drive once it was pulled out", drive.gone],
   ["went to an episode's season from its More", season.opened],
   ["played a movie's trailer from its page, from the start", fixture.playbacks.some((p) => p.item === 4000 && p.start_ms === 0)],
   ["asked for a show's More Like This and collections", asked(/^GET \/api\/items\/99\/related\?limit=20$/) && asked(/^GET \/api\/items\/99\/collections$/)],

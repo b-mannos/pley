@@ -50,7 +50,8 @@ in to with a code, choosing it in the browser.
 Home's menu, at the left, is in the order of the other TVs' rail: Search,
 Home, Discover and the requests (where the server has them), Live TV, the
 libraries, Playlists, Collections (every library's collections, a row
-each), Now Playing while music plays, and Settings.
+each), Now Playing while music plays, USB drive while one is plugged in
+([below](#videos-on-a-usb-drive)), and Settings.
 
 Beside it, as on Android TV and the native Samsung app, a hero shows the
 first of Continue Watching, else the newest title in the rows: its
@@ -598,6 +599,68 @@ Not offered: Approve's choices of profile, folder and seasons (on the web
 and phones; Approve here approves what was asked), bulk approve and
 decline, and the requests' settings (the web).
 
+### Videos on a USB drive
+
+On a Roku with a USB port (Roku Ultra, some Roku TVs), while a USB drive
+is plugged in, Home's menu has **USB drive** before Settings, as Android
+TV and the native Samsung app have it
+([ANDROID.md](ANDROID.md#videos-on-a-usb-drive),
+[TV_PLATFORMS.md](TV_PLATFORMS.md#videos-on-a-usb-drive)). Its page lists
+the drive's folders, then its videos, each sorted as a person sorts names
+("Part 2" before "Part 10"); hidden files, what Windows and macOS leave on
+a drive, and other files aren't shown. The videos are those Roku's Video
+node plays as they are: MKV and WebM (`streamFormat` `mkv`), MP4, M4V and
+MOV (`mp4`). The page's title is the name the drive was given (its volume
+label), else "USB drive"; under it, the folder's path ("/Films/2019"), at
+the drive's top "/" and how full the drive is. A folder opens over the one
+before, with ".." first to go back up. A video's line gives its kind, or
+where it resumes with a bar of how far through it is, and its size. No
+drive, an empty folder and one that can't be read say so in the middle of
+the page, under an icon. The page and the menu follow the drive as it is
+plugged in or pulled out.
+
+A video plays in Pley's player as it is, with no server, also while the
+server is out of reach: seeking, the sleep timer and Playback details are
+the same. What only a server does isn't there: converting, Quality, seek
+previews, Find subtitles…, saving track choices, the next episode,
+Continue Watching and the remote on other devices.
+
+- **The drive** is the first of Roku's USB volumes (`ext1:`, `ext2:`…,
+  `roFileSystem`'s `GetVolumeList`), read by the drive task
+  (`components/tasks/DriveTask`): `roFileSystem` works only in a Task, and
+  a large folder takes a while. It lists a folder with
+  `GetDirectoryListing`, then `Stat` for each name that shows, 5,000
+  entries at most, folders first. Roku tells of a drive plugged in or
+  pulled out (`roFileSystemEvent`), and the task looks again as the page
+  asks for a folder. Roku mounts USB drives read-only.
+- **The Video node** is given the file's path as its address
+  (`ext1:/Films/Ad Astra.mkv`, no `file://`), as Roku Media Player plays
+  a drive's files; Roku's documentation of the Video node names no local
+  address, only that `mp4` covers MOV and M4V and `mkv` WebM.
+- **Pley's menu** (Down) has Subtitles: Off, then the `.srt` and `.vtt`
+  files beside the video, named after it and then a language, "forced"
+  and SDH in any order (`Film.en.forced.srt`; `Film 2.srt` is Film 2's);
+  Audio, the Video node's tracks, where it has two or more; Subtitle sync
+  while a file shows; Sleep timer; Playback details. Subtitles start off.
+  The file's own subtitles are in Roku's options (\*), as the Roku shows
+  them.
+- **Subtitle files** are drawn by the app over the video, as Android draws
+  them: the drive task reads the file (2 MB at most) as UTF-16 or UTF-32
+  when it starts with that byte-order mark, UTF-16 without one when its
+  NUL bytes say so, else UTF-8, else Windows-1252, as the other apps do,
+  and hands the player its cues without their styling
+  (`components/lib/Drive.brs`). They show while the video plays, white
+  over a shadow at the foot of the picture; Roku's captions are off
+  meanwhile, and back as they were after. Subtitle sync moves them at once,
+  and is kept by the file's path.
+- **Where it stopped** is kept on the Roku by the file's path, as it pauses
+  and as the player closes (registry section `driveResume`, the latest 50
+  videos); past 95 % it was watched, and it starts over next time.
+- **What doesn't play** says so: a file the Roku can't play as it is ("a
+  file on a drive has no server to convert it"), a picture that doesn't
+  start in 12 s, and a video that stops, or stands still 12 s, once it
+  played (the drive pulled out).
+
 ### Settings
 
 Settings has the audio and subtitle defaults, Quality, Play the next
@@ -635,14 +698,16 @@ then shows it. It is kept on the Roku for each server.
 | `components/tasks/ApiTask` | The only code that talks to the server |
 | `components/tasks/DiscoveryTask` | `pley?` to UDP port 7539 (`apps/server/src/discovery.rs`) |
 | `components/tasks/EventsTask` | The server's event stream, on a socket |
+| `components/tasks/DriveTask` | The USB drive: which one is plugged in, a folder's lines, subtitle files' cues |
 | `components/lib/` | Plain BrightScript (no SceneGraph): the logic the unit tests cover |
 | `tests/` | Unit tests of `components/lib` |
 | `scripts/` | Test runner, smoke run, preview, bench, images |
-| `licenses/` | Notices for bundled third-party code (BrighterScript's `bslib.brs`) |
+| `licenses/` | Notices for bundled third-party code (BrighterScript's `bslib.brs`) and Lucide's icons |
 
 Rules the code keeps:
 
 - All HTTP goes through `ApiTask`; the render thread never makes a request.
+  The USB drive is read only in `DriveTask`.
 - The access token goes only in `Authorization: Bearer`, never in an
   address, including the Video node's and the pictures' HTTP agents.
 - No token goes to the server's address before the server there proves it
@@ -672,7 +737,7 @@ Rules the code keeps:
   Roku's sockets have no TLS.
 - Settings and views are kept in registry sections: `playback`,
   `subtitleSync`, `libraryViews`, `liveViews`, `household`, `startAs`,
-  `requests`, `searches`.
+  `requests`, `searches`, `driveResume`.
 - Sign-in asks for `library play playlists profiles`, and `requests
   approvals` when the server's metadata lists them in `scopes_supported`
   (an older server refuses scopes it doesn't know). A sign-in from before
@@ -722,6 +787,7 @@ bun run smoke     # the whole app in brs-node, against a fake server
 bun run bench     # the list work timed in brs-node
 bun run preview   # the app in a browser, the keyboard as its remote
 bun run images    # the nine-patch focus and watched-mark images
+bun run icons     # the USB drive page's icons, from Lucide's
 ```
 
 - **Preview** serves the app on http://127.0.0.1:8086/. Arrows, Enter
@@ -750,7 +816,9 @@ bun run images    # the nine-patch focus and watched-mark images
   under an album's "Disc 2", opens the See all of Search's Discover row,
   asks for a movie and three seasons from Discover, approves a request,
   opens a title from its ready-to-watch card on Home (which waited while
-  the requests showed), and checks that a server
+  the requests showed), plugs in a USB drive (a zip brs-node mounts as
+  `ext1:`) and walks its page, a folder, an empty one and a video's menu,
+  then pulls it out, and checks that a server
   without requests is asked nothing but the summary. The fake server also
   checks that a video's reports say which audio and subtitles play, and
   music's don't.
@@ -758,12 +826,17 @@ bun run images    # the nine-patch focus and watched-mark images
   Next and its wait at the end, the title as an item begins, reconnecting,
   stalls, media that ends short, the sleep timers' ends, picture
   subtitles shown in time and the remote's commands, which a player obeys
-  only once it plays, have only unit tests), sockets that connect but send
+  only once it plays, have only unit tests, as do a drive's subtitle files
+  drawn in time and a drive's video's place kept), a drive named "Zip
+  Storage", sockets that connect but send
   nothing (the event stream, and the casts it brings, have only unit
   tests), one fetch at a time, the odd dropped key, and no measure of a
   Roku's speed.
 - **Images:** `bun run images` runs `scripts/make_images.py` (Python
-  standard library). The home screen icons and splash screens come from
+  standard library). `bun run icons` draws the USB drive page's icons
+  (`images/icons/`) from the native Samsung app's copies of Lucide's, with
+  the canvas brs-node brings, and puts Lucide's licence in `licenses/`. The
+  home screen icons and splash screens come from
   `bun scripts/render-icons.mjs` at the repository root.
 
 ## Releases
@@ -785,5 +858,10 @@ The manifest asks for SceneGraph 1.2, which every Roku OS from 9 runs.
   playing, 30 s while paused), a channel when its stream breaks off.
 - Audio other than the file's default isn't played as it is.
 - Live TV has no channel numbers to type: Roku remotes have no number keys.
+- A USB drive's TS, M2TS, AVI and MPEG files aren't listed: the Video node
+  has no stream format for them (a transport stream only as HLS's
+  segments). The drive's make and model aren't given to apps, so its page
+  is titled with the drive's label. A size `Stat` gives as no positive
+  number isn't shown.
 - Not yet: an editable music queue.
 

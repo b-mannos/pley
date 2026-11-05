@@ -19,7 +19,8 @@
 ' stream again lower where it was once it stopped anyway
 ' (AutoQuality.brs). PGS subtitles are drawn over the video from
 ' the server's pictures (Pictures.brs), so the file plays as it is; the
-' server burns them in only where it can't make those.
+' server burns them in only where it can't make those. A video on a USB
+' drive (params.local) plays with no server at all (openLocal).
 
 sub init()
     m.video = m.top.findNode("video")
@@ -221,6 +222,19 @@ sub init()
     m.shortTries = 0
     m.detailsTimer = m.top.findNode("detailsTimer")
     m.detailsTimer.observeField("fire", "onDetailsTick")
+    ' A video on a USB drive (params.local: { path, title }; invalid for
+    ' the server's): the subtitle files beside it ([{ path, label }]), the
+    ' one drawn (-1 none) and its cues (invalid until they come), when it
+    ' was opened (clock ms), and the cue drawn over the video.
+    m.local = invalid
+    m.captionSet = ""
+    m.localSidecars = []
+    m.localSubtitle = -1
+    m.localCues = invalid
+    m.localFrom = 0
+    m.cue = m.top.findNode("cue")
+    m.cueText = m.top.findNode("cueText")
+    m.cueShadow = m.top.findNode("cueShadow")
     m.top.observeField("active", "onActive")
     m.top.observeField("serverStopped", "onServerStopped")
     m.top.observeField("playerCommand", "onPlayerCommand")
@@ -360,7 +374,243 @@ sub onActive()
     newTitle()
     m.bannerDue = true
     m.shortTries = 0
+    m.local = httpObject(params.local)
+    if m.local <> invalid
+        openLocal(Int(httpNumber(params.startMs, 0)))
+        return
+    end if
     open(params.itemId, Int(httpNumber(params.startMs, 0)), params.item, "auto")
+end sub
+
+' --- A video on a USB drive ---
+
+' Plays the video at m.local.path from startMs as it is, with no server
+' (docs/ROKU.md, "Videos on a USB drive"): no session, conversion,
+' quality, seek previews, Find subtitles…, saved track choices or next
+' episode. The subtitle files beside it are drawn here (Drive.brs's cues),
+' moved by subtitle sync as the server's are, and where it stopped is kept
+' on this Roku by its path.
+sub openLocal(startMs as integer)
+    path = httpString(m.local.path)
+    m.attempt = m.attempt + 1
+    ' The sleep timer's and the banner's: the video by its path, its title.
+    m.itemId = path
+    m.item = { kind: "video", title: httpString(m.local.title) }
+    m.info = invalid
+    m.sessionId = ""
+    m.startMs = startMs
+    m.positionMs = startMs
+    m.durationMs = 0
+    m.played = false
+    m.ended = false
+    m.next = invalid
+    m.markers = []
+    m.localSidecars = []
+    m.localSubtitle = -1
+    m.localCues = invalid
+    ' Its subtitle sync is kept by its path, as its place is.
+    m.syncKey = "drive|" + driveResumeKey(path)
+    m.syncMs = syncOffset(syncSection(), m.syncKey)
+    content = CreateObject("roSGNode", "ContentNode")
+    content.url = path
+    content.streamFormat = driveStreamFormat(path)
+    content.title = m.item.title
+    content.playStart = Int(startMs / 1000)
+    m.video.content = content
+    m.video.control = "play"
+    m.video.setFocus(true)
+    m.loading.visible = true
+    m.localFrom = m.clock.TotalMilliseconds()
+    m.stillAt = startMs
+    m.stillSince = m.localFrom
+    m.stallTimer.control = "start"
+    uiDrive({ op: "sidecars", path: path, attempt: m.attempt }, "onSidecars")
+end sub
+
+sub onSidecars(event as object)
+    if not isCurrent(event) then return
+    answer = event.getData()
+    if answer.ok then m.localSidecars = httpArray(answer.data.sidecars)
+end sub
+
+' Where the video stopped, kept on this Roku as it pauses and as the
+' player closes; past 95 % it was watched, and is forgotten. A video that
+' never played keeps what it had.
+sub keepLocal()
+    if m.local = invalid or not m.played then return
+    position = m.positionMs
+    seconds = m.video.position
+    if not m.ended and seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
+    driveRemember(CreateObject("roRegistrySection", "driveResume"), httpString(m.local.path), position, m.durationMs)
+end sub
+
+' Once a second: a picture that hasn't started in 12 s, or a playhead that
+' stood still 12 s once it played (the drive pulled out), says so, as on
+' Android TV and LG TVs.
+sub localStallTick(now as integer, state as string)
+    if m.notice.visible or m.ended then return
+    if not m.played
+        if now - m.localFrom >= playerStallMs() then localFailed("This video didn't start.")
+        return
+    end if
+    meant = state = "playing" or state = "buffering"
+    if not meant then m.stillSince = now
+    if not meant or now - m.stillSince < playerStallMs() then return
+    localFailed("This video stopped and didn't go on. The drive may have been pulled out.")
+end sub
+
+sub localFailed(text as string)
+    keepLocal()
+    m.video.control = "stop"
+    hideCue()
+    notice("Can't play this video", text, ["Back"])
+end sub
+
+' The subtitle file picked (-1: none) is read by the drive task and drawn;
+' Roku's own captions stay off meanwhile, so the file's own track doesn't
+' show over it. An audio track is the Video node's.
+sub pickLocal(kind as string, index as integer)
+    if kind = "audio"
+        tracks = httpArray(m.video.availableAudioTracks)
+        if index >= 0 and index < tracks.Count() then m.video.audioTrack = httpString(tracks[index].Track)
+        return
+    end if
+    m.localSubtitle = index
+    m.localCues = invalid
+    hideCue()
+    if index < 0 or index >= m.localSidecars.Count()
+        m.localSubtitle = -1
+        m.video.notificationInterval = 1
+        captionsBack()
+        return
+    end if
+    captionsTo("Off")
+    uiDrive({ op: "cues", path: m.localSidecars[index].path, at: index, attempt: m.attempt }, "onCues")
+end sub
+
+sub onCues(event as object)
+    if not isCurrent(event) or event.getRoSGNode().spec.at <> m.localSubtitle then return
+    answer = event.getData()
+    if not answer.ok
+        m.localSubtitle = -1
+        captionsBack()
+        showToast(httpString(answer.message))
+        return
+    end if
+    m.localCues = httpArray(answer.data.cues)
+    m.video.notificationInterval = picNotifySeconds()
+    drawCue()
+end sub
+
+' The cues showing now, moved by subtitle sync, while the video plays:
+' paused or seeking, Roku's bar has the bottom of the screen.
+sub drawCue()
+    if m.localCues = invalid then return
+    text = ""
+    if m.video.state = "playing" then text = driveCueText(m.localCues, m.positionMs, m.syncMs)
+    if text = m.cueText.text and m.cue.visible = (text <> "") then return
+    m.cueText.text = text
+    m.cueShadow.text = text
+    m.cue.visible = text <> ""
+end sub
+
+sub hideCue()
+    m.cueText.text = ""
+    m.cueShadow.text = ""
+    m.cue.visible = false
+end sub
+
+' Pley's menu for a video on a drive: Subtitles (the files beside it) and
+' Audio (the Video node's tracks, where there are two or more), Subtitle
+' sync while a file shows, Sleep timer and Playback details.
+sub openLocalMenu()
+    hideSkip()
+    m.menuKind = "menu"
+    m.menuTitle.text = "Playback"
+    items = []
+    m.menuActions = []
+    if m.localSidecars.Count() > 0
+        label = "Off"
+        if m.localSubtitle >= 0 then label = m.localSidecars[m.localSubtitle].label
+        items.Push({ title: "Subtitles: " + label })
+        m.menuActions.Push("subtitles")
+    end if
+    audio = localAudio()
+    if audio.labels.Count() > 1
+        items.Push({ title: "Audio: " + audio.labels[audio.current] })
+        m.menuActions.Push("audio")
+    end if
+    if m.localSubtitle >= 0
+        items.Push({ title: "Subtitle sync: " + syncLabel(m.syncMs) })
+        m.menuActions.Push("sync")
+    end if
+    items.Push({ title: "Sleep timer: " + sleepLabel(m.sleep, sleepNow(), playingKind()) })
+    m.menuActions.Push("sleep")
+    items.Push({ title: "Playback details" })
+    m.menuActions.Push("details")
+    at = m.menuList.itemFocused
+    m.menuList.content = nodesContent(items)
+    if at > 0 and at < items.Count() then m.menuList.jumpToItem = at
+    m.menuChoices.visible = false
+    m.menuText.visible = false
+    m.menuList.visible = true
+    m.menuHint.text = "Back closes this."
+    m.menu.visible = true
+    m.menuList.setFocus(true)
+end sub
+
+' The Video node's audio tracks: { labels, current }.
+function localAudio() as object
+    labels = []
+    current = 0
+    playing = httpString(m.video.currentAudioTrack)
+    tracks = httpArray(m.video.availableAudioTracks)
+    for i = 0 to tracks.Count() - 1
+        labels.Push(driveAudioName(tracks[i], i))
+        if httpString(tracks[i].Track) = playing then current = i
+    end for
+    return { labels: labels, current: current }
+end function
+
+' The subtitle files (Off first) or the audio tracks, the one playing
+' checked.
+sub openLocalTracks(kind as string)
+    m.menuKind = kind
+    items = []
+    m.menuValues = []
+    if kind = "audio"
+        m.menuTitle.text = "Audio"
+        audio = localAudio()
+        for i = 0 to audio.labels.Count() - 1
+            items.Push({ title: audio.labels[i] })
+            m.menuValues.Push(i)
+        end for
+        m.trackCurrent = audio.current
+        showMenuChoices(items, audio.current)
+        return
+    end if
+    m.menuTitle.text = "Subtitles"
+    items.Push({ title: "Off" })
+    m.menuValues.Push(-1)
+    for i = 0 to m.localSidecars.Count() - 1
+        items.Push({ title: m.localSidecars[i].label })
+        m.menuValues.Push(i)
+    end for
+    m.trackCurrent = m.localSubtitle
+    showMenuChoices(items, m.localSubtitle + 1)
+end sub
+
+' What plays: the file as it is, from the drive.
+sub showLocalDetails()
+    lines = ["Playing the file as it is", "From the USB drive, with no server", ""]
+    lines.Push("File: " + driveFileName(httpString(m.local.path)))
+    video = detCodec(m.video.videoFormat)
+    if video <> "" then lines.Push("Video: " + video)
+    audio = detCodec(m.video.audioFormat)
+    if audio <> "" then lines.Push("Audio: " + audio)
+    if m.localSubtitle >= 0 then lines.Push("Subtitles: " + m.localSidecars[m.localSubtitle].label + " · Drawn by Pley")
+    if m.durationMs > 0 then lines.Push("Position: " + fmtClock(m.positionMs) + " of " + fmtClock(m.durationMs))
+    m.menuText.text = lines.Join(Chr(10))
 end sub
 
 ' Another title: Automatic starts from the setting again.
@@ -815,7 +1065,7 @@ end function
 ' Pley's menu is offered while a stream plays; subtitle sync in it for a
 ' file with text subtitles, or picture ones drawn here.
 function menuOffered() as boolean
-    return m.info <> invalid and not m.notice.visible and not m.upNext.visible and not m.sync.visible
+    return (m.info <> invalid or m.local <> invalid) and not m.notice.visible and not m.upNext.visible and not m.sync.visible
 end function
 
 sub openSync()
@@ -830,8 +1080,9 @@ end sub
 sub stepSync(byMs as integer)
     m.syncMs = syncClamp(m.syncMs + byMs)
     m.syncValue.text = syncLabel(m.syncMs)
-    ' Pictures drawn here move at once.
+    ' Pictures and a drive's subtitles drawn here move at once.
     drawPictures()
+    drawCue()
 end sub
 
 sub onSyncButton(event as object)
@@ -877,13 +1128,20 @@ end sub
 ' and they go back as they were after, unless the person changed them
 ' meanwhile.
 sub captionsOn()
+    captionsTo("On")
+end sub
+
+' Captions on, or off while a drive's subtitles are drawn here, until
+' captionsBack.
+sub captionsTo(mode as string)
     if m.captionMode = invalid then m.captionMode = m.video.globalCaptionMode
-    m.video.globalCaptionMode = "On"
+    m.captionSet = mode
+    m.video.globalCaptionMode = mode
 end sub
 
 sub captionsBack()
     if m.captionMode = invalid then return
-    if m.video.globalCaptionMode = "On" then m.video.globalCaptionMode = m.captionMode
+    if m.video.globalCaptionMode = m.captionSet then m.video.globalCaptionMode = m.captionMode
     m.captionMode = invalid
 end sub
 
@@ -970,6 +1228,7 @@ sub onState(event as object)
     state = event.getData()
     watchState(state)
     drawPictures()
+    drawCue()
     ' The playhead is read again from now: a pause, or a seek's wait, isn't
     ' time it should have moved in. The last reading stays, so a seek made
     ' here (Skip intro, Chapters) moves the next one away from it.
@@ -1001,11 +1260,13 @@ sub onState(event as object)
     if state = "paused"
         m.paused = true
         report("paused")
+        keepLocal()
         m.pausedTimer.control = "start"
     else if state = "finished"
         ' Media that falls short of the title (resumed past the end of what
-        ' the file or stream holds) isn't its end.
-        if playerEndedShort(m.positionMs, m.startMs, m.durationMs)
+        ' the file or stream holds) isn't its end. A drive's video has no
+        ' title but itself.
+        if m.local = invalid and playerEndedShort(m.positionMs, m.startMs, m.durationMs)
             endedShort()
         else
             ended()
@@ -1020,6 +1281,8 @@ sub onPosition(event as object)
     if seconds = invalid then return
     m.positionMs = Int(seconds * 1000)
     now = m.clock.TotalMilliseconds()
+    ' A drive's video: its length as the Video node reads it.
+    if m.local <> invalid and m.video.duration <> invalid and m.video.duration > 0 then m.durationMs = Int(m.video.duration * 1000)
     if m.watch <> invalid then aqPosition(m.watch, now, m.positionMs)
     if m.positionMs <> m.stillAt
         m.stillAt = m.positionMs
@@ -1041,6 +1304,7 @@ sub onPosition(event as object)
     updateSkip()
     followPictures()
     drawPictures()
+    drawCue()
 end sub
 
 ' Skip Intro or Skip Credits while the playhead is in one and the video
@@ -1212,6 +1476,8 @@ sub finish()
     m.toastTimer.control = "stop"
     m.toast.visible = false
     stopPictures()
+    keepLocal()
+    hideCue()
     if m.sessionId <> ""
         report("stopped")
         endSession()
@@ -1238,6 +1504,15 @@ sub stopped(data as dynamic)
 end sub
 
 sub broken()
+    ' A drive's video has no server to convert it, or to ask about it.
+    if m.local <> invalid
+        if m.played
+            localFailed("This video stopped. The drive may have been pulled out.")
+        else
+            localFailed("This Roku can't play this file as it is, and a file on a drive has no server to convert it.")
+        end if
+        return
+    end if
     if playerErrorKind(m.video.errorCode, m.video.errorInfo, m.played) = "media"
         ' The original doesn't play on this Roku after all: converted, once.
         if m.info <> invalid and httpString(m.info.method) <> "transcode" and m.mode <> "transcode"
@@ -1319,6 +1594,10 @@ end sub
 sub onStallTick()
     now = m.clock.TotalMilliseconds()
     state = m.video.state
+    if m.local <> invalid
+        localStallTick(now, state)
+        return
+    end if
     meant = m.played and not m.ended and m.reconnectFrom < 0 and not m.notice.visible and (state = "playing" or state = "buffering")
     if not meant then m.stillSince = now
     if not meant or now - m.stillSince < playerStallMs() then return
@@ -1578,6 +1857,10 @@ end function
 ' sync for a file with text subtitles or pictures drawn here, Chapters for
 ' a file with two or more, Sleep timer, Find subtitles…, Playback details.
 sub openMenu()
+    if m.local <> invalid
+        openLocalMenu()
+        return
+    end if
     hideSkip()
     m.menuKind = "menu"
     m.menuTitle.text = "Playback"
@@ -1689,6 +1972,10 @@ end sub
 ' The file's subtitles (Off first) or audio (Automatic first), as on the
 ' title's page, the one playing checked.
 sub openTracks(kind as string)
+    if m.local <> invalid
+        openLocalTracks(kind)
+        return
+    end if
     tracks = mediaTracks(playingFile())
     m.menuKind = kind
     if kind = "audio"
@@ -1826,7 +2113,12 @@ sub onMenuChoice(event as object)
         return
     end if
     if kind = "subtitles" or kind = "audio"
-        if value <> m.trackCurrent then pickTrack(kind, value)
+        if value = m.trackCurrent then return
+        if m.local <> invalid
+            pickLocal(kind, value)
+        else
+            pickTrack(kind, value)
+        end if
         return
     end if
     if kind = "sleep"
@@ -1955,6 +2247,10 @@ sub onDetails(event as object)
 end sub
 
 sub showDetails(live as dynamic)
+    if m.local <> invalid
+        showLocalDetails()
+        return
+    end if
     if m.info = invalid then return
     details = detPlayback(m.info, playingFile(), m.audioPlaying, live, m.positionMs)
     lines = [details.method]

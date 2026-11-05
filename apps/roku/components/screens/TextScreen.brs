@@ -32,5 +32,5 @@ end function
 
 function licences() as string
     own = "Pley for Roku is free software under the GNU Affero General Public License, version 3 (AGPL-3.0-only)."
-    return own + Chr(10) + Chr(10) + ReadAsciiFile("pkg:/licenses/bslib.txt")
+    return own + Chr(10) + Chr(10) + ReadAsciiFile("pkg:/licenses/bslib.txt") + Chr(10) + Chr(10) + ReadAsciiFile("pkg:/licenses/lucide.txt")
 end function

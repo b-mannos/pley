@@ -202,8 +202,9 @@ end function
 ' and the requests (requests: their entries, from the summary), Live TV
 ' where the server has it, the libraries, Playlists, Collections where
 ' there is a library of movies or shows (the page says when none has any),
-' Now Playing while music plays, and Settings last. [{ title, action, library, count, danger }].
-function homeMenu(libraries as object, live as boolean, requests as object, music as boolean) as object
+' Now Playing while music plays, USB drive while one is plugged in (drive),
+' and Settings last. [{ title, action, library, count, danger }].
+function homeMenu(libraries as object, live as boolean, requests as object, music as boolean, drive = false as boolean) as object
     entries = [{ title: "Search", action: "search" }, { title: "Home", action: "home" }]
     for each entry in requests
         entries.Push(entry)
@@ -217,6 +218,7 @@ function homeMenu(libraries as object, live as boolean, requests as object, musi
     entries.Push({ title: "Playlists", action: "playlists" })
     if videos then entries.Push({ title: "Collections", action: "collections" })
     if music then entries.Push({ title: "Now playing", action: "nowPlaying" })
+    if drive then entries.Push({ title: "USB drive", action: "drive" })
     entries.Push({ title: "Settings", action: "settings" })
     return entries
 end function

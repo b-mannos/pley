@@ -67,8 +67,21 @@ sub init()
     m.remoteSeen = 0
     m.top.observeField("active", "onActive")
     m.top.observeField("refresh", "onRefresh")
+    ' A USB drive plugged in or pulled out: its entry comes or goes.
+    m.driveShown = false
+    m.global.drive.observeFieldScoped("drive", "onDrive")
     buildMenu()
 end sub
+
+sub onDrive()
+    if driveHere() <> m.driveShown then buildMenu()
+end sub
+
+' Whether a USB drive is plugged in (the drive task's word).
+function driveHere() as boolean
+    drive = m.global.drive.drive
+    return drive <> invalid and httpString(drive.volume) <> ""
+end function
 
 sub onActive()
     if not m.top.active
@@ -213,7 +226,8 @@ end sub
 sub buildMenu()
     m.requestEntries = requestEntries()
     m.musicShown = m.global.music.state <> "stopped"
-    entries = homeMenu(m.libraries, m.live, m.requestEntries, m.musicShown)
+    m.driveShown = driveHere()
+    entries = homeMenu(m.libraries, m.live, m.requestEntries, m.musicShown, m.driveShown)
     items = []
     m.menuActions = []
     ' The library of each entry (invalid for the others).
@@ -604,6 +618,8 @@ sub onMenu(event as object)
         uiNavigate({ to: "requests" })
     else if action = "settings"
         uiNavigate({ to: "settings" })
+    else if action = "drive"
+        uiNavigate({ to: "drive", params: { folder: "" } })
     else if m.global.music.state = "stopped"
         ' The music ended meanwhile.
         buildMenu()

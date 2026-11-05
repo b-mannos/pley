@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Home: the menu on the left (Search, Home, Discover and the requests
      where the server has them, Live TV, the libraries, Playlists,
-     Collections, Now Playing, Settings), then, as on Android TV and the
-     native Samsung app, a hero for the first of Continue Watching (its
-     backdrop, what it is, Resume or Play, From start, Info and the
-     watched mark) over the server's home rows (GET /api/hubs/home). In
-     the rows, an info block about the title focus rests on takes the
-     hero's place, and the backdrop follows it. -->
+     Collections, Now Playing, USB drive, Settings), then, as on Android
+     TV and the native Samsung app, a hero for the first of Continue
+     Watching (its backdrop, what it is, Resume or Play, From start, Info
+     and the watched mark) over the server's home rows (GET
+     /api/hubs/home). In the rows, an info block about the title focus
+     rests on takes the hero's place, and the backdrop follows it. -->
 <component name="HomeScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
