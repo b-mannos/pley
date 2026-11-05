@@ -111,9 +111,10 @@ sub uiLaunched()
 end sub
 
 ' A toast at the top right, gone by itself (MainScene's showToast): what an
-' action did, or, with isError, why it didn't.
-sub uiToast(text as string, isError = false as boolean)
-    m.top.getScene().toast = { text: text, error: isError }
+' action did, or, with isError, why it didn't; for seconds when given
+' (3.5 s, an error 6 s, otherwise).
+sub uiToast(text as string, isError = false as boolean, seconds = 0 as float)
+    m.top.getScene().toast = { text: text, error: isError, seconds: seconds }
 end sub
 
 ' A message with an OK button.

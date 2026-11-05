@@ -1119,7 +1119,8 @@ sub onState(event as object)
         end if
         if m.tracksFrom < 0 then m.tracksFrom = m.clock.TotalMilliseconds() + tracksSettleMs()
         if m.playNotice <> ""
-            uiToast(m.playNotice)
+            ' As long as Android TV's: it says where the way back is.
+            uiToast(m.playNotice, false, 6)
             m.playNotice = ""
         end if
         if m.paused or m.reportAtPlay

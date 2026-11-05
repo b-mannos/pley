@@ -827,7 +827,9 @@ end sub
 sub onToast()
     toast = m.top.toast
     if toast = invalid or toast.text = invalid or toast.text = "" then return
-    showToast(toast.text, toast.error = true, 0)
+    seconds = 0
+    if toast.seconds <> invalid then seconds = toast.seconds
+    showToast(toast.text, toast.error = true, seconds)
 end sub
 
 ' The toast at the top right, inside the TV's safe area, as Android TV's
