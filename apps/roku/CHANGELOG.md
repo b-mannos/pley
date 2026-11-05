@@ -237,6 +237,24 @@ describes how they are made.
 - Music keeps its queue at its end, when a track can't be played, when
   it's stopped from elsewhere, and while a video or a channel plays; Play
   goes on from there.
+- A server found by Search this network stays listed when the broadcast
+  answers again.
+- Two quick changes to the audio and subtitle defaults keep the later one.
+- "Pley is offline" no longer comes and goes when something else answers
+  at the server's address.
+- Retry and Clear filters keep the focus, so the remote goes on working
+  after them, and a show's season tabs slide to keep the one in focus in
+  view.
+
+### Security
+
+- Choosing a saved server, then another before the first one answers, no
+  longer opens Home as the second server's profile past its PIN.
+- Pictures and music are asked for only at the server's own address, so
+  an address elsewhere in an answer never gets the sign-in's token.
+- Search this network asks only a private network's addresses, never a
+  provider's shared ones, reads at most 4 KB of each answer, and keeps a
+  server's id only as letters, digits and dashes.
 
 ## [0.1.5] - 2026-11-04
 
