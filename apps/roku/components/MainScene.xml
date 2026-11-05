@@ -19,9 +19,10 @@
              screens showing them follow. -->
         <field id="changes" type="array" />
         <field id="changeCount" type="integer" />
-        <!-- "Who's watching?" was answered in this launch (a profile
-             chosen, a PIN checked, or a sign-in with a code): the PIN of
-             the profile signed in isn't asked again. -->
+        <!-- "Who's watching?" was answered in this launch, on the server in
+             use (a profile chosen, a PIN checked, or a sign-in with a
+             code): the PIN of the profile signed in isn't asked again.
+             Choosing a server starts it over. -->
         <field id="profileChosen" type="boolean" />
         <!-- The ids in My List as Home last saw them, for the Options key. -->
         <field id="myList" type="array" />

@@ -120,11 +120,16 @@ sub onServerUsed(event as object)
         return
     end if
     setStatus("", false)
-    if answer.data.signedIn
-        uiNavigate({ to: "home", reset: true })
-    else
+    data = answer.data
+    if not data.signedIn
         uiNavigate({ to: "link" })
+        return
     end if
+    ' A server chosen is a start on it, as on the other TVs: "Who's
+    ' watching?" as the app's start asks it, and the PIN of the profile
+    ' signed in there, whatever was answered on the server before.
+    m.top.getScene().profileChosen = false
+    uiNavigate({ to: data.screen, reset: true, params: { pin: httpTrue(data.pin) } })
 end sub
 
 sub onAction(event as object)

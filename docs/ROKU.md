@@ -39,7 +39,9 @@ hasn't yet. It asks "Who's watching?" at start when the household has more
 than one profile, unless Settings' Always start as names one. Going on
 there as the profile it was left on asks that profile's PIN when it has
 one, as on the other TVs, and so does Always start as: the start opens on
-that profile's PIN pad, and Cancel shows the other profiles. A PIN is
+that profile's PIN pad, and Cancel shows the other profiles. Choosing a
+saved server (Settings' Switch server too) is a start on it: it asks the
+same, whatever was answered on the server before. A PIN is
 typed on Roku's own PIN pad: a wrong one, or too many, asks again saying
 why; a PIN locked after too many wrong tries is said on the screen, since
 Roku's pad can't be dimmed. A profile that needs its password is signed

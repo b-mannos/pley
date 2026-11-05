@@ -43,3 +43,18 @@ sub test_servers_choose_the_first_screen()
     tkEqual(serversStartScreen("http://nas:7539", true, true), "profiles", "the household's profiles first")
     tkEqual(serversStartScreen("http://nas:7539", false, true), "link")
 end sub
+
+' A server chosen leads where a start on it would: "Who's watching?" for a
+' household of several, on the PIN pad of the profile kept as Always start
+' as when it has a PIN, never straight to Home past it.
+sub test_servers_start_on_a_chosen_server()
+    scope = "library play playlists profiles"
+    household = { count: 2, ids: [1, 2], pin: 1 }
+    tkEqual(serversStart("http://nas:7539", false, "ask"), { screen: "link", pin: false }, "not signed in there")
+    tkEqual(serversStart("http://nas:7539", true, profAtStart(scope, household, 0)), { screen: "profiles", pin: false }, "a household of two")
+    tkEqual(serversStart("http://nas:7539", true, profAtStart(scope, household, 2)), { screen: "profiles", pin: true }, "Always start as, with a PIN")
+    tkEqual(serversStart("http://nas:7539", true, profAtStart(scope, { count: 2, ids: [1, 2], pin: 0 }, 2)), { screen: "home", pin: false }, "Always start as, no PIN")
+    tkEqual(serversStart("http://nas:7539", true, profAtStart(scope, { count: 1, ids: [1], pin: 1 }, 0)), { screen: "home", pin: false }, "one profile")
+    tkEqual(serversStart("http://nas:7539", true, profAtStart("library play", household, 0)), { screen: "home", pin: false }, "a sign-in that can't switch")
+    tkEqual(serversStart("", false, ""), { screen: "servers", pin: false })
+end sub

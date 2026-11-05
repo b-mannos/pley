@@ -763,19 +763,24 @@ sub apiBoot(request as object)
         end for
         apiSelect(current, name)
     end if
-    ' "Who's watching?" first when the household had more than one profile,
-    ' unless Settings' "Always start as" names one of them, which still
-    ' opens it on the PIN pad of the profile signed in when that one has a
-    ' PIN (pin).
+    start = apiStartScreen()
+    apiAnswer(request, apiOk({ screen: start.screen, pin: start.pin, servers: servers }))
+end sub
+
+' The first screen on the server in use, at a start or once it is chosen
+' (serversStart): "Who's watching?" first when the household had more than
+' one profile, unless Settings' "Always start as" names one of them, which
+' still opens it on the PIN pad of the profile signed in when that one has
+' a PIN (pin).
+function apiStartScreen() as object
     atStart = ""
     if m.tokens <> invalid
         household = profKeptHousehold(CreateObject("roRegistrySection", "household"), m.server)
         startAs = profStartAs(CreateObject("roRegistrySection", "startAs"), m.server)
         atStart = profAtStart(m.tokens.scope, household, startAs)
     end if
-    screen = serversStartScreen(m.server, m.tokens <> invalid, atStart <> "")
-    apiAnswer(request, apiOk({ screen: screen, pin: atStart = "pin", servers: servers }))
-end sub
+    return serversStart(m.server, m.tokens <> invalid, atStart)
+end function
 
 ' Makes url the server the screens talk to, signed in when it has tokens.
 sub apiSelect(url as string, name as string)
@@ -848,7 +853,10 @@ sub apiUseServer(request as object, spec as object)
     m.serversSection.Write("current", url)
     m.serversSection.Flush()
     apiSelect(url, name)
-    apiAnswer(request, apiOk({ signedIn: m.tokens <> invalid }))
+    ' Where the server leads, as at a start: sign-in, "Who's watching?"
+    ' (pin: on the PIN pad of the profile signed in) or Home.
+    start = apiStartScreen()
+    apiAnswer(request, apiOk({ signedIn: m.tokens <> invalid, screen: start.screen, pin: start.pin }))
 end sub
 
 sub apiForgetServer(request as object, spec as object)
