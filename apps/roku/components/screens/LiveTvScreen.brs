@@ -72,7 +72,11 @@ sub init()
     m.loadedTo = 0
     m.page = invalid
     m.lastRow = -1
-    m.jumped = false
+    ' The row the guide's focus was sent to and when (m.span's ms): the
+    ' focus moves on its way there (new content starts at row 0) are
+    ' ours, not a wrap round the rows.
+    m.jumpTo = -1
+    m.jumpAt = 0
     m.asked = 0
     m.loading = false
     ' Where the last Back brought the guide back to now (backToNow).
@@ -612,8 +616,7 @@ sub onGuide(event as object)
         at = liveIndexOf(data.channels, spec.focusId)
         if at >= 0 then row = at
     end if
-    m.jumped = true
-    m.lastRow = row
+    jumpGuideTo(row)
     m.guide.contentStartTime = m.guideStart
     ' Its logos too.
     m.guide.setHttpAgent(m.top.getScene().getHttpAgent())
@@ -684,9 +687,10 @@ sub onProgramFocused()
         wasRow = m.lastRow
         m.lastRow = row
         edge = ""
-        if m.jumped
-            m.jumped = false
+        if m.jumpTo >= 0 and m.span.TotalMilliseconds() - m.jumpAt < 1000
+            if row = m.jumpTo then m.jumpTo = -1
         else
+            m.jumpTo = -1
             edge = liveGuideEdge(m.page.offset, count, m.page.total, wasRow, row)
         end if
         if edge = "last"
@@ -717,10 +721,17 @@ end sub
 ' at the time shown.
 sub holdGuideAt(row as integer)
     left = guideLeft()
-    m.jumped = true
-    m.lastRow = row
+    jumpGuideTo(row)
     m.guide.jumpToChannel = row
     m.guide.leftEdgeTargetTime = left
+end sub
+
+' The guide's focus is about to be sent to row: the moves it makes on its
+' way there, within a second, aren't the remote's.
+sub jumpGuideTo(row as integer)
+    m.jumpTo = row
+    m.jumpAt = m.span.TotalMilliseconds()
+    m.lastRow = row
 end sub
 
 ' The channel and programme in focus: { channel, program } (program
