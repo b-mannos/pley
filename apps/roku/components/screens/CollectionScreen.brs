@@ -86,7 +86,7 @@ sub onCollection(event as object)
             m.message.title = "Couldn't load this collection"
             m.message.text = answer.message
             m.message.action = "Retry"
-            if m.top.hasFocus() then m.message.setFocus(true)
+            if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
         end if
         return
     end if
@@ -111,7 +111,7 @@ sub onCollection(event as object)
     m.column.visible = true
     if m.grid.isInFocusChain() and not m.grid.visible then focusGrid(false)
     ' Only while this screen has the focus: a dialog over it keeps it.
-    if m.top.hasFocus() and m.buttons.visible then m.buttons.setFocus(true)
+    if (m.top.hasFocus() or m.message.isInFocusChain()) and m.buttons.visible then m.buttons.setFocus(true)
 end sub
 
 sub onLibraries(event as object)
@@ -213,7 +213,7 @@ sub onOnDeck(event as object)
     m.picking = false
     answer = event.getData()
     if not answer.ok
-        if not uiFailed(answer) then uiMessage("That didn't work", [answer.message])
+        if not uiFailed(answer) then uiToast(answer.message, true)
         return
     end if
     episode = invalid
@@ -221,7 +221,7 @@ sub onOnDeck(event as object)
     ' Left meanwhile: nothing starts behind the screen now on top.
     if not m.top.active then return
     if episode = invalid
-        uiMessage("Nothing to play", ["This show has no episodes yet."])
+        uiToast("Nothing to play")
         return
     end if
     tile = contentTile(episode, m.global.session.server, true)

@@ -36,8 +36,14 @@ sub onText()
     m.top.removeChildrenIndex(m.top.getChildCount(), 0)
     m.top.appendChildren(shown)
     m.top.itemSpacings = spacings
-    ' Taken out and put back, the button would lose the focus.
-    if focused and m.top.action <> "" then m.button.setFocus(true)
+    ' Taken out and put back, the button would lose the focus; taken out
+    ' for good, the message keeps it, so the page still has it and can
+    ' give it on (to its titles once they come).
+    if focused and m.top.action <> ""
+        m.button.setFocus(true)
+    else if focused
+        m.top.setFocus(true)
+    end if
 end sub
 
 sub onFocusMoved()

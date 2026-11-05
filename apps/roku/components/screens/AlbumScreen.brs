@@ -42,12 +42,18 @@ sub init()
 end sub
 
 ' What didn't load, the server's sentence, and Retry, as on Android TV.
+' With the tracks showing, they stay, and a toast says why the rest
+' didn't come.
 sub showFailure(answer as object)
+    if m.tracksLoaded
+        uiToast(answer.message, true)
+        return
+    end if
     m.message.title = "Couldn't load this album"
     m.message.text = answer.message
     m.message.action = "Retry"
     m.message.visible = true
-    if m.top.hasFocus() then m.message.setFocus(true)
+    if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
 end sub
 
 ' Retry: what didn't come is asked again.

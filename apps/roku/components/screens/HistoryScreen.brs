@@ -65,7 +65,7 @@ sub onPage(event as object)
             m.message.title = "Couldn't load your watch history"
             m.message.text = answer.message
             m.message.action = "Retry"
-            if m.top.hasFocus() then m.message.setFocus(true)
+            if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
         end if
         return
     end if
@@ -82,7 +82,7 @@ sub onPage(event as object)
         return
     end if
     m.message.visible = false
-    if m.top.hasFocus() then m.entries.setFocus(true)
+    if m.top.hasFocus() or m.message.isInFocusChain() then m.entries.setFocus(true)
 end sub
 
 sub showCount()

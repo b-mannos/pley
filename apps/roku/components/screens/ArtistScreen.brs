@@ -72,12 +72,18 @@ sub ask()
 end sub
 
 ' What didn't load, the server's sentence, and Retry, as on Android TV.
+' With the albums showing, they stay, and a toast says why the rest
+' didn't come.
 sub showFailure(answer as object)
+    if m.albums.content <> invalid and m.albums.content.getChildCount() > 0
+        uiToast(answer.message, true)
+        return
+    end if
     m.message.title = "Couldn't load this artist"
     m.message.text = answer.message
     m.message.action = "Retry"
     m.message.visible = true
-    if m.top.hasFocus() then m.message.setFocus(true)
+    if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
 end sub
 
 sub onRetry()
@@ -111,6 +117,12 @@ sub onArtist(event as object)
     m.picture.uri = contentTileImage(m.artist, server, false, 320)
     m.backdrop.setHttpAgent(agent)
     m.backdrop.uri = contentTileImage(m.artist, server, true, contentBackdropWidth())
+    ' Retried with the albums already in: the page is whole again, and the
+    ' buttons take the focus Retry gave the page.
+    if m.albumIds <> invalid and m.albums.content <> invalid
+        m.message.visible = false
+        if (m.top.hasFocus() or m.message.isInFocusChain()) and m.buttons.visible then m.buttons.setFocus(true)
+    end if
 end sub
 
 sub onAlbums(event as object)
@@ -126,7 +138,7 @@ sub onAlbums(event as object)
         m.message.title = ""
         m.message.action = ""
         m.message.text = "No albums found."
-        if m.top.hasFocus() and m.buttons.visible then m.buttons.setFocus(true)
+        if (m.top.hasFocus() or m.message.isInFocusChain()) and m.buttons.visible then m.buttons.setFocus(true)
         return
     end if
     ' The task's tiles, as the row's.
@@ -136,7 +148,7 @@ sub onAlbums(event as object)
     m.albums.content = content
     m.message.visible = false
     m.albumsLabel.visible = true
-    if m.top.hasFocus() and m.buttons.visible then m.buttons.setFocus(true)
+    if (m.top.hasFocus() or m.message.isInFocusChain()) and m.buttons.visible then m.buttons.setFocus(true)
 end sub
 
 ' Their albums and tracks, and genres, once the details came.
@@ -234,7 +246,7 @@ sub onAlbumTracks(event as object)
     answer = event.getData()
     if not answer.ok
         m.gathering = invalid
-        if not uiFailed(answer) then uiMessage("That didn't work", [answer.message])
+        if not uiFailed(answer) then uiToast(answer.message, true)
         return
     end if
     gathering.lists[spec.at] = answer.data.queue
@@ -251,7 +263,7 @@ sub onAlbumTracks(event as object)
     ' Left meanwhile: nothing starts behind the screen now on top.
     if not m.top.active then return
     if tracks.Count() = 0
-        uiMessage("Nothing to play", ["It has no tracks."])
+        uiToast("Nothing to play")
         return
     end if
     at = 0

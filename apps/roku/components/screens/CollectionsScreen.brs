@@ -80,7 +80,7 @@ sub onCollections(event as object)
             m.message.title = "Couldn't load collections"
             m.message.text = m.failed
             m.message.action = "Retry"
-            if m.top.hasFocus() then m.message.setFocus(true)
+            if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
         else
             m.message.text = "No collections yet."
         end if
@@ -90,7 +90,7 @@ sub onCollections(event as object)
     m.rows.content = content
     m.rows.visible = true
     ' Only while this screen has the focus: a dialog over it keeps it.
-    if m.top.hasFocus() then m.rows.setFocus(true)
+    if m.top.hasFocus() or m.message.isInFocusChain() then m.rows.setFocus(true)
 end sub
 
 sub onTile(event as object)

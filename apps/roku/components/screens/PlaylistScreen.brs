@@ -89,7 +89,7 @@ sub onPlaylist(event as object)
             m.message.title = "Couldn't load this playlist"
             m.message.text = answer.message
             m.message.action = "Retry"
-            if m.top.hasFocus() then m.message.setFocus(true)
+            if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
         end if
         return
     end if
@@ -116,7 +116,7 @@ sub onPlaylist(event as object)
     end if
     first = not m.buttons.visible
     showButtons()
-    if first and m.top.hasFocus() then m.buttons.setFocus(true)
+    if first and (m.top.hasFocus() or m.message.isInFocusChain()) then m.buttons.setFocus(true)
 end sub
 
 ' What it holds, after the Smart badge for a smart one.
