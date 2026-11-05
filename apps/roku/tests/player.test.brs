@@ -205,6 +205,13 @@ sub test_player_says_when_a_paused_title_ends()
     tkEqual(playerEndsAt(now, 0, invalid, true), "")
 end sub
 
+sub test_player_says_why_it_converted_a_file()
+    tkEqual(playerFallbackNote("unplayable"), "This Roku couldn't play the original file.")
+    tkEqual(playerFallbackNote("struggled"), "The original didn't play smoothly on this Roku.")
+    tkEqual(playerFallbackNote(""), "", "the quality's own way")
+    tkEqual(playerTranscodeToast("struggled"), "The original didn't play smoothly on this Roku. Play original is in Quality.", "Android TV's words")
+end sub
+
 sub test_player_limits_restarts()
     tkTrue(playerMayRestart([], 100000))
     tkTrue(playerMayRestart([50000, 90000], 100000))

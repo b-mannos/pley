@@ -268,10 +268,10 @@ paused leaves the player, as in Roku's own apps.
   again may help (not for a title gone or out of reach of the profile).
 - **Stalls:** a playhead that stands still 12 s while meant to play is
   looked at, as the other apps do: a file played as it is that has its
-  data is converted once; a stream asks the server how fast it converts,
-  and below real time says "The server can't keep up with this video"
-  (Automatic goes lower by itself); otherwise the stream opens again where
-  it was.
+  data is converted once a title (see [Quality](#quality)); a stream asks
+  the server how fast it converts, and below real time says "The server
+  can't keep up with this video" (Automatic goes lower by itself);
+  otherwise the stream opens again where it was.
 - **Media that ends short** (moments after it started, a minute or more
   before the title's end, as a file resumed past what it holds) isn't the
   end: a file played as it is is converted, and a stream opened again;
@@ -375,7 +375,15 @@ the code is `components/lib/AutoQuality.brs`. On Roku:
 
 - **Settings → Quality** is kept on the Roku. One chosen in the player's
   menu, or by the remote on another device, becomes the setting, and the
-  title reopens at it.
+  title reopens at it, played as that quality plays (the original as it
+  is), whatever the player converted before.
+- **Conversions the player chose:** a file that doesn't play on this Roku,
+  or ends short, is converted, and Quality says so above its hints ("This
+  Roku couldn't play the original file."). One that has its data but
+  stands still is converted once a title, as on Android TV, and says so
+  as the conversion plays: "The original didn't play smoothly on this
+  Roku. Play original is in Quality." Quality then offers Play original
+  above its choices (Automatic's menu has Original instead).
 - **Several sizes:** in an adaptive session the Video node moves between
   sizes itself. Other streams come in one size, so the app steps down.
 - **Signals:** a wait is the Video node's `buffering` after at least 2 s of

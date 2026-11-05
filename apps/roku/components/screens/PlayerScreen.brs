@@ -233,6 +233,13 @@ sub init()
     ' stream was opened again for falling short of its end.
     m.ended = false
     m.shortTries = 0
+    ' Why the player converted this title's file by itself (Player.brs's
+    ' playerFallbackNote: "unplayable", "struggled", "" for none), whether
+    ' it did so once already for its not moving, and what to say once the
+    ' conversion plays.
+    m.fallback = ""
+    m.struggled = false
+    m.playNotice = ""
     m.detailsTimer = m.top.findNode("detailsTimer")
     m.detailsTimer.observeField("fire", "onDetailsTick")
     m.top.observeField("active", "onActive")
@@ -374,6 +381,8 @@ sub onActive()
     newTitle()
     m.bannerDue = true
     m.shortTries = 0
+    m.fallback = ""
+    m.struggled = false
     open(params.itemId, Int(httpNumber(params.startMs, 0)), params.item, "auto")
 end sub
 
@@ -1044,6 +1053,10 @@ sub onState(event as object)
             if m.sleep.minutes = 0 then m.sleepTimer.control = "stop"
         end if
         if m.tracksFrom < 0 then m.tracksFrom = m.clock.TotalMilliseconds() + tracksSettleMs()
+        if m.playNotice <> ""
+            uiToast(m.playNotice)
+            m.playNotice = ""
+        end if
         if m.paused or m.reportAtPlay
             m.paused = false
             m.reportAtPlay = false
@@ -1243,6 +1256,7 @@ sub endedShort()
     m.stallTimer.control = "stop"
     hideBanner()
     if m.info <> invalid and httpString(m.info.method) <> "transcode" and m.mode <> "transcode"
+        m.fallback = "unplayable"
         open(m.itemId, m.startMs, m.item, "transcode")
         return
     end if
@@ -1301,8 +1315,10 @@ end sub
 
 sub broken()
     if playerErrorKind(m.video.errorCode, m.video.errorInfo, m.played) = "media"
-        ' The original doesn't play on this Roku after all: converted, once.
+        ' The original doesn't play on this Roku after all: converted, once,
+        ' which Quality says.
         if m.info <> invalid and httpString(m.info.method) <> "transcode" and m.mode <> "transcode"
+            m.fallback = "unplayable"
             open(m.itemId, m.positionMs, m.item, "transcode")
             return
         end if
@@ -1392,8 +1408,12 @@ sub onStallTick()
     end if
     method = httpString(m.info.method)
     ' A file that has its data and doesn't move doesn't play smoothly here:
-    ' converted, once.
-    if not starving and method = "direct" and m.mode <> "transcode"
+    ' converted, once a title, as on Android TV, saying so as it plays and
+    ' offering Play original in Quality (Automatic's menu has Original).
+    if not starving and method = "direct" and m.mode <> "transcode" and not m.struggled
+        m.struggled = true
+        m.fallback = "struggled"
+        if aqChoice(playbackSection()) <> "auto" then m.playNotice = playerTranscodeToast(m.fallback)
         open(m.itemId, m.positionMs, m.item, "transcode")
         return
     end if
@@ -1577,6 +1597,8 @@ sub playNext(finished = true as boolean)
     m.playAudio = -1
     m.bannerDue = true
     m.shortTries = 0
+    m.fallback = ""
+    m.struggled = false
     if m.queue <> invalid then m.queueAt = m.queueAt + 1
     open(nextEpisode.itemId, nextEpisode.startMs, invalid, "auto")
 end sub
@@ -1851,14 +1873,20 @@ sub onTrackPicked(event as object)
     open(m.itemId, position, invalid, m.mode)
 end sub
 
-' The qualities this file is offered, the one chosen checked.
+' The qualities this file is offered, the one chosen checked; after the
+' player converted a file that didn't play smoothly, Play original above
+' them, as on Android TV.
 sub openQualities()
     m.menuKind = "quality"
     m.menuTitle.text = "Quality"
     choice = aqChoice(playbackSection())
     items = []
     m.menuValues = []
-    current = 0
+    if m.fallback = "struggled" and choice <> "auto"
+        items.Push({ title: "Play original" })
+        m.menuValues.Push("playOriginal")
+    end if
+    current = items.Count()
     for each quality in aqMenuFor(playingFile())
         if quality.id = choice then current = items.Count()
         items.Push({ title: quality.label })
@@ -1919,10 +1947,18 @@ sub showMenuChoices(items as object, current as integer)
     m.menuChoices.setFocus(true)
 end sub
 
+' A quality's hint, under why the player converted the file, if it did.
 sub onMenuChoiceFocused()
     if m.menuKind <> "quality" then return
     at = m.menuChoices.itemFocused
-    if at >= 0 and at < m.menuValues.Count() then m.menuHint.text = aqHint(m.menuValues[at])
+    if at < 0 or at >= m.menuValues.Count() then return
+    lines = []
+    note = playerFallbackNote(m.fallback)
+    if note <> "" then lines.Push(note)
+    hint = "Try the original again"
+    if m.menuValues[at] <> "playOriginal" then hint = aqHint(m.menuValues[at])
+    if hint <> "" then lines.Push(hint)
+    m.menuHint.text = lines.Join(Chr(10))
 end sub
 
 ' A quality is kept as the Roku's (Settings shows it) and the title opens
@@ -1951,22 +1987,41 @@ sub onMenuChoice(event as object)
         setSleep(value)
         return
     end if
+    if value = "playOriginal"
+        playOriginal()
+        return
+    end if
     if value = aqChoice(playbackSection()) then return
     chooseQuality(value)
 end sub
 
 ' A quality picked, in the menu or by the user's remote: kept as the
-' Roku's, and the title opened again at it where it was.
+' Roku's, and the title opened again at it where it was, as that quality
+' plays (the original as it is), not as the player converted it.
 sub chooseQuality(value as string)
     aqChoose(playbackSection(), value)
     ' Picked again, Automatic starts afresh at the original.
     if value = "auto" then keepCeiling(0)
+    newTitle()
+    m.fallback = ""
+    open(m.itemId, livePosition(), m.item, "auto")
+end sub
+
+' Play original, after the player converted a file that didn't play
+' smoothly: the quality chosen, as it plays, from where it was. Should it
+' stand still again, it isn't converted again for this title.
+sub playOriginal()
+    m.fallback = ""
+    open(m.itemId, livePosition(), m.item, "auto")
+end sub
+
+' Where the video is now: the Video node's position once it has one.
+function livePosition() as integer
     position = m.positionMs
     seconds = m.video.position
     if seconds <> invalid and seconds > 0 then position = Int(seconds * 1000)
-    newTitle()
-    open(m.itemId, position, m.item, m.mode)
-end sub
+    return position
+end function
 
 ' --- The sleep timer ---
 

@@ -315,6 +315,22 @@ function playerMayTryAgain(status as integer) as boolean
     return status <> 400 and status <> 401 and status <> 403 and status <> 404 and status <> 410
 end function
 
+' Why the player converted a file it was to play as it is, in the Quality
+' menu's words, as Android TV's: "unplayable" (it didn't play here, or
+' ended short), "struggled" (it had its data and didn't move); "" for
+' none.
+function playerFallbackNote(reason as string) as string
+    if reason = "unplayable" then return "This Roku couldn't play the original file."
+    if reason = "struggled" then return "The original didn't play smoothly on this Roku."
+    return ""
+end function
+
+' Said as the conversion of a file that struggled plays, outside Automatic
+' (whose menu has Original): why, and where the way back is.
+function playerTranscodeToast(reason as string) as string
+    return playerFallbackNote(reason) + " Play original is in Quality."
+end function
+
 ' How long the playhead may stand still while the video is meant to play
 ' before it counts as stalled (Android's and the web's STALL_MS).
 function playerStallMs() as integer
