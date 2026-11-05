@@ -39,7 +39,7 @@ sub onActive()
     end if
     m.started = true
     m.shown = reqSeeAll(httpString(m.top.params.list), httpString(m.top.params.query))
-    m.title.text = m.shown.title
+    typeSet(m.title, m.shown.title)
     load()
 end sub
 
@@ -116,7 +116,7 @@ sub onPage(event as object)
     end if
     if m.content <> invalid and m.content.getChildCount() = 0 and m.page >= m.totalPages
         m.grid.visible = false
-        m.message.text = m.shown.empty
+        typeSet(m.message, m.shown.empty)
         m.message.visible = true
         return
     end if
@@ -172,8 +172,8 @@ end sub
 sub showProblem(problem as object)
     m.problemShown = problem
     m.grid.visible = false
-    m.problemTitle.text = problem.title
-    m.problemText.text = problem.text
+    typeSet(m.problemTitle, problem.title)
+    typeSet(m.problemText, problem.text)
     buttons = []
     if problem.signIn then buttons.Push("Sign in")
     if problem.retry then buttons.Push("Try again")

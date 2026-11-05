@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A playlist in the playlists' grid, as on Android TV: a square cover,
      a 2 by 2 mosaic of its first four entries' pictures (or the first
-     entry's alone, or its name in the frame), and two lines under it. The
-     pictures are decoded at the size they're drawn: four small textures. -->
+     entry's alone, or its name in the well), and two lines under it. The
+     pictures are decoded at the size they're drawn: four small textures.
+     It looks as a title's tile does (Tile): rounded corners, and focused,
+     grown to 1.05 with a ring, drawn inside its cell, its title bold. -->
 <component name="PlaylistTile" extends="Group">
     <interface>
         <field id="itemContent" type="node" onChange="onContent" />
@@ -12,15 +14,36 @@
         <field id="gridHasFocus" type="boolean" value="true" onChange="onFocus" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/items/PlaylistTile.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <children>
-        <Rectangle id="frame" color="0x262B35FF" />
-        <Label id="fallback" color="0xA1A9B6FF" horizAlign="center" vertAlign="center" wrap="true" maxLines="4" font="font:SmallestBoldSystemFont" />
-        <Poster id="cover" loadDisplayMode="scaleToZoom" />
-        <Poster id="cell0" loadDisplayMode="scaleToZoom" />
-        <Poster id="cell1" loadDisplayMode="scaleToZoom" />
-        <Poster id="cell2" loadDisplayMode="scaleToZoom" />
-        <Poster id="cell3" loadDisplayMode="scaleToZoom" />
-        <Label id="title" color="0xEBEBEBFF" font="font:SmallestBoldSystemFont" />
-        <Label id="subtitle" color="0xA1A9B6FF" font="font:TinySystemFont" />
+        <Group id="body">
+            <Group id="card">
+                <Poster id="frame" uri="pkg:/images/tile.9.png" blendColor="0x262B35FF" />
+                <Label id="fallback" color="0xA1A9B6FF" horizAlign="center" vertAlign="center" wrap="true" maxLines="4">
+                    <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="26" />
+                </Label>
+                <Poster id="cover" loadDisplayMode="scaleToZoom" />
+                <Poster id="cell0" loadDisplayMode="scaleToZoom" />
+                <Poster id="cell1" loadDisplayMode="scaleToZoom" />
+                <Poster id="cell2" loadDisplayMode="scaleToZoom" />
+                <Poster id="cell3" loadDisplayMode="scaleToZoom" />
+                <!-- The page's colour outside the corners rounds them. -->
+                <Poster id="corners" uri="pkg:/images/tile-corners.9.png" blendColor="0x16191EFF" />
+                <Poster id="ring" uri="pkg:/images/tile-ring.9.png" blendColor="0x7DD3FCFF" opacity="0" />
+            </Group>
+            <Label id="title" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
+            <Label id="subtitle" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="24" />
+            </Label>
+        </Group>
+        <!-- The focus look, as a tile's: 150 ms in, eased out; 120 ms out,
+             eased in. -->
+        <Animation id="look" duration="0.15" easeFunction="outCubic" optional="true">
+            <Vector2DFieldInterpolator id="lookScale" key="[0.0, 1.0]" keyValue="[[1.0, 1.0], [1.05, 1.05]]" fieldToInterp="card.scale" />
+            <FloatFieldInterpolator id="lookRing" key="[0.0, 1.0]" keyValue="[0.0, 1.0]" fieldToInterp="ring.opacity" />
+        </Animation>
     </children>
 </component>

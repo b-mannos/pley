@@ -23,8 +23,8 @@ sub onActive()
     session = m.global.session
     reason = httpSentence(m.top.params.reason)
     if reason = "" then reason = "The server can't be reached."
-    m.text.text = reason + " Check that the server is on and that this device is on its network."
-    m.server.text = session.serverName + " · " + urlDisplayAddress(session.server)
+    typeSet(m.text, reason + " Check that the server is on and that this device is on its network.")
+    typeSet(m.server, session.serverName + " · " + urlDisplayAddress(session.server))
     m.buttons.setFocus(true)
     uiLaunched()
     if not session.offline then uiRequest({ method: "GET", path: "/api/server", auth: session.signedIn, timeoutMs: 5000 }, "onAnswer")

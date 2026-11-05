@@ -14,6 +14,8 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/ArtistScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Titles.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
@@ -29,20 +31,32 @@
         <!-- Their initials until the picture comes, or without one. -->
         <MaskGroup translation="[96, 64]" maskUri="pkg:/images/round.png" maskSize="[240, 240]">
             <Rectangle width="240" height="240" color="0x262B35FF" />
-            <Label id="initials" width="240" height="240" horizAlign="center" vertAlign="center" color="0xEBEBEBCC" font="font:ExtraLargeBoldSystemFont" />
+            <Label id="initials" width="240" height="240" horizAlign="center" vertAlign="center" color="0xEBEBEBCC">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+            </Label>
             <Poster id="picture" width="240" height="240" loadWidth="240" loadHeight="240" loadDisplayMode="scaleToZoom" />
         </MaskGroup>
         <!-- Only the labels with text stay in it (layoutText). -->
         <LayoutGroup id="text" translation="[392, 80]" layoutDirection="vert">
-            <Label id="kindLabel" text="Artist" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
-            <Label id="name" width="1100" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="line" width="1100" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
-            <Label id="summary" width="1100" wrap="true" maxLines="2" color="0xEBEBEBD9" font="font:SmallestSystemFont" />
+            <Label id="kindLabel" text="Artist" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
+            <Label id="name" width="1100" wrap="true" maxLines="2" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <Label id="line" width="1100" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
+            <Label id="summary" width="1100" wrap="true" maxLines="2" color="0xEBEBEBD9">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
         </LayoutGroup>
         <!-- Side by side, Left and Right between them, as Home's hero's. -->
         <ChipRow id="buttons" translation="[96, 344]" pad="80" visible="false" />
-        <Label id="albumsLabel" translation="[96, 440]" text="Albums" color="0xEBEBEBFF" font="font:MediumBoldSystemFont" visible="false" />
-        <RowList id="albums" translation="[96, 496]" itemComponentName="Tile" itemSize="[1728, 400]" rowItemSize="[[260, 340]]" numRows="1" rowItemSpacing="[[28, 0]]" showRowLabel="[false]" drawFocusFeedback="false" rowFocusAnimationStyle="floatingFocus" vertFocusAnimationStyle="floatingFocus" />
+        <Label id="albumsLabel" translation="[96, 440]" text="Albums" color="0xEBEBEBFF" visible="false">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="36" />
+        </Label>
+        <RowList id="albums" translation="[80, 476]" itemComponentName="Tile" itemSize="[1744, 420]" rowItemSize="[[294, 360]]" numRows="1" rowItemSpacing="[[0, 0]]" showRowLabel="[false]" drawFocusFeedback="false" rowFocusAnimationStyle="fixedFocus" vertFocusAnimationStyle="floatingFocus" />
         <!-- Loading, or what failed with Retry. -->
         <PageMessage id="message" translation="[960, 560]" width="1728" text="Loading…" />
     </children>

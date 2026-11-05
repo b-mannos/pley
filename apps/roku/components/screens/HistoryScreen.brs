@@ -63,7 +63,7 @@ sub onPage(event as object)
         ' With nothing listed, the page says so, with Retry, as on Android TV.
         if m.content.getChildCount() = 0 and not uiFailed(answer)
             m.message.title = "Couldn't load your watch history"
-            m.message.text = answer.message
+            typeSet(m.message, answer.message)
             m.message.action = "Retry"
             if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
         end if
@@ -89,7 +89,7 @@ sub showCount()
     if m.total = 1
         m.count.text = "1 play"
     else if m.total >= 0
-        m.count.text = urlValue(m.total) + " plays"
+        typeSet(m.count, urlValue(m.total) + " plays")
     end if
 end sub
 

@@ -124,15 +124,15 @@ sub showProfile()
     me = m.me
     server = m.global.session.server
     name = httpSentence(me.name)
-    m.name.text = name
-    m.initial.text = UCase(Left(name, 1))
+    typeSet(m.name, name)
+    typeSet(m.initial, UCase(Left(name, 1)))
     m.face.color = profColor(me.avatar_color)
     ' The scene's agent carries the token, which a profile's picture needs.
     m.picture.setHttpAgent(m.top.getScene().getHttpAgent())
     m.picture.uri = urlImage(server, me.avatar_url, 96)
     who = authShownAddress(server)
     if httpTrue(me.managed) then who = "Managed profile · " + who
-    m.who.text = who
+    typeSet(m.who, who)
     showRows()
 end sub
 
@@ -192,7 +192,7 @@ sub showRows()
         m.header.visible = m.me <> invalid
         top = 300
     else if m.shown = "signOut"
-        m.intro.text = "Sign this TV out of " + authShownAddress(m.global.session.server) + ". You'll need a new link code to sign in again."
+        typeSet(m.intro, "Sign this TV out of " + authShownAddress(m.global.session.server) + ". You'll need a new link code to sign in again.")
         m.intro.visible = true
         top = 270
     else if m.shown = "about"
@@ -395,7 +395,7 @@ sub showChoices(kind as string, choice as object)
     for each label in m.choice.labels
         items.Push({ title: label })
     end for
-    m.panelTitle.text = m.choice.title
+    typeSet(m.panelTitle, m.choice.title)
     m.choices.content = nodesContent(items)
     m.choices.checkedItem = m.choice.current
     at = m.choice.current
@@ -419,7 +419,7 @@ end sub
 sub choiceHint(at as integer)
     text = ""
     if m.choice <> invalid and at >= 0 and at < m.choice.hints.Count() then text = m.choice.hints[at]
-    m.panelHint.text = text
+    typeSet(m.panelHint, text)
 end sub
 
 sub onChoice(event as object)

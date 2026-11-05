@@ -54,7 +54,7 @@ sub onActive()
     end if
     m.started = true
     uiChangesSince()
-    m.title.text = httpSentence(m.top.params.title)
+    typeSet(m.title, httpSentence(m.top.params.title))
     m.top.setFocus(true)
     load()
 end sub
@@ -69,7 +69,7 @@ sub onPlaylists(event as object)
         ' The first time, the page says so, with Retry, as on Android TV.
         if m.shown < 0 and not uiFailed(answer)
             m.message.title = "Couldn't load your playlists"
-            m.message.text = answer.message
+            typeSet(m.message, answer.message)
             m.message.action = "Retry"
             if m.top.hasFocus() then m.message.setFocus(true)
         end if

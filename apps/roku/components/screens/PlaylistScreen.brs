@@ -59,7 +59,7 @@ sub onActive()
     end if
     if not m.started
         m.started = true
-        m.title.text = httpSentence(m.top.params.title)
+        typeSet(m.title, httpSentence(m.top.params.title))
         uiChangesSince()
         m.top.setFocus(true)
     else
@@ -87,7 +87,7 @@ sub onPlaylist(event as object)
         ' The first time, the page says so, with Retry, as on Android TV.
         if m.playlist = invalid and not uiFailed(answer)
             m.message.title = "Couldn't load this playlist"
-            m.message.text = answer.message
+            typeSet(m.message, answer.message)
             m.message.action = "Retry"
             if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
         end if
@@ -96,8 +96,8 @@ sub onPlaylist(event as object)
     m.playlist = answer.data
     m.message.title = ""
     m.message.action = ""
-    m.kindLabel.text = pagePlaylistKindLine(m.playlist.kind, m.playlist.smart)
-    m.title.text = m.playlist.title
+    typeSet(m.kindLabel, pagePlaylistKindLine(m.playlist.kind, m.playlist.smart))
+    typeSet(m.title, m.playlist.title)
     showFacts()
     if m.backdrop.uri <> m.playlist.backdrop
         m.backdrop.setHttpAgent(m.top.getScene().getHttpAgent())
@@ -129,7 +129,7 @@ sub showFacts()
     end if
     m.line.translation = [x, 0]
     m.line.width = 540 - x
-    m.line.text = m.playlist.line
+    typeSet(m.line, m.playlist.line)
 end sub
 
 ' Play with entries to play, Shuffle with two or more, as on Android TV;

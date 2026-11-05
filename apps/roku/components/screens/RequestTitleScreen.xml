@@ -17,6 +17,8 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/RequestTitleScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/RequestActions.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
@@ -27,45 +29,84 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Content.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Requests.brs" />
     <children>
-        <Poster id="backdrop" width="1920" height="1080" loadWidth="640" loadHeight="360" loadDisplayMode="scaleToZoom" opacity="0.4" />
-        <Rectangle id="shade" width="1260" height="1080" color="0x16191ED9" />
+        <Poster id="backdrop" width="1920" height="1080" loadWidth="640" loadHeight="360" loadDisplayMode="scaleToZoom" />
+        <!-- Android TV's two gradients over the backdrop (stretched pictures):
+             the page's colour from the left, and from below, which comes up
+             over the backdrop as the page slides up. -->
+        <Poster uri="pkg:/images/scrim-left.png" width="1600" height="1080" blendColor="0x16191EFF" />
+        <Group id="shade" translation="[0, 520]">
+            <Poster uri="pkg:/images/scrim-bottom.png" width="1920" height="480" blendColor="0x16191EFF" />
+            <Rectangle translation="[0, 479]" width="1920" height="1080" color="0x16191EFF" />
+        </Group>
         <Group id="page">
-            <Poster id="poster" translation="[1404, 120]" width="420" height="630" loadWidth="420" loadHeight="630" loadDisplayMode="scaleToZoom" />
-            <Label id="credit" translation="[1404, 770]" width="420" wrap="true" text="Details and pictures from TMDB." color="0x8B95A5FF" font="font:SmallestSystemFont" visible="false" />
+            <MaskGroup translation="[1404, 120]" maskUri="pkg:/images/poster-mask.png" maskSize="[420, 630]">
+                <Poster id="poster" width="420" height="630" loadWidth="420" loadHeight="630" loadDisplayMode="scaleToZoom" />
+            </MaskGroup>
+            <Label id="credit" translation="[1404, 770]" width="420" wrap="true" text="Details and pictures from TMDB." color="0x8B95A5FF" visible="false">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
             <LayoutGroup id="column" translation="[96, 96]" layoutDirection="vert" itemSpacings="[40]" visible="false">
                 <!-- Only the parts with text stay in it (layoutText). -->
                 <LayoutGroup id="text" layoutDirection="vert">
-                    <Label id="heading" width="1100" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
-                    <Label id="line" width="1100" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+                    <Label id="heading" width="1100" wrap="true" maxLines="2" color="0xEBEBEBFF">
+                        <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+                    </Label>
+                    <Label id="line" width="1100" color="0xA1A9B6FF">
+                        <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+                    </Label>
                     <!-- Its network (a movie's studio) and genres. -->
-                    <Label id="facts" width="1100" color="0x8B95A5FF" font="font:SmallestSystemFont" />
-                    <Label id="tagline" width="1100" maxLines="1" color="0xEBEBEBFF" font="font:SmallerBoldSystemFont" />
-                    <Label id="overview" width="1080" wrap="true" maxLines="4" lineSpacing="6" color="0xEBEBEBFF" font="font:SmallerSystemFont" />
+                    <Label id="facts" width="1100" color="0x8B95A5FF">
+                        <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+                    </Label>
+                    <Label id="tagline" width="1100" maxLines="1" color="0xEBEBEBFF">
+                        <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="30" />
+                    </Label>
+                    <Label id="overview" width="1080" wrap="true" maxLines="4" lineSpacing="6" color="0xEBEBEBFF">
+                        <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+                    </Label>
                     <StagePill id="stage" />
-                    <Label id="stageLine" width="1100" wrap="true" maxLines="2" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
-                    <Label id="note" width="1100" wrap="true" maxLines="3" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+                    <Label id="stageLine" width="1100" wrap="true" maxLines="2" color="0xA1A9B6FF">
+                        <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+                    </Label>
+                    <Label id="note" width="1100" wrap="true" maxLines="3" color="0xA1A9B6FF">
+                        <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+                    </Label>
                 </LayoutGroup>
-                <ButtonGroup id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="560" visible="false" />
+                <Buttons id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="560" visible="false" />
             </LayoutGroup>
             <!-- Its top shows under the buttons; the page slides up to it. -->
-            <RowList id="rows" translation="[96, 940]" itemComponentName="Tile" itemSize="[1728, 470]" numRows="2" itemSpacing="[0, 28]" rowItemSpacing="[[28, 0]]" showRowLabel="[true]" rowLabelOffset="[[0, 12]]" rowLabelColor="0xEBEBEBFF" drawFocusFeedback="false" rowFocusAnimationStyle="floatingFocus" vertFocusAnimationStyle="floatingFocus" rowLabelFont="font:MediumBoldSystemFont" visible="false" />
+            <RowList id="rows" translation="[80, 940]" itemComponentName="Tile" itemSize="[1744, 506]" numRows="2" itemSpacing="[0, 28]" rowItemSpacing="[[0, 0]]" showRowLabel="[true]" rowLabelOffset="[[16, 8]]" rowLabelColor="0xEBEBEBFF" drawFocusFeedback="false" rowFocusAnimationStyle="fixedFocus" vertFocusAnimationStyle="floatingFocus" visible="false">
+                <Font role="rowLabelFont" uri="pkg:/fonts/roboto-700.ttf" size="36" />
+            </RowList>
         </Group>
         <!-- The overview as tall as its words, never drawn: whether the
              page's four lines cut it (Overview then shows it whole). -->
-        <Label id="overviewWhole" width="1080" wrap="true" lineSpacing="6" font="font:SmallerSystemFont" opacity="0" />
-        <Label id="message" translation="[96, 480]" width="1100" wrap="true" color="0xA1A9B6FF" text="Loading…" font="font:MediumSystemFont" />
+        <Label id="overviewWhole" width="1080" wrap="true" lineSpacing="6" opacity="0">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+        </Label>
+        <Label id="message" translation="[96, 480]" width="1100" wrap="true" color="0xA1A9B6FF" text="Loading…">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+        </Label>
         <!-- Why the title can't be shown, and what to do about it. -->
         <LayoutGroup id="problem" translation="[96, 360]" layoutDirection="vert" itemSpacings="[20, 48]" visible="false">
-            <Label id="problemTitle" width="1400" wrap="true" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="problemText" width="1400" wrap="true" color="0xA1A9B6FF" font="font:MediumSystemFont" />
-            <ButtonGroup id="problemButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="420" />
+            <Label id="problemTitle" width="1400" wrap="true" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <Label id="problemText" width="1400" wrap="true" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+            </Label>
+            <Buttons id="problemButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="420" />
         </LayoutGroup>
         <!-- Overview: the tagline and the whole overview, which Up and Down
              scroll; Back closes it. -->
         <Group id="panel" visible="false">
             <Rectangle translation="[720, 0]" width="1200" height="1080" color="0x1E222AFF" />
-            <Label id="panelTitle" translation="[776, 56]" width="1088" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <ScrollableText id="whole" translation="[776, 220]" width="1088" height="800" lineSpacing="6" color="0xEBEBEBFF" font="font:SmallSystemFont" />
+            <Label id="panelTitle" translation="[776, 56]" width="1088" wrap="true" maxLines="2" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <ScrollableText id="whole" translation="[776, 220]" width="1088" height="800" lineSpacing="6" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+            </ScrollableText>
         </Group>
         <!-- Asked again while something on it downloads, or while it shows a
              request and nothing tells it of changes. -->

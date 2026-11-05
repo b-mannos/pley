@@ -73,26 +73,36 @@ switch profiles offers Sign in as another profile, the same way.
 
 ### Home
 
-Home's menu, at the left, is in the order of the other TVs' rail: Search,
-Home, one way into requests (where the server has them: Discover where
-the profile may ask, else Your requests, a manager's Requests, with the
-number of what waits there), Live TV, the libraries, Playlists,
-Collections (every library's collections, a row each), Now Playing while
-music plays, and Settings. With more than six libraries, as on Android
-TV, the menu lists the first six, then Libraries in place of
-Collections: every library, with what it holds ("Movies · 412 movies").
+Home's rail, at the left, is Android TV's: the profile's avatar (its
+picture, or its initial on its colour), which opens "Who's watching?",
+then Search, Home, one way into requests (where the server has them:
+Discover where the profile may ask, else Your requests, a manager's
+Requests, with the number of what waits there), Live TV, the libraries,
+Playlists, Collections (every library's collections, a row each), Now
+Playing while music plays, and Settings, each with its icon. With more
+than six libraries, as on Android TV, the rail lists the first six, then
+Libraries in place of Collections: every library, with what it holds
+("Movies · 412 movies"). While the focus is in the page the rail shows
+the icons alone, Home's in the text colour with an accent mark beside it
+and a dot on the requests' icon while some wait. Left or Back brings the
+focus to it and it opens over the page, which dims: the names fade in
+beside the icons, the focused entry on the accent pill, Home on a raised
+one, and the requests' number after their name.
 
 Beside it, as on Android TV and the native Samsung app, a hero shows the
-first of Continue Watching, else the newest title in the rows: its
-backdrop, its title (a show's name over an episode's "S2 · E5 · Title"),
+first of Continue Watching, else the newest title in the rows, over its
+backdrop: its title (a show's name over an episode's "S2 · E5 · Title"),
 year, length, content rating, stars and quality ("4K", "DV"), the time
-left, its summary, then Resume (or Play), From start, Info and Mark as
-watched; a show's (or a season's) Play plays its next episode, as on
-Android TV, and "Nothing to play" says when it has none. Resume has the
-focus as Home first shows. Down goes to the
-server's rows: there an info block about the title focus rests on (0.4 s)
-takes the hero's place, and the backdrop follows it. Up from the first row
-goes back to the hero; Left or Back, to the menu, the hero shown again.
+left, its summary, then Resume (or Play) on a pill, and From start, Info
+and the watched mark as round buttons, whose names show under them while
+they have the focus; a show's (or a season's) Play plays its next
+episode, as on Android TV, and "Nothing to play" says when it has none.
+Resume has the focus as Home first shows. Down goes to the server's rows:
+there an info block about the title focus rests on (0.4 s) takes the
+hero's place, the rows come up under it, the focused row staying just
+under it as the others move, and the backdrop follows it. Up from the
+first row goes back to the hero; Left or Back, to the rail, the hero
+shown again.
 The hero's summary, content rating and quality come with its details
 (`GET /api/items/{id}`, which the API task reduces to what Home says), as
 do the info block's. With nothing to show, Home says why: No libraries
@@ -126,6 +136,43 @@ with Retry and Switch server. Meanwhile the app asks every 5 s whether the
 server answers (`GET /api/server`, signed in with the token, so the
 answer counts only once the server there has proved itself), and that
 page comes back by itself once it does.
+
+### How it looks
+
+The app has the Android TV app's look, as far as Roku allows:
+
+- **Type:** Roboto, the face of the Android app and the other TVs, in
+  weights 400, 500 and 700, at Android TV's sizes (its 960 × 540 dp
+  doubled to Roku's 1920 × 1080): 76 pixels for the hero's title, 56 for
+  a page's, 36 for row headers, 28 for buttons and the metadata line, 26
+  for tile captions. Roku draws a label in one font, and the Roboto files
+  hold the Latin alphabets of Western Europe: a title or a name the
+  server sends in another script (Greek, Cyrillic, Polish, Japanese…) is
+  drawn in Roku's own font, which has them, and so is a line with an
+  arrow. A rating's star is an icon in the line.
+- **Icons:** Lucide's, as every other app draws them: the rail's, the
+  hero's buttons, Live TV's tabs and its Search, Favourites, Recently
+  watched and All channels, a region's chevron, and favourite channels'
+  stars.
+- **Tiles** have rounded corners. The focused one grows to 1.05 with a
+  ring around it and its title turns bold, the look coming in over 150 ms
+  eased out and going over 120 ms eased in; only the tile's scale and the
+  ring's opacity change, which a Roku draws without laying anything out.
+  A Roku crops a list's items at its edges, so each tile is drawn inside
+  a cell with the room its look takes, and the look is a little smaller
+  than Android TV's 1.08, its ring 2 dp out rather than 3, to keep the
+  tiles as close together.
+  The rail and the page move the same way. A player Roku counts as slow
+  skips these animations (they are `optional`), and the looks change at
+  once. A row keeps the focus at its left edge and slides under it.
+- **Buttons, tabs and chips** are rounded pills, the focused one the
+  accent pill at 1.05.
+- **Backdrops** (Home, a title's page, a TMDB title's, a collection's,
+  Discover) fill the screen under Android TV's two gradients of the
+  page's colour, from the left and from below, drawn as stretched
+  pictures.
+
+Roku's own player bar, keyboards, PIN pad and dialogs keep Roku's look.
 
 ### Remote keys
 
@@ -328,7 +375,7 @@ forgets them.
 
 ### Music
 
-Music plays on while other screens show, and Home's menu has Now Playing
+Music plays on while other screens show, and Home's rail has Now Playing
 while it does. An album's page lists its tracks under "Disc 1", "Disc 2"
 when they are on several discs (the tracks' `parent_index`), each
 numbered on its disc; the focus passes over the headings. An album or a
@@ -738,7 +785,7 @@ pinned by `packages/tv/test/fixtures/remote.json`, which the tests read
 the commands), the Roku is one of the devices the profile's remotes play
 things on ([API.md](API.md#casting)): the stream names it a receiver by
 the `client_id` its players send, a TV with the name its players give,
-taking titles and playlists (`casts=item`) and channels while Home's menu
+taking titles and playlists (`casts=item`) and channels while Home's rail
 has Live TV (`live`), and opens again when Live TV comes or goes. What a
 remote sends plays as the Roku's own Play would, in place of what plays:
 
@@ -774,7 +821,7 @@ fetch them ([API.md](API.md#requests)). An administrator's Roku manages
 them (a manager, below) once its sign-in allows `approvals`; one signed in
 before is offered Sign in, which asks "Sign in again?" first (this TV
 shows a code to link it to the server's address again; Sign in and
-Cancel). As on Android TV, the menu has one way in, for what the
+Cancel). As on Android TV, the rail has one way in, for what the
 profile may do: Discover for those who may ask (the requests are at
 its top), else Your requests (a manager's Requests). Its number counts
 what waits: a manager's pending and failed requests (red while some
@@ -808,7 +855,7 @@ words for one approved as it was asked.
   Home, and the backdrop follows it: a title's facts and two lines of its
   overview, or a request's stage beside the seasons asked for, who asked
   and when, and its stage's line. At the top, the way to the requests,
-  with the menu's number of what waits there. TMDB is searched from
+  with the rail's number of what waits there. TMDB is searched from
   Search. A poster opens the title's page, or, when a library the account
   can open has the title whole, the library's title, where it plays (a
   show partly there opens its page, where more seasons can be asked
@@ -942,8 +989,11 @@ then shows it. It is kept on the Roku for each server.
 | `components/tasks/EventsTask` | The server's event stream, on a socket |
 | `components/lib/` | Plain BrightScript (no SceneGraph): the logic the unit tests cover |
 | `tests/` | Unit tests of `components/lib` |
-| `scripts/` | Test runner, smoke run, preview, bench, images |
-| `licenses/` | Notices for bundled third-party code (BrighterScript's `bslib.brs`) |
+| `components/shared/Type.brs`, `components/lib/Type.brs` | Roboto at Android TV's sizes, and Roku's font for text Roboto can't draw |
+| `fonts/` | Roboto 400, 500 and 700 (`scripts/fonts.mjs`) |
+| `images/` | The shapes and gradients (`scripts/make_images.py`), Lucide's icons in `images/icons` (`scripts/icons.mjs`) |
+| `scripts/` | Test runner, smoke run, preview, bench, fonts, icons, images |
+| `licenses/` | Notices for what the package bundles: BrighterScript's `bslib.brs`, Roboto (OFL-1.1) and Lucide (ISC, and MIT for the icons from Feather) |
 
 Rules the code keeps:
 
@@ -984,7 +1034,7 @@ Rules the code keeps:
   requests learns it from the summary (`sign_in_again`), on Discover and
   the requests.
 - **Requests' summary** (`GET /api/requests/summary`;
-  `components/lib/Requests.brs`) decides the menu, its number and what the
+  `components/lib/Requests.brs`) decides the rail, its number and what the
   screens offer. It is asked with each profile, when the event stream
   connects, a second after request events (once for those that come
   together), after the person acts on a request, and each minute without
@@ -1026,7 +1076,9 @@ bun run check     # bsc's compile check, bslint, the unit tests (CI runs this)
 bun run smoke     # the whole app in brs-node, against a fake server
 bun run bench     # the list work timed in brs-node
 bun run preview   # the app in a browser, the keyboard as its remote
-bun run images    # the nine-patch focus and watched-mark images
+bun run images    # the shapes, gradients and watched mark
+bun run icons     # Lucide's icons, drawn by Chrome
+bun run fonts     # Roboto, from @fontsource/roboto
 ```
 
 - **Preview** serves the app on http://127.0.0.1:8086/. Arrows, Enter
@@ -1059,7 +1111,8 @@ bun run images    # the nine-patch focus and watched-mark images
   without requests is asked nothing but the summary. The fake server also
   checks that a video's reports say which audio and subtitles play, and
   music's don't.
-- **brs-node limits:** its own fonts, no video or audio (Skip Intro, Up
+- **brs-node limits:** its own font in place of Roku's (Roboto draws as
+  on a Roku), no video or audio (Skip Intro, Up
   Next and its wait at the end, the title as an item begins, reconnecting,
   stalls, media that ends short, the sleep timers' ends, picture
   subtitles shown in time and the remote's commands, which a player obeys
@@ -1068,8 +1121,15 @@ bun run images    # the nine-patch focus and watched-mark images
   tests), one fetch at a time, the odd dropped key, and no measure of a
   Roku's speed.
 - **Images:** `bun run images` runs `scripts/make_images.py` (Python
-  standard library). The home screen icons and splash screens come from
-  `bun scripts/render-icons.mjs` at the repository root.
+  standard library): the nine-patch shapes Roku tints (pills, a tile's
+  well, the corners that round it and its focus ring), the gradients over
+  backdrops, the watched mark and the guide's cells. `bun run icons`
+  draws Lucide's icons through Chrome (`scripts/svg-render.mjs` at the
+  repository root), white for a Poster's `blendColor` to tint, and `bun
+  run fonts` unpacks Roboto from the web TV app's `@fontsource/roboto`;
+  both need the repository's packages installed. The home screen icons
+  and splash screens come from `bun scripts/render-icons.mjs` at the
+  repository root. All of these are committed.
 
 ## Releases
 
@@ -1091,4 +1151,6 @@ The manifest asks for SceneGraph 1.2, which every Roku OS from 9 runs.
 - Audio other than the file's default isn't played as it is.
 - Live TV has no channel numbers to type: Roku remotes have no number keys.
 - Not yet: an editable music queue.
+- Text in scripts other than the Latin alphabets of Western Europe is in
+  Roku's font, not Roboto: Roku has no fallback from one font to another.
 

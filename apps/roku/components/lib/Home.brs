@@ -190,6 +190,46 @@ function homeHeroButtons(info as object) as object
     return { labels: labels, actions: actions }
 end function
 
+' The icon of a rail entry (homeMenu's), as Android TV's rail has them
+' (RailItems.kt): its name in images/icons.
+function homeRailIcon(entry as object) as string
+    icons = {
+        search: "search", home: "house", discover: "compass", requests: "list-video", live: "tv-minimal",
+        libraries: "layers", playlists: "list-music", collections: "layers", nowPlaying: "audio-lines", settings: "settings"
+    }
+    if entry.action <> "library" then return icons[entry.action]
+    kind = ""
+    if entry.library <> invalid then kind = entry.library.kind
+    if kind = "movies" then return "clapperboard"
+    if kind = "shows" then return "tv"
+    if kind = "music" then return "music"
+    return "film"
+end function
+
+' How the hero's buttons (homeHeroButtons' actions) look, as on Android
+' TV's hero: [{ icon, round }]. The first is a pill with its words, Play's
+' icon before Resume or Play (a show's next episode too); the others are
+' round, an icon alone (From start, Info, the watched mark), their words
+' shown under them while focused. icon: its name in images/icons, "" for
+' none.
+function homeHeroLooks(actions as object) as object
+    icons = { start: "rotate-ccw", info: "info", watched: "circle-check", unwatched: "circle-check" }
+    looks = []
+    for i = 0 to actions.Count() - 1
+        action = actions[i]
+        if i = 0
+            icon = ""
+            if action = "resume" or action = "start" or action = "next" then icon = "play-fill"
+            looks.Push({ icon: icon, round: false })
+        else
+            icon = icons[action]
+            if icon = invalid then icon = ""
+            looks.Push({ icon: icon, round: icon <> "" })
+        end if
+    end for
+    return looks
+end function
+
 ' What Home says with no rows: "No libraries yet" when the profile sees
 ' none, "Scanning your libraries…" while one scans, else "Nothing here
 ' yet", as on Android TV. libraries is GET /api/libraries' answer, invalid

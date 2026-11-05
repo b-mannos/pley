@@ -104,7 +104,7 @@ sub init()
     m.refreshedAt = -1
     m.retry.buttons = ["Try again"]
     m.retry.observeField("buttonSelected", "onRetry")
-    m.tabs.chips = [{ label: "Guide", width: 208 }, { label: "Channels", width: 208 }]
+    m.tabs.chips = [{ label: "Guide", width: 228, icon: "calendar-days" }, { label: "Channels", width: 228, icon: "layout-grid" }]
     m.tabs.observeField("chosen", "onTabChosen")
     m.rail.observeField("itemSelected", "onRailSelected")
     m.rail.observeField("itemFocused", "onRailFocused")
@@ -246,7 +246,7 @@ sub buildRail()
     m.railFocused = at
     m.rail.content = nodesContent(liveRailItems(m.railEntries, m.open, m.view.category))
     m.rail.jumpToItem = at
-    m.searchRow.content = nodesContent([{ title: liveSearchLabel(m.query), countText: "", mark: "", inner: false, heading: false, current: searching() }])
+    m.searchRow.content = nodesContent([{ title: liveSearchLabel(m.query), countText: "", mark: "", inner: false, heading: false, current: searching(), icon: "search" }])
 end sub
 
 ' Rewind and fast forward in the rail: a screen of categories back or on.
@@ -426,7 +426,7 @@ end sub
 ' The category's channels from the start, or from the page around channel
 ' around (one watched).
 sub showCategory(around as integer)
-    m.categoryLabel.text = liveCategoryName(m.view.category, m.groups)
+    typeSet(m.categoryLabel, liveCategoryName(m.view.category, m.groups))
     m.failedAt = -1
     m.page = invalid
     m.cardChannels = []
@@ -476,8 +476,8 @@ sub showMessage(title as string, text as string)
     m.cards.visible = false
     m.retry.visible = false
     m.hint.text = ""
-    m.messageTitle.text = title
-    m.messageText.text = text
+    typeSet(m.messageTitle, title)
+    typeSet(m.messageText, text)
     m.message.removeChildrenIndex(m.message.getChildCount(), 0)
     if title <> "" then m.message.appendChild(m.messageTitle)
     if text <> "" then m.message.appendChild(m.messageText)
@@ -661,7 +661,7 @@ sub showCount()
     if total = 1 then text = "1 channel"
     range = liveRange(offset, shown, total)
     if range <> "" then text = text + "   ·   " + range
-    m.count.text = text
+    typeSet(m.count, text)
 end sub
 
 ' Scrolled near what is fetched: the next six hours, for the channels
@@ -763,14 +763,14 @@ sub showProgram()
     if focused = invalid then return
     channel = focused.channel
     program = focused.program
-    m.infoChannel.text = liveTitle(channel)
+    typeSet(m.infoChannel, liveTitle(channel))
     ' The scene's agent carries the token; it changes with each refresh.
     m.infoLogo.setHttpAgent(m.top.getScene().getHttpAgent())
     m.infoLogo.uri = channel.logo
     p = programOf(program)
     if p = invalid
         placeBadge(m.infoBadge, m.infoTitle, "", 1020)
-        m.infoTitle.text = channel.name
+        typeSet(m.infoTitle, channel.name)
         m.infoMeta.text = "No information for this time"
         if not channel.hasGuide then m.infoMeta.text = "No guide for this channel"
         m.infoText.text = ""
@@ -788,9 +788,9 @@ sub showProgram()
     if p.line <> "" then meta.Push(p.line)
     if p.rating <> "" then meta.Push(p.rating)
     placeBadge(m.infoBadge, m.infoTitle, liveBadge(p), 1020)
-    m.infoTitle.text = p.title
-    m.infoMeta.text = meta.Join("   ·   ")
-    m.infoText.text = p.description
+    typeSet(m.infoTitle, p.title)
+    typeSet(m.infoMeta, meta.Join("   ·   "))
+    typeSet(m.infoText, p.description)
 end sub
 
 ' A programme's LIVE or NEW (text, "" for neither) in badge, a small
@@ -798,7 +798,7 @@ end sub
 sub placeBadge(badge as object, title as object, text as string, width as integer)
     x = badge.translation[0]
     y = title.translation[1]
-    badge.text = text
+    typeSet(badge, text)
     badge.visible = text <> ""
     if text = ""
         title.translation = [x, y]
@@ -1037,7 +1037,7 @@ sub showDetails(channel as object, p as dynamic)
     agent = m.top.getScene().getHttpAgent()
     m.detailsLogo.setHttpAgent(agent)
     m.detailsLogo.uri = channel.logo
-    m.detailsInitials.text = channel.name
+    typeSet(m.detailsInitials, channel.name)
     onDetailsLogo()
     m.detailsPicture.setHttpAgent(agent)
     m.detailsPicture.uri = ""
@@ -1053,7 +1053,7 @@ end sub
 ' most. Drawn again as the clock moves (how far it is, and once it ends).
 sub drawDetails()
     d = liveDetails(m.details.channel, m.details.program, nowSeconds(), m.twelve, fmtZoneSeconds())
-    m.detailsChannel.text = d.heading
+    typeSet(m.detailsChannel, d.heading)
     x = 1248
     y = 128
     m.detailsPicture.visible = m.detailsPicture.uri <> ""
@@ -1072,16 +1072,16 @@ sub drawDetails()
     m.detailsEnded.visible = d.ended
     if not shown then return
     y = y + 28
-    m.detailsTitle.text = d.title
+    typeSet(m.detailsTitle, d.title)
     m.detailsTitle.translation = [x, y]
     y = y + m.detailsTitle.boundingRect().height
-    m.detailsEpisode.text = d.episode
+    typeSet(m.detailsEpisode, d.episode)
     m.detailsEpisode.visible = d.episode <> ""
     if m.detailsEpisode.visible
         m.detailsEpisode.translation = [x, y + 4]
         y = y + 4 + m.detailsEpisode.boundingRect().height
     end if
-    m.detailsWhen.text = d.when
+    typeSet(m.detailsWhen, d.when)
     m.detailsWhen.translation = [x, y + 16]
     y = y + 16 + m.detailsWhen.boundingRect().height
     drawDetailsBadges(d)
@@ -1090,7 +1090,7 @@ sub drawDetails()
         y = y + 12 + m.detailsBadges.boundingRect().height
     end if
     if d.airing
-        m.detailsLeft.text = d.left
+        typeSet(m.detailsLeft, d.left)
         width = m.detailsLeft.boundingRect().width
         track = 576 - width - 20
         m.detailsLeft.translation = [x + track + 20, y + 20]
@@ -1101,7 +1101,7 @@ sub drawDetails()
         m.detailsFill.width = Int(track * d.progress)
         y = y + 20 + lineHeight
     end if
-    m.detailsText.text = d.text
+    typeSet(m.detailsText, d.text)
     m.detailsText.color = "0xEBEBEBFF"
     if not d.said then m.detailsText.color = "0x8B95A5FF"
     m.detailsText.translation = [x, y + 20]
@@ -1125,14 +1125,14 @@ sub drawDetailsBadges(d as object)
     for each badge in d.badges
         label = m.detailsBadges.createChild("Label")
         label.font = "font:SmallestBoldSystemFont"
-        label.text = badge.text
+        typeSet(label, badge.text)
         label.color = "0x7DD3FCFF"
         if badge.live then label.color = "0xEB6B70FF"
     end for
     if d.rating <> ""
         label = m.detailsBadges.createChild("Label")
         label.font = "font:SmallestBoldSystemFont"
-        label.text = d.rating
+        typeSet(label, d.rating)
         label.color = "0xA1A9B6FF"
     end if
 end sub

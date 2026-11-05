@@ -1,20 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A row of chips, left and right between them, OK choosing one: a
-     library's tabs, and its sort and filters. The current one (a tab
-     shown) stands out; the focused one is in the accent while the row has
-     the focus. A chip may end with a number (the requests' tabs). -->
+<!-- A row of chips, Android TV's pills, left and right between them, OK
+     choosing one: a library's tabs, and its sort and filters, Home's hero
+     buttons. The current one (a tab shown) stands out; the focused one is
+     the accent pill at 1.05 while the row has the focus, coming in over
+     150 ms eased out and going over 120 ms eased in. A chip may start with
+     an icon, end with a number (the requests' tabs), or be a round button,
+     an icon alone whose words show under it while it has the focus. -->
 <component name="ChipRow" extends="Group">
     <interface>
-        <!-- [{ label, width, count, accent, danger, selected }]: a
-             chip's width in pixels; 0, as wide as its words. count
+        <!-- [{ label, width, count, accent, danger, selected, icon, round }]:
+             a chip's width in pixels; 0, as wide as its words. count
              (optional): its number's words, "" for none; accent or
              danger: the number in that colour, as the menu's. selected
              (optional): it stands out as the current one does (a filter
-             in force). -->
+             in force). icon (optional): its name in images/icons, before
+             the words; round: the icon alone, in a square as tall as the
+             row, the words under it. -->
         <field id="chips" type="array" onChange="onChips" />
         <!-- The room either side of a chip's words, both sides together,
              for chips of width 0. -->
         <field id="pad" type="integer" value="64" />
+        <!-- How tall the chips are, and how narrow a pill may be. -->
+        <field id="height" type="integer" value="56" />
+        <field id="minWidth" type="integer" value="0" />
+        <!-- Over a picture (Home's hero): at rest a faint fill with an edge,
+             as Android TV's buttons on art. -->
+        <field id="onArt" type="boolean" value="false" />
         <field id="current" type="integer" value="-1" onChange="onLook" />
         <field id="focusIndex" type="integer" value="0" onChange="onLook" />
         <!-- The chip OK was pressed on. -->
@@ -25,4 +36,17 @@
         <field id="places" type="array" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/items/ChipRow.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
+    <children>
+        <Group id="row" />
+        <Animation id="lookIn" duration="0.15" easeFunction="outCubic" optional="true">
+            <Vector2DFieldInterpolator id="inScale" key="[0.0, 1.0]" keyValue="[[1.0, 1.0], [1.05, 1.05]]" />
+            <FloatFieldInterpolator id="inWords" key="[0.0, 1.0]" keyValue="[0.0, 1.0]" />
+        </Animation>
+        <Animation id="lookOut" duration="0.12" easeFunction="inCubic" optional="true">
+            <Vector2DFieldInterpolator id="outScale" key="[0.0, 1.0]" keyValue="[[1.05, 1.05], [1.0, 1.0]]" />
+            <FloatFieldInterpolator id="outWords" key="[0.0, 1.0]" keyValue="[1.0, 0.0]" />
+        </Animation>
+    </children>
 </component>

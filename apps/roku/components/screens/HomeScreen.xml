@@ -1,12 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Home: the menu on the left (Search, Home, Discover or the requests
+<!-- Home, as on Android TV and the native Samsung app: the rail on the
+     left (the profile's avatar, Search, Home, Discover or the requests
      where the server has them, Live TV, the libraries, Playlists,
-     Collections, Now Playing, Settings), then, as on Android TV and the
-     native Samsung app, a hero for the first of Continue Watching (its
-     backdrop, what it is, Resume or Play, From start, Info and the
-     watched mark) over the server's home rows (GET /api/hubs/home). In
-     the rows, an info block about the title focus rests on takes the
-     hero's place, and the backdrop follows it. -->
+     Collections, Now Playing, Settings), icons only while the focus is in
+     the page and opening over it with the focus; then a hero for the
+     first of Continue Watching (its backdrop, what it is, Resume or Play,
+     From start, Info and the watched mark) over the server's home rows
+     (GET /api/hubs/home). In the rows, an info block about the title
+     focus rests on takes the hero's place, and the backdrop follows it. -->
 <component name="HomeScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -21,6 +22,8 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/HomeScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Titles.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
@@ -36,33 +39,77 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Profiles.brs" />
     <children>
         <!-- The hero's backdrop, or that of the title focus rests on in the
-             rows, drawn faint, darker under the text and the rows. -->
-        <Poster id="backdrop" translation="[380, 0]" width="1540" height="866" loadWidth="960" loadHeight="540" loadDisplayMode="scaleToZoom" opacity="0.5" />
-        <Rectangle translation="[380, 0]" width="860" height="1080" color="0x16191EB3" />
-        <Rectangle translation="[380, 600]" width="1540" height="480" color="0x16191E99" />
-        <Rectangle id="rail" width="380" height="1080" color="0x1E222AFF" />
-        <Label id="wordmark" translation="[64, 56]" text="Pley" color="0x38BDF8FF" font="font:ExtraLargeBoldSystemFont" />
-        <MarkupList id="menu" translation="[40, 200]" itemComponentName="MenuRow" itemSize="[300, 72]" numRows="11" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
+             rows: over the whole screen, under Android TV's two gradients,
+             the page's colour from the left and from below (stretched
+             pictures), which move up as the rows do. -->
+        <Poster id="backdrop" width="1920" height="1080" loadWidth="960" loadHeight="540" loadDisplayMode="scaleToZoom" />
+        <Poster uri="pkg:/images/scrim-left.png" width="1600" height="1080" blendColor="0x16191EFF" />
+        <Group id="scrim" translation="[0, 440]">
+            <Poster uri="pkg:/images/scrim-bottom.png" width="1920" height="380" blendColor="0x16191EFF" />
+            <Rectangle translation="[0, 379]" width="1920" height="1080" color="0x16191EFF" />
+        </Group>
         <!-- At rest: the hero, the first row under it. Only the labels with
              text stay in it (layOut). -->
-        <LayoutGroup id="hero" translation="[440, 96]" layoutDirection="vert" visible="false">
-            <Label id="heroTitle" width="1100" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
-            <Label id="heroContext" width="1100" maxLines="1" color="0xEBEBEBFF" font="font:SmallBoldSystemFont" />
-            <Label id="heroMeta" width="1100" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-            <Label id="heroLeft" width="1100" maxLines="1" color="0x38BDF8FF" font="font:SmallerBoldSystemFont" />
-            <Label id="heroSummary" width="1000" wrap="true" maxLines="3" lineSpacing="6" color="0xEBEBEBFF" font="font:SmallerSystemFont" />
-            <!-- Side by side, Left and Right between them, as Now Playing's. -->
-            <ChipRow id="heroButtons" pad="80" />
+        <LayoutGroup id="hero" translation="[192, 104]" layoutDirection="vert" visible="false">
+            <Label id="heroTitle" width="928" wrap="true" maxLines="2" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="76" />
+            </Label>
+            <Label id="heroContext" width="928" maxLines="1" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="32" />
+            </Label>
+            <Label id="heroMeta" width="928" maxLines="1" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="28" />
+            </Label>
+            <Label id="heroLeft" width="928" maxLines="1" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
+            <Label id="heroSummary" width="928" wrap="true" maxLines="3" lineSpacing="8" color="0xD5D8DEFF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+            </Label>
+            <!-- Play (or Resume) on a pill, then From start, Info and the
+                 watched mark as round buttons; Left and Right between them. -->
+            <ChipRow id="heroButtons" height="80" minWidth="256" pad="80" onArt="true" />
         </LayoutGroup>
         <!-- In the rows: what the title focus rests on is, over them. -->
-        <LayoutGroup id="info" translation="[440, 56]" layoutDirection="vert" visible="false">
-            <Label id="infoTitle" width="1300" maxLines="1" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="infoMeta" width="1300" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-            <Label id="infoSummary" width="1100" wrap="true" maxLines="2" lineSpacing="6" color="0xEBEBEBFF" font="font:SmallerSystemFont" />
+        <LayoutGroup id="info" translation="[192, 56]" layoutDirection="vert" visible="false">
+            <Label id="infoTitle" width="1300" maxLines="1" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+            </Label>
+            <Label id="infoMeta" width="1300" maxLines="1" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="28" />
+            </Label>
+            <Label id="infoSummary" width="1120" wrap="true" maxLines="2" lineSpacing="8" color="0xD5D8DEFF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="28" />
+            </Label>
         </LayoutGroup>
-        <RowList id="rows" translation="[440, 620]" itemComponentName="Tile" itemSize="[1480, 470]" numRows="3" itemSpacing="[0, 28]" rowItemSpacing="[[28, 0]]" showRowLabel="[true]" rowLabelOffset="[[0, 12]]" rowLabelColor="0xEBEBEBFF" drawFocusFeedback="false" rowFocusAnimationStyle="floatingFocus" vertFocusAnimationStyle="floatingFocus" visible="false" rowLabelFont="font:MediumBoldSystemFont" />
-        <!-- Loading, why Home is empty, or what failed with Retry. -->
-        <PageMessage id="message" translation="[1130, 440]" width="1380" text="Loading…" />
+        <RowList id="rows" translation="[176, 760]" itemComponentName="Tile" itemSize="[1744, 506]" numRows="3" itemSpacing="[0, 28]" rowItemSpacing="[[0, 0]]" showRowLabel="[true]" rowLabelOffset="[[16, 8]]" rowLabelColor="0xEBEBEBFF" drawFocusFeedback="false" rowFocusAnimationStyle="fixedFocus" vertFocusAnimationStyle="fixedFocus" visible="false">
+            <Font role="rowLabelFont" uri="pkg:/fonts/roboto-700.ttf" size="36" />
+        </RowList>
+        <!-- Loading, why Home is empty, or what failed with Retry, in the
+             middle of the page right of the rail. -->
+        <PageMessage id="message" translation="[1056, 440]" width="1536" text="Loading…" />
+        <!-- The rail. Closed, the page's colour under its icons, fading into
+             the page; open, a panel over the page, which dims. The panel
+             slides in over 200 ms, eased out, as Android TV's opens. -->
+        <Rectangle width="112" height="1080" color="0x16191EFF" />
+        <Poster uri="pkg:/images/fade-right.png" translation="[112, 0]" width="32" height="1080" blendColor="0x16191EFF" />
+        <Rectangle id="dim" width="1920" height="1080" color="0x0B0D10FF" opacity="0" />
+        <Group id="panel" translation="[-400, 0]" opacity="0">
+            <Rectangle width="544" height="1080" color="0x1E222AFF" opacity="0.96" />
+            <Poster uri="pkg:/images/fade-right.png" translation="[544, 0]" width="48" height="1080" blendColor="0x000000FF" opacity="0.5" />
+        </Group>
+        <MarkupList id="menu" translation="[16, 40]" itemComponentName="RailItem" itemSize="[512, 80]" itemSpacing="[0, 8]" numRows="11" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
+        <Animation id="railMotion" duration="0.2" easeFunction="outCubic" optional="true">
+            <Vector2DFieldInterpolator id="panelSlide" key="[0.0, 1.0]" keyValue="[[-400.0, 0.0], [0.0, 0.0]]" fieldToInterp="panel.translation" />
+            <FloatFieldInterpolator id="panelFade" key="[0.0, 1.0]" keyValue="[0.0, 1.0]" fieldToInterp="panel.opacity" />
+            <FloatFieldInterpolator id="dimFade" key="[0.0, 1.0]" keyValue="[0.0, 0.6]" fieldToInterp="dim.opacity" />
+        </Animation>
+        <!-- The page moving between its hero and its rows: the rows and the
+             gradient under the backdrop, 200 ms, eased out. -->
+        <Animation id="pageMotion" duration="0.2" easeFunction="outCubic" optional="true">
+            <Vector2DFieldInterpolator id="rowsMove" key="[0.0, 1.0]" keyValue="[[176.0, 760.0], [176.0, 344.0]]" fieldToInterp="rows.translation" />
+            <Vector2DFieldInterpolator id="scrimMove" key="[0.0, 1.0]" keyValue="[[0.0, 440.0], [0.0, 240.0]]" fieldToInterp="scrim.translation" />
+        </Animation>
         <!-- Focus resting on a tile: the info block and the backdrop follow. -->
         <Timer id="rest" duration="0.4" />
     </children>

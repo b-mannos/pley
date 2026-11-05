@@ -14,6 +14,8 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/CollectionScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Titles.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
@@ -24,33 +26,54 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Content.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Pages.brs" />
     <children>
-        <Poster id="backdrop" width="1920" height="1080" loadWidth="640" loadHeight="360" loadDisplayMode="scaleToZoom" opacity="0.4" />
-        <Rectangle id="shade" width="1260" height="1080" color="0x16191ED9" />
+        <Poster id="backdrop" width="1920" height="1080" loadWidth="640" loadHeight="360" loadDisplayMode="scaleToZoom" />
+        <!-- Android TV's two gradients over the backdrop (stretched pictures):
+             the page's colour from the left, and from below, which comes up
+             over the backdrop as the page slides up. -->
+        <Poster uri="pkg:/images/scrim-left.png" width="1600" height="1080" blendColor="0x16191EFF" />
+        <Group id="shade" translation="[0, 520]">
+            <Poster uri="pkg:/images/scrim-bottom.png" width="1920" height="480" blendColor="0x16191EFF" />
+            <Rectangle translation="[0, 479]" width="1920" height="1080" color="0x16191EFF" />
+        </Group>
         <Group id="page">
             <LayoutGroup id="column" translation="[96, 80]" layoutDirection="vert" itemSpacings="[40]" visible="false">
                 <!-- Only the labels with text stay in it (layoutText). -->
                 <LayoutGroup id="text" layoutDirection="vert">
                     <!-- "Collection", then its badges beside it (showBadges). -->
                     <Group id="eyebrow">
-                        <Label id="kindLabel" height="40" vertAlign="center" text="Collection" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+                        <Label id="kindLabel" height="40" vertAlign="center" text="Collection" color="0xA1A9B6FF">
+                            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+                        </Label>
                         <Group id="tmdb" visible="false">
                             <Rectangle id="tmdbBack" height="40" color="0x2E3440FF" />
-                            <Label id="tmdbText" translation="[14, 0]" height="40" vertAlign="center" text="TMDB" color="0xEBEBEBFF" font="font:SmallestBoldSystemFont" />
+                            <Label id="tmdbText" translation="[14, 0]" height="40" vertAlign="center" text="TMDB" color="0xEBEBEBFF">
+                                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="26" />
+                            </Label>
                         </Group>
                         <Group id="smart" visible="false">
                             <Rectangle id="smartBack" height="40" color="0x2E3440FF" />
-                            <Label id="smartText" translation="[14, 0]" height="40" vertAlign="center" text="Smart" color="0xEBEBEBFF" font="font:SmallestBoldSystemFont" />
+                            <Label id="smartText" translation="[14, 0]" height="40" vertAlign="center" text="Smart" color="0xEBEBEBFF">
+                                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="26" />
+                            </Label>
                         </Group>
                     </Group>
-                    <Label id="heading" width="1100" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
-                    <Label id="facts" width="1100" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-                    <Label id="summary" width="1080" wrap="true" maxLines="3" lineSpacing="6" color="0xEBEBEBFF" font="font:SmallerSystemFont" />
-                    <Label id="note" width="1100" wrap="true" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+                    <Label id="heading" width="1100" wrap="true" maxLines="2" color="0xEBEBEBFF">
+                        <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+                    </Label>
+                    <Label id="facts" width="1100" color="0xA1A9B6FF">
+                        <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+                    </Label>
+                    <Label id="summary" width="1080" wrap="true" maxLines="3" lineSpacing="6" color="0xEBEBEBFF">
+                        <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+                    </Label>
+                    <Label id="note" width="1100" wrap="true" color="0xA1A9B6FF">
+                        <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+                    </Label>
                 </LayoutGroup>
-                <ButtonGroup id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="560" visible="false" />
+                <Buttons id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="560" visible="false" />
             </LayoutGroup>
             <!-- Its top shows under the buttons; the page slides up to it. -->
-            <MarkupGrid id="grid" translation="[96, 720]" itemComponentName="Tile" numColumns="7" numRows="2" itemSize="[220, 410]" itemSpacing="[28, 24]" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" visible="false" />
+            <MarkupGrid id="grid" translation="[80, 700]" itemComponentName="Tile" numColumns="7" numRows="2" itemSize="[252, 430]" itemSpacing="[0, 4]" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" visible="false" />
         </Group>
         <!-- Loading, or what failed with Retry. -->
         <PageMessage id="message" translation="[960, 440]" width="1100" text="Loading…" />

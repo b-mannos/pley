@@ -15,49 +15,83 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/LinkScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Auth.brs" />
     <children>
-        <Label id="wordmark" translation="[96, 96]" text="Pley" color="0x38BDF8FF" font="font:ExtraLargeBoldSystemFont" />
-        <Label id="title" translation="[96, 184]" width="1040" text="Sign in to Pley" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="wordmark" translation="[96, 96]" text="Pley" color="0x38BDF8FF">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+        </Label>
+        <Label id="title" translation="[96, 184]" width="1040" text="Sign in to Pley" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+        </Label>
         <!-- Under the title: why to sign in again (in the danger colour),
              then what the server or this sign-in asks (two-step sign-in,
              or which profile to pick), a line lower when both show. -->
-        <Label id="intro" translation="[96, 280]" width="1040" color="0xEB6B70FF" visible="false" font="font:SmallerSystemFont" />
-        <Label id="note" translation="[96, 280]" width="1040" wrap="true" maxLines="2" color="0xA1A9B6FF" visible="false" font="font:SmallerSystemFont" />
+        <Label id="intro" translation="[96, 280]" width="1040" color="0xEB6B70FF" visible="false">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+        </Label>
+        <Label id="note" translation="[96, 280]" width="1040" wrap="true" maxLines="2" color="0xA1A9B6FF" visible="false">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+        </Label>
         <Group id="steps">
             <Rectangle translation="[96, 384]" width="56" height="56" color="0x2E3440FF" />
-            <Label translation="[96, 384]" width="56" height="56" horizAlign="center" vertAlign="center" text="1" color="0xEBEBEBFF" font="font:SmallBoldSystemFont" />
-            <Label translation="[180, 384]" width="900" height="56" vertAlign="center" text="Scan the code with your phone" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+            <Label translation="[96, 384]" width="56" height="56" horizAlign="center" vertAlign="center" text="1" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="32" />
+            </Label>
+            <Label translation="[180, 384]" width="900" height="56" vertAlign="center" text="Scan the code with your phone" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+            </Label>
             <Rectangle translation="[96, 464]" width="56" height="56" color="0x2E3440FF" />
-            <Label translation="[96, 464]" width="56" height="56" horizAlign="center" vertAlign="center" text="2" color="0xEBEBEBFF" font="font:SmallBoldSystemFont" />
-            <Label id="goTo" translation="[180, 464]" height="56" vertAlign="center" text="or go to" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+            <Label translation="[96, 464]" width="56" height="56" horizAlign="center" vertAlign="center" text="2" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="32" />
+            </Label>
+            <Label id="goTo" translation="[180, 464]" height="56" vertAlign="center" text="or go to" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+            </Label>
             <!-- After "or go to", in the largest size that fits on the line. -->
-            <Label id="url" translation="[320, 464]" height="56" vertAlign="center" text="…" color="0xEBEBEBFF" font="font:MediumBoldSystemFont" />
+            <Label id="url" translation="[320, 464]" height="56" vertAlign="center" text="…" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="36" />
+            </Label>
             <Rectangle translation="[96, 544]" width="56" height="56" color="0x2E3440FF" />
-            <Label translation="[96, 544]" width="56" height="56" horizAlign="center" vertAlign="center" text="3" color="0xEBEBEBFF" font="font:SmallBoldSystemFont" />
-            <Label translation="[180, 544]" width="900" height="56" vertAlign="center" text="and enter this code" color="0xEBEBEBFF" font="font:MediumSystemFont" />
+            <Label translation="[96, 544]" width="56" height="56" horizAlign="center" vertAlign="center" text="3" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="32" />
+            </Label>
+            <Label translation="[180, 544]" width="900" height="56" vertAlign="center" text="and enter this code" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+            </Label>
             <!-- The code in two fields with a dash between ("BCDF – GHJK"),
                  dimmed until it comes and once it expires (showCode places
                  them). -->
             <Group id="code" translation="[96, 624]" opacity="0.4">
                 <Rectangle id="codeBack1" width="320" height="152" color="0x262B35FF" />
-                <Label id="code1" width="320" height="152" horizAlign="center" vertAlign="center" text="····" color="0xEBEBEBFF" font="font:LargestSystemFont" />
+                <Label id="code1" width="320" height="152" horizAlign="center" vertAlign="center" text="····" color="0xEBEBEBFF">
+                    <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="90" />
+                </Label>
                 <Rectangle id="dash" translation="[340, 72]" width="40" height="8" color="0x8B95A5FF" />
                 <Rectangle id="codeBack2" translation="[424, 0]" width="320" height="152" color="0x262B35FF" />
-                <Label id="code2" translation="[424, 0]" width="320" height="152" horizAlign="center" vertAlign="center" text="····" color="0xEBEBEBFF" font="font:LargestSystemFont" />
+                <Label id="code2" translation="[424, 0]" width="320" height="152" horizAlign="center" vertAlign="center" text="····" color="0xEBEBEBFF">
+                    <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="90" />
+                </Label>
             </Group>
             <Group id="notes">
-                <Label translation="[96, 808]" width="1040" text="Your phone must be on the same Wi-Fi as this TV." color="0xA1A9B6FF" font="font:SmallerSystemFont" />
-                <Label translation="[96, 848]" width="1040" text="Or open Pley on a signed-in device and pick Link a TV" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
+                <Label translation="[96, 808]" width="1040" text="Your phone must be on the same Wi-Fi as this TV." color="0xA1A9B6FF">
+                    <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+                </Label>
+                <Label translation="[96, 848]" width="1040" text="Or open Pley on a signed-in device and pick Link a TV" color="0xA1A9B6FF">
+                    <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+                </Label>
             </Group>
             <!-- In place of the notes once the code can't be used: Get a new
                  code (or Retry). -->
-            <ButtonGroup id="again" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 800]" minWidth="380" visible="false" />
+            <Buttons id="again" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[96, 800]" minWidth="380" visible="false" />
         </Group>
-        <Label id="status" translation="[96, 956]" width="1040" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+        <Label id="status" translation="[96, 956]" width="1040" color="0xA1A9B6FF">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+        </Label>
         <Group id="side" translation="[1200, 240]">
             <!-- The QR code's tile: a placeholder until the picture comes,
                  white behind it then, dimmed once the code expires. An
@@ -66,12 +100,16 @@
                 <Rectangle id="qrBack" width="536" height="536" color="0x262B35FF" />
                 <Poster id="qr" width="536" height="536" loadDisplayMode="scaleToFit" />
             </Group>
-            <Label id="qrCaption" translation="[0, 560]" width="536" horizAlign="center" text="Scan with your phone camera" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
+            <Label id="qrCaption" translation="[0, 560]" width="536" horizAlign="center" text="Scan with your phone camera" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+            </Label>
             <!-- Change server, or Use another profile. -->
-            <ButtonGroup id="back" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[78, 636]" minWidth="380" />
+            <Buttons id="back" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[78, 636]" minWidth="380" />
         </Group>
         <!-- Signed in, for a moment: only this shows. -->
-        <Label id="done" translation="[96, 400]" width="1400" wrap="true" maxLines="2" text="Signed in" color="0xEBEBEBFF" visible="false" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="done" translation="[96, 400]" width="1400" wrap="true" maxLines="2" text="Signed in" color="0xEBEBEBFF" visible="false">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+        </Label>
         <Timer id="leave" duration="1.2" />
         <!-- "Trying again in N s", counted down each second. -->
         <Timer id="countdown" duration="1" repeat="true" />

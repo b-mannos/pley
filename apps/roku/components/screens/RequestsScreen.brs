@@ -119,7 +119,7 @@ end sub
 sub showPage(view as string)
     summary = reqSummaryOf(m.top.requestSummary)
     m.manage = summary.manage = true
-    m.heading.text = reqPageName(summary)
+    typeSet(m.heading, reqPageName(summary))
     m.tabKeys = []
     for each entry in reqTabs(m.manage)
         m.tabKeys.Push(entry.key)
@@ -220,7 +220,7 @@ sub showCount()
     if not m.manage and summary.signInAgain = "approvals"
         m.count.text = "Sign in again to approve and decline here."
     else if m.total > 0
-        m.count.text = reqCount(m.total, "request", "requests")
+        typeSet(m.count, reqCount(m.total, "request", "requests"))
     else
         m.count.text = ""
     end if
@@ -309,8 +309,8 @@ end sub
 ' may ask, Find something to ask for.
 sub showEmpty()
     empty = reqEmpty(m.view, hasFilters(), reqMayAsk(reqSummaryOf(m.top.requestSummary)), m.manage)
-    m.emptyTitle.text = empty.title
-    m.emptyText.text = empty.text
+    typeSet(m.emptyTitle, empty.title)
+    typeSet(m.emptyText, empty.text)
     buttons = []
     if empty.find then buttons.Push("Find something to ask for")
     if FormatJson(m.emptyButtons.buttons) <> FormatJson(buttons) then m.emptyButtons.buttons = buttons
@@ -496,11 +496,11 @@ sub showRequest(row as object, focus = true as boolean)
     m.requestTarget = targetOf(row)
     m.panelChoices = reqPanelChoices(m.requestTarget)
     m.panelShown = FormatJson([row.panelTitle, row.panelLines, row.stageText, row.stageColor, row.progress, m.panelChoices])
-    m.panelTitle.text = row.panelTitle
+    typeSet(m.panelTitle, row.panelTitle)
     m.headStage.color = row.stageColor
     m.headStage.progress = row.progress
-    m.headStage.text = row.stageText
-    m.headLines.text = row.panelLines.Join(Chr(10))
+    typeSet(m.headStage, row.stageText)
+    typeSet(m.headLines, row.panelLines.Join(Chr(10)))
     m.head.visible = true
     items = []
     at = 0
@@ -549,7 +549,7 @@ end sub
 sub showConfirm(action as string, confirm as object)
     m.panelKind = "confirm"
     m.confirming = action
-    m.panelTitle.text = confirm.message
+    typeSet(m.panelTitle, confirm.message)
     m.head.visible = false
     m.menu.content = nodesContent([{ title: "Cancel" }, { title: confirm.button }])
     m.menu.jumpToItem = 0
@@ -726,7 +726,7 @@ sub showChoices(kind as string, title as string, labels as object, values as obj
     m.panelKind = kind
     m.values = values
     m.choiceLabels = labels
-    m.panelTitle.text = title
+    typeSet(m.panelTitle, title)
     items = []
     for each label in labels
         items.Push({ title: label })
@@ -813,7 +813,7 @@ sub onSummary()
         return
     end if
     if m.problemShown <> invalid then return
-    m.heading.text = reqPageName(summary)
+    typeSet(m.heading, reqPageName(summary))
     showTabs()
     showCount()
     if m.empty.visible then showEmpty()
@@ -834,8 +834,8 @@ sub showProblem(problem as object)
     m.panel.visible = false
     m.panelKind = ""
     m.count.text = ""
-    m.problemTitle.text = problem.title
-    m.problemText.text = problem.text
+    typeSet(m.problemTitle, problem.title)
+    typeSet(m.problemText, problem.text)
     buttons = []
     if problem.signIn then buttons.Push("Sign in")
     if problem.retry then buttons.Push("Try again")

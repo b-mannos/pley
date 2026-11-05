@@ -4,10 +4,26 @@ lost it, images/button-footprint.9.png): nine-patch pictures, a rounded
 box in the app's accent or its raised surface, as its lists have. The
 Live TV guide's programmes sit on images/guide-cell.9.png, and what has
 aired on images/guide-past.9.png; images/spinner.png turns while a channel
-tunes, and images/round.png makes a person's photo round. The
-icons and splash screens are pley's logo, rendered with the other apps'
-icons by scripts/render-icons.mjs at the repository's root. Standard
-library only.
+tunes, and images/round.png makes a person's photo round (and, tinted,
+draws a profile's disc).
+
+The shapes of Android TV's look, in white for a Poster's blendColor to
+tint: images/pill.9.png, a button's or a rail entry's rounded box (its
+corners Android's 6 dp, 12 pixels), and images/pill-edge.9.png its edge
+at rest; images/tile.9.png a tile's well (4 dp corners), and
+images/tile-corners.9.png the page's colour outside those corners, over
+a poster, which rounds it; images/tile-ring.9.png the focus ring around
+a tile (3 dp wide, as Android's PleyFocus, and 2 dp out).
+images/scrim-left.png and images/scrim-bottom.png are the gradients over
+a backdrop (Android TV's TvSurfaces.kt: from the left 100 %, 92 %, 85 %
+then nothing; from the top nothing to all), and images/fade-right.png a
+plain fade, each stretched to its place. images/poster-mask.png and
+images/cover-mask.png round a title page's poster and an album's cover
+(a MaskGroup's mask).
+
+The icons and splash screens are pley's logo, rendered with the other
+apps' icons by scripts/render-icons.mjs at the repository's root; the
+Lucide icons by scripts/icons.mjs. Standard library only.
 
     python scripts/make_images.py
 """
@@ -23,9 +39,10 @@ SURFACE3 = (0x2E, 0x34, 0x40)  # its raised surface
 SURFACE2 = (0x26, 0x2B, 0x35)  # a guide's programme
 PAST = (0x1E, 0x22, 0x2A, 0x99)  # the guide's time gone, over the screen
 
-# A button's box: its size inside the nine-patch's border, and its corners.
+# A button's box: its size inside the nine-patch's border, and its corners
+# (Android's 6 dp for a control).
 BOX = 32
-RADIUS = 8
+RADIUS = 12
 
 # The watched mark, drawn at this size on tiles (components/items/Tile.brs).
 MARK_SIZE = 40
@@ -36,6 +53,19 @@ SPINNER_SIZE = 64
 # The mask of round pictures, a person's photo (components/screens/
 # PersonScreen), drawn at this size.
 ROUND_SIZE = 160
+
+WHITE = (0xFF, 0xFF, 0xFF)
+
+# Android TV's corners at 1080p: a control's 6 dp, a tile's 4 dp.
+PILL_RADIUS = 12
+TILE_RADIUS = 8
+
+# The focus ring: 3 dp wide, as Android's, but 2 dp out from the tile
+# where Android leaves 3, so that a tile grown with it fits the room a Roku
+# list gives it (components/lib/Content.brs, contentTileCell).
+RING_STROKE = 6
+RING_REACH = 10
+RING_BOX = 48
 
 
 def segment_distance(px, py, ax, ay, bx, by):
@@ -72,36 +102,112 @@ def render_mark(size):
     return rows
 
 
-def render_box(color, radius=RADIUS):
-    """RGBA rows of a nine-patch (Roku's .9.png): a rounded box of color
-    (with its alpha, if it has one), in a border of one pixel whose black
-    marks say what stretches (top and left)."""
-    alpha = color[3] if len(color) > 3 else 255
-    color = color[:3]
-    size = BOX + 2
+def render_nine(box, edge, cover):
+    """RGBA rows of a nine-patch (Roku's .9.png): box pixels square in a
+    border of one pixel whose black marks say what stretches (top and
+    left: all but edge pixels at either end). cover(x, y) is whether the
+    point (x, y) of the box is drawn; color is drawn there."""
+    size = box + 2
     samples = 4
     rows = []
     for row in range(size):
         line = bytearray()
         for col in range(size):
             if row in (0, size - 1) or col in (0, size - 1):
-                edge = max(radius, 1)
-                marked = (row == 0 and edge < col < size - 1 - edge) or (col == 0 and edge < row < size - 1 - edge)
+                stretch = max(edge, 1)
+                marked = (row == 0 and stretch < col < size - 1 - stretch) or (col == 0 and stretch < row < size - 1 - stretch)
                 line.extend((0, 0, 0, 255) if marked else (0, 0, 0, 0))
                 continue
             inside = 0
             for sy in range(samples):
                 for sx in range(samples):
-                    x = col - 1 + (sx + 0.5) / samples
-                    y = row - 1 + (sy + 0.5) / samples
-                    dx = max(radius - x, 0, x - (BOX - radius))
-                    dy = max(radius - y, 0, y - (BOX - radius))
-                    if math.hypot(dx, dy) <= radius:
+                    if cover(col - 1 + (sx + 0.5) / samples, row - 1 + (sy + 0.5) / samples):
                         inside += 1
-            line.extend(color)
-            line.append(round(alpha * inside / (samples * samples)))
+            line.extend(cover.color)
+            line.append(round(cover.alpha * inside / (samples * samples)))
         rows.append(bytes(line))
     return rows
+
+
+def past_corners(x, y, box, radius):
+    """How far (x, y) is outside a rounded box box wide, its corners of
+    radius: 0 or less inside it."""
+    dx = max(radius - x, 0, x - (box - radius))
+    dy = max(radius - y, 0, y - (box - radius))
+    return math.hypot(dx, dy) - radius
+
+
+def shape(test, color=(0xFF, 0xFF, 0xFF, 255)):
+    """test as a cover for render_nine, of color (with its alpha)."""
+    test.color = color[:3]
+    test.alpha = color[3] if len(color) > 3 else 255
+    return test
+
+
+def render_box(color, radius=RADIUS, box=BOX):
+    """A rounded box of color (with its alpha, if it has one)."""
+    return render_nine(box, radius, shape(lambda x, y: past_corners(x, y, box, radius) <= 0, color))
+
+
+def render_outline(radius, stroke, box):
+    """The edge of a rounded box, stroke wide, in white."""
+    inner = radius - stroke
+
+    def test(x, y):
+        if past_corners(x, y, box, radius) > 0:
+            return False
+        return past_corners(x - stroke, y - stroke, box - 2 * stroke, inner) > 0
+
+    return render_nine(box, radius, shape(test))
+
+
+def render_corners(radius, box):
+    """White outside a rounded box's corners, clear within it: drawn over
+    a picture in the colour around it, it rounds the picture's corners."""
+    return render_nine(box, radius, shape(lambda x, y: past_corners(x, y, box, radius) > 0))
+
+
+def render_rounded(width, height, radius):
+    """RGBA rows of a white box width × height with corners of radius, its
+    edge smoothed: a MaskGroup's mask that rounds a picture's corners."""
+    samples = 4
+    rows = []
+    for row in range(height):
+        line = bytearray()
+        for col in range(width):
+            inside = 0
+            for sy in range(samples):
+                for sx in range(samples):
+                    x = col + (sx + 0.5) / samples
+                    y = row + (sy + 0.5) / samples
+                    dx = max(radius - x, 0, x - (width - radius))
+                    dy = max(radius - y, 0, y - (height - radius))
+                    if math.hypot(dx, dy) <= radius:
+                        inside += 1
+            line.extend(WHITE)
+            line.append(round(255 * inside / (samples * samples)))
+        rows.append(bytes(line))
+    return rows
+
+
+def render_gradient(length, stops, across):
+    """RGBA rows of a white gradient length long and 4 wide, its alpha
+    going through stops ([(at, alpha)], at from 0 to 1): left to right
+    when across, else top to bottom."""
+
+    def alpha_at(t):
+        for (a, va), (b, vb) in zip(stops, stops[1:]):
+            if a <= t <= b:
+                return va + (vb - va) * (t - a) / (b - a)
+        return stops[-1][1]
+
+    values = [round(255 * alpha_at((i + 0.5) / length)) for i in range(length)]
+    if across:
+        line = bytearray()
+        for value in values:
+            line.extend(WHITE + (value,))
+        return [bytes(line)] * 4
+    return [bytes(WHITE + (value,)) * 4 for value in values]
 
 
 def render_spinner(size):
@@ -183,6 +289,29 @@ def main():
     print("images/spinner.png", SPINNER_SIZE, "x", SPINNER_SIZE)
     write_png(os.path.join(folder, "round.png"), ROUND_SIZE, ROUND_SIZE, render_disc(ROUND_SIZE))
     print("images/round.png", ROUND_SIZE, "x", ROUND_SIZE)
+    shapes = (
+        ("pill.9.png", BOX, render_box(WHITE, PILL_RADIUS)),
+        ("pill-edge.9.png", BOX, render_outline(PILL_RADIUS, 2, BOX)),
+        ("tile.9.png", BOX, render_box(WHITE, TILE_RADIUS)),
+        ("tile-corners.9.png", BOX, render_corners(TILE_RADIUS, BOX)),
+        ("tile-ring.9.png", RING_BOX, render_outline(TILE_RADIUS + RING_REACH, RING_STROKE, RING_BOX)),
+    )
+    for name, box, rows in shapes:
+        write_png(os.path.join(folder, name), box + 2, box + 2, rows)
+        print("images/" + name, box + 2, "x", box + 2)
+    gradients = (
+        # From the left over 800 dp: 100 % at 0, 92 % at 300, 85 % at 560, none at 800.
+        ("scrim-left.png", 400, 4, render_gradient(400, [(0, 1), (0.375, 0.92), (0.7, 0.85), (1, 0)], True)),
+        ("scrim-bottom.png", 4, 256, render_gradient(256, [(0, 0), (1, 1)], False)),
+        ("fade-right.png", 256, 4, render_gradient(256, [(0, 1), (1, 0)], True)),
+    )
+    for name, width, height, rows in gradients:
+        write_png(os.path.join(folder, name), width, height, rows)
+        print("images/" + name, width, "x", height)
+    # A title page's poster and an album's cover, with a tile's corners.
+    for name, width, height in (("poster-mask.png", 420, 630), ("cover-mask.png", 420, 420)):
+        write_png(os.path.join(folder, name), width, height, render_rounded(width, height, TILE_RADIUS))
+        print("images/" + name, width, "x", height)
 
 
 if __name__ == "__main__":

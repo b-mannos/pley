@@ -56,11 +56,11 @@ sub showSeasons()
     parts = [httpString(params.title)]
     year = httpNumber(params.year, 0)
     if year > 0 then parts.Push(urlValue(year))
-    m.subtitle.text = parts.Join(" · ")
-    m.words.text = reqAskWords(summary.access)
+    typeSet(m.subtitle, parts.Join(" · "))
+    typeSet(m.words, reqAskWords(summary.access))
     words = reqAllowance(m.allowanceShown, now)
     m.allowanceText = words.text
-    m.allowance.text = (words.text + " " + words.limits).Trim()
+    typeSet(m.allowance, (words.text + " " + words.limits).Trim())
     m.seasons.content = nodesContent(m.rows)
     ' The first ticked season, else the first that can be asked for.
     first = -1
@@ -81,7 +81,7 @@ sub onSeason(event as object)
     row = m.rows[index]
     if not row.askable
         m.line.color = "0xA1A9B6FF"
-        m.line.text = row.title + ": " + row.line + "."
+        typeSet(m.line, row.title + ": " + row.line + ".")
         return
     end if
     row.ticked = not row.ticked
@@ -104,7 +104,7 @@ sub showButton()
         m.buttonActions = ["send", "cancel"]
     end if
     if FormatJson(m.buttons.buttons) <> FormatJson(labels) then m.buttons.buttons = labels
-    m.line.text = button.line
+    typeSet(m.line, button.line)
     m.line.color = "0xA1A9B6FF"
     if ticked > 0 and button.label = "" then m.line.color = "0xEB6B70FF"
 end sub
@@ -141,7 +141,7 @@ sub onSent(event as object)
     m.top.getScene().requestTouched = { requestId: 0, kind: "show", tmdbId: httpNumber(params.tmdbId, 0) }
     if not answer.ok
         if uiFailed(answer) then return
-        m.line.text = reqAskProblem(answer, m.allowanceShown, "show", CreateObject("roDateTime").AsSeconds())
+        typeSet(m.line, reqAskProblem(answer, m.allowanceShown, "show", CreateObject("roDateTime").AsSeconds()))
         m.line.color = "0xEB6B70FF"
         return
     end if

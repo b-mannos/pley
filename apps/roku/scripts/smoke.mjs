@@ -305,14 +305,14 @@ async function waitFor(pattern, since, what, { ms = 30000, settles = true } = {}
 }
 
 // brs-node drops a key now and then: menu entries are reached from the
-// top of the menu (twelve entries at most, Settings the last, which 11
-// reaches whatever the menu holds) and checked by the request they lead
-// to.
+// top of the rail, the profile's avatar (thirteen entries at most, Settings
+// the last, which 12 reaches whatever the rail holds), index counting from
+// Search, and checked by the request they lead to.
 async function openFromMenu(index, pattern, what, then = async () => {}) {
   for (let attempt = 0; attempt < 3; attempt++) {
     await press("left", 3);
-    await press("up", 11);
-    await press("down", index);
+    await press("up", 12);
+    await press("down", index + 1);
     const since = mark();
     await press("select");
     await then();
@@ -561,13 +561,29 @@ async function walk() {
   await press("select");
   await waitFor(/^POST \/api\/items\/103\/watched$/, since, "a title marked watched");
   // See all at the end of Recently Added in Music: the library's Library
-  // tab, newest added first, for this visit only; Back to Home.
+  // tab, newest added first, for this visit only; Back to Home. brs-node
+  // can stop reading keys for half a minute while it fetches a picture,
+  // and a key pressed meanwhile is lost: another row's See all goes Back,
+  // Up to the hero (the rows left on their first) and down again.
   await settle();
-  since = mark();
-  await press("down", 4); // past Continue Watching, My List, Movies and TV Shows
-  await press("right"); // See all, after the album
-  await press("select");
-  await waitFor(/^GET \/api\/libraries\/3\/items\?.*sort=added/, since, "Recently Added's See all");
+  for (let attempt = 0; ; attempt++) {
+    since = mark();
+    await press("down", 4); // past Continue Watching, My List, Movies and TV Shows
+    await press("right"); // See all, after the album
+    await press("select");
+    try {
+      await waitFor(/^GET \/api\/libraries\/3\/items\?.*sort=added/, since, "Recently Added's See all");
+      break;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      if (seen(/^GET \/api\/libraries\/\d+\/items/, since)) {
+        await press("back");
+        await settle();
+      }
+      await press("up", 8);
+      await press("down");
+    }
+  }
   shoot("see-all");
   await press("back");
   await settle();
@@ -840,9 +856,23 @@ async function walk() {
   await press("back");
   await settle();
   await press("down", 2); // past More like this to Collections
-  since = mark();
-  await press("select");
-  await waitFor(/^GET \/api\/collections\/1$/, since, "a collection of movies");
+  // A key lost to brs-node (above) leaves the focus a row short: the title
+  // opened from More like this goes Back, and Down to Collections.
+  for (let attempt = 0; ; attempt++) {
+    since = mark();
+    await press("select");
+    try {
+      await waitFor(/^GET \/api\/collections\/1$/, since, "a collection of movies");
+      break;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+      if (seen(/^GET \/api\/items\/\d+$/, since)) {
+        await press("back");
+        await settle();
+        await press("down");
+      }
+    }
+  }
   shoot("collection");
   await press("down", 2); // past Shuffle
   await sleep(500);
@@ -1295,8 +1325,8 @@ async function walk() {
   await sleep(1500);
   fixture.down = true;
   await press("left", 3);
-  await press("up", 11);
-  await press("down", 4); // Movies, after Search, Home, Discover and Live TV
+  await press("up", 12);
+  await press("down", 5); // Movies, after the avatar, Search, Home, Discover and Live TV
   await press("select");
   await sleep(3000);
   shoot("unreachable");

@@ -13,18 +13,30 @@
         <field id="gridHasFocus" type="boolean" value="true" onChange="onFocus" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/items/LiveCard.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <children>
-        <Rectangle id="frame" color="0x262B35FF" />
-        <Rectangle id="plate" color="0x2E3440FF" />
-        <Label id="fallback" color="0xA1A9B6FF" horizAlign="center" vertAlign="center" wrap="true" maxLines="2" font="font:SmallBoldSystemFont" />
+        <Poster id="frame" uri="pkg:/images/tile.9.png" blendColor="0x262B35FF" />
+        <Poster id="plate" uri="pkg:/images/tile.9.png" blendColor="0x2E3440FF" />
+        <Label id="fallback" color="0xA1A9B6FF" horizAlign="center" vertAlign="center" wrap="true" maxLines="2">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="32" />
+        </Label>
         <Poster id="logo" loadDisplayMode="scaleToFit" />
         <Rectangle id="numberBack" color="0x16191ECC" height="40" visible="false" />
-        <Label id="number" height="40" horizAlign="center" vertAlign="center" color="0xEBEBEBFF" font="font:SmallestBoldSystemFont" />
-        <Label id="star" text="★" width="40" height="40" horizAlign="center" vertAlign="center" color="0x38BDF8FF" font="font:SmallBoldSystemFont" visible="false" />
-        <Label id="title" color="0xEBEBEBFF" font="font:SmallestBoldSystemFont" />
-        <Label id="line" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        <Label id="number" height="40" horizAlign="center" vertAlign="center" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="26" />
+        </Label>
+        <Poster id="star" uri="pkg:/images/icons/star-fill.png" width="40" height="40" blendColor="0x38BDF8FF" visible="false" />
+        <Label id="title" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="26" />
+        </Label>
+        <Label id="line" color="0xA1A9B6FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+        </Label>
         <Rectangle id="track" color="0x2E3440FF" height="6" />
         <Rectangle id="fill" color="0x38BDF8FF" height="6" />
-        <Label id="nextLine" color="0x8B95A5FF" font="font:TinySystemFont" />
+        <Label id="nextLine" color="0x8B95A5FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="24" />
+        </Label>
     </children>
 </component>

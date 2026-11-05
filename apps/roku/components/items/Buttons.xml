@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Roku's ButtonGroup in Pley's type: Roboto, at Android TV's size for
+     buttons, the focused one in bold. -->
+<component name="Buttons" extends="ButtonGroup">
+    <script type="text/brightscript" uri="pkg:/components/items/Buttons.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
+</component>

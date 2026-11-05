@@ -15,6 +15,18 @@ sub init()
     m.infoMeta = m.top.findNode("infoMeta")
     m.infoSummary = m.top.findNode("infoSummary")
     m.rest = m.top.findNode("rest")
+    m.scrim = m.top.findNode("scrim")
+    m.panel = m.top.findNode("panel")
+    m.dim = m.top.findNode("dim")
+    m.railMotion = m.top.findNode("railMotion")
+    m.pageMotion = m.top.findNode("pageMotion")
+    ' Whether the rail is drawn open (the focus in it).
+    m.railOpen = false
+    ' The profile signed in as the rail's avatar shows it: { title,
+    ' initial, color, picture } from the household's profiles, or its name
+    ' alone until they come.
+    m.profile = invalid
+    m.avatarName = ""
     m.started = false
     m.libraries = []
     ' GET /api/libraries' answer, for why Home is empty; invalid until it
@@ -64,6 +76,7 @@ sub init()
     m.heroButtons.observeField("chosen", "onHeroButton")
     m.message.observeField("chosen", "onRetry")
     m.rest.observeField("fire", "onRested")
+    m.menu.observeField("focusedChild", "onRailFocus")
     ' Changes told by the server's event stream at the last load.
     m.remoteSeen = 0
     m.top.observeField("active", "onActive")
@@ -72,6 +85,13 @@ sub init()
 end sub
 
 sub onActive()
+    ' The profile's name, for the avatar, while Home shows.
+    if m.top.active
+        m.global.session.observeFieldScoped("profileName", "onProfileName")
+        onProfileName()
+    else
+        m.global.session.unobserveFieldScoped("profileName")
+    end if
     if not m.top.active
         ' Covered by another screen: focus comes back to the same place.
         m.lastFocus = m.menu
@@ -138,7 +158,52 @@ end sub
 
 sub onHousehold(event as object)
     answer = event.getData()
-    if answer.ok and GetInterface(answer.data, "ifArray") <> invalid then profKeepHousehold(CreateObject("roRegistrySection", "household"), m.global.session.server, answer.data)
+    if not answer.ok or GetInterface(answer.data, "ifArray") = invalid then return
+    session = m.global.session
+    profKeepHousehold(CreateObject("roRegistrySection", "household"), session.server, answer.data)
+    ' The avatar: the profile signed in, the server's current one.
+    for each tile in profTiles(answer.data, session.server)
+        if tile.itemId = session.profileId or (session.profileId = 0 and tile.current)
+            m.profile = { title: tile.title, initial: tile.initial, color: tile.color, picture: tile.image }
+            buildMenu()
+            return
+        end if
+    end for
+end sub
+
+' The profile's name came (GET /api/auth/me): the avatar shows its initial
+' until the household's pictures come.
+sub onProfileName()
+    if m.profile = invalid and m.global.session.profileName <> m.avatarName and m.menuKeys <> invalid then buildMenu()
+end sub
+
+' The rail's first entry: the profile's avatar, which opens "Who's
+' watching?".
+function profileEntry() as object
+    profile = m.profile
+    if profile = invalid
+        name = m.global.session.profileName
+        profile = { title: name, initial: UCase(Left(name, 1)), color: "0x2E3440FF", picture: "" }
+    end if
+    m.avatarName = profile.title
+    title = profile.title
+    if title = "" then title = "Profile"
+    return { title: title, action: "profile", icon: "", profile: true, initial: profile.initial, color: profile.color, picture: profile.picture }
+end function
+
+' The rail opens as the focus comes into it and closes as it leaves: its
+' panel slides in over the page, which dims, over 200 ms, eased out.
+sub onRailFocus()
+    open = m.menu.isInFocusChain()
+    if open = m.railOpen then return
+    m.railOpen = open
+    target = 0.0
+    if open then target = 1.0
+    m.railMotion.control = "stop"
+    m.top.findNode("panelSlide").keyValue = [m.panel.translation, [-400 + 400 * target, 0]]
+    m.top.findNode("panelFade").keyValue = [m.panel.opacity, target]
+    m.top.findNode("dimFade").keyValue = [m.dim.opacity, 0.6 * target]
+    m.railMotion.control = "start"
 end sub
 
 ' Live TV in the menu while the server has channels this profile may
@@ -218,7 +283,12 @@ end sub
 sub buildMenu()
     m.requestEntries = requestEntries()
     m.musicShown = m.global.music.state <> "stopped"
-    entries = homeMenu(m.libraries, m.live, m.requestEntries, m.musicShown)
+    entries = [profileEntry()]
+    for each entry in homeMenu(m.libraries, m.live, m.requestEntries, m.musicShown)
+        entry.icon = homeRailIcon(entry)
+        entry.current = entry.action = "home"
+        entries.Push(entry)
+    end for
     items = []
     m.menuActions = []
     ' The library of each entry (invalid for the others).
@@ -226,7 +296,9 @@ sub buildMenu()
     for each entry in entries
         items.Push(entry)
         m.menuActions.Push(entry.action)
-        m.menuLibraries.Push(entry.library)
+        library = invalid
+        if entry.DoesExist("library") then library = entry.library
+        m.menuLibraries.Push(library)
     end for
     ' The focus stays on its entry as entries come or go above it (the
     ' requests' once the summary comes, Live TV, libraries).
@@ -269,7 +341,7 @@ sub showMessage(title as string, text as string, action = "" as string)
     m.info.visible = false
     m.backdrop.uri = ""
     m.message.title = title
-    m.message.text = text
+    typeSet(m.message, text)
     m.message.action = action
     m.message.visible = true
     if text <> "Loading…" then uiLaunched()
@@ -345,6 +417,7 @@ function place(rows as object, built as dynamic) as boolean
     for each row in rows
         m.rowSigs[row.key] = row.sig
     end for
+    typeRowLabels(m.rows)
     refocus(focus, rows)
     m.message.visible = false
     m.rows.visible = true
@@ -413,22 +486,23 @@ end sub
 sub drawHero()
     info = m.heroInfo
     if info = invalid then return
-    m.heroTitle.text = info.title
-    m.heroContext.text = info.context
-    m.heroMeta.text = info.meta
-    m.heroLeft.text = info.timeLeft
-    m.heroSummary.text = info.summary
+    typeSet(m.heroTitle, info.title)
+    typeSet(m.heroContext, info.context)
+    typeSet(m.heroMeta, info.meta)
+    typeSet(m.heroLeft, info.timeLeft)
+    typeSet(m.heroSummary, info.summary)
     buttons = homeHeroButtons(info)
     m.heroActions = buttons.actions
     if FormatJson(buttons.labels) <> FormatJson(m.heroLabels)
         m.heroLabels = buttons.labels
         chips = []
-        for each label in buttons.labels
-            chips.Push({ label: label, width: 0 })
+        looks = homeHeroLooks(buttons.actions)
+        for i = 0 to buttons.labels.Count() - 1
+            chips.Push({ label: buttons.labels[i], width: 0, icon: looks[i].icon, round: looks[i].round })
         end for
         m.heroButtons.chips = chips
     end if
-    layOut(m.hero, [{ label: m.heroTitle, gap: 0 }, { label: m.heroContext, gap: 8 }, { label: m.heroMeta, gap: 12 }, { label: m.heroLeft, gap: 8 }, { label: m.heroSummary, gap: 16 }], m.heroButtons, 32)
+    layOut(m.hero, [{ label: m.heroTitle, gap: 0 }, { label: m.heroContext, gap: 20 }, { label: m.heroMeta, gap: 16 }, { label: m.heroLeft, gap: 20 }, { label: m.heroSummary, gap: 20 }], m.heroButtons, 40)
     if not m.inRows then setBackdrop(info.backdrop)
 end sub
 
@@ -471,14 +545,34 @@ sub placeRows()
     ' hold it for a while, and gives it back.
     inRows = m.inRows or m.heroInfo = invalid
     m.hero.visible = m.heroInfo <> invalid and not inRows
-    if inRows
-        m.rows.translation = [440, 330]
-    else
-        m.rows.translation = [440, 620]
+    movePage(inRows)
+    if not inRows
         m.info.visible = false
         m.infoShown = 0
         if m.heroInfo <> invalid then setBackdrop(m.heroInfo.backdrop)
     end if
+end sub
+
+' The rows and the gradient under the backdrop where the page has them: up
+' under the info block in the rows, else under the hero. They move over
+' 200 ms, eased out, once the rows show; at once before.
+sub movePage(inRows as boolean)
+    rowsAt = [176, 760]
+    scrimAt = [0, 440]
+    if inRows
+        rowsAt = [176, 344]
+        scrimAt = [0, 240]
+    end if
+    if m.rows.translation[1] = rowsAt[1] and m.pageMotion.state <> "running" then return
+    m.pageMotion.control = "stop"
+    if not m.rows.visible
+        m.rows.translation = rowsAt
+        m.scrim.translation = scrimAt
+        return
+    end if
+    m.top.findNode("rowsMove").keyValue = [m.rows.translation, rowsAt]
+    m.top.findNode("scrimMove").keyValue = [m.scrim.translation, scrimAt]
+    m.pageMotion.control = "start"
 end sub
 
 ' The details of a title, as Home says them (the task reduces them).
@@ -526,16 +620,16 @@ sub onRested()
 end sub
 
 sub drawInfo(info as object)
-    m.infoTitle.text = info.title
+    typeSet(m.infoTitle, info.title)
     meta = info.meta
     if info.context <> "" and meta <> ""
         meta = info.context + " · " + meta
     else if info.context <> ""
         meta = info.context
     end if
-    m.infoMeta.text = meta
-    m.infoSummary.text = info.summary
-    layOut(m.info, [{ label: m.infoTitle, gap: 0 }, { label: m.infoMeta, gap: 8 }, { label: m.infoSummary, gap: 12 }], invalid, 0)
+    typeSet(m.infoMeta, meta)
+    typeSet(m.infoSummary, info.summary)
+    layOut(m.info, [{ label: m.infoTitle, gap: 0 }, { label: m.infoMeta, gap: 20 }, { label: m.infoSummary, gap: 16 }], invalid, 0)
     m.info.visible = true
     if info.backdrop <> "" then setBackdrop(info.backdrop)
 end sub
@@ -621,6 +715,8 @@ sub onMenu(event as object)
     if action = "home"
         load()
         focusPage()
+    else if action = "profile"
+        uiNavigate({ to: "profiles" })
     else if action = "live"
         uiNavigate({ to: "live" })
     else if action = "library"

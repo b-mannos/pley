@@ -16,8 +16,7 @@ sub onLetters()
     y = 0
     for each letter in m.top.letters
         label = m.top.createChild("Label")
-        label.font = "font:TinySystemFont"
-        label.text = letter
+        typeSet(label, letter, typeFont(500, 24))
         label.translation = [0, y]
         label.width = 40
         label.height = 30
@@ -44,8 +43,8 @@ sub onLook()
     if focused then marked = m.top.focusIndex
     ' Only the marked letter is bold: one font changes as the mark moves.
     if m.bold <> marked
-        if m.bold >= 0 and m.bold < m.labels.Count() then m.labels[m.bold].font = "font:TinySystemFont"
-        if marked >= 0 and marked < m.labels.Count() then m.labels[marked].font = "font:TinyBoldSystemFont"
+        if m.bold >= 0 and m.bold < m.labels.Count() then typeSet(m.labels[m.bold], m.top.letters[m.bold], typeFont(500, 24))
+        if marked >= 0 and marked < m.labels.Count() then typeSet(m.labels[marked], m.top.letters[marked], typeFont(700, 24))
         m.bold = marked
     end if
     for i = 0 to m.labels.Count() - 1

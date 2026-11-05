@@ -12,10 +12,17 @@
         <field id="listHasFocus" type="boolean" value="true" onChange="onFocus" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/items/LiveRailItem.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <children>
-        <Rectangle id="back" color="0x16191E00" />
-        <Label id="mark" width="32" horizAlign="center" vertAlign="center" color="0x8B95A5FF" font="font:SmallestBoldSystemFont" />
-        <Label id="title" vertAlign="center" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
-        <Label id="count" horizAlign="right" vertAlign="center" color="0x8B95A5FF" font="font:TinySystemFont" />
+        <Poster id="back" uri="pkg:/images/pill.9.png" blendColor="0x38BDF8FF" opacity="0" />
+        <Poster id="icon" width="32" height="32" loadWidth="32" loadHeight="32" visible="false" />
+        <Poster id="mark" width="28" height="28" loadWidth="28" loadHeight="28" blendColor="0x8B95A5FF" visible="false" />
+        <Label id="title" vertAlign="center" color="0xA1A9B6FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+        </Label>
+        <Label id="count" horizAlign="right" vertAlign="center" color="0x8B95A5FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="24" />
+        </Label>
     </children>
 </component>

@@ -8,7 +8,7 @@ end sub
 sub onLook()
     ' Fields set in markup may come before init.
     if m.label = invalid then return
-    m.label.text = m.top.text
+    typeSet(m.label, m.top.text)
     ' As wide as its words, cut short only when they don't fit.
     m.label.width = 0
     textWidth = m.label.boundingRect().width

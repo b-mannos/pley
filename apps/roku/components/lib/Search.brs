@@ -60,10 +60,10 @@ end function
 ' The size of a row's tiles, and the row's height, beside the keyboard: a
 ' channel's card, a 16:9 picture, a square or a poster, with their lines.
 function searchRowSize(key as string) as object
-    if key = "channel" then return { size: [220, 240], height: 300 }
-    if key = "episode" then return { size: [300, 250], height: 310 }
-    if contentMusic(key) then return { size: [196, 280], height: 340 }
-    return { size: [196, 370], height: 430 }
+    if key = "channel" then return { size: [220, 240], height: 316, spacing: 24 }
+    if key = "episode" then return { size: [contentTileCell(300), 270], height: 346, spacing: 0 }
+    if contentMusic(key) then return { size: [contentTileCell(196), 300], height: 376, spacing: 0 }
+    return { size: [contentTileCell(196), 390], height: 466, spacing: 0 }
 end function
 
 ' --- Recent searches ---

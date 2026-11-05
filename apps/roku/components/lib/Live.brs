@@ -329,8 +329,9 @@ function liveRail(summary as object, groups as object, open as string, query as 
 end function
 
 ' The rail's entries as LiveRailItem draws them ([{ title, countText,
-' mark, inner, heading, current }]): a region's mark says whether it is
-' open, and the category shown stands out.
+' mark, inner, heading, current, icon }]): a region's mark says whether it
+' is open, and the category shown stands out. Favourites, Recently watched
+' and All channels have Lucide's icons (images/icons), the others none.
 function liveRailItems(entries as object, open as string, shown as string) as object
     items = []
     for each entry in entries
@@ -341,7 +342,11 @@ function liveRailItems(entries as object, open as string, shown as string) as ob
         end if
         countText = ""
         if entry.count >= 0 then countText = liveThousands(entry.count)
-        items.Push({ title: entry.label, countText: countText, mark: mark, inner: entry.inner, heading: entry.kind = "heading", current: entry.kind = "category" and entry.key = shown })
+        icon = ""
+        if entry.key = "favorites" then icon = "star"
+        if entry.key = "recent" then icon = "clock"
+        if entry.key = "all" then icon = "tv-minimal"
+        items.Push({ title: entry.label, countText: countText, mark: mark, inner: entry.inner, heading: entry.kind = "heading", current: entry.kind = "category" and entry.key = shown, icon: icon })
     end for
     return items
 end function

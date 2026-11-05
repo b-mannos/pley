@@ -123,7 +123,7 @@ sub showPage()
     m.problem.visible = false
     m.problemShown = invalid
     m.page.translation = [0, 0]
-    m.shade.width = 1260
+    m.shade.translation = [0, 440]
     m.signInOnly = summary.signInAgain = "requests"
     if m.signInOnly
         showProblem(reqSignInAgain())
@@ -442,18 +442,18 @@ end sub
 ' line.
 sub drawInfo(tile as object)
     request = tile.hasField("who")
-    m.infoTitle.text = tile.title
+    typeSet(m.infoTitle, tile.title)
     if request
         m.infoMeta.text = ""
         m.infoSummary.text = ""
         m.infoStage.color = tile.subtitleColor
-        m.infoStage.text = tile.subtitle
-        m.infoSeasons.text = tile.seasonsText
-        m.infoWho.text = tile.who
-        m.infoLine.text = tile.stageLine
+        typeSet(m.infoStage, tile.subtitle)
+        typeSet(m.infoSeasons, tile.seasonsText)
+        typeSet(m.infoWho, tile.who)
+        typeSet(m.infoLine, tile.stageLine)
     else
-        m.infoMeta.text = tile.facts
-        m.infoSummary.text = tile.overview
+        typeSet(m.infoMeta, tile.facts)
+        typeSet(m.infoSummary, tile.overview)
         m.infoStage.text = ""
         m.infoSeasons.text = ""
         m.infoWho.text = ""
@@ -569,22 +569,22 @@ sub drawHero()
     if m.heroTitle = invalid then return
     hero = reqHero(m.heroTitle, m.heroDetail, reqSummaryOf(m.top.requestSummary), m.global.session.server, CreateObject("roDateTime").AsSeconds(), fmtZoneSeconds())
     m.heroShown = hero
-    m.heroName.text = hero.title
-    m.heroLine.text = hero.line
-    m.heroOverview.text = hero.overview
+    typeSet(m.heroName, hero.title)
+    typeSet(m.heroLine, hero.line)
+    typeSet(m.heroOverview, hero.overview)
     stage = hero.stage
     if stage <> invalid
         ' Requested or Following, beside the request's stage; under them
         ' the stage's own line.
-        m.heroStatusText.text = hero.note
+        typeSet(m.heroStatusText, hero.note)
         m.heroStage.color = reqToneColor(stage.tone)
         m.heroStage.progress = stage.progress
-        m.heroStage.text = stage.text
-        m.heroNote.text = stage.line
+        typeSet(m.heroStage, stage.text)
+        typeSet(m.heroNote, stage.line)
     else
         m.heroStatusText.text = ""
         m.heroStage.text = ""
-        m.heroNote.text = hero.note
+        typeSet(m.heroNote, hero.note)
     end if
     focused = m.heroButtons.buttonFocused
     if FormatJson(m.heroButtons.buttons) <> FormatJson(hero.buttons)
@@ -685,9 +685,9 @@ sub showProblem(problem as object)
     m.credit.visible = false
     m.backdrop.uri = ""
     m.page.translation = [0, 0]
-    m.shade.width = 1260
-    m.problemTitle.text = problem.title
-    m.problemText.text = problem.text
+    m.shade.translation = [0, 440]
+    typeSet(m.problemTitle, problem.title)
+    typeSet(m.problemText, problem.text)
     buttons = []
     if problem.signIn then buttons.Push("Sign in")
     if problem.retry then buttons.Push("Try again")
@@ -752,14 +752,14 @@ sub focusRows(onRows as boolean)
     m.rest.control = "stop"
     if onRows
         m.page.translation = [0, -370]
-        m.shade.width = 1920
+        m.shade.translation = [0, -200]
         m.hero.visible = false
         m.rows.setFocus(true)
         onTileFocused()
         return
     end if
     m.page.translation = [0, 0]
-    m.shade.width = 1260
+    m.shade.translation = [0, 440]
     m.info.visible = false
     m.restingOn = ""
     m.hero.visible = m.heroShown <> invalid

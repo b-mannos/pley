@@ -101,7 +101,7 @@ sub showReason()
         intro = "Sign in again to approve and decline requests here."
     end if
     if intro <> ""
-        m.intro.text = intro
+        typeSet(m.intro, intro)
         m.intro.visible = true
     end if
     if reason = "profile" and name <> ""
@@ -116,7 +116,7 @@ end sub
 ' What the server or this sign-in asks, under the title: a line lower when
 ' the reason to sign in again shows.
 sub showNote(text as string)
-    m.note.text = text
+    typeSet(m.note, text)
     top = 280
     if m.intro.visible then top = 316
     m.note.translation = [96, top]
@@ -174,7 +174,7 @@ sub onCode(event as object)
     end if
     m.failures = 0
     showCode(answer.data.userCode)
-    m.url.text = authShownAddress(answer.data.verificationUri)
+    typeSet(m.url, authShownAddress(answer.data.verificationUri))
     fitAddress()
     showQr(answer.data.qr)
 end sub
@@ -188,13 +188,13 @@ end sub
 ' another form.
 sub showCode(code as string)
     halves = authCodeHalves(code)
-    m.code1.text = halves[0]
+    typeSet(m.code1, halves[0])
     split = halves.Count() = 2
     m.dash.visible = split
     m.codeBack2.visible = split
     m.code2.visible = split
     if split
-        m.code2.text = halves[1]
+        typeSet(m.code2, halves[1])
         m.code1.width = 320
         m.codeBack1.width = 320
     else
@@ -211,8 +211,8 @@ sub fitAddress()
     room = 1136 - left
     m.url.translation = [left, m.url.translation[1]]
     m.url.width = 0
-    for each font in ["font:LargeBoldSystemFont", "font:MediumBoldSystemFont", "font:SmallBoldSystemFont", "font:SmallestBoldSystemFont"]
-        m.url.font = font
+    for each size in [44, 36, 32, 26]
+        m.url.font = typeFont(700, size)
         if m.url.boundingRect().width <= room then exit for
     end for
     m.url.width = room
@@ -389,7 +389,7 @@ sub onMe(event as object)
     answer = event.getData()
     if answer.ok and answer.data <> invalid
         name = httpSentence(answer.data.name)
-        if name <> "" then m.done.text = "Signed in as " + name
+        if name <> "" then typeSet(m.done, "Signed in as " + name)
     end if
     m.leave.control = "start"
 end sub
@@ -399,7 +399,7 @@ sub onLeave()
 end sub
 
 sub setStatus(text as string, problem as boolean)
-    m.status.text = text
+    typeSet(m.status, text)
     if problem
         m.status.color = uiColors().danger
     else

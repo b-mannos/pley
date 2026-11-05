@@ -24,6 +24,8 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/PlayerScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
@@ -57,18 +59,28 @@
              TV, how it plays, the clock and, paused, when it ends. -->
         <Group id="banner" visible="false">
             <Rectangle width="1920" height="200" color="0x000000A6" />
-            <Label id="bannerTitle" translation="[96, 56]" width="1144" maxLines="1" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="bannerLine" translation="[96, 116]" width="1144" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+            <Label id="bannerTitle" translation="[96, 56]" width="1144" maxLines="1" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <Label id="bannerLine" translation="[96, 116]" width="1144" maxLines="1" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+            </Label>
             <Group id="bannerRight" visible="false">
-                <Label id="bannerStatus" translation="[1264, 60]" width="560" horizAlign="right" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-                <Label id="bannerEnds" translation="[1264, 108]" width="560" horizAlign="right" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+                <Label id="bannerStatus" translation="[1264, 60]" width="560" horizAlign="right" maxLines="1" color="0xA1A9B6FF">
+                    <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+                </Label>
+                <Label id="bannerEnds" translation="[1264, 108]" width="560" horizAlign="right" maxLines="1" color="0xA1A9B6FF">
+                    <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+                </Label>
             </Group>
         </Group>
         <!-- Settings → Playback details: how it plays, at the top left in
              the title's place while nothing else shows (updateReadout). -->
         <Group id="readout" translation="[96, 54]" visible="false">
             <Rectangle id="readoutBack" width="840" color="0x16191EB8" />
-            <Label id="readoutText" translation="[24, 16]" width="792" wrap="true" maxLines="8" lineSpacing="4" color="0xEBEBEBFF" font="font:SmallestSystemFont" />
+            <Label id="readoutText" translation="[24, 16]" width="792" wrap="true" maxLines="8" lineSpacing="4" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
         </Group>
         <!-- Waiting for the video, after 500 ms: the spinner in the middle,
              as Android TV's ring, and while the server is out of reach
@@ -77,7 +89,9 @@
         <BusySpinner id="spinner" translation="[928, 508]" visible="false" />
         <Group id="reconnecting" visible="false">
             <Rectangle translation="[790, 604]" width="340" height="60" color="0x16191E99" />
-            <Label translation="[790, 604]" width="340" height="60" horizAlign="center" vertAlign="center" text="Reconnecting…" color="0xEBEBEBFF" font="font:SmallSystemFont" />
+            <Label translation="[790, 604]" width="340" height="60" horizAlign="center" vertAlign="center" text="Reconnecting…" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+            </Label>
         </Group>
         <!-- Up Next, Android TV's card at the bottom right: the next one's
              still, "Up next · S2 · E6", its title, then Play now and
@@ -86,28 +100,52 @@
         <Group id="upNext" visible="false">
             <Rectangle id="nextBack" width="600" color="0x16191EE6" />
             <Poster id="nextImage" width="600" height="338" loadWidth="640" loadHeight="360" loadDisplayMode="scaleToZoom" />
-            <Label id="nextHeading" translation="[32, 362]" width="536" maxLines="1" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
-            <Label id="nextTitle" translation="[32, 404]" width="536" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <ButtonGroup id="nextButtons" layoutDirection="horiz" itemSpacings="[16]" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="200" maxWidth="200" buttonHeight="64" />
-            <Label id="countdown" width="120" height="64" horizAlign="right" vertAlign="center" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+            <Label id="nextHeading" translation="[32, 362]" width="536" maxLines="1" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+            </Label>
+            <Label id="nextTitle" translation="[32, 404]" width="536" wrap="true" maxLines="2" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <Buttons id="nextButtons" layoutDirection="horiz" itemSpacings="[16]" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="200" maxWidth="200" buttonHeight="64" />
+            <Label id="countdown" width="120" height="64" horizAlign="right" vertAlign="center" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
         </Group>
         <!-- At the top, clear of the subtitles it moves. -->
         <Group id="sync" translation="[560, 72]" visible="false">
             <Rectangle width="800" height="236" color="0x16191EE6" />
-            <Label translation="[48, 40]" text="Subtitle sync" color="0x38BDF8FF" font="font:SmallerBoldSystemFont" />
-            <Label id="syncValue" translation="[48, 84]" width="340" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label translation="[48, 150]" width="360" wrap="true" maxLines="2" text="Left: earlier · Right: later" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
-            <ButtonGroup id="syncButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[440, 48]" minWidth="312" />
+            <Label translation="[48, 40]" text="Subtitle sync" color="0x38BDF8FF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="30" />
+            </Label>
+            <Label id="syncValue" translation="[48, 84]" width="340" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <Label translation="[48, 150]" width="360" wrap="true" maxLines="2" text="Left: earlier · Right: later" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
+            <Buttons id="syncButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[440, 48]" minWidth="312" />
         </Group>
         <!-- Pley's menu, at the right over the video: its entries, a
              quality's or a chapter's choices, or the playback's details. -->
         <Group id="menu" visible="false">
             <Rectangle translation="[1240, 0]" width="680" height="1080" color="0x16191EF2" />
-            <Label id="menuTitle" translation="[1296, 72]" width="568" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <LabelList id="menuList" translation="[1296, 168]" itemSize="[568, 64]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus" font="font:SmallSystemFont" focusedFont="font:SmallBoldSystemFont" />
-            <RadioButtonList id="menuChoices" translation="[1296, 168]" itemSize="[568, 64]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus" font="font:SmallSystemFont" focusedFont="font:SmallBoldSystemFont" visible="false" />
-            <Label id="menuText" translation="[1296, 168]" width="568" wrap="true" maxLines="18" lineSpacing="8" color="0xEBEBEBFF" font="font:SmallerSystemFont" visible="false" />
-            <Label id="menuHint" translation="[1296, 940]" width="568" wrap="true" maxLines="3" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+            <Label id="menuTitle" translation="[1296, 72]" width="568" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <LabelList id="menuList" translation="[1296, 168]" itemSize="[568, 64]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+                <Font role="focusedFont" uri="pkg:/fonts/roboto-700.ttf" size="32" />
+            </LabelList>
+            <RadioButtonList id="menuChoices" translation="[1296, 168]" itemSize="[568, 64]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus" visible="false">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+                <Font role="focusedFont" uri="pkg:/fonts/roboto-700.ttf" size="32" />
+            </RadioButtonList>
+            <Label id="menuText" translation="[1296, 168]" width="568" wrap="true" maxLines="18" lineSpacing="8" color="0xEBEBEBFF" visible="false">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+            </Label>
+            <Label id="menuHint" translation="[1296, 940]" width="568" wrap="true" maxLines="3" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
         </Group>
         <!-- What went wrong, as Android TV's: centred on black, the title,
              the reason in up to four lines, then Try again (focused)
@@ -115,17 +153,23 @@
         <Group id="notice" visible="false">
             <Rectangle width="1920" height="1080" color="0x000000FF" />
             <LayoutGroup translation="[960, 540]" layoutDirection="vert" horizAlignment="center" vertAlignment="center" itemSpacings="[24, 64]">
-                <Label id="noticeTitle" width="1280" horizAlign="center" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
-                <Label id="noticeText" width="1280" horizAlign="center" wrap="true" maxLines="4" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-                <ButtonGroup id="noticeButtons" layoutDirection="horiz" itemSpacings="[24]" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="300" />
+                <Label id="noticeTitle" width="1280" horizAlign="center" wrap="true" maxLines="2" color="0xEBEBEBFF">
+                    <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+                </Label>
+                <Label id="noticeText" width="1280" horizAlign="center" wrap="true" maxLines="4" color="0xA1A9B6FF">
+                    <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+                </Label>
+                <Buttons id="noticeButtons" layoutDirection="horiz" itemSpacings="[24]" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="300" />
             </LayoutGroup>
         </Group>
         <!-- The sleep timer's last 30 s, at the bottom left: Keep watching
              adds the same time again. -->
         <Group id="sleepNotice" translation="[96, 916]" visible="false">
             <Rectangle width="840" height="112" color="0x16191EE6" />
-            <Label id="sleepText" translation="[40, 0]" width="420" height="112" vertAlign="center" color="0xEBEBEBFF" font="font:SmallSystemFont" />
-            <ButtonGroup id="sleepButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[480, 20]" minWidth="320" />
+            <Label id="sleepText" translation="[40, 0]" width="420" height="112" vertAlign="center" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+            </Label>
+            <Buttons id="sleepButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[480, 20]" minWidth="320" />
         </Group>
         <Timer id="countdownTimer" duration="1" repeat="true" />
         <!-- Progress told while paused (Player.brs). -->

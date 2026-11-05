@@ -63,7 +63,7 @@ sub onActive()
         return
     end if
     m.started = true
-    m.heading.text = httpSentence(m.top.params.title)
+    typeSet(m.heading, httpSentence(m.top.params.title))
     m.top.setFocus(true)
     load()
     uiGet("/api/libraries", "onLibraries")
@@ -84,7 +84,7 @@ sub onCollection(event as object)
     if not answer.ok or answer.data = invalid
         if m.collection = invalid and not uiFailed(answer)
             m.message.title = "Couldn't load this collection"
-            m.message.text = answer.message
+            typeSet(m.message, answer.message)
             m.message.action = "Retry"
             if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
         end if
@@ -93,8 +93,8 @@ sub onCollection(event as object)
     m.collection = answer.data
     collection = m.collection
     m.message.visible = false
-    m.heading.text = collection.title
-    m.summary.text = collection.summary
+    typeSet(m.heading, collection.title)
+    typeSet(m.summary, collection.summary)
     m.note.text = ""
     if collection.shown = 0 then m.note.text = "Nothing in this collection yet."
     showBadges()
@@ -144,7 +144,7 @@ sub showFacts()
     for each one in httpArray(m.libraries)
         if one.id = m.collection.libraryId then library = one
     end for
-    m.facts.text = pageCollectionFacts(m.collection, library)
+    typeSet(m.facts, pageCollectionFacts(m.collection, library))
     layoutText()
 end sub
 
@@ -232,16 +232,16 @@ sub onTile(event as object)
     uiOpenTile(m.grid.content.getChild(event.getData()))
 end sub
 
-' The page slides up to the posters as they take the focus, the backdrop
-' shaded under them all, and back down.
+' The page slides up to the posters as they take the focus, the page's
+' colour coming up over the backdrop, and back down.
 sub focusGrid(onGrid as boolean)
     if onGrid
         m.page.translation = [0, -624]
-        m.shade.width = 1920
+        m.shade.translation = [0, -200]
         m.grid.setFocus(true)
     else
         m.page.translation = [0, 0]
-        m.shade.width = 1260
+        m.shade.translation = [0, 520]
         if m.buttons.visible
             m.buttons.setFocus(true)
         else

@@ -11,9 +11,9 @@ end sub
 sub onContent()
     row = m.top.itemContent
     if row = invalid then return
-    m.name.text = row.title
-    m.address.text = row.address
-    m.tag.text = row.tag
+    typeSet(m.name, row.title)
+    typeSet(m.address, row.address)
+    typeSet(m.tag, row.tag)
     m.warning = row.warning
     m.found = row.found
     m.problem = row.hasField("problem") and row.problem = true

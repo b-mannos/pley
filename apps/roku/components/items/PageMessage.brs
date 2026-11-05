@@ -16,8 +16,8 @@ end sub
 sub onText()
     ' Fields set before init: init lays them out.
     if m.heading = invalid then return
-    m.heading.text = m.top.title
-    m.body.text = m.top.text
+    typeSet(m.heading, m.top.title)
+    typeSet(m.body, m.top.text)
     m.heading.width = m.top.width
     m.body.width = m.top.width
     focused = m.button.isInFocusChain()

@@ -282,10 +282,20 @@ end function
 
 ' The size of a row's tiles, and the row's height, for its shape: a 16:9
 ' picture, a square or a poster, and two lines of text under it.
+' How wide a tile's cell in a row or a grid is for a tile width wide: the
+' room its focus look takes beside it, since a Roku crops a list's items
+' at its edges (items/Tile.brs: the tile grows to 1.05 about its middle,
+' its ring 10 pixels out). The tile draws itself inside.
+function contentTileCell(width as integer) as integer
+    cell = (width + 20) * 1.05
+    if cell > Int(cell) then return Int(cell) + 1
+    return Int(cell)
+end function
+
 function contentRowSize(wide as boolean, square as boolean) as object
-    if wide then return { size: [400, 300], height: 360 }
-    if square then return { size: [contentSquareWidth(), 340], height: 400 }
-    return { size: [220, 410], height: 470 }
+    if wide then return { size: [contentTileCell(400), 320], height: 396 }
+    if square then return { size: [contentTileCell(contentSquareWidth()), 360], height: 436 }
+    return { size: [contentTileCell(220), 430], height: 506 }
 end function
 
 ' A short fingerprint of a hub as the server sent it.

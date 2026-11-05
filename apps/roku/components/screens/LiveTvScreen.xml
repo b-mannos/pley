@@ -19,6 +19,8 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/LiveTvScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
@@ -28,44 +30,70 @@
     <children>
         <!-- The categories. -->
         <Rectangle width="528" height="1080" color="0x1E222AFF" />
-        <Label translation="[48, 40]" width="440" text="Live TV" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
-        <ChipRow id="tabs" translation="[48, 132]" />
+        <Label translation="[48, 40]" width="440" text="Live TV" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+        </Label>
+        <ChipRow id="tabs" translation="[48, 132]" pad="40" />
         <!-- Search, pinned above the categories: it never scrolls away. -->
         <MarkupList id="searchRow" translation="[24, 212]" itemComponentName="LiveRailItem" itemSize="[480, 56]" numRows="1" drawFocusFeedback="false" />
         <Rectangle translation="[48, 274]" width="432" height="2" color="0x2E3440FF" />
         <MarkupList id="rail" translation="[24, 284]" itemComponentName="LiveRailItem" itemSize="[480, 56]" itemSpacing="[0, 4]" numRows="13" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
         <!-- The category's channels. -->
-        <Label id="category" translation="[576, 44]" width="1280" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-        <Label id="count" translation="[576, 104]" width="1280" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+        <Label id="category" translation="[576, 44]" width="1280" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+        </Label>
+        <Label id="count" translation="[576, 104]" width="1280" color="0xA1A9B6FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+        </Label>
         <!-- The programme in focus, above the guide. -->
         <Group id="info" translation="[576, 160]" visible="false">
             <Rectangle translation="[1064, 0]" width="216" height="108" color="0x262B35FF" />
             <Poster id="infoLogo" translation="[1072, 6]" width="200" height="96" loadWidth="200" loadHeight="96" loadDisplayMode="scaleToFit" />
-            <Label id="infoChannel" width="1020" color="0x8B95A5FF" font="font:SmallestBoldSystemFont" />
+            <Label id="infoChannel" width="1020" color="0x8B95A5FF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="26" />
+            </Label>
             <!-- LIVE or NEW, before the title (placeBadge). -->
-            <Label id="infoBadge" translation="[0, 30]" height="56" vertAlign="center" font="font:SmallestBoldSystemFont" />
-            <Label id="infoTitle" translation="[0, 30]" width="1020" height="56" vertAlign="center" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="infoMeta" translation="[0, 86]" width="1020" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
-            <Label id="infoText" translation="[0, 120]" width="1280" wrap="true" maxLines="2" lineSpacing="2" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+            <Label id="infoBadge" translation="[0, 30]" height="56" vertAlign="center">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="26" />
+            </Label>
+            <Label id="infoTitle" translation="[0, 30]" width="1020" height="56" vertAlign="center" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <Label id="infoMeta" translation="[0, 86]" width="1020" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
+            <Label id="infoText" translation="[0, 120]" width="1280" wrap="true" maxLines="2" lineSpacing="2" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
         </Group>
         <!-- Rewind, fast forward and Replay are the screen's (Replay opens
              Search): it pages the guide through time itself. -->
         <TimeGrid id="guide" translation="[576, 376]" width="1280" height="648" numRows="7" duration="7200" maxDays="2" channelInfoWidth="260" infoGridGap="8" ignoreTrickPlayKeys="true"
             focusBitmapUri="pkg:/images/button-focus.9.png" programBackgroundBitmapUri="pkg:/images/guide-cell.9.png"
-            channelInfoBackgroundBitmapUri="pkg:/images/guide-cell.9.png" channelInfoTextColor="0xEBEBEBFF" channelInfoFont="font:SmallestBoldSystemFont"
-            programTitleColor="0xEBEBEBFF" programTitleFocusedColor="0x16191EFF" programTitleFont="font:SmallestSystemFont"
-            timeLabelColor="0xA1A9B6FF" timeLabelFont="font:SmallestSystemFont" timeBarHeight="48"
+            channelInfoBackgroundBitmapUri="pkg:/images/guide-cell.9.png" channelInfoTextColor="0xEBEBEBFF"
+            programTitleColor="0xEBEBEBFF" programTitleFocusedColor="0x16191EFF"
+            timeLabelColor="0xA1A9B6FF" timeBarHeight="48"
             nowBarBlendColor="0x38BDF8FF" pastTimeScreenBitmapUri="pkg:/images/guide-past.9.png"
-            loadingDataText="Loading the guide…" channelNoDataText="No guide information" visible="false" />
+            loadingDataText="Loading the guide…" channelNoDataText="No guide information" visible="false">
+            <Font role="channelInfoFont" uri="pkg:/fonts/roboto-700.ttf" size="26" />
+            <Font role="programTitleFont" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            <Font role="timeLabelFont" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+        </TimeGrid>
         <MarkupGrid id="cards" translation="[576, 168]" itemComponentName="LiveCard" numColumns="4" numRows="3" itemSize="[296, 270]" itemSpacing="[32, 32]" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" visible="false" />
         <!-- Why nothing shows: a title, and a line under it. -->
         <LayoutGroup id="message" translation="[576, 400]" layoutDirection="vert" itemSpacings="[16]">
-            <Label id="messageTitle" width="1280" wrap="true" horizAlign="center" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="messageText" width="1280" wrap="true" maxLines="3" horizAlign="center" color="0xA1A9B6FF" text="Loading…" font="font:MediumSystemFont" />
+            <Label id="messageTitle" width="1280" wrap="true" horizAlign="center" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <Label id="messageText" width="1280" wrap="true" maxLines="3" horizAlign="center" color="0xA1A9B6FF" text="Loading…">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+            </Label>
         </LayoutGroup>
         <!-- Under what failed with nothing to show. -->
-        <ButtonGroup id="retry" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[1056, 640]" minWidth="320" visible="false" />
-        <Label id="hint" translation="[576, 1036]" width="1280" horizAlign="right" color="0x8B95A5FF" font="font:TinySystemFont" />
+        <Buttons id="retry" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[1056, 640]" minWidth="320" visible="false" />
+        <Label id="hint" translation="[576, 1036]" width="1280" horizAlign="right" color="0x8B95A5FF">
+            <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="24" />
+        </Label>
         <!-- A programme's details, in a panel at the right over the rest
              (Options, or OK on a programme not on now): the channel, the
              programme's picture, title, episode, day and times with its
@@ -75,21 +103,37 @@
             <Rectangle width="1920" height="1080" color="0x000000A0" />
             <Rectangle translation="[1200, 0]" width="720" height="1080" color="0x262B35FF" />
             <Rectangle translation="[1248, 56]" width="128" height="72" color="0x2E3440FF" />
-            <Label id="detailsInitials" translation="[1248, 56]" width="128" height="72" horizAlign="center" vertAlign="center" color="0xA1A9B6FF" font="font:TinySystemFont" />
+            <Label id="detailsInitials" translation="[1248, 56]" width="128" height="72" horizAlign="center" vertAlign="center" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="24" />
+            </Label>
             <Poster id="detailsLogo" translation="[1256, 60]" width="112" height="64" loadWidth="112" loadHeight="64" loadDisplayMode="scaleToFit" />
-            <Label id="detailsChannel" translation="[1400, 56]" width="424" height="72" vertAlign="center" color="0xA1A9B6FF" font="font:SmallestBoldSystemFont" />
+            <Label id="detailsChannel" translation="[1400, 56]" width="424" height="72" vertAlign="center" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="26" />
+            </Label>
             <Poster id="detailsPicture" width="576" height="324" loadWidth="576" loadHeight="324" loadDisplayMode="scaleToZoom" />
-            <Label id="detailsTitle" width="576" wrap="true" maxLines="2" color="0xEBEBEBFF" font="font:MediumBoldSystemFont" />
-            <Label id="detailsEpisode" width="576" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-            <Label id="detailsWhen" width="576" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+            <Label id="detailsTitle" width="576" wrap="true" maxLines="2" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="36" />
+            </Label>
+            <Label id="detailsEpisode" width="576" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+            </Label>
+            <Label id="detailsWhen" width="576" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
             <!-- On now, Live, New and the rating, a label each. -->
             <LayoutGroup id="detailsBadges" layoutDirection="horiz" itemSpacings="[16]" />
             <Rectangle id="detailsTrack" height="6" color="0x2E3440FF" />
             <Rectangle id="detailsFill" height="6" color="0x38BDF8FF" />
-            <Label id="detailsLeft" color="0x8B95A5FF" font="font:SmallestSystemFont" />
-            <Label id="detailsText" width="576" wrap="true" lineSpacing="2" font="font:SmallSystemFont" />
-            <Label id="detailsEnded" text="It has ended." color="0x8B95A5FF" font="font:SmallestSystemFont" />
-            <ButtonGroup id="detailsButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[1248, 876]" minWidth="576" />
+            <Label id="detailsLeft" color="0x8B95A5FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
+            <Label id="detailsText" width="576" wrap="true" lineSpacing="2">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+            </Label>
+            <Label id="detailsEnded" text="It has ended." color="0x8B95A5FF">
+                <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+            </Label>
+            <Buttons id="detailsButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" translation="[1248, 876]" minWidth="576" />
         </Group>
         <!-- What's on moves on. -->
         <Timer id="clock" duration="15" repeat="true" />

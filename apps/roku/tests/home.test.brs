@@ -118,3 +118,25 @@ sub test_home_menu_has_one_way_into_requests()
     tkEqual(homeRequestsEntries(reqSummary({ enabled: false, access: "ask" })), [], "requests off")
     tkEqual(homeRequestsEntries(reqNoSummary(false)), [], "no summary yet")
 end sub
+
+sub test_home_rail_icons_are_android_tvs()
+    movies = { id: 1, name: "Movies", kind: "movies" }
+    shows = { id: 2, name: "TV Shows", kind: "shows" }
+    music = { id: 3, name: "Music", kind: "music" }
+    photos = { id: 4, name: "Photos", kind: "photos" }
+    requests = [{ title: "Discover", action: "discover" }, { title: "Requests", action: "requests" }]
+    icons = []
+    for each entry in homeMenu([movies, shows, music, photos], true, requests, true)
+        icons.Push(homeRailIcon(entry))
+    end for
+    tkEqual(icons, ["search", "house", "compass", "list-video", "tv-minimal", "clapperboard", "tv", "music", "film", "list-music", "layers", "audio-lines", "settings"])
+end sub
+
+sub test_home_hero_buttons_look_like_android_tvs()
+    looks = homeHeroLooks(["resume", "start", "info", "watched"])
+    tkEqual(looks, [{ icon: "play-fill", round: false }, { icon: "rotate-ccw", round: true }, { icon: "info", round: true }, { icon: "circle-check", round: true }])
+    tkEqual(homeHeroLooks(["start", "info", "unwatched"])[0], { icon: "play-fill", round: false }, "Play")
+    tkEqual(homeHeroLooks(["info", "watched"])[0], { icon: "", round: false }, "Open, a pill of words")
+    tkEqual(homeHeroLooks(["next", "info"])[0], { icon: "play-fill", round: false }, "a show's Play, its next episode")
+    tkEqual(homeRailIcon({ title: "Libraries", action: "libraries" }), "layers")
+end sub

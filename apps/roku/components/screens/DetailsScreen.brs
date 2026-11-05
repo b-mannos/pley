@@ -186,7 +186,7 @@ end sub
 sub showFailure(answer as object)
     gone = answer.status = 404
     m.messageTitle.text = "Couldn't load this item"
-    m.messageText.text = answer.message
+    typeSet(m.messageText, answer.message)
     m.messageButton.buttons = ["Retry"]
     if gone
         m.messageTitle.text = "Item not found"
@@ -233,14 +233,14 @@ sub showDetail()
     beside = { fileId: m.fileId, askMore: m.askMore <> invalid, partOf: m.partOf, years: years }
     m.detail = contentDetail(m.item, m.global.session.server, m.onDeck, beside)
     m.message.visible = false
-    m.heading.text = m.detail.heading
-    m.context.text = m.detail.context
-    m.line.text = m.detail.line
-    m.left.text = m.detail.left
-    m.genres.text = m.detail.genres
-    m.credits.text = m.detail.credits
+    typeSet(m.heading, m.detail.heading)
+    typeSet(m.context, m.detail.context)
+    typeSet(m.line, m.detail.line)
+    typeSet(m.left, m.detail.left)
+    typeSet(m.genres, m.detail.genres)
+    typeSet(m.credits, m.detail.credits)
     fitSummary()
-    m.note.text = m.detail.note
+    typeSet(m.note, m.detail.note)
     layoutText()
     agent = m.top.getScene().getHttpAgent()
     if m.backdrop.uri <> m.detail.backdrop
@@ -296,9 +296,9 @@ sub fitSummary()
     end if
     if room < 1 then room = 1
     if room > 4 then room = 4
-    m.tagline.text = tagline
+    typeSet(m.tagline, tagline)
     m.summary.maxLines = room
-    m.summary.text = m.detail.summary
+    typeSet(m.summary, m.detail.summary)
 end sub
 
 ' The labels with text, one under the other.
@@ -348,7 +348,7 @@ sub onSeasons(event as object)
         end for
     else if not answer.ok and not uiFailed(answer)
         ' Without its seasons, the page says why where the episodes go.
-        m.episodesNote.text = answer.message
+        typeSet(m.episodesNote, answer.message)
     end if
     chips = []
     for each season in m.seasons
@@ -403,7 +403,7 @@ sub onEpisodes(event as object)
     answer = event.getData()
     if not answer.ok
         if not uiFailed(answer) and m.shownSeason = 0
-            m.episodesNote.text = answer.message
+            typeSet(m.episodesNote, answer.message)
             m.shownSeason = seasonId
             placeLower()
         end if
@@ -568,11 +568,11 @@ sub showRows()
         row = m.rowNodes[key]
         content.appendChild(row.node)
         if row.wide
-            sizes.Push([400, 300])
+            sizes.Push([contentTileCell(400), 320])
         else
-            sizes.Push([220, 410])
+            sizes.Push([contentTileCell(220), 430])
         end if
-        heights.Push(sizes.Peek()[1] + 60)
+        heights.Push(sizes.Peek()[1] + 76)
     end for
     m.rowKeys = keys
     m.rows.rowItemSize = sizes
@@ -635,7 +635,7 @@ sub placeLower()
     m.episodesNote.visible = not episodes and m.episodesNote.text <> "" and m.area <> "rows"
     if episodes or m.episodesNote.text <> ""
         tops.episodes = y
-        m.episodes.translation = [96, y]
+        m.episodes.translation = [80, y]
         m.episodesNote.translation = [96, y]
         if episodes
             y = y + 388
@@ -644,7 +644,7 @@ sub placeLower()
         end if
     end if
     tops.rows = y
-    m.rows.translation = [96, y]
+    m.rows.translation = [80, y]
     if m.area = "hero"
         m.lower.translation = [0, 940]
     else if m.area = "rows"
@@ -656,10 +656,11 @@ sub placeLower()
     end if
     m.page.visible = m.area = "hero" and m.detail <> invalid
     m.infoBlock.visible = m.area <> "hero" and m.detail <> invalid
+    ' The page's colour comes up over the backdrop under the parts below.
     if m.area = "hero"
-        m.shade.width = 1260
+        m.shade.translation = [0, 520]
     else
-        m.shade.width = 1920
+        m.shade.translation = [0, -200]
     end if
 end sub
 
@@ -741,18 +742,18 @@ end sub
 ' focus rested on, else the title's summary.
 sub drawInfo()
     if m.detail = invalid then return
-    m.infoTitle.text = m.detail.heading
-    m.infoMeta.text = m.detail.line
+    typeSet(m.infoTitle, m.detail.heading)
+    typeSet(m.infoMeta, m.detail.line)
     episode = invalid
     if m.area = "tabs" or m.area = "episodes" then episode = m.infoShown
     if episode <> invalid
-        m.infoEpisode.text = episode.name
-        m.infoEpisodeLine.text = episode.line
-        m.infoSummary.text = episode.summary
+        typeSet(m.infoEpisode, episode.name)
+        typeSet(m.infoEpisodeLine, episode.line)
+        typeSet(m.infoSummary, episode.summary)
     else
         m.infoEpisode.text = ""
         m.infoEpisodeLine.text = ""
-        m.infoSummary.text = m.detail.summary
+        typeSet(m.infoSummary, m.detail.summary)
     end if
     shown = [m.infoTitle]
     spacings = []
@@ -809,8 +810,8 @@ sub showItemRequest()
     else
         m.stage.color = reqToneColor(stage.tone)
         m.stage.progress = stage.progress
-        m.stage.text = stage.text
-        m.stageLine.text = stage.line
+        typeSet(m.stage, stage.text)
+        typeSet(m.stageLine, stage.line)
         m.stage.visible = true
         m.stageLine.visible = stage.line <> ""
     end if
@@ -922,7 +923,7 @@ sub showMenu(kind as string, title as string, labels as object)
     end for
     m.panelKind = kind
     m.panelBack = ""
-    m.panelTitle.text = title
+    typeSet(m.panelTitle, title)
     m.menu.content = nodesContent(items)
     if at > 0 and at < items.Count() then m.menu.jumpToItem = at
     m.choices.visible = false
@@ -942,12 +943,11 @@ sub showChoices(kind as string, title as string, labels as object, values as obj
     m.panelKind = kind
     m.panelBack = back
     m.panelValues = values
-    m.panelTitle.text = title
+    typeSet(m.panelTitle, title)
     ' A version's line is long: smaller letters keep it whole.
-    size = "Medium"
-    if kind = "version" then size = "Small"
-    m.choices.font = "font:" + size + "SystemFont"
-    m.choices.focusedFont = "font:" + size + "BoldSystemFont"
+    size = 34
+    if kind = "version" then size = 30
+    typeListFonts(m.choices, labels, size)
     m.choices.content = nodesContent(items)
     m.choices.checkedItem = current
     if current > 0 then m.choices.jumpToItem = current
@@ -964,7 +964,7 @@ sub showInfo()
     m.panelKind = "info"
     m.panelBack = "more"
     m.panelTitle.text = "Media info"
-    m.info.text = mediaInfoText(m.item)
+    typeSet(m.info, mediaInfoText(m.item))
     m.menu.visible = false
     m.choices.visible = false
     m.info.visible = true
@@ -979,7 +979,7 @@ sub showAbout()
     m.panelKind = "info"
     m.panelBack = "more"
     m.panelTitle.text = "Details"
-    m.info.text = contentAbout(m.item, CreateObject("roDateTime").AsSeconds(), fmtZoneSeconds())
+    typeSet(m.info, contentAbout(m.item, CreateObject("roDateTime").AsSeconds(), fmtZoneSeconds()))
     m.menu.visible = false
     m.choices.visible = false
     m.info.visible = true

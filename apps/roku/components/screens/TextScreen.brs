@@ -21,7 +21,7 @@ sub onActive()
     if m.top.route = "licences"
         if m.text.text = ""
             m.title.text = "Open-source licences"
-            m.text.text = licences()
+            typeSet(m.text, licences())
         end if
         m.text.visible = true
         m.text.setFocus(true)
@@ -89,7 +89,12 @@ sub onFactFocused(event as object)
     if beyond >= 0 then m.facts.jumpToItem = beyond
 end sub
 
+' Pley's licence, then those of what the package bundles: BrighterScript's
+' helpers, Lucide's icons and the Roboto font.
 function licences() as string
     own = "Pley for Roku is free software under the GNU Affero General Public License, version 3 (AGPL-3.0-only)."
-    return own + Chr(10) + Chr(10) + ReadAsciiFile("pkg:/licenses/bslib.txt")
+    parts = [own, ReadAsciiFile("pkg:/licenses/bslib.txt")]
+    parts.Push("Lucide's icons" + Chr(10) + Chr(10) + ReadAsciiFile("pkg:/licenses/lucide.txt"))
+    parts.Push("The Roboto font" + Chr(10) + Chr(10) + ReadAsciiFile("pkg:/licenses/roboto.txt"))
+    return parts.Join(Chr(10) + Chr(10))
 end function

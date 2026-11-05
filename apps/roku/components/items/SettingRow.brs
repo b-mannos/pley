@@ -19,9 +19,9 @@ sub onContent()
         node.width = width
         node.height = height
     end for
-    m.name.text = row.title
-    m.value.text = row.value
-    m.state.text = row.state
+    typeSet(m.name, row.title)
+    typeSet(m.value, row.value)
+    typeSet(m.state, row.state)
     m.danger = row.danger = true
     m.state.translation = [width - 184, 0]
     m.state.width = 160

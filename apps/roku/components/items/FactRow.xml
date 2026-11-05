@@ -9,10 +9,18 @@
         <field id="listHasFocus" type="boolean" value="true" onChange="onFocus" />
     </interface>
     <script type="text/brightscript" uri="pkg:/components/items/FactRow.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <children>
         <Poster id="focus" width="1728" height="52" uri="pkg:/images/button-focus.9.png" visible="false" />
-        <Label id="label" translation="[24, 0]" width="340" height="52" vertAlign="center" color="0xA1A9B6FF" font="font:SmallSystemFont" />
-        <Label id="value" translation="[388, 0]" width="1316" height="52" vertAlign="center" color="0xEBEBEBFF" font="font:SmallSystemFont" />
-        <Label id="heading" translation="[0, 0]" width="1728" height="52" vertAlign="bottom" color="0xEBEBEBFF" font="font:MediumBoldSystemFont" visible="false" />
+        <Label id="label" translation="[24, 0]" width="340" height="52" vertAlign="center" color="0xA1A9B6FF">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+        </Label>
+        <Label id="value" translation="[388, 0]" width="1316" height="52" vertAlign="center" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+        </Label>
+        <Label id="heading" translation="[0, 0]" width="1728" height="52" vertAlign="bottom" color="0xEBEBEBFF" visible="false">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="36" />
+        </Label>
     </children>
 </component>

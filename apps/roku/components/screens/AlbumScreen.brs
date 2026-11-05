@@ -50,7 +50,7 @@ sub showFailure(answer as object)
         return
     end if
     m.message.title = "Couldn't load this album"
-    m.message.text = answer.message
+    typeSet(m.message, answer.message)
     m.message.action = "Retry"
     m.message.visible = true
     if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
@@ -103,7 +103,7 @@ sub onActive()
         return
     end if
     m.started = true
-    m.title.text = httpSentence(m.top.params.title)
+    typeSet(m.title, httpSentence(m.top.params.title))
     m.top.setFocus(true)
     ask()
 end sub
@@ -121,8 +121,8 @@ sub onAlbum(event as object)
         return
     end if
     m.album = answer.data
-    m.title.text = httpSentence(m.album.title)
-    m.rating.text = musicRatingLine(m.album)
+    typeSet(m.title, httpSentence(m.album.title))
+    typeSet(m.rating, musicRatingLine(m.album))
     showLine()
     showButtons()
     image = contentTileImage(m.album, m.global.session.server, false, 420)
@@ -134,7 +134,7 @@ sub onAlbum(event as object)
 end sub
 
 sub showLine()
-    if m.album <> invalid then m.line.text = musicAlbumLine(m.album, m.queue)
+    if m.album <> invalid then typeSet(m.line, musicAlbumLine(m.album, m.queue))
 end sub
 
 sub onTracks(event as object)

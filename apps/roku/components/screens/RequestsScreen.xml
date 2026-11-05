@@ -18,6 +18,8 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/RequestsScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/RequestActions.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
@@ -28,10 +30,14 @@
     <script type="text/brightscript" uri="pkg:/components/lib/Content.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Requests.brs" />
     <children>
-        <Label id="heading" translation="[96, 40]" width="1000" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
+        <Label id="heading" translation="[96, 40]" width="1000" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+        </Label>
         <!-- How many there are; for an administrator whose sign-in can't
              approve, how to make it. -->
-        <Label id="count" translation="[1024, 60]" width="800" horizAlign="right" color="0xA1A9B6FF" font="font:SmallerSystemFont" />
+        <Label id="count" translation="[1024, 60]" width="800" horizAlign="right" color="0xA1A9B6FF">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="30" />
+        </Label>
         <!-- Closer chips than a library's: a manager's eight tabs leave
              room for the filters (closer still where their numbers need
              it). -->
@@ -39,19 +45,29 @@
         <!-- A manager's filters, or Sign in again. -->
         <ChipRow id="side" translation="[1600, 132]" pad="44" visible="false" />
         <MarkupList id="list" translation="[96, 212]" itemComponentName="RequestRow" itemSize="[1728, 184]" itemSpacing="[0, 16]" numRows="4" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" />
-        <Label id="message" translation="[96, 480]" width="1728" wrap="true" horizAlign="center" color="0xA1A9B6FF" text="Loading…" font="font:MediumSystemFont" />
+        <Label id="message" translation="[96, 480]" width="1728" wrap="true" horizAlign="center" color="0xA1A9B6FF" text="Loading…">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+        </Label>
         <!-- With none to list: why, and for those who may ask, the way to
              Discover. -->
         <LayoutGroup id="empty" translation="[96, 280]" layoutDirection="vert" itemSpacings="[16, 40]" visible="false">
-            <Label id="emptyTitle" width="1400" wrap="true" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="emptyText" width="1100" wrap="true" color="0xA1A9B6FF" font="font:MediumSystemFont" />
-            <ButtonGroup id="emptyButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="520" />
+            <Label id="emptyTitle" width="1400" wrap="true" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <Label id="emptyText" width="1100" wrap="true" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+            </Label>
+            <Buttons id="emptyButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="520" />
         </LayoutGroup>
         <!-- Why the requests can't be shown, and what to do about it. -->
         <LayoutGroup id="problem" translation="[96, 360]" layoutDirection="vert" itemSpacings="[20, 48]" visible="false">
-            <Label id="problemTitle" width="1400" wrap="true" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
-            <Label id="problemText" width="1400" wrap="true" color="0xA1A9B6FF" font="font:MediumSystemFont" />
-            <ButtonGroup id="problemButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="420" />
+            <Label id="problemTitle" width="1400" wrap="true" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
+            <Label id="problemText" width="1400" wrap="true" color="0xA1A9B6FF">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+            </Label>
+            <Buttons id="problemButtons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="420" />
         </LayoutGroup>
         <!-- Over the right half: the filters, each opening its choices; or
              a request, its head over what can be done with it, and the
@@ -59,15 +75,25 @@
              (placePanel). -->
         <Group id="panel" visible="false">
             <Rectangle translation="[1000, 0]" width="920" height="1080" color="0x1E222AFF" />
-            <Label id="panelTitle" translation="[1056, 56]" width="808" wrap="true" maxLines="3" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Label id="panelTitle" translation="[1056, 56]" width="808" wrap="true" maxLines="3" color="0xEBEBEBFF">
+                <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="44" />
+            </Label>
             <!-- A request's stage, what was asked for and who asked when,
                  and what to know of it. -->
             <LayoutGroup id="head" translation="[1056, 150]" layoutDirection="vert" itemSpacings="[16]" visible="false">
                 <StagePill id="headStage" maxWidth="808" />
-                <Label id="headLines" width="808" wrap="true" maxLines="9" lineSpacing="4" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+                <Label id="headLines" width="808" wrap="true" maxLines="9" lineSpacing="4" color="0xA1A9B6FF">
+                    <Font role="font" uri="pkg:/fonts/roboto-500.ttf" size="26" />
+                </Label>
             </LayoutGroup>
-            <RadioButtonList id="choices" translation="[1056, 150]" itemSize="[808, 64]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus" font="font:MediumSystemFont" focusedFont="font:MediumBoldSystemFont" />
-            <LabelList id="menu" translation="[1056, 150]" itemSize="[808, 64]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus" font="font:MediumSystemFont" focusedFont="font:MediumBoldSystemFont" visible="false" />
+            <RadioButtonList id="choices" translation="[1056, 150]" itemSize="[808, 64]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+                <Font role="focusedFont" uri="pkg:/fonts/roboto-700.ttf" size="36" />
+            </RadioButtonList>
+            <LabelList id="menu" translation="[1056, 150]" itemSize="[808, 64]" numRows="11" color="0xEBEBEBFF" focusedColor="0x16191EFF" focusBitmapBlendColor="0x38BDF8FF" vertFocusAnimationStyle="floatingFocus" visible="false">
+                <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="34" />
+                <Font role="focusedFont" uri="pkg:/fonts/roboto-700.ttf" size="36" />
+            </LabelList>
         </Group>
         <!-- The list asked again while one of its requests downloads, or
              while the event stream is down. -->

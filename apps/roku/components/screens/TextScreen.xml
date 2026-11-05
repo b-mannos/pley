@@ -11,14 +11,20 @@
     </interface>
     <script type="text/brightscript" uri="pkg:/components/screens/TextScreen.brs" />
     <script type="text/brightscript" uri="pkg:/components/shared/Ui.brs" />
+    <script type="text/brightscript" uri="pkg:/components/shared/Type.brs" />
+    <script type="text/brightscript" uri="pkg:/components/lib/Type.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Url.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Http.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nav.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Nodes.brs" />
     <script type="text/brightscript" uri="pkg:/components/lib/Caps.brs" />
     <children>
-        <Label id="title" translation="[96, 56]" color="0xEBEBEBFF" font="font:ExtraLargeBoldSystemFont" />
-        <ScrollableText id="text" translation="[96, 180]" width="1600" height="840" color="0xEBEBEBFF" font="font:SmallSystemFont" lineSpacing="6" visible="false" />
+        <Label id="title" translation="[96, 56]" color="0xEBEBEBFF">
+            <Font role="font" uri="pkg:/fonts/roboto-700.ttf" size="56" />
+        </Label>
+        <ScrollableText id="text" translation="[96, 180]" width="1600" height="840" color="0xEBEBEBFF" lineSpacing="6" visible="false">
+            <Font role="font" uri="pkg:/fonts/roboto-400.ttf" size="32" />
+        </ScrollableText>
         <MarkupList id="facts" translation="[96, 160]" itemComponentName="FactRow" itemSize="[1728, 52]" itemSpacing="[0, 4]" numRows="15" drawFocusFeedback="false" vertFocusAnimationStyle="floatingFocus" visible="false" />
     </children>
 </component>

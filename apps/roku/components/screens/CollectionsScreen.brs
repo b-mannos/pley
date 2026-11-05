@@ -78,7 +78,7 @@ sub onCollections(event as object)
     if content.getChildCount() = 0
         if m.failed <> invalid
             m.message.title = "Couldn't load collections"
-            m.message.text = m.failed
+            typeSet(m.message, m.failed)
             m.message.action = "Retry"
             if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
         else
@@ -88,6 +88,7 @@ sub onCollections(event as object)
     end if
     m.message.visible = false
     m.rows.content = content
+    typeRowLabels(m.rows)
     m.rows.visible = true
     ' Only while this screen has the focus: a dialog over it keeps it.
     if m.top.hasFocus() or m.message.isInFocusChain() then m.rows.setFocus(true)

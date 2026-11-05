@@ -16,10 +16,10 @@ sub onContent()
     m.label.visible = not m.isHeading
     m.value.visible = not m.isHeading
     if m.isHeading
-        m.heading.text = row.title
+        typeSet(m.heading, row.title)
     else
-        m.label.text = row.title
-        m.value.text = row.value
+        typeSet(m.label, row.title)
+        typeSet(m.value, row.value)
     end if
     onFocus()
 end sub

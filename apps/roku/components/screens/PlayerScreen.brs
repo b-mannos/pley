@@ -845,7 +845,7 @@ sub updateReadout()
         node.streamBps = httpNumber(stream.streamBitrate, 0)
         node.networkBps = httpNumber(stream.measuredBitrate, 0)
     end if
-    m.readoutText.text = detReadout(m.info, playingFile(), m.audioPlaying, node).Join(Chr(10))
+    typeSet(m.readoutText, detReadout(m.info, playingFile(), m.audioPlaying, node).Join(Chr(10)))
     m.readoutBack.height = m.readoutText.boundingRect().height + 32
 end sub
 
@@ -884,8 +884,8 @@ sub updateBanner()
     banner = playerBanner(m.item)
     shown = (m.bannerUp or controls) and banner.title <> ""
     m.banner.visible = shown
-    m.bannerTitle.text = banner.title
-    m.bannerLine.text = banner.line
+    typeSet(m.bannerTitle, banner.title)
+    typeSet(m.bannerLine, banner.line)
     ticking = shown and controls
     m.bannerRight.visible = ticking
     updateReadout()
@@ -902,9 +902,9 @@ sub updateBanner()
     status = []
     if m.info <> invalid then status.Push(detMethod(m.info))
     status.Push(playerClock(now, m.twelve))
-    m.bannerStatus.text = status.Join(" · ")
+    typeSet(m.bannerStatus, status.Join(" · "))
     m.bannerEnds.text = ""
-    if m.video.state = "paused" then m.bannerEnds.text = playerEndsAt(now, m.positionMs, m.durationMs, m.twelve)
+    if m.video.state = "paused" then typeSet(m.bannerEnds, playerEndsAt(now, m.positionMs, m.durationMs, m.twelve))
 end sub
 
 ' Gives the Video node stream, its text tracks moved as the sync says,
@@ -942,7 +942,7 @@ end function
 sub openSync()
     hideSkip()
     m.syncWas = m.syncMs
-    m.syncValue.text = syncLabel(m.syncMs)
+    typeSet(m.syncValue, syncLabel(m.syncMs))
     m.sync.visible = true
     updateBanner()
     m.syncButtons.focusButton = 0
@@ -951,7 +951,7 @@ end sub
 
 sub stepSync(byMs as integer)
     m.syncMs = syncClamp(m.syncMs + byMs)
-    m.syncValue.text = syncLabel(m.syncMs)
+    typeSet(m.syncValue, syncLabel(m.syncMs))
     ' Pictures drawn here move at once.
     drawPictures()
 end sub
@@ -1190,7 +1190,7 @@ sub updateSkip()
     if key <> m.skipKey
         m.skipKey = key
         m.skipDismissed = false
-        if marker <> invalid then m.skip.text = playerSkipLabel(marker)
+        if marker <> invalid then typeSet(m.skip, playerSkipLabel(marker))
     end if
     m.skipMarker = marker
     state = m.video.state
@@ -1572,8 +1572,8 @@ sub notice(title as string, text as string, buttons as object)
     closeMenu()
     hideSkip()
     hideUpNext()
-    m.noticeTitle.text = title
-    m.noticeText.text = text
+    typeSet(m.noticeTitle, title)
+    typeSet(m.noticeText, text)
     m.noticeButtons.buttons = buttons
     m.notice.visible = true
     updateBanner()
@@ -1616,8 +1616,8 @@ sub showUpNext()
     m.upNextShown = true
     card = m.nextCard
     if card = invalid then card = playerUpNextCard(invalid, m.global.session.server, m.next)
-    m.nextHeading.text = card.heading
-    m.nextTitle.text = card.title
+    typeSet(m.nextHeading, card.heading)
+    typeSet(m.nextTitle, card.title)
     m.nextImage.setHttpAgent(m.top.getScene().getHttpAgent())
     m.nextImage.uri = card.image
     buttonsAt = 404 + m.nextTitle.boundingRect().height + 32
@@ -1634,7 +1634,7 @@ sub showUpNext()
     m.countdown.text = ""
     if not playerAutoplay(playbackSection()) then return
     m.countdownLeft = playerUpNextSeconds()
-    m.countdown.text = playerNextIn(m.countdownLeft)
+    typeSet(m.countdown, playerNextIn(m.countdownLeft))
     m.countdownTimer.control = "start"
 end sub
 
@@ -1649,7 +1649,7 @@ sub onCountdown()
     if m.countdownLeft <= 0
         playNext()
     else
-        m.countdown.text = playerNextIn(m.countdownLeft)
+        typeSet(m.countdown, playerNextIn(m.countdownLeft))
     end if
 end sub
 
@@ -2060,7 +2060,7 @@ sub onMenuChoiceFocused()
     hint = "Try the original again"
     if m.menuValues[at] <> "playOriginal" then hint = aqHint(m.menuValues[at])
     if hint <> "" then lines.Push(hint)
-    m.menuHint.text = lines.Join(Chr(10))
+    typeSet(m.menuHint, lines.Join(Chr(10)))
 end sub
 
 ' A quality is kept as the Roku's (Settings shows it) and the title opens
@@ -2174,7 +2174,7 @@ sub onSleepTick()
         hideSleepNotice()
         return
     end if
-    m.sleepText.text = "Pausing in " + urlValue(state.secondsLeft) + " s"
+    typeSet(m.sleepText, "Pausing in " + urlValue(state.secondsLeft) + " s")
     if not m.sleepNotice.visible
         m.sleepNotice.visible = true
         ' The button takes the focus while nothing else is up.
@@ -2268,7 +2268,7 @@ sub showDetailLines()
     for i = m.detailTop to last
         shown.Push(m.detailLines[i])
     end for
-    m.menuText.text = shown.Join(Chr(10))
+    typeSet(m.menuText, shown.Join(Chr(10)))
 end sub
 
 ' Up and Down: a line back, or on while the panel cuts the rest off.
@@ -2474,7 +2474,7 @@ sub openFindLanguages()
 end sub
 
 sub showMenuText(text as string)
-    m.menuText.text = text
+    typeSet(m.menuText, text)
     m.menuList.visible = false
     m.menuChoices.visible = false
     m.menuText.visible = true
@@ -2512,9 +2512,9 @@ sub onMenuEntryFocused()
     if m.menuKind <> "found" then return
     at = m.menuList.itemFocused - 1
     if at >= 0 and at < m.found.Count()
-        m.menuHint.text = m.found[at].hint
+        typeSet(m.menuHint, m.found[at].hint)
     else if m.found.Count() = 0
-        m.menuHint.text = ssNothingFound(m.findLanguage)
+        typeSet(m.menuHint, ssNothingFound(m.findLanguage))
     else
         m.menuHint.text = "The language the search looks in."
     end if

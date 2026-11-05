@@ -44,7 +44,7 @@ sub init()
     m.categoryList = m.top.findNode("categoryList")
     m.listEmpty = m.top.findNode("listEmpty")
     m.listHint = m.top.findNode("listHint")
-    m.listHint.text = listHintText()
+    typeSet(m.listHint, listHintText())
     m.notice = m.top.findNode("notice")
     m.noticeCard = m.top.findNode("noticeCard")
     m.noticeBack = m.top.findNode("noticeBack")
@@ -190,7 +190,7 @@ sub onActive()
     if m.categoryName = "" or Left(category, 7) = "search:" then m.categoryName = liveCategoryName(m.category, [])
     m.listCategory = m.category
     m.listName = m.categoryName
-    m.listTitle.text = m.categoryName
+    typeSet(m.listTitle, m.categoryName)
     askPage(m.category, 0, aroundIn(m.category, channel), "")
     tune(channel)
 end sub
@@ -240,7 +240,7 @@ sub onPage(event as object)
         m.failedPage = { category: spec.category, offset: spec.offset, around: spec.around }
         m.failedAt = m.span.TotalMilliseconds()
         m.failedCategory = spec.category
-        if listed and m.listPage = invalid then m.listRange.text = answer.message
+        if listed and m.listPage = invalid then typeSet(m.listRange, answer.message)
         return
     end if
     if spec.category = m.failedCategory
@@ -279,7 +279,7 @@ sub showListPage(page as object, content as object, pick as string)
     m.channelList.content = content
     showListEmpty()
     markCurrent()
-    if not m.categoryList.visible then m.listRange.text = liveRange(page.offset, page.channels.Count(), page.total)
+    if not m.categoryList.visible then typeSet(m.listRange, liveRange(page.offset, page.channels.Count(), page.total))
     at = -1
     if m.channel <> invalid then at = liveIndexOf(page.channels, m.channel.id)
     if at < 0 or pick = "top" then at = 0
@@ -291,7 +291,7 @@ end sub
 ' channels in this group.", "No channels match"…
 sub showListEmpty()
     empty = m.listPage <> invalid and m.listPage.channels.Count() = 0 and not m.categoryList.visible
-    if empty then m.listEmpty.text = liveEmpty(m.listCategory).title
+    if empty then typeSet(m.listEmpty, liveEmpty(m.listCategory).title)
     m.listEmpty.visible = empty
 end sub
 
@@ -323,7 +323,7 @@ sub openList()
         if m.page <> invalid then showListPage(m.page, m.pageContent, "")
     end if
     m.listName = m.categoryName
-    m.listTitle.text = m.listName
+    typeSet(m.listTitle, m.listName)
     if m.page = invalid then askAgain(m.category)
     m.list.visible = true
     if m.channel <> invalid and m.listPage <> invalid
@@ -415,7 +415,7 @@ sub showListCategory(category as string)
     m.listSearched = false
     m.listName = listNameOf(category)
     closeCategories()
-    m.listTitle.text = m.listName
+    typeSet(m.listTitle, m.listName)
     if category = m.listCategory and m.listPage <> invalid then return
     m.listCategory = category
     m.listPage = invalid
@@ -454,7 +454,7 @@ end sub
 sub onGroups(event as object)
     answer = event.getData()
     if not answer.ok
-        if m.categoryList.visible then m.listRange.text = answer.message
+        if m.categoryList.visible then typeSet(m.listRange, answer.message)
         return
     end if
     m.summary = liveSummary(answer.data)
@@ -512,10 +512,10 @@ sub closeCategories()
     if not m.categoryList.visible then return
     m.categoryList.visible = false
     m.channelList.visible = true
-    m.listTitle.text = m.listName
-    m.listHint.text = listHintText()
+    typeSet(m.listTitle, m.listName)
+    typeSet(m.listHint, listHintText())
     m.listRange.text = ""
-    if m.listPage <> invalid then m.listRange.text = liveRange(m.listPage.offset, m.listPage.channels.Count(), m.listPage.total)
+    if m.listPage <> invalid then typeSet(m.listRange, liveRange(m.listPage.offset, m.listPage.channels.Count(), m.listPage.total))
     showListEmpty()
     if m.list.visible then m.channelList.setFocus(true)
 end sub
@@ -927,11 +927,11 @@ end sub
 ' "Sound only" and what's on instead (Live.brs's liveTuningCard).
 sub showCard(channel as object, kind as string)
     words = liveTuningCard(channel, kind = "radio", nowSeconds())
-    m.cardKind.text = words.kind
+    typeSet(m.cardKind, words.kind)
     m.cardKind.visible = words.kind <> ""
-    m.cardTitle.text = words.title
-    m.cardLine.text = words.line
-    m.cardInitials.text = channel.name
+    typeSet(m.cardTitle, words.title)
+    typeSet(m.cardLine, words.line)
+    typeSet(m.cardInitials, channel.name)
     ' The scene's agent carries the token; it changes with each refresh.
     m.cardLogo.setHttpAgent(m.top.getScene().getHttpAgent())
     m.cardLogo.uri = channel.logo
@@ -961,32 +961,32 @@ sub drawBanner()
     now = nowSeconds()
     on = liveOnNow(channel, now)
     coming = liveComingUp(channel, now)
-    m.bannerChannel.text = liveTitle(channel)
-    m.bannerInitials.text = channel.name
+    typeSet(m.bannerChannel, liveTitle(channel))
+    typeSet(m.bannerInitials, channel.name)
     m.bannerLogo.setHttpAgent(m.top.getScene().getHttpAgent())
     m.bannerLogo.uri = channel.logo
     onLogos()
     placeBadge(m.bannerBadge, m.bannerTitle, liveBadge(on), 1100)
     if on <> invalid
-        m.bannerTitle.text = on.title
+        typeSet(m.bannerTitle, on.title)
         meta = [liveSpan(on, m.twelve), liveTimeLeft(on, now)]
         if on.line <> "" then meta.Push(on.line)
         if on.rating <> "" then meta.Push(on.rating)
-        m.bannerMeta.text = meta.Join("   ·   ")
+        typeSet(m.bannerMeta, meta.Join("   ·   "))
         m.bannerFill.width = Int(1100 * liveProgress(on, now))
         m.bannerTrack.visible = true
         m.bannerFill.visible = true
     else
-        m.bannerTitle.text = channel.name
+        typeSet(m.bannerTitle, channel.name)
         m.bannerMeta.text = "Nothing in the guide now"
         if not channel.hasGuide then m.bannerMeta.text = "No guide for this channel"
         m.bannerTrack.visible = false
         m.bannerFill.visible = false
     end if
     m.bannerNext.text = ""
-    if coming <> invalid then m.bannerNext.text = "Next   " + liveClock(coming.start, m.twelve) + "   " + coming.title
-    m.star.text = ""
-    if channel.favorite then m.star.text = "★ Favourite"
+    if coming <> invalid then typeSet(m.bannerNext, "Next   " + liveClock(coming.start, m.twelve) + "   " + coming.title)
+    typeSet(m.star, "")
+    if channel.favorite then typeSet(m.star, "★ Favourite")
     favorite = "Add to favourites"
     if channel.favorite then favorite = "Remove from favourites"
     ' Drawn again only when the favourite's words change: the chips are
@@ -1000,7 +1000,7 @@ end sub
 sub placeBadge(badge as object, title as object, text as string, width as integer)
     x = badge.translation[0]
     y = title.translation[1]
-    badge.text = text
+    typeSet(badge, text)
     badge.visible = text <> ""
     if text = ""
         title.translation = [x, y]
@@ -1151,14 +1151,14 @@ sub trouble(problem as object)
     m.noticeInitials.text = ""
     m.noticeLogo.uri = ""
     if channel <> invalid
-        m.noticeInitials.text = channel.name
+        typeSet(m.noticeInitials, channel.name)
         m.noticeLogo.setHttpAgent(m.top.getScene().getHttpAgent())
         m.noticeLogo.uri = channel.logo
     end if
     onLogos()
-    m.noticeTitle.text = card.title
+    typeSet(m.noticeTitle, card.title)
     y = 236 + m.noticeTitle.boundingRect().height
-    m.noticeLead.text = card.lead
+    typeSet(m.noticeLead, card.lead)
     m.noticeLead.visible = card.lead <> ""
     if m.noticeLead.visible
         m.noticeLead.translation = [64, y + 16]
@@ -1173,13 +1173,13 @@ sub trouble(problem as object)
         troubleRow(c, y)
         y = y + 88
     end for
-    m.noticeNote.text = card.note
+    typeSet(m.noticeNote, card.note)
     m.noticeNote.visible = card.note <> ""
     if m.noticeNote.visible
         m.noticeNote.translation = [64, y + 12]
         y = y + 12 + m.noticeNote.boundingRect().height
     end if
-    m.noticeText.text = card.text
+    typeSet(m.noticeText, card.text)
     m.noticeText.visible = card.text <> ""
     if m.noticeText.visible
         m.noticeText.translation = [64, y + 16]
@@ -1228,13 +1228,13 @@ sub troubleRow(c as object, y as integer)
     name.width = room
     name.font = "font:SmallBoldSystemFont"
     name.color = "0xEBEBEBFF"
-    name.text = c.channelName
+    typeSet(name, c.channelName)
     holders = row.createChild("Label")
     holders.translation = [24, 48]
     holders.width = room
     holders.font = "font:SmallestSystemFont"
     holders.color = "0xA1A9B6FF"
-    holders.text = c.holders
+    typeSet(holders, c.holders)
 end sub
 
 ' The card's focus: on its stop at m.troubleAt (a Watch here instead, or

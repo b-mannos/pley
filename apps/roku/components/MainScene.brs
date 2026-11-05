@@ -861,7 +861,7 @@ sub showToast(text as string, isError as boolean, seconds as float)
     colors = uiColors()
     m.toastText.wrap = false
     m.toastText.width = 0
-    m.toastText.text = text
+    typeSet(m.toastText, text)
     m.toastText.color = colors.fg
     if isError then m.toastText.color = colors.danger
     size = m.toastText.boundingRect()

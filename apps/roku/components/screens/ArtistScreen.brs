@@ -57,8 +57,8 @@ sub onActive()
         return
     end if
     m.started = true
-    m.name.text = httpSentence(m.top.params.title)
-    m.initials.text = pageInitials(m.name.text)
+    typeSet(m.name, httpSentence(m.top.params.title))
+    typeSet(m.initials, pageInitials(m.name.text))
     layoutText()
     m.top.setFocus(true)
     ask()
@@ -80,7 +80,7 @@ sub showFailure(answer as object)
         return
     end if
     m.message.title = "Couldn't load this artist"
-    m.message.text = answer.message
+    typeSet(m.message, answer.message)
     m.message.action = "Retry"
     m.message.visible = true
     if m.top.hasFocus() or m.message.isInFocusChain() then m.message.setFocus(true)
@@ -108,9 +108,9 @@ sub onArtist(event as object)
     end if
     m.artist = answer.data
     server = m.global.session.server
-    m.name.text = httpSentence(m.artist.title)
-    m.initials.text = pageInitials(m.name.text)
-    m.summary.text = httpClean(m.artist.summary, 400, false)
+    typeSet(m.name, httpSentence(m.artist.title))
+    typeSet(m.initials, pageInitials(m.name.text))
+    typeSet(m.summary, httpClean(m.artist.summary, 400, false))
     showLine()
     agent = m.top.getScene().getHttpAgent()
     m.picture.setHttpAgent(agent)
@@ -156,7 +156,7 @@ sub showLine()
     if m.artist = invalid then return
     albums = 0
     if m.albumIds <> invalid then albums = m.albumIds.Count()
-    m.line.text = musicArtistLine(m.artist, albums)
+    typeSet(m.line, musicArtistLine(m.artist, albums))
     layoutText()
 end sub
 
