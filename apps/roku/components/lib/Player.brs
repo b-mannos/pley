@@ -208,6 +208,17 @@ function playerUpNextSeconds() as integer
     return 10
 end function
 
+' Fast forward and rewind jump 30 s while Skip, Up Next or Pley's menu has
+' the focus (Roku's own bar has the video's), as Android TV's keys do;
+' instant replay goes back 10 s.
+function playerJumpMs() as integer
+    return 30000
+end function
+
+function playerReplayMs() as integer
+    return 10000
+end function
+
 ' Whether Up Next plays the next episode by itself at the end of its
 ' countdown (Settings, kept on the Roku): yes, unless turned off.
 function playerAutoplay(section as object) as boolean

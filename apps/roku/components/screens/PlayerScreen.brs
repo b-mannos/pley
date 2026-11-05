@@ -1090,9 +1090,9 @@ sub onSkipKey(event as object)
     playerKey(event.getData())
 end sub
 
-' What play, fast forward and rewind do when the skip button or Up Next
-' has the focus instead of the video: pause or go on, or 10 s further or
-' back.
+' What play, fast forward, rewind and instant replay do when the skip
+' button, Up Next or the menu has the focus instead of the video: pause or
+' go on, 30 s further or back, or 10 s back.
 sub playerKey(key as string)
     if key = "play"
         if m.video.state = "paused"
@@ -1101,9 +1101,11 @@ sub playerKey(key as string)
             m.video.control = "pause"
         end if
     else if key = "fastforward"
-        seekTo(m.positionMs + 10000)
+        seekTo(m.positionMs + playerJumpMs())
+    else if key = "rewind"
+        seekTo(m.positionMs - playerJumpMs())
     else
-        seekTo(m.positionMs - 10000)
+        seekTo(m.positionMs - playerReplayMs())
     end if
 end sub
 

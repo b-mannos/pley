@@ -76,7 +76,7 @@ yet, Scanning your libraries…, or Nothing here yet.
 | Options (\*) | A request | What can be done with it (Approve, Decline, Withdraw…) |
 | Down | The player | Pley's menu: Subtitles, Audio, Quality, Subtitle sync, Chapters, Sleep timer, Find subtitles…, Playback details |
 | Options (\*) | The player | Roku's own options: subtitles and audio tracks |
-| OK | Skip intro, Skip credits | Skips; fast forward and rewind move 10 s |
+| OK | Skip intro, Skip credits | Skips; fast forward and rewind jump 30 s, instant replay 10 s back |
 | Options (\*) | Live TV | A programme's details (a card's: what's on), Watch, Add to or remove from favourites |
 | Options (\*) | The live player | Add to or remove from favourites |
 | Replay | Live TV, the live player's channel list | Search (Roku remotes have no search key for apps) |
