@@ -66,6 +66,16 @@ The hero's summary, content rating and quality come with its details
 do the info block's. With nothing to show, Home says why: No libraries
 yet, Scanning your libraries…, or Nothing here yet.
 
+Tiles are captioned as on the other TVs, in rows and grids: a title in
+progress says the time left ("26 min left"), else what it is: a movie's
+year, a show's seasons ("3 seasons"), a season's episodes ("10
+episodes"), an album's artist and year, a track's artist and album. An
+episode's tile is its show's, with "S1 · E3 · 26 min left" (its title
+when not started). A show's or a season's tile has the number of its
+episodes left to watch where the watched mark goes, the mark only once
+every one is watched. Continue Watching, and any row whose first title
+is an episode, has 16:9 stills.
+
 ### Remote keys
 
 | Key | Where | What it does |

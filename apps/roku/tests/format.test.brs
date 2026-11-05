@@ -33,6 +33,12 @@ sub test_format_episode_codes()
     tkEqual(fmtEpisode(invalid, invalid), "")
 end sub
 
+sub test_format_plurals()
+    tkEqual(fmtPlural(1, "season"), "1 season")
+    tkEqual(fmtPlural(3, "season"), "3 seasons")
+    tkEqual(fmtPlural(0, "episode"), "0 episodes")
+end sub
+
 sub test_format_resume_points()
     tkEqual(fmtResume(754000), "Resume from 12:34")
     tkTrue(fmtResumable(600000, 6000000))

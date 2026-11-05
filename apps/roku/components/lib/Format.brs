@@ -85,6 +85,13 @@ function fmtMeta(item as object) as string
     return parts.Join(" · ")
 end function
 
+' "1 season", "3 seasons": count of noun.
+function fmtPlural(count as dynamic, noun as string) as string
+    n = Int(httpNumber(count, 0))
+    if n = 1 then return "1 " + noun
+    return n.ToStr() + " " + noun + "s"
+end function
+
 ' "1 movie", "245 movies", "31 shows", "12 artists" for a library's kind.
 function fmtCount(count as dynamic, kind as string) as string
     n = Int(httpNumber(count, 0))

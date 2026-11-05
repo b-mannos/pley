@@ -151,11 +151,17 @@ sub uiPatchTiles(content as dynamic, change as object)
             uiPatchTiles(node, change)
         else if node.hasField("itemId") and node.itemId = change.itemId and node.hasField("watched")
             fields = {}
-            for each key in ["title", "subtitle", "image", "wide", "square", "progress", "watched", "itemId", "kind", "parentId", "grandparentId", "positionMs", "durationMs", "summary", "entryId", "historyId", "qualityBadges"]
+            for each key in ["title", "subtitle", "image", "wide", "square", "progress", "watched", "unwatched", "leafCount", "itemId", "kind", "parentId", "grandparentId", "positionMs", "durationMs", "summary", "entryId", "historyId", "qualityBadges"]
                 if node.hasField(key) then fields[key] = node.getField(key)
             end for
             fields.positionMs = 0
             fields.progress = 0.0
+            ' A show or a season marked: none of its episodes left to watch,
+            ' or all of them.
+            if fields.DoesExist("leafCount")
+                if action = "watched" then fields.unwatched = 0
+                if action = "unwatched" then fields.unwatched = fields.leafCount
+            end if
             if action = "played"
                 fields.watched = change.watched
                 if not change.watched

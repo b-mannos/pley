@@ -5,6 +5,8 @@ sub init()
     m.track = m.top.findNode("track")
     m.fill = m.top.findNode("fill")
     m.watched = m.top.findNode("watched")
+    m.countBack = m.top.findNode("countBack")
+    m.count = m.top.findNode("count")
     m.title = m.top.findNode("title")
     m.subtitle = m.top.findNode("subtitle")
     m.badgeBack = m.top.findNode("badgeBack")
@@ -28,6 +30,12 @@ sub onContent()
     m.progress = 0.0
     if item.hasField("progress") then m.progress = item.progress
     m.watched.visible = item.hasField("watched") and item.watched = true
+    unwatched = 0
+    if item.hasField("unwatched") and item.unwatched <> invalid then unwatched = item.unwatched
+    m.count.text = ""
+    if unwatched > 0 then m.count.text = unwatched.ToStr()
+    m.count.visible = unwatched > 0
+    m.countBack.visible = unwatched > 0
     m.title.text = item.title
     ' See all, a row's Try again or note, a grid's Look further and Request
     ' more seasons: their words in the frame only.
@@ -85,6 +93,17 @@ sub onLayout()
     m.track.visible = m.progress > 0
     m.fill.visible = m.progress > 0
     m.watched.translation = [w - 52, 12]
+    ' The count at the top right, where the mark goes, as wide as its
+    ' digits.
+    if m.count.visible
+        m.count.width = 0
+        countWidth = m.count.boundingRect().width + 20
+        if countWidth < 40 then countWidth = 40
+        m.count.width = countWidth
+        m.count.translation = [w - 12 - countWidth, 12]
+        m.countBack.width = countWidth
+        m.countBack.translation = [w - 12 - countWidth, 12]
+    end if
     ' The badge at the poster's top left, as wide as its words; cut short
     ' only when they don't fit (a label as wide as it measures can lose
     ' its last letters to rounding).

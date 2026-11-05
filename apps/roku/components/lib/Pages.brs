@@ -139,7 +139,7 @@ function pageCollection(detail as object, server as string) as object
         kind = ""
         if GetInterface(item, "ifAssociativeArray") <> invalid then kind = httpString(item.kind)
         if contentShown(kind)
-            tiles.Push(contentTile(item, server, false))
+            tiles.Push(contentTile(item, server, false, true))
             if kind = "movie" then movies = true
             if contentPlayable(kind) then queue.Push(contentUpNext(item, server))
             if kind = "show" or kind = "season" then shows.Push(httpNumber(item.id, 0))

@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A title in a RowList row or a MarkupGrid: its poster (a 16:9 picture
-     for Continue Watching, a square for music), how far along it is or a
-     mark once watched, a badge (a TMDB title's "In library", "Requested"),
+     for Continue Watching and episodes, a square for music), how far along
+     it is or a mark once watched (a show's or a season's episodes left to
+     watch while there are some), a badge (a TMDB title's "In library", "Requested"),
      a library's quality badges ("4K", "DV") at the poster's foot, and two
      lines under it. -->
 <component name="Tile" extends="Group">
@@ -23,6 +24,10 @@
         <Rectangle id="track" color="0x16191ECC" visible="false" />
         <Rectangle id="fill" color="0x38BDF8FF" visible="false" />
         <Poster id="watched" uri="pkg:/images/watched.png" width="40" height="40" visible="false" />
+        <!-- A show's or a season's episodes left to watch, on the accent, as
+             the other TVs draw it. -->
+        <Rectangle id="countBack" height="34" color="0x38BDF8FF" visible="false" />
+        <Label id="count" height="34" horizAlign="center" vertAlign="center" color="0x16191EFF" font="font:TinySystemFont" visible="false" />
         <Rectangle id="badgeBack" height="34" visible="false" />
         <Label id="badge" height="34" vertAlign="center" color="0x16191EFF" font="font:TinySystemFont" visible="false" />
         <!-- A title has two quality badges at most: "4K" and its dynamic

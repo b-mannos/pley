@@ -42,10 +42,10 @@ sub test_content_library_posters_show_their_files_only_when_asked()
     plain = contentTiles([movie, "not an item"], contentTestServer())
     tkEqual(plain.Count(), 1)
     tkFalse(plain[0].DoesExist("qualityBadges"), "no badges unless asked")
-    tkEqual(plain[0].subtitle, "2016")
+    tkEqual(plain[0].subtitle, "1 h 46 min left", "in progress: the time left")
     badged = contentTiles([movie], contentTestServer(), true)
     tkEqual(badged[0].qualityBadges, ["4K", "DV"])
-    tkEqual(badged[0].subtitle, "2016", "the year, unless sorted by bitrate")
+    tkEqual(badged[0].subtitle, "1 h 46 min left", "the caption, unless sorted by bitrate")
     sorted = contentTiles([movie], contentTestServer(), true, true)
     tkEqual(sorted[0].qualityBadges, ["4K", "DV"])
     tkEqual(sorted[0].subtitle, "42 Mbps · 23.4 GB")
@@ -65,6 +65,53 @@ sub test_content_quality_badges_say_4k_and_the_dynamic_range()
     tkEqual(contentMediaLine({ bitrate: invalid, size: 1048576 }), "1.0 MB")
     tkEqual(contentMediaLine({ bitrate: invalid, size: invalid }), "Bitrate unknown")
     tkEqual(contentMediaLine(invalid), "Bitrate unknown")
+end sub
+
+sub test_content_tiles_are_captioned_as_on_the_other_tvs()
+    server = contentTestServer()
+    tkEqual(contentTile(contentTestMovie(), server, false).subtitle, "2016", "without a caption: what places it, for lists")
+    tkEqual(contentTile(contentTestMovie(), server, false, true).subtitle, "1 h 46 min left")
+    fresh = contentTestMovie()
+    fresh.user_state.position_ms = 0
+    tkEqual(contentTile(fresh, server, false, true).subtitle, "2016")
+    started = contentTestEpisode()
+    started.user_state = { position_ms: 1740000, watched: false, play_count: 0 }
+    tkEqual(contentTile(started, server, true, true).subtitle, "S1 · E1 · 26 min left")
+    tkEqual(contentTile(contentTestEpisode(), server, true, true).subtitle, "S1 · E1 · Good News About Hell")
+    show = { id: 99, kind: "show", title: "Severance", year: 2022, child_count: 3, leaf_count: 27, viewed_leaf_count: 27, user_state: { watched: true } }
+    tkEqual(contentTile(show, server, false, true).subtitle, "3 seasons")
+    show.child_count = invalid
+    tkEqual(contentTile(show, server, false, true).subtitle, "27 episodes", "no seasons counted: its episodes")
+    show.leaf_count = invalid
+    tkEqual(contentTile(show, server, false, true).subtitle, "2022", "neither: its year")
+    season = { id: 100, kind: "season", title: "Season 1", parent_title: "Severance", leaf_count: 10, viewed_leaf_count: 0 }
+    tkEqual(contentTile(season, server, false, true).subtitle, "10 episodes")
+    tkEqual(contentTile(season, server, false).subtitle, "Severance")
+    track = { id: 5201, kind: "track", title: "Song 1", parent_title: "Blue", grandparent_title: "The Fixtures" }
+    tkEqual(contentTile(track, server, false, true).subtitle, "The Fixtures · Blue")
+    album = { id: 5100, kind: "album", title: "Blue", parent_title: "The Fixtures", year: 2001 }
+    tkEqual(contentTile(album, server, false, true).subtitle, "The Fixtures · 2001")
+    tkEqual(contentTile({ id: 5000, kind: "artist", title: "The Fixtures", child_count: 2 }, server, false, true).subtitle, "2 albums")
+end sub
+
+sub test_content_shows_and_seasons_count_their_episodes_left()
+    server = contentTestServer()
+    show = { id: 99, kind: "show", title: "Severance", leaf_count: 18, viewed_leaf_count: 2, user_state: { watched: false } }
+    tile = contentTile(show, server, false)
+    tkEqual(tile.unwatched, 16)
+    tkFalse(tile.watched)
+    tkEqual(tile.leafCount, 18)
+    show.viewed_leaf_count = 18
+    show.user_state.watched = true
+    tile = contentTile(show, server, false)
+    tkEqual(tile.unwatched, 0)
+    tkTrue(tile.watched, "every episode watched: the mark")
+    show.viewed_leaf_count = 17
+    tkFalse(contentTile(show, server, false).watched, "one left: its count, not the mark")
+    show.viewed_leaf_count = 30
+    tkEqual(contentTile(show, server, false).unwatched, 0, "never below none")
+    tkEqual(contentTile(contentTestMovie(), server, false).unwatched, 0, "a movie has no count")
+    tkFalse(contentTile(contentTestMovie(), server, false).DoesExist("leafCount"))
 end sub
 
 sub test_content_episode_tiles_name_the_show()
@@ -94,6 +141,7 @@ sub test_content_home_rows_of_every_kind()
     tkTrue(rows[0].wide)
     tkEqual(rows[0].tiles.Count(), 2)
     tkEqual(rows[0].tiles[1].image, "http://nas:7539/api/items/12/images/backdrop?v=1729600000&w=400", "a movie's backdrop in a wide tile")
+    tkEqual(rows[0].tiles[1].subtitle, "1 h 46 min left", "captioned")
     tkEqual(rows[1].title, "Recently Added in Movies")
     tkFalse(rows[1].wide)
     tkFalse(rows[1].square)
@@ -132,6 +180,14 @@ sub test_content_continue_watching_on_home_and_in_a_library()
     tkFalse(contentContinueWatching("recently_added:5"))
     rows = contentHomeRows([{ key: "continue_watching:5", title: "Continue Watching", library_id: 5, items: [contentTestEpisode()] }], contentTestServer())
     tkTrue(rows[0].wide, "a library's Continue Watching is wide, as Home's")
+    rows = contentHomeRows([{ key: "recently_added:2", title: "New Episodes", library_id: 2, items: [contentTestEpisode(), contentTestMovie()] }, { key: "recently_added:1", title: "Recently Added", library_id: 1, items: [contentTestMovie(), contentTestEpisode()] }], contentTestServer())
+    tkTrue(rows[0].wide, "a row whose first title is an episode: its stills")
+    tkEqual(rows[0].tiles[0].image, "http://nas:7539/api/items/101/images/thumb?v=2&w=400")
+    tkFalse(rows[1].wide, "by its first title only")
+    changes = contentRowChanges([{ key: "recently_added:2", title: "New Episodes", library_id: 2, items: [contentTestEpisode()] }], contentTestServer(), invalid)
+    tkTrue(changes.summary[0].wide)
+    known = { "recently_added:2": changes.summary[0].sig }
+    tkTrue(contentRowChanges([{ key: "recently_added:2", title: "New Episodes", library_id: 2, items: [contentTestEpisode()] }], contentTestServer(), known).summary[0].wide, "as it was, wide too")
 end sub
 
 sub test_content_seasons_and_episodes()

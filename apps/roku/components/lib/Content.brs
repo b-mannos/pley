@@ -47,8 +47,13 @@ function contentDetailPosterWidth() as integer
 end function
 
 ' One tile of a row or a grid. wide: a 16:9 picture (Continue Watching,
-' episodes) instead of a poster.
-function contentTile(item as object, server as string, wide as boolean) as object
+' episodes) instead of a poster. caption: the line under it is the tile's
+' caption (contentCaption), as the other TVs' rows and grids say it;
+' without, it places the title (a year, a show's name, an episode's
+' number and title), which lists add to. A show or a season counts its
+' episodes left to watch (unwatched), which take the watched mark's place
+' while there are some; leafCount, its episodes, for a mark undone.
+function contentTile(item as object, server as string, wide as boolean, caption = false as boolean) as object
     kind = httpString(item.kind)
     title = httpSentence(item.title)
     subtitle = ""
@@ -93,14 +98,16 @@ function contentTile(item as object, server as string, wide as boolean) as objec
     duration = httpNumber(item.duration_ms, 0)
     progress = 0.0
     if not watched then progress = fmtProgress(position, duration)
-    return {
+    unwatched = contentUnwatched(item)
+    tile = {
         title: title,
         subtitle: subtitle,
         image: contentTileImage(item, server, wide, 0),
         wide: wide,
         square: contentMusic(kind) and not wide,
         progress: progress,
-        watched: watched,
+        watched: watched and unwatched = 0,
+        unwatched: unwatched,
         itemId: httpNumber(item.id, 0),
         kind: kind,
         parentId: httpNumber(item.parent_id, 0),
@@ -108,6 +115,70 @@ function contentTile(item as object, server as string, wide as boolean) as objec
         positionMs: position,
         durationMs: duration
     }
+    if kind = "show" or kind = "season" then tile.leafCount = httpNumber(item.leaf_count, 0)
+    if caption then tile.subtitle = contentCaption(item, tile)
+    return tile
+end function
+
+' A tile's caption, as the other TVs write it: the time left while in
+' progress ("26 min left"), else a movie's year, a show's seasons ("3
+' seasons"; its episodes or year without), a season's episodes, an
+' artist's albums, an album's artist and year, a track's artist and
+' album. An episode's tile is its show's: its number, then the time left
+' or its own title ("S1 · E3 · 26 min left").
+function contentCaption(item as object, tile as object) as string
+    kind = tile.kind
+    left = ""
+    if tile.progress > 0 and tile.progress < 1 then left = fmtLeft(tile.positionMs, tile.durationMs)
+    if kind = "episode"
+        parts = []
+        code = fmtEpisode(item.parent_index, item.index)
+        if code <> "" then parts.Push(code)
+        name = httpSentence(item.title)
+        if left <> ""
+            parts.Push(left)
+        else if name <> "" and name <> tile.title
+            parts.Push(name)
+        end if
+        return parts.Join(" · ")
+    end if
+    if left <> "" then return left
+    year = ""
+    if httpNumber(item.year, 0) > 0 then year = urlValue(Int(httpNumber(item.year, 0)))
+    if kind = "show"
+        seasons = httpNumber(item.child_count, 0)
+        if seasons > 0 then return fmtPlural(seasons, "season")
+        if httpNumber(item.leaf_count, -1) >= 0 then return fmtPlural(item.leaf_count, "episode")
+        return year
+    end if
+    if kind = "season"
+        if httpNumber(item.leaf_count, -1) >= 0 then return fmtPlural(item.leaf_count, "episode")
+        return ""
+    end if
+    if kind = "artist" and httpNumber(item.child_count, 0) > 0 then return fmtPlural(item.child_count, "album")
+    parts = []
+    if kind = "album"
+        parts = [httpSentence(item.parent_title), year]
+    else if kind = "track"
+        parts = [httpSentence(item.grandparent_title), httpSentence(item.parent_title)]
+    else if kind = "movie"
+        parts = [year]
+    end if
+    shown = []
+    for each part in parts
+        if part <> "" then shown.Push(part)
+    end for
+    return shown.Join(" · ")
+end function
+
+' A show's or a season's episodes not watched yet (leaf_count less
+' viewed_leaf_count); 0 for other kinds.
+function contentUnwatched(item as object) as integer
+    kind = httpString(item.kind)
+    if kind <> "show" and kind <> "season" then return 0
+    left = Int(httpNumber(item.leaf_count, 0) - httpNumber(item.viewed_leaf_count, 0))
+    if left < 0 then return 0
+    return left
 end function
 
 ' The picture of a tile, width pixels wide (0: the tile's own size): for
@@ -156,11 +227,11 @@ function contentHomeRows(hubs as dynamic, server as string) as object
     rows = []
     for each hub in httpArray(hubs)
         key = httpString(hub.key)
-        wide = contentContinueWatching(key)
+        wide = contentRowWide(hub)
         square = contentRowSquare(hub)
         items = []
         for each item in httpArray(hub.items)
-            if GetInterface(item, "ifAssociativeArray") <> invalid and contentShown(httpString(item.kind)) then items.Push(contentTile(item, server, wide))
+            if GetInterface(item, "ifAssociativeArray") <> invalid and contentShown(httpString(item.kind)) then items.Push(contentTile(item, server, wide, true))
         end for
         sort = contentSeeAllSort(key)
         libraryId = httpNumber(hub.library_id, 0)
@@ -192,13 +263,25 @@ function contentContinueWatching(key as string) as boolean
     return key = "continue_watching" or Left(key, 18) = "continue_watching:"
 end function
 
+' Whether a hub's row is of 16:9 tiles, as on the other TVs: Continue
+' Watching, and a row whose first title is an episode (its still).
+function contentRowWide(hub as object) as boolean
+    if contentContinueWatching(httpString(hub.key)) then return true
+    return contentRowKind(hub) = "episode"
+end function
+
 ' Whether a hub's row is of square tiles: a music library's, by its first
 ' title.
 function contentRowSquare(hub as object) as boolean
     if contentContinueWatching(httpString(hub.key)) then return false
+    return contentMusic(contentRowKind(hub))
+end function
+
+' The kind of a hub's first title, "" for none.
+function contentRowKind(hub as object) as string
     items = httpArray(hub.items)
-    if items.Count() = 0 or GetInterface(items[0], "ifAssociativeArray") = invalid then return false
-    return contentMusic(httpString(items[0].kind))
+    if items.Count() = 0 or GetInterface(items[0], "ifAssociativeArray") = invalid then return ""
+    return httpString(items[0].kind)
 end function
 
 ' The size of a row's tiles, and the row's height, for its shape: a 16:9
@@ -239,7 +322,7 @@ function contentRowChanges(hubs as dynamic, server as string, known as dynamic) 
             key = httpString(hub.key)
             sig = contentSignature(hub)
             if shown <> invalid and shown.DoesExist(key) and shown[key] = sig
-                summary.Push({ key: key, wide: contentContinueWatching(key), square: contentRowSquare(hub), sig: sig, built: false })
+                summary.Push({ key: key, wide: contentRowWide(hub), square: contentRowSquare(hub), sig: sig, built: false })
             else
                 for each row in contentHomeRows([hub], server)
                     summary.Push({ key: row.key, wide: row.wide, square: row.square, sig: sig, built: true })
@@ -259,7 +342,7 @@ function contentTiles(items as dynamic, server as string, badges = false as bool
     tiles = []
     for each item in httpArray(items)
         if GetInterface(item, "ifAssociativeArray") <> invalid and contentShown(httpString(item.kind))
-            tile = contentTile(item, server, false)
+            tile = contentTile(item, server, false, true)
             if badges then tile.qualityBadges = contentQualityBadges(item.media)
             if bitrate then tile.subtitle = contentMediaLine(item.media)
             tiles.Push(tile)

@@ -46,7 +46,7 @@ function searchRows(data as dynamic, server as string, now as integer, twelve as
     for each item in httpArray(answer.items)
         if GetInterface(item, "ifAssociativeArray") <> invalid
             kind = httpString(item.kind)
-            if contentShown(kind) then byKind[kind].Push(contentTile(item, server, kind = "episode"))
+            if contentShown(kind) then byKind[kind].Push(contentTile(item, server, kind = "episode", true))
         end if
     end for
     rows = []
