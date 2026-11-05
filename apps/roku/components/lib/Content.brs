@@ -26,10 +26,6 @@ function contentWideWidth() as integer
     return 400
 end function
 
-function contentEpisodeWidth() as integer
-    return 300
-end function
-
 ' Square tiles: an album's cover, an artist's picture.
 function contentSquareWidth() as integer
     return 260
@@ -380,48 +376,61 @@ function contentMediaLine(media as dynamic) as string
     return parts.Join(" · ")
 end function
 
-' A show's seasons: [{ itemId, title, index, episodes, watchedEpisodes }].
+' A show's seasons, its title page's tabs: [{ itemId, title, index,
+' episodes, watchedEpisodes, year }], at most 100.
 function contentSeasons(children as dynamic) as object
     seasons = []
     for each item in httpArray(children)
-        if GetInterface(item, "ifAssociativeArray") <> invalid and httpString(item.kind) = "season"
-            title = httpSentence(item.title)
-            index = httpNumber(item.index, -1)
-            if title = ""
-                if index = 0
-                    title = "Specials"
-                else
-                    title = "Season " + urlValue(index)
-                end if
-            end if
-            seasons.Push({ itemId: httpNumber(item.id, 0), title: title, index: index, episodes: httpNumber(item.leaf_count, 0), watchedEpisodes: httpNumber(item.viewed_leaf_count, 0) })
+        if GetInterface(item, "ifAssociativeArray") <> invalid and httpString(item.kind) = "season" and seasons.Count() < 100
+            seasons.Push({ itemId: httpNumber(item.id, 0), title: contentSeasonTitle(item), index: httpNumber(item.index, -1), episodes: httpNumber(item.leaf_count, 0), watchedEpisodes: httpNumber(item.viewed_leaf_count, 0), year: Int(httpNumber(item.year, 0)) })
         end if
     end for
     return seasons
 end function
 
-' A season's episodes, as rows: { itemId, kind, title ("1. Pilot"),
-' subtitle, summary, image, progress, watched, positionMs, durationMs,
-' parentId, grandparentId }.
+' The season a show's page opens on, as Android TV's: the next episode's
+' (onDeck, an ItemSummary or invalid), else the first that isn't Specials,
+' else the first; 0 for none. seasons: contentSeasons'.
+function contentFirstSeason(seasons as object, onDeck as dynamic) as dynamic
+    upcoming = httpObject(onDeck)
+    if upcoming <> invalid
+        wanted = httpNumber(upcoming.parent_id, 0)
+        for each season in seasons
+            if season.itemId = wanted and wanted > 0 then return wanted
+        end for
+    end if
+    for each season in seasons
+        if season.index <> 0 then return season.itemId
+    end for
+    if seasons.Count() > 0 then return seasons[0].itemId
+    return 0
+end function
+
+' A season's episodes, as 16:9 tiles of a title page's row, captioned as
+' on Android TV: { title ("5. Glasshouse"), subtitle (the time left, else
+' the runtime), and for the info block name (its own title), line
+' ("Season 2 · Episode 5 · 55 min · Aired Mar 4, 2024") and summary },
+' with a tile's other fields. At most 500.
 function contentEpisodes(children as dynamic, server as string) as object
     episodes = []
     for each item in httpArray(children)
-        if GetInterface(item, "ifAssociativeArray") <> invalid and httpString(item.kind) = "episode"
+        if GetInterface(item, "ifAssociativeArray") <> invalid and httpString(item.kind) = "episode" and episodes.Count() < 500
             tile = contentTile(item, server, true)
-            tile.image = contentTileImage(item, server, true, contentEpisodeWidth())
-            title = httpSentence(item.title)
+            name = httpSentence(item.title)
             index = httpNumber(item.index, -1)
-            if index >= 0 then title = urlValue(index) + ". " + title
-            tile.title = title
+            tile.title = name
+            if index >= 0 then tile.title = urlValue(index) + ". " + name
+            runtime = fmtDuration(tile.durationMs)
+            tile.subtitle = runtime
+            if tile.progress > 0 and tile.progress < 1 then tile.subtitle = fmtLeft(tile.positionMs, tile.durationMs)
             parts = []
-            duration = fmtDuration(tile.durationMs)
-            if tile.progress > 0
-                parts.Push(fmtLeft(tile.positionMs, tile.durationMs))
-            else if duration <> ""
-                parts.Push(duration)
-            end if
-            if tile.watched then parts.Push("Watched")
-            tile.subtitle = parts.Join(" · ")
+            for each part in [fmtEpisodeLong(item.parent_index, item.index), runtime]
+                if part <> "" then parts.Push(part)
+            end for
+            aired = fmtDateText(item.release_date, 0, 0)
+            if aired <> "" then parts.Push("Aired " + aired)
+            tile.name = name
+            tile.line = parts.Join(" · ")
             tile.summary = httpClean(item.summary, 300, false)
             episodes.Push(tile)
         end if
@@ -438,7 +447,7 @@ end function
 ' actions match buttons: "resume", "start", "unavailable" (nothing plays:
 ' it does nothing), "playNext" and "nextFromStart" (a show's or a
 ' season's next episode, onDeck), "askMore" (Request more seasons),
-' "episodes", "watched", "unwatched", "tracks" (Audio and subtitles),
+' "watched", "unwatched", "tracks" (Audio and subtitles),
 ' "listAdd", "listRemove", "trailer" (trailerId's), "playlist" and
 ' "more"; focus is the button the focus starts on. More holds what is
 ' used less, as on the other TVs ([{ label, action }]): "rate", "show"
@@ -517,10 +526,6 @@ function contentDetail(detail as object, server as string, onDeck = invalid as d
         if kind = "show" and httpTrue(page.askMore)
             buttons.Push("Request more seasons")
             actions.Push("askMore")
-        end if
-        if kind = "show"
-            buttons.Push("Episodes")
-            actions.Push("episodes")
         end if
     else if not contentPlayable(kind)
         note = "Pley for Roku doesn't play this kind of title yet."

@@ -80,6 +80,21 @@ function fmtMeta(item as object) as string
     return parts.Join(" · ")
 end function
 
+' "Season 2 · Episode 5", the parts that are known ("Specials" for season
+' 0), as an episode's info says it.
+function fmtEpisodeLong(season as dynamic, episode as dynamic) as string
+    s = httpNumber(season, -1)
+    e = httpNumber(episode, -1)
+    parts = []
+    if s = 0
+        parts.Push("Specials")
+    else if s > 0
+        parts.Push("Season " + Int(s).ToStr())
+    end if
+    if e >= 0 then parts.Push("Episode " + Int(e).ToStr())
+    return parts.Join(" · ")
+end function
+
 ' "1 season", "3 seasons": count of noun.
 function fmtPlural(count as dynamic, noun as string) as string
     n = Int(httpNumber(count, 0))

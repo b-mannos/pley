@@ -93,32 +93,53 @@ is an episode, has 16:9 stills.
 
 ### A title's page
 
-A movie's, an episode's or a show's page says what Android TV's does, in
-its order: the title (an episode's show, with "S1 · E3 · Pilot" under
-it), then a line of what it is: a movie's year, an episode's air day, a
-show's seasons and years ("3 seasons · 2019-2024"), the version's
+A movie's, a show's, a season's or an episode's page says what Android
+TV's does, in its order: the title (an episode's or a season's show, with
+"S1 · E3 · Pilot" or "Season 1" under it), then a line of what it is: a
+movie's year, an episode's air day, a show's seasons and years ("3
+seasons · 2019-2024"), a season's episodes, the version's
 edition, the runtime, the content rating, the stars and the quality of
 the version Play plays ("4K · DV P8.1 · Atmos"). A title resumed says
 how much is left ("1 h 33 min left"); the genres are followed by the
 collections it is part of ("Drama · Part of Dune").
 
 Its buttons are in a column at the left: Resume and From start (or Play;
-a show's next episode, "Resume S1 · E3" or "Play S1 · E3"), Request more
+a show's or a season's next episode, "Resume S1 · E3" or "Play S1 ·
+E3"), Request more
 seasons for a show with seasons left to ask for, Mark as watched, Audio
 and subtitles, My List, Trailer (where its extras have one: it plays from
 its start), Add to playlist and More…. With nothing to play the first
 says Unavailable, and the focus starts on the next. Audio and subtitles
-and More open a panel at the right; Back closes it, and Down from the
-buttons goes to the rows under them. Over the summary, as on Android TV,
+and More open a panel at the right; Back closes it. Over the summary, as
+on Android TV,
 a line says who made it and who is in it ("Directed by Grace Hopper ·
 Starring Ada Lovelace, Alan Turing"; a show's "Created by"). The column
 keeps above the rows: past six buttons the summary gives up lines, as it
 does for the lines over it, and the tagline goes when the summary would
 keep fewer than two.
 
-The rows under the buttons are in Android TV's order: Extras, then the
-people, titled by who is there (Cast, Crew or Cast & Crew; an episode's
-Guest Stars), More like this and the collections the title is part of.
+Under the buttons, their top in view, a show's or a season's page has
+its seasons' tabs (when there are two or more), then a row of the
+season's episodes: 16:9 stills, "5. Glasshouse" and the time left (else
+the runtime) under each, as on Android TV. A show's page opens on its
+next episode's season, a season's on its own, the focus coming into the
+row on the next episode; an episode's page has its own season's
+episodes, without tabs, the focus on itself. A tab the focus rests on
+(0.35 s) shows its season, as OK does. A season tile opens the season's
+page.
+
+The rows under them are in Android TV's order: Extras, then the people,
+titled by who is there (Cast, Crew or Cast & Crew; an episode's Guest
+Stars), More like this and the collections the title is part of. Down
+from the buttons goes to the tabs, the episodes and the rows, Up back:
+once the focus is there, an info block at the top keeps the title in
+view, with its line and, in the tabs and the episodes, the episode the
+focus rests on (0.4 s): its title, "Season 2 · Episode 5 · 55 min · Aired
+Mar 4, 2024" and two lines of its summary, else the title's. The part
+with the focus comes up under it. Back leaves the page from anywhere on
+it, as on Android TV. A page that doesn't load says why, with Retry
+(Back for a title that is gone, or the profile can't see); one the server
+doesn't answer for says it can't be reached, as any screen does.
 
 - **Audio and subtitles** (a movie or an episode with several files, or
   whose file has two audio tracks or more, or subtitles):
@@ -134,9 +155,9 @@ Guest Stars), More like this and the collections the title is part of.
     it only when picked here, Automatic as none, as on the other TVs.
 - **More**, what is used less, as on the other TVs: Rate (Your rating,
   once given: No rating, or 1 to 5 stars, kept for the profile on the
-  server), an episode's Go to show (the show's page) and Go to season
-  (its episodes), Media info and Details. The Options key on an
-  episode's tile goes to them alike.
+  server), an episode's or a season's Go to show (the show's page) and
+  an episode's Go to season (the season's page), Media info and Details.
+  The Options key on an episode's tile goes to them alike.
 - **Media info** (a movie or an episode with a file): each file, under its
   edition or "VERSION 2" when there are several, and every stream in
   full, in the other apps' words (codec, profile and level, size, frame

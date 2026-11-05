@@ -73,7 +73,8 @@ sub uiTitleAction(tile as object, action as string)
         return
     end if
     if action = "season"
-        if showId > 0 then uiNavigate({ to: "show", params: { showId: showId, seasonId: httpNumber(tile.parentId, 0) } })
+        seasonId = httpNumber(tile.parentId, 0)
+        if seasonId > 0 then uiNavigate({ to: "details", params: { itemId: seasonId } })
         return
     end if
     request = pageActionRequest(action, tile.itemId)

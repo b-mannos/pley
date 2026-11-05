@@ -1,15 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A movie, an episode or a show: its backdrop and poster, what it is, and
-     its buttons, as on Android TV (Resume and From start, or Play; a
-     show's next episode, Request more seasons and its episodes; Mark as
-     watched, Audio and subtitles, My List, Trailer, Add to playlist,
-     More…). Audio and subtitles and More open a panel over the right of
-     the page: the version and tracks to play; the rating, Go to show and
-     season, Media info, Details (the whole summary and the title's facts).
-     The text is laid out top to bottom, leaving out what a title doesn't
-     have. Under it, rows of a show's seasons, cast and crew, extras, More
-     Like This and the collections it is part of: Down slides the page up
-     to them. Under the poster, how a request for the title stands. -->
+<!-- A movie, an episode, a show or a season, as Android TV's title page:
+     its backdrop and poster, what it is, and its buttons (Resume and From
+     start, or Play; a show's or a season's next episode, Request more
+     seasons; Mark as watched, Audio and subtitles, My List, Trailer, Add
+     to playlist, More…). Audio and subtitles and More open a panel over
+     the right of the page: the version and tracks to play; the rating, Go
+     to show and season, Media info, Details (the whole summary and the
+     title's facts). The text is laid out top to bottom, leaving out what a
+     title doesn't have. Under it, a show's or a season's tabs (more than
+     one season) and the season's episodes, then rows of extras, cast and
+     crew, More Like This and the collections it is part of: their top
+     shows under the buttons. Once the focus is down there, an info block
+     at the top says what the title is, or the episode in focus, and the
+     part with the focus comes up under it. Under the poster, how a request
+     for the title stands. -->
 <component name="DetailsScreen" extends="Group">
     <interface>
         <field id="route" type="string" />
@@ -41,7 +45,8 @@
     <children>
         <Poster id="backdrop" width="1920" height="1080" loadWidth="640" loadHeight="360" loadDisplayMode="scaleToZoom" opacity="0.4" />
         <Rectangle id="shade" width="1260" height="1080" color="0x16191ED9" />
-        <Group id="page">
+        <!-- What the title is and its buttons, while they have the focus. -->
+        <Group id="page" visible="false">
             <Poster id="poster" translation="[1404, 120]" width="420" height="630" loadWidth="420" loadHeight="630" loadDisplayMode="scaleToZoom" />
             <!-- The title's request, where there is one (GET
                  /api/items/{id}/request). -->
@@ -66,10 +71,34 @@
                 </LayoutGroup>
                 <ButtonGroup id="buttons" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="560" visible="false" />
             </LayoutGroup>
-            <!-- Its top shows under the buttons; the page slides up to it. -->
-            <RowList id="rows" translation="[96, 940]" itemComponentName="Tile" itemSize="[1728, 470]" numRows="2" itemSpacing="[0, 28]" rowItemSpacing="[[28, 0]]" showRowLabel="[true]" rowLabelOffset="[[0, 12]]" rowLabelColor="0xEBEBEBFF" drawFocusFeedback="false" rowFocusAnimationStyle="floatingFocus" vertFocusAnimationStyle="floatingFocus" rowLabelFont="font:MediumBoldSystemFont" visible="false" />
         </Group>
-        <Label id="message" translation="[96, 480]" width="1100" wrap="true" color="0xA1A9B6FF" text="Loading…" font="font:MediumSystemFont" />
+        <!-- Under the buttons, their top in view at y = 940: the season
+             tabs, the season's episodes, then the rows. Placed by
+             placeLower. -->
+        <Group id="lower" translation="[0, 940]">
+            <ChipRow id="tabs" translation="[96, 0]" visible="false" />
+            <RowList id="episodes" translation="[96, 0]" itemComponentName="Tile" itemSize="[1728, 360]" numRows="1" rowItemSize="[[400, 300]]" rowItemSpacing="[[28, 0]]" showRowLabel="[true]" rowLabelOffset="[[0, 12]]" rowLabelColor="0xEBEBEBFF" drawFocusFeedback="false" rowFocusAnimationStyle="floatingFocus" rowLabelFont="font:MediumBoldSystemFont" visible="false" />
+            <!-- A season without episodes says so in the row's place. -->
+            <Label id="episodesNote" translation="[96, 0]" width="1100" color="0xA1A9B6FF" font="font:SmallSystemFont" visible="false" />
+            <RowList id="rows" translation="[96, 0]" itemComponentName="Tile" itemSize="[1728, 470]" numRows="2" itemSpacing="[0, 28]" rowItemSpacing="[[28, 0]]" showRowLabel="[true]" rowLabelOffset="[[0, 12]]" rowLabelColor="0xEBEBEBFF" drawFocusFeedback="false" rowFocusAnimationStyle="floatingFocus" vertFocusAnimationStyle="floatingFocus" rowLabelFont="font:MediumBoldSystemFont" visible="false" />
+        </Group>
+        <!-- With the focus under the buttons: the title and its line, then
+             the episode in focus (its title, line and summary) or the
+             title's summary, as Home's info block. -->
+        <LayoutGroup id="infoBlock" translation="[96, 56]" layoutDirection="vert" visible="false">
+            <Label id="infoTitle" width="1300" maxLines="1" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Label id="infoMeta" width="1300" maxLines="1" color="0xA1A9B6FF" font="font:SmallSystemFont" />
+            <Label id="infoEpisode" width="1300" maxLines="1" color="0xEBEBEBFF" font="font:SmallBoldSystemFont" />
+            <Label id="infoEpisodeLine" width="1300" maxLines="1" color="0xA1A9B6FF" font="font:SmallestSystemFont" />
+            <Label id="infoSummary" width="1100" wrap="true" maxLines="2" lineSpacing="6" color="0xEBEBEBFF" font="font:SmallerSystemFont" />
+        </LayoutGroup>
+        <!-- Loading, and a load that failed: why, with Retry (Back for a
+             title gone). -->
+        <LayoutGroup id="message" translation="[96, 400]" layoutDirection="vert" itemSpacings="[16, 36]">
+            <Label id="messageTitle" width="1100" wrap="true" color="0xEBEBEBFF" font="font:LargeBoldSystemFont" />
+            <Label id="messageText" width="1100" wrap="true" color="0xA1A9B6FF" text="Loading…" font="font:MediumSystemFont" />
+            <ButtonGroup id="messageButton" focusBitmapUri="pkg:/images/button-focus.9.png" focusFootprintBitmapUri="pkg:/images/button-footprint.9.png" textColor="0xEBEBEBFF" focusedTextColor="0x16191EFF" iconUri="" focusedIconUri="" minWidth="320" visible="false" />
+        </LayoutGroup>
         <!-- A menu (Audio and subtitles, More), or the choices of one of its
              entries. It leaves the buttons in view, and is wider than
              Settings' for a version's long line. -->
@@ -83,5 +112,9 @@
         </Group>
         <!-- The title's request asked again while it downloads. -->
         <Timer id="requestPoll" duration="10" />
+        <!-- A tab the focus rests on shows its season, and an episode the
+             focus rests on fills the info block. -->
+        <Timer id="tabRest" duration="0.35" />
+        <Timer id="episodeRest" duration="0.4" />
     </children>
 </component>

@@ -310,27 +310,6 @@ function pageFilterOrder(sort as string) as string
     return "Sorted by " + field
 end function
 
-' A show's seasons as poster tiles: "Season 1", and its episodes.
-function pageSeasonTiles(children as dynamic, server as string) as object
-    tiles = []
-    for each item in httpArray(children)
-        if GetInterface(item, "ifAssociativeArray") <> invalid and httpString(item.kind) = "season"
-            tile = contentTile(item, server, false)
-            seasons = contentSeasons([item])
-            tile.title = seasons[0].title
-            episodes = seasons[0].episodes
-            tile.subtitle = ""
-            if episodes = 1
-                tile.subtitle = "1 episode"
-            else if episodes > 1
-                tile.subtitle = urlValue(episodes) + " episodes"
-            end if
-            tiles.Push(tile)
-        end if
-    end for
-    return tiles
-end function
-
 ' --- People ---
 
 ' A person's page (GET /api/people/{id}): { name, photo, initials, line,

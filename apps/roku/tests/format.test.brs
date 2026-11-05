@@ -33,6 +33,13 @@ sub test_format_episode_codes()
     tkEqual(fmtEpisode(invalid, invalid), "")
 end sub
 
+sub test_format_long_episode_numbers()
+    tkEqual(fmtEpisodeLong(2, 5), "Season 2 · Episode 5")
+    tkEqual(fmtEpisodeLong(0, 1), "Specials · Episode 1")
+    tkEqual(fmtEpisodeLong(invalid, 3), "Episode 3")
+    tkEqual(fmtEpisodeLong(invalid, invalid), "")
+end sub
+
 sub test_format_plurals()
     tkEqual(fmtPlural(1, "season"), "1 season")
     tkEqual(fmtPlural(3, "season"), "3 seasons")

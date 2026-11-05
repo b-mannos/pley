@@ -196,16 +196,37 @@ sub test_content_seasons_and_episodes()
         { id: 100, kind: "season", title: "Season 1", index: 1, leaf_count: 9, viewed_leaf_count: 3 },
         { id: 1, kind: "episode", title: "stray" }
     ])
-    tkEqual(seasons, [{ itemId: 98, title: "Specials", index: 0, episodes: 2, watchedEpisodes: 0 }, { itemId: 100, title: "Season 1", index: 1, episodes: 9, watchedEpisodes: 3 }])
+    tkEqual(seasons, [{ itemId: 98, title: "Specials", index: 0, episodes: 2, watchedEpisodes: 0, year: 0 }, { itemId: 100, title: "Season 1", index: 1, episodes: 9, watchedEpisodes: 3, year: 0 }])
+    tkEqual(contentSeasons([{ id: 7, kind: "season", index: invalid, year: 2024 }])[0].title, "Season", "no number")
+    tkEqual(contentSeasons([{ id: 7, kind: "season", index: 2, year: 2024 }])[0].year, 2024)
 
     started = contentTestEpisode()
     started.user_state = { position_ms: 900000, watched: false, play_count: 0 }
+    started.release_date = "2022-02-18"
     episodes = contentEpisodes([contentTestEpisode(), started], contentTestServer())
     tkEqual(episodes[0].title, "1. Good News About Hell")
-    tkEqual(episodes[0].image, "http://nas:7539/api/items/101/images/thumb?v=2&w=300", "sized to the list's stills")
-    tkEqual(episodes[0].subtitle, "55 min · Watched")
+    tkEqual(episodes[0].image, "http://nas:7539/api/items/101/images/thumb?v=2&w=400", "its still, as wide as the row's tiles")
+    tkTrue(episodes[0].wide)
+    tkEqual(episodes[0].subtitle, "55 min", "its watched mark says the rest")
+    tkTrue(episodes[0].watched)
     tkEqual(episodes[0].summary, "Mark leads a team.")
+    tkEqual(episodes[0].name, "Good News About Hell")
+    tkEqual(episodes[0].line, "Season 1 · Episode 1 · 55 min")
     tkEqual(episodes[1].subtitle, "40 min left")
+    tkEqual(episodes[1].line, "Season 1 · Episode 1 · 55 min · Aired Feb 18, 2022")
+end sub
+
+sub test_content_a_show_opens_on_the_next_episodes_season()
+    seasons = contentSeasons([
+        { id: 98, kind: "season", index: 0 },
+        { id: 100, kind: "season", index: 1 },
+        { id: 200, kind: "season", index: 2 }
+    ])
+    tkEqual(contentFirstSeason(seasons, { id: 203, kind: "episode", parent_id: 200 }), 200, "the next episode's")
+    tkEqual(contentFirstSeason(seasons, invalid), 100, "nothing next: the first that isn't Specials")
+    tkEqual(contentFirstSeason(seasons, { id: 5, kind: "episode", parent_id: 77 }), 100, "a season not listed")
+    tkEqual(contentFirstSeason([seasons[0]], invalid), 98, "only Specials")
+    tkEqual(contentFirstSeason([], invalid), 0)
 end sub
 
 sub test_content_details_offer_resume_and_start()
@@ -276,18 +297,18 @@ sub test_content_details_offer_the_trailer()
     tkEqual(contentTrailer({ extras: invalid }), 0)
 end sub
 
-sub test_content_show_details_offer_its_next_episode_and_episodes()
+sub test_content_show_details_offer_its_next_episode()
     show = ParseJson("{""id"":99,""kind"":""show"",""title"":""Severance"",""year"":2022,""child_count"":2,""leaf_count"":18,""viewed_leaf_count"":2,""content_rating"":""TV-MA"",""user_state"":{""position_ms"":0,""watched"":false,""play_count"":0},""files"":[],""in_watchlist"":true}")
     detail = contentDetail(show, contentTestServer())
     tkEqual(detail.line, "2 seasons · 2022 · TV-MA", "Android TV's order")
-    tkEqual(detail.buttons, ["Play", "Episodes", "Mark as watched", "Remove from My List", "Add to playlist", "More…"], "nothing next: Play says so")
+    tkEqual(detail.buttons, ["Play", "Mark as watched", "Remove from My List", "Add to playlist", "More…"], "nothing next: Play says so")
     tkEqual(detail.note, "")
     tkEqual(contentDetail(show, contentTestServer(), invalid, { years: [2025, 2022, 2023] }).line, "2 seasons · 2022-2025 · TV-MA", "its seasons' years")
     onDeck = contentTestEpisode()
     onDeck.user_state = { position_ms: 600000, watched: false, play_count: 0 }
     detail = contentDetail(show, contentTestServer(), onDeck)
-    tkEqual(detail.buttons, ["Resume S1 · E1", "From start", "Episodes", "Mark as watched", "Remove from My List", "Add to playlist", "More…"])
-    tkEqual(detail.actions, ["playNext", "nextFromStart", "episodes", "watched", "listRemove", "playlist", "more"])
+    tkEqual(detail.buttons, ["Resume S1 · E1", "From start", "Mark as watched", "Remove from My List", "Add to playlist", "More…"])
+    tkEqual(detail.actions, ["playNext", "nextFromStart", "watched", "listRemove", "playlist", "more"])
     tkEqual(detail.left, "45 min left", "the next episode's")
     tkEqual(detail.more, [{ label: "Rate", action: "rate" }])
     onDeck.user_state.position_ms = 0
@@ -296,7 +317,7 @@ sub test_content_show_details_offer_its_next_episode_and_episodes()
     tkEqual(asking.buttons[1], "Request more seasons")
     tkEqual(asking.actions[1], "askMore")
     show.viewed_leaf_count = 18
-    tkEqual(contentDetail(show, contentTestServer(), onDeck).buttons[2], "Mark as unwatched", "every episode watched")
+    tkEqual(contentDetail(show, contentTestServer(), onDeck).buttons[1], "Mark as unwatched", "every episode watched")
     show.leaf_count = 0
     tkEqual(contentDetail(show, contentTestServer()).buttons[0], "Unavailable", "no episodes")
 end sub

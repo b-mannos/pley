@@ -102,19 +102,12 @@ sub test_pages_roles_in_words()
     tkEqual(pageInitials(""), "")
 end sub
 
-sub test_pages_collections_and_seasons_as_tiles()
+sub test_pages_collections_as_tiles()
     tile = pageCollectionTile({ id: 3, title: "Dune Collection", item_count: 2 }, "http://nas:7539")
     tkEqual(tile.image, "http://nas:7539/api/collections/3/images/poster?w=220", "the server's picture of it")
     tkEqual(tile.subtitle, "2 titles")
     tkEqual(tile.kind, "collection")
     tkEqual(pageCollectionTile({ id: 4, title: "One", item_count: 1, poster_url: "/api/collections/4/images/poster?v=2" }, "http://nas:7539").image, "http://nas:7539/api/collections/4/images/poster?v=2&w=220")
-    seasons = pageSeasonTiles([{ id: 100, kind: "season", index: 1, parent_id: 99, leaf_count: 9 }, { id: 101, kind: "season", index: 0, title: "", leaf_count: 1 }, { id: 5, kind: "episode" }], "http://nas:7539")
-    tkEqual(seasons.Count(), 2)
-    tkEqual(seasons[0].title, "Season 1")
-    tkEqual(seasons[0].subtitle, "9 episodes")
-    tkEqual(seasons[0].parentId, 99)
-    tkEqual(seasons[1].title, "Specials")
-    tkEqual(seasons[1].subtitle, "1 episode")
 end sub
 
 sub test_pages_collection_of_movies_plays_them_in_order()

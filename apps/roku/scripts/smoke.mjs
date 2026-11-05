@@ -6,7 +6,7 @@
 // to Z and the pages a jump passes over, a sort by bitrate and a filter
 // by resolution with their quality badges, filters saved as a smart
 // playlist, collections played (movies and a smart one of shows), a
-// show's page, its episodes and a person's
+// show's page, its season tabs and episodes and a person's
 // page, music (an artist, an album, Now Playing), playlists, Live TV (its
 // guide, a channel watched, the next one, the channel list, a favourite
 // and another category listed there, every connection in use, the
@@ -420,8 +420,8 @@ async function walk() {
   await waitFor(/^GET \/api\/items\/103$/, since, "its details");
   shoot("details");
   // More…, after Resume, From start, the watched mark, Audio and subtitles
-  // and Add to playlist: Go to season, its episodes; Back to the episode's
-  // page, up to Resume.
+  // and Add to playlist: Go to season, its page and episodes; Back to the
+  // episode's page, up to Resume.
   await press("down", 5);
   await press("select"); // Rate, Go to show, Go to season, Media info, Details
   await sleep(500);
@@ -778,24 +778,17 @@ async function walk() {
   since = mark();
   await press("select"); // Severance: its page, with its next episode first
   await waitFor(/^GET \/api\/items\/99\/on-deck$/, since, "the show's next episode");
+  // Under its buttons, its seasons' tabs and the next episode's season.
+  await waitFor(/^GET \/api\/items\/99\/children$/, since, "the show's seasons");
+  await waitFor(/^GET \/api\/items\/100\/children$/, since, "the next episode's season");
   // What may still be asked for: Request more seasons, after From start.
   await waitFor(/^GET \/api\/items\/99\/request$/, since, "what of the show may be asked for");
   await settle();
   shoot("show-details");
-  since = mark();
-  await press("down", 3); // Episodes
-  await press("select");
-  await waitFor(/^GET \/api\/items\/100\/children$/, since, "a season's episodes");
-  shoot("show");
-  await press("right"); // the episodes
-  shoot("show-episodes");
-  since = mark();
-  await press("back"); // the show's page, its buttons back with its next episode
-  await waitFor(/^GET \/api\/items\/99\/on-deck$/, since, "the show's next episode again");
   // More…, its last button: 4 stars from the rating's choices, saved at
   // once; Back from More to the buttons.
   since = mark();
-  await press("down", 4); // from Episodes, past the watched mark, My List and Add to playlist
+  await press("down", 6); // past From start, Request more seasons, the watched mark, My List and Add to playlist
   await press("select");
   await sleep(500);
   shoot("show-more");
@@ -805,10 +798,24 @@ async function walk() {
   await press("select"); // 4 stars, then More again
   await waitFor(/^PUT \/api\/items\/99\/rating$/, since, "the show rated");
   await press("back");
-  // Down from More… to its rows, the seasons then cast and crew, whose
-  // first opens a person's page.
+  // Down from More… to the season tabs, on Season 1: Right to Season 2,
+  // whose episodes show once the focus rests there, then back. Down to
+  // the episodes, on the next one; Down again to the rows, cast and crew
+  // first, whose first opens a person's page.
+  await press("down");
   since = mark();
-  await press("down", 2);
+  await press("right");
+  await waitFor(/^GET \/api\/items\/200\/children$/, since, "another season's episodes, from its tab");
+  shoot("show-season");
+  since = mark();
+  await press("left");
+  await waitFor(/^GET \/api\/items\/100\/children$/, since, "the first season's episodes again");
+  await settle();
+  await press("down");
+  await sleep(800);
+  shoot("show-episodes");
+  since = mark();
+  await press("down");
   shoot("show-rows");
   await press("select");
   await waitFor(/^GET \/api\/people\/7$/, since, "a person's page");
@@ -821,7 +828,7 @@ async function walk() {
   person.opened = true;
   await press("back");
   await settle();
-  // Back on the show's page, its last row: the collections it is part of,
+  // Back on the show's page, in its rows: the collections it is part of,
   // whose first, of five movies, plays them in its order. Down past its
   // buttons slides its page up to its posters, Up back to the buttons.
   await press("back");
@@ -842,9 +849,9 @@ async function walk() {
   since = mark();
   await press("back"); // stopped, then the session closed
   await waitFor(/^DELETE \/api\/playback\//, since, "closing the collection's session");
-  // The collection, the show's page and its buttons, the library, Home:
-  // one at a time, each screen settled before the next key.
-  for (let i = 0; i < 4; i++) {
+  // The collection, the show's page (Back leaves it from its rows), the
+  // library, Home: one at a time, each screen settled before the next key.
+  for (let i = 0; i < 3; i++) {
     await press("back");
     await settle();
   }
