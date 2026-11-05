@@ -17,6 +17,9 @@ sub init()
     m.buttons = m.top.findNode("buttons")
     m.lower = m.top.findNode("lower")
     m.tabs = m.top.findNode("tabs")
+    m.tabStrip = m.top.findNode("tabStrip")
+    ' How far the tabs have slid left (scrollTabs).
+    m.tabScroll = 0
     m.episodes = m.top.findNode("episodes")
     m.episodesNote = m.top.findNode("episodesNote")
     m.rows = m.top.findNode("rows")
@@ -125,7 +128,7 @@ sub onActive()
     end if
     if m.started
         uiGet("/api/items/" + urlValue(m.top.params.itemId), "onDetail")
-        if m.shownSeason <> 0 then askEpisodes(m.shownSeason)
+        askEpisodesAgain()
     else
         m.started = true
         askDetail()
@@ -140,7 +143,7 @@ sub onRefresh()
     if m.top.getScene().titleChanges = m.titlesSeen then return
     m.titlesSeen = m.top.getScene().titleChanges
     uiGet("/api/items/" + urlValue(m.top.params.itemId), "onDetail")
-    if m.shownSeason <> 0 then askEpisodes(m.shownSeason)
+    askEpisodesAgain()
 end sub
 
 sub askDetail()
@@ -152,7 +155,7 @@ end sub
 sub onTitleChanged(change as object)
     uiPatchTiles(m.episodes.content, change)
     if m.detail <> invalid and change.itemId = m.detail.itemId then uiGet("/api/items/" + urlValue(m.detail.itemId), "onDetail")
-    if m.shownSeason <> 0 then askEpisodes(m.shownSeason)
+    askEpisodesAgain()
 end sub
 
 ' A reload that fails leaves the details as they were; the first says why,
@@ -343,12 +346,17 @@ sub onSeasons(event as object)
         for each node in content.getChildren(-1, 0)
             m.seasons.Push({ itemId: node.itemId, title: node.title, index: node.index, year: node.year })
         end for
+    else if not answer.ok and not uiFailed(answer)
+        ' Without its seasons, the page says why where the episodes go.
+        m.episodesNote.text = answer.message
     end if
     chips = []
     for each season in m.seasons
         chips.Push({ label: season.title, width: 0 })
     end for
     m.tabs.chips = chips
+    m.tabScroll = 0
+    scrollTabs()
     showDetail()
     pickSeason()
 end sub
@@ -371,6 +379,14 @@ sub pickSeason()
     m.episodeTarget = 0
     if m.onDeck <> invalid then m.episodeTarget = httpNumber(m.onDeck.id, 0)
     if seasonId > 0 then askEpisodes(seasonId)
+end sub
+
+' The episodes again (a refresh, a title marked): the season asked for
+' last, a tab's still on its way included, else the one shown.
+sub askEpisodesAgain()
+    seasonId = m.askedSeason
+    if seasonId = 0 then seasonId = m.shownSeason
+    if seasonId <> 0 then askEpisodes(seasonId)
 end sub
 
 sub askEpisodes(seasonId as dynamic)
@@ -420,6 +436,7 @@ sub onEpisodes(event as object)
     for i = 0 to m.seasons.Count() - 1
         if m.seasons[i].itemId = seasonId then m.tabs.current = i
     end for
+    if not m.tabs.isInFocusChain() then scrollTabs()
     placeLower()
     if m.area = "episodes" and count = 0 then focusArea("tabs")
     drawInfo()
@@ -444,6 +461,7 @@ end function
 
 ' A tab the focus rests on shows its season; OK shows it at once.
 sub onTabFocused()
+    scrollTabs()
     m.tabRest.control = "stop"
     if m.tabs.isInFocusChain() then m.tabRest.control = "start"
 end sub
@@ -575,6 +593,29 @@ end sub
 
 ' --- Where the focus is ---
 
+' The tab in focus (or, without the focus, the season shown) in view: a
+' show with more seasons than fit slides its tabs no further than it
+' needs, as a library's chips do.
+sub scrollTabs()
+    places = m.tabs.places
+    room = 1728
+    width = m.tabs.rowWidth
+    at = m.tabs.focusIndex
+    if not m.tabs.isInFocusChain() and m.tabs.current >= 0 then at = m.tabs.current
+    scroll = m.tabScroll
+    if places = invalid or width <= room
+        scroll = 0
+    else if at >= 0 and at < places.Count()
+        chip = places[at]
+        if chip[0] + chip[1] - scroll > room then scroll = chip[0] + chip[1] - room
+        if chip[0] < scroll then scroll = chip[0]
+        if scroll > width - room then scroll = width - room
+        if scroll < 0 then scroll = 0
+    end if
+    m.tabScroll = scroll
+    m.tabs.translation = [-scroll, 0]
+end sub
+
 ' The parts under the buttons, one under the other: the tabs (more than
 ' one season), the season's episodes (or why there are none), the rows.
 ' With the focus on the buttons their top shows at y = 940; under them,
@@ -586,7 +627,7 @@ sub placeLower()
     m.tabs.visible = hasTabs() and (m.area = "hero" or m.area = "tabs" or m.area = "episodes")
     if hasTabs()
         tops.tabs = y
-        m.tabs.translation = [96, y]
+        m.tabStrip.translation = [96, y]
         y = y + 72
     end if
     episodes = hasEpisodes()

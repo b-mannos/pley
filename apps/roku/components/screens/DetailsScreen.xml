@@ -78,7 +78,11 @@
              tabs, the season's episodes, then the rows. Placed by
              placeLower. -->
         <Group id="lower" translation="[0, 940]">
-            <ChipRow id="tabs" translation="[96, 0]" visible="false" />
+            <!-- The tabs, cut off at the safe area's right edge, slide to
+                 keep the one in focus in view (scrollTabs). -->
+            <Group id="tabStrip" translation="[96, 0]" clippingRect="[0, -8, 1728, 72]">
+                <ChipRow id="tabs" visible="false" />
+            </Group>
             <RowList id="episodes" translation="[96, 0]" itemComponentName="Tile" itemSize="[1728, 360]" numRows="1" rowItemSize="[[400, 300]]" rowItemSpacing="[[28, 0]]" showRowLabel="[true]" rowLabelOffset="[[0, 12]]" rowLabelColor="0xEBEBEBFF" drawFocusFeedback="false" rowFocusAnimationStyle="floatingFocus" rowLabelFont="font:MediumBoldSystemFont" visible="false" />
             <!-- A season without episodes says so in the row's place. -->
             <Label id="episodesNote" translation="[96, 0]" width="1100" color="0xA1A9B6FF" font="font:SmallSystemFont" visible="false" />
