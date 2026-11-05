@@ -454,6 +454,8 @@ end function
 
 ' A title as a tile: its poster, its name, year and kind, and its badge.
 ' It opens the title's page (Nav.brs); key ("movie:603") finds it again.
+' What Discover's info block says of it as focus rests on it: its facts
+' ("2010 · Movie · ★ 8.4"), its overview and its backdrop.
 function reqTitleTile(title as object, server as string) as object
     kind = httpString(title.kind)
     tmdbId = httpNumber(title.tmdb_id, 0)
@@ -463,9 +465,15 @@ function reqTitleTile(title as object, server as string) as object
     year = httpNumber(title.year, 0)
     if year > 0 then parts.Push(urlValue(year))
     parts.Push(reqKindLabel(kind))
+    subtitle = parts.Join(" · ")
+    rating = httpNumber(title.rating, 0)
+    if rating > 0 then parts.Push("★ " + fmtOneDecimal(rating))
     return {
         title: httpSentence(title.title),
-        subtitle: parts.Join(" · "),
+        subtitle: subtitle,
+        facts: parts.Join(" · "),
+        overview: httpClean(title.overview, 400, false),
+        backdrop: urlImage(server, title.backdrop_url, contentBackdropWidth()),
         image: urlImage(server, title.poster_url, contentPosterWidth()),
         wide: false,
         progress: 0.0,
@@ -595,53 +603,80 @@ function reqHeroOf(lists as object) as dynamic
     return {}
 end function
 
-' Discover's hero (reqHeroOf's title): { title, line,
-' overview, backdrop, buttons, actions, note, tmdbKind, tmdbId,
-' libraryId }. Its main action, as far as a list's title tells it (its
-' page has the rest): actions "open" (the library's title), "request"
-' (Request, or Request more seasons for a show partly there: the title's
-' page, asking at once), "details". With nothing of its kind left to ask
-' for, Request goes and note says so (Roku's buttons can't be disabled).
-function reqHero(title as object, summary as object, server as string, now as integer) as object
+' What Discover says in place of its page once no list has a title for a
+' hero (reqHeroOf's {}): the first failure's words under "Couldn't load
+' Discover", with Try again; else that TMDB's lists have nothing for this
+' profile. lists: as reqHeroOf takes them, failed the words of the
+' answer that failed ("" for none).
+function reqNoHero(lists as object) as object
+    for each list in lists
+        if list.key <> "requests" and httpString(list.failed) <> "" then return { title: "Couldn't load Discover", text: list.failed, retry: true, signIn: false }
+    end for
+    return { title: "Nothing here right now", text: "TMDB's lists have nothing this profile can ask for. Search for a title instead.", retry: false, signIn: false }
+end function
+
+' Discover's hero (reqHeroOf's title): { title, line, overview, backdrop,
+' buttons, actions, note, stage, tmdbKind, tmdbId, libraryId, requestId,
+' allowance }. Its main action is the title page's (reqMainAction), once
+' its page came (detail, else invalid), with Stop following beside
+' Following, and the stage of the request it says Requested or Following
+' of; until then, as far as a list's title tells it, and with nothing of
+' its kind left to ask for, Request goes and note says so. actions are
+' reqMainAction's ("request" asks at once, "pick" opens the title's page
+' with Which seasons?), "unwatch", and "details", its page.
+function reqHero(title as object, detail as dynamic, summary as object, server as string, now as integer, zone as integer) as object
     tile = reqTitleTile(title, server)
-    parts = [tile.subtitle]
-    rating = httpNumber(title.rating, 0)
-    if rating > 0 then parts.Push("★ " + fmtOneDecimal(rating))
+    parts = [tile.facts]
     if tile.badge <> "" then parts.Push(tile.badge)
-    remaining = summary.moviesLeft
-    if tile.tmdbKind = "show" then remaining = summary.seasonsLeft
-    buttons = []
-    actions = []
-    note = ""
-    if tile.libraryId > 0 and (tile.status = "library" or tile.status = "partial")
-        buttons.Push("Open")
-        actions.Push("open")
-    end if
-    if reqMayAsk(summary) and (tile.status = "none" or tile.status = "partial")
-        if remaining = 0
-            note = reqAllowance(summary, now).text
-        else if tile.status = "none"
-            buttons.Push("Request")
-            actions.Push("request")
-        else
-            buttons.Push("Request more seasons")
-            actions.Push("request")
-        end if
-    end if
-    buttons.Push("Details")
-    actions.Push("details")
-    return {
+    out = {
         title: tile.title,
         line: parts.Join(" · "),
-        note: note,
-        overview: httpClean(title.overview, 400, false),
-        backdrop: urlImage(server, title.backdrop_url, contentBackdropWidth()),
-        buttons: buttons,
-        actions: actions,
+        note: "",
+        stage: invalid,
+        overview: tile.overview,
+        backdrop: tile.backdrop,
+        buttons: [],
+        actions: [],
         tmdbKind: tile.tmdbKind,
         tmdbId: tile.tmdbId,
-        libraryId: tile.libraryId
+        libraryId: tile.libraryId,
+        requestId: 0,
+        allowance: summary
     }
+    page = httpObject(detail)
+    if page <> invalid and httpString(page.kind) = tile.tmdbKind and httpNumber(page.tmdb_id, 0) = tile.tmdbId
+        main = reqMainAction(page, summary, now)
+        out.buttons = main.buttons
+        out.actions = main.actions
+        out.note = main.note
+        out.libraryId = httpNumber(page.item_id, 0)
+        out.allowance = reqTitleAllowance(page, summary)
+        shown = reqShownRequest(page)
+        if shown <> invalid and (main.note = "Requested" or main.note = "Following")
+            out.stage = reqStage(shown, summary.manage = true, now, zone)
+            out.requestId = httpNumber(shown.id, 0)
+            for each action in reqActionNames(shown.actions)
+                if action = "unwatch" and main.note = "Following" then reqPushButton(out, "Stop following", "unwatch")
+            end for
+        end if
+    else
+        remaining = summary.moviesLeft
+        if tile.tmdbKind = "show" then remaining = summary.seasonsLeft
+        if tile.libraryId > 0 and (tile.status = "library" or tile.status = "partial") then reqPushButton(out, "Open", "open")
+        if reqMayAsk(summary) and (tile.status = "none" or tile.status = "partial")
+            request = "request"
+            if tile.tmdbKind = "show" then request = "pick"
+            if remaining = 0
+                out.note = reqAllowance(summary, now).text
+            else if tile.status = "none"
+                reqPushButton(out, "Request", request)
+            else
+                reqPushButton(out, "Request more seasons", request)
+            end if
+        end if
+    end if
+    reqPushButton(out, "Details", "details")
+    return out
 end function
 
 ' --- A title's page (DiscoverDetail) ---
@@ -1275,7 +1310,9 @@ end function
 
 ' A request as a tile (Discover's Your requests): its poster, its title
 ' and its stage in the stage's colour, the download's progress. It opens
-' the title's page.
+' the title's page. What Discover's info block says of it as focus rests
+' on it: the seasons asked for beside its stage, who asked and when, the
+' stage's line, and its backdrop.
 function reqRequestTile(request as object, server as string, manage as boolean, now as integer, zone as integer) as object
     kind = httpString(request.kind)
     tmdbId = httpNumber(request.tmdb_id, 0)
@@ -1286,6 +1323,10 @@ function reqRequestTile(request as object, server as string, manage as boolean, 
         title: httpSentence(request.title),
         subtitle: stage.text,
         subtitleColor: reqToneColor(stage.tone),
+        seasonsText: reqSeasonsLabel(request.seasons),
+        who: reqWho(request, now, zone),
+        stageLine: stage.line,
+        backdrop: urlImage(server, request.backdrop_url, contentBackdropWidth()),
         image: urlImage(server, request.poster_url, contentPosterWidth()),
         wide: false,
         progress: progress,

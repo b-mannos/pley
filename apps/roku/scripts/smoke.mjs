@@ -1040,21 +1040,21 @@ async function walk() {
   shoot("playlists-made");
   await press("back"); // Home
   await settle();
-  // Discover: the first trending title over its backdrop, its Request
-  // asked after a question (Anna's asks are approved as she asks), then a
-  // show of the trending row, its seasons picked.
+  // Discover: the first trending title over its backdrop, read whole for
+  // its main action, its Request asked at once (Anna's asks are approved
+  // as she asks) with a toast saying so, then its page from Details; then
+  // a show of the trending row, its seasons picked.
+  since = mark();
   await openFromMenu(2, /^GET \/api\/discover\/trending\?page=1$/, "Discover");
+  await waitFor(/^GET \/api\/discover\/movie\/7001$/, since, "the hero's title on TMDB");
   shoot("discover");
   since = mark();
-  await press("select"); // the hero's Request: its page, asking at once
-  await waitFor(/^GET \/api\/discover\/movie\/7001$/, since, "the hero's title on TMDB");
-  shoot("discover-ask");
-  since = mark();
-  await press("select"); // Request
+  await press("select"); // the hero's Request
   await waitFor(/^POST \/api\/requests$/, since, "a movie asked for");
   shoot("discover-asked");
-  await press("select"); // OK: its page, saying how it stands
-  await settle();
+  since = mark();
+  await press("select"); // Details, in Request's place: its page, saying how it stands
+  await waitFor(/^GET \/api\/discover\/movie\/7001$/, since, "the hero's page");
   shoot("discover-title");
   await press("back"); // Discover, on the hero
   await settle();

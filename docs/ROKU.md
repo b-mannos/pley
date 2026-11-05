@@ -539,19 +539,32 @@ didn't work, shows in a toast at the top right, as on the other TVs:
 one approved as it was asked.
 
 - **Discover**, for those who may ask: a hero for the first trending title
-  (its main action and Details; once nothing of its kind is left to ask
-  for, the limit's line in place of Request); when trending has nothing
-  the profile may ask for, every row loads at once and the hero is the
-  first title of the next one with any. Then rows of posters with their
-  badges ("In library", "Partly in library", "Requested", "Declined"):
-  Trending this week, Popular movies, Popular shows, Coming to cinemas,
-  Popular anime, each loaded as it comes into view and ending with See
-  all (a grid, a page at a time; after five pages in a row that leave
-  it short of a screenful, as an age limit can, Look further asks for
-  more, and after a page that failed, a tile says so, Select asking for
-  it again); then Your requests, from the first one asked for. At the top,
-  the way to the requests, with the menu's number of what waits there.
-  TMDB is searched from Search.
+  (its facts, a line of its overview, its main action and Details); when
+  trending has nothing the profile may ask for, every row loads at once
+  and the hero is the first title of the next one with any. The hero's
+  title is read whole for its main action, as its page has it: Request,
+  Request more seasons, Open, Tell me too with "Someone asked for it
+  already.", Requested or Following beside its request's stage (Following
+  with Stop following), or the line that says why there is none (the
+  limit and when it frees up, declined and why, a restriction). A movie's
+  Request and Tell me too ask at once; a show's Request opens its page with
+  Which seasons?. Then rows of posters with their badges ("In library",
+  "Partly in library", "Requested", "Declined"): Trending this week,
+  Popular movies, Popular shows, Coming to cinemas, Popular anime, each
+  loaded as it comes into view and ending with See all (a grid, a page at
+  a time; after five pages in a row that leave it short of a screenful,
+  as an age limit can, Look further asks for more, and after a page that
+  failed, a tile says so, Select asking for it again); then Your requests,
+  from the first one asked for. A list with nothing the profile may ask
+  for leaves; with nothing in any, the page says "Nothing here right now"
+  (search for a title instead), and with every list failed, "Couldn't
+  load Discover" with Try again. Down goes to the rows: there an info
+  block about the tile focus rests on (0.4 s) takes the hero's place, as on
+  Home, and the backdrop follows it: a title's facts and two lines of its
+  overview, or a request's stage beside the seasons asked for, who asked
+  and when, and its stage's line. At the top, the way to the requests,
+  with the menu's number of what waits there. TMDB is searched from
+  Search.
 - **A TMDB title's page:** backdrop and poster, year, runtime or seasons,
   certification, rating; its network (a movie's studio) and genres;
   tagline and four lines of overview; one main action (Open, Request,

@@ -176,11 +176,18 @@ sub test_requests_title_tiles()
         { kind: "person", tmdb_id: 7, title: "Someone" },
         { kind: "show", tmdb_id: 1396, title: "Breaking Bad again" }
     ]
+    results[1].Append({ overview: "A chemistry teacher.", rating: 8.9, backdrop_url: "/api/discover/images/backdrop/b.jpg" })
     tiles = reqTitleTiles(results, "http://nas:7539", seen)
     tkEqual(tiles.Count(), 2, "shown before, people and repeats left out")
     show = tiles[0]
     tkEqual(show.title, "Breaking Bad")
     tkEqual(show.subtitle, "2008 · Show")
+    ' What Discover's info block says of it.
+    tkEqual(show.facts, "2008 · Show · ★ 8.9")
+    tkEqual(show.overview, "A chemistry teacher.")
+    tkEqual(show.backdrop, "http://nas:7539/api/discover/images/backdrop/b.jpg?w=640")
+    tkEqual(tiles[1].facts, "Movie")
+    tkEqual(tiles[1].backdrop, "")
     tkEqual(show.image, "http://nas:7539/api/discover/images/poster/b.jpg?w=220")
     tkEqual(show.kind, "discover")
     tkEqual(show.tmdbKind, "show")
@@ -332,6 +339,15 @@ sub test_requests_request_tiles_and_people()
     tkEqual(tile.progress, 0.42)
     tkEqual(tile.badge, "")
     tkEqual(tile.key, "request:42")
+    ' What Discover's info block says of it.
+    tkEqual(tile.seasonsText, "Seasons 1–2")
+    tkEqual(tile.who, "Asked for by you · 3 days ago")
+    tkEqual(tile.stageLine, "")
+    tkEqual(tile.backdrop, "", "none")
+    failed = reqRequestTile(reqTestRequest({ kind: "movie", seasons: invalid, status: "failed", stage: "failed", backdrop_url: "/api/discover/images/backdrop/x.jpg" }), "http://nas:7539", false, reqTestNow(), 0)
+    tkEqual(failed.stageLine, "It couldn't be sent to download yet: an administrator will look at it.")
+    tkEqual(failed.seasonsText, "")
+    tkEqual(failed.backdrop, "http://nas:7539/api/discover/images/backdrop/x.jpg?w=640")
     tkEqual(navForTile(tile), { to: "requestTitle", params: { kind: "show", tmdbId: 1396, title: "Breaking Bad" } })
     tkEqual(reqPeople([{ id: 2, name: "Ben", avatar_url: invalid }, { id: 0, name: "Nobody" }, { id: 3, name: "" }, "x"]), [{ id: 2, name: "Ben" }])
 end sub
@@ -640,27 +656,66 @@ sub test_requests_a_library_page_s_request()
     tkEqual(navForTile(tile), { to: "requestTitle", params: { kind: "show", tmdbId: 1396, title: "Breaking Bad", pick: true } })
 end sub
 
+' The hero before its page came: its main action as far as a list's title
+' tells it.
 sub test_requests_hero()
     now = reqTestNow()
-    hero = reqHero({ kind: "movie", tmdb_id: 27205, title: "Inception", year: 2010, overview: "A thief.", backdrop_url: "/api/discover/images/backdrop/inc.jpg", rating: 8.4, status: "none" }, reqTestSummary({}), "http://nas:7539", now)
+    hero = reqHero({ kind: "movie", tmdb_id: 27205, title: "Inception", year: 2010, overview: "A thief.", backdrop_url: "/api/discover/images/backdrop/inc.jpg", rating: 8.4, status: "none" }, invalid, reqTestSummary({}), "http://nas:7539", now, 0)
     tkEqual(hero.line, "2010 · Movie · ★ 8.4")
-    tkEqual(hero.actions, ["request", "details"])
+    tkEqual(hero.actions, ["request", "details"], "a movie is asked for at once")
     tkEqual(hero.note, "")
+    tkInvalid(hero.stage)
     tkEqual(hero.backdrop, "http://nas:7539/api/discover/images/backdrop/inc.jpg?w=640")
-    owned = reqHero({ kind: "movie", tmdb_id: 603, title: "The Matrix", status: "library", item_id: 12 }, reqTestSummary({}), "", now)
+    owned = reqHero({ kind: "movie", tmdb_id: 603, title: "The Matrix", status: "library", item_id: 12 }, invalid, reqTestSummary({}), "", now, 0)
     tkEqual(owned.buttons, ["Open", "Details"])
     tkEqual(owned.line, "Movie · In library")
-    partly = reqHero({ kind: "show", tmdb_id: 1396, title: "Breaking Bad", status: "partial", item_id: 12 }, reqTestSummary({}), "", now)
+    partly = reqHero({ kind: "show", tmdb_id: 1396, title: "Breaking Bad", status: "partial", item_id: 12 }, invalid, reqTestSummary({}), "", now, 0)
     tkEqual(partly.buttons, ["Open", "Request more seasons", "Details"])
-    tkEqual(partly.actions, ["open", "request", "details"])
-    used = reqHero({ kind: "movie", tmdb_id: 27205, title: "Inception", status: "none" }, reqTestSummary({ moviesLeft: 0, moviesNextAt: now + 3 * 86400 }), "", now)
+    tkEqual(partly.actions, ["open", "pick", "details"], "a show's seasons are picked on its page")
+    used = reqHero({ kind: "movie", tmdb_id: 27205, title: "Inception", status: "none" }, invalid, reqTestSummary({ moviesLeft: 0, moviesNextAt: now + 3 * 86400 }), "", now, 0)
     tkEqual(used.actions, ["details"], "no movie left to ask for: Request goes")
     tkEqual(used.note, "You've asked for all the movies you can for now: you can ask for more in 3 days.", "and its line shows")
-    seasons = reqHero({ kind: "show", tmdb_id: 1396, title: "Breaking Bad", status: "none" }, reqTestSummary({ moviesLeft: 0 }), "", now)
-    tkEqual(seasons.actions, ["request", "details"], "seasons are left")
+    seasons = reqHero({ kind: "show", tmdb_id: 1396, title: "Breaking Bad", status: "none" }, invalid, reqTestSummary({ moviesLeft: 0 }), "", now, 0)
+    tkEqual(seasons.actions, ["pick", "details"], "seasons are left")
     tkEqual(seasons.note, "")
-    tkEqual(reqHero({ kind: "show", tmdb_id: 1396, title: "Breaking Bad", status: "partial", item_id: 12 }, reqTestSummary({ seasonsLeft: 0 }), "", now).buttons, ["Open", "Details"], "no season left")
-    tkEqual(reqHero({ kind: "movie", tmdb_id: 27205, title: "Inception", status: "none" }, reqTestSummary({ access: "off" }), "", now).note, "", "nothing to say where Discover doesn't show")
+    tkEqual(reqHero({ kind: "show", tmdb_id: 1396, title: "Breaking Bad", status: "partial", item_id: 12 }, invalid, reqTestSummary({ seasonsLeft: 0 }), "", now, 0).buttons, ["Open", "Details"], "no season left")
+    tkEqual(reqHero({ kind: "movie", tmdb_id: 27205, title: "Inception", status: "none" }, invalid, reqTestSummary({ access: "off" }), "", now, 0).note, "", "nothing to say where Discover doesn't show")
+end sub
+
+' The hero once its page came: the page's main action, with Stop
+' following beside Following and the stage of what it says Requested or
+' Following of.
+sub test_requests_hero_follows_its_page()
+    now = reqTestNow()
+    summary = reqTestSummary({})
+    title = { kind: "movie", tmdb_id: 27205, title: "Inception", year: 2010, status: "requested" }
+    other = reqHero(title, reqTestDetail({ status: "requested", requests: [] }), summary, "", now, 0)
+    tkEqual(other.buttons, ["Tell me too", "Details"])
+    tkEqual(other.actions, ["follow", "details"])
+    tkEqual(other.note, "Someone asked for it already.")
+    tkInvalid(other.stage)
+    followed = reqTestRequest({ id: 7, kind: "movie", mine: false, watching: true, status: "approved", stage: "downloading", actions: ["unwatch"], download: { progress: 0.5, state: "downloading", eta: invalid, episodes: 1 } })
+    following = reqHero(title, reqTestDetail({ status: "requested", watching: true, request_id: 7, requests: [followed] }), summary, "", now, 0)
+    tkEqual(following.note, "Following")
+    tkEqual(following.stage.text, "Downloading 50%")
+    tkEqual(following.buttons, ["Stop following", "Details"])
+    tkEqual(following.requestId, 7)
+    mine = reqTestRequest({ id: 8, kind: "movie", status: "pending", stage: "pending", actions: ["withdraw"] })
+    requested = reqHero(title, reqTestDetail({ status: "requested", request_id: 8, requests: [mine] }), summary, "", now, 0)
+    tkEqual(requested.note, "Requested")
+    tkEqual(requested.stage.text, "Waiting for approval")
+    tkEqual(requested.buttons, ["Details"], "Withdraw is on its page")
+    declined = reqHero(title, reqTestDetail({ status: "declined", declined: { reason: "Not in 4K", at: now, again_at: now + 12 * 86400 } }), summary, "", now, 0)
+    tkEqual(declined.note, "Declined: “Not in 4K”. You can ask again in 12 days.")
+    tkEqual(declined.buttons, ["Details"])
+    restricted = reqHero(title, reqTestDetail({ status: "restricted", restriction: "Rated R: above this account's age limit" }), summary, "", now, 0)
+    tkEqual(restricted.note, "Rated R: above this account's age limit")
+    show = { kind: "show", tmdb_id: 1396, title: "Breaking Bad", status: "partial", item_id: 99 }
+    seasons = [reqTestSeason(1, "library"), reqTestSeason(2, "missing")]
+    partly = reqHero(show, reqTestDetail({ kind: "show", tmdb_id: 1396, status: "partial", item_id: 99, seasons: seasons }), summary, "", now, 0)
+    tkEqual(partly.actions, ["open", "pick", "details"])
+    tkEqual(partly.libraryId, 99)
+    tkEqual(reqHero(show, reqTestDetail({}), summary, "", now, 0).actions, ["open", "pick", "details"], "another title's page: the list's still")
 end sub
 
 ' The hero is the first title of the first list with any: trending's,
@@ -681,6 +736,16 @@ sub test_requests_hero_comes_from_the_first_list_with_a_title()
     tkEqual(reqHeroOf(lists), dune)
     none = [{ key: "trending", state: "shown", first: invalid }, { key: "requests", state: "waiting", first: invalid }]
     tkEqual(reqHeroOf(none), {}, "no title anywhere: no hero; Your requests aren't waited for")
+end sub
+
+' Without a hero, Discover says why in place of its page: a list that
+' failed, with Try again, else that TMDB's lists have nothing to ask for.
+sub test_requests_discover_without_a_hero_says_why()
+    nothing = reqNoHero([{ key: "trending", state: "shown", first: invalid, failed: "" }, { key: "requests", state: "shown", first: invalid, failed: "Couldn't." }])
+    tkEqual(nothing, { title: "Nothing here right now", text: "TMDB's lists have nothing this profile can ask for. Search for a title instead.", retry: false, signIn: false }, "Your requests aren't TMDB's")
+    tkEqual(reqNoHero([]).title, "Nothing here right now", "every list went")
+    failed = reqNoHero([{ key: "trending", state: "shown", first: invalid, failed: "" }, { key: "movies", state: "shown", first: invalid, failed: "database is locked" }])
+    tkEqual(failed, { title: "Couldn't load Discover", text: "database is locked", retry: true, signIn: false })
 end sub
 
 sub test_requests_list_queries_and_empty_lists()
